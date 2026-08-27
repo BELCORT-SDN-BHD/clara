@@ -12,7 +12,7 @@ export type SummaryRow = [label: string, value: string | null | undefined];
 export function PartSummaryCard({ title, rows, note }: { title: string; rows: SummaryRow[]; note?: string | null }) {
   const present = rows.filter((r): r is [string, string] => r[1] != null && r[1] !== "");
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm shadow-sm">
+    <div className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
       <span className="font-medium text-card-foreground">{title}</span>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         {present.map(([label, value]) => (

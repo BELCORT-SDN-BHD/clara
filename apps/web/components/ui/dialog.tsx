@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -28,7 +29,7 @@ function DialogOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) 
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/10 duration-100 ease-standard data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 motion-reduce:animate-none motion-reduce:transition-none",
+        "motion-panel fixed inset-0 isolate z-50 bg-black/10 ease-out data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className,
       )}
       {...props}
@@ -44,13 +45,28 @@ function DialogContent({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean;
 }) {
+  // P3 polish, i18n law (apps/web/AGENTS.md): the dismiss control's screen-
+  // reader name was a hardcoded English "Close" in the vendored primitive —
+  // the one string in this app that never went through next-intl.
+  const t = useTranslations("Common");
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 ease-standard outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95 motion-reduce:animate-none motion-reduce:transition-none",
+          // Contract §7 names this tier literally — "Dialog, sheet" is
+          // `--duration-panel` (200ms) on the `--ease-out` entrance curve. A
+          // modal is a centred, trigger-less surface, so `zoom-in-95` from
+          // centre is correct here and is NOT the origin-aware treatment a
+          // popover needs; it starts at 95%, never scale(0).
+          //
+          // Reduced motion follows §7 exactly: the SCALE is gated behind
+          // `motion-safe:`, so it disappears, while `fade-in-0`/`fade-out-0`
+          // stay unconditional and the opacity remains. The blanket
+          // animation-killing variant this used to carry removed the fade too,
+          // which the contract forbids.
+          "motion-panel fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 ease-out outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 motion-safe:data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 motion-safe:data-closed:zoom-out-95",
           className,
         )}
         {...props}
@@ -64,7 +80,7 @@ function DialogContent({
             }
           >
             <XIcon />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">{t("close")}</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>
@@ -90,6 +106,7 @@ function DialogFooter({
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean;
 }) {
+  const t = useTranslations("Common");
   return (
     <div
       data-slot="dialog-footer"
@@ -102,7 +119,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close render={<Button variant="outline" />}>
-          Close
+          {t("close")}
         </DialogPrimitive.Close>
       )}
     </div>

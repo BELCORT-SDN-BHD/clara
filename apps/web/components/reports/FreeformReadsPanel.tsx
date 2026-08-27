@@ -13,6 +13,10 @@
 
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { SectionHeader } from "@/components/common/section-header";
+import { NotBuiltNote } from "@/components/common/not-built-note";
+import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { listFreeformReads } from "@/lib/reports/api";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -22,24 +26,24 @@ export function FreeformReadsPanel({ clientId, session }: { clientId: string; se
   const { data: reads, err } = useHydratedPart(session, (s) => listFreeformReads(clientId, { session: s }));
 
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4">
-      <header>
-        <h2 className="text-base font-medium text-foreground">{t("heading")}</h2>
-        <p className="text-xs text-muted-foreground">{t("subheading")}</p>
-      </header>
+    <Card>
+      <CardHeader>
+        <SectionHeader level={2}>{t("heading")}</SectionHeader>
+        <CardDescription className="text-xs">{t("subheading")}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <NotBuiltNote className="text-xs">{t("runNotice")}</NotBuiltNote>
 
-      <p className="rounded-lg border border-dashed border-border p-2 text-xs text-muted-foreground">{t("runNotice")}</p>
-
-      {err ? (
-        <p className="text-sm text-destructive">{t("error", { message: err })}</p>
-      ) : !reads ? (
-        <p className="text-sm text-muted-foreground">{t("loading")}</p>
-      ) : reads.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("empty")}</p>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {reads.map((r) => (
-            <div key={r.id} className="flex flex-col gap-1 rounded-lg border border-border bg-card p-2 text-xs">
+        {err ? (
+          <StateBanner tone="error">{t("error", { message: err })}</StateBanner>
+        ) : !reads ? (
+          <LoadingState>{t("loading")}</LoadingState>
+        ) : reads.length === 0 ? (
+          <EmptyState>{t("empty")}</EmptyState>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {reads.map((r) => (
+              <div key={r.id} className="enter-content flex flex-col gap-1 rounded-lg border border-border bg-card p-3 text-xs">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={r.outcome === "ok" ? "default" : r.outcome === "refused" ? "destructive" : "outline"}>
                   {r.outcome ?? t("armed")}
@@ -52,17 +56,22 @@ export function FreeformReadsPanel({ clientId, session }: { clientId: string; se
                 {r.duration_ms !== null ? <span className="text-muted-foreground">{r.duration_ms}ms</span> : null}
               </div>
               <p className="text-card-foreground">{r.purpose}</p>
-              {r.refusal_reason ? <p className="text-destructive">{r.refusal_reason}</p> : null}
+              {/* A logged refusal REASON is history, not a live failure — it
+                  keeps the error colour but deliberately does NOT become a
+                  <StateBanner>: a banner announces, and this row is an audit
+                  entry the human went looking for. */}
+              {r.refusal_reason ? <p className="text-error">{r.refusal_reason}</p> : null}
               {r.relations_read && r.relations_read.length > 0 ? (
-                <p className="font-mono text-muted-foreground">{t("relationsLabel")}: {r.relations_read.join(", ")}</p>
+                <p className="font-mono text-muted-foreground wrap-anywhere">{t("relationsLabel")}: {r.relations_read.join(", ")}</p>
               ) : null}
               {r.rung_vector ? (
-                <p className="font-mono text-muted-foreground">{t("rungVectorLabel")}: {JSON.stringify(r.rung_vector)}</p>
+                <p className="font-mono text-muted-foreground wrap-anywhere">{t("rungVectorLabel")}: {JSON.stringify(r.rung_vector)}</p>
               ) : null}
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

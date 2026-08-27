@@ -18,10 +18,11 @@ import { listBankAccounts, listBankAccountProposals } from "@/lib/bank/reads";
 import { addBankAccount, deactivateBankAccount, reactivateBankAccount } from "@/lib/bank/doors";
 import type { BankAccountProposalRow } from "@/lib/bank/types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { SectionHeader } from "@/components/common/section-header";
 import { ReadState } from "./read-state";
 import { ActionRefusal } from "./action-refusal";
 
@@ -69,14 +70,14 @@ export function AccountsSection({ clientId }: { clientId: string }) {
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>{t("proposalsHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("proposalsHeading")}</SectionHeader>
           <CardDescription>{t("proposalsDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <ReadState hasData={proposals.data !== null} err={proposals.err} errKind={proposalsKind.kind} isEmpty={proposals.data?.length === 0} onRetry={() => void proposals.reload()}>
             <ul className="flex flex-col gap-2">
               {(proposals.data ?? []).map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-border p-2 text-sm">
+                <li key={p.id} className="enter-content flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">
                   <div>
                     <p className="font-medium text-foreground">{p.bank_name ?? p.bank_code} · {p.account_number_normalized}</p>
                     <p className="text-xs text-muted-foreground">
@@ -93,11 +94,11 @@ export function AccountsSection({ clientId }: { clientId: string }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("addHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("addHeading")}</SectionHeader>
         </CardHeader>
         <CardContent>
           <form onSubmit={submitAdd} className="flex flex-col gap-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
                 <Label htmlFor="bank-code">{t("bankCodeLabel")}</Label>
                 <Input id="bank-code" value={bankCode} onChange={(e) => setBankCode(e.target.value)} required />
@@ -126,14 +127,14 @@ export function AccountsSection({ clientId }: { clientId: string }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("listHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("listHeading")}</SectionHeader>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {accounts.data !== null && <ActionRefusal err={accounts.err} clr={accounts.clr} />}
           <ReadState hasData={accounts.data !== null} err={accounts.err} errKind={accountsKind.kind} isEmpty={accounts.data?.length === 0} onRetry={() => void accounts.reload()}>
             <ul className="flex flex-col gap-2">
               {(accounts.data ?? []).map((a) => (
-                <li key={a.id} className="flex items-center justify-between gap-3 rounded-lg border border-border p-2 text-sm">
+                <li key={a.id} className="enter-content flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">
                   <div>
                     <p className="font-medium text-foreground">
                       {a.bank_name_display} · {a.account_number}

@@ -24,7 +24,13 @@ export default async function ClientWorkspaceLayout({
 
   return (
     <div className="flex min-h-dvh flex-col">
-      <header className="border-b border-border bg-surface px-8 py-3">
+      {/*
+        The mirror half of the same token-role fix: this tab strip is NAV
+        chrome, so it carries `--shell` — it was wearing `--surface`, the
+        content-card role, while the content column below it wore `--shell`.
+        The two roles were exactly inverted.
+      */}
+      <header className="border-b border-border bg-shell px-8 py-3">
         <ClientWorkspaceNav clientId={clientId} />
       </header>
       <ClientScopeProvider clientId={clientId}>

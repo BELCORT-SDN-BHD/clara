@@ -18,6 +18,23 @@ import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import type { WireErrorKind } from "@/lib/wire-error-kind";
 import { Button } from "@/components/ui/button";
+import { EmptyState, LoadingState, StateBanner, type BannerTone } from "@/components/common/state";
+
+/**
+ * P3 polish — the tone ladder, applied. This file used to paint ALL four
+ * wire-error kinds in the destructive tone, while components/firm/data-state.tsx
+ * painted the same four in four different tones (and unboxed). Neither was
+ * wrong about its own copy; they simply disagreed. One ladder now
+ * (components/common/state.tsx): being signed out is a STATE, lacking a grant
+ * is an authority fault, a missing relation is an absence, and only a real
+ * failure is an error. The retry gate below is unchanged — no_session and
+ * forbidden still get no Retry, because retrying fixes neither.
+ */
+const KIND_TONE: Record<string, BannerTone> = {
+  no_session: "info",
+  forbidden: "warning",
+  not_found: "neutral",
+};
 
 export function ReadState({
   err,
@@ -45,21 +62,25 @@ export function ReadState({
         : errKind === "not_found" ? t("notFoundRelation")
         : t("genericError", { message: err });
       return (
-        <div role="alert" className="flex flex-col gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-          <p>{copy}</p>
-          {errKind !== "no_session" && errKind !== "forbidden" && onRetry && (
-            <Button type="button" variant="outline" size="sm" onClick={onRetry} className="self-start">
-              {t("retry")}
-            </Button>
-          )}
-        </div>
+        <StateBanner
+          tone={(errKind && KIND_TONE[errKind]) ?? "error"}
+          action={
+            errKind !== "no_session" && errKind !== "forbidden" && onRetry ? (
+              <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+                {t("retry")}
+              </Button>
+            ) : undefined
+          }
+        >
+          {copy}
+        </StateBanner>
       );
     }
-    return <p className="text-sm text-muted-foreground">{t("loading")}</p>;
+    return <LoadingState>{t("loading")}</LoadingState>;
   }
 
   if (isEmpty) {
-    return <p className="text-sm text-muted-foreground">{t("empty")}</p>;
+    return <EmptyState>{t("empty")}</EmptyState>;
   }
 
   return <>{children}</>;

@@ -9,6 +9,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
+import { LoadingState, StateBanner } from "@/components/common/state";
 import { PartSlot } from "@/components/clara/PartSlot";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -62,20 +63,28 @@ export function ClaraThreadView({
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 space-y-3 overflow-y-auto p-3" role="log" aria-live="polite">
-        {!threadId && resolveError === "not signed in" && <p className="text-sm text-warning">{t("signInRequired")}</p>}
+        {/* P3 polish: the rail's own five state spellings joined the product
+            ladder. "Sign in to talk with Clara" is a STATE, not a fault, so it
+            reads `info` here exactly as it does on every other surface; a real
+            load/send failure reads `error`. Boxing them also separates a
+            SYSTEM message from a CONVERSATION message inside a log where both
+            are just paragraphs otherwise. */}
+        {!threadId && resolveError === "not signed in" && <StateBanner tone="info">{t("signInRequired")}</StateBanner>}
         {!threadId && resolveError && resolveError !== "not signed in" && (
-          <p className="text-sm text-destructive">{t("loadError", { message: resolveError })}</p>
+          <StateBanner tone="error">{t("loadError", { message: resolveError })}</StateBanner>
         )}
-        {!threadId && !resolveError && <p className="text-sm text-muted-foreground">{t("resolving")}</p>}
-        {threadId && notSignedIn && <p className="text-sm text-warning">{t("signInRequired")}</p>}
-        {threadId && !notSignedIn && !state.messagesLoaded && (
-          <p className="text-sm text-muted-foreground">{t("loading")}</p>
-        )}
+        {!threadId && !resolveError && <LoadingState>{t("resolving")}</LoadingState>}
+        {threadId && notSignedIn && <StateBanner tone="info">{t("signInRequired")}</StateBanner>}
+        {threadId && !notSignedIn && !state.messagesLoaded && <LoadingState>{t("loading")}</LoadingState>}
         {threadId && !notSignedIn && state.loadError && state.messagesLoaded && (
-          <p className="text-sm text-destructive">{t("loadError", { message: state.loadError })}</p>
+          <StateBanner tone="error">{t("loadError", { message: state.loadError })}</StateBanner>
         )}
         {state.messages.map((msg) => (
-          <div key={msg.id} className={cn("rounded-lg p-2 text-sm", msg.role === "user" ? "bg-muted" : "bg-clara-muted")}>
+          // `enter-content`: a message ARRIVING is the archetypal "prevent a
+          // jarring change". It fires per new message only — a streaming
+          // assistant turn keeps its key, so the text grows without the
+          // bubble ever re-animating.
+          <div key={msg.id} className={cn("enter-content rounded-lg p-2 text-sm", msg.role === "user" ? "bg-muted" : "bg-clara-muted")}>
             <p className="mb-1 text-xs font-medium text-muted-foreground">{t(`role.${msg.role}`)}</p>
             {msg.parts.map((part, i) => (
               <PartSlot key={i} part={part} />
@@ -89,7 +98,13 @@ export function ClaraThreadView({
           </div>
         )}
         {streamStatusLabel(state, t) && <p className="text-xs text-muted-foreground italic">{streamStatusLabel(state, t)}</p>}
-        {state.stream.streamEndedUnexpectedly && <p className="text-sm text-destructive">{t("streamEndedUnexpectedly")}</p>}
+        {/* Kept as two INDEPENDENT conditions, deliberately: `retryAvailable`
+            can stand alone next to `streamStatusLabel`'s own "Connection
+            lost." line above, and folding the Retry into the banner would
+            have printed that sentence twice. Only the paint changed. */}
+        {state.stream.streamEndedUnexpectedly && (
+          <StateBanner tone="error">{t("streamEndedUnexpectedly")}</StateBanner>
+        )}
         {state.stream.retryAvailable && (
           <div className="flex items-center gap-2">
             <Button type="button" variant="secondary" size="sm" onClick={() => void retryConnection()}>
@@ -98,7 +113,7 @@ export function ClaraThreadView({
           </div>
         )}
         {state.sendStatus === "error" && state.sendError && (
-          <p className="text-sm text-destructive">{t("sendError", { message: state.sendError })}</p>
+          <StateBanner tone="error">{t("sendError", { message: state.sendError })}</StateBanner>
         )}
       </div>
       <form onSubmit={handleSubmit} className="flex gap-2 border-t border-border p-2">
@@ -109,7 +124,12 @@ export function ClaraThreadView({
           placeholder={t("composerPlaceholder")}
           disabled={!threadId || notSignedIn || busy}
           rows={variant === "rail" ? 2 : 3}
-          className="flex-1 resize-none rounded-lg border border-border bg-background p-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
+          // Stays a raw <textarea>: the Textarea primitive is `field-sizing-
+          // content` (auto-growing), and the rail composer is deliberately a
+          // fixed 2/3 rows. What was drifting was only the border token —
+          // `border-border` (a divider) where every other field in the product
+          // uses `border-input` (a control edge).
+          className="motion-fast flex-1 resize-none rounded-lg border border-input bg-background p-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
         />
         <Button type="submit" disabled={!threadId || notSignedIn || busy || !draft.trim()}>
           {busy ? t("sending") : t("send")}

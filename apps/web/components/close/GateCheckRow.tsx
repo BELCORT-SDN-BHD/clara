@@ -72,7 +72,7 @@ export function GateCheckRow({
 }) {
   const t = useTranslations("ClientClose.gates");
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+    <div className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground">{t("drawer")} {check.drawer}</span>
         <span className="font-medium text-card-foreground">{check.title}</span>
@@ -102,9 +102,18 @@ export function GateCheckRow({
                     ) : null}
                   </>
                 ) : (
-                  <Badge variant={item.attestation.state === "live" ? "default" : "outline"}>
-                    {item.attestation.state} — {item.attestation.reason}
-                  </Badge>
+                  // P3 polish: the STATE is the badge; the human's free-text
+                  // reason is prose beside it. Seen in the harness at 1440px,
+                  // a whole sentence inside a filled `--primary` pill was the
+                  // loudest element on the close plan and grew unboundedly
+                  // with whatever the attester typed. Both values still render
+                  // verbatim — only which one is a chip changed.
+                  <>
+                    <Badge variant={item.attestation.state === "live" ? "default" : "outline"}>
+                      {item.attestation.state}
+                    </Badge>
+                    <span className="text-muted-foreground">{item.attestation.reason}</span>
+                  </>
                 )}
               </li>
             );
@@ -125,7 +134,7 @@ function AttestForm({ busy, onSubmit }: { busy: boolean; onSubmit: (reason: stri
       description={t("description")}
       confirmLabel={t("confirm")}
       busy={busy}
-      disabled={reason.trim().length === 0}
+      confirmDisabled={reason.trim().length === 0}
       onConfirm={() => onSubmit(reason)}
     >
       <Textarea

@@ -7,7 +7,7 @@
 
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { cn } from "@/lib/utils";
+import { SectionTabs } from "@/components/common/section-tabs";
 import { AgingRegister } from "./aging-register";
 import { FixedAssetsRegister } from "./fixed-assets-register";
 import { AdjustmentsRegister } from "./adjustments-register";
@@ -37,25 +37,18 @@ export function RegistersWorkbench({ clientId }: { clientId: string }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div role="tablist" className="flex flex-wrap gap-1 border-b border-border pb-2">
-        {TABS.map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            role="tab"
-            aria-selected={active === tab}
-            className={cn(
-              "rounded-lg px-2.5 py-1.5 text-sm font-medium",
-              active === tab
-                ? "bg-muted text-foreground"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
-            )}
-            onClick={() => setTab(tab)}
-          >
-            {t(`tabs.${tab}`)}
-          </button>
-        ))}
-      </div>
+      {/* P3 polish: the muted-pill strip became the shared <SectionTabs>
+          underline. The pill belongs to the client-workspace nav one rung up
+          (components/client-workspace-nav.tsx) — a second rung of pills
+          directly beneath it flattened the hierarchy. The tablist/tab/
+          aria-selected semantics this lane already had are what the shared
+          component adopted for everyone. */}
+      <SectionTabs
+        label={t("heading")}
+        items={TABS.map((tab) => ({ value: tab, label: t(`tabs.${tab}`) }))}
+        value={active}
+        onSelect={setTab}
+      />
       {active === "aging" ? <AgingRegister clientId={clientId} /> : null}
       {active === "fixedAssets" ? <FixedAssetsRegister clientId={clientId} /> : null}
       {active === "adjustments" ? <AdjustmentsRegister clientId={clientId} /> : null}

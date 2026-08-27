@@ -1,4 +1,5 @@
 import { getTranslations } from "next-intl/server";
+import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { ClientWorkspaceOverview } from "@/components/firm/client-workspace-overview";
 
 /**
@@ -17,9 +18,9 @@ export default async function ClientWorkspacePage({
   const t = await getTranslations("ClientWorkspace");
 
   return (
-    <main className="flex flex-col gap-4 p-8">
-      <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
+    <PageShell>
+      <PageHeader title={t("heading")} />
       <ClientWorkspaceOverview clientId={clientId} />
-    </main>
+    </PageShell>
   );
 }

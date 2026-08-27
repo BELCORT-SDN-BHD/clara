@@ -24,6 +24,8 @@ import { isKnownReviewQueueRowKind, reviewQueueRowKey } from "@/lib/firm/needs-y
 import { useReviewQueue } from "@/lib/firm/use-review-queue";
 import { businessDate } from "@/lib/business-date";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { Button } from "@/components/ui/button";
+import { SectionHeader } from "@/components/common/section-header";
 import { DataState } from "./data-state";
 
 export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
@@ -58,7 +60,7 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
       </DataState>
 
       <div className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold text-foreground">{t("queueHeading")}</h2>
+        <SectionHeader level={2}>{t("queueHeading")}</SectionHeader>
         <DataState
           loading={queue.loading}
           error={queue.error}
@@ -76,14 +78,16 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
             ))}
           </ul>
           {queue.hasMore ? (
-            <button
+            <Button
               type="button"
-              className="self-start rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground"
+              variant="outline"
+              size="sm"
+              className="mt-2 self-start"
               onClick={() => void queue.loadMore()}
               disabled={queue.loadingMore || queue.busy}
             >
               {queue.loadingMore ? tny("loadingMore") : tny("loadMore")}
-            </button>
+            </Button>
           ) : null}
         </DataState>
       </div>

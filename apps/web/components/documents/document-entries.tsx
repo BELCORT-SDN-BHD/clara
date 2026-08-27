@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/common/state";
 import type { JournalEntryRow } from "@/lib/documents/types";
 
 /**
@@ -15,7 +16,7 @@ export function DocumentEntries({ entries }: { entries: JournalEntryRow[] }) {
   const t = useTranslations("ClientDocuments");
 
   if (entries.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("entriesEmpty")}</p>;
+    return <EmptyState>{t("entriesEmpty")}</EmptyState>;
   }
 
   return (

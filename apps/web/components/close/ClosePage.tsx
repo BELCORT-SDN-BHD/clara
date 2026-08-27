@@ -17,6 +17,8 @@ import { useTranslations } from "next-intl";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { listFiscalYears } from "@/lib/close/api";
+import { PageHeader, PageShell } from "@/components/common/page-shell";
+import { EmptyState } from "@/components/common/state";
 import { FiscalYearPicker } from "./FiscalYearPicker";
 import { ClosePlanPanel } from "./ClosePlanPanel";
 
@@ -26,11 +28,8 @@ export function ClosePage({ clientId }: { clientId: string }) {
   const years = useHydratedPart(sessionTokenAccessor, (s) => listFiscalYears(clientId, { session: s }));
 
   return (
-    <main className="flex flex-col gap-4 p-8">
-      <div>
-        <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
-        <p className="max-w-prose text-sm text-muted-foreground">{t("body")}</p>
-      </div>
+    <PageShell>
+      <PageHeader title={t("heading")} description={t("body")} />
       <FiscalYearPicker years={years.data} err={years.err} selected={fiscalYearId} onSelect={setFiscalYearId} />
       {fiscalYearId ? (
         <ClosePlanPanel
@@ -41,8 +40,8 @@ export function ClosePage({ clientId }: { clientId: string }) {
           reloadYears={years.reload}
         />
       ) : (
-        <p className="text-sm text-muted-foreground">{t("plan.selectPrompt")}</p>
+        <EmptyState>{t("plan.selectPrompt")}</EmptyState>
       )}
-    </main>
+    </PageShell>
   );
 }

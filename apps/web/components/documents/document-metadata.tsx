@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { documentBadges, type DocumentBadge } from "@/lib/documents/copy";
 import { openDocumentInNewTab } from "@/lib/documents/open-in-new-tab";
+import { SectionHeader } from "@/components/common/section-header";
+import { EmptyState, StateBanner } from "@/components/common/state";
 import type { DocumentRow, ProcessingTaskRow } from "@/lib/documents/types";
 
 /** The next-intl KEY for a processing task's status — never English text here
@@ -82,12 +84,12 @@ export function DocumentMetadata({ document: doc, tasks }: { document: DocumentR
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="truncate text-base font-semibold text-foreground">{doc.original_filename ?? doc.id}</h2>
+        <SectionHeader level={3} className="truncate">{doc.original_filename ?? doc.id}</SectionHeader>
         <Button size="sm" variant="outline" disabled={openState === "loading"} onClick={openDocument}>
           {openState === "loading" ? t("openingDocument") : t("openDocument")}
         </Button>
       </div>
-      {openError ? <p className="text-xs text-error">{t("openDocumentFailed", { message: openError })}</p> : null}
+      {openError ? <StateBanner tone="error" className="text-xs">{t("openDocumentFailed", { message: openError })}</StateBanner> : null}
 
       <div className="flex flex-wrap gap-1.5">
         {documentBadges(doc).map((badge) => (
@@ -99,9 +101,9 @@ export function DocumentMetadata({ document: doc, tasks }: { document: DocumentR
       ) : null}
 
       <section className="flex flex-col gap-1">
-        <h3 className="text-xs font-medium text-muted-foreground uppercase">{t("extractionTasksHeading")}</h3>
+        <SectionHeader level={4}>{t("extractionTasksHeading")}</SectionHeader>
         {tasks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("extractionTasksEmpty")}</p>
+          <EmptyState>{t("extractionTasksEmpty")}</EmptyState>
         ) : (
           <ul className="flex flex-col gap-1">
             {tasks.map((task) => (

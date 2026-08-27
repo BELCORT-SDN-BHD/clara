@@ -6,6 +6,7 @@ import { candidateRuleBandKey } from "@/lib/documents/copy";
 import { confirmCandidate, dismissCandidate } from "@/lib/documents/doors";
 import type { OpenCandidateEntry } from "@/lib/documents/loaders";
 import { DoorFeedback } from "./door-feedback";
+import { EmptyState } from "@/components/common/state";
 import type { PartClr } from "@/lib/parts/hooks";
 
 /**
@@ -28,7 +29,7 @@ export function OpenCandidateList({
   const t = useTranslations("ClientDocuments");
 
   if (entries.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("candidatesEmpty")}</p>;
+    return <EmptyState>{t("candidatesEmpty")}</EmptyState>;
   }
 
   return (
@@ -37,7 +38,7 @@ export function OpenCandidateList({
         {entries.map(({ candidate, document }) => (
           <li
             key={candidate.id}
-            className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+            className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
           >
             <div className="flex flex-col gap-0.5">
               <span className="font-medium text-card-foreground">{document.original_filename ?? document.id}</span>

@@ -9,6 +9,8 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { SectionHeader } from "@/components/common/section-header";
+import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { listExportRecipients, registerExportRecipient } from "@/lib/reports/api";
 import { DoorDialog } from "./DoorDialog";
@@ -20,10 +22,9 @@ export function ExportRecipientsPanel({ session }: { session: SessionTokenAccess
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <h4 className="text-xs font-medium text-foreground">{t("heading")}</h4>
-        <RegisterDialog session={session} busy={busy} act={act} />
-      </div>
+      <SectionHeader level={3} action={<RegisterDialog session={session} busy={busy} act={act} />}>
+        {t("heading")}
+      </SectionHeader>
       {/* Low 8 (independent review): a register/supersede refusal must render
           ALONGSIDE the still-good list, never REPLACE it — the list staying
           visible is itself evidence nothing about the existing recipients
@@ -31,20 +32,23 @@ export function ExportRecipientsPanel({ session }: { session: SessionTokenAccess
           wrapped message for the INITIAL load failure (`recipients` never
           loaded), a verbatim `code (reason): message` banner for a later
           door refusal once the list has already loaded once. */}
-      {recipients && (err || clr) ? (
-        <p className="text-xs text-destructive">
-          {clr ? `${clr.code}${clr.reason ? ` (${clr.reason})` : ""}: ` : ""}
+      {recipients && err ? (
+        <StateBanner
+          tone="error"
+          className="text-xs"
+          code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}
+        >
           {err}
-        </p>
+        </StateBanner>
       ) : null}
       {!recipients ? (
         err ? (
-          <p className="text-xs text-destructive">{t("error", { message: err })}</p>
+          <StateBanner tone="error" className="text-xs">{t("error", { message: err })}</StateBanner>
         ) : (
-          <p className="text-xs text-muted-foreground">{t("loading")}</p>
+          <LoadingState className="text-xs">{t("loading")}</LoadingState>
         )
       ) : recipients.length === 0 ? (
-        <p className="text-xs text-muted-foreground">{t("empty")}</p>
+        <EmptyState className="text-xs">{t("empty")}</EmptyState>
       ) : (
         <ul className="flex flex-col gap-1">
           {recipients.map((r) => (
@@ -80,7 +84,7 @@ function RegisterDialog({
       description={t("description")}
       confirmLabel={t("confirm")}
       busy={busy}
-      disabled={!userId.trim() || !displayName.trim() || !basis.trim()}
+      confirmDisabled={!userId.trim() || !displayName.trim() || !basis.trim()}
       onConfirm={() =>
         act(async () => {
           // firm_member ONLY in this crude door (0132:1074-1083 requires a

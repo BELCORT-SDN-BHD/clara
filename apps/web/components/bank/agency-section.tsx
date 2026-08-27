@@ -15,10 +15,11 @@ import { useReadErrKind } from "@/lib/bank/error-kind";
 import { getBankAgencyHold, listOpenBankIdentifierPromotionProposals } from "@/lib/bank/table-reads";
 import { setBankAgencyHold, confirmBankIdentifierPromotion } from "@/lib/bank/agency-doors";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { SectionHeader } from "@/components/common/section-header";
 import { ReadState } from "./read-state";
 import { ActionRefusal } from "./action-refusal";
 
@@ -55,7 +56,7 @@ export function AgencySection({ clientId }: { clientId: string }) {
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>{t("holdHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("holdHeading")}</SectionHeader>
           <CardDescription>{t("holdDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -94,7 +95,7 @@ export function AgencySection({ clientId }: { clientId: string }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("promotionsHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("promotionsHeading")}</SectionHeader>
           <CardDescription>{t("promotionsAttribution")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
@@ -102,7 +103,7 @@ export function AgencySection({ clientId }: { clientId: string }) {
           <ReadState hasData={proposals.data !== null} err={proposals.err} errKind={proposalsKind.kind} isEmpty={proposals.data?.length === 0} onRetry={() => void proposals.reload()}>
             <ul className="flex flex-col gap-2">
               {(proposals.data ?? []).map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-border p-2 text-sm">
+                <li key={p.id} className="enter-content flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">
                   <div>
                     <p className="font-medium text-foreground">
                       {String(p.payload.identifier_kind ?? "")} · {String(p.payload.identifier_value ?? "")}

@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { StateBanner } from "@/components/common/state";
 
 /**
  * Email + password sign-in via Supabase Auth cookie sessions. Invite-only
@@ -72,8 +73,12 @@ export function LoginForm() {
         <CardDescription>{t("description")}</CardDescription>
       </CardHeader>
       <CardContent>
+        {/* P3 polish: `gap-1.5` between a label and its field — the product's
+            one label-to-field gap — and the sign-in failure now renders in the
+            same <StateBanner> as every other failure in the app. Supabase's
+            own `signInError.message` is still passed through verbatim. */}
         <form onSubmit={handleLogin} className="flex flex-col gap-6">
-          <div className="grid gap-2">
+          <div className="grid gap-1.5">
             <Label htmlFor="email">{t("emailLabel")}</Label>
             <Input
               id="email"
@@ -84,7 +89,7 @@ export function LoginForm() {
               onChange={(event) => setEmail(event.target.value)}
             />
           </div>
-          <div className="grid gap-2">
+          <div className="grid gap-1.5">
             <Label htmlFor="password">{t("passwordLabel")}</Label>
             <Input
               id="password"
@@ -95,11 +100,7 @@ export function LoginForm() {
               onChange={(event) => setPassword(event.target.value)}
             />
           </div>
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
+          {error && <StateBanner tone="error">{error}</StateBanner>}
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? t("submitting") : t("submit")}
           </Button>

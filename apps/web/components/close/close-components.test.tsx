@@ -18,6 +18,7 @@ import { CloseProposalPanel } from "./CloseProposalPanel";
 import { GateCheckRow, toAttestItemKey } from "./GateCheckRow";
 import { CloseDoors, deriveCorrectionTarget, finalizeNeedsAttestation, reopenNeedsAttestation } from "./CloseDoors";
 import { FiscalYearPicker } from "./FiscalYearPicker";
+import { Button } from "@/components/ui/button";
 import type { ClosePlan, ClosePlanCheck } from "@/lib/close/types";
 
 function render(el: ReactElement): string {
@@ -80,6 +81,80 @@ test("GateCheckRow: an unattested drawer-2 item offers Attest only when a close 
   const withoutRun = render(createElement(GateCheckRow, { check: drawer2, closeRunId: null, busy: false, onAttest: async () => {} }));
   assert.match(withoutRun, /no attestation/);
   assert.doesNotMatch(withoutRun, /Attest this gate exception/);
+});
+
+// -----------------------------------------------------------------------------
+// THE UNREACHABLE-DOOR REGRESSION (a11y lane; WCAG 2.1.1 + 4.1.2, and a
+// functional product blocker). CloseDoorDialog/DoorDialog used to hand their
+// `disabled` prop to the DialogTrigger, while every condition that prop tested
+// was typed into a field INSIDE the dialog that trigger opens. Six doors were
+// therefore disabled from first paint and could never become enabled, by
+// keyboard or mouse: attest, abandon, reopen, issue-for-approval,
+// archive-signed-original, register-recipient.
+//
+// WHAT THESE TESTS PROVE, AND WHAT THEY DO NOT: they assert on the TRIGGER,
+// which is where the defect lived and the only half a static render can see —
+// Base UI's Dialog Popup does not mount at all while closed (this file's own
+// header, and the reason CloseDoors' M7/F3 predicates are exported as pure
+// functions). The confirm button's own `busy || confirmDisabled` gate and the
+// single-fire guard behind it are NOT covered here; the guard itself is proven
+// in lib/parts/single-fire-guard.test.ts.
+//
+// Reads the ATTRIBUTE, never the word. A naive `.includes("disabled")` over the
+// open tag passes on EVERY button in this app — the shadcn Button's own class
+// string carries `disabled:pointer-events-none disabled:opacity-50`, and
+// @base-ui/react adds `data-disabled` besides. `\sdisabled=` matches neither
+// (`disabled:` has no `=`; `data-disabled=` has no space before `disabled`).
+// The positive control below is what proves this can still say NO.
+function triggerIsEnabled(html: string, label: string): boolean {
+  const idx = html.indexOf(`>${label}<`);
+  if (idx < 0) return false;
+  const openTag = html.lastIndexOf("<button", idx);
+  if (openTag < 0) return false;
+  return !/\sdisabled=/.test(html.slice(openTag, idx));
+}
+
+test("the trigger-enabled probe can still say NO (positive control for the two BLOCKER tests below)", () => {
+  const enabled = render(createElement(Button, { children: "Probe" }));
+  const disabled = render(createElement(Button, { disabled: true, children: "Probe" }));
+  assert.ok(triggerIsEnabled(enabled, "Probe"), "an enabled Button must read as enabled");
+  assert.equal(
+    triggerIsEnabled(disabled, "Probe"),
+    false,
+    "a genuinely disabled Button must read as disabled — otherwise the BLOCKER assertions are vacuous",
+  );
+});
+
+test("BLOCKER: the drawer-2 Attest trigger is ENABLED with an empty reason — the reason field lives inside the dialog it opens", () => {
+  const drawer2 = check({
+    drawer: 2,
+    items: [{ item_key: "__gate__", attestation: { state: "absent" } }],
+  });
+  const html = render(createElement(GateCheckRow, { check: drawer2, closeRunId: "run1", busy: false, onAttest: async () => {} }));
+  assert.ok(
+    triggerIsEnabled(html, "Attest"),
+    "the Attest trigger must be operable before a reason is typed — it is the ONLY way to reach the reason field",
+  );
+});
+
+test("BLOCKER: the Abandon and Reopen triggers are ENABLED before their in-dialog fields are filled", () => {
+  const inProgress = render(
+    createElement(CloseDoors, {
+      plan: plan({ close_run: { state: "present", close_run_id: "r1", run_state: "in_progress", started_by: "u1", started_at: "t", ended_by: null, ended_at: null, end_reason: null } }),
+      busy: false, refusal: null,
+      onBegin: async () => {}, onFinalize: async () => {}, onAbandon: async () => {}, onReopen: async () => {},
+    }),
+  );
+  assert.ok(triggerIsEnabled(inProgress, "Abandon close"), "Abandon's reason textarea is inside its own dialog");
+
+  const closed = render(
+    createElement(CloseDoors, {
+      plan: plan({ fiscal_year: { id: "fy1", client_id: "c1", label: "FY2025", ordinal: 1, starts_on: "2025-01-01", ends_on: "2025-12-31", status: "closed", fy_end_source: "asserted" } }),
+      busy: false, refusal: null,
+      onBegin: async () => {}, onFinalize: async () => {}, onAbandon: async () => {}, onReopen: async () => {},
+    }),
+  );
+  assert.ok(triggerIsEnabled(closed, "Reopen year"), "Reopen's reason + correction-target fields are inside its own dialog");
 });
 
 // F1 (independent review, HIGH): get_close_plan's '__gate__' sentinel item_key

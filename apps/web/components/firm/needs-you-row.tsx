@@ -23,6 +23,8 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Badge } from "@/components/parts/PartBadge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { fmtCents } from "@/lib/registers/money";
 import { ErrorMessage } from "./data-state";
 import { isKnownReviewQueueRowKind, type ReviewQueueRow } from "@/lib/firm/needs-you";
@@ -65,7 +67,7 @@ export function NeedsYouRow({
     : t("rowKind.unknown", { kind: row.row_kind });
 
   return (
-    <li className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+    <li className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone={row.section === "needs_you" ? "info" : "neutral"}>
           {row.section === "needs_you" ? t("sectionNeedsYou") : t("sectionNeedsReview")}
@@ -96,27 +98,30 @@ export function NeedsYouRow({
       {row.row_kind === "open_question" && row.question_id ? (
         <div className="flex flex-col gap-2">
           {error ? <ErrorMessage error={error} /> : null}
+          {/* P3 polish: five hand-rolled <button>s and one hand-rolled <input>
+              became the Button/Input primitives. The verbs, the disabled
+              conditions and the submit-clears-only-on-success rule above are
+              untouched; what changes is that "commit" now looks like every
+              other commit in the product (default variant), "cancel"/"open a
+              form" like every other secondary act (outline), and both focus
+              with the same ring. */}
           {mode ? (
             <div className="flex flex-col gap-2">
-              <input
-                className="rounded-md border border-border bg-background px-2 py-1 text-sm"
+              <Input
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder={mode === "resolve" ? t("resolutionPlaceholder") : t("reasonPlaceholder")}
+                aria-label={mode === "resolve" ? t("resolutionPlaceholder") : t("reasonPlaceholder")}
                 disabled={busy}
               />
               <div className="flex gap-2">
-                <button
-                  type="button"
-                  className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50"
-                  onClick={() => void submit()}
-                  disabled={busy || !text.trim()}
-                >
+                <Button type="button" size="sm" onClick={() => void submit()} disabled={busy || !text.trim()}>
                   {busy ? t("submitting") : t("submit")}
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="rounded-md border border-border px-2.5 py-1 text-xs"
+                  size="sm"
+                  variant="outline"
                   onClick={() => {
                     setMode(null);
                     setText("");
@@ -124,27 +129,17 @@ export function NeedsYouRow({
                   disabled={busy}
                 >
                   {tc("cancel")}
-                </button>
+                </Button>
               </div>
             </div>
           ) : (
             <div className="flex gap-2">
-              <button
-                type="button"
-                className="rounded-md border border-border px-2.5 py-1 text-xs"
-                onClick={() => setMode("resolve")}
-                disabled={busy}
-              >
+              <Button type="button" size="sm" variant="outline" onClick={() => setMode("resolve")} disabled={busy}>
                 {t("resolve")}
-              </button>
-              <button
-                type="button"
-                className="rounded-md border border-border px-2.5 py-1 text-xs"
-                onClick={() => setMode("dismiss")}
-                disabled={busy}
-              >
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => setMode("dismiss")} disabled={busy}>
                 {t("dismiss")}
-              </button>
+              </Button>
             </div>
           )}
         </div>
