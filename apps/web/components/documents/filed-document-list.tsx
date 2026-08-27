@@ -2,9 +2,11 @@
 
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DataTableCard } from "@/components/common/data-table-card";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { extractionStatusKey, filingBasisKey, isEInvoice } from "@/lib/documents/copy";
 import type { FiledDocumentEntry } from "@/lib/documents/loaders";
+import { EmptyState } from "@/components/common/state";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,11 +24,11 @@ export function FiledDocumentList({
   const t = useTranslations("ClientDocuments");
 
   if (entries.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("filedEmpty")}</p>;
+    return <EmptyState>{t("filedEmpty")}</EmptyState>;
   }
 
   return (
-    <Table>
+    <DataTableCard>
       <TableHeader>
         <TableRow>
           <TableHead>{t("colFile")}</TableHead>
@@ -61,6 +63,6 @@ export function FiledDocumentList({
           </TableRow>
         ))}
       </TableBody>
-    </Table>
+    </DataTableCard>
   );
 }

@@ -13,6 +13,8 @@ import { DocumentFilingsHistory } from "./document-filings-history";
 import { DocumentAdmin } from "./document-admin";
 import { CorrectionWizard } from "./correction-wizard";
 import { DoorFeedback } from "./door-feedback";
+import { SectionHeader } from "@/components/common/section-header";
+import { EmptyState, LoadingState } from "@/components/common/state";
 
 /**
  * The document-detail panel — ONE `useHydratedPart` over `loadDocumentDetail`,
@@ -41,14 +43,14 @@ export function DocumentDetail({
   const [correcting, setCorrecting] = useState(false);
 
   if (loading && !data) {
-    return <p className="text-sm text-muted-foreground">{t("loading")}</p>;
+    return <LoadingState>{t("loading")}</LoadingState>;
   }
 
   if (!data) {
     // loadDocumentDetail resolves null when the document itself could not be read —
     // an honest "not reachable today" (reportsApi precedent), never a crash, and
     // distinct from a thrown err (rendered below via DoorFeedback).
-    return err ? <DoorFeedback err={err} clr={clr} /> : <p className="text-sm text-muted-foreground">{t("documentNotReachable")}</p>;
+    return err ? <DoorFeedback err={err} clr={clr} /> : <EmptyState>{t("documentNotReachable")}</EmptyState>;
   }
 
   const actAndRefreshFiled = (fn: () => Promise<void>) => act(fn, onFiledChanged);
@@ -58,14 +60,14 @@ export function DocumentDetail({
       <DocumentMetadata document={data.document} tasks={data.processingTasks} />
 
       <section className="flex flex-col gap-1">
-        <h3 className="text-xs font-medium text-muted-foreground uppercase">{t("filingsHeading")}</h3>
+        <SectionHeader level={4}>{t("filingsHeading")}</SectionHeader>
         <DocumentFilingsHistory filings={data.filings} busy={busy} act={actAndRefreshFiled} />
       </section>
 
       <DocumentEvidence regions={data.regions} />
 
       <section className="flex flex-col gap-1">
-        <h3 className="text-xs font-medium text-muted-foreground uppercase">{t("entriesHeading")}</h3>
+        <SectionHeader level={4}>{t("entriesHeading")}</SectionHeader>
         <DocumentEntries entries={data.entries} />
       </section>
 

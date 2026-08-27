@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { filingBasisKey } from "@/lib/documents/copy";
 import { retireFiling } from "@/lib/documents/doors";
+import { EmptyState } from "@/components/common/state";
 import type { FilingRow } from "@/lib/documents/types";
 
 /**
@@ -25,7 +26,7 @@ export function DocumentFilingsHistory({
   const [reason, setReason] = useState("");
 
   if (filings.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("filingsEmpty")}</p>;
+    return <EmptyState>{t("filingsEmpty")}</EmptyState>;
   }
 
   return (
