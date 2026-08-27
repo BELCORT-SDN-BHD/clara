@@ -38,16 +38,31 @@
 -- 磨合 lane row names both as "Backend gaps found and honestly not-built (Track-A debt,
 -- pre-P6)" -- a gap, not a ruling. No deliberate wall found; proceeding to build.
 --
--- Idiom (ii), not (i): a bare grant + firm-scoped RLS policy on the base table cannot express
--- the BOOKKEEPER+ floor its write verbs already enforce in-body via
--- `_human_ctx(role_rank('bookkeeper'))` -- Postgres RLS is per grantee ROLE, and the estate
--- has exactly one broad `clara_authenticated` role for every human, so a role-RANK floor
--- (a business-level value, not a Postgres role) has no precedent expressed directly in a base
--- table's RLS policy anywhere in this repo (grepped; zero hits). Every existing role-rank-
--- floored READ goes through either an RPC (`_human_ctx`) or a masked view
--- (`agent_receipts_visible`'s `coalesce(actor_role_rank(),-1) >= role_rank('bookkeeper')`,
--- 0103:410) -- a LIST read for a firm's inbox is the view shape, not the RPC shape, so this
--- file mirrors agent_receipts_visible's predicate rather than inventing a new one.
+-- Idiom (ii), not (i) -- CORRECTED JUSTIFICATION (an independent review caught the first cut's
+-- false claim; consciously ironic, since this same header elsewhere celebrates catching a
+-- grep false-negative on clara.users' ACL, and the retracted claim below was ITSELF
+-- grep-derived). A role-RANK floor expressed directly in a base table's RLS policy is NOT
+-- unprecedented -- three live, granted, FORCE-RLS counterexamples carry the BYTE-IDENTICAL
+-- floor predicate this file uses: `p_audit_log_human` (0002:518-520), `p_reportagentreceipts_
+-- human` (0111:251-253), `p_freeform_read_log_human` (0131:652-654). Idiom (i) -- a plain grant
+-- + that same floor predicate directly on firm_open_questions/client_identifier_promotions --
+-- would have been a legitimate, precedented choice too.
+--
+-- The real reason this file picks (ii) instead: 0103 already made firm_open_questions and
+-- client_identifier_promotions DEFINER-VERB-WRITTEN tables -- FORCE RLS with ONLY the owner
+-- policy, ZERO clara_authenticated grant (0103:961-964) -- and its own remit statement
+-- (0103:945-947) frames that as deliberate: "the only reads and writes are through the
+-- SECURITY DEFINER verbs ... clara.agent_receipts_visible is the single granted surface in
+-- this file". That is the SAME shape agent_receipts_visible itself sits on top of (its seven
+-- shim tables are likewise kept totally ungranted, 0103:990-1029, with the view as the one
+-- door). Grafting idiom (i) onto these two tables now would ADD a new base-table grant + policy
+-- pair where 0103 deliberately left none, widening the base relation's reachable-role set for
+-- the first time since it was authored; idiom (ii) instead reuses the "ungranted base, one
+-- granted view" shape THIS SAME MIGRATION FAMILY already established, so the base tables'
+-- zero-grant posture (re-proven in this file's own tail, section 3a) is exactly what 0103 left
+-- it at. A LIST read for a firm's inbox is also the view shape rather than the single-row/page
+-- RPC shape (`_human_ctx`, `get_open_question`/`list_review_queue`), so this file mirrors
+-- agent_receipts_visible's predicate rather than inventing a new one.
 --
 -- WHY ONE ARM, NOT agent_receipts_visible's TWO-CLOSED-ARM (`scope='firm'|'platform'`)
 -- predicate. That shape exists because a receipt's `firm_id` is NULLABLE (a platform-scoped

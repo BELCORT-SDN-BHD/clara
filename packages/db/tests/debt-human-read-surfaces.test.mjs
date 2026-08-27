@@ -18,7 +18,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, humanQuery, roleQuery, endPool, buildWorld, opk, sha, ROLES,
+  rootQuery, humanQuery, endPool, buildWorld, opk, sha, ROLES,
   ingestDocument, assertRaises, getPool,
 } from "./rig-fixtures.mjs";
 
@@ -227,20 +227,52 @@ test("debt-C2 · users_visible: exactly id + display_name -- email is not just p
 // D · THE ACL WALL — cross-role reach + the adversarial twin
 // ---------------------------------------------------------------------------------------
 
-test("debt-D1 · none of the three views are reachable by agent/wake/runtime roles", async (t) => {
-  if (gate(t)) return;
+// pi-A9's own shape: an ACL census via has_table_privilege, not an attempted read.
+// PICK-UP FROM REVIEW: the original cell attempted `select ... limit 1` as each role and
+// asserted 42501 — but that can never go red. jwt_firm()/actor_role_rank() are SECURITY
+// DEFINER and ungranted to PUBLIC/every app role but clara_authenticated (0002/0103), so
+// EVEN WITH a SELECT grant injected on a view, agent/wake/runtime roles hit 42501 on the
+// VIEW'S OWN PREDICATE calling those functions — a second, unrelated wall — before the
+// table-privilege check this cell claims to be proving ever gets to matter. assertRaises
+// compares only err.code, so a query denied by either wall reads identically: "a read that
+// cannot say NO has a meaningless YES" (this suite's own law, f-a7-pi.test.mjs pi-A9). The
+// census below asks the catalog directly, and the positive control proves THAT instrument
+// (not a read attempt) actually flips under an injected grant.
+async function aclLeaks() {
   const views = [
     "firm_open_questions_visible", "client_identifier_promotions_visible", "users_visible",
   ];
   const roles = [ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive, ROLES.runtime];
+  const bad = [];
   for (const view of views) {
     for (const role of roles) {
-      await assertRaises("42501",
-        () => roleQuery(role, `select 1 from clara.${view} limit 1`),
-        `${role} reading clara.${view}`);
+      const r = await rootQuery(
+        "select has_table_privilege($1, $2, 'select') as ok", [role, `clara.${view}`]);
+      if (r.rows[0].ok) bad.push(`${role} can SELECT clara.${view}`);
     }
   }
-});
+  return bad;
+}
+
+test("debt-D1 · THE ACL CENSUS — no agent/wake/runtime role holds SELECT on any of the three "
+  + "views, and the census FLIPS when one is granted", async (t) => {
+    if (gate(t)) return;
+    assert.deepEqual(await aclLeaks(), [],
+      "no agent/wake/runtime role holds SELECT on firm_open_questions_visible, "
+      + "client_identifier_promotions_visible or users_visible");
+
+    // THE POSITIVE CONTROL. Grant one, and the SAME instrument must name it — proving the
+    // census can say YES, not just that it happened to say NO everywhere above.
+    await inRolledBackTx(async (client) => {
+      await client.query(`grant select on clara.users_visible to ${ROLES.agentRo}`);
+      const r = await client.query(
+        "select has_table_privilege($1, $2, 'select') as ok", [ROLES.agentRo, "clara.users_visible"]);
+      assert.equal(r.rows[0].ok, true,
+        "has_table_privilege DOES flip true under an injected grant — the census is a live instrument");
+    });
+    // Rolled back: the estate is clean again, proven rather than assumed.
+    assert.deepEqual(await aclLeaks(), [], "the injected grant did not survive the cell");
+  });
 
 test("debt-D2 · THE ACL CENSUS — a stray grant on a BASE table is caught, and the census "
   + "clears once rolled back", async (t) => {
@@ -261,11 +293,21 @@ test("debt-D2 · THE ACL CENSUS — a stray grant on a BASE table is caught, and
       const dirty = await client.query(baseGrantCensus);
       assert.equal(dirty.rowCount, 1, "the census names the wrongly-granted base table");
       assert.equal(dirty.rows[0].n, "client_identifier_promotions");
-      // ...and this is what the stray grant actually costs: EVERY row, past the bookkeeper+
-      // floor AND the firm scope both, because a base-table grant bypasses the view entirely.
       const reachable = await client.query(
         "select has_table_privilege('clara_authenticated','clara.client_identifier_promotions','select') as ok");
-      assert.equal(reachable.rows[0].ok, true, "the stray grant makes the base table directly readable");
+      assert.equal(reachable.rows[0].ok, true, "the stray grant makes the base table's SELECT privilege reachable");
+      // MEASURED FACT (corrected here after review — the first cut claimed "EVERY row", which
+      // is true only for a VIEW): this base table carries FORCE RLS with ONLY the owner policy
+      // (0103:961-962). A stray table-level grant widens REACHABILITY (has_table_privilege
+      // above), but Postgres has no permissive policy naming clara_authenticated to admit any
+      // row, so an ACTUAL read through the stray grant returns ZERO rows — proven, not asserted.
+      // The real hole a stray grant would open is a grant PLUS a matching policy together;
+      // this file names that distinction rather than building a wall against a threat that
+      // (grant alone) does not exist.
+      await client.query("set role clara_authenticated");
+      const rows = await client.query("select * from clara.client_identifier_promotions");
+      assert.equal(rows.rowCount, 0,
+        "FORCE RLS with only the owner policy admits ZERO rows to clara_authenticated, even once granted");
     });
     // Rolled back: the estate is clean again, proven rather than assumed.
     assert.equal((await rootQuery(baseGrantCensus)).rowCount, 0, "the grant did not survive the cell");
@@ -288,7 +330,9 @@ test("debt-D3 · revoking the view grant actually removes the read (the grant is
         "clara_authenticated cannot read users_visible once its grant is revoked",
       );
     });
-    // Rolled back: the grant is restored, proven rather than assumed.
+    // Rolled back: the grant is restored, proven rather than assumed (not a tautology — bob
+    // reading his OWN row back through users_visible is a real, specific positive result).
     const restored = await humanQuery(world.users.bob, "select 1 as ok from clara.users_visible limit 1");
-    assert.ok(restored.rowCount >= 0, "the grant survives outside the rolled-back cell");
+    assert.equal(restored.rowCount, 1, "the grant survives outside the rolled-back cell");
+    assert.equal(restored.rows[0].ok, 1);
   });
