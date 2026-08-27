@@ -285,6 +285,45 @@ const CLOSE_MODEL_0056_CLOCK_NAMES = [
 // either before or after its matching body-move, so it names nothing here in both shapes.
 const F_A4_PR1B_CLOCK_NAMES = ["_abandon_close_core"];
 
+// F-A4 PR-1c [close-key-1's additive close-domain agent limb, `f_a4_pr_1c_close_agent_limb` at
+// whatever number merge claims]: SIX lawful bare-clock readers, MEASURED against the applied rig
+// rather than derived from reading the file (the round-8 M4 method, applied to a new lane).
+// (Prose count trued in the fix round — the array grew to six with settle_close_proposal while
+// this sentence still said five. A roster whose prose and whose members disagree is the exact
+// thing this file exists to prevent, so the count is stated once and read off the array below.)
+//
+// THE ADJUDICATION, per name, because arm (D) catches a bare token and a bare token is only a
+// defect when the body derives a DATE from it:
+//   · release_close_prep            — `released_at = now()`, a timestamptz release stamp.
+//   · _agent_close_proposal_core    — `settled_at = now()` on the supersession stamp, likewise.
+//   · _wake_task_id                 — `c.expires_at > statement_timestamp()`, the credential
+//                                     liveness predicate copied VERBATIM from wake_context()
+//                                     (itself on this roster) so the sibling and the body it
+//                                     mirrors cannot disagree about which credential is live.
+//   · mint_wake_credential_for_task — `statement_timestamp() + p_ttl`, mirroring
+//                                     mint_wake_credential's own expiry arithmetic (also on this
+//                                     roster). A timestamptz, never a date.
+//   · close_prep_due                — `wc.created_at > statement_timestamp() - interval '1 day'`,
+//                                     the cadence window on a timestamptz column. Its one DATE
+//                                     comparison, `fy.ends_on <= clara._book_today()`, goes
+//                                     through the book-clock authority — which is exactly the
+//                                     outcome S5.25 arm (B) exists to produce.
+// hold_close_prep is deliberately ABSENT: its held_at rides the column DEFAULT, so its own prosrc
+// reads no clock at all. Measured, not assumed — an unconditional pair would have over-asserted.
+//
+// STEM-GATED, never number-gated, for the reason every other block here states: this battery also
+// runs against databases pinned at earlier frontiers (d-b0..b3 stop at 0042-0045), where none of
+// these five exist, and an unconditional entry reds every one of those legs with a diff that says
+// nothing about clock discipline.
+//   · settle_close_proposal        — `settled_at = now()`, the same timestamptz settle stamp
+//                                     _agent_close_proposal_core writes on the supersession path.
+//                                     Added with the door itself (conductor ruling, this train),
+//                                     MEASURED on the applied rig like the other five.
+const F_A4_PR1C_CLOCK_NAMES = [
+  "_agent_close_proposal_core", "_wake_task_id", "close_prep_due",
+  "mint_wake_credential_for_task", "release_close_prep", "settle_close_proposal",
+];
+
 // 0057 [Wave E lane γ]: ONE lawful bare-clock reader. clara.verify_snapshot stamps
 // `'verified_at', now()` on the jsonb payload it RETURNS — a display timestamptz that says
 // when the recomputation ran, and it lands in no column and in no date-typed accounting
@@ -738,6 +777,7 @@ export async function s5BareTokenRoster(query) {
     names.push(...F_A4_PR1B_CLOCK_NAMES);
   }
   if (await appliedStem("g1_wake_engine$")) names.push(...G1_WAKE_ENGINE_CLOCK_NAMES);
+  if (await appliedStem("f_a4_pr_1c_close_agent_limb$")) names.push(...F_A4_PR1C_CLOCK_NAMES);
   return names.sort();
 }
 

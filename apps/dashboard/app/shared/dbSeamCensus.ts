@@ -153,8 +153,34 @@ export type EmittedClosure = {
   buildObjectSites: number;
 };
 
+/** A PURE DELEGATE: a body that emits no projection of its own and whose answer is a
+ *  single nested clara.* call. Such a body contributes nothing to the closure — it is a
+ *  floor or an admission in front of someone else's answer — so walking THROUGH it must
+ *  not cost a hop.
+ *
+ *  WHY THIS EXISTS (F-A4 PR-1c review, FIX-2). The depth budget is a proxy for "how far
+ *  from the read does a key still belong to the read", and it was calibrated against
+ *  chains of bodies that each actually project something. The moment a body is extracted
+ *  into `public verb -> core` — which is what the estate does whenever a human floor has
+ *  to be lifted off an answer so the agent lane can reach it — the SAME chain grows a hop
+ *  that carries no keys, and a real projection at the far end silently leaves the measured
+ *  closure. Nothing about the seam changed; only the number of stack frames did. Counting
+ *  a keyless delegate as a hop measures our refactoring, not the seam.
+ *
+ *  Deliberately narrow: zero emitted keys AND zero build-object sites AND exactly one
+ *  `return`, which is a delegating call. A body with a second return, or with any
+ *  projection of its own, is a real link in the chain and still costs its hop. */
+export function isPureDelegate(src: string, scan: ProjectionScan): boolean {
+  if (scan.keys.size > 0 || scan.buildObjectSites > 0) return false;
+  const masked = maskSqlComments(src);
+  const returns = masked.match(/\breturn\b/gi) ?? [];
+  const delegating = masked.match(/\breturn\s+clara\.[a-z0-9_]+\s*\(/gi) ?? [];
+  return returns.length === 1 && delegating.length === 1;
+}
+
 /** The emitted-key CLOSURE of one read: its own projections plus those of every
- *  clara.* jsonb-returning helper it calls, to `maxDepth` hops. The closure is
+ *  clara.* jsonb-returning helper it calls, to `maxDepth` hops — where a PURE DELEGATE
+ *  (see above) is transparent rather than depth-consuming. The closure is
  *  what makes `_fa_asset_json`'s keys count as `list_fixed_assets`' keys without
  *  anyone declaring that relationship — the exact composition the four measured
  *  defects lived inside. */
@@ -186,9 +212,13 @@ export function emittedClosure(
       const callRe = /\bclara\.(_?[a-z0-9_]+)\s*\(/gi;
       let c: RegExpExecArray | null;
       const masked = maskSqlComments(def.src);
+      // A keyless single-return delegate is TRANSPARENT: recurse at the same depth, so an
+      // extraction that lifts a human floor off an answer cannot push a real projection out
+      // of the measured closure (FIX-2).
+      const nextDepth = isPureDelegate(def.src, scan) ? depth : depth + 1;
       while ((c = callRe.exec(masked)) !== null) {
         const callee = c[1] ?? "";
-        if ((catalog.get(callee) ?? []).some((d) => /json/i.test(d.returns))) walk(callee, depth + 1);
+        if ((catalog.get(callee) ?? []).some((d) => /json/i.test(d.returns))) walk(callee, nextDepth);
       }
     }
   };

@@ -1021,6 +1021,59 @@ export const G1_WAKE_ENGINE_RUNTIME_COHORT = ["_settle_wake_task"];
 // grant-matrix row is owed for it.
 export const BANK_AGENCY_F_A3_PR3_COHORT = ["confirm_bank_identifier_promotion"];
 
+// F-A4 PR-1c [Wave-F Track A, the CLOSE-DOMAIN AGENT LIMB] — three grant tiers plus a closed
+// ungranted set, declared as ONE cohort for the same "wholly present or wholly absent" reason
+// F-A5's PR-2/PR-3 split uses: folding these into an earlier wave's list would red every
+// pre-PR-1c database, and `cohortFailures()` fails a PARTIAL cohort by design.
+//
+//   the TWELVE wake wrappers — clara_wake_interactive ONLY (design close-key-1 Annex E.1's own
+//   grant column), reached by clara_wake_write_login. The design ruled THIRTEEN;
+//   wake_establish_prepayment_schedule is PARKED on two measured blockers (its delegates
+//   propose_adjustment_template / sign_adjustment_template have no extracted cores, and Annex
+//   B.2's "term from the bound document's facts" names no DB-owned carrier) — see the
+//   migration's own header. Named here as a deliberate absence, not forgotten.
+const F_A4_PR1C_WAKE_FNS = [
+  "wake_list_fiscal_years", "wake_get_close_plan", "wake_get_close_readiness", "wake_verify_close",
+  "wake_snapshot_state", "wake_dry_run_close_readiness", "wake_open_fiscal_year", "wake_begin_close",
+  "wake_abandon_close", "wake_propose_close", "wake_run_depreciation_catchup",
+  "wake_mint_month_snapshot",
+];
+//   the clock's two runtime verbs — clara_runtime ONLY. close_prep_due is the due oracle (Annex
+//   B.1: "the wake roles never ask" — she learns a year is due by being WOKEN); the sibling
+//   minter mirrors mint_wake_credential's own grant (0011:1196-1197).
+const F_A4_PR1C_RUNTIME_FNS = ["close_prep_due", "mint_wake_credential_for_task"];
+//   the three human doors — clara_authenticated ONLY, floors body-enforced (bookkeeper+). The
+//   agent identity and BOTH wake roles gain ZERO: a brake the agent lane could lift off itself
+//   is not a brake, and a receipt panel is a human audit control.
+//   settle_close_proposal joins them at the conductor's ruling on this train: Annex I.1's review
+//   card offers adopt/decline, attest_close_exception READS a proposal without settling it, and
+//   without this door `adopted`/`withdrawn` are unreachable values on a live CHECK. Its floor is
+//   attest_close_exception's own (bookkeeper + close_and_attest), so it sits at the same tier as
+//   the other three and the wake roles gain ZERO on it.
+const F_A4_PR1C_HUMAN_FNS = [
+  "hold_close_prep", "release_close_prep", "list_agent_act_receipts", "settle_close_proposal",
+];
+//   the ungranted internals — every agent core, ladder helper, extracted read core and trigger
+//   function the limb ships. Declaring them turns a future accidental grant into a FAILING test
+//   rather than a silently-widened wall. `_adjustment_run_due_core` / `_depreciation_run_due_core`
+//   are OQ-9(a)/R-L11's additive extractions BELOW each live oracle's own admission — the live
+//   verbs keep their grants and their _assert_due_read_ctx, so x42.d8's closed census is unmoved.
+const F_A4_PR1C_UNGRANTED_FNS = [
+  "_wake_task_id", "_close_subject_client", "_close_expected_op_key", "_close_wake_ctx",
+  "_close_prep_hold_active", "_close_tier_b_common", "_close_drawer1_unclean",
+  "_close_belt_period_unrun", "_close_reopen_correction_in_flight", "_agent_close_receipt",
+  "_close_read_gate", "_agent_close_read_core", "_agent_open_fiscal_year_core", "_agent_begin_close_core",
+  "_agent_abandon_close_core", "_agent_close_proposal_core", "_agent_depreciation_catchup_core",
+  "_agent_mint_month_snapshot_core", "_list_fiscal_years_core", "_close_readiness_core",
+  "_verify_close_core", "_adjustment_run_due_core", "_depreciation_run_due_core",
+  "_tf_close_proposals_settle_only", "_tf_close_prep_holds_release_only",
+  "_tf_assert_close_agent_receipt",
+];
+export const F_A4_PR1C_COHORT = [
+  ...F_A4_PR1C_WAKE_FNS, ...F_A4_PR1C_RUNTIME_FNS, ...F_A4_PR1C_HUMAN_FNS,
+  ...F_A4_PR1C_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1106,6 +1159,11 @@ export const ALLOWED = {
     // F-A3/PR-3 [retirement + parity + doors] confirm_bank_identifier_promotion — see the block
     // above (OQ-8's deferred confirm half; agent + both wake roles gain ZERO).
     ...BANK_AGENCY_F_A3_PR3_COHORT,
+    // F-A4/PR-1c [the close-domain agent limb] the FOUR human doors: hold/release_close_prep
+    // (the brake on the clocked lane), list_agent_act_receipts (TA-P4 (4)'s read surface) and
+    // settle_close_proposal (the review card's terminal door). clara_authenticated ONLY — see the
+    // block above.
+    ...F_A4_PR1C_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1129,7 +1187,12 @@ export const ALLOWED = {
     "wake_get_bank_pack", "wake_add_bank_account", "wake_upsert_account", "wake_match_bank_line",
     "wake_settle_from_bank_line", "wake_unmatch_bank_match", "wake_complete_bank_reconciliation",
     "wake_void_bank_reconciliation", "wake_resolve_bank_line_exception", "wake_propose_bank_line_exception",
-    "wake_void_bank_statement", "wake_propose_bank_identifier_promotion", "wake_resolve_and_book_bank_line"]),
+    "wake_void_bank_statement", "wake_propose_bank_identifier_promotion", "wake_resolve_and_book_bank_line",
+    // [Wave-F Track A, F-A4 PR-1c] the TWELVE close wrappers -- clara_wake_interactive is the
+    // design's own grant column (Annex E.1), and the wake_fn_allowlist's close_prep rows are the
+    // KIND gate on top of it: an `interactive` chat credential holding this EXECUTE still fails
+    // assert_wake_allowed('interactive','wake_begin_close') because no such row exists.
+    ...F_A4_PR1C_WAKE_FNS]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
   // F-A6 PR-1 — BOTH new roles are KEYS, and that is the whole point of adding them (E.2/C11,
   // GM-6): `grantMatrixFailures` iterates Object.keys(ALLOWED), so a role that is not a key is
@@ -1174,6 +1237,11 @@ export const ALLOWED = {
     // claim path, the settle_chat_turn precedent above). Declared here so any wider grant FAILS
     // the matrix.
     ...G1_WAKE_ENGINE_RUNTIME_COHORT,
+    // [Wave-F Track A, F-A4 PR-1c] the clock's two runtime verbs: close_prep_due (the due oracle
+    // — clara_runtime and NOBODY else, Annex B.1: the wake roles never ask) and
+    // mint_wake_credential_for_task (the F14 sibling minter, mirroring mint_wake_credential's own
+    // grant above). clara._wake_task_id() stays UNGRANTED, deliberately — see the block above.
+    ...F_A4_PR1C_RUNTIME_FNS,
     ...RENDER_ZETA_RUNTIME_FNS, // 0079-0083 [Wave E lane ζ] the render queue's whole
     // reachable API — the array is the enumeration; the block where it is declared names each
     // verb and its consumer. clara_runtime holds NO table privilege on clara.render_jobs, so
@@ -1379,6 +1447,12 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("F-A3/PR-3 retirement + parity + doors", BANK_AGENCY_F_A3_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5b PR-1 sandbox export lane", F_A5B_PR1_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5b card 1 substitution seam", CARD1_SEAM_COHORT, liveNames));
+  // F-A4 PR-1c is bimodal exactly as F-A6's is: wholly present once the close agent limb applies,
+  // wholly absent before it. Half a cohort is a half-applied migration and is reported as one.
+  const closeLimbLive = F_A4_PR1C_COHORT.filter((n) => liveNames.has(n));
+  if (closeLimbLive.length !== 0) {
+    failures.push(...cohortFailures("F-A4/PR-1c close-domain agent limb", F_A4_PR1C_COHORT, liveNames));
+  }
   return failures;
 }
 

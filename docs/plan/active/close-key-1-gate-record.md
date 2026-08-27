@@ -64,8 +64,10 @@ the templates loop, so the blast radius is every client, not only those with a t
 `setupSql()` (`:136-141`) sets no `request.jwt.claims` on any pool. So B13 **raises inside the
 freezing transaction**: no receipt row, no failing-rung vector, Tier B's "COMMITS so the reason is
 durable" contract broken, and cell C-16 unable ever to go green. v1 then closed both natural exits
-itself — §7's "no edit to `0041`/`0045`" and D-14. The FA twin is fine (`0041:3617-3630` compares a
-non-null `jwt_firm()` only).
+itself — §7's "no edit to `0041`/`0045`" and D-14. ~~The FA twin is fine (`0041:3617-3630` compares a
+non-null `jwt_firm()` only).~~ **RE-CUT 2026-08-27: the FA twin is NOT fine** — `0042`'s
+WDB-R1/WDB-R2 recut gave it the same `_assert_due_read_ctx` admission, measured on the rig. The
+finding's remedy applies to BOTH oracles.
 **Fold:** design §3.6's B13 is re-cut into three arms with the ADJ arm inside its own
 `begin…exception` block, **fail-closed — an inevaluable probe counts as DUE** and refuses
 `belt_period_unrun` with `reason='adj_oracle_inevaluable'`, never a raise (Annex A.3 B13 arm 3;
@@ -445,7 +447,9 @@ a rig replay says otherwise. Each names the instrument.
 
 1. **`_assert_due_read_ctx` refuses a real wake session** — call `clara.adjustment_run_due(client)`
    through `clara_wake_write_login` → `clara_wake_interactive` and read the SQLSTATE (expect CLR03);
-   the twin call to `depreciation_run_due` answers. **Cell C-19**; the whole of GB-1 rests on it.
+   ~~the twin call to `depreciation_run_due` answers~~ **(RE-CUT 2026-08-27: it does not — both
+   oracles refuse the wake lane, and the ACL refuses 42501 before the admission's CLR03 is even
+   reached).** **Cell C-19**; the whole of GB-1 rests on it.
 2. **The live tips are the tips** — `to_regprocedure` + `prosrc` on all nineteen D1 objects
    immediately before each window, matched against the prestate pins. The lineage sweep found no
    later CoR, but a sweep of migration text is not a read of the catalog.
