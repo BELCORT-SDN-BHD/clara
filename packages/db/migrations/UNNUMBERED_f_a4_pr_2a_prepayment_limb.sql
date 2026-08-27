@@ -123,6 +123,14 @@
 --     semantics-identical and strictly smaller-coupled — the resolver no longer depends on the
 --     table's row type at all, so a later ALTER on clara.adjustment_templates cannot reach it.
 --
+--     AN ALTERNATIVE DID EXIST, and the register says so rather than implying none did: declaring
+--     the two call sites' `t` variables as `clara.adjustment_templates%rowtype` instead of `record`
+--     makes the row-type parameter callable, and the review lane RAN that and it succeeds. It was
+--     not chosen because it is the LARGER coupling -- it edits two more live bodies' declarations
+--     inside the D1 window to keep a parameter shape that binds the resolver to the table's row
+--     type, where the jsonb-pair form binds it to nothing. Smaller blast radius, and a later ALTER
+--     on clara.adjustment_templates cannot reach it.
+--
 --     AND THE HONEST HALF, recorded because it is the more useful lesson: §A2.2's own comment
 --     originally argued the OPPOSITE — that passing the record was safe "because BOTH sites
 --     populate it with a bare single-table `select *`" — and §TAIL even CENSUSED that property.
@@ -3432,8 +3440,8 @@ declare
   v_run record; v_rungs jsonb; v_receipt uuid; v_keys text[]; v_dry jsonb;
   v_bound jsonb := '{}'::jsonb; v_stale jsonb := '[]'::jsonb; v_k text;
   v_fresh text; v_recorded text; v_id uuid; v_live uuid; v_live_bound jsonb;
-  v_live_drafted jsonb; v_pairs_new text[]; v_pairs_live text[];
-  v_moved text[]; v_dropped text[]; v_added text[]; v_arm text;
+  v_live_drafted jsonb; v_pairs_new jsonb[]; v_pairs_live jsonb[];
+  v_moved text[]; v_dropped jsonb[]; v_added jsonb[]; v_arm text;
 begin
   v_rungs := clara._close_tier_b_common(v_client, p_rationale, p_model);
   select * into v_run from clara.close_runs r where r.id = p_close_run;
@@ -3541,9 +3549,16 @@ begin
       -- still supersedes, so a rotation across overlapping subsets burns live proposals one after
       -- another whenever the complement is non-empty: the same churn B11b exists to stop, wearing a
       -- different shape. STRICT SUPERSET ADMITS GROWTH AND REFUSES TRADE.
-      select coalesce(array_agg(distinct (x.el ->> 'check_key') || '|' || (x.el ->> 'item_key')), '{}')
+      -- THE PAIR KEY IS A TWO-ELEMENT COMPOSITE, NOT A JOINED STRING -- 0138:496's own idiom, and
+      -- law 3 exactly. item_key is only non-blank-validated, so it may contain any character: under
+      -- a `check_key || '|' || item_key` key, ("A", "x|y") and ("A|x", "y") produce the SAME text
+      -- and are read as one pair. That is not merely untidy -- in the ROTATION direction it can
+      -- make v_dropped come back empty when a pair really was dropped, and B11b would then
+      -- SUPERSEDE on the strict-superset arm where it should refuse. A separator is a spelling of
+      -- a pair, not the pair; jsonb_build_array carries the two fields as two fields.
+      select coalesce(array_agg(distinct jsonb_build_array(x.el ->> 'check_key', x.el ->> 'item_key')), '{}')
         into v_pairs_new from jsonb_array_elements(p_drafted) x(el);
-      select coalesce(array_agg(distinct (x.el ->> 'check_key') || '|' || (x.el ->> 'item_key')), '{}')
+      select coalesce(array_agg(distinct jsonb_build_array(x.el ->> 'check_key', x.el ->> 'item_key')), '{}')
         into v_pairs_live from jsonb_array_elements(coalesce(v_live_drafted, '[]'::jsonb)) x(el);
       select coalesce(array_agg(k order by k), '{}') into v_moved
         from jsonb_object_keys(v_bound) k
@@ -3583,15 +3598,21 @@ begin
           -- CARRIES IT: the reason names the moved check_keys AND every dropped pair. A reviewer
           -- must not have to diff two proposals to discover what a supersession took away.
           -- ARM (2) loses nothing by construction, so its sentence is simply what was added.
+          -- The pairs are RENDERED for the reader as `check_key / item_key` rather than dumped as
+          -- raw jsonb: the comparison key is a composite (above), but a durable sentence a
+          -- professional reads should not make them parse an array literal.
           settle_reason = case v_arm
             when 'moved_digest' then
               'superseded on a moved gate vector: ' || array_to_string(v_moved, ', ')
               || case when coalesce(array_length(v_dropped, 1), 0) > 0
-                      then '; coverage dropped for: ' || array_to_string(v_dropped, ', ')
+                      then '; coverage dropped for: '
+                           || (select string_agg((p ->> 0) || ' / ' || (p ->> 1), ', ' order by p)
+                                 from unnest(v_dropped) p)
                       else '; coverage retained in full' end
             when 'strict_superset' then
               'superseded by a strict superset of its drafted items; newly covered: '
-              || array_to_string(v_added, ', ')
+              || (select string_agg((p ->> 0) || ' / ' || (p ->> 1), ', ' order by p)
+                    from unnest(v_added) p)
             else 'superseded by a fresh proposal' end
       where id = v_live;
   end if;

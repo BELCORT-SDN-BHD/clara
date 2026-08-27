@@ -45,6 +45,39 @@ async function runWithItems(tag, drafts = 2) {
 const drafted = (pairs, text = "Clara: the professional's drafted words for this item.") =>
   pairs.map((p) => ({ ...p, text }));
 
+const CHECK_B = "uncoded_documents";
+
+/** A run with outstanding items under TWO DIFFERENT check_keys, which is what makes arm (2)
+ *  drivable with the world FROZEN: the drafted set growing is the AGENT'S CHOICE, not a world
+ *  event, so drafting {A} then {A,B} changes `bound_digests` (a new KEY appears) without anything
+ *  measured moving. An unapproved draft gives check A; a filed, DATED, uncoded document gives
+ *  check B -- the date is load-bearing, an undated document is simply out of the check's scope. */
+async function runWithTwoChecks(tag) {
+  const { seedVerifiedDocument, fileDocument } = await import("./rig-docs-fixtures.mjs");
+  const { firmOf, opk } = await import("./wave-a-fixtures.mjs");
+  const sc = await scene(tag);
+  const entry = await inPeriodDraft(sc.alice, {
+    client: sc.client, postingDate: "2025-03-01", memo: `med8 ${tag} A`,
+    debit: "574-C56", credit: "170-C56", cents: 1500 });
+  const firm = await firmOf(sc.client);
+  const doc = await seedVerifiedDocument({
+    firm, client: null, filename: `med8-${tag}.pdf`, financialDate: "2025-03-15" });
+  await fileDocument(sc.alice, { document: doc.documentId, client: sc.client, opKey: opk("med8-file") });
+  const begun = await VERBS.begin(sc.s, { fy: sc.fy });
+  assert.equal(begun.status, "acted", `begin_close: ${JSON.stringify(tokens(begun))}`);
+  const run = begun.result.close_run_id;
+  // BOTH checks must really be failing, or the cell below would be drafting for items that are not
+  // outstanding and proving nothing about growth.
+  const failing = await rootQuery(
+    "select check_key from clara.close_gate_results where close_run_id=$1 and state='fail' order by 1",
+    [run]);
+  assert.deepEqual(failing.rows.map((r) => r.check_key).sort(), [CHECK, CHECK_B].sort(),
+    "the two-check fixture did not produce exactly the two expected failing checks");
+  return { sc, run,
+    pairA: { check_key: CHECK, item_key: entry },
+    pairB: { check_key: CHECK_B, item_key: doc.documentId } };
+}
+
 test("fa4p2a.W23-digest a NEW outstanding item under an ALREADY-COVERED check MOVES that check's digest", async (t) => {
   if (prepayGate(t, markSkip)) return;
   // THE CRUX MEASUREMENT behind design Annex D.1a's ruling, driven here so the ruling rests on a
@@ -98,12 +131,14 @@ test("fa4p2a.W23 (MED-8) a strict SUBSET with unmoved digests REFUSES, and the l
     "a DIFFERENT proposal is now open -- the live one was superseded after all");
   assert.equal(after.length, 1, "the refused draft wrote a proposal row");
 
-  // THE SHARED CEILING (the same one W24 states, because the two share it rather than each having
-  // their own): ARM (1)'s supersede -- and with it the dropped-pair naming its settle_reason owes
-  // -- is NOT driven here. It needs a check's digest to move BETWEEN two proposals on one run, and
-  // `begin_close` freezes the year so `unapproved_drafts_in_period` cannot move that way mid-run.
-  // The MECHANISM is proven by W23-digest; the same-run TRANSITION is carried by name to PR-2b/PR-3
-  // rather than manufactured by planting into a frozen year.
+  // ARM (1)'s CEILING (stated here as well as at W24, because this cell is where a reader meets the
+  // subset case and would otherwise assume arm (1) is covered): arm (1)'s supersede -- and with it
+  // the dropped-pair naming its settle_reason owes -- is NOT driven. Arm (1) fires on a MOVED
+  // DIGEST, and a digest moves only when the MEASURED WORLD moves; `begin_close` freezes the year
+  // for both of this fixture's checks, so no measurement can change between two proposals on one
+  // run. Arm (2) is NOT subject to this and IS driven (W24-arm2): growth is the agent's choice, not
+  // a world event. The MECHANISM behind arm (1) is proven by W23-digest; the same-run TRANSITION is
+  // carried by name to PR-2b/PR-3 rather than manufactured by planting into a frozen year.
 });
 
 test("fa4p2a.W24 (MED-8) the STRICT-SUPERSET arm is over PAIRS, and the TRADE case still refuses", async (t) => {
@@ -136,22 +171,119 @@ test("fa4p2a.W24 (MED-8) the STRICT-SUPERSET arm is over PAIRS, and the TRADE ca
   assert.equal(rows.filter((p) => p.state === "superseded").length, 0,
     "a proposal was superseded despite the refusal");
 
-  // ================= THE SHARED CEILING, stated in BOTH cells that share it =================
-  // NEITHER ARM (1)'s SUPERSEDE NOR ARM (2)'s SUPERSET IS DRIVEN BY THIS BATTERY, and they share
-  // ONE reason rather than two. Both need the world to MOVE between two proposals on the same run:
-  // arm (1) needs a check's digest to change, arm (2) needs the pair set to grow by a NEW key. For
-  // `unapproved_drafts_in_period` neither can happen mid-run, because `begin_close` FREEZES the
-  // year -- the wall fa4c.B1b and fa4c.G1b already pin -- so no new draft can appear in the period
-  // after the run starts.
+  // ============================ ARM (1)'s CEILING, on its TRUE reason ============================
+  // ARM (2) IS NOW DRIVEN (cell W24-arm2). An earlier cut of this comment claimed both arms shared
+  // one ceiling and gave the reason as "arm (2) needs the pair set to grow by a NEW key, which the
+  // frozen year forbids". THAT REASON WAS WRONG, and the conclusion it supported was wrong with it:
+  // the drafted set growing is the AGENT'S CHOICE, not a world event, so a two-check fixture
+  // reaches strict_superset with the world entirely frozen. The right-conclusion-wrong-reason class
+  // this train's own deviations register already names once -- here it was a WRONG conclusion
+  // resting on a wrong reason, which is worse and is why the reason is now stated separately.
   //
-  // WHAT IS PROVEN ANYWAY: cell W23-digest shows the digest DOES move with the item set, which is
-  // the mechanism arm (1) rides and the fact design Annex D.1a's ruling rests on. What is NOT
-  // proven is the same-run TRANSITION.
+  // WHAT REMAINS CEILING'D IS ARM (1) ALONE, and its reason is its own: arm (1) fires on a MOVED
+  // DIGEST, and a digest can only move when the MEASURED WORLD moves. `begin_close` freezes the
+  // year for both of this fixture's checks -- no new draft can appear in the period and no filing
+  // can be coded -- so no measurement can change between two proposals on one run. That is a
+  // property of the world, not of the agent's choice, which is exactly why arm (2) escaped it and
+  // arm (1) does not.
   //
-  // NOTHING IS PLANTED TO FAKE IT. A fixture that mutated a frozen year to manufacture the
-  // transition would be testing the plant, not the guard. CARRIED BY NAME to PR-2b/PR-3, where the
-  // runtime's own wake cycles drive real mid-run movement across separate runs.
-  // ==========================================================================================
+  // WHAT IS PROVEN ANYWAY: cell W23-digest shows the digest DOES move with the measured item set,
+  // which is the mechanism arm (1) rides and the fact design Annex D.1a's ruling rests on. What is
+  // NOT proven is the same-run TRANSITION, and with it arm (1)'s dropped-pair sentence.
+  //
+  // NOTHING IS PLANTED TO FAKE IT. A fixture that mutated a frozen year would test the plant, not
+  // the guard. CARRIED BY NAME to PR-2b/PR-3, where the runtime's own wake cycles move the world
+  // between passes.
+  // ==============================================================================================
+});
+
+test("fa4p2a.W24-arm2 (MED-8) a STRICT SUPERSET across two check_keys supersedes, and settle_reason names the newly-covered pair", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // ARM (2), DRIVEN END TO END -- including the `case v_arm` construction, which no other cell
+  // reaches. The world is FROZEN throughout: begin_close ran before either proposal, and neither
+  // proposal changes a measurement. What grows is the AGENT'S CHOICE of how many outstanding items
+  // to draft for, which is exactly the growth arm (2) exists to admit.
+  const { sc, run, pairA, pairB } = await runWithTwoChecks("w24a2");
+
+  const first = await VERBS.propose(sc.s, { run, drafted: drafted([pairA]) });
+  assert.equal(first.status, "acted", `first proposal refused: ${JSON.stringify(tokens(first))}`);
+  const live = (await proposalRows(run)).find((p) => p.state === "open");
+  assert.ok(live, "no open proposal after the first draft");
+  assert.deepEqual(Object.keys(live.bound_digests).sort(), [CHECK],
+    "the first proposal bound a key it did not draft for");
+
+  // A FRESH TASK drafting BOTH pairs. bound_digests now carries a SECOND key, so B11's exact-map
+  // equality does not fire and B11b is reached -- with v_moved EMPTY (check A's digest is
+  // untouched) and v_added carrying B's pair. That is strict_superset, not moved_digest.
+  const s2 = await mintClosePrepSession(sc.firm, sc.client);
+  const grown = await VERBS.propose(s2, { run, drafted: drafted([pairA, pairB]) });
+  assert.equal(grown.status, "acted",
+    `legitimate growth was refused: ${JSON.stringify(grown).slice(0, 300)}`);
+
+  const rows = await proposalRows(run);
+  const superseded = rows.find((p) => p.state === "superseded");
+  assert.ok(superseded, "the predecessor was not superseded");
+  assert.equal(superseded.id, live.id, "a DIFFERENT proposal was superseded");
+  assert.equal(rows.filter((p) => p.state === "open").length, 1, "exactly one proposal stays open");
+
+  // THE SENTENCE ITSELF -- arm (2) loses nothing by construction, so the reason names what was
+  // ADDED, and it names it in the reader's form (`check_key / item_key`), not as raw jsonb.
+  assert.match(superseded.settle_reason, /strict superset/i,
+    `arm (2) did not write its own sentence: ${superseded.settle_reason}`);
+  assert.match(superseded.settle_reason, /newly covered/i);
+  assert.ok(superseded.settle_reason.includes(`${CHECK_B} / ${pairB.item_key}`),
+    `the reason does not name the newly-covered pair in reader form: ${superseded.settle_reason}`);
+  // AND IT DOES NOT NAME THE PAIR THAT WAS ALREADY COVERED -- a sentence that listed everything
+  // would tell a reviewer nothing about what changed.
+  assert.ok(!superseded.settle_reason.includes(pairA.item_key),
+    `the reason names an already-covered pair: ${superseded.settle_reason}`);
+});
+
+test("fa4p2a.W24-paircollision the pair key is a COMPOSITE: ('A','x|y') and ('A|x','y') are DISTINCT", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // LAW 3, at the expression the guard actually uses. item_key is only non-blank-validated, so it
+  // may contain any character. Under a `check_key || '|' || item_key` key the two pairs below
+  // produce the SAME text and are read as ONE -- and in the ROTATION direction that makes v_dropped
+  // come back empty when a pair really was dropped, so B11b would SUPERSEDE on the strict-superset
+  // arm where it must refuse. jsonb_build_array carries the two fields as two fields.
+  //
+  // CEILING, stated: this drives the EXPRESSION, not the ladder. The estate's check_key catalog has
+  // no member spelled `A|x`, so the collision cannot be reached through the real verb -- which is
+  // why the fix is worth having and why this control is written at the level the defect lives at.
+  const r = await rootQuery(`
+    select (jsonb_build_array('A','x|y') = jsonb_build_array('A|x','y')) as composite_collides,
+           (('A' || '|' || 'x|y') = ('A|x' || '|' || 'y'))              as concat_collides,
+           (select count(distinct jsonb_build_array(e ->> 'check_key', e ->> 'item_key'))::int
+              from jsonb_array_elements($1::jsonb) as t(e))             as composite_distinct,
+           (select count(distinct (e ->> 'check_key') || '|' || (e ->> 'item_key'))::int
+              from jsonb_array_elements($1::jsonb) as t(e))             as concat_distinct`,
+    [JSON.stringify([{ check_key: "A", item_key: "x|y" }, { check_key: "A|x", item_key: "y" }])]);
+  const x = r.rows[0];
+  assert.equal(x.concat_collides, true,
+    "the separator form no longer collides -- this control is asserting a hazard that has moved");
+  assert.equal(x.composite_collides, false, "the composite form collides -- law 3 is not satisfied");
+  assert.equal(x.concat_distinct, 1, "the separator form counted two pairs as two -- control is stale");
+  assert.equal(x.composite_distinct, 2,
+    "the composite key merged two genuinely different pairs -- the shipped guard can drop a pair silently");
+
+  // AND THE SHIPPED BODY USES THE COMPOSITE, read from the live catalog rather than assumed.
+  const src = await rootQuery(
+    "select prosrc from pg_proc where oid = to_regprocedure('clara._agent_close_proposal_core(jsonb,uuid,jsonb,text,text,jsonb,text)')");
+  const body = src.rows[0].prosrc;
+  // SPECIFIC TO THE TWO PAIR-SET AGGREGATES. A bare count of the composite idiom comes back THREE,
+  // because 0138's own FIX-8 duplicate-item rung already keys on it with `count(distinct ...)` --
+  // measured, not assumed, and counting all three would have made this control pass for a reason
+  // that has nothing to do with B11b's pair sets.
+  const aggregates = (body.match(
+    /array_agg\(distinct jsonb_build_array\(x\.el ->> 'check_key', x\.el ->> 'item_key'\)\)/g) ?? []).length;
+  assert.equal(aggregates, 2,
+    `expected BOTH pair-set aggregates to use the composite, found ${aggregates}`);
+  const preexisting = (body.match(
+    /count\(distinct jsonb_build_array\(x\.el ->> 'check_key', x\.el ->> 'item_key'\)\)/g) ?? []).length;
+  assert.equal(preexisting, 1,
+    "FIX-8's duplicate-item rung no longer keys on the composite -- the idiom moved out from under this control");
+  assert.doesNotMatch(body, /'check_key'\)\s*\|\|\s*'\|'/,
+    "a separator-joined pair key survives in the shipped body");
 });
 
 test("fa4p2a.W22 (residual 1) the rank conjunct breaks NO definer path, and a below-floor viewer still cannot read", async (t) => {

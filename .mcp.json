@@ -11,10 +11,6 @@
       "command": "cmd",
       "args": ["/c", "npx", "shadcn@4.12.0", "mcp"],
       "env": {}
-    },
-    "mobbin": {
-      "type": "http",
-      "url": "https://api.mobbin.com/mcp"
     }
   }
 }
