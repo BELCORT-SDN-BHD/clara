@@ -1,5 +1,8 @@
-// lib/bank/recon-doors.ts — the "certify" DOORS. Pins wire shape and
-// refusal-verbatim propagation.
+// lib/bank/recon-doors.ts — the "certify" DOORS. Pins wire shape,
+// refusal-verbatim propagation, and the opaque-receipt discipline (N14:
+// completeBankReconciliation returns the RPC's own bytes, never mapped
+// through toBankReconciliationView — the caller re-reads getBankReconciliation
+// for the real, mapped view).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -25,7 +28,7 @@ function withMockedFetch(impl: typeof fetch, run: () => Promise<void>): Promise<
   });
 }
 
-test("completeBankReconciliation: posts p_statement/p_ack_outstanding and maps the receipt", async () => {
+test("completeBankReconciliation: posts p_statement/p_ack_outstanding and returns the RPC's own bytes opaque, never mapped", async () => {
   let seenBody: Record<string, unknown> = {};
   await withMockedFetch(
     async (_u, init) => {
@@ -33,10 +36,12 @@ test("completeBankReconciliation: posts p_statement/p_ack_outstanding and maps t
       return jsonResponse({ statement_id: "s1", status: "complete", preview: false, closing_cents: -500 });
     },
     async () => {
-      const view = await completeBankReconciliation("s1", ["oi1", "oi2"], { session: fakeSession("tok") });
+      const receipt = await completeBankReconciliation("s1", ["oi1", "oi2"], { session: fakeSession("tok") });
       assert.deepEqual(seenBody.p_ack_outstanding, ["oi1", "oi2"]);
-      assert.equal(view.mode, "receipt");
-      assert.equal(view.terms.difference_cents, 0);
+      // Opaque pass-through, not a mapped BankReconciliationView (N14) — the
+      // RPC's own `status` key survives verbatim; there is no `.terms`/
+      // `.mode` on this return type to assert against.
+      assert.equal(receipt.status, "complete");
     },
   );
 });

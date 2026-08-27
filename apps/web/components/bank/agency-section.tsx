@@ -91,6 +91,7 @@ export function AgencySection({ clientId }: { clientId: string }) {
       <Card>
         <CardHeader>
           <CardTitle>{t("promotionsHeading")}</CardTitle>
+          <CardDescription>{t("promotionsAttribution")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {proposals.data !== null && <ActionRefusal err={proposals.err} clr={proposals.clr} />}

@@ -62,6 +62,27 @@
 // call time — no stale closure, even though the effect that fires the very
 // first reload was registered once, on mount, over whichever loader existed
 // then.
+//
+// N3 FIX — THE LATEST-WINS EPOCH GUARD (independent review on web/p3-bank,
+// ruling N3; fixed here because it is a SHARED-file defect every P3 lane
+// inherits, not a bank-specific one). A caller that calls `reload()` twice
+// in quick succession over a CHANGING loader (exactly `useReloadOnChange`'s
+// own pattern: an account picker, a selected statement, a counterparty) had
+// NO ordering guarantee between the two in-flight requests — if the FIRST
+// (now-stale) request's network round trip happens to finish AFTER the
+// SECOND (current) one's, its response painted `data`/`err` last and won,
+// silently regressing the screen to the WRONG selection's figures (a
+// statement detail table rendered under a DIFFERENT statement's header is a
+// money-mislabeling defect, not a cosmetic one). `epochRef` is bumped once
+// per `reloadImpl` invocation; every state-committing branch (the success
+// path, the failure path, and `loading`'s own `finally`) checks it is STILL
+// the newest epoch before committing — a response whose epoch has been
+// superseded is silently dropped, exactly like an aborted fetch, never
+// painted. This is the SAME "latest write wins" law lib/client-scope.ts's
+// `createScopeGuard` already enforces for a *client-switch* boundary,
+// applied here at the *per-hook, per-reload* granularity that guard does
+// not cover (two reloads on ONE mounted card, not a client-workspace
+// remount).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { RefusalError, WireError } from "../wire";
@@ -136,6 +157,9 @@ export function useHydratedPart<T>(
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
 
+  // N3: the latest-wins epoch — see the header's own paragraph.
+  const epochRef = useRef(0);
+
   // The internal variant, carrying the private `preserveErrorOnSuccess` opt-in
   // (finding 1's sticky-refusal mechanism). Round-2 finding: the PUBLIC `reload`
   // exposed on the returned state must not leak this parameter — a consumer must
@@ -146,9 +170,16 @@ export function useHydratedPart<T>(
     async (opts?: { preserveErrorOnSuccess?: boolean }) => {
       const sess = sessionRef.current;
       if (!sess) return;
+      // N3: this call's own epoch — bumped BEFORE the await, so a second
+      // reloadImpl() invoked while this one is still in flight immediately
+      // supersedes it (epochRef.current moves past the value this closure
+      // captured), regardless of which one's network round trip finishes
+      // first.
+      const epoch = ++epochRef.current;
       setLoading(true);
       try {
         const result = await loaderRef.current(sess);
+        if (epoch !== epochRef.current) return; // superseded — drop this stale success silently, never paint it
         setData(result);
         // Sticky refusal (finding 1): a plain reload (no opts, e.g. mount or a
         // manual refresh) still clears err/clr on success as always. Only the
@@ -158,9 +189,10 @@ export function useHydratedPart<T>(
           setClr(null);
         }
       } catch (e) {
+        if (epoch !== epochRef.current) return; // superseded — a stale FAILURE must not paint over a newer attempt's outcome either
         applyFailure(e, setErr, setClr);
       } finally {
-        setLoading(false);
+        if (epoch === epochRef.current) setLoading(false);
       }
     },
     // Deliberately empty (P3 follow-up): `sess` and the loader are both read via

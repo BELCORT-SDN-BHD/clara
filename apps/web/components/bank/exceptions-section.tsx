@@ -16,9 +16,9 @@ import { useHydratedPart } from "@/lib/parts/hooks";
 import { useReadErrKind } from "@/lib/bank/error-kind";
 import { listOpenBankLineExceptions, listOpenBankLineExceptionProposals } from "@/lib/bank/table-reads";
 import { exceptBankLine, resolveBankLineException } from "@/lib/bank/exception-doors";
-import { exceptionKindLabel, EXCEPTION_KINDS } from "@/lib/bank/exception-types";
+import { EXCEPTION_KINDS, type BankLineExceptionKind } from "@/lib/bank/exception-types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -76,11 +76,22 @@ export function ExceptionsSection({ clientId }: { clientId: string }) {
 
   const [writingOffId, setWritingOffId] = useState<string | null>(null);
 
+  // N11: route the DB's raw enum values through i18n at the render site,
+  // never through a pure lib helper that returns hardcoded English (the
+  // reviewed defect — lib/bank/exception-types.ts's own exceptionKindLabel
+  // is kept for non-UI callers, never rendered directly here anymore).
+  function kindLabel(k: string): string {
+    if (k === "bank_error") return t("kindBankError");
+    if (k === "disputed") return t("kindDisputed");
+    return k; // never fabricate an English word for an unrecognized kind
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader>
           <CardTitle>{t("proposalsHeading")}</CardTitle>
+          <CardDescription>{t("proposalsAttribution")}</CardDescription>
         </CardHeader>
         <CardContent>
           <ReadState hasData={proposals.data !== null} err={proposals.err} errKind={proposalsKind.kind} isEmpty={proposals.data?.length === 0} onRetry={() => void proposals.reload()}>
@@ -112,7 +123,7 @@ export function ExceptionsSection({ clientId }: { clientId: string }) {
             <div className="grid gap-1.5">
               <Label htmlFor="except-kind">{t("kindLabel")}</Label>
               <select id="except-kind" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm" value={kind} onChange={(e) => setKind(e.target.value)}>
-                {EXCEPTION_KINDS.map((k) => <option key={k} value={k}>{exceptionKindLabel(k)}</option>)}
+                {EXCEPTION_KINDS.map((k: BankLineExceptionKind) => <option key={k} value={k}>{kindLabel(k)}</option>)}
               </select>
             </div>
             <div className="grid gap-1.5">
@@ -137,7 +148,7 @@ export function ExceptionsSection({ clientId }: { clientId: string }) {
             <ul className="flex flex-col gap-2">
               {(exceptions.data ?? []).map((ex) => (
                 <li key={ex.id} className="flex flex-col gap-2 rounded-lg border border-border p-2 text-sm">
-                  <p className="font-medium text-foreground">{exceptionKindLabel(ex.kind)} — {ex.reason}</p>
+                  <p className="font-medium text-foreground">{kindLabel(ex.kind)} — {ex.reason}</p>
                   <div className="flex gap-1.5">
                     <Button type="button" size="sm" variant="outline" onClick={() => setResolvingId(resolvingId === ex.id ? null : ex.id)}>{t("resolveCorrective")}</Button>
                     <Button type="button" size="sm" variant="outline" onClick={() => setWritingOffId(writingOffId === ex.id ? null : ex.id)}>{t("writeOff")}</Button>

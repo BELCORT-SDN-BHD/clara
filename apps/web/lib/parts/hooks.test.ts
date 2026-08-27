@@ -294,3 +294,78 @@ test(
     }
   },
 );
+
+// N3 (independent review on web/p3-bank, fixed HERE because it is a
+// SHARED-file defect every P3 lane inherits): TWO overlapping reloads with
+// no ordering guarantee between their network round trips used to let
+// whichever one's response arrived LAST win, even if it was the OLDER
+// (now-superseded) request — a statement detail table could render under a
+// DIFFERENT statement's header than the one on screen. The epoch guard
+// makes it "latest STARTED wins", never "latest ARRIVED wins".
+test("the epoch guard: a slow-resolving reload started EARLIER does not overwrite a FASTER, later reload's result", async () => {
+  const resolvers: ((v: { seen: string }) => void)[] = [];
+  const loader = () => new Promise<{ seen: string }>((resolve) => { resolvers.push(resolve); });
+  const sess = session();
+  const h = await renderHook(() => useHydratedPart(sess, loader));
+  try {
+    // Mount fires reload #0 ("A") — left pending, its resolver captured.
+    await h.settle();
+    assert.equal(resolvers.length, 1, "the mount effect must have called the loader exactly once so far");
+
+    // A second reload ("B") starts BEFORE A resolves — the exact shape
+    // lib/bank/reload-on-change.ts's callers produce (the user re-selects a
+    // statement/account/counterparty before the first fetch has returned).
+    await h.act(() => { void h.current.reload(); });
+    assert.equal(resolvers.length, 2, "the second reload() call must invoke the loader again, not reuse the first");
+
+    // B (the LATER-STARTED reload) resolves FIRST.
+    await h.act(async () => { resolvers[1]!({ seen: "B" }); });
+    await h.settle();
+    assert.deepEqual(h.current.data, { seen: "B" });
+    assert.equal(h.current.loading, false);
+
+    // A (the EARLIER, now-superseded reload) resolves LAST.
+    await h.act(async () => { resolvers[0]!({ seen: "A" }); });
+    await h.settle();
+    assert.deepEqual(h.current.data, { seen: "B" }, "A's late-arriving result must be DROPPED — the epoch guard keeps B (the newer reload) standing");
+    assert.equal(h.current.loading, false, "a superseded reload's own finally must not paint loading state either");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// The failure-path mirror: a stale reload that FAILS after being superseded
+// must not paint its error over the newer reload's (successful OR failed)
+// outcome either.
+test("the epoch guard: a slow-FAILING reload started EARLIER does not overwrite a later reload's outcome", async () => {
+  const settlers: ((v?: unknown) => void)[] = [];
+  const modes: ("reject" | "resolve")[] = [];
+  const loader = () =>
+    new Promise((resolve, reject) => {
+      const mode = modes.shift();
+      settlers.push((v) => (mode === "reject" ? reject(v) : resolve(v)));
+    });
+  modes.push("reject", "resolve");
+  const sess = session();
+  const h = await renderHook(() => useHydratedPart(sess, loader));
+  try {
+    await h.settle(); // mount fires reload #0 ("A", will reject)
+    await h.act(() => { void h.current.reload(); }); // reload #1 ("B", will resolve)
+    assert.equal(settlers.length, 2);
+
+    // B settles first — a clean success.
+    await h.act(async () => { settlers[1]!({ seen: "B" }); });
+    await h.settle();
+    assert.deepEqual(h.current.data, { seen: "B" });
+    assert.equal(h.current.err, null);
+
+    // A's failure arrives LAST — it must not retroactively paint an error
+    // over B's already-landed success.
+    await h.act(async () => { settlers[0]!(new Error("A's stale failure")); });
+    await h.settle();
+    assert.equal(h.current.err, null, "a superseded FAILURE must be dropped exactly like a superseded success");
+    assert.deepEqual(h.current.data, { seen: "B" });
+  } finally {
+    await h.unmount();
+  }
+});

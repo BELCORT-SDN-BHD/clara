@@ -23,14 +23,27 @@ export type ReconTermSet = {
   difference_cents: number | null;
 };
 
+// BLOCKER-1 FIX (independent review, HIGH): on a COMPLETED reconciliation the
+// DB deliberately emits NEITHER `difference_cents` NOR `derived_closing_cents`
+// (migration 0040:4180-4211 — both are labelled "preview-only, meaningless on
+// a completed receipt": completion already REQUIRED difference=0 as a
+// precondition, so restating it would be theatre, not information). The prior
+// version of this mapper filled that absence in with `isReceipt ? 0 : null`
+// / `isReceipt ? closing : derived_closing_cents` — FAIL-OPEN: a receipt row
+// rendered a FABRICATED "RM 0.00" difference and a computed-closing figure
+// that was really just the statement's own printed closing relabelled, and
+// `reconTieState` (below) could therefore assert "tied" on a receipt
+// structurally incapable of proving it. Both fields now read the RPC's
+// OWN keys with NO isReceipt fallback: absent on a receipt reads `null`,
+// which `reconTieState` correctly turns into "unavailable" and
+// components/bank/reconciliation-section.tsx renders as "—" (formatMyr's own
+// null case) — never a value this module invented.
 function toTermSet(raw: unknown): ReconTermSet {
   const o = rec(raw);
   const snap = rec(o.snapshot);
   const st = rec(snap.terms);
-  const isReceipt = o.preview === false || s(o.status) === "complete" || s(o.status) === "void";
   const openingAnchor = numOrNull(o.opening_anchor_cents) ?? numOrNull(snap.opening_anchor_cents);
   const closing = numOrNull(o.statement_closing_cents) ?? numOrNull(o.closing_cents) ?? numOrNull(snap.statement_closing_cents);
-  const computedClosing = isReceipt ? closing : numOrNull(o.derived_closing_cents);
   return {
     opening_anchor_cents: openingAnchor,
     statement_opening_cents: numOrNull(o.statement_opening_cents),
@@ -38,9 +51,9 @@ function toTermSet(raw: unknown): ReconTermSet {
     uncleared_total_cents: numOrNull(st.uncleared_cents) ?? numOrNull(o.outstanding_cents),
     unmatched_capacity_prime_cents: numOrNull(st.capacity_prime_cents) ?? numOrNull(o.unmatched_capacity_prime_cents),
     excepted_cents: numOrNull(o.excepted_cents) ?? numOrNull(st.excepted_cents),
-    computed_closing_cents: computedClosing,
+    computed_closing_cents: numOrNull(o.derived_closing_cents),
     statement_closing_cents: closing,
-    difference_cents: numOrNull(o.difference_cents) ?? (isReceipt ? 0 : null),
+    difference_cents: numOrNull(o.difference_cents),
   };
 }
 

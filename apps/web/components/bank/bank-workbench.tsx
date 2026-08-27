@@ -25,7 +25,11 @@ export function BankWorkbench({ clientId }: { clientId: string }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <nav aria-label={t("accounts")} className="flex flex-wrap gap-1 border-b border-border pb-2">
+      {/* N17 fix (independent review): this labelled the nav landmark with
+          the FIRST TAB's own name ("Accounts") instead of a label for the
+          nav itself — a screen reader announced the sub-nav as "Accounts
+          navigation" regardless of which tab was active. */}
+      <nav aria-label={t("navLabel")} className="flex flex-wrap gap-1 border-b border-border pb-2">
         {TABS.map((tb) => (
           <button
             key={tb}

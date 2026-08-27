@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getBankReconciliation } from "./recon-reads";
+import { reconTieState } from "./recon-types";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 function fakeSession(token: string | null): SessionTokenAccessor {
@@ -44,13 +45,42 @@ test("getBankReconciliation: posts p_statement to /rpc/get_bank_reconciliation",
   );
 });
 
-test("getBankReconciliation: a receipt (preview:false) infers mode 'receipt' and difference_cents 0", async () => {
+// BLOCKER-1 (independent review, HIGH): the DB deliberately omits BOTH
+// difference_cents and derived_closing_cents on a COMPLETED receipt
+// (0040:4180-4211, "preview-only, meaningless on a completed receipt" —
+// completion already required difference=0 as its own precondition). The
+// prior mapper filled that absence with a FABRICATED difference_cents=0 and
+// relabelled the statement's own closing as "computed" — this cell locks the
+// FIX, not the fabrication: both terms read null, and reconTieState (the
+// same derivation the reconciliation-section screen renders its badge from)
+// must answer "unavailable", never a manufactured "tied".
+test("getBankReconciliation: a receipt (preview:false) that omits difference_cents/derived_closing_cents renders them null, never a fabricated 0 — the tie state reads 'unavailable'", async () => {
   await withMockedFetch(
     async () => jsonResponse({ statement_id: "s1", status: "complete", preview: false, closing_cents: -500 }),
     async () => {
       const view = await getBankReconciliation("s1", { session: fakeSession("tok") });
       assert.equal(view?.mode, "receipt");
+      assert.equal(view?.terms.difference_cents, null, "never a fabricated 0 — the DB did not say the difference, only that it was zero AT COMPLETION time");
+      assert.equal(view?.terms.computed_closing_cents, null, "never the statement's own closing relabelled as 'computed'");
+      assert.equal(reconTieState(view!), "unavailable", "a receipt missing its own terms cannot be asserted 'tied' by this client");
+    },
+  );
+});
+
+test("getBankReconciliation: a receipt that DOES carry difference_cents/derived_closing_cents (a future RPC shape) renders them verbatim, never re-derived", async () => {
+  await withMockedFetch(
+    async () =>
+      jsonResponse({
+        statement_id: "s1", status: "complete", preview: false, closing_cents: -500,
+        difference_cents: 0, derived_closing_cents: -500,
+        opening_anchor_cents: 0, gl_balance_cents: -500, outstanding_cents: 0, excepted_cents: 0,
+        unmatched_capacity_prime_cents: 0,
+      }),
+    async () => {
+      const view = await getBankReconciliation("s1", { session: fakeSession("tok") });
       assert.equal(view?.terms.difference_cents, 0);
+      assert.equal(view?.terms.computed_closing_cents, -500);
+      assert.equal(reconTieState(view!), "tied");
     },
   );
 });

@@ -15,7 +15,7 @@ import { useReadErrKind } from "@/lib/bank/error-kind";
 import { useReloadOnChange } from "@/lib/bank/reload-on-change";
 import { listUnmatchedLines, listBankMatchCandidates } from "@/lib/bank/match-reads";
 import { matchBankLine, unmatchBankMatch } from "@/lib/bank/match-doors";
-import { formatMyr } from "@/lib/bank/money";
+import { formatMyr, parseAmountToCents } from "@/lib/bank/money";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -76,8 +76,13 @@ export function MatchingSection({ clientId }: { clientId: string }) {
     const entries: { entry_id: string; matched_cents: number }[] = [];
     for (const entryId of selectedEntryIds) {
       const raw = matchedCents[entryId];
-      const cents = raw ? Number.parseInt(raw, 10) : NaN;
-      if (!Number.isFinite(cents) || cents === 0) {
+      // N9 fix (independent review): matched_cents is a signed RM amount the
+      // human types like every OTHER money field in this build — parsed via
+      // the same parseAmountToCents (comma-grouped, up to 2 decimals) rather
+      // than a raw `Number.parseInt`, whose "1,234" -> 1 truncation-at-comma
+      // is exactly the hostile-parsing shape a thousands-grouped amount hits.
+      const cents = raw ? parseAmountToCents(raw) : null;
+      if (cents === null || cents === 0) {
         setMatchFormError(t("invalidMatchedCents"));
         return;
       }
@@ -99,6 +104,9 @@ export function MatchingSection({ clientId }: { clientId: string }) {
         setSelectedEntryIds(new Set());
         setMatchedCents({});
         setAckPeriodExceptions(false);
+        // N7: a landed match changes every candidate's remaining capacity —
+        // re-read it, never trust the pre-match figures to still hold.
+        void candidates.reload();
       },
     );
   }
@@ -139,7 +147,15 @@ export function MatchingSection({ clientId }: { clientId: string }) {
                     </Button>
                   </div>
                   {settlingLineId === l.line_id && (
-                    <SettleLineForm clientId={clientId} lineId={l.line_id} onDone={() => setSettlingLineId(null)} />
+                    <SettleLineForm
+                      clientId={clientId} lineId={l.line_id}
+                      onDone={() => {
+                        setSettlingLineId(null);
+                        // N7: a settled line leaves the unmatched report — re-read it,
+                        // never assume the settle door's own receipt is the new truth.
+                        void unmatchedLines.reload();
+                      }}
+                    />
                   )}
                 </li>
               ))}
@@ -161,7 +177,7 @@ export function MatchingSection({ clientId }: { clientId: string }) {
                     <input type="checkbox" aria-label={t("selectEntry")} checked={selectedEntryIds.has(c.entry_id)} onChange={() => toggleEntry(c.entry_id)} />
                     <span className="flex-1">{c.memo ?? c.entry_id} · {c.counterparty_name ?? "—"}</span>
                     <Input
-                      className="h-7 w-28" inputMode="numeric" placeholder={t("matchedCentsPlaceholder")}
+                      className="h-7 w-28" inputMode="decimal" placeholder={t("matchedCentsPlaceholder")}
                       aria-label={t("matchedCentsLabel")}
                       value={matchedCents[c.entry_id] ?? ""}
                       onChange={(e) => setMatchedCents((prev) => ({ ...prev, [c.entry_id]: e.target.value }))}
@@ -175,6 +191,14 @@ export function MatchingSection({ clientId }: { clientId: string }) {
               {t("ackPeriodExceptions")}
             </label>
             {matchFormError && <p role="alert" className="text-sm text-destructive">{matchFormError}</p>}
+            {/* BLOCKER-2 fix (independent review): match_bank_line and
+                unmatch_bank_match both act through the SAME unmatchedLines
+                hook (one part, one lifecycle, hooks.ts's own design) — a
+                refusal from EITHER now renders in every card that acts on
+                it (here, the unmatch form below, AND the unmatched-lines
+                list card above), never only in a card scrolled out of view
+                when the acting button un-busies. */}
+            <ActionRefusal err={unmatchedLines.err} clr={unmatchedLines.clr} />
             <Button type="button" disabled={unmatchedLines.busy} onClick={() => void submitMatch()} className="self-start">
               {unmatchedLines.busy ? tc("busy") : t("matchSubmit")}
             </Button>
@@ -197,6 +221,7 @@ export function MatchingSection({ clientId }: { clientId: string }) {
               <Label htmlFor="unmatch-reason">{t("reasonLabel")}</Label>
               <Input id="unmatch-reason" value={unmatchReason} onChange={(e) => setUnmatchReason(e.target.value)} required />
             </div>
+            <ActionRefusal err={unmatchedLines.err} clr={unmatchedLines.clr} />
             <Button type="submit" disabled={unmatchedLines.busy} className="self-start">
               {unmatchedLines.busy ? tc("busy") : t("unmatchSubmit")}
             </Button>

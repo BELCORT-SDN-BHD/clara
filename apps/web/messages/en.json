@@ -133,6 +133,7 @@
     "heading": "Bank",
     "body": "P2 shell — accounts, statements, matching and reconciliation are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
     "tabs": {
+      "navLabel": "Bank sections",
       "accounts": "Accounts",
       "statements": "Statements",
       "matching": "Matching",
@@ -203,7 +204,13 @@
       "colDate": "Date",
       "colDescription": "Description",
       "colAmount": "Amount",
-      "colMatch": "Match"
+      "colMatch": "Match",
+      "statusVoid": "voided",
+      "statusLive": "live",
+      "matchLive": "matched",
+      "matchPending": "pending checker",
+      "matchUnmatched": "unmatched",
+      "completePendingMatch": "Complete"
     },
     "matching": {
       "kindLabel": "Counterparty kind",
@@ -236,6 +243,9 @@
     },
     "exceptions": {
       "proposalsHeading": "Open exception proposals",
+      "proposalsAttribution": "Proposed by the agent — awaiting your decision.",
+      "kindBankError": "bank error",
+      "kindDisputed": "disputed",
       "useProposal": "Except this line",
       "exceptHeading": "Except a line",
       "lineIdLabel": "Statement line ID",
@@ -264,6 +274,11 @@
       "accountLabel": "Bank account",
       "statementLabel": "Statement",
       "reconHeading": "Reconciliation",
+      "modeReceipt": "receipt",
+      "modePreview": "preview",
+      "statusComplete": "complete",
+      "statusVoid": "void",
+      "statusOpen": "open",
       "tie": { "tied": "tied", "variance": "variance", "unavailable": "unavailable" },
       "openingAnchor": "Opening anchor",
       "glBalance": "GL balance",
@@ -273,6 +288,7 @@
       "difference": "Difference",
       "blockersHeading": "The DB refuses completion while:",
       "staleHeading": "Stale outstanding items — acknowledge each before completing",
+      "staleDetailNotBuilt": "The detail leg is not built — verify each item in the statement view before acknowledging.",
       "complete": "Certify (complete reconciliation)",
       "cannotCompleteHint": "Not yet completable — see the blockers/stale items above.",
       "voidReasonLabel": "Void reason",
@@ -287,6 +303,7 @@
       "setHold": "Set hold",
       "releaseHold": "Release hold",
       "promotionsHeading": "Open identifier-promotion proposals",
+      "promotionsAttribution": "Proposed by the agent — awaiting your decision.",
       "confirm": "Confirm"
     }
   },

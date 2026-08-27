@@ -1,9 +1,10 @@
 // lib/bank/exception-doors.ts — exceptions DOORS. Pins wire shape and the
-// receipt-not-row honesty (except_bank_line/resolve_bank_line_exception
-// return a narrow receipt, never the full row). Also pins that
-// resolveAndBookBankLine never sends a stray p_control_account — the
-// dashboard-precedent mistake this build does not reproduce (see this
-// file's own header for the grounding).
+// receipt-not-row honesty (all three writers here return an OPAQUE receipt,
+// never mapped through a row/view mapper — N14). Also pins that
+// resolveAndBookBankLine never sends a p_control_account key, matching the
+// verb's real 13-param signature (migration 0044:3106-3111) — see this
+// file's header for item #16's correction (apps/dashboard's own reconApi.ts
+// was NOT at fault; the author confused it with a different verb).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -94,6 +95,9 @@ test("resolveAndBookBankLine: sends the hand-draft leg, no p_control_account key
       assert.equal(seenBody.p_disposition, "written_off_adjustment");
       assert.ok(seenBody.p_draft);
       assert.equal(seenBody.p_allocations, null);
+      // N14: the receipt is returned OPAQUE (Record<string, unknown>) — this
+      // only proves the RPC's own bytes pass through untouched, never that
+      // a specific shape is guaranteed.
       assert.equal(out.branch, "live");
       assert.equal(out.entry_id, "e1");
     },

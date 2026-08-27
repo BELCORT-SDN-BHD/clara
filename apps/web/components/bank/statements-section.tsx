@@ -3,18 +3,22 @@
 // The /bank Statements tab: pick a bank account, see its statements (with
 // the cheap GL-vs-unmatched tie banner), enter a new statement
 // (enter_bank_statement), void one (void_bank_statement), and view a
-// statement's lines read-only (match/unmatch and settle live in the
-// Matching tab — mohe-grill-rulings scope split (b)/(c)).
+// statement's lines read-only — INCLUDING completing a pending match
+// (complete_pending_match, N13: this door is built + tested, wiring it here
+// is the only place a match's `pending` state is ever visible today). Match/
+// unmatch and settle themselves live in the Matching tab — mohe-grill-
+// rulings scope split (b)/(c).
 
 import { useCallback, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
+import type { SessionTokenAccessor } from "@/lib/session";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { useReadErrKind } from "@/lib/bank/error-kind";
 import { useReloadOnChange } from "@/lib/bank/reload-on-change";
 import { listBankAccounts, listBankStatements, getBankStatement } from "@/lib/bank/reads";
 import { enterBankStatement, voidBankStatement, type BankStatementLineInput } from "@/lib/bank/doors";
-import { statementStatusLabel, lineMatchLabel } from "@/lib/bank/types";
+import { completePendingMatch } from "@/lib/bank/match-doors";
 import { parseAmountToCents, formatMyr } from "@/lib/bank/money";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,21 +43,49 @@ export function StatementsSection({ clientId }: { clientId: string }) {
   const activeAccountId = bankAccountId || accounts.data?.[0]?.id || "";
 
   const statementsKind = useReadErrKind();
-  const statements = useHydratedPart(
-    sessionTokenAccessor,
-    useCallback(
-      (s) => (activeAccountId ? statementsKind.wrap(() => listBankStatements(clientId, activeAccountId, { session: s })) : Promise.resolve([])),
-      [clientId, activeAccountId, statementsKind],
-    ),
+  const loadStatements = useCallback(
+    (s: SessionTokenAccessor) => (activeAccountId ? statementsKind.wrap(() => listBankStatements(clientId, activeAccountId, { session: s })) : Promise.resolve([])),
+    [clientId, activeAccountId, statementsKind],
   );
+  const statements = useHydratedPart(sessionTokenAccessor, loadStatements);
   useReloadOnChange(() => void statements.reload(), activeAccountId);
+
+  // BLOCKER-2 fix ("the mirror wart", independent review): enter_bank_
+  // statement and void_bank_statement are two DIFFERENT acting forms that
+  // would otherwise share ONE useHydratedPart instance's err/clr slot — a
+  // void refusal painting inside the unrelated enter-statement form (and
+  // vice versa) reads as "my add just failed" when it did not. `enterAction`
+  // is a SECOND instance of the SAME mechanism (never a bespoke try/catch —
+  // N8's "no second drifting mechanism" law), pointed at the identical
+  // read, so its act()/busy/err/clr are entirely independent of the void
+  // buttons' — each acting form shows only its own outcome. Voiding still
+  // refreshes the visible list via `statements.act` directly; a successful
+  // enter ALSO reloads `statements` explicitly in its own onOk, since
+  // `enterAction`'s own `data` is not what the list renders from.
+  const enterAction = useHydratedPart(sessionTokenAccessor, loadStatements);
 
   const [openStatementId, setOpenStatementId] = useState<string | null>(null);
   const detailKind = useReadErrKind();
+  // N5 fix: getBankStatement legitimately resolves null both for "nothing
+  // selected yet" (this component's own sentinel, never a real fetch) AND
+  // for a genuinely-not-found statement (a real fetch that found nothing) —
+  // `detailLoadedOnce` flips true ONLY inside the real-fetch branch, on a
+  // SUCCESSFUL resolution, so ReadState can tell "still loading" apart from
+  // "loaded, and there is genuinely nothing" instead of showing "Loading…"
+  // forever on that second, rarer case.
+  const [detailLoadedOnce, setDetailLoadedOnce] = useState(false);
   const detail = useHydratedPart(
     sessionTokenAccessor,
     useCallback(
-      (s) => (openStatementId ? detailKind.wrap(() => getBankStatement(openStatementId, { session: s })) : Promise.resolve(null)),
+      (s) => {
+        if (!openStatementId) return Promise.resolve(null);
+        return detailKind.wrap(() =>
+          getBankStatement(openStatementId, { session: s }).then((v) => {
+            setDetailLoadedOnce(true);
+            return v;
+          }),
+        );
+      },
       [openStatementId, detailKind],
     ),
   );
@@ -101,7 +133,7 @@ export function StatementsSection({ clientId }: { clientId: string }) {
         description: l.description || null, amount_cents: cents, running_balance_cents: null,
       });
     }
-    await statements.act(
+    await enterAction.act(
       async () => {
         await enterBankStatement(
           {
@@ -119,8 +151,20 @@ export function StatementsSection({ clientId }: { clientId: string }) {
       () => {
         setDocumentId(""); setPeriodStart(""); setPeriodEnd(""); setStatementDate("");
         setOpening(""); setClosing(""); setLines([{ entryDate: "", description: "", amount: "" }]);
+        void statements.reload();
       },
     );
+  }
+
+  function statusLabel(status: string): string {
+    if (status === "void") return t("statusVoid");
+    if (status === "live") return t("statusLive");
+    return status; // N11: never fabricate an English word for an unrecognized status
+  }
+  function matchLabel(state: "unmatched" | "pending" | "live"): string {
+    if (state === "live") return t("matchLive");
+    if (state === "pending") return t("matchPending");
+    return t("matchUnmatched");
   }
 
   return (
@@ -192,9 +236,9 @@ export function StatementsSection({ clientId }: { clientId: string }) {
             </div>
 
             {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
-            <ActionRefusal err={statements.err} clr={statements.clr} />
-            <Button type="submit" disabled={statements.busy || !activeAccountId} className="self-start">
-              {statements.busy ? tc("busy") : t("enterSubmit")}
+            <ActionRefusal err={enterAction.err} clr={enterAction.clr} />
+            <Button type="submit" disabled={enterAction.busy || !activeAccountId} className="self-start">
+              {enterAction.busy ? tc("busy") : t("enterSubmit")}
             </Button>
           </form>
         </CardContent>
@@ -216,7 +260,7 @@ export function StatementsSection({ clientId }: { clientId: string }) {
                       <p className="text-xs text-muted-foreground">
                         {t("openingClosing", { opening: formatMyr(st.opening_cents), closing: formatMyr(st.closing_cents) })}
                         {" · "}
-                        <Badge variant={st.status === "void" ? "destructive" : "outline"}>{statementStatusLabel(st.status)}</Badge>
+                        <Badge variant={st.status === "void" ? "destructive" : "outline"}>{statusLabel(st.status)}</Badge>
                       </p>
                     </div>
                     <div className="flex gap-1.5">
@@ -235,10 +279,14 @@ export function StatementsSection({ clientId }: { clientId: string }) {
                     </div>
                   </div>
                   {openStatementId === st.id && (
-                    <ReadState hasData={detail.data !== null} err={detail.err} errKind={detailKind.kind} onRetry={() => void detail.reload()}>
+                    <ReadState hasData={detailLoadedOnce} err={detail.err} errKind={detailKind.kind} onRetry={() => void detail.reload()}>
+                      {detail.data !== null && <ActionRefusal err={detail.err} clr={detail.clr} />}
                       <table className="w-full text-xs">
                         <thead className="text-left text-muted-foreground">
-                          <tr><th className="p-1">{t("colDate")}</th><th className="p-1">{t("colDescription")}</th><th className="p-1">{t("colAmount")}</th><th className="p-1">{t("colMatch")}</th></tr>
+                          <tr>
+                            <th className="p-1">{t("colDate")}</th><th className="p-1">{t("colDescription")}</th>
+                            <th className="p-1">{t("colAmount")}</th><th className="p-1">{t("colMatch")}</th><th className="p-1" />
+                          </tr>
                         </thead>
                         <tbody>
                           {(detail.data?.lines ?? []).map((ln) => (
@@ -246,7 +294,20 @@ export function StatementsSection({ clientId }: { clientId: string }) {
                               <td className="p-1">{ln.entry_date}</td>
                               <td className="p-1">{ln.description ?? "—"}</td>
                               <td className="p-1">{formatMyr(ln.amount_cents)}</td>
-                              <td className="p-1"><Badge variant={ln.match_state === "live" ? "default" : "outline"}>{lineMatchLabel(ln.match_state)}</Badge></td>
+                              <td className="p-1"><Badge variant={ln.match_state === "live" ? "default" : "outline"}>{matchLabel(ln.match_state)}</Badge></td>
+                              <td className="p-1">
+                                {/* N13: complete_pending_match is built + tested — this is
+                                    the only surface a 'pending' match is visible on today. */}
+                                {ln.match_state === "pending" && ln.match_id && (
+                                  <Button
+                                    type="button" size="xs" variant="outline"
+                                    disabled={detail.busy}
+                                    onClick={() => void detail.act(async () => { await completePendingMatch(clientId, ln.match_id!, { session: sessionTokenAccessor }); })}
+                                  >
+                                    {t("completePendingMatch")}
+                                  </Button>
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>

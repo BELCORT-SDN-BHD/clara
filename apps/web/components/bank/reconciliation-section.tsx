@@ -6,8 +6,17 @@
 // verdict (fail-closed: null reads as "cannot complete", never re-derived
 // locally) — plus complete_bank_reconciliation / void_bank_reconciliation.
 // The full snapshot (outstanding items/groups breakdown) is the named gap.
+//
+// BLOCKER-1 (independent review, HIGH, fixed at the mapper — lib/bank/
+// recon-types.ts's own header): a COMPLETED reconciliation deliberately
+// carries neither difference_cents nor derived_closing_cents (0040:4180-
+// 4211). Those two dl rows below now render `formatMyr(null)` -> "—" on a
+// receipt missing them (never a fabricated "RM 0.00"), and the tie badge —
+// `reconTieState`, unchanged here, fixed at its own source — can only read
+// "unavailable" on that same receipt, never "tied" without a real,
+// DB-sourced difference.
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { useHydratedPart } from "@/lib/parts/hooks";
@@ -51,11 +60,25 @@ export function ReconciliationSection({ clientId }: { clientId: string }) {
   const [statementId, setStatementId] = useState("");
   const activeStatementId = statementId || statements.data?.[0]?.id || "";
 
+  // N5 fix: get_bank_reconciliation "never null in the open-statement case"
+  // per its own doc, but a truly unreadable/gone statement CAN still
+  // resolve null on success — `reconLoadedOnce` (set only inside the real-
+  // fetch branch, on success) lets ReadState tell that apart from "still
+  // loading", instead of rendering "Loading…" forever on that edge case.
+  const [reconLoadedOnce, setReconLoadedOnce] = useState(false);
   const reconKind = useReadErrKind();
   const recon = useHydratedPart(
     sessionTokenAccessor,
     useCallback(
-      (s) => (activeStatementId ? reconKind.wrap(() => getBankReconciliation(activeStatementId, { session: s })) : Promise.resolve(null)),
+      (s) => {
+        if (!activeStatementId) return Promise.resolve(null);
+        return reconKind.wrap(() =>
+          getBankReconciliation(activeStatementId, { session: s }).then((v) => {
+            setReconLoadedOnce(true);
+            return v;
+          }),
+        );
+      },
       [activeStatementId, reconKind],
     ),
   );
@@ -63,6 +86,26 @@ export function ReconciliationSection({ clientId }: { clientId: string }) {
 
   const [ackedStale, setAckedStale] = useState<Set<string>>(new Set());
   const [voidReason, setVoidReason] = useState("");
+  // N17 fix: a stale-item acknowledgement (or a half-typed void reason) is
+  // scoped to ONE statement's reconciliation — carrying it over to a
+  // DIFFERENTLY selected statement would let an ack made for statement A's
+  // stale items silently apply to statement B's.
+  useEffect(() => {
+    setAckedStale(new Set());
+    setVoidReason("");
+  }, [activeStatementId]);
+
+  function modeLabel(mode: string): string {
+    if (mode === "receipt") return t("modeReceipt");
+    if (mode === "preview") return t("modePreview");
+    return mode;
+  }
+  function statusLabel(status: string): string {
+    if (status === "complete") return t("statusComplete");
+    if (status === "void") return t("statusVoid");
+    if (status === "open") return t("statusOpen");
+    return status; // never fabricate an English word for an unrecognized status
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -87,12 +130,12 @@ export function ReconciliationSection({ clientId }: { clientId: string }) {
           <CardHeader><CardTitle>{t("reconHeading")}</CardTitle></CardHeader>
           <CardContent className="flex flex-col gap-3">
             {recon.data !== null && <ActionRefusal err={recon.err} clr={recon.clr} />}
-            <ReadState hasData={recon.data !== null} err={recon.err} errKind={reconKind.kind} onRetry={() => void recon.reload()}>
+            <ReadState hasData={reconLoadedOnce} err={recon.err} errKind={reconKind.kind} onRetry={() => void recon.reload()}>
               {recon.data && (
                 <>
                   <div className="flex items-center gap-2">
-                    <Badge variant={recon.data.mode === "receipt" ? "default" : "outline"}>{recon.data.mode}</Badge>
-                    <Badge variant={recon.data.status === "void" ? "destructive" : "outline"}>{recon.data.status}</Badge>
+                    <Badge variant={recon.data.mode === "receipt" ? "default" : "outline"}>{modeLabel(recon.data.mode)}</Badge>
+                    <Badge variant={recon.data.status === "void" ? "destructive" : "outline"}>{statusLabel(recon.data.status)}</Badge>
                     <Badge variant={reconTieState(recon.data) === "tied" ? "default" : reconTieState(recon.data) === "variance" ? "destructive" : "secondary"}>
                       {t(`tie.${reconTieState(recon.data)}`)}
                     </Badge>
@@ -114,6 +157,15 @@ export function ReconciliationSection({ clientId }: { clientId: string }) {
                   {recon.data.stale_outstanding_ids.length > 0 && (
                     <fieldset className="flex flex-col gap-1 rounded-lg border border-border p-2 text-xs">
                       <legend className="px-1 text-muted-foreground">{t("staleHeading")}</legend>
+                      {/* N12 RULING: the read path this build has (get_bank_
+                          reconciliation's flat envelope) exposes NOTHING about
+                          each stale id beyond the id itself — no date, amount
+                          or description to ground the ack in. Rather than a
+                          blind checkbox beside a bare UUID, every row carries
+                          this build's own honest limit, and the human is
+                          pointed at the ONE place that can show more (the
+                          Statements tab's line view) before acknowledging. */}
+                      <p className="text-muted-foreground">{t("staleDetailNotBuilt")}</p>
                       {recon.data.stale_outstanding_ids.map((id) => (
                         <label key={id} className="flex items-center gap-2">
                           <input

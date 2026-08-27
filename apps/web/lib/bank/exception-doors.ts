@@ -22,18 +22,23 @@
 //     in migration 0044 (:3106-3111) — NO `p_control_account` exists on
 //     this human-callable function (migration 0121 adds a `wake_` agent
 //     variant and a shared `_core`, but never touches this public
-//     signature). apps/dashboard's own shared/reconApi.ts sends a stray
-//     `p_control_account` key on this call, which PostgREST's named-
-//     argument resolution cannot satisfy (PGRST202, "no function matching
-//     this signature") — NOT reproduced here; see this build's own report
-//     for the flag. THE SETTLEMENT/OPEN-ITEM LEG (`p_allocations`) IS THE
+//     signature). THE SETTLEMENT/OPEN-ITEM LEG (`p_allocations`) IS THE
 //     NAMED GAP this build does not wire a picker for — see
 //     components/bank/exceptions-section.tsx. This module only ever sends
 //     the HAND-DRAFT leg (`p_draft`), matching Af2DraftInput.
+//
+// CORRECTION (independent review item #16, acknowledged): an earlier
+// revision of this comment accused apps/dashboard's shared/reconApi.ts of
+// sending a stray `p_control_account` on THIS call. That was FALSE — a
+// byte-level re-read of reconApi.ts:214-227 shows its `resolveAndBookBankLine`
+// sends exactly the 13 correct keys, no more. The `p_control_account` this
+// build's own author actually saw lives on a DIFFERENT verb entirely —
+// apps/dashboard's shared/bankApi.ts:300, `settle_from_bank_line` — where it
+// IS a real parameter (migration 0038:4316-4321 confirms it). Two verbs
+// were confused; reconApi.ts is not at fault. No backend gap here.
 
 import { callDoor, type CallDoorOptions } from "../doors";
-import type { Af2DraftInput, ResolveAndBookBankLineDisposition, ResolveAndBookBankLineResult } from "./exception-types";
-import { toResolveAndBookBankLineResult } from "./exception-types";
+import type { Af2DraftInput, ResolveAndBookBankLineDisposition } from "./exception-types";
 import type { BankLineExceptionDisposition, BankLineExceptionKind } from "./exception-types";
 
 const opKey = () => crypto.randomUUID();
@@ -79,14 +84,24 @@ export async function resolveBankLineException(
 }
 
 /** The AF-2 composite, hand-draft leg only (see this file's header). No
- *  `p_control_account` — see the header note. */
+ *  `p_control_account` — see the header note.
+ *
+ *  N14 fix (independent review): this door's receipt was mapped through
+ *  `toResolveAndBookBankLineResult` on the strength of a migration-text
+ *  read (0044:3725-3729 confirms `resolution_exception_id`/`branch` ARE
+ *  top-level receipt keys) — but a write receipt is not a read view, and
+ *  the review's ruling is to return every door's receipt opaque regardless
+ *  (the same posture except_bank_line/resolve_bank_line_exception/set_bank_
+ *  agency_hold already take): hydrate-never-trust means the caller
+ *  re-reads for the mapped truth anyway, so a mapper here buys nothing and
+ *  risks the exact near-miss-shape class BLOCKER-1 caught elsewhere. */
 export async function resolveAndBookBankLine(
   args: {
     clientId: string; exceptionId: string; disposition: ResolveAndBookBankLineDisposition; note: string;
     draft: Af2DraftInput;
   },
   opts: CallDoorOptions = {},
-): Promise<ResolveAndBookBankLineResult> {
+): Promise<Record<string, unknown>> {
   const out = await callDoor(
     "resolve_and_book_bank_line",
     {
@@ -97,5 +112,5 @@ export async function resolveAndBookBankLine(
     },
     opts,
   );
-  return toResolveAndBookBankLineResult(out);
+  return (out ?? {}) as Record<string, unknown>;
 }

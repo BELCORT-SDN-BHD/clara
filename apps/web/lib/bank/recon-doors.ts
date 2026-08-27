@@ -12,19 +12,27 @@
 //     reason_required.
 
 import { callDoor, type CallDoorOptions } from "../doors";
-import { toBankReconciliationView, type BankReconciliationView } from "./recon-types";
 
 const opKey = () => crypto.randomUUID();
 
+/** N14 fix (independent review): this door's own receipt was never byte-
+ *  verified against `BankReconciliationView`'s shape (unlike resolve_and_
+ *  book_bank_line's `resolution_exception_id`/`branch`, which migration
+ *  0044:3725-3729 confirms ARE top-level receipt keys) — mapping it through
+ *  `toBankReconciliationView` risked the exact BLOCKER-1 class of defect
+ *  (a near-miss shape read as a fuller one than it is). Returned opaque,
+ *  like except_bank_line/resolve_bank_line_exception/set_bank_agency_hold:
+ *  hydrate-never-trust means the caller re-reads getBankReconciliation
+ *  afterward for the real, mapped view regardless. */
 export async function completeBankReconciliation(
   statementId: string, ackOutstandingIds: string[], opts: CallDoorOptions = {},
-): Promise<BankReconciliationView> {
+): Promise<Record<string, unknown>> {
   const out = await callDoor(
     "complete_bank_reconciliation",
     { p_statement: statementId, p_ack_outstanding: ackOutstandingIds, p_op_key: opKey() },
     opts,
   );
-  return toBankReconciliationView(out);
+  return (out ?? {}) as Record<string, unknown>;
 }
 
 export async function voidBankReconciliation(
