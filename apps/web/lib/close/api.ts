@@ -122,10 +122,12 @@ export async function reopenFiscalYear(
 
 /** clara.attest_close_exception(p_close_run, p_check_key, p_reason, p_op_key,
  *  p_item_key, p_from_proposal) — 0120:919, the LIVE 6-arg signature.
- *  `p_from_proposal` is DELIBERATELY never passed (stays defaulted null) — there is
- *  no `close_proposals` carrier in this catalog to source one from (see
- *  components/close/ClosePage.tsx's header). This is the EXISTING audited attest
- *  door from 0056 (0056:1816-1941); this build invents no new writer. */
+ *  `p_from_proposal` is DELIBERATELY never passed here (stays defaulted null)
+ *  — the `close_proposals` carrier and its doors ARE live (0138), but the
+ *  panel that would read a proposal to source an id from is not built yet
+ *  (components/close/CloseProposalPanel.tsx, P6 scope). This is the EXISTING
+ *  audited attest door from 0056 (0056:1816-1941); this build invents no new
+ *  writer. */
 export async function attestCloseException(
   args: { closeRunId: string; checkKey: string; reason: string; itemKey: string | null },
   opts: Opts = {},
