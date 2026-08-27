@@ -1184,10 +1184,12 @@ begin
   insert into clara.evaluator_versions(evaluator_name, version, entrypoint_signature,
       closure_sha256, migration_version, deployed)
     values ('prepayment_schedule', 1, 'clara.prepayment_schedule_v1(uuid,uuid)', h,
-      -- *** CLAIMED AT MERGE: this literal is the file's own name and MUST be trued when the
-      -- migration number is claimed (.claude/rules/db-migrations.md). It is named in the header's
-      -- merge checklist so it cannot be forgotten. ***
-      'UNNUMBERED_f_a4_pr_2a_prepayment_limb', false)
+      -- *** CLAIMED AT MERGE, and this is the moment: the literal is the file's own name, trued
+      -- from its authored un-numbered form in the SAME commit as the rename
+      -- (.claude/rules/db-migrations.md). 0139 went to clara.statutory_deadlines (#373), so this
+      -- file takes 0140. A stale literal here would point a later reader at a file that does not
+      -- exist, which is the failure 0100:616-618 records having made once already. ***
+      '0140_f_a4_pr_2a_prepayment_limb', false)
     returning id into e;
   insert into clara.evaluator_version_members(evaluator_version_id, ordinal, member_signature,
       body_sha256, firm_id)
