@@ -1,7 +1,7 @@
 # F-A4 PR-1c — Codex cross-model adversarial review (2026-08-27)
 
 *Lane: `codex exec --model gpt-5.6-sol --effort xhigh`, read-only sandbox, worktree
-`.claude/worktrees/codex-rev-pr1c` at `f-a4/pr-1c` tip `a035c58`. This file is the record;
+.claude/worktrees/codex-rev-pr1c at branch f-a4/pr-1c tip `a035c58`. This file is the record;
 the native fresh-context opus review runs in parallel and lands separately. Nothing in this
 file is a ruling — the HIGH-1 item is an OWNER question (see §Conflict).*
 
@@ -98,7 +98,7 @@ conflict whose verdict/vector/task/actor/model/rationale differ.
 
 ## Provenance note (2026-08-27, conductor)
 
-This file was first committed as `9d63f93` on the `docs/mohe-handoff-0827` branch, but PR
+This file was first committed as `9d63f93` on the docs/mohe-handoff-0827 branch, but PR
 #366's auto-merge fired on that branch's EARLIER tip, so the squash landed without it — the
 record never reached `main` (verified by positive read of `45500a7`'s file list). It is
 re-landed here, on the train it belongs to, byte-faithful to the original with only the
