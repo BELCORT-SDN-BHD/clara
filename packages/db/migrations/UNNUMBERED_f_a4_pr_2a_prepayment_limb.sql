@@ -677,10 +677,20 @@ alter table clara.adjustment_templates add column schedule jsonb;
 --     false-refuses `op_key_reused_with_different_args`. Fail-closed, but it breaks the very
 --     idempotency guarantee the replay path exists to provide.
 --
--- Both symptoms are ONE seam, so this is one wall rather than two patches. The digest is md5 over a
--- jsonb ARRAY encoding: array elements are delimited structurally rather than by a character that
--- can also occur inside an element, so the straddle pair above becomes two distinct values. It
--- never truncates, because it is fixed-width regardless of what it encodes.
+-- Both symptoms are ONE seam, so this is one wall rather than two patches. The fix has TWO
+-- independent parts, and they are worth separating because they answer different objections:
+--   * THE ENCODING carries the INJECTIVITY. jsonb_build_array delimits its elements STRUCTURALLY
+--     rather than by a character that can also occur inside an element, so the straddle pair above
+--     becomes two distinct texts. That property belongs to the array, not to any hash.
+--   * THE HASH carries the COLLISION RESISTANCE, and the choice is load-bearing. This started as
+--     md5, which was wrong: md5 admits PRACTICAL chosen-prefix collisions, so a comment claiming an
+--     injective identity while riding md5 asserted more than the primitive delivers. `rationale` is
+--     MODEL-INFLUENCED TEXT and therefore an adversarial input surface, however remote the reach.
+--     It is now sha256 in the ESTATE'S OWN CANONICAL FORM --
+--     `encode(sha256(convert_to(<text>, 'UTF8')), 'hex')` -- the same spelling the evaluator freeze
+--     closure and the migration-body pins use above (:1170, :336), so there is one hashing idiom
+--     here and not two. 64 hex characters, fixed-width regardless of what it encodes, so nothing
+--     downstream can truncate it into agreement with something else.
 --
 -- IT IS FROZEN FOR FREE, and that is not luck: clara._tf_adjustment_template_transition compares
 -- `to_jsonb(new) - v_frozen` against `to_jsonb(old) - v_frozen` where v_frozen is ONLY the eight
@@ -690,7 +700,7 @@ alter table clara.adjustment_templates add column schedule jsonb;
 alter table clara.adjustment_templates add column proposed_request_digest text;
 
 comment on column clara.adjustment_templates.proposed_request_digest is
-  'F-A4 PR-2a: md5 over an INJECTIVE encoding of the agent request that produced this template -- jsonb_build_array(target_account, target_basis, rationale, model_name, model_version). Set at INSERT beside proposed_op_key and frozen by clara._tf_adjustment_template_transition''s deny-by-default rule. It exists because the replay identity previously rode the receipt''s COMPOSED RATIONALE, a display string that is neither injective (a delimiter can occur inside an element, so two different requests compose to identical bytes and a changed-argument retry replays silently) nor transform-stable (the receipt stores left(...,4000), so a near-ceiling request false-refuses every replay). An identity must ride an injective, transform-stable encoding -- never a display string. NULL on every human-proposed template: only the agent lane sets it.';
+  'F-A4 PR-2a: 64 hex characters -- encode(sha256(convert_to(...,''UTF8'')),''hex'') over an INJECTIVE encoding of the agent request that produced this template, jsonb_build_array(target_account, target_basis, rationale, model_name, model_version). TWO separate properties, deliberately: the ARRAY carries the injectivity (elements are delimited structurally, so no element can imitate the separator) and SHA-256 carries the collision resistance (md5 was the first cut and was wrong -- its chosen-prefix collisions are practical, and rationale is model-influenced text). The spelling is the estate''s canonical one, shared with the evaluator freeze closure and the migration-body pins. Set at INSERT beside proposed_op_key and frozen by clara._tf_adjustment_template_transition''s deny-by-default rule. It exists because the replay identity previously rode the receipt''s COMPOSED RATIONALE, a display string that is neither injective (a delimiter can occur inside an element, so two different requests compose to identical bytes and a changed-argument retry replays silently) nor transform-stable (the receipt stores left(...,4000), so a near-ceiling request false-refuses every replay). An identity must ride an injective, transform-stable encoding -- never a display string. NULL on every human-proposed template: only the agent lane sets it.';
 
 comment on column clara.adjustment_templates.schedule is
   'F-A4 PR-2a (owner ruling F1): OPTIONAL per-occurrence line schedule, [{period_start, period_end, lines:[...]}]. NULL means "this template posts `lines` verbatim for every period" — exactly the pre-PR-2a behaviour, which is why every body that resolves lines does so through clara._adj_period_lines and is null-stable BY CONSTRUCTION. Validated AT PROPOSE for shape congruence, per-period balance and full coverage (design §5.2a); that validation is what keeps six other live `lines` readers correct and holds the D1 inventory at four bodies instead of six. NOT in clara._tf_adjustment_template_transition''s frozen-stamp set, so it inherits that trigger''s immutability with no change to it — a sign-time edit to a schedule is refused by the storage layer.';
@@ -3342,11 +3352,16 @@ begin
   -- the whole point of an identity is that ONE expression defines it. jsonb_build_array is the
   -- encoding because it is INJECTIVE: the array's structure separates the fields, so no field's
   -- content can imitate the separator (a `|` inside a rationale is just a character), and jsonb's
-  -- own text form escapes what it must. md5 then makes it FIXED-WIDTH, which is what makes it
-  -- transform-stable: nothing downstream can truncate it into agreement with something else.
-  v_expect_digest := md5(jsonb_build_array(
+  -- own text form escapes what it must. SHA-256 then does two things the encoding cannot: it makes
+  -- the value FIXED-WIDTH (64 hex characters, so nothing downstream can truncate it into agreement
+  -- with something else) and it supplies the COLLISION RESISTANCE the word "identity" implies. The
+  -- first cut used md5 and that was a real defect, not a style point: md5's chosen-prefix collisions
+  -- are practical, `p_rationale` is model-influenced text, and a comment claiming injectivity over a
+  -- primitive that does not deliver it is the kind of claim law 3 exists to catch. The spelling is
+  -- the estate's canonical one (:1170, :336) so there is ONE hashing idiom in this file, not two.
+  v_expect_digest := encode(sha256(convert_to(jsonb_build_array(
     btrim(coalesce(p_target_account, '')), btrim(coalesce(p_target_basis, '')),
-    p_rationale, p_model ->> 'name', p_model ->> 'version')::text);
+    p_rationale, p_model ->> 'name', p_model ->> 'version')::text, 'UTF8')), 'hex');
 
   v_sub := p_op_key || ':' || p_source_entry::text;
   select t.id, t.proposed_request_digest into v_twin, v_prior_digest
@@ -4434,7 +4449,12 @@ begin
   -- Two claims, because the column is worth nothing without the second one. A digest a signer could
   -- UPDATE is not an identity -- it is a suggestion, and the replay comparison built on it would be
   -- comparing against whatever was written last.
-  --   (1) the column EXISTS and is text -- the replay reads it and the propose INSERT writes it;
+  --   (1) the column EXISTS and is text -- the replay reads it and the propose INSERT writes it.
+  --       The VALUE it is meant to hold is 64 hex characters (sha256, the estate's canonical
+  --       spelling); the column stays plain `text` rather than char(64) because the estate hashes
+  --       into `text` everywhere else and a width constraint here would be a second, weaker place
+  --       for the same fact to be stated. The 64-character shape is asserted where it can be
+  --       measured on a real act -- cell W45-frozen, on a digest the verb actually wrote;
   --   (2) it is FROZEN. Read the polarity carefully: v_frozen in
   --       clara._tf_adjustment_template_transition is the set of columns EXEMPTED from the
   --       immutability compare (the lifecycle stamps), so the proof of immutability is ABSENCE from
@@ -4449,6 +4469,24 @@ begin
     raise exception 'F-A4 PR-2a tail: adjustment_templates.proposed_request_digest is absent or not text -- the replay identity has nothing to ride'
       using errcode = 'CLR10', detail = '{"reason":"tail_request_digest_column"}';
   end if;
+  -- THE PRIMITIVE IS CENSUSED, because this file's first cut got it wrong. The digest must be
+  -- sha256 in the estate's canonical spelling, and md5 must not appear in the agent core at all --
+  -- a later hand reaching for the shorter idiom would silently weaken an identity while every
+  -- behavioural cell stayed green (the shape assertions would still pass at 32 characters if they
+  -- were written loosely). This is a SPELLING instrument and says so; W45-frozen carries the
+  -- behavioural half, measuring 64 hex characters on a digest the verb actually wrote.
+  select p.prosrc into v_txt from pg_proc p
+   where p.oid = to_regprocedure('clara._agent_prepayment_schedule_core(jsonb,uuid,uuid,text,text,text,jsonb,text)');
+  -- COMMENTS ARE MASKED BEFORE THE SCAN, and that is not tidiness: this body's own comment EXPLAINS
+  -- why md5 was rejected, so an un-masked scan would fire on the explanation and this census would
+  -- have failed on the very file that fixed the defect. The estate has met that class before (the
+  -- wiki gate reading a CoR comment); the answer is the same one -- strip `--` runs, then read.
+  v_txt := regexp_replace(coalesce(v_txt, ''), '--[^\n]*', '', 'g');
+  if v_txt = '' or v_txt !~ 'encode\(sha256\(convert_to\(' or v_txt ~ 'md5\(' then
+    raise exception 'F-A4 PR-2a tail: the agent core''s request digest is not the estate''s canonical sha256 form (or md5 has reappeared in its CODE)'
+      using errcode = 'CLR10', detail = '{"reason":"tail_request_digest_primitive"}';
+  end if;
+
   select p.prosrc into v_txt from pg_proc p
    where p.oid = to_regprocedure('clara._tf_adjustment_template_transition()');
   if v_txt is null then
@@ -4480,7 +4518,7 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'F-A4 PR-2a tail: OK — the park is OVER. Wrapper 12 (clara.wake_establish_prepayment_schedule) and clara.prepayment_schedule_v1 both resolve at their EXACT signatures, inverting 0138 T.9''s positive-absence gate; the close_prep allowlist moved % -> % (a MEASURED delta, not a literal) with 0 rows naming a dead function, and wrapper 12 holds exactly ONE application grant, to clara_wake_interactive. 10 new functions + clara.document_service_periods all resolve, ALL owned by clara_fn_owner (a definer body owned by the migration role would bypass RLS), and ZERO functions this file creates or replaces are executable by PUBLIC. EXACTLY ONE overload of propose_adjustment_template survives at eleven arguments with its harvested ACL — the extraction REPLACED the door rather than shadowing it. 9 internals hold no EXECUTE grant beyond their owner, _tf_close_proposal_drafted_unique among them (residual 4''s migration half; its rig-meta half joins the PR-1c cohort separately, because 0138''s own closed set lives in an APPLIED file and applied files are immutable). The R6 SCOPE CUT IS PROVEN, not promised: sign_adjustment_template, _adj_canon_lines and _tf_adjustment_template_transition are byte-identical to their prestate shas, and _adj_template_hash is still a plain sql function with no definer and no search_path. subject_kind EXTENDED to seven values with all six originals intact. Three human-read policies carry BOTH the firm predicate and the bookkeeper rank conjunct, asserted by EXPRESSION and not by count, and all three are SELECT-only. uq_document_service_period_live is pinned by relation, key column and predicate text rather than by name. The prepayment_schedule v1 closure has exactly ONE member, so the freeze means this body and no other. clara._adj_period_lines has exactly 2 callers. adjustment_templates.proposed_request_digest exists as text and is NOT named inside the transition trigger — absence from v_frozen is what makes it immutable, so the replay identity cannot be rewritten by a later signer. FROZEN SCHEMAS (constraint 15): all 3 checks positive — nothing this file created lives outside clara — and the % relation(s) workflow/graphile_worker/spike hold are REPORTED, not asserted (on live that is the Slice-0 parked run and is expected to be non-zero).',
+  raise notice 'F-A4 PR-2a tail: OK — the park is OVER. Wrapper 12 (clara.wake_establish_prepayment_schedule) and clara.prepayment_schedule_v1 both resolve at their EXACT signatures, inverting 0138 T.9''s positive-absence gate; the close_prep allowlist moved % -> % (a MEASURED delta, not a literal) with 0 rows naming a dead function, and wrapper 12 holds exactly ONE application grant, to clara_wake_interactive. 10 new functions + clara.document_service_periods all resolve, ALL owned by clara_fn_owner (a definer body owned by the migration role would bypass RLS), and ZERO functions this file creates or replaces are executable by PUBLIC. EXACTLY ONE overload of propose_adjustment_template survives at eleven arguments with its harvested ACL — the extraction REPLACED the door rather than shadowing it. 9 internals hold no EXECUTE grant beyond their owner, _tf_close_proposal_drafted_unique among them (residual 4''s migration half; its rig-meta half joins the PR-1c cohort separately, because 0138''s own closed set lives in an APPLIED file and applied files are immutable). The R6 SCOPE CUT IS PROVEN, not promised: sign_adjustment_template, _adj_canon_lines and _tf_adjustment_template_transition are byte-identical to their prestate shas, and _adj_template_hash is still a plain sql function with no definer and no search_path. subject_kind EXTENDED to seven values with all six originals intact. Three human-read policies carry BOTH the firm predicate and the bookkeeper rank conjunct, asserted by EXPRESSION and not by count, and all three are SELECT-only. uq_document_service_period_live is pinned by relation, key column and predicate text rather than by name. The prepayment_schedule v1 closure has exactly ONE member, so the freeze means this body and no other. clara._adj_period_lines has exactly 2 callers. adjustment_templates.proposed_request_digest exists as text (sha256 in the estate''s canonical spelling, 64 hex characters -- NOT md5, whose chosen-prefix collisions are practical and whose use here would have claimed more than it delivers) and is NOT named inside the transition trigger — absence from v_frozen is what makes it immutable, so the replay identity cannot be rewritten by a later signer. FROZEN SCHEMAS (constraint 15): all 3 checks positive — nothing this file created lives outside clara — and the % relation(s) workflow/graphile_worker/spike hold are REPORTED, not asserted (on live that is the Slice-0 parked run and is expected to be non-zero).',
     (select v from _fa4_pr2a_prestate where k = 'allowlist_close_prep_pre'),
     (select count(*) from clara.wake_fn_allowlist where wake_kind = 'close_prep'),
     v_frozen;

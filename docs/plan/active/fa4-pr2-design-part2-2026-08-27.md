@@ -504,16 +504,21 @@ lane's cell pins **both** arms.
 **RECUT 2026-08-28 — what "the same request" means.** The ruling above says a self-twin replays;
 it does not say how the estate decides two calls are the same act, and the build's first two cuts
 got that wrong in both directions. The comparison now runs **digest to digest** against a new
-frozen column, `adjustment_templates.proposed_request_digest` — md5 over
-`jsonb_build_array(target_account, target_basis, rationale, model_name, model_version)` — set at
+frozen column, `adjustment_templates.proposed_request_digest` —
+`encode(sha256(convert_to(jsonb_build_array(target_account, target_basis, rationale, model_name,
+model_version)::text, 'UTF8')), 'hex')`, the estate's canonical hashing spelling — set at
 INSERT beside `proposed_op_key` and immutable by the transition trigger's deny-by-default rule (the
 same property §5.3 leans on for `schedule`). It replaced a comparison against the receipt's
 **composed rationale**, which failed twice over: not injective (the join characters occur inside the
 joined fields, so a straddling pair composed to identical bytes and a changed request replayed
 SILENTLY) and not transform-stable (the receipt stores `left(...,4000)`, so a near-ceiling request
 false-refused every replay). **An identity must ride an injective, transform-stable encoding — never
-a display string.** Wall **W45** pins all four arms plus the freeze; the evidence is the battery's,
-not this section's.
+a display string.** Two properties, carried by two different parts and worth separating: the ARRAY
+supplies the injectivity (structural delimitation), SHA-256 supplies the collision resistance. The
+first cut hashed with md5 and that was a real defect rather than a style point — md5's chosen-prefix
+collisions are practical and `rationale` is model-influenced text, so a comment claiming an
+injective identity over md5 asserted more than the primitive delivers. Wall **W45** pins all four
+arms, the freeze, and the migration-day NULL; the evidence is the battery's, not this section's.
 
 **The maxim both rulings turn on, recorded where a builder will meet it (§5.0): *facts get
 anchored, judgements get receipted.*** It is the line that explains why §4's carrier and §5.3's

@@ -9,6 +9,7 @@ import test, { before } from "node:test";
 import assert from "node:assert/strict";
 import { noteLane } from "./rig-runtime-helpers.mjs";
 import { withTxn } from "./rig-txn.mjs";
+import { humanQuery } from "./rig-helpers.mjs";
 import {
   ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, wake12, caught,
   receiptsForTask, templateById, derivedOpKey, VERB12, uniq, account, MODEL,
@@ -229,8 +230,8 @@ test("fa4p2a.W45-straddle a delimiter-STRADDLING pair refuses -- the identity is
   const enc = await rootQuery(
     `select ($1::text || ' | target account ' || $5::text || ': ' || $2::text)
           = ($3::text || ' | target account ' || $5::text || ': ' || $4::text) as old_collides,
-            md5(jsonb_build_array($5::text, $2::text, $1::text, 'm', 'v')::text)
-          = md5(jsonb_build_array($5::text, $4::text, $3::text, 'm', 'v')::text) as new_collides`,
+            encode(sha256(convert_to(jsonb_build_array($5::text, $2::text, $1::text, 'm', 'v')::text, 'UTF8')), 'hex')
+          = encode(sha256(convert_to(jsonb_build_array($5::text, $4::text, $3::text, 'm', 'v')::text, 'UTF8')), 'hex') as new_collides`,
     [r1, b1, r2, b2, A]);
   assert.equal(enc.rows[0].old_collides, true,
     "the straddling pair does NOT collide under the old composition -- this cell is not testing the defect");
@@ -250,7 +251,8 @@ test("fa4p2a.W45-straddle a delimiter-STRADDLING pair refuses -- the identity is
   // AND THE DIGESTS ARE WHAT SEPARATED THEM: the stored one is the FIRST request's, unchanged.
   const stored = await templateById(first.template_id);
   const expect = await rootQuery(
-    "select md5(jsonb_build_array($1::text, $2::text, $3::text, $4::text, $5::text)::text) as d",
+    `select encode(sha256(convert_to(jsonb_build_array($1::text, $2::text, $3::text, $4::text,
+       $5::text)::text, 'UTF8')), 'hex') as d`,
     [A, b1, r1, MODEL.name, MODEL.version]);
   assert.equal(stored.proposed_request_digest, expect.rows[0].d,
     "the persisted digest is not the digest of the request that was acted on");
@@ -290,6 +292,82 @@ test("fa4p2a.W45-ceiling a NEAR-CEILING rationale acts, and its identical retry 
   assert.equal(drafted.rows[0].n, 1, "the replay drafted a second template");
 });
 
+test("fa4p2a.W45-nulldigest a twin carrying NO digest is REFUSED, never replayed", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // THE MIGRATION-DAY POPULATION, and a security argument, in one cell. Every template standing on
+  // the estate the day this applies carries `proposed_request_digest IS NULL` -- the column is new.
+  // The replay comparison is `is distinct from`, so NULL refuses; that was argued in the source and
+  // Codex was right that a source read is not a measurement.
+  //
+  // ARM 1 -- BUILT THROUGH A GOVERNED DOOR, because the shape is reachable through one. The human
+  // door takes p_op_key, so a bookkeeper can propose a template stamped with the agent's own
+  // delegate sub-key. That is the FORGED-TWIN case the door-narrowing argument turns on (it is why
+  // the digest is NOT the human door's to set), and it is also exactly a pre-migration row's shape:
+  // sub-key present, digest NULL. The estate's answer must be a typed, fail-closed refusal.
+  const sc = await prepaidScene("w45n");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const sub = `${derivedOpKey(sc.s.task, VERB12, sc.client)}:${sc.entry}`;
+  const lines = [
+    { account_code: sc.target, debit_cents: 100, credit_cents: 0, description: "d" },
+    { account_code: sc.prepaid, debit_cents: 0, credit_cents: 100, description: "c" }];
+  const planted = await humanQuery(sc.alice,
+    `select clara.propose_adjustment_template($1::uuid,$2,'monthly',date '2025-02-01',
+       date '2025-02-28',false,$3::jsonb,'m',$4) as r`,
+    [sc.client, `w45n-${uniq()}`, JSON.stringify(lines), sub]);
+  const twin = planted.rows[0].r?.template_id;
+  assert.ok(twin, "the human proposal did not land -- the fixture, not the wall, is broken");
+  const row = await templateById(twin);
+  assert.equal(row.proposed_op_key, sub, "the planted twin does not carry the agent's sub-key");
+  assert.equal(row.proposed_request_digest, null,
+    "a HUMAN proposal carried a request digest -- the door was widened after all");
+
+  const e = await caught(() => wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target }));
+  assert.ok(e, "a twin with no digest and no acted receipt was REPLAYED -- a forged twin answered for the agent");
+  assert.match(String(e.detail ?? e.message), /prepayment_replay_receipt_absent/,
+    `expected the typed receipt-absent refusal, got ${String(e.detail ?? e.message).slice(0, 250)}`);
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.adjustment_templates where client_id=$1", [sc.client])).rows[0].n,
+    1, "the refused call drafted a second template");
+
+  // ARM 2 -- THE DIGEST COMPARISON ITSELF, which arm 1 never reaches: the receipt-absent wall fires
+  // first, and it fires first BY DESIGN (a replay with no acted receipt is not a replay). To reach
+  // the NULL-digest branch a twin needs an ACTED receipt it could never lawfully have -- no
+  // pre-migration row can carry a `prepayment_schedule` receipt, because this file mints the verb.
+  // So the receipt is PLANTED as root, past the door, and the cell says so: this branch is
+  // DEFENSIVE, unreachable through any governed path, and that is precisely why it is worth pinning
+  // -- a defensive branch nobody drives is a branch nobody notices rotting.
+  const sc2 = await prepaidScene("w45n2");
+  await recordPeriod(sc2.alice, { document: sc2.document, ...PERIOD });
+  const sub2 = `${derivedOpKey(sc2.s.task, VERB12, sc2.client)}:${sc2.entry}`;
+  const lines2 = [
+    { account_code: sc2.target, debit_cents: 100, credit_cents: 0, description: "d" },
+    { account_code: sc2.prepaid, debit_cents: 0, credit_cents: 100, description: "c" }];
+  const planted2 = await humanQuery(sc2.alice,
+    `select clara.propose_adjustment_template($1::uuid,$2,'monthly',date '2025-02-01',
+       date '2025-02-28',false,$3::jsonb,'m',$4) as r`,
+    [sc2.client, `w45n2-${uniq()}`, JSON.stringify(lines2), sub2]);
+  const twin2 = planted2.rows[0].r?.template_id;
+  await rootQuery(
+    `insert into clara.agent_act_receipts (firm_id, client_id, act_kind, subject_kind, subject_id,
+        acting_actor, via_wake_kind, wake_task_id, model_name, model_version, rationale, verdict,
+        op_key)
+     values ($1::uuid, $2::uuid, 'prepayment_schedule', 'adjustment_template', $3::uuid,
+        $4::uuid, 'close_prep', $5::uuid, $6, $7, 'planted: a receipt no lawful path could write',
+        'acted', $8)`,
+    [sc2.firm, sc2.client, twin2, sc2.alice, sc2.s.task, MODEL.name, MODEL.version, sub2]);
+
+  const e2 = await caught(() => wake12(sc2.s, { client: sc2.client, entry: sc2.entry, target: sc2.target }));
+  assert.ok(e2, "a twin whose stored digest is NULL was REPLAYED -- `is distinct from` is not doing its work");
+  assert.match(String(e2.detail ?? e2.message), /op_key_reused_with_different_args/,
+    `expected the typed reuse refusal on the NULL digest, got ${String(e2.detail ?? e2.message).slice(0, 250)}`);
+  // AND THE REFUSAL NAMES THE NULL, so a reader of the detail can tell this apart from a mismatch.
+  assert.match(String(e2.detail ?? e2.message), /stored_request_digest/,
+    "the refusal detail does not carry the stored digest, so a NULL reads like any other mismatch");
+  assert.equal((await rootQuery(
+    "select count(*)::int as n from clara.adjustment_templates where client_id=$1", [sc2.client])).rows[0].n,
+    1, "the refused call drafted a second template");
+});
+
 test("fa4p2a.W45-frozen the persisted digest is IMMUTABLE -- an identity a signer could rewrite is not one", async (t) => {
   if (prepayGate(t, markSkip)) return;
   // The column is worth nothing without this. §TAIL's T.12b proves the NAME is absent from the
@@ -300,14 +378,19 @@ test("fa4p2a.W45-frozen the persisted digest is IMMUTABLE -- an identity a signe
   const first = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
   assert.equal(first.status, "acted");
   const before = (await templateById(first.template_id)).proposed_request_digest;
-  assert.ok(before && /^[0-9a-f]{32}$/.test(before), `no digest was persisted: ${before}`);
+  // 64 HEX CHARACTERS, ASSERTED EXACTLY. This is where the sha256 swap is measured on a value the
+  // verb actually WROTE, rather than read off the source: an md5 regression would land here at 32
+  // and this cell would red. A loose /^[0-9a-f]+$/ would have accepted either, which is why the
+  // length is pinned rather than the alphabet alone.
+  assert.ok(before && /^[0-9a-f]{64}$/.test(before),
+    `the persisted digest is not 64 hex characters (sha256): ${before}`);
 
   // ROOT, deliberately -- the strongest caller in the estate, so the refusal is the TRIGGER's and
   // not a missing grant's. withTxn because a raise inside the pooled session would otherwise
   // poison it for the post-check read.
   const e = await caught(() => withTxn(async (c) => {
     await c.query("update clara.adjustment_templates set proposed_request_digest = $1 where id = $2",
-      ["00000000000000000000000000000000", first.template_id]);
+      ["0".repeat(64), first.template_id]);
   }));
   assert.ok(e, "the replay identity was REWRITTEN in place -- a later signer could redirect a replay");
   assert.match(String(e.detail ?? e.message), /adjustment_template_immutable|immutable outside/,
