@@ -67,9 +67,34 @@
     "reasonPlaceholder": "Why dismiss this?",
     "submit": "Submit",
     "submitting": "Submitting…",
-    "gapsHeading": "Not built yet",
-    "gapFirmQuestions": "Firm-level questions (a document with no client yet) have no human read surface in the database today — clara.firm_open_questions carries no grant a firm session can read. Reported as a backend gap; not shown here.",
-    "gapIdentifierPromotions": "Client-identifier merge proposals (clara.client_identifier_promotions) have the same gap — no human read surface yet."
+    "firmQuestionsHeading": "Firm-level questions",
+    "firmQuestionsEmpty": "No open firm-level questions right now.",
+    "firmQuestionKind": {
+      "unattributed": "No client attributed",
+      "collision": "Client collision",
+      "contradiction": "Contradiction",
+      "identity_document": "Identity document",
+      "correction_proposed": "Correction proposed",
+      "promotion_proposed": "Promotion proposed",
+      "unknown": "Unrecognized kind ({kind})"
+    },
+    "candidatesLabel": "Candidates ({count})",
+    "namedClientLabel": "Name a client",
+    "namedClientNone": "— none —",
+    "namedClientUnavailable": "The client list could not be loaded — you can still resolve without naming a client.",
+    "identifierPromotionsHeading": "Identifier promotion proposals",
+    "identifierPromotionsEmpty": "No open identifier promotions right now.",
+    "identifierPromotionKind": {
+      "tin": "TIN",
+      "ssm": "SSM",
+      "bank_account": "Bank account",
+      "unknown": "Unrecognized kind ({kind})"
+    },
+    "sightingsLabel": "sightings",
+    "citationsLabel": "citations",
+    "modelLabel": "model",
+    "confirm": "Confirm",
+    "decline": "Decline"
   },
   "ClientsRegister": {
     "heading": "Clients",
