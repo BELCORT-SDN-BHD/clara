@@ -6,9 +6,48 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { listReviewQueue, resolveOpenQuestion, dismissOpenQuestion } from "./needs-you";
+import {
+  listReviewQueue,
+  resolveOpenQuestion,
+  dismissOpenQuestion,
+  reviewQueueRowKey,
+  isActingRowAttached,
+  shouldShowQueueErrorBanner,
+  type ReviewQueueRow,
+} from "./needs-you";
 import { isDoorRefusal } from "../doors";
 import type { SessionTokenAccessor } from "@/lib/session";
+
+function row(overrides: Partial<ReviewQueueRow> = {}): ReviewQueueRow {
+  return {
+    row_kind: "open_question",
+    section: "needs_you",
+    client_id: null,
+    counterparty_id: null,
+    filing_id: null,
+    entry_id: null,
+    question_id: "q1",
+    task_id: null,
+    document_id: null,
+    lane: null,
+    auto: false,
+    rule_backed: false,
+    high_stakes: false,
+    aged_since: null,
+    amount_cents: null,
+    period: null,
+    question_text: null,
+    created_at: "2026-08-27T00:00:00Z",
+    id: "q1",
+    coding_kind: null,
+    watch_id: null,
+    tier: null,
+    finding_id: null,
+    asset_id: null,
+    advance_id: null,
+    ...overrides,
+  };
+}
 
 function fakeSession(token: string | null): SessionTokenAccessor {
   return { getAccessToken: async () => token };
@@ -96,4 +135,50 @@ test("dismissOpenQuestion: a governed CLR refusal surfaces as DoorRefusal verbat
     },
   );
   assert.equal(attempts, 1);
+});
+
+// R1 (independent review, fix-required, 2026-08-27 — round 2): the acted-on row
+// can VANISH from the re-read (the most common refusal — someone else already
+// settled it). A per-row-only error attachment goes dark for exactly this case;
+// the banner must fall back whenever the acting row is no longer present.
+
+test("reviewQueueRowKey: row_kind + id, stable across the same logical row", () => {
+  assert.equal(reviewQueueRowKey(row({ row_kind: "open_question", id: "q1" })), "open_question:q1");
+  assert.equal(reviewQueueRowKey(row({ row_kind: "draft", id: "e1" })), "draft:e1");
+});
+
+test("isActingRowAttached: false when actingKey is null", () => {
+  assert.equal(isActingRowAttached([row({ id: "q1" })], null), false);
+});
+
+test("isActingRowAttached: true when the acted-on row is still present", () => {
+  const rows = [row({ id: "q1" }), row({ id: "q2" })];
+  assert.equal(isActingRowAttached(rows, "open_question:q1"), true);
+});
+
+test("isActingRowAttached: false when the acted-on row VANISHED from the re-read", () => {
+  const rows = [row({ id: "q2" })]; // q1 is gone — e.g. someone else already resolved it
+  assert.equal(isActingRowAttached(rows, "open_question:q1"), false);
+});
+
+test("shouldShowQueueErrorBanner: no data ever loaded -> false (DataState's full-page error owns it)", () => {
+  assert.equal(shouldShowQueueErrorBanner(false, new Error("boom"), [row({ id: "q1" })], null), false);
+});
+
+test("shouldShowQueueErrorBanner: no error -> false", () => {
+  assert.equal(shouldShowQueueErrorBanner(true, null, [row({ id: "q1" })], "open_question:q1"), false);
+});
+
+test("shouldShowQueueErrorBanner: an error with no acting row (e.g. a loadMore failure) -> true", () => {
+  assert.equal(shouldShowQueueErrorBanner(true, new Error("boom"), [row({ id: "q1" })], null), true);
+});
+
+test("shouldShowQueueErrorBanner: the acting row is still present -> false (the row shows it instead)", () => {
+  const rows = [row({ id: "q1" })];
+  assert.equal(shouldShowQueueErrorBanner(true, new Error("boom"), rows, "open_question:q1"), false);
+});
+
+test("shouldShowQueueErrorBanner: the acting row VANISHED -> true (R1's regression fix)", () => {
+  const rows = [row({ id: "q2" })]; // q1 vanished — the refusal must still surface SOMEWHERE
+  assert.equal(shouldShowQueueErrorBanner(true, new Error("CLR10: question is not open"), rows, "open_question:q1"), true);
 });

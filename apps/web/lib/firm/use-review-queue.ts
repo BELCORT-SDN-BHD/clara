@@ -10,17 +10,37 @@
 // more rows exist.
 //
 // REVIEWER CAVEAT, LOAD-BEARING: `next_cursor` is NON-NULL even on the LAST
-// page (0011_daily_loop.sql:4725-4726 always builds one from the last row of
-// whatever page it returned) — it is not itself a "more exist" signal. `hasMore`
-// here is instead PAGE-SIZE-DERIVED: a page that returned FEWER rows than the
-// limit requested is provably the last page (the RPC would have filled it
-// otherwise); a full page MIGHT have more. This never overclaims "no more" and
-// costs nothing extra to compute.
+// page — the LIVE body (0011_daily_loop.sql:3748-3880 REPLACED WHOLE by
+// 0016_a21_compliance_watch.sql:4558-4729, per lib/firm/needs-you.ts's own
+// grounding note) always builds one from the last row of whatever page it
+// returned, at 0016_a21_compliance_watch.sql:4725-4726 (R3, independent review
+// round 2, 2026-08-27 — the prior citation named 0011's line numbers for code
+// that lives in 0016's superseded-and-replaced body; 0011 itself is 4367 lines
+// and never reaches line 4725 at all) — it is not itself a "more exist" signal.
+// `hasMore` here is instead PAGE-SIZE-DERIVED: a page that returned FEWER rows
+// than the limit requested is provably the last page (the RPC would have
+// filled it otherwise); a full page MIGHT have more. This never overclaims
+// "no more" and costs nothing extra to compute.
 //
 // Same reload-epoch guard as lib/firm/use-async-read.ts (see that file's header
 // for the mechanism and why it exists) — duplicated rather than composed because
 // pagination needs its own accumulated-rows state `useAsyncRead` has no concept
 // of; the epoch discipline itself is proven there (lib/firm/use-async-read.test.ts).
+//
+// R2 (independent review, fix-required, 2026-08-27 — round 2): `loadingMore`
+// clears UNCONDITIONALLY in loadMore's `finally` — a call whose epoch was
+// superseded by a DIFFERENT operation (a reload()/act() started while this
+// loadMore was still in flight) must still retire ITS OWN "am I loading"
+// flag; the epoch guard belongs only on whether this call's DATA gets
+// committed, never on whether the button re-enables. The prior code guarded
+// both the same way, which stranded `loadingMore: true` forever on a
+// superseded call (deterministically reachable via act-then-loadMore).
+//
+// R4 (independent review, fix-required, 2026-08-27 — round 2): a successful
+// loadMore no longer clears a standing `error`. The sticky-refusal law
+// (lib/firm/use-async-read.ts's header) says a refusal is retired only by a
+// NEW act() or an explicit dismiss — paging through MORE rows is neither, and
+// must not silently retire a refusal the human has not yet acknowledged.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -50,7 +70,9 @@ export type ReviewQueueState = {
   /** Reset to page 1 and clear every accumulated page. */
   reload: () => Promise<void>;
   /** Fetch the next page (via the prior envelope's own `next_cursor`) and
-   *  append it. No-ops if a fetch is already in flight or `hasMore` is false. */
+   *  append it. No-ops if a fetch is already in flight or `hasMore` is false.
+   *  A standing `error` survives a successful loadMore untouched (R4) — only a
+   *  new `act()` clears one. */
   loadMore: () => Promise<void>;
   /** Same contract as lib/firm/use-async-read.ts's `act()` — resolves `true`/
    *  `false`, never rejects; always reloads (resetting to page 1) afterward. */
@@ -110,12 +132,15 @@ export function useReviewQueue(scope: ReviewQueueScope): ReviewQueueState {
       setSweep(env.sweep);
       setCursor(env.next_cursor);
       setHasMore(env.rows.length === PAGE_LIMIT);
-      setError(null);
+      // R4: deliberately NOT setError(null) here — see the header note.
     } catch (e) {
       if (epochRef.current !== myEpoch) return;
       setError(e);
     } finally {
-      if (epochRef.current === myEpoch) setLoadingMore(false);
+      // R2: unconditional — see the header note. A superseded call's own
+      // "is a loadMore in flight" state must still retire when ITS fetch
+      // settles, independent of whether its data gets committed.
+      setLoadingMore(false);
     }
   }, [cursor, loadingMore, hasMore]);
 

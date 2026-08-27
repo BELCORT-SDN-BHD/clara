@@ -13,11 +13,14 @@
 // lookup as components/firm/needs-you-row.tsx (lib/firm/needs-you.ts's
 // isKnownReviewQueueRowKind) rather than a second copy. N11: `created_at`
 // renders in the business timezone explicitly.
+// R5 (independent review, 2026-08-27 — round 2): `status` now uses the SAME
+// checked lookup built for the client register (components/firm/
+// client-register-list.tsx) instead of the raw DB value.
 
 import { useTranslations } from "next-intl";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadClientById } from "@/lib/firm/reads";
-import { isKnownReviewQueueRowKind } from "@/lib/firm/needs-you";
+import { isKnownReviewQueueRowKind, reviewQueueRowKey } from "@/lib/firm/needs-you";
 import { useReviewQueue } from "@/lib/firm/use-review-queue";
 import { businessDate } from "@/lib/registers/business-date";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -26,8 +29,15 @@ import { DataState } from "./data-state";
 export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientWorkspace");
   const tny = useTranslations("NeedsYou");
+  const tcr = useTranslations("ClientsRegister");
   const client = useAsyncRead(() => loadClientById(sessionTokenAccessor, clientId));
   const queue = useReviewQueue({ client_id: clientId });
+
+  const statusLabels: Record<string, string> = {
+    active: tcr("statuses.active"),
+    archived: tcr("statuses.archived"),
+    onboarding: tcr("statuses.onboarding"),
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -40,7 +50,7 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
         {client.data ? (
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
             <dt className="text-muted-foreground">{t("statusLabel")}</dt>
-            <dd className="text-foreground">{client.data.status}</dd>
+            <dd className="text-foreground">{statusLabels[client.data.status] ?? client.data.status}</dd>
             <dt className="text-muted-foreground">{t("createdLabel")}</dt>
             <dd className="text-foreground">{businessDate(new Date(client.data.created_at))}</dd>
           </dl>
@@ -57,7 +67,7 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
         >
           <ul className="flex flex-col gap-1 text-sm text-card-foreground">
             {queue.rows.map((row) => (
-              <li key={`${row.row_kind}:${row.id}`}>
+              <li key={reviewQueueRowKey(row)}>
                 {isKnownReviewQueueRowKind(row.row_kind)
                   ? tny(`rowKind.${row.row_kind}`)
                   : tny("rowKind.unknown", { kind: row.row_kind })}
@@ -70,7 +80,7 @@ export function ClientWorkspaceOverview({ clientId }: { clientId: string }) {
               type="button"
               className="self-start rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground"
               onClick={() => void queue.loadMore()}
-              disabled={queue.loadingMore}
+              disabled={queue.loadingMore || queue.busy}
             >
               {queue.loadingMore ? tny("loadingMore") : tny("loadMore")}
             </button>

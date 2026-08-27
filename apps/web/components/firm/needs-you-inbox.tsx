@@ -18,15 +18,27 @@
 // useReviewQueue exposes:
 //   - no data has EVER loaded (`!hasData`): the full DataState error page — there
 //     is nothing else to show.
-//   - the last action was a specific ROW's resolve/dismiss (`actingKey` set): the
-//     error renders ONLY inside that row.
-//   - the last action was `loadMore` (or nothing row-specific — `actingKey`
-//     cleared before every loadMore call): a banner above the still-real list.
+//   - the last action was a specific ROW's resolve/dismiss AND that row is STILL
+//     PRESENT after the re-read (`actingKey` set and attached): the error
+//     renders ONLY inside that row.
+//   - anything else (loadMore, or a row action whose row VANISHED on re-read —
+//     R1 below): a banner above the still-real list.
+//
+// R1 (independent review, fix-required, 2026-08-27 — round 2): the most common
+// refusal on this queue is "someone else already settled it" (CLR10, "question
+// is not open"), which makes the acted-on row DISAPPEAR from the very re-read
+// act() triggers. The original per-row-only attachment went dark for exactly
+// this case (actingKey pointed at a row no longer in `rows`, and the banner
+// required actingKey===null) — a human would see the row vanish with NO error
+// anywhere and reasonably (wrongly) conclude their OWN resolution took effect.
+// lib/firm/needs-you.ts's `shouldShowQueueErrorBanner` now falls back to the
+// banner whenever the acting row is no longer attached, not only when nothing
+// was acted on.
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useReviewQueue } from "@/lib/firm/use-review-queue";
-import { resolveOpenQuestion, dismissOpenQuestion } from "@/lib/firm/needs-you";
+import { resolveOpenQuestion, dismissOpenQuestion, reviewQueueRowKey, shouldShowQueueErrorBanner } from "@/lib/firm/needs-you";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataState, ErrorMessage } from "./data-state";
 import { NeedsYouCounts } from "./needs-you-counts";
@@ -53,10 +65,12 @@ export function NeedsYouInbox() {
     void loadMore();
   };
 
+  const showBanner = shouldShowQueueErrorBanner(hasData, error, rows, actingKey);
+
   return (
     <div className="flex flex-col gap-4">
       {counts ? <NeedsYouCounts counts={counts} /> : null}
-      {hasData && error && actingKey === null ? <ErrorMessage error={error} /> : null}
+      {showBanner ? <ErrorMessage error={error} /> : null}
       <DataState
         loading={loading}
         error={hasData ? null : error}
@@ -65,7 +79,7 @@ export function NeedsYouInbox() {
       >
         <ul className="flex flex-col gap-2">
           {rows.map((row) => {
-            const rowKey = `${row.row_kind}:${row.id}`;
+            const rowKey = reviewQueueRowKey(row);
             return (
               <NeedsYouRow
                 key={rowKey}
@@ -83,7 +97,7 @@ export function NeedsYouInbox() {
             type="button"
             className="mt-2 self-start rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground"
             onClick={handleLoadMore}
-            disabled={loadingMore}
+            disabled={loadingMore || busy}
           >
             {loadingMore ? t("loadingMore") : t("loadMore")}
           </button>

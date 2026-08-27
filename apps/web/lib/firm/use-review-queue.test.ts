@@ -138,6 +138,108 @@ test("loadMore: appends the next page and advances the cursor (hasMore only true
   );
 });
 
+function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+// R2 (independent review, fix-required, 2026-08-27 — round 2): a loadMore call
+// superseded by a DIFFERENT operation's epoch (a reload()/act() that starts
+// while it is still in flight) must still clear ITS OWN loadingMore flag when
+// its fetch eventually settles — the epoch guard belongs on whether the DATA
+// commits, never on whether the "is a fetch in flight" flag retires.
+test("loadMore: a call SUPERSEDED by a different operation still clears loadingMore", async () => {
+  const cursor1 = { tuple: ["1", "c1", "", "t", "z49"] };
+  const fullPage = envelope(
+    Array.from({ length: 50 }, (_, i) => row(`p1-${i}`)),
+    cursor1,
+  );
+  const reloadPage = envelope([row("x")], { tuple: ["1", "c1", "", "t", "x"] });
+  const pendingLoadMore = deferred<Response>();
+  let calls = 0;
+  await withMockedFetch(
+    async () => {
+      calls += 1;
+      if (calls === 1) return jsonResponse(fullPage, 200); // initial load
+      if (calls === 2) return pendingLoadMore.promise; // loadMore — held open
+      return jsonResponse(reloadPage, 200); // the superseding reload()
+    },
+    async () => {
+      const h = await renderHook(() => useReviewQueue({}));
+      try {
+        await h.settle();
+        assert.equal(h.current.hasMore, true);
+        let loadMorePromise!: Promise<void>;
+        await h.act(() => {
+          loadMorePromise = h.current.loadMore();
+        });
+        assert.equal(h.current.loadingMore, true, "loadMore is now in flight");
+        // Supersede it with a DIFFERENT operation while it is still pending.
+        await h.act(() => {
+          void h.current.reload();
+        });
+        await h.settle();
+        assert.equal(h.current.loadingMore, true, "still stranded until the superseded fetch itself settles");
+        // Now let the superseded loadMore's own fetch finally resolve.
+        await h.act(() => {
+          pendingLoadMore.resolve(jsonResponse(fullPage, 200));
+        });
+        await loadMorePromise;
+        await h.settle();
+        assert.equal(h.current.loadingMore, false, "a superseded loadMore must not strand loadingMore forever (R2)");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+// R4 (independent review, fix-required, 2026-08-27 — round 2): loadMore's own
+// success must never retire a STANDING refusal from a prior act() — only a new
+// act() (or an explicit dismiss, not modeled by this hook) clears one.
+test("loadMore: a successful loadMore PRESERVES a standing error from a prior act() failure", async () => {
+  const cursor1 = { tuple: ["1", "c1", "", "t", "z49"] };
+  const fullPage = envelope(
+    Array.from({ length: 50 }, (_, i) => row(`p1-${i}`)),
+    cursor1,
+  );
+  const page2 = envelope([row("c")], { tuple: ["1", "c1", "", "t", "c"] });
+  const writeErr = new Error("CLR10: question is not open");
+  let calls = 0;
+  await withMockedFetch(
+    async () => {
+      calls += 1;
+      if (calls === 1) return jsonResponse(fullPage, 200); // initial load
+      if (calls === 2) return jsonResponse(fullPage, 200); // act()'s own confirmatory reload
+      return jsonResponse(page2, 200); // loadMore
+    },
+    async () => {
+      const h = await renderHook(() => useReviewQueue({}));
+      try {
+        await h.settle();
+        assert.equal(h.current.hasMore, true);
+        let ok: boolean | undefined;
+        await h.act(async () => {
+          ok = await h.current.act(async () => {
+            throw writeErr;
+          });
+        });
+        assert.equal(ok, false);
+        assert.equal(h.current.error, writeErr, "the write's own failure is the standing error");
+        // Page through more rows — unrelated to the failed act — must NOT retire it.
+        await h.act(() => h.current.loadMore());
+        assert.equal(h.current.error, writeErr, "a successful loadMore must not clear a standing error (R4)");
+        assert.equal(h.current.rows.length, 51, "loadMore still appends for real despite the standing error");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("act(): resolves true on success and resets to page 1", async () => {
   const page = envelope([row("a")], { tuple: ["1", "c1", "", "t", "a"] });
   await withMockedFetch(

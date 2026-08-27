@@ -26,6 +26,39 @@ test("mount fires the loader exactly once and populates data", async () => {
   }
 });
 
+// PC1-style storm-property test (the coordinator's naming, 2026-08-27 — the
+// class lib/parts/hooks.ts's own header names as its own hard-won fix): a
+// PARENT re-render handing the hook a BRAND NEW inline loader closure every
+// time must never re-trigger the mount effect. `loaderRef` (updated on every
+// render, read only inside the stable `reloadImpl`) is what makes this true —
+// the mount effect itself depends on nothing that changes across a re-render.
+test("N fresh inline loader closures across re-renders never re-trigger the loader (no storm)", async () => {
+  let calls = 0;
+  let renderCount = 0;
+  const h = await renderHook(() => {
+    renderCount += 1;
+    // A FRESH closure every render — exactly the anti-pattern the hook's own
+    // header defends against, not a stable useCallback like a well-behaved
+    // caller would pass.
+    const loader = async () => {
+      calls += 1;
+      return { seen: calls };
+    };
+    return useAsyncRead(loader);
+  });
+  try {
+    await h.settle();
+    assert.equal(calls, 1, "mount must fire the loader exactly once");
+    for (let i = 0; i < 25; i++) {
+      await h.rerender();
+    }
+    assert.ok(renderCount >= 26, "the probe genuinely re-rendered 25+ times");
+    assert.equal(calls, 1, "a fresh loader identity on every render must never re-fire the mount effect");
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("a mount failure surfaces the raw error object, not just a message", async () => {
   const boom = new Error("permission denied");
   const loader = async () => { throw boom; };

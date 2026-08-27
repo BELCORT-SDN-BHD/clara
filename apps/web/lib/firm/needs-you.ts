@@ -77,6 +77,46 @@ export function isKnownReviewQueueRowKind(kind: string): kind is ReviewQueueRowK
   return (REVIEW_QUEUE_ROW_KINDS as readonly string[]).includes(kind);
 }
 
+/** The stable identity clara.list_review_queue rows use across a re-read — the
+ *  SAME derivation everywhere a row must be recognized as "the same row" (a
+ *  React key, or R1's acted-on-row-still-present check below). `row_kind`+`id`
+ *  is unique within one queue read: `id` is the source table's own primary key
+ *  (entry_id/filing_id/question_id/task_id/watch_id/finding_id/asset_id/
+ *  advance_id all alias to it per-kind, 0011_daily_loop.sql:4715-4723 +
+ *  splices), never reused across row_kinds. */
+export function reviewQueueRowKey(row: ReviewQueueRow): string {
+  return `${row.row_kind}:${row.id}`;
+}
+
+/** R1 (independent review, fix-required, 2026-08-27 — round 2): true only when
+ *  the row identified by `actingKey` is STILL PRESENT in `rows` after a
+ *  re-read. The most common refusal on this queue — someone else already
+ *  settled the question, CLR10 "question is not open" — makes the acted-on row
+ *  VANISH from the very re-read `act()` triggers, so a per-row error
+ *  attachment keyed purely on "does actingKey match a row I can still see"
+ *  goes dark for exactly the case that most needs a visible refusal: the
+ *  human's own resolution was NOT recorded, and nothing on screen said so. */
+export function isActingRowAttached(rows: ReviewQueueRow[], actingKey: string | null): boolean {
+  if (actingKey === null) return false;
+  return rows.some((r) => reviewQueueRowKey(r) === actingKey);
+}
+
+/** The exact page-level-banner decision components/firm/needs-you-inbox.tsx
+ *  makes, extracted as a pure predicate so it has a test that does not need a
+ *  React render pass. `hasData` gates out the "nothing has ever loaded"
+ *  state — that case is DataState's full-page error, never a banner over
+ *  nothing. Otherwise the banner shows unless the error is already visibly
+ *  attached to a still-present row. */
+export function shouldShowQueueErrorBanner(
+  hasData: boolean,
+  error: unknown,
+  rows: ReviewQueueRow[],
+  actingKey: string | null,
+): boolean {
+  if (!hasData || !error) return false;
+  return actingKey === null || !isActingRowAttached(rows, actingKey);
+}
+
 export type ReviewQueueRow = {
   row_kind: ReviewQueueRowKind | string;
   section: ReviewQueueSection;
