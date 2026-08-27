@@ -109,6 +109,35 @@
 -- traffic is not evidence, a read of the disabled flag is (review law 2). ONE idle-slot argument
 -- covers both, which is the whole reason F4 is cheaper to fix here than to carry.
 --
+-- ==================== DEVIATIONS FROM THE DESIGN — DECLARED, NOT SLIPPED ====================
+--
+-- (1) clara._adj_period_lines TAKES (schedule, lines), NOT THE TEMPLATE ROW. Design §5.2 and
+--     Annex H.4 name `_adj_period_lines(p_template_row, p_period_start, p_period_end)`.
+--     *** THAT SIGNATURE IS UNCALLABLE FROM BOTH OF ITS LIVE CALL SITES. *** Each holds the
+--     template in a plpgsql variable declared `record` (0045:4446, :5629), and PostgreSQL answers
+--
+--         ERROR 42846: cannot cast type record to adjustment_templates
+--
+--     A bare `record` has NO COMPOSITE TYPE TO CAST FROM, so no column-shape argument could have
+--     rescued it. CONDUCTOR-RATIFIED 2026-08-27 as a forced deviation: the replacement is
+--     semantics-identical and strictly smaller-coupled — the resolver no longer depends on the
+--     table's row type at all, so a later ALTER on clara.adjustment_templates cannot reach it.
+--
+--     AND THE HONEST HALF, recorded because it is the more useful lesson: §A2.2's own comment
+--     originally argued the OPPOSITE — that passing the record was safe "because BOTH sites
+--     populate it with a bare single-table `select *`" — and §TAIL even CENSUSED that property.
+--     The conclusion was reachable, the reasoning was wrong, and censusing the wrong reason made
+--     it look verified. It was caught only by cell W35, the one cell that drives the real posting
+--     belt rather than calling the resolver with a genuine table row. A right-conclusion-wrong-
+--     reason finding about my own instrument, and the record says so.
+--
+--     The design docs still name the row-type form; truing them is a named obligation on the
+--     review round (fa4-pr2-design §5.2 / Annex H.4), so design and migration do not disagree.
+--
+-- (2) Pre-rung (b) SKIPS THE SELF-TWIN. Design §6.2a asked it unconditionally, which collided with
+--     D-25 / cell B-11's replay contract. RULED and recorded at design §13.2; the derivation and
+--     the discriminator (the delegate's own sub-key) are at the rung itself in §F.
+--
 -- ========================== CARRIED FORWARD BY NAME, not by silence ==========================
 -- Named so a later reader finds the reason instead of the absence (law 31, the 0138:100-111 shape):
 --   * clara.withdraw_close_proposal_item — the NAMED retraction act design §8 sketches. B11b admits

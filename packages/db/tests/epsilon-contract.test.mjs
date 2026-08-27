@@ -42,7 +42,19 @@ const CEREMONY_EXCLUDED = "evaluate_fs_pack_agent";
  *  owns evaluate_fs_pack_agent's. The key HAS to be (name, version): evaluate_metric v1 must still
  *  deploy here, and a name-only predicate would exclude both versions of the family. */
 const CEREMONY_EXCLUDED_V2 = ["evaluate_metric", 2];
-const EXCLUDED_PAIRS_SQL = "(('evaluate_fs_pack_agent',1),('evaluate_metric',2))";
+/** THE THIRD EXCLUSION, added by F-A4 PR-2a and keyed BY NAME AND VERSION for the same reason.
+ *  clara.prepayment_schedule_v1 is wrapper 12's evaluator. It ships DARK by design -- PR-2a
+ *  registers it with `deployed = false` because the RUNTIME half is PR-2b (design §13 item 1), and
+ *  the freeze binds regardless: the flag is about traffic, not about immutability. Without this
+ *  entry the covered-five ceremony flips it on sight and the floor reads SIX, which is what the
+ *  clean-order estate run reported the day PR-2a landed.
+ *
+ *  THIS IS THE CLOSED-WAVE FLOOR RULE working as written (.claude/rules/db-tests.md): a PR that
+ *  moves a catalog object a closed-wave floor counts trues that floor IN THE SAME PR. The floor is
+ *  not wrong and PR-2a is not wrong -- the count simply moved, and the PR that moved it says so. */
+const CEREMONY_EXCLUDED_V3 = ["prepayment_schedule", 1];
+const EXCLUDED_PAIRS_SQL =
+  "(('evaluate_fs_pack_agent',1),('evaluate_metric',2),('prepayment_schedule',1))";
 
 async function ensureEvaluatorDeployed() {
   const pending = (await rootQuery(
@@ -82,6 +94,13 @@ async function ensureEvaluatorDeployed() {
     CEREMONY_EXCLUDED_V2)).rows[0].ok;
   const v2Pending = notDeployed.some(
     (row) => row.evaluator_name === CEREMONY_EXCLUDED_V2[0] && row.version === CEREMONY_EXCLUDED_V2[1]);
+  // F-A4 PR-2a's closure, measured with the SAME three-state discipline: it does not exist at all
+  // on a pre-PR-2a chain, so its presence is read rather than assumed.
+  const v3Registered = (await rootQuery(
+    "select exists(select 1 from clara.evaluator_versions where evaluator_name=$1 and version=$2 and firm_id is null) as ok",
+    CEREMONY_EXCLUDED_V3)).rows[0].ok;
+  const v3Pending = notDeployed.some(
+    (row) => row.evaluator_name === CEREMONY_EXCLUDED_V3[0] && row.version === CEREMONY_EXCLUDED_V3[1]);
   if (fresh) {
     assert.equal(fsPackPending, true,
       "a fresh witness (the covered five were undeployed BEFORE this ceremony ran) requires F-A5 PR-1's row to still be undeployed too");
@@ -93,7 +112,8 @@ async function ensureEvaluatorDeployed() {
   // FIVE is what this ceremony COVERS. Each excluded row adds one to the deployed total only if
   // ITS OWN separate, one-way ceremony has already run in some prior invocation — which is read
   // back here, never assumed.
-  const extra = (fsPackPending ? 0 : 1) + (v2Registered && !v2Pending ? 1 : 0);
+  const extra = (fsPackPending ? 0 : 1) + (v2Registered && !v2Pending ? 1 : 0)
+    + (v3Registered && !v3Pending ? 1 : 0);
   assert.equal(verified.verified_deployed, 5 + extra,
     `the one-way evaluator ceremony committed every registered closure it covers (plus ${extra} row(s) some prior run's own ceremony had already flipped)`);
   // AND THE EXCLUSION IS EXACTLY THE NAMED ROWS THAT ARE STILL PENDING — read back, never assumed.
@@ -103,7 +123,10 @@ async function ensureEvaluatorDeployed() {
     ...(fsPackPending ? [{ evaluator_name: CEREMONY_EXCLUDED, version: 1 }] : []),
     ...(v2Registered && v2Pending
       ? [{ evaluator_name: CEREMONY_EXCLUDED_V2[0], version: CEREMONY_EXCLUDED_V2[1] }] : []),
-  ];
+    ...(v3Registered && v3Pending
+      ? [{ evaluator_name: CEREMONY_EXCLUDED_V3[0], version: CEREMONY_EXCLUDED_V3[1] }] : []),
+  ].sort((x, y) => (x.evaluator_name < y.evaluator_name ? -1
+    : x.evaluator_name > y.evaluator_name ? 1 : x.version - y.version));
   assert.deepEqual(notDeployed, expectedPending,
     "the only closures this ceremony leaves undeployed are the ones that own their own flip");
   return `deployed ${pending}`;
