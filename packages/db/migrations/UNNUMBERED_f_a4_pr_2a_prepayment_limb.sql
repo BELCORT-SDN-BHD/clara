@@ -1886,7 +1886,7 @@ $core$;
 revoke all on function clara._propose_adjustment_template_core(jsonb, uuid, text, text, date, date, boolean, jsonb, text, text, uuid, jsonb, text) from public;
 
 comment on function clara._propose_adjustment_template_core(jsonb, uuid, text, text, date, date, boolean, jsonb, text, text, uuid, jsonb, text) is
-  'F-A4 PR-2a §D: the extracted body of clara.propose_adjustment_template, harvested from the live catalog and ctx-substituted (two fields). UNGRANTED -- its callers are the door above it and clara._agent_prepayment_schedule_core. Carries §5.2a''s congruence validation, which is what keeps six other live t.lines readers correct under a schedule and holds the D1 inventory at four bodies instead of six.';
+  'F-A4 PR-2a §D: the extracted body of clara.propose_adjustment_template, harvested from the live catalog and ctx-substituted (two fields). UNGRANTED -- its callers are the door above it and clara._agent_prepayment_schedule_core. Carries §5.2a''s congruence validation, which is what keeps six other live t.lines readers correct under a schedule and holds the D1 inventory at four bodies instead of six. It takes ONE argument the human door does not: p_request_digest, the agent lane''s replay identity (W45). That asymmetry is deliberate -- the door stays at eleven arguments, so a human caller who can already choose p_op_key cannot also stamp the digest and plant a twin the agent would then replay.';
 
 -- THE DOOR, now a thin delegate.
 --
