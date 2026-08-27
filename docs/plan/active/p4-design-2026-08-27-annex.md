@@ -262,8 +262,18 @@ them into `_add_member_core(p_firm uuid, p_actor uuid, p_user uuid, p_role text)
 | `role_rank(p_role) is null` → `CLR10` bad role | `p_firm is distinct from c.firm` → `CLR11` (`add_member` only — `accept_invite` takes the firm from the invite row) |
 | user exists in `clara.users` → else `CLR10` | `_reserve_op` / `_finish_op`, **under the entrance's own verb string** |
 | **`is_agent` → `CLR10` "the agent identity cannot be a firm member" (HIGH-11)** | the op_key non-blank check |
-| already-active-membership → `CLR10` (the global unique index) | the audit action string and the event |
+| already-active-membership → `CLR10` (the global unique index) | the audit action string |
 | the INSERT, and `_append_event(..., 'member.added', ...)` | |
+
+**Which side the receipt lives on, stated so the table cannot be read two ways.** An earlier
+draft of this table listed the event in both columns, which is the same defect F3 fixed one
+level up: an ambiguous replacement spec lets a builder drop a wall and still believe they
+followed the design. The rule is **the audit string names the DOOR, the domain event names the
+FACT**. So `_audit` sits at the ENTRANCE — its action string is `add_member` or
+`accept_invite`, whichever door the human actually walked — while `_append_event(...,
+'member.added', ...)` sits in the CORE, because the fact recorded is identical either way: a
+person became a member of a firm. A consumer of the event spine must not have to know which
+door produced a membership, and an auditor reading `audit_log` must never lose which one did.
 
 **Why the agent-identity refusal is the one that matters most here.** `accept_invite` is
 reached with an emailed token by someone who is not yet a member of anything — the closest

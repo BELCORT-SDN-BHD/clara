@@ -93,13 +93,22 @@ background, surface-subtle, secondary, accent):
 { id: "focus-ring-composited-on-identity-canvas",
   fg: (h, composite) => composite("ring", 0.70, h("identity-canvas")),
   bg: (h) => h("identity-canvas"), threshold: 3,
-  source: "the shadcn focus idiom's translucent halo, rendered by all nine components that carry it — components/ui/button.tsx, input.tsx, textarea.tsx, select.tsx, badge.tsx (badge spells it ring-[3px], the others ring-3), components/common/native-select.tsx, components/common/section-tabs.tsx, components/journals/drafts-queue-panel.tsx, components/clara/ClaraThreadView.tsx — over the (entry) route group's cream ground" },
+  source: "the shadcn focus idiom's translucent halo, rendered by all TEN components that carry it — components/ui/button.tsx, input.tsx, textarea.tsx, select.tsx, badge.tsx, input-group.tsx, components/common/native-select.tsx, components/common/section-tabs.tsx, components/journals/drafts-queue-panel.tsx, components/clara/ClaraThreadView.tsx. Three spellings: focus-visible:ring-3 (most), ring-[3px] (badge), and has-[[data-slot=input-group-control]:focus-visible]:ring-3 on the WRAPPER (input-group, whose inner control carries ring-0 by delegation). Measured over the (entry) route group's cream ground" },
 ```
 
-That `source` string is written out in full deliberately. A single-pattern grep for
-`focus-visible:ring-3` finds only eight of the nine, because `badge.tsx` spells it
-`ring-[3px]`; a source string derived from that grep would under-describe the population the
-row asserts about, which is the "spelling is not identity" failure in miniature.
+**That `source` string is written out in full deliberately, and the population is TEN — this
+census took three attempts to get right.** `focus-visible:ring-3` finds eight: `badge.tsx`
+spells it `ring-[3px]`. Adding that spelling finds nine: `input-group.tsx` puts the idiom on
+the **wrapper** via `has-[[data-slot=input-group-control]:focus-visible]:ring-3` +
+`…:ring-ring/50`, so the literal `focus-visible:` prefix never appears. And a filtered grep
+that excludes `ring-0` drops it a second time, because that same line legitimately carries
+`in-data-[slot=combobox-content]:focus-within:ring-0` — the exclusion meant to remove
+non-carriers removed a real one.
+
+The robust query is the **colour token**, not the width or the variant:
+`grep -rl "ring-ring/50" components/` returns exactly ten. That is "spelling is not identity"
+three times over in a single census, and it is why the row's `source` names every file rather
+than describing them.
 
 **The alpha in those rows is the decision, not a detail — and the rows come AFTER the
 ruling.** At `0.50` all six fail; at `0.65` five pass and **accent fails at 2.970**; at `0.70`
@@ -121,7 +130,7 @@ after the component exists, not from the design.
 **And a defect this pass found, independent of P4.** The two existing focus rows,
 `focus-ring-on-background` and `focus-ring-on-shell`, both use `fg: (h) => h("focus")` — the
 **solid** token — and their `source` strings cite only the base `:focus-visible { outline: …
-solid var(--focus) }` rule. Nine components render the translucent idiom instead and no pair
+solid var(--focus) }` rule. Ten components render the translucent idiom instead and no pair
 measures it. The gate is green on focus because it is measuring the treatment that is not
 there. That blind spot predates P4 and should be recorded as a known issue whether or not P4
 proceeds.
@@ -207,7 +216,7 @@ was open, which is what makes the next reader re-litigate it.
 4. **Executing R3 literally extends the failure rather than leaving it flat.** Today anything
    without the shadcn idiom — a plain `<a>`, a list row, a custom control — inherits the base
    `:focus-visible` outline at 6.20 and is compliant. R3 unifies on the ring, which strips that
-   outline. So the population goes from the nine components carrying the idiom now to **every
+   outline. So the population goes from the ten components carrying the idiom now to **every
    focusable element in the app**. This is why "unify on the ring" cannot ship before the alpha
-   question is ruled: the unification is what turns a nine-component defect into an app-wide
+   question is ruled: the unification is what turns a ten-component defect into an app-wide
    one.
