@@ -170,3 +170,34 @@ the single red is a Windows-host `spawnSync grep ENOENT` artifact, not a PR defe
 4. Then the fix diff goes back to the SAME reviewers for the targeted verification rung
    (the fix round is judgement logic — review law 1): the native lane re-verifies FIX-1/2
    with fresh positive controls; Codex re-reads the receipt path if available.
+
+## Post-re-verification follow-ups (2026-08-27) — carried by name, none merge-blocking
+
+The re-verification rung returned **CLEAR** (every finding FIXED, re-derived on the
+reviewer's own instance-unique rig with its own controls). Its synthesis-compression sweep
+left seven named residuals, carried here so none goes silent:
+
+1. **PRIORITY — the bookkeeper floor is one table short.** A firm *viewer* reads
+   `model_name`/`model_version`/`rationale`/`narrative` directly off `close_proposals`
+   (measured), and `close_prep_holds` likewise keeps a firm-only read policy — the same
+   data class FIX-6 walled off on `agent_act_receipts`. Mirror the rank conjunct into both
+   tables' read policies + a cell. First candidate for the next debt batch.
+2. LOW-10(b) unaddressed: T.1b pins the partial unique indexes by
+   relname+indisunique+indpred-not-null only — no indrelid, key columns or predicate
+   content, so a same-named index elsewhere would satisfy it.
+3. LOW-10(c) unaddressed: T.1 counts policies `= 2` without reading
+   polqual/polcmd/polroles — FIX-6's own rank conjunct is not census-pinned.
+4. `clara._tf_close_proposal_drafted_unique()` is missing from BOTH closed-set censuses
+   (the migration's 26-member `k_ungranted` list and rig-meta's
+   `F_A4_PR1C_UNGRANTED_FNS`) — ungranted today, but a future grant would not be caught.
+5. FIX-7's comment overstates the proof: `close_attestations` carries no from-proposal
+   column, so the door proves a live agent-authored attestation on the RUN for that key
+   pair, not one naming THIS proposal — a superseded predecessor's attestation can cover a
+   successor's item. Strongest form the schema permits; recut the comment or add the
+   column in a later train.
+6. Migration :1331's `uq_aar` prose says six columns; the live constraint is seven
+   (`verdict`, `rung_digest` included). Comment truing.
+7. Codex MED-8's supersede-churn clause (a fresh task superseding a live proposal by
+   changing the measured check-key subset without a real state change) is a DESIGN
+   question — carried to the F-A4 PR-2 table, alongside wrapper 13's parked authority
+   question.
