@@ -201,3 +201,7 @@ test("shouldShowGapErrorBanner: the acting row is still present -> false (the ro
 test("shouldShowGapErrorBanner: the acting row VANISHED -> true (the same class R1 fixed on the review queue)", () => {
   assert.equal(shouldShowGapErrorBanner(true, new Error("CLR10: not open"), [{ id: "q2" }], "q1"), true);
 });
+
+test("shouldShowGapErrorBanner: data has loaded but there is no error at all -> false (the !error short-circuit)", () => {
+  assert.equal(shouldShowGapErrorBanner(true, null, [{ id: "q1" }], "q1"), false);
+});

@@ -38,9 +38,10 @@ const PROMOTION: IdentifierPromotionRow = {
 
 /** A stateful dispatcher: each list starts populated and flips to empty the
  *  moment its act door reports success — the SAME shape a real re-read would
- *  see once the row's status leaves 'open'/'proposed'. `refuseDismiss` lets
- *  one test prove the refusal path without touching the others. */
-function makeFetch(opts: { refuseDismiss?: boolean } = {}) {
+ *  see once the row's status leaves 'open'/'proposed'. `refuseDismiss`/
+ *  `refuseDecline` let one test prove that door's refusal path without
+ *  touching the others. */
+function makeFetch(opts: { refuseDismiss?: boolean; refuseDecline?: boolean } = {}) {
   let questionOpen = true;
   let promotionOpen = true;
   const bodies: Record<string, unknown> = {};
@@ -69,6 +70,7 @@ function makeFetch(opts: { refuseDismiss?: boolean } = {}) {
     }
     if (u.includes("/rpc/decline_identifier_promotion")) {
       bodies.decline = JSON.parse(String(init?.body));
+      if (opts.refuseDecline) return jsonResponse({ code: "CLR10", message: "identifier promotion is not open" }, 400);
       promotionOpen = false;
       return jsonResponse({ promotion_id: "p1", status: "declined" });
     }
@@ -180,6 +182,31 @@ test("NeedsYouGaps: confirm is a single click (no text step), then the promotion
 
       assert.equal((bodies.confirm as { p_proposal: string }).p_proposal, "p1");
       assert.doesNotMatch(h.text(), /c12345678090/);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("NeedsYouGaps: a governed decline refusal renders VERBATIM on the row, which stays present", async () => {
+  const { impl, bodies } = makeFetch({ refuseDecline: true });
+  await withMockedEnv(impl, async () => {
+    const h = await render();
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      const declineBtn = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Decline");
+      await h.fireEvent(declineBtn!, "click");
+      const textInput = h.find((n) => n.tagName === "INPUT");
+      await h.act(() => { setFieldValue(textInput!, "wrong account"); });
+      const submitBtn = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Submit");
+      await h.fireEvent(submitBtn!, "click");
+      for (let i = 0; i < 4; i++) await h.settle();
+
+      assert.equal((bodies.decline as { p_reason: string }).p_reason, "wrong account");
+      assert.match(h.text(), /CLR10/);
+      assert.match(h.text(), /identifier promotion is not open/);
+      // The row is STILL present — a refusal must never silently disappear the item.
+      assert.match(h.text(), /c12345678090/);
     } finally {
       await h.unmount();
     }

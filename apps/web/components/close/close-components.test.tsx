@@ -31,6 +31,7 @@ test("CloseProposalPanel honestly states the carrier/doors are LIVE and names bo
   assert.match(html, /close_proposals/);
   assert.match(html, /wake_propose_close/);
   assert.match(html, /live/i);
+  assert.match(html, /not built/i);
 });
 
 function check(overrides: Partial<ClosePlanCheck>): ClosePlanCheck {
