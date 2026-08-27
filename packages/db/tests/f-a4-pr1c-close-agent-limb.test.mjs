@@ -15,7 +15,7 @@ import {
   rootQuery, humanQuery, roleQuery, endPool, printLaneNotes, printSkipCount, noteLane, markSkip,
   opk, approveEntry, filedDocument, draftEntryV3, freshResolution,
 } from "./wave-a-fixtures.mjs";
-import { ROLES, CLR } from "./rig-helpers.mjs";
+import { ROLES, CLR, asRole } from "./rig-helpers.mjs";
 import { beginClose, attestClose, EXPN, BANK1 } from "./x56-fixtures.mjs";
 import {
   RATIONALE, MODEL, caught, derivedOpKey, mintClosePrepSession, mintUnboundClosePrep,
@@ -24,6 +24,15 @@ import {
 } from "./f-a4-pr1c-fixtures.mjs";
 
 const gate = (t) => limbGate(t, markSkip);
+
+/** The B13 fixture shortcut, in one place with its own name so the cell that calls it reads as
+ *  what it is. See fa4c.B1b's header for the adjudication and its limits. */
+async function stampBeltFlag(entry) {
+  const r = await asRole(ROLES.fnOwner, (c) => c.query(
+    `update clara.journal_entries set flags = flags || '{"depreciation_charges": true}'::jsonb
+       where id = $1 returning flags ? 'depreciation_charges' as ok`, [entry]));
+  assert.equal(r.rows[0]?.ok, true, "the belt flag is on the draft (the prestate this cell needs)");
+}
 
 before(async () => { await ensureLimb(noteLane); });
 after(async () => {
@@ -217,6 +226,16 @@ test("fa4c.B1b rung B13 (D-22's recut): an outstanding belt draft dated AT OR BE
   // draft ITSELF, with the oracle's own predicate (status='draft' and flags ? 'depreciation_
   // charges') PLUS the date bound the oracle lacks. Both polarities, because a rung that refuses
   // everything is not a rung.
+  //
+  // FIXTURE SHORTCUT, DECLARED (the forceControlMismatch precedent, x56-fixtures.mjs): the ONLY
+  // writer of the `depreciation_charges` flag is clara._fa_run_period_core, and standing up a
+  // real FA register (a signed authority + an asset + a swept period) to reach ONE prestate would
+  // make this cell an FA test wearing a close test's name. MEASURED, not assumed:
+  // clara.draft_entry filters p_flags to its own known set, so the flag arrives `{}` -- caught by
+  // this cell's first red. The flag is therefore stamped directly, as clara_fn_owner, on a draft
+  // the governed door created. This reaches a PRESTATE; it claims nothing about how the flag
+  // would arise in production. The stranded-PRIOR-YEAR half of D-22 (arm 1, design cell C-20 (i))
+  // still needs the real register and is NOT covered here.
   const late = await scene("b1b_late");
   const lateDraft = await draftEntryV3(late.bob, {
     client: late.client, resolution: freshResolution(late.bob, late.client, { subjectKind: "manual", subjectId: null }),
@@ -229,6 +248,7 @@ test("fa4c.B1b rung B13 (D-22's recut): an outstanding belt draft dated AT OR BE
     opKey: opk("fa4c-b1b-late"),
   });
   assert.ok(lateDraft.entry_id, "the out-of-period depreciation draft stands");
+  await stampBeltFlag(lateDraft.entry_id);
   const proceeds = await VERBS.begin(late.s, { fy: late.fy });
   assert.equal(proceeds.status, "acted",
     `a draft dated AFTER ends_on does not strand anything, so the freeze proceeds: ${JSON.stringify(tokens(proceeds))}`);
@@ -245,6 +265,7 @@ test("fa4c.B1b rung B13 (D-22's recut): an outstanding belt draft dated AT OR BE
     opKey: opk("fa4c-b1b-in"),
   });
   assert.ok(inDraft.entry_id, "the in-period depreciation draft stands");
+  await stampBeltFlag(inDraft.entry_id);
   const refused = await VERBS.begin(inside.s, { fy: inside.fy });
   assert.equal(refused.status, "refused");
   assert.ok(tokens(refused).includes("belt_period_unrun"),
