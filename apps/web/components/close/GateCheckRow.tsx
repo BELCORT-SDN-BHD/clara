@@ -72,7 +72,7 @@ export function GateCheckRow({
 }) {
   const t = useTranslations("ClientClose.gates");
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+    <div className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground">{t("drawer")} {check.drawer}</span>
         <span className="font-medium text-card-foreground">{check.title}</span>

@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState, StateBanner } from "@/components/common/state";
 import { verifyClose, isDoorRefusal } from "@/lib/close/api";
 import type { ClosePlanReceipt } from "@/lib/close/types";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -24,7 +25,7 @@ export function CloseReceiptPanel({ receipt, session }: { receipt: ClosePlanRece
   const [verifyError, setVerifyError] = useState<{ code: string | null; reason: string | null; message: string } | null>(null);
 
   if (receipt.state === "absent") {
-    return <p className="text-sm text-muted-foreground">{t("absent")}</p>;
+    return <EmptyState>{t("absent")}</EmptyState>;
   }
 
   const runVerify = async () => {
@@ -45,7 +46,7 @@ export function CloseReceiptPanel({ receipt, session }: { receipt: ClosePlanRece
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+    <div className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={receipt.status === "active" ? "default" : "outline"}>{receipt.kind} · {receipt.status}</Badge>
         {receipt.segregation_mode ? (
@@ -103,10 +104,16 @@ export function CloseReceiptPanel({ receipt, session }: { receipt: ClosePlanRece
         ) : null}
       </div>
       {verifyError ? (
-        <p className="text-xs text-destructive">
-          {verifyError.code ? `${verifyError.code}${verifyError.reason ? ` (${verifyError.reason})` : ""}: ` : ""}
+        <StateBanner
+          tone="error"
+          code={
+            verifyError.code
+              ? `${verifyError.code}${verifyError.reason ? ` · ${verifyError.reason}` : ""}`
+              : undefined
+          }
+        >
           {verifyError.message}
-        </p>
+        </StateBanner>
       ) : null}
     </div>
   );
