@@ -1,8 +1,9 @@
 # P4 design — annex
 
-*Companion to `p4-design-2026-08-27.md`. Evidence, measurements, proposed door shapes and
-the route inventory. Nothing here is a second design: where the two disagree, the main
-document governs.*
+*Companion to `p4-design-2026-08-27.md`: the evidence, the measurements and the proposed door
+shapes. The frontend execution half — routes, primitives, gate rows, battery, R2/R3 detail —
+split out to `p4-design-2026-08-27-annex-2.md` at this file's 500-line ceiling. Nothing in
+either is a second design: where an annex and the design disagree, the design governs.*
 
 ---
 
@@ -155,9 +156,29 @@ outward neighbour is the halo rather than the ground: **2.674** (cream) · 2.704
 2.837 (white) · 2.672 (surface-subtle). Still under 3:1, and on any focusable element with
 no border slot the halo is the only carrier at 2.31.
 
-**Minimum alpha for the halo alone to clear 3:1**, swept 50→100%: cream **64%** · shell 64% ·
-white 62% · surface-subtle 64%. Hence the main document's recommendation of a 65% alpha ring,
-which clears every ground with margin while keeping R3's translucent shape.
+**The alpha sweep, over all six grounds the design proposes to gate.** An earlier draft of
+this annex swept only four and recommended 65%; that was a real defect — the design adds six
+rows, so the sweep has to cover six, and `accent` (the ground a `bg-accent` chip is drawn on)
+is the binding one. Ratios of the composited halo against its own ground:
+
+| alpha | cream | shell | white | surface-subtle | secondary | accent |
+|---|---|---|---|---|---|---|
+| 50% | 2.317 | 2.310 | 2.363 | 2.313 | 2.280 | 2.245 |
+| 62% | 2.917 | 2.936 | **3.029** | 2.911 | 2.871 | 2.802 |
+| 64% | 3.059 | 3.051 | 3.146 | 3.046 | 3.005 | 2.906 |
+| **65%** | 3.099 | 3.119 | 3.215 | 3.086 | 3.044 | **2.970 FAIL** |
+| **66%** | 3.168 | 3.188 | 3.292 | 3.161 | 3.118 | **3.037** |
+| **70%** | 3.443 | 3.433 | 3.574 | 3.435 | 3.351 | **3.270** |
+
+Minimum integer alpha clearing 3:1 per ground: white 62% · cream, shell, surface-subtle and
+secondary 64% · **accent 66%**. So **65% fails outright** (accent 2.970) and 66% passes by
+0.037 — a margin narrower than the rounding in most colour pickers, and one an `--accent`
+retune would erase without anyone connecting the two. **70% is the recommendation**: it clears
+all six with a minimum margin of **0.270** on accent, and leaves headroom for a token change.
+
+The general lesson, recorded because it cost a review round: **the sweep must cover exactly
+the population the gate will measure.** A number handed to the owner that reds CI after he
+approves it is worse than no number.
 
 ### C.2 · Text on the R2 cream ground (bar: 4.5:1)
 
@@ -224,11 +245,44 @@ status in pending/accepted/revoked/expired, timestamps). Floor `_human_ctx(role_
 Stores only the token **hash**, never the token.
 
 **Ask 4 — invite accept.** `accept_invite(p_token text, p_display_name text, p_op_key text)`.
-One transaction: provision `clara.users` from `jwt_sub()` (same body as ask 1), insert the
-membership at the invite's role, mark the invite accepted. **Wall: the JWT's verified email
-must equal the invite's email** — `CLR04` otherwise. Also refuses `CLR09` when the invite is
-expired, consumed or revoked, and `CLR09` when the actor already holds an active membership.
-Grant: `clara_authenticated`.
+One transaction, entirely through the two cores below. **Wall: the JWT's verified email must
+equal the invite's email** — `CLR04` otherwise. Also refuses `CLR09` when the invite is
+expired, consumed or revoked. Grant: `clara_authenticated`.
+
+### D.1 · `_add_member_core` — the membership-minting core
+
+`add_member`'s live body (0005:677-705) is the only membership writer in the estate today, and
+it carries walls that a second, hand-written writer would silently lack. The extraction moves
+them into `_add_member_core(p_firm uuid, p_actor uuid, p_user uuid, p_role text)`, which
+**both** `add_member` and `accept_invite` enter. Split:
+
+| in the CORE (both entrances get them) | at the ENTRANCE (differs per door) |
+|---|---|
+| `perform 1 from clara.firms where id = p_firm for update` — per-firm serialization (v2 §F/F18) | the authority check: `_human_ctx(role_rank('admin'))` for `add_member`; the invite's own email wall for `accept_invite` |
+| `role_rank(p_role) is null` → `CLR10` bad role | `p_firm is distinct from c.firm` → `CLR11` (`add_member` only — `accept_invite` takes the firm from the invite row) |
+| user exists in `clara.users` → else `CLR10` | `_reserve_op` / `_finish_op`, **under the entrance's own verb string** |
+| **`is_agent` → `CLR10` "the agent identity cannot be a firm member" (HIGH-11)** | the op_key non-blank check |
+| already-active-membership → `CLR10` (the global unique index) | the audit action string and the event |
+| the INSERT, and `_append_event(..., 'member.added', ...)` | |
+
+**Why the agent-identity refusal is the one that matters most here.** `accept_invite` is
+reached with an emailed token by someone who is not yet a member of anything — the closest
+thing in the estate to an unauthenticated write path. A membership writer on that path without
+the HIGH-11 wall would be the single route by which the global agent identity could be made a
+firm member, which every wake-lane authority check downstream assumes is impossible. The core
+carries it; no entrance may skip it.
+
+**Why `_reserve_op` stays at the entrance.** It is keyed by verb name, and the audit row must
+name the act the human actually performed. `accept_invite` reserving under `'add_member'`
+would make the receipt lie about which door was walked.
+
+### D.2 · `_claim_identity_core` — the identity-minting core
+
+`_claim_identity_core(p_actor uuid, p_display_name text, p_email text)` inserts the
+`clara.users` row, idempotent on re-call, refusing `CLR10` if the id exists with a different
+email. Entrances: `claim_identity` (email from the caller's own JWT claim) and `accept_invite`
+(email from the JWT, **already proven equal to the invite's**). No entrance accepts an email
+as a plain argument from the client.
 
 **Ask 5 — roster read.** `clara.firm_members_visible`. Columns: membership_id, user_id,
 display_name, email, role, role_rank, status, created_at, removed_at. Predicate: firm scope
@@ -249,9 +303,59 @@ the holding state's trigger and the design's fail-closed default. Grant:
 `approve_firm_registration(p_request uuid, p_op_key text)` and
 `reject_firm_registration(p_request uuid, p_reason text, p_op_key text)`, plus an
 operator-scoped read over the requests table. Authority on all three copies
-`set_wake_source_enabled` (0133:284) exactly: `_human_ctx(role_rank('admin'))` **and**
-`exists(select 1 from clara.firms where id = c.firm and is_operator)`, else `CLR04`.
-Approval refuses `CLR09` if the applicant acquired a membership since requesting.
+`set_wake_source_enabled` (0133:288-291) exactly: **`_human_ctx(clara.role_rank('owner'))`**
+**and** `exists(select 1 from clara.firms where id = c.firm and is_operator)`, else `CLR04`.
+The floor is **owner**, not admin — 0133's own comment calls owner rank "necessary but not
+sufficient" before adding the operator predicate.
+
+### D.3 · `_create_firm_core` — the full pre/post-condition split
+
+`_create_firm_core(p_actor uuid, p_name text) returns jsonb`, extracted from the LIVE 0017
+body (§A.1 carries the byte-diff obligation). Which guard sits where is the whole point of the
+extraction, so it is enumerated rather than implied:
+
+**In the CORE** — every one of these must hold whichever entrance calls it:
+
+- `p_actor` is non-null and **exists in `clara.users`** → else `CLR04` "unknown actor".
+- **`p_actor` is not the agent identity** (`is_agent`) → else `CLR04`. *This one is load-bearing
+  for ask 8 specifically: with it in the core, `approve_firm_registration` structurally cannot
+  mint an agent-owned firm no matter what a request row contains.*
+- `p_actor` holds **no active membership anywhere** → else `CLR10` (the global unique index).
+- `p_name` is non-blank → else `CLR10`.
+- Inserts `clara.firms`, then `clara.firm_memberships(firm_id, p_actor, 'owner')`.
+- Opens the `onboarding_plans` firm-scope plan **and revision 1** — the behaviour 0017 added
+  over 0005, and the reason the return shape is `{firm_id, plan_id}`, not `{firm_id}`.
+- Returns `{firm_id, plan_id}`.
+
+**At the `create_firm` ENTRANCE** (unchanged from today):
+
+- `p_actor := clara.jwt_sub()`, non-null → else `CLR04`.
+- `select … from clara.firm_admissions where token = p_admission_token **for update**`; the row
+  must exist and be unconsumed. **The replay-return stays here** — when `consumed_op_key`
+  matches, it returns `consumed_result` verbatim without re-entering the core. That idempotency
+  lives on the token row because a firm-scoped `op_receipt` cannot exist before the firm does
+  (0017:702-712, `ck_firm_admissions_consumed_receipt_0017`).
+- Stamps `consumed_at` / `consumed_op_key` / `consumed_result`.
+- `_audit` with action **`'create_firm'`**; `_append_event('firm.created')`.
+
+**At the `approve_firm_registration` ENTRANCE** (new):
+
+- The owner+operator authority pair above.
+- `_reserve_op(c.firm, 'approve_firm_registration', p_op_key, …)` on the **operator's** firm —
+  the only firm the caller has, and the one the audit row belongs to.
+- `select … from clara.firm_registration_requests where id = p_request **for update**`; status
+  must be `open` → else `CLR09`. The row lock is what makes two operators clicking approve
+  concurrently resolve to one firm rather than two.
+- Calls the core with `p_actor := request.applicant` — **not** `jwt_sub()`, which is the
+  operator.
+- Re-checks the applicant's membership through the core; `CLR09` if they acquired one since
+  requesting.
+- Sets the request to `approved`, recording `decided_by`, `decided_at`, and the new `firm_id`.
+- `_audit` with action **`'approve_firm_registration'` — never `'create_firm'`**. Two different
+  human acts with two different floors must never share a receipt string, or the audit log
+  stops distinguishing a self-serve creation from an operator's decision.
+- `_append_event('firm.created')` plus its own registration-decision event.
+- `_finish_op`.
 
 **Ask 9 — tier catalog.** `clara.firm_tiers` (code pk, display_name, ordinal) +
 `clara.firms.tier_code` nullable FK. **No amount column** — pricing lives outside the schema
@@ -267,101 +371,7 @@ D1 write-quiesce discipline and a pre-edit byte pull like any other.
 
 ---
 
-## E · Route and component inventory
+## E-H · moved
 
-Proposed paths, in a fenced block because none of them exist yet:
-
-```
-apps/web/app/(entry)/                    NEW route group — owns the R2 cream ground
-  layout.tsx                             the cream layout + the Ledger Fold mark (R1)
-  login/page.tsx                         MOVED from app/login (URL unchanged)
-  signup/page.tsx                        NEW
-  invite/[token]/page.tsx                MOVED from app/invite/[token] (URL unchanged)
-  pending/page.tsx                       NEW — the holding state (main doc §4 E)
-
-apps/web/app/(firm)/admin/
-  page.tsx                               EXISTS as an honest empty state; becomes the hub
-  members/page.tsx                       NEW — roster, roles, invites
-  registrations/page.tsx                 NEW — operator only
-  tiers/page.tsx                         NEW — flag-hidden
-
-apps/web/app/api/invite/route.ts         NEW — the server-only mail courier (§4 C)
-
-apps/web/components/entry/               signup form, pending states, brand lockup
-apps/web/components/admin/               roster table, role control, invite dialog,
-                                         registrations queue, tier panel, price placeholder
-```
-
-Route-group moves keep every URL byte-identical (a group adds no segment), so `apps/web/proxy.ts`'s
-`PUBLIC_PATH_PREFIXES` needs only `/signup` appended — `"/login"` and `"/invite"` keep
-matching. `apps/web/tests/proxy-matcher.test.ts`'s asserted set extends with it.
-
-**Primitives to vendor (R4, build-on-demand).** Present today in `apps/web/components/ui/`:
-badge, button, card, command, dialog, input-group, input, label, select, separator, table,
-textarea. P4 needs, and must vendor via the shadcn CLI with `dark:` classes stripped and both
-gates passing in the same PR: **Tabs** (admin hub sections — or reuse the hand-rolled
-`apps/web/components/common/section-tabs.tsx`, which already exists and may make Tabs unnecessary),
-**DropdownMenu** (the row-level role/remove menu), **Switch** (the tier flag, if the
-flag surfaces in-app), **Form** + **RadioGroup** (tier selection). Avatar is **not** needed —
-the roster shows names, and `users_visible` carries no avatar.
-
-**⌘K.** `apps/web/lib/command/routes.ts` gains the new admin routes. Note the file's existing
-drift: most entries are marked `status: "planned"` while their pages exist on disk (admin
-included). The file's own header says to re-derive the manifest from the live `apps/web/app/` tree
-once P3's pages landed rather than hand-patch it — P4 should do that re-derivation rather
-than add three more hand-maintained rows to a stale table.
-
-**i18n.** Four new namespaces (Signup, Pending, Members, Registrations) plus additions to
-Admin. Note that the hardcoded-string lint gate **does not exist yet** — `apps/web/i18n/request.ts`'s
-comment describes an intended future gate, and the root `eslint.config.mjs` has no i18n or
-literal-string rule. Every P4 string still routes through next-intl by house law; the gate
-that would enforce it is a separate, unbuilt item.
-
----
-
-## F · The gate rows to add
-
-`PAIR_SPECS` in `apps/web/scripts/check-token-contrast.mjs` is a closed-world array whose
-spec signature already passes a `composite(fgToken, alpha, overHex)` helper — the existing
-`destructive-on-destructive-10` row uses it. **No schema change is needed.** The idiom to
-follow, verbatim from the shipped file:
-
-```js
-{ id: "destructive-on-destructive-10", fg: (h) => h("destructive"),
-  bg: (h, composite) => composite("destructive", 0.10, h("background")), threshold: 4.5,
-  source: "..." },
-```
-
-So a composited focus-ring row takes this shape (shown for cream; repeat for shell,
-background, surface-subtle, secondary, accent):
-
-```js
-{ id: "focus-ring-composited-on-identity-canvas",
-  fg: (h, composite) => composite("ring", 0.50, h("identity-canvas")),
-  bg: (h) => h("identity-canvas"), threshold: 3,
-  source: "the shadcn idiom's ring-ring/50 halo (components/ui/{button,input,textarea,select,badge}.tsx) over the (entry) route group's cream ground" },
-```
-
-**The alpha in those rows is the decision, not a detail.** At `0.50` all six fail (§C.1); at
-`0.65` all six pass. Whichever the owner rules on question 3 is the number that goes in, and
-the rows should be added **after** that ruling — adding them at 0.50 would put CI red on a
-question that is the owner's to answer, and adding them at 0.65 before the components change
-would assert a composition that is not what ships.
-
-Rows to add regardless of question 3: the ten cream text pairs from §C.2 at threshold 4.5,
-and — if question 4 is taken — `input-on-background`, `input-on-card`, `input-on-shell` and
-`input-on-identity-canvas` at threshold 3, which go in **with** the `--input` token change,
-never before it.
-
-**A note for whoever writes these rows.** Every existing spec's `source` string names the
-real files that render the pair, and the gate is only as honest as those strings — a row
-whose source is aspirational makes the gate assert a composition nothing renders. Write the
-source after the component exists, not from the design.
-
-**And a defect this pass found, independent of P4.** The two existing focus rows,
-`focus-ring-on-background` and `focus-ring-on-shell`, both use `fg: (h) => h("focus")` — the
-**solid** token — and their `source` strings cite only the base `:focus-visible { outline: …
-solid var(--focus) }` rule. Nine components render the translucent idiom instead and no pair
-measures it. The gate is green on focus because it is measuring the treatment that is not
-there. That blind spot predates P4 and should be recorded as a known issue whether or not P4
-proceeds.
+Route and component inventory (§E), the gate rows (§F), the battery (§G) and the R2/R3
+execution detail (§H) live in `p4-design-2026-08-27-annex-2.md`.
