@@ -474,9 +474,12 @@ which claims that chain first (gate record §7). (iv) F-A3 is an **acceptance** 
    extractions · the two new evaluators · the F14 siblings · `_adjustment_run_due_core` if OQ-9
    rules (a) · the thirteen wrappers, allowlist rows, roster/census surfaces and the tail census.
    Grants ride their consumer's PR (Annex I.2).
-5. **PR-2 (runtime)** — `close_prep_due` as a seventh leader belt · `closePrep.v1` as a NEW export
+5. **PR-2b (runtime)** — `close_prep_due` as a seventh leader belt · `closePrep.v1` as a NEW export
    with a registry entry (never an edit, law 9; bundle-grep after build) · the task-bound mint in
-   `pools.mjs`. **PR-3 (dashboard)** — the six controls of §3.11, C6 regenerated in the same PR.
+   `pools.mjs`. **RENAMED 2026-08-27 (conductor) from "PR-2": a DB-side train now holds `PR-2a` —
+   wrapper 13's unpark + the close-limb debt batch, design `fa4-pr2-design-2026-08-27.md` — and it
+   sequences FIRST, shipping the verbs this one drives. A bare "F-A4 PR-2" resolves to neither.**
+   **PR-3 (dashboard)** — the six controls of §3.11, C6 regenerated in the same PR.
    **PR-4 (acceptance, zero code)** — the synthetic round, the measured numbers, `PROGRESS.md`
    (including Track B's stand-down on task #17, D-23), the recorded BEE FY2025 deferral.
 

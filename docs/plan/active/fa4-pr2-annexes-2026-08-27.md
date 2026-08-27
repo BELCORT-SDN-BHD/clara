@@ -1,4 +1,4 @@
-# F-A4 PR-2 — annexes (battery · debt-batch mechanics · the named follow-up)
+# F-A4 PR-2a — annexes (battery · debt-batch mechanics · the named follow-up)
 
 *Companion to `docs/plan/active/fa4-pr2-design-2026-08-27.md`, which is the design of record.
 Split from it because the repo's own 500-line gate is the estate's design-doc convention (the
@@ -44,11 +44,18 @@ before the fix has proven that the instrument once worked, not that it still doe
 | W27 | residual 4 | `_tf_close_proposal_drafted_unique` is in both closed sets; the PR-1c cohort still resolves whole | — |
 | W28 | residual 5 is honest | the demonstration cell: a superseded predecessor's attestation satisfies a successor's settle — the gap, made visible ▣ | — |
 | W29 | **the park flips** | both parked objects resolve at exact signatures; allowlist = 13 `close_prep` rows, each naming a live function; no existing row moved | — |
-| W30 | constraint 15 | zero PR-2 objects in `workflow` / `graphile_worker` / `spike`; what those schemas hold is REPORTED, not asserted | — |
+| W30 | constraint 15 | zero PR-2a objects in `workflow` / `graphile_worker` / `spike`; what those schemas hold is REPORTED, not asserted | — |
+| W31 | **the FY refusal is SELF-HEALABLE, not a dead end** (conductor's note, design §13 item 4) | the two-phase cell: a term running past the entry's FY with no opened successor → `prepayment_term_underivable`; **the same wake session then opens the successor year through `wake_open_fiscal_year`**; the same draft, re-run, **acts** ▣ | hold the year unopened and re-run → still refuses (the refusal is the year's absence, not a flake) |
 
 **Fixtures the battery needs that do not exist today:** a client with an approved prepaid
-journal entry bound to a document (W6-W9), and a second such entry on the same client in one
-wake task (W13-W14). Both are built through governed doors, never as hand-written rows.
+journal entry bound to a document (W6-W9), a second such entry on the same client in one wake
+task (W13-W14), and a client whose service period runs past its open FY with the successor year
+**not yet opened** (W31). All built through governed doors, never as hand-written rows.
+
+**W31 is an integration cell, not a unit cell.** It is the one place this battery proves that
+two F-A4 verbs compose inside a single clocked pass — the refusal wrapper 13 writes is one the
+lane can itself clear under R6/HIGH-1, and the estate has been bitten before by a rung whose
+"blocked" state nothing ever drove to its resolution (0138's own B13 arm-1 carry-forward).
 
 ---
 
@@ -94,6 +101,20 @@ Folding the conjunct into the policy therefore costs no live caller and leaves t
 readable for the bookkeeper+ surfaces that are coming — FIX-6's own reasoning (0138:415-423),
 applied to the two tables it did not reach.
 
+### B.0c · The extraction's two supporting censuses (design §2)
+
+**The `c` fields.** `clara.propose_adjustment_template`'s body reads exactly `c.firm`
+(0045:3864, :3871, :4096, :4136, :4248) and `c.actor` (0045:4098, :4136) off its `_human_ctx`
+record — nothing else. The extraction is therefore the 0124 substitution shape verbatim
+(`c.firm` → `c_firm`, `c.actor` → `c_actor`, both read out of a `p_ctx jsonb`), with no third
+field to reason about. `clara.sign_adjustment_template` reads the same two (0045:4273, :4277,
+:4341, :4343, :4347) — recorded only so the review lane can see that the sign core was ruled out
+on the R6 dead-member ground, not on a difficulty one.
+
+**The ACL.** Both writers hold `clara_authenticated` and nothing else, granted through 0045's
+bulk loop (0045:6705-6728, entries at :6712 and :6713) — no wake role, no runtime role, no
+PUBLIC. The extraction must leave that ACL byte-identical, which is cell W4.
+
 ### B.1 · Residual 2 — the index census (LOW-10b)
 
 0138's T.1b (`packages/db/migrations/0138_f_a4_pr_1c_close_agent_limb.sql`:2655-2668) pins
@@ -101,7 +122,7 @@ applied to the two tables it did not reach.
 null"*. A same-named index, on another table, over other columns, with any predicate at all,
 satisfies all three — the assertion reads a name and calls it an identity (law 3).
 
-PR-2's tail pins each index by **`indrelid` at the exact `regclass`**, the **key column names**
+PR-2a's tail pins each index by **`indrelid` at the exact `regclass`**, the **key column names**
 resolved through `pg_attribute`, and the **predicate text** from
 `pg_get_expr(indpred, indrelid)` compared against an expected string. Same treatment for the
 new `uq_document_service_period_live`.
@@ -109,7 +130,7 @@ new `uq_document_service_period_live`.
 ### B.2 · Residual 3 — the policy census (LOW-10c)
 
 0138's T.1 counts policies `= 2` per table and reads nothing about them, so FIX-6's own rank
-conjunct (0138:424-427) is not census-pinned and neither would design §7's mirrors be. PR-2's
+conjunct (0138:424-427) is not census-pinned and neither would design §7's mirrors be. PR-2a's
 tail reads, per policy on each of the four tables (`agent_act_receipts`, `close_proposals`,
 `close_prep_holds`, `document_service_periods`): `polcmd`, the resolved `polroles` names, and
 `pg_get_expr(polqual, polrelid)` — asserting the firm predicate **and** the rank conjunct by
@@ -127,10 +148,10 @@ trips a checksum-drift error (`.claude/rules/db-migrations.md`). So the fix spli
   that cohort, so the cohort stays wholly-present-or-wholly-absent — which is the condition
   `cohortFailures()` actually cares about (rig-meta:277-280: a WHOLLY absent cohort is
   tolerated, a PARTIAL one fails).
-- **migration half.** PR-2's own tail carries a closed ungranted set that **includes** it
-  alongside PR-2's new internals, with a header line saying why it is censused here rather
+- **migration half.** PR-2a's own tail carries a closed ungranted set that **includes** it
+  alongside PR-2a's new internals, with a header line saying why it is censused here rather
   than there.
-- **PR-2's new names get their OWN cohort** (`F_A4_PR2_COHORT`), never folded into
+- **PR-2a's new names get their OWN cohort** (`F_A4_PR2_COHORT`), never folded into
   `F_A4_PR1C_COHORT` — folding would red every 0138-only database, which rig-meta:277-280
   records as measured, not assumed.
 
@@ -142,7 +163,7 @@ trips a checksum-drift error (`.claude/rules/db-migrations.md`). So the fix spli
 
 The truing lands in the **catalog**, where a reader actually queries it:
 `comment on constraint uq_aar on clara.agent_act_receipts is '...'` carrying the true
-seven-column spelling and naming 0138:1331 as superseded prose. PR-2's own header records the
+seven-column spelling and naming 0138:1331 as superseded prose. PR-2a's own header records the
 correction. This is the 0052 principle — put the reasoning where the next
 `pg_get_functiondef` reader will find it, not only in a file that reader may never open.
 
@@ -152,7 +173,7 @@ correction. This is the 0052 principle — put the reasoning where the next
 `adopted` arm proves *a live agent-authored attestation on the run for that key pair*, not one
 naming **this** proposal — a superseded predecessor's attestation can cover a successor's item.
 
-**Recommendation: recut the comment in PR-2, carry the column to PR-3 by name.** The recut is a
+**Recommendation: recut the comment in PR-2a, carry the column to PR-3 by name.** The recut is a
 `comment on function` stating the true strength and the exact residual gap. The column is
 deferred because writing it means recutting `clara.attest_close_exception` — the estate's
 most-reviewed close writer — inside a window sized for one body, to close a **provenance blur
@@ -184,10 +205,10 @@ discipline, the 0138:59-62 shape). Design §3 carries the measurement behind it.
    `authoritative_extraction_id` (0017:729-748). Its consumer is design §4.2's ungranted core —
    which is why that core is built at birth rather than retrofitted.
 
-**Why this half is not in PR-2.** Three reasons, each sufficient: it is a **third** live-body
+**Why this half is not in PR-2a.** Three reasons, each sufficient: it is a **third** live-body
 recut in a window sized for one (D-24's severance law); it needs a runtime change that no DB PR
 can carry; and reading a service period off an invoice face is a real extraction problem, not a
-column. Splitting it keeps PR-2's window honest and lets the human door carry the whole load
+column. Splitting it keeps PR-2a's window honest and lets the human door carry the whole load
 until the machine can.
 
 ---
@@ -246,7 +267,7 @@ comparison but by a subject too coarse to tell two acts apart.
 `('adjustment_template', v_template_id)`. Both discriminate per entry, and the split across
 verdicts is the shipped idiom — the fix order records `begin_close` / `open_fy` /
 `mint_snapshot` as *"safe by differing subject"* (§Native, F1). `journal_entry` is already in
-the closed `subject_kind` set (0138:349-350); `adjustment_template` is the one value PR-2 adds.
+the closed `subject_kind` set (0138:349-350); `adjustment_template` is the one value PR-2a adds.
 
 **The null-subject edge.** `subject_id` is `not null`, so a call with `p_source_entry = null`
 has no subject to name and no receipt it could honestly write. That case therefore raises
