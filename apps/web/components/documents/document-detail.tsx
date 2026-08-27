@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { useHydratedPart } from "@/lib/parts/hooks";
+import { useHydratedPart, type PartClr } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadDocumentDetail } from "@/lib/documents/loaders";
 import type { ClientRow } from "@/lib/documents/types";
@@ -18,13 +18,25 @@ import { DoorFeedback } from "./door-feedback";
  * The document-detail panel — ONE `useHydratedPart` over `loadDocumentDetail`,
  * re-derived on mount and after every door action here or in a child (hydrate-
  * never-trust; contract §3.2). Callers MUST `key` this by `documentId` (hooks.ts's
- * consumer contract) — see documents-workbench.tsx.
+ * consumer contract) — see documents-workbench.tsx. `onFiledChanged` (independent
+ * review 2026-08-27, N9) re-hydrates the PARENT's "Filed to this client" list after
+ * any act here that can change it — retiring a filing, or a wrong-client correction
+ * moving the document away.
  */
-export function DocumentDetail({ documentId, clientId, clients }: { documentId: string; clientId: string; clients: ClientRow[] }) {
+export function DocumentDetail({
+  documentId, clientId, clients, clientsErr, clientsClr, onFiledChanged,
+}: {
+  documentId: string;
+  clientId: string;
+  clients: ClientRow[];
+  clientsErr: string | null;
+  clientsClr: PartClr;
+  onFiledChanged: () => void;
+}) {
   const t = useTranslations("ClientDocuments");
   const { data, loading, busy, err, clr, act, reload } = useHydratedPart(
     sessionTokenAccessor,
-    () => loadDocumentDetail(documentId),
+    () => loadDocumentDetail(documentId, clientId, t),
   );
   const [correcting, setCorrecting] = useState(false);
 
@@ -39,13 +51,15 @@ export function DocumentDetail({ documentId, clientId, clients }: { documentId: 
     return err ? <DoorFeedback err={err} clr={clr} /> : <p className="text-sm text-muted-foreground">{t("documentNotReachable")}</p>;
   }
 
+  const actAndRefreshFiled = (fn: () => Promise<void>) => act(fn, onFiledChanged);
+
   return (
     <div className="flex flex-col gap-4">
       <DocumentMetadata document={data.document} tasks={data.processingTasks} />
 
       <section className="flex flex-col gap-1">
         <h3 className="text-xs font-medium text-muted-foreground uppercase">{t("filingsHeading")}</h3>
-        <DocumentFilingsHistory filings={data.filings} busy={busy} act={act} />
+        <DocumentFilingsHistory filings={data.filings} busy={busy} act={actAndRefreshFiled} />
       </section>
 
       <DocumentEvidence regions={data.regions} />
@@ -64,8 +78,10 @@ export function DocumentDetail({ documentId, clientId, clients }: { documentId: 
         document={data.document}
         fromClient={clientId}
         clients={clients}
+        clientsErr={clientsErr}
+        clientsClr={clientsClr}
         onClose={() => setCorrecting(false)}
-        onDone={() => { setCorrecting(false); void reload(); }}
+        onDone={() => { setCorrecting(false); void reload(); onFiledChanged(); }}
       />
     </div>
   );

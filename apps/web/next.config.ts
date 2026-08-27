@@ -4,19 +4,15 @@ import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  // The document-intake "begin" call MUST be same-origin relative (never
-  // runtimeBase-prefixed) — the runtime's PUT/finalize legs get CORS on the Fly
-  // origin, but begin does not (lib/documents/intake.ts's own header). Ported
-  // MECHANISM from apps/dashboard/next.config.mjs's `/api/intake/:path*` rewrite,
-  // narrowed to the one route this app's P3 documents workbench uses — apps/web
-  // is a full Next server on Cloudflare Workers (@opennextjs/cloudflare), not a
-  // static export, so `rewrites()` runs at request time same as `next dev` (the
-  // dashboard's own comment on why its Pages-Function static-export mode needs a
-  // different mechanism does not apply here).
-  async rewrites() {
-    const runtime = process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL || "http://localhost:3200";
-    return [{ source: "/api/intake/:path*", destination: `${runtime}/api/intake/:path*` }];
-  },
+  // DELIBERATELY no `rewrites()` for the runtime proxy (independent review
+  // 2026-08-27, F1/F2): a `rewrites()` destination is baked into
+  // `.next/routes-manifest.json` at BUILD time, so `process.env` is read once at
+  // `next build` and the literal value ships in the deployed bundle regardless of
+  // the runtime's actual deploy-time env — the review caught a shipped
+  // `localhost:3200`. `app/api/runtime/[...path]/route.ts` replaces it: a Route
+  // Handler reads `process.env.CLARA_RUNTIME_URL` at REQUEST time and allow-lists
+  // exactly the headers it forwards (never the framework rewrite's wholesale
+  // header/cookie copy — see that file's own header for the full finding).
 };
 
 const withNextIntl = createNextIntlPlugin("./i18n/request.ts");

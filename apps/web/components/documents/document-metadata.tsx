@@ -1,10 +1,10 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { documentBadges } from "@/lib/documents/copy";
+import { documentBadges, type DocumentBadge } from "@/lib/documents/copy";
 import { fetchDocumentBytes } from "@/lib/documents/bytes";
 import type { DocumentRow, ProcessingTaskRow } from "@/lib/documents/types";
 
@@ -20,6 +20,29 @@ const TASK_STATUS_KEY: Record<ProcessingTaskRow["status"], string> = {
   failed: "taskStatus.failed",
 };
 
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+/** Resolves one structured `DocumentBadge` (copy.ts) into its rendered label — the
+ *  ONE place this two-step translation happens (`extraction` interpolates its own
+ *  already-translated status word into the wrapping "extraction: {status}" key). */
+function badgeLabel(badge: DocumentBadge, t: Translate): string {
+  switch (badge.kind) {
+    case "extraction": return t("badgeExtraction", { status: t(badge.statusKey) });
+    case "pageCount": return t("badgePageCount", { count: badge.count });
+    case "documentKind": return badge.value; // a DB-owned enum string (e.g. "invoice"), not chrome prose
+    case "financialDate": return t("badgeFinancialDate", { date: badge.date });
+    case "retention": return badge.until
+      ? t("badgeRetentionUntil", { state: badge.state, until: badge.until })
+      : t("badgeRetention", { state: badge.state });
+    case "legalHold": return t("badgeLegalHold");
+    case "eInvoice": return t("badgeEInvoice");
+  }
+}
+
+function badgeKey(badge: DocumentBadge): string {
+  return badge.kind === "documentKind" ? `documentKind:${badge.value}` : badge.kind;
+}
+
 /** Metadata badges + the evidence viewer's entry point (fetchDocumentBytes,
  *  PIN-DELTA-4) + the extraction/processing task list. Every badge names a REAL
  *  DB-owned field (lib/documents/copy.ts); the byte fetch is honest about failure —
@@ -28,36 +51,61 @@ export function DocumentMetadata({ document: doc, tasks }: { document: DocumentR
   const t = useTranslations("ClientDocuments");
   const [openState, setOpenState] = useState<"idle" | "loading" | "error">("idle");
   const [openError, setOpenError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const openDocument = async () => {
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const openDocument = () => {
     setOpenState("loading");
     setOpenError(null);
-    try {
-      const bytes = await fetchDocumentBytes(doc.id);
-      window.open(bytes.blobUrl, "_blank", "noopener,noreferrer");
-      // The tab keeps its own reference to the blob; revoking immediately would
-      // race the browser's own load of it, so this leaks one object URL per open —
-      // acceptable for a human-paced click action, unlike a hot loop.
-      setOpenState("idle");
-    } catch (e) {
-      setOpenState("error");
-      setOpenError(e instanceof Error ? e.message : String(e));
-    }
+
+    // Open the tab SYNCHRONOUSLY, inside the click handler — every major browser
+    // popup-blocks a `window.open` called AFTER an `await` (independent review
+    // 2026-08-27, F5), and it does so by returning `null` WITHOUT throwing, so the
+    // old code reported "opened" regardless. `noreferrer` only (not `noopener` —
+    // that nulls the returned reference outright, and this tab's own `.location`
+    // is exactly what gets set once the fetch resolves).
+    const tab = window.open("about:blank", "_blank", "noreferrer");
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    void (async () => {
+      try {
+        const bytes = await fetchDocumentBytes(doc.id, { signal: controller.signal });
+        if (!tab || tab.closed) {
+          bytes.revoke();
+          setOpenState("error");
+          setOpenError(t("openDocumentPopupBlocked"));
+          return;
+        }
+        tab.location.href = bytes.blobUrl;
+        // The tab keeps its own reference to the blob; revoking immediately would
+        // race its own load of it, so this leaks one object URL per open —
+        // acceptable for a human-paced click action, unlike a hot loop.
+        setOpenState("idle");
+      } catch (e) {
+        tab?.close();
+        if (e instanceof Error && e.name === "AbortError") return; // unmounted mid-fetch — no state left to update
+        setOpenState("error");
+        setOpenError(e instanceof Error ? e.message : String(e));
+      }
+    })();
   };
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
         <h2 className="truncate text-base font-semibold text-foreground">{doc.original_filename ?? doc.id}</h2>
-        <Button size="sm" variant="outline" disabled={openState === "loading"} onClick={() => void openDocument()}>
+        <Button size="sm" variant="outline" disabled={openState === "loading"} onClick={openDocument}>
           {openState === "loading" ? t("openingDocument") : t("openDocument")}
         </Button>
       </div>
       {openError ? <p className="text-xs text-error">{t("openDocumentFailed", { message: openError })}</p> : null}
 
       <div className="flex flex-wrap gap-1.5">
-        {documentBadges(doc).map((label) => (
-          <Badge key={label} variant="outline">{label}</Badge>
+        {documentBadges(doc).map((badge) => (
+          <Badge key={badgeKey(badge)} variant="outline">{badgeLabel(badge, t)}</Badge>
         ))}
       </div>
       {doc.legal_hold && doc.legal_hold_reason ? (

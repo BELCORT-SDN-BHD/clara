@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { candidateRuleBandCopy } from "@/lib/documents/copy";
+import { candidateRuleBandKey } from "@/lib/documents/copy";
 import { confirmCandidate, dismissCandidate } from "@/lib/documents/doors";
 import type { OpenCandidateEntry } from "@/lib/documents/loaders";
 import { DoorFeedback } from "./door-feedback";
@@ -41,7 +41,7 @@ export function OpenCandidateList({
           >
             <div className="flex flex-col gap-0.5">
               <span className="font-medium text-card-foreground">{document.original_filename ?? document.id}</span>
-              <span className="text-xs text-muted-foreground">{candidateRuleBandCopy(candidate.rule_kind)}</span>
+              <span className="text-xs text-muted-foreground">{t(candidateRuleBandKey(candidate.rule_kind))}</span>
             </div>
             <div className="flex gap-2">
               <Button size="sm" disabled={busy} onClick={() => void act(() => confirmCandidate(candidate.id))}>

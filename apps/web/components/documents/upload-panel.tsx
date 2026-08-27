@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { queueRecoveryLabelKey, queueStateLabelKey } from "@/lib/documents/copy";
-import { useUploadQueue, type QueueItem, type QueueTooLargeNote } from "@/lib/documents/useUploadQueue";
+import { useUploadQueue, type QueueItem, type QueueRejection } from "@/lib/documents/useUploadQueue";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 
 /**
@@ -18,7 +18,7 @@ import { sessionTokenAccessor } from "@/lib/session-accessor";
  */
 export function UploadPanel({ clientId, onFiled }: { clientId: string; onFiled: () => void }) {
   const t = useTranslations("ClientDocuments");
-  const [note, setNote] = useState<QueueTooLargeNote | null>(null);
+  const [note, setNote] = useState<QueueRejection | null>(null);
   const queue = useUploadQueue(clientId, sessionTokenAccessor, onFiled, setNote);
 
   return (
@@ -48,7 +48,9 @@ export function UploadPanel({ clientId, onFiled }: { clientId: string; onFiled: 
 
       {note ? (
         <p className="text-xs text-warning">
-          {t("uploadTooLarge", { filename: note.filename, limitMb: Math.round(note.limitBytes / (1024 * 1024)) })}
+          {note.reason === "too_large"
+            ? t("uploadTooLarge", { filename: note.filename, limitMb: Math.round(note.limitBytes / (1024 * 1024)) })
+            : t("uploadDuplicate", { filename: note.filename })}
         </p>
       ) : null}
 

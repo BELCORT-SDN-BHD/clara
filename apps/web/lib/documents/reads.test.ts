@@ -112,13 +112,13 @@ test("listExtractionsForDocument: orders by version_n.desc", async () => {
   assert.match(seenUrl, /order=version_n\.desc/);
 });
 
-test("listEntriesForDocument: reads journal_entries directly, filtered by document_id", async () => {
+test("listEntriesForDocument: reads journal_entries directly, filtered by BOTH document_id AND client_id (independent review 2026-08-27, F4)", async () => {
   let seenUrl = "";
   await withMockedFetch(
     async (url) => { seenUrl = String(url); return okJson([]); },
-    async () => { await listEntriesForDocument("doc-1", { session: session() }); },
+    async () => { await listEntriesForDocument("doc-1", "client-1", { session: session() }); },
   );
-  assert.match(seenUrl, /\/rest\/v1\/journal_entries\?document_id=eq\.doc-1/);
+  assert.match(seenUrl, /\/rest\/v1\/journal_entries\?document_id=eq\.doc-1&client_id=eq\.client-1/, "a client-scoped surface must never list another client's entries unlabeled");
 });
 
 test("listFirmClients: orders by name.asc", async () => {

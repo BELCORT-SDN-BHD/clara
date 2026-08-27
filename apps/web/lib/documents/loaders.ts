@@ -13,7 +13,7 @@ import {
   listFirmClients, listOpenCandidatesForClient, listRegionsForExtractionIds,
 } from "./reads";
 import { listProcessingTasksForDocument } from "./intake";
-import { readErrorCopy } from "./copy";
+import { readErrorKey } from "./copy";
 import { isReadError } from "@/lib/read";
 import type {
   CandidateRow, ClientRow, DocumentRow, ExtractionRow, FilingRow, JournalEntryRow,
@@ -23,16 +23,24 @@ import type { SessionTokenAccessor } from "@/lib/session";
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
 
-/** Translates a `ReadError` into its distinct, honest `kind` copy
- *  (no_session/forbidden/not_found each their own sentence — copy.ts's
- *  `readErrorCopy`) before it reaches `useHydratedPart`'s generic `err` string.
- *  Anything else (an abort, a `RefusalError` — unreachable on a GET but kept
- *  passthrough for safety) is re-thrown UNCHANGED. */
-async function withHonestReadKinds<T>(fn: () => Promise<T>): Promise<T> {
+/** The translator every loader below threads through — resolved ONCE at the
+ *  component boundary (`useTranslations("ClientDocuments")`) and passed down as a
+ *  plain function reference. This module never imports next-intl itself: it is
+ *  plain async orchestration, not a component, and has no `t()` of its own to
+ *  call — see copy.ts's own header on why every copy.ts function returns a KEY
+ *  instead (independent review 2026-08-27, N12). */
+export type Translator = (key: string, params?: Record<string, string | number>) => string;
+
+/** Translates a `ReadError` into its distinct, honest `kind` sentence
+ *  (no_session/forbidden/not_found each their own — copy.ts's `readErrorKey`)
+ *  before it reaches `useHydratedPart`'s generic `err` string. Anything else (an
+ *  abort, a `RefusalError` — unreachable on a GET but kept passthrough for safety)
+ *  is re-thrown UNCHANGED. */
+async function withHonestReadKinds<T>(t: Translator, fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (e) {
-    if (isReadError(e)) throw new Error(readErrorCopy(e.kind));
+    if (isReadError(e)) throw new Error(t(readErrorKey(e.kind)));
     throw e;
   }
 }
@@ -41,8 +49,8 @@ export type FiledDocumentEntry = { filing: FilingRow; document: DocumentRow };
 
 /** This client's actively-filed documents, newest filing first (the workbench's
  *  main list). */
-export async function loadFiledDocuments(clientId: string, opts: Opts = {}): Promise<FiledDocumentEntry[]> {
-  return withHonestReadKinds(async () => {
+export async function loadFiledDocuments(clientId: string, t: Translator, opts: Opts = {}): Promise<FiledDocumentEntry[]> {
+  return withHonestReadKinds(t, async () => {
     const filings = await listActiveFilingsForClient(clientId, opts);
     const docs = await listDocumentsByIds(filings.map((f) => f.document_id), opts);
     const byId = new Map(docs.map((d) => [d.id, d]));
@@ -60,8 +68,8 @@ export type OpenCandidateEntry = { candidate: CandidateRow; document: DocumentRo
 /** Open (unconfirmed) attribution candidates for this client, resolved down to the
  *  underlying document via their attempt (attribution_candidates carries no
  *  document_id of its own — see reads.ts's own header). */
-export async function loadOpenCandidates(clientId: string, opts: Opts = {}): Promise<OpenCandidateEntry[]> {
-  return withHonestReadKinds(async () => {
+export async function loadOpenCandidates(clientId: string, t: Translator, opts: Opts = {}): Promise<OpenCandidateEntry[]> {
+  return withHonestReadKinds(t, async () => {
     const candidates = await listOpenCandidatesForClient(clientId, opts);
     const attempts = await listAttemptsByIds(candidates.map((c) => c.attempt_id), opts);
     const attemptById = new Map(attempts.map((a) => [a.id, a]));
@@ -88,21 +96,23 @@ export type DocumentDetailBundle = {
    *  superseded. A superseded/failed extraction's regions are historical noise for
    *  this view, not evidence a human should read as current. */
   regions: RegionRow[];
+  /** Entries citing this document AND filed to `clientId` (independent review
+   *  2026-08-27, F4 — see reads.ts's `listEntriesForDocument` own note). */
   entries: JournalEntryRow[];
   processingTasks: ProcessingTaskRow[];
 };
 
-/** The document-detail panel's whole read set, one bundle per selected document.
- *  Returns `null` when the document itself could not be read (deleted from view,
- *  wrong firm) — the caller renders that as "not reachable today"
- *  (reportsApi precedent), never a crash. */
-export async function loadDocumentDetail(documentId: string, opts: Opts = {}): Promise<DocumentDetailBundle | null> {
-  return withHonestReadKinds(async () => {
+/** The document-detail panel's whole read set, one bundle per selected document,
+ *  SCOPED to `clientId` for the entries leg (F4). Returns `null` when the document
+ *  itself could not be read (deleted from view, wrong firm) — the caller renders
+ *  that as "not reachable today" (reportsApi precedent), never a crash. */
+export async function loadDocumentDetail(documentId: string, clientId: string, t: Translator, opts: Opts = {}): Promise<DocumentDetailBundle | null> {
+  return withHonestReadKinds(t, async () => {
     const [docs, filings, extractions, entries, processingTasks] = await Promise.all([
       listDocumentsByIds([documentId], opts),
       listFilingsForDocument(documentId, opts),
       listExtractionsForDocument(documentId, opts),
-      listEntriesForDocument(documentId, opts),
+      listEntriesForDocument(documentId, clientId, opts),
       listProcessingTasksForDocument(documentId, opts),
     ]);
     const document = docs[0];
@@ -121,6 +131,6 @@ export async function loadDocumentDetail(documentId: string, opts: Opts = {}): P
  *  documents-workbench.tsx's own hydrated cell (kept here rather than called
  *  directly from reads.ts so every workbench read shares the SAME honest-kind
  *  translation, not just the multi-relation loaders above). */
-export async function loadFirmClients(opts: Opts = {}): Promise<ClientRow[]> {
-  return withHonestReadKinds(() => listFirmClients(opts));
+export async function loadFirmClients(t: Translator, opts: Opts = {}): Promise<ClientRow[]> {
+  return withHonestReadKinds(t, () => listFirmClients(opts));
 }

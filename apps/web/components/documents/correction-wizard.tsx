@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { readCorrectionPreview, type CorrectionPreview } from "@/lib/documents/reads";
 import { approveCorrection, proposeCorrection, recordDocumentResolution } from "@/lib/documents/doors";
-import { readErrorCopy } from "@/lib/documents/copy";
+import { readErrorKey } from "@/lib/documents/copy";
 import { isDoorError, isDoorRefusal } from "@/lib/doors";
 import { DoorFeedback } from "./door-feedback";
 import type { ClientRow, DocumentRow } from "@/lib/documents/types";
@@ -26,12 +26,19 @@ type Step = "select" | "preview" | "proposed" | "done";
  * never retried automatically.
  */
 export function CorrectionWizard({
-  open, document: doc, fromClient, clients, onClose, onDone,
+  open, document: doc, fromClient, clients, clientsErr, clientsClr, onClose, onDone,
 }: {
   open: boolean;
   document: DocumentRow;
   fromClient: string;
   clients: ClientRow[];
+  /** The PARENT's clients-read state (documents-workbench.tsx's own hydrated
+   *  cell) — independent review 2026-08-27, N10: a failed clients read must
+   *  render HERE, next to the picker it starves, not just wherever the parent
+   *  happens to render its own DoorFeedback. An empty dropdown with no visible
+   *  reason reads as "no other clients exist", a false absence (review law 2). */
+  clientsErr: string | null;
+  clientsClr: PartClr;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -59,9 +66,9 @@ export function CorrectionWizard({
         setClr({ code: e.code, reason: e.reason });
       } else if (isDoorError(e)) {
         // no_session/forbidden/not_found/... each get their OWN honest sentence —
-        // never one shared "something went wrong" bucket (copy.ts's readErrorCopy;
+        // never one shared "something went wrong" bucket (copy.ts's readErrorKey;
         // DoorErrorKind and ReadErrorKind share the same taxonomy).
-        setErr(readErrorCopy(e.kind));
+        setErr(t(readErrorKey(e.kind)));
       } else {
         setErr(e instanceof Error ? e.message : String(e));
       }
@@ -85,6 +92,7 @@ export function CorrectionWizard({
 
         {step === "select" ? (
           <div className="flex flex-col gap-2">
+            <DoorFeedback err={clientsErr} clr={clientsClr} />
             <Select value={toClient} onValueChange={(v) => setToClient(v ?? "")}>
               <SelectTrigger aria-label={t("correctionMoveTo")}><SelectValue placeholder={t("correctionMoveTo")} /></SelectTrigger>
               <SelectContent>

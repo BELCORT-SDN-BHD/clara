@@ -3,12 +3,16 @@
 // `fetch`), routed by matching each relation name in the URL — the property under
 // test is the MERGE/FILTER logic these loaders add on top of reads.ts's single-
 // relation calls, not the PostgREST query construction itself (already proven in
-// reads.test.ts).
+// reads.test.ts). `fakeT` stands in for the real `useTranslations()` — it returns
+// the KEY itself, so a test can assert on the EXACT key readErrorKey resolved to
+// without depending on any English wording (copy.ts's own job).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadFiledDocuments, loadFirmClients, loadOpenCandidates, loadDocumentDetail } from "./loaders";
+import { loadFiledDocuments, loadFirmClients, loadOpenCandidates, loadDocumentDetail, type Translator } from "./loaders";
 import type { SessionTokenAccessor } from "@/lib/session";
+
+const fakeT: Translator = (key) => key;
 
 function session(): SessionTokenAccessor {
   return { getAccessToken: async () => "tok" };
@@ -54,7 +58,7 @@ test("loadFiledDocuments: merges filing+document and DROPS a filing whose docume
       documents: [doc("d1")],
     },
     async () => {
-      const entries = await loadFiledDocuments("c1", { session: session() });
+      const entries = await loadFiledDocuments("c1", fakeT, { session: session() });
       assert.equal(entries.length, 1);
       assert.equal(entries[0]!.filing.id, "f1");
       assert.equal(entries[0]!.document.id, "d1");
@@ -74,7 +78,7 @@ test("loadOpenCandidates: resolves a candidate down to its document via the atte
       documents: [doc("d1")],
     },
     async () => {
-      const entries = await loadOpenCandidates("c1", { session: session() });
+      const entries = await loadOpenCandidates("c1", fakeT, { session: session() });
       assert.equal(entries.length, 1);
       assert.equal(entries[0]!.candidate.id, "cand1");
       assert.equal(entries[0]!.document.id, "d1");
@@ -91,7 +95,7 @@ test("loadOpenCandidates: zero open candidates never attempts the attempts/docum
     return new Response(JSON.stringify([]), { status: 200 });
   }) as typeof fetch;
   try {
-    const entries = await loadOpenCandidates("c1", { session: session() });
+    const entries = await loadOpenCandidates("c1", fakeT, { session: session() });
     assert.deepEqual(entries, []);
     assert.equal(seen.length, 1, "only the candidates read itself should fire — attempts/documents batches short-circuit on empty input");
   } finally {
@@ -100,14 +104,14 @@ test("loadOpenCandidates: zero open candidates never attempts the attempts/docum
   }
 });
 
-test("loadFirmClients: a 403 (forbidden) translates to its OWN honest sentence, distinct from a plain message", async () => {
+test("loadFirmClients: a 403 (forbidden) translates via readErrorKey('forbidden'), distinct from other kinds", async () => {
   const original = globalThis.fetch;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
   globalThis.fetch = (async () => new Response(JSON.stringify({ message: "permission denied for table clients" }), { status: 403 })) as typeof fetch;
   try {
-    await assert.rejects(loadFirmClients({ session: session() }), (e: unknown) => {
+    await assert.rejects(loadFirmClients(fakeT, { session: session() }), (e: unknown) => {
       assert.ok(e instanceof Error);
-      assert.match(e.message, /don't have access/);
+      assert.equal(e.message, "readError.forbidden");
       return true;
     });
   } finally {
@@ -116,14 +120,14 @@ test("loadFirmClients: a 403 (forbidden) translates to its OWN honest sentence, 
   }
 });
 
-test("loadFiledDocuments: a 401 (session expired) translates distinctly from a 403", async () => {
+test("loadFiledDocuments: a 401 (session expired) translates via readErrorKey('unauthenticated'), distinct from a 403", async () => {
   const original = globalThis.fetch;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
   globalThis.fetch = (async () => new Response(JSON.stringify({ message: "JWT expired" }), { status: 401 })) as typeof fetch;
   try {
-    await assert.rejects(loadFiledDocuments("c1", { session: session() }), (e: unknown) => {
+    await assert.rejects(loadFiledDocuments("c1", fakeT, { session: session() }), (e: unknown) => {
       assert.ok(e instanceof Error);
-      assert.match(e.message, /session has expired/);
+      assert.equal(e.message, "readError.unauthenticated");
       return true;
     });
   } finally {
@@ -139,10 +143,33 @@ test("loadDocumentDetail: returns null when the document itself cannot be read (
       document_processing_tasks_visible: [],
     },
     async () => {
-      const bundle = await loadDocumentDetail("doc-gone", { session: session() });
+      const bundle = await loadDocumentDetail("doc-gone", "c1", fakeT, { session: session() });
       assert.equal(bundle, null);
     },
   );
+});
+
+test("loadDocumentDetail: scopes the entries leg to BOTH document_id AND clientId (F4)", async () => {
+  let seenEntriesUrl: string | null = null;
+  const original = globalThis.fetch;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = (async (url: RequestInfo | URL) => {
+    const u = String(url);
+    if (u.includes("journal_entries")) { seenEntriesUrl = u; return new Response(JSON.stringify([]), { status: 200 }); }
+    // Anchored to the RELATION PATH, not a loose substring: `documents`'s own
+    // select list contains a `document_kind` COLUMN, whose name itself contains
+    // "document_" — a naive `!u.includes("document_")` exclusion misfires on it.
+    if (/\/rest\/v1\/documents\?/.test(u)) return new Response(JSON.stringify([doc("d1")]), { status: 200 });
+    return new Response(JSON.stringify([]), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const bundle = await loadDocumentDetail("d1", "client-9", fakeT, { session: session() });
+    assert.ok(bundle);
+    assert.match(seenEntriesUrl ?? "", /document_id=eq\.d1&client_id=eq\.client-9/);
+  } finally {
+    globalThis.fetch = original;
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  }
 });
 
 test("loadDocumentDetail: only reads regions for the CURRENT (done, non-superseded) extraction", async () => {
@@ -163,7 +190,7 @@ test("loadDocumentDetail: only reads regions for the CURRENT (done, non-supersed
     return new Response(JSON.stringify([]), { status: 200 });
   }) as typeof fetch;
   try {
-    const bundle = await loadDocumentDetail("d1", { session: session() });
+    const bundle = await loadDocumentDetail("d1", "client-1", fakeT, { session: session() });
     assert.ok(bundle);
     assert.ok(seenRegionsUrl, "regions must be fetched (a current extraction exists)");
     assert.match(seenRegionsUrl!, /extraction_id=in\.\(ex-new\)/);

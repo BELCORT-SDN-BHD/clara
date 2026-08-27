@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { filingBasisCopy } from "@/lib/documents/copy";
+import { filingBasisKey } from "@/lib/documents/copy";
 import { retireFiling } from "@/lib/documents/doors";
 import type { FilingRow } from "@/lib/documents/types";
 
@@ -33,7 +33,7 @@ export function DocumentFilingsHistory({
       <ul className="flex flex-col gap-1">
         {filings.map((filing) => (
           <li key={filing.id} className="flex items-center justify-between gap-2 text-sm">
-            <span className="text-foreground">{filingBasisCopy(filing.basis)}</span>
+            <span className="text-foreground">{t(filingBasisKey(filing.basis))}</span>
             <span className="text-xs text-muted-foreground">{new Date(filing.filed_at).toLocaleDateString()}</span>
             {filing.retired_at ? (
               <span className="text-xs text-muted-foreground">{t("filingRetired")}</span>

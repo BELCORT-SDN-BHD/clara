@@ -16,8 +16,22 @@
 // DoorFeedback uses for a DB/network failure — never chrome text, never translated).
 // components/documents/upload-panel.tsx does every translation via copy.ts's
 // `queueStateLabelKey`/`queueRecoveryLabelKey`.
+//
+// INDEPENDENT REVIEW 2026-08-27 additions:
+//   N6 — filing is gated EXCLUSIVELY on a DB-CONFIRMED poll read
+//        (`INTAKE_ADOPTED.has(row.status)`), never on `finalizeIntake`'s own
+//        (advisory-only) receipt — see finalizeIntake's own doc in intake.ts.
+//   N7/N8 — every leg carries an AbortController; unmount aborts every in-flight
+//        item, and Remove aborts its item's controller too. A document may already
+//        exist server-side once `finalizeIntake` has succeeded (verifying/filing
+//        states, or `documentId` set) — Remove past that point does NOT delete the
+//        row (which would let it silently keep filing with nothing left to show
+//        for it); it stops this queue's own tracking and relabels the row "filing"
+//        so it stays visible rather than vanishing.
+//   N14 — a second `add()` of the same name+size+lastModified while a LIVE
+//        (non-terminal) row for it already exists is refused locally, honestly.
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   beginIntake, finalizeIntake, INTAKE_ADOPTED, putIntakeBytes, readIntake,
   type IntakeRecoveryRefused,
@@ -51,7 +65,9 @@ export type QueueItem = {
   error: string | null;
 };
 
-export type QueueTooLargeNote = { filename: string; limitBytes: number };
+export type QueueRejection =
+  | { reason: "too_large"; filename: string; limitBytes: number }
+  | { reason: "duplicate"; filename: string };
 
 export type UploadQueue = {
   items: QueueItem[];
@@ -66,19 +82,54 @@ const BLANK: Pick<QueueItem, "failureCode" | "recoveryReason" | "recoveryRemedy"
   recoveryDocumentMime: null, recoveryUploadMime: null, errorPhase: null, error: null,
 };
 
+/** A LIVE row still occupies its identity slot for dedupe purposes (N14); a
+ *  terminally-failed one does not — a genuine retry-by-re-drop must not be
+ *  refused forever just because the first attempt failed. */
+const LIVE_STATES = new Set<QueueState>(["queued", "starting", "uploading", "verifying", "filing", "ready"]);
+
+function fileIdentity(file: File): string {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+/** true once `finalizeIntake` has succeeded for this item — a document MAY already
+ *  exist server-side from this point on, even though this queue has not (yet, or
+ *  ever) confirmed it via the DB-confirmed poll read (N7/N8's Remove guard). */
+function pastFinalize(item: Pick<QueueItem, "documentId" | "state">): boolean {
+  return item.documentId !== null || item.state === "verifying" || item.state === "filing";
+}
+
+/** An abortable sleep — `setTimeout(resolve, ms)` alone leaves the poll loop deaf
+ *  to an abort until its NEXT iteration; this rejects immediately instead. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    }, { once: true });
+  });
+}
+
+function isAbort(e: unknown): boolean {
+  return e instanceof Error && e.name === "AbortError";
+}
+
 /** `onFiled` fires once per file when its document is successfully filed to
  *  `clientId` — the caller uses it to re-hydrate the filed-documents list
  *  (hydrate-never-trust: this hook never asserts the row is filed itself).
- *  `onTooLarge` fires once per rejected file — STRUCTURED, never a rendered note. */
+ *  `onRejected` fires once per file `add()` refuses locally (too large, or a
+ *  live duplicate) — STRUCTURED, never a rendered note. */
 export function useUploadQueue(
   clientId: string,
   session: SessionTokenAccessor,
   onFiled: () => void,
-  onTooLarge: (note: QueueTooLargeNote) => void,
+  onRejected: (note: QueueRejection) => void,
 ): UploadQueue {
   const ref = useRef<QueueItem[]>([]);
   const [items, setItems] = useState<QueueItem[]>([]);
   const running = useRef(0);
+  const controllers = useRef(new Map<string, AbortController>());
 
   const sync = useCallback(() => setItems([...ref.current]), []);
   const patch = useCallback(
@@ -89,24 +140,38 @@ export function useUploadQueue(
     [sync],
   );
 
+  // Unmount: abort every in-flight leg (N7/N8) — nothing left running against an
+  // unmounted queue's own state.
+  useEffect(() => () => {
+    for (const controller of controllers.current.values()) controller.abort();
+  }, []);
+
   const runOne = useCallback(
     async (localId: string, file: File) => {
+      const controller = new AbortController();
+      controllers.current.set(localId, controller);
+      const signal = controller.signal;
       try {
         patch(localId, { state: "starting", documentId: null, ...BLANK });
-        const begun = await beginIntake({ filename: file.name, mime: file.type || "application/octet-stream", declaredBytes: file.size }, { session });
+        const begun = await beginIntake({ filename: file.name, mime: file.type || "application/octet-stream", declaredBytes: file.size }, { session, signal });
         patch(localId, { state: "uploading" });
-        await putIntakeBytes(begun.upload_token, begun.intake_id, file);
-        const receipt = await finalizeIntake(begun.upload_token, begun.intake_id);
+        await putIntakeBytes(begun.upload_token, begun.intake_id, file, signal);
+        const receipt = await finalizeIntake(begun.upload_token, begun.intake_id, signal);
         const refused = receipt.recovery_refused;
         patch(localId, { state: "verifying" });
         for (let i = 0; i < 60; i++) {
-          const row = await readIntake(begun.intake_id, { session }).catch(() => null);
+          const row = await readIntake(begun.intake_id, { session, signal }).catch((e: unknown) => {
+            if (isAbort(e)) throw e; // a transient read failure retries next tick; an abort must not
+            return null;
+          });
           if (row) {
+            // N6: filing is gated EXCLUSIVELY on this DB-confirmed row — `receipt`
+            // (finalizeIntake's own advisory return, above) never drives it.
             if (row.status === "failed") return patch(localId, { state: "failed", failureCode: row.failure_code });
             if (INTAKE_ADOPTED.has(row.status) && row.document_id) {
               patch(localId, { state: "filing", documentId: row.document_id });
               try {
-                await fileToClient(row.document_id, clientId, "documents_tab_upload", { session });
+                await fileToClient(row.document_id, clientId, "documents_tab_upload", { session, signal });
                 patch(localId, {
                   state: "ready",
                   recoveryReason: refused?.reason ?? null,
@@ -116,16 +181,20 @@ export function useUploadQueue(
                 });
                 onFiled();
               } catch (fileErr) {
+                if (isAbort(fileErr)) throw fileErr;
                 patch(localId, { state: "error", errorPhase: "filing", error: (fileErr as Error).message });
               }
               return;
             }
           }
-          await new Promise((r) => setTimeout(r, 1000));
+          await sleep(1000, signal);
         }
         patch(localId, { state: "error", errorPhase: "timeout", error: null });
       } catch (err) {
+        if (isAbort(err)) return; // Remove/unmount already decided this item's fate
         patch(localId, { state: "error", errorPhase: "upload", error: (err as Error).message });
+      } finally {
+        controllers.current.delete(localId);
       }
     },
     [session, clientId, patch, onFiled],
@@ -148,7 +217,13 @@ export function useUploadQueue(
     (files: File[]) => {
       for (const file of files) {
         if (file.size > MAX_FILE_BYTES) {
-          onTooLarge({ filename: file.name, limitBytes: MAX_FILE_BYTES });
+          onRejected({ reason: "too_large", filename: file.name, limitBytes: MAX_FILE_BYTES });
+          continue;
+        }
+        const identity = fileIdentity(file);
+        const isDuplicate = ref.current.some((i) => LIVE_STATES.has(i.state) && fileIdentity(i.file) === identity);
+        if (isDuplicate) {
+          onRejected({ reason: "duplicate", filename: file.name });
           continue;
         }
         ref.current = [
@@ -159,7 +234,7 @@ export function useUploadQueue(
       sync();
       pump();
     },
-    [onTooLarge, sync, pump],
+    [onRejected, sync, pump],
   );
 
   const retry = useCallback(
@@ -170,10 +245,24 @@ export function useUploadQueue(
     [patch, pump],
   );
 
-  const remove = useCallback((localId: string) => {
-    ref.current = ref.current.filter((i) => i.localId !== localId);
-    sync();
-  }, [sync]);
+  const remove = useCallback(
+    (localId: string) => {
+      const item = ref.current.find((i) => i.localId === localId);
+      controllers.current.get(localId)?.abort();
+      controllers.current.delete(localId);
+      if (item && pastFinalize(item)) {
+        // A document may already exist server-side, now untracked by this queue —
+        // N7/N8: never let the row silently vanish while that is still true. The
+        // client's "Filed to this client" / "Needs your confirmation" lanes are
+        // where it resurfaces if a matcher or a human picks it up later.
+        patch(localId, { state: "filing" });
+        return;
+      }
+      ref.current = ref.current.filter((i) => i.localId !== localId);
+      sync();
+    },
+    [patch, sync],
+  );
 
   const clearDone = useCallback(() => {
     ref.current = ref.current.filter((i) => i.state !== "ready");

@@ -107,18 +107,20 @@ export async function listRegionsForExtractionIds(extractionIds: string[], opts:
   );
 }
 
-/** Journal entries citing this document — a DIRECT `journal_entries` read
- *  (clara_authenticated holds SELECT, RLS-scoped to firm only:
- *  packages/db/migrations/0003_books_core.sql:507-525; this module adds the
- *  document_id filter, the same pattern as
- *  apps/dashboard/app/shared/openingApi.ts:187-190's direct journal_entries read).
- *  No RPC answers "entries for a document" — get_doc_entry_diff/get_entry_diff both
- *  need an entry_id, not a document_id (packages/db/migrations/0011_daily_loop.sql:
- *  3621,3681) — so this is a first-party table read, not a port of an existing
- *  dashboard call site. */
-export async function listEntriesForDocument(documentId: string, opts: Opts = {}): Promise<JournalEntryRow[]> {
+/** Journal entries citing this document, FILED TO THIS CLIENT — a DIRECT
+ *  `journal_entries` read (clara_authenticated holds SELECT, RLS-scoped to firm
+ *  ONLY: packages/db/migrations/0003_books_core.sql:507-525 — client-scoping is
+ *  this module's OWN filter, not an RLS boundary). Independent review 2026-08-27,
+ *  F4: `client_id` is REQUIRED, not optional — a document a wrong-client correction
+ *  moved elsewhere still carries entries under its OLD client_id, and this is a
+ *  client-scoped surface; omitting the filter would list another client's entries
+ *  unlabeled. No RPC answers "entries for a document" — get_doc_entry_diff/
+ *  get_entry_diff both need an entry_id, not a document_id
+ *  (packages/db/migrations/0011_daily_loop.sql:3621,3681) — so this is a
+ *  first-party table read, not a port of an existing dashboard call site. */
+export async function listEntriesForDocument(documentId: string, clientId: string, opts: Opts = {}): Promise<JournalEntryRow[]> {
   return getRows<JournalEntryRow>(
-    `journal_entries?document_id=eq.${encodeURIComponent(documentId)}` +
+    `journal_entries?document_id=eq.${encodeURIComponent(documentId)}&client_id=eq.${encodeURIComponent(clientId)}` +
       `&select=id,client_id,status,posting_date,memo,origin,document_id,is_opening_balance,tax_affecting,approved_at,reversal_of,reversed_by,created_at` +
       `&order=posting_date.desc,created_at.desc`,
     opts,

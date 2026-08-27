@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { extractionStatusCopy, filingBasisCopy, isEInvoice } from "@/lib/documents/copy";
+import { extractionStatusKey, filingBasisKey, isEInvoice } from "@/lib/documents/copy";
 import type { FiledDocumentEntry } from "@/lib/documents/loaders";
 import { cn } from "@/lib/utils";
 
@@ -50,13 +50,13 @@ export function FiledDocumentList({
             </TableCell>
             <TableCell className="text-muted-foreground">
               <span className="flex flex-wrap items-center gap-1">
-                {extractionStatusCopy(document.extraction_status)}
+                {t(extractionStatusKey(document.extraction_status))}
                 {document.legal_hold && <Badge variant="destructive">{t("legalHold")}</Badge>}
                 {isEInvoice(document) && <Badge variant="outline">{t("eInvoiceBadge")}</Badge>}
               </span>
             </TableCell>
             <TableCell className="text-muted-foreground">
-              {new Date(filing.filed_at).toLocaleDateString()} · {filingBasisCopy(filing.basis)}
+              {new Date(filing.filed_at).toLocaleDateString()} · {t(filingBasisKey(filing.basis))}
             </TableCell>
           </TableRow>
         ))}

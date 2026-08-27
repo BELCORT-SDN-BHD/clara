@@ -23,9 +23,9 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientDocuments");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const filed = useHydratedPart(sessionTokenAccessor, () => loadFiledDocuments(clientId));
-  const candidates = useHydratedPart(sessionTokenAccessor, () => loadOpenCandidates(clientId));
-  const clients = useHydratedPart(sessionTokenAccessor, () => loadFirmClients());
+  const filed = useHydratedPart(sessionTokenAccessor, () => loadFiledDocuments(clientId, t));
+  const candidates = useHydratedPart(sessionTokenAccessor, () => loadOpenCandidates(clientId, t));
+  const clients = useHydratedPart(sessionTokenAccessor, () => loadFirmClients(t));
 
   const refreshFiled = () => void filed.reload();
 
@@ -75,7 +75,15 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
           ) : clients.loading && !clients.data ? (
             <p className="text-sm text-muted-foreground">{t("loading")}</p>
           ) : (
-            <DocumentDetail key={selectedId} documentId={selectedId} clientId={clientId} clients={clients.data ?? []} />
+            <DocumentDetail
+              key={selectedId}
+              documentId={selectedId}
+              clientId={clientId}
+              clients={clients.data ?? []}
+              clientsErr={clients.err}
+              clientsClr={clients.clr}
+              onFiledChanged={refreshFiled}
+            />
           )}
         </aside>
       </div>
