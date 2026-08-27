@@ -635,7 +635,7 @@
   },
   "ClientClose": {
     "heading": "Close",
-    "body": "Pick a fiscal year to view its close plan — gates, doors, and the receipt/segregation record. Every figure is read live from the DB; “Clara proposes close” is not built yet (no close_proposals carrier exists).",
+    "body": "Pick a fiscal year to view its close plan — gates, doors, and the receipt/segregation record. Every figure is read live from the DB; the “Clara proposes close” card is not built in this workbench yet — the close_proposals carrier and its doors are live (see below).",
     "picker": {
       "ariaLabel": "Fiscal years",
       "loading": "Loading fiscal years…",
@@ -738,7 +738,7 @@
     },
     "proposal": {
       "heading": "Clara proposes close",
-      "body": "Not built yet — no clara.close_proposals carrier and no wake_propose_close verb exist in the live catalog. When they ship, this panel reads the existing proposal (never invents one), and attest_close_exception's own p_from_proposal argument links an attestation back to it."
+      "body": "The close_proposals carrier and its doors are live — wake_propose_close (Clara proposes) and attest_close_exception's p_from_proposal argument (a human adopts). This panel's own card — reading a live proposal and letting you act on it — is not built yet; it lands with a later wire bump."
     }
   },
   "ClientReports": {
