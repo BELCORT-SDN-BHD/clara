@@ -1022,76 +1022,6 @@ comment on function clara.prepayment_schedule_v1(uuid, uuid) is
   'F-A4 PR-2a: the versioned deterministic evaluator behind wrapper 12. Amounts are DB-derived from the source entry''s own prepaid-asset leg; the emitted period_lines carry that ASSET half only, and the judged EXPENSE account is applied by clara._agent_prepayment_schedule_core under F2''s three walls. Whole-calendar-month straight line, remainder wholly in the final period. A calendar month is charged iff the term covers that month''s FIRST day (the uniform reading of law 20''s split-month doctrine, ruled 2026-08-27). Calls no other clara function, which is what keeps its evaluator_versions closure at ONE member and the freeze meaningful; a changed formula is _v2, never an edit.';
 
 -- =================================================================================================
--- §E — agent_act_receipts.subject_kind ADMITS 'adjustment_template' (design §6.3, Annex E).
---
--- EXTEND, NEVER REWRITE. act_kind already admits 'prepayment_schedule' (0138:346-348 — a declared
--- SHAPE 0138 shipped for exactly this verb) but subject_kind admits no template. The new set is the
--- existing SIX values plus one; §0 captured the old definition so §TAIL can prove the six survived
--- rather than trusting that they did.
---
--- WHY THE SUBJECT DIFFERS BY VERDICT, and why that is not cosmetic (Annex E). The derived op key is
--- per (task, verb, CLIENT) — _close_expected_op_key hashes task || verb || subject (0138:1266-1269)
--- and wrapper 12 pins its ctx subject to the client. So two source entries in ONE wake task carry
--- the SAME op key. If the refusal receipt named the CLIENT as its subject, two entries refusing for
--- the same reason would collide on uq_aar (firm, act_kind, subject_kind, subject_id, op_key,
--- verdict, rung_digest — 0138:396), the read-back's identity guard would find every compared field
--- equal, and entry B's refusal would be answered with ENTRY A'S RECEIPT ID. That is FIX-1's defect
--- exactly, re-opened not by a missing comparison but by a subject too coarse to tell two acts apart.
--- Hence: refused -> ('journal_entry', p_source_entry); acted -> ('adjustment_template', template).
--- Both discriminate per entry, and the split across verdicts is the shipped idiom (the fix order
--- records begin_close/open_fy/mint_snapshot as "safe by differing subject").
---
--- THE COLLISION IS NARROWER THAN A LOOSE READING SUGGESTS, WHICH IS WHY IT SURVIVED REVIEW:
--- rung_digest is in uq_aar, so two refusals collide only when their rung VECTORS are byte-identical.
--- That is not a corner — the ordinary path walks straight into it. Two prepaid entries on one
--- client, neither carrying a service period, both refuse with the same single-element B10 vector.
--- A narrow window the common case walks into is the worst kind.
--- =================================================================================================
-alter table clara.agent_act_receipts drop constraint agent_act_receipts_subject_kind_check;
-alter table clara.agent_act_receipts add constraint ck_aar_subject_kind check (
-  subject_kind in ('client', 'fiscal_year', 'close_run', 'close_receipt', 'journal_entry',
-                   'snapshot', 'adjustment_template'));
-
-comment on constraint ck_aar_subject_kind on clara.agent_act_receipts is
-  'F-A4 PR-2a: the six kinds 0138 shipped plus ''adjustment_template'', which wrapper 12''s ACTED receipt names. EXPLICITLY NAMED, replacing the system-generated agent_act_receipts_subject_kind_check that 0138 produced by writing the CHECK inline on the column — so a later lane can select this constraint by a name someone chose rather than by a LIKE over its definition (the T.1b2 lesson: a predicate that matches on spelling picks up whatever else contains the word).';
-
--- =================================================================================================
--- §G — RESIDUAL 1: the bookkeeper conjunct mirrored into two read policies (design §7).
---
--- THE MEASURED DEFECT (fix order, post-re-verification follow-up 1): a firm VIEWER reads
--- model_name / model_version / rationale / narrative straight off clara.close_proposals — the exact
--- data class FIX-6 walled off on agent_act_receipts. p_cp_human (0138:558-559) and p_cph_human
--- (0138:625-626) check firm_id = clara.jwt_firm() and NOTHING ELSE.
---
--- THE CONSUMER CENSUS WAS RUN BEFORE CHOOSING THE WALL — Annex B.0b carries it row by row, and its
--- second cut names the four readers the first cut MISSED (a consumer census that misses readers is
--- the instrument failure it exists to prevent). Its result: two definer doors that read under the
--- OWNER policy and are unaffected; ZERO apps/web row reads (the close panel deliberately reads
--- nothing); six rig readers, four as clara_fn_owner and two as superuser. Not one is a
--- clara_authenticated row read, which is the only population this conjunct can touch. No legitimate
--- consumer breaks.
---
--- close_prep_holds carries a WEAKER data class (a hold reason, not a model's rationale) and is
--- walled anyway — stated here rather than left to inference: its own doors are bookkeeper-floored
--- (0138:1573, :1608), so a record readable BELOW the floor of the act that wrote it is an
--- inconsistency waiting to be found.
---
--- Spelled IDENTICALLY to 0138:427 and to §A's p_dsp_human, so every close-limb table reads as ONE
--- rule rather than four similar ones.
--- =================================================================================================
-drop policy p_cp_human on clara.close_proposals;
-create policy p_cp_human on clara.close_proposals
-  for select to clara_authenticated
-  using (firm_id = clara.jwt_firm()
-         and clara.actor_role_rank() >= clara.role_rank('bookkeeper'));
-
-drop policy p_cph_human on clara.close_prep_holds;
-create policy p_cph_human on clara.close_prep_holds
-  for select to clara_authenticated
-  using (firm_id = clara.jwt_firm()
-         and clara.actor_role_rank() >= clara.role_rank('bookkeeper'));
-
--- =================================================================================================
 -- §D — THE EXTRACTION [D1 WRITE-QUIESCE]. clara._propose_adjustment_template_core, then the door as
 -- a thin delegate (design §6.1). This is the ONE core extraction R6 leaves standing;
 -- clara.sign_adjustment_template is UNTOUCHED (NON-GOAL 2) because signing stays a human ADMIN act
@@ -3060,6 +2990,347 @@ end
 $d3app$;
 
 -- =================================================================================================
+-- §E — agent_act_receipts.subject_kind ADMITS 'adjustment_template' (design §6.3, Annex E).
+--
+-- EXTEND, NEVER REWRITE. act_kind already admits 'prepayment_schedule' (0138:346-348 — a declared
+-- SHAPE 0138 shipped for exactly this verb) but subject_kind admits no template. The new set is the
+-- existing SIX values plus one; §0 captured the old definition so §TAIL can prove the six survived
+-- rather than trusting that they did.
+--
+-- WHY THE SUBJECT DIFFERS BY VERDICT, and why that is not cosmetic (Annex E). The derived op key is
+-- per (task, verb, CLIENT) — _close_expected_op_key hashes task || verb || subject (0138:1266-1269)
+-- and wrapper 12 pins its ctx subject to the client. So two source entries in ONE wake task carry
+-- the SAME op key. If the refusal receipt named the CLIENT as its subject, two entries refusing for
+-- the same reason would collide on uq_aar (firm, act_kind, subject_kind, subject_id, op_key,
+-- verdict, rung_digest — 0138:396), the read-back's identity guard would find every compared field
+-- equal, and entry B's refusal would be answered with ENTRY A'S RECEIPT ID. That is FIX-1's defect
+-- exactly, re-opened not by a missing comparison but by a subject too coarse to tell two acts apart.
+-- Hence: refused -> ('journal_entry', p_source_entry); acted -> ('adjustment_template', template).
+-- Both discriminate per entry, and the split across verdicts is the shipped idiom (the fix order
+-- records begin_close/open_fy/mint_snapshot as "safe by differing subject").
+--
+-- THE COLLISION IS NARROWER THAN A LOOSE READING SUGGESTS, WHICH IS WHY IT SURVIVED REVIEW:
+-- rung_digest is in uq_aar, so two refusals collide only when their rung VECTORS are byte-identical.
+-- That is not a corner — the ordinary path walks straight into it. Two prepaid entries on one
+-- client, neither carrying a service period, both refuse with the same single-element B10 vector.
+-- A narrow window the common case walks into is the worst kind.
+-- =================================================================================================
+alter table clara.agent_act_receipts drop constraint agent_act_receipts_subject_kind_check;
+alter table clara.agent_act_receipts add constraint ck_aar_subject_kind check (
+  subject_kind in ('client', 'fiscal_year', 'close_run', 'close_receipt', 'journal_entry',
+                   'snapshot', 'adjustment_template'));
+
+comment on constraint ck_aar_subject_kind on clara.agent_act_receipts is
+  'F-A4 PR-2a: the six kinds 0138 shipped plus ''adjustment_template'', which wrapper 12''s ACTED receipt names. EXPLICITLY NAMED, replacing the system-generated agent_act_receipts_subject_kind_check that 0138 produced by writing the CHECK inline on the column — so a later lane can select this constraint by a name someone chose rather than by a LIKE over its definition (the T.1b2 lesson: a predicate that matches on spelling picks up whatever else contains the word).';
+
+-- =================================================================================================
+-- §F — WRAPPER 12: clara.wake_establish_prepayment_schedule + its agent core (design §6.2).
+--
+-- THE PARK IS OVER. 0138's deviation (1) named two blockers; R6 dissolved the first (one core, not
+-- two — §D) and §A/§B built the second (the DB-owned term carrier). §0 confirmed both parked
+-- objects ABSENT at the moment this file began; §TAIL inverts 0138's T.9 into a presence census.
+--
+-- ORDINAL, SETTLED (N6): THIS VERB IS WRAPPER 12. An earlier cut of the design said 13; that was
+-- wrong. close-key-1-annexes-2-record.md:33 says 12 and 0138 says 12 TWICE (:1790, :2435) while
+-- numbering wake_mint_month_snapshot 13. Nothing keys on the ordinal — the allowlist and every
+-- census key on the NAME — which is exactly why a wrong one can sit unnoticed. Counts are a
+-- different quantity and DO move: twelve wrappers existed, this is the THIRTEENTH.
+--
+-- TIER DISCIPLINE, and it is the whole reason this shape looks the way it does. A RAISE inside an
+-- agent core aborts the transaction AND TAKES THE RECEIPT WITH IT — a judgement act leaving no
+-- trace, which is the silent-daily-log failure F-A4 exists to end. So everything below the Tier-A
+-- line becomes a RUNG and a refused receipt, never a raise.
+--
+-- THE FIVE PRE-RUNGS (design §6.2a, review finding F3) are the delegate's own raise paths, asked
+-- HERE as rungs BEFORE the delegate is called. THEY ARE COURTESIES, NOT WALLS, and this file says
+-- so rather than letting a later reader assume otherwise: pre-rung (c) reads the eligibility helper
+-- without the client:fa-roles leaf the delegate takes immediately before its own check, and (b)'s
+-- durable half is a partial unique index — both race a concurrent writer. THE DELEGATE'S RAISE
+-- REMAINS THE STRUCTURAL WALL, Tier D captures the abort, and NO CELL MAY ASSERT that the pre-rungs
+-- make the raise unreachable (Annex F.3).
+--
+-- F2's THREE WALLS ride here (design §5.3): (1) deterministic validation of the judged account,
+-- (2) the judgement receipted with its stated basis, (3) visible at the sign door — §D4's half.
+-- THE MAXIM: facts get anchored, judgements get receipted. The TERM is a fact and came through §B's
+-- human door; the ACCOUNT is a judgement and arrives here as an argument, validated and receipted.
+-- =================================================================================================
+create function clara._agent_prepayment_schedule_core(p_ctx jsonb, p_client uuid,
+    p_source_entry uuid, p_target_account text, p_target_basis text, p_rationale text,
+    p_model jsonb, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $agent$
+declare
+  v_firm uuid := (p_ctx ->> 'firm_id')::uuid;
+  v_rungs jsonb; v_receipt uuid; v_sched jsonb; v_pl jsonb; v_refusal text;
+  v_acct record; v_breach jsonb; v_lines jsonb; v_tmpl_sched jsonb := '[]'::jsonb;
+  v_start date; v_end date; v_total bigint; v_n int; v_name text; v_memo text;
+  v_hash text; v_twin uuid; v_result jsonb; v_template uuid; x jsonb; v_base bigint;
+begin
+  -- ---- TIER A (raises, writes nothing) -------------------------------------------------------
+  -- A receipt row needs a NON-NULL subject, and this verb's refusal subject IS the source entry.
+  -- With no entry there is no subject to name and no receipt that could honestly be written, so
+  -- this raises in the tier whose contract is "RAISES, writes nothing" (0138:1272-1273) rather than
+  -- inventing a stand-in subject (law 2: a derived subject is not evidence of the real one).
+  if p_source_entry is null then
+    raise exception 'a prepayment schedule names the source entry it amortises'
+      using errcode = 'CLR10', detail = '{"reason":"prepayment_source_required"}';
+  end if;
+
+  -- ---- TIER B (rungs; typed non-act receipt, no raise) ---------------------------------------
+  v_rungs := clara._close_tier_b_common(p_client, p_rationale, p_model);
+
+  -- B10 / B10' -- the evaluator derives the term and the amounts from DB-owned inputs, or refuses
+  -- by name. Its refusals are RETURNED, never raised, precisely so they can land as rungs.
+  if jsonb_array_length(v_rungs) = 0 then
+    v_sched := clara.prepayment_schedule_v1(p_client, p_source_entry);
+    v_refusal := v_sched ->> 'refusal';
+    if v_refusal is not null then
+      v_rungs := v_rungs || jsonb_build_array(
+        jsonb_build_object('rung', case when v_refusal = 'prepayment_source_unfit' then 'B10p' else 'B10' end,
+                           'token', v_refusal) || (v_sched - 'refusal' - 'schedule_version'));
+    end if;
+  end if;
+
+  -- F2 WALL 1 -- DETERMINISTIC VALIDATION OF THE JUDGED ACCOUNT. The model names the account; the
+  -- DB decides whether it is admissible, by the estate's OWN existing rule rather than a new one.
+  if jsonb_array_length(v_rungs) = 0 then
+    if p_target_account is null or btrim(p_target_account) = '' then
+      -- The no-plausible-account arm, NOT the default path (design §5.3). A lane that refused
+      -- whenever it was unsure of a classification would never charge anything -- over-caution
+      -- wearing a safety property's clothes.
+      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10t',
+        'token', 'prepayment_target_underivable',
+        'detail', 'no expense account was proposed for the amortisation charge'));
+    else
+      select ca.account_code, ca.account_type, ca.is_active into v_acct
+        from clara.coa_accounts ca
+       where ca.client_id = p_client and ca.account_code = btrim(p_target_account);
+      if v_acct.account_code is null then
+        v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10t',
+          'token', 'prepayment_target_ineligible', 'axis', 'account_unknown',
+          'account_code', btrim(p_target_account)));
+      elsif v_acct.account_type <> 'expense' then
+        -- P&L / expense-class: an amortisation charge is an expense. A balance-sheet target would
+        -- move the prepayment sideways and never charge it.
+        v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10t',
+          'token', 'prepayment_target_ineligible', 'axis', 'not_expense_class',
+          'account_code', v_acct.account_code, 'account_type', v_acct.account_type));
+      else
+        -- THE SAME HELPER THE PROPOSE DOOR AND THE POSTER ALREADY USE, so a bank-class or otherwise
+        -- ineligible account refuses by the estate's own existing rule. This is also the axis W41's
+        -- wired bank-account fixture exercises.
+        v_breach := clara._adj_line_eligibility_breach(p_client,
+          jsonb_build_array(jsonb_build_object('account_code', v_acct.account_code,
+            'debit_cents', 1, 'credit_cents', 0)));
+        if v_breach is not null then
+          v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10t',
+            'token', 'prepayment_target_ineligible') || v_breach);
+        end if;
+      end if;
+    end if;
+    if p_target_basis is null or btrim(p_target_basis) = '' then
+      -- F2 WALL 2's precondition: a judgement with NO RECORDED BASIS is what TA-P4 exists to
+      -- prevent. Refuse rather than receipt an unexplained classification.
+      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10t',
+        'token', 'prepayment_target_underivable', 'axis', 'basis_missing',
+        'detail', 'the target account was proposed without its stated grounds'));
+    end if;
+  end if;
+
+  -- ---- ASSEMBLE THE TEMPLATE, then ask the five pre-rungs over it ----------------------------
+  if jsonb_array_length(v_rungs) = 0 then
+    v_pl    := v_sched -> 'period_lines';
+    v_total := (v_sched ->> 'total_cents')::bigint;
+    v_n     := (v_sched ->> 'period_count')::int;
+    v_start := (v_pl -> 0 ->> 'period_start')::date;
+    v_end   := (v_pl -> (v_n - 1) ->> 'period_end')::date;
+    v_base  := (v_pl -> 0 ->> 'credit_cents')::bigint;
+    v_name  := 'Prepayment amortisation ' || substr(p_source_entry::text, 1, 8);
+    v_memo  := 'Prepayment amortisation';
+
+    -- THE JUDGED ACCOUNT IS APPLIED HERE, at lines-assembly, and NOWHERE ELSE. The evaluator emits
+    -- the prepaid-ASSET half with the account read off the source entry's own leg; this core pairs
+    -- each period with the DEBIT on the judged expense account. That is what keeps the evaluator
+    -- amounts-only and hard constraint 2 exact: no model NUMERAL reaches a durable artifact, a
+    -- model CLASSIFICATION does -- receipted here, shown at §D4's projection, signed by a human.
+    v_lines := jsonb_build_array(
+      jsonb_build_object('account_code', v_acct.account_code, 'debit_cents', v_base,
+                         'credit_cents', 0, 'description', v_memo),
+      jsonb_build_object('account_code', v_sched ->> 'prepaid_account_code', 'debit_cents', 0,
+                         'credit_cents', v_base, 'description', v_memo));
+    for x in select value from jsonb_array_elements(v_pl) loop
+      v_tmpl_sched := v_tmpl_sched || jsonb_build_array(jsonb_build_object(
+        'period_start', x ->> 'period_start', 'period_end', x ->> 'period_end',
+        'lines', jsonb_build_array(
+          jsonb_build_object('account_code', v_acct.account_code,
+                             'debit_cents', (x ->> 'credit_cents')::bigint,
+                             'credit_cents', 0, 'description', v_memo),
+          jsonb_build_object('account_code', x ->> 'account_code', 'debit_cents', 0,
+                             'credit_cents', (x ->> 'credit_cents')::bigint,
+                             'description', v_memo))));
+    end loop;
+
+    -- (a) template_alignment_unmet -- RECLASSIFIED, not deleted (Annex F.1). Under F1's ruled
+    -- convention monthly IS calendar-month at the bytes, so the template's start_date is a period
+    -- start BY CONSTRUCTION and this can no longer fire on ordinary caller input. It is kept as a
+    -- SELF-CHECK ON OUR OWN OUTPUT, because a silent misalignment would post a schedule against the
+    -- wrong periods, and it costs one comparison. Cell W38.
+    if clara._adj_period_start(p_client, 'monthly', v_start) is distinct from v_start then
+      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10a',
+        'token', 'template_alignment_unmet', 'start_date', v_start,
+        'period_start', clara._adj_period_start(p_client, 'monthly', v_start)));
+    end if;
+    -- (e) template_lines_unbalanced -- a SELF-CHECK on the evaluator's own output. A red here is a
+    -- fault in clara.prepayment_schedule_v1, not in the caller, and it must STILL land as a receipt
+    -- rather than an abort: a broken evaluator that leaves no evidence is strictly worse than one
+    -- that refuses loudly.
+    if (select coalesce(sum((e ->> 'debit_cents')::bigint), 0)
+             <> coalesce(sum((e ->> 'credit_cents')::bigint), 0)
+          from jsonb_array_elements(v_lines) as t(e)) then
+      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10e',
+        'token', 'template_lines_unbalanced'));
+    end if;
+    -- (d) template_date_unsupported -- the DERIVED first period end is domain-checked, not the
+    -- supplied dates (the distinction 0045's own round-9 comment draws).
+    if not clara._wdb_iso_date_supported(clara._adj_period_end(p_client, 'monthly', v_start)) then
+      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10d',
+        'token', 'template_date_unsupported', 'derived_period_end',
+        clara._adj_period_end(p_client, 'monthly', v_start)));
+    end if;
+    -- (c) template_line_ineligible -- the same helper, the same payload, asked before the delegate.
+    v_breach := clara._adj_line_eligibility_breach(p_client, v_lines);
+    if v_breach is not null then
+      v_rungs := v_rungs || jsonb_build_array(
+        jsonb_build_object('rung', 'B10c', 'token', 'template_line_ineligible') || v_breach);
+    end if;
+    -- (b) template_duplicate_pending -- THE RUNG A RE-WAKE HITS: the lane drafted this schedule
+    -- yesterday, nobody signed it, and today's pass would otherwise ABORT on the delegate's raise.
+    -- Same hash over the same canonical content, same partial-unique population, and the twin's id
+    -- rides in the payload so the receipt says WHICH template already stands.
+    v_hash := clara._adj_template_hash(btrim(v_name), 'monthly', v_start, v_end, false,
+      v_lines, v_memo, v_tmpl_sched);
+    select t.id into v_twin from clara.adjustment_templates t
+     where t.client_id = p_client and t.content_hash = v_hash
+       and t.status in ('proposed', 'live') limit 1;
+    if v_twin is not null then
+      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10b',
+        'token', 'template_duplicate_pending', 'template_id', v_twin));
+    end if;
+  end if;
+
+  -- ---- THE REFUSED RECEIPT -------------------------------------------------------------------
+  -- SUBJECT = THE SOURCE ENTRY, and that is not cosmetic (Annex E). The derived op key is per
+  -- (task, verb, CLIENT), so two source entries in ONE wake task share it. A client-subject refusal
+  -- would collide on uq_aar and hand entry B the receipt minted for entry A -- FIX-1's defect,
+  -- re-opened by a subject too coarse to tell two acts apart. Cell W14.
+  if jsonb_array_length(v_rungs) > 0 then
+    v_receipt := clara._agent_close_receipt(v_firm, p_client, 'prepayment_schedule', 'journal_entry',
+      p_source_entry, p_ctx ->> 'wake_kind', nullif(p_ctx ->> 'on_behalf_of', '')::uuid,
+      (p_ctx ->> 'task_id')::uuid, p_rationale, p_model, 'refused', v_rungs, p_op_key);
+    return jsonb_build_object('status', 'refused', 'receipt_id', v_receipt, 'rung_vector', v_rungs);
+  end if;
+
+  -- ---- THE ACTED PATH ------------------------------------------------------------------------
+  -- THE DELEGATE TAKES A SUB-KEY. propose_adjustment_template holds its OWN _reserve_op slot
+  -- (0045:3864), so two entries in one task need two keys there. The depreciation catch-up already
+  -- solves this exact problem the same way (0138:2399 against :2379-2381).
+  v_result := clara._propose_adjustment_template_core(
+    jsonb_build_object('firm', v_firm, 'actor', clara.agent_user_id()),
+    p_client, v_name, 'monthly', v_start, v_end, false, v_lines, v_memo,
+    p_op_key || ':' || p_source_entry::text, null, v_tmpl_sched);
+  v_template := (v_result ->> 'template_id')::uuid;
+  -- FAIL CLOSED rather than substitute a stand-in subject: a delegate answer with no template_id
+  -- means the proposal did not happen the way this receipt is about to claim it did. The
+  -- _agent_mint_month_snapshot_core precedent (0138), verbatim in spirit.
+  if v_template is null then
+    raise exception 'the template proposal returned no template_id; the receipt has no subject to name'
+      using errcode = 'CLR08', detail = '{"reason":"prepayment_subject_unresolvable"}';
+  end if;
+
+  -- SUBJECT = THE TEMPLATE. Differing subjects across verdicts is the shipped idiom (the fix order
+  -- records begin_close / open_fy / mint_snapshot as "safe by differing subject"), and it is what
+  -- keeps an acted and a refused receipt for the same entry from ever contending.
+  -- F2 WALL 2: the judged account AND ITS STATED BASIS ride the receipt, through the law-79
+  -- machinery that already carries model name, version and rationale.
+  v_receipt := clara._agent_close_receipt(v_firm, p_client, 'prepayment_schedule',
+    'adjustment_template', v_template, p_ctx ->> 'wake_kind',
+    nullif(p_ctx ->> 'on_behalf_of', '')::uuid, (p_ctx ->> 'task_id')::uuid,
+    p_rationale || ' | target account ' || v_acct.account_code || ': ' || btrim(p_target_basis),
+    p_model, 'acted', '[]'::jsonb, p_op_key);
+
+  return jsonb_build_object('status', 'acted', 'receipt_id', v_receipt,
+    'template_id', v_template, 'status_of_template', 'proposed',
+    'schedule_version', v_sched ->> 'schedule_version', 'total_cents', v_total,
+    'period_count', v_n, 'target_account', v_acct.account_code,
+    'target_basis', btrim(p_target_basis), 'content_hash', v_hash);
+end $agent$;
+revoke all on function clara._agent_prepayment_schedule_core(jsonb, uuid, uuid, text, text, text, jsonb, text) from public;
+
+-- THE WRAPPER. No DML text in its body -- it names ITSELF in its _close_wake_ctx call and delegates,
+-- which is what every census in the estate keys on.
+create function clara.wake_establish_prepayment_schedule(p_client uuid, p_source_entry uuid,
+    p_target_account text, p_target_basis text, p_rationale text, p_model jsonb, p_op_key text)
+  returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $wake$
+declare v_ctx jsonb;
+begin
+  v_ctx := clara._close_wake_ctx('wake_establish_prepayment_schedule', 'client', p_client, p_op_key);
+  return clara._agent_prepayment_schedule_core(v_ctx, p_client, p_source_entry, p_target_account,
+    p_target_basis, p_rationale, p_model, p_op_key);
+end $wake$;
+revoke all on function clara.wake_establish_prepayment_schedule(uuid, uuid, text, text, text, jsonb, text) from public;
+
+-- THE ALLOWLIST ROW -- the THIRTEENTH close_prep entry. §0 measured the pre-count at 12 and §TAIL
+-- asserts the delta, so the flip is a measured change rather than a literal restated.
+-- The writable column is function_name; fn_name is GENERATED from it (measured on the rig, not
+-- read off a design line -- the first cut of this INSERT named the generated column and was
+-- refused, which is the storage layer doing exactly what it should).
+insert into clara.wake_fn_allowlist(wake_kind, function_name)
+  values ('close_prep', 'wake_establish_prepayment_schedule');
+
+-- THE ONE NEW PRIVILEGE IN THIS ENTIRE TRAIN (NON-GOAL 3: no floor moves anywhere).
+grant execute on function clara.wake_establish_prepayment_schedule(uuid, uuid, text, text, text, jsonb, text)
+  to clara_wake_interactive;
+
+comment on function clara.wake_establish_prepayment_schedule(uuid, uuid, text, text, text, jsonb, text) is
+  'F-A4 PR-2a: wrapper 12, unparked. DRAFT-ONLY BY CONSTRUCTION, not by promise -- this verb reaches only clara._propose_adjustment_template_core, and adjustment_templates.status moves to ''live'' in exactly ONE body, clara.sign_adjustment_template, which opens the ADMIN floor and holds no grant to any wake role (R6). The judged expense account arrives as an argument with its stated basis, is validated deterministically, receipted, and shown at the sign door; the AMOUNTS come only from clara.prepayment_schedule_v1. Facts get anchored, judgements get receipted.';
+
+-- =================================================================================================
+-- §G — RESIDUAL 1: the bookkeeper conjunct mirrored into two read policies (design §7).
+--
+-- THE MEASURED DEFECT (fix order, post-re-verification follow-up 1): a firm VIEWER reads
+-- model_name / model_version / rationale / narrative straight off clara.close_proposals — the exact
+-- data class FIX-6 walled off on agent_act_receipts. p_cp_human (0138:558-559) and p_cph_human
+-- (0138:625-626) check firm_id = clara.jwt_firm() and NOTHING ELSE.
+--
+-- THE CONSUMER CENSUS WAS RUN BEFORE CHOOSING THE WALL — Annex B.0b carries it row by row, and its
+-- second cut names the four readers the first cut MISSED (a consumer census that misses readers is
+-- the instrument failure it exists to prevent). Its result: two definer doors that read under the
+-- OWNER policy and are unaffected; ZERO apps/web row reads (the close panel deliberately reads
+-- nothing); six rig readers, four as clara_fn_owner and two as superuser. Not one is a
+-- clara_authenticated row read, which is the only population this conjunct can touch. No legitimate
+-- consumer breaks.
+--
+-- close_prep_holds carries a WEAKER data class (a hold reason, not a model's rationale) and is
+-- walled anyway — stated here rather than left to inference: its own doors are bookkeeper-floored
+-- (0138:1573, :1608), so a record readable BELOW the floor of the act that wrote it is an
+-- inconsistency waiting to be found.
+--
+-- Spelled IDENTICALLY to 0138:427 and to §A's p_dsp_human, so every close-limb table reads as ONE
+-- rule rather than four similar ones.
+-- =================================================================================================
+drop policy p_cp_human on clara.close_proposals;
+create policy p_cp_human on clara.close_proposals
+  for select to clara_authenticated
+  using (firm_id = clara.jwt_firm()
+         and clara.actor_role_rank() >= clara.role_rank('bookkeeper'));
+
+drop policy p_cph_human on clara.close_prep_holds;
+create policy p_cph_human on clara.close_prep_holds
+  for select to clara_authenticated
+  using (firm_id = clara.jwt_firm()
+         and clara.actor_role_rank() >= clara.role_rank('bookkeeper'));
+
+-- =================================================================================================
 -- §H — MED-8: THE SUPERSEDE-CHURN GUARD [declared, provably idle] (design §8; derivation Annex D).
 --
 -- This body was created by 0138 and is reachable only through its own wrapper under a close_prep
@@ -3414,277 +3685,6 @@ begin
                         where (e ->> 'debit_cents')::bigint > 0));
 end
 $d4json$;
-
--- =================================================================================================
--- §F — WRAPPER 12: clara.wake_establish_prepayment_schedule + its agent core (design §6.2).
---
--- THE PARK IS OVER. 0138's deviation (1) named two blockers; R6 dissolved the first (one core, not
--- two — §D) and §A/§B built the second (the DB-owned term carrier). §0 confirmed both parked
--- objects ABSENT at the moment this file began; §TAIL inverts 0138's T.9 into a presence census.
---
--- ORDINAL, SETTLED (N6): THIS VERB IS WRAPPER 12. An earlier cut of the design said 13; that was
--- wrong. close-key-1-annexes-2-record.md:33 says 12 and 0138 says 12 TWICE (:1790, :2435) while
--- numbering wake_mint_month_snapshot 13. Nothing keys on the ordinal — the allowlist and every
--- census key on the NAME — which is exactly why a wrong one can sit unnoticed. Counts are a
--- different quantity and DO move: twelve wrappers existed, this is the THIRTEENTH.
---
--- TIER DISCIPLINE, and it is the whole reason this shape looks the way it does. A RAISE inside an
--- agent core aborts the transaction AND TAKES THE RECEIPT WITH IT — a judgement act leaving no
--- trace, which is the silent-daily-log failure F-A4 exists to end. So everything below the Tier-A
--- line becomes a RUNG and a refused receipt, never a raise.
---
--- THE FIVE PRE-RUNGS (design §6.2a, review finding F3) are the delegate's own raise paths, asked
--- HERE as rungs BEFORE the delegate is called. THEY ARE COURTESIES, NOT WALLS, and this file says
--- so rather than letting a later reader assume otherwise: pre-rung (c) reads the eligibility helper
--- without the client:fa-roles leaf the delegate takes immediately before its own check, and (b)'s
--- durable half is a partial unique index — both race a concurrent writer. THE DELEGATE'S RAISE
--- REMAINS THE STRUCTURAL WALL, Tier D captures the abort, and NO CELL MAY ASSERT that the pre-rungs
--- make the raise unreachable (Annex F.3).
---
--- F2's THREE WALLS ride here (design §5.3): (1) deterministic validation of the judged account,
--- (2) the judgement receipted with its stated basis, (3) visible at the sign door — §D4's half.
--- THE MAXIM: facts get anchored, judgements get receipted. The TERM is a fact and came through §B's
--- human door; the ACCOUNT is a judgement and arrives here as an argument, validated and receipted.
--- =================================================================================================
-create function clara._agent_prepayment_schedule_core(p_ctx jsonb, p_client uuid,
-    p_source_entry uuid, p_target_account text, p_target_basis text, p_rationale text,
-    p_model jsonb, p_op_key text) returns jsonb
-  language plpgsql security definer set search_path = clara, pg_temp as $agent$
-declare
-  v_firm uuid := (p_ctx ->> 'firm_id')::uuid;
-  v_rungs jsonb; v_receipt uuid; v_sched jsonb; v_pl jsonb; v_refusal text;
-  v_acct record; v_breach jsonb; v_lines jsonb; v_tmpl_sched jsonb := '[]'::jsonb;
-  v_start date; v_end date; v_total bigint; v_n int; v_name text; v_memo text;
-  v_hash text; v_twin uuid; v_result jsonb; v_template uuid; x jsonb; v_base bigint;
-begin
-  -- ---- TIER A (raises, writes nothing) -------------------------------------------------------
-  -- A receipt row needs a NON-NULL subject, and this verb's refusal subject IS the source entry.
-  -- With no entry there is no subject to name and no receipt that could honestly be written, so
-  -- this raises in the tier whose contract is "RAISES, writes nothing" (0138:1272-1273) rather than
-  -- inventing a stand-in subject (law 2: a derived subject is not evidence of the real one).
-  if p_source_entry is null then
-    raise exception 'a prepayment schedule names the source entry it amortises'
-      using errcode = 'CLR10', detail = '{"reason":"prepayment_source_required"}';
-  end if;
-
-  -- ---- TIER B (rungs; typed non-act receipt, no raise) ---------------------------------------
-  v_rungs := clara._close_tier_b_common(p_client, p_rationale, p_model);
-
-  -- B10 / B10' -- the evaluator derives the term and the amounts from DB-owned inputs, or refuses
-  -- by name. Its refusals are RETURNED, never raised, precisely so they can land as rungs.
-  if jsonb_array_length(v_rungs) = 0 then
-    v_sched := clara.prepayment_schedule_v1(p_client, p_source_entry);
-    v_refusal := v_sched ->> 'refusal';
-    if v_refusal is not null then
-      v_rungs := v_rungs || jsonb_build_array(
-        jsonb_build_object('rung', case when v_refusal = 'prepayment_source_unfit' then 'B10p' else 'B10' end,
-                           'token', v_refusal) || (v_sched - 'refusal' - 'schedule_version'));
-    end if;
-  end if;
-
-  -- F2 WALL 1 -- DETERMINISTIC VALIDATION OF THE JUDGED ACCOUNT. The model names the account; the
-  -- DB decides whether it is admissible, by the estate's OWN existing rule rather than a new one.
-  if jsonb_array_length(v_rungs) = 0 then
-    if p_target_account is null or btrim(p_target_account) = '' then
-      -- The no-plausible-account arm, NOT the default path (design §5.3). A lane that refused
-      -- whenever it was unsure of a classification would never charge anything -- over-caution
-      -- wearing a safety property's clothes.
-      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10t',
-        'token', 'prepayment_target_underivable',
-        'detail', 'no expense account was proposed for the amortisation charge'));
-    else
-      select ca.account_code, ca.account_type, ca.is_active into v_acct
-        from clara.coa_accounts ca
-       where ca.client_id = p_client and ca.account_code = btrim(p_target_account);
-      if v_acct.account_code is null then
-        v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10t',
-          'token', 'prepayment_target_ineligible', 'axis', 'account_unknown',
-          'account_code', btrim(p_target_account)));
-      elsif v_acct.account_type <> 'expense' then
-        -- P&L / expense-class: an amortisation charge is an expense. A balance-sheet target would
-        -- move the prepayment sideways and never charge it.
-        v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10t',
-          'token', 'prepayment_target_ineligible', 'axis', 'not_expense_class',
-          'account_code', v_acct.account_code, 'account_type', v_acct.account_type));
-      else
-        -- THE SAME HELPER THE PROPOSE DOOR AND THE POSTER ALREADY USE, so a bank-class or otherwise
-        -- ineligible account refuses by the estate's own existing rule. This is also the axis W41's
-        -- wired bank-account fixture exercises.
-        v_breach := clara._adj_line_eligibility_breach(p_client,
-          jsonb_build_array(jsonb_build_object('account_code', v_acct.account_code,
-            'debit_cents', 1, 'credit_cents', 0)));
-        if v_breach is not null then
-          v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10t',
-            'token', 'prepayment_target_ineligible') || v_breach);
-        end if;
-      end if;
-    end if;
-    if p_target_basis is null or btrim(p_target_basis) = '' then
-      -- F2 WALL 2's precondition: a judgement with NO RECORDED BASIS is what TA-P4 exists to
-      -- prevent. Refuse rather than receipt an unexplained classification.
-      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10t',
-        'token', 'prepayment_target_underivable', 'axis', 'basis_missing',
-        'detail', 'the target account was proposed without its stated grounds'));
-    end if;
-  end if;
-
-  -- ---- ASSEMBLE THE TEMPLATE, then ask the five pre-rungs over it ----------------------------
-  if jsonb_array_length(v_rungs) = 0 then
-    v_pl    := v_sched -> 'period_lines';
-    v_total := (v_sched ->> 'total_cents')::bigint;
-    v_n     := (v_sched ->> 'period_count')::int;
-    v_start := (v_pl -> 0 ->> 'period_start')::date;
-    v_end   := (v_pl -> (v_n - 1) ->> 'period_end')::date;
-    v_base  := (v_pl -> 0 ->> 'credit_cents')::bigint;
-    v_name  := 'Prepayment amortisation ' || substr(p_source_entry::text, 1, 8);
-    v_memo  := 'Prepayment amortisation';
-
-    -- THE JUDGED ACCOUNT IS APPLIED HERE, at lines-assembly, and NOWHERE ELSE. The evaluator emits
-    -- the prepaid-ASSET half with the account read off the source entry's own leg; this core pairs
-    -- each period with the DEBIT on the judged expense account. That is what keeps the evaluator
-    -- amounts-only and hard constraint 2 exact: no model NUMERAL reaches a durable artifact, a
-    -- model CLASSIFICATION does -- receipted here, shown at §D4's projection, signed by a human.
-    v_lines := jsonb_build_array(
-      jsonb_build_object('account_code', v_acct.account_code, 'debit_cents', v_base,
-                         'credit_cents', 0, 'description', v_memo),
-      jsonb_build_object('account_code', v_sched ->> 'prepaid_account_code', 'debit_cents', 0,
-                         'credit_cents', v_base, 'description', v_memo));
-    for x in select value from jsonb_array_elements(v_pl) loop
-      v_tmpl_sched := v_tmpl_sched || jsonb_build_array(jsonb_build_object(
-        'period_start', x ->> 'period_start', 'period_end', x ->> 'period_end',
-        'lines', jsonb_build_array(
-          jsonb_build_object('account_code', v_acct.account_code,
-                             'debit_cents', (x ->> 'credit_cents')::bigint,
-                             'credit_cents', 0, 'description', v_memo),
-          jsonb_build_object('account_code', x ->> 'account_code', 'debit_cents', 0,
-                             'credit_cents', (x ->> 'credit_cents')::bigint,
-                             'description', v_memo))));
-    end loop;
-
-    -- (a) template_alignment_unmet -- RECLASSIFIED, not deleted (Annex F.1). Under F1's ruled
-    -- convention monthly IS calendar-month at the bytes, so the template's start_date is a period
-    -- start BY CONSTRUCTION and this can no longer fire on ordinary caller input. It is kept as a
-    -- SELF-CHECK ON OUR OWN OUTPUT, because a silent misalignment would post a schedule against the
-    -- wrong periods, and it costs one comparison. Cell W38.
-    if clara._adj_period_start(p_client, 'monthly', v_start) is distinct from v_start then
-      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10a',
-        'token', 'template_alignment_unmet', 'start_date', v_start,
-        'period_start', clara._adj_period_start(p_client, 'monthly', v_start)));
-    end if;
-    -- (e) template_lines_unbalanced -- a SELF-CHECK on the evaluator's own output. A red here is a
-    -- fault in clara.prepayment_schedule_v1, not in the caller, and it must STILL land as a receipt
-    -- rather than an abort: a broken evaluator that leaves no evidence is strictly worse than one
-    -- that refuses loudly.
-    if (select coalesce(sum((e ->> 'debit_cents')::bigint), 0)
-             <> coalesce(sum((e ->> 'credit_cents')::bigint), 0)
-          from jsonb_array_elements(v_lines) as t(e)) then
-      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10e',
-        'token', 'template_lines_unbalanced'));
-    end if;
-    -- (d) template_date_unsupported -- the DERIVED first period end is domain-checked, not the
-    -- supplied dates (the distinction 0045's own round-9 comment draws).
-    if not clara._wdb_iso_date_supported(clara._adj_period_end(p_client, 'monthly', v_start)) then
-      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10d',
-        'token', 'template_date_unsupported', 'derived_period_end',
-        clara._adj_period_end(p_client, 'monthly', v_start)));
-    end if;
-    -- (c) template_line_ineligible -- the same helper, the same payload, asked before the delegate.
-    v_breach := clara._adj_line_eligibility_breach(p_client, v_lines);
-    if v_breach is not null then
-      v_rungs := v_rungs || jsonb_build_array(
-        jsonb_build_object('rung', 'B10c', 'token', 'template_line_ineligible') || v_breach);
-    end if;
-    -- (b) template_duplicate_pending -- THE RUNG A RE-WAKE HITS: the lane drafted this schedule
-    -- yesterday, nobody signed it, and today's pass would otherwise ABORT on the delegate's raise.
-    -- Same hash over the same canonical content, same partial-unique population, and the twin's id
-    -- rides in the payload so the receipt says WHICH template already stands.
-    v_hash := clara._adj_template_hash(btrim(v_name), 'monthly', v_start, v_end, false,
-      v_lines, v_memo, v_tmpl_sched);
-    select t.id into v_twin from clara.adjustment_templates t
-     where t.client_id = p_client and t.content_hash = v_hash
-       and t.status in ('proposed', 'live') limit 1;
-    if v_twin is not null then
-      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10b',
-        'token', 'template_duplicate_pending', 'template_id', v_twin));
-    end if;
-  end if;
-
-  -- ---- THE REFUSED RECEIPT -------------------------------------------------------------------
-  -- SUBJECT = THE SOURCE ENTRY, and that is not cosmetic (Annex E). The derived op key is per
-  -- (task, verb, CLIENT), so two source entries in ONE wake task share it. A client-subject refusal
-  -- would collide on uq_aar and hand entry B the receipt minted for entry A -- FIX-1's defect,
-  -- re-opened by a subject too coarse to tell two acts apart. Cell W14.
-  if jsonb_array_length(v_rungs) > 0 then
-    v_receipt := clara._agent_close_receipt(v_firm, p_client, 'prepayment_schedule', 'journal_entry',
-      p_source_entry, p_ctx ->> 'wake_kind', nullif(p_ctx ->> 'on_behalf_of', '')::uuid,
-      (p_ctx ->> 'task_id')::uuid, p_rationale, p_model, 'refused', v_rungs, p_op_key);
-    return jsonb_build_object('status', 'refused', 'receipt_id', v_receipt, 'rung_vector', v_rungs);
-  end if;
-
-  -- ---- THE ACTED PATH ------------------------------------------------------------------------
-  -- THE DELEGATE TAKES A SUB-KEY. propose_adjustment_template holds its OWN _reserve_op slot
-  -- (0045:3864), so two entries in one task need two keys there. The depreciation catch-up already
-  -- solves this exact problem the same way (0138:2399 against :2379-2381).
-  v_result := clara._propose_adjustment_template_core(
-    jsonb_build_object('firm', v_firm, 'actor', clara.agent_user_id()),
-    p_client, v_name, 'monthly', v_start, v_end, false, v_lines, v_memo,
-    p_op_key || ':' || p_source_entry::text, null, v_tmpl_sched);
-  v_template := (v_result ->> 'template_id')::uuid;
-  -- FAIL CLOSED rather than substitute a stand-in subject: a delegate answer with no template_id
-  -- means the proposal did not happen the way this receipt is about to claim it did. The
-  -- _agent_mint_month_snapshot_core precedent (0138), verbatim in spirit.
-  if v_template is null then
-    raise exception 'the template proposal returned no template_id; the receipt has no subject to name'
-      using errcode = 'CLR08', detail = '{"reason":"prepayment_subject_unresolvable"}';
-  end if;
-
-  -- SUBJECT = THE TEMPLATE. Differing subjects across verdicts is the shipped idiom (the fix order
-  -- records begin_close / open_fy / mint_snapshot as "safe by differing subject"), and it is what
-  -- keeps an acted and a refused receipt for the same entry from ever contending.
-  -- F2 WALL 2: the judged account AND ITS STATED BASIS ride the receipt, through the law-79
-  -- machinery that already carries model name, version and rationale.
-  v_receipt := clara._agent_close_receipt(v_firm, p_client, 'prepayment_schedule',
-    'adjustment_template', v_template, p_ctx ->> 'wake_kind',
-    nullif(p_ctx ->> 'on_behalf_of', '')::uuid, (p_ctx ->> 'task_id')::uuid,
-    p_rationale || ' | target account ' || v_acct.account_code || ': ' || btrim(p_target_basis),
-    p_model, 'acted', '[]'::jsonb, p_op_key);
-
-  return jsonb_build_object('status', 'acted', 'receipt_id', v_receipt,
-    'template_id', v_template, 'status_of_template', 'proposed',
-    'schedule_version', v_sched ->> 'schedule_version', 'total_cents', v_total,
-    'period_count', v_n, 'target_account', v_acct.account_code,
-    'target_basis', btrim(p_target_basis), 'content_hash', v_hash);
-end $agent$;
-revoke all on function clara._agent_prepayment_schedule_core(jsonb, uuid, uuid, text, text, text, jsonb, text) from public;
-
--- THE WRAPPER. No DML text in its body -- it names ITSELF in its _close_wake_ctx call and delegates,
--- which is what every census in the estate keys on.
-create function clara.wake_establish_prepayment_schedule(p_client uuid, p_source_entry uuid,
-    p_target_account text, p_target_basis text, p_rationale text, p_model jsonb, p_op_key text)
-  returns jsonb
-  language plpgsql security definer set search_path = clara, pg_temp as $wake$
-declare v_ctx jsonb;
-begin
-  v_ctx := clara._close_wake_ctx('wake_establish_prepayment_schedule', 'client', p_client, p_op_key);
-  return clara._agent_prepayment_schedule_core(v_ctx, p_client, p_source_entry, p_target_account,
-    p_target_basis, p_rationale, p_model, p_op_key);
-end $wake$;
-revoke all on function clara.wake_establish_prepayment_schedule(uuid, uuid, text, text, text, jsonb, text) from public;
-
--- THE ALLOWLIST ROW -- the THIRTEENTH close_prep entry. §0 measured the pre-count at 12 and §TAIL
--- asserts the delta, so the flip is a measured change rather than a literal restated.
--- The writable column is function_name; fn_name is GENERATED from it (measured on the rig, not
--- read off a design line -- the first cut of this INSERT named the generated column and was
--- refused, which is the storage layer doing exactly what it should).
-insert into clara.wake_fn_allowlist(wake_kind, function_name)
-  values ('close_prep', 'wake_establish_prepayment_schedule');
-
--- THE ONE NEW PRIVILEGE IN THIS ENTIRE TRAIN (NON-GOAL 3: no floor moves anywhere).
-grant execute on function clara.wake_establish_prepayment_schedule(uuid, uuid, text, text, text, jsonb, text)
-  to clara_wake_interactive;
-
-comment on function clara.wake_establish_prepayment_schedule(uuid, uuid, text, text, text, jsonb, text) is
-  'F-A4 PR-2a: wrapper 12, unparked. DRAFT-ONLY BY CONSTRUCTION, not by promise -- this verb reaches only clara._propose_adjustment_template_core, and adjustment_templates.status moves to ''live'' in exactly ONE body, clara.sign_adjustment_template, which opens the ADMIN floor and holds no grant to any wake role (R6). The judged expense account arrives as an argument with its stated basis, is validated deterministically, receipted, and shown at the sign door; the AMOUNTS come only from clara.prepayment_schedule_v1. Facts get anchored, judgements get receipted.';
 
 -- =================================================================================================
 -- §I — THE CATALOG-COMMENT TRUINGS (Annex B.4, B.5).
