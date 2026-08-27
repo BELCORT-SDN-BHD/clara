@@ -121,9 +121,81 @@
     "registers": "Registers",
     "knowledge": "Knowledge"
   },
-  "ClientJournals": {
+  "JournalsWorkbench": {
     "heading": "Journals",
-    "body": "P2 shell — drafts, the review queue, manual JE compose and posted-entry reversal are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+    "loading": "Loading journals…",
+    "noSession": "Sign in to view this client's journals.",
+    "unauthenticated": "Your session has expired. Sign in again to view this client's journals.",
+    "forbidden": "You don't have permission to view this client's journals.",
+    "notFound": "Journals are not available for this client right now.",
+    "loadError": "Could not load journals: {message}",
+    "retry": "Retry",
+    "tabs": {
+      "drafts": "Drafts & review queue",
+      "posted": "Posted"
+    },
+    "status": {
+      "draft": "Draft",
+      "approved": "Approved",
+      "withdrawn": "Withdrawn"
+    },
+    "section": {
+      "needs_review": "Needs review",
+      "needs_you": "Needs you"
+    },
+    "linesEditor": {
+      "account": "Account",
+      "description": "Description",
+      "debit": "Debit",
+      "credit": "Credit",
+      "selectAccount": "Select an account…",
+      "removeLine": "Remove line",
+      "addLine": "Add line",
+      "presentationSumLabel": "Totals (presentation sum)",
+      "notBalanced": "Debits and credits don't match yet — the DB will refuse an unbalanced entry on submit."
+    },
+    "compose": {
+      "trigger": "New journal entry",
+      "title": "New journal entry",
+      "description": "A manual entry — recorded via record_client_resolution + draft_entry, the DB's own manual-compose ceremony.",
+      "postingDate": "Posting date",
+      "memo": "Memo",
+      "submit": "Create draft",
+      "submitting": "Creating…"
+    },
+    "drafts": {
+      "empty": "No drafts are waiting for review.",
+      "showingOf": "Showing {shown} of {total} drafts — some may be hidden behind a large backlog in another category. Narrow the queue to see the rest.",
+      "highStakes": "High stakes",
+      "noMemo": "(no memo)",
+      "entryUnavailable": "This entry could not be read — it may have changed since the queue was last loaded.",
+      "account": "Account",
+      "description": "Description",
+      "debit": "Debit",
+      "credit": "Credit",
+      "presentationSumLabel": "Totals (presentation sum)",
+      "presentationSumUnavailable": "Totals unavailable — too many lines to verify",
+      "linesTruncated": "This client has more lines than could be safely read at once — the totals below cannot be verified and are withheld.",
+      "attestation": "Attestation (optional)",
+      "attestationPlaceholder": "Optional attestation note…",
+      "approve": "Approve",
+      "revise": "Revise",
+      "saveRevision": "Save revision",
+      "cancel": "Cancel"
+    },
+    "posted": {
+      "empty": "No posted entries yet.",
+      "noMemo": "(no memo)",
+      "presentationSumLabel": "presentation sum",
+      "presentationSumUnavailable": "unavailable — too many lines to verify",
+      "alreadyReversed": "This entry has already been reversed.",
+      "isReversal": "This entry is itself a reversal — a reversal cannot be reversed.",
+      "reasonLabel": "Reversal reason",
+      "reasonPlaceholder": "Reason for reversal (required)…",
+      "reverse": "Reverse",
+      "confirmReverse": "Confirm reversal",
+      "cancel": "Cancel"
+    }
   },
   "ClientDocuments": {
     "heading": "Documents",
