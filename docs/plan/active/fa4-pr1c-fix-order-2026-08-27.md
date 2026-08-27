@@ -7,12 +7,22 @@ fresh-context native opus lane, rig-instrumented, whose verdict this file is the
 record of (§Native). Both verdicts: **FIX-REQUIRED**. This file is the single fix order
 the build lane executes on this branch.*
 
-## Codex HIGH-1 (the law-71 reading collision) — OUT OF SCOPE for this fix round
+## Codex HIGH-1 (the law-71 reading collision) — RULED 2026-08-27: the design's reading
 
-The owner ruling is still pending (see the Codex record's §Conflict). Both reviewers state
-everything else is independent of it, so the fix round proceeds. **Nothing in this fix
-order touches the five preparation wrappers' grants or allowlist rows.** Evidence relevant
-to the ruling, recorded here without ruling: the native lane independently re-derived all
+**Owner ruling (Tao, 2026-08-27, in-session):** the gated design's reading stands. The
+reserved human acts under law 71 are exactly `finalize_close`, `reopen_fiscal_year`,
+`attest_close_exception` and `settle_close_proposal` — the professional-signature acts.
+`begin_close`/`abandon_close`, opening a fiscal year, running a depreciation period and
+minting a month snapshot are agent-lawful *preparation*: reversible, receipted, with every
+number produced by the DB's deterministic evaluators. **HIGH-1 is therefore WITHDRAWN; the
+five preparation wrappers' grants, allowlist rows and the walls-census tests are correct as
+written.** Rationale record: the vision's boundary is who SIGNS, not who prepares (the
+ADR-0071 professional-signature framing); the alternative reading would reduce the clocked
+lane to a checklist generator. **Nothing in this fix order touches the five preparation
+wrappers' grants or allowlist rows** (they were out of scope while the ruling was pending
+and need no change now that it has landed on the design's side).
+
+Evidence that stood behind the ruling: the native lane independently re-derived all
 four law-71 walls at the live catalog (roster resolving 49/49, non-vacuous) and ran the
 full bypass battery — forged-ctx calls at the ungranted cores, a live wake session reaching
 for `settle_close_proposal` / `finalize_close` / its own brake — every attempt refused with
