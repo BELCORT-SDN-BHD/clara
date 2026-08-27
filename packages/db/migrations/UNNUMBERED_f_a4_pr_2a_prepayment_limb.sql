@@ -1040,4 +1040,699 @@ create policy p_cph_human on clara.close_prep_holds
   using (firm_id = clara.jwt_firm()
          and clara.actor_role_rank() >= clara.role_rank('bookkeeper'));
 
+-- =================================================================================================
+-- §D — THE EXTRACTION [D1 WRITE-QUIESCE]. clara._propose_adjustment_template_core, then the door as
+-- a thin delegate (design §6.1). This is the ONE core extraction R6 leaves standing;
+-- clara.sign_adjustment_template is UNTOUCHED (NON-GOAL 2) because signing stays a human ADMIN act
+-- and an extracted sign core would be a permanent dead member.
+--
+-- BUILT BY HARVEST, NEVER BY RE-TYPING. The body below was produced by running
+-- pg_get_functiondef on the LIVE catalog and applying COUNTED substitutions to that text — the
+-- 0046 S7.1 / 0048 S1 law 0052 restates at its own SECTION 1. It is the direct remedy for the
+-- F-A3/PR-1b class, where a CoR built from a migration's FILE TEXT silently erased a LATER
+-- migration's dynamic patch on that body. §2's census says this body carries no later patch; THE
+-- HARVEST IS WHAT PROVES THAT RATHER THAN ASSUMING IT.
+--
+-- THE SUBSTITUTION IS EXACTLY TWO FIELDS WIDE, asserted by exact count at generation time:
+--   the firm field  x5   ->  c_firm       (read from p_ctx)
+--   the actor field x2   ->  c_actor      (read from p_ctx)
+-- plus three structural edits (the ctx declaration, the _human_ctx call, the hash call), two INSERT
+-- lines for the new column, and §5.2a's validation block. THE MOVE WAS A MOVE: a line-level
+-- differential of the harvested body against this one removes exactly TEN lines, and every one of
+-- them is a named substitution site. Nothing else changed. Cell W1 re-derives that differential.
+--
+-- THE FLOOR MOVED TO THE DOOR, which is where a floor belongs (0055:507-509): the core is UNGRANTED
+-- and reads its ctx from the caller; the door opens _human_ctx(role_rank('bookkeeper')) exactly as
+-- the shipped body did, so W2's viewer still refuses and W2's bookkeeper still succeeds.
+--
+-- p_schedule RIDES LAST WITH A DEFAULT, per 0045:6707-6711's own house rule, so no existing caller
+-- moves and the grant string is the only other line that changes.
+-- =================================================================================================
+create function clara._propose_adjustment_template_core(p_ctx jsonb, p_client uuid, p_name text,
+    p_cadence text, p_start_date date, p_end_date date, p_auto_reverse boolean, p_lines jsonb,
+    p_memo_template text, p_op_key text, p_replaces uuid default null,
+    p_schedule jsonb default null)
+  returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $core$
+declare
+  c_firm uuid; c_actor uuid; v_sched jsonb; v_shape_t text[]; v_shape_s text[];
+  v_sd bigint; v_sc bigint; v_prev date; v_first_ps date; v_last_pe date; y jsonb;
+  v_dedupe jsonb; v_firm uuid; v_id uuid; v_lines jsonb; v_hash text;
+  v_dr bigint := 0; v_cr bigint := 0; v_n int; v_breach jsonb; x jsonb;
+  v_d bigint; v_k bigint; v_warn jsonb := '[]'::jsonb;
+  v_repl_status text; v_anc jsonb;
+  v_repl_root uuid;    -- [R12 FIX 2026-08-04] the predecessor's lineage root, read with its status
+  v_constraint text;   -- [R11 FIX 2026-08-04] which of this table's partial uniques raised -- three now
+begin
+  -- EXTRACTED (F-A4 PR-2a §D). The floor this line used to open lives in the DOOR now; a core
+  -- is ungranted and reads its ctx from the caller. Exactly two fields, which is the whole
+  -- surface Annex B.0c measured on this body: the firm field five times, the actor field
+  -- twice -- re-measured at the LIVE catalog by the generator that produced this text and
+  -- asserted by an exact count, not taken from the annex on trust.
+  -- (The two field names are spelled out in prose here on purpose: written literally, this
+  -- comment would itself be rewritten by the substitution it describes.)
+  c_firm  := (p_ctx ->> 'firm')::uuid;
+  c_actor := (p_ctx ->> 'actor')::uuid;
+  if c_firm is null or c_actor is null then
+    raise exception 'the propose core requires a firm and an actor in its ctx'
+      using errcode = 'CLR10', detail = '{"reason":"ctx_incomplete"}';
+  end if;
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+
+  -- ARGUMENT VALIDATION RUNS BEFORE THE RESERVATION, because the op-key request hash is
+  -- ('client', p_client, 'hash', content_hash) (ABI SSE) and the content hash is only
+  -- computable once the lines canonicalise. A malformed proposal therefore never occupies an
+  -- op_receipts slot at all.
+  if p_name is null or btrim(p_name) = '' then
+    raise exception 'a template name is required'
+      using errcode = 'CLR10', detail = '{"reason":"template_name_required"}';
+  end if;
+  if p_memo_template is null or btrim(p_memo_template) = '' then
+    raise exception 'a memo template is required -- it is the memo every occurrence carries'
+      using errcode = 'CLR10', detail = '{"reason":"template_memo_required"}';
+  end if;
+  -- [WDB-G3] the cadence vocabulary is monthly + annual, and nothing else.
+  if p_cadence is null or p_cadence not in ('monthly', 'annual') then
+    raise exception 'template cadence must be monthly or annual (WDB-G3)'
+      using errcode = 'CLR10', detail = '{"reason":"template_cadence_invalid"}';
+  end if;
+  if p_auto_reverse is null then
+    raise exception 'auto_reverse must be stated true or false'
+      using errcode = 'CLR10', detail = '{"reason":"template_auto_reverse_required"}';
+  end if;
+  if p_start_date is null then
+    raise exception 'a start date is required'
+      using errcode = 'CLR10', detail = '{"reason":"template_start_required"}';
+  end if;
+  -- THE SUPPORTED DATE DOMAIN, AT THE DOOR THAT LETS A DATE IN (round 8). Every period bound
+  -- this family ever derives descends from start_date, and every one of them is serialised into
+  -- an entry's period stamp and compared as ISO text by clara._wdb_rerun_breach -- whose
+  -- four-digit form can faithfully carry AD 0001-01-01 .. 9999-12-31 and nothing else. Refusing
+  -- HERE rather than teaching the gate about eras is the root fix: a BC or five-digit stamp is
+  -- not a comparison problem, it is a date this product has no accounting meaning for, and one
+  -- accepted at propose brings the client's WHOLE calendar into every gate's set (measured: a
+  -- BC-dated occurrence made May 2026 read as shape_already_met). The full measurement is at
+  -- clara._wdb_iso_date_supported.
+  if not clara._wdb_iso_date_supported(p_start_date) then
+    raise exception 'the start date % is outside the supported range 0001-01-01 .. 9999-12-31 (AD)', p_start_date
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'template_date_unsupported', 'axis', 'start_date',
+          'supported_from', date '0001-01-01', 'supported_to', date '9999-12-31')::text;
+  end if;
+  if not clara._wdb_iso_date_supported(p_end_date) then
+    raise exception 'the end date % is outside the supported range 0001-01-01 .. 9999-12-31 (AD)', p_end_date
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'template_date_unsupported', 'axis', 'end_date',
+          'supported_from', date '0001-01-01', 'supported_to', date '9999-12-31')::text;
+  end if;
+  if p_end_date is not null and p_end_date < p_start_date then
+    raise exception 'the end date precedes the start date'
+      using errcode = 'CLR10', detail = '{"reason":"template_window_invalid"}';
+  end if;
+
+  -- THE LINE SHAPE (ABI SSC): an array of at least two rows; exactly one of debit/credit
+  -- positive per row; balanced to the sen. An occurrence ALWAYS carries a charge, which is
+  -- why the zero-charge noop branch the 0041 poster needs does not exist here [L3/11].
+  if p_lines is null or jsonb_typeof(p_lines) <> 'array' then
+    raise exception 'template lines must be a JSON array'
+      using errcode = 'CLR10', detail = '{"reason":"template_lines_invalid","axis":"shape"}';
+  end if;
+  v_n := jsonb_array_length(p_lines);
+  if v_n < 2 then
+    raise exception 'a template needs at least two lines'
+      using errcode = 'CLR10', detail = '{"reason":"template_lines_invalid","axis":"too_few"}';
+  end if;
+  for x in select value from jsonb_array_elements(p_lines) loop
+    if jsonb_typeof(x) <> 'object' or nullif(btrim(coalesce(x ->> 'account_code', '')), '') is null then
+      raise exception 'every template line needs an account_code'
+        using errcode = 'CLR10',
+          detail = '{"reason":"template_lines_invalid","axis":"account_code"}';
+    end if;
+    v_d := coalesce((x ->> 'debit_cents')::bigint, 0);
+    v_k := coalesce((x ->> 'credit_cents')::bigint, 0);
+    if v_d < 0 or v_k < 0 or (v_d > 0) = (v_k > 0) then
+      raise exception 'every template line carries exactly one positive side (debit or credit), in cents'
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'template_lines_invalid', 'axis', 'one_side',
+            'account_code', x ->> 'account_code')::text;
+    end if;
+    v_dr := v_dr + v_d;
+    v_cr := v_cr + v_k;
+  end loop;
+  if v_dr <> v_cr then
+    raise exception 'template lines must balance exactly to the sen (debit % vs credit %)', v_dr, v_cr
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'template_lines_invalid', 'axis', 'unbalanced',
+          'debit_cents', v_dr, 'credit_cents', v_cr)::text;
+  end if;
+
+  v_lines := clara._adj_canon_lines(p_lines);
+
+  -- ===== F-A4 PR-2a §5.2a -- THE CONGRUENCE CONSTRAINT, VALIDATED AT PROPOSE (review N1) =====
+  -- THIS IS WHAT EARNS THE FOUR-BODY D1 INVENTORY. Six other live bodies read t.lines as a stand-in
+  -- for WHAT AN OCCURRENCE POSTS (Annex H.3 censuses them with sites). Under a schedule that is no
+  -- longer trivially true -- unless every period agrees with `lines` on everything those readers
+  -- look at. So the door validates it here, once, instead of six bodies each learning to read a
+  -- schedule. WITHOUT CLAUSE (a) THE D1 INVENTORY IS SIX BODIES, NOT FOUR.
+  v_sched := clara._adj_canon_schedule(p_schedule);
+  if v_sched is not null then
+    -- (c) COVERAGE. An empty schedule is refused EXPLICITLY: it would leave every occurrence to the
+    -- resolver's no-match branch after signature.
+    if jsonb_array_length(v_sched) = 0 then
+      raise exception 'a template schedule cannot be empty'
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'schedule_coverage_gap', 'axis', 'empty')::text;
+    end if;
+    -- (a) SHAPE CONGRUENCE -- every period's (account_code, direction) MULTISET equals `lines`'.
+    -- This is exactly the projection clara._wdb_line_shape computes: it emits code||':D'/':C' keyed
+    -- on debit_cents > 0 and DISCARDS EVERY MAGNITUDE (0045:2054-2062). Amount-blind readers are
+    -- therefore correct BY CONSTRUCTION, not by luck.
+    select array_agg((e ->> 'account_code') || case when (e ->> 'debit_cents')::bigint > 0 then ':D' else ':C' end order by 1)
+      into v_shape_t from jsonb_array_elements(v_lines) as t(e);
+    v_prev := null; v_first_ps := null; v_last_pe := null;
+    for y in select value from jsonb_array_elements(v_sched) loop
+      select array_agg((e ->> 'account_code') || case when (e ->> 'debit_cents')::bigint > 0 then ':D' else ':C' end order by 1)
+        into v_shape_s from jsonb_array_elements(y -> 'lines') as t(e);
+      if v_shape_s is distinct from v_shape_t then
+        raise exception 'a schedule period posts a different set of accounts than the template lines declare'
+          using errcode = 'CLR10',
+            detail = jsonb_build_object('reason', 'schedule_shape_incongruent',
+              'period_start', y ->> 'period_start', 'template_shape', v_shape_t,
+              'period_shape', v_shape_s)::text;
+      end if;
+      -- (b) PER-PERIOD BALANCE -- so the poster's own exact-equality check (0045:5196-5199) can
+      -- never be reached with an unbalanced occurrence.
+      select coalesce(sum((e ->> 'debit_cents')::bigint), 0), coalesce(sum((e ->> 'credit_cents')::bigint), 0)
+        into v_sd, v_sc from jsonb_array_elements(y -> 'lines') as t(e);
+      if v_sd <> v_sc then
+        raise exception 'a schedule period does not balance to the sen (debit % vs credit %)', v_sd, v_sc
+          using errcode = 'CLR10',
+            detail = jsonb_build_object('reason', 'schedule_period_unbalanced',
+              'period_start', y ->> 'period_start', 'debit_cents', v_sd, 'credit_cents', v_sc)::text;
+      end if;
+      -- (c) continued: contiguous, non-overlapping, in order. _adj_canon_schedule sorted them, so
+      -- a gap or an overlap is a comparison against the previous period's end.
+      if v_prev is not null and (y ->> 'period_start')::date <> v_prev + 1 then
+        raise exception 'the schedule leaves a gap or overlaps between periods'
+          using errcode = 'CLR10',
+            detail = jsonb_build_object('reason', 'schedule_coverage_gap', 'axis', 'discontiguous',
+              'previous_period_end', v_prev, 'next_period_start', y ->> 'period_start')::text;
+      end if;
+      if v_first_ps is null then v_first_ps := (y ->> 'period_start')::date; end if;
+      v_prev := (y ->> 'period_end')::date;
+      v_last_pe := v_prev;
+    end loop;
+    -- (c) continued: the run must span the DECLARED template range exactly at both ends.
+    if v_first_ps <> p_start_date or (p_end_date is not null and v_last_pe <> p_end_date) then
+      raise exception 'the schedule does not span the template''s own date range'
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'schedule_coverage_gap', 'axis', 'span',
+            'schedule_start', v_first_ps, 'schedule_end', v_last_pe,
+            'template_start', p_start_date, 'template_end', p_end_date)::text;
+    end if;
+    -- THE HONEST CEILING, stated rather than implied (the Annex F.3 discipline): clauses (a)-(c)
+    -- prove the schedule is well-formed and spans the DECLARED range contiguously. They do not
+    -- prove that its entry boundaries coincide with the boundaries the occurrence runner will
+    -- derive for a cadence whose periods are not the entries' own. For F1's ruled convention
+    -- (monthly = calendar month) they do coincide by construction. For anything else,
+    -- clara._adj_period_lines' typed schedule_period_uncovered refusal remains the STRUCTURAL wall,
+    -- and no cell may assert that this validation makes it unreachable.
+  end if;
+  v_hash := clara._adj_template_hash(btrim(p_name), p_cadence, p_start_date, p_end_date,
+    p_auto_reverse, v_lines, p_memo_template, v_sched);
+
+  -- THE LINEAGE DECLARATION IS PART OF THE REQUEST'S IDENTITY, and it has to be [round 10, lane
+  -- P1]. content_hash covers {name, cadence, start, end, auto_reverse, lines, memo} and NOT the
+  -- declaration, so without this term two proposals that differ ONLY in what they say they replace
+  -- hash identically: a caller who retried one op_key with a CORRECTED p_replaces would be handed
+  -- the first receipt and would believe a declaration that was never written. clara._reserve_op
+  -- already has the right refusal for that shape ('op_key reused with different args', CLR10) --
+  -- it just needs to be able to SEE the difference.
+  --
+  -- THE TERM IS CONDITIONAL SO ABI SSE IS UNTOUCHED FOR EVERY EXISTING CALLER: with p_replaces
+  -- NULL the object is byte-for-byte the ('client', 'hash') pair ABI SSE pins, so no receipt this
+  -- product has ever minted changes shape. Only a proposal that MAKES a declaration carries it.
+  v_dedupe := clara._reserve_op(c_firm, 'propose_adjustment_template', p_op_key,
+    clara._hash(jsonb_build_object('client', p_client, 'hash', v_hash)
+      || case when p_replaces is null then '{}'::jsonb
+              else jsonb_build_object('replaces', p_replaces) end));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  select cl.firm_id into v_firm from clara.clients cl where cl.id = p_client;
+  if v_firm is null or v_firm <> c_firm then
+    raise exception 'client is not in your firm' using errcode = 'CLR11';
+  end if;
+
+  -- THE CLIENT RUNG, THEN THE LEAF (the pinned order for every role-claiming writer). The
+  -- rung is what makes the FY read below and the reservation read under the leaf ONE
+  -- lock-holding transaction against a concurrent clara.set_client_fy_end or enrolment.
+  perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
+
+  -- START AND END ARE CADENCE BOUNDARIES, VALIDATED AGAINST THE CLIENT'S CURRENT FY
+  -- [L2/23, L7/3]. start_date MUST be a period START (the first eligible period begins at
+  -- it, so a mid-period start would silently shift every window); end_date, when stated,
+  -- MUST be a period END (else the last occurrence would straddle a partial period and the
+  -- admission window would never close cleanly). For an ANNUAL template both are FY-relative,
+  -- which is why clara.set_client_fy_end refuses while a live annual template exists and why
+  -- sign re-validates: the propose -> FYE-change -> sign window is the one gap left, and
+  -- sign closes it.
+  if clara._adj_period_start(p_client, p_cadence, p_start_date) is distinct from p_start_date then
+    raise exception 'the start date % is not the first day of a % period for this client', p_start_date, p_cadence
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'template_fy_stale', 'axis', 'start_date',
+          'cadence', p_cadence, 'expected',
+          clara._adj_period_start(p_client, p_cadence, p_start_date))::text;
+  end if;
+  if p_end_date is not null
+     and clara._adj_period_end(p_client, p_cadence, p_end_date) is distinct from p_end_date then
+    raise exception 'the end date % is not the last day of a % period for this client', p_end_date, p_cadence
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'template_fy_stale', 'axis', 'end_date',
+          'cadence', p_cadence, 'expected',
+          clara._adj_period_end(p_client, p_cadence, p_end_date))::text;
+  end if;
+
+  -- THE DATE THE CADENCE DERIVES IS ASKED THE SAME QUESTION AS THE DATE THE HUMAN SUPPLIED
+  -- (round 9, Codex finding 2). Round 8 domain-checked start_date and end_date -- the two dates a
+  -- caller can type -- and a template's periods are DERIVED from start_date, not typed. MEASURED:
+  -- a client with FYE 30 November and an ANNUAL template starting 9999-12-01 proposes and SIGNS
+  -- live, because 9999-12-01 is inside the domain AND is a genuine annual period start; its first
+  -- period then ENDS 10000-11-30, and every run of it is refused CLR38
+  -- period_request_invalid/date_unsupported, forever. A template that signs live and can never
+  -- run is a walled corridor in time, and the door that let the date in is this one.
+  --
+  -- THE FIRST DERIVED END IS SUFFICIENT, and this is the whole of "any end the cadence can derive
+  -- inside the template's own life": with end_date STATED, it is itself domain-checked above and
+  -- is a period end, so every derived end in between is <= it; with end_date NULL, the only
+  -- derived end that can leave the domain is the first one, because every later period opens the
+  -- day after its predecessor closes and the poster refuses any period that has not ENDED in MYT
+  -- (v_pe >= clara._fa_today()) long before the calendar could reach year 10000. The cadence
+  -- algebra itself does not overflow -- Postgres DATE runs to 5874897-12-31 -- so this is a
+  -- DOMAIN refusal, not an arithmetic guard.
+  --
+  -- IT IS ASKED HERE, AFTER THE FY ALIGNMENT, because the derivation needs the client's financial
+  -- year and therefore the 203005004 rung, and because a start date that is not a period start at
+  -- all deserves its own refusal (template_fy_stale) before this one.
+  if not clara._wdb_iso_date_supported(clara._adj_period_end(p_client, p_cadence, p_start_date)) then
+    raise exception 'this template''s first % period would end % , which is outside the supported range 0001-01-01 .. 9999-12-31 (AD)', p_cadence, clara._adj_period_end(p_client, p_cadence, p_start_date)
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'template_date_unsupported',
+          'axis', 'derived_period_end', 'cadence', p_cadence, 'period_start', p_start_date,
+          'period_end', clara._adj_period_end(p_client, p_cadence, p_start_date),
+          'supported_from', date '0001-01-01', 'supported_to', date '9999-12-31')::text;
+  end if;
+
+  -- LEAF-LAST. propose CLAIMS the line accounts for this template, so it serialises against
+  -- every other role-claiming writer on this client through the one `client:fa-roles` leaf.
+  perform clara._fa_lock_roles(p_client);
+
+  v_breach := clara._adj_line_eligibility_breach(p_client, v_lines);
+  if v_breach is not null then
+    raise exception 'template line account % cannot back a recurring adjustment (%)', v_breach ->> 'account_code', v_breach ->> 'axis'
+      using errcode = 'CLR10',
+        detail = (jsonb_build_object('reason', 'template_line_ineligible') || v_breach)::text;
+  end if;
+
+  -- THE FRIENDLY DUPLICATE REFUSAL. The partial unique index is the durable half; this is the
+  -- half that names the twin, so a human sees which template they already have.
+  if exists (select 1 from clara.adjustment_templates t
+             where t.client_id = p_client and t.content_hash = v_hash
+               and t.status in ('proposed', 'live')) then
+    raise exception 'this client already has a proposed or live template with identical content; retire it before proposing the same one again'
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'template_duplicate', 'content_hash', v_hash)::text;
+  end if;
+
+  -- ------------------------------------------------------------------------------------
+  -- THE LINEAGE DECLARATION (round 10, lane P1; the OWNER's option (b)). FAIL-CLOSED: a
+  -- declaration this body cannot verify is REFUSED, never stored and never softened into a
+  -- warning -- because the gate downstream will ASSERT on it and forbid a lawful act, and an
+  -- assertion is only allowed to rest on a fact that was checked at the door that wrote it.
+  --
+  -- IT IS VALIDATED HERE, AFTER THE RESERVATION AND UNDER THE CLIENT RUNG, and that placement is
+  -- deliberate rather than lazy: every term of it is a READ of this client's template register
+  -- (existence, tenancy, status, chain depth), so it cannot run before the firm check that
+  -- establishes the caller may read that register at all, and it must run under the 203005004 rung
+  -- so a concurrent clara.retire_adjustment_template cannot move the predecessor's status between
+  -- the read and the INSERT. It sits with the other two register-reading refusals
+  -- (template_line_ineligible, template_duplicate) for exactly that reason.
+  --
+  -- THREE TERMS, EACH REFUSED BY NAME, and each refusal names an act the caller can actually take
+  -- (WDB-R2 -- the remedy in a refusal is a promise about another door):
+  --   (i)   THE PREDECESSOR MUST BE A TEMPLATE OF THIS CLIENT. The read is client-scoped, so a
+  --         forged id, a deleted-and-restored id and ANOTHER CLIENT'S template all land here as
+  --         one fact -- "these books have no such template" -- rather than three, and none of them
+  --         can be used to probe whether some other client owns that id (the CLR11 read-shape
+  --         discipline this file already keeps at clara.get_adjustment_run).
+  --   (ii)  IT MUST BE RETIRED. [WDB-G13]'s edit is retire-and-re-propose, and a replacement for
+  --         something still LIVE is not a replacement, it is a second live template moving the
+  --         same accounts -- the state the poster refuses every month and the state O1's propose
+  --         advisory already warns about. Refusing here is what keeps the recorded fact TRUE:
+  --         "replaces" must mean the predecessor stopped.
+  --         WHAT THIS COSTS THE PROPOSE-FIRST ORDER, MEASURED RATHER THAN WAVED AWAY [R12 FIX
+  --         2026-08-04 -- confirming round, Codex CXR1]. The sentence that stood here said the
+  --         propose-first order "keeps working exactly as lane O1 shipped it, WITHOUT p_replaces
+  --         and with its warning". The warning was the false half: round 11's term (c) scanned
+  --         RETIRED siblings only, and in this order the predecessor is LIVE at propose -- so
+  --         the pair got no declaration (refused here), no wall (predicate (5) needs a recorded
+  --         edge) and no advisory (no retired subject) AT ONCE. MEASURED end to end: four
+  --         already-charged months re-ran on fresh codes for RM1,800,000 against an RM600,000
+  --         intention, with `warnings: []`, `blocked: []` and the sweep advertising it as due.
+  --         The order is still lawful and still refused nothing; what changed is that the
+  --         advisory now covers LIVE siblings too (clara._wdb_period_overlap_advisory) and is
+  --         re-asked at SIGN, the last human moment before money can move. The two acts that
+  --         make the declaration itself possible are unchanged: retire, then propose -- or
+  --         propose, retire, and re-propose with the stamp.
+  --   (iii) THE CHAIN MUST STILL HAVE ROOM. The gate walks this chain upward under a cap
+  --         (clara._wdb_template_ancestry, which OWNS the number); refusing to EXTEND a chain that
+  --         is already at it is the root fix -- it means a walk can never truncate on a history
+  --         these verbs built, and truncation stays what it should be: a signal of a forged or
+  --         restored graph. `truncated` is refused for the same reason and with the same act: a
+  --         predecessor whose own ancestry cannot be walked to a root is not a foundation to
+  --         assert on.
+  -- SELF-REFERENCE IS NOT A TERM HERE because it is not reachable here: `id` is minted by the
+  -- table's own default at INSERT, so p_replaces cannot name it. The S1 CHECK stands over the
+  -- storage layer for a hand-written row, which is the only writer that could ever try.
+  if p_replaces is not null then
+    -- [R12 FIX 2026-08-04] The predecessor's LINEAGE ROOT is read with its status, in one statement under
+    -- the rung: the root is what term (v) below tests and what this row will carry for the rest of
+    -- the chain's life, and reading it twice would be two answers to one question.
+    select t.status, coalesce(t.lineage_root_id, t.id)
+      into v_repl_status, v_repl_root
+      from clara.adjustment_templates t
+      where t.id = p_replaces and t.client_id = p_client;
+    if v_repl_status is null then
+      raise exception 'the template this one says it replaces (%) is not a template of this client; propose it without naming a predecessor, or name one from this client''s own register', p_replaces
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'template_replaces_unknown',
+            'replaces_template_id', p_replaces)::text;
+    end if;
+    if v_repl_status <> 'retired' then
+      raise exception 'the template this one says it replaces (%) is still %; retire it first (clara.retire_adjustment_template) and propose this one again, or propose it now without naming a predecessor', p_replaces, v_repl_status
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'template_replaces_not_retired',
+            'replaces_template_id', p_replaces, 'replaces_status', v_repl_status)::text;
+    end if;
+    -- (iv) IT MUST NOT ALREADY HAVE A SUCCESSOR [R11 FIX 2026-08-04 -- Codex round-11 finding 4].
+    -- MEASURED: two concurrent sessions each proposed a different child of one retired
+    -- predecessor; B waited correctly behind A's 203005004 rung and then also succeeded, both
+    -- signed, and the predecessor ended with TWO LIVE DIRECT SUCCESSORS. That is a lineage FORK,
+    -- and every consumer of the walk is written for a chain -- "the ancestors" as an ordered list,
+    -- a cap that counts "generations", a prohibition that says "the generation this template
+    -- replaces" in the singular. Read under the rung with the status read above, so a concurrent
+    -- proposer cannot slip between the two; the partial unique index at SS1.1 is the belt for the
+    -- writer the rung cannot serialise. The refusal names both acts that exist: take the existing
+    -- successor's place by retiring it first, or propose without the declaration.
+    if exists (select 1 from clara.adjustment_templates s
+                where s.replaces_template_id = p_replaces and s.client_id = p_client
+                  and s.status in ('proposed', 'live')) then
+      raise exception 'the template this one says it replaces (%) already has a successor on this client; retire that successor first (clara.retire_adjustment_template) and propose this one again, or propose it now without naming a predecessor -- one generation may be replaced once', p_replaces
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'template_replaces_already_succeeded',
+            'replaces_template_id', p_replaces,
+            'successor_template_id', (select s.id from clara.adjustment_templates s
+                                       where s.replaces_template_id = p_replaces
+                                         and s.client_id = p_client
+                                         and s.status in ('proposed', 'live')
+                                       order by s.created_at, s.id limit 1))::text;
+    end if;
+    -- (v) NO OTHER TEMPLATE OF THIS LINEAGE MAY BE UNRETIRED [R12 FIX 2026-08-04 -- confirming round,
+    -- Codex CXR2]. MEASURED: P retired, A replaces P, A retired, B replaces A and goes LIVE, C
+    -- replaces P -- and (iv) admits C, because P's only DIRECT successor A is retired. The
+    -- lineage ends with TWO LIVE LEAVES, B and C, and on disjoint codes neither branch can see
+    -- the other: both book the same months, and every consumer of the walk (an ordered ancestor
+    -- list, a cap that counts generations, a prohibition in the singular) is true of one branch
+    -- and silent about the other. E30's recorded intent is ONE ACTIVE CONTINUATION per lineage,
+    -- which is a fact about the ROOT and cannot be expressed one edge at a time.
+    -- THE ROOT IS THE PREDECESSOR'S, INHERITED: coalesce(its own root, itself). Read under the
+    -- same 203005004 rung as the status above, so a concurrent proposer cannot slip between the
+    -- two; uq_adjustment_templates_one_live_leaf is the belt for the writer the rung cannot
+    -- serialise. The refusal NAMES the live template in the way, because "some other template in
+    -- this lineage" is not a remedy anyone can follow.
+    if exists (select 1 from clara.adjustment_templates s
+                where s.client_id = p_client
+                  and coalesce(s.lineage_root_id, s.id) = v_repl_root
+                  and s.status in ('proposed', 'live')) then
+      raise exception 'another template of this lineage (%) is still %; a generation may have only one unretired continuation -- retire that one first (clara.retire_adjustment_template) and propose this again, or propose it now without naming a predecessor', (select s.id from clara.adjustment_templates s where s.client_id = p_client and coalesce(s.lineage_root_id, s.id) = v_repl_root and s.status in ('proposed', 'live') order by s.created_at, s.id limit 1), (select s.status from clara.adjustment_templates s where s.client_id = p_client and coalesce(s.lineage_root_id, s.id) = v_repl_root and s.status in ('proposed', 'live') order by s.created_at, s.id limit 1)
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'template_lineage_root_occupied',
+            'replaces_template_id', p_replaces,
+            'lineage_root_id', v_repl_root,
+            'occupying_template_id', (select s.id from clara.adjustment_templates s
+                                       where s.client_id = p_client
+                                         and coalesce(s.lineage_root_id, s.id) = v_repl_root
+                                         and s.status in ('proposed', 'live')
+                                       order by s.created_at, s.id limit 1))::text;
+    end if;
+    v_anc := clara._wdb_template_ancestry(p_client, p_replaces);
+    if (v_anc ->> 'depth')::int >= (v_anc ->> 'cap')::int
+       or (v_anc ->> 'truncated')::boolean then
+      raise exception 'the template this one says it replaces (%) already stands on a chain of % recorded generation(s) (the limit is %); propose this one without naming a predecessor', p_replaces, v_anc ->> 'depth', v_anc ->> 'cap'
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'template_replaces_chain_too_long',
+            'replaces_template_id', p_replaces,
+            'axis', case when (v_anc ->> 'truncated')::boolean then 'unwalkable' else 'depth' end,
+            'depth', (v_anc ->> 'depth')::int, 'cap', (v_anc ->> 'cap')::int)::text;
+    end if;
+  end if;
+
+  begin
+    -- [R12 FIX 2026-08-04] lineage_root_id is v_repl_root -- the predecessor's own root, or the
+    -- predecessor itself when it is one -- and NULL when nothing was declared, which is this
+    -- column's spelling for "I am my own root" (argued at the column). It is set here and never
+    -- again: the transition trigger's frozen-set subtraction makes it immutable from this moment.
+    insert into clara.adjustment_templates(firm_id, client_id, status, name, cadence,
+        start_date, end_date, auto_reverse, lines, memo_template, content_hash,
+        replaces_template_id, lineage_root_id, proposed_by, proposed_op_key, schedule)
+      values (c_firm, p_client, 'proposed', btrim(p_name), p_cadence, p_start_date, p_end_date,
+        p_auto_reverse, v_lines, p_memo_template, v_hash, p_replaces,
+        case when p_replaces is null then null else v_repl_root end, c_actor, p_op_key, v_sched)
+      returning id into v_id;
+  exception when unique_violation then
+    -- The index caught a twin the precheck could not see (a concurrent proposer inside the
+    -- same rung is impossible, but a re-apply against a restored database is not). Same token
+    -- either way -- a caller must never have to tell the two apart.
+    -- [R11 FIX 2026-08-04] ...BUT THERE ARE NOW TWO PARTIAL UNIQUES ON THIS TABLE, so this handler asks
+    -- WHICH ONE bit instead of assuming. Before the single-successor index existed, `unique_
+    -- violation` here could only ever mean the content-hash slot; today a lineage fork raced past
+    -- the precheck lands here too, and reporting it as `template_duplicate` would send a
+    -- professional to look for an identical template that does not exist. `constraint_name` is
+    -- the only fact that tells them apart, and it is read rather than inferred from the message.
+    -- [R12 FIX 2026-08-04] ...AND THERE ARE NOW THREE. uq_adjustment_templates_one_live_leaf is the
+    -- root-keyed belt, and a race past term (v) lands here exactly as a race past term (iv) does.
+    get stacked diagnostics v_constraint = constraint_name;
+    if v_constraint = 'uq_adjustment_templates_one_live_leaf' then
+      raise exception 'another template of this lineage is still unretired; a generation may have only one unretired continuation -- retire that one first (clara.retire_adjustment_template) and propose this again, or propose it now without naming a predecessor'
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'template_lineage_root_occupied',
+            'replaces_template_id', p_replaces, 'lineage_root_id', v_repl_root,
+            'axis', 'storage_layer')::text;
+    end if;
+    if v_constraint = 'uq_adjustment_templates_one_successor' then
+      raise exception 'the template this one says it replaces (%) already has a successor on this client; retire that successor first (clara.retire_adjustment_template) and propose this one again, or propose it now without naming a predecessor -- one generation may be replaced once', p_replaces
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'template_replaces_already_succeeded',
+            'replaces_template_id', p_replaces, 'axis', 'storage_layer')::text;
+    end if;
+    raise exception 'this client already has a proposed or live template with identical content'
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'template_duplicate', 'content_hash', v_hash)::text;
+  end;
+
+  -- THE DECLARATION IS AUDITED WITH THE PROPOSAL [round 10, lane P1]. The column is immutable, so
+  -- the row itself is already the durable record -- but the audit line is where a reviewer reads
+  -- WHO declared the lineage the gate later asserts on, and a fact that drives a prohibition
+  -- belongs in the trail beside the actor who stated it. The key is always present (jsonb null
+  -- when nothing was declared) for the same reason the propose receipt's `warnings` always is.
+  perform clara._audit(c_firm, c_actor, null, null, 'propose_adjustment_template', null,
+    jsonb_build_object('client', p_client, 'template', v_id, 'cadence', p_cadence,
+      'start_date', p_start_date, 'end_date', p_end_date, 'auto_reverse', p_auto_reverse,
+      'content_hash', v_hash, 'replaces_template_id', p_replaces, 'op_key', p_op_key));
+
+  -- ------------------------------------------------------------------------------------
+  -- THE ADVISORY WARNINGS (round 10). ADVISORY, NOT REFUSALS -- the distinction is the whole
+  -- design of this block and it is deliberate on both counts.
+  --
+  -- (a) A LIVE SIBLING THIS ONE COLLIDES WITH. [WDB-G13] says an edit IS retire + propose
+  -- again, and NOTHING in this product requires the retire to come first: propose-then-retire
+  -- is the order a professional actually works in (confirm the replacement is right, then
+  -- withdraw the old one). MEASURED (probe z1/p5-order-bypass.mjs): worked in that order, the
+  -- poster's refusal reads the predecessor as `live`, prints the plain distinct-codes clause,
+  -- and following it ran four already-charged months onto fresh codes with blocked:[] --
+  -- RM18,000 of expense against an RM6,000 intention. The propose-first ORDER IS LAWFUL AND
+  -- MUST STAY, so this is not a refusal; what was missing is that nobody was ever told the
+  -- collision exists at the moment they create it. The warning names the sibling id, so the
+  -- reader can act on it before the sweep ever runs.
+  --
+  -- IT FIRES ONLY ON A CONTAINMENT OVERLAP (identical / contains / contained), never on a
+  -- PARTIAL one: two liabilities sharing one accrual code is the DESIGNED grain (argued at
+  -- clara._wdb_line_shape) and warning on it would be noise the reader must learn to ignore --
+  -- which is how a warning stops being read. The three containment shapes are exactly the three
+  -- an edit takes: the same accounts (a figure changed), a leg added, a leg removed.
+  --
+  -- (a) DOES NOT WARN ON A RETIRED SIBLING, and that is term (c)'s subject rather than an
+  -- oversight -- [R11 FIX 2026-08-04]. THE JUSTIFICATION THAT STOOD HERE WAS MEASURED FALSE AND HAS BEEN
+  -- DELETED RATHER THAN SOFTENED (this file's own rule, stated at clara._wdb_rerun_breach: a
+  -- comment that argues a falsehood is worse than no comment). It read: "retire-then-propose is
+  -- the lawful order, THE REPLACEMENT IS REFUSED ON THE PREDECESSOR'S STANDING PERIODS rather than
+  -- doubling them". Round 11 measured that the replacement was refused on nothing at all once the
+  -- codes differed: this advisory returns only SHAPE-COLLIDING siblings and then filters them to
+  -- `status='live'`, and clara._wdb_rerun_breach is keyed on shape intersection -- so a RE-CODED
+  -- replacement, the commonest [WDB-G13] edit after a figure change, was invisible to every
+  -- defence in this file. RM18,000 of expense stood against an RM6,000 intention with
+  -- `warnings: []` and `blocked: []` (probe w1i-no-declaration.mjs, no lineage feature used at
+  -- all -- the only call shape the dashboard could send).
+  -- THE SENTENCE IS TRUE NOW, and it is true because two things were built: admission predicate
+  -- (5) in clara._adj_run_occurrence_core actually refuses a replaced generation's standing
+  -- periods, and term (c) below tells the professional at the door where the edit is still one
+  -- act away from being right.
+  --
+  -- (b) A START DATE NO MALAYSIAN CLIENT'S BOOKS CAN REACH. Round 8 ruled the supported date
+  -- domain AD 0001-01-01 .. 9999-12-31 and that ruling is not touched here: this is a
+  -- PLAUSIBILITY floor, not a grammar. MEASURED (probe z1/p3-domain-and-scale.mjs): a monthly
+  -- template starting 0001-01-01 -- an ordinary typo for 2001 -- proposes, signs, and
+  -- clara.adjustment_run_due advertises {due:true, period 0001-01-01..0001-01-31, blocked:[]},
+  -- so the sweep drafts an occurrence dated in the first millennium. Nothing posts unattended
+  -- (it is catch-up, so it drafts, and draft-N-blocks-N+1 then parks the template in front of a
+  -- human) which is why this is a WARNING and not a refusal: refusing would invent a date law
+  -- the design has not ruled, and the smallest honest act is to say so at the door where the
+  -- typo is still one edit away from being fixed.
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'axis', 'colliding_live_sibling',
+           'template_id', e ->> 'template_id',
+           'name', e ->> 'name',
+           'status', e ->> 'status',
+           'containment', e ->> 'containment',
+           'colliding_elements', e -> 'colliding_elements',
+           'standing_charges', (e ->> 'standing')::int,
+           'first_period', e ->> 'first_period',
+           'last_period', e ->> 'last_period',
+           'message', 'template ' || (e ->> 'template_id') || ' ("' || (e ->> 'name')
+             || '") is LIVE on this client and '
+             || case when (e ->> 'containment') = 'identical'
+                       then 'carries exactly this template''s account shape'
+                     when (e ->> 'containment') = 'contains'
+                       then 'carries a shape this one fully contains (a leg was added)'
+                     else 'carries a shape that fully contains this one (a leg was removed)' end
+             || '; every period both cover will be refused '
+             || 'period_shape_already_met until one of them is retired or re-coded. It already '
+             || 'carries ' || (e ->> 'standing') || ' standing charge(s)'
+             || case when coalesce((e ->> 'standing')::int, 0) = 0 then ''
+                     else ' for ' || coalesce(e ->> 'first_period', 'an unstated period') || ' .. '
+                          || coalesce(e ->> 'last_period', 'an unstated period') end
+             || '. IF this template replaces that one, retire it and correct those charges: '
+             || 'giving this template distinct codes instead would book those periods twice.')
+           order by e ->> 'template_id'), '[]'::jsonb)
+    into v_warn
+    from jsonb_array_elements(
+           clara._wdb_overlapping_siblings(p_client, v_id,
+             clara._wdb_line_shape(v_lines))) as t(e)
+   where (e ->> 'status') = 'live' and (e ->> 'containment') <> 'partial';
+  -- (c) A GENERATION WHOSE STANDING MONTHS THIS PROPOSAL REACHES BACK OVER
+  -- [R11 FIX 2026-08-04 -- W1 finding 1, the propose-side half of the silent re-code double;
+  --  R12 FIX 2026-08-04 -- the confirming round widened its subject from RETIRED to RETIRED-OR-LIVE and
+  --  moved it into clara._wdb_period_overlap_advisory, which is now asked at SIGN as well].
+  --
+  -- THE WHOLE ARGUMENT LIVES AT THE BODY (S2.1a-6b), including why the retired arm has no shape
+  -- requirement, why the live arm has one, and what was measured when the term was retired-only.
+  -- What belongs HERE is only the caller's window and its own row: this proposal's bookable
+  -- window is [p_start_date, p_end_date], its shape is v_lines', and it may not warn about
+  -- itself.
+  v_warn := v_warn || clara._wdb_period_overlap_advisory(p_client, v_id,
+    clara._wdb_line_shape(v_lines), p_start_date, p_end_date);
+
+  if p_start_date < date '1900-01-01' then
+    v_warn := v_warn || jsonb_build_array(jsonb_build_object(
+      'axis', 'implausible_start_date',
+      'start_date', p_start_date,
+      'plausible_from', date '1900-01-01',
+      'message', 'the start date ' || p_start_date
+        || ' is before 1900 -- no Malaysian client''s books begin there, so this is almost '
+        || 'certainly a typo. The sweep will offer the first period from that date as catch-up '
+        || 'and the template will then park behind that draft. Retire this template and propose '
+        || 'one with the intended start date.'));
+  end if;
+
+  -- THE KEY IS ALWAYS PRESENT, empty array and all: a caller that has to test for the key's
+  -- EXISTENCE before reading it is a caller that will one day forget, and the house rule for
+  -- this migration's stamps is that a shape stays stable and says "nothing" honestly.
+  return clara._finish_op(c_firm, 'propose_adjustment_template', p_op_key,
+    jsonb_build_object('template_id', v_id, 'status', 'proposed', 'content_hash', v_hash,
+      'warnings', v_warn));
+end
+$core$;
+revoke all on function clara._propose_adjustment_template_core(jsonb, uuid, text, text, date, date, boolean, jsonb, text, text, uuid, jsonb) from public;
+
+comment on function clara._propose_adjustment_template_core(jsonb, uuid, text, text, date, date, boolean, jsonb, text, text, uuid, jsonb) is
+  'F-A4 PR-2a §D: the extracted body of clara.propose_adjustment_template, harvested from the live catalog and ctx-substituted (two fields). UNGRANTED -- its callers are the door above it and clara._agent_prepayment_schedule_core. Carries §5.2a''s congruence validation, which is what keeps six other live t.lines readers correct under a schedule and holds the D1 inventory at four bodies instead of six.';
+
+-- THE DOOR, now a thin delegate. create-or-replace PRESERVES the existing ACL, which is what W4's
+-- prestate-vs-tail comparison asserts byte-for-byte rather than re-granting and hoping.
+create or replace function clara.propose_adjustment_template(p_client uuid, p_name text,
+    p_cadence text, p_start_date date, p_end_date date, p_auto_reverse boolean, p_lines jsonb,
+    p_memo_template text, p_op_key text, p_replaces uuid default null,
+    p_schedule jsonb default null)
+  returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $door$
+declare c record;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  return clara._propose_adjustment_template_core(
+    jsonb_build_object('firm', c.firm, 'actor', c.actor),
+    p_client, p_name, p_cadence, p_start_date, p_end_date, p_auto_reverse, p_lines,
+    p_memo_template, p_op_key, p_replaces, p_schedule);
+end $door$;
+
+-- =================================================================================================
+-- §D2 — F1: clara._adj_template_hash AT EIGHT ARGUMENTS, NULL-STABLE [D1] (design §5.2, Annex H.5).
+--
+-- THE DEFECT AVOIDED. The hash covers seven keys. Adding a `schedule` key UNCONDITIONALLY would
+-- change EVERY recomputed hash, and the duplicate guard (0045:3948-3952) compares a recomputed hash
+-- against STORED ones — so every pre-existing template would silently stop being recognised as its
+-- own twin. The extension therefore folds the schedule in ONLY WHEN NON-NULL, leaving the null case
+-- byte-identical to today. Cell W37 asserts exactly that against a template created BEFORE this
+-- migration; its mutant folds unconditionally and watches the stored hashes mismatch.
+--
+-- THE CONDITIONAL-TERM IDIOM IS THIS FILE'S OWN NEIGHBOUR'S: propose_adjustment_template already
+-- adds a lineage term to its reserve hash the same way (`|| case when p_replaces is null then
+-- '{}'::jsonb else ... end`, 0045:122-126), for the same reason — a term that must not move an
+-- existing receipt's shape. Reusing the shape rather than inventing one keeps the two readable
+-- together.
+--
+-- WHY DROP-AND-CREATE RATHER THAN create-or-replace: an eighth argument WITH A DEFAULT does not
+-- replace the seven-argument function, it ADDS AN OVERLOAD — and a seven-argument call would then
+-- match both and fail "function is not unique". The old signature must go.
+--
+-- SAFE BECAUSE THE CALLER CENSUS IS CLOSED, and it was re-derived at the live catalog rather than
+-- taken from the annex: exactly ONE body in clara references this function, and it is
+-- clara.propose_adjustment_template — the body §D has already replaced above with one that calls
+-- the eight-argument form. A two-line blast radius, as Annex H.5 predicted.
+--
+-- THE TRIPLE IS PRESERVED DELIBERATELY. The harvest recorded this body as
+-- `prosecdef=false | proconfig=(none) | owner=clara_fn_owner` — it is `language sql stable`, NOT
+-- security definer and carrying NO search_path. A from-memory rebuild would have quietly promoted
+-- it to the definer/search_path shape every neighbouring function wears; §0 pinned the triple and
+-- §TAIL compares it, so a promotion cannot pass unnoticed.
+-- =================================================================================================
+drop function clara._adj_template_hash(text, text, date, date, boolean, jsonb, text);
+
+create function clara._adj_template_hash(p_name text, p_cadence text, p_start date,
+    p_end date, p_auto boolean, p_lines jsonb, p_memo text, p_schedule jsonb default null)
+  returns text
+  language sql stable as $$
+  select encode(clara._hash(
+    jsonb_build_object(
+      'name', p_name, 'cadence', p_cadence, 'start_date', p_start, 'end_date', p_end,
+      'auto_reverse', p_auto, 'lines', clara._adj_canon_lines(p_lines),
+      'memo_template', p_memo)
+    || case when p_schedule is null then '{}'::jsonb
+            else jsonb_build_object('schedule', clara._adj_canon_schedule(p_schedule)) end
+  ), 'hex') $$;
+revoke all on function clara._adj_template_hash(text, text, date, date, boolean, jsonb, text, jsonb) from public;
+
+comment on function clara._adj_template_hash(text, text, date, date, boolean, jsonb, text, jsonb) is
+  'F-A4 PR-2a §D2: the seven-key template content hash, plus an eighth `schedule` key folded in ONLY when the schedule is non-null. Null-stability is not a nicety -- the duplicate guard compares a RECOMPUTED hash against STORED ones, so an unconditional key would make every pre-existing template stop recognising its own twin (cell W37). Deliberately still `language sql stable` with NO security definer and NO search_path, exactly as harvested.';
+
 -- ##FA4PR2A-APPEND-POINT##
