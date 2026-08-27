@@ -1,77 +1,18 @@
-# F-A4 PR-2a — annexes (battery · debt-batch mechanics · the named follow-up)
+# F-A4 PR-2a — annexes B-H (measurements · debt mechanics · derivations)
 
-*Companion to `docs/plan/active/fa4-pr2-design-2026-08-27.md`, which is the design of record.
-Split from it because the repo's own 500-line gate is the estate's design-doc convention (the
-close-key-1 and bank-agency sets split the same way). Nothing here is independent of the
-design; every annex is cited from it by section.*
+*Companion to the design of record — `docs/plan/active/fa4-pr2-design-2026-08-27.md` (§§0-6) and
+`docs/plan/active/fa4-pr2-design-part2-2026-08-27.md` (§§7-14). **Annex A, the battery, lives in
+`docs/plan/active/fa4-pr2-battery-2026-08-27.md`.** Split at the estate's design + annex
+convention and again at the 2026-08-27 F1/F2 fold, each time against the repo's 500-line gate.
+Nothing here is independent of the design; every annex is cited from it by section.*
 
 ---
 
-## Annex A · The battery — every wall with its cell AND its mutant
+## Annex A · The battery — **moved to its own file**
 
-Contract-blind cells marked ▣. **The mutant law:** every new or flipped wall re-runs its
-mutant *after* the fix, in a rolled-back transaction. A wall whose mutant was only ever run
-before the fix has proven that the instrument once worked, not that it still does.
-
-| # | wall | cell | mutant |
-|---|---|---|---|
-| W1 | the extraction moved text, not behaviour | normalized-prosrc differential (harvested pre vs post, modulo the ctx substitution) ▣ | reorder one statement in a scratch copy → the differential reds |
-| W2 | the human door's floor survives | a `viewer` calling `propose_adjustment_template` still refuses at the floor | a `bookkeeper` succeeds (positive control) |
-| W3 | the core is ungranted | ACL census over the closed set | grant it to `clara_authenticated` in a rolled-back txn → the census reds |
-| W4 | the ACL/ownership/`search_path` triple is byte-unmoved | prestate-vs-tail comparison of `proacl` / `proowner` / `proconfig` | revoke one grant in a scratch txn → reds |
-| W5 | **the agent can never sign** | closed-world read: `status='live'` is written by exactly one body, and no wake role holds EXECUTE on it ▣. **Ceiling, stated in the cell as W11's is:** the writer half is a prosrc scan for the `live` status write — a spelling instrument, not an identity one (law 3) — so it is PAIRED with the ACL half, which is structural and is the claim that actually binds | a real admin signs the agent's proposed template → succeeds (the human path is open); and a scratch body writing that status under another name makes the prosrc half red, proving the scan is live |
-| W6 | B10 fails closed and names the missing fact | no live service period → `prepayment_term_underivable`, payload names `document_service_periods` and the document id; **zero `adjustment_templates` rows written** | record the period through the door, re-run → acted |
-| W7 | no bound document is its own refusal | a memo-basis prepaid entry → `prepayment_term_underivable` | the same entry with a document + period → acted |
-| W8 | `prepayment_source_unfit` | three cells: unapproved entry · foreign client · ambiguous prepaid leg | the fit case acts |
-| W9 | evaluator determinism | two calls return byte-identical `period_lines`; `sum(period_lines) = total_cents` to the sen ▣ | a total with a remainder (100 sen over 3 months) proves the remainder lands **wholly** in the final period |
-| W10 | the split-month rule (law 20) | a day-1 start and a day-2 start over the same span produce different first periods | **self-mutating by construction:** the two arms are each other's mutant — collapse the rule and the two answers become equal, which the cell asserts they are not |
-| W11 | the single-member closure | `evaluator_version_members` count = 1; a prosrc scan finds no `clara.` call site (ceiling stated in the cell) | add a helper call in a scratch copy → both instruments red |
-| W12 | the freeze binds | `verify_evaluator_freeze()` green after registration | `create or replace` the evaluator in a rolled-back txn → red |
-| W13 | op-key discipline | a caller-minted key → `op_key_not_derived`; a retry of the same entry replays | two source entries in one task both act, with distinct templates and distinct sub-keys |
-| W14 | **receipt honesty under multiplicity** | refusals on entries A and B in ONE task are TWO rows with distinct `subject_id` ▣ | collapse the subject to the client in a scratch build → the second refusal wears the first's receipt (FIX-1 reproduced) |
-| W15 | the FIX-1 regression, extended to wrapper 13 | refused→acted and acted→refused within one task give two receipts with honest verdicts | drop `verdict` from `uq_aar` in a rolled-back txn → the second call returns the first's receipt id under the wrong status (FIX-1 reproduced on this verb) |
-| W16 | `subject_kind` extends, does not loosen | a receipt at `adjustment_template` inserts; an unknown kind still refuses | in a rolled-back txn restore the pre-PR-2a six-value CHECK → the ACTED insert reds, proving the cell reads the NEW constraint and not an incidentally-permissive one |
-| W17 | the carrier is supersede-only | an UPDATE of `period_start` refuses; the supersede stamp succeeds; DELETE and TRUNCATE refuse | disable the supersede-only trigger in a rolled-back txn → the `period_start` UPDATE lands, proving the trigger and not a coincidence is the refusal |
-| W18 | one live period per document | a second live insert hits `uq_document_service_period_live` | after superseding the first, the second inserts |
-| W19 | the carrier's basis discipline | `extracted` with no region refuses; a region with `human_stated` refuses; a blank basis refuses | a well-formed `human_stated` row inserts |
-| W20 | the carrier's tenancy + floor | a firm viewer reads zero rows; a foreign firm reads zero; a bookkeeper reads its own firm's | drop the rank conjunct in a scratch txn → the viewer reads |
-| W21 | **residual 1** | a firm viewer selects zero from `close_proposals` and from `close_prep_holds`; a bookkeeper selects them | drop each conjunct in a rolled-back txn → the viewer reads (both tables, separately) |
-| W22 | residual 1 breaks no definer path | `attest_close_exception(p_from_proposal)` and `settle_close_proposal` still work for a bookkeeper after the policy recut ▣ | run the same arm as a below-floor VIEWER → it must fail at the door's own floor, not at the policy. A definer path that reads identically for both ranks would mean the cell cannot see a definer break at all |
-| W23 | **MED-8** | a fresh task drafting a strict subset with unmoved digests → `close_proposal_no_state_change`; the live proposal is STILL `open` ▣ | move one digest → supersedes, and `settle_reason` names the moved key |
-| W24 | MED-8, the STRICT-SUPERSET arm | a draft that is a proper superset of the live set → supersedes, and `settle_reason` names coverage | **the trade case:** a draft that adds one pair and DROPS three → must REFUSE `close_proposal_no_state_change`. This is the arm the review's churn fact killed — under the old non-empty-new-pairs reading it superseded |
-| W25 | residual 2 | the index census fires on `indrelid`, key columns and predicate text | create a same-named index on another table in a scratch txn → the census reds (0138's own T.1b would have passed it) |
-| W26 | residual 3 | the policy census reads `polcmd` / `polroles` / `polqual` | flip one policy's roles, then drop one rank conjunct → two separate reds |
-| W27 | residual 4 | `_tf_close_proposal_drafted_unique` is in both closed sets; the PR-1c cohort still resolves whole | grant it to `clara_authenticated` in a rolled-back txn → the ungranted-set census reds, proving the new member is actually probed and not merely listed |
-| W28 | residual 5 is honest | the demonstration cell: a superseded predecessor's attestation satisfies a successor's settle — the gap, made visible ▣ | **the inverse control:** with NO attestation on the run at all, the same settle-to-`adopted` REFUSES — so the cell above shows a mis-BINDING, not a door that never checks anything |
-| W29 | **the park flips** | both parked objects resolve at exact signatures; allowlist = 13 `close_prep` rows, each naming a live function; no existing row moved | **a REAL mutant, no exception (F7).** In a rolled-back txn drop the wrapper and re-run → the presence half reds; separately delete the thirteenth allowlist row → the count half reds. A flipped gate that cannot fail is the same false green its parked ancestor was written to avoid |
-| W30 | constraint 15 | zero PR-2a objects in `workflow` / `graphile_worker` / `spike`; what those schemas hold is REPORTED, not asserted | create a same-named dummy function in `spike` inside a rolled-back txn → the census reds, proving it looks in those schemas at all |
-| W31 | **the FY refusal is SELF-HEALABLE, not a dead end** (conductor's note, design §13 item 4) | the two-phase cell: a term running past the entry's FY with no opened successor → `prepayment_term_underivable`; **the same wake session then opens the successor year through `wake_open_fiscal_year`**; the same draft, re-run, **acts** ▣ | hold the year unopened and re-run → still refuses (the refusal is the year's absence, not a flake) |
-
-| W32 | **F4 — the mint-snapshot collision** | two DIFFERENT months minted in ONE wake task, both refusing on the same vector → **two receipt rows**, each naming its own month in `op_key` ▣ | revert to the bare `p_op_key` in a rolled-back build → the second month's refusal returns the first month's receipt id (the shipped defect, reproduced) |
-| W33 | **F6 — the region belongs to THIS document** | a service period on document A citing a region extracted from document B (same firm) → `service_period_evidence_foreign_document` | drop the congruence trigger in a rolled-back txn → the forged row lands, proving the composite FK alone never saw it |
-| W34 | **F8(a) — twin equivalence** | the agent core and the human door, given IDENTICAL inputs, produce **byte-identical durable state**: same `content_hash`, same canonical `lines`, same column values on the template row, same `_audit` shape — differing only in the two ctx-derived fields (`proposed_by`, `proposed_op_key`) ▣ | perturb one line's order in the agent's input → the hashes diverge, proving the comparison is live rather than trivially true |
-| W35 | **F8(b) — the books actually close** | end-to-end: propose → a human signs → every occurrence runs through `run_adjustment_occurrence` → **the prepaid asset account reaches exactly zero** and the expense side totals `total_cents`, to the sen ▣ | stop one occurrence short → the balance is non-zero, so the cell is reading a real ledger and not asserting a tautology. **PARAMETERIZED on F1/F2:** the target account and the per-period amounts are exactly what the owner's ruling settles, so this cell's final arithmetic is written after it |
-
-**Fixtures the battery needs that do not exist today:** a client with an approved prepaid
-journal entry bound to a document (W6-W9), a second such entry on the same client in one wake
-task (W13-W14), a client whose service period runs past its open FY with the successor year
-**not yet opened** (W31), two months mintable in one task (W32), a second document on the same
-firm carrying its own extraction region (W33), and a signed template whose occurrences can all be
-run (W35). All built through governed doors, never as hand-written rows.
-
-**Every conditional skip is ARMED and PROBED (F8c).** Vacuity has layers in this estate, and the
-battery states its own defence rather than assuming it: (i) no cell may gate on a flag assigned
-in `before()` — the 0136 lesson, where `{skip: flag}` always read the initial value; (ii) every
-`t.skip()` path prints the catalog fact that triggered it, so a skipped run is legible as a
-decision rather than a silence; (iii) the focused PR-2a run is executed with its allow-missing
-variable **unset**, which is the shape that fails rather than skips; and (iv) the suite asserts a
-**skip count of zero** in that shape. A cell that only ever skips is a false green — which is the
-same failure mode the parked W29 gate was written to avoid, one layer up.
-
-**W31 is an integration cell, not a unit cell.** It is the one place this battery proves that
-two F-A4 verbs compose inside a single clocked pass — the refusal wrapper 13 writes is one the
-lane can itself clear under R6/HIGH-1, and the estate has been bitten before by a rung whose
-"blocked" state nothing ever drove to its resolution (0138's own B13 arm-1 carry-forward).
+The forty walls, each with its cell AND its mutant, plus the fixtures and the armed-skip
+statement, are in `docs/plan/active/fa4-pr2-battery-2026-08-27.md`. Split out when the F1/F2
+fold pushed this file past the 500-line gate; it is cited as **Annex A** throughout the design.
 
 ---
 
@@ -145,6 +86,23 @@ on the R6 dead-member ground, not on a difficulty one.
 **The ACL.** Both writers hold `clara_authenticated` and nothing else, granted through 0045's
 bulk loop (0045:6705-6728, entries at :6712 and :6713) — no wake role, no runtime role, no
 PUBLIC. The extraction must leave that ACL byte-identical, which is cell W4.
+
+### B.0d · The region-congruence trigger, derived (design §4.1a — review finding F6)
+
+`clara.document_regions` hangs off `extraction_id`, not off a document (0007:203-221): its own
+composite FK is `(extraction_id, firm_id)`. So `(evidence_region_id, firm_id)` on the service-period
+carrier establishes only that the cited region belongs to the same **firm** — **a period on
+document A could cite a region extracted from document B and every declared constraint would
+pass.** That is provenance theatre of exactly the kind §4.1 rejects two-columns-on-`documents`
+for, and it would be worse here, because the whole reason `basis_kind='extracted'` exists is to
+say *this fact was read off THIS page*.
+
+The wall is a BEFORE INSERT/UPDATE trigger: resolve `evidence_region_id` → its
+`document_extractions` row → assert that row's `document_id` equals **this row's own**
+`document_id`, else refuse `service_period_evidence_foreign_document`. It fires only when
+`evidence_region_id` is non-null, so the `human_stated` path never meets it. Cell **W33** plants a
+region from a second document on the same firm; its mutant drops the trigger in a rolled-back
+transaction and watches the forged row land — which is what proves the composite FK never saw it.
 
 ### B.1 · Residual 2 — the index census (LOW-10b)
 
@@ -421,3 +379,85 @@ which month it was about whichever way the act went.
 is keyed and labelled by, on a verb no live credential can currently reach. The ACTED path's
 behaviour is unchanged in every observable except the recorded key. Cell **W32**; its mutant
 reverts to the bare key and reproduces the shipped defect.
+
+---
+
+## Annex H · F1's carrier surgery, derived (design §5.2 — owner ruling 2026-08-27)
+
+### H.1 · Why the present carrier cannot express the ruled convention
+
+`clara.adjustment_templates.lines` is ONE canonical line array, and `_adj_run_occurrence_core`
+materialises it verbatim for every period it runs (0045:5181-5191 — a loop over
+`jsonb_array_elements(t.lines)` straight into `clara.journal_lines`). Nothing in the row varies by
+period. So a straight-line schedule whose final period absorbs the rounding remainder has two
+available spellings and **both post wrong books**: put the base in `lines` and the remainder is
+never charged; put `total_cents` in `lines` and `n` occurrences charge `n × total`. This is why
+the finding was CRITICAL and why it was an owner question rather than a builder's call.
+
+### H.2 · Per-occurrence lines vs a final-occurrence override — the choice, with its reasoning
+
+The ruled convention needs exactly **two** distinct amounts. A final-occurrence override is
+therefore sufficient for v1 and is genuinely the smaller diff, so it deserves a real answer rather
+than a dismissal.
+
+**It loses on the extension path, which is already ruled rather than speculative.** Pro-rata is
+the named second policy, and under day-count pro-rata **every** period can differ. An override
+carrier would then have to be removed and replaced — a second surgery on
+`_adj_run_occurrence_core` and `_adj_on_approve`, the two bodies on the unattended daily posting
+path, and a **second D1 window**, paid at a later date under whatever conditions then apply.
+
+Per-occurrence lines subsume both conventions: straight-line is a schedule whose entries happen to
+be equal-but-one; pro-rata is a schedule whose entries are not. Under this shape the ruled
+extension is an evaluator `_v2` — a NEW frozen closure, which is what law 9 already requires of a
+changed formula — and **the carrier, the CoR set and the window do not move again.** One surgery
+instead of two, taken at the moment we are already holding the window open.
+
+### H.3 · Sibling column, not a widened `lines`
+
+`lines` is read outside this train: `_wdb_line_shape` (0045:4629), `_adj_line_eligibility_breach`
+(0045:5109), the overlap advisory, `_adj_canon_lines` itself (0045:1930-1939) and the approval
+gate. Changing what an element of `lines` *means* would put every one of those bodies in scope.
+A sibling `schedule jsonb` — `[{period_start, period_end, lines:[…]}]` — leaves all of them
+reading exactly what they read today. **`_adj_canon_lines` is untouched**, which is the single
+biggest reason this stays a four-body recut rather than an estate-wide one.
+
+### H.4 · The resolver, and null-stability as the safety property
+
+`clara._adj_period_lines(p_template_row, p_period_start, p_period_end)`:
+
+- `t.schedule is null` → `clara._adj_canon_lines(t.lines)`, i.e. **exactly today's answer**;
+- otherwise → the matching entry's lines, canonicalised through the same helper.
+
+Two call sites change, and only two: `_adj_run_occurrence_core` at 0045:5186 (the materialisation
+loop) and `_adj_on_approve`'s axis (2d) at 0045:5733-5744, whose `v_want :=
+clara._adj_canon_lines(t.lines)` becomes the resolver call for **the entry's own period** — which
+the entry already carries on its flags (`period_start` / `period_end`, written at 0045:5178).
+
+**Every template in the estate has `schedule is null` on the day this applies**, so every one of
+the four recut bodies is observably unchanged. That is the property that makes a four-body window
+on the daily posting path acceptable, and it is proven by cell W36 on the rig **before** the
+ceremony rather than inferred afterwards.
+
+### H.5 · The hash, extended without breaking a single stored value
+
+`_adj_template_hash` (0045:1952-1958) hashes a seven-key object. Adding a `schedule` key
+unconditionally would change **every** recomputed hash, and the duplicate guard at 0045:3948-3952
+compares a recomputed hash against stored ones — so every pre-existing template would silently
+stop being recognised as its own twin. The extension therefore folds the schedule in **only when
+non-null**, leaving the null case byte-identical to today. Cell **W37** asserts exactly that
+against a template created before the migration; its mutant folds unconditionally and watches the
+stored hashes mismatch.
+
+The function has **one caller** (0045:3850), so the eight-argument recut is a two-line blast
+radius. `propose_adjustment_template` takes `p_schedule jsonb default null` **last**, per
+0045:6707-6711's own house rule that new arguments go last with a default so the grant string is
+the only other line that moves.
+
+### H.6 · What F2 does NOT touch, and why that matters for §5.1
+
+The target account is a **classification**, applied by the agent core when it assembles `lines`.
+It never enters `clara.prepayment_schedule_v1`, whose signature and amounts-only output are
+unchanged. That is deliberate: the evaluator's single-member frozen closure (§5.1) survives, and
+hard constraint 2 is satisfied exactly — **no model-generated numeral reaches a durable artifact;
+a model-generated classification does, receipted under wall 2 and signed under wall 3.** The maxim
+§5.0 records is the compressed form: *facts get anchored, judgements get receipted.*
