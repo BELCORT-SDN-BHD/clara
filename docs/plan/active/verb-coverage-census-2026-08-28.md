@@ -32,8 +32,8 @@ subject's train merged, and nothing updated them:
 
 **Law minted:** every NotBuiltNote names the verb/train it waits on; when that train
 merges, truing the note is part of the MERGE, not a later discovery. A fix lane
-(`web/stale-notes-truing`) is wiring the needs-you reads + four live doors and truing the
-close note as this file is written.
+(branch web/stale-notes-truing) is wiring the needs-you reads + four live doors and truing
+the close note as this file is written.
 
 ## The 29 orphans (no UI, no honest note, no ruling — each needs a disposition)
 
