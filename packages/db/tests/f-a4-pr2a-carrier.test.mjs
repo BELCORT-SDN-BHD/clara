@@ -172,13 +172,11 @@ test("fa4p2a.W20 the carrier's TENANCY and FLOOR: a below-floor viewer reads zer
     `select u.id from clara.users u join clara.firm_memberships m on m.user_id = u.id
       where m.firm_id = $1 and m.status='active'
         and clara.role_rank(m.role) < clara.role_rank('bookkeeper') limit 1`, [sc.firm]);
-  if (viewer.rows.length === 0) {
-    noteLane("fa4p2a.W20: this world has no below-floor member -- the viewer half is not driven, and that is PRINTED rather than silent");
-  } else {
-    const asViewer = await humanQuery(viewer.rows[0].id,
-      "select count(*)::int as n from clara.document_service_periods where document_id=$1", [sc.document]);
-    assert.equal(asViewer.rows[0].n, 0, "a below-floor viewer read a professional's stated basis");
-  }
+  assert.ok(viewer.rows.length > 0,
+    "a below-floor viewer is REQUIRED for this control: without one the cell cannot tell a working floor from an absent one, so it FAILS rather than notes (Codex C6). buildWorld mints one; if it stopped, fix the fixture, not this assertion.");
+  const asViewer = await humanQuery(viewer.rows[0].id,
+    "select count(*)::int as n from clara.document_service_periods where document_id=$1", [sc.document]);
+  assert.equal(asViewer.rows[0].n, 0, "a below-floor viewer read a professional's stated basis");
   const asBookkeeper = await humanQuery(sc.alice,
     "select count(*)::int as n from clara.document_service_periods where document_id=$1", [sc.document]);
   assert.ok(asBookkeeper.rows[0].n >= 1, "the bookkeeper+ read must still work -- a floor that locks out its own consumers is not a fix");

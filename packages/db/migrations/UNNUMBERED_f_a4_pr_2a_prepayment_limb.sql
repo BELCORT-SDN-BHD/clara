@@ -461,6 +461,14 @@ create table clara.document_service_periods (
   superseded_by      uuid        references clara.document_service_periods(id) deferrable initially deferred,
   superseded_at      timestamptz,
   constraint ck_dsp_period_order check (period_end >= period_start),
+  -- C4: FINITE AND BOUNDED, at the TABLE as well as at the door. `date` admits 'infinity' and
+  -- years in the millions; an infinite term poisons every later extract()/interval read, and an
+  -- absurd one would have the evaluator emit one JSON entry per month. The door refuses these BY
+  -- NAME so a caller gets a reason -- these two exist so no OTHER writer, now or later, can get
+  -- past them. 120 months is a conductor-set default (2026-08-27): it covers every ordinary
+  -- prepayment, and widening it is a one-line PR.
+  constraint ck_dsp_finite check (isfinite(period_start) and isfinite(period_end)),
+  constraint ck_dsp_max_term check (period_end <= (period_start + interval '120 months')::date),
   -- The stamp is ONE act: both columns or neither (0055:405-408).
   constraint ck_dsp_supersession_paired check (
     (superseded_by is null) = (superseded_at is null)),
@@ -767,9 +775,30 @@ begin
     raise exception 'a service period requires both of its dates'
       using errcode = 'CLR10', detail = '{"reason":"service_period_dates_missing"}';
   end if;
+  -- C4: FINITE AND BOUNDED. `date` admits 'infinity' and years in the millions, and a bookkeeper
+  -- keys this by hand. An infinite or absurd term poisons every later extract()/interval
+  -- arithmetic that reads it, and the evaluator would try to emit one JSON entry per month --
+  -- millions of them -- before anything downstream could refuse. Both walls are here AND on the
+  -- table (ck_dsp_finite / ck_dsp_max_term): the door so the caller gets a reason, the table so no
+  -- other writer can ever get past it.
+  --
+  -- 120 MONTHS is a CONDUCTOR-SET DEFAULT (2026-08-27), named as a constant with its reason rather
+  -- than buried as a literal: it covers every ordinary prepayment an accounting firm meets, and
+  -- widening it is a one-line PR. It goes to the owner in the next batch as a set default, not as
+  -- a silent choice.
+  if not isfinite(p_period_start) or not isfinite(p_period_end) then
+    raise exception 'a service period must carry finite dates'
+      using errcode = 'CLR10', detail = '{"reason":"service_period_dates_not_finite"}';
+  end if;
   if p_period_end < p_period_start then
     raise exception 'a service period ends on or after it starts'
       using errcode = 'CLR10', detail = '{"reason":"service_period_dates_inverted"}';
+  end if;
+  if p_period_end > (p_period_start + interval '120 months')::date then
+    raise exception 'a service period longer than 120 months is out of range for this carrier'
+      using errcode = 'CLR10',
+        detail = jsonb_build_object('reason', 'service_period_term_too_long',
+          'max_months', 120, 'period_start', p_period_start, 'period_end', p_period_end)::text;
   end if;
 
   -- SUPERSESSION, NEVER UPDATE (0055:610-623's idiom). Lock the live predecessor, stamp it with the
@@ -1106,7 +1135,7 @@ create function clara._propose_adjustment_template_core(p_ctx jsonb, p_client uu
   language plpgsql security definer set search_path = clara, pg_temp as $core$
 declare
   c_firm uuid; c_actor uuid; v_sched jsonb; v_shape_t text[]; v_shape_s text[];
-  v_sd bigint; v_sc bigint; v_prev date; v_first_ps date; v_last_pe date; y jsonb;
+  v_sd bigint; v_sc bigint; v_prev date; v_first_ps date; v_last_pe date; y jsonb; v_walk date;
   v_dedupe jsonb; v_firm uuid; v_id uuid; v_lines jsonb; v_hash text;
   v_dr bigint := 0; v_cr bigint := 0; v_n int; v_breach jsonb; x jsonb;
   v_d bigint; v_k bigint; v_warn jsonb := '[]'::jsonb;
@@ -1249,8 +1278,32 @@ begin
     select array_agg((e ->> 'account_code') || case when (e ->> 'debit_cents')::bigint > 0 then ':D' else ':C' end
              order by (e ->> 'account_code') || case when (e ->> 'debit_cents')::bigint > 0 then ':D' else ':C' end)
       into v_shape_t from jsonb_array_elements(v_lines) as t(e);
-    v_prev := null; v_first_ps := null; v_last_pe := null;
+    -- COVERAGE IS UNDEFINABLE WITHOUT AN END DATE: an open-ended template has no last period to
+    -- match, so a schedule cannot be proven to cover it. Refuse rather than validate half of it.
+    if p_end_date is null then
+      raise exception 'a template that carries a schedule must declare its end date'
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'schedule_coverage_gap', 'axis', 'open_ended')::text;
+    end if;
+    v_walk := clara._adj_period_start(p_client, p_cadence, p_start_date);
     for y in select value from jsonb_array_elements(v_sched) loop
+      -- (a0) PER-LINE SHAPE -- Codex C1(a). The multiset and the aggregate balance are both blind
+      -- to a line that carries BOTH sides positive (or both zero): two such lines can agree on
+      -- shape and sum to an equal total, so a schedule containing them PROPOSES, a human SIGNS it,
+      -- and the poster then aborts at journal insertion. A poisoned template goes LIVE, and the
+      -- refusal arrives after the signature. Every scheduled line therefore meets the same rule a
+      -- flat line meets: nonnegative integer cents, exactly one positive side.
+      if exists (
+        select 1 from jsonb_array_elements(y -> 'lines') as t(e)
+         where coalesce((e ->> 'debit_cents')::bigint, 0) < 0
+            or coalesce((e ->> 'credit_cents')::bigint, 0) < 0
+            or (coalesce((e ->> 'debit_cents')::bigint, 0) > 0)
+               = (coalesce((e ->> 'credit_cents')::bigint, 0) > 0)) then
+        raise exception 'a schedule line must carry exactly one positive side in nonnegative cents'
+          using errcode = 'CLR10',
+            detail = jsonb_build_object('reason', 'schedule_line_invalid',
+              'period_start', y ->> 'period_start', 'lines', y -> 'lines')::text;
+      end if;
       select array_agg((e ->> 'account_code') || case when (e ->> 'debit_cents')::bigint > 0 then ':D' else ':C' end
              order by (e ->> 'account_code') || case when (e ->> 'debit_cents')::bigint > 0 then ':D' else ':C' end)
         into v_shape_s from jsonb_array_elements(y -> 'lines') as t(e);
@@ -1271,34 +1324,42 @@ begin
             detail = jsonb_build_object('reason', 'schedule_period_unbalanced',
               'period_start', y ->> 'period_start', 'debit_cents', v_sd, 'credit_cents', v_sc)::text;
       end if;
-      -- (c) continued: contiguous, non-overlapping, in order. _adj_canon_schedule sorted them, so
-      -- a gap or an overlap is a comparison against the previous period's end.
-      if v_prev is not null and (y ->> 'period_start')::date <> v_prev + 1 then
-        raise exception 'the schedule leaves a gap or overlaps between periods'
+      -- (c) COVERAGE AT CADENCE BOUNDARIES -- not merely contiguous, EXACT.
+      -- Codex C1(b): contiguity plus a matching span is NOT enough. Jan1-31 / Feb1-10 / Feb11-Mar31
+      -- is contiguous and spans the declared range exactly, yet carries no exact February and no
+      -- exact March period. January posts, then February's occurrence resolves to nothing and
+      -- raises schedule_period_uncovered -- STRANDING the prepaid asset mid-schedule, after a human
+      -- has already signed. The wall must therefore compare each entry against the period the
+      -- occurrence runner will actually derive, which is what _adj_period_start/_adj_period_end
+      -- return, and must consume the whole range with NO missing and NO extraneous entry.
+      if (y ->> 'period_start')::date is distinct from v_walk
+         or (y ->> 'period_end')::date
+            is distinct from clara._adj_period_end(p_client, p_cadence, v_walk) then
+        raise exception 'a schedule period does not match the cadence period the poster will run'
           using errcode = 'CLR10',
-            detail = jsonb_build_object('reason', 'schedule_coverage_gap', 'axis', 'discontiguous',
-              'previous_period_end', v_prev, 'next_period_start', y ->> 'period_start')::text;
+            detail = jsonb_build_object('reason', 'schedule_coverage_gap', 'axis', 'boundary',
+              'entry_start', y ->> 'period_start', 'entry_end', y ->> 'period_end',
+              'expected_start', v_walk,
+              'expected_end', clara._adj_period_end(p_client, p_cadence, v_walk))::text;
       end if;
-      if v_first_ps is null then v_first_ps := (y ->> 'period_start')::date; end if;
-      v_prev := (y ->> 'period_end')::date;
-      v_last_pe := v_prev;
+      v_walk := clara._adj_period_end(p_client, p_cadence, v_walk) + 1;
     end loop;
-    -- (c) continued: the run must span the DECLARED template range exactly at both ends.
-    if v_first_ps <> p_start_date or (p_end_date is not null and v_last_pe <> p_end_date) then
-      raise exception 'the schedule does not span the template''s own date range'
+    -- NO MISSING PERIOD: the walk must have consumed the declared range. (A schedule that stops
+    -- early is the stranding case again, one period further out.)
+    if v_walk <= p_end_date then
+      raise exception 'the schedule stops before the template''s own end date'
         using errcode = 'CLR10',
-          detail = jsonb_build_object('reason', 'schedule_coverage_gap', 'axis', 'span',
-            'schedule_start', v_first_ps, 'schedule_end', v_last_pe,
-            'template_start', p_start_date, 'template_end', p_end_date)::text;
+          detail = jsonb_build_object('reason', 'schedule_coverage_gap', 'axis', 'short',
+            'first_uncovered_period_start', v_walk, 'template_end', p_end_date)::text;
     end if;
-    -- THE HONEST CEILING, stated rather than implied (the Annex F.3 discipline): clauses (a)-(c)
-    -- prove the schedule is well-formed and spans the DECLARED range contiguously. They do not
-    -- prove that its entry boundaries coincide with the boundaries the occurrence runner will
-    -- derive for a cadence whose periods are not the entries' own. For F1's ruled convention
-    -- (monthly = calendar month) they do coincide by construction. For anything else,
-    -- clara._adj_period_lines' typed schedule_period_uncovered refusal remains the STRUCTURAL wall,
-    -- and no cell may assert that this validation makes it unreachable.
+    -- CLAUSE (c) NOW BINDS THE CEILING AN EARLIER CUT ONLY DECLARED. That cut said the validation
+    -- "does not prove that its entry boundaries coincide with the boundaries the occurrence runner
+    -- will derive", and left _adj_period_lines' typed refusal as the structural wall. That refusal
+    -- is still the wall at POST time -- but a wall that fires only after a signature has stranded
+    -- an asset is not where this belongs. Comparing against _adj_period_start/_adj_period_end makes
+    -- the boundaries provably the runner's own, for every cadence and not only for monthly.
   end if;
+
   v_hash := clara._adj_template_hash(btrim(p_name), p_cadence, p_start_date, p_end_date,
     p_auto_reverse, v_lines, p_memo_template, v_sched);
 
@@ -3122,6 +3183,7 @@ declare
   v_acct record; v_breach jsonb; v_lines jsonb; v_tmpl_sched jsonb := '[]'::jsonb;
   v_start date; v_end date; v_total bigint; v_n int; v_name text; v_memo text;
   v_hash text; v_twin uuid; v_result jsonb; v_template uuid; x jsonb; v_base bigint;
+  v_sub text; v_prior_acct text; v_prior_receipt uuid;
 begin
   -- ---- TIER A (raises, writes nothing) -------------------------------------------------------
   -- A receipt row needs a NON-NULL subject, and this verb's refusal subject IS the source entry.
@@ -3131,6 +3193,53 @@ begin
   if p_source_entry is null then
     raise exception 'a prepayment schedule names the source entry it amortises'
       using errcode = 'CLR10', detail = '{"reason":"prepayment_source_required"}';
+  end if;
+
+  -- ---- THE OWN-KEY REPLAY, ANSWERED BEFORE ANY MUTABLE RUNG (Codex C2) -----------------------
+  -- D-25 / cell B-11 make a same-task retry a REPLAY of the stored outcome. The self-twin
+  -- exclusion alone did not deliver that, because it lived inside pre-rung (b) -- AFTER every
+  -- MUTABLE rung. Deactivate the chosen expense account after the act and retry the same key, and
+  -- F2 wall 1 refuses `prepayment_target_ineligible` before the replay is ever considered: the
+  -- lane reads a FRESH REFUSAL for work that already succeeded. The world moved; the answer to a
+  -- retry must not.
+  --
+  -- IDENTIFIED POSITIVELY, on what is already PERSISTED and IMMUTABLE -- not on a re-derivation.
+  -- The delegate stamps its own sub-key into adjustment_templates.proposed_op_key, and that row's
+  -- `lines` carry the judged account; both are frozen by
+  -- clara._tf_adjustment_template_transition. So the twin is found by the sub-key, and the request
+  -- is validated against the stored row rather than against anything recomputed from a world that
+  -- may since have changed. This is the estate's own op_receipts idiom read one layer up.
+  v_sub := p_op_key || ':' || p_source_entry::text;
+  select t.id into v_twin from clara.adjustment_templates t
+   where t.client_id = p_client and t.proposed_op_key = v_sub limit 1;
+  if v_twin is not null then
+    select (e ->> 'account_code') into v_prior_acct
+      from clara.adjustment_templates t, jsonb_array_elements(t.lines) as z(e)
+     where t.id = v_twin and (e ->> 'debit_cents')::bigint > 0 limit 1;
+    -- CHANGED ARGS UNDER THE SAME KEY ARE A REUSE REFUSAL, exactly as _reserve_op would answer:
+    -- a retry that quietly re-judges the account is a different act wearing the first one's key.
+    if v_prior_acct is distinct from btrim(coalesce(p_target_account, '')) then
+      raise exception 'op_key reused with different args'
+        using errcode = 'CLR10',
+          detail = jsonb_build_object('reason', 'op_key_reused_with_different_args',
+            'template_id', v_twin, 'stored_target_account', v_prior_acct,
+            'supplied_target_account', btrim(coalesce(p_target_account, '')))::text;
+    end if;
+    -- THE STORED ACTED RECEIPT, returned as it stands. Read by the subject this verb's acted path
+    -- writes; if it is absent the act did not complete the way a replay would be claiming it did,
+    -- so this FAILS CLOSED rather than minting a fresh receipt for an old act (law 2).
+    select r.id into v_prior_receipt from clara.agent_act_receipts r
+     where r.firm_id = v_firm and r.act_kind = 'prepayment_schedule'
+       and r.subject_kind = 'adjustment_template' and r.subject_id = v_twin
+       and r.verdict = 'acted' limit 1;
+    if v_prior_receipt is null then
+      raise exception 'a template stands for this op key but its acted receipt does not'
+        using errcode = 'CLR08', detail = '{"reason":"prepayment_replay_receipt_absent"}';
+    end if;
+    select t.content_hash into v_hash from clara.adjustment_templates t where t.id = v_twin;
+    return jsonb_build_object('status', 'acted', 'receipt_id', v_prior_receipt,
+      'template_id', v_twin, 'status_of_template', 'proposed', 'replayed', true,
+      'target_account', v_prior_acct, 'content_hash', v_hash);
   end if;
 
   -- ---- TIER B (rungs; typed non-act receipt, no raise) ---------------------------------------
@@ -3204,6 +3313,26 @@ begin
     v_base  := (v_pl -> 0 ->> 'credit_cents')::bigint;
     v_name  := 'Prepayment amortisation ' || substr(p_source_entry::text, 1, 8);
     v_memo  := 'Prepayment amortisation';
+
+    -- C3: THE AMOUNT MUST REACH THE GRANULARITY OF ITS OWN SCHEDULE, asked BEFORE the delegate.
+    -- One cent over two months truncates to a base of 0, so the schedule is [0, 1] and this core's
+    -- REPRESENTATIVE flat lines (built from period 1) go zero-sided. Zero-amount journal lines are
+    -- refused estate-wide, so the delegate raises a RAW CLR10 -- which aborts the transaction and
+    -- takes the receipt with it, leaving no trace of WHY the lane could not act. That is the
+    -- silent-daily-log failure F-A4 exists to end, so it becomes a typed rung like every other
+    -- foreseeable refusal.
+    --
+    -- REFUSAL IS THE RIGHT ARM, not a zero-period design: an amortisation that cannot charge every
+    -- period a positive amount is not a schedule this product should draft, and the human's remedy
+    -- (a shorter term, or simply expensing it) is a judgement they should make knowingly.
+    if v_base <= 0 then
+      v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B10g',
+        'token', 'prepayment_amount_below_period_granularity',
+        'total_cents', v_total, 'period_count', v_n, 'base_cents', v_base));
+    end if;
+  end if;
+
+  if jsonb_array_length(v_rungs) = 0 then
 
     -- THE JUDGED ACCOUNT IS APPLIED HERE, at lines-assembly, and NOWHERE ELSE. The evaluator emits
     -- the prepaid-ASSET half with the account read off the source entry's own leg; this core pairs
@@ -3865,9 +3994,18 @@ begin
     raise exception 'F-A4 PR-2a tail: % overload(s) of propose_adjustment_template -- the extraction left the shipped body standing', v_n
       using errcode = 'CLR10', detail = '{"reason":"tail_propose_overloaded"}';
   end if;
+  -- THE REPLACED BODIES ARE IN THIS CENSUS TOO (Codex C6). "No function this file touches is
+  -- PUBLIC-EXECUTE" has to mean every body this file CREATES *or REPLACES*: a `create or replace`
+  -- that lost its REVOKE would leave a definer body callable by PUBLIC just as surely as a new one,
+  -- and an earlier cut enumerated only the new ten plus two. All five recut bodies are named here.
   foreach v_sig in array (k_new_fns || array[
       'clara.propose_adjustment_template(uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb)',
-      'clara._adj_template_hash(text,text,date,date,boolean,jsonb,text,jsonb)']) loop
+      'clara._adj_template_hash(text,text,date,date,boolean,jsonb,text,jsonb)',
+      'clara._adj_run_occurrence_core(uuid,uuid,date,date,text,uuid,uuid,text)',
+      'clara._adj_on_approve(uuid)',
+      'clara._adj_template_json(uuid)',
+      'clara._agent_close_proposal_core(jsonb,uuid,jsonb,text,text,jsonb,text)',
+      'clara._agent_mint_month_snapshot_core(jsonb,uuid,date,text,jsonb,text)']) loop
     if exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl,
                  acldefault('f', p.proowner))) a
                 where p.oid = to_regprocedure(v_sig) and a.grantee = 0) then
@@ -3925,6 +4063,31 @@ begin
   -- ---- T.6 THE ACL/OWNERSHIP/search_path TRIPLES ARE BYTE-UNMOVED where they must be ----------
   -- W4: the extraction must leave the door's ACL exactly as harvested. _adj_template_hash keeps
   -- its NON-definer, NO-search_path triple -- a from-memory rebuild would have promoted it.
+  -- THE PROPOSE DOOR'S OWN TRIPLE, compared EXPLICITLY (Codex C6). §0 harvested the ten-argument
+  -- door's ACL before the drop; the eleven-argument door that replaces it must carry the SAME one.
+  -- W4 asserts this from the battery, but the tail is what a ceremony conductor reads, and an
+  -- extraction that silently widened or narrowed the door's grant is precisely the thing this file
+  -- must not be able to do quietly. Compared here against the pre-image, not merely re-granted.
+  select v into v_pre from _fa4_pr2a_prestate
+   where k = 'acl:clara.propose_adjustment_template(uuid,text,text,date,date,boolean,jsonb,text,text,uuid)';
+  select coalesce(array_to_string(p.proacl::text[], '|'), '(default)') into v_post
+    from pg_proc p
+   where p.oid = to_regprocedure('clara.propose_adjustment_template(uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb)');
+  if v_pre is distinct from v_post then
+    raise exception 'F-A4 PR-2a tail: the propose door''s ACL moved across the extraction (pre % / post %)', v_pre, v_post
+      using errcode = 'CLR10', detail = '{"reason":"tail_propose_acl_moved"}';
+  end if;
+  select p.prosecdef::text || '|' || coalesce(array_to_string(p.proconfig, ','), '(none)')
+                           || '|' || pg_get_userbyid(p.proowner) into v_post
+    from pg_proc p
+   where p.oid = to_regprocedure('clara.propose_adjustment_template(uuid,text,text,date,date,boolean,jsonb,text,text,uuid,jsonb)');
+  select v into v_pre from _fa4_pr2a_prestate
+   where k = 'triple:clara.propose_adjustment_template(uuid,text,text,date,date,boolean,jsonb,text,text,uuid)';
+  if v_pre is distinct from v_post then
+    raise exception 'F-A4 PR-2a tail: the propose door''s secdef/search_path/owner triple moved (pre % / post %)', v_pre, v_post
+      using errcode = 'CLR10', detail = '{"reason":"tail_propose_triple_moved"}';
+  end if;
+
   select v into v_pre from _fa4_pr2a_prestate
    where k = 'acl:clara.sign_adjustment_template(uuid,uuid,text)';
   select coalesce(array_to_string(p.proacl::text[], '|'), '(default)') into v_post
@@ -3957,9 +4120,18 @@ begin
   -- 0138's T.1 counted policies = 2 per table and read nothing about them, so FIX-6's own rank
   -- conjunct was never census-pinned and neither would §G's mirrors be. This reads polcmd, the
   -- resolved role names and the qual EXPRESSION, and asserts the rank conjunct by expression.
-  for v_sig in select unnest(array['p_cp_human', 'p_cph_human', 'p_dsp_human']) loop
-    select pg_get_expr(pol.polqual, pol.polrelid) into v_txt from pg_policy pol
-     where pol.polname = v_sig;
+  -- QUALIFIED BY (RELATION, POLICY), never by polname alone (Codex C6). A policy name is unique
+  -- per TABLE, not per database: a same-named policy on some other relation would satisfy a
+  -- name-only probe, and the census would be reading a stranger's rule. Law 3 again -- a name is a
+  -- projection of the thing.
+  for v_sig in select unnest(array[
+      'close_proposals|p_cp_human', 'close_prep_holds|p_cph_human',
+      'document_service_periods|p_dsp_human']) loop
+    select pg_get_expr(pol.polqual, pol.polrelid) into v_txt
+      from pg_policy pol join pg_class c on c.oid = pol.polrelid
+     where c.relnamespace = 'clara'::regnamespace
+       and c.relname = split_part(v_sig, '|', 1)
+       and pol.polname = split_part(v_sig, '|', 2);
     if v_txt is null then
       raise exception 'F-A4 PR-2a tail: policy % is absent', v_sig using errcode = 'CLR10';
     end if;
@@ -3971,7 +4143,10 @@ begin
       raise exception 'F-A4 PR-2a tail: policy % carries no bookkeeper rank conjunct: %', v_sig, v_txt
         using errcode = 'CLR10', detail = '{"reason":"tail_policy_rank_missing"}';
     end if;
-    if (select pol.polcmd from pg_policy pol where pol.polname = v_sig) <> 'r' then
+    if (select pol.polcmd from pg_policy pol join pg_class c on c.oid = pol.polrelid
+         where c.relnamespace = 'clara'::regnamespace
+           and c.relname = split_part(v_sig, '|', 1)
+           and pol.polname = split_part(v_sig, '|', 2)) <> 'r' then
       raise exception 'F-A4 PR-2a tail: policy % is not SELECT-only', v_sig using errcode = 'CLR10';
     end if;
   end loop;
@@ -4016,12 +4191,31 @@ begin
       using errcode = 'CLR10', detail = '{"reason":"tail_unpark_absent"}';
   end if;
   -- WRAPPER 12 HOLDS EXACTLY ONE APPLICATION GRANT, and it is the interactive wake role.
+  -- COUNTED, NOT MERELY FILTERED (Codex C6). The earlier form asked only whether a grant BEYOND
+  -- clara_wake_interactive existed, which is satisfied by ZERO grants -- a wrapper nobody can call
+  -- would have passed a census whose headline says "exactly one". Both directions now bind.
+  select count(*)::int into v_n from pg_proc p, aclexplode(p.proacl) a
+   where p.oid = to_regprocedure('clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)')
+     and a.grantee <> p.proowner and a.privilege_type = 'EXECUTE';
+  if v_n <> 1 then
+    raise exception 'F-A4 PR-2a tail: wrapper 12 holds % application grant(s), expected exactly 1', v_n
+      using errcode = 'CLR10', detail = '{"reason":"tail_wrapper_grant_count"}';
+  end if;
   if exists (select 1 from pg_proc p, aclexplode(p.proacl) a
               where p.oid = to_regprocedure('clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)')
                 and a.grantee <> p.proowner
                 and a.grantee::regrole::text <> 'clara_wake_interactive') then
     raise exception 'F-A4 PR-2a tail: wrapper 12 holds a grant beyond clara_wake_interactive'
       using errcode = 'CLR10', detail = '{"reason":"tail_wrapper_overgranted"}';
+  end if;
+
+  -- PR-2a's CLOSURE SHIPS DARK, and the tail pins it (Codex C6). deployed = false is a CLAIM this
+  -- train makes -- that the runtime half is PR-2b's -- and an unpinned claim is one a later lane
+  -- can flip without any cell noticing.
+  if (select ev.deployed from clara.evaluator_versions ev
+       where ev.evaluator_name = 'prepayment_schedule' and ev.version = 1) is distinct from false then
+    raise exception 'F-A4 PR-2a tail: the prepayment_schedule v1 closure is not registered undeployed -- it must ship DARK until PR-2b''s own ceremony'
+      using errcode = 'CLR10', detail = '{"reason":"tail_closure_not_dark"}';
   end if;
 
   -- ---- T.11 THE EVALUATOR'S CLOSURE IS GENUINELY SINGLE-MEMBER --------------------------------
@@ -4035,12 +4229,23 @@ begin
       using errcode = 'CLR10', detail = '{"reason":"tail_closure_not_single"}';
   end if;
 
-  -- ---- T.12 THE COMPOSITE-PARAMETER PROPERTY, censused rather than assumed --------------------
-  -- clara._adj_period_lines takes clara.adjustment_templates. Both live call sites hold the row in
-  -- a plpgsql variable declared `record` and populate it with a BARE SINGLE-TABLE `select *`, which
-  -- is the only reason passing it to a composite-typed parameter is safe. That is a property of
-  -- those bodies, not a guarantee of the language: a future body that loads a SUBSET of columns and
-  -- passes it here would fail at RUNTIME. Censused so the next lane meets it at review instead.
+  -- ---- T.12 THE RESOLVER'S SHIPPED CONTRACT, censused rather than assumed ---------------------
+  -- REWRITTEN (Codex C7). This census used to describe the COMPOSITE-PARAMETER form and the
+  -- `select *` property that made passing a `record` to it safe. That contract is gone: the
+  -- row-type form was uncallable (deviations register, deviation (1)) and the shipped resolver
+  -- takes (schedule, lines, period_start, period_end). A census describing a signature the estate
+  -- does not have is worse than none -- it tells a reader the wrong thing WITH the authority of a
+  -- passing gate. What it censuses now is the contract that actually ships:
+  --   * the jsonb-pair signature resolves, and the row-type one does NOT exist to be called;
+  --   * exactly two callers, the occurrence poster and the approve axis.
+  if to_regprocedure('clara._adj_period_lines(jsonb,jsonb,date,date)') is null then
+    raise exception 'F-A4 PR-2a tail: the resolver does not resolve at its shipped jsonb-pair signature'
+      using errcode = 'CLR10', detail = '{"reason":"tail_resolver_signature"}';
+  end if;
+  if to_regprocedure('clara._adj_period_lines(clara.adjustment_templates,date,date)') is not null then
+    raise exception 'F-A4 PR-2a tail: the uncallable row-type resolver overload exists -- a caller could bind to it and fail at runtime'
+      using errcode = 'CLR10', detail = '{"reason":"tail_resolver_rowtype_overload"}';
+  end if;
   select count(*)::int into v_n from pg_proc p
    where p.pronamespace = 'clara'::regnamespace
      and p.prosrc ~ '_adj_period_lines\s*\('

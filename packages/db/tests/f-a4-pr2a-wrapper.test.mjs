@@ -11,7 +11,7 @@ import { noteLane } from "./rig-runtime-helpers.mjs";
 import { withTxn } from "./rig-txn.mjs";
 import {
   ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, wake12, caught,
-  receiptsForTask, templateById, derivedOpKey, VERB12, uniq,
+  receiptsForTask, templateById, derivedOpKey, VERB12, uniq, account,
 } from "./f-a4-pr2a-fixtures.mjs";
 
 let skipped = 0;
@@ -88,6 +88,83 @@ test("fa4p2a.W13 a caller-MINTED op key is refused, and a retry of the same act 
 // W14 / W15 -- RECEIPT HONESTY UNDER MULTIPLICITY. FIX-1's defect, re-opened by a subject too
 // coarse to tell two acts apart.
 // ---------------------------------------------------------------------------------------------
+test("fa4p2a.W13-movedworld (C2) the own-key replay survives the world MOVING under it", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // The self-twin exclusion alone did not deliver D-25's replay contract, because it lived AFTER
+  // every mutable rung. Deactivate the judged expense account after the act and retry the same
+  // key: F2 wall 1 would refuse `prepayment_target_ineligible` and the lane would read a FRESH
+  // REFUSAL for work that already succeeded. The world moved; the answer to a retry must not.
+  const sc = await prepaidScene("w13mw");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const first = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(first.status, "acted", `first act refused: ${JSON.stringify(first).slice(0, 250)}`);
+
+  // MOVE THE WORLD: the chosen account goes inactive, which is exactly what wall 1 reads.
+  await rootQuery(
+    "update clara.coa_accounts set is_active = false where client_id = $1 and account_code = $2",
+    [sc.client, sc.target]);
+  const breach = await rootQuery(
+    "select clara._adj_line_eligibility_breach($1, $2::jsonb) as b",
+    [sc.client, JSON.stringify([{ account_code: sc.target, debit_cents: 1, credit_cents: 0 }])]);
+  assert.ok(breach.rows[0].b, "the account is still eligible -- the world did not actually move");
+
+  const replay = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(replay.status, "acted",
+    `the retry read a fresh refusal after the world moved: ${JSON.stringify(replay).slice(0, 300)}`);
+  assert.equal(replay.template_id, first.template_id, "the replay returned a different template");
+  assert.equal(replay.receipt_id, first.receipt_id, "the replay minted a second receipt");
+  assert.equal(replay.replayed, true, "the replay did not identify itself as one");
+
+  const drafted = await rootQuery(
+    "select count(*)::int as n from clara.adjustment_templates where client_id=$1", [sc.client]);
+  assert.equal(drafted.rows[0].n, 1, "the replay drafted a second template");
+});
+
+test("fa4p2a.W13-changedargs (C2) the SAME key with a DIFFERENT judged account is an op-key reuse refusal", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // The other half of the replay contract: a retry that quietly re-judges the account is a
+  // DIFFERENT act wearing the first one's key, and the estate answers that with a reuse refusal
+  // rather than silently replaying the old answer or silently acting on the new one.
+  const sc = await prepaidScene("w13ca");
+  await recordPeriod(sc.alice, { document: sc.document, ...PERIOD });
+  const first = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(first.status, "acted");
+  const other = await account(sc.alice, {
+    client: sc.client, code: "59000002", name: "Other expense", type: "expense" });
+  const e = await caught(() => wake12(sc.s, { client: sc.client, entry: sc.entry, target: other }));
+  assert.ok(e, "the same key with a different account was accepted");
+  assert.match(String(e.detail ?? e.message), /op_key_reused_with_different_args|reused with different args/);
+  const drafted = await rootQuery(
+    "select count(*)::int as n from clara.adjustment_templates where client_id=$1", [sc.client]);
+  assert.equal(drafted.rows[0].n, 1, "the refused retry drafted a template anyway");
+});
+
+test("fa4p2a.W13-granularity (C3) an amount smaller than its period count refuses TYPED, with a receipt", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // One cent over two months truncates to a base of 0, so the representative flat lines go
+  // zero-sided and the delegate would raise a RAW CLR10 -- aborting the transaction and taking the
+  // receipt with it, leaving no trace of WHY the lane could not act. It must be a typed rung.
+  const sc = await prepaidScene("w13g", { cents: 1 });
+  await recordPeriod(sc.alice, { document: sc.document, start: "2025-02-01", end: "2025-03-31" });
+  const r = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(r.status, "refused", `expected a typed refusal, got ${JSON.stringify(r).slice(0, 250)}`);
+  const toks = (r.rung_vector ?? []).map((v) => v.token);
+  assert.ok(toks.includes("prepayment_amount_below_period_granularity"),
+    `expected prepayment_amount_below_period_granularity, got ${toks.join(",")}`);
+  // THE RECEIPT SURVIVES -- which is the whole point of making it a rung rather than a raise.
+  const rows = await receiptsForTask(sc.s.task);
+  const mine = rows.filter((x) => x.act_kind === "prepayment_schedule" && x.verdict === "refused");
+  assert.equal(mine.length, 1, "the typed refusal left no receipt");
+  assert.equal(mine[0].subject_id, sc.entry, "the refusal receipt does not name its source entry");
+
+  // MUTANT / positive control: an amount that DOES reach its granularity acts, so the rung is
+  // conditional and not a blanket refusal of small prepayments.
+  const ok = await prepaidScene("w13gok", { cents: 200 });
+  await recordPeriod(ok.alice, { document: ok.document, start: "2025-02-01", end: "2025-03-31" });
+  const acted = await wake12(ok.s, { client: ok.client, entry: ok.entry, target: ok.target });
+  assert.equal(acted.status, "acted", `200 cents over 2 months must act: ${JSON.stringify(acted).slice(0, 250)}`);
+});
+
 test("fa4p2a.W13-arm2 a FOREIGN task's duplicate still meets pre-rung (b), named with the twin's id", async (t) => {
   if (prepayGate(t, markSkip)) return;
   // THE OTHER HALF of §13.2's ruling, and the arm §6.2a was written for: the lane drafted this
@@ -302,12 +379,12 @@ test("fa4p2a.W38 (F3 pre-rung a) the constructed template start is a PERIOD STAR
     await recordPeriod(sc.alice, { document: sc.document, start: `2025-02-${day}`, end: "2025-06-30",
       basis: `term starting on day ${day}` });
     const r = await wake12(sc.s, { client: sc.client, entry: sc.entry, target: sc.target });
-    if (r.status === "refused") {
-      const toks = (r.rung_vector ?? []).map((v) => v.token);
-      assert.ok(!toks.includes("template_alignment_unmet"),
-        `a term starting on day ${day} produced a MISALIGNED template -- the construction invariant is false`);
-      continue;
-    }
+    // A POSITIVE CONTROL PER DAY (Codex C6). The earlier form let a refusal `continue` after
+    // checking only that it was not template_alignment_unmet -- so a day whose scene failed for an
+    // UNRELATED reason (no service period, an ineligible account, a fixture slip) counted as
+    // evidence for the invariant while never constructing a template at all. Each day must ACT.
+    assert.equal(r.status, "acted",
+      `day ${day} did not produce a template, so it proves nothing about alignment: ${JSON.stringify(r).slice(0, 250)}`);
     const tmpl = await templateById(r.template_id);
     const aligned = await rootQuery(
       "select clara._adj_period_start($1,'monthly',$2::date) = $2::date as ok", [sc.client, tmpl.start_date]);

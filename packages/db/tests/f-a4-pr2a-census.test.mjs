@@ -63,15 +63,17 @@ test("fa4p2a.W2 the human door's FLOOR survives the extraction", async (t) => {
   const lines = [
     { account_code: sc.target, debit_cents: 100, credit_cents: 0, description: "d" },
     { account_code: sc.prepaid, debit_cents: 0, credit_cents: 100, description: "c" }];
-  if (viewer.rows.length > 0) {
-    const e = await caught(() => humanQuery(viewer.rows[0].id,
-      `select clara.propose_adjustment_template($1::uuid,$2,'monthly',date '2025-02-01',
-         date '2025-02-28',false,$3::jsonb,'m',$4) as r`,
-      [sc.client, `w2-${uniq()}`, JSON.stringify(lines), `w2-${uniq()}`]));
-    assert.ok(e, "a BELOW-FLOOR viewer proposed a template -- the floor did not survive the move");
-  } else {
-    noteLane("fa4p2a.W2: no below-floor member in this world -- the viewer half is PRINTED, not silent");
-  }
+  // THE CONTROL IS REQUIRED, NOT OPTIONAL (Codex C6). W2's whole claim is that the FLOOR survived
+  // the extraction, and only the below-floor arm can show that -- the bookkeeper arm below would
+  // pass just as happily with no floor at all. Noting the fixture's absence let the cell go green
+  // having proven nothing, so it fails instead.
+  assert.ok(viewer.rows.length > 0,
+    "no below-floor member in this world: W2 cannot show the floor survived without one, so it fails rather than notes. buildWorld mints one; if it stopped, fix the fixture.");
+  const e = await caught(() => humanQuery(viewer.rows[0].id,
+    `select clara.propose_adjustment_template($1::uuid,$2,'monthly',date '2025-02-01',
+       date '2025-02-28',false,$3::jsonb,'m',$4) as r`,
+    [sc.client, `w2-${uniq()}`, JSON.stringify(lines), `w2-${uniq()}`]));
+  assert.ok(e, "a BELOW-FLOOR viewer proposed a template -- the floor did not survive the move");
   // POSITIVE CONTROL: a bookkeeper+ still succeeds. A floor that refuses everyone is not a floor.
   const ok = await humanQuery(sc.alice,
     `select clara.propose_adjustment_template($1::uuid,$2,'monthly',date '2025-02-01',

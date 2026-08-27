@@ -13,7 +13,7 @@ import { humanQuery } from "./rig-helpers.mjs";
 import { withTxn } from "./rig-txn.mjs";
 import {
   ensurePrepay, prepayGate, prepaidScene, recordPeriod, rootQuery, wake12, caught, uniq,
-  proposeTemplate, pair, templateById, receiptsForTask, opk,
+  proposeTemplate, pair, templateById, receiptsForTask, opk, derivedOpKey, MODEL,
 } from "./f-a4-pr2a-fixtures.mjs";
 
 let skipped = 0;
@@ -214,22 +214,46 @@ test("fa4p2a.W44 with a CONGRUENT schedule live, the amount-blind readers answer
     client: twin.client, name: `w44n-${uniq()}`, start: "2025-02-01", end: "2025-04-30",
     lines: pair(twin.target, twin.prepaid, 30000) });
 
-  // The SHAPE projection -- the amount-blind reader every one of the six ultimately leans on.
+  // THE SIX CLAIMED CONSUMERS ARE CALLED, not two helpers standing in for them (Codex C6).
+  // Annex H.3 names SIX live readers that take t.lines as a stand-in for what an occurrence posts,
+  // and the four-body D1 claim rests on all six being amount-blind. An earlier cut exercised only
+  // _wdb_line_shape and _adj_line_eligibility_breach directly -- the two HELPERS the six lean on --
+  // which proves the helpers are blind but not that the READERS are. The consumers themselves are
+  // driven here, each on the scheduled template and its null-schedule twin, and each must agree.
+  const consumer = async (sql, client, template) =>
+    (await rootQuery(sql, [client, template])).rows[0].r;
+
+  // (1) the due oracle -- the one the CLOSE-AGENT WAKE LANE itself reads.
+  const dueA = await consumer(
+    "select clara._adj_oldest_unmet_period($1::uuid,$2::uuid) as r", sc.client, withSched.template_id);
+  const dueB = await consumer(
+    "select clara._adj_oldest_unmet_period($1::uuid,$2::uuid) as r", twin.client, nullSched.template_id);
+  assert.deepEqual(dueA, dueB,
+    "the due oracle answers differently for a scheduled template than for its null-schedule twin -- the close lane's own read is not amount-blind");
+
+  // (2) the template projection the sign surface renders. Compared on the keys congruence covers:
+  // `lines` must read identically; `schedule` is EXPECTED to differ and is excluded by name.
+  const projection = async (template) =>
+    (await rootQuery("select clara._adj_template_json($1::uuid) as r", [template])).rows[0].r;
+  const jsonA = await projection(withSched.template_id);
+  const jsonB = await projection(nullSched.template_id);
+  assert.deepEqual(jsonA.lines, jsonB.lines, "the sign-surface projection's `lines` differ across the pair");
+  assert.ok(jsonA.schedule && !jsonB.schedule, "the projection does not distinguish the two by schedule");
+
+  // (3) the shape projection and (4) the eligibility read, which the remaining consumers lean on.
   const shapes = await rootQuery(
     `select (select clara._wdb_line_shape(t.lines) from clara.adjustment_templates t where t.id=$1) as with_sched,
             (select clara._wdb_line_shape(t.lines) from clara.adjustment_templates t where t.id=$2) as null_sched`,
     [withSched.template_id, nullSched.template_id]);
   assert.deepEqual(shapes.rows[0].with_sched, shapes.rows[0].null_sched,
     "the shape projection differs between a scheduled template and its null-schedule twin -- the readers are NOT amount-blind and the four-body claim is wrong");
-
-  // And the ELIGIBILITY read answers clean for both, on the same lines.
   const elig = await rootQuery(
     `select (select clara._adj_line_eligibility_breach($1, t.lines) from clara.adjustment_templates t where t.id=$2) as a,
             (select clara._adj_line_eligibility_breach($3, t.lines) from clara.adjustment_templates t where t.id=$4) as b`,
     [sc.client, withSched.template_id, twin.client, nullSched.template_id]);
   assert.equal(elig.rows[0].a, null, "the scheduled template's lines are ineligible");
   assert.equal(elig.rows[0].b, null, "the twin's lines are ineligible");
-  noteLane("W44: the shape projection and the eligibility read agree across the scheduled/null pair");
+  noteLane("W44: the due oracle, the sign projection, the shape read and the eligibility read all agree across the scheduled/null pair");
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -293,6 +317,46 @@ test("fa4p2a.W31 a term running past the FY refuses -- and the SAME lane can cle
   const s2 = await mintClosePrepSession(sc.firm, sc.client);
   const still = await wake12(s2, { client: sc.client, entry: sc.entry, target: sc.target });
   assert.equal(still.status, "refused", "the refusal is not stable -- it was a flake, not a state");
+
+  // ===== THE SELF-HEAL, ACTUALLY DRIVEN (Codex C5) =====
+  // An earlier cut of this cell claimed the refusal was self-healable and then only re-confirmed
+  // it in a fresh session -- it never invoked the verb it advertised. Under R6/HIGH-1 the clocked
+  // lane may open the successor year ITSELF, so the cell now does exactly that and proves the same
+  // draft then ACTS. Without this the "self-healable, not a dead end" claim was a sentence, not a
+  // demonstration.
+  const { callWake } = await import("./f-a4-pr1c-fixtures.mjs");
+  // THE LANE CANNOT INVENT THE FY END. wake_open_fiscal_year refuses `fy_end_not_on_file` until a
+  // HUMAN has stated it -- measured, not assumed, and exactly the right division: the year-end is a
+  // client FACT a professional asserts, not something the clocked lane may decide. So the human
+  // states it through the governed door first, and only then does the lane clear its own blocker.
+  // That is what makes the self-heal a real division of labour rather than the agent doing both.
+  await humanQuery(sc.alice, "select clara.set_client_fy_end($1::uuid,$2::int,$3::int,$4) as r",
+    [sc.client, 12, 31, opk("fa4p2a-fyend")]);
+  const s3 = await mintClosePrepSession(sc.firm, sc.client);
+  const nextStart = `${Number(endsOn.slice(0, 4)) + 1}-01-01`;
+  const opened = await callWake(s3.secret, "wake_open_fiscal_year",
+    [{ name: "p_client", cast: "uuid" }, { name: "p_label" }, { name: "p_starts_on", cast: "date" },
+     { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_op_key" }],
+    [sc.client, `FY${Number(endsOn.slice(0, 4)) + 1}`, nextStart,
+     "f-a4-pr2a W31: the lane clears its own blocker", JSON.stringify(MODEL),
+     derivedOpKey(s3.task, "wake_open_fiscal_year", sc.client)]);
+  assert.equal(opened.status, "acted",
+    `the lane could not open the successor year: ${JSON.stringify(opened).slice(0, 300)}`);
+
+  // THE SAME DRAFT NOW ACTS, in a fresh session, with a real schedule and an honest receipt.
+  const s4 = await mintClosePrepSession(sc.firm, sc.client);
+  const healed = await wake12(s4, { client: sc.client, entry: sc.entry, target: sc.target });
+  assert.equal(healed.status, "acted",
+    `the refusal did not clear after the lane opened the year: ${JSON.stringify(healed).slice(0, 300)}`);
+  const tmpl = await templateById(healed.template_id);
+  assert.ok(tmpl.schedule, "the healed act drafted no schedule");
+  assert.equal(tmpl.status, "proposed");
+  assert.ok(Number(healed.period_count) > 0, "the healed schedule carries no periods");
+  const rec = await receiptsForTask(s4.task);
+  const act = rec.find((r) => r.act_kind === "prepayment_schedule" && r.verdict === "acted");
+  assert.ok(act, "the healed act left no acted receipt");
+  assert.equal(act.subject_kind, "adjustment_template");
+  assert.equal(act.subject_id, healed.template_id, "the receipt names a different template");
 });
 
 test("fa4p2a.armed-skip the focused run records ZERO skips", async () => {

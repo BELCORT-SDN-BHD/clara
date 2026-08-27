@@ -286,6 +286,81 @@ test("fa4p2a.W43 coverage: an EMPTY schedule and a GAP both refuse at propose", 
   assert.match(String(gap.detail ?? gap.message), /schedule_coverage_gap/);
 });
 
+test("fa4p2a.W43-lineshape (C1a) a scheduled line with BOTH sides positive refuses AT PROPOSE, before a signature exists", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // THE POISONED-TEMPLATE CASE. The multiset clause is direction-blind above zero and the balance
+  // clause only sums, so two lines each carrying BOTH a debit and a credit can agree on shape and
+  // sum equal -- the schedule PROPOSES, a human SIGNS it, and the poster then aborts at journal
+  // insertion. The refusal would arrive after the signature, on a template already live.
+  const sc = await prepaidScene("w43ls", { cents: 30000 });
+  const lines = pair(sc.target, sc.prepaid, 10000);
+  const bothSides = [
+    { account_code: sc.target, debit_cents: 10000, credit_cents: 10000, description: "d" },
+    { account_code: sc.prepaid, debit_cents: 10000, credit_cents: 10000, description: "c" }];
+  const e = await caught(() => propose(sc.alice, {
+    client: sc.client, name: `w43ls-${uniq()}`, start: "2025-02-01", end: "2025-02-28", lines,
+    schedule: [{ period_start: "2025-02-01", period_end: "2025-02-28", lines: bothSides }] }));
+  assert.ok(e, "a two-sided schedule line proposed cleanly -- it would sign, then abort at posting");
+  assert.match(String(e.detail ?? e.message), /schedule_line_invalid/);
+
+  // MUTANT / the other half of the same wall: a ZERO-zero line must refuse too, and a well-formed
+  // one-positive-side line must still propose -- so the clause is refusing a SHAPE, not everything.
+  const zeroZero = [
+    { account_code: sc.target, debit_cents: 0, credit_cents: 0, description: "d" },
+    { account_code: sc.prepaid, debit_cents: 0, credit_cents: 0, description: "c" }];
+  const z = await caught(() => propose(sc.alice, {
+    client: sc.client, name: `w43z-${uniq()}`, start: "2025-02-01", end: "2025-02-28", lines,
+    schedule: [{ period_start: "2025-02-01", period_end: "2025-02-28", lines: zeroZero }] }));
+  assert.ok(z, "a zero-on-both-sides schedule line proposed cleanly");
+  assert.match(String(z.detail ?? z.message), /schedule_line_invalid/);
+  const ok = await propose(sc.alice, {
+    client: sc.client, name: `w43ok-${uniq()}`, start: "2025-02-01", end: "2025-02-28", lines,
+    schedule: [{ period_start: "2025-02-01", period_end: "2025-02-28", lines: pair(sc.target, sc.prepaid, 10000) }] });
+  assert.ok(ok?.template_id, "a well-formed scheduled line was refused");
+});
+
+test("fa4p2a.W43-boundary (C1b) a CONTIGUOUS schedule on the wrong boundaries refuses -- the stranding case", async (t) => {
+  if (prepayGate(t, markSkip)) return;
+  // Jan1-31 / Feb1-10 / Feb11-Mar31 is contiguous AND spans the declared range exactly, so the
+  // old contiguity+span clause admitted it. It carries no exact February and no exact March
+  // period, so January posts and February then resolves to nothing -- STRANDING the prepaid asset
+  // mid-schedule, after a signature. The wall now compares each entry against the period the
+  // poster will actually derive.
+  const sc = await prepaidScene("w43b", { cents: 30000 });
+  const lines = pair(sc.target, sc.prepaid, 10000);
+  const e = await caught(() => propose(sc.alice, {
+    client: sc.client, name: `w43b-${uniq()}`, start: "2025-01-01", end: "2025-03-31", lines,
+    schedule: [
+      { period_start: "2025-01-01", period_end: "2025-01-31", lines: pair(sc.target, sc.prepaid, 10000) },
+      { period_start: "2025-02-01", period_end: "2025-02-10", lines: pair(sc.target, sc.prepaid, 10000) },
+      { period_start: "2025-02-11", period_end: "2025-03-31", lines: pair(sc.target, sc.prepaid, 10000) },
+    ] }));
+  assert.ok(e, "a contiguous but mis-bounded schedule proposed cleanly -- it would strand the asset");
+  assert.match(String(e.detail ?? e.message), /schedule_coverage_gap/);
+  assert.match(String(e.detail ?? e.message), /boundary/);
+
+  // MUTANT: a schedule that STOPS SHORT of the declared end must refuse on its own axis, so the
+  // walk is proven to consume the whole range and not merely to check the entries it was given.
+  const short = await caught(() => propose(sc.alice, {
+    client: sc.client, name: `w43s-${uniq()}`, start: "2025-01-01", end: "2025-03-31", lines,
+    schedule: [
+      { period_start: "2025-01-01", period_end: "2025-01-31", lines: pair(sc.target, sc.prepaid, 10000) },
+      { period_start: "2025-02-01", period_end: "2025-02-28", lines: pair(sc.target, sc.prepaid, 10000) },
+    ] }));
+  assert.ok(short, "a schedule stopping a month early proposed cleanly");
+  assert.match(String(short.detail ?? short.message), /short/);
+
+  // POSITIVE CONTROL: the three EXACT calendar months propose.
+  const ok = await propose(sc.alice, {
+    client: sc.client, name: `w43bok-${uniq()}`, start: "2025-01-01", end: "2025-03-31", lines,
+    schedule: [
+      { period_start: "2025-01-01", period_end: "2025-01-31", lines: pair(sc.target, sc.prepaid, 10000) },
+      { period_start: "2025-02-01", period_end: "2025-02-28", lines: pair(sc.target, sc.prepaid, 10000) },
+      { period_start: "2025-03-01", period_end: "2025-03-31", lines: pair(sc.target, sc.prepaid, 10000) },
+    ] });
+  assert.ok(ok?.template_id, "the exact cadence periods were refused -- the wall is refusing everything");
+});
+
 test("fa4p2a.W43-resolver a period the schedule does not cover raises a TYPED refusal, never an empty line set", async (t) => {
   if (prepayGate(t, markSkip)) return;
   // REACHED THROUGH LAWFUL MEANS, and the first cut of this cell could not be. Annex A allowed a

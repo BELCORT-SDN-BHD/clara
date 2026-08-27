@@ -305,13 +305,14 @@ test("fa4p2a.W22 (residual 1) the rank conjunct breaks NO definer path, and a be
     `select u.id from clara.users u join clara.firm_memberships m on m.user_id = u.id
       where m.firm_id=$1 and m.status='active'
         and clara.role_rank(m.role) < clara.role_rank('bookkeeper') limit 1`, [sc.firm]);
-  if (viewer.rows.length === 0) {
-    noteLane("fa4p2a.W22: no below-floor member in this world -- the control arm is PRINTED, not silent");
-  } else {
-    const asViewer = await humanQuery(viewer.rows[0].id,
-      "select count(*)::int as n from clara.close_proposals where close_run_id=$1", [run]);
-    assert.equal(asViewer.rows[0].n, 0, "a below-floor viewer read a model's rationale");
-  }
+  // THE CONTROL IS REQUIRED, NOT OPTIONAL (Codex C6). Noting its absence let the cell go green on a
+  // world with no viewer -- and without the control it cannot tell a working floor from an absent
+  // one, which is the only thing it is here to distinguish. It FAILS instead.
+  assert.ok(viewer.rows.length > 0,
+    "no below-floor member in this world: this cell cannot tell a working floor from an absent one without one, so it fails rather than notes. buildWorld mints one; if it stopped, fix the fixture.");
+  const asViewer = await humanQuery(viewer.rows[0].id,
+    "select count(*)::int as n from clara.close_proposals where close_run_id=$1", [run]);
+  assert.equal(asViewer.rows[0].n, 0, "a below-floor viewer read a model's rationale");
 });
 
 test("fa4p2a.W28 (residual 5) the adopted arm's TRUE strength is stated in the catalog, not over-claimed", async (t) => {
