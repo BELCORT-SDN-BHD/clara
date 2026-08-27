@@ -1,6 +1,6 @@
 # F-A4 PR-1c — double-review synthesis + fix order (2026-08-27)
 
-*Conductor's synthesis of the two independent reviews of `f-a4/pr-1c` at frozen tip
+*Conductor's synthesis of the two independent reviews of branch f-a4/pr-1c at frozen tip
 `a035c58`: the Codex `gpt-5.6-sol` read-only adversarial pass (recorded in this train
 alongside this file: `docs/plan/active/fa4-pr1c-codex-review-2026-08-27.md` — its first
 commit missed PR #366's squash, see that file's provenance note) and the
