@@ -94,4 +94,25 @@ export default tseslint.config(
       "@typescript-eslint/no-misused-promises": "error",
     },
   },
+
+  // apps/web only — ban a 3-argument `window.open(...)` call outright (independent
+  // review 2026-08-27, R1/R5). WHATWG: a "noopener"/"noreferrer" features string
+  // makes `window.open` return `null` UNCONDITIONALLY, which R1 shipped as a
+  // regression and R5 found had reappeared, undetected, inside the very adapter
+  // meant to prevent it (lib/documents/open-in-new-tab.ts's own type-signature
+  // wall covers only THAT file — this rule is the wall that survives a future
+  // call site bypassing it entirely). The two-argument `(url, target)` form is
+  // never restricted.
+  {
+    files: ["apps/web/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.object.name='window'][callee.property.name='open'][arguments.length>2]",
+          message: "window.open must be called with at most two arguments (url, target). A features string (\"noopener\"/\"noreferrer\"/even \"\") changes its return-value behaviour — WHATWG's noreferrer implies noopener, and noopener makes window.open return null unconditionally (2026-08-27 R1/R5). Use lib/documents/open-in-new-tab.ts's injectable windowOpen instead of calling window.open directly.",
+        },
+      ],
+    },
+  },
 );
