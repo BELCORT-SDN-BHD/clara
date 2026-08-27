@@ -286,8 +286,11 @@ const CLOSE_MODEL_0056_CLOCK_NAMES = [
 const F_A4_PR1B_CLOCK_NAMES = ["_abandon_close_core"];
 
 // F-A4 PR-1c [close-key-1's additive close-domain agent limb, `f_a4_pr_1c_close_agent_limb` at
-// whatever number merge claims]: FIVE lawful bare-clock readers, MEASURED against the applied rig
+// whatever number merge claims]: SIX lawful bare-clock readers, MEASURED against the applied rig
 // rather than derived from reading the file (the round-8 M4 method, applied to a new lane).
+// (Prose count trued in the fix round — the array grew to six with settle_close_proposal while
+// this sentence still said five. A roster whose prose and whose members disagree is the exact
+// thing this file exists to prevent, so the count is stated once and read off the array below.)
 //
 // THE ADJUDICATION, per name, because arm (D) catches a bare token and a bare token is only a
 // defect when the body derives a DATE from it:

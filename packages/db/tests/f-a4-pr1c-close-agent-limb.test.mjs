@@ -424,7 +424,12 @@ test("fa4c.C2 the proposal carrier is SUPERSEDE-never-delete: one live row per r
   assert.equal(all.find((p) => p.id === first.result.proposal_id).state, "superseded");
 
   // NO DELETE PATH EXISTS, proven by trying it as the owner role rather than inferred from absence.
-  const del = await caught(() => rootQuery(
-    "set role clara_fn_owner; delete from clara.close_proposals where id=$1", [first.result.proposal_id]));
-  assert.ok(del, "a delete on the proposal carrier is refused");
+  // SEPARATE STATEMENTS, REAL ROW, TYPED CODE (FIX-9). Sending  as ONE
+  // parameterized query is rejected by the extended protocol at PARSE (42601) -- so the old
+  //  passed without the append-only trigger ever firing. The role is set by the
+  // helper, the DELETE is its own statement against a row that exists, and the SQLSTATE is
+  // asserted: CLR08 is the trigger talking.
+  const del = await caught(() => asRole(ROLES.fnOwner, (c) =>
+    c.query("delete from clara.close_proposals where id=$1", [first.result.proposal_id])));
+  assert.equal(del?.code, CLR.immutable, "the append-only trigger refuses the delete, by its own code");
 });

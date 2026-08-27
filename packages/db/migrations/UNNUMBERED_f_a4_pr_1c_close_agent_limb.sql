@@ -27,7 +27,12 @@
 --   §J  the wake_fn_allowlist rows + the EXECUTE grants
 --   §TAIL the census a reviewer reads
 --
--- ============================ THREE DEVIATIONS, DECLARED NOT SLIPPED ============================
+-- ============================ FOUR DEVIATIONS, DECLARED NOT SLIPPED ============================
+--
+-- Numbered (1) (4) (3) (2) below, in the order they were discovered rather than renumbered: the
+-- FA-oracle correction (4) was measured after the first three were written, and renumbering a
+-- deviation after a review has cited it is how a citation quietly comes to mean other work. The
+-- count in this banner is trued; the numbers deliberately are not.
 --
 -- (1) TWELVE WRAPPERS, NOT THIRTEEN. `wake_establish_prepayment_schedule` (§3.1 row 12) and its
 --     evaluator `clara.prepayment_schedule_v1` (Annex B.2) are PARKED, with two measured blockers:
@@ -277,11 +282,15 @@ begin
     raise exception 'F-A4 PR-1c prestate: the close_prep wake_engine_sources row is absent or already enabled' using errcode = 'CLR10';
   end if;
 
-  -- 0.8 · The wake allowlist carries ZERO close_prep rows today (§J adds exactly twelve).
+  -- 0.8 · The wake allowlist carries ZERO close_prep rows today (§J adds exactly twelve), and the
+  -- OTHER kinds' population is captured so the tail can prove extend-only by an actual difference
+  -- rather than by a total (N1).
   select count(*)::int into v_n from clara.wake_fn_allowlist where wake_kind = 'close_prep';
   if v_n <> 0 then
     raise exception 'F-A4 PR-1c prestate: wake_fn_allowlist already carries % close_prep row(s)', v_n using errcode = 'CLR10';
   end if;
+  insert into _fa4_pr1c_pre(k, v)
+    select 'allowlist_other_kinds', count(*)::text from clara.wake_fn_allowlist where wake_kind <> 'close_prep';
 
   raise notice 'F-A4 PR-1c prestate: OK — PR-1b''s six ALTERs live, 14 delegates resolve at pinned signatures, attest_close_exception''s p_from_proposal arm reads the pinned close_proposals shape, 7 prosrc shas pinned, 3 target tables absent, 14 gate-catalog rows, close_prep source registered-and-disabled, 0 close_prep allowlist rows.';
 end $pre$;
@@ -337,11 +346,36 @@ create table clara.agent_act_receipts (
   -- The FULL failing vector, not the first failure: a refusal explains everything wrong at once
   -- rather than one thing per wake (design §3.2 Tier B's closing paragraph).
   rung_vector     jsonb       not null default '[]'::jsonb check (jsonb_typeof(rung_vector) = 'array'),
+  -- The failing vector's canonical digest, STORED so it can carry a unique key (FIX-1). jsonb's
+  -- ::text rendering is canonical for a given value — same vector, same digest, always — so this
+  -- is a deterministic restatement of rung_vector and never an independent fact that could drift
+  -- from it.
+  rung_digest     text        generated always as (md5(rung_vector::text)) stored,
   op_key          text        not null check (btrim(op_key) <> ''),
   created_at      timestamptz not null default now(),
   -- Annex E.3's uq_aar, firm-scoped: an op_key string is client-chosen and was never meant to be
   -- globally unique across every firm on the estate (F-A3's own B3 correction, applied at birth).
-  constraint uq_aar unique (firm_id, act_kind, subject_kind, subject_id, op_key),
+  --
+  -- THE OUTCOME JOINS THE KEY (FIX-1, both review lanes). Annex E.3 spells uq_aar without it, and
+  -- the first cut followed the annex — which made a same-task retry whose OUTCOME had changed
+  -- collide with the standing row, so ON CONFLICT DO NOTHING returned the OTHER outcome's receipt
+  -- id under this call's status. Rig-reproduced both directions: refused->acted answered
+  -- `status='acted'` while naming a REFUSED receipt (for the depreciation catch-up, real journal
+  -- entries with the ledger denying them), and acted->refused returned the earlier ACTED row so
+  -- the refusal left no trace at all.
+  --
+  -- The key therefore carries `verdict` AND `rung_digest`, and the second is not belt-and-braces:
+  -- with verdict alone, a task that refuses for one reason and then refuses for a DIFFERENT one
+  -- (a hold set between two calls) still collides, and the honest second refusal would have to
+  -- either overwrite the first (mutation, forbidden) or abort the transaction — losing exactly
+  -- the trace this fix exists to keep. Keyed on the digest, each distinct outcome is its own
+  -- durable row and the identity guard in _agent_close_receipt can then be strict without ever
+  -- refusing an honest act.
+  --
+  -- Design semantics are unchanged: D-25 / cell B-11 make a same-task retry of the SAME outcome a
+  -- REPLAY, and that is exactly what still happens — identical vector, identical digest, one row,
+  -- the stored id returned. What can no longer happen is one outcome wearing another's receipt.
+  constraint uq_aar unique (firm_id, act_kind, subject_kind, subject_id, op_key, verdict, rung_digest),
   constraint ck_aar_vector check ((verdict = 'acted') = (jsonb_array_length(rung_vector) = 0)),
   constraint fk_aar_client foreign key (client_id, firm_id) references clara.clients (id, firm_id)
 );
@@ -360,8 +394,19 @@ alter table clara.agent_act_receipts enable row level security;
 alter table clara.agent_act_receipts force row level security;
 create policy p_aar_owner on clara.agent_act_receipts
   for all to clara_fn_owner using (true) with check (true);
+-- THE BOOKKEEPER FLOOR HOLDS ON THE DIRECT PATH TOO (FIX-6). TA-P4 (4) puts this surface at
+-- bookkeeper+, and clara.list_agent_act_receipts enforces that — but a plain
+-- `select * from clara.agent_act_receipts` never goes through the reader, so a firm VIEWER with a
+-- JWT could read every model name, rationale, wake task and failing-rung vector the lane has ever
+-- written. The floor therefore lives in the POLICY, where it binds every reader rather than the
+-- one that happens to be polite. Consumers censused before choosing this over revoking SELECT:
+-- the gated reader is the only consumer in the estate today (the dashboard panel is PR-3's), so
+-- folding the rank in costs no live caller and leaves the table readable for the bookkeeper+
+-- surfaces that are coming.
 create policy p_aar_human on clara.agent_act_receipts
-  for select to clara_authenticated using (firm_id = clara.jwt_firm());
+  for select to clara_authenticated
+  using (firm_id = clara.jwt_firm()
+         and clara.actor_role_rank() >= clara.role_rank('bookkeeper'));
 grant select on clara.agent_act_receipts to clara_authenticated;
 create trigger t_aar_append_only before update or delete on clara.agent_act_receipts
   for each row execute function clara._tf_append_only();
@@ -418,6 +463,30 @@ create table clara.close_proposals (
 -- before ever reaching this index; the index is what makes the rung structurally true.
 create unique index uq_close_proposal_live on clara.close_proposals (close_run_id) where state = 'open';
 create index ix_cp_run on clara.close_proposals (close_run_id, created_at desc);
+
+-- ONE DRAFTED TEXT PER (proposal, check_key, item_key) — FIX-8. `drafted` is a jsonb array and
+-- nothing stopped it carrying the same item twice with two different texts; attest_close_exception
+-- resolves the adoption with `limit 1` over an unordered array, so which of the two the reviewer
+-- ends up signing would have been a coin flip, and the receipt would name a text the card may not
+-- have shown. The uniqueness is expressed where jsonb cannot express it: a trigger that projects
+-- the array and refuses a duplicate key, checked on the ONE insert path the carrier has.
+create function clara._tf_close_proposal_drafted_unique() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_total int; v_distinct int;
+begin
+  select count(*)::int,
+         count(distinct jsonb_build_array(x.el ->> 'check_key', x.el ->> 'item_key'))::int
+    into v_total, v_distinct
+    from jsonb_array_elements(new.drafted) x(el);
+  if v_total is distinct from v_distinct then
+    raise exception 'a close proposal drafts at most one text per (check_key, item_key); this one carries % element(s) over % key(s)', v_total, v_distinct
+      using errcode = 'CLR10', detail = '{"reason":"close_proposal_drafted_duplicate_item"}';
+  end if;
+  return new;
+end $$;
+revoke all on function clara._tf_close_proposal_drafted_unique() from public;
+create trigger t_close_proposal_drafted_unique before insert on clara.close_proposals
+  for each row execute function clara._tf_close_proposal_drafted_unique();
 comment on table clara.close_proposals is
   'F-A4 (design §3.7, Annex E.4): the durable carrier for a proposed close — the gate digest vector '
   'it binds, the drafted attestation text per (check_key, item_key), the narrative and the model '
@@ -582,13 +651,37 @@ create function clara._tf_assert_close_agent_receipt() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare v_actor uuid; v_is_agent boolean; v_kind text; v_n int;
 begin
+  -- CLASSIFICATION IS A CLOSED WORLD IN BOTH DIRECTIONS (FIX-3). The first cut read INSERT as
+  -- begin_close unconditionally and UPDATE as abandon-or-nothing, so a run born already terminal
+  -- classified as a begin, and every UPDATE that was not an abandon fell out of the wall entirely
+  -- — including a transition nobody has written yet. Both arms now enumerate what they admit and
+  -- REFUSE the rest, which is what makes this a wall rather than a filter.
   if tg_op = 'INSERT' then
+    if new.state is distinct from 'in_progress'
+       or new.ended_by is not null or new.ended_at is not null or new.end_reason is not null then
+      raise exception 'a close run is born in_progress with no terminal fields; this one is born % (ended_by %, ended_at %)', new.state, new.ended_by, new.ended_at
+        using errcode = 'CLR08', detail = '{"reason":"close_run_birth_shape_invalid"}';
+    end if;
     v_actor := new.started_by; v_kind := 'begin_close';
-  elsif new.state = 'abandoned' then
-    v_actor := new.ended_by; v_kind := 'abandon_close';
+  elsif tg_op = 'UPDATE' then
+    if new.state = old.state then
+      -- No lifecycle transition at all (the settlement columns moving without the state is
+      -- already refused by t_close_runs_lifecycle); nothing is owed.
+      return null;
+    elsif new.state = 'abandoned' then
+      v_actor := new.ended_by; v_kind := 'abandon_close';
+    elsif new.state = 'finalized' then
+      -- A finalize is key ②'s, a HUMAN act by law 71 — no agent receipt is owed and none is
+      -- sought. Named explicitly rather than reached by falling off the end.
+      return null;
+    else
+      raise exception 'close run % attempted an unclassified transition % -> %; the agent-receipt wall refuses what it cannot adjudicate', new.id, old.state, new.state
+        using errcode = 'CLR08', detail = jsonb_build_object('reason', 'close_run_transition_unclassified',
+          'from', old.state, 'to', new.state)::text;
+    end if;
   else
-    -- A finalize is key ②'s, a HUMAN act by law 71 — no agent receipt is owed and none is sought.
-    return null;
+    raise exception 'the close agent-receipt wall saw tg_op %, which it does not adjudicate', tg_op
+      using errcode = 'CLR08', detail = '{"reason":"close_agent_receipt_unknown_tg_op"}';
   end if;
   -- ARM-0: a settled run with no acting actor cannot be adjudicated at all. Refuse.
   if v_actor is null then
@@ -609,11 +702,22 @@ begin
   -- unique per transition, so the count is exactly one or the wall has found a real gap. (An
   -- agent core writes its REFUSED begin receipt against the fiscal year instead — there is no run
   -- to name when the freeze never happened — which is why this read pins subject_kind too.)
+  --
+  -- THE MATCH IS BOUND TO THE ACT, NOT MERELY TO THE SUBJECT (FIX-4). act_kind + subject + verdict
+  -- alone is satisfied by ANY acted receipt naming this run — including one pre-planted in another
+  -- firm, or by another actor, or with no task behind it. The wall now also requires the receipt's
+  -- FIRM to be this run's, its ACTING ACTOR to be the very identity this transition records, and
+  -- its wake task to resolve — so satisfying it means the act really was receipted by the actor the
+  -- run names, in the tenant the run belongs to.
   select count(*)::int into v_n from clara.agent_act_receipts r
     where r.act_kind = v_kind and r.subject_kind = 'close_run'
-      and r.subject_id = new.id and r.verdict = 'acted';
+      and r.subject_id = new.id and r.verdict = 'acted'
+      and r.firm_id = new.firm_id
+      and r.client_id = new.client_id
+      and r.acting_actor = v_actor
+      and r.wake_task_id is not null;
   if v_n <> 1 then
-    raise exception 'an agent-authored % on close run % carries exactly one ACTED agent_act_receipts row; it carries %', v_kind, new.id, v_n
+    raise exception 'an agent-authored % on close run % carries exactly one ACTED agent_act_receipts row bound to this firm, client, actor and a wake task; it carries %', v_kind, new.id, v_n
       using errcode = 'CLR08', detail = jsonb_build_object('reason', 'close_agent_receipt_missing',
         'close_run_id', new.id, 'act_kind', v_kind, 'receipts', v_n)::text;
   end if;
@@ -624,6 +728,20 @@ revoke all on function clara._tf_assert_close_agent_receipt() from public;
 create constraint trigger t_close_run_agent_receipt after insert or update on clara.close_runs
   deferrable initially deferred
   for each row execute function clara._tf_assert_close_agent_receipt();
+
+-- THE SCHEDULE BYPASS, CLOSED STRUCTURALLY (FIX-5). A deferred constraint trigger can be forced
+-- IMMEDIATE by the session itself (`SET CONSTRAINTS ... IMMEDIATE`), which fires the count while
+-- it still reads exactly one and lets a SECOND matching acted receipt land afterwards — the wall
+-- passes and the record ends up with two acted receipts for one transition. A trigger cannot
+-- defend against a caller who chooses when the trigger runs, so the "exactly one" half is ALSO
+-- expressed as an index, which no scheduling verb can move: at most one ACTED receipt may exist
+-- per (close-run subject, act kind) for the two close-run transitions. The trigger keeps proving
+-- the OTHER half — that at least one exists, bound to the right firm/client/actor/task — which an
+-- index cannot express.
+create unique index uq_aar_one_acted_close_run_transition
+  on clara.agent_act_receipts (subject_id, act_kind)
+  where subject_kind = 'close_run' and verdict = 'acted'
+    and act_kind in ('begin_close', 'abandon_close');
 
 -- =================================================================================================
 -- §C · F14's TWO SIBLINGS — the credential↔task binding (design §3.8's closing paragraph, D-13).
@@ -1191,11 +1309,26 @@ revoke all on function clara._close_wake_ctx(text, text, uuid, text) from public
 -- takes the receipt with it. The receipt is written for BOTH verdicts — a refusal that leaves no
 -- trace is the silent-daily-log-line failure F-A4 exists to end.
 --
--- REPLAY: uq_aar is (firm_id, act_kind, subject_kind, subject_id, op_key). A retried op_key inside
--- one wake task replays the delegate's own _reserve_op outcome and would then try to insert a
--- SECOND receipt; ON CONFLICT DO NOTHING keeps the table append-only and idempotent, and the
--- read-back proves the standing row IS this act (law 3: an op_key names an act only if the act it
--- belongs to is this one).
+-- REPLAY, AND THE IDENTITY PROOF THE FIRST CUT ONLY CLAIMED (FIX-1, both review lanes).
+-- uq_aar is (firm_id, act_kind, subject_kind, subject_id, op_key, VERDICT) — see the table's own
+-- note for why verdict is in the key. A retried op_key inside one wake task replays the delegate's
+-- own _reserve_op outcome and would then try to insert a SECOND receipt; ON CONFLICT DO NOTHING
+-- keeps the table append-only and idempotent.
+--
+-- THE READ-BACK NOW ACTUALLY COMPARES. The first cut selected `verdict` into a record and never
+-- looked at it — a law-3 guard that was designed, commented, and never written; both reviewers
+-- found it and the native lane reproduced the consequence on two rigs. The standing row must BE
+-- this act: same verdict (structural now, since verdict is in the conflict target), same wake
+-- task, same acting actor, same client, same wake kind, same failing-rung vector. Anything else
+-- means an op key is being pointed at a different act, and this body RAISES rather than returning
+-- an id that would misdescribe what happened. Raising inside an agent core aborts the whole
+-- transaction, so nothing durable can carry a lying receipt; the lane's next wake is a new task,
+-- a new derived op key, and an honest re-measurement (D-25 / cell B-11's own semantics).
+--
+-- WHY BOTH HALVES AND NOT JUST ONE. Verdict-in-the-key alone would let a foreign or pre-planted
+-- row satisfy a read-back; the comparison alone would abort the legitimate outcome-changed retry
+-- that ought to leave a second, honest trace. Together: every outcome is durable, and the row this
+-- function returns is provably the act its caller just performed.
 create function clara._agent_close_receipt(p_firm uuid, p_client uuid, p_act_kind text,
     p_subject_kind text, p_subject_id uuid, p_wake_kind text, p_on_behalf_of uuid, p_task uuid,
     p_rationale text, p_model jsonb, p_verdict text, p_rung_vector jsonb, p_op_key text)
@@ -1227,12 +1360,31 @@ begin
     values (p_firm, p_client, p_act_kind, p_subject_kind, p_subject_id,
       clara.agent_user_id(), p_on_behalf_of, p_wake_kind, p_task,
       v_name, v_version, v_rationale, p_verdict, coalesce(p_rung_vector, '[]'::jsonb), p_op_key)
-    on conflict (firm_id, act_kind, subject_kind, subject_id, op_key) do nothing
+    on conflict (firm_id, act_kind, subject_kind, subject_id, op_key, verdict, rung_digest) do nothing
     returning id into v_id;
   if v_id is null then
-    select id, verdict into v_existing from clara.agent_act_receipts
+    select id, verdict, wake_task_id, acting_actor, client_id, via_wake_kind, rung_vector
+      into v_existing from clara.agent_act_receipts
       where firm_id = p_firm and act_kind = p_act_kind and subject_kind = p_subject_kind
-        and subject_id = p_subject_id and op_key = p_op_key;
+        and subject_id = p_subject_id and op_key = p_op_key and verdict = p_verdict
+        and rung_digest = md5(coalesce(p_rung_vector, '[]'::jsonb)::text);
+    -- ARM-0 (law 68): the insert conflicted, so a row MUST be there. If the read-back cannot see
+    -- one, something is wrong that this body must not paper over with a NULL receipt id.
+    if v_existing.id is null then
+      raise exception 'the agent-act receipt for op_key % conflicted but cannot be read back', p_op_key
+        using errcode = 'CLR08', detail = '{"reason":"receipt_readback_absent"}';
+    end if;
+    if v_existing.verdict      is distinct from p_verdict
+       or v_existing.wake_task_id is distinct from p_task
+       or v_existing.acting_actor is distinct from clara.agent_user_id()
+       or v_existing.client_id    is distinct from p_client
+       or v_existing.via_wake_kind is distinct from p_wake_kind
+       or v_existing.rung_vector  is distinct from coalesce(p_rung_vector, '[]'::jsonb) then
+      raise exception 'op_key % already names a DIFFERENT act; a replayed key must never return another act''s receipt', p_op_key
+        using errcode = 'CLR10', detail = jsonb_build_object('reason', 'op_key_identity_mismatch',
+          'act_kind', p_act_kind, 'subject_kind', p_subject_kind, 'subject_id', p_subject_id,
+          'standing_verdict', v_existing.verdict, 'incoming_verdict', p_verdict)::text;
+    end if;
     v_id := v_existing.id;
   end if;
   return v_id;
@@ -1496,7 +1648,7 @@ revoke all on function clara.release_close_prep(uuid, text, text) from public;
 -- -------------------------------------------------------------------------------------------------
 create function clara.settle_close_proposal(p_proposal uuid, p_state text, p_reason text, p_op_key text)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
-declare c record; v_dedupe jsonb; v_p record; v_reason text;
+declare c record; v_dedupe jsonb; v_p record; v_reason text; v_missing int;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if not clara._has_capability(c.firm, c.actor, 'close_and_attest') then
@@ -1529,11 +1681,42 @@ begin
   v_dedupe := clara._reserve_op(c.firm, 'settle_close_proposal', p_op_key,
     clara._hash(jsonb_build_object('proposal', p_proposal, 'state', p_state, 'reason', v_reason)));
   if v_dedupe is not null then return v_dedupe; end if;
+  -- SERIALIZED AGAINST THE ATTESTATION FLOW (FIX-8). The state was read above WITHOUT a lock, so
+  -- two settles — or a settle racing an attest_close_exception(p_from_proposal) that is checking
+  -- `cp.state = 'open'` — could both pass their read and both proceed. Re-read FOR UPDATE and
+  -- decide on the LOCKED row: from here the proposal cannot change under this transaction, and a
+  -- concurrent attestation either committed before us (and is counted below) or waits and then
+  -- finds the settled state its own guard refuses.
+  select * into v_p from clara.close_proposals cp where cp.id = p_proposal for update;
   if v_p.state <> 'open' then
     raise exception 'close proposal % is already %; a settled proposal is terminal', p_proposal, v_p.state
       using errcode = 'CLR41',
         detail = jsonb_build_object('reason', 'close_proposal_already_settled',
           'state', v_p.state)::text;
+  end if;
+  -- ADOPTION MUST PROVE ITS ATTESTATIONS (FIX-7). "Adopted" is a claim about work a professional
+  -- actually did: that every drafted item was signed through attest_close_exception naming THIS
+  -- proposal. Stamping it on a proposal with no linked attestations would put a false professional
+  -- record on a close, which is the exact class TA-P4 exists to prevent — so the door counts the
+  -- LIVE attestations that cite this proposal, in the same transaction that settles it, and every
+  -- drafted (check_key, item_key) must be covered. A withdrawal proves nothing: declining is the
+  -- refusal of that work.
+  if p_state = 'adopted' then
+    select count(*)::int into v_missing
+      from jsonb_array_elements(v_p.drafted) x(el)
+     where not exists (
+       select 1 from clara.close_attestations a
+        where a.close_run_id = v_p.close_run_id
+          and a.check_key = (x.el ->> 'check_key')
+          and a.item_key = (x.el ->> 'item_key')
+          and a.authored_by = 'agent'
+          and a.superseded_at is null);
+    if v_missing > 0 then
+      raise exception 'this proposal cannot be adopted: % of its drafted item(s) carry no live agent-authored attestation on the run', v_missing
+        using errcode = 'CLR41',
+          detail = jsonb_build_object('reason', 'close_proposal_attestations_missing',
+            'uncovered_items', v_missing)::text;
+    end if;
   end if;
   update clara.close_proposals
     set state = p_state, settled_by = c.actor, settled_at = now(), settle_reason = v_reason
@@ -2035,6 +2218,17 @@ begin
                      or nullif(btrim(coalesce(x.el ->> 'text', '')), '') is null) then
         v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B2',
           'token', 'receipt_incomplete', 'class', 'drafted_element'));
+      -- DUPLICATE ITEMS ARE A SHAPE REFUSAL, NOT A RAISE (FIX-8). t_close_proposal_drafted_unique
+      -- is the structural backstop under every writer, but a trigger raise escaping this core
+      -- would abort the transaction and leave no receipt — breaking Tier B's "a typed non-act, no
+      -- raise" contract for what is only a malformed request. The rung answers it first, so the
+      -- lane gets a durable, readable refusal and the trigger stays the wall for anything that
+      -- reaches the table another way.
+      elsif (select count(*) from jsonb_array_elements(p_drafted) x(el))
+            is distinct from (select count(distinct jsonb_build_array(x.el ->> 'check_key', x.el ->> 'item_key'))
+                                from jsonb_array_elements(p_drafted) x(el)) then
+        v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B2',
+          'token', 'receipt_incomplete', 'class', 'drafted_duplicate_item'));
       else
         select array_agg(distinct x.el ->> 'check_key') into v_keys
           from jsonb_array_elements(p_drafted) x(el);
@@ -2072,8 +2266,13 @@ begin
     -- B11 -- a live proposal already stands for this run AT THE SAME DIGEST VECTOR. A live
     -- proposal at a DIFFERENT vector is not a duplicate: it is a superseded one, and the act below
     -- supersedes it rather than refusing (supersede-never-mutate, law 6's reverse-not-delete).
+    -- FOR UPDATE (FIX-8): the live row is read under a lock, so the settle door cannot terminate
+    -- it between this read and the supersede below. Without the lock the two writers could each
+    -- see `open`, and the loser would stamp `superseded` over a row a reviewer had just adopted —
+    -- the settle-only trigger would refuse it, but only after the lane had already decided it was
+    -- superseding a live proposal. Locking here makes the two lifecycle writers take turns.
     select cp.id, cp.bound_digests into v_live, v_live_bound from clara.close_proposals cp
-      where cp.close_run_id = p_close_run and cp.state = 'open' limit 1;
+      where cp.close_run_id = p_close_run and cp.state = 'open' limit 1 for update;
     if v_live is not null and v_live_bound is not distinct from v_bound then
       v_rungs := v_rungs || jsonb_build_array(jsonb_build_object('rung', 'B11',
         'token', 'close_proposal_exists', 'proposal_id', v_live));
@@ -2260,7 +2459,7 @@ end $$;
 revoke all on function clara.wake_mint_month_snapshot(uuid, date, text, jsonb, text) from public;
 
 -- =================================================================================================
--- §I.2 · THE TWO NEW EVENT TYPES, on the register that VALIDATES them.
+-- §I.2 · THE THREE NEW EVENT TYPES, on the register that VALIDATES them.
 --
 -- clara._append_event refuses an unregistered name outright ("unknown event_type"), so the DB half
 -- of design §3.3's "a new event type on both registers" has to land in the migration that ships the
@@ -2273,6 +2472,10 @@ revoke all on function clara.wake_mint_month_snapshot(uuid, date, text, jsonb, t
 -- which is PR-2's, and PR-2 is a RUNTIME PR with no migration of its own to carry the row. An
 -- unregistered name would make the belt's very first notice raise. It is inert until something
 -- emits it.
+--
+-- `close.proposal_settled` arrived with clara.settle_close_proposal (the review card's terminal
+-- door) and is emitted by it — the terminal half of close.proposed, and a DIFFERENT fact, so it
+-- carries its own name rather than a second payload shape on the first.
 -- =================================================================================================
 with inserted_types as (
   insert into clara.event_types(name, client_scoped, description)
@@ -2453,15 +2656,16 @@ begin
   -- (iii) the HUMAN door names ONLY adopted/withdrawn as admissible, read positionally off its own
   --       prosrc -- so it can never reach `superseded` (the LANE's stamp, written by
   --       _agent_close_proposal_core) nor write `open` back over a settled row.
-  -- `like '%state%'` alone is NOT the domain CHECK: ck_cp_state_settled ("(state = 'open') =
-  -- (settled_at is null)") matches that too and carries only one of the four literals. Pin the
-  -- ENUM form -- Postgres renders `state in (...)` as `state = ANY (ARRAY[...])` -- so this reads
-  -- the constraint it means to read. Caught by this file's own first apply.
+  -- SELECTED BY conname, NOT BY ITS OWN TEXT (N6). Matching on `like '%state = ANY%'` asks the
+  -- constraint to describe itself and then trusts the description — so a future constraint that
+  -- happened to render that way would be read instead, and this census would be measuring
+  -- something it never meant to. The domain CHECK has a stable name; pin that, and fail loudly if
+  -- it is gone rather than silently reading a neighbour.
   select pg_get_constraintdef(c.oid) into v_def from pg_constraint c
     where c.conrelid = 'clara.close_proposals'::regclass and c.contype = 'c'
-      and pg_get_constraintdef(c.oid) like '%state = ANY%';
+      and c.conname = 'close_proposals_state_check';
   if v_def is null then
-    raise exception 'F-A4 PR-1c tail: close_proposals carries no state-domain CHECK' using errcode = 'CLR10';
+    raise exception 'F-A4 PR-1c tail: close_proposals_state_check is absent' using errcode = 'CLR10';
   end if;
   foreach v_sig in array array['open', 'adopted', 'withdrawn', 'superseded'] loop
     if position('''' || v_sig || '''' in v_def) = 0 then
@@ -2596,12 +2800,19 @@ begin
   end loop;
 
   -- T.5 · THE ALLOWLIST: exactly TWELVE close_prep rows, one per wrapper, no more and no fewer —
-  -- and EVERY OTHER KIND'S ROW COUNT IS UNMOVED (extend-only, proven by a difference rather than
-  -- by a total).
+  -- and EVERY OTHER KIND'S ROW COUNT IS UNMOVED. The extend-only half is now an ACTUAL DIFFERENCE
+  -- (N1): the first cut said "proven by a difference" and then computed a total, which proves
+  -- nothing about the other kinds. This measures the non-close_prep population against the count
+  -- captured at prestate, so a row added to or removed from ANY other kind by this file fails here.
   select count(*)::int into v_n from clara.wake_fn_allowlist where wake_kind = 'close_prep';
   if v_n <> 12 then
     raise exception 'F-A4 PR-1c tail: wake_fn_allowlist carries % close_prep rows, expected 12', v_n
       using errcode = 'CLR10';
+  end if;
+  select count(*)::int into v_m from clara.wake_fn_allowlist where wake_kind <> 'close_prep';
+  if v_m <> (select v::int from _fa4_pr1c_pre where k = 'allowlist_other_kinds') then
+    raise exception 'F-A4 PR-1c tail: the OTHER wake kinds moved from % to % allowlist row(s) — this file extends, it does not touch them',
+      (select v from _fa4_pr1c_pre where k = 'allowlist_other_kinds'), v_m using errcode = 'CLR10';
   end if;
   select array_agg(function_name order by function_name) into v_extra
     from clara.wake_fn_allowlist where wake_kind = 'close_prep'
@@ -2610,16 +2821,19 @@ begin
     raise exception 'F-A4 PR-1c tail: unexpected close_prep allowlist row(s): %', array_to_string(v_extra, ', ')
       using errcode = 'CLR10';
   end if;
-  -- Every allowlisted name resolves to exactly ONE function in clara (an allowlist row naming
-  -- nothing is a permission for a verb that cannot fire).
-  select count(*)::int into v_m from clara.wake_fn_allowlist w
-    where w.wake_kind = 'close_prep'
-      and not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-                       where n.nspname = 'clara' and p.proname = w.function_name);
-  if v_m <> 0 then
-    raise exception 'F-A4 PR-1c tail: % close_prep allowlist row(s) name a function that does not exist', v_m
-      using errcode = 'CLR10';
-  end if;
+  -- Every allowlisted name resolves at the wrapper's EXACT SIGNATURE (N/LOW-10, law 3): a bare
+  -- proname match is satisfied by any overload, so a row naming a verb whose real signature had
+  -- drifted would still read green. k_wrappers carries the pinned regprocedures.
+  for v_n in 1 .. array_length(k_names, 1) loop
+    if not exists (select 1 from clara.wake_fn_allowlist w
+                    where w.wake_kind = 'close_prep' and w.function_name = k_names[v_n]) then
+      raise exception 'F-A4 PR-1c tail: no close_prep allowlist row for %', k_names[v_n] using errcode = 'CLR10';
+    end if;
+    if to_regprocedure(k_wrappers[v_n]) is null then
+      raise exception 'F-A4 PR-1c tail: allowlisted % does not resolve at its pinned signature %', k_names[v_n], k_wrappers[v_n]
+        using errcode = 'CLR10';
+    end if;
+  end loop;
 
   -- T.6 · THE THREE EXTRACTED READS + THE ADJ ORACLE: each public verb is now a THIN delegate that
   -- still opens its own floor, and each core is the body that moved. Proven POSITIONALLY, not by a
@@ -2761,9 +2975,28 @@ begin
     raise exception 'F-A4 PR-1c tail: close_gate_checks moved to % rows', v_n using errcode = 'CLR10';
   end if;
 
-  -- T.11 · The frozen schemas are untouched by this file (hard constraint 15, restated as a read).
+  -- T.11 · The frozen schemas (hard constraint 15) — ASSERTED HONESTLY (N5). The first cut printed
+  -- the relation count with "(0 expected)", which is true on a rig built from migrations alone and
+  -- FALSE on live, where the Slice-0 spike's parked run lives in exactly those schemas: a census
+  -- that reads green only because the fixture is empty is the vacuous-green class. What this file
+  -- can actually claim is that it created nothing outside `clara`, so that is what is measured —
+  -- every object it mints is checked for its namespace, and the frozen-schema population is
+  -- REPORTED rather than asserted at zero.
   select count(*)::int into v_n from pg_class c join pg_namespace n on n.oid = c.relnamespace
-    where n.nspname in ('workflow', 'graphile_worker', 'spike') and c.relkind = 'r';
+    where n.nspname in ('workflow', 'graphile_worker', 'spike');
+  foreach v_sig in array array['agent_act_receipts', 'close_proposals', 'close_prep_holds'] loop
+    if (select n.nspname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+         where c.oid = to_regclass('clara.' || v_sig)) is distinct from 'clara' then
+      raise exception 'F-A4 PR-1c tail: % was created outside schema clara', v_sig using errcode = 'CLR10';
+    end if;
+  end loop;
+  select count(*)::int into v_m from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname in ('workflow', 'graphile_worker', 'spike')
+      and (p.proname like 'wake!_%' escape '!' or p.proname like '!_close%' escape '!'
+           or p.proname like '!_agent!_close%' escape '!');
+  if v_m <> 0 then
+    raise exception 'F-A4 PR-1c tail: % close-limb function(s) landed in a frozen schema', v_m using errcode = 'CLR10';
+  end if;
 
   raise notice 'F-A4 PR-1c tail: OK — 3 new tables (agent_act_receipts / close_proposals / close_prep_holds), each FORCE RLS with exactly the owner+human-read policy pair and ZERO DML grant to any non-owner role; close_proposals carries the five columns attest_close_exception''s shipped p_from_proposal arm reads, plus its partial one-live-proposal index; the deferred Tier-C wall t_close_run_agent_receipt is installed on close_runs (DEFERRABLE INITIALLY DEFERRED). The proposal lifecycle has NO STUCK STATE: the state domain is exactly the four Annex E.4 names, the settle-only trigger is installed, and clara.settle_close_proposal (bookkeeper + close_and_attest, mirrored from attest_close_exception''s own floor and proven against BOTH bodies) admits adopted/withdrawn and never names ''superseded''. The four human doors are executable by clara_authenticated ALONE. TWELVE wake wrappers resolve at their exact signatures, all SECURITY DEFINER / search_path-pinned / clara_fn_owner-owned, each naming ITSELF in its _close_wake_ctx call, none carrying DML text, all holding EXECUTE for clara_wake_interactive and ZERO for clara_agent_ro / clara_runtime / clara_wake_proactive, PUBLIC on none. % internals resolve and are app-callable by no role. wake_fn_allowlist gained exactly 12 close_prep rows, every one naming a live function, and no existing row moved. list_fiscal_years / get_close_readiness / verify_close are thin viewer-floor delegates over their new cores; BOTH due oracles still assert _assert_due_read_ctx BEFORE delegating to their additive ungranted cores, exactly TWO bodies in clara consult that predicate (x42.d8''s closed census, unmoved), and all four EXECUTE grants survived. mint_wake_credential, wake_context (still 5 columns) and _close_gate_uncoded are byte-identical to their prestate shas. The close_prep wake_engine_sources row is still registered-and-DISABLED (the flip is PR-2''s). The PARKED thirteenth verb and its evaluator are provably absent. close_gate_checks is still 14 rows. % relation(s) in workflow/graphile_worker/spike (0 expected, untouched by this file).',
     array_length(k_ungranted, 1), v_n;

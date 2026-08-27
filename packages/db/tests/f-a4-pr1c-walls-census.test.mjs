@@ -12,7 +12,7 @@ import {
   rootQuery, humanQuery, roleQuery, getPool, endPool, printLaneNotes, printSkipCount,
   noteLane, markSkip, opk,
 } from "./wave-a-fixtures.mjs";
-import { ROLES, CLR, PG } from "./rig-helpers.mjs";
+import { ROLES, CLR, PG, asRole } from "./rig-helpers.mjs";
 import { beginClose } from "./x56-fixtures.mjs";
 import {
   WRAPPERS, PARKED_WRAPPER, RATIONALE, MODEL, caught, derivedOpKey, callWake,
@@ -316,9 +316,15 @@ test("fa4c.G2 the receipt carrier: zero DML grant to every role, append-only eve
   assert.equal(cross?.code, CLR.notFound, "the panel refuses a client outside the reader's firm");
 
   // Append-only: even the owner role cannot rewrite a receipt.
-  const upd = await caught(() => rootQuery(
-    "set role clara_fn_owner; update clara.agent_act_receipts set rationale='x' where client_id=$1", [sc.client]));
-  assert.ok(upd, "the receipt carrier is append-only");
+  // SEPARATE STATEMENTS, A REAL TARGET ROW, TYPED CODE (FIX-9). The dry run above wrote a
+  // receipt for this client, so the UPDATE has something to hit -- an update matching zero rows
+  // fires no row trigger and would have been a green cell proving nothing.
+  const before = await rootQuery(
+    "select count(*)::int as n from clara.agent_act_receipts where client_id=$1", [sc.client]);
+  assert.ok(before.rows[0].n >= 1, "there is a real receipt row to attempt the update against");
+  const upd = await caught(() => asRole(ROLES.fnOwner, (c) =>
+    c.query("update clara.agent_act_receipts set rationale='x' where client_id=$1", [sc.client])));
+  assert.equal(upd?.code, CLR.immutable, "the receipt carrier is append-only, by its own code");
 });
 
 test("fa4c.G0 ALL TWELVE wrappers fire end-to-end through a real wake session -- every grant, every allowlist row and every delegate, exercised once", async (t) => {
