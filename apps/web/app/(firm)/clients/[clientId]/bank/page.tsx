@@ -1,5 +1,6 @@
 import { getTranslations } from "next-intl/server";
 
+import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { BankWorkbench } from "@/components/bank/bank-workbench";
 
 /**
@@ -20,9 +21,9 @@ export default async function ClientBankPage({
   const t = await getTranslations("ClientBank");
 
   return (
-    <main className="flex flex-col gap-4 p-8">
-      <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
+    <PageShell>
+      <PageHeader title={t("heading")} />
       <BankWorkbench clientId={clientId} />
-    </main>
+    </PageShell>
   );
 }

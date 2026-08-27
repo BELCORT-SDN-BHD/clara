@@ -33,7 +33,16 @@ export default async function FirmLayout({
 
   return (
     <CommandKProvider>
-      <div className="flex min-h-dvh bg-shell">
+      {/*
+        TOKEN-ROLE FIX (P3 polish, coordinator ruling): the content column used
+        to inherit `bg-shell` from this wrapper. `--shell` is the NAV/APP-SHELL
+        role in the ClaraBook token contract, deliberately distinct from the
+        content canvas — so painting a page's own ground with it was a role
+        misuse even though it read fine. `--shell` now stays on the chrome (the
+        sidebar, via `--sidebar`, and the client-workspace tab header one level
+        down); the content column is `--background`, the canvas.
+      */}
+      <div className="flex min-h-dvh bg-background">
         <aside className="flex w-56 shrink-0 flex-col gap-4 border-r border-sidebar-border bg-sidebar p-4">
           <span className="px-2.5 text-sm font-semibold text-sidebar-foreground">
             {t("productName")}
@@ -43,7 +52,7 @@ export default async function FirmLayout({
             <LogoutButton />
           </div>
         </aside>
-        <div className="min-w-0 flex-1">{children}</div>
+        <div className="min-w-0 flex-1 bg-background">{children}</div>
       </div>
       <RailMount />
     </CommandKProvider>

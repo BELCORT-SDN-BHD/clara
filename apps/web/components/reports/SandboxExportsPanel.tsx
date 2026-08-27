@@ -9,6 +9,10 @@
 
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { SectionHeader } from "@/components/common/section-header";
+import { NotBuiltNote } from "@/components/common/not-built-note";
+import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { listSandboxExports } from "@/lib/reports/api";
 import { ExportRecipientsPanel } from "./ExportRecipientsPanel";
@@ -28,35 +32,40 @@ export function SandboxExportsPanel({ clientId, session }: { clientId: string; s
   const forThisClient = exports?.filter((e) => e.client_set.includes(clientId)) ?? null;
 
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4">
-      <header>
-        <h2 className="text-base font-medium text-foreground">{t("heading")}</h2>
-        <p className="text-xs text-muted-foreground">{t("subheading")}</p>
-      </header>
+    <Card>
+      <CardHeader>
+        <SectionHeader level={2}>{t("heading")}</SectionHeader>
+        <CardDescription className="text-xs">{t("subheading")}</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        {/* The "there is no human door for this" notice now wears the product's
+            one dashed edge, same as Bank's NotBuilt and Close's proposal
+            panel — the copy (which names the agent-lane-only verbs) is
+            unchanged. */}
+        <NotBuiltNote className="text-xs">{t("requestNotice")}</NotBuiltNote>
 
-      <p className="rounded-lg border border-dashed border-border p-2 text-xs text-muted-foreground">{t("requestNotice")}</p>
+        {err ? (
+          <StateBanner tone="error">{t("error", { message: err })}</StateBanner>
+        ) : !forThisClient ? (
+          <LoadingState>{t("loading")}</LoadingState>
+        ) : forThisClient.length === 0 ? (
+          <EmptyState>{t("empty")}</EmptyState>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {forThisClient.map((e) => (
+              <div key={e.id} className="enter-content flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3 text-xs">
+                <Badge variant={STATE_VARIANT[e.state]}>{e.state}</Badge>
+                <span className="text-card-foreground">{e.recipient_display_name}</span>
+                <span className="text-muted-foreground">{e.locale}</span>
+                {e.artifact_sha256 ? <span className="font-mono text-muted-foreground">{e.artifact_sha256.slice(0, 16)}…</span> : null}
+                <span className="text-muted-foreground">{e.created_at}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
-      {err ? (
-        <p className="text-sm text-destructive">{t("error", { message: err })}</p>
-      ) : !forThisClient ? (
-        <p className="text-sm text-muted-foreground">{t("loading")}</p>
-      ) : forThisClient.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("empty")}</p>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {forThisClient.map((e) => (
-            <div key={e.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-2 text-xs">
-              <Badge variant={STATE_VARIANT[e.state]}>{e.state}</Badge>
-              <span className="text-card-foreground">{e.recipient_display_name}</span>
-              <span className="text-muted-foreground">{e.locale}</span>
-              {e.artifact_sha256 ? <span className="font-mono text-muted-foreground">{e.artifact_sha256.slice(0, 16)}…</span> : null}
-              <span className="text-muted-foreground">{e.created_at}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <ExportRecipientsPanel session={session} />
-    </section>
+        <ExportRecipientsPanel session={session} />
+      </CardContent>
+    </Card>
   );
 }

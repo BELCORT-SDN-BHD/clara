@@ -28,11 +28,14 @@ import { completeBankReconciliation, voidBankReconciliation } from "@/lib/bank/r
 import { reconTieState, canCompleteReconciliation } from "@/lib/bank/recon-types";
 import { formatMyr } from "@/lib/bank/money";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { SectionHeader } from "@/components/common/section-header";
+import { NativeSelect } from "@/components/common/native-select";
 import { ReadState } from "./read-state";
+import { StateBanner } from "@/components/common/state";
 import { ActionRefusal } from "./action-refusal";
 import { NotBuilt } from "./not-built";
 
@@ -110,24 +113,24 @@ export function ReconciliationSection({ clientId }: { clientId: string }) {
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <CardHeader><CardTitle>{t("pickHeading")}</CardTitle></CardHeader>
+        <CardHeader><SectionHeader level={2}>{t("pickHeading")}</SectionHeader></CardHeader>
         <CardContent className="flex flex-col gap-3">
           <ReadState hasData={accounts.data !== null} err={accounts.err} errKind={accountsKind.kind} isEmpty={accounts.data?.length === 0} onRetry={() => void accounts.reload()}>
-            <select aria-label={t("accountLabel")} className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm" value={activeAccountId} onChange={(e) => { setBankAccountId(e.target.value); setStatementId(""); }}>
+            <NativeSelect aria-label={t("accountLabel")} value={activeAccountId} onChange={(e) => { setBankAccountId(e.target.value); setStatementId(""); }}>
               {(accounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.bank_name_display} · {a.account_number}</option>)}
-            </select>
+            </NativeSelect>
           </ReadState>
           <ReadState hasData={statements.data !== null} err={statements.err} errKind={statementsKind.kind} isEmpty={statements.data?.length === 0} onRetry={() => void statements.reload()}>
-            <select aria-label={t("statementLabel")} className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm" value={activeStatementId} onChange={(e) => setStatementId(e.target.value)}>
+            <NativeSelect aria-label={t("statementLabel")} value={activeStatementId} onChange={(e) => setStatementId(e.target.value)}>
               {(statements.data ?? []).map((st) => <option key={st.id} value={st.id}>{st.period_start} → {st.period_end}</option>)}
-            </select>
+            </NativeSelect>
           </ReadState>
         </CardContent>
       </Card>
 
       {activeStatementId && (
         <Card>
-          <CardHeader><CardTitle>{t("reconHeading")}</CardTitle></CardHeader>
+          <CardHeader><SectionHeader level={2}>{t("reconHeading")}</SectionHeader></CardHeader>
           <CardContent className="flex flex-col gap-3">
             {recon.data !== null && <ActionRefusal err={recon.err} clr={recon.clr} />}
             <ReadState hasData={reconLoadedOnce} err={recon.err} errKind={reconKind.kind} onRetry={() => void recon.reload()}>
@@ -149,10 +152,13 @@ export function ReconciliationSection({ clientId }: { clientId: string }) {
                     <dt className="text-muted-foreground">{t("difference")}</dt><dd>{formatMyr(recon.data.terms.difference_cents)}</dd>
                   </dl>
                   {recon.data.blockers.length > 0 && (
-                    <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
-                      <p className="font-medium">{t("blockersHeading")}</p>
+                    // The server's own can_complete verdict, rendered verbatim
+                    // — now in the shared banner shell, so "the DB says you
+                    // cannot certify yet" looks like every other refusal on
+                    // this tab rather than a fifth bespoke red box.
+                    <StateBanner tone="error" className="text-xs" title={t("blockersHeading")}>
                       <ul className="list-inside list-disc">{recon.data.blockers.map((b) => <li key={b}>{b}</li>)}</ul>
-                    </div>
+                    </StateBanner>
                   )}
                   {recon.data.stale_outstanding_ids.length > 0 && (
                     <fieldset className="flex flex-col gap-1 rounded-lg border border-border p-2 text-xs">

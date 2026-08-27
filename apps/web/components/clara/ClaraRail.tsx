@@ -49,8 +49,16 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
   }
 
   return (
+    // Motion: `enter-panel` slides the rail in from the right edge it docks
+    // to. The contract names this exact case — §7's `--duration-panel` tier is
+    // "Dialog, sheet, Clara dock reflow" (200ms, `--ease-out`). It explains
+    // WHERE the panel lives, which a hard appear does not, and under reduced
+    // motion the slide becomes a fade (§7: position removed, opacity kept).
+    // It is an ENTER only: an exit transition needs the aside to stay mounted
+    // while it animates, which is a structural change to this component's
+    // open/closed branch, not a polish edit — noted rather than half-built.
     <aside
-      className="fixed top-0 right-0 z-40 flex h-dvh w-80 flex-col border-l border-border bg-card shadow-lg"
+      className="enter-panel fixed top-0 right-0 z-40 flex h-dvh w-80 flex-col border-l border-border bg-card shadow-lg"
       aria-label={t("title")}
     >
       <header className="flex items-center justify-between border-b border-border p-2">

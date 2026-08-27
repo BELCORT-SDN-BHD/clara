@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { cn } from "@/lib/utils";
+import { SectionTabs } from "@/components/common/section-tabs";
 import { AccountsSection } from "./accounts-section";
 import { StatementsSection } from "./statements-section";
 import { MatchingSection } from "./matching-section";
@@ -25,26 +25,22 @@ export function BankWorkbench({ clientId }: { clientId: string }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* N17 fix (independent review): this labelled the nav landmark with
-          the FIRST TAB's own name ("Accounts") instead of a label for the
-          nav itself — a screen reader announced the sub-nav as "Accounts
-          navigation" regardless of which tab was active. */}
-      <nav aria-label={t("navLabel")} className="flex flex-wrap gap-1 border-b border-border pb-2">
-        {TABS.map((tb) => (
-          <button
-            key={tb}
-            type="button"
-            aria-current={tab === tb ? "page" : undefined}
-            className={cn(
-              "rounded-lg px-3 py-1.5 text-sm font-medium transition-colors",
-              tab === tb ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
-            )}
-            onClick={() => setTab(tb)}
-          >
-            {t(tb)}
-          </button>
-        ))}
-      </nav>
+      {/* P3 polish: the filled-primary pill strip became the shared
+          <SectionTabs> underline. --primary is the interaction colour, and
+          spending it on "which section am I reading" left this page's real
+          primary actions (Add account, Enter statement, Match) with nothing
+          louder to say. N17's fix travels with it intact: the strip is
+          labelled for ITSELF (`navLabel`), never with the active tab's own
+          name — that was the defect, and SectionTabs' `label` prop carries the
+          same rule for every lane. It is a tablist now rather than a <nav>
+          landmark, which is what it always was: these buttons select among
+          panels, they do not navigate. */}
+      <SectionTabs
+        label={t("navLabel")}
+        items={TABS.map((tb) => ({ value: tb, label: t(tb) }))}
+        value={tab}
+        onSelect={setTab}
+      />
 
       {tab === "accounts" && <AccountsSection clientId={clientId} />}
       {tab === "statements" && <StatementsSection clientId={clientId} />}

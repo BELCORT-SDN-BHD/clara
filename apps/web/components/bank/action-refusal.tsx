@@ -10,19 +10,23 @@
 
 import { useTranslations } from "next-intl";
 
+import { StateBanner } from "@/components/common/state";
+
 export function ActionRefusal({ err, clr }: { err: string | null; clr: { code: string; reason: string | null } | null }) {
   const t = useTranslations("ClientBank.common");
   if (!err) return null;
+  // P3 polish: the shared shell. Bank's own refusal-vs-operational-failure
+  // TITLE is kept — it is real information the message text alone does not
+  // carry — and the CLR code moves from a dimmed 12px line UNDER the message
+  // to the chip ABOVE it, which is where every other surface in the product
+  // puts it. The DB's message is still verbatim, still never retried.
   return (
-    <div role="alert" className="flex flex-col gap-1 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
-      <p className="font-medium">{clr ? t("refusalTitle") : t("actionFailedTitle")}</p>
-      <p>{err}</p>
-      {clr && (
-        <p className="text-xs text-destructive/80">
-          {clr.code}
-          {clr.reason ? ` · ${clr.reason}` : ""}
-        </p>
-      )}
-    </div>
+    <StateBanner
+      tone="error"
+      title={clr ? t("refusalTitle") : t("actionFailedTitle")}
+      code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}
+    >
+      {err}
+    </StateBanner>
   );
 }

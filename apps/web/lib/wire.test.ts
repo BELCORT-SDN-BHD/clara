@@ -79,6 +79,16 @@ test("status-before-clr ordering: a 401 with NO CLR-shaped body classifies as Wi
   assert.equal(err.status, 401);
 });
 
+// ROUND-3 (this polish round): `??` never fires on an EMPTY-STRING message (the
+// estate's recorded `??`-vs-`||` lesson) — a CLR body with `message: ""` (a real,
+// truthy-but-empty string) must still fall back to the code, not render nothing.
+test("a governed refusal with an EMPTY-STRING message falls back to the code (|| not ??)", () => {
+  const err = classifyPgrestFailure(400, { code: "CLR21", message: "", details: "..." });
+  assert.ok(err instanceof RefusalError);
+  assert.equal(err.message, "CLR21", "an empty message must fall back to the code string, never render nothing");
+  assert.equal(err.code, "CLR21");
+});
+
 test("a governed refusal at a non-401 status is unaffected by the auth branch", () => {
   const err = classifyPgrestFailure(400, { code: "CLR10", message: "op_key is required" });
   assert.ok(err instanceof RefusalError);

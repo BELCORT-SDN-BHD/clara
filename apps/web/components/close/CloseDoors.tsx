@@ -163,7 +163,7 @@ function AbandonDialog({ busy, onConfirm }: { busy: boolean; onConfirm: (reason:
       description={t("description")}
       confirmLabel={t("confirm")}
       busy={busy}
-      disabled={reason.trim().length === 0}
+      confirmDisabled={reason.trim().length === 0}
       onConfirm={() => onConfirm(reason)}
     >
       <Textarea aria-label={t("trigger")} placeholder={t("reasonPlaceholder")} value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -202,7 +202,7 @@ function ReopenDialog({
       description={t("description")}
       confirmLabel={t("confirm")}
       busy={busy}
-      disabled={reason.trim().length < 10 || correctionTarget === null}
+      confirmDisabled={reason.trim().length < 10 || correctionTarget === null}
       onConfirm={() =>
         correctionTarget
           ? onConfirm({ reason, correctionTarget, attestation: attestation.trim() || undefined })

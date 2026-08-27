@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { StateBanner } from "@/components/common/state";
 
 /**
  * Posts to "/logout" (app/logout/route.ts) — a Route Handler, not a client-
@@ -59,11 +60,7 @@ export function LogoutButton() {
       >
         {isLoading ? t("submitting") : t("submit")}
       </Button>
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
+      {error && <StateBanner tone="error" className="text-xs">{error}</StateBanner>}
     </div>
   );
 }

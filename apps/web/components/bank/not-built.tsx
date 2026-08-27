@@ -7,14 +7,15 @@
 
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
+import { NotBuiltNote } from "@/components/common/not-built-note";
 
 export function NotBuilt({ missingVerb }: { missingVerb: string }) {
   const t = useTranslations("ClientBank.common");
   return (
-    <div className="flex flex-col gap-1 rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground">
-      <Badge variant="outline" className="self-start">{t("notBuiltYet")}</Badge>
+    <NotBuiltNote>
+      <Badge variant="outline">{t("notBuiltYet")}</Badge>
       {/* missingVerb: {missingVerb} — named for the reader, not translated (a DB identifier). */}
       <p>{t("notBuiltDetail", { verb: missingVerb })}</p>
-    </div>
+    </NotBuiltNote>
   );
 }

@@ -1,4 +1,5 @@
 import { getTranslations } from "next-intl/server";
+import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { KnowledgePanel } from "@/components/registers/knowledge-panel";
 
 /**
@@ -17,9 +18,11 @@ export default async function ClientKnowledgePage({
   const t = await getTranslations("ClientKnowledge");
 
   return (
-    <main className="flex flex-col gap-4 p-8">
-      <h1 className="text-xl font-semibold text-foreground">{t("heading")}</h1>
+    <PageShell>
+      {/* `subheading` moved out of KnowledgePanel into the page header — same
+          key, one place, same as the Activity feed's own orientation line. */}
+      <PageHeader title={t("heading")} description={t("subheading")} />
       <KnowledgePanel clientId={clientId} />
-    </main>
+    </PageShell>
   );
 }

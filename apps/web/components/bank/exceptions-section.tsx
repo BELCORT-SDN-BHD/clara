@@ -18,10 +18,12 @@ import { listOpenBankLineExceptions, listOpenBankLineExceptionProposals } from "
 import { exceptBankLine, resolveBankLineException } from "@/lib/bank/exception-doors";
 import { EXCEPTION_KINDS, type BankLineExceptionKind } from "@/lib/bank/exception-types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { SectionHeader } from "@/components/common/section-header";
+import { NativeSelect } from "@/components/common/native-select";
 import { ReadState } from "./read-state";
 import { ActionRefusal } from "./action-refusal";
 import { NotBuilt } from "./not-built";
@@ -100,14 +102,14 @@ export function ExceptionsSection({ clientId }: { clientId: string }) {
     <div className="flex flex-col gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>{t("proposalsHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("proposalsHeading")}</SectionHeader>
           <CardDescription>{t("proposalsAttribution")}</CardDescription>
         </CardHeader>
         <CardContent>
           <ReadState hasData={proposals.data !== null} err={proposals.err} errKind={proposalsKind.kind} isEmpty={proposals.data?.length === 0} onRetry={() => void proposals.reload()}>
             <ul className="flex flex-col gap-2">
               {(proposals.data ?? []).map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-border p-2 text-sm">
+                <li key={p.id} className="enter-content flex items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 text-sm">
                   <div>
                     <p className="font-medium text-foreground">{String(p.payload.kind ?? "")} — {String(p.payload.reason ?? "")}</p>
                     <p className="text-xs text-muted-foreground">{p.rationale}</p>
@@ -122,7 +124,7 @@ export function ExceptionsSection({ clientId }: { clientId: string }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("exceptHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("exceptHeading")}</SectionHeader>
         </CardHeader>
         <CardContent>
           <form onSubmit={submitExcept} className="flex flex-col gap-3">
@@ -132,9 +134,9 @@ export function ExceptionsSection({ clientId }: { clientId: string }) {
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="except-kind">{t("kindLabel")}</Label>
-              <select id="except-kind" className="h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm" value={kind} onChange={(e) => setKind(e.target.value)}>
+              <NativeSelect id="except-kind" value={kind} onChange={(e) => setKind(e.target.value)}>
                 {EXCEPTION_KINDS.map((k: BankLineExceptionKind) => <option key={k} value={k}>{kindLabel(k)}</option>)}
-              </select>
+              </NativeSelect>
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="except-reason">{t("reasonLabel")}</Label>
@@ -150,21 +152,21 @@ export function ExceptionsSection({ clientId }: { clientId: string }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("openHeading")}</CardTitle>
+          <SectionHeader level={2}>{t("openHeading")}</SectionHeader>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           {exceptions.data !== null && <ActionRefusal err={exceptions.err} clr={exceptions.clr} />}
           <ReadState hasData={exceptions.data !== null} err={exceptions.err} errKind={exceptionsKind.kind} isEmpty={exceptions.data?.length === 0} onRetry={() => void exceptions.reload()}>
             <ul className="flex flex-col gap-2">
               {(exceptions.data ?? []).map((ex) => (
-                <li key={ex.id} className="flex flex-col gap-2 rounded-lg border border-border p-2 text-sm">
+                <li key={ex.id} className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
                   <p className="font-medium text-foreground">{kindLabel(ex.kind)} — {ex.reason}</p>
                   <div className="flex gap-1.5">
                     <Button type="button" size="sm" variant="outline" onClick={() => setResolvingId(resolvingId === ex.id ? null : ex.id)}>{t("resolveCorrective")}</Button>
                     <Button type="button" size="sm" variant="outline" onClick={() => setWritingOffId(writingOffId === ex.id ? null : ex.id)}>{t("writeOff")}</Button>
                   </div>
                   {resolvingId === ex.id && (
-                    <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-2">
+                    <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/50 p-3">
                       <div className="grid gap-1.5">
                         <Label htmlFor={`counterpart-${ex.id}`}>{t("counterpartLineLabel")}</Label>
                         <Input id={`counterpart-${ex.id}`} value={counterpartLineId} onChange={(e) => setCounterpartLineId(e.target.value)} />

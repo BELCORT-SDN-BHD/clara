@@ -10,6 +10,8 @@ import { useTranslations } from "next-intl";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadChartOfAccounts } from "@/lib/registers/accounts";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { DataTableCard } from "@/components/common/data-table-card";
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DataState } from "@/components/firm/data-state";
 
 export function ChartOfAccountsRegister({ clientId }: { clientId: string }) {
@@ -27,29 +29,27 @@ export function ChartOfAccountsRegister({ clientId }: { clientId: string }) {
 
   return (
     <DataState loading={loading} error={error} isEmpty={rows.length === 0} emptyMessage={t("empty")}>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-border text-xs text-muted-foreground">
-              <th className="py-2 pr-4 font-medium">{t("code")}</th>
-              <th className="py-2 pr-4 font-medium">{t("name")}</th>
-              <th className="py-2 pr-4 font-medium">{t("type")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((a) => (
-              <tr key={a.account_code} className="border-b border-border last:border-0">
-                <td className="py-2 pr-4 font-mono text-card-foreground">{a.account_code}</td>
-                <td className="py-2 pr-4 text-card-foreground">
-                  {a.name}
-                  {!a.is_active ? ` (${t("inactive")})` : ""}
-                </td>
-                <td className="py-2 pr-4 text-card-foreground">{typeLabels[a.account_type] ?? a.account_type}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTableCard>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{t("code")}</TableHead>
+            <TableHead>{t("name")}</TableHead>
+            <TableHead>{t("type")}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((a) => (
+            <TableRow key={a.account_code}>
+              <TableCell className="font-mono">{a.account_code}</TableCell>
+              <TableCell>
+                {a.name}
+                {!a.is_active ? ` (${t("inactive")})` : ""}
+              </TableCell>
+              <TableCell className="text-muted-foreground">{typeLabels[a.account_type] ?? a.account_type}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </DataTableCard>
     </DataState>
   );
 }

@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { EmptyState, StateBanner } from "@/components/common/state";
 import { Money } from "@/components/journals/money";
 import { FormattedDate } from "@/components/journals/formatted-date";
 import { EntryStatusBadge } from "@/components/journals/entry-status-badge";
@@ -59,7 +60,7 @@ export function PostedPanel({
   const [reason, setReason] = useState("");
 
   if (posted.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("empty")}</p>;
+    return <EmptyState>{t("empty")}</EmptyState>;
   }
 
   return (
@@ -73,7 +74,7 @@ export function PostedPanel({
         const isReversal = entry.origin === "reversal";
         const isActing = actingId === entry.id;
         return (
-          <Card key={entry.id}>
+          <Card key={entry.id} className="enter-content">
             <CardContent className="flex flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex flex-col gap-1">
@@ -94,10 +95,10 @@ export function PostedPanel({
               </div>
               {alreadyReversed && <p className="text-xs text-muted-foreground">{t("alreadyReversed")}</p>}
               {isReversal && <p className="text-xs text-muted-foreground">{t("isReversal")}</p>}
-              {isActing && (clr || err) && (
-                <p role="alert" className="text-sm text-destructive">
-                  {clr ? `${clr.code}: ${err}` : err}
-                </p>
+              {isActing && err && (
+                <StateBanner tone="error" code={clr ? clr.code : undefined}>
+                  {err}
+                </StateBanner>
               )}
               {!alreadyReversed && !isReversal && (
                 <div className="flex flex-wrap items-center gap-2">

@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { EmptyState, StateBanner } from "@/components/common/state";
 import { DoorDialog } from "./DoorDialog";
 import { issueReportForApproval, archiveSignedOriginal, retrieveSignedOriginal, isDoorRefusal } from "@/lib/reports/api";
 import type { ReportArtifactRow } from "@/lib/reports/types";
@@ -46,7 +47,7 @@ export function ArtifactRow({
   };
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
+    <div className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         {/* LOW (independent review): render `kind` verbatim — a `_` → ` `
             relabel is a small liberty this build's own verbatim discipline
@@ -59,7 +60,7 @@ export function ArtifactRow({
         {artifact.uncertified ? <Badge variant="destructive">{t("uncertified")}</Badge> : null}
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="font-mono text-muted-foreground">{artifact.storage_key}</span>
+        <span className="font-mono text-muted-foreground wrap-anywhere">{artifact.storage_key}</span>
         <Button variant="outline" size="xs" onClick={copyKey}>{copied ? t("copied") : t("copyKey")}</Button>
       </div>
       <p className="text-xs text-muted-foreground">{t("noDownload")}</p>
@@ -103,7 +104,7 @@ function IssueDialog({
       description={t("description")}
       confirmLabel={t("confirm")}
       busy={busy}
-      disabled={reason.trim().length === 0}
+      confirmDisabled={reason.trim().length === 0}
       onConfirm={() =>
         act(async () => {
           await issueReportForApproval(
@@ -149,7 +150,7 @@ function ArchiveDialog({
       description={t("description")}
       confirmLabel={t("confirm")}
       busy={busy}
-      disabled={!sha.trim() || !byteSizeValid || !signer.trim()}
+      confirmDisabled={!sha.trim() || !byteSizeValid || !signer.trim()}
       onConfirm={() =>
         act(async () => {
           await archiveSignedOriginal(
@@ -165,8 +166,13 @@ function ArchiveDialog({
     >
       <div className="flex flex-col gap-2">
         <Input aria-label={t("shaPlaceholder")} placeholder={t("shaPlaceholder")} value={sha} onChange={(e) => setSha(e.target.value)} />
-        <Input aria-label={t("byteSizePlaceholder")} placeholder={t("byteSizePlaceholder")} value={byteSize} onChange={(e) => setByteSize(e.target.value)} inputMode="numeric" />
-        {byteSize.trim().length > 0 && !byteSizeValid ? <p className="text-xs text-destructive">{t("byteSizeInvalid")}</p> : null}
+        {/* `aria-invalid` was already a styled state on the Input primitive
+            (border + ring in the destructive tone) and nothing in the product
+            set it. The local byte-size validation is exactly what it is for:
+            the field itself now shows it is the problem, instead of only a
+            sentence underneath saying so. */}
+        <Input aria-label={t("byteSizePlaceholder")} placeholder={t("byteSizePlaceholder")} value={byteSize} onChange={(e) => setByteSize(e.target.value)} inputMode="numeric" aria-invalid={byteSize.trim().length > 0 && !byteSizeValid} />
+        {byteSize.trim().length > 0 && !byteSizeValid ? <p className="text-xs text-error">{t("byteSizeInvalid")}</p> : null}
         <Input aria-label={t("signerPlaceholder")} placeholder={t("signerPlaceholder")} value={signer} onChange={(e) => setSigner(e.target.value)} />
       </div>
     </DoorDialog>
@@ -199,16 +205,16 @@ function RetrieveAction({ reportRunId, session }: { reportRunId: string; session
       <Button variant="outline" size="sm" disabled={busy} onClick={retrieve}>{busy ? t("retrieving") : t("trigger")}</Button>
       {attempted && custody ? (
         <>
-          <span className="font-mono text-muted-foreground">{custody.storage_key}</span>
-          <span className="font-mono text-muted-foreground">
+          <span className="font-mono text-muted-foreground wrap-anywhere">{custody.storage_key}</span>
+          <span className="font-mono text-muted-foreground wrap-anywhere">
             {tArtifact("sha256Label")} {custody.sha256} · {custody.byte_size.toLocaleString()} {tArtifact("bytesLabel")}
           </span>
           <span className="text-muted-foreground">{custody.retrieval_note}</span>
         </>
       ) : attempted ? (
-        <p className="text-muted-foreground">{t("none")}</p>
+        <EmptyState className="text-xs">{t("none")}</EmptyState>
       ) : null}
-      {error ? <p className="text-destructive">{error}</p> : null}
+      {error ? <StateBanner tone="error">{error}</StateBanner> : null}
     </div>
   );
 }

@@ -3,6 +3,8 @@
 import { useTranslations } from "next-intl";
 import type { RegionRow } from "@/lib/documents/types";
 import { NotBuiltBadge } from "./not-built-badge";
+import { SectionHeader } from "@/components/common/section-header";
+import { EmptyState } from "@/components/common/state";
 
 /**
  * Extracted regions from the document's current extraction (loaders.ts's
@@ -18,11 +20,11 @@ export function DocumentEvidence({ regions }: { regions: RegionRow[] }) {
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-xs font-medium text-muted-foreground uppercase">{t("evidenceHeading")}</h3>
+        <SectionHeader level={4}>{t("evidenceHeading")}</SectionHeader>
         <NotBuiltBadge label={t("evidenceOverlayLabel")} reason={t("evidenceOverlayReason")} />
       </div>
       {regions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("evidenceEmpty")}</p>
+        <EmptyState>{t("evidenceEmpty")}</EmptyState>
       ) : (
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
           {regions.map((region) => (

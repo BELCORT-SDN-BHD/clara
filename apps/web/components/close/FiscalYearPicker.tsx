@@ -12,6 +12,7 @@ import { useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import type { FiscalYearRow } from "@/lib/close/types";
 
 export function FiscalYearPicker({
@@ -40,9 +41,9 @@ export function FiscalYearPicker({
     // (lib/parts/hooks.ts's own header), so no suppression comment is needed.
   }, [years]);
 
-  if (err) return <p className="text-sm text-destructive">{t("error", { message: err })}</p>;
-  if (!years) return <p className="text-sm text-muted-foreground">{t("loading")}</p>;
-  if (years.length === 0) return <p className="text-sm text-muted-foreground">{t("empty")}</p>;
+  if (err) return <StateBanner tone="error">{t("error", { message: err })}</StateBanner>;
+  if (!years) return <LoadingState>{t("loading")}</LoadingState>;
+  if (years.length === 0) return <EmptyState>{t("empty")}</EmptyState>;
 
   return (
     <div className="flex flex-wrap gap-2" role="tablist" aria-label={t("ariaLabel")}>

@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { StateBanner } from "@/components/common/state";
 import { EntryLinesEditor } from "@/components/journals/entry-lines-editor";
 import { businessToday } from "@/lib/business-date";
 import { COMPOSE_ACTING_ID } from "@/lib/journals/use-journals-workbench";
@@ -97,8 +98,12 @@ export function ComposeDialog({
           <DialogDescription>{t("description")}</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex flex-col gap-1">
+          {/* P3 polish: `gap-1.5` between a label and its field — the gap the
+              Bank and Close forms already used, and now the one label-to-field
+              gap in the product (this lane's own gap-1 and the auth cards'
+              gap-2 were the two other spellings). */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5">
               <Label htmlFor="je-posting-date">{t("postingDate")}</Label>
               <Input
                 id="je-posting-date"
@@ -109,20 +114,15 @@ export function ComposeDialog({
               />
             </div>
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="je-memo">{t("memo")}</Label>
             <Textarea id="je-memo" value={memo} onChange={(e) => setMemo(e.target.value)} required rows={2} />
           </div>
           <EntryLinesEditor lines={lines} onChange={setLines} accounts={accounts} />
-          {visibleClr && (
-            <p role="alert" className="text-sm text-destructive">
-              {visibleClr.code}: {visibleErr}
-            </p>
-          )}
-          {!visibleClr && visibleErr && (
-            <p role="alert" className="text-sm text-destructive">
+          {visibleErr && (
+            <StateBanner tone="error" code={visibleClr ? visibleClr.code : undefined}>
               {visibleErr}
-            </p>
+            </StateBanner>
           )}
           <DialogFooter>
             <Button type="submit" disabled={busy}>

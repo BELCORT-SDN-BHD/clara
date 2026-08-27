@@ -13,12 +13,15 @@
 
 import { useTranslations } from "next-intl";
 
+import { NotBuiltNote } from "@/components/common/not-built-note";
+import { SectionHeader } from "@/components/common/section-header";
+
 export function CloseProposalPanel() {
   const t = useTranslations("ClientClose.proposal");
   return (
-    <section className="flex flex-col gap-1 rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground">
-      <h3 className="text-sm font-medium text-foreground">{t("heading")}</h3>
+    <NotBuiltNote>
+      <SectionHeader level={3}>{t("heading")}</SectionHeader>
       <p>{t("body")}</p>
-    </section>
+    </NotBuiltNote>
   );
 }

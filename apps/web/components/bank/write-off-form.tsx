@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { StateBanner } from "@/components/common/state";
 import { ActionRefusal } from "./action-refusal";
 
 type DraftLine = { accountCode: string; debit: string; credit: string };
@@ -77,8 +78,8 @@ export function WriteOffForm({ clientId, exceptionId, onDone }: { clientId: stri
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/30 p-2">
-      <div className="grid grid-cols-2 gap-2">
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/50 p-3">
+      <div className="grid gap-2 sm:grid-cols-2">
         <div className="grid gap-1.5">
           <Label htmlFor={`wo-date-${exceptionId}`}>{t("postingDateLabel")}</Label>
           <Input id={`wo-date-${exceptionId}`} type="date" value={postingDate} onChange={(e) => setPostingDate(e.target.value)} />
@@ -91,7 +92,7 @@ export function WriteOffForm({ clientId, exceptionId, onDone }: { clientId: stri
       <div className="flex flex-col gap-1">
         <Label>{t("draftLinesLabel")}</Label>
         {lines.map((l, i) => (
-          <div key={i} className="grid grid-cols-3 gap-2">
+          <div key={i} className="grid gap-2 sm:grid-cols-3">
             <Input aria-label={t("accountCodeLabel", { n: i + 1 })} placeholder={t("accountCodeLabel", { n: i + 1 })} value={l.accountCode} onChange={(e) => updateLine(i, { accountCode: e.target.value })} />
             <Input aria-label={t("debitLabel", { n: i + 1 })} inputMode="decimal" placeholder={t("debitLabel", { n: i + 1 })} value={l.debit} onChange={(e) => updateLine(i, { debit: e.target.value })} />
             <Input aria-label={t("creditLabel", { n: i + 1 })} inputMode="decimal" placeholder={t("creditLabel", { n: i + 1 })} value={l.credit} onChange={(e) => updateLine(i, { credit: e.target.value })} />
@@ -102,7 +103,7 @@ export function WriteOffForm({ clientId, exceptionId, onDone }: { clientId: stri
         <Label htmlFor={`wo-note-${exceptionId}`}>{t("noteLabel")}</Label>
         <Textarea id={`wo-note-${exceptionId}`} value={note} onChange={(e) => setNote(e.target.value)} />
       </div>
-      {formError && <p role="alert" className="text-xs text-destructive">{formError}</p>}
+      {formError && <StateBanner tone="error" className="text-xs">{formError}</StateBanner>}
       <ActionRefusal err={action.err} clr={action.clr} />
       <div className="flex gap-2">
         <Button type="button" size="sm" disabled={action.busy} onClick={() => void submit()}>{action.busy ? t("writeOffBusy") : t("writeOffSubmit")}</Button>
