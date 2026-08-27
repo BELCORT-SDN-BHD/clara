@@ -576,7 +576,11 @@
       "statusComplete": "complete",
       "statusVoid": "void",
       "statusOpen": "open",
-      "tie": { "tied": "tied", "variance": "variance", "unavailable": "unavailable" },
+      "tie": {
+        "tied": "tied",
+        "variance": "variance",
+        "unavailable": "unavailable"
+      },
       "openingAnchor": "Opening anchor",
       "glBalance": "GL balance",
       "uncleared": "Uncleared total",
@@ -601,7 +605,7 @@
       "releaseHold": "Release hold",
       "promotionsHeading": "Open identifier-promotion proposals",
       "promotionsAttribution": "Proposed by the agent — awaiting your decision.",
-      "confirm": "Confirm"
+      "confirm": "Confirm promotion"
     }
   },
   "ClientClose": {
@@ -620,7 +624,10 @@
       "selectPrompt": "Select a fiscal year above to view its close plan.",
       "fyEnd": "fy_end"
     },
-    "dialog": { "cancel": "Cancel", "working": "Working…" },
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
     "doors": {
       "begin": {
         "trigger": "Begin close",
@@ -694,7 +701,7 @@
       "closingTbDigest": "closing trial-balance digest",
       "gateDigest": "gate digest",
       "closeEntryId": "close entry id",
-      "none": "none",
+      "none": "None",
       "closingPosition": "closing position",
       "selfAttestation": "self-attestation",
       "segregation": {
@@ -712,7 +719,10 @@
   "ClientReports": {
     "heading": "Reports",
     "body": "Statutory close reports (sealed, archived) and the analysis sandbox (watermarked, requested through Clara) — every figure and every custody fact is read live from the DB.",
-    "dialog": { "cancel": "Cancel", "working": "Working…" },
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
     "statutory": {
       "heading": "Statutory close reports",
       "subheading": "The signed-original archive (0127) — sealed, never watermarked.",
@@ -754,6 +764,7 @@
         "none": "No signed original archived yet for this run."
       },
       "receipts": {
+        "loading": "Loading agent receipts…",
         "heading": "Agent receipts",
         "empty": "No agent-act receipts yet for this client.",
         "directedBy": "directed by"
