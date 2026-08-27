@@ -769,4 +769,205 @@ grant execute on function clara.record_document_service_period(uuid, date, date,
 comment on function clara.record_document_service_period(uuid, date, date, text, text) is
   'F-A4 PR-2a: the ONE human door that anchors a prepayment/service term to a document, at the bookkeeper floor. HUMAN-ONLY BY LAW (design §13 item 3): there is no wake wrapper and no agent path, because a period read off a document by a model is a model-generated value and hard constraint 2 forbids it entering a durable artifact. Writes basis_kind=''human_stated'' structurally -- the kind is not a parameter. Supersede-never-mutate. The clocked lane''s role is to REFUSE and name this door: rung B10 of clara.wake_establish_prepayment_schedule returns {missing:''document_service_periods'', document_id: ...}.';
 
+-- =================================================================================================
+-- §C — clara.prepayment_schedule_v1 — THE VERSIONED DETERMINISTIC EVALUATOR (design §5).
+--
+-- Signature and semantics are close-key-1-annexes-1-mechanics.md B.2's (:400-432), unchanged.
+-- STABLE, SECURITY DEFINER, search_path pinned, and UNGRANTED — it is reached only from §F's agent
+-- core; no consumer exists for a human grant and law 31 says do not mint one.
+--
+-- THE FREEZE, AND THE CLOSURE KEPT AT ONE MEMBER (design §5.1). Registering a closure in
+-- clara.evaluator_versions freezes EVERY member body estate-wide: verify_evaluator_freeze() ignores
+-- the `deployed` flag and hashes the full pg_get_functiondef, so an N-member registration is N
+-- bodies a later lane can never recut without reding an apply. THEREFORE THIS BODY CALLS NO OTHER
+-- clara FUNCTION — it reads tables and does its own arithmetic inline (no _adj_period_start, no
+-- _adj_period_end, no _hash). The registration below is then a genuine single-member closure and
+-- the freeze means what it says: this body, this version, this receipt. A changed formula is a
+-- _v2, never an edit (law 9 applied to evaluators).
+--
+-- NOTE FOR THE CENSUS CELL (W11), because the instrument's ceiling decides how it must be written:
+-- a prosrc scan for the bare string 'clara.' WOULD MATCH THE QUALIFIED TABLE NAMES BELOW and report
+-- call sites that do not exist. The cell must match a CALL SHAPE — `clara.<identifier>(` — and even
+-- then it is a SPELLING instrument, not an identity one (law 3), which is why W11 pairs it with the
+-- structural fact that the registration carries exactly one evaluator_version_members row. That
+-- structural half is the claim that actually binds.
+--
+-- ================================ THE MONTH PREDICATE — RULED ================================
+-- The design states the START rule (law 20's split-month doctrine: "a day-1 start gives the month
+-- to the successor, day-2+ leaves it with the predecessor") and defines n only as "the term's
+-- months". It never states the END rule. CONDUCTOR RULING, 2026-08-27, adopting the uniform
+-- predicate and recording its derivation here because a builder must find the reasoning:
+--
+--     *** A calendar month M is a period of this schedule IF AND ONLY IF the term covers M's
+--         FIRST day:   period_start <= first_day(M) <= period_end.  ***
+--
+-- WHY THIS AND NOT A SECOND CONVENTION. The ruled start rule's underlying principle is that A MONTH
+-- BELONGS TO WHOEVER HOLDS ITS DAY 1. Applied uniformly, that single predicate:
+--   * reproduces the ruled start behaviour EXACTLY — a day-1 start includes its own month; a day-2
+--     start excludes it, because the term does not cover that month's first day (cell W10: the same
+--     span from day 1 and from day 2 yields DIFFERENT first periods);
+--   * settles the end with no new rule — the last period is the last month whose first day the term
+--     covers, so a term ending mid-month still charges that month, which is simply what "no
+--     day-level pro-rating" means (W10's companion cell pins this end behaviour);
+--   * and — THE DECISIVE CHECK — makes n equal the term's months for EVERY start day. A 12-month
+--     term starting 15 Mar yields Apr..Mar = exactly 12 periods: the partial START month is
+--     excluded and the partial END month is included, so exactly ONE of the two split months
+--     charges and they net to the term's length. The prepaid asset therefore reaches EXACTLY ZERO,
+--     which is what cell W35 asserts end to end.
+-- The rejected alternative — charge the last month only when the term runs to its final day —
+-- yields n-1 charges on every day-2+ start and STRANDS the asset. Refused on that ground.
+-- =================================================================================================
+create function clara.prepayment_schedule_v1(p_client uuid, p_source_entry uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $eval$
+declare
+  v_entry     record;
+  v_leg       record;
+  v_legs      int;
+  v_period    record;
+  v_fy        record;
+  v_first     date;
+  v_last      date;
+  v_n         int;
+  v_base      bigint;
+  v_rem       bigint;
+  v_lines     jsonb := '[]'::jsonb;
+  v_ps        date;
+  v_pe        date;
+  v_amt       bigint;
+  i           int;
+begin
+  -- -----------------------------------------------------------------------------------------
+  -- FITNESS OF THE SOURCE. Absent and foreign answer with ONE refusal — this evaluator is not an
+  -- existence oracle for another client's entries (the 0021 rule).
+  -- -----------------------------------------------------------------------------------------
+  select je.id, je.status, je.document_id, je.posting_date, je.client_id
+    into v_entry
+    from clara.journal_entries je
+   where je.id = p_source_entry and je.client_id = p_client;
+  if v_entry.id is null then
+    return jsonb_build_object('schedule_version', 'v1', 'refusal', 'prepayment_source_unfit',
+      'reason', 'the source entry is not this client''s', 'source_entry', p_source_entry);
+  end if;
+  if v_entry.status <> 'approved' then
+    return jsonb_build_object('schedule_version', 'v1', 'refusal', 'prepayment_source_unfit',
+      'reason', 'a prepayment schedule amortises a POSTED entry; this one is ' || v_entry.status,
+      'source_entry', p_source_entry, 'status', v_entry.status);
+  end if;
+
+  -- THE PREPAID-ASSET LEG must be UNAMBIGUOUS: exactly one debited asset line. Zero or many is a
+  -- refusal, never a guess — picking one of two candidate legs would be the model choosing a
+  -- number, which is exactly what hard constraint 2 forbids.
+  select count(*)::int into v_legs
+    from clara.journal_lines jl
+    join clara.coa_accounts ca
+      on ca.client_id = jl.client_id and ca.account_code = jl.account_code
+   where jl.entry_id = p_source_entry and jl.debit_cents > 0 and ca.account_type = 'asset';
+  if v_legs <> 1 then
+    return jsonb_build_object('schedule_version', 'v1', 'refusal', 'prepayment_source_unfit',
+      'reason', case when v_legs = 0 then 'the source entry debits no asset account'
+                     else 'the source entry debits more than one asset account, so its prepaid leg is ambiguous' end,
+      'source_entry', p_source_entry, 'candidate_legs', v_legs);
+  end if;
+  select jl.account_code, jl.debit_cents into v_leg
+    from clara.journal_lines jl
+    join clara.coa_accounts ca
+      on ca.client_id = jl.client_id and ca.account_code = jl.account_code
+   where jl.entry_id = p_source_entry and jl.debit_cents > 0 and ca.account_type = 'asset';
+
+  -- -----------------------------------------------------------------------------------------
+  -- THE TERM. ck_je_basis (0003:127) permits a MEMO-ONLY entry, so the absence of a bound document
+  -- is a FIRST-CLASS REFUSAL, not an error — and the refusal NAMES what to record and where, so the
+  -- human's next act is one call to clara.record_document_service_period (design §6.2a).
+  -- -----------------------------------------------------------------------------------------
+  if v_entry.document_id is null then
+    return jsonb_build_object('schedule_version', 'v1', 'refusal', 'prepayment_term_underivable',
+      'reason', 'the source entry is memo-based and binds no document, so no term can be read',
+      'missing', 'journal_entries.document_id', 'source_entry', p_source_entry);
+  end if;
+  select sp.period_start, sp.period_end into v_period
+    from clara.document_service_periods sp
+   where sp.document_id = v_entry.document_id and sp.superseded_at is null;
+  if v_period.period_start is null then
+    -- OQ-4's ruled answer: a term the document does not state is a TYPED REFUSAL, never a 12-month
+    -- default. The payload is the actionable half — which fact, on which document.
+    return jsonb_build_object('schedule_version', 'v1', 'refusal', 'prepayment_term_underivable',
+      'reason', 'no live service period is recorded for the document this entry binds',
+      'missing', 'document_service_periods', 'document_id', v_entry.document_id,
+      'source_entry', p_source_entry);
+  end if;
+
+  -- THE FY ARM. Refuse when the term runs past the FY the entry sits in and the client has no
+  -- OPENED successor year. This is a SELF-HEALABLE state, not a dead end (design §13 item 4): under
+  -- R6/HIGH-1 the clocked lane may open the successor year itself through wake_open_fiscal_year and
+  -- re-run, which is what cell W31 drives rather than assumes.
+  select fy.id, fy.starts_on, fy.ends_on, fy.ordinal into v_fy
+    from clara.fiscal_years fy
+   where fy.client_id = p_client
+     and v_entry.posting_date between fy.starts_on and fy.ends_on;
+  if v_fy.id is null then
+    return jsonb_build_object('schedule_version', 'v1', 'refusal', 'prepayment_term_underivable',
+      'reason', 'the source entry does not sit inside any opened fiscal year for this client',
+      'missing', 'fiscal_years', 'source_entry', p_source_entry);
+  end if;
+  if v_period.period_end > v_fy.ends_on
+     and not exists (select 1 from clara.fiscal_years nx
+                      where nx.client_id = p_client and nx.starts_on > v_fy.ends_on
+                        and nx.status in ('open', 'reopened')) then
+    return jsonb_build_object('schedule_version', 'v1', 'refusal', 'prepayment_term_underivable',
+      'reason', 'the term runs past this fiscal year and no successor year is open yet',
+      'missing', 'fiscal_years.successor', 'fy_ends_on', v_fy.ends_on,
+      'period_end', v_period.period_end, 'source_entry', p_source_entry);
+  end if;
+
+  -- -----------------------------------------------------------------------------------------
+  -- THE PERIODS — the ruled predicate, spelled directly: the first charged month is the first whose
+  -- day 1 the term covers; the last is the last whose day 1 the term covers.
+  -- -----------------------------------------------------------------------------------------
+  v_first := case when v_period.period_start = date_trunc('month', v_period.period_start)::date
+                  then v_period.period_start
+                  else (date_trunc('month', v_period.period_start) + interval '1 month')::date end;
+  v_last  := date_trunc('month', v_period.period_end)::date;
+  v_n := ((extract(year from v_last)::int * 12 + extract(month from v_last)::int)
+        - (extract(year from v_first)::int * 12 + extract(month from v_first)::int)) + 1;
+  if v_n < 1 then
+    return jsonb_build_object('schedule_version', 'v1', 'refusal', 'prepayment_term_underivable',
+      'reason', 'the term covers no calendar month''s first day, so it charges no whole month',
+      'period_start', v_period.period_start, 'period_end', v_period.period_end,
+      'source_entry', p_source_entry);
+  end if;
+
+  -- base truncated toward zero; the remainder lands WHOLLY in the final period, so the emitted
+  -- amounts sum to total_cents EXACTLY. Stated because "round each period" loses sen.
+  v_base := v_leg.debit_cents / v_n;
+  v_rem  := v_leg.debit_cents - (v_base * v_n);
+
+  for i in 0 .. v_n - 1 loop
+    v_ps := (v_first + (i || ' months')::interval)::date;
+    v_pe := ((v_first + ((i + 1) || ' months')::interval) - interval '1 day')::date;
+    v_amt := v_base + case when i = v_n - 1 then v_rem else 0 end;
+    -- THE EMITTED LINE IS THE PREPAID-ASSET HALF ONLY, and its account_code is read off the source
+    -- entry's own leg — DB-OWNED, never judged. §F's agent core pairs each of these with a DEBIT on
+    -- the F2-judged EXPENSE account for the same amount. That split is what keeps this evaluator
+    -- amounts-only (design §5.3, Annex H.6) and hard constraint 2 exact: no model-generated NUMERAL
+    -- reaches a durable artifact; a model-generated CLASSIFICATION does, receipted and signed.
+    -- CONDUCTOR-RATIFIED 2026-08-27 as the reading of §5.3/H.6.
+    v_lines := v_lines || jsonb_build_object(
+      'period_start', v_ps, 'period_end', v_pe,
+      'debit_cents', 0, 'credit_cents', v_amt, 'account_code', v_leg.account_code);
+  end loop;
+
+  return jsonb_build_object(
+    'schedule_version', 'v1',
+    'period_lines', v_lines,
+    'total_cents', v_leg.debit_cents,
+    'period_count', v_n,
+    'prepaid_account_code', v_leg.account_code,
+    'term_start', v_period.period_start, 'term_end', v_period.period_end,
+    'remainder_placement', 'final_period');
+end $eval$;
+revoke all on function clara.prepayment_schedule_v1(uuid, uuid) from public;
+
+comment on function clara.prepayment_schedule_v1(uuid, uuid) is
+  'F-A4 PR-2a: the versioned deterministic evaluator behind wrapper 12. Amounts are DB-derived from the source entry''s own prepaid-asset leg; the emitted period_lines carry that ASSET half only, and the judged EXPENSE account is applied by clara._agent_prepayment_schedule_core under F2''s three walls. Whole-calendar-month straight line, remainder wholly in the final period. A calendar month is charged iff the term covers that month''s FIRST day (the uniform reading of law 20''s split-month doctrine, ruled 2026-08-27). Calls no other clara function, which is what keeps its evaluator_versions closure at ONE member and the freeze meaningful; a changed formula is _v2, never an edit.';
+
 -- ##FA4PR2A-APPEND-POINT##
