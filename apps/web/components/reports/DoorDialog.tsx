@@ -8,7 +8,7 @@
 // components/reports stay independently reviewable, each with its own i18n
 // namespace ("ClientReports.dialog" here vs "ClientClose.dialog" there).
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -21,6 +21,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { createSingleFireGuard, runOnce } from "@/lib/parts/singleFireGuard";
 
 export function DoorDialog({
   triggerLabel,
@@ -45,6 +46,10 @@ export function DoorDialog({
 }) {
   const [open, setOpen] = useState(false);
   const t = useTranslations("ClientReports.dialog");
+  // The single-fire guard (review finding M3) — see components/close/
+  // CloseDoorDialog.tsx's identical comment and lib/parts/singleFireGuard.ts's
+  // header for the measured regression this closes.
+  const guardRef = useRef(createSingleFireGuard());
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -62,8 +67,8 @@ export function DoorDialog({
           <Button
             disabled={busy}
             onClick={async () => {
-              await onConfirm();
-              setOpen(false);
+              const ran = await runOnce(guardRef.current, onConfirm);
+              if (ran) setOpen(false);
             }}
           >
             {busy ? t("working") : confirmLabel}

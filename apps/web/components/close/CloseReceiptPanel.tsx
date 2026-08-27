@@ -16,7 +16,12 @@ export function CloseReceiptPanel({ receipt, session }: { receipt: ClosePlanRece
   const t = useTranslations("ClientClose.receipt");
   const [verifying, setVerifying] = useState(false);
   const [verified, setVerified] = useState<boolean | null>(null);
-  const [verifyError, setVerifyError] = useState<string | null>(null);
+  // Low 7 (independent review): a governed refusal from verify_close carries a
+  // CLR code — dropping it and keeping only `.message` is the SAME class of
+  // loss the rest of this build refuses everywhere else (doors.ts's own
+  // RefusalError.code). Kept as a typed pair, not a pre-formatted string, so
+  // the code survives even if the message text ever changes.
+  const [verifyError, setVerifyError] = useState<{ code: string | null; reason: string | null; message: string } | null>(null);
 
   if (receipt.state === "absent") {
     return <p className="text-sm text-muted-foreground">{t("absent")}</p>;
@@ -29,7 +34,11 @@ export function CloseReceiptPanel({ receipt, session }: { receipt: ClosePlanRece
       const result = await verifyClose(receipt.receipt_id, { session });
       setVerified(result.verified);
     } catch (e) {
-      setVerifyError(isDoorRefusal(e) ? e.message : e instanceof Error ? e.message : String(e));
+      if (isDoorRefusal(e)) {
+        setVerifyError({ code: e.code, reason: e.reason, message: e.message });
+      } else {
+        setVerifyError({ code: null, reason: null, message: e instanceof Error ? e.message : String(e) });
+      }
     } finally {
       setVerifying(false);
     }
@@ -56,10 +65,32 @@ export function CloseReceiptPanel({ receipt, session }: { receipt: ClosePlanRece
         <dd className="font-mono text-card-foreground">{receipt.books_watermark}</dd>
         <dt className="text-muted-foreground">{t("datasetSha")}</dt>
         <dd className="truncate font-mono text-card-foreground">{receipt.dataset_sha256}</dd>
+        {/* LOW (independent review): the mandate named closing_position; the
+            two digests + close_entry_id ride the same receipt document and
+            were silently dropped alongside it — every field the DB returns
+            on this receipt is now rendered, none computed. */}
+        <dt className="text-muted-foreground">{t("closingTbDigest")}</dt>
+        <dd className="truncate font-mono text-card-foreground">{receipt.closing_tb_digest}</dd>
+        <dt className="text-muted-foreground">{t("gateDigest")}</dt>
+        <dd className="truncate font-mono text-card-foreground">{receipt.gate_digest}</dd>
+        <dt className="text-muted-foreground">{t("closeEntryId")}</dt>
+        <dd className="font-mono text-card-foreground">{receipt.close_entry_id ?? t("none")}</dd>
         {receipt.self_attestation ? (
           <>
             <dt className="text-muted-foreground">{t("selfAttestation")}</dt>
             <dd className="text-card-foreground">{receipt.self_attestation}</dd>
+          </>
+        ) : null}
+        {receipt.closing_position ? (
+          <>
+            <dt className="text-muted-foreground">{t("closingPosition")}</dt>
+            <dd className="text-card-foreground">
+              <ul className="flex flex-col gap-0.5">
+                {Object.entries(receipt.closing_position).map(([account, cents]) => (
+                  <li key={account} className="font-mono">{account}: {cents}</li>
+                ))}
+              </ul>
+            </dd>
           </>
         ) : null}
       </dl>
@@ -71,7 +102,12 @@ export function CloseReceiptPanel({ receipt, session }: { receipt: ClosePlanRece
           <Badge variant={verified ? "default" : "destructive"}>{verified ? t("verified") : t("notVerified")}</Badge>
         ) : null}
       </div>
-      {verifyError ? <p className="text-xs text-destructive">{verifyError}</p> : null}
+      {verifyError ? (
+        <p className="text-xs text-destructive">
+          {verifyError.code ? `${verifyError.code}${verifyError.reason ? ` (${verifyError.reason})` : ""}: ` : ""}
+          {verifyError.message}
+        </p>
+      ) : null}
     </div>
   );
 }

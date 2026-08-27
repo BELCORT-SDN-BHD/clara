@@ -8,7 +8,7 @@ import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
 import messages from "../../messages/en.json";
-import { ArtifactRow } from "./ArtifactRow";
+import { ArtifactRow, isValidByteSize } from "./ArtifactRow";
 import { SandboxExportsPanel } from "./SandboxExportsPanel";
 import { FreeformReadsPanel } from "./FreeformReadsPanel";
 import { StatutoryReportsPanel } from "./StatutoryReportsPanel";
@@ -63,6 +63,25 @@ test("ArtifactRow shows the agent_prepared / claim_removed / uncertified bands o
   assert.match(flagged, /agent-prepared/);
   assert.match(flagged, /claim removed/);
   assert.match(flagged, /uncertified/);
+});
+
+// LOW (independent review): kind renders VERBATIM, never a `_` → ` ` relabel.
+test("ArtifactRow renders artifact.kind verbatim, never relabelled", () => {
+  const html = render(createElement(ArtifactRow, { artifact: artifact({ kind: "pre_sign" }), session: noSession(), busy: false, act: async (fn) => { await fn(); } }));
+  assert.match(html, />pre_sign</);
+  assert.doesNotMatch(html, />pre sign</);
+});
+
+// LOW (independent review, L3): a malformed byte size must never reach
+// Number() → NaN → a confusing generic CLR10; validated locally instead.
+test("L3: isValidByteSize accepts digits-only, rejects blank/whitespace/non-digit input", () => {
+  assert.equal(isValidByteSize("4096"), true);
+  assert.equal(isValidByteSize(" 4096 "), true, "surrounding whitespace is trimmed before validating");
+  assert.equal(isValidByteSize(""), false);
+  assert.equal(isValidByteSize("   "), false);
+  assert.equal(isValidByteSize("4096KB"), false);
+  assert.equal(isValidByteSize("-4096"), false);
+  assert.equal(isValidByteSize("4096.5"), false);
 });
 
 test("SandboxExportsPanel honestly states there is no human request door — ask Clara instead", () => {

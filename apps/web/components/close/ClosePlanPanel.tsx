@@ -7,6 +7,11 @@
 // this panel outright — the simplest, structurally-sound race guard for a
 // same-client selection change (lib/parts/hooks.ts's own header names this as
 // the alternative to a manual reload-on-change effect).
+//
+// M1 (independent review): every door handler ALSO calls `reloadYears()`
+// (ClosePage's own fiscal-year list reload) after `act()` settles — success or
+// refusal, same as the plan's own reload — so the picker's status badge can
+// never read stale against what this panel just showed.
 
 import { useTranslations } from "next-intl";
 import { useHydratedPart } from "@/lib/parts/hooks";
@@ -29,15 +34,24 @@ export function ClosePlanPanel({
   clientId,
   fiscalYearId,
   session,
+  reloadYears,
 }: {
   clientId: string;
   fiscalYearId: string;
   session: SessionTokenAccessor;
+  /** ClosePage's own fiscal-year list reload (M1) — called after every door
+   *  act this panel performs, alongside the plan's own reload. */
+  reloadYears: () => Promise<void>;
 }) {
   const t = useTranslations("ClientClose.plan");
   const tGates = useTranslations("ClientClose.gates");
   const tReceipt = useTranslations("ClientClose.receipt");
   const { data: plan, busy, err, clr, act } = useHydratedPart(session, (s) => getClosePlan(fiscalYearId, { session: s }));
+
+  // Wraps a door's own write in `act()` (which always reloads the plan, success
+  // or failure) AND fires the picker's reload right alongside it — same
+  // timing, same "always, regardless of outcome" discipline.
+  const actAndReloadYears = (fn: () => Promise<void>): Promise<void> => act(fn).then(() => reloadYears());
 
   if (!plan) {
     // `err === null` here means either still loading, or the read resolved a
@@ -80,15 +94,16 @@ export function ClosePlanPanel({
       <CloseDoors
         plan={plan}
         busy={busy}
-        onBegin={() => act(async () => { await beginClose(fiscalYearId, { session }); })}
-        onFinalize={(selfAttestation) => act(async () => { await finalizeClose(fiscalYearId, selfAttestation, { session }); })}
+        refusal={clr}
+        onBegin={() => actAndReloadYears(async () => { await beginClose(fiscalYearId, { session }); })}
+        onFinalize={(selfAttestation) => actAndReloadYears(async () => { await finalizeClose(fiscalYearId, selfAttestation, { session }); })}
         onAbandon={(reason) =>
           closeRunId
-            ? act(async () => { await abandonClose(closeRunId, reason, { session }); })
+            ? actAndReloadYears(async () => { await abandonClose(closeRunId, reason, { session }); })
             : Promise.resolve()
         }
         onReopen={(args: { reason: string; correctionTarget: ReopenCorrectionTarget; attestation?: string }) =>
-          act(async () => {
+          actAndReloadYears(async () => {
             await reopenFiscalYear({ fiscalYearId, reason: args.reason, correctionTarget: args.correctionTarget, attestation: args.attestation }, { session });
           })
         }
@@ -108,7 +123,7 @@ export function ClosePlanPanel({
                 busy={busy}
                 onAttest={({ checkKey, reason, itemKey }) =>
                   closeRunId
-                    ? act(async () => { await attestCloseException({ closeRunId, checkKey, reason, itemKey }, { session }); })
+                    ? actAndReloadYears(async () => { await attestCloseException({ closeRunId, checkKey, reason, itemKey }, { session }); })
                     : Promise.resolve()
                 }
               />

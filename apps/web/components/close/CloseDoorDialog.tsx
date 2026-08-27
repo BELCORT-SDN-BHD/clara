@@ -9,7 +9,7 @@
 // (lib/parts/hooks.ts's sticky-refusal design: it survives the dialog closing
 // and the follow-up reload that always runs after).
 
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -22,6 +22,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { createSingleFireGuard, runOnce } from "@/lib/parts/singleFireGuard";
 
 export function CloseDoorDialog({
   triggerLabel,
@@ -50,6 +51,13 @@ export function CloseDoorDialog({
 }) {
   const [open, setOpen] = useState(false);
   const t = useTranslations("ClientClose.dialog");
+  // The single-fire guard (review finding M3): `disabled={busy}` alone is a
+  // cosmetic affordance, not a correctness guard — see lib/parts/
+  // singleFireGuard.ts's header for the measured regression. `guardRef`
+  // persists across the re-renders `busy` itself provokes, so a rapid second
+  // click is dropped even in the window before React repaints the disabled
+  // button.
+  const guardRef = useRef(createSingleFireGuard());
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -67,8 +75,8 @@ export function CloseDoorDialog({
           <Button
             disabled={busy}
             onClick={async () => {
-              await onConfirm();
-              setOpen(false);
+              const ran = await runOnce(guardRef.current, onConfirm);
+              if (ran) setOpen(false);
             }}
           >
             {busy ? t("working") : confirmLabel}

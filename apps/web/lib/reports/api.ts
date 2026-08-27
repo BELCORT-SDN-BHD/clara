@@ -46,6 +46,22 @@ export async function listReportArtifacts(clientId: string, opts: Opts = {}): Pr
   }
 }
 
+// M5 (independent review ruling, reversed from this build's own first pass —
+// KEEP deterministic, do not switch to crypto.randomUUID()): this is the SAME
+// scheme apps/dashboard/app/reports/page.tsx already ships in production
+// (`dash-issue-${artifact.id}` / `dash-archive-${artifact.id}`, page.tsx:252/
+// :299) — a stable, artifact-scoped op_key so a lost-response retry (a network
+// timeout after the RPC actually landed, a double-click) replays the SAME op
+// and gets the ORIGINAL receipt back, per `_reserve_op`'s own idempotency
+// contract, rather than minting a second op the door then has to disambiguate.
+// The `dash-`/no-prefix namespaces are DELIBERATELY not shared — a web-UI
+// click on an artifact a dashboard session already issued falls through to
+// the real `report_run_state_illegal` refusal instead of silently replaying a
+// stale dashboard receipt. The one accepted cost: editing a field (reason/
+// attestation) and re-clicking Issue on the SAME artifact reuses the same
+// op_key, so `_reserve_op` returns CLR10 (an op_key/request-hash mismatch) —
+// now VISIBLE to the human once F2's banner fix lands (it was silently
+// swallowed before), which is the accepted answer, not a bug to route around.
 const opKey = (prefix: string, id: string): string => `${prefix}-${id}`;
 
 /** clara.approve_report_for_issue — the ONE human act that closes the pre_sign
@@ -149,16 +165,30 @@ export async function supersedeExportRecipient(
   );
 }
 
-/** clara.freeform_read_log, filtered to reads whose client_scope contains this
- *  client — a Postgres array-contains filter (`cs.{<id>}`), PostgREST's own
- *  operator for "array column contains this value". A history read only — see
- *  ./types.ts's header for why there is no "run a freeform read" door here. */
+/** clara.freeform_read_log — a history read only (see ./types.ts's header for
+ *  why there is no "run a freeform read" door here). M6 (independent review):
+ *  0131:550-553's own CHECK forces `client_scope IS NULL` whenever
+ *  `scope = 'firm'` — a single `client_scope cs.{<id>}` filter therefore
+ *  structurally EXCLUDES every firm-scope read, even one that in substance
+ *  touched this client (a HOME-scoped agent session asking about the whole
+ *  firm). Two separate queries, merged and re-sorted by `at desc` — a firm-
+ *  scope row is real information for this client's page, not noise to hide,
+ *  so it is returned WITH its own `scope: 'firm'` marker intact for the UI to
+ *  label honestly, never merged into a false claim of "client-scoped". */
 export async function listFreeformReads(clientId: string, opts: Opts = {}): Promise<FreeformReadLogRow[]> {
-  return getRows<FreeformReadLogRow>("freeform_read_log", {
-    filters: { client_scope: `cs.{${clientId}}` },
-    order: "at.desc",
-    ...opts,
-  });
+  const [clientScoped, firmScoped] = await Promise.all([
+    getRows<FreeformReadLogRow>("freeform_read_log", {
+      filters: { client_scope: `cs.{${clientId}}` },
+      order: "at.desc",
+      ...opts,
+    }),
+    getRows<FreeformReadLogRow>("freeform_read_log", {
+      filters: { scope: "eq.firm" },
+      order: "at.desc",
+      ...opts,
+    }),
+  ]);
+  return [...clientScoped, ...firmScoped].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 }
 
 /** clara.report_agent_receipts, filtered to one client (firm-wide RLS scope; see

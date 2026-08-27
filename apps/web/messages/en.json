@@ -140,7 +140,8 @@
       "ariaLabel": "Fiscal years",
       "loading": "Loading fiscal years…",
       "error": "Could not load fiscal years: {message}",
-      "empty": "No fiscal years opened yet for this client."
+      "empty": "No fiscal years opened yet for this client.",
+      "reopened": "previously reopened"
     },
     "plan": {
       "loading": "Loading the close plan…",
@@ -176,8 +177,18 @@
         "description": "clara.reopen_fiscal_year mirrors the closing entry as a prior-period adjustment. Needs the reopen capability, a reason (10+ characters), and a correction target. A CLR05 refusal (no_eligible_human / attestation_required / distinct_checker / self_attestation) names exactly who may act — try again with an attestation if it asks for one.",
         "confirm": "Reopen",
         "reasonLabel": "Reason (10+ characters)",
-        "checkKeyLabel": "Correction target — gate check key",
+        "targetKindLabel": "Correction target",
+        "targetKind": {
+          "check_key": "Gate check key",
+          "entry_ids": "Entry ids",
+          "document_id": "Document id"
+        },
+        "checkKeyLabel": "Gate check key",
         "checkKeyPlaceholder": "e.g. ar_control_tie",
+        "entryIdsLabel": "Entry ids (comma-separated)",
+        "entryIdsPlaceholder": "e.g. 3fa9c1de-...-..., 8b2e4a10-...-...",
+        "documentIdLabel": "Document id",
+        "documentIdPlaceholder": "e.g. 8b2e4a10-...-...",
         "attestationLabel": "Attestation (only if a refusal named it)"
       }
     },
@@ -186,6 +197,8 @@
       "empty": "No gate measurements yet — begin the close to evaluate them.",
       "notYetMeasured": "not yet measured",
       "noAttestation": "no attestation",
+      "drawer": "drawer",
+      "wholeGate": "this gate as a whole",
       "attest": {
         "trigger": "Attest",
         "title": "Attest this gate exception",
@@ -207,6 +220,11 @@
       "retainedEarnings": "retained earnings account",
       "watermark": "books watermark",
       "datasetSha": "dataset sha256",
+      "closingTbDigest": "closing trial-balance digest",
+      "gateDigest": "gate digest",
+      "closeEntryId": "close entry id",
+      "none": "none",
+      "closingPosition": "closing position",
       "selfAttestation": "self-attestation",
       "segregation": {
         "two_person": "two-person segregation",
@@ -238,6 +256,10 @@
       "noDownload": "No byte-download door exists yet — copy the storage key and retrieve the file through ops tooling. A signed-URL download route is a named follow-up, not built in this pass.",
       "copyKey": "Copy storage key",
       "copied": "Copied",
+      "runLabel": "run",
+      "sha256Label": "sha256",
+      "bytesLabel": "bytes",
+      "byteSizeInvalid": "Byte size must be a whole number of bytes (digits only).",
       "issue": {
         "trigger": "Issue for approval",
         "title": "Issue this pack for approval",
@@ -278,6 +300,7 @@
         "loading": "Loading recipients…",
         "error": "Could not load recipients: {message}",
         "empty": "No export recipients registered yet.",
+        "superseded": "superseded",
         "register": {
           "trigger": "Register recipient",
           "title": "Register an export recipient",
@@ -295,7 +318,13 @@
       "runNotice": "There is no human \"run a freeform read\" door — wake_freeform_read is Clara's agent lane. This is a read-only history of what Clara has read.",
       "loading": "Loading freeform read history…",
       "error": "Could not load freeform reads: {message}",
-      "empty": "No freeform reads yet touching this client."
+      "empty": "No freeform reads yet naming this client, and no firm-wide reads either.",
+      "firmWide": "firm-wide read",
+      "armed": "armed",
+      "rowsLabel": "rows",
+      "bytesLabel": "bytes",
+      "relationsLabel": "relations read",
+      "rungVectorLabel": "rung vector"
     }
   },
   "ClientRegisters": {

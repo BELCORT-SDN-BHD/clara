@@ -16,7 +16,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 
 export function ExportRecipientsPanel({ session }: { session: SessionTokenAccessor }) {
   const t = useTranslations("ClientReports.sandbox.recipients");
-  const { data: recipients, err, busy, act } = useHydratedPart(session, (s) => listExportRecipients({ session: s }));
+  const { data: recipients, err, clr, busy, act } = useHydratedPart(session, (s) => listExportRecipients({ session: s }));
 
   return (
     <div className="flex flex-col gap-2">
@@ -24,10 +24,25 @@ export function ExportRecipientsPanel({ session }: { session: SessionTokenAccess
         <h4 className="text-xs font-medium text-foreground">{t("heading")}</h4>
         <RegisterDialog session={session} busy={busy} act={act} />
       </div>
-      {err ? (
-        <p className="text-xs text-destructive">{t("error", { message: err })}</p>
-      ) : !recipients ? (
-        <p className="text-xs text-muted-foreground">{t("loading")}</p>
+      {/* Low 8 (independent review): a register/supersede refusal must render
+          ALONGSIDE the still-good list, never REPLACE it — the list staying
+          visible is itself evidence nothing about the existing recipients
+          changed. Mirrors StatutoryReportsPanel.tsx's split: a friendly
+          wrapped message for the INITIAL load failure (`recipients` never
+          loaded), a verbatim `code (reason): message` banner for a later
+          door refusal once the list has already loaded once. */}
+      {recipients && (err || clr) ? (
+        <p className="text-xs text-destructive">
+          {clr ? `${clr.code}${clr.reason ? ` (${clr.reason})` : ""}: ` : ""}
+          {err}
+        </p>
+      ) : null}
+      {!recipients ? (
+        err ? (
+          <p className="text-xs text-destructive">{t("error", { message: err })}</p>
+        ) : (
+          <p className="text-xs text-muted-foreground">{t("loading")}</p>
+        )
       ) : recipients.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t("empty")}</p>
       ) : (
@@ -36,7 +51,7 @@ export function ExportRecipientsPanel({ session }: { session: SessionTokenAccess
             <li key={r.id} className="flex flex-wrap items-center gap-2 text-xs">
               <span className="text-card-foreground">{r.display_name}</span>
               <Badge variant="secondary">{r.kind}</Badge>
-              {r.superseded_by ? <Badge variant="outline">superseded</Badge> : null}
+              {r.superseded_by ? <Badge variant="outline">{t("superseded")}</Badge> : null}
             </li>
           ))}
         </ul>
