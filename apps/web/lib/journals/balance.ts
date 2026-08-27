@@ -4,7 +4,12 @@
 // PRESENTATION SUM, not a DB-owned figure (hard constraint 2) — callers must
 // label it as such wherever it renders (see components/journals's usage).
 
-import type { JournalLineRow } from "./types";
+/** Widened to a structural subset (not the full `JournalLineRow`) so this ONE
+ *  sum is reusable for both a read row (`JournalLineRow`, has `.id`/`.
+ *  entry_id`/`.line_no`) and an in-progress edit (`EntryLineInput`, has
+ *  neither) — N8 (independent review): reused by EntryLinesEditor's own
+ *  footer instead of a THIRD hand-rolled reduce living next to this one. */
+type Amounts = { debit_cents: number; credit_cents: number };
 
 export type LineBalance = {
   /** Sum of `debit_cents` across the given lines — a client-side presentation
@@ -20,7 +25,7 @@ export type LineBalance = {
   balanced: boolean;
 };
 
-export function sumLines(lines: JournalLineRow[]): LineBalance {
+export function sumLines(lines: Amounts[]): LineBalance {
   let debitCents = 0;
   let creditCents = 0;
   for (const line of lines) {
@@ -31,7 +36,15 @@ export function sumLines(lines: JournalLineRow[]): LineBalance {
 }
 
 /** Cents -> "RM 1,234.56". Presentation formatting only — never a computed
- *  figure, just a display transform of a number the caller already has. */
+ *  figure, just a display transform of a number the caller already has.
+ *
+ *  N9 (independent review): NOT the render path any more —
+ *  components/journals/money.tsx's `<Money>` (next-intl's `useFormatter`) is,
+ *  so every currency string in the UI goes through ONE locale-aware
+ *  mechanism. This plain-string version is kept (and tested, below) as the
+ *  documented fallback for a non-JSX/non-hook context — there is none in this
+ *  module today, but a future server-side receipt line or a plain-text export
+ *  would need exactly this, not a hook. */
 export function formatCents(cents: number | null | undefined): string {
   if (cents === null || cents === undefined || !Number.isFinite(cents)) return "—";
   const sign = cents < 0 ? "-" : "";

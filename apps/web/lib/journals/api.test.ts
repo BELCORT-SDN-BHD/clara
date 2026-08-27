@@ -1,22 +1,20 @@
 // lib/journals/api.ts — mocked-fetch style ported from lib/read.test.ts /
 // lib/doors.test.ts's own precedent (this module's own header). Covers: every
-// read shape (table reads + the review-queue RPC), every door's success +
-// refusal-verbatim path, the reversal path, and the manual-compose ceremony's
-// two-call ordering (including the "step 2 refuses, step 1 already landed"
-// case named in api.ts's own header).
+// read shape (table reads + the review-queue RPC + FIX-1 truncation detection
+// + FIX-6 counts.open_drafts), and every door's success + refusal-verbatim
+// path + the reversal path. The manual-compose ceremony has its own file,
+// ./api-compose.test.ts (kept this file under the repo's 500-line convention).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   approveEntry,
-  composeManualEntry,
   listCoaAccounts,
   listCounterparties,
   listJournalEntries,
   listJournalLines,
   listReviewQueue,
   loadJournalsWorkbench,
-  recordManualResolution,
   reverseEntry,
   reviseEntry,
 } from "./api";
@@ -60,13 +58,46 @@ const CLIENT_ID = "11111111-1111-1111-1111-111111111111";
 
 // --- reads: each relation's shape --------------------------------------------
 
-test("listJournalEntries: reads journal_entries with client_id scoped, returns rows as-is", async () => {
+test("listJournalEntries: reads journal_entries with client_id scoped, returns rows as-is, untruncated", async () => {
   await withMockedFetch(
     routedFetch({ "journal_entries?": [{ id: "e1", client_id: CLIENT_ID, status: "draft" }] }),
     async () => {
-      const rows = await listJournalEntries(fakeSession(), CLIENT_ID);
+      const { rows, truncated } = await listJournalEntries(fakeSession(), CLIENT_ID);
       assert.equal(rows.length, 1);
       assert.equal(rows[0]?.id, "e1");
+      assert.equal(truncated, false);
+    },
+  );
+});
+
+// FIX-1 (independent review): journal_entries/journal_lines are read WITHOUT a
+// caller-supplied limit — a Supabase/PostgREST db-max-rows ceiling would
+// otherwise truncate silently. Prove the request asks for FETCH_CAP+1 and that
+// hitting exactly that many rows back is treated as truncation.
+test("listJournalEntries: requests FETCH_CAP+1 rows and reports truncated when the cap is hit", async () => {
+  let seenUrl = "";
+  const overCap = Array.from({ length: 1001 }, (_, i) => ({ id: `e${i}` }));
+  await withMockedFetch(
+    async (input) => {
+      seenUrl = String(input);
+      return jsonResponse(overCap);
+    },
+    async () => {
+      const { rows, truncated } = await listJournalEntries(fakeSession(), CLIENT_ID);
+      assert.equal(truncated, true, "1001 rows back on a 1001-row request means more may exist");
+      assert.equal(rows.length, 1000, "the reported rows are capped back to FETCH_CAP, never the raw overflow");
+    },
+  );
+  assert.match(seenUrl, /limit=1001/);
+});
+
+test("listJournalEntries: fewer rows than the cap reports untruncated", async () => {
+  await withMockedFetch(
+    async () => jsonResponse(Array.from({ length: 5 }, (_, i) => ({ id: `e${i}` }))),
+    async () => {
+      const { rows, truncated } = await listJournalEntries(fakeSession(), CLIENT_ID);
+      assert.equal(truncated, false);
+      assert.equal(rows.length, 5);
     },
   );
 });
@@ -87,13 +118,24 @@ test("listJournalEntries: the request URL carries select= and the client_id filt
   assert.match(seenUrl, /select=/);
 });
 
-test("listJournalLines: reads journal_lines scoped by client_id", async () => {
+test("listJournalLines: reads journal_lines scoped by client_id, untruncated", async () => {
   await withMockedFetch(
     routedFetch({ "journal_lines?": [{ id: "l1", entry_id: "e1", line_no: 1, account_code: "6000", debit_cents: 100, credit_cents: 0, description: null, counterparty_id: null }] }),
     async () => {
-      const rows = await listJournalLines(fakeSession(), CLIENT_ID);
+      const { rows, truncated } = await listJournalLines(fakeSession(), CLIENT_ID);
       assert.equal(rows.length, 1);
       assert.equal(rows[0]?.debit_cents, 100);
+      assert.equal(truncated, false);
+    },
+  );
+});
+
+test("listJournalLines: reports truncated when the cap is hit (the class FIX-1 flagged: a truncated line set makes every sum unverifiable)", async () => {
+  await withMockedFetch(
+    async () => jsonResponse(Array.from({ length: 1001 }, (_, i) => ({ id: `l${i}` }))),
+    async () => {
+      const { truncated } = await listJournalLines(fakeSession(), CLIENT_ID);
+      assert.equal(truncated, true);
     },
   );
 });
@@ -132,14 +174,16 @@ test("listReviewQueue: POSTs to rpc/list_review_queue with the client scope, fil
           { row_kind: "draft", section: "needs_review", entry_id: "e1", client_id: CLIENT_ID, id: "e1", amount_cents: 5000, sort: ["1", "a", "b", "c", "d"] },
           { row_kind: "uncoded_filing", section: "needs_you", filing_id: "f1", client_id: CLIENT_ID, id: "f1" },
         ],
+        counts: { open_drafts: 1 },
       });
     },
     async () => {
-      const rows = await listReviewQueue(fakeSession(), CLIENT_ID);
+      const { rows, counts } = await listReviewQueue(fakeSession(), CLIENT_ID);
       assert.equal(rows.length, 1, "only row_kind==='draft' rows survive the filter");
       assert.equal(rows[0]?.row_kind, "draft");
       assert.equal(rows[0]?.section, "needs_review", "section is rendered verbatim, never relabeled");
       assert.equal(rows[0]?.amount_cents, 5000, "amount_cents is the DB-computed sum, passed through unchanged");
+      assert.equal(counts.open_drafts, 1);
     },
   );
   assert.match(seenUrl, /\/rest\/v1\/rpc\/list_review_queue$/);
@@ -151,10 +195,38 @@ test("listReviewQueue: a malformed row degrades defensively, never throws", asyn
   await withMockedFetch(
     async () => jsonResponse({ rows: [{ row_kind: "draft" }] }),
     async () => {
-      const rows = await listReviewQueue(fakeSession(), CLIENT_ID);
+      const { rows } = await listReviewQueue(fakeSession(), CLIENT_ID);
       assert.equal(rows.length, 1);
       assert.equal(rows[0]?.id, "");
       assert.equal(rows[0]?.amount_cents, null);
+    },
+  );
+});
+
+// FIX-6 (independent review): counts.open_drafts is DB-computed PRE-limit — it
+// must survive even when the p_limit page has pushed every draft row off the
+// page entirely (a large needs_you backlog of a DIFFERENT row_kind).
+test("listReviewQueue: counts.open_drafts survives even when the page carries zero draft rows", async () => {
+  await withMockedFetch(
+    async () =>
+      jsonResponse({
+        rows: [{ row_kind: "uncoded_filing", section: "needs_you", filing_id: "f1", id: "f1" }],
+        counts: { open_drafts: 7 },
+      }),
+    async () => {
+      const { rows, counts } = await listReviewQueue(fakeSession(), CLIENT_ID);
+      assert.equal(rows.length, 0, "the page itself carries zero draft rows");
+      assert.equal(counts.open_drafts, 7, "but the TRUE total is still visible from counts");
+    },
+  );
+});
+
+test("listReviewQueue: a missing counts block degrades to open_drafts: 0, never throws", async () => {
+  await withMockedFetch(
+    async () => jsonResponse({ rows: [] }),
+    async () => {
+      const { counts } = await listReviewQueue(fakeSession(), CLIENT_ID);
+      assert.equal(counts.open_drafts, 0);
     },
   );
 });
@@ -173,10 +245,13 @@ test("loadJournalsWorkbench: fetches all five endpoints and assembles the shape"
     async () => {
       const data = await loadJournalsWorkbench(fakeSession(), CLIENT_ID);
       assert.equal(data.entries.length, 1);
+      assert.equal(data.entriesTruncated, false);
       assert.equal(data.lines.length, 1);
+      assert.equal(data.linesTruncated, false);
       assert.equal(data.accounts.length, 1);
       assert.equal(data.counterparties.length, 1);
       assert.deepEqual(data.queueRows, []);
+      assert.equal(data.queueCounts.open_drafts, 0);
     },
   );
 });
@@ -238,6 +313,40 @@ test("reviseEntry: success returns the new revision_token", async () => {
   );
 });
 
+// N3 (independent review, "proven gap: renaming p_lines stayed green"): a
+// wire-shape body assertion, keyed on the EXACT arg names PostgREST calls
+// revise_entry with — a typo'd/renamed key here is a silent no-op on the DB
+// side (an unknown named arg raises its own error, but a same-shaped RENAME
+// that happens to still typecheck client-side would not be caught by the
+// return-value-only test above).
+test("reviseEntry: the wire body carries the exact arg names revise_entry expects (N3 wire-shape assertion)", async () => {
+  let seenBody: Record<string, unknown> = {};
+  await withMockedFetch(
+    async (input, init) => {
+      seenBody = init?.body ? JSON.parse(String(init.body)) : {};
+      return jsonResponse({ revision_token: "rev-2" });
+    },
+    async () => {
+      await reviseEntry(fakeSession(), "e1", [{ account_code: "6000", debit_cents: 100, credit_cents: 0, description: "x" }], "rev-1");
+    },
+  );
+  assert.deepEqual(Object.keys(seenBody).sort(), [
+    "p_amount_override",
+    "p_duplicate_override",
+    "p_entry",
+    "p_evidence",
+    "p_expected_revision",
+    "p_lines",
+    "p_op_key",
+    "p_proposed_counterparty",
+  ]);
+  assert.equal(seenBody.p_entry, "e1");
+  assert.equal(seenBody.p_expected_revision, "rev-1");
+  assert.deepEqual(seenBody.p_lines, [{ account_code: "6000", debit_cents: 100, credit_cents: 0, description: "x" }]);
+  assert.equal(seenBody.p_proposed_counterparty, null);
+  assert.equal(seenBody.p_evidence, null);
+});
+
 test("reviseEntry: a CLR07 unbalanced refusal surfaces verbatim", async () => {
   await withMockedFetch(
     async () => jsonResponse({ code: "CLR07", message: "entry is unbalanced by 10c" }, 400),
@@ -285,78 +394,8 @@ test("reverseEntry: a CLR10 already-reversed refusal surfaces verbatim, never re
   );
 });
 
-// --- manual compose: the two-call ceremony -----------------------------------
-
-test("composeManualEntry: calls record_client_resolution THEN draft_entry, in order, resolution id threaded through", async () => {
-  const calls: string[] = [];
-  await withMockedFetch(
-    async (input, init) => {
-      const url = String(input);
-      if (url.includes("record_client_resolution")) {
-        calls.push("resolution");
-        return jsonResponse({ resolution_id: "res-1" });
-      }
-      if (url.includes("draft_entry")) {
-        calls.push("draft");
-        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-        assert.equal(body.p_resolution, "res-1", "the resolution id from step 1 must thread into step 2");
-        return jsonResponse({ entry_id: "e9", revision_token: "rev-9", status: "draft" });
-      }
-      throw new Error(`unexpected url: ${url}`);
-    },
-    async () => {
-      const out = await composeManualEntry(fakeSession(), CLIENT_ID, {
-        postingDate: "2026-08-27",
-        memo: "opening float",
-        lines: [
-          { account_code: "1000", debit_cents: 10000, credit_cents: 0 },
-          { account_code: "3000", debit_cents: 0, credit_cents: 10000 },
-        ],
-      });
-      assert.deepEqual(out, { entry_id: "e9", revision_token: "rev-9", status: "draft" });
-    },
-  );
-  assert.deepEqual(calls, ["resolution", "draft"]);
-});
-
-test("composeManualEntry: step 2 refusing (CLR07) propagates that EXACT refusal — step 1 already landed", async () => {
-  await withMockedFetch(
-    async (input) => {
-      const url = String(input);
-      if (url.includes("record_client_resolution")) return jsonResponse({ resolution_id: "res-1" });
-      if (url.includes("draft_entry")) return jsonResponse({ code: "CLR07", message: "entry is unbalanced by 50c" }, 400);
-      throw new Error(`unexpected url: ${url}`);
-    },
-    async () => {
-      await assert.rejects(
-        composeManualEntry(fakeSession(), CLIENT_ID, {
-          postingDate: "2026-08-27",
-          memo: "unbalanced test",
-          lines: [{ account_code: "1000", debit_cents: 10050, credit_cents: 0 }, { account_code: "3000", debit_cents: 0, credit_cents: 10000 }],
-        }),
-        (e: unknown) => {
-          assert.ok(isDoorRefusal(e));
-          assert.equal((e as { code: string }).code, "CLR07");
-          return true;
-        },
-      );
-    },
-  );
-});
-
-test("recordManualResolution: sends subject_kind: 'manual', subject: null, confidence: 1", async () => {
-  let seenBody: Record<string, unknown> = {};
-  await withMockedFetch(
-    async (input, init) => {
-      seenBody = init?.body ? JSON.parse(String(init.body)) : {};
-      return jsonResponse({ resolution_id: "res-1" });
-    },
-    async () => {
-      await recordManualResolution(fakeSession(), CLIENT_ID);
-    },
-  );
-  assert.equal(seenBody.p_client, CLIENT_ID);
-  assert.equal(seenBody.p_subject_kind, "manual");
-  assert.equal(seenBody.p_subject, null);
-  assert.equal(seenBody.p_confidence, 1);
-});
+// --- manual compose: the two-call ceremony ------------------------------------
+// Split into ./api-compose.test.ts to keep this file under the repo's file-size
+// convention (500 lines) — covers composeManualEntry/draftManualEntry/
+// recordManualResolution, including the N3 wire-shape assertion and the
+// "step 2 refuses, step 1 already landed" case.

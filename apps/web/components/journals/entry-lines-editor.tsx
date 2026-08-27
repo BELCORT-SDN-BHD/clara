@@ -6,17 +6,40 @@
 // shape `draft_entry`/`revise_entry` accept as `p_lines`. This component does
 // NOT validate balance or account existence itself — the DB is the authority
 // (CLR07/CLR10 on a real submit); it only shows the client-side PRESENTATION
-// sum (lib/journals/balance.ts) so a preparer can see it before submitting.
+// sum (lib/journals/balance.ts's `sumLines`) so a preparer can see it before
+// submitting.
 
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Money } from "@/components/journals/money";
+import { useAmountInput } from "@/components/journals/use-amount-input";
+import { sumLines } from "@/lib/journals/balance";
 import type { CoaAccountRow, EntryLineInput } from "@/lib/journals/types";
-import { formatCents } from "@/lib/journals/balance";
 
-function centsFromInput(raw: string): number {
-  const n = Math.round(Number(raw) * 100);
-  return Number.isFinite(n) ? n : 0;
+/** FIX-3 (independent review) — see use-amount-input.ts's header for the bug
+ *  and the fix; this is only the thin DOM-event wrapper around it. */
+function AmountInput({
+  cents,
+  onChange,
+  ariaLabel,
+}: {
+  cents: number;
+  onChange: (cents: number) => void;
+  ariaLabel: string;
+}) {
+  const { raw, handleChange } = useAmountInput(cents, onChange);
+  return (
+    <Input
+      aria-label={ariaLabel}
+      type="number"
+      step="0.01"
+      min="0"
+      className="text-right"
+      value={raw}
+      onChange={(e) => handleChange(e.target.value)}
+    />
+  );
 }
 
 export function EntryLinesEditor({
@@ -41,8 +64,10 @@ export function EntryLinesEditor({
     onChange([...lines, { account_code: activeAccounts[0]?.account_code ?? "", debit_cents: 0, credit_cents: 0, description: "" }]);
   }
 
-  const debitTotal = lines.reduce((sum, l) => sum + l.debit_cents, 0);
-  const creditTotal = lines.reduce((sum, l) => sum + l.credit_cents, 0);
+  // N8 (independent review): ONE balance computation (lib/journals/balance.ts's
+  // `sumLines`), not a third hand-rolled reduce living beside DraftDetail's and
+  // PostedPanel's own — `.balanced` is a real consumer here, not a dead field.
+  const balance = sumLines(lines);
 
   return (
     <div className="flex flex-col gap-2">
@@ -82,25 +107,17 @@ export function EntryLinesEditor({
                 />
               </td>
               <td className="pr-2 pb-1">
-                <Input
-                  aria-label={t("debit")}
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  className="text-right"
-                  value={line.debit_cents ? (line.debit_cents / 100).toFixed(2) : ""}
-                  onChange={(e) => updateLine(i, { debit_cents: centsFromInput(e.target.value), credit_cents: 0 })}
+                <AmountInput
+                  ariaLabel={t("debit")}
+                  cents={line.debit_cents}
+                  onChange={(debit_cents) => updateLine(i, { debit_cents, credit_cents: 0 })}
                 />
               </td>
               <td className="pr-2 pb-1">
-                <Input
-                  aria-label={t("credit")}
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  className="text-right"
-                  value={line.credit_cents ? (line.credit_cents / 100).toFixed(2) : ""}
-                  onChange={(e) => updateLine(i, { credit_cents: centsFromInput(e.target.value), debit_cents: 0 })}
+                <AmountInput
+                  ariaLabel={t("credit")}
+                  cents={line.credit_cents}
+                  onChange={(credit_cents) => updateLine(i, { credit_cents, debit_cents: 0 })}
                 />
               </td>
               <td className="pb-1">
@@ -116,10 +133,21 @@ export function EntryLinesEditor({
             <td colSpan={2} className="pt-1 text-right text-muted-foreground">
               {t("presentationSumLabel")}
             </td>
-            <td className="pt-1 text-right">{formatCents(debitTotal)}</td>
-            <td className="pt-1 text-right">{formatCents(creditTotal)}</td>
+            <td className={`pt-1 text-right ${balance.balanced ? "" : "text-warning"}`}>
+              <Money cents={balance.debitCents} />
+            </td>
+            <td className={`pt-1 text-right ${balance.balanced ? "" : "text-warning"}`}>
+              <Money cents={balance.creditCents} />
+            </td>
             <td />
           </tr>
+          {!balance.balanced && (
+            <tr>
+              <td colSpan={5} className="pt-1 text-right text-xs text-warning">
+                {t("notBalanced")}
+              </td>
+            </tr>
+          )}
         </tfoot>
       </table>
       <Button type="button" variant="outline" size="sm" onClick={addLine}>

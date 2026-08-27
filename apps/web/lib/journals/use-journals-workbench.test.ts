@@ -111,6 +111,49 @@ test("readErrorKind: resets to null after a subsequent successful reload", async
   );
 });
 
+// N4 (independent review): listReviewQueue fails as a DoorError (it rides
+// callDoor), not a ReadError — the kind must still surface.
+test("readErrorKind: a 403 from the review-queue RPC (a DoorError, not a ReadError) still surfaces kind: 'forbidden'", async () => {
+  await withMockedFetch(
+    async (input) => {
+      const url = String(input);
+      if (url.includes("rpc/list_review_queue")) return jsonResponse({ message: "permission denied for function list_review_queue" }, 403);
+      return jsonResponse([]);
+    },
+    async () => {
+      const sess = fakeSession();
+      const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
+      try {
+        await h.settle();
+        assert.equal(h.current.readErrorKind, "forbidden");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("readErrorKind: a 401 surfaces kind: 'unauthenticated', distinct from 'forbidden'", async () => {
+  await withMockedFetch(
+    async (input) => {
+      const url = String(input);
+      if (url.includes("journal_entries")) return jsonResponse({ message: "JWT expired" }, 401);
+      if (url.includes("rpc/list_review_queue")) return jsonResponse({ rows: [] });
+      return jsonResponse([]);
+    },
+    async () => {
+      const sess = fakeSession();
+      const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
+      try {
+        await h.settle();
+        assert.equal(h.current.readErrorKind, "unauthenticated");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("mount: reloads once and populates data from the real read endpoints", async () => {
   const counter = { n: 0 };
   await withMockedFetch(emptyWorkbenchFetch(counter), async () => {
@@ -118,7 +161,16 @@ test("mount: reloads once and populates data from the real read endpoints", asyn
     const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
     try {
       await h.settle();
-      assert.deepEqual(h.current.data, { entries: [], lines: [], accounts: [], counterparties: [], queueRows: [] });
+      assert.deepEqual(h.current.data, {
+        entries: [],
+        entriesTruncated: false,
+        lines: [],
+        linesTruncated: false,
+        accounts: [],
+        counterparties: [],
+        queueRows: [],
+        queueCounts: { open_drafts: 0 },
+      });
       assert.equal(h.current.err, null);
       assert.equal(counter.n, 5, "five endpoints: entries, lines, accounts, counterparties, review-queue RPC");
     } finally {
@@ -158,7 +210,7 @@ test("approve(): calls approve_entry then re-reads (a fresh loader round after t
   );
 });
 
-test("reverse(): a CLR10 refusal from reverse_entry is captured as a sticky clr, verbatim", async () => {
+test("reverse(): a CLR10 refusal from reverse_entry is captured as a sticky clr, verbatim, attributed to the acting entry", async () => {
   await withMockedFetch(
     async (input) => {
       const url = String(input);
@@ -174,6 +226,69 @@ test("reverse(): a CLR10 refusal from reverse_entry is captured as a sticky clr,
         await h.act(() => h.current.reverse("e1", "duplicate"));
         assert.equal(h.current.clr?.code, "CLR10");
         assert.match(h.current.err ?? "", /entry already reversed/);
+        // FIX-2 / N1: the failing action's identity is attributed, so a caller
+        // can tell THIS row's refusal apart from any other row's.
+        assert.equal(h.current.actingId, "e1");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+// FIX-2 / N1 (independent review): a refusal from reversing entry A must never
+// render attached to entry B. actingId is the mechanism that lets a component
+// tell them apart.
+test("actingId: distinguishes which row a refusal belongs to across two different reverse() calls", async () => {
+  let shouldRefuse = true;
+  await withMockedFetch(
+    async (input) => {
+      const url = String(input);
+      if (url.includes("rpc/reverse_entry")) {
+        if (shouldRefuse) return jsonResponse({ code: "CLR10", message: "entry already reversed" }, 400);
+        return jsonResponse({ reversal_id: "mirror-1", status: "approved" });
+      }
+      if (url.includes("rpc/list_review_queue")) return jsonResponse({ rows: [] });
+      return jsonResponse([]);
+    },
+    async () => {
+      const sess = fakeSession();
+      const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
+      try {
+        await h.settle();
+        await h.act(() => h.current.reverse("entry-a", "duplicate"));
+        assert.equal(h.current.actingId, "entry-a");
+        assert.equal(h.current.clr?.code, "CLR10");
+
+        shouldRefuse = false;
+        await h.act(() => h.current.reverse("entry-b", "duplicate"));
+        assert.equal(h.current.actingId, "entry-b", "actingId moved to the NEW acting row");
+        assert.equal(h.current.err, null, "a successful action on B clears the error B's own act() call set");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("compose(): sets actingId to the COMPOSE_ACTING_ID sentinel, never a real row id", async () => {
+  await withMockedFetch(
+    async (input) => {
+      const url = String(input);
+      if (url.includes("rpc/record_client_resolution")) return jsonResponse({ code: "CLR04", message: "insufficient role" }, 400);
+      if (url.includes("rpc/list_review_queue")) return jsonResponse({ rows: [] });
+      return jsonResponse([]);
+    },
+    async () => {
+      const sess = fakeSession();
+      const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
+      try {
+        await h.settle();
+        await h.act(() =>
+          h.current.compose({ postingDate: "2026-08-27", memo: "x", lines: [] }),
+        );
+        assert.equal(h.current.actingId, "compose");
+        assert.equal(h.current.clr?.code, "CLR04");
       } finally {
         await h.unmount();
       }

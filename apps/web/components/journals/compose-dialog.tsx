@@ -6,7 +6,7 @@
 // real verb pair exists; if it did not, this dialog would not exist and the
 // affordance would say so instead (mission's honest-not-built rule).
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
@@ -22,8 +22,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { EntryLinesEditor } from "@/components/journals/entry-lines-editor";
+import { businessToday } from "@/lib/business-date";
+import { COMPOSE_ACTING_ID } from "@/lib/journals/use-journals-workbench";
 import type { CoaAccountRow, EntryLineInput } from "@/lib/journals/types";
 import type { PartClr } from "@/lib/parts/hooks";
+
+function emptyLines(): EntryLineInput[] {
+  return [
+    { account_code: "", debit_cents: 0, credit_cents: 0, description: "" },
+    { account_code: "", debit_cents: 0, credit_cents: 0, description: "" },
+  ];
+}
 
 export function ComposeDialog({
   open,
@@ -32,6 +41,7 @@ export function ComposeDialog({
   busy,
   err,
   clr,
+  actingId,
   onSubmit,
 }: {
   /** CONTROLLED from the parent — the parent closes this on a successful
@@ -44,15 +54,34 @@ export function ComposeDialog({
   busy: boolean;
   err: string | null;
   clr: PartClr;
+  /** FIX-2 / N1: the workbench's busy/err/clr are ONE state shared across every
+   *  action — this dialog only renders them when it is genuinely the acting
+   *  party (`actingId === COMPOSE_ACTING_ID`), never a stale refusal left over
+   *  from approving/revising/reversing some OTHER row. */
+  actingId: string | null;
   onSubmit: (input: { postingDate: string; memo: string; lines: EntryLineInput[] }) => void;
 }) {
   const t = useTranslations("JournalsWorkbench.compose");
-  const [postingDate, setPostingDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [postingDate, setPostingDate] = useState(businessToday);
   const [memo, setMemo] = useState("");
-  const [lines, setLines] = useState<EntryLineInput[]>([
-    { account_code: "", debit_cents: 0, credit_cents: 0, description: "" },
-    { account_code: "", debit_cents: 0, credit_cents: 0, description: "" },
-  ]);
+  const [lines, setLines] = useState<EntryLineInput[]>(emptyLines);
+
+  // FIX-4 (independent review): a lazy `useState` initializer runs ONCE, at
+  // this component's first mount — since the dialog stays mounted (only its
+  // `open` prop toggles), the posting-date default would otherwise be
+  // computed once, ever, for the app's whole session, not "today" each time
+  // the dialog opens. Recompute — and reset the whole form, N6's "reset on
+  // success" — every time `open` transitions to `true`.
+  useEffect(() => {
+    if (!open) return;
+    setPostingDate(businessToday());
+    setMemo("");
+    setLines(emptyLines());
+  }, [open]);
+
+  const isActing = actingId === COMPOSE_ACTING_ID;
+  const visibleErr = isActing ? err : null;
+  const visibleClr = isActing ? clr : null;
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -85,14 +114,14 @@ export function ComposeDialog({
             <Textarea id="je-memo" value={memo} onChange={(e) => setMemo(e.target.value)} required rows={2} />
           </div>
           <EntryLinesEditor lines={lines} onChange={setLines} accounts={accounts} />
-          {clr && (
+          {visibleClr && (
             <p role="alert" className="text-sm text-destructive">
-              {clr.code}: {err}
+              {visibleClr.code}: {visibleErr}
             </p>
           )}
-          {!clr && err && (
+          {!visibleClr && visibleErr && (
             <p role="alert" className="text-sm text-destructive">
-              {err}
+              {visibleErr}
             </p>
           )}
           <DialogFooter>
