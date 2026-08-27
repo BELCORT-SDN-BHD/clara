@@ -84,7 +84,7 @@ export function DocumentMetadata({ document: doc, tasks }: { document: DocumentR
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <SectionHeader level={2} className="truncate">{doc.original_filename ?? doc.id}</SectionHeader>
+        <SectionHeader level={3} className="truncate">{doc.original_filename ?? doc.id}</SectionHeader>
         <Button size="sm" variant="outline" disabled={openState === "loading"} onClick={openDocument}>
           {openState === "loading" ? t("openingDocument") : t("openDocument")}
         </Button>

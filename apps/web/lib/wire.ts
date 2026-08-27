@@ -167,7 +167,7 @@ export function classifyPgrestFailure(
   const clr = parseClrCode(body.code, body.message);
   if (clr) {
     const reason = parseReasonToken(body.details);
-    return new RefusalError(clr, body.message ?? clr, {
+    return new RefusalError(clr, body.message || clr, {
       reason,
       status,
       pgCode: body.code ?? null,

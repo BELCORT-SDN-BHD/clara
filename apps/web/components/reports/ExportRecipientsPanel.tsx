@@ -22,7 +22,7 @@ export function ExportRecipientsPanel({ session }: { session: SessionTokenAccess
 
   return (
     <div className="flex flex-col gap-2">
-      <SectionHeader level={4} action={<RegisterDialog session={session} busy={busy} act={act} />}>
+      <SectionHeader level={3} action={<RegisterDialog session={session} busy={busy} act={act} />}>
         {t("heading")}
       </SectionHeader>
       {/* Low 8 (independent review): a register/supersede refusal must render

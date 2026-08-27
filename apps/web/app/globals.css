@@ -181,6 +181,33 @@
   --clara-foreground: #ffffff;
   --clara-muted: #f4f1fb;
 
+  /*
+   * FOCUS TREATMENT, RECORDED DIVERGENCE (not resolved either direction).
+   * The token contract of record (clarabook-frontend g5-design-system/
+   * docs/01-TOKEN-CONTRACT.md §9, read at `main` 2026-08-27) specifies the
+   * product's focus indicator as "a 2px #1D4ED8 indicator with 2px offset" —
+   * implemented literally below (`:focus-visible { outline: 2px solid
+   * var(--focus); outline-offset: 2px; }`, driven by `--focus-ring-width`/
+   * `--focus-ring-offset`).
+   *
+   * The vendored shadcn primitives instead ship shadcn's own idiom: a 3px
+   * translucent ring (`focus-visible:ring-3 focus-visible:ring-ring/50`)
+   * plus a solid border-colour swap — every Button, Input, Textarea,
+   * Select, Badge, NativeSelect and SectionTabs in this tree. Both idioms
+   * share the SAME colour (`--ring` is `var(--focus)`, #1D4ED8) — only the
+   * shape (a crisp 2px outline vs. a soft 3px halo) differs.
+   *
+   * Recorded here for the owner's brand sitting, deliberately NOT unified
+   * either direction: rewriting every vendored primitive to the contract's
+   * flat outline is a visible product-wide look change; relaxing §9 to
+   * bless the vendored idiom is a token-contract change — neither is this
+   * pass's call to make unilaterally (constraint 1, AGENTS.md — a
+   * design-vs-contract collision goes to the owner). See
+   * components/common/section-tabs.tsx and
+   * components/common/native-select.tsx for the two call sites whose
+   * comments point back at this note.
+   */
+
   /* Product semantics: identity and interaction stay separate. */
   --background: var(--canvas);
   --foreground: var(--ink);
@@ -295,11 +322,10 @@
  * decorative perpetual animation"). Two jobs:
  *
  *   1. NAME the --motion-duration-* scale so no component ever hardcodes a
- *      millisecond. Because they read the CSS vars, they inherit the
- *      prefers-reduced-motion override above for free — the whole scale
- *      collapses to 0ms and every transition below settles instantly.
- *      That collapse is the token contract's own ratified reduced-motion
- *      answer; components must not re-implement a second one.
+ *      millisecond. Durations are NOT globally zeroed under reduced motion
+ *      (see the PORT DRIFT note above) — each motion utility below instead
+ *      carries its own `@media (prefers-reduced-motion: reduce)` arm that
+ *      drops MOVEMENT and keeps the fade, per the token contract's own rule.
  *   2. Carry the ONE content-arrival transition (`enter-content`), so an
  *      async read landing reads as content ARRIVING rather than teleporting.
  *      It fires on first paint only (`@starting-style`), which is exactly

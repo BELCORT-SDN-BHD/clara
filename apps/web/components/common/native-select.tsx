@@ -11,6 +11,9 @@ import { cn } from "@/lib/utils";
  * and NONE of them carried Input's focus ring, so a select tabbed to with
  * the keyboard fell through to the browser/global outline while the text
  * field beside it drew the product's 3px halo. Two focus looks, one form.
+ * Matching Input's ring here is itself a RECORDED divergence from the token
+ * contract's own §9, not pure internal consistency — see the FOCUS
+ * TREATMENT note beside the identity-canvas citation in app/globals.css.
  *
  * It stays a real `<select>` deliberately: the shadcn Select primitive
  * renders a button plus a portalled listbox, which is a different keyboard

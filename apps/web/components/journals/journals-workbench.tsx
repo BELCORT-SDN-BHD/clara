@@ -11,7 +11,7 @@ import { useTranslations } from "next-intl";
 import { useJournalsWorkbench } from "@/lib/journals/use-journals-workbench";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { SectionTabs } from "@/components/common/section-tabs";
-import { LoadingState, StateBanner } from "@/components/common/state";
+import { LoadingState, StateBanner, type BannerTone } from "@/components/common/state";
 import { Button } from "@/components/ui/button";
 import { DraftsQueuePanel } from "@/components/journals/drafts-queue-panel";
 import { PostedPanel } from "@/components/journals/posted-panel";
@@ -143,11 +143,11 @@ function readFailure(
   err: string | null,
   data: unknown,
   t: (key: string, values?: Record<string, string>) => string,
-): { tone: "info" | "error"; message: string } | null {
+): { tone: BannerTone; message: string } | null {
   if (kind === "no_session") return { tone: "info", message: t("noSession") };
   if (kind === "unauthenticated") return { tone: "error", message: t("unauthenticated") };
-  if (kind === "forbidden") return { tone: "error", message: t("forbidden") };
-  if (kind === "not_found") return { tone: "error", message: t("notFound") };
+  if (kind === "forbidden") return { tone: "warning", message: t("forbidden") };
+  if (kind === "not_found") return { tone: "neutral", message: t("notFound") };
   if (err && !data) return { tone: "error", message: t("loadError", { message: err }) };
   return null;
 }
