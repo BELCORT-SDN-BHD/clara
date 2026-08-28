@@ -18,6 +18,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -81,18 +82,14 @@ export function ArApCounterpartyDoorDialog({
         </DialogHeader>
         {children}
         <DialogFooter>
-          {/* F5 (independent review, fix-required): a plain Button with an
-              explicit onClick, not DialogClose — DialogClose's own internal
-              click handler (base-ui's FloatingFocusManager) checks
-              `event instanceof KeyboardEvent`, which THROWS in this test
-              harness's fake DOM (no such global) when driven via the shared
-              `clickButton` instrument. A plain onClick closes the SAME
-              `open` state Dialog watches, so behaviour (including base-ui's
-              own focus restoration on the `open` transition) is identical —
-              this is not a test workaround, it removes a real fragility. */}
-          <Button variant="ghost" disabled={busy} onClick={() => setOpen(false)}>
-            {t("cancel")}
-          </Button>
+          {/* The house shape (close/CloseDoorDialog.tsx, reports/DoorDialog.tsx):
+              DialogClose, not a plain onClick — restored after a fix-round
+              false start (F5 correction, independent review): a stale
+              premise assumed clickButton throws on DialogClose in this
+              harness; #390 (T9, merged to main) added the
+              KeyboardEvent/MouseEvent/FocusEvent stubs to installDom
+              precisely so it does not — see hookHarness.ts's own header. */}
+          <DialogClose render={<Button variant="ghost" disabled={busy} />}>{t("cancel")}</DialogClose>
           <Button
             variant={confirmVariant}
             disabled={busy || confirmDisabled === true}

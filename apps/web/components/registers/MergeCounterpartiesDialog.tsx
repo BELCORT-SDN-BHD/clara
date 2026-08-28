@@ -16,7 +16,7 @@ import { useTranslations } from "next-intl";
 import { businessToday } from "@/lib/business-date";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadCounterpartyMergePreview, type CounterpartyMergePreview, type CounterpartyKind, type CounterpartyRow } from "@/lib/registers/counterparty";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -137,11 +137,12 @@ export function MergeCounterpartiesDialog({
               </>
             )}
             <DialogFooter>
-              {/* F5 (independent review): plain onClick, not DialogClose —
-                  see ArApCounterpartyDoorDialog.tsx's own comment for why. */}
-              <Button variant="ghost" onClick={resetAndClose}>
-                {t("cancel")}
-              </Button>
+              {/* House shape restored (F5 correction, independent review):
+                  DialogClose, not a plain onClick — the Dialog's own
+                  onOpenChange(false) above already runs resetAndClose(),
+                  and #390's harness stubs make DialogClose genuinely
+                  clickButton-testable now (see ArApCounterpartyDoorDialog.tsx). */}
+              <DialogClose render={<Button variant="ghost" />}>{t("cancel")}</DialogClose>
               <Button disabled={!otherId || reason.trim().length === 0} onClick={() => void goToPreview()}>
                 {t("previewButton")}
               </Button>
@@ -176,11 +177,7 @@ export function MergeCounterpartiesDialog({
               <Button variant="ghost" onClick={() => setStep("pick")}>
                 {t("back")}
               </Button>
-              {/* F5 (independent review): plain onClick, not DialogClose —
-                  see ArApCounterpartyDoorDialog.tsx's own comment for why. */}
-              <Button variant="ghost" onClick={resetAndClose}>
-                {t("cancel")}
-              </Button>
+              <DialogClose render={<Button variant="ghost" />}>{t("cancel")}</DialogClose>
               <Button
                 variant="destructive"
                 disabled={busy || preview.loading || !preview.data}
