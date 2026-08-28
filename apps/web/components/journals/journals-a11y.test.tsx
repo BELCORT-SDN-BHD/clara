@@ -61,9 +61,11 @@ test("journals drafts queue (collapsed) has zero violations", async () => {
   const h = await renderComponent(
     App(
       createElement(DraftsQueuePanel, {
+        clientId: "c1",
         queueRows: [QUEUE_ROW], queueCounts: { open_drafts: 1 }, entries: [DRAFT_ENTRY], lines: DRAFT_LINES,
         linesTruncated: false, accounts: ACCOUNTS, busy: false, err: null, clr: null, actingId: null,
         onApprove: () => {}, onRevise: () => {},
+        onApproveRoutine: () => {}, onWithdraw: async () => {},
       }),
     ),
   );
@@ -80,9 +82,11 @@ test("journals drafts queue EXPANDED (approve/revise detail visible) has zero vi
   const h = await renderComponent(
     App(
       createElement(DraftsQueuePanel, {
+        clientId: "c1",
         queueRows: [QUEUE_ROW], queueCounts: { open_drafts: 1 }, entries: [DRAFT_ENTRY], lines: DRAFT_LINES,
         linesTruncated: false, accounts: ACCOUNTS, busy: false, err: null, clr: null, actingId: null,
         onApprove: () => {}, onRevise: () => {},
+        onApproveRoutine: () => {}, onWithdraw: async () => {},
       }),
     ),
   );
