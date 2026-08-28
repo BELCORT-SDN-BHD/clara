@@ -47,6 +47,14 @@ test("getNeedsYouAffordance resolves fixed_asset_incomplete (T3, port wave)", ()
   assert.equal(typeof getNeedsYouAffordance("fixed_asset_incomplete"), "function");
 });
 
+// T10 (port wave): this file's own case above proved TWO real entries; this
+// one proves a third BY NAME rather than being inferred from the others still
+// passing — the same F8 reasoning (needs-you-affordances.tsx's own table, not
+// this file's count of assertions) applies to every train that adds one.
+test("getNeedsYouAffordance resolves compliance_watch (T10, port wave)", () => {
+  assert.equal(typeof getNeedsYouAffordance("compliance_watch"), "function");
+});
+
 test("NEEDS_YOU_AFFORDANCES has no prototype (Object.getPrototypeOf is null)", () => {
   assert.equal(Object.getPrototypeOf(NEEDS_YOU_AFFORDANCES), null);
 });

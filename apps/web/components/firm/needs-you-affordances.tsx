@@ -29,6 +29,7 @@ import { FixedAssetIncompleteAffordance } from "./fixed-asset-incomplete-afforda
 import { UncodedFilingAffordance } from "./uncoded-filing-affordance";
 import { CodingTaskAffordance } from "./coding-task-affordance";
 import { LintFindingAffordance } from "./lint-finding-affordance";
+import { ComplianceWatchAffordance } from "./compliance-watch-affordance";
 
 export type NeedsYouAffordanceProps = {
   row: ReviewQueueRow;
@@ -86,6 +87,10 @@ export const NEEDS_YOU_AFFORDANCES: Partial<Record<ReviewQueueRowKind, NeedsYouA
     coding_task: CodingTaskAffordance,
     // T7: an open lint finding awaiting resolution.
     lint_finding: LintFindingAffordance,
+    // T10 (port-wave plan §4 T10, §5's compliance row): the ack/snooze/resolve
+    // inline acts on a compliance_watch row — see
+    // ./compliance-watch-affordance.tsx's own header for the grounding.
+    compliance_watch: ComplianceWatchAffordance,
   } satisfies Partial<Record<ReviewQueueRowKind, NeedsYouAffordance>>,
 );
 

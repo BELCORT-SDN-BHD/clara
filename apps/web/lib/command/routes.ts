@@ -87,11 +87,34 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
     keywords: ["activity", "receipts", "open register", "audit"],
   },
   {
+    // TRUED (N3, independent review, port-wave T10, 2026-08-28): a page.tsx
+    // has existed at /admin since P2 (the honest-empty shell) — this entry
+    // was already stale before T10 touched the file. T10 is the train that
+    // makes the surface real (the two sub-routes below), so it is the one
+    // that trues the parent too, per §3.6's own rule: truing routes.ts is
+    // part of a train's merge, never a later sweep.
     id: "admin",
     scope: "firm",
     href: "/admin",
-    status: "planned",
+    status: "built",
     keywords: ["admin", "members", "rbac", "tiers", "metering"],
+  },
+  {
+    // T10 (port-wave plan §4 T10): the compliance register, under /admin.
+    id: "adminCompliance",
+    scope: "firm",
+    href: "/admin/compliance",
+    status: "built",
+    keywords: ["compliance", "sst", "registration", "watch"],
+  },
+  {
+    // T10 (port-wave plan §4 T10): the vendor identity binding governance
+    // panel, under /admin.
+    id: "adminVendorBindings",
+    scope: "firm",
+    href: "/admin/vendor-bindings",
+    status: "built",
+    keywords: ["vendor", "binding", "identity", "propose", "sign", "revoke"],
   },
 ];
 
