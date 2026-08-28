@@ -79,6 +79,34 @@ function App() {
   });
 }
 
+// M5 (independent review, fix-required): a DETERMINISTIC mid-flight probe —
+// the merge preview's own ap_aging read is gated behind a manually-resolved
+// promise, so "the Merge button is disabled WHILE preview.data is null" can
+// be asserted for real rather than raced against however fast the mocked
+// fetch happens to resolve.
+let releasePreviewFetch: (() => void) | null = null;
+async function mockFetchGatedPreview(url: RequestInfo | URL): Promise<Response> {
+  const u = String(url);
+  if (u.includes("/rpc/ap_aging")) {
+    await new Promise<void>((resolve) => {
+      releasePreviewFetch = resolve;
+    });
+    return jsonResponse(AP_AGING);
+  }
+  return mockFetch(url);
+}
+
+// M15 (independent review, fix-required): a REAL governed refusal driven
+// through a dialog's own Confirm button — the wave law is that the code and
+// message land VERBATIM in the caller's persistent banner, OUTSIDE any
+// dialog, which auto-closes on every confirm attempt regardless of outcome.
+const RENAME_REFUSAL = { code: "CLR23", message: "counterparty name collides with an existing identity", details: '{"reason":"alias_collision"}' };
+async function mockFetchWithRenameRefusal(url: RequestInfo | URL): Promise<Response> {
+  const u = String(url);
+  if (u.includes("/rpc/rename_counterparty")) return jsonResponse(RENAME_REFUSAL, 400);
+  return mockFetch(url);
+}
+
 test("aging tab: every top-level door trigger is keyboard-reachable, in DOM order, no positive tabindex, never disabled by a client-side count", async () => {
   await withMockedEnv(mockFetch, async () => {
     const h = await renderComponent(App());
@@ -213,6 +241,106 @@ test("Merge Counterparties dialog: the destructive confirm is gated by REAL prev
         triggerAfterClose && focusableElements(h.container as never).includes(triggerAfterClose as never),
         "the trigger must be reachable again after Cancel — focus is not stranded on a removed node",
       );
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+// M5 (independent review, fix-required): the Merge button's own `disabled`
+// PROPERTY is `true` DURING the preview read, not merely `false` once it
+// resolves — proven with a deliberately-gated fetch, not a race.
+test("Merge Counterparties dialog: the destructive Merge button stays disabled WHILE the preview read is genuinely in flight", async () => {
+  releasePreviewFetch = null;
+  await withMockedEnv(mockFetchGatedPreview, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Merge…"));
+      assert.ok(trigger, "the Merge trigger must render");
+      await h.fireEvent(trigger as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const otherSelect = findIn(body as never, (n) => n.tagName === "SELECT");
+      await h.act(() => { setFieldValue(otherSelect as never, "v2"); });
+      const reasonField = findIn(body as never, (n) => n.tagName === "TEXTAREA");
+      await h.act(() => { setFieldValue(reasonField as never, "duplicate vendor"); });
+      for (let i = 0; i < 2; i++) await h.settle();
+
+      const previewButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Preview merge"));
+      await h.act(() => { clickButton(previewButton as never); });
+      for (let i = 0; i < 3; i++) await h.settle();
+
+      // The ap_aging fetch is HUNG on releasePreviewFetch (a captured
+      // resolver means the gate is armed and waiting) — preview.data is
+      // provably still null at this point, not merely "probably".
+      assert.notEqual(releasePreviewFetch, null, "the preview read must genuinely still be in flight (the gate armed, not yet released)");
+      const mergeWhileLoading = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Merge");
+      assert.ok(mergeWhileLoading, "the Merge button renders in the footer regardless of load state");
+      assert.equal((mergeWhileLoading as unknown as { disabled: boolean }).disabled, true, "Merge must be disabled while preview.data is still null");
+
+      releasePreviewFetch?.();
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      const mergeAfterLoad = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Merge");
+      assert.equal((mergeAfterLoad as unknown as { disabled: boolean }).disabled, false, "Merge enables once the gate is released and preview.data lands for real");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+// M15 (independent review, fix-required): a REAL refusal driven through a
+// dialog's own Confirm button, verbatim in the caller's PERSISTENT banner —
+// outside the dialog, which has already auto-closed by the time this is
+// checked (the wave law, apps/web/components/close/CloseDoorDialog.tsx's
+// own precedent).
+test("F15: a governed refusal (rename_counterparty) renders verbatim in the hygiene panel's own persistent banner, after the dialog has closed", async () => {
+  await withMockedEnv(mockFetchWithRenameRefusal, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Rename"));
+      assert.ok(trigger, "the Rename trigger must render");
+      await h.fireEvent(trigger as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      // Two vendors each render their OWN "Rename" trigger with identical
+      // text — scope every subsequent search to the OPEN dialog's own
+      // content (data-slot="dialog-content"), never the whole document,
+      // or a plain text match risks grabbing the OTHER vendor's closed
+      // trigger instead of this dialog's real confirm button.
+      const dialogContent = findIn(
+        body as never,
+        (n) => (n as unknown as { getAttribute?: (a: string) => string | null }).getAttribute?.("data-slot") === "dialog-content",
+      );
+      assert.ok(dialogContent, "the open dialog's own content region must be reachable");
+
+      const nameField = findIn(dialogContent as never, (n) => n.tagName === "INPUT");
+      assert.ok(nameField, "the rename dialog's own name field must be reachable");
+      await h.act(() => { setFieldValue(nameField as never, "Lost Invention Holdings"); });
+      for (let i = 0; i < 2; i++) await h.settle();
+
+      const confirmButton = findIn(dialogContent as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Rename"));
+      assert.ok(confirmButton, "the dialog's own Confirm button must be reachable, distinct from the trigger");
+      assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, false, "the new name differs from the current one — Confirm must be enabled");
+
+      await h.act(() => { clickButton(confirmButton as never); });
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      // The dialog auto-closes on every confirm attempt regardless of
+      // outcome — its own Cancel control is the closed signal.
+      const cancelStillThere = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Cancel");
+      assert.equal(cancelStillThere, null, "the dialog must have closed after the confirm attempt settled");
+
+      assert.match(h.text(), /CLR23/, "the CLR code must render, verbatim, in the panel's own persistent banner");
+      assert.match(h.text(), /collides with an existing identity/, "the DB's own message must render, verbatim — never re-worded");
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();
