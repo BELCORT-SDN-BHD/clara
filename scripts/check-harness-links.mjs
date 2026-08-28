@@ -102,6 +102,14 @@ export const NON_PATH_ALLOWLIST = new Set([
   "/etc/sudoers.d/runner", // an absolute path on the CI RUNNER host, not in this repo
   "/run/secrets/clara_storage_service_key", // a container secret mount path, not in this repo
 
+  // --- BRANCH and WORKTREE names that a review/handoff record must cite to date its own
+  // evidence: a review is only checkable if it says which tip it read and where it read it.
+  // Same class as the two `build/…` git branches above; a worktree under .claude/worktrees/ is
+  // additionally gitignored and transient by design, so it can never resolve on any checkout.
+  "f-a4/pr-1c", // the F-A4 PR-1c build branch — the tip both PR-1c records name as what they reviewed
+  ".claude/worktrees/codex-rev-pr1c", // the Codex review lane's own worktree; gitignored + transient, named so the read is locatable
+  "docs/mohe-handoff-0827", // a git branch (the 磨合 handoff lane) — where the Codex record was first committed before it moved trains
+
   // --- Files RETIRED (deleted) by a landed lane. The design docs that named them are the
   // retirement checklist's own historical record of what was removed and why (Annex I,
   // AGENTS.md constraint 9's append-only ethos) — never rewritten to erase the citation, per

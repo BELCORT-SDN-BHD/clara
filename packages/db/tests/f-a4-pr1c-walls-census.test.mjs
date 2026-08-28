@@ -269,22 +269,39 @@ test("fa4c.F3 C-21 parity: the extracted reads answer IDENTICALLY through the hu
 // G -- THE ROSTER AND CENSUS SURFACES.
 // =====================================================================================
 
-test("fa4c.G1 the wake surface census: twelve wrappers, twelve allowlist rows, one NAMED absence, and no role but clara_wake_interactive", async (t) => {
+test("fa4c.G1 the wake surface census: the built wrappers, their allowlist rows, the parked/unparked thirteenth, and no role but clara_wake_interactive", async (t) => {
   if (gate(t)) return;
+  // SUCCESSION-AWARE (.claude/rules/db-tests.md): F-A4 PR-2a UNPARKS the thirteenth verb, so this
+  // gate's twelve-and-absent assertion goes false BY DESIGN the moment that migration lands -- not
+  // drift. The witness is a CATALOG one, probed by EXACT SIGNATURE rather than a bare name (law 3)
+  // and never by a migration NUMBER, which is claimed at merge. Both arms assert; neither skips.
+  const w = await rootQuery(
+    `select (to_regprocedure('clara.prepayment_schedule_v1(uuid,uuid)') is not null
+             and to_regprocedure('clara.wake_establish_prepayment_schedule(uuid,uuid,text,text,text,jsonb,text)') is not null) as unparked`);
+  const unparked = w.rows[0].unparked;
+  const expected = unparked ? [...WRAPPERS, PARKED_WRAPPER].sort() : [...WRAPPERS].sort();
+
   const rows = await rootQuery(
     "select function_name from clara.wake_fn_allowlist where wake_kind='close_prep' order by 1");
-  assert.deepEqual(rows.rows.map((r) => r.function_name), [...WRAPPERS].sort(),
-    "the allowlist is exactly the twelve built wrappers");
+  assert.deepEqual(rows.rows.map((r) => r.function_name), expected,
+    unparked
+      ? "with PR-2a applied the allowlist is the twelve wrappers PLUS the unparked thirteenth"
+      : "the allowlist is exactly the twelve built wrappers");
 
-  // THE NAMED ABSENCE, read POSITIVELY (law 31 + review law 2): the design's thirteenth verb and
-  // its evaluator are PARKED on two measured blockers, so their absence is asserted here rather
-  // than inferred from a count that happens to be twelve.
+  // THE THIRTEENTH, read POSITIVELY in BOTH directions (law 31 + review law 2) -- absent while
+  // parked, present at its exact signature once unparked. A count that happens to be twelve is not
+  // evidence either way.
   const parked = await rootQuery(
     `select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='clara' and p.proname in ($1,'prepayment_schedule_v1')`, [PARKED_WRAPPER]);
-  assert.equal(parked.rows[0].n, 0, "the parked prepayment half is provably absent");
+  if (unparked) {
+    assert.ok(parked.rows[0].n >= 2, "the unparked prepayment half does not resolve");
+  } else {
+    assert.equal(parked.rows[0].n, 0, "the parked prepayment half is provably absent");
+  }
 
-  for (const w of WRAPPERS) {
+  for (const w2 of unparked ? [...WRAPPERS, PARKED_WRAPPER] : WRAPPERS) {
+    const w = w2;
     const acl = await rootQuery(
       `select a.grantee::regrole::text as g from pg_proc p join pg_namespace n on n.oid=p.pronamespace
         cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
