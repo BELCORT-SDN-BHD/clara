@@ -112,6 +112,37 @@ export function loadOnboardingPlansForClient(
   });
 }
 
+/** The two opening-POSITION plan items the interview's `openingItems()`
+ *  builder mints (fix round, rev-t2, F3 — TRUED, was a false census):
+ *  `packages/runtime/workflows/interview.v1.questions.ts:87-92` (a `@frozen`
+ *  file — read, never edited) writes EXACTLY ONE of
+ *  `item_key: "first_year_zero_opening"` (`item_kind: "must_ask"`,
+ *  `state: "answered"` — a new/first-year client's zero opening, no seed
+ *  needed) or `item_key: "carry_down_deferred"` (`item_kind: "todo"`,
+ *  `state: "deferred"` — an ongoing client's carry-down, deferred pending
+ *  materials) onto the plan at interview time. `clara_authenticated` holds a
+ *  plain firm-scoped SELECT policy on `onboarding_plan_items`
+ *  (`p_onboarding_plan_items_human`, census-confirmed) — the SAME live
+ *  instrument the prior build's `openingPositionFromPlan()`
+ *  (`apps/dashboard/app/clients/plan/model.ts:37-43`) already read. Neither
+ *  item may exist yet (the interview has not reached this step, or the plan
+ *  predates Wave-B) — `[]` is a legitimate, honestly-rendered answer, not an
+ *  error. */
+export type OpeningPositionPlanItem = { id: string; item_key: string; state: string; question: string };
+
+const OPENING_POSITION_ITEM_KEYS = "in.(carry_down_deferred,first_year_zero_opening)";
+
+export function loadOpeningPositionPlanItems(
+  session: SessionTokenAccessor,
+  planId: string,
+): Promise<OpeningPositionPlanItem[]> {
+  return getRows<OpeningPositionPlanItem>("onboarding_plan_items", {
+    select: "id,item_key,state,question",
+    filters: { plan_id: `eq.${planId}`, item_key: OPENING_POSITION_ITEM_KEYS },
+    session,
+  });
+}
+
 /** Builds the `p_entry_revisions` object shape `clara._opening_revision_matches`
  *  accepts for a JSON OBJECT input: `{ [entry_id]: revision_token }` (the
  *  live body reads `p_revisions->>p_entry::text` for the object branch —

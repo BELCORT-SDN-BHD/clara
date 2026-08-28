@@ -4,9 +4,15 @@
 // grounding takeaways 1-3 (docs/plan/active/mobbin-grounding-wave-2026-08-28.md
 // §T2): the tie-out is a strip of DB-RETURNED terms converging on the DB's
 // own signed difference (`obe_net_cents`) — a `StateBanner`, never client
-// arithmetic (constraint 2); zero is quiet `tone="success"`, nonzero is
-// `tone="warning"` carrying the DB figure; the outstanding-items-causing-the-
-// gap table (`deltas[]`) is what makes the difference actionable.
+// arithmetic (constraint 2); zero is quiet, nonzero is `tone="warning"`
+// carrying the DB figure. N3 (fix round, rev-t2): the mobbin takeaway's own
+// language is "quiet tone=success", but `BannerTone`
+// (components/common/state.tsx) has no `"success"` value — the quiet state
+// below is `tone="neutral"`, this file's own scope note on that wording, not
+// a code change (neutral IS this house's quiet tone; adding a `"success"`
+// variant for one caller was not this fix round's call to make). The
+// outstanding-items-causing-the-gap table (`deltas[]`) is what makes the
+// difference actionable.
 
 import { useTranslations } from "next-intl";
 import { useAsyncRead } from "@/lib/firm/use-async-read";

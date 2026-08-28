@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/common/native-select";
 import { CentsInput } from "./staff-advance-money-input";
+import { SignedAmountInput } from "./opening-signed-amount-input";
 import { OpeningLinesEditor, sumOpeningLines } from "./opening-lines-editor";
 import { fmtCents } from "@/lib/registers/money";
 import type { OpeningItemInput, OpeningItemKind, OpeningLineInput } from "@/lib/registers/opening-types";
@@ -58,7 +59,14 @@ export function OpeningItemFields({
         <NativeSelect
           id={`${idPrefix}-kind`}
           value={kind}
-          onChange={(e) => patch({ item_kind: e.target.value as OpeningItemInput["item_kind"] })}
+          onChange={(e) => {
+            // N4 (fix round, rev-t2): a kind switch clears `lines` — carrying
+            // stale GL lines into e.g. obe_plug sends a non-null `p_lines`
+            // the door refuses outright ("OBE plug lines are DB-resolved;
+            // p_lines must be null", CLR10) rather than silently dropping.
+            patch({ item_kind: e.target.value as OpeningItemInput["item_kind"] });
+            onLinesChange([]);
+          }}
         >
           <option value="gl_balance">{t("kinds.gl_balance")}</option>
           <option value="bank_uncleared">{t("kinds.bank_uncleared")}</option>
@@ -102,7 +110,7 @@ export function OpeningItemFields({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor={`${idPrefix}-amount`}>{t("amountLabel")}</Label>
-            <CentsInput ariaLabel={t("amountLabel")} cents={item.amount_cents ?? 0} onChange={(c) => patch({ amount_cents: c })} />
+            <CentsInput id={`${idPrefix}-amount`} ariaLabel={t("amountLabel")} cents={item.amount_cents ?? 0} onChange={(c) => patch({ amount_cents: c })} />
           </div>
         </div>
       ) : null}
@@ -110,16 +118,7 @@ export function OpeningItemFields({
       {SIGNED_AMOUNT_KINDS.includes(kind) ? (
         <div className="grid gap-1.5">
           <Label htmlFor={`${idPrefix}-signed`}>{t("signedAmountLabel")}</Label>
-          <Input
-            id={`${idPrefix}-signed`}
-            inputMode="decimal"
-            placeholder="0.00"
-            value={item.amount_cents === null ? "" : (item.amount_cents / 100).toFixed(2)}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              patch({ amount_cents: Number.isFinite(n) ? Math.round(n * 100) : null });
-            }}
-          />
+          <SignedAmountInput id={`${idPrefix}-signed`} cents={item.amount_cents} onChange={(amount_cents) => patch({ amount_cents })} />
           <p className="text-xs text-muted-foreground">{t("signedAmountHint")}</p>
         </div>
       ) : null}

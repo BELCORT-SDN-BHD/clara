@@ -2,7 +2,8 @@
 
 // The seed lifecycle header — mobbin grounding takeaway 4: the seed's own
 // state is a `Badge` beside the page title, never a full-page banner (the
-// dry-run's tone="success"/"warning" StateBanner owns that visual weight —
+// dry-run's own quiet/`tone="warning"` StateBanner owns that visual weight —
+// see opening-dryrun-strip.tsx's own N3 note on the "success" wording —
 // two banners stacked on one page would blur which one the user must act
 // on). Also the seed's entry-point dialog (takeaway 5: a small `Dialog`
 // starts the lifecycle, not a wizard page) plus the cancel/reopen door

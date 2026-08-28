@@ -112,17 +112,17 @@ export function OpeningFixedAssetDialog({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="opening-fa-cost">{t("costLabel")}</Label>
-            <CentsInput ariaLabel={t("costLabel")} cents={a.cost_cents} onChange={(cost_cents) => patch({ cost_cents })} />
+            <CentsInput id="opening-fa-cost" ariaLabel={t("costLabel")} cents={a.cost_cents} onChange={(cost_cents) => patch({ cost_cents })} />
           </div>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="grid gap-1.5">
             <Label htmlFor="opening-fa-accum">{t("accumulatedLabel")}</Label>
-            <CentsInput ariaLabel={t("accumulatedLabel")} cents={a.accumulated_depreciation_cents ?? 0} onChange={(v) => patch({ accumulated_depreciation_cents: v })} />
+            <CentsInput id="opening-fa-accum" ariaLabel={t("accumulatedLabel")} cents={a.accumulated_depreciation_cents ?? 0} onChange={(v) => patch({ accumulated_depreciation_cents: v })} />
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="opening-fa-residual">{t("residualLabel")}</Label>
-            <CentsInput ariaLabel={t("residualLabel")} cents={a.residual_cents ?? 0} onChange={(v) => patch({ residual_cents: v })} />
+            <CentsInput id="opening-fa-residual" ariaLabel={t("residualLabel")} cents={a.residual_cents ?? 0} onChange={(v) => patch({ residual_cents: v })} />
           </div>
         </div>
         <div className="grid gap-1.5">

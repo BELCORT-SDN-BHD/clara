@@ -42,6 +42,7 @@ export function OpeningTargetKeyedPanel({
   act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("OpeningCarryDown.keyed");
+  const tc = useTranslations("Common");
 
   return (
     <div className="flex flex-col gap-2">
@@ -51,7 +52,15 @@ export function OpeningTargetKeyedPanel({
       </div>
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">{t("targetsHeading")}</p>
-        {seed.state === "open" && keyedResolutionId ? <TargetDialog seed={seed} accounts={accounts} busy={busy} act={act} /> : null}
+        {/* F8 (fix round, rev-t2): `record_opening_target` carries NO
+            resolution precondition at all (its live body asserts bookkeeper+,
+            in-firm, state='open', untied, debit/credit XOR — nothing about a
+            bound resolution); the trigger used to be hidden on
+            `keyedResolutionId`, a precondition this door does not have.
+            Render-and-shape: the trigger is always reachable on an open,
+            untied seed — the door is still the wall for anything it DOES
+            require. */}
+        {seed.state === "open" ? <TargetDialog seed={seed} accounts={accounts} busy={busy} act={act} /> : null}
       </div>
       {targets.length === 0 ? (
         <EmptyState className="text-xs">{t("targetsEmpty")}</EmptyState>
@@ -70,8 +79,8 @@ export function OpeningTargetKeyedPanel({
               <TableRow key={tg.id}>
                 <TableCell>{tg.line_key}</TableCell>
                 <TableCell className="text-muted-foreground">{tg.account_code ?? "—"}</TableCell>
-                <TableCell className="text-right">{fmtCents(tg.debit_cents)}</TableCell>
-                <TableCell className="text-right">{fmtCents(tg.credit_cents)}</TableCell>
+                <TableCell className="text-right">{fmtCents(tg.debit_cents, tc("centsUnsafe"))}</TableCell>
+                <TableCell className="text-right">{fmtCents(tg.credit_cents, tc("centsUnsafe"))}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -122,7 +131,11 @@ function TargetDialog({ seed, accounts, busy, act }: { seed: OpeningSeedRow; acc
       onConfirm={() =>
         act(async () => {
           await recordOpeningTarget(sessionTokenAccessor, { seed: seed.id, lineKey: lineKey.trim(), accountCode, sourceLabel: lineKey.trim(), debitCents: debit, creditCents: credit });
-        }).then(() => { setLineKey(""); setDebit(0); setCredit(0); })
+        }).then((ok) => {
+          // F6 (fix round, rev-t2): only clear on a real success — see
+          // opening-items-panel.tsx's own DraftItemDialog note.
+          if (ok) { setLineKey(""); setDebit(0); setCredit(0); }
+        })
       }
     >
       <div className="flex flex-col gap-2">
@@ -142,11 +155,11 @@ function TargetDialog({ seed, accounts, busy, act }: { seed: OpeningSeedRow; acc
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="grid gap-1.5">
             <Label htmlFor="opening-target-debit">{t("debitCol")}</Label>
-            <CentsInput ariaLabel={t("debitCol")} cents={debit} onChange={(c) => { setDebit(c); if (c > 0) setCredit(0); }} />
+            <CentsInput id="opening-target-debit" ariaLabel={t("debitCol")} cents={debit} onChange={(c) => { setDebit(c); if (c > 0) setCredit(0); }} />
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="opening-target-credit">{t("creditCol")}</Label>
-            <CentsInput ariaLabel={t("creditCol")} cents={credit} onChange={(c) => { setCredit(c); if (c > 0) setDebit(0); }} />
+            <CentsInput id="opening-target-credit" ariaLabel={t("creditCol")} cents={credit} onChange={(c) => { setCredit(c); if (c > 0) setDebit(0); }} />
           </div>
         </div>
       </div>

@@ -983,6 +983,12 @@
     "noSeedYet": "No opening seed has been created for this client yet.",
     "noPlanNote": "This client has no onboarding plan yet — an opening seed cannot be created until one exists.",
     "dialog": { "cancel": "Cancel", "working": "Working…" },
+    "openingPosition": {
+      "loading": "Checking the client's opening position…",
+      "firstYearZero": "No opening seed needed — this client's opening position was recorded as zero at onboarding (a first-year, first-trading client).",
+      "deferredTitle": "Carry-down deferred at onboarding",
+      "notBuiltNote": "The FY1 basis-of-preparation cost figure and the close-seal block while this banner is up are not built on this surface yet."
+    },
     "seed": {
       "heading": "Opening seed",
       "states": { "open": "Open", "finalized": "Finalized", "cancelled": "Cancelled" },
@@ -997,7 +1003,8 @@
       "reopenTrigger": "Reopen seed",
       "reopenTitle": "Reopen this opening seed",
       "reopenDescription": "Reopens a finalized seed for a further batch of items.",
-      "reasonLabel": "Reason"
+      "reasonLabel": "Reason",
+      "notSerializableHint": "Approval must run in a serializable transaction — the deploy ceremony sets this in the DB."
     },
     "dryrun": {
       "heading": "Tie-out",
@@ -1069,7 +1076,8 @@
       "trigger": "Supersede",
       "title": "Supersede \"{key}\"",
       "description": "Reverses this item on the finalized seed and reopens it for a correction batch.",
-      "reversalOnlyNote": "This drafts a reversal only — draft a fresh replacement item afterward if one is needed, then approve the correction."
+      "reversalOnlyNote": "This drafts a reversal only — draft a fresh replacement item afterward if one is needed, then approve the correction.",
+      "fixedAssetReplacementRequired": "A fixed-asset item cannot be superseded by a plain reversal — the DB requires a replacement baseline this dialog does not author. Draft a fresh asset via \"Seed a fixed asset\" after reopening the seed instead."
     },
     "keyed": {
       "resolutionBound": "A keyed resolution is bound to this seed.",
@@ -1077,6 +1085,7 @@
       "targetsHeading": "TB target lines",
       "targetsEmpty": "No target lines recorded yet.",
       "lineKeyCol": "Line key",
+      "accountCol": "Account",
       "debitCol": "Debit",
       "creditCol": "Credit",
       "mintResolutionTrigger": "Mint keyed resolution",

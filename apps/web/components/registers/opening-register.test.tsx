@@ -84,6 +84,9 @@ function mockFetch(overrides: Record<string, unknown> = {}) {
     const url = String(u);
     if (url.includes("/rpc/get_opening_dryrun")) return jsonResponse(overrides.dryrun ?? DRYRUN);
     if (url.includes("/rest/v1/opening_seed_registry")) return jsonResponse(overrides.seeds ?? [SEED_OPEN_UNTIED]);
+    // MUST precede the `onboarding_plans` check below — `.includes` would
+    // otherwise match this URL too (it is a string prefix of it).
+    if (url.includes("/rest/v1/onboarding_plan_items")) return jsonResponse(overrides.positionItems ?? []);
     if (url.includes("/rest/v1/onboarding_plans")) return jsonResponse(overrides.plans ?? [{ id: "plan1", state: "open", revision_token: "rev1", created_at: "2026-01-01T00:00:00Z" }]);
     if (url.includes("/rest/v1/coa_accounts")) return jsonResponse(overrides.accounts ?? ACCOUNTS);
     if (url.includes("/rest/v1/counterparties")) return jsonResponse([]);

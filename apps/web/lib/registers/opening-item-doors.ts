@@ -95,12 +95,18 @@ export function recordOpeningKeyedResolution(
 /** clara.supersede_opening_item(p_item, p_replacement, p_op_key) —
  *  bookkeeper+. Only an ACTIVE item on a FINALIZED seed is correctable (CLR31
  *  `registry_not_open` otherwise) — reopens the seed's registry to `open` and
- *  drafts a reversal in the SAME call; `replacement` is optional (`null` for
- *  a pure reversal). T2 scope is the reversal-only and non-asset-replacement
- *  paths — a fixed-asset item's correction is superseded via a plain
- *  reversal here followed by a fresh `seed_fixed_asset` baseline, rather than
- *  this dialog authoring the live body's own nested `asset` replacement
- *  envelope. */
+ *  drafts a reversal in the SAME call; `replacement` is optional for every
+ *  kind EXCEPT `fixed_asset` (fix round, rev-t2, F7 — TRUED, was claimed
+ *  backwards): the live body drafts the reversal, THEN, only on the `null`
+ *  branch, raises CLR31 "a fixed-asset supersede requires a replacement
+ *  baseline" for `oi.item_kind='fixed_asset'` — the raise aborts the WHOLE
+ *  transaction (the reversal draft is rolled back with it), so
+ *  `replacement: null` on a fixed-asset row is not a degraded path, it is a
+ *  call that can never succeed. T2 does not build the live body's own nested
+ *  `asset` replacement envelope, so this dialog does not offer a working
+ *  supersede for a fixed-asset row at all — the caller (opening-supersede-
+ *  dialog.tsx) disables Confirm with a visible reason on that kind, never
+ *  hides the trigger. */
 export function supersedeOpeningItem(
   session: SessionTokenAccessor,
   args: {

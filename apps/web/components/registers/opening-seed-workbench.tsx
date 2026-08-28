@@ -13,6 +13,7 @@ import { useTranslations } from "next-intl";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadOpeningItems, loadOpeningTbTargets, loadOpeningKeyedResolution } from "@/lib/registers/opening";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { isDoorRefusal } from "@/lib/doors";
 import { SectionHeader } from "@/components/common/section-header";
 import { DataState, ErrorMessage } from "@/components/firm/data-state";
 import { OpeningSeedBadge, CancelOpeningSeedDialog, ReopenOpeningSeedDialog } from "./opening-seed-lifecycle";
@@ -67,7 +68,14 @@ export function OpeningSeedWorkbench({
           <OpeningSeedBadge state={seed.state} />
         </div>
         <div className="flex flex-wrap gap-2">
-          {seed.state === "open" && items.length === 0 ? <CancelOpeningSeedDialog seed={seed} busy={busy} act={act} /> : null}
+          {/* F8 (fix round, rev-t2): un-hid — cancel_opening_seed's live
+              precondition ("only an EMPTY open seed") was being enforced a
+              second time here by hiding the trigger once items existed,
+              contradicting opening-doors.ts's own doc comment ("never hides
+              it outright"). Render-and-shape: the trigger is reachable on
+              any open seed; the door refuses CLR31 `registry_not_open` on a
+              non-empty one, surfaced verbatim like any other refusal. */}
+          {seed.state === "open" ? <CancelOpeningSeedDialog seed={seed} busy={busy} act={act} /> : null}
           {seed.state === "finalized" ? <ReopenOpeningSeedDialog seed={seed} busy={busy} act={act} /> : null}
           {seed.state === "open" ? <ApproveOpeningSeedDialog seed={seed} draftItems={draftItems} busy={busy} act={act} /> : null}
           {seed.state === "open" && items.some((i) => i.supersedes_item_id !== null) ? (
@@ -78,11 +86,29 @@ export function OpeningSeedWorkbench({
       </div>
 
       {error ? <ErrorMessage error={error} /> : null}
+      {/* NOT A DEFECT, recorded per the fix round: approve_opening_seed /
+          approve_opening_correction assert `transaction_isolation =
+          'serializable'` in-body; no migration sets it (a manual wave-b 0017
+          ceremony artifact) — an un-ceremonied DB refuses CLR31
+          `not_serializable` on EVERY approve attempt. The refusal itself
+          already renders verbatim above; this is one extra line of operator
+          guidance, reusing the prior build's own hint text verbatim
+          (apps/dashboard/app/opening/openingModel.ts:348-349) rather than
+          inventing new copy. */}
+      {isDoorRefusal(error) && error.code === "CLR31" && error.reason === "not_serializable" ? (
+        <p className="text-xs text-muted-foreground">{t("notSerializableHint")}</p>
+      ) : null}
 
       <DataState loading={loading} error={null} isEmpty={false} emptyMessage="">
         {data ? (
           <div className="flex flex-col gap-6">
-            <OpeningDryrunStrip key={`${seed.id}:${items.length}:${seed.state}`} seedId={seed.id} />
+            {/* F2 (fix round, rev-t2): the key omitted `targets.length` — a
+                `record_opening_target` write (an untied seed's TB target
+                lines, which `_opening_seed_deltas` reads directly) never
+                changes `items`/`state`, so the strip stayed on its ONE
+                mount-time fetch and went stale. Any of the three counts
+                changing now remounts (and re-fetches) the strip fresh. */}
+            <OpeningDryrunStrip key={`${seed.id}:${items.length}:${data.targets.length}:${seed.state}`} seedId={seed.id} />
 
             {!seed.tie_document_id ? (
               <OpeningTargetKeyedPanel clientId={clientId} seed={seed} targets={data.targets} keyedResolutionId={keyedResolutionId} accounts={accounts} busy={busy} act={act} />

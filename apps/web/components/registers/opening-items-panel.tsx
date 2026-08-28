@@ -47,6 +47,7 @@ export function OpeningItemsPanel({
   act: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("OpeningCarryDown.items");
+  const tc = useTranslations("Common");
   const kindLabels: Record<string, string> = {
     gl_balance: t("kindLabels.gl_balance"),
     bank_uncleared: t("kindLabels.bank_uncleared"),
@@ -83,7 +84,7 @@ export function OpeningItemsPanel({
               <TableRow key={i.id}>
                 <TableCell>{i.item_key}</TableCell>
                 <TableCell className="text-muted-foreground">{kindLabels[i.item_kind] ?? i.item_kind}</TableCell>
-                <TableCell className="text-right">{fmtCents(i.amount_cents)}</TableCell>
+                <TableCell className="text-right">{fmtCents(i.amount_cents, tc("centsUnsafe"))}</TableCell>
                 <TableCell className="text-muted-foreground">{i.state === "active" ? t("stateActive") : t("stateSuperseded")}</TableCell>
                 <TableCell>
                   {i.state === "active" && seed.state === "finalized" ? <OpeningSupersedeDialog item={i} busy={busy} act={act} /> : null}
@@ -138,9 +139,17 @@ function DraftItemDialog({
             document: seed.tie_document_id,
             sha256: seed.tie_document_sha256,
           });
-        }).then(() => {
-          setItem(EMPTY_ITEM);
-          setLines([]);
+        }).then((ok) => {
+          // F6 (fix round, rev-t2): only clear the typed fields on a REAL
+          // success — `act()` resolves `false` (never rejects) on a caught
+          // refusal, and the prior unconditional reset wiped what the human
+          // typed at the exact moment they most needed to see it again (to
+          // fix and resubmit) — the refusal banner showed, but the form
+          // behind it had already gone blank.
+          if (ok) {
+            setItem(EMPTY_ITEM);
+            setLines([]);
+          }
         })
       }
     >
