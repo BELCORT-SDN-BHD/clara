@@ -170,9 +170,10 @@ test("mount: reloads once and populates data from the real read endpoints", asyn
         counterparties: [],
         queueRows: [],
         queueCounts: { open_drafts: 0 },
+        interruptions: [],
       });
       assert.equal(h.current.err, null);
-      assert.equal(counter.n, 5, "five endpoints: entries, lines, accounts, counterparties, review-queue RPC");
+      assert.equal(counter.n, 6, "six endpoints: entries, lines, accounts, counterparties, review-queue RPC, agent_interruptions (T6)");
     } finally {
       await h.unmount();
     }
@@ -331,6 +332,86 @@ test("compose(): a successful two-call ceremony re-reads afterward", async () =>
         );
         assert.deepEqual(seen.slice(0, 2), ["resolution", "draft"]);
         assert.equal(h.current.err, null);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+// --- T6: approveRoutine / withdraw / answerClarify -----------------------------
+
+test("approveRoutine(): calls approve_routine_entry then re-reads", async () => {
+  const seen: string[] = [];
+  await withMockedFetch(
+    async (input) => {
+      const url = String(input);
+      if (url.includes("rpc/approve_routine_entry")) { seen.push("approve_routine"); return jsonResponse(null); }
+      seen.push("read");
+      if (url.includes("rpc/list_review_queue")) return jsonResponse({ rows: [] });
+      return jsonResponse([]);
+    },
+    async () => {
+      const sess = fakeSession();
+      const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
+      try {
+        await h.settle();
+        const before = seen.filter((s) => s === "read").length;
+        await h.act(() => h.current.approveRoutine("e1", "rev-1"));
+        assert.ok(seen.includes("approve_routine"));
+        assert.ok(seen.filter((s) => s === "read").length > before, "act() re-reads after the write");
+        assert.equal(h.current.actingId, "e1");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("withdraw(): a CLR22 refusal (reason required) is captured verbatim, attributed to the acting entry", async () => {
+  await withMockedFetch(
+    async (input) => {
+      const url = String(input);
+      if (url.includes("rpc/withdraw_draft")) return jsonResponse({ code: "CLR22", message: "withdrawal reason is required" }, 400);
+      if (url.includes("rpc/list_review_queue")) return jsonResponse({ rows: [] });
+      return jsonResponse([]);
+    },
+    async () => {
+      const sess = fakeSession();
+      const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
+      try {
+        await h.settle();
+        await h.act(() => h.current.withdraw("e1", "", "rev-1"));
+        assert.equal(h.current.clr?.code, "CLR22");
+        assert.equal(h.current.actingId, "e1");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("answerClarify(): calls answer_interruption then re-reads (including the interruptions list itself)", async () => {
+  const seen: string[] = [];
+  await withMockedFetch(
+    async (input) => {
+      const url = String(input);
+      if (url.includes("rpc/answer_interruption")) { seen.push("answer"); return jsonResponse(null); }
+      if (url.includes("agent_interruptions")) { seen.push("interruptions"); return jsonResponse([]); }
+      seen.push("read");
+      if (url.includes("rpc/list_review_queue")) return jsonResponse({ rows: [] });
+      return jsonResponse([]);
+    },
+    async () => {
+      const sess = fakeSession();
+      const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
+      try {
+        await h.settle();
+        const before = seen.filter((s) => s === "interruptions").length;
+        await h.act(() => h.current.answerClarify("i1", { text: "cash account" }));
+        assert.ok(seen.includes("answer"));
+        assert.ok(seen.filter((s) => s === "interruptions").length > before, "act() re-reads interruptions too — no optimistic UI");
+        assert.equal(h.current.actingId, "i1");
       } finally {
         await h.unmount();
       }

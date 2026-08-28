@@ -135,13 +135,18 @@ export type JournalsData = {
    *  fit under its own `p_limit`. Comparing the two is the only honest way to
    *  tell "no drafts" apart from "more drafts than this page could hold". */
   queueCounts: ReviewQueueCounts;
-  /** T6 — every FIRM-WIDE pending `agent_interruptions` row (governance-
-   *  doors.ts's `listPendingInterruptions`). Folded into this same combined
-   *  hydration cycle (rather than a second, parallel `useHydratedPart`) so
-   *  answering one rides the SAME act()-and-reload discipline every other
-   *  door on this tab already uses — see the "Clarifications" tab. Genuinely
-   *  firm-wide, not filtered to `clientId`: the table carries no client_id
-   *  column (types.ts's own header). */
+};
+
+/** T6 — `JournalsData` plus every FIRM-WIDE pending `agent_interruptions` row
+ *  (use-journals-workbench.ts's own composition, governance-doors.ts's
+ *  `listPendingInterruptions`) — folded into the SAME combined hydration
+ *  cycle (never a second, parallel `useHydratedPart`) so answering one rides
+ *  the identical act()-and-reload discipline every other door on this tab
+ *  already uses. Genuinely firm-wide, not filtered to one client: the table
+ *  carries no client_id column (AgentInterruptionRow's own header) — the
+ *  "Clarifications" tab labels this honestly rather than implying a filter
+ *  that cannot exist. */
+export type JournalsDataWithInterruptions = JournalsData & {
   interruptions: AgentInterruptionRow[];
 };
 
