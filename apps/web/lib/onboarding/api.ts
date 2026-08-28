@@ -1,9 +1,14 @@
 // T11 client onboarding — reads + doors. See ./types.ts's header for the rung-0
-// grounding: five human doors, all UNCHANGED since 0017_wave_b.sql, all EXECUTE-
-// granted to clara_authenticated (0017:5137-5161, floors enforced INSIDE each
-// body via `_human_ctx(role_rank(...))` — admin for begin/bootstrap/commit/
-// cancel, bookkeeper+ for resolve — never re-derived client-side; the DB is the
-// wall, this module only shapes the affordance).
+// grounding: five human doors, all EXECUTE-granted to clara_authenticated
+// (0017:5137-5161, floors enforced INSIDE each body via
+// `_human_ctx(role_rank(...))` — admin for begin/bootstrap/commit/cancel,
+// bookkeeper+ for resolve — never re-derived client-side; the DB is the wall,
+// this module only shapes the affordance). FOUR of the five are UNCHANGED
+// since 0017 (no CREATE OR REPLACE, no splice, found across every migration
+// file). The fifth, commit_client_onboarding, is CREATEd at 0017 then
+// DYNAMICALLY SPLICED by 0018_gate_k_domain.sql SS4 — see that function's own
+// doc comment below for what changed and why this matters (the migration-
+// citation law: chase the LIVE body, never the first CREATE).
 //
 // Reads ride `getRows` (../read) — direct RLS-scoped table GETs, not RPCs; see
 // ./types.ts's header for the grant/policy citations. Writes ride `callDoor`
@@ -115,12 +120,21 @@ export async function resolveOnboardingPlanItem(
 
 /** clara.commit_client_onboarding(p_client uuid, p_plan uuid,
  *  p_expected_plan_revision uuid, p_op_key text, p_attestation text DEFAULT
- *  NULL) — 0017:2751, admin floor. `attestation` is OPTIONAL and stays
- *  unpassed (`null`) unless a prior refusal named it (CLR05
- *  'self_attestation') — never a client-side guess at whether a distinct
- *  checker exists; the DB is the wall (mirrors lib/close/api.ts's
- *  `finalizeClose`, the same "pass it only once a refusal has named it"
- *  discipline). */
+ *  NULL) — CREATEd at 0017:2751, then DYNAMICALLY SPLICED by
+ *  0018_gate_k_domain.sql SS4 (anchor-based prosrc surgery, not a
+ *  CREATE OR REPLACE — the LIVE body differs from 0017's own text; the
+ *  migration-citation law: "chase the LIVE body… never cite a migration's
+ *  first CREATE without checking what superseded it"). Signature and floor
+ *  (admin) are UNCHANGED by the splice — only the CLR10 arm gained typed
+ *  `reason` detail tokens, code still CLR10 throughout:
+ *  `op_key_required` · `plan_not_open` · `client_not_onboarding` (site-2
+ *  SPLITS with pinned precedence — plan_not_open wins when both the plan is
+ *  non-open AND the client isn't 'onboarding') · `questions_unresolved` ·
+ *  `opening_position_required`. `attestation` is OPTIONAL and stays unpassed
+ *  (`null`) unless a prior CLR05 refusal named it ('self_attestation') —
+ *  never a client-side guess at whether a distinct checker exists; the DB is
+ *  the wall (mirrors lib/close/api.ts's `finalizeClose`, the same "pass it
+ *  only once a refusal has named it" discipline). */
 export async function commitClientOnboarding(
   args: { clientId: string; planId: string; expectedPlanRevision: string; attestation?: string | null },
   opts: Opts = {},

@@ -1,11 +1,15 @@
 // T11 (port-wave plan §4 T11) — client onboarding, the five HUMAN doors:
 // begin_client_onboarding · bootstrap_client_plan · resolve_onboarding_plan_item ·
-// commit_client_onboarding · cancel_client_onboarding — all UNCHANGED since
-// 0017_wave_b.sql (rung-0 census, this train's own settle report). F-A7b PR-a
-// (0142) is a DIFFERENT mechanism (wake_propose_client_onboarding /
-// accept_onboarding_proposal, PR-b's) — it touches none of these five bodies;
-// its only effect on this file is the three honest-label columns below
-// (D-3, 0142), which are additive and live.
+// commit_client_onboarding · cancel_client_onboarding — four CREATEd at
+// 0017_wave_b.sql and UNCHANGED since (rung-0 census: no CREATE OR REPLACE,
+// no dynamic splice, in any migration file). The fifth,
+// commit_client_onboarding, is CREATEd at 0017 then DYNAMICALLY SPLICED by
+// 0018_gate_k_domain.sql SS4 (typed CLR10 `reason` tokens; same code, same
+// signature, same floor) — see ../onboarding/api.ts's own doc comment on
+// that door. F-A7b PR-a (0142) is a DIFFERENT mechanism
+// (wake_propose_client_onboarding / accept_onboarding_proposal, PR-b's) — it
+// touches none of these five bodies; its only effect on this file is the
+// three honest-label columns below (D-3, 0142), which are additive and live.
 //
 // Every row shape here is read VERBATIM off `clara.onboarding_plans` /
 // `clara.onboarding_plan_items` — both are direct RLS-scoped table reads

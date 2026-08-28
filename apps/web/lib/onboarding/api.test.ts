@@ -171,6 +171,25 @@ test("commitClientOnboarding's CLR05 self_attestation refusal surfaces verbatim"
   });
 });
 
+test("commitClientOnboarding's CLR10 questions_unresolved refusal surfaces verbatim (0018_gate_k_domain.sql's typed-reason splice of the LIVE body — not the plain 0017 text)", async () => {
+  const impl = (async () =>
+    jsonResponse(
+      { code: "CLR10", message: "required onboarding questions remain unresolved", details: '{"reason":"questions_unresolved"}' },
+      400,
+    )) as typeof fetch;
+  await withMockedFetch(impl, async () => {
+    await assert.rejects(
+      commitClientOnboarding({ clientId: "c1", planId: "p1", expectedPlanRevision: "rt1" }, { session: fakeSession() }),
+      (e: unknown) => {
+        assert.ok(isDoorRefusal(e));
+        assert.equal((e as import("./api").DoorRefusal).code, "CLR10");
+        assert.equal((e as import("./api").DoorRefusal).reason, "questions_unresolved");
+        return true;
+      },
+    );
+  });
+});
+
 test("commitClientOnboarding's CLR06 stale_plan refusal surfaces verbatim", async () => {
   const impl = (async () =>
     jsonResponse({ code: "CLR06", message: "stale onboarding plan revision", details: '{"reason":"stale_plan"}' }, 400)) as typeof fetch;

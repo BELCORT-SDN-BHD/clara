@@ -97,10 +97,13 @@ function completedCount(items: OnboardingPlanItemRow[]): number {
 
 /** required_for_commit rows are the ONE opening-position/checker rule this
  *  card pre-computes — it is exactly what commit_client_onboarding's own
- *  CLR10 checks (0017:2806-2811), never a wider re-derivation of Gate O.
- *  Everything else commit_client_onboarding refuses on (the opening-position
- *  arm, the distinct-checker/self-attestation arm) is left to the DB's own
- *  verbatim refusal — this card does not re-implement Gate O. */
+ *  CLR10 `questions_unresolved` arm checks (0017:2806-2811 source anchor;
+ *  the LIVE body carries this typed reason via 0018_gate_k_domain.sql SS4's
+ *  splice — lib/onboarding/api.ts's own doc comment on this door), never a
+ *  wider re-derivation of Gate O. Everything else commit_client_onboarding
+ *  refuses on (the opening-position arm, the distinct-checker/self-
+ *  attestation arm) is left to the DB's own verbatim refusal — this card
+ *  does not re-implement Gate O. */
 function hasUnresolvedRequiredItem(items: OnboardingPlanItemRow[]): boolean {
   return items.some((i) => i.required_for_commit && i.state !== "answered" && i.state !== "resolved");
 }
