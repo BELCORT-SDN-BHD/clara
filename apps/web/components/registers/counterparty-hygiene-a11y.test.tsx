@@ -158,6 +158,9 @@ test("Merge Counterparties dialog OPEN through the preview step has zero a11y vi
 
       const previewButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Preview merge"));
       assert.ok(previewButton, "the Preview merge button must be reachable, distinct from the trigger");
+      // House law (apps/web/AGENTS.md, "Testing a dialog"): assert the gate,
+      // THEN act — clickButton is not a substitute for checking `disabled`.
+      assert.equal((previewButton as unknown as { disabled: boolean }).disabled, false, "Preview must be enabled once both fields are filled");
       await h.act(() => { clickButton(previewButton as never); });
       for (let i = 0; i < 8; i++) await h.settle();
 
