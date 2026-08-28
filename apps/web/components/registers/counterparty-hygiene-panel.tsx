@@ -13,7 +13,7 @@ import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import {
   loadCounterparties, loadCounterpartyAliases,
-  type CounterpartyKind, type CounterpartyRow, type CounterpartyAliasRow,
+  type CounterpartyKind, type CounterpartyRow,
 } from "@/lib/registers/counterparty";
 import {
   createCounterparty, setCounterpartyTerms, addCounterpartyAlias, retireCounterpartyAlias,
