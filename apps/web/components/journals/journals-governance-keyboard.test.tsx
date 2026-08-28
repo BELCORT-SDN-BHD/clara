@@ -193,7 +193,7 @@ const INTERRUPTION: AgentInterruptionRow = {
 
 test("ANSWER journey: the clarification's answer field and submit control are keyboard-reachable with focus visible", async () => {
   const h = await renderComponent(
-    App(createElement(InterruptionsPanel, { interruptions: [INTERRUPTION], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {} })),
+    App(createElement(InterruptionsPanel, { interruptions: [INTERRUPTION], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {}, clientIdByTaskId: {} })),
   );
   try {
     for (let i = 0; i < 2; i++) await h.settle();
@@ -224,6 +224,65 @@ test("ANSWER journey: the clarification's answer field and submit control are ke
       "the Answer submit control must become keyboard-reachable once the field carries text",
     );
     assert.deepEqual(checkKeyboardWalk(h.container as never), [], "no tabindex-order/focus-visible violations");
+  } finally {
+    await h.unmount();
+  }
+});
+
+// T7 (F9, independent review): a keyboard walk for promote_clarify_to_question
+// — the door dialog CodingDoorDialog wraps, portalled to document.body,
+// same findIn/body-appendChild precedent as documents-governance-
+// keyboard.test.tsx (this file's own header cites it).
+test("PROMOTE journey: the dialog opens (only once a client_id genuinely resolved), Confirm/Cancel are keyboard-reachable, a real confirm calls onPromote with the interruption + resolved client id and closes", async () => {
+  const calls: { interruptionId: string; scopeId: string }[] = [];
+  const h = await renderComponent(
+    App(createElement(InterruptionsPanel, {
+      interruptions: [INTERRUPTION], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {},
+      clientIdByTaskId: { t1: "client-9" },
+      onPromote: async (interruptionId, scopeId) => { calls.push({ interruptionId, scopeId }); },
+    })),
+  );
+  const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+  (body as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Promote to a durable question$/) !== null);
+    assert.ok(trigger, "the promote trigger must render once clientIdByTaskId resolves this row's task");
+    await h.fireEvent(trigger!, "click");
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    assert.match(textOf(body as never), /Promote this clarification to a durable question/, "the dialog must open with its own title");
+    const confirmButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Promote$/) !== null);
+    const cancelButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Cancel$/) !== null);
+    assert.ok(confirmButton, "the confirm control must render");
+    assert.ok(cancelButton, "the cancel control must render");
+    assert.ok(focusableElements(body as never).includes(confirmButton as never), "confirm must be keyboard-reachable (this door needs no fields)");
+    assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations in the open dialog");
+
+    await h.act(() => { clickButton(confirmButton as never); });
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    assert.deepEqual(calls, [{ interruptionId: "i1", scopeId: "client-9" }], "onPromote must be called exactly once with the interruption id and the RESOLVED client id, never a guess");
+    assert.doesNotMatch(textOf(body as never), /Promote this clarification to a durable question/, "the dialog must actually close on a real confirm");
+  } finally {
+    await h.unmount();
+    const bodyRef = body as unknown as { removeChild: (c: unknown) => void; childNodes?: unknown[] };
+    if (bodyRef.childNodes?.includes(h.container)) bodyRef.removeChild(h.container);
+  }
+});
+
+test("PROMOTE journey: with no resolved client id for this task, the promote control does not render at all — never a guessed scope_id", async () => {
+  const h = await renderComponent(
+    App(createElement(InterruptionsPanel, {
+      interruptions: [INTERRUPTION], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {},
+      clientIdByTaskId: {},
+      onPromote: async () => {},
+    })),
+  );
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Promote to a durable question$/) !== null);
+    assert.equal(trigger, null, "no promote control may render without a genuinely-resolved client id");
   } finally {
     await h.unmount();
   }

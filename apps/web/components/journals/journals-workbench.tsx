@@ -125,6 +125,8 @@ export function JournalsWorkbench({ clientId }: { clientId: string }) {
           clr={workbench.clr}
           actingId={workbench.actingId}
           onAnswer={(id, answer, onOk) => void workbench.answerClarify(id, answer, onOk)}
+          clientIdByTaskId={data.clientIdByTaskId}
+          onPromote={(id, scopeId) => workbench.promoteClarify(id, scopeId)}
         />
       )}
       {tab === "posted" && (

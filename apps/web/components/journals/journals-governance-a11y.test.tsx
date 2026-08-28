@@ -71,7 +71,7 @@ const INTERRUPTION: AgentInterruptionRow = {
 
 test("InterruptionsPanel has zero violations (one pending clarify, structured question)", async () => {
   const h = await renderComponent(
-    App(createElement(InterruptionsPanel, { interruptions: [INTERRUPTION], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {} })),
+    App(createElement(InterruptionsPanel, { interruptions: [INTERRUPTION], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {}, clientIdByTaskId: {} })),
   );
   try {
     for (let i = 0; i < 2; i++) await h.settle();
@@ -85,7 +85,7 @@ test("InterruptionsPanel has zero violations (one pending clarify, structured qu
 test("InterruptionsPanel has zero violations for an opaque (schema-less) question, rendered as raw JSON", async () => {
   const opaque: AgentInterruptionRow = { ...INTERRUPTION, id: "i2", question: { foo: "bar", n: 1 } };
   const h = await renderComponent(
-    App(createElement(InterruptionsPanel, { interruptions: [opaque], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {} })),
+    App(createElement(InterruptionsPanel, { interruptions: [opaque], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {}, clientIdByTaskId: {} })),
   );
   try {
     for (let i = 0; i < 2; i++) await h.settle();
@@ -99,7 +99,7 @@ test("InterruptionsPanel has zero violations for an opaque (schema-less) questio
 
 test("InterruptionsPanel empty state has zero violations", async () => {
   const h = await renderComponent(
-    App(createElement(InterruptionsPanel, { interruptions: [], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {} })),
+    App(createElement(InterruptionsPanel, { interruptions: [], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {}, clientIdByTaskId: {} })),
   );
   try {
     for (let i = 0; i < 2; i++) await h.settle();

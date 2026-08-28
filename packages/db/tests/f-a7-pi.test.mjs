@@ -50,6 +50,18 @@ async function piApplied() {
   );
 }
 
+/** True once F-A7b PR-a has landed on this chain — the EIGHTH receipt-surface member, wired
+ *  from its own migration's start (not left as a pi-style unwired stub). Gated on the wake
+ *  wrapper's own presence, never on the agent_receipt_surfaces row the pi-A1/A7/A9/E1 cells
+ *  below are themselves reading — a self-referential gate would read "the row vanished" as
+ *  "PR-a absent" and pass either way, the same trap pi-E1's own betaLanded comment names. */
+async function praLanded() {
+  const r = await rootQuery(
+    "select to_regprocedure("
+    + "'clara.wake_propose_client_onboarding(uuid,text,jsonb,text,jsonb,uuid,text)') is not null as ok");
+  return r.rows[0].ok;
+}
+
 before(async () => {
   live = await piApplied();
   if (live) world = await buildWorld();
@@ -101,17 +113,24 @@ async function inRolledBackTx(fn) {
 test("pi-A1 · the seven shims are registered, present, conforming, and unwired except where a "
   + "later train has since landed", async (t) => {
   if (gate(t)) return;
+  const pra = await praLanded();
   const r = await rootQuery("select * from clara.agent_receipt_source_census() order by item");
-  assert.deepEqual(r.rows.map((x) => x.item),
-    ["f_a2", "f_a3", "f_a4", "f_a5", "f_a6", "f_a7", "f_a8"],
-    "the closed world is TA-P4 A's five plus F-A3 and F-A7 itself");
+  const expectedItems = ["f_a2", "f_a3", "f_a4", "f_a5", "f_a6", "f_a7"]
+    .concat(pra ? ["f_a7b"] : [])
+    .concat(["f_a8"]);
+  assert.deepEqual(r.rows.map((x) => x.item), expectedItems,
+    "the closed world is TA-P4 A's five plus F-A3 and F-A7 itself, plus F-A7b PR-a's own eighth "
+    + "member (onboarding_agent_receipts) once that train has landed");
   // F-A7/PR-4 beta (0126) wires f_a7's shim to its real `agent_filing_receipts` table, and
   // F-A6 PR-1 wires f_a6's shim to its real `freeform_read_log` table (folded in at merge,
   // once pi's own contract landed first — pi's header names this exact obligation on every
   // member item). At pi's OWN frontier every shim was an unwired stub, but this file runs
   // against the merged chain where both are real, so f_a6/f_a7 are the two legitimately-wired
-  // exceptions to the closed world below.
-  const WIRED = { f_a6: "freeform_read_log", f_a7: "agent_filing_receipts" };
+  // exceptions to the closed world below. F-A7b PR-a's f_a7b is a THIRD, different shape: it
+  // is the eighth (not one of pi's original seven) and its migration wires it from the start —
+  // there is no unwired-stub phase for it to have passed through.
+  const WIRED = { f_a6: "freeform_read_log", f_a7: "agent_filing_receipts",
+    ...(pra ? { f_a7b: "onboarding_agent_receipts" } : {}) };
   for (const row of r.rows) {
     assert.equal(row.shim_exists, true, `${row.item}: shim exists`);
     assert.equal(row.conforms, true, `${row.item}: shim conforms to the contract`);
@@ -324,10 +343,11 @@ test("pi-A6 · the union REACHES a wired member, and the census sees the wiring 
 
 test("pi-A7 · the shims are NOT directly readable — the one entrance is one", async (t) => {
   if (gate(t)) return;
+  const pra = await praLanded();
   const roles = [ROLES.authenticated, ROLES.agentRo, ROLES.wakeInteractive, ROLES.runtime];
   const shims = (await rootQuery("select shim_relname from clara.agent_receipt_surfaces order by item"))
     .rows.map((r) => r.shim_relname);
-  assert.equal(shims.length, 7);
+  assert.equal(shims.length, pra ? 8 : 7);
   for (const role of roles) {
     for (const shim of shims) {
       const r = await rootQuery(
@@ -345,6 +365,7 @@ test("pi-A7 · the shims are NOT directly readable — the one entrance is one",
 test("pi-A9 · THE ACL CENSUS — zero non-owner grantees on every internal receipt view, and the "
   + "census FAILS when one is granted", async (t) => {
     if (gate(t)) return;
+    const pra = await praLanded();
     // This is not defence-in-depth; it is the wall. Each shim is a plain view owned by
     // clara_fn_owner over a firm-scoped table, and every governed clara table carries
     // `p_<t>_owner for all to clara_fn_owner using (true)` — so each shim INDIVIDUALLY sees every
@@ -370,7 +391,8 @@ test("pi-A9 · THE ACL CENSUS — zero non-owner grantees on every internal rece
       `select count(*)::int as n from pg_class c join pg_namespace n on n.oid = c.relnamespace
         where n.nspname = 'clara' and c.relkind = 'v'
           and (c.relname like '\\_agent\\_receipt\\_src\\_%' or c.relname = '_agent_receipts_all')`);
-    assert.equal(seen.rows[0].n, 8, "seven shims plus the raw union");
+    assert.equal(seen.rows[0].n, pra ? 9 : 8,
+      pra ? "eight shims (incl. F-A7b PR-a's f_a7b) plus the raw union" : "seven shims plus the raw union");
     // THE ADVERSARIAL TWIN. Grant one, and the SAME census must name it. A census never shown to
     // fail is a claim, not a wall.
     await inRolledBackTx(async (client) => {
@@ -812,9 +834,14 @@ test("pi-E1 · pi itself minted NO wake authority — any filing-kind rows, wrap
   const betaLanded = (await rootQuery(
     "select count(*)::int as n from clara.schema_migrations "
     + "where version ~ '^[0-9]{4}_f_a7_beta_filing_verb$'")).rows[0].n > 0;
-  assert.equal(rows.rows[0].n, betaLanded ? 6 : 0,
-    "the filing kind and its rows are train beta's — zero if beta is absent, exactly beta's own "
-    + "pinned six if beta has landed (0126 tail census)");
+  // F-A7b PR-a is a THIRD contributor to the same 'filing' kind (its own row 8,
+  // wake_propose_client_onboarding) -- pi's boundary claim is unchanged (pi itself still mints
+  // zero), but the total is no longer beta's alone once PR-a has also landed. Gated on the
+  // wrapper's own presence, not on this very count (praLanded's own header explains why).
+  const praLandedFlag = await praLanded();
+  assert.equal(rows.rows[0].n, (betaLanded ? 6 : 0) + (praLandedFlag ? 1 : 0),
+    "the filing kind and its rows are train beta's plus F-A7b PR-a's own — zero if neither has "
+    + "landed, beta's pinned six plus PR-a's pinned one once each respectively has");
   const wrappers = await rootQuery(
     `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname='clara' and p.proname = any($1)`,

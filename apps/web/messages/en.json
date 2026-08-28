@@ -9,6 +9,8 @@
     "forbidden": "Your account can't read this yet.",
     "notFound": "This isn't available yet.",
     "unexpectedError": "Something went wrong: {message}",
+    "refusalTitle": "This was refused",
+    "actionFailedTitle": "This action failed",
     "notBuiltHeading": "Not built yet",
     "cancel": "Cancel",
     "close": "Close",
@@ -202,6 +204,8 @@
         "clientRegister": "Client register",
         "firmActivity": "Firm activity",
         "admin": "Admin",
+        "adminCompliance": "Compliance register",
+        "adminVendorBindings": "Vendor identity bindings",
         "clientWorkspaceHome": "Workspace overview",
         "journals": "Journals",
         "documents": "Documents",
@@ -857,7 +861,8 @@
       "d6190": "61–90",
       "d91plus": "91+",
       "total": "Total",
-      "totalsRow": "Client total"
+      "totalsRow": "Client total",
+      "viewStatement": "View statement"
     },
     "fixedAssets": {
       "empty": "No fixed assets recorded for this client.",
@@ -915,6 +920,7 @@
       "voided": "Voided"
     },
     "accounts": {
+      "heading": "Chart of accounts",
       "empty": "No accounts in this client's chart of accounts yet.",
       "code": "Code",
       "name": "Name",
@@ -1094,7 +1100,127 @@
       "cancel": "Cancel"
     }
   },
-  "AdjustmentsAccounts": {},
+  "AdjustmentsAccounts": {
+    "dialog": { "cancel": "Cancel", "working": "Working…" },
+    "linesEditor": {
+      "lineNo": "#",
+      "account": "Account",
+      "debit": "Debit",
+      "credit": "Credit",
+      "selectAccount": "Select an account…",
+      "removeLine": "Remove line",
+      "presentationSumLabel": "Sum (presentation only)",
+      "notBalanced": "Debits and credits do not balance yet — the DB will refuse an unbalanced entry.",
+      "addLine": "Add line"
+    },
+    "proposeTemplate": {
+      "trigger": "Propose template",
+      "title": "Propose a recurring adjustment template",
+      "description": "An admin must sign this before it can run. Lines are the template's own recipe — every occurrence posts them unchanged.",
+      "nameLabel": "Name",
+      "cadenceLabel": "Cadence",
+      "cadence": { "monthly": "Monthly", "annual": "Annual" },
+      "autoReverseLabel": "Auto-reverse each occurrence at the start of the next period",
+      "startDateLabel": "Start date",
+      "endDateLabel": "End date (optional)",
+      "memoLabel": "Memo template",
+      "memoHint": "The memo every occurrence carries — required, since it is the only description a scheduled run posts with."
+    },
+    "signTemplate": {
+      "trigger": "Sign",
+      "title": "Sign \"{name}\"",
+      "description": "Signing is admin-only. This re-checks the template's dates are still the first/last day of a period under the client's CURRENT fiscal year — a stale window refuses rather than posting on the wrong dates."
+    },
+    "retireTemplate": {
+      "trigger": "Retire",
+      "title": "Retire \"{name}\"",
+      "description": "Stops the template being run. A reason is required. Refused while an occurrence draft for this template is still outstanding — approve or withdraw it first.",
+      "reasonLabel": "Reason"
+    },
+    "runDue": {
+      "due": "An adjustment run is due for {start} – {end}.",
+      "nothingDue": "No adjustment run is due right now.",
+      "allBlocked": "Every live template's next period is blocked — see the run history below.",
+      "clientNotFound": "Client not found.",
+      "unknownReason": "Not due ({reason})."
+    },
+    "runHistory": {
+      "heading": "Run history",
+      "subheading": "Every adjustment run, with its own correction affordance where the DB says one applies.",
+      "empty": "No adjustment runs recorded for this client.",
+      "period": "Period",
+      "mode": "Mode",
+      "modePost": "Posted",
+      "modeDraft": "Draft",
+      "amount": "Amount",
+      "correction": "Correction",
+      "pairInFlight": "A pair reversal is already in flight ({status}) — see the ledger below.",
+      "soloOccurrenceNote": "This run is a solo occurrence, not an auto-reverse pair — correct it from the Journals tab.",
+      "wallFallback": "Not correctable right now ({wall}).",
+      "unavailable": "Could not load run history — see the error above."
+    },
+    "runNow": {
+      "trigger": "Run now",
+      "title": "Run an adjustment manually",
+      "description": "The period must exactly match the live template's own cadence window, and must have already ended.",
+      "templateLabel": "Template",
+      "selectTemplate": "Select a live template…",
+      "noLiveTemplates": "No live templates yet — sign one above first.",
+      "periodStartLabel": "Period start",
+      "periodEndLabel": "Period end"
+    },
+    "reversePair": {
+      "trigger": "Reverse pair",
+      "title": "Reverse this adjustment pair",
+      "description": "Mints two draft corrections (one per half of the auto-reverse pair) for a distinct checker to approve or cancel below — this does not post anything itself.",
+      "reasonLabel": "Reason"
+    },
+    "pairLedger": {
+      "heading": "Pair-reversal ledger",
+      "unavailable": "Could not load the pair-reversal ledger — see the error above.",
+      "empty": "No pair reversals raised for this client.",
+      "raised": "Raised",
+      "status": "Status",
+      "statuses": { "pending": "Pending", "approving": "Approving", "completed": "Completed", "cancelled": "Cancelled" }
+    },
+    "approvePair": {
+      "trigger": "Approve",
+      "title": "Approve this pair reversal",
+      "description": "A distinct checker act — the DB re-derives both corrections are byte-exact leg-swaps of the halves they reverse before approving either.",
+      "attestationLabel": "Attestation (optional)"
+    },
+    "cancelPair": {
+      "trigger": "Cancel",
+      "title": "Cancel this pair reversal",
+      "description": "Withdraws both draft corrections. A reason is required. Only possible while both halves are still drafts.",
+      "reasonLabel": "Reason"
+    },
+    "upsertAccount": {
+      "addTrigger": "Add account",
+      "editTrigger": "Edit",
+      "addTitle": "Add an account",
+      "editTitle": "Edit account {code}",
+      "description": "Create or update a row in this client's chart of accounts. Confirming ALWAYS leaves the account active — editing a currently-inactive account reactivates it.",
+      "reactivateHint": "This account is currently inactive — confirming this edit reactivates it.",
+      "codeLabel": "Account code",
+      "nameLabel": "Name",
+      "typeLabel": "Type",
+      "types": { "asset": "Asset", "liability": "Liability", "equity": "Equity", "income": "Income", "expense": "Expense" },
+      "classLabel": "Class (optional)",
+      "classNone": "None",
+      "classes": { "payable": "Payable", "receivable": "Receivable" },
+      "specialLabel": "Special account slot (optional)",
+      "specialNone": "None — an ordinary account",
+      "specials": {
+        "rounding": "Rounding",
+        "sst_output": "SST output",
+        "sst_purchase_cost": "SST purchase cost",
+        "opening_balance_equity": "Opening balance equity",
+        "retained_earnings": "Retained earnings"
+      },
+      "specialHint": "These five slots are usually provisioned at onboarding — only change one if you know it needs correcting."
+    }
+  },
   "StaffAdvances": {
     "loading": "Loading staff advances…",
     "ledgerHeading": "Staff advances",
@@ -1319,8 +1445,311 @@
       }
     }
   },
-  "CodingQuestionsSignals": {},
-  "ArApCounterparty": {},
+  "CodingQuestionsSignals": {
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
+    "panelHeading": "Coding lane",
+    "panelDescription": "Filings still awaiting a posted entry, open coding tasks awaiting a decision, and open quality-lint findings for this client.",
+    "loading": "Loading…",
+    "uncodedFiling": {
+      "heading": "Uncoded filings",
+      "lanesLabel": "Coding lane",
+      "lanes": {
+        "needs_you": "Needs you",
+        "needs_review": "Needs review",
+        "ready": "Ready"
+      },
+      "laneEmpty": "Nothing in this lane right now.",
+      "columnDocument": "Document",
+      "columnFiled": "Filed",
+      "columnReasons": "Why",
+      "columnActions": "Actions",
+      "noReasons": "No blocking reasons recorded.",
+      "openTaskTrigger": "Open coding task",
+      "openTaskTitle": "Open a coding task",
+      "openTaskConfirm": "Open coding task",
+      "openTaskReasonLabel": "Why does this need a coding task?",
+      "openTaskReasonPlaceholder": "e.g. vendor could not be matched automatically…",
+      "askQuestionTrigger": "Ask a question",
+      "askQuestionTitle": "Ask a question about this document",
+      "askQuestionConfirm": "Ask question",
+      "askQuestionLabel": "Your question",
+      "askQuestionPlaceholder": "e.g. Which account should this be coded to?",
+      "reasons": {
+        "no_active_filing": "No active filing found.",
+        "open_draft": "A draft entry already exists for this filing.",
+        "already_coded": "Already posted to an approved entry.",
+        "facts_pending": "Extraction facts are not ready yet.",
+        "multi_doc": "Spans multiple source documents — needs manual review.",
+        "non_myr": "States a non-MYR amount explicitly.",
+        "tier_a_fails": "The extracted facts are not yet corroborated.",
+        "direction_unresolved": "Could not determine whether this is a purchase or a sale.",
+        "customer_name_missing": "No customer name could be read from the document.",
+        "vendor_unresolved": "No matching vendor could be found.",
+        "vendor_ambiguous": "The vendor match is ambiguous and needs a human decision.",
+        "customer_ambiguous": "The customer match is ambiguous and needs a human decision.",
+        "vendor_bound": "Bound to a known vendor via its registration number.",
+        "binding_ambiguous": "Multiple vendor bindings matched — needs a human decision.",
+        "open_question": "An open question is already blocking this filing.",
+        "no_consent": "This client has no active data-processing consent on file.",
+        "parked": "A prior autodraft attempt was parked.",
+        "rule_backed": "A coding rule already exists for this vendor.",
+        "high_stakes": "The amount is above this firm's high-stakes threshold.",
+        "near_duplicate": "Looks like a near-duplicate of an already-posted entry.",
+        "unknown": "Unrecognized reason ({code})."
+      }
+    },
+    "codingTask": {
+      "heading": "Open coding tasks",
+      "empty": "No open coding tasks for this client.",
+      "columnOpened": "Opened",
+      "columnOrigin": "Origin",
+      "columnActions": "Actions",
+      "origin": {
+        "correction": "Correction",
+        "manual": "Manual"
+      },
+      "completeTrigger": "Complete",
+      "completeTitle": "Complete this coding task",
+      "completeDescription": "Point this task at the approved journal entry it produced.",
+      "completeConfirm": "Complete task",
+      "loadingEntries": "Loading approved entries for this filing…",
+      "retryEntries": "Retry",
+      "noApprovedEntries": "No approved entry exists yet for this filing — post one first, then come back to complete this task.",
+      "entryPickerLabel": "Result entry",
+      "entryPickerPlaceholder": "Choose the approved entry…",
+      "dismissTrigger": "Dismiss",
+      "dismissTitle": "Dismiss this coding task",
+      "dismissConfirm": "Dismiss task",
+      "dismissReasonLabel": "Reason for dismissing",
+      "dismissReasonPlaceholder": "e.g. duplicate task, already handled elsewhere…"
+    },
+    "lintFinding": {
+      "heading": "Open quality-lint findings",
+      "empty": "No open lint findings for this client.",
+      "columnKind": "Finding",
+      "columnSeverity": "Severity",
+      "columnOpened": "Opened",
+      "columnActions": "Actions",
+      "kinds": {
+        "contradiction": "Contradiction",
+        "stale_claim": "Stale claim",
+        "orphan_page": "Orphan page",
+        "cap_pages": "Too many pages",
+        "cap_page_size": "Page too large",
+        "wiki_synthesis_held": "Wiki synthesis held",
+        "opening_tb_tie_broken": "Opening trial-balance tie broken",
+        "opening_doc_unfiled": "Opening document not filed",
+        "stale_citation": "Stale citation"
+      },
+      "severities": {
+        "info": "Info",
+        "warn": "Warning",
+        "critical": "Critical"
+      },
+      "resolveTrigger": "Resolve",
+      "resolveTitle": "Resolve this finding",
+      "resolveConfirm": "Resolve finding",
+      "conclusionLabel": "Conclusion",
+      "conclusionPlaceholder": "Choose a conclusion…",
+      "conclusions": {
+        "corrected": "Corrected",
+        "accepted_revision": "Accepted the revision",
+        "false_positive": "False positive",
+        "superseded_by_edit": "Superseded by a later edit"
+      },
+      "noteLabel": "Note",
+      "notePlaceholder": "What was found, and what was done about it…",
+      "viewDetailsTrigger": "View details",
+      "loadingDetail": "Loading the finding's full detail…",
+      "detailNotReachable": "This finding's detail could not be read.",
+      "dedupeKeyLabel": "Dedupe key"
+    },
+    "sweep": {
+      "heading": "Sweep runs",
+      "openRun": "A sweep run is currently open.",
+      "noOpenRun": "No sweep run is currently open.",
+      "lastFinalizedLabel": "Last finalized",
+      "lastAckLabel": "Last acknowledged",
+      "never": "Never",
+      "acknowledgeGap": "Acknowledging a finalized sweep run needs its run id, which only arrives via Clara's own sweep-receipt message in a thread — not built yet here. Ruled: it ships as a rich card on that message in the P6 wire bump, not a separate control on this panel."
+    },
+    "agentTasks": {
+      "heading": "Running agent tasks",
+      "note": "Tasks the agent is currently queued, held, running, or awaiting your input on — cancellable here. Already-finished work is in the activity log below.",
+      "empty": "No running agent tasks right now.",
+      "kinds": {
+        "chat_turn": "Chat turn",
+        "wake": "Wake",
+        "autodraft": "Autodraft",
+        "close_prep": "Close preparation"
+      },
+      "statuses": {
+        "queued": "Queued",
+        "held": "Held",
+        "running": "Running",
+        "awaiting_input": "Awaiting input",
+        "cancel_requested": "Cancel requested",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled",
+        "expired": "Expired"
+      },
+      "cancelTrigger": "Cancel",
+      "cancelTitle": "Cancel this task",
+      "cancelDescription": "A running task aborts and settles; a queued or held task is cancelled immediately.",
+      "cancelConfirm": "Cancel task",
+      "cancelRequestedNote": "Cancel already requested — the task is still settling."
+    },
+    "openQuestion": {
+      "viewDetailsTrigger": "View details",
+      "loadingDetail": "Loading the question's full detail…",
+      "detailNotReachable": "This question's detail could not be read.",
+      "originLabel": "Origin",
+      "openedAtLabel": "Opened",
+      "spawnedRuleLabel": "Spawned rule"
+    },
+    "promoteClarify": {
+      "trigger": "Promote to a durable question",
+      "dialogTitle": "Promote this clarification to a durable question",
+      "dialogDescription": "Turns Clara's own clarification into a durable question on this client's own record, visible on the client's Needs-you queue — distinct from a firm-level question.",
+      "confirm": "Promote"
+    }
+  },
+  "ArApCounterparty": {
+    "heading": "Counterparty hygiene",
+    "loading": "Loading counterparties…",
+    "empty": "No counterparties recorded yet for this client.",
+    "aliasListNotBuilt": "A counterparty's existing aliases and the retire-alias action are not available yet — this build has no read for them. Adding a new alias still works.",
+    "kindVendorPlural": "Vendors",
+    "kindCustomerPlural": "Customers",
+    "registration": "Registration",
+    "tin": "TIN",
+    "terms": "Terms (days)",
+    "statusLive": "Live",
+    "statusRetired": "Retired",
+    "statusMerged": "Merged into {name}",
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
+    "create": {
+      "trigger": "Create counterparty",
+      "title": "Create a counterparty",
+      "description": "Mints a new counterparty for this client. If one already exists at this name or registration number, the door returns the existing party rather than creating a duplicate.",
+      "confirm": "Create",
+      "kindLabel": "Kind",
+      "kindVendor": "Vendor",
+      "kindCustomer": "Customer",
+      "nameLabel": "Name",
+      "registrationLabel": "Registration number",
+      "tinLabel": "TIN"
+    },
+    "setTerms": {
+      "trigger": "Set terms",
+      "title": "Set payment terms — {name}",
+      "confirm": "Save",
+      "daysLabel": "Terms (days)",
+      "daysHint": "1–365 days."
+    },
+    "addAlias": {
+      "trigger": "Add alias",
+      "title": "Add an alias — {name}",
+      "confirm": "Add",
+      "aliasLabel": "Alias",
+      "originLabel": "Origin",
+      "originTradeName": "Trade name",
+      "originFormerName": "Former name",
+      "originHuman": "Recorded by a human"
+    },
+    "retireAlias": {
+      "trigger": "Retire",
+      "title": "Retire alias \"{alias}\"",
+      "description": "The alias stops matching new activity. It stays in the record as history.",
+      "confirm": "Retire alias"
+    },
+    "rename": {
+      "trigger": "Rename",
+      "title": "Rename — {name}",
+      "confirm": "Rename",
+      "nameLabel": "New name"
+    },
+    "merge": {
+      "trigger": "Merge…",
+      "title": "Merge — {name}",
+      "consequence": "Merging retires the party that does not survive, for good — there is no un-merge door. The exact effect is listed on the next step, once you name the other party.",
+      "otherLabel": "Merge with",
+      "otherPlaceholder": "Select a counterparty",
+      "roleLabel": "Which party survives?",
+      "roleThisSurvives": "{name} survives — the other party merges into it",
+      "roleThisMerges": "{name} merges into the other party",
+      "reasonLabel": "Reason",
+      "noCandidates": "No other live counterparty of this kind exists yet to merge with.",
+      "previewButton": "Preview merge",
+      "previewLoading": "Reading both counterparties' current state…",
+      "back": "Back",
+      "cancel": "Cancel",
+      "confirm": "Merge",
+      "working": "Merging…"
+    },
+    "mergePreview": {
+      "title": "What each side carries",
+      "consequence": "Read directly from the database — nothing here is computed by this screen.",
+      "survivor": "Survivor",
+      "merged": "Merging in",
+      "registration": "Registration",
+      "tin": "TIN",
+      "terms": "Terms (days)",
+      "outstanding": "Outstanding",
+      "openItems": "Open items",
+      "whatChangesHeading": "What this merge actually does",
+      "whatChanges1": "{merged} is marked merged into {survivor} and retired — this cannot be undone.",
+      "whatChanges2": "From now on, new activity naming {merged} attributes to and reads as {survivor}'s.",
+      "whatChanges3": "{merged}'s own live coding rule (if any) retires; a replacement is proposed on {survivor} only if {survivor} does not already have one of that kind.",
+      "whatChanges4": "{merged}'s existing open items and its own outstanding balance stay recorded under {merged} until settled — this merge does not move them.",
+      "whatChanges5": "Aliases are not shown here — this build has no read for them."
+    },
+    "statement": {
+      "heading": "Statement — {name} · {from} to {to}",
+      "loading": "Loading the statement…",
+      "empty": "No movement in this counterparty's statement for this period.",
+      "fromLabel": "From",
+      "toFixed": "to {date} (today)",
+      "redirectedNote": "{merged} was merged into {survivor}; this is {survivor}'s own statement.",
+      "redirectedNoteUnknownName": "{merged} was merged into another counterparty (id {survivorId}); this is that party's own statement — its name could not be read.",
+      "date": "Date",
+      "type": "Type",
+      "label": "Label",
+      "delta": "Amount",
+      "running": "Running balance",
+      "openingLabel": "Opening balance",
+      "closingLabel": "Closing balance",
+      "applicationsHeading": "Applications",
+      "noApplications": "No item applications recorded for this counterparty.",
+      "applicationGroupLabel": "{count} row(s)"
+    },
+    "applyOpenItems": {
+      "trigger": "Apply open items",
+      "title": "Apply one open item to another",
+      "description": "Applies a credit (e.g. a credit note) against an outstanding claim (e.g. an invoice), with no movement of cash and no GL entry. Both items must already belong to this counterparty.",
+      "confirm": "Apply",
+      "sourceLabel": "Source (credit)",
+      "targetLabel": "Target (claim)",
+      "selectItem": "Select an item",
+      "amountLabel": "Amount",
+      "reasonLabel": "Reason",
+      "noCandidateItems": "This counterparty needs at least two currently-outstanding open items before one can be applied to another."
+    },
+    "unallocateGroup": {
+      "trigger": "Unallocate",
+      "title": "Unallocate this application",
+      "description": "Reverses the WHOLE application as one act — never a single row inside it.",
+      "confirm": "Unallocate",
+      "reasonLabel": "Reason"
+    }
+  },
   "ReportsSnapshotsSeeding": {
     "snapshots": {
       "heading": "Month snapshots",
@@ -1416,6 +1845,173 @@
       }
     }
   },
-  "FirmAdminCompliance": {},
-  "ClientOnboarding": {}
+  "FirmAdminCompliance": {
+    "adminNavLabel": "Firm admin sections",
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
+    "needsYou": {
+      "ackTrigger": "Acknowledge",
+      "snoozeTrigger": "Snooze",
+      "resolveTrigger": "Resolve",
+      "submitting": "Submitting…",
+      "rationalePlaceholder": "Rationale",
+      "untilLabel": "Snooze until",
+      "conclusionLabel": "Conclusion",
+      "conclusion": {
+        "registration_recorded": "Registration recorded",
+        "not_liable_documented": "Not liable — documented"
+      },
+      "evidencePlaceholder": "Evidence"
+    },
+    "compliance": {
+      "heading": "Compliance register",
+      "pageDescription": "Every SST-registration watch across the firm that has not yet been resolved.",
+      "staleEvaluator": "The compliance evaluator has not completed a run in the last 48 hours — these figures may be out of date.",
+      "loading": "Loading the compliance register…",
+      "empty": "No open compliance watches for this firm.",
+      "clientNamesUnavailable": "Client names could not be loaded — the client column below shows raw ids",
+      "state": {
+        "monitored": "Monitored",
+        "early_warning": "Early warning",
+        "crossed": "Crossed",
+        "overdue": "Overdue",
+        "resolved": "Resolved"
+      },
+      "confirmedIncluded": "Confirmed included",
+      "unknownOrMixed": "Unknown / mixed",
+      "screeningProxy": "Screening proxy",
+      "earliestCrossing": "Earliest crossing month",
+      "applicationDue": "Application due",
+      "futureMethodStatus": "Future-method attestation",
+      "futureMethodStatuses": {
+        "not_assessed": "Not assessed",
+        "attested_below": "Attested — below threshold",
+        "attested_above": "Attested — above threshold",
+        "expired": "Attestation expired"
+      },
+      "centsUnsafe": "(amount out of range — verify in the ledger)"
+    },
+    "vendorBindings": {
+      "pageHeading": "Vendor identity bindings",
+      "pageDescription": "Propose, sign and revoke a vendor's identity binding. Signing requires an admin — propose and sign are rank-gated, not required to be different people.",
+      "clientPickerLabel": "Client",
+      "clientPickerLoading": "Loading clients…",
+      "clientPickerPlaceholder": "Select a client…",
+      "noClientSelected": "Select a client to see its vendor identity bindings.",
+      "heading": "Vendor identity bindings",
+      "loading": "Loading vendor identity bindings…",
+      "empty": "No vendor identity bindings for this client yet.",
+      "status": {
+        "proposed": "Proposed",
+        "live": "Live",
+        "revoked": "Revoked",
+        "declined": "Declined",
+        "expired": "Expired"
+      },
+      "fingerprint": "Vendor name \"{f1}\" · invoice prefix \"{f2}\"",
+      "evidenceLine": "{evidence} evidence entr{evidence, plural, one {y} other {ies}} · {resolutions} resolution{resolutions, plural, one {} other {s}} · {divergences} divergence{divergences, plural, one {} other {s}} (30d)",
+      "signTrigger": "Sign",
+      "signTitle": "Sign this vendor identity binding",
+      "signDescription": "Signing makes this binding LIVE — future invoices from this vendor auto-bind to the counterparty it names. Requires admin; the same admin who proposed it may also sign it.",
+      "revokeTrigger": "Revoke",
+      "revokeTitle": "Revoke this vendor identity binding",
+      "revokeDescription": "Revoking ends auto-binding for this vendor immediately. A reason is required.",
+      "reasonLabel": "Reason",
+      "detailLoading": "Loading the binding's own detail…",
+      "detailProposedBy": "Proposed by",
+      "detailProposedAt": "Proposed at",
+      "detailEvidence": "Evidence",
+      "detailEvidenceCount": "{count, plural, one {# entry} other {# entries}}",
+      "detailResolutions": "Resolutions",
+      "detailResolutionsCount": "{count, plural, one {# resolution} other {# resolutions}}",
+      "detailFingerprintHash": "Content fingerprint",
+      "proposeTrigger": "Propose binding",
+      "proposeTitle": "Propose a vendor identity binding",
+      "proposeDescription": "The DB derives the binding's own fingerprint from at least three recent approved entries for this vendor — this dialog only names which counterparty to bind.",
+      "counterpartyLabel": "Vendor",
+      "counterpartyPlaceholder": "Select a vendor…",
+      "counterpartyNoneYet": "No eligible vendors for this client yet",
+      "counterpartiesLoading": "Loading vendors…"
+    },
+    "sharing": {
+      "sharedBadge": "Shared with firm",
+      "shareTrigger": "Share with firm",
+      "shareTitle": "Share this conversation with the firm",
+      "shareDescription": "Every member of your firm will be able to read this conversation. This cannot be undone from here."
+    }
+  },
+  "ClientOnboarding": {
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
+    "item": {
+      "state": {
+        "pending": "Pending",
+        "answered": "Answered",
+        "resolved": "Resolved",
+        "deferred": "Deferred"
+      },
+      "requiredForCommit": "Required before activation",
+      "resolveTrigger": "Resolve",
+      "resolveTitle": "Resolve this onboarding item",
+      "resolveDescription": "Record how \"{item}\" was settled.",
+      "resolveConfirm": "Resolve",
+      "resolvePlaceholder": "How was this settled?",
+      "alreadySettled": "This item is no longer pending — its own state above is the record.",
+      "planNotOpen": "The onboarding plan is no longer open — nothing more can be resolved on it."
+    },
+    "card": {
+      "loading": "Loading the onboarding plan…",
+      "clientNotVisible": "This client isn't visible to your session.",
+      "heading": "Client onboarding",
+      "noPlanBootstrapEligible": "This client has no onboarding plan yet — it was activated before this plan type existed.",
+      "bootstrapTrigger": "Bootstrap onboarding plan",
+      "bootstrapTitle": "Bootstrap an onboarding plan",
+      "bootstrapDescription": "Creates the carry-down plan this pre-existing active client never received. The client's status is not changed.",
+      "bootstrapConfirm": "Bootstrap plan",
+      "noPlanNotEligible": "This client has no onboarding plan, and its status ({status}) isn't eligible for bootstrapping.",
+      "progressLabel": "{completed} of {total} onboarding steps complete",
+      "planState": {
+        "open": "open",
+        "committed": "committed",
+        "cancelled": "cancelled"
+      },
+      "openedByAgent": "Clara opened this file.",
+      "openedByAgentWithModel": "Clara ({model}) opened this file.",
+      "committedNote": "This onboarding plan was committed on {at}. The client is active.",
+      "cancelledNote": "This onboarding plan was cancelled: {reason}",
+      "noItems": "This plan has no items yet.",
+      "commitTrigger": "Commit onboarding",
+      "commitTitle": "Commit this onboarding plan",
+      "commitDescription": "This activates {client} and closes the plan ({completed} of {total} items settled). The client can then be worked in its own workspace.",
+      "commitConfirm": "Commit onboarding",
+      "commitBlocked": {
+        "plan_not_open": "This plan is no longer open — it cannot be committed again.",
+        "client_not_onboarding": "This client's status is no longer \"onboarding\".",
+        "questions_unresolved": "A required item is still pending — resolve it before committing.",
+        "opening_position_required": "An opening position is required before activation — settle or defer it first."
+      },
+      "attestationLabel": "Attestation (only needed if the DB asks for one)",
+      "attestationPlaceholder": "Only fill this in if a commit attempt asks for an attestation.",
+      "cancelTrigger": "Cancel onboarding",
+      "cancelTitle": "Cancel this client's onboarding",
+      "cancelDescription": "This archives {client}. A client record is never deleted — cancelling is the only way to undo an onboarding started in error.",
+      "cancelConfirm": "Cancel onboarding",
+      "cancelReasonLabel": "Reason for cancelling",
+      "cancelReasonPlaceholder": "Why is this onboarding being cancelled?",
+      "cancelBlockedNotOpen": "This plan is no longer open — there is nothing left to cancel.",
+      "beginHeading": "Start a new client's onboarding",
+      "beginTrigger": "Begin client onboarding",
+      "beginTitle": "Begin a new client's onboarding",
+      "beginDescription": "Creates a new client record and its onboarding plan.",
+      "beginConfirm": "Begin onboarding",
+      "nameLabel": "Client name",
+      "namePlaceholder": "Legal or trading name",
+      "beginResult": "Client {clientId} and plan {planId} were created.",
+      "beginResultLink": "Open this client's workspace"
+    }
+  }
 }

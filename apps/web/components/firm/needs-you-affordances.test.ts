@@ -47,6 +47,29 @@ test("getNeedsYouAffordance resolves fixed_asset_incomplete (T3, port wave)", ()
   assert.equal(typeof getNeedsYouAffordance("fixed_asset_incomplete"), "function");
 });
 
+// T10 (port wave): this file's own case above proved TWO real entries; this
+// one proves a third BY NAME rather than being inferred from the others still
+// passing — the same F8 reasoning (needs-you-affordances.tsx's own table, not
+// this file's count of assertions) applies to every train that adds one.
+test("getNeedsYouAffordance resolves compliance_watch (T10, port wave)", () => {
+  assert.equal(typeof getNeedsYouAffordance("compliance_watch"), "function");
+});
+
 test("NEEDS_YOU_AFFORDANCES has no prototype (Object.getPrototypeOf is null)", () => {
   assert.equal(Object.getPrototypeOf(NEEDS_YOU_AFFORDANCES), null);
+});
+
+// T7 (port-wave plan §4/§5): three more row kinds registered, by name — this
+// file's own F8 discipline (a stale "the ONE real entry" claim is worse than
+// no claim at all).
+test("getNeedsYouAffordance resolves uncoded_filing (T7, port wave)", () => {
+  assert.equal(typeof getNeedsYouAffordance("uncoded_filing"), "function");
+});
+
+test("getNeedsYouAffordance resolves coding_task (T7, port wave)", () => {
+  assert.equal(typeof getNeedsYouAffordance("coding_task"), "function");
+});
+
+test("getNeedsYouAffordance resolves lint_finding (T7, port wave)", () => {
+  assert.equal(typeof getNeedsYouAffordance("lint_finding"), "function");
 });
