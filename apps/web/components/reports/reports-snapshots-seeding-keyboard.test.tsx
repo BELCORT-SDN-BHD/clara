@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent, textOf, setFieldValue, setNativeValue } from "../../test/hookHarness";
+import { renderComponent, textOf, setFieldValue, setNativeValue, clickButton } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource, sessionTokenAccessor } from "../../lib/session-accessor";
@@ -31,36 +31,16 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
   return null;
 }
 
-/** DoorDialog's Confirm button is a plain `@base-ui/react` Button with a
- *  CONSUMER onClick — see reports-snapshots-seeding-a11y.test.tsx's own
- *  identical helper for the full discovery note (hookHarness's `fireEvent`
- *  reaches DialogTrigger/DialogClose's PRIMITIVE click handling but never
- *  this button's wrapped `externalOnClick`). Calls the react fiber's own
- *  onClick prop directly, exactly like `setFieldValue` does for onChange. */
-async function clickConfirm(node: Node): Promise<void> {
-  const propsKey = Object.keys(node as object).find((k) => k.startsWith("__reactProps"));
-  const onClick = propsKey ? (node as unknown as Record<string, { onClick?: (e: unknown) => unknown }>)[propsKey]?.onClick : undefined;
-  if (!onClick) throw new Error("clickConfirm: no onClick prop found on this node — is it really a Button?");
-  await onClick({
-    type: "click", target: node, currentTarget: node, bubbles: true, cancelable: true,
-    defaultPrevented: false, isTrusted: true, timeStamp: Date.now(),
-    // Re-verify round: also reachable via THIS helper is DialogClose (the
-    // Cancel button), whose own handleClick reads `event.nativeEvent.target`
-    // to build base-ui's internal close-event details, then floating-ui's
-    // FloatingFocusManager resolves `ownerWindow(getTarget(nativeEvent))`
-    // off it — DoorDialog's own Confirm never touches `nativeEvent` at all
-    // (its close is a plain React setOpen(false), not base-ui's internal
-    // store), so this was invisible until Cancel needed the SAME direct-
-    // invoke treatment. A nested fake `nativeEvent` with a real `target`
-    // (this stub node, whose `ownerDocument`/`defaultView` chain the harness
-    // already wires up) keeps that resolution on its normal, non-throwing
-    // path.
-    nativeEvent: { type: "click", target: node, currentTarget: node },
-    preventDefault() {}, stopPropagation() {}, persist() {},
-  });
-}
+// T6/T9 meet-point consolidation: this file used to carry its own local
+// `clickConfirm` (a direct-invoke helper for a DoorDialog Confirm/Cancel
+// button's onClick, including the `nativeEvent` shape DialogClose's own
+// handleClick needs — see hookHarness.ts's `clickButton` for the full
+// discovery note). It is now `clickButton`, imported above — the ONE
+// exported helper both T6 and T9 converged on, guarded to throw on a
+// disabled node rather than risk manufacturing a false green on an
+// unopenable door.
 
-/** The SAME portal-boundary gap `clickConfirm` exists for, on a plain
+/** The SAME portal-boundary gap `clickButton` exists for, on a plain
  *  native `<input type="checkbox">`'s onChange: this checkbox lives inside
  *  the SAME DialogPortal content (appended to `body`, a SIBLING of
  *  `h.container`, not a descendant), so `fireEvent`'s delegated dispatch
@@ -157,7 +137,7 @@ test("T9 (mint-snapshot door): the trigger is keyboard-reachable, opening it rea
       // portaled Cancel is a no-op with NO fake-Event globals defined. This
       // file's own hookHarness.ts fix (the requeue test's third open, this
       // same file) makes Cancel genuinely drivable via the direct-invoke
-      // `clickConfirm` helper — proven THERE (checkbox/Confirm state
+      // `clickButton` helper — proven THERE (checkbox/Confirm state
       // actually reset after a close+reopen) — so this uses the SAME
       // mechanism here for a REAL positive proof, never a downgrade: the
       // dialog's own content (its title) must be GONE from `body` after
@@ -171,7 +151,7 @@ test("T9 (mint-snapshot door): the trigger is keyboard-reachable, opening it rea
       );
       assert.match(textOf(body as never), /Mint a month snapshot/, "sanity: the dialog title is present BEFORE Cancel — proves the assertion below is not vacuously true");
 
-      await h.act(() => clickConfirm(cancelButton as never));
+      await h.act(() => clickButton(cancelButton as never));
       for (let i = 0; i < 6; i++) await h.settle();
 
       assert.doesNotMatch(
@@ -304,7 +284,7 @@ test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm start
       );
       assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations, first open");
 
-      await h.act(() => clickConfirm(confirmButton as never));
+      await h.act(() => clickButton(confirmButton as never));
       for (let i = 0; i < 8; i++) await h.settle();
 
       // --- Second open: the drift checkbox must be keyboard-reachable, and
@@ -370,7 +350,7 @@ test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm start
       // one.
       const cancelSecond = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Cancel"));
       assert.ok(cancelSecond, "the Cancel control must be reachable on the second open too");
-      await h.act(() => clickConfirm(cancelSecond as never));
+      await h.act(() => clickButton(cancelSecond as never));
       for (let i = 0; i < 6; i++) await h.settle();
 
       trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Requeue"));
@@ -450,6 +430,56 @@ test("T9 (retire-wiki-page door): Confirm starts DISABLED on an empty reason and
         "Confirm ENABLES once the reason is typed — a mutation pinning it disabled must go RED",
       );
       assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the dialog is open");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+// Item 4 (T6/T9 meet-point consolidation): prove the DISABLED guard binds —
+// hookHarness.ts's own doc claims `clickButton` throws rather than silently
+// no-ops on a disabled node; a claim in a comment is not evidence (review
+// law 2). No dedicated hookHarness selftest file exists yet, so this lives
+// here, against a REAL disabled control from this train's own fixtures
+// (the retire-wiki Confirm button, disabled before any reason is typed) —
+// not a hand-built stub, since only a react-dom-committed node carries the
+// `__reactProps$…` key `clickButton` reads.
+test("hookHarness clickButton GUARD: refuses to click a DISABLED node — throws, never silently no-ops (the F6/P3 unopenable-door defect class)", async () => {
+  const impl = (async (u: RequestInfo | URL) => {
+    if (String(u).includes("/wiki_pages")) {
+      return jsonResponse([{ id: "w1", client_id: "c1", slug: "treatment/gst-input-tax", page_kind: "treatment", title: "GST input tax treatment", counterparty_id: null, current_version_id: "v1", state: "active", retired_at: null, retired_by: null, retire_reason: null, created_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-15T00:00:00Z" }]);
+    }
+    throw new Error(`unexpected fetch: ${String(u)} — the guard must throw BEFORE any door call, so this must never be reached`);
+  }) as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const h = await renderComponent(App(createElement(WikiCurationPanel, { clientId: "c1", session: sessionTokenAccessor })));
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Retire"));
+      assert.ok(trigger, "the Retire trigger must render");
+      await h.fireEvent(trigger!, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const confirmButton = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Retire" && (n as unknown) !== (trigger as unknown),
+      );
+      assert.ok(confirmButton, "the dialog's own Confirm button must be reachable");
+      assert.equal(
+        (confirmButton as unknown as { disabled: boolean }).disabled,
+        true,
+        "sanity: Confirm must genuinely be disabled here (no reason typed yet) — otherwise this test proves nothing about the guard",
+      );
+
+      await assert.rejects(
+        h.act(() => clickButton(confirmButton as never)),
+        (e: unknown) => e instanceof Error && /refusing to click a DISABLED node/.test(e.message),
+        "clickButton must THROW on a disabled node, not silently no-op — a helper that can click through a disabled gate is the one tool capable of manufacturing a false green on a permanently-unopenable door",
+      );
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();

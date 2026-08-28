@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent, textOf, setFieldValue } from "../../test/hookHarness";
+import { renderComponent, textOf, setFieldValue, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import { configureSessionTokenSource, resetSessionTokenSource, sessionTokenAccessor } from "../../lib/session-accessor";
@@ -53,29 +53,14 @@ function findIn(root: DomNode, predicate: (n: DomNode) => boolean): DomNode | nu
   return null;
 }
 
-/** DoorDialog's Confirm button is a plain `@base-ui/react` Button with a
- *  CONSUMER onClick (`onConfirm`, no arguments read from the event) —
- *  discovered while wiring this file's own F7 fix: hookHarness's `fireEvent`
- *  (a synthetic event handed to `container.__listeners`) reliably opens/
- *  closes the dialog via DialogTrigger/DialogClose, whose click handling is
- *  a base-ui PRIMITIVE behaviour, but never reaches THIS button's wrapped
- *  `externalOnClick` (base-ui's `useButton` `getButtonProps` — the same
- *  class of gap `setFieldValue` exists for on the `<Input>` onChange side,
- *  confirmed by a direct-invoke probe that DOES reach it). Calls the react
- *  fiber's own onClick prop directly, exactly like `setFieldValue` does for
- *  onChange — never a plain `fireEvent(node, "click")` for a DoorDialog
- *  Confirm button specifically (Trigger/Cancel/other primitive-driven clicks
- *  are unaffected and keep using ordinary `fireEvent`). */
-async function clickConfirm(node: DomNode): Promise<void> {
-  const propsKey = Object.keys(node as object).find((k) => k.startsWith("__reactProps"));
-  const onClick = propsKey ? (node as unknown as Record<string, { onClick?: (e: unknown) => unknown }>)[propsKey]?.onClick : undefined;
-  if (!onClick) throw new Error("clickConfirm: no onClick prop found on this node — is it really a Button?");
-  await onClick({
-    type: "click", target: node, currentTarget: node, bubbles: true, cancelable: true,
-    defaultPrevented: false, isTrusted: true, timeStamp: Date.now(),
-    preventDefault() {}, stopPropagation() {}, persist() {},
-  });
-}
+// T6/T9 meet-point consolidation: this file used to carry its own local
+// `clickConfirm` (a direct-invoke helper for a DoorDialog Confirm button's
+// CONSUMER onClick, bypassing `fireEvent`'s delegated dispatch — see
+// hookHarness.ts's `clickButton` for the full portal-boundary story). It is
+// now `clickButton`, imported above — the ONE exported helper both T6 and
+// T9 converged on, guarded to throw on a disabled node ("assert the gate,
+// then act") rather than risk manufacturing a false green on an
+// unopenable door.
 
 function App(child: ReturnType<typeof createElement>, heading: string) {
   // Wrapped in the same ambient <h1> the real Reports page renders (P3
@@ -172,7 +157,7 @@ test("RenderJobQueuePanel: zero violations across the FULL drift journey — col
         (n) => n.tagName === "BUTTON" && textOf(n as never) === "Requeue" && (n as unknown) !== (trigger as unknown),
       );
       assert.ok(confirmFirst, "the dialog's own Confirm button must be reachable, distinct from the trigger (F7 disambiguation)");
-      await h.act(() => clickConfirm(confirmFirst as never));
+      await h.act(() => clickButton(confirmFirst as never));
       for (let i = 0; i < 8; i++) await h.settle();
       assert.equal(requeueCalls, 1, "exactly one requeue attempt so far");
 

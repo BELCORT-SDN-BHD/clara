@@ -198,7 +198,7 @@ test("DocumentAdmin has zero violations with the re-extraction outcome banner ac
         // reaches (hookHarness.ts's `clickButton` header has the full
         // story). `clickButton` reads the node's own `onClick` prop
         // directly instead.
-        await h.act(() => { clickButton(confirmButton as never); });
+        await h.act(() => clickButton(confirmButton as never));
         for (let i = 0; i < 6; i++) await h.settle();
         assert.match(textOf(b as never), /Superseding a prior extraction/, "the outcome banner must actually be showing, with the real admission label");
         const violations = checkAccessibility(b as never);
@@ -238,7 +238,7 @@ test("DocumentAdmin has zero violations with the consent-evidence outcome banner
         // reaches (hookHarness.ts's `clickButton` header has the full
         // story). `clickButton` reads the node's own `onClick` prop
         // directly instead.
-        await h.act(() => { clickButton(confirmButton as never); });
+        await h.act(() => clickButton(confirmButton as never));
         for (let i = 0; i < 6; i++) await h.settle();
         assert.match(textOf(b as never), /Was: other/, "the outcome banner must actually be showing, with the real prior kind");
         const violations = checkAccessibility(b as never);
@@ -275,7 +275,7 @@ test("DocumentAdmin has zero violations with the consent-evidence outcome banner
         // reaches (hookHarness.ts's `clickButton` header has the full
         // story). `clickButton` reads the node's own `onClick` prop
         // directly instead.
-        await h.act(() => { clickButton(confirmButton as never); });
+        await h.act(() => clickButton(confirmButton as never));
         for (let i = 0; i < 6; i++) await h.settle();
         assert.match(textOf(b as never), /Was: unclassified/, "a NULL prior_kind must render the honest 'unclassified' label, never a blank");
         const violations = checkAccessibility(b as never);
@@ -312,7 +312,7 @@ test("DocumentFilingsHistory has zero violations with the autodraft outcome bann
         // reaches (hookHarness.ts's `clickButton` header has the full
         // story). `clickButton` reads the node's own `onClick` prop
         // directly instead.
-        await h.act(() => { clickButton(confirmButton as never); });
+        await h.act(() => clickButton(confirmButton as never));
         for (let i = 0; i < 6; i++) await h.settle();
         assert.match(textOf(b as never), /Admitted/, "the outcome banner must actually be showing");
         const violations = checkAccessibility(b as never);

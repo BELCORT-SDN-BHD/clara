@@ -278,22 +278,42 @@ export function setFieldValue(node: Stub, value: string): void {
  *  of FloatingFocusManager's `getEventType`, which DialogClose's internal
  *  close-handling chain reaches on a Dialog's open/close cycle. Confirmed
  *  empirically (a probe against a live DialogClose Cancel button, this same
- *  meet-point commit): `clickButton` needs no special-cased event shape for
- *  DialogClose either — the SAME call this function already makes for a
- *  plain consumer onClick closes it too, verbatim, no `nativeEvent` field
- *  required. What this function still cannot reach is REAL browser hit-
- *  testing — pointer-events, overlay stacking, z-index, anything that needs
- *  an actual layout/paint engine to resolve which element a coordinate
- *  would hit; there is no layout engine in this harness, so a click always
- *  "lands" on whatever node you hand it, never on what a browser would
- *  actually resolve underneath a real cursor position. That is a narrower,
- *  and different, gap than the one this paragraph used to describe. */
-export function clickButton(node: Stub): void {
+ *  meet-point commit): the event needs a `nativeEvent` field carrying a real
+ *  `target` (added below — DialogClose's own `handleClick` reads
+ *  `event.nativeEvent` before forwarding), but no OTHER special-casing.
+ *  What this function still cannot reach is REAL browser hit-testing —
+ *  pointer-events, overlay stacking, z-index, anything that needs an actual
+ *  layout/paint engine to resolve which element a coordinate would hit;
+ *  there is no layout engine in this harness, so a click always "lands" on
+ *  whatever node you hand it, never on what a browser would actually
+ *  resolve underneath a real cursor position. That is a narrower, and
+ *  different, gap than the one this paragraph used to describe.
+ *
+ *  CONSOLIDATED at the T6/T9 meet-point (independent review, both trains):
+ *  this is now the ONE exported click helper — T9's two local `clickConfirm`
+ *  copies (which had already grown `await`, the `nativeEvent` field above,
+ *  and a throw on a missing `onClick`) are folded in here rather than kept
+ *  as separate, drifting copies.
+ *
+ *  GUARDED: throws if the node's own LIVE `.disabled` is `true` —
+ *  "assert the gate, then act." A click helper that can fire a DISABLED
+ *  button's handler is the one tool in this harness capable of
+ *  MANUFACTURING a false green on a permanently-unopenable door: the exact
+ *  F6/P3 defect class the keyboard battery exists to catch (a control that
+ *  RENDERS but never actually admits a click). A test that means to prove a
+ *  control is disabled asserts `.disabled` directly, never routes a click
+ *  through it and hopes nothing happens. */
+export async function clickButton(node: Stub): Promise<void> {
+  if ((node as unknown as { disabled?: boolean }).disabled === true) {
+    throw new Error("clickButton: refusing to click a DISABLED node — assert the gate, then act; a click helper must never be the thing that manufactures a green on an unopenable door");
+  }
   const propsKey = Object.keys(node as object).find((k) => k.startsWith("__reactProps"));
-  const props = propsKey ? (node as unknown as Record<string, { onClick?: (e: unknown) => void }>)[propsKey] : undefined;
-  props?.onClick?.({
+  const onClick = propsKey ? (node as unknown as Record<string, { onClick?: (e: unknown) => unknown }>)[propsKey]?.onClick : undefined;
+  if (!onClick) throw new Error("clickButton: no onClick prop found on this node — is it really a Button?");
+  await onClick({
     type: "click", target: node, currentTarget: node, bubbles: true, cancelable: true,
     defaultPrevented: false, isTrusted: true, timeStamp: Date.now(),
+    nativeEvent: { type: "click", target: node, currentTarget: node },
     preventDefault() {}, stopPropagation() {}, persist() {},
   });
 }
