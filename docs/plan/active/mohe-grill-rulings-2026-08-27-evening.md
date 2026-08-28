@@ -10,7 +10,7 @@ execution owner and window.*
 The **platform's user-facing name is ClaraBook**; **Clara remains the agent persona**
 (the AI accountant the user converses with); the repo/codebase name `clara` is unchanged.
 The **Ledger Fold** mark (finished exports in clarabook-frontend
-`g3-identity/g3-2/exports/`) is ADOPTED as the platform logo, paired with the ClaraBook
+g3-identity/g3-2/exports/ (a clarabook-frontend path, not this repo)) is ADOPTED as the platform logo, paired with the ClaraBook
 wordmark. *Execution: asset port + product-name copy pass, pre-P6 polish item. This
 closes the silent brand gap the handoff-conformance audit flagged.*
 

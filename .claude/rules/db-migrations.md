@@ -38,6 +38,12 @@ migration trips a checksum-drift error. Fix forward with a new file.
 **Never touch `workflow`, `graphile_worker`, or `spike`.** The Slice-0 spike holds a live
 parked run in them — which is exactly why this pipeline is schema-scoped to `clara`.
 
+**A migration that adds a `clara_authenticated` door must name its frontend home in the PR
+body** — the journey/panel that will call it, or the explicit non-UI ruling (ops drill,
+internal-only, cutover-owed). Minted 2026-08-28 from the verb-coverage census: every orphan it
+found was a door merged without a named home. The census re-run at the P6 exit gate is the
+closing instrument; this rule is what keeps the gap from re-opening between censuses.
+
 **A migration that replaces an audited writer's body carries the D1 write-quiesce obligation**
 at deploy. PostgreSQL runs an in-flight PL/pgSQL call to completion on the body it *started*
 with, so a call that spans the migration silently runs the OLD body and skips the new
