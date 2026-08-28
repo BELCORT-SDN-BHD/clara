@@ -30,6 +30,7 @@ import { UncodedFilingAffordance } from "./uncoded-filing-affordance";
 import { CodingTaskAffordance } from "./coding-task-affordance";
 import { LintFindingAffordance } from "./lint-finding-affordance";
 import { ComplianceWatchAffordance } from "./compliance-watch-affordance";
+import { SeedingProposalAffordance } from "./seeding-proposal-affordance";
 
 export type NeedsYouAffordanceProps = {
   row: ReviewQueueRow;
@@ -91,6 +92,10 @@ export const NEEDS_YOU_AFFORDANCES: Partial<Record<ReviewQueueRowKind, NeedsYouA
     // inline acts on a compliance_watch row — see
     // ./compliance-watch-affordance.tsx's own header for the grounding.
     compliance_watch: ComplianceWatchAffordance,
+    // 裁-17 (mohe-grill-rulings-2026-08-28.md): a LINK-ONLY affordance — the
+    // tick/decline acts stay on T9's SeedingBatchesPanel; see
+    // ./seeding-proposal-affordance.tsx's own header for the grounding.
+    seeding_proposal: SeedingProposalAffordance,
   } satisfies Partial<Record<ReviewQueueRowKind, NeedsYouAffordance>>,
 );
 

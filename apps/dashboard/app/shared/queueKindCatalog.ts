@@ -111,6 +111,16 @@ const FIXTURES = {
     advance_id: "d1000000-0000-4000-8000-000000000001",
     question_text: "Staff advance (particulars pending) — 610-000 RM1,200.00",
   }),
+  // 裁-17 (mohe-grill-rulings-2026-08-28.md, UNNUMBERED_ninth_rowkind_seeding_
+  // proposal.sql): BATCH-LEVEL — one row per client with >=1 OPEN
+  // clara.seeding_proposals row. This app's own tick/decline surface
+  // (app/seeding/SeedingBatchView.tsx) already owns the act; this catalog
+  // entry only needs to render honestly (FallbackDetail — no dedicated card),
+  // matching coding_task's own posture below.
+  seeding_proposal: fx({
+    row_kind: "seeding_proposal", id: "fixture-seeding",
+    question_text: "2 open seeding proposals pending review",
+  }),
 } as const;
 
 /** NOT a catalog key — proves the honest degrade path for a row_kind the catalog
@@ -138,6 +148,8 @@ const TITLES = {
   // 0042: the DB's own placeholder description rides question_text, exactly
   // like fixed_asset_incomplete above (design §3.4).
   staff_advance_incomplete: (row: QueueRow) => row.question_text ?? "Staff advance (particulars pending)",
+  // 裁-17: the DB's own composed sentence rides question_text, same convention.
+  seeding_proposal: (row: QueueRow) => row.question_text ?? "Seeding proposals pending review",
 } as const satisfies Record<string, (row: QueueRow) => string>;
 
 /** The honest fallback title for a row_kind with no catalog entry — the id-only
@@ -285,8 +297,9 @@ function StaffAdvanceIncompleteDetail({ row }: QueueDetailProps): ReactElement {
 // --- the catalog ------------------------------------------------------------------
 
 /** Every row_kind `clara.list_review_queue` emits (0011 base + 0016 compliance_watch
- *  + 0017 lint_finding + 0041 fixed_asset_incomplete). The queueKindCatalog.test.tsx
- *  parity probe asserts the DEPLOYED function never emits a literal outside this set. */
+ *  + 0017 lint_finding + 0041 fixed_asset_incomplete + 0043 staff_advance_incomplete
+ *  + 裁-17 seeding_proposal). The queueKindCatalog.test.tsx parity probe asserts the
+ *  DEPLOYED function never emits a literal outside this set. */
 export const QUEUE_KIND_CATALOG: Record<string, QueueKindEntry> = {
   draft: { row_kind: "draft", title: TITLES.draft, RowAccessory: null, Detail: DraftDetail, fixture: FIXTURES.draft },
   uncoded_filing: {
@@ -313,6 +326,13 @@ export const QUEUE_KIND_CATALOG: Record<string, QueueKindEntry> = {
   staff_advance_incomplete: {
     row_kind: "staff_advance_incomplete", title: TITLES.staff_advance_incomplete, RowAccessory: null,
     Detail: StaffAdvanceIncompleteDetail, fixture: FIXTURES.staff_advance_incomplete,
+  },
+  // 裁-17: FallbackDetail only (no dedicated card) — this app's own seeding
+  // surface (app/seeding/SeedingBatchView.tsx) already owns the tick/decline
+  // acts; the queue row degrades honestly, same posture as coding_task above.
+  seeding_proposal: {
+    row_kind: "seeding_proposal", title: TITLES.seeding_proposal, RowAccessory: null,
+    Detail: FallbackDetail, fixture: FIXTURES.seeding_proposal,
   },
 };
 

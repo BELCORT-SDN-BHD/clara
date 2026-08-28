@@ -45,6 +45,9 @@ function row(overrides: Partial<ReviewQueueRow> = {}): ReviewQueueRow {
     finding_id: null,
     asset_id: null,
     advance_id: null,
+    client_name: null,
+    batch_ids: null,
+    open_proposal_count: null,
     ...overrides,
   };
 }

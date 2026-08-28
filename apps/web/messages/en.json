@@ -55,9 +55,11 @@
       "lint_finding": "Lint finding",
       "fixed_asset_incomplete": "Fixed asset — particulars incomplete",
       "staff_advance_incomplete": "Staff advance — particulars incomplete",
+      "seeding_proposal": "Seeding proposals awaiting review",
       "unknown": "Unrecognized item ({kind})"
     },
     "openClient": "Open client",
+    "reviewSeedingProposals": "Review in Reports",
     "loadMore": "Load more",
     "loadingMore": "Loading more…",
     "highStakes": "high stakes",

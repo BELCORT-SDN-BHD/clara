@@ -41,10 +41,10 @@ test("every catalog entry's title is a non-empty string for its own fixture", ()
   }
 });
 
-test("the known row_kind set matches 0011 + 0016 + 0017 + 0041 + 0042 exactly", () => {
+test("the known row_kind set matches 0011 + 0016 + 0017 + 0041 + 0042 + 裁-17 exactly", () => {
   assert.deepEqual([...QUEUE_KIND_KEYS].sort(), [
     "coding_task", "compliance_watch", "draft", "fixed_asset_incomplete", "lint_finding",
-    "open_question", "staff_advance_incomplete", "uncoded_filing",
+    "open_question", "seeding_proposal", "staff_advance_incomplete", "uncoded_filing",
   ]);
 });
 

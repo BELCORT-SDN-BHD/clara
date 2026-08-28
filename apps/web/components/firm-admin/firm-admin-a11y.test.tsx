@@ -72,6 +72,7 @@ const COMPLIANCE_ENVELOPE: ReviewQueueEnvelope = {
       rule_backed: false, high_stakes: false, aged_since: "2026-07-01T00:00:00Z", amount_cents: null, period: "2026-07-31",
       question_text: "SST registration threshold watch (digital_services)", created_at: "2026-07-01T00:00:00Z", id: "w1",
       coding_kind: null, watch_id: "w1", tier: "crossed", finding_id: null, asset_id: null, advance_id: null,
+      client_name: null, batch_ids: null, open_proposal_count: null,
     },
   ],
   next_cursor: null,

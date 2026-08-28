@@ -73,3 +73,10 @@ test("getNeedsYouAffordance resolves coding_task (T7, port wave)", () => {
 test("getNeedsYouAffordance resolves lint_finding (T7, port wave)", () => {
   assert.equal(typeof getNeedsYouAffordance("lint_finding"), "function");
 });
+
+// 裁-17 (mohe-grill-rulings-2026-08-28.md): the ninth row_kind, by name — the
+// same F8 discipline as every case above (this file's own count of assertions
+// proves nothing; the registry table does).
+test("getNeedsYouAffordance resolves seeding_proposal (裁-17, pre-beta)", () => {
+  assert.equal(typeof getNeedsYouAffordance("seeding_proposal"), "function");
+});

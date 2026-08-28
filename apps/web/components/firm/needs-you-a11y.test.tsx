@@ -62,6 +62,7 @@ const ENVELOPE: ReviewQueueEnvelope = {
       rule_backed: false, high_stakes: false, aged_since: null, amount_cents: null, period: null,
       question_text: "Which account should this fee post to?", created_at: "2026-04-01T00:00:00Z", id: "q1",
       coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null, advance_id: null,
+      client_name: null, batch_ids: null, open_proposal_count: null,
     },
   ],
   next_cursor: null,
@@ -172,6 +173,7 @@ const HOSTILE_ENVELOPE: ReviewQueueEnvelope = {
       rule_backed: false, high_stakes: false, aged_since: null, amount_cents: null, period: null,
       question_text: null, created_at: "2026-04-01T00:00:00Z", id: "hostile-1",
       coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null, advance_id: null,
+      client_name: null, batch_ids: null, open_proposal_count: null,
     },
     {
       row_kind: "toString", section: "needs_review", client_id: "c1", counterparty_id: null, filing_id: null,
@@ -179,6 +181,7 @@ const HOSTILE_ENVELOPE: ReviewQueueEnvelope = {
       rule_backed: false, high_stakes: false, aged_since: null, amount_cents: null, period: null,
       question_text: null, created_at: "2026-04-01T00:00:00Z", id: "hostile-2",
       coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null, advance_id: null,
+      client_name: null, batch_ids: null, open_proposal_count: null,
     },
   ],
   next_cursor: null,
@@ -272,6 +275,7 @@ const T7_ENVELOPE: ReviewQueueEnvelope = {
       rule_backed: false, high_stakes: false, aged_since: null, amount_cents: null, period: null,
       question_text: null, created_at: "2026-04-01T00:00:00Z", id: "f1",
       coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null, advance_id: null,
+      client_name: null, batch_ids: null, open_proposal_count: null,
     },
     {
       row_kind: "coding_task", section: "needs_review", client_id: "c1", counterparty_id: null, filing_id: "f2",
@@ -279,6 +283,7 @@ const T7_ENVELOPE: ReviewQueueEnvelope = {
       rule_backed: false, high_stakes: false, aged_since: null, amount_cents: null, period: null,
       question_text: null, created_at: "2026-04-02T00:00:00Z", id: "t1",
       coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null, advance_id: null,
+      client_name: null, batch_ids: null, open_proposal_count: null,
     },
     {
       row_kind: "lint_finding", section: "needs_review", client_id: "c1", counterparty_id: null, filing_id: null,
@@ -286,6 +291,7 @@ const T7_ENVELOPE: ReviewQueueEnvelope = {
       rule_backed: false, high_stakes: false, aged_since: null, amount_cents: null, period: null,
       question_text: "Lint: stale_claim", created_at: "2026-04-03T00:00:00Z", id: "lf1",
       coding_kind: null, watch_id: null, tier: "warn", finding_id: "lf1", asset_id: null, advance_id: null,
+      client_name: null, batch_ids: null, open_proposal_count: null,
     },
   ],
   next_cursor: null,
@@ -320,6 +326,70 @@ test("firm needs-you inbox: uncoded_filing / coding_task / lint_finding rows, di
         assert.ok(h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Open coding task$/) !== null), "uncoded_filing must dispatch to UncodedFilingActions");
         assert.ok(h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Complete$/) !== null), "coding_task must dispatch to CodingTaskActions");
         assert.ok(h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Resolve$/) !== null), "lint_finding must dispatch to LintFindingActions");
+        const violations = checkAccessibility(h.container as never);
+        assert.deepEqual(violations, [], JSON.stringify(violations));
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+// 裁-17 (mohe-grill-rulings-2026-08-28.md): the NINTH row_kind, rendered through
+// the REAL registry dispatch (NEEDS_YOU_AFFORDANCES via getNeedsYouAffordance),
+// never a standalone render of SeedingProposalAffordance. Discriminating
+// post-condition: the deep link's href names the OWNING TAB
+// (/clients/:id/reports, where T9's SeedingBatchesPanel is mounted), never the
+// client-workspace root (/clients/:id) — a link to the root would ALSO match a
+// substring-only assertion, which is exactly why this asserts the full href.
+const SEEDING_ENVELOPE: ReviewQueueEnvelope = {
+  watermark: "w4",
+  counts: { ready: 0, needs_review: 1, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 0, lint_findings: 0 },
+  sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
+  rows: [
+    {
+      row_kind: "seeding_proposal", section: "needs_review", client_id: "c1", counterparty_id: null, filing_id: null,
+      entry_id: null, question_id: null, task_id: null, document_id: null, lane: null, auto: false,
+      rule_backed: false, high_stakes: false, aged_since: "2026-08-01T00:00:00Z", amount_cents: null, period: null,
+      question_text: "2 open seeding proposals pending review", created_at: "2026-08-01T00:00:00Z", id: "c1",
+      coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null, advance_id: null,
+      client_name: "Acme Sdn Bhd", batch_ids: ["b1", "b2"], open_proposal_count: 2,
+    },
+  ],
+  next_cursor: null,
+};
+
+function mockSeedingFetch(u: string): Response {
+  if (u.includes("/rpc/list_review_queue")) return jsonResponse(SEEDING_ENVELOPE);
+  if (u.includes("/rest/v1/firm_open_questions_visible")) return jsonResponse([]);
+  if (u.includes("/rest/v1/client_identifier_promotions_visible")) return jsonResponse([]);
+  if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
+  throw new Error(`unexpected fetch: ${u}`);
+}
+
+test("firm needs-you inbox: a seeding_proposal row, dispatched through the REAL registry, links to the client's Reports tab (owning tab, not the workspace root)", async () => {
+  await withMockedEnv(
+    async (u) => mockSeedingFetch(String(u)),
+    async () => {
+      const h = await renderComponent(
+        createElement(NextIntlClientProvider, {
+          locale: "en",
+          messages,
+          children: createElement("div", null, createElement("h1", null, "Needs you"), createElement(NeedsYouInbox)),
+        }),
+      );
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        assert.match(h.text(), /2 open seeding proposals pending review/, "the seeding_proposal row must have actually loaded");
+        // needs-you-row.tsx ALSO renders a generic "Open client" link to the
+        // workspace root on EVERY row (client_id present or not) — that link is
+        // NOT this affordance's own, so its presence is expected, not a defect.
+        // The discriminating assertion is that the REGISTRY-dispatched link
+        // (SeedingProposalAffordance, via getNeedsYouAffordance) ALSO renders,
+        // and points at the OWNING TAB specifically.
+        const reportsLink = h.find((n) => n.tagName === "A" && (n as unknown as { getAttribute?: (a: string) => string | null }).getAttribute?.("href") === "/clients/c1/reports");
+        assert.ok(reportsLink, "the registry dispatched a REAL link to the owning tab (/clients/c1/reports)");
+        assert.match(textOf(reportsLink as never), /Review in Reports/, "the deep-link text is the affordance's own label, not the generic \"Open client\" text");
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {
