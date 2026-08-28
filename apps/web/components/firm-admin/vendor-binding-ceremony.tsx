@@ -11,7 +11,8 @@
 // when the signer is the same person who proposed the binding — a PERSON
 // separation on top of the RANK floor, not merely rank-gated. STRICT: no
 // relaxation for a single-admin firm; the refusal names both lawful ways out
-// (let Clara propose it, or a different admin signs it). This component
+// in the OWNER'S OWN RULED WORDS (裁-18c: "let Clara propose it, or add a
+// second admin" — independent review, 2026-08-29). This component
 // still adds no client-side proposer≠signer gate — the DB's own wall is the
 // wall, matching the estate's standing convention (a DoorRefusal renders
 // verbatim, never pre-guessed client-side). The Sign trigger is NEVER

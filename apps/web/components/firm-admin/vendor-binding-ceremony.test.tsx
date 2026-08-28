@@ -6,10 +6,13 @@
 // the PANEL's own persistent banner, never inside the dialog — which
 // FirmAdminDoorDialog auto-closes on every confirm attempt regardless of
 // outcome (CloseDoorDialog's own contract, ported). Security-note load-bearing
-// test: sign is a RANK-gated act (admin+, not a proposer≠signer separation —
-// F1, independent review) whose trigger this train's own header says is
-// never pre-hidden on a client-side role guess — this proves the DB's OWN
-// refusal is what actually renders when that rule is exercised.
+// test: sign is a RANK-gated act (admin+) AND, as of the pre-beta hardening
+// batch (裁-18a, mohe-grill-rulings, 2026-08-28), a PERSON-gated one too — the
+// signer must not be the binding's own proposer, unconditionally. This file's
+// own cell below drives the RANK refusal specifically; the trigger this
+// train's own header says is never pre-hidden on a client-side role OR
+// identity guess — this proves the DB's OWN refusal is what actually renders
+// when either rule is exercised.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -151,6 +154,73 @@ test("Sign refusal (CLR04, insufficient rank): a real click through the dialog's
   });
 });
 
+// MED-3 (independent review, 2026-08-29): the signer<>proposer wall's CLR04 refusal carries a
+// stable `reason` token in its DETAIL (`{"reason":"signer_is_proposer"}`), distinct from the
+// bare-message shape the RANK-floor refusal above carries (which has no reason token). This
+// cell proves the estate's generic wire.ts reason-parsing pipeline (`parseReasonToken`,
+// already wired into every StateBanner via `clr.reason`) actually surfaces THIS wall's reason
+// — no vendor-bindings.ts change was needed (confirmed: `signVendorIdentityBinding` is a bare
+// `callDoor` passthrough, no error transform), but nothing proved the reason renders until now.
+test("Sign refusal (CLR04, signer_is_proposer): the wall's stable reason token renders in the panel's own banner, distinguishing it from a bare rank refusal", async () => {
+  const calls: { url: string }[] = [];
+  const impl = (async (url: RequestInfo | URL) => {
+    const u = String(url);
+    calls.push({ url: u });
+    if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
+    if (u.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS);
+    if (u.includes("/rest/v1/counterparties")) return jsonResponse(COUNTERPARTIES);
+    if (u.includes("/rpc/sign_vendor_identity_binding")) {
+      // The exact PostgREST error envelope shape (code/message/details) a real
+      // DETAIL '{"reason":"signer_is_proposer"}' raise produces (wire.ts's
+      // classifyPgrestFailure reads `body.details`, JSON-parses it via
+      // parseReasonToken).
+      return jsonResponse({
+        code: "CLR04",
+        message: "the signer cannot be the same person who proposed this binding; let Clara propose it, or add a second admin",
+        details: JSON.stringify({ reason: "signer_is_proposer" }),
+      }, 400);
+    }
+    if (u.includes("/rpc/get_vendor_binding")) return jsonResponse(BINDING_DETAIL);
+    throw new Error(`unexpected fetch: ${u}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const { h, body } = await mount();
+    try {
+      const signTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign");
+      assert.ok(signTrigger, "the Sign trigger must render");
+      await h.fireEvent(signTrigger! as never, "click");
+      for (let i = 0; i < 4; i++) await h.settle();
+
+      const confirmButton = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign" && (n as unknown) !== (signTrigger as unknown),
+      );
+      assert.ok(confirmButton, "the dialog's own Confirm button must be reachable, distinct from the trigger");
+      await h.act(() => { clickButton(confirmButton as never); });
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      const bodyText = textOf(body as never);
+      assert.match(bodyText, /CLR04/, "the CLR code must render, verbatim");
+      assert.match(bodyText, /let Clara propose it, or add a second admin/, "the wall's own message, in the OWNER'S RULED WORDS, must render verbatim");
+      // THE DISCRIMINATING ASSERTION (MED-3, rev-hb F2: structured, not English-prose
+      // matching): every panel renders the reason in the EXACT `${code} · ${reason}` slot
+      // format (compliance-register-panel.tsx / vendor-bindings-panel.tsx / this component
+      // all share it) — pin THAT exact shape, not merely "the token appears somewhere",
+      // which is what tells a caller this is SPECIFICALLY the signer<>proposer wall,
+      // distinguishable from a bare rank refusal (the previous cell, no reason token at all)
+      // or any other CLR04 in the estate.
+      assert.match(bodyText, /CLR04 · signer_is_proposer/, "the wall's stable reason token must render in the banner's own CODE · REASON slot, not just appear anywhere in the page text");
+
+      const call = calls.find((c) => c.url.includes("/rpc/sign_vendor_identity_binding"));
+      assert.ok(call, "sign_vendor_identity_binding must have actually been called — the DB's wall is the wall, not a client-side gate");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
+    }
+  });
+});
+
 // 裁-18a (mohe-grill-rulings, 2026-08-28) copy re-true pin: before this ruling landed,
 // signDescription claimed "the same admin who proposed it may also sign it" — the DB now
 // REFUSES exactly that (a signer<>proposer wall, unconditional even for a single-admin firm),
@@ -180,6 +250,9 @@ test("Sign dialog description states the signer<>proposer rule (裁-18a), not th
         "the corrected copy (裁-18a) must render in the open Sign dialog");
       assert.doesNotMatch(dialogText, /the same admin who proposed it may also sign it/,
         "the retired, now-false copy must not render");
+      // rev-hb F1: both exits, in the owner's own words.
+      assert.match(dialogText, /let Clara propose it, or add a second admin/,
+        "the Sign dialog's own description must name both lawful exits, verbatim");
     } finally {
       await h.unmount();
       for (let i = 0; i < 3; i++) await h.settle();

@@ -21,9 +21,11 @@
 //     hardening batch (裁-18a, mohe-grill-rulings, 2026-08-28), a PERSON
 //     gate too: the live body now reads `created_by` and refuses when the
 //     signer is the same person who proposed the binding, unconditionally —
-//     no relaxation for a single-admin firm. The refusal is typed CLR04 and
-//     names both lawful ways out (let Clara propose it, or a different admin
-//     signs it). The UI never pre-hides the Sign trigger on a client-side
+//     no relaxation for a single-admin firm. The refusal is typed CLR04 with
+//     DETAIL reason "signer_is_proposer" and names both lawful ways out in
+//     the OWNER'S OWN RULED WORDS (let Clara propose it, or add a second
+//     admin — independent review, 2026-08-29). The UI never pre-hides the
+//     Sign trigger on a client-side
 //     role OR identity guess (team-lead security note): every viewer sees
 //     it; a caller who clicks it gets the DB's own refusal, verbatim —
 //     whether that is the rank floor or the signer≠proposer wall.

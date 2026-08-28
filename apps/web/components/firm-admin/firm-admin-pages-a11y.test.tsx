@@ -176,6 +176,11 @@ test("/admin/vendor-bindings page composition (PageHeader + the real VendorBindi
         // corrected phrase renders, and the retired phrase does not.
         assert.match(pageText, /did not propose it/, "pageDescription must state the signer<>proposer rule, corrected");
         assert.doesNotMatch(pageText, /not required to be different people/, "the retired, now-false claim must not render");
+        // rev-hb F1 (independent review, 2026-08-29): the copy must name BOTH exits in the
+        // OWNER'S OWN RULED WORDS (裁-18c), not merely state that the rule exists -- a solo
+        // firm reading only "requires an admin who did not propose it" has no idea what to DO.
+        assert.match(pageText, /let Clara propose it, or add a second admin/, "pageDescription must name both lawful exits, verbatim");
+        assert.doesNotMatch(pageText, /a different admin signs it/, "the retired phrasing (tells a genuinely solo firm to use a person who does not exist) must not render");
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {

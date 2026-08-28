@@ -1996,7 +1996,7 @@
     },
     "vendorBindings": {
       "pageHeading": "Vendor identity bindings",
-      "pageDescription": "Propose, sign and revoke a vendor's identity binding. Signing requires an admin who did not propose it — the DB refuses a self-sign.",
+      "pageDescription": "Propose, sign and revoke a vendor's identity binding. Signing requires an admin who did not propose it — the person who proposed a binding cannot also sign it; let Clara propose it, or add a second admin.",
       "clientPickerLabel": "Client",
       "clientPickerLoading": "Loading clients…",
       "clientPickerPlaceholder": "Select a client…",
@@ -2015,7 +2015,7 @@
       "evidenceLine": "{evidence} evidence entr{evidence, plural, one {y} other {ies}} · {resolutions} resolution{resolutions, plural, one {} other {s}} · {divergences} divergence{divergences, plural, one {} other {s}} (30d)",
       "signTrigger": "Sign",
       "signTitle": "Sign this vendor identity binding",
-      "signDescription": "Signing makes this binding LIVE — future invoices from this vendor auto-bind to the counterparty it names. Requires an admin who did not propose this binding; the person who proposed it cannot also sign it.",
+      "signDescription": "Signing makes this binding LIVE — future invoices from this vendor auto-bind to the counterparty it names. Requires an admin who did not propose this binding; the person who proposed it cannot also sign it — let Clara propose it, or add a second admin.",
       "revokeTrigger": "Revoke",
       "revokeTitle": "Revoke this vendor identity binding",
       "revokeDescription": "Revoking ends auto-binding for this vendor immediately. A reason is required.",
