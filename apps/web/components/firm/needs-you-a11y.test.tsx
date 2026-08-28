@@ -4,6 +4,10 @@
 //
 // NeedsYouInbox self-fetches list_review_queue (lib/firm/needs-you.ts) — one
 // mocked RPC, matching that module's own `listReviewQueue` call shape.
+// NeedsYouGaps (rendered at the bottom of NeedsYouInbox's own tree) now
+// self-fetches its own two live reads (lib/firm/needs-you-gaps.ts, 0137) plus
+// the client register (lib/firm/reads.ts) for its resolve form's client
+// select — three more mocked GETs, below.
 //
 // Wrapped in a synthetic <h1> — the same idiom used in
 // components/documents/documents-a11y.test.tsx and
@@ -19,7 +23,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent } from "../../test/hookHarness";
+import { renderComponent, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
@@ -63,13 +67,61 @@ const ENVELOPE: ReviewQueueEnvelope = {
   next_cursor: null,
 };
 
-test("firm needs-you inbox has zero violations", async () => {
+// The two 0137 read surfaces (lib/firm/needs-you-gaps.ts) plus the client
+// register their resolve form's select reads (lib/firm/reads.ts).
+const FIRM_QUESTION = {
+  id: "q1", firm_id: "f1", document_id: "d1", kind: "unattributed",
+  question_text: "Which client does this belong to?", candidates: [],
+  status: "open", opened_by: "u1", opened_at: "2026-08-01T00:00:00Z",
+  settled_by: null, settled_at: null, settlement_text: null, named_client: null, receipt_id: null,
+};
+const IDENTIFIER_PROMOTION = {
+  id: "p1", firm_id: "f1", client_id: "c1", kind: "tin", value_normalized: "c12345678090",
+  sightings: 3, citations: [{ document_id: "d2" }], rationale: "Seen on three filed statements.",
+  model: { provider: "anthropic", model: "claude", version: "5" }, status: "proposed",
+  proposed_by: "agent", proposed_at: "2026-08-02T00:00:00Z",
+  settled_by: null, settled_at: null, identifier_id: null,
+};
+const CLIENTS = [{ id: "c1", name: "Acme Sdn Bhd", status: "active", created_at: "2026-01-01T00:00:00Z" }];
+
+function mockGapsAndQueueFetch(u: string): Response {
+  if (u.includes("/rpc/list_review_queue")) return jsonResponse(ENVELOPE);
+  if (u.includes("/rest/v1/firm_open_questions_visible")) return jsonResponse([FIRM_QUESTION]);
+  if (u.includes("/rest/v1/client_identifier_promotions_visible")) return jsonResponse([IDENTIFIER_PROMOTION]);
+  if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
+  throw new Error(`unexpected fetch: ${u}`);
+}
+
+// "Resolve" is ambiguous by text alone: the review-queue's own open_question
+// row (NeedsYouRow) AND the firm-question row (FirmQuestionRow, below it)
+// both render a button with this exact label, reusing the SAME translation
+// key by design. Ported from matching-section.test.tsx's `checkboxNear`
+// idiom — content-scoped, never a DOM-order assumption.
+type Node = { tagName?: string; parentNode?: Node | null; childNodes?: Node[] };
+
+function findAll(root: Node, predicate: (n: Node) => boolean): Node[] {
+  const found: Node[] = [];
+  (function walk(n: Node) {
+    if (predicate(n)) found.push(n);
+    for (const c of n.childNodes ?? []) walk(c);
+  })(root);
+  return found;
+}
+
+function buttonInRowNamed(h: Awaited<ReturnType<typeof renderComponent>>, label: string, rowNeedle: string): Node {
+  const candidates = findAll(h.container as unknown as Node, (n) => n.tagName === "BUTTON" && textOf(n as never) === label);
+  const match = candidates.find((btn) => {
+    let ancestor: Node | null | undefined = btn.parentNode;
+    while (ancestor && ancestor.tagName !== "LI") ancestor = ancestor.parentNode;
+    return ancestor ? textOf(ancestor as never).includes(rowNeedle) : false;
+  });
+  assert.ok(match, `no "${label}" button found in the row containing "${rowNeedle}"`);
+  return match!;
+}
+
+test("firm needs-you inbox (queue + the two 0137 gap lists) has zero violations", async () => {
   await withMockedEnv(
-    async (u) => {
-      const url = String(u);
-      if (url.includes("/rpc/list_review_queue")) return jsonResponse(ENVELOPE);
-      throw new Error(`unexpected fetch: ${url}`);
-    },
+    async (u) => mockGapsAndQueueFetch(String(u)),
     async () => {
       const h = await renderComponent(
         createElement(NextIntlClientProvider, {
@@ -80,8 +132,36 @@ test("firm needs-you inbox has zero violations", async () => {
         }),
       );
       try {
-        for (let i = 0; i < 3; i++) await h.settle();
+        for (let i = 0; i < 4; i++) await h.settle();
         assert.match(h.text(), /Which account should this fee post to/, "the queue row must have actually loaded");
+        assert.match(h.text(), /Which client does this belong to\?/, "the firm-questions row must have actually loaded");
+        assert.match(h.text(), /c12345678090/, "the identifier-promotion row must have actually loaded");
+        const violations = checkAccessibility(h.container as never);
+        assert.deepEqual(violations, [], JSON.stringify(violations));
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("firm needs-you inbox: the firm-question resolve form (open, with its client select) has zero violations", async () => {
+  await withMockedEnv(
+    async (u) => mockGapsAndQueueFetch(String(u)),
+    async () => {
+      const h = await renderComponent(
+        createElement(NextIntlClientProvider, {
+          locale: "en",
+          messages,
+          children: createElement("div", null, createElement("h1", null, "Needs you"), createElement(NeedsYouInbox)),
+        }),
+      );
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        const resolveBtn = buttonInRowNamed(h, "Resolve", "Which client does this belong to?");
+        await h.fireEvent(resolveBtn as never, "click");
+        await h.settle();
+        assert.ok(h.find((n) => n.tagName === "SELECT"), "the resolve form's client select must be open");
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {
