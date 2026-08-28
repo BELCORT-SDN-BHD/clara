@@ -88,3 +88,52 @@ conformance re-runs as P6 exit gates; (iv) the Wave-G estate e2e. New mechanical
 minted with this batch (lives in `.claude/rules/db-migrations.md`): **any migration adding
 a `clara_authenticated` door must name its frontend home or non-UI ruling in the PR
 body.**
+
+## 裁-8 · Wave C sequencing — "可以等, 我要完美的的成品"
+
+**Proposed:** Wave C (T1 · T2 · T11) dispatches as one wave AFTER F-A7b PR-a merges, so T11
+is built against F-A7b's live doors rather than a guess; the alternative (dispatch T1/T2 now,
+T11 later) trades a cleaner calendar for a split wave and a third review cohort while Wave B's
+four reviews + P4's final pin round already hold the review capacity.
+**Ruled:** wait — the owner values the complete product over the calendar. Conductor's
+latitude, recorded so it is not read as drift: T1/T2 carry no F-A7b dependency and MAY be
+dispatched the moment Wave B's fix rounds are in same-reviewer re-verify (a capacity
+decision, not a dependency one); T11 never precedes F-A7b's merge.
+
+## 裁-9 · P6 polish depth — THE DEEPEST TIER, every provided resource
+
+**Proposed:** tier (b) of 裁-3 for P6 (flow-level polish + the four-card wire bump).
+**Ruled (escalated past the recommendation):** "我要最深的, 用我们的所有 design system, token
+… rules 和 philosophy, 和我们给与的 design resources, like all skill, mcp we have given …
+還有很多我沒有看到的 … 你要去确认一下." Binding from this entry:
+
+- **P6 runs at tier (c), full depth**: every built surface is re-checked screen-by-screen
+  against the COMPLETE handoff resource set — the token contract, the design-rule docs, the
+  FD-001..FD-047 decision log, EMIL-CRAFT-AUDIT.md, all eight vendored Emil skills, the
+  shadcn registry + live shadcn MCP, the Mobbin MCP references, and the high-fidelity
+  prototype screens themselves. Deviations are recorded by ruling, never absorbed.
+- **A THIRD conformance pass is P6's ENTRY gate, not only its exit gate.** Passes 1-2
+  (`clarabook-resource-audit-2026-08-28.md`) read every PRESCRIPTIVE document; pass 3 reads
+  the DESCRIPTIVE ones — the prototype screens and components — as the parity reference for
+  the polish lanes, AND re-fetches the handoff repo at P6 entry so any resource added after
+  2026-08-28 is caught (a drift check on the source, not only on the port).
+- The standing answer to "did the port respect the handoff's resources": **yes, with the
+  audit's own honest bound** — 1,408 files, every prescriptive one read, provenance
+  byte-cited in `apps/web`; the two identity-asset gaps and the one binding-rule delta are
+  on file (§3/§4 of the audit) and sit in the owner's 待裁 batch (items 2 and 3). Under this
+  ruling their fail-closed defaults ("owed at P6") are the operating assumption until ruled
+  otherwise.
+
+## 裁-10 · The beta line — "听你的"
+
+**Proposed and ruled:** an **accounting-correctness defect BLOCKS beta** (a wrong number, a
+wrong depreciable base, a mis-attributed posting — the T3 F1 class); a **coverage gap SHIPS
+DOCUMENTED** (a `NotBuiltNote` on the surface + a PROGRESS Known-issues row + the Wave-G e2e
+record naming it). The owner's follow-up "不过目前都是基本上都可以对吧?" — answer of record at
+this batch: nothing merged on `main` is known-broken; every merged train (T0, T3, T6, T5,
+T9) cleared an adversarial independent review whose FIX-REQUIRED findings were fixed and
+re-verified by the same reviewer; every open item is either in flight (Wave B's four
+reviews, P4's final pin round, F-A7b PR-a) or a RECORDED gap — the `counterparty_aliases`
+read policy (T8's census), the sweep-receipt acknowledge control (T7's census), and the six
+待裁 items. "Basically fine" is true of what is merged; it is not yet true of the product,
+which is why the loop continues.
