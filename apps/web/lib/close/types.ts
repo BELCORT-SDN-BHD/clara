@@ -16,8 +16,9 @@
 //   - clara.attest_close_exception(p_close_run uuid, p_check_key text, p_reason text,
 //     p_op_key text, p_item_key text DEFAULT NULL, p_from_proposal uuid DEFAULT NULL)
 //     — 0120:919 (the LIVE 6-arg signature; p_from_proposal stays unpassed/defaulted,
-//     exactly like closeApi.ts:151-166 — there is no close_proposals carrier to pass
-//     one from, see the ClosePage header for the "Clara proposes close" honesty note)
+//     exactly like closeApi.ts:151-166 — the close_proposals carrier and its doors ARE
+//     live (0138), but the panel that would read one to source an id from is not built
+//     yet, see components/close/CloseProposalPanel.tsx's "Clara proposes close" note)
 //   - clara.list_fiscal_years(p_client uuid) — 0056:2665, unchanged since
 //   - clara.get_close_plan(p_fiscal_year_id uuid) — 0064:154, unchanged since
 //   - clara.verify_close(p_receipt uuid) — 0056:2529, viewer+, unchanged since
