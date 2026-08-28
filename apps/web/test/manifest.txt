@@ -67,6 +67,8 @@ components/registers/counterparty-hygiene-keyboard.test.tsx
 components/registers/fa-particulars-fields.test.tsx
 components/registers/fixed-assets-a11y.test.tsx
 components/registers/fixed-assets-keyboard.test.tsx
+components/registers/opening-a11y.test.tsx
+components/registers/opening-keyboard.test.tsx
 components/registers/opening-register.test.tsx
 components/registers/staff-advance-money-input.test.tsx
 components/registers/staff-advance-statement-panel.test.tsx
@@ -130,6 +132,9 @@ lib/registers/depreciation.test.ts
 lib/registers/fa-account-profiles.test.ts
 lib/registers/fixed-assets.test.ts
 lib/registers/knowledge.test.ts
+lib/registers/opening-doors.test.ts
+lib/registers/opening-item-doors.test.ts
+lib/registers/opening.test.ts
 lib/registers/staff-advances-doors.test.ts
 lib/registers/staff-advances.test.ts
 lib/reports/api.test.ts
