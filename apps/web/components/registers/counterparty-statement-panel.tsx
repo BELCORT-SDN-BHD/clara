@@ -66,7 +66,7 @@ export function CounterpartyStatementPanel({
 
   return (
     <div className="flex flex-col gap-4">
-      <SectionHeader level={3}>{t("heading", { name: counterpartyName })}</SectionHeader>
+      <SectionHeader level={2}>{t("heading", { name: counterpartyName })}</SectionHeader>
       {err && (
         <StateBanner tone="error" code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}>
           {err}
@@ -111,7 +111,7 @@ export function CounterpartyStatementPanel({
 
       <div className="flex flex-col gap-2">
         <SectionHeader
-          level={4}
+          level={3}
           action={
             <ApplyOpenItemsDialog
               items={agingItems}
