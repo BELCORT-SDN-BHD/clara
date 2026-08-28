@@ -23,7 +23,7 @@ import { loadUncodedFilingsWithLanes } from "@/lib/coding/loaders";
 import { listOpenCodingTasks, listOpenLintFindings } from "@/lib/coding/reads";
 import { SectionHeader } from "@/components/common/section-header";
 import { LoadingState } from "@/components/common/state";
-import { ActionRefusal } from "@/components/bank/action-refusal";
+import { CodingActionRefusal } from "./coding-action-refusal";
 import { UncodedFilingsList } from "./uncoded-filings-list";
 import { CodingTasksSection } from "./coding-tasks-section";
 import { LintFindingsSection } from "./lint-findings-section";
@@ -45,7 +45,7 @@ export function CodingLanePanel({ clientId }: { clientId: string }) {
         {uncoded.loading && !uncoded.data ? (
           <LoadingState>{t("loading")}</LoadingState>
         ) : !uncoded.data && uncoded.err ? (
-          <ActionRefusal err={uncoded.err} clr={uncoded.clr} />
+          <CodingActionRefusal err={uncoded.err} clr={uncoded.clr} />
         ) : (
           <UncodedFilingsList entries={uncoded.data ?? []} busy={uncoded.busy} error={uncoded.err} clr={uncoded.clr} act={uncoded.act} />
         )}
@@ -56,7 +56,7 @@ export function CodingLanePanel({ clientId }: { clientId: string }) {
         {tasks.loading && !tasks.data ? (
           <LoadingState>{t("loading")}</LoadingState>
         ) : !tasks.data && tasks.err ? (
-          <ActionRefusal err={tasks.err} clr={tasks.clr} />
+          <CodingActionRefusal err={tasks.err} clr={tasks.clr} />
         ) : (
           <CodingTasksSection tasks={tasks.data ?? []} busy={tasks.busy} error={tasks.err} clr={tasks.clr} act={tasks.act} />
         )}
@@ -67,7 +67,7 @@ export function CodingLanePanel({ clientId }: { clientId: string }) {
         {findings.loading && !findings.data ? (
           <LoadingState>{t("loading")}</LoadingState>
         ) : !findings.data && findings.err ? (
-          <ActionRefusal err={findings.err} clr={findings.clr} />
+          <CodingActionRefusal err={findings.err} clr={findings.clr} />
         ) : (
           <LintFindingsSection findings={findings.data ?? []} busy={findings.busy} error={findings.err} clr={findings.clr} act={findings.act} />
         )}

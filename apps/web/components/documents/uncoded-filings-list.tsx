@@ -14,7 +14,7 @@ import { SectionTabs } from "@/components/common/section-tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/parts/PartBadge";
 import { EmptyState } from "@/components/common/state";
-import { ActionRefusal } from "@/components/bank/action-refusal";
+import { CodingActionRefusal } from "./coding-action-refusal";
 import { isActingRowPresent } from "@/lib/firm/needs-you-gaps";
 import { businessDate } from "@/lib/business-date";
 import { CODING_LANE_REASON_CODES, type CodingLane } from "@/lib/coding/types";
@@ -58,7 +58,7 @@ export function UncodedFilingsList({
 
   return (
     <div className="flex flex-col gap-2">
-      {rowVanished ? <ActionRefusal err={error} clr={clr} /> : null}
+      {rowVanished ? <CodingActionRefusal err={error} clr={clr} /> : null}
       <SectionTabs
         label={t("lanesLabel")}
         value={lane}
@@ -100,7 +100,7 @@ export function UncodedFilingsList({
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-col gap-2">
-                    {actingId === entry.filing_id ? <ActionRefusal err={error} clr={clr} /> : null}
+                    {actingId === entry.filing_id && !rowVanished ? <CodingActionRefusal err={error} clr={clr} /> : null}
                     <UncodedFilingActions
                       clientId={entry.client_id}
                       documentId={entry.document_id}

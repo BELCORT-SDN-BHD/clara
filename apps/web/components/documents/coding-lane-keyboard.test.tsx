@@ -269,3 +269,106 @@ test("DISMISS CODING TASK journey: the dialog opens, its reason field and Confir
     await detach(h, b);
   }
 });
+
+// M13, independent review (pin the fixes): a REFUSED confirm must NOT clear
+// what the human typed. `CodingDoorDialog` closes on every confirm click
+// regardless of outcome (its own `runOnce` reports whether `onConfirm` RAN,
+// never whether the door succeeded — lib/parts/single-fire-guard.ts's own
+// header), so the only observable proof is on REOPEN: the field must still
+// hold the original text, not a blank one a `.then()`-style unconditional
+// clear would have produced.
+test("OPEN CODING TASK journey: a REFUSED confirm does not clear the typed reason — reopening the dialog shows it still there", async () => {
+  let refusalCalls = 0;
+  await withMockedEnv(
+    async (url) => {
+      if (String(url).includes("/rpc/open_coding_task")) {
+        refusalCalls += 1;
+        return jsonResponse({ code: "CLR24", message: "active coding-task filing not found" }, 400);
+      }
+      throw new Error(`unexpected fetch: ${String(url)}`);
+    },
+    async () => {
+      const h = await renderComponent(
+        App(createElement(UncodedFilingActions, {
+          clientId: "c1", documentId: "d1", filingId: "f1", busy: false,
+          // A refusal caught and swallowed HERE, never rethrown — the SAME
+          // contract the real `useHydratedPart().act()`/needs-you `act()`
+          // both honor (they catch internally and never reject; that is
+          // what lets `onConfirm` reach its own `if (succeeded)` check
+          // instead of throwing past it).
+          act: async (fn: () => Promise<void>) => { try { await fn(); } catch { /* swallowed, matching the real act() */ } },
+        })),
+      );
+      const b = body();
+      (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
+      try {
+        for (let i = 0; i < 2; i++) await h.settle();
+        const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Open coding task$/) !== null);
+        await h.fireEvent(trigger!, "click");
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        const reasonField = findIn(b, (n) => n.tagName === "TEXTAREA");
+        await h.act(() => { setFieldValue(reasonField as never, "vendor could not be matched"); });
+        const confirmButton = findIn(b, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Open coding task$/) !== null && n !== trigger);
+        await h.act(() => { clickButton(confirmButton as never); });
+        for (let i = 0; i < 6; i++) await h.settle();
+        assert.equal(refusalCalls, 1, "the refusal must actually have been reached exactly once");
+        assert.doesNotMatch(textOf(b as never), /Open a coding task/, "the dialog closes regardless of outcome");
+
+        await h.fireEvent(trigger!, "click");
+        for (let i = 0; i < 6; i++) await h.settle();
+        // Read the value react itself last rendered onto the REOPENED
+        // (freshly-mounted, per base-ui's own unmount-on-close default)
+        // textarea's own props — the same `__reactProps$...` mechanism
+        // setFieldValue already relies on — rather than the raw DOM
+        // property, which a fresh stub node's own value-tracking quirks
+        // make an unreliable read in this harness.
+        const reopenedField = findIn(b, (n) => n.tagName === "TEXTAREA") as unknown as Record<string, unknown>;
+        const propsKey = Object.keys(reopenedField).find((k) => k.startsWith("__reactProps"));
+        const reactValue = propsKey ? (reopenedField[propsKey] as { value?: string }).value : undefined;
+        assert.equal(reactValue, "vendor could not be matched", "the reason must survive a refusal — cleared only on SUCCESS");
+      } finally {
+        await detach(h, b);
+      }
+    },
+  );
+});
+
+// M16, independent review (pin the fixes): a FAILED read of the entry picker
+// must render as an error with a retry, never the honest-but-wrong "no
+// approved entries exist" claim — that message is reserved for a read that
+// genuinely succeeded and returned zero rows.
+test("COMPLETE CODING TASK journey: a FAILED entry-picker read renders the error + retry, never the empty-entries claim", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/journal_entries")) {
+        return jsonResponse({ code: "PGRST000", message: "connection reset" }, 500);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(
+        App(createElement(CodingTaskActions, {
+          taskId: "t1", filingId: "f1", busy: false,
+          act: async (fn: () => Promise<void>) => { await fn(); },
+        })),
+      );
+      const b = body();
+      (b as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Complete$/) !== null);
+        await h.fireEvent(trigger!, "click");
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        assert.doesNotMatch(textOf(b as never), /No approved entry exists yet/, "a FAILED read must never render as a fabricated empty-entries fact");
+        const retryButton = findIn(b, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Retry$/) !== null);
+        assert.ok(retryButton, "a retry control must render on a failed read");
+        assert.equal(findIn(b, (n) => n.tagName === "SELECT"), null, "no entry picker may render over a failed read");
+      } finally {
+        await detach(h, b);
+      }
+    },
+  );
+});

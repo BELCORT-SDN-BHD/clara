@@ -16,6 +16,12 @@
 // explicitly, the same shape coding-lane-panel.tsx's own fix uses, so the
 // real error renders via `ActionRefusal` (CLR code + tone ladder intact).
 //
+// R1, independent review: the row-vanish banner used to sit behind an early
+// `rows.length === 0 ? <EmptyState>` branch — when the acted-on row was the
+// ONLY row (the common case), that branch fired before the banner ever
+// rendered. It is now checked UNCONDITIONALLY once a successful load has
+// happened (`data` non-null), before deciding empty-vs-list.
+//
 // F6, independent review: the read includes `cancel_requested`
 // (lib/coding/reads.ts's `AGENT_TASK_LIVE_STATUSES`) — a running task's
 // cancel is only a REQUEST, so the row must stay visible, labeled
@@ -33,7 +39,7 @@ import { isActingRowPresent } from "@/lib/firm/needs-you-gaps";
 import { businessDateTime } from "@/lib/business-date";
 import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState, LoadingState } from "@/components/common/state";
-import { ActionRefusal } from "@/components/bank/action-refusal";
+import { CodingActionRefusal } from "@/components/documents/coding-action-refusal";
 import { Badge } from "@/components/parts/PartBadge";
 import { CodingDoorDialog } from "@/components/documents/CodingDoorDialog";
 
@@ -67,12 +73,13 @@ export function AgentTasksPanel() {
       {loading && !data ? (
         <LoadingState>{t("loading")}</LoadingState>
       ) : !data && err ? (
-        <ActionRefusal err={err} clr={clr} />
-      ) : rows.length === 0 ? (
-        <EmptyState>{t("empty")}</EmptyState>
+        <CodingActionRefusal err={err} clr={clr} />
       ) : (
         <>
-          {rowVanished ? <ActionRefusal err={err} clr={clr} /> : null}
+          {rowVanished ? <CodingActionRefusal err={err} clr={clr} /> : null}
+          {rows.length === 0 ? (
+            <EmptyState>{t("empty")}</EmptyState>
+          ) : (
           <ul className="flex flex-col gap-2">
             {rows.map((task) => (
               <li key={task.id} className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
@@ -83,7 +90,7 @@ export function AgentTasksPanel() {
                       UTC slice. */}
                   <span className="text-xs text-muted-foreground">{businessDateTime(task.created_at)}</span>
                 </div>
-                {actingId === task.id && !rowVanished && err ? <ActionRefusal err={err} clr={clr} /> : null}
+                {actingId === task.id && !rowVanished && err ? <CodingActionRefusal err={err} clr={clr} /> : null}
                 {AGENT_TASK_CANCELLABLE_STATUSES.has(task.status) ? (
                   <CodingDoorDialog
                     triggerLabel={t("cancelTrigger")}
@@ -103,6 +110,7 @@ export function AgentTasksPanel() {
               </li>
             ))}
           </ul>
+          )}
         </>
       )}
     </div>

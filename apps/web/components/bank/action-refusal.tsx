@@ -12,7 +12,23 @@ import { useTranslations } from "next-intl";
 
 import { StateBanner } from "@/components/common/state";
 
-export function ActionRefusal({ err, clr }: { err: string | null; clr: { code: string; reason: string | null } | null }) {
+export function ActionRefusal({
+  err, clr, refusalTitle, actionFailedTitle,
+}: {
+  err: string | null;
+  clr: { code: string; reason: string | null } | null;
+  /** R2, independent review: this component is now a shared, cross-domain
+   *  primitive (T7's coding-lane/agent-tasks surfaces are a second consumer
+   *  beyond bank), but its title text was hardcoded to `ClientBank.common`'s
+   *  own strings — every non-bank caller silently rendered "The bank refused
+   *  this." Both titles are now OPTIONAL overrides; omitting either preserves
+   *  the exact bank behavior byte-for-byte (every existing bank call site
+   *  passes neither). A non-bank caller supplies its own domain-neutral
+   *  text — see documents/coding-lane-panel.tsx and its five siblings for
+   *  the "Common" namespace strings T7 uses. */
+  refusalTitle?: string;
+  actionFailedTitle?: string;
+}) {
   const t = useTranslations("ClientBank.common");
   if (!err) return null;
   // P3 polish: the shared shell. Bank's own refusal-vs-operational-failure
@@ -23,7 +39,7 @@ export function ActionRefusal({ err, clr }: { err: string | null; clr: { code: s
   return (
     <StateBanner
       tone="error"
-      title={clr ? t("refusalTitle") : t("actionFailedTitle")}
+      title={clr ? (refusalTitle ?? t("refusalTitle")) : (actionFailedTitle ?? t("actionFailedTitle"))}
       code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}
     >
       {err}

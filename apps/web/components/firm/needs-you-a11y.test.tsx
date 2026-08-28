@@ -136,6 +136,13 @@ test("firm needs-you inbox (queue + the two 0137 gap lists) has zero violations"
         assert.match(h.text(), /Which account should this fee post to/, "the queue row must have actually loaded");
         assert.match(h.text(), /Which client does this belong to\?/, "the firm-questions row must have actually loaded");
         assert.match(h.text(), /c12345678090/, "the identifier-promotion row must have actually loaded");
+        // M3, independent review (pin the fixes): SweepStatusPanel is genuinely
+        // MOUNTED inside NeedsYouInbox — the SAME envelope's `sweep` field this
+        // test already reads, never a second call.
+        assert.match(h.text(), /No sweep run is currently open/, "SweepStatusPanel must actually be mounted inside NeedsYouInbox");
+        // M5, independent review: OpenQuestionDetail is genuinely mounted
+        // inside the open_question row's own OpenQuestionAffordance.
+        assert.match(h.text(), /View details/, "OpenQuestionDetail's reveal trigger must actually be mounted on the open_question row");
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {

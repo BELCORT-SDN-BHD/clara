@@ -9,6 +9,8 @@
     "forbidden": "Your account can't read this yet.",
     "notFound": "This isn't available yet.",
     "unexpectedError": "Something went wrong: {message}",
+    "refusalTitle": "This was refused",
+    "actionFailedTitle": "This action failed",
     "notBuiltHeading": "Not built yet",
     "cancel": "Cancel",
     "close": "Close",

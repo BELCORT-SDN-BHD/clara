@@ -19,7 +19,7 @@ import { completeCodingTask, dismissCodingTask } from "@/lib/coding/doors";
 import { listApprovedEntriesForFiling } from "@/lib/coding/reads";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { CodingDoorDialog } from "./CodingDoorDialog";
-import { ActionRefusal } from "@/components/bank/action-refusal";
+import { CodingActionRefusal } from "./coding-action-refusal";
 
 // F1, independent review — CORRECTED SHAPE: no outer error/clr prop; see
 // uncoded-filing-actions.tsx's own header for why (its two real callers
@@ -83,7 +83,7 @@ export function CodingTaskActions({
             <p className="text-sm text-muted-foreground">{t("loadingEntries")}</p>
           ) : entries.kind === "error" ? (
             <div className="flex flex-col gap-2">
-              <ActionRefusal
+              <CodingActionRefusal
                 err={entries.error instanceof Error ? entries.error.message : String(entries.error)}
                 clr={null}
               />
