@@ -246,7 +246,8 @@
     "retry": "Retry",
     "tabs": {
       "drafts": "Drafts & review queue",
-      "posted": "Posted"
+      "posted": "Posted",
+      "clarifications": "Clarifications ({count})"
     },
     "status": {
       "draft": "Draft",
@@ -980,7 +981,105 @@
   "FixedAssetsDepreciation": {},
   "AdjustmentsAccounts": {},
   "StaffAdvances": {},
-  "DraftsDocumentGovernance": {},
+  "DraftsDocumentGovernance": {
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
+    "entryDiff": {
+      "show": "View diff & history",
+      "hide": "Hide diff & history",
+      "loading": "Loading the diff…",
+      "docDiffHeading": "Document vs. entry",
+      "noSourceDocument": "This entry has no source document to compare against.",
+      "docDiffEmpty": "No comparable fields were found on the source document.",
+      "field": "Field",
+      "docValue": "Document",
+      "entryValue": "Entry",
+      "deltaCents": "Delta",
+      "noRegion": "not found on the document",
+      "revisionsHeading": "Revision history",
+      "revisionsEmpty": "This draft has never been revised.",
+      "revisionNo": "Revision {n}",
+      "revisionBy": "by {actor}",
+      "revisionActorUnknown": "an unknown actor"
+    },
+    "approveRoutine": {
+      "trigger": "Approve (routine)"
+    },
+    "withdraw": {
+      "trigger": "Withdraw",
+      "title": "Withdraw this draft",
+      "description": "Abandons the draft entirely (clara.withdraw_draft) — distinct from reversing a posted entry. A reason is required.",
+      "confirm": "Withdraw draft",
+      "reasonLabel": "Withdrawal reason",
+      "reasonPlaceholder": "Reason for withdrawing this draft (required)…"
+    },
+    "interruptions": {
+      "empty": "No pending clarifications from Clara.",
+      "firmWideNote": "Firm-wide — not filtered to this client (clarifications carry no client scope).",
+      "questionOpaque": "Clara is asking for a clarification.",
+      "answerLabel": "Your answer",
+      "answerPlaceholder": "Type your answer…",
+      "answerSubmit": "Answer"
+    },
+    "documentExtract": {
+      "show": "View extraction text",
+      "hide": "Hide extraction text",
+      "loading": "Loading the extraction…",
+      "maxCharsNote": "Budgeted to {maxChars} characters — the same budget the agent reads under.",
+      "extractionsHeading": "Extractions",
+      "noExtractions": "No completed extraction for this document.",
+      "regionsHeading": "Regions",
+      "noRegions": "No extracted regions.",
+      "envelopeEmpty": "(no envelope text)"
+    },
+    "reextraction": {
+      "trigger": "Request re-extraction",
+      "title": "Request re-extraction",
+      "description": "Re-queues this document for a fresh extraction attempt (clara.request_reextraction). A reason is required — this changes the evidence a posted entry may rest on.",
+      "confirm": "Request re-extraction",
+      "reasonLabel": "Re-extraction reason",
+      "reasonPlaceholder": "Why does this document need to be re-extracted (required)…",
+      "outcomeHeading": "Last request",
+      "outcomeStatusQueued": "Queued (version {version})",
+      "outcomeStatusFailed": "Failed — budget exceeded",
+      "outcomeReused": "An extraction was already in flight for this lane — reused.",
+      "admission": {
+        "reextraction": "Superseding a prior extraction",
+        "receipt_backfill": "First extraction for a pre-existing receipt",
+        "filed_bootstrap": "First extraction for an already-filed document",
+        "failed_retry": "Retrying after a failed attempt"
+      }
+    },
+    "consentEvidence": {
+      "trigger": "Classify as consent evidence",
+      "title": "Classify as consent evidence",
+      "description": "Marks this document as the client's cross-border-transfer consent evidence (clara.classify_consent_evidence_document). Owner-level action — the DB refuses honestly if your session doesn't hold it. A reason is required.",
+      "confirm": "Classify as consent evidence",
+      "reasonLabel": "Reason",
+      "reasonPlaceholder": "Why this document is the client's consent evidence (required)…",
+      "priorKindNote": "Was: {priorKind}"
+    },
+    "autodraft": {
+      "trigger": "Request autodraft",
+      "title": "Request autodraft",
+      "description": "Asks Clara to draft a journal entry from this filing (clara.request_autodraft) — a one-click admission; the agent still runs under the same coding-lane and budget walls as the unattended sweep.",
+      "confirm": "Request autodraft",
+      "outcome": {
+        "admitted": "Admitted — Clara will draft this filing.",
+        "re_admitted": "Re-admitted after the earlier attempt didn't complete.",
+        "re_admitted_after_withdrawal": "Re-admitted — the earlier draft was withdrawn.",
+        "noop_existing": "Already in progress — nothing new was queued.",
+        "already_done": "Already drafted — nothing new was queued.",
+        "skipped_direction": "Not queued — the sales-invoice lane isn't open for this firm yet.",
+        "refused_budget": "Not queued — today's autodraft budget is used up.",
+        "refused_attempts": "Not queued — this filing has already used its autodraft attempts.",
+        "lane_changed": "Not queued — this filing isn't in a ready coding lane right now.",
+        "unknown": "Result: {outcome}"
+      }
+    }
+  },
   "CodingQuestionsSignals": {},
   "ArApCounterparty": {},
   "ReportsSnapshotsSeeding": {},
