@@ -73,9 +73,12 @@ export function ClaraThreadView({
       <div className="flex-1 space-y-3 overflow-y-auto p-3" role="log" aria-live="polite">
         {/* T11: the onboarding checklist card — a stateful card INLINE in the
             message stream (R7, the Manus precedent), never a side panel.
-            Rendered first so it stays visible above the transcript's own
-            scroll, and independent of threadId's own load state — see this
-            component's own `clientId` doc comment. */}
+            N5 fix (rev-t11): this is the FIRST child of the scrolling log
+            (role="log", the SAME scroll region the transcript itself lives
+            in) — it scrolls out of view like any other item as messages
+            accumulate, exactly R7's "inline in the stream" shape; it is
+            NOT pinned above the scroll. Independent of threadId's own load
+            state — see this component's own `clientId` doc comment. */}
         <OnboardingChecklistCard clientId={clientId} session={auth} />
         {/* P3 polish: the rail's own five state spellings joined the product
             ladder. "Sign in to talk with Clara" is a STATE, not a fault, so it

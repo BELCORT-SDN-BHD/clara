@@ -76,6 +76,28 @@ export async function getOnboardingClient(clientId: string, opts: Opts = {}): Pr
   return rows[0] ?? null;
 }
 
+/** F2 fix (rev-t11): whether a FINALIZED opening seed exists for this
+ *  client+plan — the one disjunct of commit_client_onboarding's
+ *  `opening_position_required` OR-of-three-EXISTS (0017:2812-2822) this
+ *  module cannot answer from `onboarding_plan_items` alone (the other two
+ *  disjuncts are item-key checks over data this card already holds; see
+ *  `OnboardingChecklistCard.tsx`'s `openingPositionCaptured`). T2 (port-wave
+ *  plan §4 T2) owns `opening_seed_registry`'s own UI — this is a narrow,
+ *  read-only existence check, not a re-implementation of T2's surface. Same
+ *  access class as onboarding_plans/items: direct `clara_authenticated`
+ *  SELECT grant, no DML (0017:5114-5122). Deliberately checked so this
+ *  card's opening-position gate is HONEST (never a false denial the DB
+ *  would actually allow) rather than skipped outright. */
+export async function hasFinalizedOpeningSeed(clientId: string, planId: string, opts: Opts = {}): Promise<boolean> {
+  const rows = await getRows<{ id: string }>("opening_seed_registry", {
+    select: "id",
+    filters: { client_id: `eq.${clientId}`, plan_id: `eq.${planId}`, state: "eq.finalized" },
+    limit: 1,
+    ...opts,
+  });
+  return rows.length > 0;
+}
+
 const opKey = (): string => crypto.randomUUID();
 
 /** clara.begin_client_onboarding(p_name text, p_op_key text) — 0017:2492,

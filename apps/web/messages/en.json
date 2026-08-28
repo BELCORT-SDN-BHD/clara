@@ -1988,7 +1988,12 @@
       "commitTitle": "Commit this onboarding plan",
       "commitDescription": "This activates {client} and closes the plan ({completed} of {total} items settled). The client can then be worked in its own workspace.",
       "commitConfirm": "Commit onboarding",
-      "commitBlockedRequired": "A required item is still pending — resolve it before committing.",
+      "commitBlocked": {
+        "plan_not_open": "This plan is no longer open — it cannot be committed again.",
+        "client_not_onboarding": "This client's status is no longer \"onboarding\".",
+        "questions_unresolved": "A required item is still pending — resolve it before committing.",
+        "opening_position_required": "An opening position is required before activation — settle or defer it first."
+      },
       "attestationLabel": "Attestation (only needed if the DB asks for one)",
       "attestationPlaceholder": "Only fill this in if a commit attempt asks for an attestation.",
       "cancelTrigger": "Cancel onboarding",
@@ -1997,6 +2002,7 @@
       "cancelConfirm": "Cancel onboarding",
       "cancelReasonLabel": "Reason for cancelling",
       "cancelReasonPlaceholder": "Why is this onboarding being cancelled?",
+      "cancelBlockedNotOpen": "This plan is no longer open — there is nothing left to cancel.",
       "beginHeading": "Start a new client's onboarding",
       "beginTrigger": "Begin client onboarding",
       "beginTitle": "Begin a new client's onboarding",
@@ -2004,7 +2010,8 @@
       "beginConfirm": "Begin onboarding",
       "nameLabel": "Client name",
       "namePlaceholder": "Legal or trading name",
-      "beginResult": "Client {clientId} and plan {planId} were created. Open it from the client register to continue."
+      "beginResult": "Client {clientId} and plan {planId} were created.",
+      "beginResultLink": "Open this client's workspace"
     }
   }
 }

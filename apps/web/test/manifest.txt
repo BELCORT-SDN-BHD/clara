@@ -28,6 +28,7 @@ components/bank/bank-a11y.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx
+components/clara/onboarding-begin-keyboard.test.tsx
 components/clara/onboarding-checklist-a11y.test.tsx
 components/clara/onboarding-checklist-keyboard.test.tsx
 components/clara/onboarding-checklist.test.tsx

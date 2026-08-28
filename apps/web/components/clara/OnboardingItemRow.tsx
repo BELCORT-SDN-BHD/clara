@@ -44,7 +44,14 @@ export function OnboardingItemRow({
    *  the door still renders) so a doomed round trip is not the human's first
    *  signal that the plan already closed. */
   planOpen: boolean;
-  onResolve: (resolution: string) => Promise<void>;
+  /** F1 fix (rev-t11): the clear-on-settle discipline lives in the CALLER's
+   *  `act(fn, onOk)` — `onOk` fires only inside `act`'s try block, BEFORE the
+   *  reload, so a refusal never reaches it (`lib/parts/hooks.ts:221-243`).
+   *  This row must not clear its own typed text itself; it hands the clear
+   *  down as `onOk` so the parent's `act` decides whether it ever runs —
+   *  mirrors this same file's sibling Cancel door
+   *  (`OnboardingChecklistCard.tsx`'s `act(fn, () => setCancelReason(""))`). */
+  onResolve: (resolution: string, onOk: () => void) => Promise<void>;
 }) {
   const t = useTranslations("ClientOnboarding.item");
   const [resolution, setResolution] = useState("");
@@ -70,8 +77,7 @@ export function OnboardingItemRow({
         busy={busy}
         confirmDisabled={!canResolve || resolution.trim().length === 0}
         onConfirm={async () => {
-          await onResolve(resolution.trim());
-          setResolution("");
+          await onResolve(resolution.trim(), () => setResolution(""));
         }}
       >
         <Textarea

@@ -34,6 +34,7 @@
 // card is the ONLY surface for all five doors in the whole product today.
 
 import { useState } from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -48,6 +49,7 @@ import {
   commitClientOnboarding,
   getMostRecentOnboardingPlan,
   getOnboardingClient,
+  hasFinalizedOpeningSeed,
   listOnboardingPlanItems,
   resolveOnboardingPlanItem,
 } from "@/lib/onboarding/api";
@@ -73,7 +75,15 @@ export function OnboardingChecklistCard({
 type Loaded =
   | { kind: "no_client" }
   | { kind: "no_plan"; client: OnboardingClientRow }
-  | { kind: "plan"; client: OnboardingClientRow | null; plan: OnboardingPlanRow; items: OnboardingPlanItemRow[] };
+  | {
+      kind: "plan";
+      client: OnboardingClientRow | null;
+      plan: OnboardingPlanRow;
+      items: OnboardingPlanItemRow[];
+      /** F2 fix — see lib/onboarding/api.ts's `hasFinalizedOpeningSeed` doc
+       *  comment for why this read exists. */
+      openingSeedFinalized: boolean;
+    };
 
 async function loadClientOnboarding(clientId: string, s: SessionTokenAccessor): Promise<Loaded> {
   const client = await getOnboardingClient(clientId, { session: s });
@@ -81,7 +91,8 @@ async function loadClientOnboarding(clientId: string, s: SessionTokenAccessor): 
   const plan = await getMostRecentOnboardingPlan(clientId, { session: s });
   if (!plan) return { kind: "no_plan", client };
   const items = await listOnboardingPlanItems(plan.id, { session: s });
-  return { kind: "plan", client, plan, items };
+  const openingSeedFinalized = await hasFinalizedOpeningSeed(clientId, plan.id, { session: s });
+  return { kind: "plan", client, plan, items, openingSeedFinalized };
 }
 
 /** `resolve_onboarding_plan_item` counts an item "completed" toward Q9's
@@ -95,17 +106,52 @@ function completedCount(items: OnboardingPlanItemRow[]): number {
   return items.filter((i) => i.state !== "pending").length;
 }
 
-/** required_for_commit rows are the ONE opening-position/checker rule this
- *  card pre-computes — it is exactly what commit_client_onboarding's own
- *  CLR10 `questions_unresolved` arm checks (0017:2806-2811 source anchor;
- *  the LIVE body carries this typed reason via 0018_gate_k_domain.sql SS4's
- *  splice — lib/onboarding/api.ts's own doc comment on this door), never a
- *  wider re-derivation of Gate O. Everything else commit_client_onboarding
- *  refuses on (the opening-position arm, the distinct-checker/self-
- *  attestation arm) is left to the DB's own verbatim refusal — this card
- *  does not re-implement Gate O. */
+/** required_for_commit rows — mirrors commit_client_onboarding's own CLR10
+ *  `questions_unresolved` arm (0017:2806-2811 source anchor; the LIVE body
+ *  carries this typed reason via 0018_gate_k_domain.sql SS4's splice —
+ *  lib/onboarding/api.ts's own doc comment on this door). */
 function hasUnresolvedRequiredItem(items: OnboardingPlanItemRow[]): boolean {
   return items.some((i) => i.required_for_commit && i.state !== "answered" && i.state !== "resolved");
+}
+
+/** Mirrors the OTHER two (of three) disjuncts of commit_client_onboarding's
+ *  `opening_position_required` OR-of-three-EXISTS (0017:2812-2822) that live
+ *  on `onboarding_plan_items` itself — the third disjunct (a finalized
+ *  `opening_seed_registry` row) is `openingSeedFinalized`, read separately
+ *  (see `hasFinalizedOpeningSeed`'s own doc comment; T2 owns that table). */
+function openingPositionCaptured(items: OnboardingPlanItemRow[], openingSeedFinalized: boolean): boolean {
+  if (openingSeedFinalized) return true;
+  if (items.some((i) => i.item_key === "first_year_zero_opening" && (i.state === "answered" || i.state === "resolved"))) return true;
+  if (items.some((i) => i.item_key === "carry_down_deferred" && (i.state === "deferred" || i.state === "resolved"))) return true;
+  return false;
+}
+
+/** F2 fix (rev-t11 finding): the card's ONE piece of judgement logic, now
+ *  covering every commit_client_onboarding CLR10 arm this card can HONESTLY
+ *  compute from data it already holds — in the LIVE body's OWN precedence
+ *  order (0018_gate_k_domain.sql SS4's site-2 split: `plan_not_open` wins
+ *  over `client_not_onboarding` when both are true; `questions_unresolved`
+ *  and `opening_position_required` follow, in body order). Returns the
+ *  FIRST blocking reason, or `null` once none of the four hold — deliberately
+ *  NOT the CLR05 checker arms (`checker_required`/`distinct_checker`/
+ *  `self_attestation`): this card never guesses whether a distinct checker
+ *  exists, and CLR06 `stale_plan` is inherently a race only the DB can
+ *  resolve. Every reason this function returns null for is not a claim the
+ *  door will succeed — only that this card found no reason of its own to
+ *  block the attempt. */
+type CommitBlockReason = "plan_not_open" | "client_not_onboarding" | "questions_unresolved" | "opening_position_required";
+
+function commitBlockReason(
+  client: OnboardingClientRow | null,
+  plan: OnboardingPlanRow,
+  items: OnboardingPlanItemRow[],
+  openingSeedFinalized: boolean,
+): CommitBlockReason | null {
+  if (plan.state !== "open") return "plan_not_open";
+  if (client && client.status !== "onboarding") return "client_not_onboarding";
+  if (hasUnresolvedRequiredItem(items)) return "questions_unresolved";
+  if (!openingPositionCaptured(items, openingSeedFinalized)) return "opening_position_required";
+  return null;
 }
 
 function ClientOnboardingCard({ clientId, session }: { clientId: string; session: SessionTokenAccessor }) {
@@ -196,79 +242,94 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
               item={item}
               busy={busy}
               planOpen={planOpen}
-              onResolve={(resolution) =>
+              onResolve={(resolution, onOk) =>
                 act(async () => {
                   await resolveOnboardingPlanItem(plan.id, item.item_key, resolution, { session });
-                })
+                }, onOk)
               }
             />
           ))}
         </ul>
       )}
 
-      {planOpen ? (
-        <div className="flex flex-wrap gap-2">
-          {/* Consent shows what it approves (working protocol): the dialog
-              lists exactly what commit does — activates the client and closes
-              the plan — never a bare "Confirm". */}
-          <OnboardingDoorDialog
-            triggerLabel={t("commitTrigger")}
-            title={t("commitTitle")}
-            description={t("commitDescription", { client: data.client?.name ?? clientId, completed, total })}
-            confirmLabel={t("commitConfirm")}
-            busy={busy}
-            confirmDisabled={hasUnresolvedRequiredItem(items)}
-            onConfirm={() =>
-              act(async () => {
-                await commitClientOnboarding(
-                  { clientId, planId: plan.id, expectedPlanRevision: plan.revision_token, attestation: attestation.trim() || null },
-                  { session },
-                );
-              })
-            }
-          >
-            {hasUnresolvedRequiredItem(items) ? <p className="text-xs text-muted-foreground">{t("commitBlockedRequired")}</p> : null}
-            <Textarea
-              aria-label={t("attestationLabel")}
-              placeholder={t("attestationPlaceholder")}
-              value={attestation}
-              onChange={(e) => setAttestation(e.target.value)}
-            />
-          </OnboardingDoorDialog>
+      {(() => {
+        // F2 fix (rev-t11) + N1 nit: BOTH doors now render UNCONDITIONALLY
+        // once a plan exists — gating SHAPES, never HIDES, matching
+        // OnboardingItemRow's own resolve-door discipline (this file's own
+        // header used to apply the house rule two different ways in one
+        // PR). Commit's Confirm is gated by the full, ordered
+        // `commitBlockReason`; Cancel's by the same single `plan.state`
+        // check cancel_client_onboarding's own body makes (0017:2862-2864:
+        // `cl.status<>'onboarding' or p.state<>'open'`).
+        const blockReason = commitBlockReason(data.client, plan, items, data.openingSeedFinalized);
+        const cancelBlocked = plan.state !== "open";
+        return (
+          <div className="flex flex-wrap gap-2">
+            {/* Consent shows what it approves (working protocol): the dialog
+                lists exactly what commit does — activates the client and
+                closes the plan — never a bare "Confirm". */}
+            <OnboardingDoorDialog
+              triggerLabel={t("commitTrigger")}
+              title={t("commitTitle")}
+              description={t("commitDescription", { client: data.client?.name ?? clientId, completed, total })}
+              confirmLabel={t("commitConfirm")}
+              busy={busy}
+              confirmDisabled={blockReason !== null}
+              onConfirm={() =>
+                act(async () => {
+                  await commitClientOnboarding(
+                    { clientId, planId: plan.id, expectedPlanRevision: plan.revision_token, attestation: attestation.trim() || null },
+                    { session },
+                  );
+                })
+              }
+            >
+              {blockReason ? <p className="text-xs text-muted-foreground">{t(`commitBlocked.${blockReason}`)}</p> : null}
+              <Textarea
+                aria-label={t("attestationLabel")}
+                placeholder={t("attestationPlaceholder")}
+                value={attestation}
+                onChange={(e) => setAttestation(e.target.value)}
+              />
+            </OnboardingDoorDialog>
 
-          {/* Cancel — a destructive, irreversible-from-the-thread act (law 6:
-              the estate has no delete verb; cancel archives the client). No
-              literal "interruption" widget in this codebase models a governed
-              cancel act (mobbin-grounding-wave-2026-08-28.md §T11 takeaway 5:
-              "no pattern to import" for this door) — this reuses the SAME
-              destructive door-dialog treatment the thread's other running-act
-              cancels already use (components/firm/agent-tasks-panel.tsx's
-              cancel_agent_task, components/close/CloseDoors.tsx's abandon):
-              a destructive-styled confirm dialog requiring a typed reason,
-              never a silent one-click. */}
-          <OnboardingDoorDialog
-            triggerLabel={t("cancelTrigger")}
-            triggerVariant="destructive"
-            title={t("cancelTitle")}
-            description={t("cancelDescription", { client: data.client?.name ?? clientId })}
-            confirmLabel={t("cancelConfirm")}
-            busy={busy}
-            confirmDisabled={cancelReason.trim().length === 0}
-            onConfirm={() =>
-              act(async () => {
-                await cancelClientOnboarding({ clientId, planId: plan.id, reason: cancelReason.trim() }, { session });
-              }, () => setCancelReason(""))
-            }
-          >
-            <Textarea
-              aria-label={t("cancelReasonLabel")}
-              placeholder={t("cancelReasonPlaceholder")}
-              value={cancelReason}
-              onChange={(e) => setCancelReason(e.target.value)}
-            />
-          </OnboardingDoorDialog>
-        </div>
-      ) : null}
+            {/* Cancel — a destructive, irreversible-from-the-thread act (law
+                6: the estate has no delete verb; cancel archives the
+                client). No literal "interruption" widget in this codebase
+                models a governed cancel act (mobbin-grounding-wave-
+                2026-08-28.md §T11 takeaway 5: "no pattern to import" for
+                this door) — this reuses the SAME destructive door-dialog
+                treatment the thread's other running-act cancels already use
+                (components/firm/agent-tasks-panel.tsx's cancel_agent_task,
+                components/close/CloseDoors.tsx's abandon): a destructive-
+                styled confirm dialog requiring a typed reason, never a
+                silent one-click. */}
+            <OnboardingDoorDialog
+              triggerLabel={t("cancelTrigger")}
+              triggerVariant="destructive"
+              title={t("cancelTitle")}
+              description={t("cancelDescription", { client: data.client?.name ?? clientId })}
+              confirmLabel={t("cancelConfirm")}
+              busy={busy}
+              confirmDisabled={cancelBlocked || cancelReason.trim().length === 0}
+              onConfirm={() =>
+                act(async () => {
+                  await cancelClientOnboarding({ clientId, planId: plan.id, reason: cancelReason.trim() }, { session });
+                }, () => setCancelReason(""))
+              }
+            >
+              {cancelBlocked ? <p className="text-xs text-muted-foreground">{t("cancelBlockedNotOpen")}</p> : null}
+              <Textarea
+                aria-label={t("cancelReasonLabel")}
+                placeholder={t("cancelReasonPlaceholder")}
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                disabled={cancelBlocked}
+              />
+            </OnboardingDoorDialog>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -286,21 +347,30 @@ function BeginOnboardingCard({ session }: { session: SessionTokenAccessor }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [clrCode, setClrCode] = useState<string | null>(null);
+  const [clr, setClr] = useState<{ code: string; reason: string | null } | null>(null);
   const [result, setResult] = useState<{ client_id: string; plan_id: string } | null>(null);
 
   async function onConfirm() {
     setBusy(true);
     setErr(null);
-    setClrCode(null);
+    setClr(null);
+    // F5 fix (rev-t11): a NEW attempt clears the LAST attempt's success
+    // receipt too — otherwise a later refusal renders its red banner beside
+    // a stale green "created" receipt from an earlier, unrelated success
+    // (two contradictory receipts on screen at once, a fabricated-receipt
+    // read on a governed act).
+    setResult(null);
     try {
       const out = await beginClientOnboarding(name.trim(), { session });
       setResult(out);
       setName("");
     } catch (e) {
       if (isDoorRefusal(e)) {
-        setErr(e.reason ? `${e.message} (${e.reason})` : e.message);
-        setClrCode(e.code);
+        // N7 nit: the SAME code-slot composition ClientOnboardingCard's own
+        // refusalBanner uses, rather than folding the reason into the
+        // message text — one presentation for a DoorRefusal across this file.
+        setErr(e.message);
+        setClr({ code: e.code, reason: e.reason });
       } else {
         setErr(e instanceof Error ? e.message : String(e));
       }
@@ -312,10 +382,21 @@ function BeginOnboardingCard({ session }: { session: SessionTokenAccessor }) {
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
       <SectionHeader level={2}>{t("beginHeading")}</SectionHeader>
-      {err ? <StateBanner tone="error" code={clrCode ?? undefined}>{err}</StateBanner> : null}
+      {err ? (
+        <StateBanner tone="error" code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}>
+          {err}
+        </StateBanner>
+      ) : null}
       {result ? (
         <StateBanner tone="info">
-          {t("beginResult", { clientId: result.client_id, planId: result.plan_id })}
+          <p>{t("beginResult", { clientId: result.client_id, planId: result.plan_id })}</p>
+          {/* F6 fix (rev-t11): a REAL link, not just a claim of one — the
+              SAME Link-not-redirect precedent client-register-list.tsx
+              already uses (no auto-navigation: the human decides when to
+              move). */}
+          <Link href={`/clients/${result.client_id}`} className="text-primary underline-offset-4 hover:underline">
+            {t("beginResultLink")}
+          </Link>
         </StateBanner>
       ) : null}
       <OnboardingDoorDialog

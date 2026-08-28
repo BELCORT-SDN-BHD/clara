@@ -59,7 +59,14 @@ const ITEMS_2_OF_5 = [
   { id: "i5", plan_id: "plan-1", firm_id: "f1", item_kind: "todo", item_key: "coa_seed", question: "Chart of accounts seed", answer: null, state: "pending", required_for_commit: false, answered_by: null, answered_at: null, created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z" },
 ];
 
-const NO_GAPS = { "/rest/v1/clients": [{ id: "c1", name: "Rome Public Advisory", status: "onboarding" }] };
+const NO_GAPS = {
+  "/rest/v1/clients": [{ id: "c1", name: "Rome Public Advisory", status: "onboarding" }],
+  // F2 fix: loadClientOnboarding always reads opening_seed_registry once a
+  // plan exists — none of these fixtures exercise the commit gate, so an
+  // empty (not-finalized) answer is correct and irrelevant to what each
+  // test actually asserts.
+  "/rest/v1/opening_seed_registry": [],
+};
 
 function mockFetch(planItemsOverride?: unknown[]) {
   const impl = (async (url: RequestInfo | URL) => {

@@ -44,7 +44,13 @@ export function ClaraFullScreenThread({
         <Link href={returnHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
           {t("collapse")}
         </Link>
-        <span className="text-sm font-semibold text-clara">{t("title")}</span>
+        {/* F4 fix (rev-t11): this route (app/(full)/…) has NO other heading
+            anywhere — "no firm sidebar/rail chrome" (this file's own
+            header) — so a bare `<span>` here left the document with zero
+            `<h1>`s, and T11's card `<h2>` (SectionHeader level={2}) then
+            jumped straight from h0. A real `<h1>`, same visual weight
+            (same classes) — no new heading primitive introduced. */}
+        <h1 className="text-sm font-semibold text-clara">{t("title")}</h1>
         {/* T10 (port-wave plan §4 T10, §5's sharing row): share_chat_session
             attaches here, the escalated altitude a firm-visibility decision
             belongs at — replaces the prior bare `w-16` spacer (whose only

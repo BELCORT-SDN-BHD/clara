@@ -1,7 +1,21 @@
 // GATE (b) — structural a11y scan of the onboarding checklist card + its
-// Commit door dialog (owner ruling Q7), mounted the way it actually ships:
-// as a real ClientOnboardingCard branch of OnboardingChecklistCard, not a
-// hand-mounted stand-in. close-a11y.test.tsx's own precedent for the harness.
+// Commit door dialog (owner ruling Q7).
+//
+// F4 fix (rev-t11): mounted through the REAL route component
+// (`ClaraFullScreenThread`, the escalated full-screen thread T11's card
+// actually ships inside — `app/(full)/clients/[clientId]/clara/[threadId]/
+// page.tsx`), never a hand-mounted `OnboardingChecklistCard` under a
+// synthetic `<h1>Clara</h1>` — the synthetic heading manufactured the very
+// `<h1>` the real route was missing, masking a genuine `heading-order`
+// violation (the card's own `<h2>` jumping straight from h0). The real
+// mount's own `<h1>` (this file's own header on `ClaraFullScreenThread.tsx`)
+// is what the scan below actually measures now.
+//
+// N4 fix (rev-t11): the OLD "dialog opened" guard matched `/Cancel/` against
+// the ALWAYS-PRESENT "Cancel onboarding" trigger (which contains the
+// substring "Cancel") — vacuously true even with the dialog closed. The
+// discriminating check: the attestation TEXTAREA, which only exists inside
+// the OPEN Commit dialog's own children.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -10,11 +24,22 @@ import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
-import { configureSessionTokenSource, resetSessionTokenSource, sessionTokenAccessor } from "../../lib/session-accessor";
+import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import messages from "../../messages/en.json";
-import { OnboardingChecklistCard } from "./OnboardingChecklistCard";
+import { ClaraFullScreenThread } from "./ClaraFullScreenThread";
 
 enableDomInspection();
+
+type Node = { tagName?: string; childNodes?: Node[] };
+
+function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
+  if (predicate(root)) return root;
+  for (const c of root.childNodes ?? []) {
+    const found = findIn(c, predicate);
+    if (found) return found;
+  }
+  return null;
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -44,30 +69,46 @@ const PLAN = {
 };
 const ITEM = {
   id: "i1", plan_id: "plan-1", firm_id: "f1", item_kind: "must_ask", item_key: "legal_name",
-  question: "Legal name", answer: null, state: "pending", required_for_commit: true,
-  answered_by: null, answered_at: null, created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
+  question: "Legal name", answer: "Rome Public Advisory", state: "answered", required_for_commit: true,
+  answered_by: "u1", answered_at: "2026-08-01T00:00:00Z", created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
+};
+
+/** The ONE pre-existing violation rev-t11 attributed to `ClaraThreadView`'s
+ *  own composer textarea (`ClaraThreadView.tsx:134-147` — a `placeholder`
+ *  but no `aria-label`), measured present with or without T11's card
+ *  mounted. NOT this train's finding, NOT fixed here — asserted present
+ *  (never silently allow-listed away) so a NEW violation this train
+ *  introduces still reds this test. */
+const PRE_EXISTING_COMPOSER_FINDING = {
+  rule: "label",
+  wcag: "1.3.1 Info and Relationships / 4.1.2 Name, Role, Value",
+  element: "textarea",
+  message: "Form elements must have an accessible name (aria-label, aria-labelledby, or an associated <label>).",
 };
 
 function App() {
   return createElement(NextIntlClientProvider, {
     locale: "en",
     messages,
-    children: createElement(
-      "div",
-      null,
-      createElement("h1", null, "Clara"),
-      createElement(OnboardingChecklistCard, { clientId: "c1", session: sessionTokenAccessor }),
-    ),
+    // threadId="" — the same no-fetch "resolving" state
+    // ClaraThreadView.onboarding.test.tsx already proves needs no
+    // session/message/SSE mocking (useClaraThread's own mount effect
+    // early-returns on a falsy threadId).
+    children: createElement(ClaraFullScreenThread, { threadId: "", clientId: "c1", returnHref: "/clients/c1" }),
   });
 }
 
-test("onboarding checklist card + Commit door dialog OPEN have zero a11y violations", async () => {
+test("the REAL full-screen thread route (card + Commit door dialog OPEN) has zero a11y violations, including heading-order", async () => {
   await withMockedEnv(
     async (u) => {
       const url = String(u);
       if (url.includes("/rest/v1/onboarding_plans")) return jsonResponse([PLAN]);
       if (url.includes("/rest/v1/onboarding_plan_items")) return jsonResponse([ITEM]);
       if (url.includes("/rest/v1/clients")) return jsonResponse([{ id: "c1", name: "Rome Public Advisory", status: "onboarding" }]);
+      if (url.includes("/rest/v1/opening_seed_registry")) return jsonResponse([{ id: "seed-1" }]);
+      // ShareSessionButton's own read (mounted in ClaraFullScreenThread's
+      // header) — an empty result resolves `null`, which renders nothing.
+      if (url.includes("/rest/v1/chat_sessions")) return jsonResponse([]);
       throw new Error(`unexpected fetch: ${url}`);
     },
     async () => {
@@ -79,18 +120,28 @@ test("onboarding checklist card + Commit door dialog OPEN have zero a11y violati
         assert.match(h.text(), /Commit onboarding/, "the plan must have loaded far enough to show the commit door");
 
         const collapsedViolations = checkAccessibility(body as never);
-        assert.deepEqual(collapsedViolations, [], `collapsed: ${JSON.stringify(collapsedViolations)}`);
+        assert.deepEqual(
+          collapsedViolations,
+          [PRE_EXISTING_COMPOSER_FINDING],
+          `collapsed — expected EXACTLY the one pre-existing, attributed composer finding and NOTHING from T11 (in particular no heading-order): ${JSON.stringify(collapsedViolations)}`,
+        );
 
         const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Commit onboarding");
         assert.ok(trigger, "the Commit-onboarding dialog trigger must render");
         await h.fireEvent(trigger!, "click");
         for (let i = 0; i < 6; i++) await h.settle();
 
-        const bodyText = textOf(body as never);
-        assert.match(bodyText, /Cancel/, "opening the trigger must reveal the dialog's cancel control");
+        // N4 fix: the discriminating "did it actually open" proof — the
+        // attestation field only exists inside the OPEN dialog's children.
+        const attestationField = findIn(body as never, (n) => n.tagName === "TEXTAREA");
+        assert.ok(attestationField, "opening the trigger must reveal the dialog's own attestation field");
 
         const openViolations = checkAccessibility(body as never);
-        assert.deepEqual(openViolations, [], `open dialog: ${JSON.stringify(openViolations)}`);
+        assert.deepEqual(
+          openViolations,
+          [PRE_EXISTING_COMPOSER_FINDING],
+          `open dialog — must be the SAME single pre-existing finding, no NEW violation introduced by the open Commit dialog: ${JSON.stringify(openViolations)}`,
+        );
       } finally {
         await h.unmount();
         for (let i = 0; i < 5; i++) await h.settle();
