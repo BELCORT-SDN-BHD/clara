@@ -145,6 +145,76 @@ test("firm needs-you inbox (queue + the two 0137 gap lists) has zero violations"
   );
 });
 
+// A row bearing a HOSTILE row_kind — Object.prototype's own member names —
+// never reaches the DB today (independent review, fix-required, 2026-08-28:
+// this is the render-level half of the pinned finding; needs-you-affordances.
+// test.ts pins the pure-function half). Before the fix, the affordance
+// registry lookup resolved these to INHERITED functions instead of
+// `undefined`, so needs-you-row.tsx tried to render "constructor" as a
+// component (a THROW) or "toString" as one (the literal text
+// "[object Undefined]"). This envelope is intentionally separate from the
+// shared ENVELOPE above so the other two tests' own assertions are untouched.
+const HOSTILE_ENVELOPE: ReviewQueueEnvelope = {
+  watermark: "w2",
+  counts: { ready: 0, needs_review: 1, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 0, lint_findings: 0 },
+  sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
+  rows: [
+    {
+      row_kind: "constructor", section: "needs_review", client_id: "c1", counterparty_id: null, filing_id: null,
+      entry_id: null, question_id: null, task_id: null, document_id: null, lane: null, auto: false,
+      rule_backed: false, high_stakes: false, aged_since: null, amount_cents: null, period: null,
+      question_text: null, created_at: "2026-04-01T00:00:00Z", id: "hostile-1",
+      coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null, advance_id: null,
+    },
+    {
+      row_kind: "toString", section: "needs_review", client_id: "c1", counterparty_id: null, filing_id: null,
+      entry_id: null, question_id: null, task_id: null, document_id: null, lane: null, auto: false,
+      rule_backed: false, high_stakes: false, aged_since: null, amount_cents: null, period: null,
+      question_text: null, created_at: "2026-04-01T00:00:00Z", id: "hostile-2",
+      coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null, advance_id: null,
+    },
+  ],
+  next_cursor: null,
+};
+
+function mockGapsAndQueueFetchHostile(u: string): Response {
+  if (u.includes("/rpc/list_review_queue")) return jsonResponse(HOSTILE_ENVELOPE);
+  if (u.includes("/rest/v1/firm_open_questions_visible")) return jsonResponse([]);
+  if (u.includes("/rest/v1/client_identifier_promotions_visible")) return jsonResponse([]);
+  if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
+  throw new Error(`unexpected fetch: ${u}`);
+}
+
+test("firm needs-you inbox: a row bearing 'constructor' or 'toString' as its row_kind renders no inline affordance and does not crash", async () => {
+  await withMockedEnv(
+    async (u) => mockGapsAndQueueFetchHostile(String(u)),
+    async () => {
+      const h = await renderComponent(
+        createElement(NextIntlClientProvider, {
+          locale: "en",
+          messages,
+          children: createElement("div", null, createElement("h1", null, "Needs you"), createElement(NeedsYouInbox)),
+        }),
+      );
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        // Rendered at all (no throw) and the honest "unrecognized" label —
+        // never a raw next-intl key path, never the hostile name itself
+        // executed as a component — is what proves the getter's own
+        // undefined-for-hostile-keys contract actually reaches the DOM.
+        assert.match(h.text(), /Unrecognized item \(constructor\)/, "the 'constructor' row must render the honest unrecognized-kind label");
+        assert.match(h.text(), /Unrecognized item \(toString\)/, "the 'toString' row must render the honest unrecognized-kind label");
+        assert.ok(!h.text().includes("[object Undefined]"), "must never render an inherited toString() call's own output");
+        assert.equal(h.find((n) => n.tagName === "BUTTON") === null, true, "neither hostile row may carry ANY inline act button");
+        const violations = checkAccessibility(h.container as never);
+        assert.deepEqual(violations, [], JSON.stringify(violations));
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("firm needs-you inbox: the firm-question resolve form (open, with its client select) has zero violations", async () => {
   await withMockedEnv(
     async (u) => mockGapsAndQueueFetch(String(u)),

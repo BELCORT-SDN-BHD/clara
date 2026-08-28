@@ -141,6 +141,17 @@ waits on; when that train merges, truing the note is part of the MERGE, not a la
 discovery."* Each train then replaces the content of its own tab in its own file, and the
 arrays never move again.
 
+**AS-CONDUCTED (conductor ruling, 2026-08-28).** `CLIENT_TABS` stays at its current EIGHT
+entries — no edit; the array is already final. T1's own §4 write-up resolves its hedge to
+**no new route** ("extends `apps/web/components/close/` — no new route"). **T2**'s
+opening-seed lifecycle nests as `registers-workbench.tsx`'s own SIXTH `TABS` entry, `opening`
+(T0 pre-landed, first position — the earliest-lifecycle object), rather than a new
+`CLIENT_TABS` route: the seed is exactly the registers family's kind of object. **T7**'s
+coding-lane surface nests inside the `documents` tab as its own section/file when T7 builds
+(no `TABS`/`CLIENT_TABS` edit — the triaged objects are uncoded filings, document-side work).
+Both stay inside Q3's owner-ruled closed IA; reopening that ruling itself would be an owner
+matter, not a wave-conducting one.
+
 ### 3.4 The locale file — `apps/web/messages/en.json`
 
 23 top-level namespaces, one per surface. New namespaces are key-disjoint, so conflicts are
@@ -424,6 +435,15 @@ ships as a bare form dump, and nothing composes two doors into one control.
 | T9 reports + seeding | `seeding_proposal` tick/decline | snapshot registry · render-job queue · wiki curation · account-set authoring | mint snapshot · requeue render · cancel/complete batch · decline/tick proposal · retire wiki page | — | no |
 | T10 firm admin | `compliance_watch` ack/snooze/resolve inline | compliance register · **vendor bindings panel** | ack/snooze/resolve watch · propose/sign/revoke binding · share chat session | — | no |
 | T11 onboarding | onboarding plan item | **in-thread checklist card** (parts, R7) | begin/cancel/commit onboarding · bootstrap plan · resolve plan item | — | **yes** |
+
+**AS-CONDUCTED (2026-08-28, T9).** The row's `seeding_proposal` needs-you presentation is
+SUPERSEDED: the live `clara.list_review_queue` body emits exactly eight `row_kind` values,
+none of them seeding — T9's rung-0 census confirmed this at the live catalog. Shipped instead
+as `SeedingBatchesPanel` (a direct RLS read of `seeding_batches`/`seeding_proposals`, with
+tick/decline/cancel/complete as door dialogs on the real rows) — every doorway is preserved,
+only the presentation moved. `create_account_set_v1` was censused and reported BY NAME as a
+retirement candidate (OQ-5) — owner ruling pending, no UI built for it. The "accounts"
+registers-tab extension point named for account-set authoring was therefore left untouched.
 
 **On `merge_counterparties` specifically.** A merge is destructive and irreversible from the
 user's point of view. It gets the heaviest treatment in the wave: a preview panel showing

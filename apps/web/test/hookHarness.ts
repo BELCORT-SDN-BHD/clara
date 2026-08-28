@@ -32,6 +32,23 @@ type Stub = Record<string, unknown>;
 // without crashing.
 class HTMLElementStub {}
 
+// T9 fix round (re-verify): the SAME missing-global class of crash, found
+// one layer deeper — @base-ui/react's floating-ui-react internals
+// (FloatingFocusManager's `getEventType`, reached on a Dialog's SECOND
+// open/close cycle via base-ui's OWN internal `store.setOpen()`, e.g.
+// DialogClose's Cancel button — DoorDialog's Confirm never reaches this at
+// all, since its own close is a plain React `setOpen(false)`, not base-ui's
+// internal store) does `event instanceof win.KeyboardEvent` /
+// `win.FocusEvent` / `win.MouseEvent` with NO fallback for an undefined
+// global — the identical "right-hand side of instanceof is not an object"
+// shape the HTMLElement stubs above exist to prevent, just for three
+// different globals. Each is an empty marker class exactly like
+// HTMLElementStub: no dialog-close test needs to construct a real one, only
+// to test an ordinary object AGAINST one and get `false`.
+class KeyboardEventStub {}
+class MouseEventStub {}
+class FocusEventStub {}
+
 // react-dom's OWN controlled-input change detection (inputValueTracking.js's
 // `trackValueOnNode`) requires `Object.getOwnPropertyDescriptor(node.
 // constructor.prototype, 'value' | 'checked')` to already exist with BOTH a
@@ -171,6 +188,8 @@ function installDom(): void {
     ["HTMLElement", HTMLElementStub], ["HTMLInputElement", HTMLInputElementStub],
     ["HTMLSelectElement", HTMLSelectElementStub], ["HTMLButtonElement", HTMLButtonElementStub],
     ["HTMLTextAreaElement", HTMLTextAreaElementStub], ["HTMLAnchorElement", HTMLAnchorElementStub],
+    // See KeyboardEventStub's own header above.
+    ["KeyboardEvent", KeyboardEventStub], ["MouseEvent", MouseEventStub], ["FocusEvent", FocusEventStub],
   ] as const) {
     (globalThis as Stub)[name] = cls;
     win[name] = cls;
@@ -228,6 +247,82 @@ export function setFieldValue(node: Stub, value: string): void {
   props?.onChange?.({
     target: node, currentTarget: node, nativeEvent,
     persist() {}, preventDefault() {}, stopPropagation() {},
+  });
+}
+
+/** Invokes a node's own `onClick` prop DIRECTLY, bypassing `fireEvent`'s
+ *  delegated dispatch entirely — the SAME reasoning `setFieldValue` above
+ *  already documents for `onChange`, discovered chasing a T6 door-dialog
+ *  confirm-click test that silently never reached its handler. `fireEvent`
+ *  dispatches only through `container.__listeners[type]` (this file's own
+ *  header on that function: "React 17+ delegates most interactive events to
+ *  ONE listener registered on the ROOT CONTAINER") — true for content
+ *  committed directly under `container`, but a `@base-ui/react` Dialog's
+ *  open content is a PORTAL into `document.body`, a SEPARATE delegation
+ *  root `fireEvent` never reaches (confirmed: even reading `document.body`'s
+ *  OWN captured listeners and invoking them with a synthetic event did not
+ *  reach the handler — whatever internal root-correlation react-dom's
+ *  dispatcher needs did not resolve correctly for a node whose commit target
+ *  is a portal). Reading `__reactProps$…` directly (react-dom stamps this on
+ *  every committed host node) and calling `onClick` sidesteps the whole
+ *  delegation question. Call this INSIDE `h.act(...)` for a control INSIDE
+ *  an open portaled Dialog whose `onClick` is the CALLER'S OWN plain
+ *  function (a door dialog's confirm button, wired straight to `onConfirm`)
+ *  — proven end to end (journals-governance-keyboard.test.tsx's WITHDRAW
+ *  confirm test).
+ *
+ *  TRUED at the T6/T9 meet-point merge: this ALSO now drives `@base-ui/
+ *  react`'s own `DialogClose` (Cancel) — installDom's KeyboardEventStub/
+ *  MouseEventStub/FocusEventStub (see their own header above) close the gap
+ *  that used to throw "right-hand side of instanceof is not an object" out
+ *  of FloatingFocusManager's `getEventType`, which DialogClose's internal
+ *  close-handling chain reaches on a Dialog's open/close cycle. Confirmed
+ *  empirically (a probe against a live DialogClose Cancel button, this same
+ *  meet-point commit): with the three event stubs in place, NO special-
+ *  casing at all is required to drive DialogClose — this was RIGHT-
+ *  CONCLUSION-WRONG-REASON on the original probe (this repo's own named
+ *  class): the `nativeEvent` field below (added in the same window as the
+ *  stubs, and originally credited with the fix) is neither necessary nor
+ *  sufficient on its own; the event stubs are the actual, measured cause.
+ *  Kept anyway as a harmless DEFENSIVE addition — `DialogClose`'s own
+ *  `handleClick` does read `event.nativeEvent` before forwarding, so
+ *  carrying a real `target` there costs nothing and may matter for a future
+ *  base-ui internal this repo has not yet exercised — but it is not what
+ *  makes DialogClose work today, and no test in this repo depends on it.
+ *  What this function still cannot reach is REAL browser hit-testing —
+ *  pointer-events, overlay stacking, z-index, anything that needs an actual
+ *  layout/paint engine to resolve which element a coordinate would hit;
+ *  there is no layout engine in this harness, so a click always "lands" on
+ *  whatever node you hand it, never on what a browser would actually
+ *  resolve underneath a real cursor position. That is a narrower, and
+ *  different, gap than the one this paragraph used to describe.
+ *
+ *  CONSOLIDATED at the T6/T9 meet-point (independent review, both trains):
+ *  this is now the ONE exported click helper — T9's two local `clickConfirm`
+ *  copies (which had already grown `await`, the `nativeEvent` field above,
+ *  and a throw on a missing `onClick`) are folded in here rather than kept
+ *  as separate, drifting copies.
+ *
+ *  GUARDED: throws if the node's own LIVE `.disabled` is `true` —
+ *  "assert the gate, then act." A click helper that can fire a DISABLED
+ *  button's handler is the one tool in this harness capable of
+ *  MANUFACTURING a false green on a permanently-unopenable door: the exact
+ *  F6/P3 defect class the keyboard battery exists to catch (a control that
+ *  RENDERS but never actually admits a click). A test that means to prove a
+ *  control is disabled asserts `.disabled` directly, never routes a click
+ *  through it and hopes nothing happens. */
+export async function clickButton(node: Stub): Promise<void> {
+  if ((node as unknown as { disabled?: boolean }).disabled === true) {
+    throw new Error("clickButton: refusing to click a DISABLED node — assert the gate, then act; a click helper must never be the thing that manufactures a green on an unopenable door");
+  }
+  const propsKey = Object.keys(node as object).find((k) => k.startsWith("__reactProps"));
+  const onClick = propsKey ? (node as unknown as Record<string, { onClick?: (e: unknown) => unknown }>)[propsKey]?.onClick : undefined;
+  if (!onClick) throw new Error("clickButton: no onClick prop found on this node — is it really a Button?");
+  await onClick({
+    type: "click", target: node, currentTarget: node, bubbles: true, cancelable: true,
+    defaultPrevented: false, isTrusted: true, timeStamp: Date.now(),
+    nativeEvent: { type: "click", target: node, currentTarget: node },
+    preventDefault() {}, stopPropagation() {}, persist() {},
   });
 }
 

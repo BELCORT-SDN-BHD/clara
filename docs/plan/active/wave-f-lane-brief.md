@@ -19,10 +19,19 @@ never `wsl --shutdown`.
 3. Query the codebase graph (`codebase-memory-mcp` via ToolSearch: `search_graph` / `query_graph`) before grep.
 
 ## Your rig
-- One throwaway Postgres 17 per lane in WSL docker, YOUR name and YOUR port only (given in your order):
-  `docker run -d --name <name> -p 127.0.0.1:<port>:5432 -e POSTGRES_PASSWORD=rig postgres:17`.
-  Prove it is virgin before use (no `clara` schema). Export `PGHOST=127.0.0.1 PGPORT=<port> PGUSER=postgres
-  PGPASSWORD=rig PGDATABASE=postgres` — rigs use PG* vars, NEVER `DATABASE_URL`. Destroy it when you settle.
+- One throwaway Postgres 17 per lane in WSL docker, YOUR name and YOUR port only (given in your order).
+  **`docker` is NOT on the Windows PATH — it lives inside WSL2**, so invoke it through wsl (a lane lost a
+  cycle to this on 2026-08-28, concluding it was "blocked on credentials" when nothing was wrong):
+  `wsl -e docker run -d --name <name> -p 127.0.0.1:<port>:5432 -e POSTGRES_PASSWORD=rig postgres:17`.
+  **You MINT the password** — it is your own throwaway; there is no shared credential, no `.env` and no
+  pgpass to hunt for, by design. Prove it is virgin before use (no `clara` schema). Export
+  `PGHOST=127.0.0.1 PGPORT=<port> PGUSER=postgres PGPASSWORD=rig PGDATABASE=postgres` — rigs use PG* vars,
+  NEVER `DATABASE_URL`. Destroy it when you settle, and NEVER touch a live local Postgres service.
+- **Bootstrap the superuser as `postgres`, never a `clara*` name** — `0119`'s closed-world grantee census
+  matches `rolname like 'clara%'`, so a `clara`-named bootstrap role produces a false-positive
+  "clara_rig can EXECUTE" failure; `0121` also grants test-only membership to a role literally named
+  `postgres`. **Run the db suite with `--test-concurrency=1`** (the real `packages/db` script does): a
+  decoy-planting test racing a sibling census that reads the live catalog produces a false red.
 - Host memory is shared by ~10 lanes + 4 CI runners: keep ONE rig, run your item's battery during authoring, run
   the FULL estate (`pnpm --filter @clara/db test`, then runtime/dashboard/render suites per `packages/*/README.md`)
   ONCE at the end on a pristine rig, tails unfiltered. Report pass/skip/fail per package; name every skip.

@@ -40,3 +40,24 @@ export function fmtCents(cents: number | null | undefined, unsafeLabel: string =
 export function shortId(id: string | null | undefined): string {
   return id ? id.slice(0, 8) : "—";
 }
+
+/** T3 (port wave): a human-typed decimal amount -> integer cents, for the
+ *  fixed-asset write surface's own money fields (disposal proceeds). String-
+ *  based (BigInt), never `Math.round(x * 100)` — the same reasoning as
+ *  lib/bank/money.ts's own `parseAmountToCents`, ported rather than cross-
+ *  imported so components/registers stays independently reviewable (the same
+ *  "one door dialog per domain" reasoning DoorDialog.tsx's header states, now
+ *  applied to this domain's money parser). `null` for anything that is not a
+ *  valid decimal amount — the caller must treat `null` as "not a number yet",
+ *  never coerce it to 0. */
+export function parseAmountToCents(input: string): number | null {
+  const cleaned = input.trim().replace(/,/g, "");
+  if (cleaned === "") return null;
+  const m = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(cleaned);
+  if (!m) return null;
+  const [, sign = "", whole = "0", frac = ""] = m;
+  const fracPadded = (frac + "00").slice(0, 2);
+  const cents = BigInt(whole) * 100n + BigInt(fracPadded);
+  const signed = sign === "-" ? -cents : cents;
+  return Number(signed);
+}
