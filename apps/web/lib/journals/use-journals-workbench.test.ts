@@ -171,8 +171,12 @@ test("mount: reloads once and populates data from the real read endpoints", asyn
         queueRows: [],
         queueCounts: { open_drafts: 0 },
         interruptions: [],
+        clientIdByTaskId: {},
       });
       assert.equal(h.current.err, null);
+      // T7: listAgentTaskClientIds([]) short-circuits without calling fetch
+      // (an empty interruptions list needs no client-id lookup) — the
+      // endpoint count stays six.
       assert.equal(counter.n, 6, "six endpoints: entries, lines, accounts, counterparties, review-queue RPC, agent_interruptions (T6)");
     } finally {
       await h.unmount();
@@ -410,6 +414,43 @@ test("answerClarify(): calls answer_interruption then re-reads (including the in
         const before = seen.filter((s) => s === "interruptions").length;
         await h.act(() => h.current.answerClarify("i1", { text: "cash account" }));
         assert.ok(seen.includes("answer"));
+        assert.ok(seen.filter((s) => s === "interruptions").length > before, "act() re-reads interruptions too — no optimistic UI");
+        assert.equal(h.current.actingId, "i1");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+// T7: promoteClarify.
+test("promoteClarify(): posts promote_clarify_to_question with scope_kind='client' and the caller's own scopeId, then re-reads", async () => {
+  const seen: string[] = [];
+  let seenBody: Record<string, unknown> = {};
+  await withMockedFetch(
+    async (input, init) => {
+      const url = String(input);
+      if (url.includes("rpc/promote_clarify_to_question")) {
+        seen.push("promote");
+        seenBody = JSON.parse(String(init?.body));
+        return jsonResponse(null);
+      }
+      if (url.includes("agent_interruptions")) { seen.push("interruptions"); return jsonResponse([]); }
+      seen.push("read");
+      if (url.includes("rpc/list_review_queue")) return jsonResponse({ rows: [] });
+      return jsonResponse([]);
+    },
+    async () => {
+      const sess = fakeSession();
+      const h = await renderHook(() => useJournalsWorkbench(CLIENT_ID, sess));
+      try {
+        await h.settle();
+        const before = seen.filter((s) => s === "interruptions").length;
+        await h.act(() => h.current.promoteClarify("i1", "client-9"));
+        assert.ok(seen.includes("promote"));
+        assert.equal(seenBody.p_interruption, "i1");
+        assert.equal(seenBody.p_scope_kind, "client");
+        assert.equal(seenBody.p_scope_id, "client-9");
         assert.ok(seen.filter((s) => s === "interruptions").length > before, "act() re-reads interruptions too — no optimistic UI");
         assert.equal(h.current.actingId, "i1");
       } finally {

@@ -9,6 +9,8 @@
     "forbidden": "Your account can't read this yet.",
     "notFound": "This isn't available yet.",
     "unexpectedError": "Something went wrong: {message}",
+    "refusalTitle": "This was refused",
+    "actionFailedTitle": "This action failed",
     "notBuiltHeading": "Not built yet",
     "cancel": "Cancel",
     "close": "Close",
@@ -1321,7 +1323,179 @@
       }
     }
   },
-  "CodingQuestionsSignals": {},
+  "CodingQuestionsSignals": {
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
+    "panelHeading": "Coding lane",
+    "panelDescription": "Filings still awaiting a posted entry, open coding tasks awaiting a decision, and open quality-lint findings for this client.",
+    "loading": "Loading…",
+    "uncodedFiling": {
+      "heading": "Uncoded filings",
+      "lanesLabel": "Coding lane",
+      "lanes": {
+        "needs_you": "Needs you",
+        "needs_review": "Needs review",
+        "ready": "Ready"
+      },
+      "laneEmpty": "Nothing in this lane right now.",
+      "columnDocument": "Document",
+      "columnFiled": "Filed",
+      "columnReasons": "Why",
+      "columnActions": "Actions",
+      "noReasons": "No blocking reasons recorded.",
+      "openTaskTrigger": "Open coding task",
+      "openTaskTitle": "Open a coding task",
+      "openTaskConfirm": "Open coding task",
+      "openTaskReasonLabel": "Why does this need a coding task?",
+      "openTaskReasonPlaceholder": "e.g. vendor could not be matched automatically…",
+      "askQuestionTrigger": "Ask a question",
+      "askQuestionTitle": "Ask a question about this document",
+      "askQuestionConfirm": "Ask question",
+      "askQuestionLabel": "Your question",
+      "askQuestionPlaceholder": "e.g. Which account should this be coded to?",
+      "reasons": {
+        "no_active_filing": "No active filing found.",
+        "open_draft": "A draft entry already exists for this filing.",
+        "already_coded": "Already posted to an approved entry.",
+        "facts_pending": "Extraction facts are not ready yet.",
+        "multi_doc": "Spans multiple source documents — needs manual review.",
+        "non_myr": "States a non-MYR amount explicitly.",
+        "tier_a_fails": "The extracted facts are not yet corroborated.",
+        "direction_unresolved": "Could not determine whether this is a purchase or a sale.",
+        "customer_name_missing": "No customer name could be read from the document.",
+        "vendor_unresolved": "No matching vendor could be found.",
+        "vendor_ambiguous": "The vendor match is ambiguous and needs a human decision.",
+        "customer_ambiguous": "The customer match is ambiguous and needs a human decision.",
+        "vendor_bound": "Bound to a known vendor via its registration number.",
+        "binding_ambiguous": "Multiple vendor bindings matched — needs a human decision.",
+        "open_question": "An open question is already blocking this filing.",
+        "no_consent": "This client has no active data-processing consent on file.",
+        "parked": "A prior autodraft attempt was parked.",
+        "rule_backed": "A coding rule already exists for this vendor.",
+        "high_stakes": "The amount is above this firm's high-stakes threshold.",
+        "near_duplicate": "Looks like a near-duplicate of an already-posted entry.",
+        "unknown": "Unrecognized reason ({code})."
+      }
+    },
+    "codingTask": {
+      "heading": "Open coding tasks",
+      "empty": "No open coding tasks for this client.",
+      "columnOpened": "Opened",
+      "columnOrigin": "Origin",
+      "columnActions": "Actions",
+      "origin": {
+        "correction": "Correction",
+        "manual": "Manual"
+      },
+      "completeTrigger": "Complete",
+      "completeTitle": "Complete this coding task",
+      "completeDescription": "Point this task at the approved journal entry it produced.",
+      "completeConfirm": "Complete task",
+      "loadingEntries": "Loading approved entries for this filing…",
+      "retryEntries": "Retry",
+      "noApprovedEntries": "No approved entry exists yet for this filing — post one first, then come back to complete this task.",
+      "entryPickerLabel": "Result entry",
+      "entryPickerPlaceholder": "Choose the approved entry…",
+      "dismissTrigger": "Dismiss",
+      "dismissTitle": "Dismiss this coding task",
+      "dismissConfirm": "Dismiss task",
+      "dismissReasonLabel": "Reason for dismissing",
+      "dismissReasonPlaceholder": "e.g. duplicate task, already handled elsewhere…"
+    },
+    "lintFinding": {
+      "heading": "Open quality-lint findings",
+      "empty": "No open lint findings for this client.",
+      "columnKind": "Finding",
+      "columnSeverity": "Severity",
+      "columnOpened": "Opened",
+      "columnActions": "Actions",
+      "kinds": {
+        "contradiction": "Contradiction",
+        "stale_claim": "Stale claim",
+        "orphan_page": "Orphan page",
+        "cap_pages": "Too many pages",
+        "cap_page_size": "Page too large",
+        "wiki_synthesis_held": "Wiki synthesis held",
+        "opening_tb_tie_broken": "Opening trial-balance tie broken",
+        "opening_doc_unfiled": "Opening document not filed",
+        "stale_citation": "Stale citation"
+      },
+      "severities": {
+        "info": "Info",
+        "warn": "Warning",
+        "critical": "Critical"
+      },
+      "resolveTrigger": "Resolve",
+      "resolveTitle": "Resolve this finding",
+      "resolveConfirm": "Resolve finding",
+      "conclusionLabel": "Conclusion",
+      "conclusionPlaceholder": "Choose a conclusion…",
+      "conclusions": {
+        "corrected": "Corrected",
+        "accepted_revision": "Accepted the revision",
+        "false_positive": "False positive",
+        "superseded_by_edit": "Superseded by a later edit"
+      },
+      "noteLabel": "Note",
+      "notePlaceholder": "What was found, and what was done about it…",
+      "viewDetailsTrigger": "View details",
+      "loadingDetail": "Loading the finding's full detail…",
+      "detailNotReachable": "This finding's detail could not be read.",
+      "dedupeKeyLabel": "Dedupe key"
+    },
+    "sweep": {
+      "heading": "Sweep runs",
+      "openRun": "A sweep run is currently open.",
+      "noOpenRun": "No sweep run is currently open.",
+      "lastFinalizedLabel": "Last finalized",
+      "lastAckLabel": "Last acknowledged",
+      "never": "Never",
+      "acknowledgeGap": "Acknowledging a finalized sweep run needs its run id, which only arrives via Clara's own sweep-receipt message in a thread — not built yet here. Ruled: it ships as a rich card on that message in the P6 wire bump, not a separate control on this panel."
+    },
+    "agentTasks": {
+      "heading": "Running agent tasks",
+      "note": "Tasks the agent is currently queued, held, running, or awaiting your input on — cancellable here. Already-finished work is in the activity log below.",
+      "empty": "No running agent tasks right now.",
+      "kinds": {
+        "chat_turn": "Chat turn",
+        "wake": "Wake",
+        "autodraft": "Autodraft",
+        "close_prep": "Close preparation"
+      },
+      "statuses": {
+        "queued": "Queued",
+        "held": "Held",
+        "running": "Running",
+        "awaiting_input": "Awaiting input",
+        "cancel_requested": "Cancel requested",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled",
+        "expired": "Expired"
+      },
+      "cancelTrigger": "Cancel",
+      "cancelTitle": "Cancel this task",
+      "cancelDescription": "A running task aborts and settles; a queued or held task is cancelled immediately.",
+      "cancelConfirm": "Cancel task",
+      "cancelRequestedNote": "Cancel already requested — the task is still settling."
+    },
+    "openQuestion": {
+      "viewDetailsTrigger": "View details",
+      "loadingDetail": "Loading the question's full detail…",
+      "detailNotReachable": "This question's detail could not be read.",
+      "originLabel": "Origin",
+      "openedAtLabel": "Opened",
+      "spawnedRuleLabel": "Spawned rule"
+    },
+    "promoteClarify": {
+      "trigger": "Promote to a durable question",
+      "dialogTitle": "Promote this clarification to a durable question",
+      "dialogDescription": "Turns Clara's own clarification into a durable question on this client's own record, visible on the client's Needs-you queue — distinct from a firm-level question.",
+      "confirm": "Promote"
+    }
+  },
   "ArApCounterparty": {},
   "ReportsSnapshotsSeeding": {
     "snapshots": {

@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { dismissOpenQuestion, resolveOpenQuestion } from "@/lib/firm/needs-you";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { ErrorMessage } from "./data-state";
+import { OpenQuestionDetail } from "./open-question-detail";
 import type { NeedsYouAffordanceProps } from "./needs-you-affordances";
 
 export function OpenQuestionAffordance({ row, busy, error, act }: NeedsYouAffordanceProps) {
@@ -47,6 +48,8 @@ export function OpenQuestionAffordance({ row, busy, error, act }: NeedsYouAfford
   return (
     <div className="flex flex-col gap-2">
       {error ? <ErrorMessage error={error} /> : null}
+      {/* T7 (port-wave plan §4) — clara.get_open_question, on demand. */}
+      <OpenQuestionDetail questionId={questionId} />
       {mode ? (
         <div className="flex flex-col gap-2">
           <Input
