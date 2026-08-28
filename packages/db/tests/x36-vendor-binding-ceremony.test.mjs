@@ -305,18 +305,31 @@ test("x36c.9 sign_vendor_identity_binding still refuses a binding whose created_
   requireReady();
   const cp = await seedPassingWindow(w, "C9null");
   const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
-  // Simulate a hypothetical future nullable-drift on the column directly, as owner (the
-  // migration's own prestate would refuse a REAL such drift at apply time -- this cell proves
-  // the WALL ITSELF is also independently safe, defense in depth, not merely relying on that
-  // prestate check to have run). A bare `b.created_by = c.actor` would evaluate NULL here
-  // (neither TRUE nor FALSE), which the original (pre-fix-round) draft of this wall got
-  // wrong -- measured by the independent reviewer executing exactly this scenario.
-  await rootQuery("update clara.vendor_identity_bindings set created_by = null where id = $1", [proposed.binding_id]);
+  // MEASURED (fix-round finding): created_by is CURRENTLY NOT NULL (0028's own table def) --
+  // this rig-measured fact is exactly why the prestate's own attnotnull check exists (LOW-5
+  // §0(6)). A "hypothetical future nullable-drift" therefore has to be SIMULATED by actually
+  // dropping the constraint first, as owner -- the migration's own prestate would refuse a
+  // REAL such drift at apply time; this cell proves the WALL ITSELF is also independently
+  // safe, defense in depth, not merely relying on that prestate check to have run. A bare
+  // `b.created_by = c.actor` would evaluate NULL here (neither TRUE nor FALSE), which the
+  // original (pre-fix-round) draft of this wall got wrong -- measured by the independent
+  // reviewer executing exactly this scenario. The constraint is restored in `finally` so
+  // this cell never leaves the shared rig's schema drifted for any other test.
+  await rootQuery("alter table clara.vendor_identity_bindings alter column created_by drop not null");
   try {
-    await sign(w.users.alice, { binding: proposed.binding_id });
-    assert.fail("sign_vendor_identity_binding must refuse a NULL created_by, not silently sign it live (the fail-open this cell regression-pins)");
-  } catch (e) {
-    assert.equal(e.code, "CLR04", `expected CLR04, got ${e.code}: ${e.message}`);
-    assert.equal(reasonOf(e), "signer_is_proposer", `expected the wall's reason token even on the defensive NULL arm, got: ${JSON.stringify(e.detail)}`);
+    await rootQuery("update clara.vendor_identity_bindings set created_by = null where id = $1", [proposed.binding_id]);
+    try {
+      await sign(w.users.alice, { binding: proposed.binding_id });
+      assert.fail("sign_vendor_identity_binding must refuse a NULL created_by, not silently sign it live (the fail-open this cell regression-pins)");
+    } catch (e) {
+      assert.equal(e.code, "CLR04", `expected CLR04, got ${e.code}: ${e.message}`);
+      assert.equal(reasonOf(e), "signer_is_proposer", `expected the wall's reason token even on the defensive NULL arm, got: ${JSON.stringify(e.detail)}`);
+    }
+  } finally {
+    // Restore, as owner: a nulled row from THIS cell's own probe would otherwise still be
+    // sitting there too -- clean it up before re-adding the constraint, or the ALTER itself
+    // would refuse on the very row this cell created.
+    await rootQuery("update clara.vendor_identity_bindings set created_by = $1 where id = $2", [w.users.bob, proposed.binding_id]);
+    await rootQuery("alter table clara.vendor_identity_bindings alter column created_by set not null");
   }
 });

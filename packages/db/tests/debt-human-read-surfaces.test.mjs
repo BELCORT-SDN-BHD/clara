@@ -65,7 +65,18 @@ before(async () => {
   live = await debtApplied();
   if (live) world = await buildWorld();
 });
-after(async () => { await endPool(); });
+after(async () => {
+  // MEASURED (fix-round finding): the LOW-6 attack cells' planted snoop artifacts
+  // (clara._hrd_a_snoop / clara._hrd_a_snoop_witness) are NOT test-local -- they live in the
+  // shared `clara` schema on the shared rig, and the estate's OWN closed-world censuses
+  // elsewhere (rig-isolation.test.mjs's T17 grant matrix, T18 definer-hygiene/RLS censuses)
+  // enumerate the WHOLE schema and correctly flag an unlisted, ungoverned function/table as a
+  // drift -- exactly the class of bug those censuses exist to catch. Drop them here so this
+  // file leaves no residue for any test that runs after it in the same `node --test` process.
+  try { await rootQuery("drop function if exists clara._hrd_a_snoop(text)"); } catch { /* best-effort cleanup */ }
+  try { await rootQuery("drop table if exists clara._hrd_a_snoop_witness"); } catch { /* best-effort cleanup */ }
+  await endPool();
+});
 
 const gate = (t) => {
   if (!live) { t.skip("debt human-read-surfaces layer not applied -- clara.users_visible absent"); return true; }
@@ -340,9 +351,14 @@ test("debt-BAR2 (LOW-6 negative control) · resetting security_barrier on ONE fa
 
 async function plantSnoop() {
   await rootQuery("create table if not exists clara._hrd_a_snoop_witness(seen text)");
+  // SECURITY DEFINER (owned by the connecting superuser, which always has table access) --
+  // plpgsql defaults to SECURITY INVOKER, which would run the INSERT as whatever role is
+  // calling the probe (clara_authenticated inside the attack query), and that role holds no
+  // grant on the witness table by design (this is a planted attacker artifact, not a real
+  // clara.* table -- it gets no app-role grant of its own).
   await rootQuery(
     `create or replace function clara._hrd_a_snoop(t text) returns boolean
-       language plpgsql volatile cost 0.0000001 as $snoop$
+       language plpgsql volatile cost 0.0000001 security definer as $snoop$
      begin
        insert into clara._hrd_a_snoop_witness(seen) values (t);
        return true;
@@ -377,68 +393,111 @@ test("debt-ATTACK1 (LOW-6) · users_visible: a non-leakproof near-zero-cost prob
     "WITH security_barrier, the probe must never see firm A's display_name while queried by firm B's caller");
 
   // ATTACK, WITHOUT security_barrier -- expect a leak, proving the reloption is what closed
-  // the channel above, not some other property of the view. The reset AND the attack query
-  // must share ONE session (a DIFFERENT connection would never see this transaction's
-  // uncommitted DDL) -- humanQuery/asHuman's own session recipe (rig-helpers.mjs's withActor:
-  // `set role <role>` then `select set_config('request.jwt.claims', {sub, role:
-  // "authenticated"}, ...)`) is replicated here by hand, on the SAME client, inside the SAME
-  // rolled-back transaction as the ALTER.
-  await inRolledBackTx(async (client) => {
-    await client.query("set role clara_fn_owner");
-    await client.query("alter view clara.users_visible reset (security_barrier)");
-    await client.query("reset role");
+  // the channel above, not some other property of the view. MEASURED (fix-round finding): a
+  // ROLLED-BACK transaction is the WRONG instrument here -- it would roll back the probe's
+  // own witness-table INSERT along with the ALTER, so the leak could never be observed
+  // afterward even if it genuinely happened (confirmed by directly reproducing this exact
+  // shape on the rig: EXPLAIN shows the probe evaluated on all 405 rows inside a single
+  // rolled-back transaction, but the witness table held ZERO rows once rolled back -- the
+  // side effect and the DDL share one rollback boundary). This attack half therefore uses a
+  // REAL, COMMITTED reset, then restores it in `finally` -- the view is genuinely (if
+  // briefly) less safe on this throwaway rig for the duration of one query, which is the
+  // whole point: proving the mechanism, not just asserting it.
+  await rootQuery("set role clara_fn_owner");
+  await rootQuery("alter view clara.users_visible reset (security_barrier)");
+  await rootQuery("reset role");
+  try {
     await clearSnoopWitness();
-    await client.query("set role clara_authenticated");
-    await client.query("select set_config('request.jwt.claims', $1, true)",
-      [JSON.stringify({ sub: world.users.dave, role: "authenticated" })]);
-    await client.query("select id from clara.users_visible where clara._hrd_a_snoop(display_name)");
-  });
+    await humanQuery(world.users.dave, "select id from clara.users_visible where clara._hrd_a_snoop(display_name)", []);
+  } finally {
+    await rootQuery("set role clara_fn_owner");
+    await rootQuery("alter view clara.users_visible set (security_barrier = true)");
+    await rootQuery("reset role");
+  }
   assert.equal(await snoopSaw(canary), true,
     "WITHOUT security_barrier, the SAME probe/query shape must see firm A's display_name -- proving the reloption, not some other property, is what closes the channel");
+  // Restored, proven rather than assumed.
+  const restored = await rootQuery(
+    `select c.reloptions from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'clara' and c.relname = 'users_visible'`,
+  );
+  assert.ok(
+    Array.isArray(restored.rows[0].reloptions) && restored.rows[0].reloptions.includes("security_barrier=true"),
+    "users_visible's security_barrier is restored after this cell",
+  );
 });
 
 test("debt-ATTACK2 (LOW-6) · agent_tasks_visible: the SAME probe leaks a firm-A task's id to a firm-B caller WITHOUT security_barrier once the planner is forced off index/bitmap plans (enable_indexscan/enable_bitmapscan=off — a caller's own USERSET choice), and does NOT leak WITH it", async (t) => {
   if (gate(t)) return;
   await plantSnoop();
-  // Direct-insert (root bypasses RLS) -- agent_tasks needs no FK-chained fixture beyond
-  // firm_id for this cell's purpose; the task's own id is the canary (any firm-B-invisible
+  // Direct-insert (root bypasses RLS). MEASURED (fix-round finding): a kind='wake' task's OWN
+  // trigger (_tf_agent_task_insert, 0011/0120) requires a real origin_intent_id resolving
+  // through wake_intents+domain_events -- kind='chat_turn' is the simpler admission (a real
+  // chat_sessions row + status='queued'). The task's own id is the canary (any firm-B-invisible
   // value would do -- the id is convenient and needs no extra column).
-  const taskId = (await rootQuery(
-    "insert into clara.agent_tasks(firm_id, kind, status) values ($1, 'wake', 'queued') returning id",
-    [world.firms.A],
+  const sessionId = (await rootQuery(
+    "insert into clara.chat_sessions(firm_id, created_by) values ($1, $2) returning id",
+    [world.firms.A, world.users.alice],
   )).rows[0].id;
+  const taskId = (await rootQuery(
+    "insert into clara.agent_tasks(firm_id, kind, session_id, status) values ($1, 'chat_turn', $2, 'queued') returning id",
+    [world.firms.A, sessionId],
+  )).rows[0].id;
+
+  // MEASURED (fix-round finding, same class as debt-ATTACK1): a ROLLED-BACK transaction is
+  // the wrong instrument when the probe's OWN witness-table INSERT must be observed
+  // afterward -- a rollback discards that side effect along with anything else in the same
+  // transaction. Both attack halves below run on ONE raw client, GUCs/role/claims set
+  // SESSION-scoped (no wrapping BEGIN, so each statement autocommits and the witness INSERT
+  // genuinely persists), reset via the estate's own recipe (`reset role` -> `reset all`,
+  // db-tests.md) before the client is released back to the pool.
+  async function attackAgentTasksVisibleAsDave() {
+    const client = await getPool().connect();
+    try {
+      await client.query("set enable_indexscan = off");
+      await client.query("set enable_bitmapscan = off");
+      await client.query("set role clara_authenticated");
+      await client.query("select set_config('request.jwt.claims', $1, false)",
+        [JSON.stringify({ sub: world.users.dave, role: "authenticated" })]);
+      await client.query("select id from clara.agent_tasks_visible where clara._hrd_a_snoop(id::text)");
+    } finally {
+      try { await client.query("reset role"); } catch { /* best-effort cleanup */ }
+      try { await client.query("reset all"); } catch { /* best-effort cleanup */ }
+      client.release();
+    }
+  }
 
   // ATTACK, WITH security_barrier (the live, migrated state), planner forced off index/bitmap
   // plans -- expect NO leak.
   await clearSnoopWitness();
-  await inRolledBackTx(async (client) => {
-    await client.query("set local enable_indexscan = off");
-    await client.query("set local enable_bitmapscan = off");
-    await client.query("set role clara_authenticated");
-    await client.query("select set_config('request.jwt.claims', $1, true)",
-      [JSON.stringify({ sub: world.users.dave, role: "authenticated" })]);
-    await client.query("select id from clara.agent_tasks_visible where clara._hrd_a_snoop(id::text)");
-    // This tx itself has no DDL to undo, but inRolledBackTx's rollback is harmless here too --
-    // the point is scoping enable_indexscan/enable_bitmapscan to exactly this attack attempt.
-  });
+  await attackAgentTasksVisibleAsDave();
   assert.equal(await snoopSaw(taskId), false,
     "WITH security_barrier, the probe must never see firm A's task id even with index/bitmap plans disabled");
 
-  // ATTACK, WITHOUT security_barrier, SAME forced plan -- expect a leak.
-  await clearSnoopWitness();
-  await inRolledBackTx(async (client) => {
-    await client.query("set role clara_fn_owner");
-    await client.query("alter view clara.agent_tasks_visible reset (security_barrier)");
-    await client.query("reset role");
-    await client.query("set local enable_indexscan = off");
-    await client.query("set local enable_bitmapscan = off");
-    await client.query("set role clara_authenticated");
-    await client.query("select set_config('request.jwt.claims', $1, true)",
-      [JSON.stringify({ sub: world.users.dave, role: "authenticated" })]);
-    await client.query("select id from clara.agent_tasks_visible where clara._hrd_a_snoop(id::text)");
-  });
+  // ATTACK, WITHOUT security_barrier, SAME forced plan -- expect a leak. A REAL, COMMITTED
+  // reset (restored in `finally`), same reasoning as debt-ATTACK1.
+  await rootQuery("set role clara_fn_owner");
+  await rootQuery("alter view clara.agent_tasks_visible reset (security_barrier)");
+  await rootQuery("reset role");
+  try {
+    await clearSnoopWitness();
+    await attackAgentTasksVisibleAsDave();
+  } finally {
+    await rootQuery("set role clara_fn_owner");
+    await rootQuery("alter view clara.agent_tasks_visible set (security_barrier = true)");
+    await rootQuery("reset role");
+  }
   assert.equal(await snoopSaw(taskId), true,
     "WITHOUT security_barrier, forcing the planner off index/bitmap plans, the SAME probe/query shape must see firm A's task id -- proving the reloption, not some other property, is what closes the channel");
+  // Restored, proven rather than assumed.
+  const restored = await rootQuery(
+    `select c.reloptions from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'clara' and c.relname = 'agent_tasks_visible'`,
+  );
+  assert.ok(
+    Array.isArray(restored.rows[0].reloptions) && restored.rows[0].reloptions.includes("security_barrier=true"),
+    "agent_tasks_visible's security_barrier is restored after this cell",
+  );
 });
 
 // NOTE (LOW-6, honest record): agent_receipts_visible and document_intakes_visible carry the
