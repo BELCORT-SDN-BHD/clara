@@ -278,9 +278,17 @@ export function setFieldValue(node: Stub, value: string): void {
  *  of FloatingFocusManager's `getEventType`, which DialogClose's internal
  *  close-handling chain reaches on a Dialog's open/close cycle. Confirmed
  *  empirically (a probe against a live DialogClose Cancel button, this same
- *  meet-point commit): the event needs a `nativeEvent` field carrying a real
- *  `target` (added below — DialogClose's own `handleClick` reads
- *  `event.nativeEvent` before forwarding), but no OTHER special-casing.
+ *  meet-point commit): with the three event stubs in place, NO special-
+ *  casing at all is required to drive DialogClose — this was RIGHT-
+ *  CONCLUSION-WRONG-REASON on the original probe (this repo's own named
+ *  class): the `nativeEvent` field below (added in the same window as the
+ *  stubs, and originally credited with the fix) is neither necessary nor
+ *  sufficient on its own; the event stubs are the actual, measured cause.
+ *  Kept anyway as a harmless DEFENSIVE addition — `DialogClose`'s own
+ *  `handleClick` does read `event.nativeEvent` before forwarding, so
+ *  carrying a real `target` there costs nothing and may matter for a future
+ *  base-ui internal this repo has not yet exercised — but it is not what
+ *  makes DialogClose work today, and no test in this repo depends on it.
  *  What this function still cannot reach is REAL browser hit-testing —
  *  pointer-events, overlay stacking, z-index, anything that needs an actual
  *  layout/paint engine to resolve which element a coordinate would hit;
