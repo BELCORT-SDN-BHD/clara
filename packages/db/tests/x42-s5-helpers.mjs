@@ -718,6 +718,15 @@ const AGENT_LIMB_F_A3_PR1B_CLOCK_NAMES = ["_tf_bank_agent_proposal_accept", "set
 // the clock" idiom every other core already on this roster carries.
 const FILING_VERB_F_A7_BETA_CLOCK_NAMES = ["_agent_file_document_core", "wake_reattribute_document"];
 
+// [F-A7b PR-a, `UNNUMBERED_fa7b_pr_a_client_onboarding_open` -- number claimed at merge]:
+// clara.wake_propose_client_onboarding reads statement_timestamp() twice -- the authorization
+// liveness check (`a.expires_at > statement_timestamp()`) and the consume stamp
+// (`consumed_at = statement_timestamp()`) -- the SAME "the audit/liveness clock is the bare
+// token" idiom every other wake wrapper on this roster already carries (wake_file_document's
+// own A9/B7 rungs among them). Gated on the migration's stem, not a number, per this file's
+// own convention.
+const ONBOARDING_OPEN_F_A7B_PR_A_CLOCK_NAMES = ["wake_propose_client_onboarding"];
+
 // [Gate G1, `0133_g1_wake_engine` — number claimed at merge]: ONE genuinely new body.
 // clara.set_wake_source_enabled's two `now()` calls stamp enabled_at/disabled_at on the
 // registry row it flips — the SAME "the audit stamp is the clock" idiom every other human
@@ -805,6 +814,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a4_pr_1c_close_agent_limb$")) names.push(...F_A4_PR1C_CLOCK_NAMES);
   if (await appliedStem("f_a4_pr_2a_prepayment_limb$")) names.push(...F_A4_PR2A_CLOCK_NAMES);
   if (await appliedStem("p4_tranche1_invite_rbac$")) names.push(...P4T1_CLOCK_NAMES);
+  if (await appliedStem("fa7b_pr_a_client_onboarding_open$")) names.push(...ONBOARDING_OPEN_F_A7B_PR_A_CLOCK_NAMES);
   return names.sort();
 }
 

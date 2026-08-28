@@ -357,15 +357,21 @@ test("filing kind: mints with client_id NULL; refuses with a client", async (t) 
   );
 });
 
-test("filing allowlist: closed world holds exactly the six provable rows (cell 40, corrected scope)", async (t) => {
+test("filing allowlist: closed world holds exactly the six train-beta rows plus F-A7b PR-a's own (cell 40, corrected scope, widened by F-A7b PR-a)", async (t) => {
   if (unready(t)) return;
   const r = await rootQuery("select function_name from clara.wake_fn_allowlist where wake_kind='filing' order by 1");
   const got = r.rows.map((x) => x.function_name).sort();
+  // Rows 1-6 are train beta's (this file). Row 7, wake_begin_client_onboarding, is F-A7b PR-b's
+  // still-unclaimed reservation. Row 8, wake_propose_client_onboarding, is F-A7b PR-a's own --
+  // this cell is the closed-world floor PR-a's own migration widens, trued here in the same PR
+  // (db-tests.md's succession rule: a PR that widens a registered closed world trues the floor
+  // that pins it, in the same PR, rather than leaving the next sweep to find it red).
   const expected = [
     "get_document_extract", "wake_file_document", "wake_open_firm_question",
     "wake_propose_filing_correction", "wake_propose_identifier_promotion", "wake_reattribute_document",
+    "wake_propose_client_onboarding",
   ].sort();
-  assert.deepEqual(got, expected, "filing allowlist rows 1-6 (row 7, wake_begin_client_onboarding, is F-A7b's)");
+  assert.deepEqual(got, expected, "filing allowlist rows 1-6 (train beta) + row 8 (F-A7b PR-a); row 7 (wake_begin_client_onboarding) is F-A7b PR-b's, still unclaimed");
 });
 
 test("filing allowlist twin: a filing credential cannot call wake_draft_entry", async (t) => {
