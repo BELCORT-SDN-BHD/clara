@@ -205,3 +205,19 @@ test("getDocumentExtract: posts get_document_extract with document/client/max_ch
   assert.equal(seenFn, "get_document_extract");
   assert.deepEqual(seenBody, { p_document: "doc-1", p_client: "c1", p_max_chars: 20000 });
 });
+
+// F2 (independent review, fix-required): the `admitted` CTE legitimately
+// resolves to zero rows — a document filed to a DIFFERENT client than
+// `p_client` and not unassigned — so the RPC's own 200 response body is the
+// JSON literal `null`, not a refusal. Proves this module returns that `null`
+// VERBATIM (never asserts it away) so the caller can render an honest
+// not-available state instead of a silent blank.
+test("getDocumentExtract: returns null verbatim when the DB admits nothing (wrong-client / not-unassigned), never throws", async () => {
+  await withMockedFetch(
+    async () => okJson(null),
+    async () => {
+      const out = await getDocumentExtract("doc-1", "other-client", 20000, { session: session() });
+      assert.equal(out, null);
+    },
+  );
+});

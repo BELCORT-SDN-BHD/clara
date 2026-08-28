@@ -83,6 +83,12 @@ test("RE-EXTRACTION journey: the dialog opens, its reason field and Confirm/Canc
     assert.equal(activeElement(), reasonField, "focusing the reason field must move document.activeElement to it");
   } finally {
     await h.unmount();
+    // F7 (independent review, hygiene): remove the appended container from
+    // the shared fake `document.body` — journals-governance-keyboard.
+    // test.tsx's own WITHDRAW test does this; without it, a later test in
+    // this file can walk stale DOM left behind by this one.
+    const bodyEl = b as unknown as { removeChild: (c: unknown) => void; childNodes?: unknown[] };
+    if (bodyEl.childNodes?.includes(h.container)) bodyEl.removeChild(h.container);
   }
 });
 
@@ -105,9 +111,28 @@ test("CONSENT EVIDENCE journey: the dialog opens, its reason field and Confirm/C
     assert.ok(cancelButton, "the cancel control must render");
     assert.ok(focusableElements(b as never).includes(reasonField as never));
     assert.ok(focusableElements(b as never).includes(cancelButton as never));
+
+    // F4 (independent review, minor) — the GATED -> ENABLED transition,
+    // matching the RE-EXTRACTION walk above.
+    const confirmBefore = findIn(b, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Classify as consent evidence$/) !== null && n !== trigger);
+    assert.ok(confirmBefore, "the confirm control must render even while disabled");
+    assert.ok(
+      !focusableElements(b as never).includes(confirmBefore as never),
+      "confirm must be unreachable (disabled) while the reason is empty",
+    );
+
     assert.deepEqual(checkKeyboardWalk(b as never), [], "no tabindex-order/focus-visible violations in the open dialog");
+
+    await h.act(() => { setFieldValue(reasonField as never, "client's signed PDPA cross-border consent letter"); });
+    const confirmAfter = findIn(b, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Classify as consent evidence$/) !== null && n !== trigger);
+    assert.ok(
+      focusableElements(b as never).includes(confirmAfter as never),
+      "confirm must become reachable once a reason is typed",
+    );
   } finally {
     await h.unmount();
+    const bodyEl = b as unknown as { removeChild: (c: unknown) => void; childNodes?: unknown[] };
+    if (bodyEl.childNodes?.includes(h.container)) bodyEl.removeChild(h.container);
   }
 });
 
@@ -138,5 +163,8 @@ test("AUTODRAFT journey: the dialog opens with no fields of its own, and Confirm
     assert.deepEqual(checkKeyboardWalk(b as never), [], "no tabindex-order/focus-visible violations in the open dialog");
   } finally {
     await h.unmount();
+    // F7 (independent review, hygiene) — see the RE-EXTRACTION test's own note.
+    const bodyEl = b as unknown as { removeChild: (c: unknown) => void; childNodes?: unknown[] };
+    if (bodyEl.childNodes?.includes(h.container)) bodyEl.removeChild(h.container);
   }
 });

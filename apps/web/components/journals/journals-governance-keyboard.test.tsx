@@ -8,7 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent, textOf, setFieldValue } from "../../test/hookHarness";
+import { renderComponent, textOf, setFieldValue, clickButton } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import messages from "../../messages/en.json";
@@ -95,18 +95,89 @@ test("WITHDRAW journey: from an expanded draft, the Withdraw dialog opens, its r
     assert.ok(confirmButton, "the dialog's own confirm control must render");
     assert.ok(cancelButton, "the dialog's own cancel control must render");
 
+    // F4 (independent review, minor) — the GATED -> ENABLED transition,
+    // documents-governance-keyboard.test.tsx's RE-EXTRACTION walk is the
+    // model: confirm must be genuinely unreachable while the reason is
+    // empty, and become reachable once one is typed — not merely present in
+    // the DOM.
+    assert.ok(
+      !focusableElements(body as never).includes(confirmButton as never),
+      "confirm must be unreachable (disabled) while the withdrawal reason is empty",
+    );
+
     assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations in the open dialog");
 
     (reasonField as unknown as { focus: () => void }).focus();
     assert.equal(activeElement(), reasonField, "focusing the reason field must move document.activeElement to it");
 
-    await h.fireEvent(cancelButton as never, "click");
-    for (let i = 0; i < 10; i++) await h.settle();
-    const withdrawTriggerAfterClose = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Withdraw$/) !== null);
+    await h.act(() => { setFieldValue(reasonField as never, "duplicate entry, drafted twice"); });
+    const confirmAfterTyping = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Withdraw draft$/) !== null);
     assert.ok(
-      withdrawTriggerAfterClose && focusableElements(h.container as never).includes(withdrawTriggerAfterClose as never),
-      "the trigger must be reachable again after the dialog closes",
+      focusableElements(body as never).includes(confirmAfterTyping as never),
+      "confirm must become reachable once a reason is typed",
     );
+
+    // Cancel is `DialogClose` (base-ui's own primitive, not this file's
+    // code) — clicking it through EITHER `h.fireEvent` (proven earlier this
+    // round to be a no-op for portaled content) OR `clickButton` (which
+    // reaches base-ui's real internals, but those internals then call
+    // `event instanceof KeyboardEvent` — a global this harness's fake DOM
+    // does not define, since no test before this round ever drove a click
+    // deep enough to reach it) cannot be honestly proven to close the dialog
+    // with the tools available in this file. Recorded as a real, separate
+    // harness gap — NOT fixed here (out of this round's scope; fixing it
+    // means adding fake Event/KeyboardEvent/MouseEvent globals to
+    // hookHarness.ts's shared `installDom()`, a bigger and riskier change
+    // than this fix round owns). What IS proven: the control renders, is
+    // keyboard-reachable, and the CONFIRM path (this file's OWN onClick,
+    // the next test below) genuinely closes the dialog end to end.
+    assert.ok(
+      focusableElements(body as never).includes(cancelButton as never),
+      "cancel must be keyboard-reachable",
+    );
+  } finally {
+    await h.unmount();
+    const bodyEl = body as unknown as { removeChild: (c: unknown) => void; childNodes?: unknown[] };
+    if (bodyEl.childNodes?.includes(h.container)) bodyEl.removeChild(h.container);
+  }
+});
+
+test("WITHDRAW confirm: a real click on Confirm calls onWithdraw and closes the dialog (the CONFIRM path, not just Cancel)", async () => {
+  const calls: Array<{ entryId: string; reason: string; expectedRevision: string }> = [];
+  const h = await renderComponent(
+    App(
+      createElement(DraftsQueuePanel, {
+        clientId: "c1",
+        queueRows: [QUEUE_ROW], queueCounts: { open_drafts: 1 }, entries: [DRAFT_ENTRY], lines: DRAFT_LINES,
+        linesTruncated: false, accounts: ACCOUNTS, busy: false, err: null, clr: null, actingId: null,
+        onApprove: () => {}, onRevise: () => {}, onApproveRoutine: () => {},
+        onWithdraw: async (entryId, reason, expectedRevision, onOk) => { calls.push({ entryId, reason, expectedRevision }); onOk(); },
+      }),
+    ),
+  );
+  const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+  body.appendChild(h.container);
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const rowToggle = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("April supplies"));
+    await h.fireEvent(rowToggle!, "click");
+    await h.settle();
+    const withdrawTrigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Withdraw$/) !== null);
+    await h.fireEvent(withdrawTrigger!, "click");
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    const reasonField = findIn(body as never, (n) => n.tagName === "TEXTAREA");
+    await h.act(() => { setFieldValue(reasonField as never, "duplicate entry, drafted twice"); });
+    const confirmButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Withdraw draft$/) !== null);
+    assert.ok(confirmButton, "confirm must render once the reason is typed");
+
+    await h.act(() => { clickButton(confirmButton as never); });
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    assert.equal(calls.length, 1, "onWithdraw must be called exactly once");
+    assert.equal(calls[0]!.entryId, "je-1");
+    assert.equal(calls[0]!.reason, "duplicate entry, drafted twice");
+    assert.doesNotMatch(textOf(body as never), /Withdraw this draft/, "the dialog must actually close on a real confirm");
   } finally {
     await h.unmount();
     const bodyEl = body as unknown as { removeChild: (c: unknown) => void; childNodes?: unknown[] };

@@ -55,7 +55,13 @@ export function DocumentAdmin({
   const [reextractReason, setReextractReason] = useState("");
   const [reextractOutcome, setReextractOutcome] = useState<RequestReextractionResult | null>(null);
   const [consentReason, setConsentReason] = useState("");
-  const [consentPriorKind, setConsentPriorKind] = useState<string | null>(null);
+  // A discriminated wrapper, not a bare `string | null` — `prior_kind` is
+  // ITSELF legitimately `null` (an unclassified document has no prior
+  // kind), so `consentOutcome !== null` (an attempt completed) must stay
+  // distinguishable from `priorKind !== null` (the DB had a NAMED prior
+  // kind) — the same F2 (independent review) reasoning applied here
+  // preventatively before it became a live bug.
+  const [consentOutcome, setConsentOutcome] = useState<{ priorKind: string | null } | null>(null);
 
   return (
     <div className="flex flex-col gap-3">
@@ -125,11 +131,18 @@ export function DocumentAdmin({
             confirmLabel={tg("reextraction.confirm")}
             busy={busy}
             confirmDisabled={!reextractReason.trim()}
-            onConfirm={() => act(async () => {
-              const out = await requestReextraction(doc.id, reextractReason.trim());
-              setReextractOutcome(out);
-              setReextractReason("");
-            })}
+            onConfirm={() => {
+              // F3 (independent review, minor): clear the PRIOR attempt's
+              // banner at the START of a new one — otherwise a refusal on
+              // attempt 2 leaves attempt 1's stale success banner standing,
+              // which reads as "it worked" when it did not.
+              setReextractOutcome(null);
+              return act(async () => {
+                const out = await requestReextraction(doc.id, reextractReason.trim());
+                setReextractOutcome(out);
+                setReextractReason("");
+              });
+            }}
           >
             <Textarea
               aria-label={tg("reextraction.reasonLabel")}
@@ -159,11 +172,16 @@ export function DocumentAdmin({
             confirmLabel={tg("consentEvidence.confirm")}
             busy={busy}
             confirmDisabled={!consentReason.trim()}
-            onConfirm={() => act(async () => {
-              const out = await classifyConsentEvidenceDocument(doc.id, consentReason.trim());
-              setConsentPriorKind(out.prior_kind);
-              setConsentReason("");
-            })}
+            onConfirm={() => {
+              // F3 (independent review, minor): same reasoning as the
+              // re-extraction door above — clear before, not after.
+              setConsentOutcome(null);
+              return act(async () => {
+                const out = await classifyConsentEvidenceDocument(doc.id, consentReason.trim());
+                setConsentOutcome({ priorKind: out.prior_kind });
+                setConsentReason("");
+              });
+            }}
           >
             <Textarea
               aria-label={tg("consentEvidence.reasonLabel")}
@@ -173,8 +191,10 @@ export function DocumentAdmin({
             />
           </DocumentsDoorDialog>
         </div>
-        {consentPriorKind !== null && (
-          <p className="text-xs text-muted-foreground">{tg("consentEvidence.priorKindNote", { priorKind: consentPriorKind })}</p>
+        {consentOutcome && (
+          <StateBanner tone="info">
+            {tg("consentEvidence.priorKindNote", { priorKind: consentOutcome.priorKind ?? tg("consentEvidence.priorKindNone") })}
+          </StateBanner>
         )}
       </div>
     </div>

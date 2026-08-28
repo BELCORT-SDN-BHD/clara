@@ -72,10 +72,17 @@ export function DocumentFilingsHistory({
                     description={tg("autodraft.description")}
                     confirmLabel={tg("autodraft.confirm")}
                     busy={busy}
-                    onConfirm={() => act(async () => {
-                      const out = await requestAutodraft(filing.id);
-                      setAutodraftOutcomes((m) => ({ ...m, [filing.id]: out.outcome }));
-                    })}
+                    onConfirm={() => {
+                      // F3 (independent review, minor): clear THIS filing's
+                      // prior outcome banner at the START of a new attempt —
+                      // a refusal (or a later hold outcome) must not leave an
+                      // earlier "admitted" banner standing.
+                      setAutodraftOutcomes((m) => Object.fromEntries(Object.entries(m).filter(([id]) => id !== filing.id)));
+                      return act(async () => {
+                        const out = await requestAutodraft(filing.id);
+                        setAutodraftOutcomes((m) => ({ ...m, [filing.id]: out.outcome }));
+                      });
+                    }}
                   />
                   <Button
                     size="xs"

@@ -991,7 +991,7 @@
       "hide": "Hide diff & history",
       "loading": "Loading the diff…",
       "docDiffHeading": "Document vs. entry",
-      "noSourceDocument": "This entry has no source document to compare against.",
+      "noSourceDocument": "A document-sourced comparison isn't available for this entry.",
       "docDiffEmpty": "No comparable fields were found on the source document.",
       "field": "Field",
       "docValue": "Document",
@@ -1032,7 +1032,8 @@
       "noExtractions": "No completed extraction for this document.",
       "regionsHeading": "Regions",
       "noRegions": "No extracted regions.",
-      "envelopeEmpty": "(no envelope text)"
+      "envelopeEmpty": "(no envelope text)",
+      "notAvailable": "This document's extraction text isn't available for this client."
     },
     "reextraction": {
       "trigger": "Request re-extraction",
@@ -1059,7 +1060,8 @@
       "confirm": "Classify as consent evidence",
       "reasonLabel": "Reason",
       "reasonPlaceholder": "Why this document is the client's consent evidence (required)…",
-      "priorKindNote": "Was: {priorKind}"
+      "priorKindNote": "Was: {priorKind}",
+      "priorKindNone": "unclassified"
     },
     "autodraft": {
       "trigger": "Request autodraft",

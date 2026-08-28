@@ -30,16 +30,28 @@ export function DocumentExtractPanel({ documentId, clientId }: { documentId: str
   );
 }
 
+/** Wraps the read's own `DocumentExtractResult | null` in a non-null
+ *  container (F2, independent review) so `useHydratedPart`'s `data` field
+ *  can tell "not yet loaded" (`data === null`, the hook's own initial state)
+ *  apart from "loaded, and the DB legitimately admitted nothing" (`data =
+ *  {result: null}`, a real fact) — the SAME shape `EntryDiffPanel`'s own
+ *  `Bundle` uses for `get_doc_entry_diff`'s equally-legitimate null. */
+type ExtractLoad = { result: DocumentExtractResult | null };
+
 function DocumentExtractLoader({ documentId, clientId }: { documentId: string; clientId: string }) {
   const t = useTranslations("DraftsDocumentGovernance.documentExtract");
-  const { data, loading, err, clr } = useHydratedPart<DocumentExtractResult>(sessionTokenAccessor, (session) =>
-    getDocumentExtract(documentId, clientId, 20000, { session }),
-  );
+  const { data, loading, err, clr } = useHydratedPart<ExtractLoad>(sessionTokenAccessor, async (session) => {
+    const result = await getDocumentExtract(documentId, clientId, 20000, { session });
+    return { result };
+  });
   if (loading && !data) return <LoadingState>{t("loading")}</LoadingState>;
   if (!data) {
     return err ? <StateBanner tone="error" code={clr ? clr.code : undefined}>{err}</StateBanner> : null;
   }
-  return <DocumentExtractContent data={data} />;
+  if (data.result === null) {
+    return <StateBanner tone="neutral">{t("notAvailable")}</StateBanner>;
+  }
+  return <DocumentExtractContent data={data.result} />;
 }
 
 /** The pure, fixed-prop presentational body — split out so an a11y scan can

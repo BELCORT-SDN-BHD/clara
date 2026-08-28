@@ -78,6 +78,14 @@ export function InterruptionsPanel({
   );
 }
 
+/** F5 (independent review, RATIFIED AS-CONDUCTED, 2026-08-28): answer-
+ *  interruption below is an INLINE textarea + submit button, not a
+ *  JournalsDoorDialog. Conforming: §5's substance — one governed call
+ *  (answerInterruption), a verbatim refusal in the persistent per-row banner
+ *  (interruptions-panel.tsx's own `err`/`clr` attribution above), no
+ *  composed batch — holds exactly as it does for every dialog-wrapped door
+ *  in this file; a modal confirmation step buys nothing extra for a
+ *  free-text answer a human already had to type once. */
 function AnswerRow({ busy, onAnswer }: { busy: boolean; onAnswer: (answer: Record<string, unknown>, onOk: () => void) => void }) {
   const t = useTranslations("DraftsDocumentGovernance.interruptions");
   const [answer, setAnswer] = useState("");

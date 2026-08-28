@@ -302,7 +302,18 @@ function DraftDetail({
  *  without one) stay visually distinct: both are real, DB-gated doors, and
  *  the DB's own CLR05/CLR06 refusal is the arbiter of which one a given
  *  entry actually accepts — this component invents no client-side rule about
- *  which to prefer. */
+ *  which to prefer.
+ *
+ *  F5 (independent review, RATIFIED AS-CONDUCTED, 2026-08-28): approve-
+ *  routine below is a BARE BUTTON, not a JournalsDoorDialog, deliberately
+ *  mirroring its P3 sibling `approveEntry` (drafts-queue-panel.tsx's own
+ *  "Approve" button, same file) rather than the plan §5 table's literal word
+ *  "dialog". Conforming: §5's substance is one governed call + a verbatim
+ *  refusal in the persistent banner + no composed batch — all three hold
+ *  here exactly as they do for `approveEntry`. A no-field confirmation
+ *  dialog around a single click that IS already the confirming act (the row
+ *  is already expanded; the button already reads "Approve (routine)") would
+ *  add friction without adding a real second confirmation step. */
 function DraftGovernanceRow({
   clientId, entry, busy, onApproveRoutine, onWithdraw,
 }: {
