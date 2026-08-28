@@ -79,7 +79,7 @@ test("chart-of-accounts register: Add and Edit triggers are keyboard-reachable, 
   });
 });
 
-test("Add Account door dialog: opens on click, reaches Confirm/Cancel, Confirm gates on code+name, no keyboard-walk violations while open", async () => {
+test("Add Account door dialog: opens on click, reaches Confirm/Cancel, Confirm gates on code+name, and Cancel genuinely closes it (Confirm GONE afterward)", async () => {
   await withMockedEnv(mockFetch, async () => {
     const h = await renderComponent(App());
     const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
@@ -92,6 +92,10 @@ test("Add Account door dialog: opens on click, reaches Confirm/Cancel, Confirm g
       (trigger as unknown as { focus: () => void }).focus();
       assert.equal(activeElement(), trigger, "keyboard focus must actually reach the trigger before activation");
 
+      // The trigger lives in the container (outside any portal), so
+      // fireEvent reaches it fine — see apps/web/AGENTS.md's "Testing a
+      // dialog" section for why everything INSIDE the now-open dialog needs
+      // clickButton instead.
       await h.fireEvent(trigger as never, "click");
       for (let i = 0; i < 6; i++) await h.settle();
 
@@ -106,17 +110,25 @@ test("Add Account door dialog: opens on click, reaches Confirm/Cancel, Confirm g
       assert.ok(confirmButton, "the dialog's own Confirm button must be reachable, distinct from the trigger");
       assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, true, "Confirm stays disabled with no code/name entered yet");
 
-      // F7 (independent review, fix-required — RECORDED, not a retry-harder
-      // fix): a Cancel-based close proof was attempted and genuinely FAILS
-      // in this harness — hookHarness.ts's own `clickButton` header documents
-      // that `@base-ui/react`'s `DialogClose` (Cancel) checks `event
-      // instanceof KeyboardEvent` internally, which this fake-DOM harness's
-      // dispatched events never satisfy (via `fireEvent` OR `clickButton`).
-      // Asserting "the trigger is reachable again" after a Cancel click (the
-      // ORIGINAL shape here) was vacuous for exactly that reason — Cancel
-      // never provably closes anything here, so it always passed. The
-      // genuine close proof below rides the Confirm path instead, which
-      // `clickButton` IS proven to reach end to end.
+      // F7 (independent review, fix-required): the ORIGINAL shape here
+      // asserted "the trigger is reachable again" after a Cancel click —
+      // vacuous, since the trigger never unmounts regardless of whether the
+      // dialog actually closed. Restored post-merge with the T9 fix round's
+      // event stubs (apps/web/test/hookHarness.ts): Cancel is content
+      // INSIDE the open dialog's portal, so it rides clickButton — not
+      // fireEvent, which silently no-ops there — and the discriminating
+      // post-condition is the dialog's own Confirm button being GONE
+      // afterward.
+      const cancelButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Cancel"));
+      assert.ok(cancelButton, "the Cancel control must render as a real <button>");
+      await h.act(() => { clickButton(cancelButton as never); });
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const confirmAfterCancel = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Add account") && (n as unknown) !== (trigger as unknown),
+      );
+      assert.equal(confirmAfterCancel, null, "the dialog's own Confirm button must be GONE after Cancel — the dialog genuinely closed");
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();

@@ -108,7 +108,7 @@ test("adjustments workbench: every door trigger is keyboard-reachable, in DOM or
   });
 });
 
-test("Reverse Pair door dialog: opens on click, reaches Confirm/Cancel, no keyboard-walk violations while open", async () => {
+test("Reverse Pair door dialog: opens on click, reaches Confirm/Cancel, and Cancel genuinely closes it (Confirm GONE afterward)", async () => {
   await withMockedEnv(mockFetch, async () => {
     const h = await renderComponent(App());
     const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
@@ -118,9 +118,23 @@ test("Reverse Pair door dialog: opens on click, reaches Confirm/Cancel, no keybo
       const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Reverse pair"));
       assert.ok(trigger, "the Reverse Pair trigger must render for a correctable run");
 
+      // This fixture's pending pair reversal ALSO renders a standalone
+      // "Cancel" trigger (CancelPairDialog's own, unrelated to this
+      // dialog) whose text is byte-identical to AdjustmentDoorDialog's
+      // "Cancel" close control — both namespaces render the literal string
+      // "Cancel". Captured here, BEFORE opening the Reverse Pair dialog, so
+      // the search below can exclude it by reference and land on the
+      // RIGHT Cancel — this dialog's own DialogClose.
+      const pairLedgerCancelTrigger = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Cancel");
+      assert.ok(pairLedgerCancelTrigger, "the pair-ledger's own Cancel trigger must render for the pending row (sanity check on the fixture)");
+
       (trigger as unknown as { focus: () => void }).focus();
       assert.equal(activeElement(), trigger, "keyboard focus must actually reach the trigger before activation");
 
+      // The trigger itself lives in the container (outside any portal), so
+      // fireEvent reaches it fine — see apps/web/AGENTS.md's "Testing a
+      // dialog" section for why everything INSIDE the now-open dialog needs
+      // clickButton instead.
       await h.fireEvent(trigger as never, "click");
       for (let i = 0; i < 6; i++) await h.settle();
 
@@ -134,23 +148,28 @@ test("Reverse Pair door dialog: opens on click, reaches Confirm/Cancel, no keybo
       );
       assert.ok(confirmButton, "the dialog's own Confirm button must be reachable while open, distinct from the trigger");
 
-      // F7 (independent review, fix-required — RECORDED, not fixed by
-      // trying harder here): a genuine "does Cancel close the dialog" proof
-      // was attempted and FAILED for a real reason, not a flaky one —
-      // hookHarness.ts's own `clickButton` header documents that
-      // `@base-ui/react`'s `DialogClose` (Cancel) checks `event instanceof
-      // KeyboardEvent` internally, which this fake-DOM harness's dispatched
-      // events never satisfy, via `fireEvent` OR `clickButton` — "a
-      // SEPARATE, deeper gap this function does not close." Asserting
-      // "the trigger is reachable again" after a Cancel click (the
-      // ORIGINAL shape here) was vacuous for exactly this reason: Cancel
-      // never provably closes anything in this environment, so the
-      // assertion always passed regardless of whether the real product
-      // does. The genuine "does this dialog actually close" proof below
-      // rides the CONFIRM path instead — `clickButton` IS proven to reach a
-      // door dialog's own Confirm handler end to end — and lives in the F2
-      // test immediately below, which also checks the dialog's own Confirm
-      // button is GONE after a real, successful confirm.
+      // F7 (independent review, fix-required): the ORIGINAL shape here
+      // asserted "the trigger is reachable again" after a Cancel click —
+      // vacuous, since the trigger never unmounts regardless of whether the
+      // dialog actually closed. Restored post-merge with the T9 fix round's
+      // event stubs (apps/web/test/hookHarness.ts): Cancel is content
+      // INSIDE the open dialog's portal, so it rides clickButton — not
+      // fireEvent, which silently no-ops there (apps/web/AGENTS.md's
+      // "Testing a dialog" section) — and the discriminating post-condition
+      // is the dialog's own Confirm button being GONE afterward.
+      const cancelButton = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Cancel" && (n as unknown) !== (pairLedgerCancelTrigger as unknown),
+      );
+      assert.ok(cancelButton, "the dialog's OWN Cancel control must be reachable, distinct from the pair-ledger's unrelated Cancel trigger");
+      await h.act(() => { clickButton(cancelButton as never); });
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const confirmAfterCancel = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Reverse pair" && (n as unknown) !== (trigger as unknown),
+      );
+      assert.equal(confirmAfterCancel, null, "the dialog's own Confirm button must be GONE after Cancel — the dialog genuinely closed");
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();
