@@ -137,3 +137,27 @@ reviews, P4's final pin round, F-A7b PR-a) or a RECORDED gap — the `counterpar
 read policy (T8's census), the sweep-receipt acknowledge control (T7's census), and the six
 待裁 items. "Basically fine" is true of what is merged; it is not yet true of the product,
 which is why the loop continues.
+
+## 裁-11 · `counterparty_aliases` gains its human read policy — "可以，聽你的"
+
+**Context put to the owner (大白话, recorded because the question was "is this an agentic
+tool, what does it serve, does it break agentic"):** `clara.counterparty_aliases` (`0011`) is
+the DB-owned alias memory the deterministic resolver `_match_counterparty` reads — the
+`alias_match` decision in a journal entry's `match_fingerprint` — so Clara recognises "TNB"
+as Tenaga without a human coding it twice. Three origins: `former_name` (auto-written by
+`rename_counterparty`), `trade_name`, `human` (`add_counterparty_alias`). It is NOT an LLM
+tool; the SQL resolver reads it inside `security definer` bodies. The gap T8's rung-0 census
+measured via `pg_policy`: the table carries only the owner and `clara_freeform_ro` policies —
+`0011` skipped the scoped human read that `.claude/rules/db-migrations.md` makes the default
+pair — so no human surface can list an alias, `retire_counterparty_alias` (EXECUTE-granted)
+has no reachable id, and the accountant cannot see or retire the memory Clara attributes on.
+**Adding the policy touches no agent path**: the definer resolver and the freeform read are
+byte-unchanged; RLS still decides who sees what; what it adds is human visibility and
+correction over the agent's memory — professional human control, not a weakening.
+
+**Ruled:** ADD it, riding **P4 DB tranche-2**: a `clara_authenticated` SELECT policy + grant
+on `clara.counterparty_aliases` that copies the `counterparties` table's own human-read
+policy shape verbatim (firm + client scoping, no new predicate). No writer body moves, so
+no D1 window; the PR body names **T8's counterparty-hygiene panel** (alias list + the
+retire-alias dialog, currently unmounted) as the door's frontend home. T8's wiring lands as
+a ride-along after the tranche ceremonies.
