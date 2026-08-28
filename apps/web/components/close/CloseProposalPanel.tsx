@@ -1,37 +1,108 @@
 "use client";
 
-// "Clara proposes close" — the CARRIER and its DOORS are LIVE (verb-coverage
-// census, 2026-08-28; migration 0138_f_a4_pr_1c_close_agent_limb.sql):
-// clara.close_proposals (§A.2) holds the digest vector, the drafted
-// attestation texts and the model/narrative triple; clara.wake_propose_close
-// (0138:2333) is the agent-side writer; clara.attest_close_exception's own
-// p_from_proposal arm (0120:1010-1041, LIVE since 0120 and pinned unchanged
-// at 0138's own prestate §0.3) is the human-side adoption path — a human
-// signs an exception FROM a live proposal, never inventing one.
+// "Clara proposes close" — the WORKBENCH half (port-wave-plan part2 §8.1:
+// "three of the four [P6] parts have a workbench half in T1 (close_proposal,
+// agent_receipt) … shipping the card before the workbench would mean a card
+// whose 'open the full object' destination does not exist"). This panel
+// reads the live `clara.close_proposals` row for the current close run
+// (getRows — a real table read, p_cp_human: bookkeeper+, firm-scoped) and
+// lets a human settle it (adopt/withdraw) through `settle_close_proposal`.
 //
-// This corrects an earlier claim on this panel (superseded by 0138 landing):
-// "no clara.close_proposals table, no wake_propose_close ... F-A4 PR-1c is
-// unbuilt". That was true when written; it is false at the frontier now.
-//
-// What is STILL NOT BUILT is this panel's OWN surface — a card that reads a
-// live clara.close_proposals row and lets a human adopt/withdraw it through
-// the doors above. That lands with P6's four-card wire bump (chatTurn_v15).
-// This note stays a NotBuiltNote for exactly that reason: the DB side is
-// done, the frontend card is not, and the mission's "anything unbuilt
-// renders honestly, never worked around" rule applies to the LATTER, not a
-// verb that no longer exists.
+// What is STILL NOT BUILT here: the CARD — a proactive `close_proposal` typed
+// part Clara raises unprompted in the chat rail. That is the P6 four-part
+// wire bump's own scope (chatTurn_v15, apps/web/lib/parts/{types,catalog}.ts
+// + PartRenderer.tsx) — recorded here as P6-owed, not fabricated as a
+// NotBuiltNote, because the object this panel opens is real and live.
 
 import { useTranslations } from "next-intl";
-
-import { NotBuiltNote } from "@/components/common/not-built-note";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { useState } from "react";
+import { useHydratedPart } from "@/lib/parts/hooks";
+import { listCloseProposalsForRun, settleCloseProposal } from "@/lib/close/api";
+import type { SessionTokenAccessor } from "@/lib/session";
+import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
+import { businessDateTime } from "@/lib/business-date";
 import { SectionHeader } from "@/components/common/section-header";
+import { CloseDoorDialog } from "./CloseDoorDialog";
 
-export function CloseProposalPanel() {
+export function CloseProposalPanel({
+  closeRunId,
+  session,
+  reloadPlan,
+}: {
+  /** `null` when no close run exists yet for this fiscal year — close_proposals.
+   *  close_run_id is NOT NULL, so no proposal can exist either; this panel
+   *  skips the fetch rather than reading zero rows and calling it "empty". */
+  closeRunId: string | null;
+  session: SessionTokenAccessor;
+  /** ClosePlanPanel's own plan (+ readiness + years) reload — called after
+   *  every settle, success or refusal, same discipline as every other door
+   *  on this page. */
+  reloadPlan: () => Promise<void>;
+}) {
   const t = useTranslations("ClientClose.proposal");
+  const proposals = useHydratedPart(session, (s) => (closeRunId ? listCloseProposalsForRun(closeRunId, { session: s }) : Promise.resolve([])));
+  const actAndReloadPlan = (fn: () => Promise<void>): Promise<void> => proposals.act(fn).then(() => reloadPlan());
+
   return (
-    <NotBuiltNote>
+    <section className="flex flex-col gap-2">
       <SectionHeader level={3}>{t("heading")}</SectionHeader>
-      <p>{t("body")}</p>
-    </NotBuiltNote>
+      {closeRunId === null ? <EmptyState>{t("noRun")}</EmptyState> : null}
+      {closeRunId !== null && proposals.loading && proposals.data === null ? <LoadingState>{t("loading")}</LoadingState> : null}
+      {proposals.err ? (
+        <StateBanner tone="error" code={proposals.clr ? `${proposals.clr.code}${proposals.clr.reason ? ` · ${proposals.clr.reason}` : ""}` : undefined}>
+          {proposals.err}
+        </StateBanner>
+      ) : null}
+      {closeRunId !== null && proposals.data && proposals.data.length === 0 ? <EmptyState>{t("empty")}</EmptyState> : null}
+      {proposals.data?.map((p) => (
+        <div key={p.id} className="enter-content flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={p.state === "open" ? "default" : p.state === "adopted" ? "secondary" : "outline"}>{p.state}</Badge>
+            <span className="text-xs text-muted-foreground">{p.model_name} {p.model_version} · {businessDateTime(p.created_at)}</span>
+          </div>
+          <p className="text-card-foreground">{p.narrative}</p>
+          <p className="text-xs text-muted-foreground">{p.rationale}</p>
+          <span className="text-xs text-muted-foreground">{t("drafted", { count: p.drafted.length })}</span>
+          {p.state === "open" ? (
+            <div className="flex flex-wrap gap-2">
+              <AdoptDialog busy={proposals.busy} onConfirm={() => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "adopted", null, { session }); })} />
+              <WithdrawDialog busy={proposals.busy} onConfirm={(reason) => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "withdrawn", reason, { session }); })} />
+            </div>
+          ) : (
+            <span className="text-xs text-muted-foreground">
+              {t("settledBy")}: {p.settled_by} · {p.settled_at ? businessDateTime(p.settled_at) : ""} {p.settle_reason ? `· ${p.settle_reason}` : ""}
+            </span>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function AdoptDialog({ busy, onConfirm }: { busy: boolean; onConfirm: () => Promise<void> }) {
+  const t = useTranslations("ClientClose.proposal.adopt");
+  return (
+    <CloseDoorDialog triggerLabel={t("trigger")} title={t("title")} description={t("description")} confirmLabel={t("confirm")} busy={busy} onConfirm={onConfirm} />
+  );
+}
+
+function WithdrawDialog({ busy, onConfirm }: { busy: boolean; onConfirm: (reason: string) => Promise<void> }) {
+  const t = useTranslations("ClientClose.proposal.withdraw");
+  const [reason, setReason] = useState("");
+  return (
+    <CloseDoorDialog
+      triggerLabel={t("trigger")}
+      triggerVariant="destructive"
+      title={t("title")}
+      description={t("description")}
+      confirmLabel={t("confirm")}
+      busy={busy}
+      confirmDisabled={reason.trim().length === 0}
+      onConfirm={() => onConfirm(reason)}
+    >
+      <Textarea aria-label={t("trigger")} placeholder={t("reasonPlaceholder")} value={reason} onChange={(e) => setReason(e.target.value)} />
+    </CloseDoorDialog>
   );
 }

@@ -30,6 +30,7 @@ components/bank/reconciliation-section.test.tsx
 components/close/close-a11y.test.tsx
 components/close/close-components.test.tsx
 components/close/close-keyboard.test.tsx
+components/close/close-t1-workbench.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/documents-a11y.test.tsx
