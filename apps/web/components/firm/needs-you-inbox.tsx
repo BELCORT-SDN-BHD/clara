@@ -44,10 +44,11 @@ import { DataState, ErrorMessage } from "./data-state";
 import { NeedsYouCounts } from "./needs-you-counts";
 import { NeedsYouRow } from "./needs-you-row";
 import { NeedsYouGaps } from "./needs-you-gaps";
+import { SweepStatusPanel } from "./sweep-status-panel";
 
 export function NeedsYouInbox() {
   const t = useTranslations("NeedsYou");
-  const { rows, counts, loading, loadingMore, busy, error, hasMore, act, loadMore } = useReviewQueue({});
+  const { rows, counts, sweep, loading, loadingMore, busy, error, hasMore, act, loadMore } = useReviewQueue({});
   const [actingKey, setActingKey] = useState<string | null>(null);
 
   const hasData = counts !== null;
@@ -72,6 +73,9 @@ export function NeedsYouInbox() {
   return (
     <div className="flex flex-col gap-4">
       {counts ? <NeedsYouCounts counts={counts} /> : null}
+      {/* T7 (port-wave plan §4/§5) — the sweep-runs state, from the SAME
+          envelope `counts`/`rows` above already read; zero extra call. */}
+      <SweepStatusPanel sweep={sweep} />
       {showBanner ? <ErrorMessage error={error} /> : null}
       <DataState
         loading={loading}

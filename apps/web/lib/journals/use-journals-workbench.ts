@@ -59,6 +59,8 @@ import {
   listPendingInterruptions,
   withdrawDraft,
 } from "./governance-doors";
+import { promoteClarifyToQuestion } from "@/lib/coding/doors";
+import { listAgentTaskClientIds } from "@/lib/coding/reads";
 import type { EntryLineInput, JournalsDataWithInterruptions } from "./types";
 
 /** T6: the P3 combined loader (`loadJournalsWorkbench`) predates the firm-wide
@@ -67,15 +69,32 @@ import type { EntryLineInput, JournalsDataWithInterruptions } from "./types";
  *  header), and rather than a second parallel `useHydratedPart` cycle, so
  *  answering an interruption rides the SAME single act()-and-reload
  *  discipline as every other door on this tab. */
+/** F12, independent review: the client_id lookup used to run as a THIRD,
+ *  serial `await` after `Promise.all` had already resolved BOTH the main
+ *  workbench read and the interruptions read — adding a full extra round
+ *  trip to the whole tab's critical path for a value only the promote
+ *  control needs. Folded into the SAME parallel wave instead, chained off
+ *  `listPendingInterruptions` (it needs that read's own output as input, so
+ *  it cannot start any earlier) — it now runs CONCURRENTLY with
+ *  `loadJournalsWorkbench`, not after both. `.catch(() => ({}))`: a failure
+ *  here must degrade ONLY the promote control (interruptions-panel.tsx omits
+ *  it for a task with no known client_id — its own header), never the
+ *  entries/drafts/posted data this whole tab actually needs. */
 async function loadJournalsWorkbenchWithInterruptions(
   session: SessionTokenAccessor,
   clientId: string,
 ): Promise<JournalsDataWithInterruptions> {
-  const [data, interruptions] = await Promise.all([
+  const interruptionsWithClients = listPendingInterruptions({ session }).then(async (interruptions) => {
+    const clientIdByTaskId = await listAgentTaskClientIds(interruptions.map((i) => i.task_id), { session })
+      .then((rows) => Object.fromEntries(rows.map((r) => [r.id, r.client_id])))
+      .catch(() => ({}) as Record<string, string | null>);
+    return { interruptions, clientIdByTaskId };
+  });
+  const [data, { interruptions, clientIdByTaskId }] = await Promise.all([
     loadJournalsWorkbench(session, clientId),
-    listPendingInterruptions({ session }),
+    interruptionsWithClients,
   ]);
-  return { ...data, interruptions };
+  return { ...data, interruptions, clientIdByTaskId };
 }
 
 /** The sentinel `actingId` for the compose ceremony — not a real entry id
@@ -168,5 +187,17 @@ export function useJournalsWorkbench(clientId: string, auth: SessionTokenAccesso
     [auth, state],
   );
 
-  return { ...state, readErrorKind, actingId, approve, revise, reverse, compose, approveRoutine, withdraw, answerClarify };
+  // T7 (port-wave plan §4: promote_clarify_to_question, "the workbench half
+  // only, no wire change") — the SAME act()-and-reload cycle as every other
+  // door here. `scopeId` is the caller's own already-resolved client_id
+  // (interruptionClientIds above) — this hook does not derive it itself.
+  const promoteClarify = useCallback(
+    (interruptionId: string, scopeId: string, onOk?: () => void) => {
+      setActingId(interruptionId);
+      return state.act(() => promoteClarifyToQuestion(interruptionId, "client", scopeId, { session: auth }).then(() => undefined), onOk);
+    },
+    [auth, state],
+  );
+
+  return { ...state, readErrorKind, actingId, approve, revise, reverse, compose, approveRoutine, withdraw, answerClarify, promoteClarify };
 }
