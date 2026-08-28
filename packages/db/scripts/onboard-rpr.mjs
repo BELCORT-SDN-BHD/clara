@@ -305,7 +305,9 @@ async function resolveFirm(client, args, plan, log) {
   if (await one(client, "select 1 from clara.firm_memberships where user_id=$1 and status='active'", [args.firmOwner])) {
     throw new Error(`--firm-owner ${args.firmOwner} already belongs to a firm; create_firm requires an owner with no active membership.`);
   }
-  if (!(await one(client, "select 1 from clara.firm_admissions where token=$1 and consumed_at is null", [args.firmAdmissionToken]))) {
+  // 裁-16b (pre-beta hardening batch): firm_admissions stores token_hash only -- the plaintext
+  // is never persisted, so discovery hashes the operator-supplied value before comparing.
+  if (!(await one(client, "select 1 from clara.firm_admissions where token_hash=sha256(convert_to($1::text,'UTF8')) and consumed_at is null", [args.firmAdmissionToken]))) {
     throw new Error(`--firm-admission-token ${args.firmAdmissionToken} is missing or already consumed.`);
   }
   await setActor(client, args.firmOwner);

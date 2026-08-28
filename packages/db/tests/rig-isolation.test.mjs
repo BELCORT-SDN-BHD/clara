@@ -597,8 +597,23 @@ test("T23 create_firm is fail-closed on an admission token; create_client is adm
   const token = await seedAdmission();
   const firmF = await createFirm(frank, { name: `${world.prefix}_firmF`, token, opKey: opk() });
   assert.ok(firmF, "create_firm with a valid token succeeds");
-  const consumed = await rootQuery("select consumed_at from clara.firm_admissions where token = $1", [token]);
+  // 裁-16b (pre-beta hardening batch): firm_admissions stores token_hash only.
+  const consumed = await rootQuery(
+    "select consumed_at from clara.firm_admissions where token_hash = sha256(convert_to($1::text,'UTF8'))", [token],
+  );
   assert.ok(consumed.rows[0].consumed_at != null, "admission token is consumed");
+  // 裁-16b direct census, AS OWNER: no plaintext `token` column exists on the table at all
+  // (not merely "unreadable" -- ABSENT), and the row's stored hash equals sha256 of the exact
+  // plaintext this test minted and successfully used above.
+  const cols = await rootQuery(
+    "select attname from pg_attribute where attrelid = 'clara.firm_admissions'::regclass and attnum > 0 and not attisdropped",
+  );
+  assert.ok(!cols.rows.some((r) => r.attname === "token"), "firm_admissions carries no plaintext token column");
+  assert.ok(cols.rows.some((r) => r.attname === "token_hash"), "firm_admissions carries token_hash");
+  const directHash = await rootQuery(
+    "select token_hash = sha256(convert_to($1::text,'UTF8')) as matches from clara.firm_admissions where token_hash = sha256(convert_to($1::text,'UTF8'))", [token],
+  );
+  assert.equal(directHash.rows[0]?.matches, true, "the row's token_hash is exactly sha256 of the plaintext token that was actually used");
   const owner = await rootQuery("select role from clara.firm_memberships where firm_id = $1 and user_id = $2 and status = 'active'", [firmF, frank]);
   assert.equal(owner.rows[0]?.role, "owner", "bootstrapping user becomes owner");
   const grace = await insertUser(world.prefix, "grace");

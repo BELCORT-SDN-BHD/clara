@@ -328,8 +328,10 @@ export const findingEventRows = (finding) =>
 export const latestLintRun = () =>
   row1("select to_jsonb(r) as row from clara.lint_runs r order by r.started_at desc nulls last, r.id desc limit 1");
 
+// 裁-16b (pre-beta hardening batch): firm_admissions stores token_hash only -- callers still
+// pass the plaintext token they were minted; the lookup hashes it before comparing.
 export const admissionRow = (token) =>
-  row1("select to_jsonb(a) as row from clara.firm_admissions a where a.token=$1", [token]);
+  row1("select to_jsonb(a) as row from clara.firm_admissions a where a.token_hash=sha256(convert_to($1::text,'UTF8'))", [token]);
 
 /** Domain events of a type for a firm whose serialized row contains `frag`. */
 export async function eventsOf(firm, type, frag = null) {

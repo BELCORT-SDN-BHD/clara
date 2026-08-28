@@ -49,15 +49,25 @@ Both are live writes, so run them yourself, in a terminal, connected as the cere
 insert into clara.users (id, display_name, email, is_agent)
 values ('<UUID>', 'Rome Public Advisory — owner', '<EMAIL>', false);
 
--- (b) mint ONE admission token, and print it.
-insert into clara.firm_admissions (token, note)
-values (gen_random_uuid(), 'Gate F — Rome Public Advisory, minted <YYYY-MM-DD>')
-returning token;
+-- (b) mint ONE admission token, and print it ONCE. As of 裁-16b (pre-beta hardening batch),
+-- firm_admissions stores ONLY the token's hash at rest -- the plaintext exists nowhere on
+-- disk after this statement returns, so mint it in the same statement that hashes it.
+with minted as (
+  select gen_random_uuid() as token
+), ins as (
+  insert into clara.firm_admissions (token_hash, note)
+  select sha256(convert_to(token::text, 'UTF8')),
+         'Gate F — Rome Public Advisory, minted <YYYY-MM-DD>'
+    from minted
+  returning 1
+)
+select token from minted;
 ```
 
 Keep that token where you keep the other `~/.clara-*` secrets. **Do not paste it into chat** —
 it is a single-use bearer credential for creating a firm, and the agent does not need to see it:
-the agent drives the journey through the product, where *you* supply it.
+the agent drives the journey through the product, where *you* supply it. This is the ONLY
+moment the plaintext ever exists — the row this statement inserts carries only its hash.
 
 Sanity check before moving on — this must return exactly one row, and `member_of` must be null:
 

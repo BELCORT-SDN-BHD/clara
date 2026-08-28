@@ -373,9 +373,14 @@ export async function insertUser(prefix, tag) {
   return id;
 }
 
+// 裁-16b (pre-beta hardening batch): firm_admissions stores token_hash only -- the plaintext
+// is minted here, returned to the caller, and never written to the row itself.
 export async function seedAdmission(note = "relay rig admission") {
   const token = randomUUID();
-  await rootQuery("insert into clara.firm_admissions (token, note) values ($1, $2)", [token, note]);
+  await rootQuery(
+    "insert into clara.firm_admissions (token_hash, note) values (sha256(convert_to($1::text,'UTF8')), $2)",
+    [token, note],
+  );
   return token;
 }
 
