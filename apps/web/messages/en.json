@@ -2089,5 +2089,76 @@
       "shareDescription": "Every member of your firm will be able to read this conversation. This cannot be undone from here."
     }
   },
-  "ClientOnboarding": {}
+  "ClientOnboarding": {
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
+    "item": {
+      "state": {
+        "pending": "Pending",
+        "answered": "Answered",
+        "resolved": "Resolved",
+        "deferred": "Deferred"
+      },
+      "requiredForCommit": "Required before activation",
+      "resolveTrigger": "Resolve",
+      "resolveTitle": "Resolve this onboarding item",
+      "resolveDescription": "Record how \"{item}\" was settled.",
+      "resolveConfirm": "Resolve",
+      "resolvePlaceholder": "How was this settled?",
+      "alreadySettled": "This item is no longer pending — its own state above is the record.",
+      "planNotOpen": "The onboarding plan is no longer open — nothing more can be resolved on it."
+    },
+    "card": {
+      "loading": "Loading the onboarding plan…",
+      "clientNotVisible": "This client isn't visible to your session.",
+      "heading": "Client onboarding",
+      "noPlanBootstrapEligible": "This client has no onboarding plan yet — it was activated before this plan type existed.",
+      "bootstrapTrigger": "Bootstrap onboarding plan",
+      "bootstrapTitle": "Bootstrap an onboarding plan",
+      "bootstrapDescription": "Creates the carry-down plan this pre-existing active client never received. The client's status is not changed.",
+      "bootstrapConfirm": "Bootstrap plan",
+      "noPlanNotEligible": "This client has no onboarding plan, and its status ({status}) isn't eligible for bootstrapping.",
+      "progressLabel": "{completed} of {total} onboarding steps complete",
+      "planState": {
+        "open": "open",
+        "committed": "committed",
+        "cancelled": "cancelled"
+      },
+      "openedByAgent": "Clara opened this file.",
+      "openedByAgentWithModel": "Clara ({model}) opened this file.",
+      "committedNote": "This onboarding plan was committed on {at}. The client is active.",
+      "cancelledNote": "This onboarding plan was cancelled: {reason}",
+      "noItems": "This plan has no items yet.",
+      "commitTrigger": "Commit onboarding",
+      "commitTitle": "Commit this onboarding plan",
+      "commitDescription": "This activates {client} and closes the plan ({completed} of {total} items settled). The client can then be worked in its own workspace.",
+      "commitConfirm": "Commit onboarding",
+      "commitBlocked": {
+        "plan_not_open": "This plan is no longer open — it cannot be committed again.",
+        "client_not_onboarding": "This client's status is no longer \"onboarding\".",
+        "questions_unresolved": "A required item is still pending — resolve it before committing.",
+        "opening_position_required": "An opening position is required before activation — settle or defer it first."
+      },
+      "attestationLabel": "Attestation (only needed if the DB asks for one)",
+      "attestationPlaceholder": "Only fill this in if a commit attempt asks for an attestation.",
+      "cancelTrigger": "Cancel onboarding",
+      "cancelTitle": "Cancel this client's onboarding",
+      "cancelDescription": "This archives {client}. A client record is never deleted — cancelling is the only way to undo an onboarding started in error.",
+      "cancelConfirm": "Cancel onboarding",
+      "cancelReasonLabel": "Reason for cancelling",
+      "cancelReasonPlaceholder": "Why is this onboarding being cancelled?",
+      "cancelBlockedNotOpen": "This plan is no longer open — there is nothing left to cancel.",
+      "beginHeading": "Start a new client's onboarding",
+      "beginTrigger": "Begin client onboarding",
+      "beginTitle": "Begin a new client's onboarding",
+      "beginDescription": "Creates a new client record and its onboarding plan.",
+      "beginConfirm": "Begin onboarding",
+      "nameLabel": "Client name",
+      "namePlaceholder": "Legal or trading name",
+      "beginResult": "Client {clientId} and plan {planId} were created.",
+      "beginResultLink": "Open this client's workspace"
+    }
+  }
 }
