@@ -157,7 +157,9 @@ correction over the agent's memory — professional human control, not a weakeni
 
 **Ruled:** ADD it, riding **P4 DB tranche-2**: a `clara_authenticated` SELECT policy + grant
 on `clara.counterparty_aliases` that copies the `counterparties` table's own human-read
-policy shape verbatim (firm + client scoping, no new predicate). No writer body moves, so
+policy shape verbatim (**measured live: firm-only, `firm_id = clara.jwt_firm()` — the
+"firm + client" phrase in this entry's first draft was descriptive drift; the operative
+instruction, copy the live catalog, governs; trued at the tranche-2 build**). No writer body moves, so
 no D1 window; the PR body names **T8's counterparty-hygiene panel** (alias list + the
 retire-alias dialog, currently unmounted) as the door's frontend home. T8's wiring lands as
 a ride-along after the tranche ceremonies.

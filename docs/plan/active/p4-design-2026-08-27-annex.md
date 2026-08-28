@@ -358,7 +358,7 @@ extraction, so it is enumerated rather than implied:
   concurrently resolve to one firm rather than two.
 - Calls the core with `p_actor := request.applicant` — **not** `jwt_sub()`, which is the
   operator.
-- Re-checks the applicant's membership through the core; `CLR09` if they acquired one since
+- Re-checks the applicant's membership through the core; `CLR10` (*trued at the tranche-2 build: the core's own bullet says `CLR10`, and `_add_member_core` (0141) uses `CLR10` for the identical invariant — this line's earlier `CLR09` was loose prose*) if they acquired one since
   requesting.
 - Sets the request to `approved`, recording `decided_by`, `decided_at`, and the new `firm_id`.
 - `_audit` with action **`'approve_firm_registration'` — never `'create_firm'`**. Two different
