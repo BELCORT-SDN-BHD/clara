@@ -340,6 +340,15 @@ const F_A4_PR1C_CLOCK_NAMES = [
 // the count to zero -- so it is declared here, in the PR that creates it.
 const F_A4_PR2A_CLOCK_NAMES = ["_record_document_service_period_core"];
 
+// P4 tranche 1 [invite/RBAC first]: THREE lawful bare-clock readers, all timestamptz, none a
+// date column arm (D) would need a ::date cast on. invite_member computes the invite's
+// `expires_at := now() + interval '7 days'`; accept_invite reads `now()` twice -- the
+// `expires_at <= now()` expiry check and the `accepted_at := now()` consumption stamp;
+// revoke_invite stamps `revoked_at := now()` on the same table. Declared here, in the PR that
+// creates them, per arm (D)'s own law: every bare-clock reader gets a stated reason, not a
+// silent pass.
+const P4T1_CLOCK_NAMES = ["accept_invite", "invite_member", "revoke_invite"];
+
 // 0057 [Wave E lane γ]: ONE lawful bare-clock reader. clara.verify_snapshot stamps
 // `'verified_at', now()` on the jsonb payload it RETURNS — a display timestamptz that says
 // when the recomputation ran, and it lands in no column and in no date-typed accounting
@@ -795,6 +804,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("g1_wake_engine$")) names.push(...G1_WAKE_ENGINE_CLOCK_NAMES);
   if (await appliedStem("f_a4_pr_1c_close_agent_limb$")) names.push(...F_A4_PR1C_CLOCK_NAMES);
   if (await appliedStem("f_a4_pr_2a_prepayment_limb$")) names.push(...F_A4_PR2A_CLOCK_NAMES);
+  if (await appliedStem("p4_tranche1_invite_rbac$")) names.push(...P4T1_CLOCK_NAMES);
   return names.sort();
 }
 
