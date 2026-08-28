@@ -13,6 +13,20 @@
 //     idiom — a mapper the closure cannot find fails rather than scoring zero;
 //   * the extractor self-tests below fail if masking/parsing regresses to the
 //     silently-sees-nothing state that made list_bank_rules read as 0 keys.
+//
+// UNARMED, LAYER 2 REPORTS GREEN BY NOT RUNNING — and that is the ceiling to know about.
+// The self-skip is deliberate (a laptop with no rig must not fail the suite), but it means a
+// suite run WITHOUT the arming variables cannot tell "the seam is accounted for" apart from
+// "the seam was never looked at". CI's estate leg arms it; a lane's own estate runner may not,
+// and F-A4 PR-2a shipped a red to CI for exactly that reason — every local "full estate" run
+// reported this cell green without executing it. If you are about to trust a green here, arm it:
+//
+//   CLARA_RIG_DB=1 CLARA_PSQL_BIN=<path to psql> \
+//   PGHOST=… PGPORT=… PGUSER=… PGDATABASE=<a rig migrated to YOUR branch's frontier> \
+//   node --import ./test/bootstrap.mjs --import tsx --test app/shared/dbSeamCensus.test.ts
+//
+// The rig must carry your branch's migrations: the census reads the SHIPPED catalog, so a rig at
+// an older frontier measures an older seam and agrees with a stale ledger.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
