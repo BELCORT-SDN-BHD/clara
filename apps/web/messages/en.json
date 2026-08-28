@@ -642,7 +642,7 @@
   },
   "ClientClose": {
     "heading": "Close",
-    "body": "Pick a fiscal year to view its close plan — gates, doors, and the receipt/segregation record. Every figure is read live from the DB; the “Clara proposes close” card is not built in this workbench yet — the close_proposals carrier and its doors are live (see below).",
+    "body": "Open a fiscal year, pick one to view its close plan — gates, doors, and the receipt/segregation record — or manage the close-prep hold and future-method attestation below. Every figure is read live from the DB.",
     "picker": {
       "ariaLabel": "Fiscal years",
       "loading": "Loading fiscal years…",
@@ -745,7 +745,108 @@
     },
     "proposal": {
       "heading": "Clara proposes close",
-      "body": "The close_proposals carrier and its doors are live — wake_propose_close (Clara proposes) and attest_close_exception's p_from_proposal argument (a human adopts). This panel's own card — reading a live proposal and letting you act on it — is not built yet; it lands with a later wire bump."
+      "noRun": "No close run yet for this fiscal year — a proposal cannot exist until one begins.",
+      "loading": "Loading proposals…",
+      "empty": "No close proposal from Clara yet for this run.",
+      "drafted": "{count, plural, =1 {1 drafted item} other {# drafted items}}",
+      "settledBy": "settled by",
+      "adopt": {
+        "trigger": "Adopt",
+        "title": "Adopt this close proposal",
+        "description": "clara.settle_close_proposal — adopts Clara's proposal. Refuses unless every drafted item already carries a live agent-authored attestation on this run.",
+        "confirm": "Adopt",
+        "basisModel": "proposed by {model}",
+        "basisDrafted": "{count, plural, =1 {covers 1 drafted item} other {covers # drafted items}}"
+      },
+      "withdraw": {
+        "trigger": "Withdraw",
+        "title": "Withdraw this close proposal",
+        "description": "clara.settle_close_proposal — declines Clara's proposal. Requires a reason.",
+        "confirm": "Withdraw",
+        "reasonPlaceholder": "Why is this proposal being declined?"
+      }
+    },
+    "opener": {
+      "fyEndLoading": "Loading fiscal-year end…",
+      "fyEndUnset": "FY end not set (defaults to 31 Dec)",
+      "fyEndSet": "FY end: {day}/{month}",
+      "setFyEnd": {
+        "trigger": "Set fiscal-year end",
+        "title": "Set the client's fiscal-year end",
+        "description": "clara.set_client_fy_end — refuses while a live ANNUAL-cadence adjustment template or depreciation authority stands (retire it first).",
+        "confirm": "Set fiscal-year end",
+        "monthLabel": "Month (1–12)",
+        "dayLabel": "Day"
+      },
+      "open": {
+        "trigger": "Open fiscal year",
+        "title": "Open a fiscal year",
+        "description": "clara.open_fiscal_year — the first-ever trigger for this door in the product. One click opens ONE new fiscal year for this client.",
+        "confirm": "Open fiscal year",
+        "labelLabel": "Label",
+        "labelPlaceholder": "e.g. FY2026",
+        "startsOnLabel": "Starts on",
+        "endsOnLabel": "Ends on",
+        "previewLoading": "Previewing the fiscal-year end…",
+        "previewFallback": "No fiscal-year end set yet — defaults to {endsOn}.",
+        "previewAsserted": "Computed fiscal-year end: {endsOn}.",
+        "lengthReasonLabel": "Length reason (refused without one — this year is not ~12 months)"
+      }
+    },
+    "readiness": {
+      "heading": "Close readiness",
+      "loading": "Loading close readiness…",
+      "catalogEmpty": "No gate catalog entries found.",
+      "runState": "run state",
+      "noRun": "no close run yet",
+      "fyEndSource": "fy_end_source",
+      "drawer": "drawer",
+      "attested": "attested",
+      "notAttested": "not attested",
+      "notYetMeasured": "not yet measured"
+    },
+    "closePrep": {
+      "heading": "Close-prep hold",
+      "loading": "Loading close-prep hold…",
+      "notHeld": "No close-prep hold is visible here.",
+      "held": "on hold",
+      "heldBy": "held by",
+      "hold": {
+        "trigger": "Hold close prep",
+        "title": "Hold close prep",
+        "description": "clara.hold_close_prep — pauses the close-prep lane for this client. Requires a reason.",
+        "confirm": "Hold",
+        "reasonPlaceholder": "Why is close prep being held?"
+      },
+      "release": {
+        "trigger": "Release hold",
+        "title": "Release the close-prep hold",
+        "description": "clara.release_close_prep — resumes the close-prep lane. Requires a reason.",
+        "confirm": "Release",
+        "reasonPlaceholder": "Why is the hold being released?"
+      }
+    },
+    "futureAttestation": {
+      "heading": "SST future-method attestation",
+      "trigger": "Record future-method attestation",
+      "title": "Record a future-method attestation",
+      "description": "clara.record_future_attestation — human-attested only (never inferred). service_group is validated server-side against the live SST threshold schedule.",
+      "confirm": "Record",
+      "serviceGroupLabel": "Service group",
+      "serviceGroupPlaceholder": "e.g. G",
+      "expectedLabel": "Expected amount (RM)",
+      "horizonLabel": "Horizon start",
+      "expiresLabel": "Expires at",
+      "evidenceLabel": "Evidence",
+      "recorded": "Recorded — id {id}."
+    },
+    "receipts": {
+      "heading": "Agent act receipts",
+      "loading": "Loading agent act receipts…",
+      "empty": "No agent act receipts yet for this client.",
+      "model": "model",
+      "unknownModel": "(unnamed)",
+      "via": "via"
     }
   },
   "ClientReports": {
