@@ -1,5 +1,5 @@
 // HIGH-1 (independent review, 2026-08-29) -- the PIN PROOF for the sha256(prosrc) recut guard
-// the hardening-batch Migration A (UNNUMBERED_db_hardening_a_barrier_signer_wall.sql, §0(5))
+// the hardening-batch Migration A (0144_db_hardening_a_barrier_signer_wall.sql, §0(5))
 // adds to its own prestate. The finding: a marker-string census alone admits an INTERVENING
 // RECUT that keeps every marker but adds real behaviour elsewhere in the body -- the
 // recut-body class the estate has already paid for (PR-0 gate night; the 0136 lesson). This
@@ -19,7 +19,7 @@
 //                      HIGH-1's machinery specifically is what refused above, not the
 //                      pre-existing marker/position census alone.
 //
-// RESET-GATED (drops schema clara via reset(), replays the whole 0001-0142 chain twice), so it
+// RESET-GATED (drops schema clara via reset(), replays the whole numbered chain below 0144 twice), so it
 // SKIPS in the concurrent all-packages sweep -- run it ALONE:
 //   CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 node --test tests/hrd-a-recut-guard.test.mjs
 
@@ -35,7 +35,7 @@ after(async () => { await endPool(); });
 
 const RESET_OK = process.env.CLARA_RIG_ALLOW_RESET === "1";
 const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
-const REAL_FILE = join(MIG_DIR, "UNNUMBERED_db_hardening_a_barrier_signer_wall.sql");
+const REAL_FILE = join(MIG_DIR, "0144_db_hardening_a_barrier_signer_wall.sql");
 
 function skipUnlessReset(t) {
   if (!RESET_OK) {
@@ -45,20 +45,20 @@ function skipUnlessReset(t) {
   return false;
 }
 
-/** Copy 0001-0142 (every baseline migration, NOT this file's own UNNUMBERED text) into a
- *  throwaway dir. migrate() re-verifies EVERY already-applied version's checksum against what
- *  is on disk in `dir` -- omitting any of 0001-0142 here would fail the history-integrity check
+/** Copy every numbered baseline migration BELOW 0144 (0001-0143; never this file's own 0144
+ *  text) into a throwaway dir. migrate() re-verifies EVERY already-applied version's checksum
+ *  against what is on disk in `dir` -- omitting any baseline file here would fail the history-integrity check
  *  before the real test (the sha-compare guard) is ever reached, not because the guard fired. */
 function exportBaseline() {
   const tmp = mkdtempSync(join(tmpdir(), "clara-hrda-baseline-"));
   for (const f of readdirSync(MIG_DIR)) {
-    if (/^0(00[1-9]|0[1-9][0-9]|1[0-3][0-9]|14[0-2])_.*\.sql$/.test(f)) copyFileSync(join(MIG_DIR, f), join(tmp, f));
+    if (/^0(00[1-9]|0[1-9][0-9]|1[0-3][0-9]|14[0-3])_.*\.sql$/.test(f)) copyFileSync(join(MIG_DIR, f), join(tmp, f));
   }
   return tmp;
 }
 
-/** Fresh reset + 0001-0142 replay. Returns the migrate() function AND the dir it replayed
- *  from, so the caller can drop the numbered 0143 copy into that SAME dir afterward (migrate()
+/** Fresh reset + the below-0144 baseline replay. Returns the migrate() function AND the dir it
+ *  replayed from, so the caller can drop the 0144 copy into that SAME dir afterward (migrate()
  *  needs every already-applied file present on disk, every subsequent call). */
 async function freshBaseline() {
   const { reset } = await import("../scripts/reset.mjs");
@@ -187,7 +187,7 @@ test("hrd-a HIGH-1 guard: an intervening recut that keeps every marker string is
   if (skipUnlessReset(t)) return;
   const { migrate, dir } = await freshBaseline();
   await mutateLiveBody();
-  copyFileSync(REAL_FILE, join(dir, "0143_hrd_a_guarded.sql"));
+  copyFileSync(REAL_FILE, join(dir, "0144_hrd_a_guarded.sql"));
 
   await assert.rejects(
     () => migrate({ dir, log: () => {} }),
@@ -218,7 +218,7 @@ test("hrd-a HIGH-1 mutant-of-the-guard: the SAME mutated precondition passes SIL
   if (skipUnlessReset(t)) return;
   const { migrate, dir } = await freshBaseline();
   await mutateLiveBody();
-  writeGuardlessMutant(dir, "0143_hrd_a_guardless_mutant.sql");
+  writeGuardlessMutant(dir, "0144_hrd_a_guardless_mutant.sql");
 
   // No assert.rejects here -- a throw would FAIL this test, which is exactly the point: without
   // ANY of HIGH-1's machinery, this migration silently CoRs over the mutated body it does not
@@ -249,7 +249,7 @@ test("hrd-a HIGH-1 mutant-of-the-guard: the SAME mutated precondition passes SIL
   );
   assert.equal(after.rows[0].has_wall, true, "the guardless mutant migration DID commit the CoR silently (the wall landed, unconditionally) -- proving the guard's absence lets an unrecognised pre-image through with no refusal and no record");
   const recorded = await rootQuery(
-    "select 1 from clara.schema_migrations where version = '0143_hrd_a_guardless_mutant'",
+    "select 1 from clara.schema_migrations where version = '0144_hrd_a_guardless_mutant'",
   );
   assert.equal(recorded.rowCount, 1, "the guardless mutant migration is recorded as successfully, silently applied -- no error, no operator-visible warning that the pre-image had drifted");
 });
