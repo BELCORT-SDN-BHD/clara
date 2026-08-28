@@ -25,7 +25,11 @@ export type AccountRow = {
   name: string;
   account_type: "asset" | "liability" | "equity" | "income" | "expense" | string;
   account_class: string | null;
-  special_acc_type: "rounding" | null;
+  // F8 (independent review, nit, 2026-08-28): trued to the live 5-value
+  // CHECK (coa_accounts_special_acc_type_check) — the T4 rung-0 census read
+  // it directly; the pre-T4 type only ever named the one value this read
+  // module happened to have exercised.
+  special_acc_type: "rounding" | "sst_output" | "sst_purchase_cost" | "opening_balance_equity" | "retained_earnings" | null;
   is_active: boolean;
 };
 

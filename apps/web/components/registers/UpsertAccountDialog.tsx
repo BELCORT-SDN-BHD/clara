@@ -61,6 +61,11 @@ export function UpsertAccountDialog({
       }
     >
       <div className="flex flex-col gap-3">
+        {/* F5 (independent review, nit): upsert_account's own ON CONFLICT
+         *  unconditionally sets is_active=true (lib/registers/accounts.ts's
+         *  header) — editing a currently-inactive row REACTIVATES it. Said
+         *  plainly, not left to be discovered from the confirm's own effect. */}
+        {existing && !existing.is_active ? <p className="text-xs text-warning">{t("reactivateHint")}</p> : null}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="acct-code">{t("codeLabel")}</Label>
           <Input id="acct-code" value={code} onChange={(e) => setCode(e.target.value)} disabled={!!existing} required />

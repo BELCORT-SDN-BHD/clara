@@ -27,6 +27,15 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
   return null;
 }
 
+function findAllIn(root: Node, predicate: (n: Node) => boolean): Node[] {
+  const out: Node[] = [];
+  (function walk(n: Node) {
+    if (predicate(n)) out.push(n);
+    for (const c of n.childNodes ?? []) walk(c);
+  })(root);
+  return out;
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -55,7 +64,7 @@ const ACCOUNTS = [
   { client_id: "c1", account_code: "5100", name: "Rent expense", account_type: "expense", account_class: null, special_acc_type: null, is_active: true },
   { client_id: "c1", account_code: "2100", name: "Accrued liabilities", account_type: "liability", account_class: null, special_acc_type: null, is_active: true },
 ];
-const RUNS_PROJECTED = RUNS.map((r) => ({ ...r, correctable: false, active_pair_id: null, active_pair_status: null, correction_verb: null, correction_wall: "entry_not_approved", correction_wall_advice: null }));
+const RUNS_PROJECTED = RUNS.map((r) => ({ ...r, correctable: false, active_pair_id: null, active_pair_status: null, correction_verb: null, correction_entry: r.entry_id, correction_wall: "entry_not_approved", correction_wall_advice: null }));
 const DUE = { due: false, reason: "nothing_due", blocked: [] };
 const PAIR_REVERSALS: unknown[] = [];
 
@@ -167,6 +176,70 @@ test("a governed refusal (retire_adjustment_template) renders verbatim in the re
       } finally {
         await h.unmount();
         for (let i = 0; i < 5; i++) await h.settle();
+      }
+    },
+  );
+});
+
+// F6 (independent review, nit): pin the NEGATIVE direction of the pair-ledger's
+// pending gate. Positive coverage (a pending row offers Approve/Cancel) already
+// exists in adjustments-keyboard.test.tsx; a mutant that dropped the `status ===
+// "pending"` condition entirely (offering Approve/Cancel on every row) would
+// leave that positive-only coverage green.
+test("pair-reversal ledger offers Approve/Cancel ONLY on a pending row — completed and cancelled rows offer neither", async () => {
+  const PAIR_REVERSALS_MIXED = [
+    { id: "pr1", client_id: "c1", template_id: "tpl1", occurrence_id: "e1", mirror_id: "e2", occurrence_correction_id: "e3", mirror_correction_id: "e4", maker: "u1", status: "pending", completed_at: null, op_key: "k1", created_at: "2026-02-05T00:00:00Z" },
+    { id: "pr2", client_id: "c1", template_id: "tpl1", occurrence_id: "e5", mirror_id: "e6", occurrence_correction_id: "e7", mirror_correction_id: "e8", maker: "u1", status: "completed", completed_at: "2026-02-06T00:00:00Z", op_key: "k2", created_at: "2026-02-04T00:00:00Z" },
+    { id: "pr3", client_id: "c1", template_id: "tpl1", occurrence_id: "e9", mirror_id: "e10", occurrence_correction_id: "e11", mirror_correction_id: "e12", maker: "u1", status: "cancelled", completed_at: null, op_key: "k3", created_at: "2026-02-03T00:00:00Z" },
+  ];
+  await withMockedEnv(
+    (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("/rest/v1/adjustment_pair_reversals?")) return jsonResponse(PAIR_REVERSALS_MIXED);
+      return mockFetch(url);
+    }) as typeof fetch,
+    async () => {
+      const h = await renderComponent(App());
+      try {
+        for (let i = 0; i < 5; i++) await h.settle();
+        assert.match(h.text(), /Completed/, "the completed row's status badge must render");
+        assert.match(h.text(), /Cancelled/, "the cancelled row's status badge must render");
+
+        const approveButtons = findAllIn(h.container as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Approve");
+        const cancelButtons = findAllIn(h.container as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Cancel");
+        assert.equal(approveButtons.length, 1, "exactly ONE Approve button — only the pending row's");
+        assert.equal(cancelButtons.length, 1, "exactly ONE Cancel button — only the pending row's (the dialog-level Cancel controls are unrelated 'Cancel' text and are not open here)");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
+// F8 (independent review, nit): the solo-occurrence branch. `list_adjustment_runs`
+// can report `correction_verb: "clara.reverse_entry"` for a run whose auto-reverse
+// pair mirror was never minted — this train's own door (reverse_adjustment_pair)
+// does not apply, and the panel must say so honestly rather than offering a wrong
+// button or silence.
+test("a solo-occurrence run (correction_verb: clara.reverse_entry) renders the honest note, never a Reverse-pair button", async () => {
+  const RUNS_SOLO = RUNS.map((r) => ({ ...r, correctable: true, active_pair_id: null, active_pair_status: null, correction_verb: "clara.reverse_entry", correction_entry: r.entry_id, correction_wall: null, correction_wall_advice: null }));
+  await withMockedEnv(
+    (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("/rpc/list_adjustment_runs")) return jsonResponse({ client_id: "c1", runs: RUNS_SOLO });
+      return mockFetch(url);
+    }) as typeof fetch,
+    async () => {
+      const h = await renderComponent(App());
+      try {
+        for (let i = 0; i < 5; i++) await h.settle();
+        assert.match(h.text(), /solo occurrence, not an auto-reverse pair/, "the honest solo-occurrence note must render");
+        const reversePairButtons = findAllIn(h.container as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Reverse pair"));
+        assert.equal(reversePairButtons.length, 0, "no Reverse-pair button for a solo occurrence — that verb is clara.reverse_entry, T6's door, not this train's");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
       }
     },
   );

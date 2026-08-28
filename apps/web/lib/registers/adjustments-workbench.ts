@@ -12,6 +12,15 @@
 // it is the only way to get the DB's own per-run correctability projection (never
 // re-derived client-side, hard constraint 2) that the pair-reversal ceremony needs and
 // the plain table read cannot provide.
+//
+// F4 (independent review, 2026-08-28 — "consider" language, recorded rather than silently
+// skipped): the three reads ride ONE Promise.all, so a single failing read (e.g. a narrow
+// permission edge case on adjustment_run_due) blanks BOTH the run-history panel and the
+// pair-reversal ledger, even when the other two reads succeeded. Decoupling into three
+// independently-failable fields would need useHydratedPart's single err/clr model to widen
+// into a per-field shape — a real redesign, not a one-line fix. Left coupled for this pass;
+// the caller (adjustments-register.tsx) at least tells loading/unavailable/live-panel apart
+// honestly now, which was F4's actual should-fix half.
 
 import { listAdjustmentRuns, loadAdjustmentPairReversals, adjustmentRunDue } from "./adjustments";
 import type { AdjustmentRunWithCorrection, AdjustmentPairReversalRow, AdjustmentRunDueResult } from "./adjustments";

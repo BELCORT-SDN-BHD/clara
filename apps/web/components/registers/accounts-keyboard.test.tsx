@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent, textOf } from "../../test/hookHarness";
+import { renderComponent, textOf, clickButton, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
@@ -79,7 +79,7 @@ test("chart-of-accounts register: Add and Edit triggers are keyboard-reachable, 
   });
 });
 
-test("Add Account door dialog: opens on click, reaches Confirm/Cancel, leaves its trigger reachable again on close, Confirm gates on code+name", async () => {
+test("Add Account door dialog: opens on click, reaches Confirm/Cancel, Confirm gates on code+name, no keyboard-walk violations while open", async () => {
   await withMockedEnv(mockFetch, async () => {
     const h = await renderComponent(App());
     const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
@@ -106,16 +106,67 @@ test("Add Account door dialog: opens on click, reaches Confirm/Cancel, leaves it
       assert.ok(confirmButton, "the dialog's own Confirm button must be reachable, distinct from the trigger");
       assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, true, "Confirm stays disabled with no code/name entered yet");
 
-      const cancelButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Cancel"));
-      assert.ok(cancelButton, "the Cancel control must render as a real <button>");
-      await h.fireEvent(cancelButton as never, "click");
+      // F7 (independent review, fix-required — RECORDED, not a retry-harder
+      // fix): a Cancel-based close proof was attempted and genuinely FAILS
+      // in this harness — hookHarness.ts's own `clickButton` header documents
+      // that `@base-ui/react`'s `DialogClose` (Cancel) checks `event
+      // instanceof KeyboardEvent` internally, which this fake-DOM harness's
+      // dispatched events never satisfy (via `fireEvent` OR `clickButton`).
+      // Asserting "the trigger is reachable again" after a Cancel click (the
+      // ORIGINAL shape here) was vacuous for exactly that reason — Cancel
+      // never provably closes anything here, so it always passed. The
+      // genuine close proof below rides the Confirm path instead, which
+      // `clickButton` IS proven to reach end to end.
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+test("Add Account door dialog: a real successful confirm closes the dialog for real (Confirm GONE afterward, never a never-closes mutant)", async () => {
+  const impl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(url);
+    if (u.includes("/rpc/upsert_account")) return jsonResponse({ client_id: "c1", account_code: "5200" });
+    void init;
+    return mockFetch(url);
+  }) as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Add account"));
+      assert.ok(trigger, "the Add Account trigger must render");
+      await h.fireEvent(trigger as never, "click");
       for (let i = 0; i < 6; i++) await h.settle();
 
-      const triggerAfterClose = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Add account"));
-      assert.ok(
-        triggerAfterClose && focusableElements(h.container as never).includes(triggerAfterClose as never),
-        "the trigger must be reachable again after the dialog closes — focus is not stranded on a removed node",
+      const codeField = findIn(body as never, (n) => (n as unknown as { getAttribute?: (a: string) => string | null }).getAttribute?.("id") === "acct-code");
+      assert.ok(codeField, "the code field must be reachable inside the dialog");
+      await h.act(() => { setFieldValue(codeField as never, "5200"); });
+
+      const nameField = findIn(body as never, (n) => (n as unknown as { getAttribute?: (a: string) => string | null }).getAttribute?.("id") === "acct-name");
+      assert.ok(nameField, "the name field must be reachable inside the dialog");
+      await h.act(() => { setFieldValue(nameField as never, "Office supplies"); });
+      for (let i = 0; i < 2; i++) await h.settle();
+
+      const confirmButton = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Add account") && (n as unknown) !== (trigger as unknown),
       );
+      assert.ok(confirmButton, "the dialog's own Confirm button must be reachable");
+      assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, false, "code + name are now filled — Confirm must be enabled");
+
+      await h.act(() => { clickButton(confirmButton as never); });
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      const confirmAfterSuccess = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Add account") && (n as unknown) !== (trigger as unknown),
+      );
+      assert.equal(confirmAfterSuccess, null, "the dialog's own Confirm button must be GONE after a real, successful confirm — the dialog genuinely closed");
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();

@@ -36,7 +36,7 @@ import { fmtCents } from "@/lib/registers/money";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { SectionHeader } from "@/components/common/section-header";
-import { StateBanner } from "@/components/common/state";
+import { StateBanner, LoadingState, EmptyState } from "@/components/common/state";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DataState } from "@/components/firm/data-state";
 import { ProposeTemplateDialog, SignTemplateDialog, RetireTemplateDialog } from "./adjustment-template-ceremony";
@@ -179,7 +179,14 @@ export function AdjustmentsRegister({ clientId }: { clientId: string }) {
       <section className="flex flex-col gap-2">
         <SectionHeader level={2}>{ta("runHistory.heading")}</SectionHeader>
         <p className="text-xs text-muted-foreground">{ta("runHistory.subheading")}</p>
-        {gov.data ? (
+        {/* F4 (independent review, fix-required): loading/data/unavailable are
+            three distinct states, told apart honestly — a bare `{gov.data ?
+            panel : null}` rendered a SILENT empty heading both on first paint
+            (every visit) and after any failed read, indistinguishable from
+            "nothing here". */}
+        {gov.loading ? (
+          <LoadingState>{tc("loading")}</LoadingState>
+        ) : gov.data ? (
           <AdjustmentRunHistoryPanel
             templates={templates.data ?? []}
             runs={gov.data.runs}
@@ -193,18 +200,24 @@ export function AdjustmentsRegister({ clientId }: { clientId: string }) {
             }
             onReversePair={(occurrenceEntryId, reason) => gov.act(() => reverseAdjustmentPair(sessionTokenAccessor, clientId, occurrenceEntryId, reason).then(() => undefined))}
           />
-        ) : null}
+        ) : (
+          <EmptyState>{ta("runHistory.unavailable")}</EmptyState>
+        )}
       </section>
       <section className="flex flex-col gap-2">
         <SectionHeader level={2}>{ta("pairLedger.heading")}</SectionHeader>
-        {gov.data ? (
+        {gov.loading ? (
+          <LoadingState>{tc("loading")}</LoadingState>
+        ) : gov.data ? (
           <AdjustmentPairReversalPanel
             pairReversals={gov.data.pairReversals}
             busy={gov.busy}
             onApprove={(pairId, attestation) => gov.act(() => approvePairReversal(sessionTokenAccessor, clientId, pairId, attestation || null).then(() => undefined))}
             onCancel={(pairId, reason) => gov.act(() => cancelPairReversal(sessionTokenAccessor, clientId, pairId, reason).then(() => undefined))}
           />
-        ) : null}
+        ) : (
+          <EmptyState>{ta("pairLedger.unavailable")}</EmptyState>
+        )}
       </section>
     </div>
   );

@@ -1151,7 +1151,8 @@
       "correction": "Correction",
       "pairInFlight": "A pair reversal is already in flight ({status}) — see the ledger below.",
       "soloOccurrenceNote": "This run is a solo occurrence, not an auto-reverse pair — correct it from the Journals tab.",
-      "wallFallback": "Not correctable right now ({wall})."
+      "wallFallback": "Not correctable right now ({wall}).",
+      "unavailable": "Could not load run history — see the error above."
     },
     "runNow": {
       "trigger": "Run now",
@@ -1171,6 +1172,7 @@
     },
     "pairLedger": {
       "heading": "Pair-reversal ledger",
+      "unavailable": "Could not load the pair-reversal ledger — see the error above.",
       "empty": "No pair reversals raised for this client.",
       "raised": "Raised",
       "status": "Status",
@@ -1193,7 +1195,8 @@
       "editTrigger": "Edit",
       "addTitle": "Add an account",
       "editTitle": "Edit account {code}",
-      "description": "Create or update a row in this client's chart of accounts.",
+      "description": "Create or update a row in this client's chart of accounts. Confirming ALWAYS leaves the account active — editing a currently-inactive account reactivates it.",
+      "reactivateHint": "This account is currently inactive — confirming this edit reactivates it.",
       "codeLabel": "Account code",
       "nameLabel": "Name",
       "typeLabel": "Type",

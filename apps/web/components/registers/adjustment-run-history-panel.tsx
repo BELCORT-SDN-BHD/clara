@@ -9,6 +9,11 @@
 // not this train's, and is rendered as an honest note rather than a second,
 // wrong button. When not correctable, the DB's own wall (+ advice sentence,
 // when it has one) renders verbatim — never a client-side guess at why.
+//
+// F2 (independent review, fix-required, 2026-08-28): the reverse-pair call
+// below sends `r.correction_entry` — the DB's OWN resolved occurrence id —
+// not `r.entry_id` re-derived by inference. See adjustments.ts's own field
+// comment for the full grounding.
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
@@ -153,7 +158,7 @@ export function AdjustmentRunHistoryPanel({
                 </TableCell>
                 <TableCell>
                   {r.correctable && r.correction_verb === "clara.reverse_adjustment_pair" ? (
-                    <ReversePairDialog busy={busy} onSubmit={(reason) => onReversePair(r.entry_id, reason)} />
+                    <ReversePairDialog busy={busy} onSubmit={(reason) => onReversePair(r.correction_entry, reason)} />
                   ) : null}
                 </TableCell>
               </TableRow>

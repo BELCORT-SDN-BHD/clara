@@ -24,7 +24,7 @@ function withMockedFetch(impl: typeof fetch, run: () => Promise<void>): Promise<
 }
 
 test("loadAdjustmentGovernance: reads runs (RPC), pair reversals (table) and run-due (RPC) in one bundle, verbatim", async () => {
-  const runs = [{ id: "r1", client_id: "c1", template_id: "t1", period_start: "2026-01-01", period_end: "2026-01-31", mode: "post", entry_id: "e1", reversal_entry_id: null, amount_cents: 5000, created_at: "t", correctable: true, active_pair_id: null, active_pair_status: null, correction_verb: "clara.reverse_adjustment_pair", correction_wall: null, correction_wall_advice: null }];
+  const runs = [{ id: "r1", client_id: "c1", template_id: "t1", period_start: "2026-01-01", period_end: "2026-01-31", mode: "post", entry_id: "e1", reversal_entry_id: null, amount_cents: 5000, created_at: "t", correctable: true, active_pair_id: null, active_pair_status: null, correction_verb: "clara.reverse_adjustment_pair", correction_entry: "e1", correction_wall: null, correction_wall_advice: null }];
   const pairReversals = [{ id: "pr1", client_id: "c1", template_id: "t1", occurrence_id: "e1", mirror_id: "e2", occurrence_correction_id: "e3", mirror_correction_id: "e4", maker: "u1", status: "pending", completed_at: null, op_key: "k1", created_at: "t" }];
   const due = { due: false, reason: "nothing_due", blocked: [] };
 

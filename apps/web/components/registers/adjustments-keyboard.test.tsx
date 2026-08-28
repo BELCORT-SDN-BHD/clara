@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent, textOf } from "../../test/hookHarness";
+import { renderComponent, textOf, clickButton, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
@@ -56,7 +56,11 @@ const RUNS = [
 const ACCOUNTS = [
   { client_id: "c1", account_code: "5100", name: "Rent expense", account_type: "expense", account_class: null, special_acc_type: null, is_active: true },
 ];
-const RUNS_PROJECTED = RUNS.map((r) => ({ ...r, correctable: true, active_pair_id: null, active_pair_status: null, correction_verb: "clara.reverse_adjustment_pair", correction_wall: null, correction_wall_advice: null }));
+// F2 (independent review, fix-required): correction_entry is DELIBERATELY
+// distinct from both entry_id and id here — "occ-e1" vs "e1"/"r1" — so a
+// test asserting p_occurrence === "occ-e1" actually discriminates the DB's
+// own resolved field from either plausible client-side re-derivation.
+const RUNS_PROJECTED = RUNS.map((r) => ({ ...r, correctable: true, active_pair_id: null, active_pair_status: null, correction_verb: "clara.reverse_adjustment_pair", correction_entry: "occ-e1", correction_wall: null, correction_wall_advice: null }));
 const DUE = { due: false, reason: "nothing_due", blocked: [] };
 const PAIR_REVERSALS = [
   { id: "pr1", client_id: "c1", template_id: "tpl1", occurrence_id: "e1", mirror_id: "e2", occurrence_correction_id: "e3", mirror_correction_id: "e4", maker: "u1", status: "pending", completed_at: null, op_key: "k1", created_at: "2026-02-05T00:00:00Z" },
@@ -104,7 +108,7 @@ test("adjustments workbench: every door trigger is keyboard-reachable, in DOM or
   });
 });
 
-test("Reverse Pair door dialog: opens on click, reaches Confirm/Cancel, leaves its trigger reachable again on close", async () => {
+test("Reverse Pair door dialog: opens on click, reaches Confirm/Cancel, no keyboard-walk violations while open", async () => {
   await withMockedEnv(mockFetch, async () => {
     const h = await renderComponent(App());
     const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
@@ -124,16 +128,87 @@ test("Reverse Pair door dialog: opens on click, reaches Confirm/Cancel, leaves i
       assert.match(bodyText, /Cancel/, "opening the dialog must reveal its Cancel control");
       assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the dialog is open");
 
-      const cancelButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Cancel"));
-      assert.ok(cancelButton, "the Cancel control must render as a real <button>");
-      await h.fireEvent(cancelButton as never, "click");
+      const confirmButton = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Reverse pair" && (n as unknown) !== (trigger as unknown),
+      );
+      assert.ok(confirmButton, "the dialog's own Confirm button must be reachable while open, distinct from the trigger");
+
+      // F7 (independent review, fix-required — RECORDED, not fixed by
+      // trying harder here): a genuine "does Cancel close the dialog" proof
+      // was attempted and FAILED for a real reason, not a flaky one —
+      // hookHarness.ts's own `clickButton` header documents that
+      // `@base-ui/react`'s `DialogClose` (Cancel) checks `event instanceof
+      // KeyboardEvent` internally, which this fake-DOM harness's dispatched
+      // events never satisfy, via `fireEvent` OR `clickButton` — "a
+      // SEPARATE, deeper gap this function does not close." Asserting
+      // "the trigger is reachable again" after a Cancel click (the
+      // ORIGINAL shape here) was vacuous for exactly this reason: Cancel
+      // never provably closes anything in this environment, so the
+      // assertion always passed regardless of whether the real product
+      // does. The genuine "does this dialog actually close" proof below
+      // rides the CONFIRM path instead — `clickButton` IS proven to reach a
+      // door dialog's own Confirm handler end to end — and lives in the F2
+      // test immediately below, which also checks the dialog's own Confirm
+      // button is GONE after a real, successful confirm.
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+// F2 (independent review, fix-required): a real Reverse-pair Confirm click
+// must send the DB's own `correction_entry` as `p_occurrence` — never a
+// client-side re-derivation from `entry_id` (or `id`). Both wrong
+// derivations are distinguishable from the fixture's deliberately-distinct
+// "occ-e1" (see RUNS_PROJECTED's own comment above).
+test("F2: Reverse Pair's Confirm posts p_occurrence = the DB's own correction_entry, never entry_id/id", async () => {
+  let capturedBody: Record<string, unknown> | null = null;
+  const impl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(url);
+    if (u.includes("/rpc/reverse_adjustment_pair")) {
+      capturedBody = init?.body ? JSON.parse(String(init.body)) : {};
+      return jsonResponse({ pair_id: "pr2", status: "pending" });
+    }
+    return mockFetch(url);
+  }) as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 5; i++) await h.settle();
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Reverse pair"));
+      assert.ok(trigger, "the Reverse Pair trigger must render");
+      await h.fireEvent(trigger as never, "click");
       for (let i = 0; i < 6; i++) await h.settle();
 
-      const triggerAfterClose = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Reverse pair"));
-      assert.ok(
-        triggerAfterClose && focusableElements(h.container as never).includes(triggerAfterClose as never),
-        "the trigger must be reachable again after the dialog closes — focus is not stranded on a removed node",
+      const reasonField = findIn(body as never, (n) => n.tagName === "INPUT" && (n as unknown as { getAttribute?: (a: string) => string | null }).getAttribute?.("id") === "adj-reverse-pair-reason");
+      assert.ok(reasonField, "the reason field must be reachable inside the dialog");
+      await h.act(() => { setFieldValue(reasonField as never, "wrong period charged"); });
+      for (let i = 0; i < 2; i++) await h.settle();
+
+      const confirmButton = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Reverse pair" && (n as unknown) !== (trigger as unknown),
       );
+      assert.ok(confirmButton, "the dialog's own Confirm button must be reachable");
+      await h.act(() => { clickButton(confirmButton as never); });
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      assert.ok(capturedBody, "reverse_adjustment_pair must have been called");
+      assert.equal((capturedBody as Record<string, unknown>).p_occurrence, "occ-e1", "p_occurrence must be the DB's own correction_entry, not entry_id (\"e1\") or id (\"r1\")");
+
+      // F7 (independent review, fix-required): the GENUINE close proof — via
+      // the Confirm path, which clickButton IS proven to reach end to end
+      // (unlike Cancel/DialogClose, see the sibling test's own note above).
+      const confirmAfterSuccess = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Reverse pair" && (n as unknown) !== (trigger as unknown),
+      );
+      assert.equal(confirmAfterSuccess, null, "the dialog's own Confirm button must be GONE after a real, successful confirm — the dialog genuinely closed, never a never-closes mutant");
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();

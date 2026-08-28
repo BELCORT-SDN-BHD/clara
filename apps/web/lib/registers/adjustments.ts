@@ -158,6 +158,17 @@ export type AdjustmentRunWithCorrection = AdjustmentRunRow & {
    *  train's) or `"clara.reverse_adjustment_pair"` for an auto-reverse pair
    *  (this train's own verb) — null when `correctable` is false. */
   correction_verb: "clara.reverse_entry" | "clara.reverse_adjustment_pair" | null;
+  /** F2 (independent review, fix-required, 2026-08-28): the DB's OWN resolved
+   *  occurrence id for whichever correction verb applies — `_adj_run_json`'s
+   *  seventh correction key, `clara._adj_correction_door`'s own `entry`
+   *  field. This is the exact id `reverse_adjustment_pair`'s `p_occurrence`
+   *  wants (hard constraint 2 / "spelling is not identity": the caller does
+   *  not re-derive this from `entry_id` on the reasoning that a run's own
+   *  entry is never the auto-reversal mirror — that reasoning happens to
+   *  hold today, but the DB already computed and named the answer, so this
+   *  field carries it verbatim rather than asking a UI-side inference to
+   *  agree with it). */
+  correction_entry: string;
   correction_wall: string | null;
   correction_wall_advice: string | null;
 };
@@ -198,6 +209,16 @@ export function adjustmentRunDue(session: SessionTokenAccessor, clientId: string
 // file's header for the full grounding on every door below.
 // =====================================================================
 
+// F9 (independent review, nit, 2026-08-28): `propose_adjustment_template`'s
+// own line-validation loop reads only `account_code`/`debit_cents`/
+// `credit_cents` off each element — unlike journal/staff-advance lines, it
+// never rejects an unrecognised key, so a per-line `description` MAY ride
+// along uninspected. Whether `clara._adj_canon_lines` (the content-hash
+// canonicalisation the door runs before persisting) preserves or strips it
+// is UNVERIFIED — this module does not claim either way. Deliberately not
+// exposed by this dialog: the memo_template field is already the one
+// description every occurrence carries, and adding an unverified per-line
+// field risks silently promising persistence the DB may not honour.
 export type AdjustmentTemplateLineInput = {
   account_code: string;
   debit_cents: number;

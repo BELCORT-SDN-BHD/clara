@@ -94,7 +94,7 @@ test("loadAdjustmentPairReversals: reads adjustment_pair_reversals scoped by cli
 });
 
 test("listAdjustmentRuns: posts p_client, unwraps the .runs array (never the raw envelope)", async () => {
-  const runs = [{ id: "r1", client_id: "c1", template_id: "t1", period_start: "2026-01-01", period_end: "2026-01-31", mode: "post", entry_id: "e1", reversal_entry_id: null, amount_cents: 5000, created_at: "t", correctable: true, active_pair_id: null, active_pair_status: null, correction_verb: "clara.reverse_adjustment_pair", correction_wall: null, correction_wall_advice: null }];
+  const runs = [{ id: "r1", client_id: "c1", template_id: "t1", period_start: "2026-01-01", period_end: "2026-01-31", mode: "post", entry_id: "e1", reversal_entry_id: null, amount_cents: 5000, created_at: "t", correctable: true, active_pair_id: null, active_pair_status: null, correction_verb: "clara.reverse_adjustment_pair", correction_entry: "e1", correction_wall: null, correction_wall_advice: null }];
   const { impl, calls } = captureFetch({ client_id: "c1", runs });
   let resolved: unknown;
   await withMockedFetch(impl, async () => {
