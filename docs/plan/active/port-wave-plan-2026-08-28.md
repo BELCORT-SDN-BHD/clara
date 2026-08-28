@@ -141,6 +141,17 @@ waits on; when that train merges, truing the note is part of the MERGE, not a la
 discovery."* Each train then replaces the content of its own tab in its own file, and the
 arrays never move again.
 
+**AS-CONDUCTED (conductor ruling, 2026-08-28).** `CLIENT_TABS` stays at its current EIGHT
+entries — no edit; the array is already final. T1's own §4 write-up resolves its hedge to
+**no new route** ("extends `apps/web/components/close/` — no new route"). **T2**'s
+opening-seed lifecycle nests as `registers-workbench.tsx`'s own SIXTH `TABS` entry, `opening`
+(T0 pre-landed, first position — the earliest-lifecycle object), rather than a new
+`CLIENT_TABS` route: the seed is exactly the registers family's kind of object. **T7**'s
+coding-lane surface nests inside the `documents` tab as its own section/file when T7 builds
+(no `TABS`/`CLIENT_TABS` edit — the triaged objects are uncoded filings, document-side work).
+Both stay inside Q3's owner-ruled closed IA; reopening that ruling itself would be an owner
+matter, not a wave-conducting one.
+
 ### 3.4 The locale file — `apps/web/messages/en.json`
 
 23 top-level namespaces, one per surface. New namespaces are key-disjoint, so conflicts are

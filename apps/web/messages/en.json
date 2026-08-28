@@ -838,6 +838,7 @@
     "heading": "Registers",
     "body": "P2 shell — AR/AP aging, fixed assets, adjustments, staff advances and accounts are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
     "tabs": {
+      "opening": "Opening",
       "aging": "AR/AP aging",
       "fixedAssets": "Fixed assets",
       "adjustments": "Adjustments",
@@ -970,7 +971,12 @@
     "submitting": "Saving…"
   },
   "CloseLifecycle": {},
-  "OpeningCarryDown": {},
+  "OpeningCarryDown": {
+    "notBuilt": {
+      "heading": "Opening balances & carry-down",
+      "body": "The opening-seed lifecycle — create_opening_seed and its approve/cancel/reopen/correction/dry-run doors — is not built on this surface yet. It lands with train T2 of the port wave."
+    }
+  },
   "FixedAssetsDepreciation": {},
   "AdjustmentsAccounts": {},
   "StaffAdvances": {},
