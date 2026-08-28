@@ -60,11 +60,11 @@ function ClientVendorBindings({ clientId }: { clientId: string }) {
     <div className="flex flex-col gap-3">
       <SectionHeader
         level={2}
-        action={
-          counterpartiesState.data ? (
-            <ProposeBindingDialog clientId={clientId} counterparties={counterpartiesState.data} busy={busy} act={act} />
-          ) : null
-        }
+        // F3(b) (independent review, fix-required, 2026-08-28): the trigger
+        // is ALWAYS rendered now — see ProposeBindingDialog's own header for
+        // why passing the FULL counterparties state (not just `.data`) is
+        // what lets it show a real read failure + retry instead of vanishing.
+        action={<ProposeBindingDialog clientId={clientId} counterpartiesState={counterpartiesState} busy={busy} act={act} />}
       >
         {t("heading")}
       </SectionHeader>

@@ -190,10 +190,29 @@ const BINDINGS = [
 ];
 const COUNTERPARTIES = [{ id: "cp3", name: "Supplier Three Sdn Bhd", registration_normalized: "202401017777" }];
 
+// F2's own read (independent review, 2026-08-28): the Sign/Revoke dialogs now
+// mount VendorBindingDetailView on open, which fetches get_vendor_binding —
+// a real response here, not just an "unexpected fetch" swallowed into an
+// error banner, is what makes the a11y scan below prove something (the P3
+// vacuous-test lesson: a passing scan over a hidden error banner proves
+// nothing about the content a reviewer actually needs to see).
+const BINDING_DETAIL = {
+  binding: {
+    id: "b1", firm_id: "f1", client_id: "c1", counterparty_id: "cp1", status: "proposed",
+    f1_vendor_name_norm: "supplier one sdn bhd", f2_invoice_prefix: "INV-S", registration_at_signing: "202401012345",
+    content_hash: "a".repeat(64), created_by: "u1234567-89ab-cdef-0123-456789abcdef", created_at: "2026-01-01T00:00:00Z",
+    signed_by: null, signed_at: null, revoked_by: null, revoked_at: null, revoke_reason: null, expires_at: "2026-12-31T00:00:00Z",
+  },
+  counterparty: { counterparty_id: "cp1", counterparty_name: "Supplier One Sdn Bhd" },
+  evidence: [{ entry_id: "e1", document_id: "d1", facts_extraction_id: "f1", ocr_extraction_id: "o1", posting_date: "2026-01-01" }],
+  resolutions: [],
+};
+
 function mockVendorBindingsFetch(u: string): Response {
   if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
   if (u.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS);
   if (u.includes("/rest/v1/counterparties")) return jsonResponse(COUNTERPARTIES);
+  if (u.includes("/rpc/get_vendor_binding")) return jsonResponse(BINDING_DETAIL);
   throw new Error(`unexpected fetch: ${u}`);
 }
 
@@ -260,7 +279,11 @@ test("vendor-bindings panel: the Sign dialog (proposed row) and the Revoke dialo
         const signTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign");
         assert.ok(signTrigger, "the Sign trigger must render for the proposed binding — never pre-hidden on a client-side role guess");
         await h.fireEvent(signTrigger! as never, "click");
-        for (let i = 0; i < 4; i++) await h.settle();
+        for (let i = 0; i < 6; i++) await h.settle();
+        // F2 (independent review): the consent must show what it approves —
+        // a real get_vendor_binding response must have actually rendered,
+        // not merely "no crash happened".
+        assert.match(textOf(body as never), /u1234567/, "the detail view's own real created_by chip must render");
         let violations = checkAccessibility(body as never);
         assert.deepEqual(violations, [], `Sign dialog: ${JSON.stringify(violations)}`);
 
@@ -272,7 +295,8 @@ test("vendor-bindings panel: the Sign dialog (proposed row) and the Revoke dialo
         const revokeTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Revoke");
         assert.ok(revokeTrigger, "the Revoke trigger must render for the live binding");
         await h.fireEvent(revokeTrigger! as never, "click");
-        for (let i = 0; i < 4; i++) await h.settle();
+        for (let i = 0; i < 6; i++) await h.settle();
+        assert.match(textOf(body as never), /u1234567/, "the Revoke dialog's own detail view must have rendered too");
         violations = checkAccessibility(body as never);
         assert.deepEqual(violations, [], `Revoke dialog: ${JSON.stringify(violations)}`);
       } finally {

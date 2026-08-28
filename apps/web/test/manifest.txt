@@ -40,6 +40,7 @@ components/firm/needs-you-gaps.test.tsx
 components/firm/staff-advance-incomplete-affordance.test.tsx
 components/firm-admin/firm-admin-a11y.test.tsx
 components/firm-admin/firm-admin-keyboard.test.tsx
+components/firm-admin/firm-admin-pages-a11y.test.tsx
 components/firm-admin/vendor-binding-ceremony.test.tsx
 components/journals/journals-a11y.test.tsx
 components/journals/journals-governance-a11y.test.tsx

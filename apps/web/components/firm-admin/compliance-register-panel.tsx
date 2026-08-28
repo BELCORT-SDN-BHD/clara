@@ -38,6 +38,14 @@ function stateVariant(state: ComplianceWatchState): "outline" | "default" | "des
   return STATE_VARIANT[state] ?? "outline";
 }
 
+// N4 (independent review, fix-required, 2026-08-28): `future_method_status`
+// is `compliance_watches_future_method_status_check`'s own closed four-value
+// domain (rig census) — the same closed-world-lookup pattern this file
+// already uses for `state` above, applied to a second column this build had
+// typed and read but never rendered.
+const KNOWN_FUTURE_METHOD_STATUSES = ["not_assessed", "attested_below", "attested_above", "expired"] as const;
+type KnownFutureMethodStatus = (typeof KNOWN_FUTURE_METHOD_STATUSES)[number];
+
 export function ComplianceRegisterPanel() {
   const t = useTranslations("FirmAdminCompliance.compliance");
 
@@ -53,6 +61,16 @@ export function ComplianceRegisterPanel() {
   return (
     <div className="flex flex-col gap-3">
       {register?.staleEvaluator ? <StateBanner tone="warning">{t("staleEvaluator")}</StateBanner> : null}
+      {/* F3(a) (independent review, fix-required, 2026-08-28): before this
+          fix, a failed client-names read was silently swallowed — the
+          register still rendered RM figures with no disclosure that the
+          client column had fallen back to raw UUIDs. Review law 2: absence
+          is not evidence, so a degraded read must say so. */}
+      {clientsState.err ? (
+        <StateBanner tone="warning" code={clientsState.clr ? `${clientsState.clr.code}${clientsState.clr.reason ? ` · ${clientsState.clr.reason}` : ""}` : undefined}>
+          {t("clientNamesUnavailable")} ({clientsState.err})
+        </StateBanner>
+      ) : null}
       {!register ? (
         err ? (
           <StateBanner tone="error" code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}>
@@ -109,12 +127,24 @@ function ComplianceClientRow({ row, clientName }: { row: ComplianceClientWatch; 
           <dd className="text-foreground">{fmtCents(row.unknown_or_mixed_cents, t("centsUnsafe"))}</dd>
         </div>
         <div>
+          <dt>{t("screeningProxy")}</dt>
+          <dd className="text-foreground">{fmtCents(row.screening_proxy_cents, t("centsUnsafe"))}</dd>
+        </div>
+        <div>
           <dt>{t("earliestCrossing")}</dt>
           <dd className="text-foreground">{row.earliest_crossing_month ?? "—"}</dd>
         </div>
         <div>
           <dt>{t("applicationDue")}</dt>
           <dd className="text-foreground">{row.application_due ?? "—"}</dd>
+        </div>
+        <div>
+          <dt>{t("futureMethodStatus")}</dt>
+          <dd className="text-foreground">
+            {row.future_method_status && (KNOWN_FUTURE_METHOD_STATUSES as readonly string[]).includes(row.future_method_status)
+              ? t(`futureMethodStatuses.${row.future_method_status as KnownFutureMethodStatus}`)
+              : (row.future_method_status ?? "—")}
+          </dd>
         </div>
       </dl>
     </li>

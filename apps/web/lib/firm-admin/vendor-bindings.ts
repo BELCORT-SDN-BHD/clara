@@ -17,10 +17,14 @@
 //     (0028:721-729). This module's own `proposeVendorIdentityBinding` builds
 //     that literal shape and no other.
 //   - clara.sign_vendor_identity_binding(p_binding uuid, p_op_key text) —
-//     ADMIN+ (0028:809, `role_rank('admin')`) — the two-person half of the
-//     ceremony. The UI never pre-hides this trigger on a client-side role
-//     guess (team-lead security note): every viewer sees Sign; a bookkeeper
-//     who clicks it gets the DB's own refusal, verbatim.
+//     ADMIN+ (0028:809, `role_rank('admin')`) — a RANK gate, not a PERSON
+//     gate: the live body never reads `created_by`, so the same admin who
+//     proposed a binding may also sign it alone (TRUED F1, independent
+//     review, 2026-08-28 — a proposer≠signer separation is a DB wall the
+//     owner would have to add, not a fact this module may claim). The UI
+//     never pre-hides the Sign trigger on a client-side role guess (team-lead
+//     security note): every viewer sees it; a bookkeeper who clicks it gets
+//     the DB's own refusal, verbatim.
 //   - clara.revoke_vendor_identity_binding(p_binding uuid, p_reason text,
 //     p_op_key text) — bookkeeper+. `p_reason` is required
 //     (`nullif(btrim(p_reason),'')` — 0028:910-911).

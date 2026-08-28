@@ -11,7 +11,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent, textOf, setFieldValue } from "../../test/hookHarness";
+import { renderComponent, textOf, setFieldValue, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { NeedsYouInbox } from "./needs-you-inbox";
@@ -29,17 +29,6 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
     if (found) return found;
   }
   return null;
-}
-
-function driveHandler(node: Node, handlerName: "onChange" | "onClick", patch?: Record<string, unknown>): void {
-  if (patch) Object.assign(node as object, patch);
-  const propsKey = Object.keys(node as object).find((k) => k.startsWith("__reactProps"));
-  const props = propsKey ? (node as unknown as Record<string, Record<string, (e: unknown) => void>>)[propsKey] : undefined;
-  const nativeEvent = { type: "input", target: node, defaultPrevented: false };
-  props?.[handlerName]?.({
-    target: node, currentTarget: node, nativeEvent,
-    persist() {}, preventDefault() {}, stopPropagation() {},
-  });
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -121,14 +110,14 @@ test("Acknowledge: fires ack_compliance_watch with p_watch/p_rationale, and a RE
 
       const textarea = findIn(body as never, (n) => n.tagName === "TEXTAREA");
       assert.ok(textarea, "the rationale textarea must be reachable after opening Acknowledge");
-      await h.act(() => { driveHandler(textarea as never, "onChange", { value: "Client's SST registration filed today, receipt on hand." }); });
+      await h.act(() => { setFieldValue(textarea as never, "Client's SST registration filed today, receipt on hand."); });
 
       const confirmButton = findIn(
         body as never,
         (n) => n.tagName === "BUTTON" && textOf(n as never) === "Acknowledge" && (n as unknown) !== (ackTrigger as unknown),
       );
       assert.ok(confirmButton, "the inline form's own submit button must be reachable, distinct from the trigger");
-      await h.act(() => { driveHandler(confirmButton as never, "onClick"); });
+      await h.act(() => { clickButton(confirmButton as never); });
       for (let i = 0; i < 6; i++) await h.settle();
 
       const call = calls.find((c) => c.url.includes("/rpc/ack_compliance_watch"));
@@ -174,19 +163,19 @@ test("Resolve refusal (CLR04, not_liable_documented requires admin): the CLR cod
 
       const select = findIn(body as never, (n) => n.tagName === "SELECT");
       assert.ok(select, "the conclusion select must be reachable");
-      await h.act(() => { driveHandler(select as never, "onChange", { value: "not_liable_documented" }); });
+      await h.act(() => { setFieldValue(select as never, "not_liable_documented"); });
 
       const evidenceText = "Below the SST threshold this period; screening proxy attached.";
       const textarea = findIn(body as never, (n) => n.tagName === "TEXTAREA");
       assert.ok(textarea, "the evidence textarea must be reachable");
-      await h.act(() => { driveHandler(textarea as never, "onChange", { value: evidenceText }); });
+      await h.act(() => { setFieldValue(textarea as never, evidenceText); });
 
       const confirmButton = findIn(
         body as never,
         (n) => n.tagName === "BUTTON" && textOf(n as never) === "Resolve" && (n as unknown) !== (resolveTrigger as unknown),
       );
       assert.ok(confirmButton, "the inline form's own submit button must be reachable, distinct from the trigger");
-      await h.act(() => { driveHandler(confirmButton as never, "onClick"); });
+      await h.act(() => { clickButton(confirmButton as never); });
       for (let i = 0; i < 6; i++) await h.settle();
 
       const call = calls.find((c) => c.url.includes("/rpc/resolve_compliance_watch"));
@@ -226,7 +215,7 @@ test("Snooze: fires snooze_compliance_watch with p_watch/p_until/p_rationale, ex
 
       const textarea = findIn(body as never, (n) => n.tagName === "TEXTAREA");
       assert.ok(textarea, "the rationale textarea must be reachable");
-      await h.act(() => { driveHandler(textarea as never, "onChange", { value: "Waiting on the client's registration certificate." }); });
+      await h.act(() => { setFieldValue(textarea as never, "Waiting on the client's registration certificate."); });
 
       const confirmButton = findIn(
         body as never,
@@ -234,7 +223,7 @@ test("Snooze: fires snooze_compliance_watch with p_watch/p_until/p_rationale, ex
       );
       assert.ok(confirmButton, "the inline form's own submit button must be reachable");
       assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, false, "both required fields are filled — submit must be enabled");
-      await h.act(() => { driveHandler(confirmButton as never, "onClick"); });
+      await h.act(() => { clickButton(confirmButton as never); });
       for (let i = 0; i < 6; i++) await h.settle();
 
       const matches = calls.filter((c) => c.url.includes("/rpc/snooze_compliance_watch"));

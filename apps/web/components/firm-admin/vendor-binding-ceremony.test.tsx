@@ -6,9 +6,10 @@
 // the PANEL's own persistent banner, never inside the dialog — which
 // FirmAdminDoorDialog auto-closes on every confirm attempt regardless of
 // outcome (CloseDoorDialog's own contract, ported). Security-note load-bearing
-// test: sign is the two-person half of the ceremony this train's own header
-// says is never pre-hidden on a client-side role guess — this proves the
-// DB's OWN refusal is what actually renders when that rule is exercised.
+// test: sign is a RANK-gated act (admin+, not a proposer≠signer separation —
+// F1, independent review) whose trigger this train's own header says is
+// never pre-hidden on a client-side role guess — this proves the DB's OWN
+// refusal is what actually renders when that rule is exercised.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -61,6 +62,18 @@ const BINDINGS = [
   },
 ];
 const COUNTERPARTIES: unknown[] = [];
+// F2's own read: the Sign dialog now mounts VendorBindingDetailView on open.
+const BINDING_DETAIL = {
+  binding: {
+    id: "b1", firm_id: "f1", client_id: "c1", counterparty_id: "cp1", status: "proposed",
+    f1_vendor_name_norm: "supplier one sdn bhd", f2_invoice_prefix: "INV-S", registration_at_signing: "202401012345",
+    content_hash: "a".repeat(64), created_by: "u1234567-89ab-cdef-0123-456789abcdef", created_at: "2026-01-01T00:00:00Z",
+    signed_by: null, signed_at: null, revoked_by: null, revoked_at: null, revoke_reason: null, expires_at: "2026-12-31T00:00:00Z",
+  },
+  counterparty: { counterparty_id: "cp1", counterparty_name: "Supplier One Sdn Bhd" },
+  evidence: [{ entry_id: "e1", document_id: "d1", facts_extraction_id: "f1", ocr_extraction_id: "o1", posting_date: "2026-01-01" }],
+  resolutions: [],
+};
 
 async function mount() {
   const h = await renderComponent(
@@ -96,6 +109,7 @@ test("Sign refusal (CLR04, insufficient rank): a real click through the dialog's
     if (u.includes("/rpc/sign_vendor_identity_binding")) {
       return jsonResponse({ code: "CLR04", message: "insufficient rank — sign_vendor_identity_binding requires admin" }, 400);
     }
+    if (u.includes("/rpc/get_vendor_binding")) return jsonResponse(BINDING_DETAIL);
     throw new Error(`unexpected fetch: ${u}`);
   }) as typeof fetch;
 

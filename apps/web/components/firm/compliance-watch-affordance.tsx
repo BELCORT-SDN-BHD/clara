@@ -34,6 +34,22 @@ import type { NeedsYouAffordanceProps } from "./needs-you-affordances";
 
 type Mode = null | "ack" | "snooze" | "resolve";
 
+/** N5 (independent review, 2026-08-28): the DB's own bound is
+ *  `(now(), now()+60 days]` (lib/firm-admin/compliance.ts's own header,
+ *  grounded at snooze_compliance_watch's live body). This is UI SHAPING
+ *  only — a client whose clock differs from the server's still gets the
+ *  DB's own verbatim refusal, never a client-side substitute for it. `min`
+ *  is tomorrow (the finest day-granularity boundary strictly after "now"
+ *  under any reasonable clock skew); `max` is today+60 days. */
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+function snoozeDateBounds(): { min: string; max: string } {
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  return { min: isoDate(new Date(now + dayMs)), max: isoDate(new Date(now + 60 * dayMs)) };
+}
+
 export function ComplianceWatchAffordance({ row, busy, error, act }: NeedsYouAffordanceProps) {
   const t = useTranslations("FirmAdminCompliance.needsYou");
   const tc = useTranslations("Common");
@@ -119,6 +135,8 @@ export function ComplianceWatchAffordance({ row, busy, error, act }: NeedsYouAff
             onChange={(e) => setUntil(e.target.value)}
             aria-label={t("untilLabel")}
             disabled={busy}
+            min={snoozeDateBounds().min}
+            max={snoozeDateBounds().max}
             className="motion-fast h-8 w-fit rounded-lg border border-input bg-transparent px-2.5 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
           />
           <Textarea

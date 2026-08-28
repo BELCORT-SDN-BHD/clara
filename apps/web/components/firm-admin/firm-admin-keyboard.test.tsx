@@ -76,10 +76,26 @@ const BINDINGS = [
 ];
 const COUNTERPARTIES = [{ id: "cp3", name: "Supplier Three Sdn Bhd", registration_normalized: "202401017777" }];
 
+// F2's own read: the Sign/Revoke dialogs now mount VendorBindingDetailView on
+// open, which fetches get_vendor_binding — mocked here so opening either
+// dialog in these keyboard-walk tests exercises the real detail render.
+const BINDING_DETAIL = {
+  binding: {
+    id: "b1", firm_id: "f1", client_id: "c1", counterparty_id: "cp1", status: "proposed",
+    f1_vendor_name_norm: "supplier one sdn bhd", f2_invoice_prefix: "INV-S", registration_at_signing: "202401012345",
+    content_hash: "a".repeat(64), created_by: "u1234567-89ab-cdef-0123-456789abcdef", created_at: "2026-01-01T00:00:00Z",
+    signed_by: null, signed_at: null, revoked_by: null, revoked_at: null, revoke_reason: null, expires_at: "2026-12-31T00:00:00Z",
+  },
+  counterparty: { counterparty_id: "cp1", counterparty_name: "Supplier One Sdn Bhd" },
+  evidence: [{ entry_id: "e1", document_id: "d1", facts_extraction_id: "f1", ocr_extraction_id: "o1", posting_date: "2026-01-01" }],
+  resolutions: [],
+};
+
 function mockVendorBindingsFetch(u: string): Response {
   if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
   if (u.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS);
   if (u.includes("/rest/v1/counterparties")) return jsonResponse(COUNTERPARTIES);
+  if (u.includes("/rpc/get_vendor_binding")) return jsonResponse(BINDING_DETAIL);
   throw new Error(`unexpected fetch: ${u}`);
 }
 
@@ -149,7 +165,11 @@ test("Sign dialog: the trigger is enabled from first render for a PROPOSED bindi
         assert.equal((signTrigger as unknown as { disabled: boolean }).disabled, false, "the trigger is never gated — every viewer sees it, the DB's own rank check is the wall");
 
         await h.fireEvent(signTrigger as never, "click");
-        for (let i = 0; i < 4; i++) await h.settle();
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        // F2 (independent review): the consent must show what it approves —
+        // the detail view's own real content, not merely "no crash".
+        assert.match(textOf(body as never), /u1234567/, "the Sign dialog's own detail view (get_vendor_binding) must have actually rendered");
 
         const confirmButton = findIn(
           body as never,
@@ -177,7 +197,9 @@ test("Revoke dialog (live binding): Confirm gates on the required reason field i
         assert.equal((revokeTrigger as unknown as { disabled: boolean }).disabled, false, "the trigger itself is never gated — only Confirm is");
 
         await h.fireEvent(revokeTrigger as never, "click");
-        for (let i = 0; i < 4; i++) await h.settle();
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        assert.match(textOf(body as never), /u1234567/, "the Revoke dialog's own detail view (get_vendor_binding) must have actually rendered");
 
         const textarea = findIn(body as never, (n) => n.tagName === "TEXTAREA");
         assert.ok(textarea, "the click must genuinely open the dialog and reach the reason field");
