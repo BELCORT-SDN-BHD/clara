@@ -31,6 +31,8 @@ components/close/close-a11y.test.tsx
 components/close/close-components.test.tsx
 components/close/close-keyboard.test.tsx
 components/documents/documents-a11y.test.tsx
+components/documents/documents-governance-a11y.test.tsx
+components/documents/documents-governance-keyboard.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
 components/firm/needs-you-gaps.test.tsx

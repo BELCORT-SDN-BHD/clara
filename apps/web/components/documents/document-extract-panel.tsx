@@ -51,7 +51,7 @@ export function DocumentExtractContent({ data }: { data: DocumentExtractResult }
     <div className="flex flex-col gap-4 border-t border-border pt-2">
       <p className="text-xs text-muted-foreground">{t("maxCharsNote", { maxChars: data.max_chars })}</p>
       <section className="flex flex-col gap-2">
-        <SectionHeader level={2}>{t("extractionsHeading")}</SectionHeader>
+        <SectionHeader level={4}>{t("extractionsHeading")}</SectionHeader>
         {data.extractions.length === 0 ? (
           <EmptyState>{t("noExtractions")}</EmptyState>
         ) : (
@@ -68,7 +68,7 @@ export function DocumentExtractContent({ data }: { data: DocumentExtractResult }
         )}
       </section>
       <section className="flex flex-col gap-2">
-        <SectionHeader level={2}>{t("regionsHeading")}</SectionHeader>
+        <SectionHeader level={4}>{t("regionsHeading")}</SectionHeader>
         {data.regions.length === 0 ? (
           <EmptyState>{t("noRegions")}</EmptyState>
         ) : (
