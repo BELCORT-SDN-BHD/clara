@@ -54,9 +54,6 @@ const VENDORS = [
 const CUSTOMERS = [
   { id: "cu1", firm_id: "f1", client_id: "c1", kind: "customer", name: "ABC Trading", name_normalized: "abctrading", registration_no: null, tin: null, payment_terms_days: 30, merged_into: null, retired_at: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
 ];
-const ALIASES = [
-  { id: "al1", client_id: "c1", counterparty_id: "v1", alias_normalized: "lostinventiontrading", alias_display: "Lost Invention Trading", origin: "trade_name", created_at: "2026-01-01T00:00:00Z", retired_at: null },
-];
 const AR_AGING = {
   as_of: "2026-08-28", domain: "ar",
   counterparties: [{ counterparty_id: "cu1", counterparty_name: "ABC Trading", current_cents: 100000, d31_60_cents: 0, d61_90_cents: 0, d91_plus_cents: 0, total_cents: 100000, items: [{ item_id: "i1", item_kind: "invoice", item_date: "2026-08-01", due_date: "2026-08-31", overdue: false, outstanding_cents: 100000, bucket: "current" }] }],
@@ -78,7 +75,11 @@ async function mockFetch(url: RequestInfo | URL): Promise<Response> {
   if (u.includes("/rest/v1/counterparties?") && u.includes("kind=eq.vendor")) return jsonResponse(VENDORS);
   if (u.includes("/rest/v1/counterparties?") && u.includes("kind=eq.customer")) return jsonResponse(CUSTOMERS);
   if (u.includes("/rest/v1/counterparties?")) return jsonResponse([...VENDORS, ...CUSTOMERS]);
-  if (u.includes("/rest/v1/counterparty_aliases?")) return jsonResponse(ALIASES);
+  // Rung-0 finding: counterparty_aliases carries no clara_authenticated
+  // read policy — a real live call would 42501 permission-denied. Mocked as
+  // an error here (never a silent [] or fake row) so any regression that
+  // reaches for this endpoint fails loudly, never quietly.
+  if (u.includes("/rest/v1/counterparty_aliases?")) return jsonResponse({ message: "permission denied for table counterparty_aliases" }, 403);
   if (u.includes("/rest/v1/open_items?")) return jsonResponse([]);
   if (u.includes("/rest/v1/open_item_allocations?")) return jsonResponse([]);
   throw new Error(`unexpected fetch: ${u}`);

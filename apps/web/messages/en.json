@@ -1325,6 +1325,7 @@
     "heading": "Counterparty hygiene",
     "loading": "Loading counterparties…",
     "empty": "No counterparties recorded yet for this client.",
+    "aliasListNotBuilt": "A counterparty's existing aliases and the retire-alias action are not available yet — this build has no read for them. Adding a new alias still works.",
     "kindVendorPlural": "Vendors",
     "kindCustomerPlural": "Customers",
     "registration": "Registration",

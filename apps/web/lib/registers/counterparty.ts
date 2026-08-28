@@ -1,12 +1,8 @@
-// T8 (port-wave plan §4/§5) rung-0 census — instance-unique throwaway rig blocked on
-// local DB credentials (see the T8 build report); every signature below is grounded
-// against the LIVE catalog TEXT at the migration frontier this branch forked from
-// (0001..0140, no docker/pg available locally to run pg_get_functiondef directly) —
-// every function was traced from its FIRST `create function` to every later migration
-// that so much as MENTIONS its name, so a dynamic splice would have been caught (the
-// "chase the LIVE body" rule, apps/web/AGENTS.md). Confirm against a real
-// pg_proc/pg_get_functiondef read before merge; this header records exactly what that
-// confirmation should re-derive.
+// T8 (port-wave plan §4/§5) rung-0 census — CONFIRMED at the LIVE catalog (an
+// instance-unique throwaway rig, docker-via-WSL2, migrated to frontier 0140,
+// pg_proc/pg_get_functiondef + pg_policy read directly — not migration text)
+// after an earlier text-only pass through every migration mention of each
+// name. Every signature and grant below is a live read, not an inference.
 //
 // clara.customer_statement(p_client uuid, p_counterparty uuid, p_from date, p_to date)
 // / clara.supplier_statement(same) — packages/db/migrations/0040_wave_c_c_tieout.sql:
@@ -20,15 +16,18 @@
 // 0040:3864. bookkeeper+. UNRECUT. Refuses CLR10 "terms_out_of_range" (days must be
 // 1-365) and CLR08 on a merged/retired counterparty.
 //
-// clara.counterparties / clara.counterparty_aliases — direct RLS table reads (policies
-// p_counterparties_human / the client-scoped alias read, 0009:1117 / 0011:~660),
-// clara_authenticated holds plain SELECT, forced RLS, firm_id = jwt_firm(). Columns
-// confirmed at their DDL: counterparties(id, firm_id, client_id, kind['vendor'|
-// 'customer'], name, name_normalized, registration_no, registration_normalized, tin,
-// payment_terms_days[0040], merged_into[0011], retired_at[0011], created_by,
-// created_at, updated_at); counterparty_aliases(id, firm_id, client_id,
-// counterparty_id, alias_normalized, alias_display, origin['former_name'|
-// 'trade_name'|'human'], created_by, created_at, retired_at).
+// clara.counterparties — direct RLS table read, policy p_counterparties_human,
+// clara_authenticated holds plain SELECT, forced RLS, firm_id = jwt_firm().
+// Columns confirmed live via information_schema: id, firm_id, client_id,
+// kind['vendor'|'customer'], name, name_normalized, registration_no,
+// registration_normalized, tin, payment_terms_days, merged_into, retired_at,
+// created_by, created_at, updated_at.
+//
+// clara.counterparty_aliases — NO clara_authenticated read policy exists
+// (confirmed via pg_policy: only p_counterparty_aliases_owner and
+// p_counterparty_aliases_freeform). There is deliberately no bulk-read
+// function for this table below — see the finding recorded just above
+// `OpenItemRow`.
 //
 // clara.open_items / clara.open_item_allocations — direct RLS table reads (0037:851
 // grants plain SELECT to clara_authenticated, forced RLS, firm-scoped). Used here ONLY
@@ -92,36 +91,18 @@ export function loadCounterparties(
   });
 }
 
-export type CounterpartyAliasRow = {
-  id: string;
-  client_id: string;
-  counterparty_id: string;
-  alias_normalized: string;
-  alias_display: string;
-  origin: "former_name" | "trade_name" | "human" | string;
-  created_at: string;
-  retired_at: string | null;
-};
-
-const ALIAS_COLS = "id,client_id,counterparty_id,alias_normalized,alias_display,origin,created_at,retired_at";
-
-/** Every alias (live AND retired) recorded for this client, across every
- *  counterparty — the hygiene panel groups them client-side by
- *  `counterparty_id` (a pure grouping of already-fetched rows, not a
- *  derived legality decision). */
-export function loadCounterpartyAliases(
-  session: SessionTokenAccessor,
-  clientId: string,
-  opts: Opts = {},
-): Promise<CounterpartyAliasRow[]> {
-  return getRows<CounterpartyAliasRow>("counterparty_aliases", {
-    select: ALIAS_COLS,
-    filters: { client_id: `eq.${clientId}` },
-    order: "created_at.asc",
-    session,
-    signal: opts.signal,
-  });
-}
+// RUNG-0 LIVE-CATALOG FINDING (throwaway rig, migrated to 0140): unlike
+// `counterparties`/`open_items`/`open_item_allocations` above, the live
+// `clara.counterparty_aliases` table carries NO `clara_authenticated` human
+// read policy — only `p_counterparty_aliases_owner` (clara_fn_owner) and
+// `p_counterparty_aliases_freeform` (clara_freeform_ro). Confirmed by a
+// direct `pg_policy` read, not by migration text. There is deliberately no
+// `loadCounterpartyAliases` here: a bulk table read against this relation
+// would 403/return zero rows under RLS for every human session. Reported to
+// the conductor as a new backend-read finding — `add_counterparty_alias`
+// needs no such read (a human types a new alias) and stays wired;
+// `retire_counterparty_alias` is EXECUTE-granted but has no honest way to
+// discover an alias id to retire, so it is not offered as a control.
 
 export type OpenItemRow = {
   id: string;
@@ -321,9 +302,6 @@ export function domainForKind(kind: CounterpartyKind): AgingDomain {
 
 export type CounterpartyMergeSide = {
   counterparty: CounterpartyRow;
-  /** Live (non-retired) aliases only — a retired alias carries no bearing on
-   *  what a human judging this merge needs to see. */
-  aliases: CounterpartyAliasRow[];
   /** This side's row from a FRESH ar_aging/ap_aging read, or `null` when the
    *  side carries no currently-outstanding open items (a real, DB-confirmed
    *  absence — `_aging_core` simply omits a counterparty with nothing
@@ -338,9 +316,10 @@ export type CounterpartyMergePreview = {
   merged: CounterpartyMergeSide;
 };
 
-/** Three PARALLEL fresh reads (counterparties, counterparty_aliases, a full
- *  ar_aging/ap_aging pass), assembled into the two sides the preview card
- *  renders. Throws (never returns a partial/guessed shape) if either id is
+/** TWO PARALLEL fresh reads (counterparties, a full ar_aging/ap_aging pass),
+ *  assembled into the two sides the preview card renders. No aliases —
+ *  `counterparty_aliases` carries no human-read policy (this file's own
+ *  header). Throws (never returns a partial/guessed shape) if either id is
  *  missing from the fresh counterparties read — the caller's DataState
  *  renders that as a real read failure, not a silent empty preview. */
 export async function loadCounterpartyMergePreview(
@@ -353,17 +332,10 @@ export async function loadCounterpartyMergePreview(
   opts: Opts = {},
 ): Promise<CounterpartyMergePreview> {
   const domain = domainForKind(kind);
-  const [counterparties, aliases, aging] = await Promise.all([
+  const [counterparties, aging] = await Promise.all([
     getRows<CounterpartyRow>("counterparties", {
       select: COUNTERPARTY_COLS,
       filters: { client_id: `eq.${clientId}`, id: `in.(${survivorId},${mergedId})` },
-      session,
-      signal: opts.signal,
-    }),
-    getRows<CounterpartyAliasRow>("counterparty_aliases", {
-      select: ALIAS_COLS,
-      filters: { client_id: `eq.${clientId}`, counterparty_id: `in.(${survivorId},${mergedId})`, retired_at: "is.null" },
-      order: "created_at.asc",
       session,
       signal: opts.signal,
     }),
@@ -375,11 +347,7 @@ export async function loadCounterpartyMergePreview(
     if (!counterparty) {
       throw new Error(`loadCounterpartyMergePreview: counterparty ${id} not found in the fresh read`);
     }
-    return {
-      counterparty,
-      aliases: aliases.filter((a) => a.counterparty_id === id),
-      aging: aging.counterparties.find((r) => r.counterparty_id === id) ?? null,
-    };
+    return { counterparty, aging: aging.counterparties.find((r) => r.counterparty_id === id) ?? null };
   };
 
   return { domain, as_of: asOf, survivor: side(survivorId), merged: side(mergedId) };

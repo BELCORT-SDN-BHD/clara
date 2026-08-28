@@ -1,42 +1,48 @@
 "use client";
 
 // The counterparty hygiene panel — T8's NEW surface (port-wave plan §4/§5):
-// create · set terms · add/retire alias · rename · merge. Nested inside the
+// create · set terms · add alias · rename · merge. Nested inside the
 // registers "aging" tab (Q3's closed IA; no TABS/CLIENT_TABS edit — the
 // team-lead's own brief), a full write surface in the staff-advances-register.tsx
 // shape: one useHydratedPart, one persistent refusal banner, every dialog a
 // thin controlled form over a single governed call.
+//
+// RUNG-0 LIVE-CATALOG FINDING (throwaway rig, migrated to 0140, confirmed via
+// pg_policy — not migration text): `clara.counterparty_aliases` carries NO
+// `clara_authenticated` human-read policy — only the owner and freeform-agent
+// policies (`p_counterparty_aliases_owner`, `p_counterparty_aliases_freeform`).
+// `add_counterparty_alias` needs no prior read (a human types a new alias;
+// the DB's own alias_collision refusal, if any, renders verbatim) and stays
+// fully wired below. `retire_counterparty_alias` is EXECUTE-granted but has
+// no honest way to reach it: retiring needs the alias's own id, and no read
+// exists to discover one — this is NOT a missing verb, it is a missing READ,
+// so it is not offered as a control at all rather than as a dead one. Filed
+// as a new backend-read finding, separate from the plan's own OQ-4.
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { loadCounterparties, type CounterpartyKind, type CounterpartyRow } from "@/lib/registers/counterparty";
 import {
-  loadCounterparties, loadCounterpartyAliases,
-  type CounterpartyKind, type CounterpartyRow,
-} from "@/lib/registers/counterparty";
-import {
-  createCounterparty, setCounterpartyTerms, addCounterpartyAlias, retireCounterpartyAlias,
+  createCounterparty, setCounterpartyTerms, addCounterpartyAlias,
   renameCounterparty, mergeCounterparties,
 } from "@/lib/registers/counterparty-doors";
 import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
+import { NotBuiltNote } from "@/components/common/not-built-note";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CreateCounterpartyDialog } from "./CreateCounterpartyDialog";
 import { SetCounterpartyTermsDialog } from "./SetCounterpartyTermsDialog";
 import { AddCounterpartyAliasDialog } from "./AddCounterpartyAliasDialog";
-import { RetireCounterpartyAliasDialog } from "./RetireCounterpartyAliasDialog";
 import { RenameCounterpartyDialog } from "./RenameCounterpartyDialog";
 import { MergeCounterpartiesDialog } from "./MergeCounterpartiesDialog";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 async function loadHygieneData(session: SessionTokenAccessor, clientId: string, kind: CounterpartyKind) {
-  const [counterparties, aliases] = await Promise.all([
-    loadCounterparties(session, clientId, kind),
-    loadCounterpartyAliases(session, clientId),
-  ]);
-  return { counterparties, aliases };
+  const counterparties = await loadCounterparties(session, clientId, kind);
+  return { counterparties };
 }
 
 function statusBadge(t: ReturnType<typeof useTranslations>, row: CounterpartyRow, all: CounterpartyRow[]) {
@@ -96,7 +102,6 @@ export function CounterpartyHygienePanel({ clientId }: { clientId: string }) {
         <ul className="flex flex-col gap-3">
           {data.counterparties.map((row) => {
             const isLive = row.merged_into === null && row.retired_at === null;
-            const rowAliases = data.aliases.filter((a) => a.counterparty_id === row.id && a.retired_at === null);
             const mergeCandidates = data.counterparties.filter((c) => c.id !== row.id && c.merged_into === null && c.retired_at === null);
             return (
               <li key={row.id} className="flex flex-col gap-2 rounded-lg border p-3">
@@ -145,27 +150,15 @@ export function CounterpartyHygienePanel({ clientId }: { clientId: string }) {
                     <dt>{t("terms")}</dt><dd>{row.payment_terms_days ?? "—"}</dd>
                   </div>
                 </dl>
-                {rowAliases.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {rowAliases.map((a) => (
-                      <span key={a.id} className="flex items-center gap-1">
-                        <Badge variant="outline">{a.alias_display}</Badge>
-                        {isLive && (
-                          <RetireCounterpartyAliasDialog
-                            aliasDisplay={a.alias_display}
-                            busy={busy}
-                            onSubmit={() => act(() => retireCounterpartyAlias(clientId, a.id, { session: sessionTokenAccessor }).then(() => undefined))}
-                          />
-                        )}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </li>
             );
           })}
         </ul>
       )}
+
+      <NotBuiltNote>
+        <p>{t("aliasListNotBuilt")}</p>
+      </NotBuiltNote>
     </div>
   );
 }

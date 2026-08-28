@@ -62,7 +62,10 @@ async function mockFetch(url: RequestInfo | URL): Promise<Response> {
   if (u.includes("/rest/v1/counterparties?") && u.includes("kind=eq.vendor")) return jsonResponse(VENDORS);
   if (u.includes("/rest/v1/counterparties?") && u.includes("kind=eq.customer")) return jsonResponse([]);
   if (u.includes("/rest/v1/counterparties?")) return jsonResponse(VENDORS);
-  if (u.includes("/rest/v1/counterparty_aliases?")) return jsonResponse([]);
+  // Rung-0 finding: counterparty_aliases carries no clara_authenticated read
+  // policy — mocked as an error so any regression that reaches for it fails
+  // loudly (see counterparty-hygiene-a11y.test.tsx's own comment).
+  if (u.includes("/rest/v1/counterparty_aliases?")) return jsonResponse({ message: "permission denied for table counterparty_aliases" }, 403);
   if (u.includes("/rest/v1/open_items?")) return jsonResponse([]);
   if (u.includes("/rest/v1/open_item_allocations?")) return jsonResponse([]);
   throw new Error(`unexpected fetch: ${u}`);

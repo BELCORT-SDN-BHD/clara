@@ -1,10 +1,13 @@
 "use client";
 
-// retire_counterparty_alias's door dialog — bookkeeper+. No extra input: the
-// alias id is already known from the row this trigger renders on, so the
-// dialog's own body is confirmation prose only (still a real Dialog, never a
-// bare button — the house "one click opens, one confirm performs exactly one
-// governed call" shape stays uniform even for a field-less write).
+// retire_counterparty_alias's door dialog — bookkeeper+, EXECUTE-granted at
+// the live catalog (confirmed). NOT currently rendered from
+// counterparty-hygiene-panel.tsx: `clara.counterparty_aliases` carries no
+// clara_authenticated human-read policy (rung-0 finding, counterparty.ts's
+// own header), so this build has no honest way to discover an alias's id to
+// retire. Kept ready — takes `aliasDisplay` + an id-bearing `onSubmit` — for
+// the day a read exists; it is not dead in the sense of wrong, only
+// currently unreachable from any real screen.
 
 import { useTranslations } from "next-intl";
 import { ArApCounterpartyDoorDialog } from "./ArApCounterpartyDoorDialog";

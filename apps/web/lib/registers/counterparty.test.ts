@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  loadCounterparties, loadCounterpartyAliases, loadCounterpartyOpenItems,
+  loadCounterparties, loadCounterpartyOpenItems,
   loadOpenItemAllocationsForItems, unallocateCandidateGroups, getCustomerStatement,
   getSupplierStatement, domainForKind, loadCounterpartyMergePreview,
   type OpenItemAllocationRow,
@@ -45,21 +45,10 @@ test("loadCounterparties: reads counterparties scoped by client_id + kind, name 
   assert.match(seenUrl, /order=name\.asc/);
 });
 
-test("loadCounterpartyAliases: reads counterparty_aliases scoped by client_id only (every counterparty's aliases at once)", async () => {
-  let seenUrl = "";
-  await withMockedFetch(
-    async (url) => {
-      seenUrl = String(url);
-      return jsonResponse([], 200);
-    },
-    async () => {
-      await loadCounterpartyAliases(fakeSession("tok"), "c1");
-    },
-  );
-  assert.match(seenUrl, /\/rest\/v1\/counterparty_aliases\?/);
-  assert.match(seenUrl, /client_id=eq\.c1/);
-  assert.doesNotMatch(seenUrl, /counterparty_id=/);
-});
+// NOTE: no loadCounterpartyAliases test — the function does not exist.
+// Rung-0 confirmed (pg_policy, live catalog) that clara.counterparty_aliases
+// carries no clara_authenticated human-read policy; see counterparty.ts's
+// own header for the finding. A bulk read of that table would fail live.
 
 test("loadCounterpartyOpenItems: reads open_items scoped by client_id + domain + counterparty_id, item_date ascending", async () => {
   let seenUrl = "";
@@ -183,7 +172,7 @@ test("unallocateCandidateGroups: excludes a group whose row has ALREADY been rev
   assert.deepEqual(groups, []);
 });
 
-test("loadCounterpartyMergePreview: THREE parallel fresh reads (counterparties + aliases + aging), assembled with no computed figure", async () => {
+test("loadCounterpartyMergePreview: TWO parallel fresh reads (counterparties + aging), assembled with no computed figure", async () => {
   const calls: string[] = [];
   await withMockedFetch(
     async (url) => {
@@ -198,7 +187,6 @@ test("loadCounterpartyMergePreview: THREE parallel fresh reads (counterparties +
           200,
         );
       }
-      if (u.includes("/rest/v1/counterparty_aliases?")) return jsonResponse([], 200);
       if (u.includes("/rpc/ap_aging")) {
         return jsonResponse({ as_of: "2026-08-28", domain: "ap", counterparties: [{ counterparty_id: "merged", counterparty_name: "Acme Sdn Bhd", current_cents: 1000, d31_60_cents: 0, d61_90_cents: 0, d91_plus_cents: 0, total_cents: 1000, items: [] }], totals: {} }, 200);
       }
@@ -212,7 +200,7 @@ test("loadCounterpartyMergePreview: THREE parallel fresh reads (counterparties +
       assert.equal(preview.merged.aging?.total_cents, 1000, "the merged side's outstanding figure is the FRESH aging read's own value, never computed here");
     },
   );
-  assert.equal(calls.length, 3, "exactly three reads: counterparties, counterparty_aliases, ap_aging");
+  assert.equal(calls.length, 2, "exactly two reads: counterparties, ap_aging — no counterparty_aliases read (no human-read policy exists on it)");
 });
 
 test("loadCounterpartyMergePreview: throws if the fresh counterparties read is missing one of the two ids (never a guessed/partial preview)", async () => {
@@ -220,7 +208,6 @@ test("loadCounterpartyMergePreview: throws if the fresh counterparties read is m
     async (url) => {
       const u = String(url);
       if (u.includes("/rest/v1/counterparties?")) return jsonResponse([], 200);
-      if (u.includes("/rest/v1/counterparty_aliases?")) return jsonResponse([], 200);
       if (u.includes("/rpc/ap_aging")) return jsonResponse({ as_of: "2026-08-28", domain: "ap", counterparties: [], totals: {} }, 200);
       throw new Error(`unexpected fetch: ${u}`);
     },

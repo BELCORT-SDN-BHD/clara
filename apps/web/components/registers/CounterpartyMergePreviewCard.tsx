@@ -21,7 +21,6 @@
 import { useTranslations } from "next-intl";
 import { fmtCents } from "@/lib/registers/money";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import type { CounterpartyMergePreview, CounterpartyMergeSide } from "@/lib/registers/counterparty";
 
 function SideColumn({ label, side, tc }: { label: string; side: CounterpartyMergeSide; tc: ReturnType<typeof useTranslations> }) {
@@ -52,15 +51,6 @@ function SideColumn({ label, side, tc }: { label: string; side: CounterpartyMerg
           <dd>{side.aging?.items.length ?? 0}</dd>
         </div>
       </dl>
-      {side.aliases.length > 0 ? (
-        <div className="flex flex-wrap gap-1">
-          {side.aliases.map((a) => (
-            <Badge key={a.id} variant="outline">
-              {a.alias_display}
-            </Badge>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }
