@@ -188,12 +188,13 @@ export type OpenQuestionDetail = { question: OpenQuestionRow; rule: CodingRuleRo
 // in the 18-member parts catalog, is what Clara posts into a thread when a
 // sweep finalizes. That part renders today as a generic id-only summary
 // card (components/parts/PartRenderer.tsx) rather than a rich card hydrating
-// get_sweep_run/acknowledge_sweep_run — a standing P3-era gap, not named in
-// this wave's own scope. RECORDED SCOPE NOTE (rung 0, port-wave plan §7.0):
-// the queue-altitude sweep panel this train owes (components/firm/
-// sweep-status-panel.tsx) renders the STATE the review-queue envelope
-// already carries, honestly, and names — rather than fabricates — why the
-// acknowledge control cannot live at that altitude. -------------------------
+// get_sweep_run/acknowledge_sweep_run. OWNER-RULED (裁-20,
+// docs/plan/active/mohe-grill-rulings-2026-08-28.md:268-272): that upgrade
+// ships inside the P6 four-part wire bump (chatTurn_v15), no separate train.
+// RECORDED SCOPE NOTE (rung 0, port-wave plan §7.0): the queue-altitude
+// sweep panel this train owes (components/firm/sweep-status-panel.tsx)
+// renders the STATE the review-queue envelope already carries, honestly,
+// and names that ruled, tracked home rather than a vague gap. -------------
 
 /** Re-exported from lib/firm/needs-you.ts's own type under this module's
  *  vocabulary — the SAME envelope shape, never a second definition. */

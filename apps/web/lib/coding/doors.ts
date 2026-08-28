@@ -60,10 +60,11 @@ export function resolveLintFinding(
  *  a named verb" is about the UI, not this module) — NOT wired to a control
  *  on the queue-altitude sweep panel: no BROWSABLE list of sweep run ids
  *  exists there (types.ts's own SweepStatus header). A run id does reach a
- *  human through the Clara thread's own `sweep_receipt` part, but that
- *  part's card is a standing, out-of-this-wave P3-era gap (same header) —
- *  components/firm/sweep-status-panel.tsx names the reason honestly rather
- *  than fabricating a control. */
+ *  human through the Clara thread's own `sweep_receipt` part; owner-ruled
+ *  (裁-20, docs/plan/active/mohe-grill-rulings-2026-08-28.md:268-272) that
+ *  its rich-card upgrade calling THIS door lands inside the P6 wire bump,
+ *  not this train — components/firm/sweep-status-panel.tsx names that ruled
+ *  home rather than fabricating a control here. */
 export function acknowledgeSweepRun(runId: string, opts: Opts = {}): Promise<unknown> {
   return callDoor("acknowledge_sweep_run", { p_run: runId, p_op_key: opKey() }, opts);
 }
