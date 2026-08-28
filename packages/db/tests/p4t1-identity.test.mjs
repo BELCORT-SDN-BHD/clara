@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AGENT_USER_ID, CLR, PG, assertRaises, opk, rootQuery, roleQuery } from "./rig-helpers.mjs";
+import { AGENT_USER_ID, CLR, PG, assertRaises, opk, rootQuery, roleQuery, humanQuery } from "./rig-helpers.mjs";
 import { claimIdentity, freshPersona } from "./p4t1-fixtures.mjs";
 
 test("p4t1.identity: an unauthenticated call (no jwt_sub) refuses CLR04", async () => {
@@ -66,6 +66,27 @@ test("p4t1.identity: re-calling with a DIFFERENT email refuses CLR10 (the row is
   );
   const row = await rootQuery("select email from clara.users where id = $1", [p.sub]);
   assert.equal(row.rows[0].email, p.email, "the original email must survive the refused re-claim");
+});
+
+test("p4t1.identity: [F2] a JWT with no email claim refuses CLR04 -- it must never fail open into a NULL-email, permanently-wedged row", async () => {
+  const p = freshPersona("noemail");
+  // humanQuery (rig-helpers) sets request.jwt.claims to exactly {sub, role} -- no email key at
+  // all, the real shape of a session whose provider never populated the claim.
+  await assertRaises(
+    CLR.authz,
+    () => humanQuery(p.sub, "select clara.claim_identity(p_display_name => $1, p_op_key => $2)", ["No Email", opk("noemail")]),
+    "claim_identity with a JWT carrying no email claim",
+  );
+  const row = await rootQuery("select 1 from clara.users where id = $1", [p.sub]);
+  assert.equal(row.rows.length, 0, "a refused claim must not leave a NULL-email row behind");
+});
+
+test("p4t1.identity: [F3] the stored email is lowercase regardless of the JWT claim's casing", async () => {
+  const p = freshPersona("mixedcase");
+  const mixed = `Mixed.Case.${p.sub.slice(0, 8)}@Rig.Test`;
+  await claimIdentity(p.sub, mixed, { displayName: "Case Test", opKey: opk("mixedcase") });
+  const row = await rootQuery("select email from clara.users where id = $1", [p.sub]);
+  assert.equal(row.rows[0].email, mixed.toLowerCase(), "clara.users.email must be lowercase no matter how the JWT spelled it");
 });
 
 test("p4t1.identity: an email already claimed by a DIFFERENT identity refuses cleanly (unique_violation -> CLR10, not a raw 23505)", async () => {

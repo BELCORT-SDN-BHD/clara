@@ -108,6 +108,20 @@ test("p4t1.accept: a JWT-email/invite-email mismatch refuses CLR04, and does NOT
   assert.equal(row.status, "pending", "a mismatched attempt must not consume the invite");
 });
 
+test("p4t1.accept: [F3] a CASE-VARIANT JWT email still matches the invite -- both sides normalize through _jwt_email()'s lower()", async () => {
+  const sc = await scene("casevariant");
+  const p = freshPersona("casevariant");
+  // Issue to the UPPERCASE spelling: invite_member's own lower() normalizes it at write.
+  const issued = await inviteMember(sc.admin, { email: p.email.toUpperCase(), role: "viewer", opKey: opk("cv-issue") });
+  // Accept with a THIRD, differently-mixed casing -- proves the match is on the normalized
+  // form (via _jwt_email()'s own lower()), not on either side happening to already agree.
+  const mixedAccept = p.email.charAt(0).toUpperCase() + p.email.slice(1);
+  const result = await acceptInvite(p.sub, mixedAccept, { token: issued.token, displayName: "Case Variant", opKey: opk("cv-accept") });
+  assert.equal(result.user_id, p.sub);
+  const user = await rootQuery("select email from clara.users where id = $1", [p.sub]);
+  assert.equal(user.rows[0].email, p.email.toLowerCase());
+});
+
 test("p4t1.accept: end to end -- claims identity, mints an active membership at the invited role, consumes the invite, and the roster event is member.added, not a fabricated invite.accepted", async () => {
   const sc = await scene("e2e");
   const p = freshPersona("joiner");
@@ -190,6 +204,31 @@ test("p4t1.accept: an op_key replay on the SAME accept call returns the SAME rec
   assert.deepEqual(second, first);
   const n = await rootQuery("select count(*)::int as n from clara.firm_memberships where user_id = $1", [p.sub]);
   assert.equal(n.rows[0].n, 1);
+});
+
+test("p4t1.accept: [F4] a stale op_key + the same token cannot be replayed by an IMPOSTOR to steal the original caller's receipt -- the JWT-email wall runs before the dedupe short-circuit", async () => {
+  const sc = await scene("f4replay");
+  const joiner = freshPersona("f4joiner");
+  const issued = await inviteMember(sc.admin, { email: joiner.email, role: "viewer", opKey: opk("f4-issue") });
+  const sharedKey = opk("f4-shared");
+  const legit = await acceptInvite(joiner.sub, joiner.email, { token: issued.token, displayName: "Legit", opKey: sharedKey });
+  assert.equal(legit.user_id, joiner.sub);
+
+  // The impostor has the SAME token (e.g. a forwarded email) and somehow the SAME op_key, but
+  // their OWN JWT does not carry the invited address. Pre-fix, _reserve_op ran before the email
+  // wall, so this call would have found the already-reserved receipt for (firm, accept_invite,
+  // sharedKey) and returned the LEGITIMATE joiner's user_id/membership_id -- without the
+  // impostor ever proving they owned the invited email.
+  const impostor = freshPersona("f4impostor");
+  await assertRaises(
+    CLR.authz,
+    () => acceptInvite(impostor.sub, impostor.email, { token: issued.token, displayName: "Impostor", opKey: sharedKey }),
+    "accept_invite replay with a mismatched email must refuse, never return the original receipt",
+  );
+  const impostorRow = await rootQuery("select 1 from clara.users where id = $1", [impostor.sub]);
+  assert.equal(impostorRow.rows.length, 0, "the impostor must not even get an identity minted from this call");
+  const membershipCount = await rootQuery("select count(*)::int as n from clara.firm_memberships where firm_id = $1", [sc.firm]);
+  assert.equal(membershipCount.rows[0].n, 5, "still exactly the scene's owner+admin+bookkeeper+viewer plus the legitimate joiner -- no impostor membership");
 });
 
 test("p4t1.accept: the global one-active-membership invariant refuses a joiner who already belongs elsewhere (CLR10, from the shared _add_member_core)", async () => {

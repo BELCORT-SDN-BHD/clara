@@ -129,6 +129,18 @@ set role clara_fn_owner;
 -- defensive shape exactly (0002:339-350) -- never trusts a malformed claims blob, never reads
 -- anything but the GUC PostgREST already sets. Internal only (no policy references it, so it
 -- needs no EXECUTE grant -- the doors that call it run AS the owner, which owns this too).
+--
+-- Native review F3: normalized to lower(btrim(...)) HERE, once, so every consumer agrees --
+-- clara.users.email is a case-sensitive unique column, and invite_member's own dedup writes
+-- (email = lower(btrim(p_email)), §E) and reads (firm_invites.email, §E/§F) are already
+-- lowercase. Before this fix, claim_identity wrote the JWT's RAW-CASE email into clara.users,
+-- so a later invite_member dedup check (`u.email = v_email`, §E) could silently MISS an
+-- already-active member whose stored email differed only in case -- admitting a duplicate
+-- invite for someone already in the firm, which then has no lawful way to resolve (accept_invite
+-- would find them already active elsewhere and refuse CLR10, and the invite itself is left
+-- permanently pending). Lowering at the single source (this function) makes every one of the
+-- four email call sites (claim_identity, _claim_identity_core's comparison, accept_invite,
+-- invite_member) agree by construction rather than by each caller remembering to normalize.
 -- =================================================================================================
 create function clara._jwt_email() returns text
   language plpgsql stable as $$
@@ -139,7 +151,7 @@ begin
   begin
     v_email := (v_raw::jsonb) ->> 'email';
   exception when others then return null; end;
-  return nullif(btrim(v_email), '');
+  return nullif(lower(btrim(v_email)), '');
 end $$;
 
 -- =================================================================================================
@@ -224,7 +236,7 @@ end $$;
 
 create function clara.claim_identity(p_display_name text, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_actor uuid;
+declare v_actor uuid; v_email text;
 begin
   v_actor := clara.jwt_sub();
   if v_actor is null then raise exception 'no authenticated actor' using errcode = 'CLR04'; end if;
@@ -233,7 +245,17 @@ begin
   -- door's idempotency is structural (the core's own select-then-branch), not op_receipts: there
   -- is no firm to scope an op_receipts row under before this call succeeds.
   if p_op_key is null or btrim(p_op_key) = '' then raise exception 'op_key is required' using errcode = 'CLR10'; end if;
-  return clara._claim_identity_core(v_actor, p_display_name, clara._jwt_email());
+  v_email := clara._jwt_email();
+  -- Native review F2: a JWT carrying no `email` claim must refuse here, not fail open. A NULL
+  -- passed through to _claim_identity_core would insert a clara.users row with email=NULL, and
+  -- every LATER claim_identity/accept_invite call for that actor would then hit the core's own
+  -- `v_existing.email is distinct from p_email` check (§C) -- NULL is distinct from every real
+  -- email -- wedging the identity permanently: it can never attach a real address or accept an
+  -- invite (accept_invite's own JWT-email wall, below, would always refuse a member-less
+  -- caller). Refusing here, matching accept_invite's identical wall, is cheaper than a stuck
+  -- account with no recovery path.
+  if v_email is null then raise exception 'a verified email claim is required' using errcode = 'CLR04'; end if;
+  return clara._claim_identity_core(v_actor, p_display_name, v_email);
 end $$;
 
 -- =================================================================================================
@@ -345,10 +367,18 @@ end $$;
 
 -- =================================================================================================
 -- §F -- Invite accept (ask 4). One transaction through both cores. The wall: the caller's VERIFIED
--- JWT email must equal the invite's email (case-insensitive; invite_member already lower()s at
--- write, mirrored here at read) -- a SECOND, independent wall on top of Supabase's own verifyOtp
--- subject-binding (design §4 C), so a token intercepted by anyone other than its addressee cannot
--- be bound to a different account.
+-- JWT email must equal the invite's email -- both sides already lowercase (§A normalizes the JWT
+-- side; invite_member normalizes the stored side, §E) -- a SECOND, independent wall on top of
+-- Supabase's own verifyOtp subject-binding (design §4 C), so a token intercepted by anyone other
+-- than its addressee cannot be bound to a different account.
+--
+-- Native review F4: this wall runs BEFORE _reserve_op, matching every sibling door's guard-first
+-- order (authz, then dedupe). With the wall AFTER _reserve_op, a caller who knows the token but
+-- not the invited address -- e.g. a forwarded email plus a guessed or leaked op_key -- could
+-- replay a DIFFERENT caller's own successful op_key and receive THEIR cached receipt (user_id,
+-- membership_id) via the dedupe short-circuit, never once proving their own email matched. The
+-- receipt is keyed by (firm, fn, op_key) alone, not by caller identity, so dedupe has no way to
+-- tell an impostor's replay from the legitimate retry it exists for -- the wall has to run first.
 -- =================================================================================================
 create function clara.accept_invite(p_token text, p_display_name text, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -362,13 +392,14 @@ begin
   select * into inv from clara.firm_invites where token_hash = v_hash for update;
   if not found then raise exception 'invalid invite token' using errcode = 'CLR10'; end if;
 
-  v_dedupe := clara._reserve_op(inv.firm_id, 'accept_invite', p_op_key, clara._hash(jsonb_build_object('token_hash', encode(v_hash, 'hex'))));
-  if v_dedupe is not null then return v_dedupe; end if;
-
-  v_email := lower(btrim(clara._jwt_email()));
+  v_email := clara._jwt_email();
   if v_email is null or v_email is distinct from inv.email then
     raise exception 'the signed-in email does not match this invite' using errcode = 'CLR04';
   end if;
+
+  v_dedupe := clara._reserve_op(inv.firm_id, 'accept_invite', p_op_key, clara._hash(jsonb_build_object('token_hash', encode(v_hash, 'hex'))));
+  if v_dedupe is not null then return v_dedupe; end if;
+
   -- Expiry is CHECKED here, never PERSISTED here: a RAISE later in this same call rolls back
   -- every write since the transaction began, including an UPDATE issued moments before it (this
   -- was tried and caught by the rig battery -- an update-then-raise on the same row is a no-op
