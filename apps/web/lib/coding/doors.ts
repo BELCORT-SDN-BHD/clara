@@ -58,10 +58,12 @@ export function resolveLintFinding(
  *  "not_finalized" if the run hasn't finalized yet, CLR11 if not found. Built
  *  and wire-tested against the live verb (Q9 rung 1's "no affordance without
  *  a named verb" is about the UI, not this module) — NOT wired to a control
- *  on the sweep panel: no human-reachable door in the live catalog supplies a
- *  run id to call this with (types.ts's own SweepStatus header records the
- *  rung-0 finding; components/firm/sweep-status-panel.tsx renders the honest
- *  gap). */
+ *  on the queue-altitude sweep panel: no BROWSABLE list of sweep run ids
+ *  exists there (types.ts's own SweepStatus header). A run id does reach a
+ *  human through the Clara thread's own `sweep_receipt` part, but that
+ *  part's card is a standing, out-of-this-wave P3-era gap (same header) —
+ *  components/firm/sweep-status-panel.tsx names the reason honestly rather
+ *  than fabricating a control. */
 export function acknowledgeSweepRun(runId: string, opts: Opts = {}): Promise<unknown> {
   return callDoor("acknowledge_sweep_run", { p_run: runId, p_op_key: opKey() }, opts);
 }

@@ -179,17 +179,21 @@ export type OpenQuestionDetail = { question: OpenQuestionRow; rule: CodingRuleRo
 
 // --- clara.sweep_runs — a bookkeeper+ read has NO table grant at all
 // (measured: only an owner-only RLS policy exists on both sweep_runs and
-// sweep_run_items); the ONLY human-reachable read is get_sweep_run(p_run),
-// and NO door in the live catalog gives a human a run's id to call it with
-// (list_review_queue's own `sweep` envelope carries only open_run/
-// last_finalized_at/last_ack_at — booleans and timestamps, never an id; no
-// list_sweep_runs door exists; the receipt registry, clara.
-// agent_receipt_surfaces, has no sweep-shaped kind either). RECORDED SCOPE
-// NOTE (rung 0, port-wave plan §7.0): the sweep-runs panel this train owes
-// renders the STATE this envelope already carries, honestly, and the
-// acknowledge affordance is a NotBuiltNote naming the gap rather than a
-// fabricated id source — see components/firm/sweep-status-panel.tsx's own
-// header. -------------------------------------------------------------------
+// sweep_run_items); the ONLY human-reachable read is get_sweep_run(p_run).
+// list_review_queue's own `sweep` envelope carries only open_run/
+// last_finalized_at/last_ack_at (booleans and timestamps, never an id), and
+// no `list_sweep_runs` door exists — but a run id DOES reach a human
+// honestly through a DIFFERENT channel: `lib/parts/types.ts`'s
+// `SweepReceiptPart` (`type: "sweep_receipt"; run_id: string`), already live
+// in the 18-member parts catalog, is what Clara posts into a thread when a
+// sweep finalizes. That part renders today as a generic id-only summary
+// card (components/parts/PartRenderer.tsx) rather than a rich card hydrating
+// get_sweep_run/acknowledge_sweep_run — a standing P3-era gap, not named in
+// this wave's own scope. RECORDED SCOPE NOTE (rung 0, port-wave plan §7.0):
+// the queue-altitude sweep panel this train owes (components/firm/
+// sweep-status-panel.tsx) renders the STATE the review-queue envelope
+// already carries, honestly, and names — rather than fabricates — why the
+// acknowledge control cannot live at that altitude. -------------------------
 
 /** Re-exported from lib/firm/needs-you.ts's own type under this module's
  *  vocabulary — the SAME envelope shape, never a second definition. */

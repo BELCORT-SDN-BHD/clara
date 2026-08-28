@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { resolveLintFinding } from "@/lib/coding/doors";
 import { LINT_FINDING_CONCLUSIONS, type LintFindingConclusion } from "@/lib/coding/types";
 import { CodingDoorDialog } from "./CodingDoorDialog";
+import { LintFindingDetail } from "./lint-finding-detail";
 import { ErrorMessage } from "@/components/firm/data-state";
 
 export function LintFindingActions({
@@ -29,6 +30,8 @@ export function LintFindingActions({
   return (
     <div className="flex flex-col gap-2">
       {error ? <ErrorMessage error={error} /> : null}
+      {/* T7 (port-wave plan §4) — clara.get_lint_finding, on demand. */}
+      <LintFindingDetail findingId={findingId} />
       <CodingDoorDialog
         triggerLabel={t("resolveTrigger")}
         title={t("resolveTitle")}

@@ -1434,7 +1434,11 @@
         "superseded_by_edit": "Superseded by a later edit"
       },
       "noteLabel": "Note",
-      "notePlaceholder": "What was found, and what was done about it…"
+      "notePlaceholder": "What was found, and what was done about it…",
+      "viewDetailsTrigger": "View details",
+      "loadingDetail": "Loading the finding's full detail…",
+      "detailNotReachable": "This finding's detail could not be read.",
+      "dedupeKeyLabel": "Dedupe key"
     },
     "sweep": {
       "openRun": "A sweep run is currently open.",
@@ -1442,7 +1446,7 @@
       "lastFinalizedLabel": "Last finalized",
       "lastAckLabel": "Last acknowledged",
       "never": "Never",
-      "acknowledgeGap": "Acknowledging a finalized sweep run needs its run id, and no backend verb today gives a human one to read (clara.acknowledge_sweep_run exists, but nothing lists a run's id) — not built yet."
+      "acknowledgeGap": "Acknowledging a finalized sweep run needs its run id. There is no browsable list of runs here — the id arrives only via Clara's own sweep-receipt message in a thread, which does not yet hydrate this action — not built yet."
     },
     "agentTasks": {
       "heading": "Running agent tasks",

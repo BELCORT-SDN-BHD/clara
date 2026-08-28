@@ -5,15 +5,25 @@
 // (lib/firm/use-review-queue.ts's `sweep` field — measured UNUSED anywhere
 // in apps/web before this train) — zero extra network calls.
 //
-// RUNG-0 SCOPE NOTE (recorded, not a silent gap): `get_sweep_run`/
-// `acknowledge_sweep_run` both take a run id, and NO door in the live
-// catalog gives a human one — the envelope carries only `open_run` (a
-// boolean) plus two timestamps, `list_sweep_runs` does not exist, and
-// neither `sweep_runs` nor `sweep_run_items` carries a human SELECT policy
-// (owner-only; measured 2026-08-28). The acknowledge affordance therefore
-// renders as an honest NotBuiltNote naming the gap — the ⌘K "Do" precedent
-// (apps/web/AGENTS.md: "a missing backend verb renders honestly... never a
-// fake control") — rather than a control this UI cannot correctly wire.
+// RUNG-0 SCOPE NOTE, CORRECTED (recorded, not a silent gap): there is no
+// BROWSABLE LIST of sweep runs anywhere — the queue envelope carries only
+// `open_run` (a boolean) plus two timestamps, `list_sweep_runs` does not
+// exist, and neither `sweep_runs` nor `sweep_run_items` carries a human
+// SELECT policy (owner-only; measured 2026-08-28). But a run id DOES reach
+// the human, honestly, through a channel this panel does not cover: Clara
+// posts a `sweep_receipt` part (`lib/parts/types.ts`'s `SweepReceiptPart`,
+// already live in the 18-member catalog) into the thread carrying its own
+// `run_id` when a sweep finalizes — `get_sweep_run`/`acknowledge_sweep_run`
+// are real, callable doors FOR THAT id. That part renders today as a
+// generic id-only summary card (components/parts/PartRenderer.tsx's
+// `SUMMARY_TYPES` bucket, alongside eight OTHER identifier-only part types
+// nobody has hydrated yet) — upgrading it into a rich card that calls
+// get_sweep_run and offers acknowledge is a standing P3-era gap at the
+// PARTS-CATALOG layer, not named anywhere in this wave's own scope (§5's
+// table), so it is reported here rather than built quietly. This queue-
+// altitude panel renders the ONE thing it genuinely has (the envelope's own
+// state) and names the honest reason the acknowledge control cannot live
+// here.
 
 import { useTranslations } from "next-intl";
 import { StateBanner } from "@/components/common/state";
