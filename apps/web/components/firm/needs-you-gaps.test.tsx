@@ -113,6 +113,24 @@ test("NeedsYouGaps: renders both live lists with real content", async () => {
   });
 });
 
+test("NeedsYouGaps: 裁-22 -- an identifier promotion's RESOLVED citation renders (the region/document id text, not just the count)", async () => {
+  const { impl } = makeFetch();
+  await withMockedEnv(impl, async () => {
+    const h = await render();
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      // PROMOTION's fixture citation carries document_id "d2" -- the resolved shape
+      // _resolve_proposal_basis actually returns, not the pre-裁-22 unresolved placeholder.
+      // This is DISCRIMINATING against the vacuous case: deleting the citations details
+      // block entirely would still pass the sightings/count assertions elsewhere but fail
+      // THIS one, since "d2" only ever renders from the resolved-citation dump.
+      assert.match(h.text(), /d2/);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("NeedsYouGaps: resolve posts p_client from the select, then the row leaves the list on re-read", async () => {
   const { impl, bodies } = makeFetch();
   await withMockedEnv(impl, async () => {

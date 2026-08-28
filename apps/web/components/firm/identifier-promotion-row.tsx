@@ -3,10 +3,13 @@
 // One clara.client_identifier_promotions_visible row (lib/firm/needs-you-gaps.ts).
 // Confirm is a genuine ONE-CLICK act (the door takes no other argument —
 // 0103_f_a7_pi_additive.sql:866-904); decline needs a reason, same
-// mode-toggle shape as FirmQuestionRow/NeedsYouRow. `citations` has no
-// documented per-element shape, so only its count is shown — the same
-// "render generically, invent no semantics a live body has not committed to"
-// discipline as the firm-question candidates block.
+// mode-toggle shape as FirmQuestionRow/NeedsYouRow. 裁-22: `citations` is now
+// DB-RESOLVED (region_id/extraction_id/document_id/kind, UNNUMBERED_proposal_
+// basis_resolved.sql) -- the count still renders (sightings/citationsLabel),
+// and the resolved rows render too, via the SAME generic details/summary/pre
+// dump FirmQuestionRow already uses for its own under-typed jsonb column
+// (`candidates`) -- no new primitive, no per-field guess at a shape the DB
+// has not committed to beyond what it actually returns.
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
@@ -69,6 +72,12 @@ export function IdentifierPromotionRow({
           </>
         ) : null}
       </dl>
+      {citationCount > 0 ? (
+        <details className="text-xs text-muted-foreground">
+          <summary>{t("citationsDetailsHeading", { count: citationCount })}</summary>
+          <pre className="mt-1 overflow-x-auto wrap-anywhere whitespace-pre-wrap">{JSON.stringify(row.citations, null, 2)}</pre>
+        </details>
+      ) : null}
       <p className="text-card-foreground">{row.rationale}</p>
       <div className="flex flex-col gap-2">
         {error ? <ErrorMessage error={error} /> : null}
