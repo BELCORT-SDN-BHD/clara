@@ -1,16 +1,16 @@
 # Mobbin grounding — the port wave's four NEW flows (T2/T7/T8/T11)
 
 *Grounding lane (`claude-sonnet-5`), 2026-08-28, dispatched from the 磨合 frontend train's
-port-wave conductor. Closes §13 (in port-wave-plan-2026-08-28-part2.md)'s four-flow half of the
+port-wave conductor. Closes §13 (in `docs/plan/active/port-wave-plan-2026-08-28-part2.md`)'s four-flow half of the
 Mobbin grounding debt — T2 (opening balances / carry-down), T7 (coding-lane triage), T8
 (counterparty merge) and T11 (in-thread onboarding checklist card). §13's other three
 (signup-to-holding, operator approval queue, invite/RBAC) are P4's and are closed already by
-p4-mobbin-grounding-2026-08-28.md, which this file is a sibling of rather than an extension
-of — the merged file would exceed the harness's 500-line split limit, and the two files
-ground disjoint trains (P4 vs. the port wave) so nothing is lost by keeping them separate.
-Both companion documents live on their own not-yet-merged branches (docs/port-wave-plan,
-docs/p4-mobbin-grounding) — named here in plain text rather than as backtick paths because
-neither is present on this branch's tree yet for the harness-links gate to resolve.*
+`docs/plan/active/p4-mobbin-grounding-2026-08-28.md`, which this file is a sibling of rather
+than an extension of — the merged file would exceed the harness's 500-line split limit, and
+the two files ground disjoint trains (P4 vs. the port wave) so nothing is lost by keeping
+them separate. Both companion documents merged to `main` (#378, #379) before this file
+landed; the references here were re-backticked at that point so the harness-links gate
+resolves them.*
 
 **Same ground rule as the sibling file, restated (`AGENTS.md` constraint 1, per the ClaraBook
 handoff): Mobbin informs flow structure and interaction patterns only.** Clara's tokens,
