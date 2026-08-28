@@ -157,7 +157,9 @@ correction over the agent's memory — professional human control, not a weakeni
 
 **Ruled:** ADD it, riding **P4 DB tranche-2**: a `clara_authenticated` SELECT policy + grant
 on `clara.counterparty_aliases` that copies the `counterparties` table's own human-read
-policy shape verbatim (firm + client scoping, no new predicate). No writer body moves, so
+policy shape verbatim (**measured live: firm-only, `firm_id = clara.jwt_firm()` — the
+"firm + client" phrase in this entry's first draft was descriptive drift; the operative
+instruction, copy the live catalog, governs; trued at the tranche-2 build**). No writer body moves, so
 no D1 window; the PR body names **T8's counterparty-hygiene panel** (alias list + the
 retire-alias dialog, currently unmounted) as the door's frontend home. T8's wiring lands as
 a ride-along after the tranche ceremonies.
@@ -292,3 +294,46 @@ template feature · the `create_account_set_v1` retirement (裁-12, rides any of
 Frontend, P6: 裁-13 target-size gate · 裁-14 mascot · 裁-20 sweep card · the inbox deep-link +
 "ask Clara about this" handoff (裁-17's polish notes). Still a sitting, not a one-word answer:
 **the pricing-amounts sitting** (R8c) before P4's UI tranche.
+
+## 裁-22 · Agent proposal bases become DB-RESOLVED citations — "要，beta 前，两门一起改"
+
+**Context put (大白话, the owner asked twice):** a proposal door (`propose_client_identifier_promotion`,
+`0103:835-858`; `wake_propose_client_onboarding`, F-A7b PR-a) takes a `basis {sightings,
+citations}` from the agent and checks only its SHAPE (non-empty array, positive number) before
+persisting it verbatim into the receipt and the needs-you question — `{"sightings":1,
+"citations":[null]}` is admitted, and the card would show a blank basis. Nothing enters the
+books (a human confirms), so PRD §6 invariant 1 does not bind; but the basis is model-claimed,
+not DB-verified — while journal-entry evidence already IS verified (`document_regions`, the
+model cites an idx, the server resolves it to a row id, `_write_entry_evidence` refuses a
+region that is not the document's — `0054`/`0090`). The gap: the proposal doors are the
+exception to that law. Found by the F-A7b PR-a review (Codex HIGH-1, native-downgraded to an
+estate question with the four grounds on record in that PR).
+**Ruled:** every citation in a proposal basis must resolve to a `document_regions` row of the
+triggering document (firm-congruent, current extraction generation), `sightings` is derived by
+the DB from those rows, an unresolvable citation REFUSES the proposal (typed), and the
+needs-you card renders the resolved regions — **both doors in ONE migration pair (one
+contract, never one door), before beta**, on the pre-beta backend queue. Until it lands, the
+shape floor stands and PR-e's card must say "basis unresolved" on a null/empty element.
+
+### Record-only notes from the same reviews (no ruling needed)
+
+- **Receipt contract looseness (pre-existing, `0126` ×4 + PR-a):** `trigger_kind='wake_task'`
+  with `trigger_id = the CREDENTIAL uuid`, while `0103:270-273` defines trigger_id as the
+  task/turn. Backlog against the receipt contract: an honest `wake_credential` kind, or
+  task-binding via `0138:781`'s resolver.
+- **The wake allowlist is name-bound, not signature-bound (`0002`/`0004`):** a later same-name
+  overload granted to a wake role would inherit a reviewed authorization. Backlog: key the
+  registry on `regprocedure` identity. Safe today (one `pg_proc` row per name; the doors pass
+  the DB-derived kind).
+- **The role-ceiling wall folded into P4 tranche-2 (INFORM, conductor's call):** the P4-2
+  review proved an operator-firm ADMIN can `set_member_role(self,'owner')` and walk the
+  owner-only approval queue (pre-existing since `0005`). Ruled in-tranche: never assign, invite
+  or promote above your own rank; `owner` only by an existing owner; an invite's role is
+  re-checked against its ISSUER's rank at accept (pending owner invites are censused, not
+  deleted); the ceiling lives at the four entrances, never as a core signature change. The
+  replaced writer bodies ride the same D1 window as `create_firm`.
+- **Overnight autonomy (2026-08-29, owner asleep, "做完 till the end"):** the standing mandate
+  continues without new grants — ceremonies under the ceremony run grant, test data under
+  constraint 14, Wave C after F-A7b merges (裁-8), the pre-beta queue as parallel lanes, every
+  code change through the full ladder. Owner-level questions batch to the morning; nothing
+  irreversible outside the grants is taken overnight.

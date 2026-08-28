@@ -10,10 +10,11 @@ file wins or it is stale — and truing it is the first thing you do.
 *(as of 2026-08-28 — **THE 磨合 WINDOW IS OPEN AND SPRINTING: P1-P3 MERGED IN FULL
 (#357-#367) · the night train #368-#384 ALL MERGED** (PR-1c `0138` · rulings ledgers · P4
 design set · verb census · `0139` · needs-you wiring · PR-2a `0140` · Mobbin grounding ·
-the port-wave plan · the resource audit · the ceremony as-run) — **LIVE 135/`0140`** (the
-0139+0140 D1 window RAN 2026-08-28), F-A7b BUILD-AUTHORIZED, **the PORT WAVE IS RUNNING:
-T0 seam + WAVE A COMPLETE — T3/T6/T5/T9 MERGED (#382 #385 #386 #387 #390); Wave B
-(T4/T7/T8/T10) BUILT and in independent review; P4's `0141` in its final pin round**)*
+the port-wave plan · the resource audit · the ceremony as-runs) — **LIVE 136/`0141`** (0139+0140
+windowed 2026-08-28; **P4 tranche-1 `0141` MERGED #393 + CEREMONIED 14:10 UTC**, as-run
+`docs/plan/completed/mohe-0141-apply-asrun.md`; tranche-2 DISPATCHED), F-A7b BUILD-AUTHORIZED,
+**PORT WAVE: T0 + WAVES A AND B COMPLETE — T3/T6/T5/T9 (#382 #385 #386 #387 #390) ·
+T10/T7/T4/T8 (#395 #399 #398 #397); 9/11 trains on main; Wave C waits for F-A7b PR-a (裁-8)**)*
 
 - **THE 磨合 (frontend integration) WINDOW OPENED 2026-08-26/27** — its own session, per
   `docs/plan/active/mohe-session-handoff-2026-08-26.md`; `chatTurn_v14` deployed +
@@ -163,9 +164,8 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 
 Registered but not scheduled. Sources of record in brackets.
 
-**THE DEBT-CLEARING SPRINT IS NEXT (owner mandate, 2026-08-24): everything except full Track B
-clears in the 磨合 window.** New items folded in from the W2/W3 review ladders (2026-08-25) —
-the forward-obligations block and the F-A5b/W4 items below also ride this sprint:
+**THE DEBT-CLEARING SPRINT IS NEXT (owner mandate, 2026-08-24): everything except full Track B clears in the 磨合 window.** W2/W3 ladder items (2026-08-25), the forward-obligations block and the F-A5b/W4 items below ride it:
+- **裁-22 (2026-08-29) — agent proposal bases become DB-RESOLVED citations**, both proposal doors in one migration pair, before beta (`mohe-grill-rulings-2026-08-28.md`); with the receipt-contract `trigger_id` looseness and the name-bound wake allowlist recorded there as backlog.
 - **π-E1's `betaLanded` check is SELF-REFERENTIAL** (blind at n ∈ {0,6}) — gate on the
   `schema_migrations` stem like `wb-0020`'s idiom; covered twice already, not a hole.
 - **N1** — `fa5-pr3-real-seal-drill.mjs` has no CI leg, decision item: weekly sweep or not.
