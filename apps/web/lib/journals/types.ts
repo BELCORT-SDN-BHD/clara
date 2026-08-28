@@ -148,6 +148,17 @@ export type JournalsData = {
  *  that cannot exist. */
 export type JournalsDataWithInterruptions = JournalsData & {
   interruptions: AgentInterruptionRow[];
+  /** T7 (port-wave plan §4: promote_clarify_to_question, "the workbench half
+   *  only") — keyed by TASK id (each pending interruption's OWN `task_id`,
+   *  never the interruption's own id), resolved via
+   *  `clara.agent_tasks_visible` (lib/coding/reads.ts's
+   *  `listAgentTaskClientIds`; agent_interruptions itself carries no
+   *  client_id — this file's own AgentInterruptionRow header). A task absent
+   *  from this map (masked by the viewer's own visibility, per that view's
+   *  header) means interruptions-panel.tsx omits the promote control for
+   *  that row rather than guessing a scope_id the door's own CHECK
+   *  constraint would refuse. */
+  clientIdByTaskId: Record<string, string | null>;
 };
 
 // --- clara.list_review_queue (READ RPC — see api.ts's listReviewQueue header) --

@@ -13,6 +13,7 @@ import { OpenCandidateList } from "./open-candidate-list";
 import { UploadPanel } from "./upload-panel";
 import { DocumentDetail } from "./document-detail";
 import { DoorFeedback } from "./door-feedback";
+import { CodingLanePanel } from "./coding-lane-panel";
 
 /**
  * The client Documents tab (owner ruling Q3) — workbench-first on direct RLS reads
@@ -93,6 +94,14 @@ export function DocumentsWorkbench({ clientId }: { clientId: string }) {
           )}
         </aside>
       </div>
+
+      {/* T7 (port-wave plan §4/§5) — the coding-lane surface. CONDUCTOR
+          RULING (part2.md §12): nests as a section inside this tab rather
+          than a new client-tab array entry — the triaged objects are uncoded
+          FILINGS, which is this tab's own subject matter. Full-width, below
+          the upload/candidates/filed row, so its own three sub-sections have
+          room to breathe rather than competing with the narrow left column. */}
+      <CodingLanePanel clientId={clientId} />
     </PageShell>
   );
 }

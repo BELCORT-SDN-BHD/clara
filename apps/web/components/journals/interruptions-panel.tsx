@@ -17,6 +17,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { EmptyState, StateBanner } from "@/components/common/state";
 import { FormattedDate } from "./formatted-date";
+import { CodingDoorDialog } from "@/components/documents/CodingDoorDialog";
 import type { AgentInterruptionRow } from "@/lib/journals/types";
 import type { PartClr } from "@/lib/parts/hooks";
 
@@ -32,6 +33,8 @@ export function InterruptionsPanel({
   clr,
   actingId,
   onAnswer,
+  clientIdByTaskId,
+  onPromote,
 }: {
   interruptions: AgentInterruptionRow[];
   busy: boolean;
@@ -39,6 +42,15 @@ export function InterruptionsPanel({
   clr: PartClr;
   actingId: string | null;
   onAnswer: (interruptionId: string, answer: Record<string, unknown>, onOk: () => void) => void;
+  /** T7 (port-wave plan §4) — each row's own task's client_id, keyed by
+   *  task_id (lib/journals/types.ts's own header). */
+  clientIdByTaskId: Record<string, string | null>;
+  /** `undefined` disables promote entirely (a caller that has not wired it
+   *  yet) — a real, present callback is required to render the control at
+   *  all, never a silently-inert button. Returns the SAME act()-derived
+   *  Promise the dialog awaits before closing (CodingDoorDialog's own
+   *  contract) — never a fire-and-forget callback. */
+  onPromote?: (interruptionId: string, scopeId: string) => Promise<void>;
 }) {
   const t = useTranslations("DraftsDocumentGovernance.interruptions");
 
@@ -52,6 +64,7 @@ export function InterruptionsPanel({
       {interruptions.map((row) => {
         const isActing = actingId === row.id;
         const text = questionText(row.question);
+        const scopeClientId = clientIdByTaskId[row.task_id] ?? null;
         return (
           <Card key={row.id} className="enter-content">
             <CardContent className="flex flex-col gap-2">
@@ -70,6 +83,12 @@ export function InterruptionsPanel({
                 <StateBanner tone="error" code={clr ? clr.code : undefined}>{err}</StateBanner>
               )}
               <AnswerRow busy={busy} onAnswer={(answer, onOk) => onAnswer(row.id, answer, onOk)} />
+              {/* T7 (port-wave plan §4: promote_clarify_to_question) —
+                  offered ONLY once this row's own client_id genuinely
+                  resolved; never a guessed scope_id. */}
+              {onPromote && scopeClientId ? (
+                <PromoteRow busy={busy} onConfirm={() => onPromote(row.id, scopeClientId)} />
+              ) : null}
             </CardContent>
           </Card>
         );
@@ -106,6 +125,26 @@ function AnswerRow({ busy, onAnswer }: { busy: boolean; onAnswer: (answer: Recor
       >
         {t("answerSubmit")}
       </Button>
+    </div>
+  );
+}
+
+/** T7 — the promote_clarify_to_question trigger, one door dialog, no fields
+ *  of its own (the interruption's own text and the resolved client id are
+ *  everything the door needs). */
+function PromoteRow({ busy, onConfirm }: { busy: boolean; onConfirm: () => Promise<void> }) {
+  const t = useTranslations("CodingQuestionsSignals.promoteClarify");
+  return (
+    <div className="flex justify-end">
+      <CodingDoorDialog
+        triggerLabel={t("trigger")}
+        triggerVariant="secondary"
+        title={t("dialogTitle")}
+        description={t("dialogDescription")}
+        confirmLabel={t("confirm")}
+        busy={busy}
+        onConfirm={onConfirm}
+      />
     </div>
   );
 }
