@@ -16,8 +16,8 @@ import {
   loadCounterpartyOpenItems,
   loadOpenItemAllocationsForItems,
   unallocateCandidateGroups,
-  type AgingDomain,
 } from "@/lib/registers/counterparty";
+import type { AgingDomain } from "@/lib/registers/aging";
 import { applyOpenItems, unallocateGroup } from "@/lib/registers/counterparty-doors";
 import { fmtCents } from "@/lib/registers/money";
 import { SectionHeader } from "@/components/common/section-header";
