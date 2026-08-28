@@ -436,6 +436,15 @@ ships as a bare form dump, and nothing composes two doors into one control.
 | T10 firm admin | `compliance_watch` ack/snooze/resolve inline | compliance register · **vendor bindings panel** | ack/snooze/resolve watch · propose/sign/revoke binding · share chat session | — | no |
 | T11 onboarding | onboarding plan item | **in-thread checklist card** (parts, R7) | begin/cancel/commit onboarding · bootstrap plan · resolve plan item | — | **yes** |
 
+**AS-CONDUCTED (2026-08-28, T9).** The row's `seeding_proposal` needs-you presentation is
+SUPERSEDED: the live `clara.list_review_queue` body emits exactly eight `row_kind` values,
+none of them seeding — T9's rung-0 census confirmed this at the live catalog. Shipped instead
+as `SeedingBatchesPanel` (a direct RLS read of `seeding_batches`/`seeding_proposals`, with
+tick/decline/cancel/complete as door dialogs on the real rows) — every doorway is preserved,
+only the presentation moved. `create_account_set_v1` was censused and reported BY NAME as a
+retirement candidate (OQ-5) — owner ruling pending, no UI built for it. The "accounts"
+registers-tab extension point named for account-set authoring was therefore left untouched.
+
 **On `merge_counterparties` specifically.** A merge is destructive and irreversible from the
 user's point of view. It gets the heaviest treatment in the wave: a preview panel showing
 exactly what both sides carry, read from the DB, before the dialog opens — and the dialog's
