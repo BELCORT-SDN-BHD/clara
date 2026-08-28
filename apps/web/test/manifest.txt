@@ -35,6 +35,9 @@ components/clara/onboarding-checklist.test.tsx
 components/close/close-a11y.test.tsx
 components/close/close-components.test.tsx
 components/close/close-keyboard.test.tsx
+components/close/close-t1-hold-receipts.test.tsx
+components/close/close-t1-opener.test.tsx
+components/close/close-t1-proposal-readiness.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/documents-a11y.test.tsx
