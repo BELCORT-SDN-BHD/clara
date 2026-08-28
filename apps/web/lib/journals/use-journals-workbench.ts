@@ -59,6 +59,8 @@ import {
   listPendingInterruptions,
   withdrawDraft,
 } from "./governance-doors";
+import { promoteClarifyToQuestion } from "@/lib/coding/doors";
+import { listAgentTaskClientIds } from "@/lib/coding/reads";
 import type { EntryLineInput, JournalsDataWithInterruptions } from "./types";
 
 /** T6: the P3 combined loader (`loadJournalsWorkbench`) predates the firm-wide
@@ -75,7 +77,12 @@ async function loadJournalsWorkbenchWithInterruptions(
     loadJournalsWorkbench(session, clientId),
     listPendingInterruptions({ session }),
   ]);
-  return { ...data, interruptions };
+  // T7: resolve each pending interruption's OWN task's client_id (types.ts's
+  // own JournalsDataWithInterruptions header) — a SECOND honest read, never a
+  // guess, since agent_interruptions itself carries no client_id.
+  const taskRows = await listAgentTaskClientIds(interruptions.map((i) => i.task_id), { session });
+  const clientIdByTaskId = Object.fromEntries(taskRows.map((r) => [r.id, r.client_id]));
+  return { ...data, interruptions, clientIdByTaskId };
 }
 
 /** The sentinel `actingId` for the compose ceremony — not a real entry id
@@ -168,5 +175,17 @@ export function useJournalsWorkbench(clientId: string, auth: SessionTokenAccesso
     [auth, state],
   );
 
-  return { ...state, readErrorKind, actingId, approve, revise, reverse, compose, approveRoutine, withdraw, answerClarify };
+  // T7 (port-wave plan §4: promote_clarify_to_question, "the workbench half
+  // only, no wire change") — the SAME act()-and-reload cycle as every other
+  // door here. `scopeId` is the caller's own already-resolved client_id
+  // (interruptionClientIds above) — this hook does not derive it itself.
+  const promoteClarify = useCallback(
+    (interruptionId: string, scopeId: string, onOk?: () => void) => {
+      setActingId(interruptionId);
+      return state.act(() => promoteClarifyToQuestion(interruptionId, "client", scopeId, { session: auth }).then(() => undefined), onOk);
+    },
+    [auth, state],
+  );
+
+  return { ...state, readErrorKind, actingId, approve, revise, reverse, compose, approveRoutine, withdraw, answerClarify, promoteClarify };
 }

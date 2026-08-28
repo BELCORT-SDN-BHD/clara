@@ -26,6 +26,9 @@ import type { ReviewQueueRow, ReviewQueueRowKind } from "@/lib/firm/needs-you";
 import { OpenQuestionAffordance } from "./open-question-affordance";
 import { StaffAdvanceIncompleteAffordance } from "./staff-advance-incomplete-affordance";
 import { FixedAssetIncompleteAffordance } from "./fixed-asset-incomplete-affordance";
+import { UncodedFilingAffordance } from "./uncoded-filing-affordance";
+import { CodingTaskAffordance } from "./coding-task-affordance";
+import { LintFindingAffordance } from "./lint-finding-affordance";
 
 export type NeedsYouAffordanceProps = {
   row: ReviewQueueRow;
@@ -73,6 +76,16 @@ export const NEEDS_YOU_AFFORDANCES: Partial<Record<ReviewQueueRowKind, NeedsYouA
     // T3 (port wave, port-wave-plan-2026-08-28.md §5): the "inline complete"
     // affordance for a fixed asset born with incomplete particulars.
     fixed_asset_incomplete: FixedAssetIncompleteAffordance,
+    // T7 (port-wave plan §4/§5, rung-0 census-grounded): a filing with no
+    // draft/approved entry yet — "open coding task" (the raising half,
+    // Mobbin T7 takeaway 3) or "ask a question" scoped to its document.
+    uncoded_filing: UncodedFilingAffordance,
+    // T7: an ALREADY-open coding task awaiting a human's complete/dismiss
+    // decision (distinct from uncoded_filing above — see coding-task-
+    // affordance.tsx's own header).
+    coding_task: CodingTaskAffordance,
+    // T7: an open lint finding awaiting resolution.
+    lint_finding: LintFindingAffordance,
   } satisfies Partial<Record<ReviewQueueRowKind, NeedsYouAffordance>>,
 );
 

@@ -193,7 +193,7 @@ const INTERRUPTION: AgentInterruptionRow = {
 
 test("ANSWER journey: the clarification's answer field and submit control are keyboard-reachable with focus visible", async () => {
   const h = await renderComponent(
-    App(createElement(InterruptionsPanel, { interruptions: [INTERRUPTION], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {} })),
+    App(createElement(InterruptionsPanel, { interruptions: [INTERRUPTION], busy: false, err: null, clr: null, actingId: null, onAnswer: () => {}, clientIdByTaskId: {} })),
   );
   try {
     for (let i = 0; i < 2; i++) await h.settle();

@@ -64,6 +64,9 @@ lib/bank/recon-reads.test.ts
 lib/bank/reload-on-change.test.ts
 lib/bank/table-reads.test.ts
 lib/business-date.test.ts
+lib/coding/doors.test.ts
+lib/coding/loaders.test.ts
+lib/coding/reads.test.ts
 lib/close/api.test.ts
 lib/documents/bytes.test.ts
 lib/documents/copy.test.ts
