@@ -266,18 +266,31 @@ export async function listWikiPages(clientId: string, opts: Opts = {}): Promise<
  *  refuses "the month has not finished" (CLR10 period_not_complete) rather
  *  than the UI pre-computing that answer.
  *
- *  RULING F9 (independent review, T9 fix round): `opKey` is CALLER-SUPPLIED,
- *  never minted in here — a departure from register/supersede's own
- *  crypto.randomUUID()-per-call shape above, and a THIRD op_key discipline
- *  alongside M5's per-artifact-stable scheme. The caller (SnapshotRegistryPanel's
- *  MintDialog) mints ONE key when the dialog OPENS and reuses it for every
- *  confirm click while it stays open, via DoorDialog's `onOpenChange`: a
- *  lost-response retry WITHIN one open dialog (a double-click, a network
- *  timeout after the RPC actually landed) replays the SAME op through
- *  `_reserve_op`'s own idempotency and returns the ORIGINAL receipt — closing
- *  and reopening the dialog is the deliberate signal for a genuine re-mint
- *  (re-minting an already-snapshotted month is itself legitimate; see this
- *  module's header), so THAT gets a fresh key. */
+ *  RULING F9 (independent review, T9 fix round; TRUED at re-verify): `opKey`
+ *  is CALLER-SUPPLIED, never minted in here — a departure from register/
+ *  supersede's own crypto.randomUUID()-per-call shape above, and a THIRD
+ *  op_key discipline alongside M5's per-artifact-stable scheme. The caller
+ *  (SnapshotRegistryPanel's MintDialog) mints ONE key when the dialog OPENS
+ *  and would reuse it for every confirm click while it stayed open, via
+ *  DoorDialog's `onOpenChange`.
+ *
+ *  SHAPE-ONLY TODAY, not a live replay path — the reviewer proved the
+ *  scenario this was written to protect is currently UNREACHABLE: DoorDialog
+ *  closes the dialog on EVERY resolved confirm (success or refusal —
+ *  useHydratedPart's act() never rethrows), so there is never a SECOND
+ *  confirm click to replay through while the SAME key is still in scope.
+ *  `runOnce`'s single-fire guard independently drops a concurrent double-
+ *  click before it ever reaches this function, and a genuine network-level
+ *  retry (a 504 after the RPC actually landed) can only happen through a
+ *  FRESH dialog open — a NEW key, not a replay of the old one, since the
+ *  dialog already closed. Kept anyway: the caller-owned shape becomes LIVE
+ *  the moment any dialog in this codebase is changed to stay open across a
+ *  failed confirm (a real, plausible future shape — see the F2/F4 notes in
+ *  RenderJobQueuePanel.tsx for a door that already wants exactly that), and
+ *  retrofitting op_key ownership onto every call site at that point would be
+ *  a worse time to do it than now. This file does NOT change DoorDialog's
+ *  close-on-refusal behaviour to make the scenario live — that mechanism is
+ *  house-wide, not this train's to alter. */
 export async function mintMonthSnapshot(
   args: { clientId: string; monthStart: string; opKey: string },
   opts: Opts = {},

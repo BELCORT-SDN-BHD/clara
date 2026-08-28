@@ -328,7 +328,14 @@ test("mintMonthSnapshot posts the exact mint_month_snapshot body shape, forwardi
   assert.deepEqual(calls[0]!.body, { p_client: "c1", p_month_start: "2026-06-01", p_op_key: "caller-supplied-key-1" });
 });
 
-test("mintMonthSnapshot: two calls with the SAME caller-supplied op_key post the SAME p_op_key — the F9 replay shape", async () => {
+// F9 TRUED at re-verify: this pins the WIRE SHAPE only — that
+// mintMonthSnapshot forwards WHATEVER op_key the caller passes, verbatim,
+// never generating its own. It does NOT prove a live replay scenario (no
+// caller in this codebase currently makes two calls with the same key in
+// practice; DoorDialog closes on every confirm attempt, so there is no
+// second click within one open to replay against). See lib/reports/
+// api.ts's mintMonthSnapshot header for the full reasoning.
+test("mintMonthSnapshot forwards the SAME caller-supplied op_key verbatim across two calls — the wire-SHAPE pin, not a live replay proof (F9)", async () => {
   const { impl, calls } = captureFetch({ snapshot_id: "s1" });
   await withMockedFetch(impl, async () => {
     await mintMonthSnapshot({ clientId: "c1", monthStart: "2026-06-01", opKey: "same-key" }, { session: fakeSession() });

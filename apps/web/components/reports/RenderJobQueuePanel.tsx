@@ -116,18 +116,29 @@ function RequeueDialog({ job, busy, act }: { job: RenderJobRow; busy: boolean; a
 
   const submit = () =>
     act(async () => {
+      // Gap B (independent review, re-verify round): clear the STALE flag at
+      // the top of every attempt, not only on success. Without this, a
+      // requeue that fails for an UNRELATED reason (a role refusal, a
+      // network error — anything but CLR43 drift) left the checkbox from a
+      // PRIOR drift finding standing, forcing consent to a condition this
+      // attempt never even re-tested. Clearing first and only re-setting it
+      // below when THIS attempt's own refusal names drift keeps the flag
+      // honest: a drift refusal immediately re-arms it (so the next open
+      // still shows consent for the SAME still-live obstacle), while any
+      // other outcome — success, or a changed/different obstacle — retires
+      // it.
+      setDrift(false);
       try {
         await requeueRenderJob({ jobId: job.id, reason, acceptDrift });
-        setDrift(false);
       } catch (e) {
         // The drift refusal is read here, once. DoorDialog's own confirm
         // button closes on ANY resolved onConfirm — including a caught
         // failure, since useHydratedPart's act() never rethrows — so this
         // dialog cannot stay open to offer a same-session second confirm;
         // the refusal renders through the panel's own persistent banner
-        // (never inside the dialog, per house law), and `drift` (kept, not
-        // reset — see onOpenChange below) is what makes the NEXT open show
-        // the consent checkbox instead of a blank retry.
+        // (never inside the dialog, per house law), and `drift` (re-armed
+        // here when it applies, cleared otherwise) is what makes the NEXT
+        // open show the consent checkbox instead of a blank retry.
         if (isDoorRefusal(e) && e.code === "CLR43" && e.reason === "requeue_manifest_drifted") {
           setDrift(true);
         }
@@ -146,14 +157,17 @@ function RequeueDialog({ job, busy, act }: { job: RenderJobRow; busy: boolean; a
       onConfirm={submit}
       // F4 (independent review, corrected — self-caught while wiring the
       // fix): `reason` and `acceptDrift` are a FRESH deliberate act every
-      // open, so they reset here. `drift` deliberately does NOT reset: this
-      // door's own DoorDialog closes after EVERY confirm attempt, success or
-      // refusal (act() never rethrows — see submit's own note below), so a
-      // drift finding can only ever be SHOWN on the dialog's NEXT open, after
-      // the human has read the refusal from the panel's persistent banner
-      // and reopens deliberately to accept it. Resetting `drift` here would
-      // make that reopen show nothing, trapping every drifted job in a
-      // refuse-close-reopen loop with no way to ever complete a requeue.
+      // open, so they reset here. `drift` deliberately does NOT reset ON
+      // OPEN: this door's own DoorDialog closes after EVERY confirm attempt,
+      // success or refusal (act() never rethrows — see submit's own note
+      // below), so a drift finding can only ever be SHOWN on the dialog's
+      // NEXT open, after the human has read the refusal from the panel's
+      // persistent banner and reopens deliberately to accept it. Resetting
+      // `drift` HERE (on open) would make that reopen show nothing, trapping
+      // every drifted job in a refuse-close-reopen loop with no way to ever
+      // complete a requeue. It IS cleared PER ATTEMPT instead — see Gap B's
+      // note at the top of `submit`, below — which is a different axis
+      // entirely (an attempt's own fresh outcome, not the act of opening).
       onOpenChange={(isOpen) => {
         if (isOpen) {
           setReason("");

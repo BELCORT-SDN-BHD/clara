@@ -107,7 +107,7 @@ function App(child: ReturnType<typeof createElement>) {
   });
 }
 
-test("T9 (mint-snapshot door): the trigger is keyboard-reachable, opening it reaches the month field and Cancel/Confirm, and closing returns focus reachability to the trigger", async () => {
+test("T9 (mint-snapshot door): the trigger is keyboard-reachable, opening it reaches the month field, Confirm and a keyboard-reachable Cancel (closing itself is NOT proven here — see the ride-along note in-file)", async () => {
   const impl = (async (u: RequestInfo | URL) => {
     if (String(u).includes("/period_snapshots")) return jsonResponse([]);
     throw new Error(`unexpected fetch: ${String(u)}`);
@@ -149,15 +149,26 @@ test("T9 (mint-snapshot door): the trigger is keyboard-reachable, opening it rea
         "Confirm must NOT be disabled with a month already filled in — a mutation to confirmDisabled={true} here must go RED",
       );
 
+      // Re-verify round (T6's reviewer, probe-proven, ride-along fix): Cancel
+      // is `DialogClose` (base-ui's own primitive) — clicking it through
+      // plain `h.fireEvent` is a NO-OP for portaled content; the old
+      // assertion below ("trigger reachable after close") measured nothing,
+      // because the trigger lives in `h.container` (never portaled) and is
+      // ALWAYS reachable there regardless of whether the dialog actually
+      // closed. journals-governance-keyboard.test.tsx:120-133 is the model
+      // this mirrors: true the claim down to what this file can actually
+      // prove — the control renders and is keyboard-reachable — and leave
+      // proving the close itself to a later, deliberate pass (this round's
+      // instruction is explicit: hookHarness.ts's shared installDom() stays
+      // untouched by this ride-along; the requeue test elsewhere in this
+      // file proves REAL closes via the direct-invoke `clickConfirm` helper,
+      // which is a separate, already-landed fix this round does not extend
+      // here).
       const cancelButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Cancel"));
       assert.ok(cancelButton, "the Cancel control must render as a real button");
-      await h.fireEvent(cancelButton as never, "click");
-      for (let i = 0; i < 6; i++) await h.settle();
-
-      const triggerAfterClose = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Mint snapshot"));
       assert.ok(
-        triggerAfterClose && focusableElements(h.container as never).includes(triggerAfterClose as never),
-        "the trigger must be reachable again after the dialog closes",
+        focusableElements(body as never).includes(cancelButton as never),
+        "the Cancel control must be keyboard-reachable",
       );
     } finally {
       await h.unmount();
