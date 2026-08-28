@@ -857,7 +857,8 @@
       "d6190": "61–90",
       "d91plus": "91+",
       "total": "Total",
-      "totalsRow": "Client total"
+      "totalsRow": "Client total",
+      "viewStatement": "View statement"
     },
     "fixedAssets": {
       "empty": "No fixed assets recorded for this client.",
@@ -1320,7 +1321,125 @@
     }
   },
   "CodingQuestionsSignals": {},
-  "ArApCounterparty": {},
+  "ArApCounterparty": {
+    "heading": "Counterparty hygiene",
+    "loading": "Loading counterparties…",
+    "empty": "No counterparties recorded yet for this client.",
+    "kindVendorPlural": "Vendors",
+    "kindCustomerPlural": "Customers",
+    "registration": "Registration",
+    "tin": "TIN",
+    "terms": "Terms (days)",
+    "statusLive": "Live",
+    "statusRetired": "Retired",
+    "statusMerged": "Merged into {name}",
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
+    "create": {
+      "trigger": "Create counterparty",
+      "title": "Create a counterparty",
+      "description": "Mints a new counterparty for this client. If one already exists at this name or registration number, the door returns the existing party rather than creating a duplicate.",
+      "confirm": "Create",
+      "kindLabel": "Kind",
+      "kindVendor": "Vendor",
+      "kindCustomer": "Customer",
+      "nameLabel": "Name",
+      "registrationLabel": "Registration number",
+      "tinLabel": "TIN"
+    },
+    "setTerms": {
+      "trigger": "Set terms",
+      "title": "Set payment terms — {name}",
+      "confirm": "Save",
+      "daysLabel": "Terms (days)",
+      "daysHint": "1–365 days."
+    },
+    "addAlias": {
+      "trigger": "Add alias",
+      "title": "Add an alias — {name}",
+      "confirm": "Add",
+      "aliasLabel": "Alias",
+      "originLabel": "Origin",
+      "originTradeName": "Trade name",
+      "originFormerName": "Former name",
+      "originHuman": "Recorded by a human"
+    },
+    "retireAlias": {
+      "trigger": "Retire",
+      "title": "Retire alias \"{alias}\"",
+      "description": "The alias stops matching new activity. It stays in the record as history.",
+      "confirm": "Retire alias"
+    },
+    "rename": {
+      "trigger": "Rename",
+      "title": "Rename — {name}",
+      "confirm": "Rename",
+      "nameLabel": "New name"
+    },
+    "merge": {
+      "trigger": "Merge…",
+      "title": "Merge — {name}",
+      "consequence": "Merging is destructive and irreversible. Every open item, statement history and coding rule on the merged party moves to the survivor, and the merged party is retired for good — there is no un-merge door.",
+      "otherLabel": "Merge with",
+      "otherPlaceholder": "Select a counterparty",
+      "roleLabel": "Which party survives?",
+      "roleThisSurvives": "{name} survives — the other party merges into it",
+      "roleThisMerges": "{name} merges into the other party",
+      "reasonLabel": "Reason",
+      "previewButton": "Preview merge",
+      "previewLoading": "Reading both counterparties' current state…",
+      "back": "Back",
+      "cancel": "Cancel",
+      "confirm": "Merge",
+      "working": "Merging…"
+    },
+    "mergePreview": {
+      "title": "What each side carries",
+      "consequence": "Read directly from the database — nothing here is computed by this screen.",
+      "survivor": "Survivor",
+      "merged": "Merging in",
+      "registration": "Registration",
+      "tin": "TIN",
+      "terms": "Terms (days)",
+      "outstanding": "Outstanding",
+      "openItems": "Open items"
+    },
+    "statement": {
+      "heading": "Statement — {name}",
+      "loading": "Loading the statement…",
+      "empty": "No movement in this counterparty's statement.",
+      "date": "Date",
+      "type": "Type",
+      "label": "Label",
+      "delta": "Amount",
+      "running": "Running balance",
+      "openingLabel": "Opening balance",
+      "closingLabel": "Closing balance",
+      "applicationsHeading": "Applications",
+      "noApplications": "No item applications recorded for this counterparty.",
+      "applicationGroupLabel": "{count} row(s)"
+    },
+    "applyOpenItems": {
+      "trigger": "Apply open items",
+      "title": "Apply one open item to another",
+      "description": "Applies a credit (e.g. a credit note) against an outstanding claim (e.g. an invoice), with no movement of cash and no GL entry. Both items must already belong to this counterparty.",
+      "confirm": "Apply",
+      "sourceLabel": "Source (credit)",
+      "targetLabel": "Target (claim)",
+      "selectItem": "Select an item",
+      "amountLabel": "Amount",
+      "reasonLabel": "Reason"
+    },
+    "unallocateGroup": {
+      "trigger": "Unallocate",
+      "title": "Unallocate this application",
+      "description": "Reverses the WHOLE application as one act — never a single row inside it.",
+      "confirm": "Unallocate",
+      "reasonLabel": "Reason"
+    }
+  },
   "ReportsSnapshotsSeeding": {},
   "FirmAdminCompliance": {},
   "ClientOnboarding": {}
