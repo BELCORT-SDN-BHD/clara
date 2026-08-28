@@ -40,6 +40,11 @@ ruling of the night). The full records are in the named files; the rulings ledge
 3. **Raw model `sightings` numbers are DROPPED, not kept as an annotation** (裁-22): one of the
    two was reachable by two human read views, showing "1" and "3" side by side with nothing
    marking which is authoritative. PRD §6 invariant 1's spirit; your ruling's letter.
+3b. **裁-11's alias read ships as a masked VIEW (`counterparty_aliases_visible`), not a direct
+   table grant.** The full estate suite caught that `counterparty_aliases` sits in the Wave-A
+   "fn-fronted only" table set (a standing invariant test); the sibling you told us to copy
+   (`counterparties`) does not. Same purpose (humans list aliases; `retire_counterparty_alias`
+   gets an honest id), same idiom as the tranche's other read, the invariant kept.
 
 ## Decisions that are YOURS (each: 大白话 · rec · cost · the default that stands)
 
