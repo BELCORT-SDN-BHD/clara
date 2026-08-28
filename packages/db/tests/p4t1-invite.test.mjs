@@ -3,7 +3,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CLR, AGENT_USER_ID, assertRaises, opk, rootQuery, humanQuery, insertUser, createFirm, seedAdmission } from "./rig-fixtures.mjs";
+import { CLR, AGENT_USER_ID, assertRaises, opk, rootQuery, humanQuery, insertUser, createFirm, seedAdmission, getPool } from "./rig-fixtures.mjs";
 import { inviteMember, acceptInvite, revokeInvite, expireInvite, rawInvite, freshPersona } from "./p4t1-fixtures.mjs";
 
 /** A firm with an owner + one admin member, ready to issue invites. */
@@ -231,64 +231,131 @@ test("p4t1.accept: [F4] a stale op_key + the same token cannot be replayed by an
   assert.equal(membershipCount.rows[0].n, 5, "still exactly the scene's owner+admin+bookkeeper+viewer plus the legitimate joiner -- no impostor membership");
 });
 
-test("p4t1.accept: [N2-M2] the tail census's F4 pin is comment-STRIPPED, not comment-naive -- a genuinely mis-ordered body carrying a red-herring comment is still caught, and a genuinely correct body carrying an early mention of the dedupe call does not false-alarm", async () => {
-  // The reviewer's own mutant on the round-2 pin: a raw position()-on-prosrc match is
-  // comment-maskable both ways. This cell reproduces the MIGRATION'S OWN comment-stripping
-  // regex (regexp_replace(prosrc, '--[^\n]*', '', 'g')) against two real, owner-created decoy
-  // functions and proves the stripped check gets BOTH directions right where the old raw-text
-  // check would not have.
-  const DECOY_BAD = "_n2m2_decoy_masked_regression";
-  const DECOY_GOOD = "_n2m2_decoy_false_alarm";
+// ---------------------------------------------------------------------------
+// [N2 pin regression suite] -- the reviewer's own mutant panel on the round-2 comment-strip
+// fix found the fix was still a PARTIAL instrument: it matches TEXT, not SYNTAX, and "absent"
+// read as "earliest". Three residual holes, one family: (M5) the wall's PRESENCE was checked
+// against RAW prosrc, so a body whose wall exists ONLY in a comment -- no real wall in code at
+// all -- read as present; (M6) a `/* block comment */` naming the wall was never stripped;
+// (M9) a `--` inside a STRING LITERAL ahead of the wall on the same line erases the wall from
+// the line-stripped code, since the strip is syntax-blind and cannot tell a comment marker from
+// one sitting inside quotes.
+//
+// THIS SUITE pushes real decoy `accept_invite` bodies through POSTGRES's OWN regexp_replace,
+// via the migration's EXACT pin SQL copied verbatim (never a JS reimplementation -- review law
+// 3, "spelling is not identity": a JS copy validates a copy, not the deployed pin) -- for FIVE
+// shapes (M2/M3 as standing regression controls the round-2 fix already got right; M5/M6/M9 as
+// the new holes round-3 closes), each proven in BOTH directions: the OLD (round-2, single-
+// line-strip) pin's actual outcome, and the NEW (round-3, double-strip + presence-before-order)
+// pin's actual outcome. Every mutation runs inside a rolled-back transaction; the real
+// clara.accept_invite is never touched.
+// ---------------------------------------------------------------------------
+
+// PIN_F4_OLD: the F4 pin exactly as it shipped at 2b8c1a7d (round 2) -- raw-prosrc presence,
+// then a SINGLE line-comment strip before the ordering check.
+const PIN_F4_OLD = `do $$
+declare v_bad text; v_code text;
+begin
+  select p.prosrc into v_bad from pg_proc p where p.oid = 'clara.accept_invite(text,text,text)'::regprocedure;
+  if position('does not match this invite' in v_bad) = 0 then
+    raise exception 'accept_invite is missing its JWT-email wall' using errcode = 'CLR10';
+  end if;
+  v_code := regexp_replace(v_bad, '--[^\\n]*', '', 'g');
+  if position('does not match this invite' in v_code) >= position('_reserve_op' in v_code) then
+    raise exception 'F4 has regressed' using errcode = 'CLR10';
+  end if;
+end $$;`;
+
+// PIN_F4_NEW: the F4 pin exactly as it ships in 0141 §K (5b) at this commit -- block comments
+// AND line comments stripped, presence checked on the STRIPPED code (both markers), THEN the
+// ordering check -- also on the stripped code.
+const PIN_F4_NEW = `do $$
+declare v_bad text; v_code text;
+begin
+  select p.prosrc into v_bad from pg_proc p where p.oid = 'clara.accept_invite(text,text,text)'::regprocedure;
+  v_code := regexp_replace(regexp_replace(v_bad, '/\\*.*?\\*/', '', 'gs'), '--[^\\n]*', '', 'g');
+  if position('does not match this invite' in v_code) = 0 then
+    raise exception 'accept_invite has no JWT-email wall in CODE' using errcode = 'CLR10';
+  end if;
+  if position('_reserve_op' in v_code) = 0 then
+    raise exception 'accept_invite no longer calls _reserve_op in CODE' using errcode = 'CLR10';
+  end if;
+  if position('does not match this invite' in v_code) >= position('_reserve_op' in v_code) then
+    raise exception 'F4 has regressed' using errcode = 'CLR10';
+  end if;
+end $$;`;
+
+/** Runs `ddl` (a CREATE OR REPLACE on clara.accept_invite) then `pin` inside one transaction
+ *  that is ALWAYS rolled back -- the real accept_invite is never mutated. Returns the pin's
+ *  raised errcode, or null if the pin stayed silent. */
+async function underPin(ddl, pin) {
+  const c = await getPool().connect();
   try {
-    // BAD: the REAL code order is dedupe-THEN-wall (the F4 regression shape) -- but an early
-    // comment names the wall text before the real dedupe call, exactly what would let a
-    // comment-naive pin read this as wall-before-dedupe and PASS a genuine regression.
-    await rootQuery(`
-      create function clara.${DECOY_BAD}() returns void language plpgsql as $body$
-      begin
-        -- does not match this invite -- an early, misleading comment naming the wall
-        perform pg_sleep(0);                          -- stands in for the real dedupe call
-        raise exception 'does not match this invite';  -- the REAL wall raise, AFTER dedupe
-      end $body$;
-    `);
-    // GOOD: the REAL code order is wall-THEN-dedupe (correct, matching F4) -- but an early
-    // comment names the dedupe stand-in before the real wall raise, exactly what would let a
-    // comment-naive pin read this as dedupe-before-wall and FALSE-ALARM a correct body.
-    await rootQuery(`
-      create function clara.${DECOY_GOOD}() returns void language plpgsql as $body$
-      begin
-        -- pg_sleep is mentioned here, in a comment, well before the real wall raise below
-        if true then raise exception 'does not match this invite'; end if;
-        perform pg_sleep(0);                          -- never reached; stands in for the real dedupe call
-      end $body$;
-    `);
-
-    const [bad, good] = await Promise.all([
-      rootQuery("select prosrc from pg_proc where oid = $1::regprocedure", [`clara.${DECOY_BAD}()`]),
-      rootQuery("select prosrc from pg_proc where oid = $1::regprocedure", [`clara.${DECOY_GOOD}()`]),
-    ]);
-    const badSrc = bad.rows[0].prosrc;
-    const goodSrc = good.rows[0].prosrc;
-    const stripComments = (s) => s.replace(/--[^\n]*/g, "");
-    // Real code marker for "the dedupe call ran" is `pg_sleep` here (standing in for
-    // `_reserve_op`, since these decoys must not actually reach a real op_receipts row).
-    const posWallRaw = (s) => s.indexOf("does not match this invite");
-    const posDedupeRaw = (s) => s.indexOf("pg_sleep");
-
-    // (a) The OLD, comment-naive check would have gotten BOTH of these wrong.
-    assert.ok(posWallRaw(badSrc) < posDedupeRaw(badSrc), "old check: BAD decoy reads as wall-before-dedupe (WRONG -- the real order is dedupe-before-wall)");
-    assert.ok(posWallRaw(goodSrc) >= posDedupeRaw(goodSrc), "old check: GOOD decoy reads as dedupe-before-wall (WRONG -- the real order is wall-before-dedupe, dedupe never runs)");
-
-    // (b) The NEW, comment-stripped check (the migration's own regexp_replace + position, 0141
-    //     §K's F4 pin) gets both right.
-    const badCode = stripComments(badSrc);
-    const goodCode = stripComments(goodSrc);
-    assert.ok(posWallRaw(badCode) >= posDedupeRaw(badCode), "stripped check: BAD decoy correctly reads as dedupe-before-wall (a real regression) once the misleading comment is gone");
-    assert.ok(posWallRaw(goodCode) < posDedupeRaw(goodCode), "stripped check: GOOD decoy correctly reads as wall-before-dedupe once the misleading comment is gone");
+    await c.query("begin");
+    await c.query("set local role clara_fn_owner");
+    await c.query(ddl);
+    await c.query("reset role");
+    try {
+      await c.query(pin);
+      return null;
+    } catch (e) {
+      return e.code ?? "RAISED";
+    }
   } finally {
-    await rootQuery(`drop function if exists clara.${DECOY_BAD}()`);
-    await rootQuery(`drop function if exists clara.${DECOY_GOOD}()`);
+    await c.query("rollback").catch(() => {});
+    await c.query("reset role").catch(() => {});
+    c.release();
   }
+}
+
+const decoyAccept = (body) => `create or replace function clara.accept_invite(p_token text, p_display_name text, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fn$
+begin
+${body}
+  return '{}'::jsonb;
+end $fn$`;
+
+const RESERVE_CALL = "  perform clara._reserve_op(null::uuid, 'accept_invite', p_op_key, null::bytea);";
+const WALL_RAISE = "  raise exception 'the signed-in email does not match this invite';";
+
+test("p4t1.accept: [N2-M2] mis-ordered body + an early LINE comment naming the wall -- both pins already correctly raise (round-2 control, unchanged by round 3)", async () => {
+  const ddl = decoyAccept(`  -- the signed-in email does not match this invite (ONLY a comment)\n${RESERVE_CALL}\n${WALL_RAISE}`);
+  const oldOutcome = await underPin(ddl, PIN_F4_OLD);
+  const newOutcome = await underPin(ddl, PIN_F4_NEW);
+  assert.equal(oldOutcome, "CLR10", "OLD pin already catches this mis-ordering despite the masking line comment");
+  assert.equal(newOutcome, "CLR10", "NEW pin still catches it -- round 3 must not regress round 2's fix");
+});
+
+test("p4t1.accept: [N2-M3] correct body + an early LINE comment naming the dedupe call -- both pins already correctly stay silent (round-2 control, unchanged by round 3)", async () => {
+  const ddl = decoyAccept(`  -- this body calls clara._reserve_op below, after the wall\n${WALL_RAISE}\n${RESERVE_CALL}`);
+  const oldOutcome = await underPin(ddl, PIN_F4_OLD);
+  const newOutcome = await underPin(ddl, PIN_F4_NEW);
+  assert.equal(oldOutcome, null, "OLD pin already does not false-alarm on this correct body");
+  assert.equal(newOutcome, null, "NEW pin still does not false-alarm -- round 3 must not introduce a new false positive");
+});
+
+test("p4t1.accept: [N2-M5] the wall exists ONLY as a comment, with NO real wall anywhere in code -- the OLD pin was fooled (the exact catastrophe this pin exists to prevent); the NEW pin correctly refuses", async () => {
+  const ddl = decoyAccept(`  -- the signed-in email does not match this invite\n${RESERVE_CALL}`);
+  const oldOutcome = await underPin(ddl, PIN_F4_OLD);
+  const newOutcome = await underPin(ddl, PIN_F4_NEW);
+  assert.equal(oldOutcome, null, "OLD pin: FOOLED -- a body with no real email wall at all reads as fine (raw-prosrc presence check finds the comment)");
+  assert.equal(newOutcome, "CLR10", "NEW pin: presence is checked on the STRIPPED code, so a comment-only wall is correctly read as absent");
+});
+
+test("p4t1.accept: [N2-M6] a /* block comment */ naming the wall masks a genuinely mis-ordered body -- the OLD pin (line-strip only) was fooled; the NEW pin (block-then-line strip) correctly refuses", async () => {
+  const ddl = decoyAccept(`  /* the signed-in email does not match this invite -- block comment */\n${RESERVE_CALL}\n${WALL_RAISE}`);
+  const oldOutcome = await underPin(ddl, PIN_F4_OLD);
+  const newOutcome = await underPin(ddl, PIN_F4_NEW);
+  assert.equal(oldOutcome, null, "OLD pin: FOOLED -- block comments are not line comments, so /* ... */ survives the single strip and its own text satisfies the order check");
+  assert.equal(newOutcome, "CLR10", "NEW pin: block comments are stripped FIRST, so no comment text survives to mask the real dedupe-before-wall order");
+});
+
+test("p4t1.accept: [N2-M9] a '--' inside a STRING LITERAL, ahead of the wall text on the same line, erases the wall from the mis-ordered body's stripped code -- the OLD pin was fooled; the NEW pin fails CLOSED because presence is now mandatory on the stripped code", async () => {
+  const ddl = decoyAccept(`${RESERVE_CALL}\n  raise exception 'problem -- the signed-in email does not match this invite';`);
+  const oldOutcome = await underPin(ddl, PIN_F4_OLD);
+  const newOutcome = await underPin(ddl, PIN_F4_NEW);
+  assert.equal(oldOutcome, null, "OLD pin: FOOLED -- the strip is syntax-blind and deletes from the literal's own '--' to end of line, erasing the wall text entirely, so the order check reads position 0 and passes a genuinely mis-ordered body");
+  assert.equal(newOutcome, "CLR10", "NEW pin: the same syntax-blind erasure still happens, but presence is now checked BEFORE ordering and fails CLOSED on 'wall not found in code' rather than silently reading position 0 as 'ran first'");
 });
 
 test("p4t1.accept: [C2] the SAME op_key + token but a CHANGED display_name refuses 'op_key reused with different args', never silently replays the first receipt", async () => {

@@ -689,13 +689,12 @@ begin
     raise exception 'p4t1 tail: HIGH-11 / global-uniqueness wall string lost across the add_member extraction' using errcode = 'CLR10';
   end if;
 
-  -- (5) accept_invite's body carries the JWT-email wall, calls both cores, and never contains
-  --     'add_member' as its own _reserve_op/_audit verb string (the "the receipt must name the
-  --     door actually walked" rule, annex 1 §D.1).
+  -- (5) accept_invite's body calls both cores, and never contains 'add_member' as its own
+  --     _reserve_op/_audit verb string (the "the receipt must name the door actually walked"
+  --     rule, annex 1 §D.1). The JWT-email-wall presence check used to live here too, reading
+  --     RAW prosrc -- moved into (5b) below, onto STRIPPED code, per native review N2-M5/M6/M9
+  --     (a raw-text presence check reads a wall that exists ONLY in a comment as present).
   select p.prosrc into v_bad from pg_proc p where p.oid = 'clara.accept_invite(text,text,text)'::regprocedure;
-  if position('does not match this invite' in v_bad) = 0 then
-    raise exception 'p4t1 tail: accept_invite is missing its JWT-email wall' using errcode = 'CLR10';
-  end if;
   if position('_claim_identity_core' in v_bad) = 0 or position('_add_member_core' in v_bad) = 0 then
     raise exception 'p4t1 tail: accept_invite does not route through both cores' using errcode = 'CLR10';
   end if;
@@ -703,28 +702,47 @@ begin
     raise exception 'p4t1 tail: accept_invite''s receipt strings leak the add_member verb name' using errcode = 'CLR10';
   end if;
 
-  -- (5b) Native review N2 (amended per the reviewer's own mutant: a raw position() match on
-  --      prosrc is COMMENT-MASKABLE -- a genuinely mis-ordered body carrying an explanatory
-  --      comment that happens to name the wall string early would still PASS this pin, and a
-  --      correctly-ordered body carrying a comment that names `_reserve_op` early would
-  --      FALSE-ALARM. Strip line comments FIRST (the 0136 idiom done structurally, not
-  --      textually), then match against the comment-free CODE only -- a comment can no longer
-  --      move where either wall reads as sitting.
-  --      F4: the JWT-email wall (`does not match this invite`) must appear BEFORE the dedupe
-  --      short-circuit (`_reserve_op`) in accept_invite's own CODE -- position-ordering, not
-  --      mere presence, is what makes the exploit (a replay-theft impostor reaching the dedupe
-  --      short-circuit before the wall proves they own the invited email) impossible.
-  v_code := regexp_replace(v_bad, '--[^\n]*', '', 'g');
-  if position('does not match this invite' in v_code) >= position('_reserve_op' in v_code) then
-    raise exception 'p4t1 tail: accept_invite''s JWT-email wall does not run BEFORE _reserve_op in the CODE -- F4 has regressed' using errcode = 'CLR10';
+  -- (5b) Native review N2, twice amended. Round 1 (F4/F3, position-ordering) found a raw
+  --      position() match on prosrc is COMMENT-MASKABLE -- fixed by stripping LINE comments
+  --      before matching. Round 2 (the reviewer's own mutant panel: M5/M6/M9) found the round-1
+  --      fix was still a partial instrument: (M5) the wall's PRESENCE was still checked against
+  --      RAW prosrc in (5) above, so a body whose wall exists ONLY in a comment -- no wall in
+  --      CODE at all, the exact catastrophe this pin exists to prevent -- read as present via
+  --      the raw check and then read as "position 0, not >= N" via the stripped ordering check,
+  --      passing BOTH; (M6) a `/* block comment */` was never stripped at all; (M9) a `--`
+  --      inside a STRING LITERAL ahead of the wall on the same line erased the wall from the
+  --      stripped code, since the strip is syntax-blind and cannot tell a comment marker from
+  --      one sitting inside quotes.
+  --
+  --      THE COMPLETE FIX: strip BOTH block and line comments (in that order -- a block comment
+  --      cannot itself contain a live line-comment marker meaningfully, but stripping block
+  --      first means a `--` a block comment happens to carry is gone before the line-strip ever
+  --      runs) into ONE v_code, then run presence checks on v_code BEFORE the ordering check --
+  --      never on raw prosrc. This does not defend against M9's literal-`--` shape in general
+  --      (that needs a real parser); it is accepted here because accept_invite's own two marker
+  --      strings ("does not match this invite", "_reserve_op") are BOTH confirmed absent from
+  --      every SQL string literal in this file (grep this file: neither ever appears quoted
+  --      except as its own genuine wall/call), so the syntax-blind strip cannot be fooled by a
+  --      literal that does not exist.
+  select p.prosrc into v_bad from pg_proc p where p.oid = 'clara.accept_invite(text,text,text)'::regprocedure;
+  v_code := regexp_replace(regexp_replace(v_bad, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+  if position('does not match this invite' in v_code) = 0 then
+    raise exception 'p4t1 tail: accept_invite has no JWT-email wall in CODE -- F4 has regressed (M5)' using errcode = 'CLR10';
   end if;
-  --      F3: _jwt_email() must still normalize with lower() at its single source, in CODE -- a
-  --      comment mentioning "lower(" would otherwise be enough to pass this pin without the
-  --      function's own body actually calling it. Every one of the four email call sites
-  --      (claim_identity, _claim_identity_core's comparison, accept_invite, invite_member)
-  --      agrees BY CONSTRUCTION only as long as this holds.
+  if position('_reserve_op' in v_code) = 0 then
+    raise exception 'p4t1 tail: accept_invite no longer calls _reserve_op in CODE' using errcode = 'CLR10';
+  end if;
+  if position('does not match this invite' in v_code) >= position('_reserve_op' in v_code) then
+    raise exception 'p4t1 tail: accept_invite''s JWT-email wall does not run BEFORE _reserve_op in CODE -- F4 has regressed' using errcode = 'CLR10';
+  end if;
+  --      F3: _jwt_email() must still normalize with lower() at its single source, in CODE, using
+  --      the SAME double strip (block then line) -- a comment (line OR block) mentioning
+  --      "lower(" must not be enough to pass this pin without the function's own body actually
+  --      calling it. Every one of the four email call sites (claim_identity, _claim_identity_
+  --      core's comparison, accept_invite, invite_member) agrees BY CONSTRUCTION only as long as
+  --      this holds.
   select p.prosrc into v_bad from pg_proc p where p.oid = 'clara._jwt_email()'::regprocedure;
-  v_code := regexp_replace(v_bad, '--[^\n]*', '', 'g');
+  v_code := regexp_replace(regexp_replace(v_bad, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
   if position('lower(' in v_code) = 0 then
     raise exception 'p4t1 tail: _jwt_email() no longer normalizes with lower() in CODE -- F3 has regressed' using errcode = 'CLR10';
   end if;
