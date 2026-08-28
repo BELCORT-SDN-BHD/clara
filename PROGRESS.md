@@ -127,8 +127,8 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 1. **THE FRONTEND 磨合 WINDOW IS OPEN AND RUNNING** — pre-flight discharged, P1-P3 merged,
    the night train #368-#384 merged, `0139`+`0140` ceremonied (live 135); the port wave is
    running (posture bullet above carries the full list and the Wave-A instrument laws).
-   **In flight**: Wave B (T4/T7/T8/T10) in independent review · P4's `0141` in its final pin
-   round · F-A7b PR-a building. **Still owed in this window** (owner rulings,
+   **In flight**: Wave B (T4/T7/T8/T10) in fix rounds · **P4 tranche-1 `0141` MERGED #393, its D1
+   ceremony OWED** · F-A7b PR-a building · **the ten-item sitting RULED (裁-12…裁-21, `mohe-grill-rulings-2026-08-28.md`) mints a pre-beta backend queue: P4 tranche-2 · the hardening batch (barrier ×6 · hash-only tokens ×2 · the binding signer≠proposer wall) · the ninth row_kind `seeding_proposal` · merge re-home + un-merge · the Clara binding-proposal door · the firm-level COA template**. **Still owed in this window** (owner rulings,
    `harness-audit-rulings-2026-08-26.md`): the F-A7b train · all three firm tiers' UI
    (tier-3 LIVE AT BETA behind its own security gate) · **the pricing-amounts sitting**
    (before P4 ships) · the R2 PRD two-tier wording (drafted + owner-approved 2026-08-27,
