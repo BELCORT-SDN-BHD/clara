@@ -1120,6 +1120,16 @@ const P4T1_HUMAN_FNS = ["claim_identity", "invite_member", "accept_invite", "rev
 const P4T1_UNGRANTED_FNS = ["_jwt_email", "_claim_identity_core", "_add_member_core"];
 export const P4T1_COHORT = [...P4T1_HUMAN_FNS, ...P4T1_UNGRANTED_FNS];
 
+// P4 tranche 2 (design §5 asks 2 + 8, 裁-11): the self-serve registration door + the operator
+// approval queue. clara_authenticated ONLY — agent + both wake roles gain ZERO (an operator
+// ruling is a human-lane act by its own nature, and _create_firm_core is the T2 extraction the
+// P4T1 comment above already anticipated). create_firm itself is unlisted here for the SAME
+// reason add_member is unlisted in P4T1's own comment: it already lived in WRITERS pre-P4, and
+// its recut (this tranche extracts _create_firm_core from its live body) changes no grant.
+const P4T2_HUMAN_FNS = ["request_firm_registration", "approve_firm_registration", "reject_firm_registration"];
+const P4T2_UNGRANTED_FNS = ["_create_firm_core"];
+export const P4T2_COHORT = [...P4T2_HUMAN_FNS, ...P4T2_UNGRANTED_FNS];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1217,6 +1227,9 @@ export const ALLOWED = {
     ...F_A4_PR2A_HUMAN_FNS,
     // P4 tranche 1 [invite/RBAC first] the four human doors — see the block above.
     ...P4T1_HUMAN_FNS,
+    // P4 tranche 2 [registration + operator approval, 裁-11] the three human doors — see the
+    // block above.
+    ...P4T2_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1540,6 +1553,24 @@ export async function grantMatrixFailures() {
       "P4 tranche 1 invite/RBAC first: signature-exact check found a PARTIAL cohort -- these "
       + "exact signatures no longer resolve (a same-named, different-signature overload may have "
       + `silently replaced one): ${p4t1SigMissing.join(", ")}`,
+    );
+  }
+  failures.push(...cohortFailures("P4 tranche 2 registration + operator approval", P4T2_COHORT, liveNames));
+  // The same signature-exact companion as P4T1's above, scoped to P4T2's own four names --
+  // review law 3 applied from the start this round, not discovered by a later mutant panel.
+  const p4t2Sigs = [
+    "clara.request_firm_registration(text,text,text)", "clara.approve_firm_registration(uuid,text)",
+    "clara.reject_firm_registration(uuid,text,text)", "clara._create_firm_core(uuid,text)",
+  ];
+  const p4t2SigCheck = await rootQuery(
+    "select sig, to_regprocedure(sig) is not null as ok from unnest($1::text[]) sig", [p4t2Sigs],
+  );
+  const p4t2SigMissing = p4t2SigCheck.rows.filter((r) => !r.ok).map((r) => r.sig);
+  if (p4t2SigMissing.length !== 0 && p4t2SigMissing.length !== p4t2Sigs.length) {
+    failures.push(
+      "P4 tranche 2 registration + operator approval: signature-exact check found a PARTIAL "
+      + "cohort -- these exact signatures no longer resolve (a same-named, different-signature "
+      + `overload may have silently replaced one): ${p4t2SigMissing.join(", ")}`,
     );
   }
   return failures;
