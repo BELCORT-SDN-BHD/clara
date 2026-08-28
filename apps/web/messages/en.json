@@ -1388,6 +1388,7 @@
       "roleThisSurvives": "{name} survives — the other party merges into it",
       "roleThisMerges": "{name} merges into the other party",
       "reasonLabel": "Reason",
+      "noCandidates": "No other live counterparty of this kind exists yet to merge with.",
       "previewButton": "Preview merge",
       "previewLoading": "Reading both counterparties' current state…",
       "back": "Back",
@@ -1430,7 +1431,8 @@
       "targetLabel": "Target (claim)",
       "selectItem": "Select an item",
       "amountLabel": "Amount",
-      "reasonLabel": "Reason"
+      "reasonLabel": "Reason",
+      "noCandidateItems": "This counterparty needs at least two currently-outstanding open items before one can be applied to another."
     },
     "unallocateGroup": {
       "trigger": "Unallocate",

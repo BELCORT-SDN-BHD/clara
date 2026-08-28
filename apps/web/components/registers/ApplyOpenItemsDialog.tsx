@@ -52,7 +52,6 @@ export function ApplyOpenItemsDialog({
     <ArApCounterpartyDoorDialog
       triggerLabel={t("trigger")}
       triggerSize="xs"
-      triggerDisabled={items.length < 2}
       title={t("title")}
       description={t("description")}
       confirmLabel={t("confirm")}
@@ -60,6 +59,9 @@ export function ApplyOpenItemsDialog({
       confirmDisabled={!canSubmit}
       onConfirm={() => onSubmit(sourceItemId, targetItemId, amountCents as number, reason)}
     >
+      {items.length < 2 ? (
+        <p className="text-sm text-muted-foreground">{t("noCandidateItems")}</p>
+      ) : (
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="cp-apply-source">{t("sourceLabel")}</Label>
@@ -92,6 +94,7 @@ export function ApplyOpenItemsDialog({
           <Textarea id="cp-apply-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={2} required />
         </div>
       </div>
+      )}
     </ArApCounterpartyDoorDialog>
   );
 }

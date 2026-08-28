@@ -91,7 +91,7 @@ export function MergeCounterpartiesDialog({
         else setOpen(true);
       }}
     >
-      <DialogTrigger render={<Button variant="outline" size="xs" disabled={candidates.length === 0} />}>{t("trigger")}</DialogTrigger>
+      <DialogTrigger render={<Button variant="outline" size="xs" />}>{t("trigger")}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t("title", { name: counterparty.name })}</DialogTitle>
@@ -100,32 +100,38 @@ export function MergeCounterpartiesDialog({
         {step === "pick" ? (
           <div className="flex flex-col gap-3">
             <StateBanner tone="warning">{t("consequence")}</StateBanner>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="cp-merge-other">{t("otherLabel")}</Label>
-              <NativeSelect id="cp-merge-other" value={otherId} onChange={(e) => setOtherId(e.target.value)}>
-                <option value="">{t("otherPlaceholder")}</option>
-                {candidates.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </NativeSelect>
-            </div>
-            <fieldset className="flex flex-col gap-1.5">
-              <legend className="text-sm font-medium">{t("roleLabel")}</legend>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="radio" name="cp-merge-role" checked={thisIsSurvivor} onChange={() => setThisIsSurvivor(true)} />
-                {t("roleThisSurvives", { name: counterparty.name })}
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="radio" name="cp-merge-role" checked={!thisIsSurvivor} onChange={() => setThisIsSurvivor(false)} />
-                {t("roleThisMerges", { name: counterparty.name })}
-              </label>
-            </fieldset>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="cp-merge-reason">{t("reasonLabel")}</Label>
-              <Textarea id="cp-merge-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={2} required />
-            </div>
+            {candidates.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("noCandidates")}</p>
+            ) : (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="cp-merge-other">{t("otherLabel")}</Label>
+                  <NativeSelect id="cp-merge-other" value={otherId} onChange={(e) => setOtherId(e.target.value)}>
+                    <option value="">{t("otherPlaceholder")}</option>
+                    {candidates.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </div>
+                <fieldset className="flex flex-col gap-1.5">
+                  <legend className="text-sm font-medium">{t("roleLabel")}</legend>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="radio" name="cp-merge-role" checked={thisIsSurvivor} onChange={() => setThisIsSurvivor(true)} />
+                    {t("roleThisSurvives", { name: counterparty.name })}
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="radio" name="cp-merge-role" checked={!thisIsSurvivor} onChange={() => setThisIsSurvivor(false)} />
+                    {t("roleThisMerges", { name: counterparty.name })}
+                  </label>
+                </fieldset>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="cp-merge-reason">{t("reasonLabel")}</Label>
+                  <Textarea id="cp-merge-reason" value={reason} onChange={(e) => setReason(e.target.value)} rows={2} required />
+                </div>
+              </>
+            )}
             <DialogFooter>
               <DialogClose render={<Button variant="ghost" />}>{t("cancel")}</DialogClose>
               <Button disabled={!otherId || reason.trim().length === 0} onClick={() => void goToPreview()}>
