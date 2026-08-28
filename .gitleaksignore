@@ -8,3 +8,7 @@
 # 0040 aging bucket-key literals (d91_plus_cents / b91_plus_cents) — generic-api-key false positives
 5da818ec4032d9349cefd4d04327436c071c8687:apps/dashboard/app/aging/agingModel.ts:generic-api-key:61
 6a70323b3dd3e3324d051fbbe5f7fef73cdce3d8:apps/dashboard/app/aging/agingModel.ts:generic-api-key:121
+# T2 (port wave) opening-judgement fixture token `rev-plan-distinct-42` — a distinct test-fixture
+# revision token, not a credential; the line carries an inline `gitleaks:allow` from e7e72a5c on.
+defebb6c1f62af4c16bcb75533baba36e42f4a37:apps/web/components/registers/opening-judgement.test.tsx:generic-api-key:175
+2435744357ffa9c8507c592095fc305980ee93dd:apps/web/components/registers/opening-judgement.test.tsx:generic-api-key:175
