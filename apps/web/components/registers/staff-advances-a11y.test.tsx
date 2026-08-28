@@ -262,11 +262,20 @@ test("Book Application dialog OPEN with a real allocation row has zero a11y viol
 
       const addAllocation = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Add allocation"));
       assert.ok(addAllocation, "the Add allocation control must render inside the dialog");
-      await h.fireEvent(addAllocation as never, "click");
+      // S2-b (independent review, fix-required): `h.fireEvent(addAllocation,
+      // "click")` was a no-op through this dialog's own portal (the same
+      // click-dispatch trap F3's header documents for Confirm) — the row
+      // never actually landed, and the post-condition below matched anyway
+      // (the register's OWN summary line also contains "outstanding"), so
+      // the test passed vacuously either way. Fixed on both axes: the click
+      // is driven directly (F3's `driveHandler`), and the post-condition is
+      // a string that exists ONLY on a real allocation row's own select
+      // placeholder, never elsewhere on the page.
+      await h.act(() => { driveHandler(addAllocation as never, "onClick"); });
       for (let i = 0; i < 2; i++) await h.settle();
 
       const bodyText = textOf(body as never);
-      assert.match(bodyText, /outstanding/, "the added allocation row must show the real, DB-derived outstanding candidate");
+      assert.match(bodyText, /Select an outstanding advance/, "the added allocation row's own select (with its real, DB-derived candidate) must be present");
 
       const violations = checkAccessibility(body as never);
       assert.deepEqual(violations, [], `open Book Application dialog with a live allocation row: ${JSON.stringify(violations)}`);
