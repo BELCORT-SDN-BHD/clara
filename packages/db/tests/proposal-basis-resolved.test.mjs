@@ -566,6 +566,34 @@ test("Codex HIGH-1: wake_propose_identifier_promotion -- a CHANGED citations und
     "same op_key, a genuinely different citations array");
 });
 
+// rev-pb M12a, ruled 2026-08-29: the SYMMETRIC TWIN of MED-5(a) (Door 2's own such cell above)
+// for Door 1. An unchanged region between the two calls proves nothing about WHETHER resolution
+// reran on the replay -- the same input resolves the same way either order. This cell makes the
+// two orderings actually DIVERGE: between the first (genuine) call and the replay, the cited
+// region's OWN generation is superseded by a newer one. A genuine reserve-then-serve-from-cache
+// implementation never touches the resolver on the replay, so the now-stale region does not
+// matter and the replay still succeeds identically. A mutant that resolved BEFORE reserving (or
+// re-resolved on every call, cache or not) would re-walk the now-superseded citation on the
+// replay and refuse basis_unresolved instead of returning the cached success.
+test("Codex M12a: wake_propose_identifier_promotion -- an identical replay on the same op_key is served from the reservation cache -- proven by superseding the cited region's generation BETWEEN the two calls and still getting the identical cached result", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await freshDoc();
+  const { region } = await seedOneRegion(doc.documentId);
+  const opKey = opk("wpip22-replay");
+  const value = `SSM22m12a${Date.now()}`;
+  const first = await wakeProposeIdentifierPromotion(secret, {
+    client: world.clients.A1, document: doc.documentId, value, opKey, citations: [{ region_id: region }],
+  });
+  // Supersede: a NEWER extraction generation lands for the SAME document -- if resolution ran
+  // again right now, `region` (still version_n=1) would refuse as a stale generation.
+  await seedExtraction({ firm: world.firms.A, document: doc.documentId, versionN: 2 });
+  const second = await wakeProposeIdentifierPromotion(secret, {
+    client: world.clients.A1, document: doc.documentId, value, opKey, citations: [{ region_id: region }],
+  });
+  assert.deepEqual(second.rows[0].result, first.rows[0].result, "replay returns the identical cached result, unaffected by the region having since become stale");
+});
+
 test("wake_propose_client_onboarding: persists the RESOLVED basis in BOTH the receipt.verdict AND the firm_open_questions candidate, with sightings DERIVED, never the model's raw claim", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
