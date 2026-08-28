@@ -31,12 +31,19 @@ components/close/close-a11y.test.tsx
 components/close/close-components.test.tsx
 components/close/close-keyboard.test.tsx
 components/documents/documents-a11y.test.tsx
+components/documents/documents-governance-a11y.test.tsx
+components/documents/documents-governance-keyboard.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
 components/firm/needs-you-gaps.test.tsx
 components/journals/journals-a11y.test.tsx
+components/journals/journals-governance-a11y.test.tsx
+components/journals/journals-governance-keyboard.test.tsx
 components/journals/journals-keyboard.test.tsx
 components/journals/use-amount-input.test.ts
+components/registers/fa-particulars-fields.test.tsx
+components/registers/fixed-assets-a11y.test.tsx
+components/registers/fixed-assets-keyboard.test.tsx
 components/registers/opening-register.test.tsx
 components/reports/reports-components.test.tsx
 components/reports/reports-snapshots-seeding-a11y.test.tsx
@@ -73,6 +80,8 @@ lib/firm/use-review-queue.test.ts
 lib/journals/api-compose.test.ts
 lib/journals/api.test.ts
 lib/journals/balance.test.ts
+lib/journals/diff-reads.test.ts
+lib/journals/governance-doors.test.ts
 lib/journals/use-journals-workbench.test.ts
 lib/parts/catalog.test.tsx
 lib/parts/hooks.test.ts
@@ -81,6 +90,8 @@ lib/read.test.ts
 lib/registers/accounts.test.ts
 lib/registers/adjustments.test.ts
 lib/registers/aging.test.ts
+lib/registers/depreciation.test.ts
+lib/registers/fa-account-profiles.test.ts
 lib/registers/fixed-assets.test.ts
 lib/registers/knowledge.test.ts
 lib/registers/staff-advances.test.ts

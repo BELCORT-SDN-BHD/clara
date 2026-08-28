@@ -11,6 +11,7 @@ import {
   recordDocumentResolution, fileDocument, fileToClient, retireFiling, confirmCandidate,
   dismissCandidate, setDocumentKind, placeLegalHold, releaseLegalHold,
   proposeCorrection, approveCorrection,
+  requestAutodraft, requestReextraction, classifyConsentEvidenceDocument,
 } from "./doors";
 import { isDoorRefusal } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -199,4 +200,108 @@ test("approveCorrection: a distinct-checker refusal (CLR19) surfaces VERBATIM, n
     },
   );
   assert.equal(attempts, 1);
+});
+
+// --- T6: request_autodraft / request_reextraction / classify_consent_evidence ----
+
+test("requestAutodraft: posts request_autodraft with p_filing and normalizes a real 200 outcome envelope", async () => {
+  let seenFn = ""; let seenBody: unknown;
+  await withMockedFetch(
+    async (url, init) => { seenFn = rpcName(url); seenBody = JSON.parse(String(init?.body)); return okJson({ outcome: "admitted", task_id: "task-1" }); },
+    async () => {
+      const out = await requestAutodraft("filing-1", { session: session() });
+      assert.equal(out.outcome, "admitted");
+      assert.equal(out.task_id, "task-1");
+      assert.equal(out.reason, null);
+    },
+  );
+  assert.equal(seenFn, "request_autodraft");
+  assert.deepEqual(seenBody, { p_filing: "filing-1" });
+});
+
+test("requestAutodraft: a real refusal (CLR11, no active filing) still surfaces as a DoorRefusal, distinct from a 200 hold outcome", async () => {
+  await withMockedFetch(
+    async () => refusal("CLR11", "CLR11: active filing not found"),
+    async () => {
+      await assert.rejects(
+        requestAutodraft("filing-1", { session: session() }),
+        (e: unknown) => { assert.ok(isDoorRefusal(e)); assert.equal((e as { code: string }).code, "CLR11"); return true; },
+      );
+    },
+  );
+});
+
+test("requestAutodraft: a 200 hold (refused_budget) is NOT thrown — the caller reads the outcome field", async () => {
+  await withMockedFetch(
+    async () => okJson({ outcome: "refused_budget", reason: "refused_budget" }),
+    async () => {
+      const out = await requestAutodraft("filing-1", { session: session() });
+      assert.equal(out.outcome, "refused_budget");
+      assert.equal(out.reason, "refused_budget");
+    },
+  );
+});
+
+test("requestReextraction: posts request_reextraction with document/reason/op_key and returns the admission envelope", async () => {
+  let seenFn = ""; let seenBody: Record<string, unknown> = {};
+  await withMockedFetch(
+    async (url, init) => {
+      seenFn = rpcName(url);
+      seenBody = JSON.parse(String(init?.body));
+      return okJson({ task_id: "task-2", document_id: "doc-1", version_n: 2, status: "queued", reused: false, admission: "reextraction" });
+    },
+    async () => {
+      const out = await requestReextraction("doc-1", "wrong invoice amount extracted", { session: session() });
+      assert.equal(out.admission, "reextraction");
+      assert.equal(out.version_n, 2);
+      assert.equal(out.reused, false);
+    },
+  );
+  assert.equal(seenFn, "request_reextraction");
+  assert.equal(seenBody.p_document, "doc-1");
+  assert.equal(seenBody.p_reason, "wrong invoice amount extracted");
+  assert.ok(typeof seenBody.p_op_key === "string" && seenBody.p_op_key.length > 0);
+});
+
+test("requestReextraction: CLR16 (no completed extraction to re-extract) surfaces verbatim", async () => {
+  await withMockedFetch(
+    async () => refusal("CLR16", "CLR16: no completed extraction to re-extract"),
+    async () => {
+      await assert.rejects(
+        requestReextraction("doc-1", "x", { session: session() }),
+        (e: unknown) => { assert.ok(isDoorRefusal(e)); assert.equal((e as { code: string }).code, "CLR16"); return true; },
+      );
+    },
+  );
+});
+
+test("classifyConsentEvidenceDocument: posts classify_consent_evidence_document with document/reason/op_key", async () => {
+  let seenFn = ""; let seenBody: Record<string, unknown> = {};
+  await withMockedFetch(
+    async (url, init) => {
+      seenFn = rpcName(url);
+      seenBody = JSON.parse(String(init?.body));
+      return okJson({ document_id: "doc-1", document_kind: "consent_evidence", prior_kind: "other" });
+    },
+    async () => {
+      const out = await classifyConsentEvidenceDocument("doc-1", "client's signed PDPA consent letter", { session: session() });
+      assert.equal(out.document_kind, "consent_evidence");
+      assert.equal(out.prior_kind, "other");
+    },
+  );
+  assert.equal(seenFn, "classify_consent_evidence_document");
+  assert.equal(seenBody.p_document, "doc-1");
+  assert.equal(seenBody.p_reason, "client's signed PDPA consent letter");
+});
+
+test("classifyConsentEvidenceDocument: CLR28 (evidence_kind_conflict — an owner acting on a coded document) surfaces verbatim", async () => {
+  await withMockedFetch(
+    async () => refusal("CLR28", "CLR28: consent evidence must be an unclassified, unplaced (other) or consent-evidence document, not a invoice"),
+    async () => {
+      await assert.rejects(
+        classifyConsentEvidenceDocument("doc-1", "x", { session: session() }),
+        (e: unknown) => { assert.ok(isDoorRefusal(e)); assert.equal((e as { code: string }).code, "CLR28"); return true; },
+      );
+    },
+  );
 });

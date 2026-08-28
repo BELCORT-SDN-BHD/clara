@@ -24,6 +24,7 @@ import type { ComponentType } from "react";
 
 import type { ReviewQueueRow, ReviewQueueRowKind } from "@/lib/firm/needs-you";
 import { OpenQuestionAffordance } from "./open-question-affordance";
+import { FixedAssetIncompleteAffordance } from "./fixed-asset-incomplete-affordance";
 
 export type NeedsYouAffordanceProps = {
   row: ReviewQueueRow;
@@ -64,6 +65,9 @@ export const NEEDS_YOU_AFFORDANCES: Partial<Record<ReviewQueueRowKind, NeedsYouA
   Object.create(null),
   {
     open_question: OpenQuestionAffordance,
+    // T3 (port wave, port-wave-plan-2026-08-28.md §5): the "inline complete"
+    // affordance for a fixed asset born with incomplete particulars.
+    fixed_asset_incomplete: FixedAssetIncompleteAffordance,
   } satisfies Partial<Record<ReviewQueueRowKind, NeedsYouAffordance>>,
 );
 

@@ -137,6 +137,19 @@ export type JournalsData = {
   queueCounts: ReviewQueueCounts;
 };
 
+/** T6 — `JournalsData` plus every FIRM-WIDE pending `agent_interruptions` row
+ *  (use-journals-workbench.ts's own composition, governance-doors.ts's
+ *  `listPendingInterruptions`) — folded into the SAME combined hydration
+ *  cycle (never a second, parallel `useHydratedPart`) so answering one rides
+ *  the identical act()-and-reload discipline every other door on this tab
+ *  already uses. Genuinely firm-wide, not filtered to one client: the table
+ *  carries no client_id column (AgentInterruptionRow's own header) — the
+ *  "Clarifications" tab labels this honestly rather than implying a filter
+ *  that cannot exist. */
+export type JournalsDataWithInterruptions = JournalsData & {
+  interruptions: AgentInterruptionRow[];
+};
+
 // --- clara.list_review_queue (READ RPC — see api.ts's listReviewQueue header) --
 // Envelope + row shape PORTED from apps/dashboard/app/shared/reviewTypes.ts's
 // `QueueRow`/`toQueueRow` (the FINAL pin for this same live DB function) —
@@ -183,4 +196,91 @@ export type ReviewQueueRow = {
   created_at: string | null;
   id: string;
   coding_kind: string | null;
+};
+
+// --- T6 (port-wave plan §4) — the drafts/document-governance seam --------------
+//
+// Every shape below is grounded at the LIVE catalog on an instance-unique
+// throwaway rig (0001..0140), not migration text — `pg_get_functiondef` pulls,
+// 2026-08-28. Grants: clara_authenticated (human), and the three "get_" reads
+// below ALSO hold clara_agent_ro (readable by the agent lane — this workbench
+// only ever calls them as the human, via callDoor's ordinary bearer-token path).
+
+/** clara.get_entry_diff(p_entry uuid, p_client uuid) -> jsonb, STABLE — one
+ *  entry's `journal_entry_revisions` history, oldest-first, each with its
+ *  delta vs. the PRIOR revision (computed IN the query, never client-side).
+ *  Returns `{entry_id, revisions: []}` for an entry with no revision rows
+ *  (never null — see api.ts's `getEntryDiff`). */
+export type EntryDiffDelta = {
+  field: string;
+  before: unknown;
+  after: unknown;
+  /** Only set for the synthetic `total_debit_cents` delta row; every
+   *  header-field delta carries `delta_cents: null` (the DB's own shape). */
+  delta_cents: number | null;
+};
+
+export type EntryDiffRevision = {
+  revision_no: number;
+  actor_kind: string;
+  actor: string | null;
+  reason: string | null;
+  created_at: string;
+  header: Record<string, unknown>;
+  legs: unknown[];
+  rule_decision_id: string | null;
+  deltas_vs_prev: EntryDiffDelta[];
+};
+
+export type EntryDiffResult = {
+  entry_id: string;
+  revisions: EntryDiffRevision[];
+};
+
+/** clara.get_doc_entry_diff(p_entry uuid, p_client uuid) -> jsonb, STABLE —
+ *  field-by-field comparison of this entry's own figures against the SOURCE
+ *  DOCUMENT's extracted regions (invoice.total/invoice_date/invoice_id/
+ *  customer_name-or-vendor_name/currency; receivable vs. payable branch
+ *  chosen by `coding_kind`). Returns `null` (not an entry, or the entry
+ *  carries no `document_id`) — the caller renders that as "no source
+ *  document", never as an error. */
+export type DocEntryDiffField = {
+  field: string;
+  doc_value: string | null;
+  doc_region_id: string | null;
+  doc_page: string | null;
+  doc_region_locator_kind: string | null;
+  doc_region_locator: Record<string, unknown> | null;
+  entry_value: string | null;
+  delta_cents: number | null;
+  no_region: boolean;
+};
+
+export type DocEntryDiffResult = {
+  entry_id: string;
+  document_id: string;
+  fields: DocEntryDiffField[];
+};
+
+/** clara.agent_interruptions — a plain RLS-scoped table (forced RLS,
+ *  `p_agent_interruptions_human` grants clara_authenticated SELECT scoped to
+ *  `firm_id = jwt_firm()`; no client_id column exists on this table, so this
+ *  read is FIRM-WIDE, not client-scoped — the caller labels it honestly as
+ *  such rather than implying a client filter that cannot exist). `kind` is a
+ *  DB CHECK-constrained singleton today (`= 'clarify'`), kept as `string` so a
+ *  future kind degrades honestly instead of being silently excluded. */
+export type AgentInterruptionStatus = "pending" | "answered" | "expired" | "cancelled";
+
+export type AgentInterruptionRow = {
+  id: string;
+  task_id: string;
+  kind: string;
+  question: Record<string, unknown>;
+  answer: Record<string, unknown> | null;
+  status: AgentInterruptionStatus | (string & {});
+  asked_of: string | null;
+  answered_by: string | null;
+  expires_at: string;
+  created_at: string;
+  answered_at: string | null;
 };

@@ -53,7 +53,30 @@ import {
   reviseEntry,
   type ComposeManualEntryInput,
 } from "./api";
-import type { EntryLineInput, JournalsData } from "./types";
+import {
+  answerInterruption,
+  approveRoutineEntry,
+  listPendingInterruptions,
+  withdrawDraft,
+} from "./governance-doors";
+import type { EntryLineInput, JournalsDataWithInterruptions } from "./types";
+
+/** T6: the P3 combined loader (`loadJournalsWorkbench`) predates the firm-wide
+ *  interruptions read — folded in HERE rather than editing api.ts's already-
+ *  500-line loader (this repo's own file-size convention, api.test.ts's
+ *  header), and rather than a second parallel `useHydratedPart` cycle, so
+ *  answering an interruption rides the SAME single act()-and-reload
+ *  discipline as every other door on this tab. */
+async function loadJournalsWorkbenchWithInterruptions(
+  session: SessionTokenAccessor,
+  clientId: string,
+): Promise<JournalsDataWithInterruptions> {
+  const [data, interruptions] = await Promise.all([
+    loadJournalsWorkbench(session, clientId),
+    listPendingInterruptions({ session }),
+  ]);
+  return { ...data, interruptions };
+}
 
 /** The sentinel `actingId` for the compose ceremony — not a real entry id
  *  (a new entry has none until the door succeeds), but a stable identity the
@@ -73,7 +96,7 @@ export function useJournalsWorkbench(clientId: string, auth: SessionTokenAccesso
   const loader = useCallback(
     async (session: SessionTokenAccessor) => {
       try {
-        const data = await loadJournalsWorkbench(session, clientId);
+        const data = await loadJournalsWorkbenchWithInterruptions(session, clientId);
         setReadErrorKind(null);
         return data;
       } catch (e) {
@@ -83,7 +106,7 @@ export function useJournalsWorkbench(clientId: string, auth: SessionTokenAccesso
     },
     [clientId],
   );
-  const state = useHydratedPart<JournalsData>(auth, loader);
+  const state = useHydratedPart<JournalsDataWithInterruptions>(auth, loader);
 
   const approve = useCallback(
     (entryId: string, expectedRevision: string, attestation?: string | null) => {
@@ -117,5 +140,33 @@ export function useJournalsWorkbench(clientId: string, auth: SessionTokenAccesso
     [auth, clientId, state],
   );
 
-  return { ...state, readErrorKind, actingId, approve, revise, reverse, compose };
+  // --- T6 additions: the routine quick-approve, draft withdrawal, and the
+  // firm-wide agent-clarify answer door — all ride the SAME act()-and-reload
+  // cycle as approve/revise/reverse/compose above (hydrate-never-trust). ---
+
+  const approveRoutine = useCallback(
+    (entryId: string, expectedRevision: string, onOk?: () => void) => {
+      setActingId(entryId);
+      return state.act(() => approveRoutineEntry(entryId, expectedRevision, { session: auth }), onOk);
+    },
+    [auth, state],
+  );
+
+  const withdraw = useCallback(
+    (entryId: string, reason: string, expectedRevision: string, onOk?: () => void) => {
+      setActingId(entryId);
+      return state.act(() => withdrawDraft(entryId, reason, expectedRevision, { session: auth }), onOk);
+    },
+    [auth, state],
+  );
+
+  const answerClarify = useCallback(
+    (interruptionId: string, answer: Record<string, unknown>, onOk?: () => void) => {
+      setActingId(interruptionId);
+      return state.act(() => answerInterruption(interruptionId, answer, { session: auth }), onOk);
+    },
+    [auth, state],
+  );
+
+  return { ...state, readErrorKind, actingId, approve, revise, reverse, compose, approveRoutine, withdraw, answerClarify };
 }
