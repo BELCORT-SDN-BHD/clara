@@ -42,9 +42,12 @@ begin
     (k_dave,  'Dave Rahman', 'dave@synthetic.test'),
     (k_erin,  'Erin Wong',   'erin@synthetic.test'),
     (k_cmt,   'Cara Commit', 'cara@synthetic.test'); -- [R3-F2] the clean Gate-O committer
-  insert into clara.firm_admissions (token, note) values
-    (k_tok_a, 'synthetic firm A bootstrap'),
-    (k_tok_b, 'synthetic firm B bootstrap');
+  -- 裁-16b (pre-beta hardening batch): firm_admissions stores token_hash only. k_tok_a/k_tok_b
+  -- stay as VALUES (public, checked-in synthetic constants, not secrets) -- only the target
+  -- column changes; create_firm(k_tok_a, ...) below is called with the SAME plaintext uuid.
+  insert into clara.firm_admissions (token_hash, note) values
+    (sha256(convert_to(k_tok_a::text, 'UTF8')), 'synthetic firm A bootstrap'),
+    (sha256(convert_to(k_tok_b::text, 'UTF8')), 'synthetic firm B bootstrap');
 
   -- ===== FIRM A (alice owner, bob bookkeeper): two clients =====
   perform set_config('request.jwt.claims', json_build_object('sub', k_alice)::text, true);

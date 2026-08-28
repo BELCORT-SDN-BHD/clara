@@ -305,8 +305,27 @@ async function resolveFirm(client, args, plan, log) {
   if (await one(client, "select 1 from clara.firm_memberships where user_id=$1 and status='active'", [args.firmOwner])) {
     throw new Error(`--firm-owner ${args.firmOwner} already belongs to a firm; create_firm requires an owner with no active membership.`);
   }
-  if (!(await one(client, "select 1 from clara.firm_admissions where token=$1 and consumed_at is null", [args.firmAdmissionToken]))) {
-    throw new Error(`--firm-admission-token ${args.firmAdmissionToken} is missing or already consumed.`);
+  // 裁-16b (pre-beta hardening batch): firm_admissions stores token_hash only -- the plaintext
+  // is never persisted, so discovery hashes the operator-supplied value before comparing.
+  //
+  // MED-2 (independent review 2026-08-29), two fixes on these three lines:
+  //
+  //  (1) `$1::uuid::text`, NOT `$1::text`. The stored hash is over the CANONICAL uuid rendering
+  //      -- the migration's backfill hashes `token::text` and create_firm hashes
+  //      `p_admission_token::text`, both of which go through uuid's own lowercase-hyphenated
+  //      output. A raw `$1::text` hashes the OPERATOR'S SPELLING instead, so an uppercase or
+  //      brace-wrapped uuid (all legal input, all accepted by the very next line's `$2::uuid`)
+  //      hashes differently and this preflight falsely refuses a token create_firm would then
+  //      happily consume -- a preflight that disagrees with the door it is guarding. The cast
+  //      also makes a malformed uuid fail HERE, as a typed uuid error, instead of silently
+  //      hashing garbage and reporting "missing or already consumed".
+  //
+  //  (2) the refusal no longer interpolates the token. It is a live single-use bearer credential
+  //      and this message goes to stderr, into terminal scrollback, CI logs and screenshots --
+  //      the ONE place 裁-16 says it must not end up. The operator already knows what they typed;
+  //      the message names the flag, not the secret.
+  if (!(await one(client, "select 1 from clara.firm_admissions where token_hash=sha256(convert_to($1::uuid::text,'UTF8')) and consumed_at is null", [args.firmAdmissionToken]))) {
+    throw new Error("--firm-admission-token is missing or already consumed (value redacted: it is a live single-use bearer credential and never belongs in a log line).");
   }
   await setActor(client, args.firmOwner);
   const receipt = (await one(client, "select clara.create_firm($1, $2::uuid, $3) as result", [args.firmName, args.firmAdmissionToken, plan.firm.op_key]))?.result;

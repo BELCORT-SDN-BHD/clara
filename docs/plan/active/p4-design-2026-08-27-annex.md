@@ -345,7 +345,18 @@ extraction, so it is enumerated rather than implied:
   matches, it returns `consumed_result` verbatim without re-entering the core. That idempotency
   lives on the token row because a firm-scoped `op_receipt` cannot exist before the firm does
   (0017:702-712, `ck_firm_admissions_consumed_receipt_0017`).
-- Stamps `consumed_at` / `consumed_op_key` / `consumed_result`.
+  > **Pre-hardening history, superseded by the hash-only bearer-token migration (裁-16b).** The
+  > `where token = p_admission_token` spelling above is what 0145 shipped and is kept here as the
+  > record of what P4 tranche-2 was designed against. `clara.firm_admissions.token` no longer
+  > exists: the hardening-batch Migration B converts the table to `token_hash bytea` (NOT NULL,
+  > unique) with a surrogate `id` primary key, and the entrance now reads
+  > `where token_hash = sha256(convert_to(p_admission_token::text, 'UTF8'))`. Everything else in
+  > this bullet — the `FOR UPDATE` lock, the replay-return, and where they live — is unchanged;
+  > only the compared column moved. `create_firm`'s signature is unchanged, so every caller still
+  > hands the same plaintext uuid it always did.
+- Stamps `consumed_at` / `consumed_op_key` / `consumed_result` — re-keyed by 裁-16b onto the
+  locked row's surrogate `id` (`where id = a.id`), the same row this bullet's `FOR UPDATE`
+  already holds.
 - `_audit` with action **`'create_firm'`**; `_append_event('firm.created')`.
 
 **At the `approve_firm_registration` ENTRANCE** (new):

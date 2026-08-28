@@ -49,15 +49,49 @@ Both are live writes, so run them yourself, in a terminal, connected as the cere
 insert into clara.users (id, display_name, email, is_agent)
 values ('<UUID>', 'Rome Public Advisory — owner', '<EMAIL>', false);
 
--- (b) mint ONE admission token, and print it.
-insert into clara.firm_admissions (token, note)
-values (gen_random_uuid(), 'Gate F — Rome Public Advisory, minted <YYYY-MM-DD>')
-returning token;
+-- (b) mint ONE admission token, and print it ONCE. As of 裁-16b (pre-beta hardening batch),
+-- clara.firm_admissions stores ONLY the token's hash -- so mint it in the same statement that
+-- hashes it, and capture the printed value before you close the terminal.
+with minted as (
+  select gen_random_uuid() as token
+), ins as (
+  insert into clara.firm_admissions (token_hash, note)
+  select sha256(convert_to(token::text, 'UTF8')),
+         'Gate F — Rome Public Advisory, minted <YYYY-MM-DD>'
+    from minted
+  returning 1
+)
+select token from minted;
 ```
 
 Keep that token where you keep the other `~/.clara-*` secrets. **Do not paste it into chat** —
 it is a single-use bearer credential for creating a firm, and the agent does not need to see it:
 the agent drives the journey through the product, where *you* supply it.
+
+**What 裁-16b does and does not buy you.** The `clara.firm_admissions` ROW carries only the hash:
+nobody with database access — a restored backup, a DR drill, a support session, an agent read —
+can recover the token from it. What the ruling does *not* do is erase the plaintext from the
+places the statement above just printed it: your terminal scrollback, your shell's session log,
+a tmux capture, a screenshot. Treat those the way you treat the token itself, and close or clear
+that terminal once the token is filed. (An earlier revision of this page claimed the plaintext
+"exists nowhere on disk after this statement returns" — it was overclaiming, and is corrected
+here.)
+
+**If you already hold a token and need its hash** — checking whether it is the one on file,
+re-minting a row for a token an operator still has, or verifying an entry by hand — hash it the
+same way `create_firm` does, from the CANONICAL uuid rendering. The `::uuid::text` cast is
+load-bearing: an uppercase or brace-wrapped spelling hashes to something different, and the row
+would then be findable by nobody:
+
+```sql
+-- What create_firm will compute for the token you hold.
+select encode(sha256(convert_to('<TOKEN>'::uuid::text, 'UTF8')), 'hex') as expected_hash;
+
+-- Is it on file, and still unconsumed?
+select id, note, consumed_at
+  from clara.firm_admissions
+ where token_hash = sha256(convert_to('<TOKEN>'::uuid::text, 'UTF8'));
+```
 
 Sanity check before moving on — this must return exactly one row, and `member_of` must be null:
 

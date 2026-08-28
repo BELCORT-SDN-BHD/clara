@@ -76,15 +76,17 @@ test("p4t1.invite: token_hash is stored, never the raw token", async () => {
   assert.ok(cols.includes("token_hash"));
 });
 
-test("p4t1.invite: an op_key replay returns the SAME token (courier-retry shape), and does not re-mint a second invite row", async () => {
+test("p4t1.invite: RE-TRUED (裁-16a, pre-beta hardening batch) — an op_key replay does NOT re-mint a second invite row and returns the SAME token_hash, but the plaintext token is NEVER re-surfaced (the courier-retry-by-replaying-the-token shape this cell used to pin is exactly the plaintext-at-rest leak 裁-16a closes; a courier that needs to re-send now has to be handed the token on the FIRST call, not fished back out via a replay)", async () => {
   const sc = await scene("replay");
   const key = opk("replay");
   const first = await inviteMember(sc.admin, { email: "cand5@rig.test", role: "viewer", opKey: key });
+  assert.equal(typeof first.token, "string", "the fresh mint returns the plaintext token once");
   const second = await inviteMember(sc.admin, { email: "cand5@rig.test", role: "viewer", opKey: key });
-  assert.equal(second.token, first.token);
+  assert.equal(second.token, undefined, "a replay must NOT re-surface the plaintext token");
+  assert.equal(second.token_hash, first.token_hash, "the replay's hash still identifies the SAME invite deterministically");
   assert.equal(second.invite_id, first.invite_id);
   const n = await rootQuery("select count(*)::int as n from clara.firm_invites where firm_id = $1 and email = $2", [sc.firm, "cand5@rig.test"]);
-  assert.equal(n.rows[0].n, 1);
+  assert.equal(n.rows[0].n, 1, "the replay never re-mints a second invite row");
 });
 
 // ---------------------------------------------------------------------------
@@ -433,18 +435,33 @@ test("p4t1.accept: [C2] two DIFFERENT actors sharing the SAME invited-email JWT 
   assert.equal(p2row.rows.length, 0, "p2 must not receive p1's identity, nor a minted identity of their own, from this refused call");
 });
 
-test("p4t1.invite: [C3] op_receipts.result stores the invite's raw token in plaintext, owner-only -- the SAME zero-app-grant bearer-credential-at-rest shape as clara.firm_admissions.token (pinned as measured, not silently changed here; an estate-wide pass is a named follow-up, see PR body)", async () => {
+test("p4t1.invite: [C3] RE-TRUED (裁-16a, pre-beta hardening batch) — op_receipts.result stores ONLY the invite token's hash; the plaintext is returned to the caller once and never persisted; a replay of the same op_key surfaces no plaintext", async () => {
   const sc = await scene("c3token");
   const key = opk("c3token");
   const r = await inviteMember(sc.admin, { email: "c3token@rig.test", role: "viewer", opKey: key });
+  assert.equal(typeof r.token, "string", "the fresh mint returns the plaintext token to the caller, exactly once");
+  assert.ok(r.token.length > 0);
+
   const receipt = await rootQuery(
     "select result from clara.op_receipts where firm_id = $1 and fn = 'invite_member' and op_key = $2",
     [sc.firm, key],
   );
   assert.equal(receipt.rows.length, 1, "expected exactly one op_receipts row for this op_key");
-  assert.equal(receipt.rows[0].result.token, r.token, "the raw token is stored in op_receipts.result in plaintext");
+  const persisted = receipt.rows[0].result;
+  assert.equal(persisted.token, undefined, "the plaintext token must NOT be persisted in op_receipts.result");
+  assert.equal(typeof persisted.token_hash, "string", "op_receipts.result carries the hash instead");
+  const expectedHash = await rootQuery("select encode(sha256(convert_to($1,'UTF8')),'hex') as h", [r.token]);
+  assert.equal(persisted.token_hash, expectedHash.rows[0].h, "the persisted hash matches sha256(the returned plaintext token)");
+
+  // REPLAY: the same op_key, called again, short-circuits at _reserve_op's dedupe branch and
+  // returns whatever is in op_receipts.result -- hash-only, going forward. A replay cannot
+  // re-mint or re-surface the plaintext because there is no plaintext anywhere for it to read.
+  const replay = await inviteMember(sc.admin, { email: "c3token@rig.test", role: "viewer", opKey: key });
+  assert.equal(replay.token, undefined, "a replay of the same op_key returns NO plaintext token");
+  assert.equal(replay.token_hash, persisted.token_hash, "the replay's hash matches the original mint's persisted hash");
+
   const grant = await rootQuery("select has_table_privilege('clara_authenticated', 'clara.op_receipts'::regclass, 'select') as ok");
-  assert.equal(grant.rows[0].ok, false, "no app role has a SELECT path onto op_receipts -- the token is owner-reachable only");
+  assert.equal(grant.rows[0].ok, false, "no app role has a SELECT path onto op_receipts -- the hash-only receipt is owner-reachable only");
 });
 
 test("p4t1.accept: the global one-active-membership invariant refuses a joiner who already belongs elsewhere (CLR10, from the shared _add_member_core)", async () => {
