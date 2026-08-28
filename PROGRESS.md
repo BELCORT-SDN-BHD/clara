@@ -10,10 +10,11 @@ file wins or it is stale — and truing it is the first thing you do.
 *(as of 2026-08-28 — **THE 磨合 WINDOW IS OPEN AND SPRINTING: P1-P3 MERGED IN FULL
 (#357-#367) · the night train #368-#384 ALL MERGED** (PR-1c `0138` · rulings ledgers · P4
 design set · verb census · `0139` · needs-you wiring · PR-2a `0140` · Mobbin grounding ·
-the port-wave plan · the resource audit · the ceremony as-run) — **LIVE 135/`0140`** (the
-0139+0140 D1 window RAN 2026-08-28), F-A7b BUILD-AUTHORIZED, **the PORT WAVE IS RUNNING:
-T0 seam + WAVE A COMPLETE — T3/T6/T5/T9 MERGED (#382 #385 #386 #387 #390); Wave B
-(T4/T7/T8/T10) BUILT and in independent review; P4's `0141` in its final pin round**)*
+the port-wave plan · the resource audit · the ceremony as-runs) — **LIVE 136/`0141`** (0139+0140
+windowed 2026-08-28; **P4 tranche-1 `0141` MERGED #393 + CEREMONIED 14:10 UTC**, as-run
+`docs/plan/completed/mohe-0141-apply-asrun.md`; tranche-2 DISPATCHED), F-A7b BUILD-AUTHORIZED,
+**PORT WAVE: T0 + WAVES A AND B COMPLETE — T3/T6/T5/T9 (#382 #385 #386 #387 #390) ·
+T10/T7/T4/T8 (#395 #399 #398 #397); 9/11 trains on main; Wave C waits for F-A7b PR-a (裁-8)**)*
 
 - **THE 磨合 (frontend integration) WINDOW OPENED 2026-08-26/27** — its own session, per
   `docs/plan/active/mohe-session-handoff-2026-08-26.md`; `chatTurn_v14` deployed +
