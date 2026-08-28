@@ -979,7 +979,114 @@
   },
   "FixedAssetsDepreciation": {},
   "AdjustmentsAccounts": {},
-  "StaffAdvances": {},
+  "StaffAdvances": {
+    "loading": "Loading staff advances…",
+    "ledgerHeading": "Staff advances",
+    "tieOk": "The register ties to the general ledger.",
+    "tieMismatch": "The register does not tie to the general ledger for at least one account — see the statement below to trace the difference.",
+    "enrolmentsHeading": "Enrolled accounts",
+    "noEnrolments": "No staff-advance accounts enrolled for this client yet.",
+    "accountCode": "Account",
+    "personLabel": "Person",
+    "status": "Status",
+    "statusActive": "Active",
+    "statusRetired": "Retired",
+    "summaryHeading": "Summary",
+    "summaryOutstanding": "{amount} outstanding across every enrolled account",
+    "summaryIncomplete": "{count} advance(s) missing particulars",
+    "statementHeading": "Statement",
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
+    "linesEditor": {
+      "lineNo": "#",
+      "account": "Account",
+      "description": "Description",
+      "debit": "Debit",
+      "credit": "Credit",
+      "selectAccount": "Select an account…",
+      "removeLine": "Remove line",
+      "presentationSumLabel": "Sum (presentation only)",
+      "notBalanced": "Debits and credits do not balance yet — the DB will refuse an unbalanced entry.",
+      "addLine": "Add line"
+    },
+    "allocationsEditor": {
+      "lineNo": "Line",
+      "advance": "Advance",
+      "amount": "Amount",
+      "selectAdvance": "Select an outstanding advance…",
+      "outstandingSuffix": "outstanding",
+      "removeAllocation": "Remove allocation",
+      "addAllocation": "Add allocation",
+      "noOutstanding": "No outstanding advances to allocate against for this client."
+    },
+    "bookApplication": {
+      "trigger": "Book application",
+      "title": "Book a staff-advance application",
+      "description": "Record a payroll deduction, bank return or claim against one or more outstanding staff advances. The entry lines and the register allocations are recorded together in one governed call.",
+      "confirm": "Book application",
+      "kind": "Kind",
+      "postingDate": "Posting date",
+      "memo": "Memo",
+      "reason": "Reason",
+      "linesHeading": "Entry lines",
+      "allocationsHeading": "Register allocations",
+      "allocatedSummary": "RM {amount} allocated to outstanding advances",
+      "kinds": {
+        "payroll_deduction": "Payroll deduction",
+        "bank_return": "Bank return",
+        "claim": "Claim"
+      }
+    },
+    "completeParticulars": {
+      "trigger": "Complete particulars",
+      "title": "Complete this advance's particulars",
+      "description": "Purpose and reference are recorded together, once — the register is append-only and does not allow a later edit.",
+      "confirm": "Save particulars",
+      "purposeLabel": "Purpose",
+      "referenceLabel": "Reference"
+    },
+    "enrolAccount": {
+      "trigger": "Enrol account",
+      "title": "Enrol a staff-advance account",
+      "description": "Enrolment is a supervisory act: it decides what this account means for every future entry. Choose an active, asset-typed, non-control chart account dedicated to ONE person.",
+      "confirm": "Enrol account",
+      "accountLabel": "Chart account",
+      "selectAccount": "Select an account…",
+      "noCandidateAccounts": "No active, asset-typed, non-control accounts are available on this client's chart — add one on the Chart of accounts tab first.",
+      "personLabel": "Person",
+      "attestationLabel": "Attestation",
+      "attestationHint": "Who this account is for, and whether the balance is a related-party balance. Hard constraint 13: a sole proprietor's own draws are EQUITY, never a staff advance — do not enrol a proprietor's account here.",
+      "confirmDedicatedLabel": "I confirm this account is dedicated to this one person only."
+    },
+    "retireAccount": {
+      "trigger": "Retire",
+      "title": "Retire {account}",
+      "description": "Retiring closes this enrolment. Every advance on the account must already be settled — the DB refuses while any balance remains outstanding.",
+      "confirm": "Retire account",
+      "reasonLabel": "Reason",
+      "reasonPlaceholder": "Why is this enrolment being retired?"
+    },
+    "needsYou": {
+      "purposePlaceholder": "Purpose",
+      "referencePlaceholder": "Reference",
+      "submitting": "Saving…",
+      "submit": "Save",
+      "completeTrigger": "Complete particulars"
+    },
+    "statement": {
+      "noAccounts": "No enrolled accounts yet — enrol one above to see its statement.",
+      "accountLabel": "Account",
+      "empty": "No movement recorded for this account in the selected range.",
+      "date": "Date",
+      "kind": "Kind",
+      "amount": "Amount",
+      "running": "Running balance",
+      "openingLabel": "Opening balance",
+      "closingLabel": "Closing balance"
+    }
+  },
   "DraftsDocumentGovernance": {},
   "CodingQuestionsSignals": {},
   "ArApCounterparty": {},

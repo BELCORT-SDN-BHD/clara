@@ -24,6 +24,7 @@ import type { ComponentType } from "react";
 
 import type { ReviewQueueRow, ReviewQueueRowKind } from "@/lib/firm/needs-you";
 import { OpenQuestionAffordance } from "./open-question-affordance";
+import { StaffAdvanceIncompleteAffordance } from "./staff-advance-incomplete-affordance";
 
 export type NeedsYouAffordanceProps = {
   row: ReviewQueueRow;
@@ -64,6 +65,10 @@ export const NEEDS_YOU_AFFORDANCES: Partial<Record<ReviewQueueRowKind, NeedsYouA
   Object.create(null),
   {
     open_question: OpenQuestionAffordance,
+    // T5 (port-wave plan §3.2, §5's staffAdvances row): the inline "complete
+    // particulars" act on a staff_advance_incomplete row — see
+    // ./staff-advance-incomplete-affordance.tsx's own header for the grounding.
+    staff_advance_incomplete: StaffAdvanceIncompleteAffordance,
   } satisfies Partial<Record<ReviewQueueRowKind, NeedsYouAffordance>>,
 );
 
