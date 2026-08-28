@@ -16,9 +16,11 @@
 //   - clara.attest_close_exception(p_close_run uuid, p_check_key text, p_reason text,
 //     p_op_key text, p_item_key text DEFAULT NULL, p_from_proposal uuid DEFAULT NULL)
 //     — 0120:919 (the LIVE 6-arg signature; p_from_proposal stays unpassed/defaulted,
-//     exactly like closeApi.ts:151-166 — the close_proposals carrier and its doors ARE
-//     live (0138), but the panel that would read one to source an id from is not built
-//     yet, see components/close/CloseProposalPanel.tsx's "Clara proposes close" note)
+//     exactly like closeApi.ts:151-166. FIX-5 (rev-t1): the close_proposals carrier,
+//     its doors AND a real read of a live proposal are ALL live now (T1,
+//     components/close/CloseProposalPanel.tsx) — the missing piece is a per-gate
+//     "attest THIS check_key from proposal X" affordance on GateCheckRow.tsx's own
+//     AttestForm, not the panel's existence)
 //   - clara.list_fiscal_years(p_client uuid) — 0056:2665, unchanged since
 //   - clara.get_close_plan(p_fiscal_year_id uuid) — 0064:154, unchanged since
 //   - clara.verify_close(p_receipt uuid) — 0056:2529, viewer+, unchanged since

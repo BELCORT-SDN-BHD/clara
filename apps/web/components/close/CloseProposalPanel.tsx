@@ -20,6 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useState } from "react";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { listCloseProposalsForRun, settleCloseProposal } from "@/lib/close/api";
+import type { CloseProposalRow } from "@/lib/close/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { businessDateTime } from "@/lib/business-date";
@@ -67,7 +68,7 @@ export function CloseProposalPanel({
           <span className="text-xs text-muted-foreground">{t("drafted", { count: p.drafted.length })}</span>
           {p.state === "open" ? (
             <div className="flex flex-wrap gap-2">
-              <AdoptDialog busy={proposals.busy} onConfirm={() => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "adopted", null, { session }); })} />
+              <AdoptDialog proposal={p} busy={proposals.busy} onConfirm={() => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "adopted", null, { session }); })} />
               <WithdrawDialog busy={proposals.busy} onConfirm={(reason) => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "withdrawn", reason, { session }); })} />
             </div>
           ) : (
@@ -81,10 +82,25 @@ export function CloseProposalPanel({
   );
 }
 
-function AdoptDialog({ busy, onConfirm }: { busy: boolean; onConfirm: () => Promise<void> }) {
+// FIX-4 (rev-t1, law 71): a consent shows what it approves. Adopting binds
+// the firm to Clara's judgement across EVERY drafted gate item (settle_
+// close_proposal's own FIX-7 arm proves each one carries a live agent-
+// authored attestation before it will adopt) — a title + a generic sentence
+// + Confirm, with the narrative/rationale/model/drafted-count sitting BEHIND
+// the modal, showed the human nothing of what they were actually approving.
+function AdoptDialog({ proposal, busy, onConfirm }: { proposal: CloseProposalRow; busy: boolean; onConfirm: () => Promise<void> }) {
   const t = useTranslations("ClientClose.proposal.adopt");
   return (
-    <CloseDoorDialog triggerLabel={t("trigger")} title={t("title")} description={t("description")} confirmLabel={t("confirm")} busy={busy} onConfirm={onConfirm} />
+    <CloseDoorDialog triggerLabel={t("trigger")} title={t("title")} description={t("description")} confirmLabel={t("confirm")} busy={busy} onConfirm={onConfirm}>
+      <div className="flex flex-col gap-1.5 text-sm">
+        <p className="text-card-foreground">{proposal.narrative}</p>
+        <p className="text-xs text-muted-foreground">{proposal.rationale}</p>
+        <p className="text-xs text-muted-foreground">
+          {t("basisModel", { model: `${proposal.model_name} ${proposal.model_version}` })} ·{" "}
+          {t("basisDrafted", { count: proposal.drafted.length })}
+        </p>
+      </div>
+    </CloseDoorDialog>
   );
 }
 

@@ -752,7 +752,9 @@
         "trigger": "Adopt",
         "title": "Adopt this close proposal",
         "description": "clara.settle_close_proposal — adopts Clara's proposal. Refuses unless every drafted item already carries a live agent-authored attestation on this run.",
-        "confirm": "Adopt"
+        "confirm": "Adopt",
+        "basisModel": "proposed by {model}",
+        "basisDrafted": "{count, plural, =1 {covers 1 drafted item} other {covers # drafted items}}"
       },
       "withdraw": {
         "trigger": "Withdraw",
@@ -804,7 +806,7 @@
     "closePrep": {
       "heading": "Close-prep hold",
       "loading": "Loading close-prep hold…",
-      "notHeld": "Close prep is not on hold.",
+      "notHeld": "No close-prep hold is visible here.",
       "held": "on hold",
       "heldBy": "held by",
       "hold": {

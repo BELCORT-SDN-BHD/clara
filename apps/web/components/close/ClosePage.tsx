@@ -59,11 +59,11 @@ export function ClosePage({ clientId }: { clientId: string }) {
           list_agent_act_receipts. Each owns its own read/reload; none
           depends on which fiscal year is selected above. */}
       <section className="flex flex-col gap-2">
-        <SectionHeader level={3}>{t("closePrep.heading")}</SectionHeader>
+        <SectionHeader level={2}>{t("closePrep.heading")}</SectionHeader>
         <ClosePrepHoldPanel clientId={clientId} session={sessionTokenAccessor} />
       </section>
       <section className="flex flex-col gap-2">
-        <SectionHeader level={3}>{t("futureAttestation.heading")}</SectionHeader>
+        <SectionHeader level={2}>{t("futureAttestation.heading")}</SectionHeader>
         <FutureAttestationPanel clientId={clientId} session={sessionTokenAccessor} />
       </section>
       <AgentActReceiptsPanel clientId={clientId} session={sessionTokenAccessor} />

@@ -32,7 +32,7 @@ export function AgentActReceiptsPanel({ clientId, session }: { clientId: string;
 
   return (
     <section className="flex flex-col gap-2">
-      <SectionHeader level={3}>{t("heading")}</SectionHeader>
+      <SectionHeader level={2}>{t("heading")}</SectionHeader>
       {receipts.loading && receipts.data === null ? <LoadingState>{t("loading")}</LoadingState> : null}
       {receipts.err ? <StateBanner tone="error">{receipts.err}</StateBanner> : null}
       {receipts.data && receipts.data.length === 0 ? <EmptyState>{t("empty")}</EmptyState> : null}

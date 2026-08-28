@@ -497,5 +497,8 @@ test("attestCloseException posts five args; p_from_proposal is never sent (defau
     { p_close_run: s.body.p_close_run, p_check_key: s.body.p_check_key, p_reason: s.body.p_reason, p_item_key: s.body.p_item_key },
     { p_close_run: "run1", p_check_key: "ar_control_tie", p_reason: "manually verified", p_item_key: null },
   );
-  assert.ok(!("p_from_proposal" in s.body), "p_from_proposal must never be sent — no close_proposals carrier exists");
+  assert.ok(
+    !("p_from_proposal" in s.body),
+    "p_from_proposal must never be sent from THIS wrapper — the carrier and its doors are live (0138), and CloseProposalPanel.tsx now reads it; there is no per-gate 'attest from this proposal' affordance wired into attestCloseException's own call sites yet",
+  );
 });

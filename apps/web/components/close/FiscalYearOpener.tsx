@@ -135,7 +135,7 @@ function SetFyEndDialog({ busy, onConfirm }: { busy: boolean; onConfirm: (month:
   );
 }
 
-type ProposeState = { loading: boolean; result: FiscalYearProposal | null; err: string | null };
+type ProposeState = { loading: boolean; result: FiscalYearProposal | null; err: string | null; clr: { code: string; reason: string | null } | null };
 
 function OpenFiscalYearDialog({
   clientId,
@@ -156,7 +156,7 @@ function OpenFiscalYearDialog({
   const [endsOn, setEndsOn] = useState("");
   const [endsOnTouched, setEndsOnTouched] = useState(false);
   const [lengthReason, setLengthReason] = useState("");
-  const [propose, setPropose] = useState<ProposeState>({ loading: false, result: null, err: null });
+  const [propose, setPropose] = useState<ProposeState>({ loading: false, result: null, err: null, clr: null });
   const epochRef = useRef(0);
   const needsLengthReason = openFiscalYearNeedsLengthReason(refusal);
 
@@ -164,15 +164,24 @@ function OpenFiscalYearDialog({
     setStartsOn(value);
     if (!value) return;
     const epoch = ++epochRef.current;
-    setPropose({ loading: true, result: null, err: null });
+    setPropose({ loading: true, result: null, err: null, clr: null });
     try {
       const result = await proposeFiscalYear(clientId, value, { session });
       if (epoch !== epochRef.current) return; // superseded by a later blur
-      setPropose({ loading: false, result, err: null });
+      setPropose({ loading: false, result, err: null, clr: null });
       if (!endsOnTouched) setEndsOn(result.ends_on);
     } catch (e) {
       if (epoch !== epochRef.current) return;
-      setPropose({ loading: false, result: null, err: isDoorRefusal(e) ? e.message : e instanceof Error ? e.message : String(e) });
+      // N3 (rev-t1 nit): a DoorRefusal's own CLR code was being DROPPED here
+      // — only `.message` survived into `err`, the same class of loss the
+      // rest of this domain refuses everywhere else (CloseReceiptPanel's own
+      // Low-7 finding, doors.ts's typed RefusalError.code).
+      setPropose({
+        loading: false,
+        result: null,
+        err: isDoorRefusal(e) ? e.message : e instanceof Error ? e.message : String(e),
+        clr: isDoorRefusal(e) ? { code: e.code, reason: e.reason } : null,
+      });
     }
   }
 
@@ -215,7 +224,11 @@ function OpenFiscalYearDialog({
             {propose.result.fy_end.fallback ? t("previewFallback", { endsOn: propose.result.ends_on }) : t("previewAsserted", { endsOn: propose.result.ends_on })}
           </EmptyState>
         ) : null}
-        {propose.err ? <StateBanner tone="error">{propose.err}</StateBanner> : null}
+        {propose.err ? (
+          <StateBanner tone="error" code={propose.clr ? `${propose.clr.code}${propose.clr.reason ? ` · ${propose.clr.reason}` : ""}` : undefined}>
+            {propose.err}
+          </StateBanner>
+        ) : null}
         {needsLengthReason ? (
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="fy-open-length-reason">{t("lengthReasonLabel")}</Label>

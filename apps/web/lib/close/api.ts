@@ -130,11 +130,15 @@ export async function reopenFiscalYear(
 /** clara.attest_close_exception(p_close_run, p_check_key, p_reason, p_op_key,
  *  p_item_key, p_from_proposal) — 0120:919, the LIVE 6-arg signature.
  *  `p_from_proposal` is DELIBERATELY never passed here (stays defaulted null)
- *  — the `close_proposals` carrier and its doors ARE live (0138), but the
- *  panel that would read a proposal to source an id from is not built yet
- *  (components/close/CloseProposalPanel.tsx, P6 scope). This is the EXISTING
- *  audited attest door from 0056 (0056:1816-1941); this build invents no new
- *  writer. */
+ *  — FIX-5 (rev-t1): the `close_proposals` carrier, its doors AND a real
+ *  read of a live proposal ARE all live (T1, components/close/
+ *  CloseProposalPanel.tsx), which corrects an earlier claim on this comment
+ *  that the panel itself was unbuilt. What is STILL missing is a per-gate
+ *  affordance on GateCheckRow.tsx's own AttestForm — "attest THIS check_key
+ *  FROM proposal X's drafted item" — the wiring that would let a human pick
+ *  a proposal id to source here, not the panel's existence. This is the
+ *  EXISTING audited attest door from 0056 (0056:1816-1941); this build
+ *  invents no new writer. */
 export async function attestCloseException(
   args: { closeRunId: string; checkKey: string; reason: string; itemKey: string | null },
   opts: Opts = {},
