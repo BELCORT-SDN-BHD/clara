@@ -51,7 +51,7 @@ import {
   endPool,
 } from "./rig-fixtures.mjs";
 import { printLaneNotes } from "./rig-runtime-helpers.mjs";
-import { seedVerifiedDocument, activeFilings, ensureFirmNarrowAttribution } from "./rig-docs-fixtures.mjs";
+import { seedVerifiedDocument, activeFilings, ensureFirmNarrowAttribution, seedExtraction, seedRegion } from "./rig-docs-fixtures.mjs";
 
 let world;
 let ready = false;
@@ -303,14 +303,19 @@ async function wakeOpenFirmQuestion(secret, o) {
   return runAs(wakeActor("clara_wake_filing", secret), namedCall("wake_open_firm_question", specs), vals);
 }
 
+// 裁-22: gained p_document (the triggering document) as its 2nd positional arg, and
+// p_citations is now DB-resolved against it (region_id-keyed, never the pre-裁-22
+// `[{"note":"rig"}]` placeholder shape) -- see proposal-basis-resolved.test.mjs for the full
+// resolver battery. This file's own sole cell below is updated to a real, resolvable citation.
 async function wakeProposeIdentifierPromotion(secret, o) {
   const specs = [
-    { name: "p_client" }, { name: "p_kind" }, { name: "p_value" }, { name: "p_sightings", cast: "int" },
-    { name: "p_citations", cast: "jsonb" }, { name: "p_rationale" }, { name: "p_model", cast: "jsonb" },
-    { name: "p_op_key" },
+    { name: "p_client" }, { name: "p_document" }, { name: "p_kind" }, { name: "p_value" },
+    { name: "p_sightings", cast: "int" }, { name: "p_citations", cast: "jsonb" },
+    { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_op_key" },
   ];
   const vals = [
-    o.client, o.kind ?? "ssm", o.value, o.sightings ?? 1, JSON.stringify(o.citations ?? [{ note: "rig" }]),
+    o.client, o.document ?? null, o.kind ?? "ssm", o.value, o.sightings ?? 1,
+    JSON.stringify(o.citations ?? [{ region_id: null }]),
     o.rationale ?? "rig rationale", JSON.stringify(o.model ?? validModel()), o.opKey ?? opk("wpip"),
   ];
   return runAs(wakeActor("clara_wake_filing", secret), namedCall("wake_propose_identifier_promotion", specs), vals);
@@ -1102,13 +1107,22 @@ test("wake_open_firm_question: blank rationale -> CLR10", async (t) => {
 test("wake_propose_identifier_promotion: writes a promotion card, zero client_identifiers rows (B9's spirit)", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
+  const doc = await seedVerifiedDocument({ firm: world.firms.A, kind: "invoice" });
+  const extraction = await seedExtraction({ firm: world.firms.A, document: doc.documentId });
+  const region = await seedRegion({ firm: world.firms.A, extraction });
   const before = await rootQuery("select count(*)::int as n from clara.client_identifiers where client_id=$1", [world.clients.A1]);
-  const r = await wakeProposeIdentifierPromotion(secret, { client: world.clients.A1, kind: "ssm", value: `SSM${Date.now()}` });
+  const r = await wakeProposeIdentifierPromotion(secret, {
+    client: world.clients.A1, document: doc.documentId, kind: "ssm", value: `SSM${Date.now()}`,
+    citations: [{ region_id: region }],
+  });
   assert.ok(r.rows[0].result.promotion_id, "promotion_id returned");
   const after2 = await rootQuery("select count(*)::int as n from clara.client_identifiers where client_id=$1", [world.clients.A1]);
   assert.equal(after2.rows[0].n, before.rows[0].n, "no client_identifiers row written by the proposal itself");
-  const card = await rootQuery("select status from clara.client_identifier_promotions where id=$1", [r.rows[0].result.promotion_id]);
+  const card = await rootQuery("select status, sightings, citations from clara.client_identifier_promotions where id=$1", [r.rows[0].result.promotion_id]);
   assert.equal(card.rows[0].status, "proposed");
+  assert.equal(card.rows[0].sightings, 1, "裁-22: sightings is DB-derived (one distinct resolved region)");
+  assert.equal(card.rows[0].citations[0].region_id, region, "the persisted citation is the RESOLVED region");
+  assert.equal(card.rows[0].citations[0].kind, "region", "Codex MED-3: the persisted citation carries kind explicitly");
 });
 
 // ===========================================================================
