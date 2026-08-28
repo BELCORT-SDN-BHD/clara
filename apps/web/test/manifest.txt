@@ -33,10 +33,15 @@ components/close/close-keyboard.test.tsx
 components/documents/documents-a11y.test.tsx
 components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
+components/firm/compliance-watch-affordance.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
 components/firm/needs-you-gaps.test.tsx
 components/firm/staff-advance-incomplete-affordance.test.tsx
+components/firm-admin/firm-admin-a11y.test.tsx
+components/firm-admin/firm-admin-keyboard.test.tsx
+components/firm-admin/firm-admin-pages-a11y.test.tsx
+components/firm-admin/vendor-binding-ceremony.test.tsx
 components/journals/journals-a11y.test.tsx
 components/journals/journals-governance-a11y.test.tsx
 components/journals/journals-governance-keyboard.test.tsx
@@ -84,6 +89,9 @@ lib/firm/needs-you.test.ts
 lib/firm/reads.test.ts
 lib/firm/use-async-read.test.ts
 lib/firm/use-review-queue.test.ts
+lib/firm-admin/chat-sharing.test.ts
+lib/firm-admin/compliance.test.ts
+lib/firm-admin/vendor-bindings.test.ts
 lib/journals/api-compose.test.ts
 lib/journals/api.test.ts
 lib/journals/balance.test.ts

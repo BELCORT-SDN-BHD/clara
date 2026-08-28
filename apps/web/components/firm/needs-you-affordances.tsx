@@ -26,6 +26,7 @@ import type { ReviewQueueRow, ReviewQueueRowKind } from "@/lib/firm/needs-you";
 import { OpenQuestionAffordance } from "./open-question-affordance";
 import { StaffAdvanceIncompleteAffordance } from "./staff-advance-incomplete-affordance";
 import { FixedAssetIncompleteAffordance } from "./fixed-asset-incomplete-affordance";
+import { ComplianceWatchAffordance } from "./compliance-watch-affordance";
 
 export type NeedsYouAffordanceProps = {
   row: ReviewQueueRow;
@@ -73,6 +74,10 @@ export const NEEDS_YOU_AFFORDANCES: Partial<Record<ReviewQueueRowKind, NeedsYouA
     // T3 (port wave, port-wave-plan-2026-08-28.md §5): the "inline complete"
     // affordance for a fixed asset born with incomplete particulars.
     fixed_asset_incomplete: FixedAssetIncompleteAffordance,
+    // T10 (port-wave plan §4 T10, §5's compliance row): the ack/snooze/resolve
+    // inline acts on a compliance_watch row — see
+    // ./compliance-watch-affordance.tsx's own header for the grounding.
+    compliance_watch: ComplianceWatchAffordance,
   } satisfies Partial<Record<ReviewQueueRowKind, NeedsYouAffordance>>,
 );
 
