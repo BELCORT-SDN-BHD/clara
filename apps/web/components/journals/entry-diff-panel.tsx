@@ -34,10 +34,19 @@ export function EntryDiffPanel({ entryId, clientId }: { entryId: string; clientI
     return err ? <StateBanner tone="error" code={clr ? clr.code : undefined}>{err}</StateBanner> : null;
   }
 
+  return <EntryDiffContent entryDiff={data.entryDiff} docDiff={data.docDiff} />;
+}
+
+/** The pure, fixed-prop presentational body — split out from the self-
+ *  fetching wrapper above so an a11y scan can mount it directly with fixture
+ *  data, the SAME pattern documents-a11y.test.tsx already uses for
+ *  DocumentMetadata/DocumentEvidence/DocumentEntries (fixed props, no fetch
+ *  mock needed) rather than driving the parent's own hydration cycle. */
+export function EntryDiffContent({ entryDiff, docDiff }: { entryDiff: EntryDiffResult; docDiff: DocEntryDiffResult | null }) {
   return (
     <div className="flex flex-col gap-4 border-t border-border pt-2">
-      <DocDiffSection docDiff={data.docDiff} />
-      <RevisionsSection entryDiff={data.entryDiff} />
+      <DocDiffSection docDiff={docDiff} />
+      <RevisionsSection entryDiff={entryDiff} />
     </div>
   );
 }
@@ -46,7 +55,7 @@ function DocDiffSection({ docDiff }: { docDiff: DocEntryDiffResult | null }) {
   const t = useTranslations("DraftsDocumentGovernance.entryDiff");
   return (
     <section className="flex flex-col gap-1">
-      <SectionHeader level={4}>{t("docDiffHeading")}</SectionHeader>
+      <SectionHeader level={2}>{t("docDiffHeading")}</SectionHeader>
       {docDiff === null ? (
         <p className="text-sm text-muted-foreground">{t("noSourceDocument")}</p>
       ) : docDiff.fields.length === 0 ? (
@@ -86,14 +95,14 @@ function RevisionsSection({ entryDiff }: { entryDiff: EntryDiffResult }) {
   if (entryDiff.revisions.length === 0) {
     return (
       <section className="flex flex-col gap-1">
-        <SectionHeader level={4}>{t("revisionsHeading")}</SectionHeader>
+        <SectionHeader level={2}>{t("revisionsHeading")}</SectionHeader>
         <p className="text-sm text-muted-foreground">{t("revisionsEmpty")}</p>
       </section>
     );
   }
   return (
     <section className="flex flex-col gap-2">
-      <SectionHeader level={4}>{t("revisionsHeading")}</SectionHeader>
+      <SectionHeader level={2}>{t("revisionsHeading")}</SectionHeader>
       <ul className="flex flex-col gap-2">
         {entryDiff.revisions.map((rev) => (
           <li key={rev.revision_no} className="rounded-md border border-border p-2 text-sm">

@@ -35,6 +35,8 @@ components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
 components/firm/needs-you-gaps.test.tsx
 components/journals/journals-a11y.test.tsx
+components/journals/journals-governance-a11y.test.tsx
+components/journals/journals-governance-keyboard.test.tsx
 components/journals/journals-keyboard.test.tsx
 components/journals/use-amount-input.test.ts
 components/registers/opening-register.test.tsx
