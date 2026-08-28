@@ -34,8 +34,17 @@ test("getNeedsYouAffordance returns undefined for an unregistered but otherwise 
   assert.equal(getNeedsYouAffordance("some_unregistered_kind"), undefined);
 });
 
-test("getNeedsYouAffordance still resolves the one real, registered entry", () => {
+test("getNeedsYouAffordance still resolves open_question", () => {
   assert.equal(typeof getNeedsYouAffordance("open_question"), "function");
+});
+
+// F8 (independent review, fix-required, 2026-08-28): this file's own case
+// above used to say "the ONE real entry" — stale the moment T3 registered a
+// second one (needs-you-affordances.tsx's own table now carries
+// fixed_asset_incomplete too). Proven here by name, not inferred from the
+// other case still passing.
+test("getNeedsYouAffordance resolves fixed_asset_incomplete (T3, port wave)", () => {
+  assert.equal(typeof getNeedsYouAffordance("fixed_asset_incomplete"), "function");
 });
 
 test("NEEDS_YOU_AFFORDANCES has no prototype (Object.getPrototypeOf is null)", () => {
