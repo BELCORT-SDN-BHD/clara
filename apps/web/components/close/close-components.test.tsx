@@ -14,7 +14,6 @@ import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
 import messages from "../../messages/en.json";
-import { CloseProposalPanel } from "./CloseProposalPanel";
 import { GateCheckRow, toAttestItemKey } from "./GateCheckRow";
 import { CloseDoors, deriveCorrectionTarget, finalizeNeedsAttestation, reopenNeedsAttestation } from "./CloseDoors";
 import { FiscalYearPicker } from "./FiscalYearPicker";
@@ -25,14 +24,14 @@ function render(el: ReactElement): string {
   return renderToStaticMarkup(createElement(NextIntlClientProvider, { locale: "en", messages, children: el }));
 }
 
-test("CloseProposalPanel honestly states the carrier/doors are LIVE and names both, while the panel's own surface stays not-built", () => {
-  const html = render(createElement(CloseProposalPanel));
-  assert.match(html, /Clara proposes close/);
-  assert.match(html, /close_proposals/);
-  assert.match(html, /wake_propose_close/);
-  assert.match(html, /live/i);
-  assert.match(html, /not built/i);
-});
+// T1 (port-wave, 2026-08-29): CloseProposalPanel is no longer the fixed-props
+// NotBuiltNote this file's own renderToStaticMarkup instrument was built for
+// — it now self-fetches via useHydratedPart (a live `close_proposals` read +
+// the `settle_close_proposal` door), so it belongs with the OTHER self-
+// fetching close surfaces (ClosePlanPanel's own precedent: close-a11y.test.tsx
+// / close-keyboard.test.tsx use `renderComponent` + mocked fetch, never a
+// static pass). Its real coverage — the open-proposal render, Adopt/Withdraw,
+// a live CLR41 refusal, Cancel — is in close-t1-workbench.test.tsx.
 
 function check(overrides: Partial<ClosePlanCheck>): ClosePlanCheck {
   return {

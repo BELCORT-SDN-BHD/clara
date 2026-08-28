@@ -19,5 +19,5 @@ export default async function ClientClaraThreadPage({
   const { clientId, threadId } = await params;
   const { from } = await searchParams;
 
-  return <ClaraFullScreenThread threadId={threadId} returnHref={from || `/clients/${clientId}`} />;
+  return <ClaraFullScreenThread threadId={threadId} returnHref={from || `/clients/${clientId}`} clientId={clientId} />;
 }

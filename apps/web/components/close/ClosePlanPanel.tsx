@@ -17,6 +17,7 @@ import { useTranslations } from "next-intl";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import {
   getClosePlan,
+  getCloseReadiness,
   beginClose,
   finalizeClose,
   abandonClose,
@@ -29,6 +30,7 @@ import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { CloseDoors } from "./CloseDoors";
 import { CloseReceiptPanel } from "./CloseReceiptPanel";
+import { CloseReadinessPanel } from "./CloseReadinessPanel";
 import { GateCheckRow } from "./GateCheckRow";
 import { CloseProposalPanel } from "./CloseProposalPanel";
 
@@ -48,12 +50,24 @@ export function ClosePlanPanel({
   const t = useTranslations("ClientClose.plan");
   const tGates = useTranslations("ClientClose.gates");
   const tReceipt = useTranslations("ClientClose.receipt");
-  const { data: plan, busy, err, clr, act } = useHydratedPart(session, (s) => getClosePlan(fiscalYearId, { session: s }));
+  const tReadiness = useTranslations("ClientClose.readiness");
+  const { data: plan, busy, err, clr, act, reload } = useHydratedPart(session, (s) => getClosePlan(fiscalYearId, { session: s }));
+  // T1: get_close_readiness rides its OWN hydrated part (a distinct DB read
+  // from get_close_plan — see CloseReadinessPanel's own header for why the
+  // shapes differ), reloaded in lockstep with the plan on every act below.
+  const readiness = useHydratedPart(session, (s) => getCloseReadiness(clientId, fiscalYearId, { session: s }));
 
   // Wraps a door's own write in `act()` (which always reloads the plan, success
   // or failure) AND fires the picker's reload right alongside it — same
   // timing, same "always, regardless of outcome" discipline.
-  const actAndReloadYears = (fn: () => Promise<void>): Promise<void> => act(fn).then(() => reloadYears());
+  const actAndReloadYears = (fn: () => Promise<void>): Promise<void> =>
+    act(fn).then(() => Promise.all([reloadYears(), readiness.reload()]).then(() => undefined));
+
+  // T1: CloseProposalPanel's own settle acts already reload via ITS OWN
+  // hydrated part (proposals.act) — this is the follow-up reload for the
+  // things settling a proposal can affect: the plan's own attestation state
+  // (a settled 'adopted' proposal covers gate attestations) and readiness.
+  const reloadPlanAndReadiness = (): Promise<void> => Promise.all([reload(), readiness.reload()]).then(() => undefined);
 
   if (!plan) {
     // `err === null` here means either still loading, or the read resolved a
@@ -142,7 +156,17 @@ export function ClosePlanPanel({
         <CloseReceiptPanel receipt={plan.receipt} session={session} />
       </section>
 
-      <CloseProposalPanel />
+      <section className="flex flex-col gap-2">
+        <SectionHeader level={3}>{tReadiness("heading")}</SectionHeader>
+        <CloseReadinessPanel readiness={readiness.data} loading={readiness.loading} err={readiness.err} session={session} />
+      </section>
+
+      {/* Keyed by closeRunId (M1's own remount technique, ClosePage.tsx's
+          header): a fresh mount is the simplest, structurally-sound way to
+          re-fetch once a Begin-close act turns closeRunId from null into a
+          real id — useHydratedPart's own mount effect does not re-fire on a
+          changed PROP, only on a genuine null<->present SESSION transition. */}
+      <CloseProposalPanel key={closeRunId ?? "none"} closeRunId={closeRunId} session={session} reloadPlan={reloadPlanAndReadiness} />
     </div>
   );
 }
