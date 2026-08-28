@@ -88,27 +88,44 @@ test("p4t2.role_ceiling: invite_member -- an OWNER issuing an 'owner'-role invit
 
 test("p4t2.role_ceiling: accept_invite -- an admin-issued 'owner' invite refuses AT ACCEPT (CLR04, issuer exceeds their own rank), even though invite_member itself would already refuse to ISSUE it -- proves the re-check independently via a raw fixture row naming the admin as issuer", async () => {
   const sc = await scene("ai_admin");
+  // rev-p4t2's finding (a): BOTH cells originally invited a HARD-CODED email address and
+  // accepted as a DIFFERENT freshPersona() -- the email-mismatch wall (CLR04 "the signed-in
+  // email does not match this invite") fired FIRST on every attempt, so this cell's assertRaises
+  // was passing for the WRONG reason (a false green: the email wall, not the rank wall), and the
+  // positive cell below failed outright. The invite must target the PERSONA'S OWN email, and the
+  // assertion must read the MESSAGE (never the bare CLR04 code, which both walls share) so the
+  // email wall can never stand in for the rank wall again.
+  //
   // invite_member itself already refuses an admin issuing an owner invite (the cell above) -- to
   // prove accept_invite's OWN re-check independently (the exact "pending invite minted before
-  // this fix" shape the ruling targets), issue a LEGITIMATE bookkeeper invite from the admin, then
-  // root-escalate its stored role to 'owner' after the fact, simulating an invite that predates
-  // the fix or whose issuer was demoted post-issue.
-  const issued = await inviteMember(sc.admin, { email: "ai-admin-owner@rig.test", role: "bookkeeper", opKey: opk("ai-admin-issue") });
+  // this fix" shape the ruling targets), issue a LEGITIMATE bookkeeper invite from the admin to
+  // the persona's own email, then root-escalate its stored role to 'owner' after the fact,
+  // simulating an invite that predates the fix or whose issuer was demoted post-issue.
+  const p = freshPersona("ai_admin_target");
+  const issued = await inviteMember(sc.admin, { email: p.email, role: "bookkeeper", opKey: opk("ai-admin-issue") });
   const { rootQuery } = await import("./rig-helpers.mjs");
   await rootQuery("update clara.firm_invites set role = 'owner' where id = $1", [issued.invite_id]);
 
-  const p = freshPersona("ai_admin_target");
-  await assertRaises(
-    CLR.authz,
+  await assert.rejects(
     () => acceptInvite(p.sub, p.email, { token: issued.token, displayName: "AI Admin Target", opKey: opk("ai-admin-accept") }),
+    (err) => {
+      assert.equal(err.code, CLR.authz, "must refuse CLR04");
+      assert.match(err.message, /invite exceeds the issuer's rank/, "must be the RANK wall, not the email wall (both share CLR04)");
+      return true;
+    },
     "accept_invite on an owner-role invite whose issuer is only an admin",
   );
+  const membership = await rootQuery("select 1 from clara.firm_memberships where user_id = (select id from clara.users where id = $1)", [p.sub]);
+  assert.equal(membership.rowCount, 0, "a refused accept must never mint a membership");
 });
 
 test("p4t2.role_ceiling: accept_invite -- an owner-issued 'owner' invite accepts normally (positive control)", async () => {
   const sc = await scene("ai_owner");
-  const issued = await inviteMember(sc.owner, { email: "ai-owner-owner@rig.test", role: "owner", opKey: opk("ai-owner-issue") });
   const p = freshPersona("ai_owner_target");
+  const issued = await inviteMember(sc.owner, { email: p.email, role: "owner", opKey: opk("ai-owner-issue") });
   const r = await acceptInvite(p.sub, p.email, { token: issued.token, displayName: "AI Owner Target", opKey: opk("ai-owner-accept") });
   assert.ok(r.membership_id);
+  const { rootQuery } = await import("./rig-helpers.mjs");
+  const m = await rootQuery("select role from clara.firm_memberships where id = $1", [r.membership_id]);
+  assert.equal(m.rows[0].role, "owner");
 });

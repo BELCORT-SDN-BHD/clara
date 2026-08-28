@@ -4,12 +4,40 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { AGENT_USER_ID, CLR, assertRaises, opk, rootQuery, humanQuery, insertUser, createFirm, seedAdmission, addMember } from "./rig-fixtures.mjs";
+import { AGENT_USER_ID, CLR, assertRaises, opk, rootQuery, humanQuery, insertUser, createFirm, seedAdmission, addMember, getPool } from "./rig-fixtures.mjs";
 import { requestFirmRegistration, approveFirmRegistration, rejectFirmRegistration, rawRegistrationRequest, markOperator, clearOperator } from "./p4t2-fixtures.mjs";
 
 // Leave a clean is_operator slate for whichever file runs next in the same suite invocation --
 // see markOperator's own header note (p4t2-fixtures.mjs) for why this is unscoped.
 after(clearOperator);
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Poll (bounded) until backend `pid` is observably WAITING (wait_event_type='Lock') on a lock
+ *  held by `blockerPid`. Mirrors p4t1-add-member-regression.test.mjs's own local copy (db-tests.md:
+ *  "never a sleep, which proves nothing about whether the block actually happened") -- copied
+ *  locally rather than cross-imported from another test area's own helper module. */
+async function waitBlockedByOrThrow(pid, blockerPid, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await rootQuery(
+      "select wait_event_type as wet, pg_blocking_pids(pid) as blockers from pg_stat_activity where pid = $1",
+      [pid],
+    );
+    const row = r.rows[0];
+    if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(blockerPid))) return true;
+    await sleep(25);
+  }
+  throw new Error(`waitBlockedByOrThrow: backend ${pid} never observably blocked on blocker ${blockerPid} within ${timeoutMs}ms`);
+}
+
+async function operatorSceneRace(tag) {
+  const owner = await insertUser("p4t2f3race", `${tag}_owner`);
+  const token = await seedAdmission(`p4t2-f3race-${tag}`);
+  const firm = await createFirm(owner, { name: `P4T2 F3 Race ${tag} ${Date.now()}`, token, opKey: opk(`f3racefirm_${tag}`) });
+  await markOperator(firm);
+  return { firm, owner };
+}
 
 /** A firm marked is_operator, with an owner and a bookkeeper (below the ask-8 floor). */
 async function operatorScene(tag) {
@@ -338,4 +366,87 @@ test("p4t2.create_firm_regression: F1 -- the SAME actor who legitimately consume
     "F1 Valid Replay Co", token, key,
   ]);
   assert.deepEqual(r2.rows[0].receipt, r1.rows[0].receipt);
+});
+
+// ---------------------------------------------------------------------------
+// F3 fix (rev-p4t2, round 3): _create_firm_core's membership insert must translate a raw
+// unique_violation into the SAME typed CLR10 the core's own exists-check raises. Round 1 pinned
+// this only by CODE presence; the reviewer's re-verify found no BEHAVIOURAL race cell existed for
+// it (unlike _add_member_core's own established C4 cell). This proves the interleave for real:
+// TWO different entrances into the SAME core (create_firm's admission-token path, and
+// approve_firm_registration's applicant path) racing on the SAME actor.
+// ---------------------------------------------------------------------------
+
+test("p4t2.create_firm_regression: F3 race -- create_firm (admission token) and approve_firm_registration (the SAME actor's own separate registration request) race on _create_firm_core's membership insert; the loser gets the typed CLR10, never a raw unique_violation, and the request stays open -- the interleave premise is pinned via pg_locks (T2 holds a GRANTED RowExclusiveLock on clara.firm_memberships while WAITING, ungranted, on T1's transactionid), 3/3 deterministic", async () => {
+  for (let i = 0; i < 3; i += 1) {
+    const actor = await insertUser("p4t2f3race", `actor_${i}`);
+    const token = await seedAdmission(`p4t2-f3race-token-${i}`);
+    const req = await requestFirmRegistration(actor, { firmName: `F3 Race Req ${i}`, opKey: opk(`f3race-req-${i}`) });
+    const op = await operatorSceneRace(`iter${i}`);
+
+    const c1 = await getPool().connect();
+    const c2 = await getPool().connect();
+    let loserOutcome;
+    let blocked = false;
+    try {
+      // T1: create_firm via the admission token, held open in an explicit transaction.
+      await c1.query("set role clara_authenticated");
+      await c1.query("begin");
+      await c1.query("select set_config('request.jwt.claims', $1, true)", [
+        JSON.stringify({ sub: actor, role: "authenticated" }),
+      ]);
+      await c1.query(
+        "select clara.create_firm(p_name => $1, p_admission_token => $2, p_op_key => $3)",
+        [`F3 Race Direct Co ${i}`, token, opk(`f3race-direct-${i}`)],
+      );
+      const pid1 = (await c1.query("select pg_backend_pid() as pid")).rows[0].pid;
+
+      // T2: approve_firm_registration for the SAME actor's separate request -- a DIFFERENT
+      // entrance into the SAME core, fired while T1 is still uncommitted.
+      await c2.query("set role clara_authenticated");
+      await c2.query("select set_config('request.jwt.claims', $1, false)", [
+        JSON.stringify({ sub: op.owner, role: "authenticated" }),
+      ]);
+      const pid2 = (await c2.query("select pg_backend_pid() as pid")).rows[0].pid;
+      const t2Promise = c2
+        .query("select clara.approve_firm_registration(p_request => $1, p_op_key => $2)", [req.request_id, opk(`f3race-approve-${i}`)])
+        .then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+
+      blocked = await waitBlockedByOrThrow(pid2, pid1);
+
+      // The interleave premise, pinned precisely (not merely "some lock, somewhere"): T2 holds a
+      // GRANTED RowExclusiveLock on the table its own INSERT targets, AND is separately WAITING
+      // (ungranted) on a transactionid lock -- the exact mechanism Postgres uses when an INSERT
+      // hits a unique index whose conflicting row belongs to another in-progress transaction.
+      const locks = await rootQuery(
+        `select locktype, mode, granted, relation::regclass::text as rel from pg_locks where pid = $1`,
+        [pid2],
+      );
+      const hasTableLock = locks.rows.some(
+        (l) => l.locktype === "relation" && l.rel === "clara.firm_memberships" && l.mode === "RowExclusiveLock" && l.granted === true,
+      );
+      const hasTxnWait = locks.rows.some((l) => l.locktype === "transactionid" && l.granted === false);
+      assert.ok(hasTableLock, `iter ${i}: T2 must hold a GRANTED RowExclusiveLock on clara.firm_memberships`);
+      assert.ok(hasTxnWait, `iter ${i}: T2 must be WAITING (ungranted) on a transactionid lock`);
+
+      await c1.query("commit");
+      loserOutcome = await t2Promise;
+    } finally {
+      await c1.query("rollback").catch(() => {});
+      await c1.query("reset role").catch(() => {});
+      await c1.query("reset all").catch(() => {});
+      c1.release();
+      await c2.query("rollback").catch(() => {});
+      await c2.query("reset role").catch(() => {});
+      await c2.query("reset all").catch(() => {});
+      c2.release();
+    }
+
+    assert.ok(blocked, `iter ${i}: T2 must be observably blocked on T1's uncommitted insert -- a race that never blocked proves nothing`);
+    assert.equal(loserOutcome.ok, false, `iter ${i}: the loser must be refused, never silently succeed with a second owner membership`);
+    assert.equal(loserOutcome.e.code, CLR.badRequest, `iter ${i}: the refusal must be the SAME typed CLR10 the exists-check itself raises, not a raw 23505 unique_violation`);
+
+    const request = await rawRegistrationRequest(req.request_id);
+    assert.equal(request.status, "open", `iter ${i}: the request must stay open -- the core's refusal must roll back the WHOLE approve call, not half-approve`);
+  }
 });

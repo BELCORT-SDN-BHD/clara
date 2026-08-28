@@ -52,23 +52,28 @@
 --      (token, op_key) pair, because the existence/is_agent walls lived ONLY inside
 --      _create_firm_core, reached AFTER the replay already returned. Fixed by restoring both walls
 --      to the ENTRANCE, before the token lookup -- they stay in the core too (defense in depth).
---   F2 (HIGH, pre-existing, folded in by conductor ruling) -- the advertised "owner+ AND
---      is_operator" ask-8 floor was reachable by an ADMIN in practice: set_member_role's own floor
---      is admin, with no ceiling on the role an admin may ASSIGN, so an operator-firm admin could
---      self-promote to owner, then approve. Fixed with one rule, three sites: an actor may never
---      assign/invite/promote to a role ABOVE their own rank (which subsumes "owner is grantable
---      only by an owner", since only rank 3 reaches rank 3) -- set_member_role (0005's LIVE body),
---      _add_member_core and invite_member (0141's LIVE bodies) all CoR'd to add it.
---      _add_member_core's own wall is exempted when p_actor = p_user (accept_invite's self-join,
---      where the role was already ceiling-checked once, at invite_member's own wall, when the
---      invite was issued -- the target has no membership yet to compare against). This makes
---      create_firm, set_member_role, _add_member_core and invite_member the four live writer
---      bodies this file replaces -- the D1 write-quiesce obligation (packages/db/README.md,
---      "Deploy contract") therefore names all four in the PR body, wider than the reviewer's own
---      draft (create_firm + set_member_role only), because the migrations rule binds the ACT of
---      replacing a body, not a subset of them.
+--   F2 (HIGH, pre-existing, folded in by conductor ruling; widened across two reviewer re-verify
+--      rounds) -- the advertised "owner+ AND is_operator" ask-8 floor was reachable by an ADMIN in
+--      practice: set_member_role's own floor is admin, with no ceiling on the role an admin may
+--      ASSIGN, so an operator-firm admin could self-promote to owner, then approve. Fixed with one
+--      rule, at FOUR entrances (never inside a shared core -- see §C2's own header for why): an
+--      actor may never assign/invite/promote to a role ABOVE their own rank (which subsumes
+--      "owner is grantable only by an owner", since only rank 3 reaches rank 3) --
+--      set_member_role and add_member (0005's LIVE bodies) and invite_member (0141's LIVE body)
+--      all CoR'd to add the wall directly; accept_invite (0141's LIVE body) CoR'd to RE-CHECK the
+--      invite's ISSUER's rank at accept time (firm_invites.invited_by), closing the fourth route
+--      the reviewer's panel found -- a ceiling at issue time does not retract an invite already
+--      pending. `_add_member_core` is NOT touched by this file: it has no caller-rank input by
+--      design (a signature change there is exactly the same-name-different-signature trap
+--      rig-meta's P4T1 signature-exact cohort exists to catch), and every entrance that reaches it
+--      now enforces its own ceiling before delegating in. This makes create_firm, set_member_role,
+--      add_member, accept_invite and invite_member the FIVE live writer bodies this file
+--      replaces -- the D1 write-quiesce obligation (packages/db/README.md, "Deploy contract")
+--      names all five in the PR body.
 --   F3 (MEDIUM) -- _create_firm_core's membership insert had no unique_violation translation (0141
---      C4's own class); fixed identically to _add_member_core's own idiom.
+--      C4's own class, `_add_member_core`'s established idiom); fixed identically, and pinned by
+--      the tail census against `_create_firm_core`'s own prosrc (round 3 correction -- the prior
+--      round's pin targeted the wrong function) plus a genuine concurrent-race battery cell.
 --   F4 (MEDIUM) -- the §K (8b) drift census matched raw text, so a comment could mask a real
 --      regression (this session's own tranche-1 fix rounds already found this class once), and
 --      NEITHER the census nor the battery pinned the shared "owner" RANK literal (only the
@@ -76,7 +81,11 @@
 --      would have passed silently. Fixed: every substring-based tail pin now comment-strips
 --      (block + line) before matching, and a fifth pin covers the shared `role_rank('owner'`
 --      fragment across both doors and the view; new admin-rank (rank 2) battery cells on the view
---      and both doors close the behavioural gap the census alone cannot.
+--      and both doors close the behavioural gap the census alone cannot. Round 3 correction: the
+--      fifth pin's VIEW check was itself vacuous -- F11's decided_by mask repeats the SAME rank
+--      literal in a CASE alongside the WHERE clause, so a presence-only check stayed green even if
+--      the WHERE-side occurrence (the real gate) were downgraded, since the CASE-side occurrence
+--      alone still satisfied it. Now an occurrence COUNT (1 for each door, 2 for the view).
 --   F5 (MEDIUM) -- p4t2-approval.test.mjs's agent-applicant fixture root-inserted a row it never
 --      cleaned up, parking an agent-owned OPEN request and breaking a second run on the same DB.
 --      Fixed with an inline delete at the end of that test.
@@ -202,8 +211,9 @@ begin
     raise exception 'p4t2 prestate: set_member_role''s LIVE body is missing an expected wall string -- re-read the live catalog before patching' using errcode = 'CLR10';
   end if;
 
-  -- (5c) Stash _add_member_core's CURRENT prosrc + ACL (F2/F3: role-ceiling wall AND the
-  --      unique_violation translation on the membership insert -- the third replaced live writer).
+  -- (5c) Stash _add_member_core's CURRENT prosrc + ACL -- round 3 correction: this file does NOT
+  --      touch this body at all (§C2's own header note). Stashed so the tail can prove it stays
+  --      BYTE-IDENTICAL end to end, never that it changed.
   select p.prosrc, coalesce(p.proacl::text, '(null)'), pg_get_userbyid(p.proowner)
     into v_src, v_acl, v_owner
     from pg_proc p where p.oid = 'clara._add_member_core(uuid,uuid,uuid,text)'::regprocedure;
@@ -294,6 +304,15 @@ begin
 end $$;
 
 set role clara_fn_owner;
+
+-- LOAD-BEARING (F8, moved here at round 3 -- 0131/0138's own shape): every CREATE OR REPLACE
+-- FUNCTION and every DDL statement below runs under this bound wait, not just §F's
+-- counterparty_aliases policy/grant specifically -- without it, the runner's own lock_timeout=0
+-- default lets any one of them queue indefinitely behind a live reader/writer, stalling every
+-- migration behind this one too. It should fail fast and let the ceremony retry in a quieter
+-- window instead. `set local` scopes to the remainder of this transaction, which is this whole
+-- migration file.
+set local lock_timeout = '15s';
 
 -- =================================================================================================
 -- §A -- clara.firm_registration_requests (ask 2). Forced RLS, owner-only base policy -- the human
@@ -559,10 +578,22 @@ end $$;
 --                                  time (firm_invites.invited_by is stored): the invite's role must
 --                                  not exceed the issuer's rank NOW, not merely at issue time.
 --
--- _add_member_core itself carries ONLY F3's unique_violation translation in this file -- no
--- ceiling logic, by the ruling above. Four live bodies patched for the ceiling wall (plus
--- _add_member_core for F3 alone), six live writers replaced by this file in total counting
--- create_firm -- see the D1 write-quiesce line in the PR body.
+-- _add_member_core (0141) IS NOT TOUCHED BY THIS FILE AT ALL, round-3 correction: F3's own
+-- unique_violation translation targets `_create_firm_core` (THIS file's own new core, §C), never
+-- `_add_member_core` -- 0141's `_add_member_core` already carries its OWN unique_violation
+-- translation from its own C4 fix, untouched here. `_add_member_core` has NO caller-rank input
+-- by design (a signature change here would be exactly the same-name-different-signature trap
+-- rig-meta's P4T1 signature-exact cohort exists to catch), so it carries NO ceiling logic --
+-- every entrance that reaches it now enforces its own ceiling BEFORE calling in (add_member,
+-- accept_invite's issuer re-check). An earlier round of this file DID CoR `_add_member_core` with
+-- a comment-only body (zero executable delta, describing a since-superseded design where the
+-- ceiling lived in the core with a p_actor = p_user exemption) -- self-contradicting once the
+-- exemption was pulled back out. Round 3 corrects this: `_add_member_core`'s live body is
+-- BYTE-UNTOUCHED by this file (proven in the tail: prosrc/ACL/owner identical to the §0
+-- prestate stash), and this explanatory note lives HERE, in the section header, instead.
+--
+-- FIVE live writers are replaced by this file in total: create_firm, set_member_role, add_member,
+-- accept_invite, invite_member -- see the D1 write-quiesce line in the PR body.
 -- =================================================================================================
 create or replace function clara.set_member_role(p_membership uuid, p_role text, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -570,15 +601,17 @@ declare c record; v_dedupe jsonb; m record;
 begin
   c := clara._human_ctx(clara.role_rank('admin'));
   if p_op_key is null or btrim(p_op_key) = '' then raise exception 'op_key is required' using errcode = 'CLR10'; end if;
+  if clara.role_rank(p_role) is null then raise exception 'bad role' using errcode = 'CLR10'; end if;
+  -- F2 fix: the role-ceiling wall, moved BEFORE _reserve_op (round 3 nit) -- every sibling
+  -- entrance (add_member, invite_member) already puts its own wall before the dedupe reservation,
+  -- 0141's own wall-before-dedupe idiom; this one was the sole straggler.
+  if clara.role_rank(p_role) > coalesce(clara.actor_role_rank(), -1) then
+    raise exception 'cannot assign a role above your own rank' using errcode = 'CLR04';
+  end if;
   v_dedupe := clara._reserve_op(c.firm, 'set_member_role', p_op_key,
     clara._hash(jsonb_build_object('mem', p_membership, 'r', p_role)));
   if v_dedupe is not null then return v_dedupe; end if;
   perform 1 from clara.firms where id = c.firm for update;
-  if clara.role_rank(p_role) is null then raise exception 'bad role' using errcode = 'CLR10'; end if;
-  -- F2 fix: the role-ceiling wall.
-  if clara.role_rank(p_role) > coalesce(clara.actor_role_rank(), -1) then
-    raise exception 'cannot assign a role above your own rank' using errcode = 'CLR04';
-  end if;
   select * into m from clara.firm_memberships where id = p_membership;
   if not found or m.firm_id <> c.firm then raise exception 'membership not in your firm' using errcode = 'CLR11'; end if;
   if m.status <> 'active' then raise exception 'membership is not active' using errcode = 'CLR11'; end if;
@@ -590,41 +623,6 @@ begin
   perform clara._audit(c.firm, c.actor, null, null, 'set_member_role', null, jsonb_build_object('membership', p_membership, 'role', p_role));
   perform clara._append_event(c.firm, 'member.role_changed', null, c.actor, null, null, null, null, null, '{}'::jsonb);
   return clara._finish_op(c.firm, 'set_member_role', p_op_key, jsonb_build_object('membership_id', p_membership, 'role', p_role));
-end $$;
-
-create or replace function clara._add_member_core(p_firm uuid, p_actor uuid, p_user uuid, p_role text) returns uuid
-  language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_id uuid;
-begin
-  perform 1 from clara.firms where id = p_firm for update;                 -- serialize per-firm (v2 §F/F18)
-  if clara.role_rank(p_role) is null then raise exception 'bad role' using errcode = 'CLR10'; end if;
-  if not exists (select 1 from clara.users where id = p_user) then
-    raise exception 'unknown user' using errcode = 'CLR10';
-  end if;
-  if exists (select 1 from clara.users where id = p_user and is_agent) then
-    raise exception 'the agent identity cannot be a firm member' using errcode = 'CLR10';   -- HIGH-11
-  end if;
-  -- Round 2 ruling (§C2's own header note): NO role-ceiling wall lives here -- this core has no
-  -- caller-rank input by design (a signature change here is exactly the trap the P4T1
-  -- signature-exact cohort exists to catch), and every entrance that reaches this core now
-  -- enforces its own ceiling BEFORE calling in (add_member, accept_invite's issuer re-check).
-  if exists (select 1 from clara.firm_memberships where user_id = p_user and status = 'active') then
-    raise exception 'user already belongs to a firm' using errcode = 'CLR10';
-  end if;
-  -- Native review C4: the exists-check above and this insert are not atomic across two
-  -- concurrent callers on DIFFERENT firms -- the per-firm `for update` lock above only
-  -- serializes callers targeting the SAME p_firm, so a genuine cross-firm race (e.g. two
-  -- admins accepting/adding the same user into two different firms at once) can lose to
-  -- uq_membership_active_user's partial-unique index. Catch the raw 23505 and translate it
-  -- into the SAME typed refusal the exists-check raises, so a racing caller never sees a raw
-  -- unique_violation.
-  begin
-    insert into clara.firm_memberships(firm_id, user_id, role) values (p_firm, p_user, p_role) returning id into v_id;
-  exception when unique_violation then
-    raise exception 'user already belongs to a firm' using errcode = 'CLR10';
-  end;
-  perform clara._append_event(p_firm, 'member.added', null, p_actor, null, null, null, null, null, '{}'::jsonb);
-  return v_id;
 end $$;
 
 create or replace function clara.invite_member(p_email text, p_role text, p_op_key text) returns jsonb
@@ -938,13 +936,10 @@ create view clara.firm_registration_requests_visible with (security_barrier) as
 -- F8 fix (rev-p4t2 round 1, MEDIUM): CREATE POLICY + GRANT below take an ACCESS EXCLUSIVE lock on
 -- counterparty_aliases, a table this estate's agent path reads constantly (the alias-matching
 -- resolver). LOAD-BEARING, the 0138 15s shape (packages/db/README.md, .claude/rules/db-migrations.md
--- "Put the timeout in the file, not in the ceremony"): without a bound wait, the runner's own
--- lock_timeout=0 default lets this DDL queue indefinitely behind any live reader/writer, stalling
--- every migration behind it too -- it should fail fast and let the ceremony retry in a quieter
--- window instead.
+-- "Put the timeout in the file, not in the ceremony") -- `set local lock_timeout` is set once, at
+-- the TOP of this file (round 3 nit: moved so every CoR above ALSO runs under the same bound wait,
+-- 0131/0138's own shape), not repeated here.
 -- =================================================================================================
-set local lock_timeout = '15s';
-
 create policy p_counterparty_aliases_human on clara.counterparty_aliases
   for select to clara_authenticated using (firm_id = clara.jwt_firm());
 grant select on clara.counterparty_aliases to clara_authenticated;
@@ -969,9 +964,10 @@ select a.version, i.name, 'context_update', null from inserted_types i cross joi
 -- =================================================================================================
 -- §H -- PUBLIC LOCKDOWN + GRANT MATRIX. N13 (0005:38-42): ALTER DEFAULT PRIVILEGES is empirically a
 -- no-op for functions created after it ran, so every function above is PUBLIC-executable until this
--- sweep. create_firm/set_member_role/_add_member_core/invite_member/add_member/accept_invite's
--- existing grants survive CREATE OR REPLACE untouched -- no re-grant needed or issued for any of them here (proven in the
--- tail, not assumed).
+-- sweep. create_firm/set_member_role/invite_member/add_member/accept_invite's existing grants
+-- survive CREATE OR REPLACE untouched -- no re-grant needed or issued for any of them here (proven
+-- in the tail, not assumed). _add_member_core is not touched by this file at all (§C2's own
+-- header note) -- its grant (none, by design) is likewise untouched.
 -- =================================================================================================
 revoke execute on all functions in schema clara from public;
 
@@ -1119,27 +1115,41 @@ begin
     raise exception 'p4t2 tail: set_member_role is missing its role-ceiling wall in CODE' using errcode = 'CLR10';
   end if;
 
-  -- (4c) _add_member_core: ACL byte-unchanged, prosrc genuinely changed (F3's unique_violation
-  --      translation), and round 2's ruling proven NEGATIVELY -- no ceiling logic lives here.
+  -- (4c) _add_member_core: round 3 correction -- this file does NOT touch this body. Prove it
+  --      NEGATIVELY and POSITIVELY: ACL, owner AND prosrc are all byte-IDENTICAL to the §0
+  --      prestate stash (a real equality proof, not a dead local -- "sha equal main-rig vs
+  --      PR-rig" per the reviewer's own framing), it still carries 0141's OWN pre-existing C4
+  --      unique_violation translation (untouched, not this file's doing), and it carries NO
+  --      role-ceiling wall (round 2's ruling: the ceiling lives at the entrances only).
   select coalesce(p.proacl::text, '(null)'), pg_get_userbyid(p.proowner), p.prosrc
     into v_acl_now, v_owner_now, v_src_now
     from pg_proc p where p.oid = 'clara._add_member_core(uuid,uuid,uuid,text)'::regprocedure;
   if v_acl_now is distinct from (select v from _p4t2_pre where k = 'add_member_core.acl') then
-    raise exception 'p4t2 tail: _add_member_core''s ACL moved during this migration -- was %, now %',
+    raise exception 'p4t2 tail: _add_member_core''s ACL moved -- this file must never touch it -- was %, now %',
       (select v from _p4t2_pre where k = 'add_member_core.acl'), v_acl_now using errcode = 'CLR10';
   end if;
   if v_owner_now <> 'clara_fn_owner' then
     raise exception 'p4t2 tail: _add_member_core owner drifted to %', v_owner_now using errcode = 'CLR10';
   end if;
-  if v_src_now = (select v from _p4t2_pre where k = 'add_member_core.prosrc') then
-    raise exception 'p4t2 tail: _add_member_core''s body is byte-identical to prestate -- the F3 patch did not happen' using errcode = 'CLR10';
+  if v_src_now is distinct from (select v from _p4t2_pre where k = 'add_member_core.prosrc') then
+    raise exception 'p4t2 tail: _add_member_core''s body moved -- this file must never touch it (round 3 ruling)' using errcode = 'CLR10';
   end if;
   v_code := regexp_replace(regexp_replace(v_src_now, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
   if position('exception when unique_violation' in v_code) = 0 then
-    raise exception 'p4t2 tail: _add_member_core is missing F3''s unique_violation translation in CODE' using errcode = 'CLR10';
+    raise exception 'p4t2 tail: _add_member_core lost 0141''s own pre-existing unique_violation translation in CODE' using errcode = 'CLR10';
   end if;
   if position('cannot assign a role above your own rank' in v_code) > 0 then
     raise exception 'p4t2 tail: _add_member_core carries a role-ceiling wall -- round 2''s ruling put it at the entrances only (signature-stability)' using errcode = 'CLR10';
+  end if;
+
+  -- (4c2) F3 fix's OWN pin, round 3 correction: F3 targets `_create_firm_core` (THIS file's new
+  --       core, §C), never `_add_member_core` -- the prior round pinned the WRONG function's
+  --       prosrc for F3, leaving a revert of _create_firm_core's own exception handler invisible
+  --       to every instrument. Comment-stripped CODE, same idiom as every other wall pin here.
+  select p.prosrc into v_bad from pg_proc p where p.oid = 'clara._create_firm_core(uuid,text)'::regprocedure;
+  v_code := regexp_replace(regexp_replace(v_bad, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+  if position('exception when unique_violation' in v_code) = 0 then
+    raise exception 'p4t2 tail: _create_firm_core is missing F3''s unique_violation translation in CODE' using errcode = 'CLR10';
   end if;
 
   -- (4d) invite_member: same three proofs.
@@ -1347,12 +1357,22 @@ begin
   --      reformatting AND a comment-maskable defeat, while still failing loudly on any REAL
   --      structural drift (a different function call, a different operator, a missing/extra
   --      token, a downgraded rank literal) between the three bodies.
+  --
+  --      Round 3 correction: the rank-floor check is an OCCURRENCE COUNT, not bare presence.
+  --      F11 masks decided_by with a CASE that repeats the SAME operator-scope predicate the
+  --      WHERE clause already carries, so the view's normalized text contains `role_rank('owner'`
+  --      TWICE -- a presence-only check (position() > 0) stays green even if the WHERE-side
+  --      occurrence (the actual security-relevant gate) were silently downgraded to 'admin',
+  --      because the CASE-side occurrence alone would still satisfy it (measured: this was
+  --      genuinely vacuous for the view before this fix). Counting via substring-length arithmetic
+  --      (no regexp_count dependency) catches a downgrade of EITHER occurrence.
   declare
     v_frag constant text := $q$exists (select 1 from clara.firms f where f.id = clara.jwt_firm() and f.is_operator)$q$;
     v_frag_norm constant text := regexp_replace(lower(v_frag), '\s+', '', 'g');
     v_rank_frag constant text := $q$clara.role_rank('owner'$q$;
     v_rank_frag_norm constant text := regexp_replace(lower(v_rank_frag), '\s+', '', 'g');
     v_strip text;
+    v_rank_count int;
   begin
     select p.prosrc into v_bad from pg_proc p where p.oid = 'clara.approve_firm_registration(uuid,text)'::regprocedure;
     v_strip := regexp_replace(regexp_replace(lower(v_bad), '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
@@ -1360,8 +1380,9 @@ begin
     if position(v_frag_norm in v_strip) = 0 then
       raise exception 'p4t2 tail: approve_firm_registration no longer carries the shared operator-authority fragment' using errcode = 'CLR10';
     end if;
-    if position(v_rank_frag_norm in v_strip) = 0 then
-      raise exception 'p4t2 tail: approve_firm_registration no longer carries the shared owner-rank floor (F4)' using errcode = 'CLR10';
+    v_rank_count := (length(v_strip) - length(replace(v_strip, v_rank_frag_norm, ''))) / length(v_rank_frag_norm);
+    if v_rank_count <> 1 then
+      raise exception 'p4t2 tail: approve_firm_registration''s owner-rank floor occurs % time(s), expected exactly 1 (F4)', v_rank_count using errcode = 'CLR10';
     end if;
 
     select p.prosrc into v_bad from pg_proc p where p.oid = 'clara.reject_firm_registration(uuid,text,text)'::regprocedure;
@@ -1370,8 +1391,9 @@ begin
     if position(v_frag_norm in v_strip) = 0 then
       raise exception 'p4t2 tail: reject_firm_registration no longer carries the shared operator-authority fragment' using errcode = 'CLR10';
     end if;
-    if position(v_rank_frag_norm in v_strip) = 0 then
-      raise exception 'p4t2 tail: reject_firm_registration no longer carries the shared owner-rank floor (F4)' using errcode = 'CLR10';
+    v_rank_count := (length(v_strip) - length(replace(v_strip, v_rank_frag_norm, ''))) / length(v_rank_frag_norm);
+    if v_rank_count <> 1 then
+      raise exception 'p4t2 tail: reject_firm_registration''s owner-rank floor occurs % time(s), expected exactly 1 (F4)', v_rank_count using errcode = 'CLR10';
     end if;
 
     select pg_get_viewdef('clara.firm_registration_requests_visible'::regclass, true) into v_bad;
@@ -1383,8 +1405,9 @@ begin
     if position(v_frag_norm in v_strip) = 0 then
       raise exception 'p4t2 tail: firm_registration_requests_visible no longer carries the shared operator-authority fragment' using errcode = 'CLR10';
     end if;
-    if position(v_rank_frag_norm in v_strip) = 0 then
-      raise exception 'p4t2 tail: firm_registration_requests_visible no longer carries the shared owner-rank floor (F4)' using errcode = 'CLR10';
+    v_rank_count := (length(v_strip) - length(replace(v_strip, v_rank_frag_norm, ''))) / length(v_rank_frag_norm);
+    if v_rank_count <> 2 then
+      raise exception 'p4t2 tail: firm_registration_requests_visible''s owner-rank floor occurs % time(s), expected exactly 2 -- WHERE-side + F11''s CASE-side (F4)', v_rank_count using errcode = 'CLR10';
     end if;
   end;
 
