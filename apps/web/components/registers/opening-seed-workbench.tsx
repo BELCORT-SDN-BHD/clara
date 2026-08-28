@@ -9,6 +9,7 @@
 // (`onSeedsChanged`) after every governed write — the seed's own state/badge
 // must never go stale after an approve/cancel/reopen/supersede.
 
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadOpeningItems, loadOpeningTbTargets, loadOpeningKeyedResolution } from "@/lib/registers/opening";
@@ -49,8 +50,24 @@ export function OpeningSeedWorkbench({
     return { items, targets, keyed };
   });
 
+  // BLOCKER 1 (fix round 2, rev-t2): `record_opening_target`'s live body ends
+  // in `on conflict(seed_id,line_key) do update set … debit_cents=excluded…`
+  // against `uq_opening_tb_targets_key UNIQUE(seed_id,line_key)` — RE-recording
+  // an EXISTING line_key (correcting a mistyped amount, the commonest action
+  // while keying a TB) updates the row IN PLACE. `targets.length` therefore
+  // never moves on an edit, even though the figure the dry-run strip's own
+  // `_opening_seed_deltas` reads DID change — a count-based remount key is
+  // blind to an upsert. An epoch this component itself bumps on every
+  // SETTLED `act()` (success or failure — the strip re-reading after a
+  // failed act is exactly the same "never trust, always re-derive" law every
+  // other read in this file already follows) is discriminator-free: it does
+  // not need to know WHAT changed, only that a governed write on this seed
+  // just settled, which subsumes the items.length/targets.length signals it
+  // replaces.
+  const [actEpoch, setActEpoch] = useState(0);
   const act = async (fn: () => Promise<void>): Promise<boolean> => {
     const ok = await rawAct(fn);
+    setActEpoch((e) => e + 1);
     await onSeedsChanged();
     return ok;
   };
@@ -102,13 +119,14 @@ export function OpeningSeedWorkbench({
       <DataState loading={loading} error={null} isEmpty={false} emptyMessage="">
         {data ? (
           <div className="flex flex-col gap-6">
-            {/* F2 (fix round, rev-t2): the key omitted `targets.length` — a
-                `record_opening_target` write (an untied seed's TB target
-                lines, which `_opening_seed_deltas` reads directly) never
-                changes `items`/`state`, so the strip stayed on its ONE
-                mount-time fetch and went stale. Any of the three counts
-                changing now remounts (and re-fetches) the strip fresh. */}
-            <OpeningDryrunStrip key={`${seed.id}:${items.length}:${data.targets.length}:${seed.state}`} seedId={seed.id} />
+            {/* F2 residual fix (fix round 2, rev-t2): a COUNT-based key
+                (items.length/targets.length) is blind to an in-place UPDATE
+                (record_opening_target's own upsert on an existing line_key)
+                — the count never moves even though the figure did. The
+                act-epoch above bumps on every settled write on this seed,
+                remounting (and re-fetching) the strip regardless of whether
+                the write added, updated, or left the row count unchanged. */}
+            <OpeningDryrunStrip key={`${seed.id}:${actEpoch}`} seedId={seed.id} />
 
             {!seed.tie_document_id ? (
               <OpeningTargetKeyedPanel clientId={clientId} seed={seed} targets={data.targets} keyedResolutionId={keyedResolutionId} accounts={accounts} busy={busy} act={act} />

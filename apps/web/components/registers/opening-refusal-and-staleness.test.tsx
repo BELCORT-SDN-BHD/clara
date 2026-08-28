@@ -15,7 +15,7 @@ import { OpeningRegister } from "./opening-register";
 
 enableDomInspection();
 
-type Node = { tagName?: string; childNodes?: Node[] };
+type Node = { tagName?: string; childNodes?: Node[]; getAttribute?: (name: string) => string | null };
 function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
   if (predicate(root)) return root;
   for (const c of root.childNodes ?? []) {
@@ -32,6 +32,18 @@ function findAllIn(root: Node, predicate: (n: Node) => boolean): Node[] {
 }
 function buttonsLabelled(root: Node, text: string): Node[] {
   return findAllIn(root, (n) => n.tagName === "BUTTON" && textOf(n as never).includes(text));
+}
+/** The dry-run strip's OWN subtree only (`data-testid="opening-dryrun-strip"`,
+ *  opening-dryrun-strip.tsx:38) — scoping the read here, rather than to the
+ *  whole page, is what makes a staleness assertion DISCRIMINATING: the
+ *  targets TABLE elsewhere on the page refreshes through a completely
+ *  different mechanism (the workbench's own combined read, reloaded by
+ *  every `act()`), so a page-wide text match would stay green even if the
+ *  strip's OWN separate fetch never re-ran. */
+function findStrip(root: Node): Node {
+  const strip = findIn(root, (n) => n.getAttribute?.("data-testid") === "opening-dryrun-strip");
+  if (!strip) throw new Error("opening-dryrun-strip not found");
+  return strip;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -66,22 +78,39 @@ const SEED_OPEN_UNTIED = {
 };
 const DRYRUN_EMPTY = { seed_id: "s1", client_id: "c1", as_of: "2026-01-15", state: "open", obe_net_cents: 0, deltas: [], unmapped_labels: [], missing_must_asks: [] };
 
-test("F2: the tie-out strip RE-FETCHES after a record_opening_target write — the fetch count strictly increases", async () => {
+test("F2 BLOCKER residual: the tie-out strip RE-FETCHES after EDITING an EXISTING line_key — a count-based key is blind to this (record_opening_target's own upsert), an act-epoch is not", async () => {
   let dryrunFetchCount = 0;
-  // A REAL stateful mock: the target actually PERSISTS after
-  // record_opening_target posts, so the follow-up `opening_tb_targets` GET
-  // (the workbench's own re-read, act()'s "never trust the write's own
-  // response" law) returns a DIFFERENT row set — the same shape a real
-  // PostgREST backend would produce, which is what makes the key change (and
-  // therefore the remount+refetch) a genuine behavioural proof rather than a
-  // fixture coincidence.
-  let targets: unknown[] = [];
+  // A REAL stateful mock reproducing the live body's own
+  // `on conflict(seed_id,line_key) do update set debit_cents=excluded…`
+  // (against `uq_opening_tb_targets_key UNIQUE(seed_id,line_key)`): the
+  // SAME line_key overwrites the SAME row — the target COUNT never moves,
+  // only the figure does. `obe_net_cents` below stands in for "the dry-run's
+  // own reflection of the target's current value" so this test can prove
+  // the NEW figure was actually re-read, not merely that some fetch fired.
+  let targets: { id: string; line_key: string; debit_cents: number; credit_cents: number }[] = [
+    { id: "t1", line_key: "target-a", debit_cents: 1000, credit_cents: 0 },
+  ];
   const mock = (async (u: RequestInfo | URL, init?: RequestInit) => {
     const url = String(u);
-    if (url.includes("/rest/v1/rpc/get_opening_dryrun")) { dryrunFetchCount++; return jsonResponse(DRYRUN_EMPTY); }
+    if (url.includes("/rest/v1/rpc/get_opening_dryrun")) {
+      dryrunFetchCount++;
+      const currentDebit = targets[0]?.debit_cents ?? 0;
+      return jsonResponse({ ...DRYRUN_EMPTY, obe_net_cents: currentDebit });
+    }
     if (url.includes("/rest/v1/rpc/record_opening_target")) {
-      targets = [...targets, { id: "t1", firm_id: "f1", client_id: "c1", seed_id: "s1", line_key: "target-a", account_code: "1000", source_label: "target-a", debit_cents: 1000, credit_cents: 0, provenance_kind: "keyed", document_id: null, source_sha256: null, extraction_ref: null, entered_by: "u1", created_at: "2026-01-15T00:00:00Z" }];
-      return jsonResponse({ target_id: "t1", seed_id: "s1", provenance_kind: "keyed" });
+      const body = init?.body ? (JSON.parse(String(init.body)) as { p_line: { line_key: string; debit_cents: number; credit_cents: number } }) : null;
+      const line = body?.p_line;
+      if (line) {
+        const existingIdx = targets.findIndex((t) => t.line_key === line.line_key);
+        if (existingIdx >= 0) {
+          // THE UPSERT: same row, same count, new figures — record_opening_target's
+          // own `on conflict … do update` reproduced faithfully.
+          targets = targets.map((t, i) => (i === existingIdx ? { ...t, debit_cents: line.debit_cents, credit_cents: line.credit_cents } : t));
+        } else {
+          targets = [...targets, { id: `t${targets.length + 1}`, line_key: line.line_key, debit_cents: line.debit_cents, credit_cents: line.credit_cents }];
+        }
+      }
+      return jsonResponse({ target_id: targets[0]?.id ?? "t1", seed_id: "s1", provenance_kind: "keyed" });
     }
     if (url.includes("/rest/v1/opening_seed_registry")) return jsonResponse([SEED_OPEN_UNTIED]);
     if (url.includes("/rest/v1/onboarding_plan_items")) return jsonResponse([]);
@@ -89,7 +118,7 @@ test("F2: the tie-out strip RE-FETCHES after a record_opening_target write — t
     if (url.includes("/rest/v1/coa_accounts")) return jsonResponse([{ account_code: "1000", name: "Cash", account_type: "asset", account_class: null, special_acc_type: null, is_active: true }]);
     if (url.includes("/rest/v1/counterparties")) return jsonResponse([]);
     if (url.includes("/rest/v1/opening_items")) return jsonResponse([]);
-    if (url.includes("/rest/v1/opening_tb_targets")) return jsonResponse(targets);
+    if (url.includes("/rest/v1/opening_tb_targets")) return jsonResponse(targets.map((t) => ({ id: t.id, firm_id: "f1", client_id: "c1", seed_id: "s1", line_key: t.line_key, account_code: "1000", source_label: t.line_key, debit_cents: t.debit_cents, credit_cents: t.credit_cents, provenance_kind: "keyed", document_id: null, source_sha256: null, extraction_ref: null, entered_by: "u1", created_at: "2026-01-15T00:00:00Z" })));
     if (url.includes("/rest/v1/client_resolutions")) return jsonResponse([]);
     throw new Error(`unexpected fetch: ${url} ${init ? "" : ""}`);
   }) as typeof fetch;
@@ -100,27 +129,36 @@ test("F2: the tie-out strip RE-FETCHES after a record_opening_target write — t
     body.appendChild(h.container);
     try {
       for (let i = 0; i < 6; i++) await h.settle();
-      const countAfterMount = dryrunFetchCount;
-      assert.ok(countAfterMount >= 1, "the strip must have fetched at least once on mount");
+      assert.match(textOf(findStrip(h.container as never)), /RM 10\.00/, "the STRIP (scoped, not the whole page) must show the ORIGINAL figure (1000 cents) on mount");
+      const targetCountBefore = findAllIn(h.container as never, (n) => n.tagName === "TR" && textOf(n as never).includes("target-a")).length;
+      assert.equal(targetCountBefore, 1, "one target row exists before the edit");
+      const fetchCountBeforeEdit = dryrunFetchCount;
+      assert.ok(fetchCountBeforeEdit >= 1, "the strip must have fetched at least once on mount");
 
       const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Add target line"));
       assert.ok(trigger, "the Add-target trigger must render");
       await h.fireEvent(trigger as never, "click");
       for (let i = 0; i < 4; i++) await h.settle();
 
+      // EDIT the SAME line_key with a DIFFERENT amount — never a second, distinct key.
       const lineKeyField = findIn(body as never, (n) => (n as unknown as { id?: string }).id === "opening-target-key");
       assert.ok(lineKeyField, "the line-key field must be reachable");
       await h.act(() => setFieldValue(lineKeyField as never, "target-a"));
       const debitField = findIn(body as never, (n) => (n as unknown as { id?: string }).id === "opening-target-debit");
       assert.ok(debitField, "the debit field must be reachable");
-      await h.act(() => setFieldValue(debitField as never, "10"));
+      await h.act(() => setFieldValue(debitField as never, "99.99"));
 
       const confirmButtons = buttonsLabelled(body as never, "Add target line");
       assert.equal(confirmButtons.length, 2);
       await h.act(() => clickButton(confirmButtons[1] as never));
       for (let i = 0; i < 8; i++) await h.settle();
 
-      assert.ok(dryrunFetchCount > countAfterMount, `F2: the dry-run strip must re-fetch after a target write — count was ${countAfterMount}, now ${dryrunFetchCount}`);
+      assert.equal(targets.length, 1, "the upsert must have kept exactly ONE row — this is the count-blind case the epoch fix exists for");
+      assert.equal(targets[0]!.debit_cents, 9999, "the row's OWN figure must have changed to the edited amount");
+      const stripTextAfter = textOf(findStrip(body as never));
+      assert.match(stripTextAfter, /RM 99\.99/, "F2 BLOCKER: the STRIP (scoped) must show the EDITED figure (RM 99.99) — a stale strip would still read RM 10.00 despite the target count never moving");
+      assert.doesNotMatch(stripTextAfter, /RM 10\.00/, "the strip must NOT still carry the pre-edit figure");
+      assert.ok(dryrunFetchCount > fetchCountBeforeEdit, `the strip's own fetch count must have increased (was ${fetchCountBeforeEdit}, now ${dryrunFetchCount})`);
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();

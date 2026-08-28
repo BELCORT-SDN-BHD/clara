@@ -68,6 +68,7 @@ components/registers/fa-particulars-fields.test.tsx
 components/registers/fixed-assets-a11y.test.tsx
 components/registers/fixed-assets-keyboard.test.tsx
 components/registers/opening-a11y.test.tsx
+components/registers/opening-approve-guarantees.test.tsx
 components/registers/opening-i18n-keys.test.tsx
 components/registers/opening-judgement.test.tsx
 components/registers/opening-keyboard.test.tsx

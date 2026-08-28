@@ -112,6 +112,7 @@ const APPROVAL_LIST_CAP = 12;
 function ApprovalItemList({ items }: { items: OpeningItemRow[] }) {
   const t = useTranslations("OpeningCarryDown.approve");
   const tk = useTranslations("OpeningCarryDown.items");
+  const tc = useTranslations("Common");
   // A checked lookup, never a dynamic `tk(item_kind)` call (N10's own
   // reasoning, fixed-assets-register.tsx) — a kind value outside the closed
   // set falls back to the RAW value rather than throwing a missing-message
@@ -133,7 +134,7 @@ function ApprovalItemList({ items }: { items: OpeningItemRow[] }) {
     <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground">
       {items.map((i) => (
         <li key={i.id}>
-          {i.item_key} — {kindLabels[i.item_kind] ?? i.item_kind} — {fmtCents(i.amount_cents)}
+          {i.item_key} — {kindLabels[i.item_kind] ?? i.item_kind} — {fmtCents(i.amount_cents, tc("centsUnsafe"))}
         </li>
       ))}
     </ul>

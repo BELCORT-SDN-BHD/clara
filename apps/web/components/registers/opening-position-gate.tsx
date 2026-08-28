@@ -75,8 +75,20 @@ function OpeningPositionGate({
   if (error) return <ErrorMessage error={error} />;
 
   const items = data ?? [];
-  const deferred = items.find((i) => i.item_key === "carry_down_deferred" && i.state === "deferred");
-  const firstYearZero = items.find((i) => i.item_key === "first_year_zero_opening");
+  // Fix round 2 (rev-t2): guarded like the port source's own `isSatisfied` /
+  // `openingPositionFromPlan` (apps/dashboard/app/clients/plan/model.ts:22-44)
+  // — the prior version checked NO state for `firstYearZero` (a `pending`
+  // must_ask row, never actually answered, would have suppressed Create
+  // outright) and only `state==='deferred'` for `deferred` (missing the
+  // `resolved` arm the port source also admits).
+  const deferred = items.find((i) => i.item_key === "carry_down_deferred" && (i.state === "deferred" || i.state === "resolved"));
+  const firstYearZero = items.find((i) => i.item_key === "first_year_zero_opening" && (i.state === "answered" || i.state === "resolved"));
+  // Fix round 2 (rev-t2) — the "chase list" half of §5's T2 row: every
+  // required-for-commit plan item not yet answered/resolved. The SAME
+  // predicate `get_opening_dryrun`'s own `missing_must_asks` uses server-side
+  // (opening.ts's `OpeningDryrun` type) — read here from the plan item set
+  // this component already fetched, never a second endpoint.
+  const chaseList = items.filter((i) => i.required_for_commit && i.state !== "answered" && i.state !== "resolved");
 
   // First-year-zero: no carry-down exists — a seed is not wanted here, so
   // (deliberately) no Create trigger renders in this branch.
@@ -90,6 +102,15 @@ function OpeningPositionGate({
         <StateBanner tone="info" title={t("openingPosition.deferredTitle")}>
           {deferred.question}
         </StateBanner>
+        {chaseList.length > 0 ? (
+          <StateBanner tone="warning" title={t("openingPosition.chaseListTitle")}>
+            <ul className="list-disc pl-4">
+              {chaseList.map((i) => (
+                <li key={i.id}>{i.question}</li>
+              ))}
+            </ul>
+          </StateBanner>
+        ) : null}
         <NotBuiltNote>{t("openingPosition.notBuiltNote")}</NotBuiltNote>
         <div>
           <CreateOpeningSeedDialog clientId={clientId} planId={planId} busy={busy} act={act} />

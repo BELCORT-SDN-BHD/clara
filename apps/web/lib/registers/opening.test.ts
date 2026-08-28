@@ -10,6 +10,7 @@ import {
   loadOpeningEntryRevisions,
   loadOnboardingPlanRevision,
   loadOnboardingPlansForClient,
+  loadOpeningPositionPlanItems,
   loadOpeningKeyedResolution,
   buildEntryRevisionsMap,
   getOpeningDryrun,
@@ -112,6 +113,18 @@ test("loadOnboardingPlansForClient: GETs onboarding_plans filtered by client_id 
   assert.match(seenUrl, /\/rest\/v1\/onboarding_plans\?/);
   assert.match(seenUrl, /client_id=eq\.c1/);
   assert.match(seenUrl, /scope_kind=eq\.client/);
+});
+
+test("loadOpeningPositionPlanItems: GETs EVERY onboarding_plan_item for the plan, with required_for_commit selected (fix round 2 — widened for the chase-list predicate)", async () => {
+  let seenUrl = "";
+  await withMockedFetch(
+    async (url) => { seenUrl = String(url); return jsonResponse([], 200); },
+    async () => { await loadOpeningPositionPlanItems(fakeSession("tok"), "plan1"); },
+  );
+  assert.match(seenUrl, /\/rest\/v1\/onboarding_plan_items\?/);
+  assert.match(seenUrl, /plan_id=eq\.plan1/);
+  assert.match(seenUrl, /select=.*required_for_commit/, "required_for_commit must be selected — the chase-list predicate reads it");
+  assert.doesNotMatch(seenUrl, /item_key=in\./, "the item_key filter was DROPPED in the widening — every plan item is read, not just the two opening-position keys");
 });
 
 test("loadOpeningKeyedResolution: GETs client_resolutions bound to this seed, live only", async () => {

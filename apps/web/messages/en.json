@@ -987,6 +987,7 @@
       "loading": "Checking the client's opening position…",
       "firstYearZero": "No opening seed needed — this client's opening position was recorded as zero at onboarding (a first-year, first-trading client).",
       "deferredTitle": "Carry-down deferred at onboarding",
+      "chaseListTitle": "Still needed before this client's opening can be keyed",
       "notBuiltNote": "The FY1 basis-of-preparation cost figure and the close-seal block while this banner is up are not built on this surface yet."
     },
     "seed": {

@@ -110,6 +110,47 @@ test("F3: neither plan item present falls through to the generic empty state (wi
   });
 });
 
+test("fix round 2: a PENDING first_year_zero_opening row must NOT suppress Create — only answered/resolved satisfies it (guarded like the port source's isSatisfied)", async () => {
+  await withMockedEnv(
+    mockFetch({ seeds: [], positionItems: [{ id: "pi3", item_key: "first_year_zero_opening", state: "pending", question: "Opening position" }] }),
+    async () => {
+      const h = await renderComponent(App());
+      try {
+        for (let i = 0; i < 6; i++) await h.settle();
+        assert.doesNotMatch(h.text(), /No opening seed needed/, "a PENDING row is not yet satisfied — the first-year-zero branch must not fire");
+        const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Create opening seed"));
+        assert.ok(trigger, "Create must be reachable — a pending row cannot suppress it");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("fix round 2: the deferred branch's chase list renders every required-for-commit item not yet answered/resolved (the missing_must_asks predicate)", async () => {
+  await withMockedEnv(
+    mockFetch({
+      seeds: [],
+      positionItems: [
+        { id: "pi1", item_key: "carry_down_deferred", state: "deferred", question: "Carry down the prior-period closing position", required_for_commit: false },
+        { id: "pi4", item_key: "ssm_number", state: "pending", question: "What is the client's SSM registration number?", required_for_commit: true },
+        { id: "pi5", item_key: "bank_statement", state: "answered", question: "Attach the closing bank statement", required_for_commit: true },
+      ],
+    }),
+    async () => {
+      const h = await renderComponent(App());
+      try {
+        for (let i = 0; i < 6; i++) await h.settle();
+        assert.match(h.text(), /Still needed before this client's opening can be keyed/, "the chase-list banner title must render");
+        assert.match(h.text(), /What is the client's SSM registration number\?/, "an unsatisfied required item must be chased");
+        assert.doesNotMatch(h.text(), /Attach the closing bank statement/, "an ALREADY-answered required item must NOT appear in the chase list");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("F9: a 403 on the seeds read shows the error state ONLY — never the empty-state text, never the Create trigger", async () => {
   await withMockedEnv(mockFetch({ seedsStatus: 403, seedsBody: { message: "permission denied for table opening_seed_registry" } }), async () => {
     const h = await renderComponent(App());
