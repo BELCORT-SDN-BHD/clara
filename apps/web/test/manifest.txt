@@ -62,6 +62,8 @@ components/registers/adjustments-a11y.test.tsx
 components/registers/adjustments-keyboard.test.tsx
 components/registers/adjustments-render-states.test.tsx
 components/registers/EnrolAccountDialog.test.ts
+components/registers/counterparty-hygiene-a11y.test.tsx
+components/registers/counterparty-hygiene-keyboard.test.tsx
 components/registers/fa-particulars-fields.test.tsx
 components/registers/fixed-assets-a11y.test.tsx
 components/registers/fixed-assets-keyboard.test.tsx
@@ -122,6 +124,8 @@ lib/registers/accounts.test.ts
 lib/registers/adjustments-workbench.test.ts
 lib/registers/adjustments.test.ts
 lib/registers/aging.test.ts
+lib/registers/counterparty-doors.test.ts
+lib/registers/counterparty.test.ts
 lib/registers/depreciation.test.ts
 lib/registers/fa-account-profiles.test.ts
 lib/registers/fixed-assets.test.ts
