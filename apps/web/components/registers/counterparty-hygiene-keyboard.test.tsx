@@ -107,6 +107,69 @@ async function mockFetchWithRenameRefusal(url: RequestInfo | URL): Promise<Respo
   return mockFetch(url);
 }
 
+// S1 (independent review, fix-required): pins F7 — after a SUCCESSFUL
+// apply_open_items/unallocate_group, the PARENT aging table re-reads (never
+// stays stale), and the Apply dialog's own candidate pool (fed from that
+// same fresh read) reflects it. Counted with a real call counter, never
+// inferred from timing. `v1` carries two open items so Apply has a genuine
+// source (a credit, negative outstanding) and target (a claim, positive) —
+// BEFORE has both; AFTER has only the target, the credit fully applied away
+// (`_aging_core`'s own `outstanding_cents <> 0` filter — a settled item
+// simply stops appearing, never a placeholder row).
+let apAgingCallCount = 0;
+const AP_AGING_S1_BEFORE = {
+  as_of: "2026-08-28", domain: "ap",
+  counterparties: [{
+    counterparty_id: "v1", counterparty_name: "Lost Invention Sdn Bhd",
+    current_cents: 60000, d31_60_cents: 0, d61_90_cents: 0, d91_plus_cents: 0, total_cents: 60000,
+    items: [
+      { item_id: "i1", item_kind: "bill", item_date: "2026-08-01", due_date: "2026-08-31", overdue: false, outstanding_cents: 100000, bucket: "current" },
+      { item_id: "i2", item_kind: "credit_note", item_date: "2026-08-02", due_date: null, overdue: false, outstanding_cents: -40000, bucket: "current" },
+    ],
+  }],
+  totals: { current_cents: 60000, d31_60_cents: 0, d61_90_cents: 0, d91_plus_cents: 0, total_cents: 60000 },
+};
+const AP_AGING_S1_AFTER = {
+  as_of: "2026-08-28", domain: "ap",
+  counterparties: [{
+    counterparty_id: "v1", counterparty_name: "Lost Invention Sdn Bhd",
+    current_cents: 60000, d31_60_cents: 0, d61_90_cents: 0, d91_plus_cents: 0, total_cents: 60000,
+    items: [{ item_id: "i1", item_kind: "bill", item_date: "2026-08-01", due_date: "2026-08-31", overdue: false, outstanding_cents: 60000, bucket: "current" }],
+  }],
+  totals: { current_cents: 60000, d31_60_cents: 0, d61_90_cents: 0, d91_plus_cents: 0, total_cents: 60000 },
+};
+const STATEMENT_S1 = { counterparty_id: "v1", domain: "ap", from: "2026-01-01", to: "2026-08-28", opening_balance_cents: 0, rows: [], closing_balance_cents: 0 };
+
+async function mockFetchS1Apply(url: RequestInfo | URL): Promise<Response> {
+  const u = String(url);
+  if (u.includes("/rpc/ap_aging")) {
+    apAgingCallCount += 1;
+    return jsonResponse(apAgingCallCount === 1 ? AP_AGING_S1_BEFORE : AP_AGING_S1_AFTER);
+  }
+  if (u.includes("/rpc/supplier_statement")) return jsonResponse(STATEMENT_S1);
+  if (u.includes("/rpc/apply_open_items")) return jsonResponse({ group_id: "g1", domain: "ap", applied_cents: 40000 });
+  return mockFetch(url);
+}
+
+// The unallocate cell needs one EXISTING application the statement panel's
+// own open_item_allocations read can surface as a candidate group — v1's
+// item i1, already the target of one prior apply.
+const OPEN_ITEMS_S1 = [{ id: "i1", client_id: "c1", domain: "ap", counterparty_id: "v1", entry_id: "e1", item_kind: "bill", item_date: "2026-08-01", due_date: "2026-08-31", amount_cents: 100000 }];
+const OPEN_ITEM_ALLOCATIONS_S1 = [{ id: "a1", client_id: "c1", domain: "ap", item_id: "i1", application_group: "g0", operation_kind: "apply", reverses_allocation_id: null, amount_cents: -40000, reason: "prior application", created_by: "u1", created_at: "2026-08-02T00:00:00Z" }];
+
+async function mockFetchS1Unallocate(url: RequestInfo | URL): Promise<Response> {
+  const u = String(url);
+  if (u.includes("/rpc/ap_aging")) {
+    apAgingCallCount += 1;
+    return jsonResponse(apAgingCallCount === 1 ? AP_AGING_S1_AFTER : AP_AGING_S1_BEFORE); // unallocating REOPENS the credit, so the counts invert
+  }
+  if (u.includes("/rpc/supplier_statement")) return jsonResponse(STATEMENT_S1);
+  if (u.includes("/rpc/unallocate_group")) return jsonResponse({ group_id: "g1", reversed_group: "g0", allocations: 2 });
+  if (u.includes("/rest/v1/open_items?")) return jsonResponse(OPEN_ITEMS_S1);
+  if (u.includes("/rest/v1/open_item_allocations?")) return jsonResponse(OPEN_ITEM_ALLOCATIONS_S1);
+  return mockFetch(url);
+}
+
 test("aging tab: every top-level door trigger is keyboard-reachable, in DOM order, no positive tabindex, never disabled by a client-side count", async () => {
   await withMockedEnv(mockFetch, async () => {
     const h = await renderComponent(App());
@@ -341,6 +404,131 @@ test("F15: a governed refusal (rename_counterparty) renders verbatim in the hygi
 
       assert.match(h.text(), /CLR23/, "the CLR code must render, verbatim, in the panel's own persistent banner");
       assert.match(h.text(), /collides with an existing identity/, "the DB's own message must render, verbatim — never re-worded");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+// S1 (independent review, fix-required): a successful apply_open_items
+// re-reads the PARENT aging table (F7's own `onActed`), and the Apply
+// dialog's own candidate pool — fed from that same fresh read — reflects
+// it: the fully-applied credit i2 disappears from the picker.
+test("S1: apply_open_items success re-reads aging exactly once more (1 -> 2), and the Apply dialog's own candidates reflect it", async () => {
+  apAgingCallCount = 0;
+  await withMockedEnv(mockFetchS1Apply, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      const apButton = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Payables"));
+      assert.ok(apButton, "the Payables toggle must render");
+      await h.fireEvent(apButton as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+      assert.equal(apAgingCallCount, 1, "exactly ONE ap_aging call before any act — the domain-toggle's own load");
+
+      const viewStatement = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("View statement"));
+      assert.ok(viewStatement, "the View statement trigger must render for v1's AP row");
+      await h.fireEvent(viewStatement as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const applyTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Apply open items"));
+      assert.ok(applyTrigger, "the Apply open items trigger must render (two candidate items exist)");
+      await h.fireEvent(applyTrigger as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const dialogContent = findIn(
+        body as never,
+        (n) => (n as unknown as { getAttribute?: (a: string) => string | null }).getAttribute?.("data-slot") === "dialog-content",
+      );
+      assert.ok(dialogContent, "the Apply dialog's own content must be reachable");
+      const selects = (function collectSelects(n: Node, out: Node[]): Node[] {
+        if (n.tagName === "SELECT") out.push(n);
+        for (const c of n.childNodes ?? []) collectSelects(c, out);
+        return out;
+      })(dialogContent as never, []);
+      assert.equal(selects.length, 2, "the source and target selects must both be reachable");
+      await h.act(() => { setFieldValue(selects[0] as never, "i2"); }); // source: the credit
+      await h.act(() => { setFieldValue(selects[1] as never, "i1"); }); // target: the claim
+
+      const amountInput = findIn(dialogContent as never, (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type !== undefined);
+      assert.ok(amountInput, "the amount field must be reachable");
+      await h.act(() => { setFieldValue(amountInput as never, "400.00"); });
+      const reasonField = findIn(dialogContent as never, (n) => n.tagName === "TEXTAREA");
+      assert.ok(reasonField, "the reason field must be reachable");
+      await h.act(() => { setFieldValue(reasonField as never, "apply the credit note"); });
+      for (let i = 0; i < 2; i++) await h.settle();
+
+      const confirmButton = findIn(dialogContent as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Apply") && !textOf(n as never).includes("open items"));
+      assert.ok(confirmButton, "the dialog's own Confirm button must be reachable");
+      assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, false, "every field is filled — Confirm must be enabled");
+
+      await h.act(() => { clickButton(confirmButton as never); });
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      assert.equal(apAgingCallCount, 2, "exactly ONE MORE ap_aging call after the successful act — F7's onActed, never stale");
+
+      // Reopen Apply — its OWN candidate pool (agingItems, from the parent's
+      // fresh read) must now show only i1: i2 fully applied away.
+      const applyTriggerAgain = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Apply open items"));
+      assert.ok(applyTriggerAgain, "the Apply trigger must still render");
+      await h.fireEvent(applyTriggerAgain as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const bodyText = textOf(body as never);
+      assert.match(bodyText, /needs at least two currently-outstanding open items/, "with only ONE item left, the dialog's own honest empty message must render — proving its candidate pool is the FRESH read, not the stale one");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+// S1 (independent review, fix-required): the same pin for unallocate_group.
+test("S1: unallocate_group success re-reads aging exactly once more (1 -> 2)", async () => {
+  apAgingCallCount = 0;
+  await withMockedEnv(mockFetchS1Unallocate, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      const apButton = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Payables"));
+      assert.ok(apButton, "the Payables toggle must render");
+      await h.fireEvent(apButton as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+      assert.equal(apAgingCallCount, 1, "exactly ONE ap_aging call before any act");
+
+      const viewStatement = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("View statement"));
+      assert.ok(viewStatement, "the View statement trigger must render for v1's AP row");
+      await h.fireEvent(viewStatement as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const unallocateTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Unallocate"));
+      assert.ok(unallocateTrigger, "the Unallocate trigger must render for the prior application group");
+      await h.fireEvent(unallocateTrigger as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const dialogContent = findIn(
+        body as never,
+        (n) => (n as unknown as { getAttribute?: (a: string) => string | null }).getAttribute?.("data-slot") === "dialog-content",
+      );
+      assert.ok(dialogContent, "the Unallocate dialog's own content must be reachable");
+      const reasonField = findIn(dialogContent as never, (n) => n.tagName === "TEXTAREA");
+      assert.ok(reasonField, "the reason field must be reachable");
+      await h.act(() => { setFieldValue(reasonField as never, "applied to the wrong bill"); });
+      for (let i = 0; i < 2; i++) await h.settle();
+
+      const confirmButton = findIn(dialogContent as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Unallocate"));
+      assert.ok(confirmButton, "the dialog's own Confirm button must be reachable");
+      assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, false, "the reason is filled — Confirm must be enabled");
+
+      await h.act(() => { clickButton(confirmButton as never); });
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      assert.equal(apAgingCallCount, 2, "exactly ONE MORE ap_aging call after the successful act — F7's onActed, never stale");
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();
