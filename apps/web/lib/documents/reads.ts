@@ -10,7 +10,7 @@ import { getRows } from "@/lib/read";
 import { callDoor } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type {
-  AttemptRow, CandidateRow, ClientRow, DocumentRow, ExtractionRow,
+  AttemptRow, CandidateRow, ClientRow, DocumentExtractResult, DocumentRow, ExtractionRow,
   FilingRow, JournalEntryRow, RegionRow,
 } from "./types";
 
@@ -160,6 +160,25 @@ export async function readCorrectionPreview(
   return (await callDoor<CorrectionPreview>(
     "preview_wrong_client_correction",
     { p_document: documentId, p_from_client: fromClient, p_to_client: toClient },
+    opts,
+  ))!;
+}
+
+// --- T6 (port-wave plan §4) ------------------------------------------------------
+
+/** clara.get_document_extract(p_document uuid, p_client uuid, p_max_chars
+ *  integer) -> jsonb, STABLE — read RPC (transport via callDoor; not a
+ *  governed act: no confirmation UI, no re-read-after semantics). The same
+ *  budgeted envelope+region text the agent reads under (types.ts's own
+ *  header). `p_max_chars` defaults to 20000 server-side; this module always
+ *  passes it explicitly so the UI's own "budgeted to N characters" note is
+ *  never guessing at the DB's default. */
+export async function getDocumentExtract(
+  documentId: string, clientId: string | null, maxChars = 20000, opts: Opts = {},
+): Promise<DocumentExtractResult> {
+  return (await callDoor<DocumentExtractResult>(
+    "get_document_extract",
+    { p_document: documentId, p_client: clientId, p_max_chars: maxChars },
     opts,
   ))!;
 }

@@ -180,6 +180,105 @@ export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
 
 export const INTAKE_ADOPTED: ReadonlySet<IntakeStatus> = new Set(["finalized", "adopted"]);
 
+// --- T6 (port-wave plan §4) — the document-governance seam ---------------------
+//
+// Grounded at the LIVE catalog on an instance-unique throwaway rig (migrate
+// 0001..0140), not migration text — `pg_get_functiondef` pulls, 2026-08-28.
+
+/** clara.get_document_extract(p_document uuid, p_client uuid, p_max_chars
+ *  integer) -> jsonb, STABLE — the same budgeted envelope+regions text an
+ *  agent reads, viewer+ (or the wake lane; this workbench only ever calls it
+ *  as the human). `p_client` scopes admission: an UNASSIGNED document (no
+ *  active filing) is always admitted; a FILED one only for the filing's own
+ *  client. */
+export type DocumentExtractExtraction = {
+  id: string;
+  engine_id: string;
+  engine_kind: string;
+  version_n: number;
+  status: string;
+  page_count: number | null;
+  extracted_at: string;
+  envelope_text: string;
+  raw_sha256: string | null;
+  normalization_version: string | null;
+};
+
+export type DocumentExtractRegion = {
+  idx: number;
+  id: string;
+  extraction_id: string;
+  engine_kind: string;
+  version_n: number;
+  extracted_at: string;
+  locator_kind: string;
+  locator: Record<string, unknown>;
+  field_path: string | null;
+  text_content: string | null;
+  engine_confidence: number | null;
+  monetary_raw: string | null;
+  monetary_cents: number | null;
+};
+
+export type DocumentExtractResult = {
+  document: {
+    id: string; sha256: string; original_filename: string | null; mime_type: string | null;
+    byte_size: number | null; bytes_verified_at: string | null; page_count: number | null;
+    extraction_status: string; document_kind: string | null; financial_date: string | null;
+  };
+  unassigned: boolean;
+  filing: { id: string; client_id: string; filed_at: string; basis: string } | null;
+  extractions: DocumentExtractExtraction[];
+  regions: DocumentExtractRegion[];
+  max_chars: number;
+};
+
+/** clara.request_autodraft(p_filing uuid) -> jsonb — bookkeeper+. NOT a
+ *  CLR-refusal-shaped door for most of its outcomes: `admit_autodraft_task`
+ *  (the core it delegates to) returns a 200 `{outcome, ...}` envelope for
+ *  every state-dependent admission decision (a budget cap, a lane not yet
+ *  ready, a sales-lane hold) — only a malformed call or a missing filing
+ *  raises a real CLR exception. The closed set below is every `outcome`
+ *  string `admit_autodraft_task`'s own body can return (governance-
+ *  doors.ts's sibling `admissionOutcome` header on the documents side cites
+ *  the exact branches) — `(string & {})` keeps a future outcome honest rather
+ *  than silently miscategorized. */
+export type AutodraftOutcome =
+  | "admitted" | "re_admitted" | "re_admitted_after_withdrawal"
+  | "noop_existing" | "already_done"
+  | "skipped_direction" | "refused_budget" | "refused_attempts" | "lane_changed"
+  | (string & {});
+
+export type RequestAutodraftResult = {
+  outcome: AutodraftOutcome;
+  task_id: string | null;
+  reason: string | null;
+  lane: string | null;
+  reasons: unknown;
+  direction: string | null;
+  cap: number | null;
+  used: number | null;
+};
+
+/** clara.request_reextraction(p_document uuid, p_reason text, p_op_key text)
+ *  -> jsonb — bookkeeper+. Every SUCCESSFUL admission path returns this
+ *  shape; CLR10/CLR11/CLR16 (a bad call, a foreign document, or "no
+ *  completed extraction to re-extract") raise real refusals instead
+ *  (governance-doors.ts's own header enumerates every admission door). */
+export type ReextractionAdmission = "reextraction" | "receipt_backfill" | "filed_bootstrap" | "failed_retry" | (string & {});
+
+export type RequestReextractionResult = {
+  task_id: string | null;
+  document_id: string;
+  version_n: number | null;
+  status: string | null;
+  reused: boolean;
+  admission: ReextractionAdmission;
+  lane: string | null;
+  extraction_id: string | null;
+  reason: string | null;
+};
+
 /** Per-turn admission budget mirrored from the runtime's own cap
  *  (apps/dashboard/app/shared/intake.ts:99-100). */
 export const MAX_FILE_BYTES = 20 * 1024 * 1024;
