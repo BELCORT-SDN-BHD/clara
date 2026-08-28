@@ -14,7 +14,11 @@
 // Final acceptance is exactly that focused shape with the variable UNSET, and accounts for zero
 // skips.
 //
-// MERGE NOTE: packages/db/package.json's test script needs this gate added to its --import chain
-// alongside the existing delta/epsilon/eta/f-a7-beta/rs-guard/theta/zeta gates. The team lead
-// owns that edit at merge prep; this lane does not touch package.json.
+// MERGE NOTE (trued at merge prep, 2026-08-29): this gate is NOT wired into packages/db/
+// package.json's --import chain — deliberately, matching its two F-A7 siblings
+// (f-a7-alpha-preintegration-gate.mjs, f-a7-beta-preintegration-gate.mjs), neither of which is
+// wired either. The package-wide sweep always runs against a chain that carries this
+// migration (CI applies HEAD's migrations first), so the allow-missing arm is only ever needed
+// by a hand-run against a pre-0142 database — preload it explicitly in that case:
+//   node --test --import ./tests/f-a7b-pr-a-preintegration-gate.mjs tests/
 process.env.CLARA_ALLOW_MISSING_F_A7B_PR_A = "1";

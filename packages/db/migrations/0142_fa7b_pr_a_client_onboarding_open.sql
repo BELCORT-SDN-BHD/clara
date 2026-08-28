@@ -1,6 +1,7 @@
--- UNNUMBERED_fa7b_pr_a_client_onboarding_open.sql -- F-A7b (client onboarding), PR-a, the
--- ADDITIVE opener of the train. Authored UNNUMBERED; the number is claimed at MERGE
--- PREPARATION (standing law, AGENTS.md + .claude/rules/db-migrations.md).
+-- 0142_fa7b_pr_a_client_onboarding_open.sql -- F-A7b (client onboarding), PR-a, the
+-- ADDITIVE opener of the train. Authored UNNUMBERED; 0142 claimed at MERGE PREPARATION
+-- 2026-08-29 against a main frontier of 0141 (standing law, AGENTS.md +
+-- .claude/rules/db-migrations.md).
 --
 -- Design of record: docs/plan/active/fa7b-onboarding-design.md SS4 D-1, D-3, D-4, as amended by
 -- the gate record docs/plan/active/fa7b-gate-record.md (Q-D1 ALL-PROPOSE; Q-D4 ride

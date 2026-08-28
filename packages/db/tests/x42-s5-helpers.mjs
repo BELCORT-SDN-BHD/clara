@@ -718,7 +718,7 @@ const AGENT_LIMB_F_A3_PR1B_CLOCK_NAMES = ["_tf_bank_agent_proposal_accept", "set
 // the clock" idiom every other core already on this roster carries.
 const FILING_VERB_F_A7_BETA_CLOCK_NAMES = ["_agent_file_document_core", "wake_reattribute_document"];
 
-// [F-A7b PR-a, `UNNUMBERED_fa7b_pr_a_client_onboarding_open` -- number claimed at merge]:
+// [F-A7b PR-a, `0142_fa7b_pr_a_client_onboarding_open` -- number claimed at merge prep 2026-08-29]:
 // clara.wake_propose_client_onboarding reads statement_timestamp() twice -- the authorization
 // liveness check (`a.expires_at > statement_timestamp()`) and the consume stamp
 // (`consumed_at = statement_timestamp()`) -- the SAME "the audit/liveness clock is the bare
