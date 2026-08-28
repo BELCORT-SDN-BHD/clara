@@ -8,14 +8,14 @@ carries the in-flight detail a resuming session needs that PROGRESS deliberately
 | PR | What |
 |---|---|
 | #362 | **P2 shell** — Supabase SSR invite-only auth · Clara rail + full-screen threads · the 18-part renderer + tsc guard · ⌘K. Post-merge full CI sweep ran ALL-GREEN. |
-| #363 | **P3.0** — the human-lane foundation: `lib/read.ts` (`getRows`) + `lib/doors.ts` (`callDoor`, DoorRefusal verbatim/never-retried) + `useHydratedPart` loader-stability hardening. |
+| #363 | **P3.0** — the human-lane foundation: `apps/web/lib/read.ts` (`getRows`) + `apps/web/lib/doors.ts` (`callDoor`, DoorRefusal verbatim/never-retried) + `useHydratedPart` loader-stability hardening. |
 | #364 | **P3 workbench** — five journey lanes folded (journals · firm/registers · close/reports · documents · bank), 521/521. |
 | #365 | **0137 three human read surfaces** — `firm_open_questions_visible` · `client_identifier_promotions_visible` · `users_visible`. Estate suite 3047/0. |
 
 ## In flight at the compaction point
 
-1. **`web/p3-finale`** (worktree `.claude/worktrees/p3-finale`) — `web/p3-polish` (tip
-   `10ca982`) + `web/p3-a11y-gates` (tip `f8fc891`) merged, both zero-conflict. A seam lane
+1. **web/p3-finale** (worktree .claude/worktrees/p3-finale) — web/p3-polish (tip
+   `10ca982`) + web/p3-a11y-gates (tip `f8fc891`) merged, both zero-conflict. A seam lane
    is truing **5 test failures** (fold-seam class: the a11y gates were written against
    pre-polish markup): the Attest KNOWN-VIOLATION test must FLIP to pin the fix · four
    zero-violation scans (bank matching · bank recon · documents quintet · needs-you) ·
@@ -23,11 +23,11 @@ carries the in-flight detail a resuming session needs that PROGRESS deliberately
    then **flipped to `--strict`** (its one former near-miss was fixed by polish).
    Rule given: real violations get COMPONENT fixes, stale fixtures get TEST truings;
    never delete a rule or exclude a surface to reach green.
-2. **`f-a4/pr-1c`** (tip `a035c58`, FROZEN) — the close agent limb. Estate suite
+2. **f-a4/pr-1c** (tip `a035c58`, FROZEN) — the close agent limb. Estate suite
    3144 tests / 3060 pass / 0 fail. Under **double review**: a fresh-context opus lane
    (law-71 four-wall re-derivation + two active bypass attempts + the oracle
    byte-unchanged proof) and a **Codex `gpt-5.6-sol` read-only adversarial pass**
-   (worktree `.claude/worktrees/codex-rev-pr1c`; output at the session task file).
+   (worktree .claude/worktrees/codex-rev-pr1c; output at the session task file).
    Its rig container `clara-rig-fa4pr1c` (127.0.0.1:55977) is deliberately LEFT UP.
 
 ## Rulings made this session (beyond the grill record)
