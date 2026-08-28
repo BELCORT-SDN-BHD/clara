@@ -3,8 +3,29 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AGENT_USER_ID, CLR, assertRaises, opk, rootQuery, roleQuery, insertUser, createFirm, seedAdmission } from "./rig-fixtures.mjs";
+import { AGENT_USER_ID, CLR, assertRaises, opk, rootQuery, roleQuery, insertUser, createFirm, seedAdmission, getPool } from "./rig-fixtures.mjs";
 import { requestFirmRegistration, rawRegistrationRequest } from "./p4t2-fixtures.mjs";
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Poll (bounded) until backend `pid` is observably WAITING (wait_event_type='Lock') on a lock
+ *  held by `blockerPid`. Mirrors p4t1-add-member-regression.test.mjs's own local copy (itself
+ *  mirroring rig-runtime-race.mjs's convention, db-tests.md: "never a sleep, which proves
+ *  nothing about whether the block actually happened") -- copied locally rather than
+ *  cross-imported from another test area's own helper module. */
+async function waitBlockedByOrThrow(pid, blockerPid, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await rootQuery(
+      "select wait_event_type as wet, pg_blocking_pids(pid) as blockers from pg_stat_activity where pid = $1",
+      [pid],
+    );
+    const row = r.rows[0];
+    if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(blockerPid))) return true;
+    await sleep(25);
+  }
+  throw new Error(`waitBlockedByOrThrow: backend ${pid} never observably blocked on blocker ${blockerPid} within ${timeoutMs}ms`);
+}
 
 async function unclaimedActor(tag) {
   // A raw jwt_sub with a real clara.users row (request_firm_registration requires the actor to
@@ -78,6 +99,110 @@ test("p4t2.request: an op_key replay (SAME actor, SAME op_key) returns the SAME 
   assert.deepEqual(second, first);
   const n = await rootQuery("select count(*)::int as n from clara.firm_registration_requests where applicant = $1", [actor]);
   assert.equal(n.rows[0].n, 1, "a genuine op_key retry must never mint a second row");
+});
+
+test("p4t2.request: F6 -- reusing an op_key with a DIFFERENT firm_name refuses CLR10 (op_key reused with different args), and no second row is created", async () => {
+  const actor = await unclaimedActor("f6args");
+  const key = opk("f6args-key");
+  const first = await requestFirmRegistration(actor, { firmName: "F6 Original Co", opKey: key });
+  assert.ok(first.request_id);
+  await assertRaises(CLR.badRequest, () => requestFirmRegistration(actor, { firmName: "F6 Different Co", opKey: key }), "request_firm_registration op_key reused with different firm_name");
+  const n = await rootQuery("select count(*)::int as n from clara.firm_registration_requests where applicant = $1", [actor]);
+  assert.equal(n.rows[0].n, 1, "the mismatched-args attempt must not mint a second row");
+});
+
+test("p4t2.request: F6 -- reusing an op_key with a DIFFERENT note (same firm_name) also refuses CLR10", async () => {
+  const actor = await unclaimedActor("f6note");
+  const key = opk("f6note-key");
+  await requestFirmRegistration(actor, { firmName: "F6 Note Co", note: "first note", opKey: key });
+  await assertRaises(CLR.badRequest, () => requestFirmRegistration(actor, { firmName: "F6 Note Co", note: "different note", opKey: key }), "request_firm_registration op_key reused with different note");
+});
+
+test("p4t2.request: F6 -- an op_key that already decided a request (approved/rejected) is used up: identical args still replay the OLD receipt (now reflecting its current status), a FRESH op_key is required for a genuinely new request", async () => {
+  const actor = await unclaimedActor("f6decided");
+  const key = opk("f6decided-key");
+  const first = await requestFirmRegistration(actor, { firmName: "F6 Decided Co", opKey: key });
+  assert.equal(first.status, "open");
+
+  // Reject it directly (root, bypassing the operator ceremony -- this file only proves the
+  // request-door's own replay contract, not the decision doors, which have their own battery).
+  await rootQuery(
+    "update clara.firm_registration_requests set status = 'rejected', decided_at = now(), reason = 'f6 fixture' where id = $1",
+    [first.request_id],
+  );
+
+  // Identical args, same op_key: replays the SAME row, now reporting its CURRENT (rejected) status
+  // -- not a fabricated frozen receipt, and not a fresh "open" row.
+  const replay = await requestFirmRegistration(actor, { firmName: "F6 Decided Co", opKey: key });
+  assert.equal(replay.request_id, first.request_id);
+  assert.equal(replay.status, "rejected");
+  const n1 = await rootQuery("select count(*)::int as n from clara.firm_registration_requests where applicant = $1", [actor]);
+  assert.equal(n1.rows[0].n, 1, "a replay after rejection must never mint a second row");
+
+  // A FRESH op_key opens a genuinely new request for the same applicant (the old row is no
+  // longer 'open', so the open-applicant partial-unique index does not block it).
+  const second = await requestFirmRegistration(actor, { firmName: "F6 Decided Co Take Two", opKey: opk("f6decided-fresh") });
+  assert.equal(second.status, "open");
+  assert.notEqual(second.request_id, first.request_id);
+  const n2 = await rootQuery("select count(*)::int as n from clara.firm_registration_requests where applicant = $1", [actor]);
+  assert.equal(n2.rows[0].n, 2);
+});
+
+test("p4t2.request: F6 -- a concurrent IDENTICAL pair (SAME actor, op_key, and args, racing on two connections) yields a replay for BOTH callers, never a spurious CLR09 for the loser -- PROVEN via an observed block, never a sleep", async () => {
+  const actor = await unclaimedActor("f6race");
+  const key = opk("f6race-key");
+
+  const c1 = await getPool().connect();
+  const c2 = await getPool().connect();
+  let loserOutcome;
+  let blocked = false;
+  try {
+    // T1: an explicit, held-open transaction inserting the request row (uncommitted).
+    await c1.query("set role clara_authenticated");
+    await c1.query("begin");
+    await c1.query("select set_config('request.jwt.claims', $1, true)", [
+      JSON.stringify({ sub: actor, role: "authenticated" }),
+    ]);
+    const t1Result = await c1.query(
+      "select clara.request_firm_registration(p_firm_name => $1, p_note => $2, p_op_key => $3) as receipt",
+      ["F6 Race Co", null, key],
+    );
+    const pid1 = (await c1.query("select pg_backend_pid() as pid")).rows[0].pid;
+
+    // T2: a SEPARATE, ordinary autocommitting call on ANOTHER connection -- the SAME actor,
+    // SAME op_key, SAME args -- fired while T1's transaction is still open (uncommitted). T2's
+    // own replay lookup cannot see T1's uncommitted row (MVCC), so T2 also attempts the INSERT
+    // and blocks on uq_firm_registration_requests_open_applicant until T1 resolves.
+    await c2.query("set role clara_authenticated");
+    await c2.query("select set_config('request.jwt.claims', $1, false)", [
+      JSON.stringify({ sub: actor, role: "authenticated" }),
+    ]);
+    const pid2 = (await c2.query("select pg_backend_pid() as pid")).rows[0].pid;
+    const t2Promise = c2
+      .query("select clara.request_firm_registration(p_firm_name => $1, p_note => $2, p_op_key => $3) as receipt", ["F6 Race Co", null, key])
+      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+
+    blocked = await waitBlockedByOrThrow(pid2, pid1);
+    // Only NOW does T1 commit -- releasing T1's hold is what lets T2's insert re-check the
+    // (now-committed) unique index and discover the conflict.
+    await c1.query("commit");
+    loserOutcome = await t2Promise;
+
+    assert.ok(blocked, "T2 must be observably blocked on T1's uncommitted insert -- a race that never blocked proves nothing");
+    assert.equal(loserOutcome.ok, true, "the loser of the race must be REPLAYED, never refused with a spurious CLR09");
+    assert.deepEqual(loserOutcome.r.rows[0].receipt, t1Result.rows[0].receipt, "both callers must see the SAME receipt");
+  } finally {
+    await c1.query("rollback").catch(() => {});
+    await c1.query("reset role").catch(() => {});
+    await c1.query("reset all").catch(() => {});
+    c1.release();
+    await c2.query("rollback").catch(() => {});
+    await c2.query("reset role").catch(() => {});
+    await c2.query("reset all").catch(() => {});
+    c2.release();
+  }
+  const n = await rootQuery("select count(*)::int as n from clara.firm_registration_requests where applicant = $1", [actor]);
+  assert.equal(n.rows[0].n, 1, "exactly one request row survives the race");
 });
 
 test("p4t2.request: no _audit row and no domain event fire -- the identical structural reason claim_identity (0141) documents: no firm_id exists yet to scope either under", async () => {

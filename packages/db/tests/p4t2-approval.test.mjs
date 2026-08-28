@@ -3,7 +3,8 @@
 
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { AGENT_USER_ID, CLR, assertRaises, opk, rootQuery, humanQuery, insertUser, createFirm, seedAdmission } from "./rig-fixtures.mjs";
+import { randomUUID } from "node:crypto";
+import { AGENT_USER_ID, CLR, assertRaises, opk, rootQuery, humanQuery, insertUser, createFirm, seedAdmission, addMember } from "./rig-fixtures.mjs";
 import { requestFirmRegistration, approveFirmRegistration, rejectFirmRegistration, rawRegistrationRequest, markOperator, clearOperator } from "./p4t2-fixtures.mjs";
 
 // Leave a clean is_operator slate for whichever file runs next in the same suite invocation --
@@ -32,6 +33,15 @@ test("p4t2.approve: floor is owner+ AND is_operator -- a bookkeeper refuses CLR0
   const app = await applicant("bkfloor");
   const req = await requestFirmRegistration(app, { firmName: "BK Floor Co", opKey: opk("bkfloor-req") });
   await assertRaises(CLR.authz, () => approveFirmRegistration(op.bookkeeper, { request: req.request_id, opKey: opk("bkfloor-approve") }), "approve_firm_registration as bookkeeper");
+});
+
+test("p4t2.approve: F4 -- an ADMIN (rank 2) of the operator firm refuses CLR04 (the owner-rank floor, not merely a membership check -- the exact gap F2 closed at set_member_role/_add_member_core/invite_member, proven here at the approve door too)", async () => {
+  const op = await operatorScene("adminfloor");
+  const admin = await insertUser("p4t2op", "adminfloor_admin");
+  await addMember(op.owner, { firm: op.firm, user: admin, role: "admin", opKey: opk("adminfloor-add") });
+  const app = await applicant("adminfloor");
+  const req = await requestFirmRegistration(app, { firmName: "Admin Floor Co", opKey: opk("adminfloor-req") });
+  await assertRaises(CLR.authz, () => approveFirmRegistration(admin, { request: req.request_id, opKey: opk("adminfloor-approve") }), "approve_firm_registration as an operator-firm admin");
 });
 
 test("p4t2.approve: an OWNER of a NON-operator firm refuses CLR04 (owner rank alone is not sufficient, matching 0133's own comment)", async () => {
@@ -125,6 +135,18 @@ test("p4t2.approve: an applicant who acquired an active membership elsewhere SIN
   assert.equal(request.status, "open", "the request must stay open -- the core's refusal must roll back the whole call, not half-approve");
 });
 
+test("p4t2.approve: F7 -- an operator cannot approve their OWN registration request (the applicant-turned-operator-owner case, ruling: add the self-decision wall)", async () => {
+  const op = await operatorScene("selfapprove");
+  const app = await applicant("selfapprove");
+  const req = await requestFirmRegistration(app, { firmName: "Self Approve Co", opKey: opk("selfapprove-req") });
+  // The applicant separately joins the OPERATOR firm as owner (a distinct, legitimate admin act),
+  // creating the self-decision conflict F7 closes -- the request stays open.
+  await addMember(op.owner, { firm: op.firm, user: app, role: "owner", opKey: opk("selfapprove-add") });
+  await assertRaises(CLR.authz, () => approveFirmRegistration(app, { request: req.request_id, opKey: opk("selfapprove-approve") }), "approve_firm_registration on one's own request");
+  const request = await rawRegistrationRequest(req.request_id);
+  assert.equal(request.status, "open", "a refused self-approval must not consume the request");
+});
+
 test("p4t2.approve: the fixed agent identity as the request's applicant refuses CLR04 (the core's own is_agent wall, load-bearing exactly here per annex §D.3)", async () => {
   const op = await operatorScene("agentapp");
   // Directly insert a request naming the agent identity as applicant -- the normal
@@ -135,7 +157,15 @@ test("p4t2.approve: the fixed agent identity as the request's applicant refuses 
     "insert into clara.firm_registration_requests(applicant, firm_name, op_key) values ($1, $2, $3) returning id",
     [AGENT_USER_ID, "Agent Owned Co", opk("agentapp-fixture")],
   )).rows[0].id;
-  await assertRaises(CLR.authz, () => approveFirmRegistration(op.owner, { request: reqId, opKey: opk("agentapp-approve") }), "approve_firm_registration for a request naming the agent identity");
+  try {
+    await assertRaises(CLR.authz, () => approveFirmRegistration(op.owner, { request: reqId, opKey: opk("agentapp-approve") }), "approve_firm_registration for a request naming the agent identity");
+  } finally {
+    // F5 fix (rev-p4t2 round 1): this fixture root-inserts a row the normal door would never
+    // create, and the door refuses before ever changing its status -- it stays 'open' forever
+    // under the fixed AGENT_USER_ID applicant unless cleaned up here, colliding with
+    // uq_firm_registration_requests_open_applicant on a second run against the same DB.
+    await rootQuery("delete from clara.firm_registration_requests where id = $1", [reqId]);
+  }
 });
 
 test("p4t2.reject: floor is owner+ AND is_operator -- a bookkeeper refuses CLR04", async () => {
@@ -143,6 +173,15 @@ test("p4t2.reject: floor is owner+ AND is_operator -- a bookkeeper refuses CLR04
   const app = await applicant("rejfloor");
   const req = await requestFirmRegistration(app, { firmName: "Reject Floor Co", opKey: opk("rejfloor-req") });
   await assertRaises(CLR.authz, () => rejectFirmRegistration(op.bookkeeper, { request: req.request_id, reason: "no", opKey: opk("rejfloor-reject") }), "reject_firm_registration as bookkeeper");
+});
+
+test("p4t2.reject: F4 -- an ADMIN (rank 2) of the operator firm refuses CLR04 (same owner-rank floor proof as approve's own admin-rank cell)", async () => {
+  const op = await operatorScene("rejadminfloor");
+  const admin = await insertUser("p4t2op", "rejadminfloor_admin");
+  await addMember(op.owner, { firm: op.firm, user: admin, role: "admin", opKey: opk("rejadminfloor-add") });
+  const app = await applicant("rejadminfloor");
+  const req = await requestFirmRegistration(app, { firmName: "Reject Admin Floor Co", opKey: opk("rejadminfloor-req") });
+  await assertRaises(CLR.authz, () => rejectFirmRegistration(admin, { request: req.request_id, reason: "no", opKey: opk("rejadminfloor-reject") }), "reject_firm_registration as an operator-firm admin");
 });
 
 test("p4t2.reject: a BLANK reason refuses CLR10 -- the reason-required build flag, DB-enforced not merely UI-gated", async () => {
@@ -181,6 +220,16 @@ test("p4t2.reject: a successful rejection stamps status/decided_by/decided_at/re
   assert.equal(events.rows.length, 1);
   assert.equal(events.rows[0].event_type, "firm_registration.rejected");
   assert.equal(events.rows[0].firm_id, op.firm);
+});
+
+test("p4t2.reject: F7 -- an operator cannot reject their OWN registration request (the applicant-turned-operator-owner case, ruling: add the self-decision wall)", async () => {
+  const op = await operatorScene("selfreject");
+  const app = await applicant("selfreject");
+  const req = await requestFirmRegistration(app, { firmName: "Self Reject Co", opKey: opk("selfreject-req") });
+  await addMember(op.owner, { firm: op.firm, user: app, role: "owner", opKey: opk("selfreject-add") });
+  await assertRaises(CLR.authz, () => rejectFirmRegistration(app, { request: req.request_id, reason: "no", opKey: opk("selfreject-reject") }), "reject_firm_registration on one's own request");
+  const request = await rawRegistrationRequest(req.request_id);
+  assert.equal(request.status, "open", "a refused self-rejection must not consume the request");
 });
 
 test("p4t2.reject: a request that is no longer open (already rejected) refuses CLR09", async () => {
@@ -234,6 +283,59 @@ test("p4t2.create_firm_regression: a consumed token's op_key replay still return
   ]);
   const r2 = await humanQuery(owner, "select clara.create_firm(p_name => $1, p_admission_token => $2, p_op_key => $3) as receipt", [
     "Replay Token Co", token, key,
+  ]);
+  assert.deepEqual(r2.rows[0].receipt, r1.rows[0].receipt);
+});
+
+// ---------------------------------------------------------------------------
+// F1 fix (rev-p4t2 round 1, HIGH, regression): create_firm's replay path must re-check WHO is
+// asking, not just WHICH (token, op_key) pair -- rig-proven finding, one cell per subject class.
+// ---------------------------------------------------------------------------
+
+test("p4t2.create_firm_regression: F1 -- the fixed agent identity replaying a CONSUMED (token, op_key) pair refuses CLR04, never the cached receipt", async () => {
+  const owner = await insertUser("p4t2cf", "f1_agent_orig");
+  const token = await seedAdmission("p4t2-f1-agent");
+  const key = opk("f1-agent-replay");
+  const r1 = await humanQuery(owner, "select clara.create_firm(p_name => $1, p_admission_token => $2, p_op_key => $3) as receipt", [
+    "F1 Agent Replay Co", token, key,
+  ]);
+  assert.ok(r1.rows[0].receipt.firm_id, "the original, legitimate call must still succeed");
+  await assertRaises(
+    CLR.authz,
+    () => humanQuery(AGENT_USER_ID, "select clara.create_firm(p_name => $1, p_admission_token => $2, p_op_key => $3)", [
+      "F1 Agent Replay Co", token, key,
+    ]),
+    "create_firm replay as the fixed agent identity",
+  );
+});
+
+test("p4t2.create_firm_regression: F1 -- an unknown subject replaying a CONSUMED (token, op_key) pair refuses CLR04, never the cached receipt", async () => {
+  const owner = await insertUser("p4t2cf", "f1_unknown_orig");
+  const token = await seedAdmission("p4t2-f1-unknown");
+  const key = opk("f1-unknown-replay");
+  const r1 = await humanQuery(owner, "select clara.create_firm(p_name => $1, p_admission_token => $2, p_op_key => $3) as receipt", [
+    "F1 Unknown Replay Co", token, key,
+  ]);
+  assert.ok(r1.rows[0].receipt.firm_id, "the original, legitimate call must still succeed");
+  const stranger = randomUUID();
+  await assertRaises(
+    CLR.authz,
+    () => humanQuery(stranger, "select clara.create_firm(p_name => $1, p_admission_token => $2, p_op_key => $3)", [
+      "F1 Unknown Replay Co", token, key,
+    ]),
+    "create_firm replay as an unknown subject (no clara.users row)",
+  );
+});
+
+test("p4t2.create_firm_regression: F1 -- the SAME actor who legitimately consumed the token still replays cleanly (positive control -- the fix must not break a genuine retry)", async () => {
+  const owner = await insertUser("p4t2cf", "f1_valid_replay");
+  const token = await seedAdmission("p4t2-f1-valid");
+  const key = opk("f1-valid-replay");
+  const r1 = await humanQuery(owner, "select clara.create_firm(p_name => $1, p_admission_token => $2, p_op_key => $3) as receipt", [
+    "F1 Valid Replay Co", token, key,
+  ]);
+  const r2 = await humanQuery(owner, "select clara.create_firm(p_name => $1, p_admission_token => $2, p_op_key => $3) as receipt", [
+    "F1 Valid Replay Co", token, key,
   ]);
   assert.deepEqual(r2.rows[0].receipt, r1.rows[0].receipt);
 });
