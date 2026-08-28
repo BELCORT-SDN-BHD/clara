@@ -172,7 +172,7 @@ test("F5-3/F5-4: approve_opening_seed posts the REAL plan revision_token and the
   let captured: Record<string, unknown> | null = null;
   const mock = baseMock({
     items: [ITEM],
-    planRevisionToken: "rev-plan-distinct-42",
+    planRevisionToken: "rev-plan-distinct-42", // gitleaks:allow -- a distinct test-fixture revision token, not a credential
     entryRevisionToken: "rev-entry-distinct-99",
     captureBody: (fn, body) => { if (fn === "approve_opening_seed") captured = body; },
   });
