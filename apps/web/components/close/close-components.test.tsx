@@ -25,11 +25,13 @@ function render(el: ReactElement): string {
   return renderToStaticMarkup(createElement(NextIntlClientProvider, { locale: "en", messages, children: el }));
 }
 
-test("CloseProposalPanel honestly states 'Clara proposes close' is not built, naming the missing verb/carrier", () => {
+test("CloseProposalPanel honestly states the carrier/doors are LIVE and names both, while the panel's own surface stays not-built", () => {
   const html = render(createElement(CloseProposalPanel));
   assert.match(html, /Clara proposes close/);
   assert.match(html, /close_proposals/);
   assert.match(html, /wake_propose_close/);
+  assert.match(html, /live/i);
+  assert.match(html, /not built/i);
 });
 
 function check(overrides: Partial<ClosePlanCheck>): ClosePlanCheck {
