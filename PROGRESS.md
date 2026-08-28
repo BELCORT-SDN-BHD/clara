@@ -190,6 +190,9 @@ its finding; none blocks beta):
   `.claude/rules/db-tests.md`; the full text of each obligation above is archived verbatim in
   `docs/plan/completed/progress-archive-2026-08-part3.md`.
 - **F-A6 PR-2 runtime obligations (load-bearing, not optional)** — named in `freeform-read-design.md` §7 item 4 and `freeform-read-annexes-2-record.md` Annex J R-3's S-1 note: **H-4** the POOL, not the verb, must set a session `statement_timeout` before calling `wake_freeform_read` (a verb-local `SET LOCAL` cannot bound a single FETCH) · **H-5** `withFreeformRead` releases the freeform pool connection with `DISCARD ALL`, never `reset all` (which does not release a payload-taken session advisory lock) · **S-1** `withFreeformRead` calls ONLY `wake_freeform_read`, never `_freeform_arm`/`_freeform_settle` directly (both GRANTED to `clara_freeform_ro`, callable outside the verb).
+- **ClaraBook resource-audit residuals (2026-08-28, `clarabook-resource-audit-2026-08-28.md`)** —
+  the Clara mascot assets (P6 + owner batch) · the WCAG 2.2 target-size owner question (§4,
+  recommendation: adopt at P6) · the Mobbin flow-video viewing pass (裁-4 7d).
 - **Gate-record OQ long tail (audited 2026-08-26)** — carried, not yet ruled: F-T1 OQ-1/2/3/5/6/7/8/9/10 · F-A4 OQ-1..6 · F-T3 OQ-2/3/9 · F-A8 OI-1 · F-A7 gate §5 item 3 (dual-attribution severance) · F-A9 TA-P13-OQ-2/4 · fix-queue's claims-auto-post widening trigger · bank-agency OQ-8's later-relation question · reporting-agency OQ-4 + P12 · freeform OQ-A — one row, pointers only.
 - **Small unrecorded follow-ups (audit 2026-08-26)** — wb-o's AMB-11 adjudication request (`docs/plan/research/wave-b/0017-ambiguity-adjudications.md`) · the metering `firm_usage_daily`/`task_usage` read-drop follow-up (`metering-survey.md:447`, design §3.9 — PR-1 only stops reading them) · `chatTurn.v14.bank`'s per-rung friendly-message table · `wake-engine.mjs:70-79`'s CAS cancel-race guard is a NAMED obligation on whoever ships the first `bank_agent`/`close_prep` wake workflow body — VERIFIED still absent from `chatTurn.v14.bank.ts` (zero `cas`/`cancel` hits, 2026-08-26).
 - **Dated-tripwire class, seen 3×** (f-a2 witness v2 08-21 · #352's closed-wave floor · B5.4) — pin the monotonic DIRECTION, never a ceremony-state; a trued pin proves both ways; sweep for a candidate at every ceremony. Same-audit reviewer items: `--lock-deployed` is BLANKET (stamps every non-`true` entry — run only when every dark entry is genuinely deployed; a scoped `--only` flag would be its own PR, none exists today) · the D-a window (08-24) has NO as-run document · the `frozen-evaluators.json` `evaluate_fs_pack_agent_v1` migration-path one-liner is fixed in this PR (see M1).
@@ -401,8 +404,7 @@ bare-SST-id vision-prompt check (lock 3's margin was one channel) · `coverage.p
   `docs/plan/completed/progress-archive-2026-08-part2.md` (verbatim); **the standing law stands:**
   drive the db suite with libpq `PG*` vars + `CLARA_ALLOW_DESTRUCTIVE=1`, NEVER `DATABASE_URL`,
   and cure WSL split-brain with a full `wsl --shutdown` when runners are IDLE, then one keeper.
-- **Three genuinely dangling doc paths** (`RENUMBER.md` · `algebra.md` · `INTERFACE-PINS.md`) —
-  authored in worktrees, never committed; inert (law 41 + ADR-058); re-author only on real need.
+- **Three dangling doc paths** (`RENUMBER.md` · `algebra.md` · `INTERFACE-PINS.md`) — inert (law 41 + ADR-058); re-author only on real need.
 - **Two γ post-CLEAN NITs** (PR #231, residuals 4–5) — one-word fixes, next `0057`-area batch.
 - ~~**BEE's opening TB**~~ — **RESOLVED 2026-08-20** for ADR-043 by a live read; record archived
   in `docs/plan/completed/progress-archive-2026-08-part2.md`. **The one residual that stays open:**
