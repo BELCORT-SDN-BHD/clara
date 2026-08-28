@@ -9,6 +9,7 @@
 import { callDoor } from "@/lib/doors";
 import { getRows } from "@/lib/read";
 import type { SessionTokenAccessor } from "@/lib/session";
+import { AGENT_TASK_LIVE_STATUSES } from "./types";
 import type {
   AgentTaskRow, CodingLaneResult, CodingLaneRow, CodingTaskRow,
   LintFindingDetail, LintFindingRow, OpenQuestionDetail, UncodedFilingRow,
@@ -105,16 +106,21 @@ export function listApprovedEntriesForFiling(
 }
 
 /** `clara.agent_tasks_visible` — every non-terminal task for the firm (the
- *  cancel affordance's own population; types.ts's
- *  AGENT_TASK_CANCELLABLE_STATUSES is the closed set this filters to). Unused
- *  anywhere in apps/web before this train (measured: zero references at
- *  rung 0) — the firm activity feed reads a DIFFERENT relation
+ *  agent-tasks panel's own population). Filters to
+ *  `AGENT_TASK_LIVE_STATUSES` (F6, independent review) — the FIVE non-
+ *  terminal statuses, not the narrower four-value
+ *  `AGENT_TASK_CANCELLABLE_STATUSES`: a task the panel just requested a
+ *  cancel on moves to `cancel_requested` (still non-terminal — the engine is
+ *  still active), and filtering the READ to the cancellable set alone made
+ *  that row vanish on the very re-read the cancel's own `act()` triggers.
+ *  Unused anywhere in apps/web before this train (measured: zero references
+ *  at rung 0) — the firm activity feed reads a DIFFERENT relation
  *  (`agent_receipts_visible`, an audit trail of what already happened; this
  *  is the live task queue). */
 export function listCancellableAgentTasks(opts: Opts = {}): Promise<AgentTaskRow[]> {
   return getRows<AgentTaskRow>("agent_tasks_visible", {
     select: "id,kind,status,client_id,error_code,created_at,updated_at,cancelled_by,cancelled_at,session_id,created_by",
-    filters: { status: "in.(queued,held,running,awaiting_input)" },
+    filters: { status: `in.(${AGENT_TASK_LIVE_STATUSES.join(",")})` },
     order: "created_at.asc",
     ...opts,
   });

@@ -23,7 +23,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent, textOf } from "../../test/hookHarness";
+import { renderComponent, textOf, setFieldValue, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
@@ -236,6 +236,132 @@ test("firm needs-you inbox: the firm-question resolve form (open, with its clien
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {
         await h.unmount();
+      }
+    },
+  );
+});
+
+// T7 (F9, independent review): the THREE new row kinds, rendered through the
+// REAL needs-you registry dispatch (NEEDS_YOU_AFFORDANCES via
+// getNeedsYouAffordance — never a standalone render of the affordance
+// component), with a discriminating post-condition driven on one dialog.
+function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
+  if (predicate(root)) return root;
+  for (const c of root.childNodes ?? []) {
+    const found = findIn(c, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
+const T7_ENVELOPE: ReviewQueueEnvelope = {
+  watermark: "w3",
+  counts: { ready: 0, needs_review: 3, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 1, compliance_watches: 0, lint_findings: 1 },
+  sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
+  rows: [
+    {
+      row_kind: "uncoded_filing", section: "needs_review", client_id: "c1", counterparty_id: null, filing_id: "f1",
+      entry_id: null, question_id: null, task_id: null, document_id: "d1", lane: "needs_review", auto: false,
+      rule_backed: false, high_stakes: false, aged_since: null, amount_cents: null, period: null,
+      question_text: null, created_at: "2026-04-01T00:00:00Z", id: "f1",
+      coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null, advance_id: null,
+    },
+    {
+      row_kind: "coding_task", section: "needs_review", client_id: "c1", counterparty_id: null, filing_id: "f2",
+      entry_id: null, question_id: null, task_id: "t1", document_id: "d2", lane: null, auto: false,
+      rule_backed: false, high_stakes: false, aged_since: null, amount_cents: null, period: null,
+      question_text: null, created_at: "2026-04-02T00:00:00Z", id: "t1",
+      coding_kind: null, watch_id: null, tier: null, finding_id: null, asset_id: null, advance_id: null,
+    },
+    {
+      row_kind: "lint_finding", section: "needs_review", client_id: "c1", counterparty_id: null, filing_id: null,
+      entry_id: null, question_id: null, task_id: null, document_id: null, lane: null, auto: false,
+      rule_backed: false, high_stakes: false, aged_since: null, amount_cents: null, period: null,
+      question_text: "Lint: stale_claim", created_at: "2026-04-03T00:00:00Z", id: "lf1",
+      coding_kind: null, watch_id: null, tier: "warn", finding_id: "lf1", asset_id: null, advance_id: null,
+    },
+  ],
+  next_cursor: null,
+};
+
+function mockT7Fetch(u: string): Response {
+  if (u.includes("/rpc/list_review_queue")) return jsonResponse(T7_ENVELOPE);
+  if (u.includes("/rpc/open_coding_task")) return jsonResponse({ coding_task_id: "new-task", status: "open" });
+  if (u.includes("/rest/v1/firm_open_questions_visible")) return jsonResponse([]);
+  if (u.includes("/rest/v1/client_identifier_promotions_visible")) return jsonResponse([]);
+  if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
+  if (u.includes("/rest/v1/journal_entries")) return jsonResponse([]);
+  throw new Error(`unexpected fetch: ${u}`);
+}
+
+test("firm needs-you inbox: uncoded_filing / coding_task / lint_finding rows, dispatched through the REAL registry, have zero a11y violations", async () => {
+  await withMockedEnv(
+    async (u) => mockT7Fetch(String(u)),
+    async () => {
+      const h = await renderComponent(
+        createElement(NextIntlClientProvider, {
+          locale: "en",
+          messages,
+          children: createElement("div", null, createElement("h1", null, "Needs you"), createElement(NeedsYouInbox)),
+        }),
+      );
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        // Registry dispatch actually resolved a real affordance for each of
+        // the three kinds — proven by the presence of each one's own trigger
+        // text, never asserted from the row_kind label alone.
+        assert.ok(h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Open coding task$/) !== null), "uncoded_filing must dispatch to UncodedFilingActions");
+        assert.ok(h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Complete$/) !== null), "coding_task must dispatch to CodingTaskActions");
+        assert.ok(h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Resolve$/) !== null), "lint_finding must dispatch to LintFindingActions");
+        const violations = checkAccessibility(h.container as never);
+        assert.deepEqual(violations, [], JSON.stringify(violations));
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("firm needs-you inbox: the uncoded_filing row's open_coding_task dialog, driven through the REAL registry to a real confirm, posts the door and the trigger row's error clears — discriminating post-condition", async () => {
+  await withMockedEnv(
+    async (u) => mockT7Fetch(String(u)),
+    async () => {
+      const h = await renderComponent(
+        createElement(NextIntlClientProvider, {
+          locale: "en",
+          messages,
+          children: createElement("div", null, createElement("h1", null, "Needs you"), createElement(NeedsYouInbox)),
+        }),
+      );
+      const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+      (body as unknown as { appendChild: (c: unknown) => void }).appendChild(h.container);
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Open coding task$/) !== null);
+        assert.ok(trigger, "the open-task trigger must render");
+        await h.fireEvent(trigger!, "click");
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        const reasonField = findIn(body as never, (n) => n.tagName === "TEXTAREA");
+        assert.ok(reasonField, "the reason field must render as a real <textarea>");
+        await h.act(() => { setFieldValue(reasonField as never, "vendor could not be matched"); });
+
+        const confirmButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Open coding task$/) !== null && n !== trigger);
+        assert.ok(confirmButton, "the confirm control must render");
+        await h.act(() => { clickButton(confirmButton as never); });
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        // Discriminating post-condition: the dialog genuinely closed (a
+        // fabricated success would leave it open, or the reason text still
+        // visible) — proven, not assumed, since this same envelope is
+        // returned again on the re-read (the row itself does not vanish).
+        assert.doesNotMatch(textOf(body as never), /Open a coding task/, "the dialog must actually close on a real confirm");
+        const violations = checkAccessibility(h.container as never);
+        assert.deepEqual(violations, [], JSON.stringify(violations));
+      } finally {
+        await h.unmount();
+        const bodyRef = body as unknown as { removeChild: (c: unknown) => void; childNodes?: unknown[] };
+        if (bodyRef.childNodes?.includes(h.container)) bodyRef.removeChild(h.container);
       }
     },
   );

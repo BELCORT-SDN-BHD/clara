@@ -117,14 +117,14 @@ test("listApprovedEntriesForFiling: GETs journal_entries filtered to filing_id +
   assert.match(seenUrl, /reversed_by=is\.null/);
 });
 
-test("listCancellableAgentTasks: GETs agent_tasks_visible filtered to the four non-terminal statuses", async () => {
+test("listCancellableAgentTasks: GETs agent_tasks_visible filtered to the FIVE non-terminal statuses (F6: cancel_requested included, so a just-requested cancel doesn't vanish the row)", async () => {
   let seenUrl = "";
   await withMockedFetch(
     async (url) => { seenUrl = String(url); return okJson([]); },
     async () => { await listCancellableAgentTasks({ session: session() }); },
   );
   assert.match(seenUrl, /\/rest\/v1\/agent_tasks_visible\?/);
-  assert.match(seenUrl, /status=in\.%28queued%2Cheld%2Crunning%2Cawaiting_input%29/);
+  assert.match(seenUrl, /status=in\.%28queued%2Cheld%2Crunning%2Cawaiting_input%2Ccancel_requested%29/);
 });
 
 test("listAgentTaskClientIds([]) resolves [] WITHOUT calling fetch", async () => {

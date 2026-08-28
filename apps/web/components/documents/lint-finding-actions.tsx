@@ -13,14 +13,15 @@ import { resolveLintFinding } from "@/lib/coding/doors";
 import { LINT_FINDING_CONCLUSIONS, type LintFindingConclusion } from "@/lib/coding/types";
 import { CodingDoorDialog } from "./CodingDoorDialog";
 import { LintFindingDetail } from "./lint-finding-detail";
-import { ErrorMessage } from "@/components/firm/data-state";
+
+// F1, independent review — CORRECTED SHAPE: no outer error/clr prop; see
+// uncoded-filing-actions.tsx's own header for why.
 
 export function LintFindingActions({
-  findingId, busy, error, act,
+  findingId, busy, act,
 }: {
   findingId: string;
   busy: boolean;
-  error: unknown;
   act: (fn: () => Promise<void>) => Promise<unknown>;
 }) {
   const t = useTranslations("CodingQuestionsSignals.lintFinding");
@@ -29,7 +30,6 @@ export function LintFindingActions({
 
   return (
     <div className="flex flex-col gap-2">
-      {error ? <ErrorMessage error={error} /> : null}
       {/* T7 (port-wave plan §4) — clara.get_lint_finding, on demand. */}
       <LintFindingDetail findingId={findingId} />
       <CodingDoorDialog
@@ -38,11 +38,12 @@ export function LintFindingActions({
         confirmLabel={t("resolveConfirm")}
         busy={busy}
         confirmDisabled={!conclusion || !note.trim()}
-        onConfirm={() =>
-          act(async () => { await resolveLintFinding(findingId, conclusion, note.trim()); }).then(() => {
-            setConclusion(""); setNote("");
-          })
-        }
+        onConfirm={async () => {
+          // F5, independent review: clear only on success.
+          let succeeded = false;
+          await act(async () => { await resolveLintFinding(findingId, conclusion, note.trim()); succeeded = true; });
+          if (succeeded) { setConclusion(""); setNote(""); }
+        }}
       >
         <NativeSelect
           aria-label={t("conclusionLabel")}

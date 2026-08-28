@@ -10,46 +10,59 @@
 // shape (CodingTaskRow here, ReviewQueueRow on the needs-you side) can supply
 // them without an adapter type.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/common/native-select";
 import { Textarea } from "@/components/ui/textarea";
 import { completeCodingTask, dismissCodingTask } from "@/lib/coding/doors";
 import { listApprovedEntriesForFiling } from "@/lib/coding/reads";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { CodingDoorDialog } from "./CodingDoorDialog";
-import { ErrorMessage } from "@/components/firm/data-state";
+import { ActionRefusal } from "@/components/bank/action-refusal";
+
+// F1, independent review — CORRECTED SHAPE: no outer error/clr prop; see
+// uncoded-filing-actions.tsx's own header for why (its two real callers
+// disagree on their error shape, and each already renders its own, in its
+// own idiom, around this component). The ENTRIES-fetch error below is a
+// separate, purely-internal concern (F3(a)) — it is genuinely always the
+// same {message, null clr} shape this component derives itself, regardless
+// of which caller is using it, so it keeps its own ActionRefusal.
+
+type EntryRow = { id: string; posting_date: string | null; memo: string | null };
+/** F3(a), independent review: a FAILED read must never render as "zero
+ *  approved entries exist" — that is a fabricated fact about the books, and
+ *  it silently permanently disables Complete on a transient failure the
+ *  human has no way to retry. Three real states, never collapsed into one. */
+type EntriesState = { kind: "loading" } | { kind: "error"; error: unknown } | { kind: "loaded"; rows: EntryRow[] };
 
 export function CodingTaskActions({
-  taskId, filingId, busy, error, act,
+  taskId, filingId, busy, act,
 }: {
   taskId: string;
   filingId: string;
   busy: boolean;
-  error: unknown;
-  /** The SAME act()-and-reload cycle every caller's own queue uses — never a
-   *  bespoke door call outside it. Typed `Promise<unknown>` because the two
-   *  real callers disagree on what they resolve to (needs-you-affordances.tsx's
-   *  `Promise<boolean>` vs lib/parts/hooks.ts's `useHydratedPart().act()`'s
-   *  `Promise<void>`) — this component never inspects the resolved value. */
   act: (fn: () => Promise<void>) => Promise<unknown>;
 }) {
   const t = useTranslations("CodingQuestionsSignals.codingTask");
-  const [entries, setEntries] = useState<{ id: string; posting_date: string | null; memo: string | null }[] | null>(null);
+  const [entries, setEntries] = useState<EntriesState>({ kind: "loading" });
   const [entryId, setEntryId] = useState("");
   const [reason, setReason] = useState("");
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     let live = true;
+    setEntries({ kind: "loading" });
     listApprovedEntriesForFiling(filingId, { session: sessionTokenAccessor })
-      .then((rows) => { if (live) setEntries(rows); })
-      .catch(() => { if (live) setEntries([]); });
+      .then((rows) => { if (live) setEntries({ kind: "loaded", rows }); })
+      .catch((e) => { if (live) setEntries({ kind: "error", error: e }); });
     return () => { live = false; };
-  }, [filingId]);
+  }, [filingId, retryToken]);
+
+  const retry = useCallback(() => setRetryToken((n) => n + 1), []);
 
   return (
     <div className="flex flex-col gap-2">
-      {error ? <ErrorMessage error={error} /> : null}
       <div className="flex flex-wrap gap-2">
         <CodingDoorDialog
           triggerLabel={t("completeTrigger")}
@@ -57,12 +70,28 @@ export function CodingTaskActions({
           description={t("completeDescription")}
           confirmLabel={t("completeConfirm")}
           busy={busy}
-          confirmDisabled={!entryId}
-          onConfirm={() => act(async () => { await completeCodingTask(taskId, entryId); }).then(() => undefined)}
+          confirmDisabled={entries.kind !== "loaded" || !entryId}
+          onConfirm={async () => {
+            // F5, independent review: clear only on success (see
+            // uncoded-filing-actions.tsx's own comment on the same fix).
+            let succeeded = false;
+            await act(async () => { await completeCodingTask(taskId, entryId); succeeded = true; });
+            if (succeeded) setEntryId("");
+          }}
         >
-          {entries === null ? (
+          {entries.kind === "loading" ? (
             <p className="text-sm text-muted-foreground">{t("loadingEntries")}</p>
-          ) : entries.length === 0 ? (
+          ) : entries.kind === "error" ? (
+            <div className="flex flex-col gap-2">
+              <ActionRefusal
+                err={entries.error instanceof Error ? entries.error.message : String(entries.error)}
+                clr={null}
+              />
+              <Button type="button" size="sm" variant="outline" onClick={retry}>
+                {t("retryEntries")}
+              </Button>
+            </div>
+          ) : entries.rows.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("noApprovedEntries")}</p>
           ) : (
             <NativeSelect
@@ -72,7 +101,7 @@ export function CodingTaskActions({
               className="w-full"
             >
               <option value="">{t("entryPickerPlaceholder")}</option>
-              {entries.map((entry) => (
+              {entries.rows.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.posting_date ?? "—"} — {entry.memo ?? entry.id}
                 </option>
@@ -87,7 +116,11 @@ export function CodingTaskActions({
           confirmLabel={t("dismissConfirm")}
           busy={busy}
           confirmDisabled={!reason.trim()}
-          onConfirm={() => act(async () => { await dismissCodingTask(taskId, reason.trim()); }).then(() => { setReason(""); })}
+          onConfirm={async () => {
+            let succeeded = false;
+            await act(async () => { await dismissCodingTask(taskId, reason.trim()); succeeded = true; });
+            if (succeeded) setReason("");
+          }}
         >
           <Textarea
             aria-label={t("dismissReasonLabel")}

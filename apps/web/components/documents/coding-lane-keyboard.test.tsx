@@ -79,7 +79,7 @@ test("OPEN CODING TASK journey: the dialog opens, its reason field and Confirm/C
     async () => {
       const h = await renderComponent(
         App(createElement(UncodedFilingActions, {
-          clientId: "c1", documentId: "d1", filingId: "f1", busy: false, error: null,
+          clientId: "c1", documentId: "d1", filingId: "f1", busy: false,
           act: async (fn: () => Promise<void>) => { calls += 1; await fn(); },
         })),
       );
@@ -126,7 +126,7 @@ test("OPEN CODING TASK journey: the dialog opens, its reason field and Confirm/C
 test("ASK QUESTION journey: the dialog opens, its question field and Confirm/Cancel are keyboard-reachable", async () => {
   const h = await renderComponent(
     App(createElement(UncodedFilingActions, {
-      clientId: "c1", documentId: "d1", filingId: "f1", busy: false, error: null,
+      clientId: "c1", documentId: "d1", filingId: "f1", busy: false,
       act: async (fn: () => Promise<void>) => { await fn(); },
     })),
   );
@@ -156,7 +156,7 @@ test("ASK QUESTION journey: the dialog opens, its question field and Confirm/Can
 test("RESOLVE LINT FINDING journey: the dialog opens, its conclusion select + note field + Confirm/Cancel are keyboard-reachable, Confirm gated until BOTH are filled", async () => {
   const h = await renderComponent(
     App(createElement(LintFindingActions, {
-      findingId: "lf1", busy: false, error: null,
+      findingId: "lf1", busy: false,
       act: async (fn: () => Promise<void>) => { await fn(); },
     })),
   );
@@ -211,7 +211,7 @@ test("COMPLETE CODING TASK journey: the dialog opens, its (async-fetched) entry 
     async () => {
       const h = await renderComponent(
         App(createElement(CodingTaskActions, {
-          taskId: "t1", filingId: "f1", busy: false, error: null,
+          taskId: "t1", filingId: "f1", busy: false,
           act: async (fn: () => Promise<void>) => { await fn(); },
         })),
       );
@@ -244,7 +244,7 @@ test("COMPLETE CODING TASK journey: the dialog opens, its (async-fetched) entry 
 test("DISMISS CODING TASK journey: the dialog opens, its reason field and Confirm/Cancel are keyboard-reachable", async () => {
   const h = await renderComponent(
     App(createElement(CodingTaskActions, {
-      taskId: "t1", filingId: "f1", busy: false, error: null,
+      taskId: "t1", filingId: "f1", busy: false,
       act: async (fn: () => Promise<void>) => { await fn(); },
     })),
   );

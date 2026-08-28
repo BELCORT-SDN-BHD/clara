@@ -216,6 +216,20 @@ export const AGENT_TASK_CANCELLABLE_STATUSES: ReadonlySet<AgentTaskStatus> = new
   "queued", "held", "running", "awaiting_input",
 ]);
 
+/** The FIVE non-terminal statuses (F6, independent review) — what the panel's
+ *  own list READ filters to. `cancel_requested` is deliberately INCLUDED here
+ *  even though it is absent from `AGENT_TASK_CANCELLABLE_STATUSES` above: a
+ *  running task's cancel is only a REQUEST (the live body: running/
+ *  awaiting_input -> cancel_requested, engine still active; only queued/held
+ *  settle straight to cancelled) — filtering the read to the cancellable set
+ *  alone made a just-cancelled row VANISH from the very re-read `act()`
+ *  triggers, which reads as "nothing happened" rather than "cancel
+ *  requested, settling." The row leaves the list only once the DB itself
+ *  settles it to a genuinely terminal status. */
+export const AGENT_TASK_LIVE_STATUSES: readonly AgentTaskStatus[] = [
+  "queued", "held", "running", "awaiting_input", "cancel_requested",
+];
+
 export type AgentTaskRow = {
   id: string;
   kind: AgentTaskKind;

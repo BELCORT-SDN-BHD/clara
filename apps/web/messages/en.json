@@ -1390,6 +1390,7 @@
       "completeDescription": "Point this task at the approved journal entry it produced.",
       "completeConfirm": "Complete task",
       "loadingEntries": "Loading approved entries for this filing…",
+      "retryEntries": "Retry",
       "noApprovedEntries": "No approved entry exists yet for this filing — post one first, then come back to complete this task.",
       "entryPickerLabel": "Result entry",
       "entryPickerPlaceholder": "Choose the approved entry…",
@@ -1441,6 +1442,7 @@
       "dedupeKeyLabel": "Dedupe key"
     },
     "sweep": {
+      "heading": "Sweep runs",
       "openRun": "A sweep run is currently open.",
       "noOpenRun": "No sweep run is currently open.",
       "lastFinalizedLabel": "Last finalized",
@@ -1472,7 +1474,8 @@
       "cancelTrigger": "Cancel",
       "cancelTitle": "Cancel this task",
       "cancelDescription": "A running task aborts and settles; a queued or held task is cancelled immediately.",
-      "cancelConfirm": "Cancel task"
+      "cancelConfirm": "Cancel task",
+      "cancelRequestedNote": "Cancel already requested — the task is still settling."
     },
     "openQuestion": {
       "viewDetailsTrigger": "View details",
@@ -1483,9 +1486,9 @@
       "spawnedRuleLabel": "Spawned rule"
     },
     "promoteClarify": {
-      "trigger": "Promote to firm question",
-      "dialogTitle": "Promote this clarification to a firm question",
-      "dialogDescription": "Turns Clara's own clarification into a durable, firm-visible question scoped to this client.",
+      "trigger": "Promote to a durable question",
+      "dialogTitle": "Promote this clarification to a durable question",
+      "dialogDescription": "Turns Clara's own clarification into a durable question on this client's own record, visible on the client's Needs-you queue — distinct from a firm-level question.",
       "confirm": "Promote"
     }
   },

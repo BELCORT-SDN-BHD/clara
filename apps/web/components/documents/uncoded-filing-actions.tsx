@@ -17,16 +17,26 @@ import { useTranslations } from "next-intl";
 import { Textarea } from "@/components/ui/textarea";
 import { openCodingTask, openQuestion } from "@/lib/coding/doors";
 import { CodingDoorDialog } from "./CodingDoorDialog";
-import { ErrorMessage } from "@/components/firm/data-state";
+
+// F1, independent review — CORRECTED SHAPE: this component carries NO error
+// prop and renders no error itself. Its two real callers disagree on their
+// error's shape (the workbench's `useHydratedPart` splits `err: string|null`
+// + a separate `clr`; the needs-you registry's `useReviewQueue` hands a raw
+// `unknown` exception with no separate `clr` at all) and each already has
+// the RIGHT house component for its own shape (`ActionRefusal` for the
+// former, `ErrorMessage` for the latter, exactly as the existing
+// `OpenQuestionAffordance` already does for the needs-you side) — forcing
+// one shape onto both here was the actual bug: it silently dropped the CLR
+// code for whichever caller's shape didn't match. Each caller now renders
+// its OWN error, in its OWN idiom, around this component.
 
 export function UncodedFilingActions({
-  clientId, documentId, filingId, busy, error, act,
+  clientId, documentId, filingId, busy, act,
 }: {
   clientId: string;
   documentId: string;
   filingId: string;
   busy: boolean;
-  error: unknown;
   act: (fn: () => Promise<void>) => Promise<unknown>;
 }) {
   const t = useTranslations("CodingQuestionsSignals.uncodedFiling");
@@ -35,7 +45,6 @@ export function UncodedFilingActions({
 
   return (
     <div className="flex flex-col gap-2">
-      {error ? <ErrorMessage error={error} /> : null}
       <div className="flex flex-wrap gap-2">
         <CodingDoorDialog
           triggerLabel={t("openTaskTrigger")}
@@ -43,11 +52,16 @@ export function UncodedFilingActions({
           confirmLabel={t("openTaskConfirm")}
           busy={busy}
           confirmDisabled={!taskReason.trim()}
-          onConfirm={() =>
-            act(async () => { await openCodingTask(clientId, documentId, filingId, taskReason.trim()); }).then(() => {
-              setTaskReason("");
-            })
-          }
+          onConfirm={async () => {
+            // F5, independent review: clear ONLY on success — `act()` never
+            // rejects (it catches internally), so a plain `.then()` fired on
+            // a REFUSAL too and silently discarded what the human typed.
+            // `succeeded` is set inside the door call itself, so it is only
+            // ever true when that call did not throw.
+            let succeeded = false;
+            await act(async () => { await openCodingTask(clientId, documentId, filingId, taskReason.trim()); succeeded = true; });
+            if (succeeded) setTaskReason("");
+          }}
         >
           <Textarea
             aria-label={t("openTaskReasonLabel")}
@@ -63,11 +77,11 @@ export function UncodedFilingActions({
           confirmLabel={t("askQuestionConfirm")}
           busy={busy}
           confirmDisabled={!questionText.trim()}
-          onConfirm={() =>
-            act(async () => { await openQuestion(clientId, "document", documentId, questionText.trim()); }).then(() => {
-              setQuestionText("");
-            })
-          }
+          onConfirm={async () => {
+            let succeeded = false;
+            await act(async () => { await openQuestion(clientId, "document", documentId, questionText.trim()); succeeded = true; });
+            if (succeeded) setQuestionText("");
+          }}
         >
           <Textarea
             aria-label={t("askQuestionLabel")}

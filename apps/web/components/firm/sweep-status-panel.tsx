@@ -26,6 +26,7 @@
 // here.
 
 import { useTranslations } from "next-intl";
+import { SectionHeader } from "@/components/common/section-header";
 import { StateBanner } from "@/components/common/state";
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import { businessDateTime } from "@/lib/business-date";
@@ -38,6 +39,9 @@ export function SweepStatusPanel({ sweep }: { sweep: ReviewQueueSweep | null }) 
 
   return (
     <div className="flex flex-col gap-2">
+      {/* F11, independent review: this panel had no heading of its own — it
+          read as an unexplained banner floating above the queue. */}
+      <SectionHeader level={2}>{t("heading")}</SectionHeader>
       <StateBanner tone={sweep.open_run ? "info" : "neutral"}>
         {sweep.open_run ? t("openRun") : t("noOpenRun")}
       </StateBanner>

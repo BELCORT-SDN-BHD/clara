@@ -14,9 +14,13 @@ import { SectionTabs } from "@/components/common/section-tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/parts/PartBadge";
 import { EmptyState } from "@/components/common/state";
+import { ActionRefusal } from "@/components/bank/action-refusal";
+import { isActingRowPresent } from "@/lib/firm/needs-you-gaps";
+import { businessDate } from "@/lib/business-date";
 import { CODING_LANE_REASON_CODES, type CodingLane } from "@/lib/coding/types";
 import type { UncodedFilingEntry } from "@/lib/coding/loaders";
 import { UncodedFilingActions } from "./uncoded-filing-actions";
+import type { PartClr } from "@/lib/parts/hooks";
 
 const LANES: CodingLane[] = ["needs_you", "needs_review", "ready"];
 
@@ -27,7 +31,7 @@ function reasonLabel(t: (key: string, params?: Record<string, string>) => string
 }
 
 export function UncodedFilingsList({
-  entries, busy, error, act,
+  entries, busy, error, clr, act,
 }: {
   entries: UncodedFilingEntry[];
   busy: boolean;
@@ -35,7 +39,8 @@ export function UncodedFilingsList({
    *  it (`actingId` below), the same per-row attribution needs-you-inbox.tsx
    *  uses (N13/R1): a shared error rendered on every row would misattribute
    *  one filing's refusal to every other filing shown in the same lane. */
-  error: unknown;
+  error: string | null;
+  clr: PartClr;
   act: (fn: () => Promise<void>) => Promise<unknown>;
 }) {
   const t = useTranslations("CodingQuestionsSignals.uncodedFiling");
@@ -43,9 +48,17 @@ export function UncodedFilingsList({
   const [actingId, setActingId] = useState<string | null>(null);
 
   const shown = entries.filter((e) => e.lane === lane);
+  // F2, independent review: the commonest refusal on a settle-style door is
+  // "someone else already acted on it", which makes the row VANISH from the
+  // very re-read `act()` triggers — the per-row attachment below then goes
+  // dark for exactly that case. `isActingRowPresent` (the R1 fix, reused
+  // verbatim from lib/firm/needs-you-gaps.ts rather than a second copy)
+  // decides whether a persistent SECTION-level banner is owed instead.
+  const rowVanished = actingId !== null && Boolean(error) && !isActingRowPresent(entries.map((e) => ({ id: e.filing_id })), actingId);
 
   return (
     <div className="flex flex-col gap-2">
+      {rowVanished ? <ActionRefusal err={error} clr={clr} /> : null}
       <SectionTabs
         label={t("lanesLabel")}
         value={lane}
@@ -68,7 +81,10 @@ export function UncodedFilingsList({
             {shown.map((entry) => (
               <TableRow key={entry.filing_id}>
                 <TableCell className="whitespace-normal">{entry.original_filename ?? entry.document_kind ?? entry.document_id}</TableCell>
-                <TableCell>{entry.filed_at.slice(0, 10)}</TableCell>
+                {/* F4, independent review: `businessDate` (Asia/Kuala_Lumpur),
+                    never a raw UTC slice — see lib/business-date.ts's own
+                    header on the "two days" hazard this fixes. */}
+                <TableCell>{businessDate(new Date(entry.filed_at))}</TableCell>
                 <TableCell className="whitespace-normal">
                   <div className="flex flex-wrap gap-1">
                     {entry.reasons.length === 0 ? (
@@ -83,14 +99,16 @@ export function UncodedFilingsList({
                   </div>
                 </TableCell>
                 <TableCell>
-                  <UncodedFilingActions
-                    clientId={entry.client_id}
-                    documentId={entry.document_id}
-                    filingId={entry.filing_id}
-                    busy={busy}
-                    error={actingId === entry.filing_id ? error : null}
-                    act={(fn) => { setActingId(entry.filing_id); return act(fn); }}
-                  />
+                  <div className="flex flex-col gap-2">
+                    {actingId === entry.filing_id ? <ActionRefusal err={error} clr={clr} /> : null}
+                    <UncodedFilingActions
+                      clientId={entry.client_id}
+                      documentId={entry.document_id}
+                      filingId={entry.filing_id}
+                      busy={busy}
+                      act={(fn) => { setActingId(entry.filing_id); return act(fn); }}
+                    />
+                  </div>
                 </TableCell>
               </TableRow>
             ))}

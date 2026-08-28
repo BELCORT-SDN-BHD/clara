@@ -69,19 +69,31 @@ import type { EntryLineInput, JournalsDataWithInterruptions } from "./types";
  *  header), and rather than a second parallel `useHydratedPart` cycle, so
  *  answering an interruption rides the SAME single act()-and-reload
  *  discipline as every other door on this tab. */
+/** F12, independent review: the client_id lookup used to run as a THIRD,
+ *  serial `await` after `Promise.all` had already resolved BOTH the main
+ *  workbench read and the interruptions read — adding a full extra round
+ *  trip to the whole tab's critical path for a value only the promote
+ *  control needs. Folded into the SAME parallel wave instead, chained off
+ *  `listPendingInterruptions` (it needs that read's own output as input, so
+ *  it cannot start any earlier) — it now runs CONCURRENTLY with
+ *  `loadJournalsWorkbench`, not after both. `.catch(() => ({}))`: a failure
+ *  here must degrade ONLY the promote control (interruptions-panel.tsx omits
+ *  it for a task with no known client_id — its own header), never the
+ *  entries/drafts/posted data this whole tab actually needs. */
 async function loadJournalsWorkbenchWithInterruptions(
   session: SessionTokenAccessor,
   clientId: string,
 ): Promise<JournalsDataWithInterruptions> {
-  const [data, interruptions] = await Promise.all([
+  const interruptionsWithClients = listPendingInterruptions({ session }).then(async (interruptions) => {
+    const clientIdByTaskId = await listAgentTaskClientIds(interruptions.map((i) => i.task_id), { session })
+      .then((rows) => Object.fromEntries(rows.map((r) => [r.id, r.client_id])))
+      .catch(() => ({}) as Record<string, string | null>);
+    return { interruptions, clientIdByTaskId };
+  });
+  const [data, { interruptions, clientIdByTaskId }] = await Promise.all([
     loadJournalsWorkbench(session, clientId),
-    listPendingInterruptions({ session }),
+    interruptionsWithClients,
   ]);
-  // T7: resolve each pending interruption's OWN task's client_id (types.ts's
-  // own JournalsDataWithInterruptions header) — a SECOND honest read, never a
-  // guess, since agent_interruptions itself carries no client_id.
-  const taskRows = await listAgentTaskClientIds(interruptions.map((i) => i.task_id), { session });
-  const clientIdByTaskId = Object.fromEntries(taskRows.map((r) => [r.id, r.client_id]));
   return { ...data, interruptions, clientIdByTaskId };
 }
 
