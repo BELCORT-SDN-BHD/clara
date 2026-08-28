@@ -2,11 +2,12 @@
 
 // One clara.list_review_queue row (lib/firm/needs-you.ts), rendered honestly from
 // exactly the fields the RPC projects — row_kind/section verbatim (this build's
-// coordinator ruling), no relabeling. Only `open_question` rows carry an act door
-// (resolve_open_question/dismiss_open_question) — every other row_kind is a
-// same-page LINK into the object that actually owns its verbs (a draft's journals
-// tab, a filing's documents tab, a coding task's documents tab), never a duplicated
-// action here.
+// coordinator ruling), no relabeling. A row_kind registered in
+// ./needs-you-affordances.tsx carries an inline act (today: only
+// `open_question`, via resolve_open_question/dismiss_open_question) — every
+// other row_kind is a same-page LINK into the object that actually owns its
+// verbs (a draft's journals tab, a filing's documents tab, a coding task's
+// documents tab), never a duplicated action here.
 //
 // FIX-1 (independent review, fix-required, 2026-08-27): the row_kind label used a
 // `t(\`rowKind.${row.row_kind}\` as "rowKind.draft")` CAST, which compiles clean
@@ -18,23 +19,28 @@
 // in the one module that also grounds it against the live DB body) with an honest
 // "unrecognized" fallback for anything outside it — never a key path, never a
 // silent cast.
+//
+// T0 seam (port-wave plan §3.2): the inline act itself no longer branches on
+// row_kind here — it dispatches through getNeedsYouAffordance
+// (./needs-you-affordances.tsx), the registry every later train's own inline
+// affordance adds itself to from its own file. The closed-world check above
+// (isKnownReviewQueueRowKind) is unchanged and still gates the LABEL; the
+// registry lookup is a second, independent gate behind it for the ACT — a
+// row_kind can be known (has a label) without carrying an inline affordance
+// (the seven link-only kinds today).
 
-import { useState } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Badge } from "@/components/parts/PartBadge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { fmtCents } from "@/lib/registers/money";
-import { ErrorMessage } from "./data-state";
 import { isKnownReviewQueueRowKind, type ReviewQueueRow } from "@/lib/firm/needs-you";
+import { getNeedsYouAffordance } from "./needs-you-affordances";
 
 export function NeedsYouRow({
   row,
   busy,
   error,
-  onResolve,
-  onDismiss,
+  onAct,
 }: {
   row: ReviewQueueRow;
   busy: boolean;
@@ -42,25 +48,14 @@ export function NeedsYouRow({
    *  level banner would misattribute a refusal to whichever row a human looks at
    *  next. */
   error: unknown;
-  onResolve: (questionId: string, resolution: string) => Promise<boolean>;
-  onDismiss: (questionId: string, reason: string) => Promise<boolean>;
+  /** Runs an act through the queue's act()-and-reload cycle, already scoped to
+   *  THIS row's acting key by the caller (needs-you-inbox.tsx) — passed
+   *  straight through to whichever affordance the registry resolves. */
+  onAct: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useTranslations("NeedsYou");
   const tc = useTranslations("Common");
-  const [mode, setMode] = useState<"resolve" | "dismiss" | null>(null);
-  const [text, setText] = useState("");
-
-  const submit = async () => {
-    if (!row.question_id || !text.trim()) return;
-    const ok =
-      mode === "resolve" ? await onResolve(row.question_id, text.trim()) : await onDismiss(row.question_id, text.trim());
-    // N13: clear ONLY on success — a refusal must not discard what the human
-    // typed; they should be able to see the refusal, adjust, and resubmit.
-    if (ok) {
-      setMode(null);
-      setText("");
-    }
-  };
+  const Affordance = getNeedsYouAffordance(row.row_kind);
 
   const kindLabel = isKnownReviewQueueRowKind(row.row_kind)
     ? t(`rowKind.${row.row_kind}`)
@@ -95,55 +90,7 @@ export function NeedsYouRow({
           </>
         ) : null}
       </dl>
-      {row.row_kind === "open_question" && row.question_id ? (
-        <div className="flex flex-col gap-2">
-          {error ? <ErrorMessage error={error} /> : null}
-          {/* P3 polish: five hand-rolled <button>s and one hand-rolled <input>
-              became the Button/Input primitives. The verbs, the disabled
-              conditions and the submit-clears-only-on-success rule above are
-              untouched; what changes is that "commit" now looks like every
-              other commit in the product (default variant), "cancel"/"open a
-              form" like every other secondary act (outline), and both focus
-              with the same ring. */}
-          {mode ? (
-            <div className="flex flex-col gap-2">
-              <Input
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder={mode === "resolve" ? t("resolutionPlaceholder") : t("reasonPlaceholder")}
-                aria-label={mode === "resolve" ? t("resolutionPlaceholder") : t("reasonPlaceholder")}
-                disabled={busy}
-              />
-              <div className="flex gap-2">
-                <Button type="button" size="sm" onClick={() => void submit()} disabled={busy || !text.trim()}>
-                  {busy ? t("submitting") : t("submit")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setMode(null);
-                    setText("");
-                  }}
-                  disabled={busy}
-                >
-                  {tc("cancel")}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => setMode("resolve")} disabled={busy}>
-                {t("resolve")}
-              </Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => setMode("dismiss")} disabled={busy}>
-                {t("dismiss")}
-              </Button>
-            </div>
-          )}
-        </div>
-      ) : null}
+      {Affordance ? <Affordance row={row} busy={busy} error={error} act={onAct} /> : null}
     </li>
   );
 }

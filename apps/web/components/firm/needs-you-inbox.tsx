@@ -38,8 +38,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useReviewQueue } from "@/lib/firm/use-review-queue";
-import { resolveOpenQuestion, dismissOpenQuestion, reviewQueueRowKey, shouldShowQueueErrorBanner } from "@/lib/firm/needs-you";
-import { sessionTokenAccessor } from "@/lib/session-accessor";
+import { reviewQueueRowKey, shouldShowQueueErrorBanner } from "@/lib/firm/needs-you";
 import { Button } from "@/components/ui/button";
 import { DataState, ErrorMessage } from "./data-state";
 import { NeedsYouCounts } from "./needs-you-counts";
@@ -53,13 +52,15 @@ export function NeedsYouInbox() {
 
   const hasData = counts !== null;
 
-  const handleResolve = async (questionId: string, resolution: string, rowKey: string): Promise<boolean> => {
+  // T0 seam (port-wave plan §3.2): ONE generic act, scoped to whichever row's
+  // key the caller closes over below — replaces the former handleResolve/
+  // handleDismiss pair now that the door call itself lives inside each
+  // registered affordance (components/firm/needs-you-affordances.tsx), not
+  // here. Same act()-and-reload contract as before; only the door(s) invoked
+  // inside `fn` are no longer this file's business.
+  const handleAct = async (rowKey: string, fn: () => Promise<void>): Promise<boolean> => {
     setActingKey(rowKey);
-    return act(() => resolveOpenQuestion(sessionTokenAccessor, questionId, resolution).then(() => undefined));
-  };
-  const handleDismiss = async (questionId: string, reason: string, rowKey: string): Promise<boolean> => {
-    setActingKey(rowKey);
-    return act(() => dismissOpenQuestion(sessionTokenAccessor, questionId, reason).then(() => undefined));
+    return act(fn);
   };
   const handleLoadMore = () => {
     setActingKey(null); // any resulting error is now general, not row-attributed
@@ -87,8 +88,7 @@ export function NeedsYouInbox() {
                 row={row}
                 busy={busy}
                 error={actingKey === rowKey ? error : null}
-                onResolve={(questionId, resolution) => handleResolve(questionId, resolution, rowKey)}
-                onDismiss={(questionId, reason) => handleDismiss(questionId, reason, rowKey)}
+                onAct={(fn) => handleAct(rowKey, fn)}
               />
             );
           })}

@@ -16,7 +16,10 @@ cutover. Full reference: `README.md` here.
 - Every string routes through next-intl; semantic Tailwind tokens only (no raw hex, no `dark:`
   — light-theme-only per the mohe-grill rulings).
 - The Node 20 test runner does NOT dir-scan for `.test.ts` — every test file MUST be
-  enumerated explicitly in `package.json`'s `test` script or it silently never runs.
+  enumerated explicitly, one path per line, in `test/manifest.txt` (T0 seam, port-wave plan
+  §3.1; `scripts/run-tests.mjs` feeds it to `node --test`). A file missing from the manifest
+  is no longer silent: `scripts/check-test-manifest.mjs`, wired into `pnpm lint`, globs every
+  real test file on disk and fails the build (RED) if one is absent from the manifest.
 - A migration citation must chase the LIVE body (a later `CREATE OR REPLACE`, a dynamic
   splice) — never cite a migration's first `CREATE` without checking what superseded it.
 

@@ -1,10 +1,12 @@
-# apps/web — Clara's production frontend (P2 shell)
+# apps/web — Clara's production frontend
 
-**Status: P2 SHELL.** The full shell is landed — Supabase SSR invite-only auth, the
-two-level workspace chrome, the Clara rail + full-screen thread escalation, the 18-part
-catalog renderer, and `⌘K`. No product data screens yet (those are P3). It replaces
-`apps/dashboard` **at cutover**, not before
-(`docs/plan/active/frontend-handoff-2026-08-23.md` §0.1).
+**Status: P1–P3 merged in full; the port wave's T0 seam is in flight.** The shell (Supabase
+SSR invite-only auth, the two-level workspace chrome, the Clara rail + full-screen thread
+escalation, the 18-part catalog renderer, `⌘K`) and the full P3 product workbench (journals,
+documents, bank, close, reports, registers, knowledge) are landed. It replaces
+`apps/dashboard` **at cutover**, not before — see
+`docs/plan/active/port-wave-plan-2026-08-28.md` for the current cutover plan
+(`docs/plan/active/frontend-handoff-2026-08-23.md` §0.1 is the original at-cutover ruling).
 
 ## What this is
 
