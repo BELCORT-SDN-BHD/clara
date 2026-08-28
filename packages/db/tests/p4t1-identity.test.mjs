@@ -89,6 +89,28 @@ test("p4t1.identity: [F3] the stored email is lowercase regardless of the JWT cl
   assert.equal(row.rows[0].email, mixed.toLowerCase(), "clara.users.email must be lowercase no matter how the JWT spelled it");
 });
 
+test("p4t1.identity: [N1] a LEGACY mixed-case stored email still matches on re-claim -- the comparison is case-insensitive, not just the write side", async () => {
+  const p = freshPersona("legacycase");
+  const legacyMixed = `Legacy.${p.sub.slice(0, 8)}@Rig.Test`;
+  // Simulate a row written before F3 normalized storage: insert directly as root with the
+  // RAW-CASE email, bypassing claim_identity (and its lower()) entirely.
+  await rootQuery("insert into clara.users (id, display_name, email, is_agent) values ($1, $2, $3, false)", [
+    p.sub,
+    "Legacy Name",
+    legacyMixed,
+  ]);
+  // Re-claim through the real door with the JWT's own (always-lowercased) email -- must succeed
+  // and refresh display_name, not refuse "identity already claimed with a different email".
+  const result = await claimIdentity(p.sub, legacyMixed.toLowerCase(), {
+    displayName: "Legacy Name Refreshed",
+    opKey: opk("legacycase"),
+  });
+  assert.equal(result.user_id, p.sub);
+  const row = await rootQuery("select display_name, email from clara.users where id = $1", [p.sub]);
+  assert.equal(row.rows[0].display_name, "Legacy Name Refreshed", "the re-claim must succeed and refresh display_name, not refuse");
+  assert.equal(row.rows[0].email, legacyMixed, "the STORED legacy row's email is untouched by a matching re-claim -- only display_name updates");
+});
+
 test("p4t1.identity: an email already claimed by a DIFFERENT identity refuses cleanly (unique_violation -> CLR10, not a raw 23505)", async () => {
   const shared = `p4t1_shared_${Date.now()}@rig.test`;
   const p1 = freshPersona("shareA");

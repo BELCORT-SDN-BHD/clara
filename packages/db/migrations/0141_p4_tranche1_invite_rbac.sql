@@ -22,10 +22,17 @@
 -- extracting it here with no second entrance to justify the extraction would be exactly the kind
 -- of judgement-logic improvisation the review laws warn against, so `create_firm` stays as-is.
 --
--- NO D1 WRITE-QUIESCE OBLIGATION: `add_member` is the one live writer this file recuts, and its
--- ONLY behavioural difference is where `_audit` lands relative to `_append_event` inside the same
--- transaction (both still commit together) -- no refusal code, no message, no wall, and no argument
--- shape moves. See §D for the byte-by-byte comparison against the live body.
+-- D1 WRITE-QUIESCE OBLIGATION: `add_member` is a live audited writer and this file replaces its
+-- body (the extraction into `_add_member_core`, §D). The house rule
+-- (.claude/rules/db-migrations.md, "A migration that replaces an audited writer's body carries
+-- the D1 write-quiesce obligation at deploy") is CATEGORICAL on "the body was replaced", not on
+-- how small or behaviourally-inert the delta measures -- PostgreSQL runs an in-flight PL/pgSQL
+-- call to completion on the body it STARTED with, so a call that spans the deploy silently
+-- finishes on the OLD body regardless of how equivalent the new one is. The apply ceremony for
+-- this file therefore opens a D1 write-quiesce window before 0141 applies (recipe:
+-- packages/db/README.md, "Deploy contract"; conductor runs it). §D's byte-by-byte comparison
+-- against the live body is evidence the delta is behaviourally inert for callers once the quiesce
+-- has run -- it is not a basis for skipping the window itself (native review C6).
 --
 -- No pgcrypto extension is installed (0098:269's own note: sha256() is core-builtin, no extension
 -- needed) -- so the invite token is TWO concatenated gen_random_uuid() calls (core PG13+,
@@ -220,7 +227,13 @@ begin
   if v_name is null then raise exception 'display name is required' using errcode = 'CLR10'; end if;
   select id, email into v_existing from clara.users where id = p_actor;
   if found then
-    if v_existing.email is distinct from p_email then
+    -- Native review N1: compare case-INSENSITIVELY. p_email always arrives lowercase (every
+    -- caller routes it through _jwt_email()'s own lower(), §A), but a row written before that
+    -- normalization existed can still carry a mixed-case stored email -- a case-sensitive
+    -- compare here would wedge that row's owner out of ever claiming again (0 such rows
+    -- measured on this rig; the read-side comparison is hardened regardless, since the
+    -- invariant is enforced going forward, not backfilled onto rows already on disk).
+    if lower(v_existing.email) is distinct from p_email then
       raise exception 'identity already claimed with a different email' using errcode = 'CLR10';
     end if;
     update clara.users set display_name = v_name where id = p_actor and display_name is distinct from v_name;
@@ -274,9 +287,9 @@ end $$;
 -- The ONLY observable difference: _audit now runs AFTER _append_event instead of before (the core
 -- owns the event per "the audit string names the DOOR, the event names the FACT" -- annex 1 §D.1),
 -- both still inside the SAME transaction as before, so nothing about atomicity, the refusal codes,
--- or the final DB state changes for add_member's existing callers. No D1 quiesce: no wall, message,
--- or argument shape moved -- only which of two independent inserts (audit_log vs domain_events) a
--- reader would see first inside one transaction, which nothing in the estate observes as a wall.
+-- or the final DB state changes for add_member's existing callers. This is evidence the delta is
+-- BEHAVIOURALLY inert for callers once the D1 window (file header) has run -- it is not a basis
+-- for skipping that window (native review C6).
 -- =================================================================================================
 create function clara._add_member_core(p_firm uuid, p_actor uuid, p_user uuid, p_role text) returns uuid
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -293,7 +306,18 @@ begin
   if exists (select 1 from clara.firm_memberships where user_id = p_user and status = 'active') then
     raise exception 'user already belongs to a firm' using errcode = 'CLR10';
   end if;
-  insert into clara.firm_memberships(firm_id, user_id, role) values (p_firm, p_user, p_role) returning id into v_id;
+  -- Native review C4: the exists-check above and this insert are not atomic across two
+  -- concurrent callers on DIFFERENT firms -- the per-firm `for update` lock above only
+  -- serializes callers targeting the SAME p_firm, so a genuine cross-firm race (e.g. two
+  -- admins accepting/adding the same user into two different firms at once) can lose to
+  -- uq_membership_active_user's partial-unique index. Catch the raw 23505 and translate it
+  -- into the SAME typed refusal the exists-check raises, so a racing caller never sees a raw
+  -- unique_violation.
+  begin
+    insert into clara.firm_memberships(firm_id, user_id, role) values (p_firm, p_user, p_role) returning id into v_id;
+  exception when unique_violation then
+    raise exception 'user already belongs to a firm' using errcode = 'CLR10';
+  end;
   perform clara._append_event(p_firm, 'member.added', null, p_actor, null, null, null, null, null, '{}'::jsonb);
   return v_id;
 end $$;
@@ -397,7 +421,16 @@ begin
     raise exception 'the signed-in email does not match this invite' using errcode = 'CLR04';
   end if;
 
-  v_dedupe := clara._reserve_op(inv.firm_id, 'accept_invite', p_op_key, clara._hash(jsonb_build_object('token_hash', encode(v_hash, 'hex'))));
+  -- Native review C2: the request hash covers token_hash AND p_display_name AND the caller's
+  -- own jwt_sub (v_actor) -- not token_hash alone. Under the old, narrower hash, the SAME
+  -- op_key plus the SAME token but a DIFFERENT p_display_name (or a different caller entirely)
+  -- would dedupe-replay the cached receipt instead of refusing "op_key reused with different
+  -- args" (the dedupe helper's own check, 0004:56-58) -- silently binding one caller's args to
+  -- an earlier caller's receipt. Folding the actor in makes the dedupe key actor-bound; folding
+  -- the display name in makes it argument-complete, matching every sibling door's convention of
+  -- hashing every argument a legitimate retry would resend identically.
+  v_dedupe := clara._reserve_op(inv.firm_id, 'accept_invite', p_op_key,
+    clara._hash(jsonb_build_object('token_hash', encode(v_hash, 'hex'), 'display_name', p_display_name, 'actor', v_actor)));
   if v_dedupe is not null then return v_dedupe; end if;
 
   -- Expiry is CHECKED here, never PERSISTED here: a RAISE later in this same call rolls back
@@ -409,6 +442,11 @@ begin
   if inv.status <> 'pending' then
     raise exception 'this invite is no longer open (status: %)', inv.status using errcode = 'CLR09';
   end if;
+  -- Native review C5 (accepted as-is, comment-only): now() is STATEMENT/TRANSACTION time in
+  -- PL/pgSQL, fixed at this transaction's start -- an invite whose expires_at falls between
+  -- transaction-start and the real wall-clock "now" still reads as pending here and is
+  -- accepted; the window is bounded by one transaction's duration and is not a security wall
+  -- (annex 1 §D names no requirement stricter than "expired eventually refuses").
   if inv.expires_at <= now() then
     raise exception 'this invite has expired' using errcode = 'CLR09';
   end if;
@@ -450,11 +488,28 @@ end $$;
 -- idiom, 0137:291 -- NOT security_invoker, because the whole point is a floor/mask the base
 -- table's own grant does not carry). Each carries its full predicate in the view body; RLS on the
 -- base tables is irrelevant to these because they run as clara_fn_owner.
+--
+-- Native review C1 (amended): all three carry `security_barrier`. WHAT IT BUYS: Postgres may
+-- otherwise push a caller-supplied qualifier (a WHERE clause the caller attaches on top of the
+-- view) IN FRONT OF the view's own predicate when planning, and if that pushed qual calls a
+-- non-leakproof function or operator, its side channel (an error, a timing difference, a crash)
+-- can leak a masked/filtered ROW's existence before the view's own firm/rank predicate ever gets
+-- to exclude it -- security_barrier forces the view's own predicate to evaluate first. WHAT IT
+-- DOES NOT BUY: it does nothing for TARGET-LIST masking -- firm_members_visible's `case when
+-- ... then u.email else null end as email` (below) still computes and returns exactly what that
+-- CASE expression says for any row the caller's WHERE already admits; security_barrier governs
+-- qual-pushdown ORDER, not column projection. The battery's census cell (p4t1-reads.test.mjs)
+-- asserts both halves rather than just the reloption being set.
+--
+-- DEBT (named, not silently fixed here): 0137's three masked views (firm_open_questions_visible,
+-- client_identifier_promotions_visible, users_visible) share this exact shape and predate
+-- security_barrier's introduction to the estate -- an estate-wide pass belongs in its own
+-- follow-up PR, not a silent three-of-six fix folded into this tranche. See the PR body.
 -- =================================================================================================
 
 -- Ask 5: the roster. bookkeeper+ sees the roster; email is null-masked below admin+ (a single
 -- view with a floored column, not two views -- annex 1 §D so a caller cannot mistake which they hold).
-create view clara.firm_members_visible as
+create view clara.firm_members_visible with (security_barrier) as
   select
     m.id as membership_id,
     m.user_id,
@@ -474,7 +529,7 @@ create view clara.firm_members_visible as
 -- computed live off expires_at -- accept_invite deliberately never persists a 'pending' ->
 -- 'expired' transition (§F's comment: a write immediately before a refusal's RAISE would roll
 -- back with it), so a reader here would otherwise see a stale 'pending' on a dead invite forever.
-create view clara.firm_invites_visible as
+create view clara.firm_invites_visible with (security_barrier) as
   select i.id, i.firm_id, i.email, i.role,
     case when i.status = 'pending' and i.expires_at <= now() then 'expired' else i.status end as status,
     i.invited_by, i.created_at, i.expires_at, i.accepted_at, i.revoked_at
@@ -486,7 +541,7 @@ create view clara.firm_invites_visible as
 -- trigger and the design's fail-closed default (design §4 E / annex 1 §D). Self-scoped only
 -- (jwt_sub() -- no argument, so no tenant probe is possible); uq_membership_active_user (§0
 -- prestate check (3)) is what makes "at most one row" a DB guarantee, not just an observation.
-create view clara.caller_context as
+create view clara.caller_context with (security_barrier) as
   select
     m.user_id,
     m.firm_id,
@@ -648,6 +703,23 @@ begin
     raise exception 'p4t1 tail: accept_invite''s receipt strings leak the add_member verb name' using errcode = 'CLR10';
   end if;
 
+  -- (5b) Native review N2: pin both fix-round findings in the tail (the 0136 idiom) so a future
+  --      recut cannot silently reopen them.
+  --      F4: the JWT-email wall (`does not match this invite`) must appear BEFORE the dedupe
+  --      short-circuit (`_reserve_op`) in accept_invite's own source -- position-ordering, not
+  --      mere presence, is what makes the exploit (a replay-theft impostor reaching the dedupe
+  --      short-circuit before the wall proves they own the invited email) impossible.
+  if position('does not match this invite' in v_bad) >= position('_reserve_op' in v_bad) then
+    raise exception 'p4t1 tail: accept_invite''s JWT-email wall does not run BEFORE _reserve_op -- F4 has regressed' using errcode = 'CLR10';
+  end if;
+  --      F3: _jwt_email() must still normalize with lower() at its single source -- every one of
+  --      the four email call sites (claim_identity, _claim_identity_core's comparison,
+  --      accept_invite, invite_member) agrees BY CONSTRUCTION only as long as this holds.
+  select p.prosrc into v_bad from pg_proc p where p.oid = 'clara._jwt_email()'::regprocedure;
+  if position('lower(' in v_bad) = 0 then
+    raise exception 'p4t1 tail: _jwt_email() no longer normalizes with lower() -- F3 has regressed' using errcode = 'CLR10';
+  end if;
+
   -- (6) PUBLIC holds EXECUTE on none of the 8 new/recut functions; clara_authenticated holds it
   --     on exactly the 5 human entrances (4 new + add_member unchanged), and the 3 cores +
   --     _jwt_email are ungranted to every app role.
@@ -693,5 +765,5 @@ begin
     raise exception 'p4t1 tail: a T2 door exists -- scope leak' using errcode = 'CLR10';
   end if;
 
-  raise notice 'p4t1 tail: OK -- clara.firm_invites live (forced RLS, owner-only, zero clara_authenticated grant, 2 unique indexes); claim_identity/_claim_identity_core, invite_member, accept_invite, revoke_invite, _add_member_core all live with exact ACLs (5 human entrances reach clara_authenticated only, 3 cores + _jwt_email ungranted everywhere, zero PUBLIC/agent/wake/runtime reach anywhere); add_member''s ACL byte-unchanged across a genuinely-changed body carrying both preserved wall strings; accept_invite''s receipt never leaks the add_member verb name; firm_members_visible (9 cols) / firm_invites_visible (10 cols, no token_hash) / caller_context (6 cols) closed-world column census clean; invite.issued/invite.revoked registered at the active taxonomy version as context_update; uq_membership_active_user, uq_firms_one_operator and create_firm all byte-untouched; no T2 object (_create_firm_core / approve_firm_registration / request_firm_registration) leaked into this file''s scope. No table in workflow/graphile_worker/spike touched.';
+  raise notice 'p4t1 tail: OK -- clara.firm_invites live (forced RLS, owner-only, zero clara_authenticated grant, 2 unique indexes); claim_identity/_claim_identity_core, invite_member, accept_invite, revoke_invite, _add_member_core all live with exact ACLs (5 human entrances reach clara_authenticated only, 3 cores + _jwt_email ungranted everywhere, zero PUBLIC/agent/wake/runtime reach anywhere); add_member''s ACL byte-unchanged across a genuinely-changed body carrying both preserved wall strings; accept_invite''s receipt never leaks the add_member verb name; firm_members_visible (9 cols) / firm_invites_visible (10 cols, no token_hash) / caller_context (6 cols) closed-world column census clean; invite.issued/invite.revoked registered at the active taxonomy version as context_update; uq_membership_active_user, uq_firms_one_operator and create_firm all byte-untouched; no T2 object (_create_firm_core / approve_firm_registration / request_firm_registration) leaked into this file''s scope. No table in workflow/graphile_worker/spike touched. ROUND 2: all three views carry security_barrier; accept_invite''s wall-before-dedupe order (F4) and _jwt_email''s lower() (F3) are pinned by position/substring rather than trusted; _claim_identity_core compares stored email case-insensitively (N1); accept_invite''s dedupe hash is actor+display-name-bound (C2); _add_member_core translates a concurrent cross-firm unique_violation into the same typed refusal (C4).';
 end $$;

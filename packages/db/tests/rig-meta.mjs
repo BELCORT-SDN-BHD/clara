@@ -1518,6 +1518,30 @@ export async function grantMatrixFailures() {
     failures.push(...cohortFailures("F-A4/PR-2a prepayment limb", F_A4_PR2A_COHORT, liveNames));
   }
   failures.push(...cohortFailures("P4 tranche 1 invite/RBAC first", P4T1_COHORT, liveNames));
+  // Native review C7: cohortFailures() above is proname-only (law 3, "spelling is not
+  // identity") -- it would still read GREEN if a same-named but DIFFERENT-signature overload
+  // silently replaced one of P4T1's seven names (e.g. a future migration adding
+  // clara.claim_identity(text) beside the real clara.claim_identity(text,text)). This is the
+  // signature-exact companion, scoped to P4T1: every cohort member must resolve at the EXACT
+  // signature the migration's own tail census pins, via to_regprocedure -- never a bare-name
+  // lookup -- with the SAME wholly-present-or-wholly-absent tolerance as every other cohort here.
+  const p4t1Sigs = [
+    "clara.claim_identity(text,text)", "clara.invite_member(text,text,text)",
+    "clara.accept_invite(text,text,text)", "clara.revoke_invite(uuid,text)",
+    "clara._jwt_email()", "clara._claim_identity_core(uuid,text,text)",
+    "clara._add_member_core(uuid,uuid,uuid,text)",
+  ];
+  const p4t1SigCheck = await rootQuery(
+    "select sig, to_regprocedure(sig) is not null as ok from unnest($1::text[]) sig", [p4t1Sigs],
+  );
+  const p4t1SigMissing = p4t1SigCheck.rows.filter((r) => !r.ok).map((r) => r.sig);
+  if (p4t1SigMissing.length !== 0 && p4t1SigMissing.length !== p4t1Sigs.length) {
+    failures.push(
+      "P4 tranche 1 invite/RBAC first: signature-exact check found a PARTIAL cohort -- these "
+      + "exact signatures no longer resolve (a same-named, different-signature overload may have "
+      + `silently replaced one): ${p4t1SigMissing.join(", ")}`,
+    );
+  }
   return failures;
 }
 

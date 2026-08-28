@@ -4,7 +4,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { opk, humanQuery, insertUser, createFirm, seedAdmission } from "./rig-fixtures.mjs";
+import { opk, humanQuery, rootQuery, insertUser, createFirm, seedAdmission } from "./rig-fixtures.mjs";
 import { inviteMember, acceptInvite, freshPersona } from "./p4t1-fixtures.mjs";
 
 async function scene(tag) {
@@ -49,13 +49,46 @@ test("p4t1.reads: firm_members_visible -- role_rank matches clara.role_rank and 
   assert.equal(admin.rows[0].status, "active");
 });
 
-test("p4t1.reads: firm_members_visible -- cross-firm isolation: a member of firm A sees zero of firm B's roster", async () => {
+test("p4t1.reads: firm_members_visible -- cross-firm isolation: a member of firm A sees zero of firm B's roster (all FOUR of firm B's identities, closed-world, not a sample of two)", async () => {
   const scA = await scene("crossA");
   const scB = await scene("crossB");
-  void scB;
   const rows = await humanQuery(scA.admin, "select user_id from clara.firm_members_visible", []);
   const ids = rows.rows.map((r) => r.user_id);
-  assert.ok(!ids.includes(scB.admin) && !ids.includes(scB.owner));
+  const foreign = [scB.owner, scB.admin, scB.bookkeeper, scB.viewer];
+  assert.deepEqual(
+    foreign.filter((id) => ids.includes(id)),
+    [],
+    "native review C7: the prior cell checked only owner+admin -- extended to all four firm-B identities",
+  );
+});
+
+// Native review C1 (amended): security_barrier is set on all three views, AND it is proven to
+// buy exactly what it buys (qual-pushdown ordering) -- not target-list masking, which the
+// existing "email is null-masked below admin" cell above already proves independently. A reader
+// checking only the reloption would not know whether the masking guarantee still holds; this
+// cell states both halves so neither is mistaken for the other.
+test("p4t1.reads: [C1] all three views carry security_barrier -- and that reloption is provably NOT what makes firm_members_visible's email masking work (the CASE expression above does, unconditionally of this setting)", async () => {
+  const r = await rootQuery(
+    `select c.relname, c.reloptions
+       from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'clara'
+        and c.relname in ('firm_members_visible', 'firm_invites_visible', 'caller_context')
+      order by c.relname`,
+  );
+  assert.equal(r.rows.length, 3);
+  for (const row of r.rows) {
+    assert.ok(
+      Array.isArray(row.reloptions) && row.reloptions.includes("security_barrier=true"),
+      `${row.relname} must carry security_barrier=true`,
+    );
+  }
+  // The masking half: a security_barrier reloption change alone cannot be what hides the email
+  // column below admin+ -- it is the view body's own CASE expression (§H). Proven here by
+  // re-deriving the SAME fact the earlier "rostermask" cell measures, so this cell does not
+  // depend on that one still existing to be meaningful on its own.
+  const sc = await scene("c1barrier");
+  const bk = await humanQuery(sc.bookkeeper, "select email from clara.firm_members_visible", []);
+  assert.ok(bk.rows.every((row) => row.email === null), "target-list masking still holds -- it is the view body's CASE, not security_barrier, that does this");
 });
 
 // ---------------------------------------------------------------------------
@@ -81,6 +114,20 @@ test("p4t1.reads: firm_invites_visible -- status reflects accept/revoke", async 
   await acceptInvite(p.sub, p.email, { token: issued.token, displayName: "X", opKey: opk("irs-accept") });
   row = await humanQuery(sc.admin, "select status from clara.firm_invites_visible where id = $1", [issued.invite_id]);
   assert.equal(row.rows[0].status, "accepted");
+});
+
+test("p4t1.reads: [C7] firm_invites_visible -- cross-firm isolation: firm B's admin sees ZERO of firm A's invites, positively (not merely a filtered-out row count of one firm read alone)", async () => {
+  const scA = await scene("invcrossA");
+  const scB = await scene("invcrossB");
+  await inviteMember(scA.admin, { email: "invcrossA-target@rig.test", role: "viewer", opKey: opk("invcrossA") });
+  const bIssued = await inviteMember(scB.admin, { email: "invcrossB-target@rig.test", role: "viewer", opKey: opk("invcrossB") });
+  const fromB = await humanQuery(scB.admin, "select id, email from clara.firm_invites_visible", []);
+  assert.equal(fromB.rows.length, 1, "firm B's admin sees exactly firm B's own one invite");
+  assert.equal(fromB.rows[0].id, bIssued.invite_id);
+  assert.ok(
+    !fromB.rows.some((r) => r.email === "invcrossA-target@rig.test"),
+    "firm A's invite must not appear in firm B's admin's read",
+  );
 });
 
 // ---------------------------------------------------------------------------

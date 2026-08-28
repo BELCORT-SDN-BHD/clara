@@ -231,6 +231,58 @@ test("p4t1.accept: [F4] a stale op_key + the same token cannot be replayed by an
   assert.equal(membershipCount.rows[0].n, 5, "still exactly the scene's owner+admin+bookkeeper+viewer plus the legitimate joiner -- no impostor membership");
 });
 
+test("p4t1.accept: [C2] the SAME op_key + token but a CHANGED display_name refuses 'op_key reused with different args', never silently replays the first receipt", async () => {
+  const sc = await scene("c2args");
+  const p = freshPersona("c2argsjoiner");
+  const issued = await inviteMember(sc.admin, { email: p.email, role: "viewer", opKey: opk("c2args-issue") });
+  const key = opk("c2args-accept");
+  const first = await acceptInvite(p.sub, p.email, { token: issued.token, displayName: "First Name", opKey: key });
+  assert.equal(first.user_id, p.sub);
+  await assertRaises(
+    CLR.badRequest,
+    () => acceptInvite(p.sub, p.email, { token: issued.token, displayName: "Different Name", opKey: key }),
+    "accept_invite replay with the same op_key but a different display_name",
+  );
+  const n = await rootQuery("select count(*)::int as n from clara.firm_memberships where user_id = $1", [p.sub]);
+  assert.equal(n.rows[0].n, 1, "still exactly one membership -- the changed-args call never proceeded to mint anything");
+});
+
+test("p4t1.accept: [C2] two DIFFERENT actors sharing the SAME invited-email JWT claim and the SAME op_key+token cannot replay each other's receipt -- the dedupe hash is actor-bound", async () => {
+  const sc = await scene("c2actor");
+  const invitedEmail = `p4t1_c2actor_${Date.now()}@rig.test`;
+  const issued = await inviteMember(sc.admin, { email: invitedEmail, role: "viewer", opKey: opk("c2actor-issue") });
+  const key = opk("c2actor-accept");
+  const p1 = freshPersona("c2actor1");
+  const p2 = freshPersona("c2actor2");
+  const first = await acceptInvite(p1.sub, invitedEmail, { token: issued.token, displayName: "Actor One", opKey: key });
+  assert.equal(first.user_id, p1.sub);
+  // p2's JWT claims the SAME invited email (the rig can fabricate this even though a real
+  // Supabase session could not) -- the email wall alone would let p2 through, so it is the
+  // actor-bound hash that has to catch this: without it, p2 would receive p1's cached receipt
+  // (p1's own user_id/membership_id) verbatim.
+  await assertRaises(
+    CLR.badRequest,
+    () => acceptInvite(p2.sub, invitedEmail, { token: issued.token, displayName: "Actor One", opKey: key }),
+    "accept_invite replay with the same op_key/token/display_name but a DIFFERENT actor",
+  );
+  const p2row = await rootQuery("select 1 from clara.users where id = $1", [p2.sub]);
+  assert.equal(p2row.rows.length, 0, "p2 must not receive p1's identity, nor a minted identity of their own, from this refused call");
+});
+
+test("p4t1.invite: [C3] op_receipts.result stores the invite's raw token in plaintext, owner-only -- the SAME zero-app-grant bearer-credential-at-rest shape as clara.firm_admissions.token (pinned as measured, not silently changed here; an estate-wide pass is a named follow-up, see PR body)", async () => {
+  const sc = await scene("c3token");
+  const key = opk("c3token");
+  const r = await inviteMember(sc.admin, { email: "c3token@rig.test", role: "viewer", opKey: key });
+  const receipt = await rootQuery(
+    "select result from clara.op_receipts where firm_id = $1 and fn = 'invite_member' and op_key = $2",
+    [sc.firm, key],
+  );
+  assert.equal(receipt.rows.length, 1, "expected exactly one op_receipts row for this op_key");
+  assert.equal(receipt.rows[0].result.token, r.token, "the raw token is stored in op_receipts.result in plaintext");
+  const grant = await rootQuery("select has_table_privilege('clara_authenticated', 'clara.op_receipts'::regclass, 'select') as ok");
+  assert.equal(grant.rows[0].ok, false, "no app role has a SELECT path onto op_receipts -- the token is owner-reachable only");
+});
+
 test("p4t1.accept: the global one-active-membership invariant refuses a joiner who already belongs elsewhere (CLR10, from the shared _add_member_core)", async () => {
   const sc1 = await scene("global1");
   const sc2 = await scene("global2");
