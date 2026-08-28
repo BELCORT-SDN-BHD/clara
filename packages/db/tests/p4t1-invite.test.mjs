@@ -231,6 +231,66 @@ test("p4t1.accept: [F4] a stale op_key + the same token cannot be replayed by an
   assert.equal(membershipCount.rows[0].n, 5, "still exactly the scene's owner+admin+bookkeeper+viewer plus the legitimate joiner -- no impostor membership");
 });
 
+test("p4t1.accept: [N2-M2] the tail census's F4 pin is comment-STRIPPED, not comment-naive -- a genuinely mis-ordered body carrying a red-herring comment is still caught, and a genuinely correct body carrying an early mention of the dedupe call does not false-alarm", async () => {
+  // The reviewer's own mutant on the round-2 pin: a raw position()-on-prosrc match is
+  // comment-maskable both ways. This cell reproduces the MIGRATION'S OWN comment-stripping
+  // regex (regexp_replace(prosrc, '--[^\n]*', '', 'g')) against two real, owner-created decoy
+  // functions and proves the stripped check gets BOTH directions right where the old raw-text
+  // check would not have.
+  const DECOY_BAD = "_n2m2_decoy_masked_regression";
+  const DECOY_GOOD = "_n2m2_decoy_false_alarm";
+  try {
+    // BAD: the REAL code order is dedupe-THEN-wall (the F4 regression shape) -- but an early
+    // comment names the wall text before the real dedupe call, exactly what would let a
+    // comment-naive pin read this as wall-before-dedupe and PASS a genuine regression.
+    await rootQuery(`
+      create function clara.${DECOY_BAD}() returns void language plpgsql as $body$
+      begin
+        -- does not match this invite -- an early, misleading comment naming the wall
+        perform pg_sleep(0);                          -- stands in for the real dedupe call
+        raise exception 'does not match this invite';  -- the REAL wall raise, AFTER dedupe
+      end $body$;
+    `);
+    // GOOD: the REAL code order is wall-THEN-dedupe (correct, matching F4) -- but an early
+    // comment names the dedupe stand-in before the real wall raise, exactly what would let a
+    // comment-naive pin read this as dedupe-before-wall and FALSE-ALARM a correct body.
+    await rootQuery(`
+      create function clara.${DECOY_GOOD}() returns void language plpgsql as $body$
+      begin
+        -- pg_sleep is mentioned here, in a comment, well before the real wall raise below
+        if true then raise exception 'does not match this invite'; end if;
+        perform pg_sleep(0);                          -- never reached; stands in for the real dedupe call
+      end $body$;
+    `);
+
+    const [bad, good] = await Promise.all([
+      rootQuery("select prosrc from pg_proc where oid = $1::regprocedure", [`clara.${DECOY_BAD}()`]),
+      rootQuery("select prosrc from pg_proc where oid = $1::regprocedure", [`clara.${DECOY_GOOD}()`]),
+    ]);
+    const badSrc = bad.rows[0].prosrc;
+    const goodSrc = good.rows[0].prosrc;
+    const stripComments = (s) => s.replace(/--[^\n]*/g, "");
+    // Real code marker for "the dedupe call ran" is `pg_sleep` here (standing in for
+    // `_reserve_op`, since these decoys must not actually reach a real op_receipts row).
+    const posWallRaw = (s) => s.indexOf("does not match this invite");
+    const posDedupeRaw = (s) => s.indexOf("pg_sleep");
+
+    // (a) The OLD, comment-naive check would have gotten BOTH of these wrong.
+    assert.ok(posWallRaw(badSrc) < posDedupeRaw(badSrc), "old check: BAD decoy reads as wall-before-dedupe (WRONG -- the real order is dedupe-before-wall)");
+    assert.ok(posWallRaw(goodSrc) >= posDedupeRaw(goodSrc), "old check: GOOD decoy reads as dedupe-before-wall (WRONG -- the real order is wall-before-dedupe, dedupe never runs)");
+
+    // (b) The NEW, comment-stripped check (the migration's own regexp_replace + position, 0141
+    //     §K's F4 pin) gets both right.
+    const badCode = stripComments(badSrc);
+    const goodCode = stripComments(goodSrc);
+    assert.ok(posWallRaw(badCode) >= posDedupeRaw(badCode), "stripped check: BAD decoy correctly reads as dedupe-before-wall (a real regression) once the misleading comment is gone");
+    assert.ok(posWallRaw(goodCode) < posDedupeRaw(goodCode), "stripped check: GOOD decoy correctly reads as wall-before-dedupe once the misleading comment is gone");
+  } finally {
+    await rootQuery(`drop function if exists clara.${DECOY_BAD}()`);
+    await rootQuery(`drop function if exists clara.${DECOY_GOOD}()`);
+  }
+});
+
 test("p4t1.accept: [C2] the SAME op_key + token but a CHANGED display_name refuses 'op_key reused with different args', never silently replays the first receipt", async () => {
   const sc = await scene("c2args");
   const p = freshPersona("c2argsjoiner");

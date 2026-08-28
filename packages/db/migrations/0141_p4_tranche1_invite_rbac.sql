@@ -603,7 +603,7 @@ reset role;
 -- body above ran as written.
 -- =================================================================================================
 do $$
-declare v_bad text; v_n int; v_acl_now text; v_owner_now text; v_src_now text;
+declare v_bad text; v_n int; v_acl_now text; v_owner_now text; v_src_now text; v_code text;
 begin
   -- (1) The table + 3 views exist, owned by clara_fn_owner, ACL exactly {clara_fn_owner, clara_authenticated}
   --     for the views (SELECT), and firm_invites carries ZERO clara_authenticated/agent/wake/runtime grant.
@@ -703,21 +703,30 @@ begin
     raise exception 'p4t1 tail: accept_invite''s receipt strings leak the add_member verb name' using errcode = 'CLR10';
   end if;
 
-  -- (5b) Native review N2: pin both fix-round findings in the tail (the 0136 idiom) so a future
-  --      recut cannot silently reopen them.
+  -- (5b) Native review N2 (amended per the reviewer's own mutant: a raw position() match on
+  --      prosrc is COMMENT-MASKABLE -- a genuinely mis-ordered body carrying an explanatory
+  --      comment that happens to name the wall string early would still PASS this pin, and a
+  --      correctly-ordered body carrying a comment that names `_reserve_op` early would
+  --      FALSE-ALARM. Strip line comments FIRST (the 0136 idiom done structurally, not
+  --      textually), then match against the comment-free CODE only -- a comment can no longer
+  --      move where either wall reads as sitting.
   --      F4: the JWT-email wall (`does not match this invite`) must appear BEFORE the dedupe
-  --      short-circuit (`_reserve_op`) in accept_invite's own source -- position-ordering, not
+  --      short-circuit (`_reserve_op`) in accept_invite's own CODE -- position-ordering, not
   --      mere presence, is what makes the exploit (a replay-theft impostor reaching the dedupe
   --      short-circuit before the wall proves they own the invited email) impossible.
-  if position('does not match this invite' in v_bad) >= position('_reserve_op' in v_bad) then
-    raise exception 'p4t1 tail: accept_invite''s JWT-email wall does not run BEFORE _reserve_op -- F4 has regressed' using errcode = 'CLR10';
+  v_code := regexp_replace(v_bad, '--[^\n]*', '', 'g');
+  if position('does not match this invite' in v_code) >= position('_reserve_op' in v_code) then
+    raise exception 'p4t1 tail: accept_invite''s JWT-email wall does not run BEFORE _reserve_op in the CODE -- F4 has regressed' using errcode = 'CLR10';
   end if;
-  --      F3: _jwt_email() must still normalize with lower() at its single source -- every one of
-  --      the four email call sites (claim_identity, _claim_identity_core's comparison,
-  --      accept_invite, invite_member) agrees BY CONSTRUCTION only as long as this holds.
+  --      F3: _jwt_email() must still normalize with lower() at its single source, in CODE -- a
+  --      comment mentioning "lower(" would otherwise be enough to pass this pin without the
+  --      function's own body actually calling it. Every one of the four email call sites
+  --      (claim_identity, _claim_identity_core's comparison, accept_invite, invite_member)
+  --      agrees BY CONSTRUCTION only as long as this holds.
   select p.prosrc into v_bad from pg_proc p where p.oid = 'clara._jwt_email()'::regprocedure;
-  if position('lower(' in v_bad) = 0 then
-    raise exception 'p4t1 tail: _jwt_email() no longer normalizes with lower() -- F3 has regressed' using errcode = 'CLR10';
+  v_code := regexp_replace(v_bad, '--[^\n]*', '', 'g');
+  if position('lower(' in v_code) = 0 then
+    raise exception 'p4t1 tail: _jwt_email() no longer normalizes with lower() in CODE -- F3 has regressed' using errcode = 'CLR10';
   end if;
 
   -- (6) PUBLIC holds EXECUTE on none of the 8 new/recut functions; clara_authenticated holds it
