@@ -130,14 +130,16 @@ begin
     ('clara.request_firm_registration(text,text,text)'),
     ('clara.approve_firm_registration(uuid,text)'),
     ('clara.reject_firm_registration(uuid,text,text)'),
-    ('clara.firm_registration_requests_visible (view)')
+    ('clara.firm_registration_requests_visible (view)'),
+    ('clara.counterparty_aliases_visible (view)')
   ) t(n)
   where (n = 'clara.firm_registration_requests (table)' and to_regclass('clara.firm_registration_requests') is not null)
      or (n = 'clara._create_firm_core(uuid,text)' and to_regprocedure('clara._create_firm_core(uuid,text)') is not null)
      or (n = 'clara.request_firm_registration(text,text,text)' and to_regprocedure('clara.request_firm_registration(text,text,text)') is not null)
      or (n = 'clara.approve_firm_registration(uuid,text)' and to_regprocedure('clara.approve_firm_registration(uuid,text)') is not null)
      or (n = 'clara.reject_firm_registration(uuid,text,text)' and to_regprocedure('clara.reject_firm_registration(uuid,text,text)') is not null)
-     or (n = 'clara.firm_registration_requests_visible (view)' and to_regclass('clara.firm_registration_requests_visible') is not null);
+     or (n = 'clara.firm_registration_requests_visible (view)' and to_regclass('clara.firm_registration_requests_visible') is not null)
+     or (n = 'clara.counterparty_aliases_visible (view)' and to_regclass('clara.counterparty_aliases_visible') is not null);
   if v_present is not null then
     raise exception 'p4t2 prestate: name(s) already exist, refusing to clobber: %', v_present using errcode = 'CLR10';
   end if;
@@ -279,28 +281,20 @@ begin
    where fi.status = 'pending' and clara.role_rank(fi.role) > coalesce(clara.role_rank(m.role), -1);
   insert into _p4t2_pre(k, v) values ('pending_invites_over_issuer_rank.pre', v_n::text);
 
-  -- (6) The counterparties human-read policy MEASURED shape -- stashed so the tail can prove the
-  --     new counterparty_aliases policy copies it byte-for-byte, and so a drift between this
-  --     prestate read and the tail's own re-read (impossible within one migration transaction,
-  --     but the discipline is the same measure-before/measure-after shape as every other section)
-  --     is the same instrument throughout.
-  select pg_get_expr(pol.polqual, pol.polrelid) into v_qual
-    from pg_policy pol where pol.polrelid = 'clara.counterparties'::regclass and pol.polname = 'p_counterparties_human';
-  if v_qual is null then
-    raise exception 'p4t2 prestate: clara.counterparties'' p_counterparties_human policy not found -- the shape 裁-11 requires copying is not live' using errcode = 'CLR10';
-  end if;
-  insert into _p4t2_pre(k, v) values ('counterparties.human_qual', v_qual);
-
-  -- (7) counterparty_aliases carries NO clara_authenticated grant today (T8's rung-0 finding,
-  --     裁-11's own context) -- confirm the gap is real before claiming to close it.
+  -- (6) Round 4 correction: the counterparties byte-copy premise is GONE (§F's own header note
+  --     explains why -- copying counterparties' shape onto a fn-fronted-only table was the wrong
+  --     mechanism). What this file now needs confirmed instead: counterparty_aliases is genuinely
+  --     a member of the fn-fronted-only family wave-a-shape.test.mjs's §13 enforces -- it carries
+  --     NO direct app-role grant today (subsumes the old check (7)'s premise).
   if exists (
     select 1 from information_schema.role_table_grants
-     where table_schema = 'clara' and table_name = 'counterparty_aliases' and grantee = 'clara_authenticated'
+     where table_schema = 'clara' and table_name = 'counterparty_aliases'
+       and grantee not in ('clara_fn_owner', 'clara_freeform_ro')
   ) then
-    raise exception 'p4t2 prestate: clara.counterparty_aliases already carries a clara_authenticated grant -- 裁-11''s premise (zero grant today) does not hold' using errcode = 'CLR10';
+    raise exception 'p4t2 prestate: clara.counterparty_aliases already carries an app-role grant beyond clara_freeform_ro -- the fn-fronted-only premise does not hold' using errcode = 'CLR10';
   end if;
 
-  raise notice 'p4t2 prestate: OK -- 6 new names clear, 17 depended-upon functions + 5 depended-upon tables resolve, both partial-unique invariants present, no event_type collision, create_firm/set_member_role/_add_member_core/invite_member/add_member/accept_invite prosrc+acl+owner all stashed with their load-bearing strings confirmed present pre-edit, % pending invite(s) already exceed their issuer''s current rank (reported, not asserted zero -- expected 0 on a fresh rig), counterparties'' human-read qual stashed, counterparty_aliases confirmed to carry zero clara_authenticated grant today.', v_n;
+  raise notice 'p4t2 prestate: OK -- 7 new names clear, 17 depended-upon functions + 5 depended-upon tables resolve, both partial-unique invariants present, no event_type collision, create_firm/set_member_role/_add_member_core/invite_member/add_member/accept_invite prosrc+acl+owner all stashed with their load-bearing strings confirmed present pre-edit, % pending invite(s) already exceed their issuer''s current rank (reported, not asserted zero -- expected 0 on a fresh rig), counterparty_aliases confirmed to carry no app-role grant beyond clara_freeform_ro today (round 4: the fn-fronted-only premise wave-a-shape §13 enforces).', v_n;
 end $$;
 
 set role clara_fn_owner;
@@ -927,22 +921,47 @@ create view clara.firm_registration_requests_visible with (security_barrier) as
 
 -- =================================================================================================
 -- §F -- 裁-11: clara.counterparty_aliases gains the human read the table has carried zero of
--- (T8's rung-0 finding, §0 prestate check (7)) -- a clara_authenticated SELECT grant + a policy
--- copying clara.counterparties' OWN p_counterparties_human policy verbatim (firm-scoped only, per
--- the header note's ruling-vs-measured resolution). Touches no agent path: the definer resolver
--- (_match_counterparty) and clara_freeform_ro's own policy are byte-unchanged; RLS still decides
--- who sees what; this adds human visibility and correction over the agent's alias memory.
+-- (T8's rung-0 finding, §0 prestate check (7)).
 --
--- F8 fix (rev-p4t2 round 1, MEDIUM): CREATE POLICY + GRANT below take an ACCESS EXCLUSIVE lock on
+-- ROUND 4 CORRECTION (rev-p4t2's full estate suite, a real MERGE-BLOCKER round 1-3 missed): the
+-- FIRST attempt at 裁-11 (a direct `grant select ... to clara_authenticated` + policy on the base
+-- table, copying clara.counterparties' own shape) violates wave-a-shape.test.mjs's §13 invariant
+-- -- clara.counterparty_aliases is the FIRST member of WA_NEW_TABLES (wave-a-helpers.mjs:103),
+-- whose whole family carries ZERO direct DML/SELECT grant to any app role (fn-fronted only).
+-- counterparties itself is NOT in that fn-fronted set, so copying its shape onto a table that IS
+-- in the set was the wrong mechanism -- 裁-11's INTENT (humans can list aliases so
+-- retire_counterparty_alias has an honest id) stands; the RULING is the mechanism is this file's
+-- to choose. Chosen: the SAME masked-view idiom §E already uses for
+-- firm_registration_requests_visible -- clara.counterparty_aliases_visible, owned by
+-- clara_fn_owner, `WITH (security_barrier = true)` (it joins the catalog-derived masked-human-
+-- read-view family the hardening batch's own census walks; debt-BAR1 requires the barrier), a
+-- firm-only predicate (`firm_id = clara.jwt_firm()`), SELECT granted to clara_authenticated ONLY.
+-- The base table itself carries NO direct grant and NO policy beyond the pre-existing owner-only
+-- one -- wave-a-shape's §13 now passes on this file's own doing, not merely by absence.
+--
+-- PROJECTED COLUMNS, deliberately minimal (T8's hygiene panel's own consumption, confirmed against
+-- its live code -- RetireCounterpartyAliasDialog reads `aliasDisplay` only, alias_normalized is
+-- unconsumed today but included since a hygiene panel comparing near-duplicate names is exactly
+-- where the normalized form earns its place): id (the alias id retire_counterparty_alias needs),
+-- counterparty_id, alias_display, alias_normalized, created_at, retired_at. NOT projected:
+-- firm_id (RLS-redundant), client_id, origin, created_by -- "no more" per the ruling.
+--
+-- Touches no agent path: the definer resolver (_match_counterparty) and clara_freeform_ro's own
+-- policy are byte-unchanged; RLS still decides what the VIEW itself may read; this adds human
+-- visibility and correction over the agent's alias memory without widening the base table's ACL.
+--
+-- F8 fix (rev-p4t2 round 1, MEDIUM, still applies): CREATE VIEW + GRANT below take locks against
 -- counterparty_aliases, a table this estate's agent path reads constantly (the alias-matching
 -- resolver). LOAD-BEARING, the 0138 15s shape (packages/db/README.md, .claude/rules/db-migrations.md
 -- "Put the timeout in the file, not in the ceremony") -- `set local lock_timeout` is set once, at
 -- the TOP of this file (round 3 nit: moved so every CoR above ALSO runs under the same bound wait,
 -- 0131/0138's own shape), not repeated here.
 -- =================================================================================================
-create policy p_counterparty_aliases_human on clara.counterparty_aliases
-  for select to clara_authenticated using (firm_id = clara.jwt_firm());
-grant select on clara.counterparty_aliases to clara_authenticated;
+create view clara.counterparty_aliases_visible with (security_barrier) as
+  select ca.id, ca.counterparty_id, ca.alias_display, ca.alias_normalized, ca.created_at, ca.retired_at
+  from clara.counterparty_aliases ca
+  where ca.firm_id = clara.jwt_firm();
+grant select on clara.counterparty_aliases_visible to clara_authenticated;
 
 -- =================================================================================================
 -- §G -- event_types + trigger_taxonomy (the 0138:2508 idiom -- register at whichever taxonomy
@@ -1295,21 +1314,16 @@ begin
    where t.event_type in ('firm_registration.approved', 'firm_registration.rejected') and t.decision = 'context_update';
   if v_n <> 2 then raise exception 'p4t2 tail: expected 2 trigger_taxonomy rows at the active version, found %', v_n using errcode = 'CLR10'; end if;
 
-  -- (8) 裁-11: counterparty_aliases now carries EXACTLY the same human-read qual as counterparties'
-  --     own policy (byte-identical to the §0 prestate stash), plus the grant, and freeform stays
-  --     byte-unchanged. F8's tail additions: forced RLS is what makes the policy real, and
-  --     clara_authenticated holds EXACTLY SELECT, never a write privilege.
-  select pg_get_expr(pol.polqual, pol.polrelid) into v_bad
-    from pg_policy pol where pol.polrelid = 'clara.counterparty_aliases'::regclass and pol.polname = 'p_counterparty_aliases_human';
-  if v_bad is null then
-    raise exception 'p4t2 tail: p_counterparty_aliases_human policy not found' using errcode = 'CLR10';
-  end if;
-  if v_bad is distinct from (select v from _p4t2_pre where k = 'counterparties.human_qual') then
-    raise exception 'p4t2 tail: counterparty_aliases'' new policy qual (%) does not byte-match counterparties'' own (%)',
-      v_bad, (select v from _p4t2_pre where k = 'counterparties.human_qual') using errcode = 'CLR10';
-  end if;
-  if not has_table_privilege('clara_authenticated', 'clara.counterparty_aliases'::regclass, 'select') then
-    raise exception 'p4t2 tail: clara_authenticated still cannot SELECT counterparty_aliases' using errcode = 'CLR10';
+  -- (8) 裁-11, round 4 correction: the mechanism is a masked view, matching §E's own
+  --     firm_registration_requests_visible idiom -- see §F's header for why the earlier
+  --     direct-grant attempt was wrong (wave-a-shape.test.mjs §13, a real merge-blocker).
+  --
+  -- (8-base) The BASE TABLE must carry NO direct app-role grant beyond its pre-existing
+  --          clara_freeform_ro read (0131) -- this is the fn-fronted-only invariant itself,
+  --          re-proven here so a future edit re-adding a direct grant fails THIS file's own
+  --          tail, not only wave-a-shape's (which runs in a different suite entirely).
+  if has_table_privilege('clara_authenticated', 'clara.counterparty_aliases'::regclass, 'select') then
+    raise exception 'p4t2 tail: clara_authenticated can SELECT counterparty_aliases DIRECTLY -- the mask is bypassable (wave-a-shape ''s fn-fronted-only invariant)' using errcode = 'CLR10';
   end if;
   if not has_table_privilege('clara_freeform_ro', 'clara.counterparty_aliases'::regclass, 'select') then
     raise exception 'p4t2 tail: clara_freeform_ro lost its pre-existing SELECT on counterparty_aliases' using errcode = 'CLR10';
@@ -1324,15 +1338,67 @@ begin
     select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
      where n.nspname = 'clara' and c.relname = 'counterparty_aliases' and c.relrowsecurity and c.relforcerowsecurity
   ) then
-    raise exception 'p4t2 tail: counterparty_aliases lost forced RLS -- the new policy is only real because of it (F8 tail addition)' using errcode = 'CLR10';
+    raise exception 'p4t2 tail: counterparty_aliases lost forced RLS' using errcode = 'CLR10';
+  end if;
+
+  -- (8-view) counterparty_aliases_visible: owned by clara_fn_owner, security_barrier, a
+  --          firm-only predicate (comment-stripped/normalized, the same F4 discipline), a
+  --          closed-world 6-column census, clara_authenticated holds EXACTLY SELECT, and no
+  --          agent/wake/runtime role gained reach.
+  select coalesce(pg_get_userbyid(c.relowner), '(none)') into v_bad
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace
+   where n.nspname = 'clara' and c.relname = 'counterparty_aliases_visible';
+  if v_bad is distinct from 'clara_fn_owner' then
+    raise exception 'p4t2 tail: counterparty_aliases_visible is not owned by clara_fn_owner (owner=%)', v_bad using errcode = 'CLR10';
+  end if;
+  if not exists (
+    select 1 from pg_class where oid = 'clara.counterparty_aliases_visible'::regclass
+      and reloptions is not null and 'security_barrier=true' = any(reloptions)
+  ) then
+    raise exception 'p4t2 tail: counterparty_aliases_visible is missing security_barrier' using errcode = 'CLR10';
+  end if;
+  select string_agg(format('%s: expected %s col(s) [%s], found %s [%s]',
+           k.relname, k.n_expected, k.expected, v.n_actual, v.actual), '; ')
+    into v_bad
+    from (values
+      ('counterparty_aliases_visible', 6, 'id,counterparty_id,alias_display,alias_normalized,created_at,retired_at')
+    ) as k(relname, n_expected, expected)
+    join lateral (
+      select count(*)::int as n_actual, string_agg(a.attname, ',' order by a.attnum) as actual
+        from pg_attribute a where a.attrelid = ('clara.' || k.relname)::regclass and a.attnum > 0 and not a.attisdropped
+    ) v on true
+   where v.n_actual <> k.n_expected or v.actual <> k.expected;
+  if v_bad is not null then
+    raise exception 'p4t2 tail: counterparty_aliases_visible closed-world column census failed: %', v_bad using errcode = 'CLR10';
+  end if;
+  if not has_table_privilege('clara_authenticated', 'clara.counterparty_aliases_visible'::regclass, 'select') then
+    raise exception 'p4t2 tail: clara_authenticated cannot SELECT counterparty_aliases_visible' using errcode = 'CLR10';
   end if;
   if exists (
     select 1 from information_schema.role_table_grants
-     where table_schema = 'clara' and table_name = 'counterparty_aliases' and grantee = 'clara_authenticated'
+     where table_schema = 'clara' and table_name = 'counterparty_aliases_visible' and grantee = 'clara_authenticated'
        and privilege_type <> 'SELECT'
   ) then
-    raise exception 'p4t2 tail: clara_authenticated holds more than SELECT on counterparty_aliases (F8 tail addition)' using errcode = 'CLR10';
+    raise exception 'p4t2 tail: clara_authenticated holds more than SELECT on counterparty_aliases_visible' using errcode = 'CLR10';
   end if;
+  if has_table_privilege('clara_agent_ro', 'clara.counterparty_aliases_visible'::regclass, 'select')
+     or has_table_privilege('clara_wake_interactive', 'clara.counterparty_aliases_visible'::regclass, 'select')
+     or has_table_privilege('clara_wake_proactive', 'clara.counterparty_aliases_visible'::regclass, 'select')
+     or has_table_privilege('clara_runtime', 'clara.counterparty_aliases_visible'::regclass, 'select') then
+    raise exception 'p4t2 tail: counterparty_aliases_visible gained an agent/wake/runtime SELECT grant' using errcode = 'CLR10';
+  end if;
+  declare
+    v_ca_frag constant text := $q$firm_id = clara.jwt_firm()$q$;
+    v_ca_frag_norm constant text := regexp_replace(lower(v_ca_frag), '\s+', '', 'g');
+    v_ca_strip text;
+  begin
+    select pg_get_viewdef('clara.counterparty_aliases_visible'::regclass, true) into v_bad;
+    v_ca_strip := regexp_replace(regexp_replace(lower(v_bad), '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+    v_ca_strip := regexp_replace(v_ca_strip, '\s+', '', 'g');
+    if position(v_ca_frag_norm in v_ca_strip) = 0 then
+      raise exception 'p4t2 tail: counterparty_aliases_visible no longer carries the firm-only predicate' using errcode = 'CLR10';
+    end if;
+  end;
 
   -- (8b) Conductor condition (c) + F4's fix: the operator-authority fragment (existence) AND the
   --      owner-rank floor (F4's own finding: an owner->admin edit in the rank literal survived
@@ -1441,5 +1507,5 @@ begin
     raise exception 'p4t2 tail: a p4t2 function name resolves inside a frozen schema' using errcode = 'CLR10';
   end if;
 
-  raise notice 'p4t2 tail: OK -- clara.firm_registration_requests live (forced RLS, owner-only, zero clara_authenticated grant, 1 partial-unique index); request_firm_registration/approve_firm_registration/reject_firm_registration/create_firm all live with exact ACLs (4 human entrances reach clara_authenticated only, _create_firm_core ungranted everywhere, zero PUBLIC/agent/wake/runtime reach anywhere); create_firm''s existence/is_agent wall now runs at the ENTRANCE, positionally BEFORE the admission-token lookup, and still in the core too (F1); set_member_role/invite_member/add_member all carry the role-ceiling wall in comment-stripped CODE, ACL byte-unchanged, prosrc genuinely changed (F2); accept_invite carries the issuer-rank re-check wall (F2 round 2 ruling (i)), and % pending invite(s) exceed their issuer''s rank estate-wide, byte-unchanged across this transaction (reported, not asserted zero); _add_member_core carries F3''s unique_violation translation ONLY -- proven NEGATIVELY to carry no ceiling logic of its own, per round 2''s entrances-only ruling; _create_firm_core''s membership insert translates unique_violation to the typed CLR10 (F3); approve/reject carry the self-decision wall and an actor-bound dedupe hash (F7/F10); request_firm_registration carries its own is_agent wall AND the arg-complete replay refusal (F6); firm_registration_requests_visible (10 cols, security_barrier) closed-world column census clean, decided_by masked to the operator scope only (F11); the shared operator-authority fragment AND the shared owner-rank floor both byte-match, comment-stripped and normalized, across both doors and the view (F4); firm_registration.approved/rejected registered at the active taxonomy version as context_update; counterparty_aliases'' new human-read policy is BYTE-IDENTICAL to counterparties'' own (the measured shape, firm-only), forced RLS intact, clara_authenticated holds EXACTLY SELECT, the grant lands, clara_freeform_ro is untouched, and no agent/wake/runtime role gained reach (F8 tail additions); uq_membership_active_user and uq_firms_one_operator byte-untouched; constraint 15 (frozen schemas) holds % relation(s) estate-wide (reported, not asserted zero) and zero of them are this file''s own names (F9).', v_pending_over_rank, v_frozen;
+  raise notice 'p4t2 tail: OK -- clara.firm_registration_requests live (forced RLS, owner-only, zero clara_authenticated grant, 1 partial-unique index); request_firm_registration/approve_firm_registration/reject_firm_registration/create_firm all live with exact ACLs (4 human entrances reach clara_authenticated only, _create_firm_core ungranted everywhere, zero PUBLIC/agent/wake/runtime reach anywhere); create_firm''s existence/is_agent wall now runs at the ENTRANCE, positionally BEFORE the admission-token lookup, and still in the core too (F1); set_member_role/invite_member/add_member all carry the role-ceiling wall in comment-stripped CODE, ACL byte-unchanged, prosrc genuinely changed (F2); accept_invite carries the issuer-rank re-check wall (F2 round 2 ruling (i)), and % pending invite(s) exceed their issuer''s rank estate-wide, byte-unchanged across this transaction (reported, not asserted zero); _add_member_core carries F3''s unique_violation translation ONLY -- proven NEGATIVELY to carry no ceiling logic of its own, per round 2''s entrances-only ruling; _create_firm_core''s membership insert translates unique_violation to the typed CLR10 (F3); approve/reject carry the self-decision wall and an actor-bound dedupe hash (F7/F10); request_firm_registration carries its own is_agent wall AND the arg-complete replay refusal (F6); firm_registration_requests_visible (10 cols, security_barrier) closed-world column census clean, decided_by masked to the operator scope only (F11); the shared operator-authority fragment AND the shared owner-rank floor both byte-match, comment-stripped and normalized, across both doors and the view (F4); firm_registration.approved/rejected registered at the active taxonomy version as context_update; counterparty_aliases_visible (round 4 correction: a masked view, not a direct grant -- wave-a-shape §13''s fn-fronted-only invariant) is owned by clara_fn_owner, security_barrier, 6-col closed-world census clean, firm-only predicate byte-matched, clara_authenticated holds EXACTLY SELECT on the VIEW ONLY (the base table carries zero direct app-role grant beyond its pre-existing clara_freeform_ro read), forced RLS intact on the base table, and no agent/wake/runtime role gained reach anywhere (F8 tail additions); uq_membership_active_user and uq_firms_one_operator byte-untouched; constraint 15 (frozen schemas) holds % relation(s) estate-wide (reported, not asserted zero) and zero of them are this file''s own names (F9).', v_pending_over_rank, v_frozen;
 end $$;
