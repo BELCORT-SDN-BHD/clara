@@ -17,9 +17,25 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   CLR, PG, ROLES, assertRaises, opk, rootQuery, roleQuery, human,
-  wakeActor, runAs, namedCall, ensureReady, buildWorld, mintWake, endPool,
+  wakeActor, runAs, namedCall, ensureReady, buildWorld, mintWake, endPool, getPool,
 } from "./rig-fixtures.mjs";
 import { seedVerifiedDocument, ensureFirmNarrowAttribution } from "./rig-docs-fixtures.mjs";
+
+/** Run `fn` inside ONE transaction that is ALWAYS rolled back -- mirrors f-a7-pi.test.mjs's own
+ *  helper of the same name. Used for adversarial probes that must leave no residue even if the
+ *  wall under test is mutated away and the probe's INSERT unexpectedly succeeds (independent
+ *  review F6 nit: a bare autocommitting rootQuery insert would otherwise persist the row and
+ *  block restoring a tightened constraint later). */
+async function inRolledBackTx(fn) {
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    return await fn(client);
+  } finally {
+    try { await client.query("rollback"); } catch { /* the rollback is best-effort cleanup */ }
+    client.release();
+  }
+}
 
 let world;
 let ready = false;
@@ -616,14 +632,19 @@ test("census: firm_open_questions.kind CHECK actually REFUSES a garbage value at
   // The cell above only greps the constraint's own pg_get_constraintdef TEXT -- a definition
   // rewritten as `kind = ANY(ARRAY[...]) OR true` would still contain every expected substring
   // and still pass that cell while admitting anything. This is the behavioral companion: a real
-  // INSERT attempt against the LIVE constraint.
-  await assert.rejects(
-    () => rootQuery(
-      `insert into clara.firm_open_questions(firm_id, document_id, kind, question_text, opened_by)
-         values ($1,$2,'not_a_real_kind','rig bad-kind probe',$3)`,
-      [world.firms.A, doc.documentId, world.users.alice]),
-    (e) => e.code === PG.checkViolation,
-    "a garbage kind value is refused by the live CHECK at insert time");
+  // INSERT attempt against the LIVE constraint. Run inside a rolled-back transaction
+  // (independent review F6 nit): under a mutant that widens the CHECK away, this INSERT would
+  // otherwise SUCCEED and COMMIT on a bare rootQuery call, leaving a permanent bad row that
+  // could then block restoring the tightened constraint.
+  await inRolledBackTx(async (client) => {
+    await assert.rejects(
+      () => client.query(
+        `insert into clara.firm_open_questions(firm_id, document_id, kind, question_text, opened_by)
+           values ($1,$2,'not_a_real_kind','rig bad-kind probe',$3)`,
+        [world.firms.A, doc.documentId, world.users.alice]),
+      (e) => e.code === PG.checkViolation,
+      "a garbage kind value is refused by the live CHECK at insert time");
+  });
 });
 
 // ===========================================================================

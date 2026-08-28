@@ -522,7 +522,7 @@ insert into clara.wake_fn_allowlist(wake_kind, function_name) values
 -- SS7 -- TAIL SELF-PROOF. Raises on failure; every claim is re-READ from the catalog.
 -- =====================================================================================
 do $fa7b_pra_tail$
-declare v_bad text; v_n int; v_def text; v_census record;
+declare v_bad text; v_n int; v_def text; v_census record; v_constraint text;
 begin
   -- (1) D1's claim, proven: exactly one pg_proc row for the one function this file installs.
   if (select count(*) from pg_proc p join pg_namespace n2 on n2.oid = p.pronamespace
@@ -548,24 +548,44 @@ begin
   --     what the database actually enforces -- a tautology that stays green even if the live
   --     constraint diverges from this file's own claim about it). ADMISSION of 'f_a7b' itself
   --     is already proven, for real, by SS4.2's own INSERT above (no separate probe needed for
-  --     that half); this proves REFUSAL, for real, isolating each widened column in turn. Each
-  --     probe runs inside its own exception block (an implicit savepoint), so a caught
-  --     check_violation leaves no row behind -- nothing here reaches the append-only wall.
+  --     that half); this proves REFUSAL, for real, isolating each widened column in turn.
+  --
+  --     ROUND 2 (independent review, F7 re-verify): the first fix's own probe rows used
+  --     receipt_kind/expected_source literals starting with `_` (e.g. '_probe_kind_a') --
+  --     values that ALSO violate agent_receipt_surfaces_receipt_kind_check / _expected_source_
+  --     check's shared `^[a-z][a-z0-9_]*$` pattern, so Postgres could refuse the row on EITHER
+  --     of those two constraints before ever reaching the item_check/shim_relname_check this
+  --     probe exists to isolate -- the check_violation was real, but not proof of what this
+  --     file claimed. Every OTHER column in each probe is now lawful and unique, so only the
+  --     ONE column under test can be why the row is refused, and the exception handler reads
+  --     the constraint name off the catalog rather than assuming it. Each probe runs inside its
+  --     own exception block (an implicit savepoint), so a caught check_violation leaves no row
+  --     behind -- nothing here reaches the append-only wall.
   begin
     insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expected_source)
-      values ('f_a7bx', '_probe_kind_a', '_agent_receipt_src_f_a7b', '_probe_source_a');
+      values ('f_a7bx', 'probe_kind_a', '_agent_receipt_src_f_a99', 'probe_source_a');
     raise exception 'fa7b pr-a tail: a garbage item (f_a7bx, two trailing letters) was WRONGLY ADMITTED by the live item_check'
       using errcode = 'CLR10';
   exception
-    when check_violation then null; -- expected: the live item_check refuses it, for real
+    when check_violation then
+      get stacked diagnostics v_constraint = constraint_name;
+      if v_constraint is distinct from 'agent_receipt_surfaces_item_check' then
+        raise exception 'fa7b pr-a tail: probe 1 (garbage item) was refused by % instead of agent_receipt_surfaces_item_check -- the probe does not isolate what it claims to', v_constraint
+          using errcode = 'CLR10';
+      end if;
   end;
   begin
     insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expected_source)
-      values ('f_a99y', '_probe_kind_b', '_agent_receipt_src_f_a7bx', '_probe_source_b');
+      values ('f_a99y', 'probe_kind_b', '_agent_receipt_src_f_a7bx', 'probe_source_b');
     raise exception 'fa7b pr-a tail: a garbage shim_relname (two trailing letters) was WRONGLY ADMITTED by the live shim_relname_check'
       using errcode = 'CLR10';
   exception
-    when check_violation then null; -- expected: the live shim_relname_check refuses it, for real
+    when check_violation then
+      get stacked diagnostics v_constraint = constraint_name;
+      if v_constraint is distinct from 'agent_receipt_surfaces_shim_relname_check' then
+        raise exception 'fa7b pr-a tail: probe 2 (garbage shim_relname) was refused by % instead of agent_receipt_surfaces_shim_relname_check -- the probe does not isolate what it claims to', v_constraint
+          using errcode = 'CLR10';
+      end if;
   end;
   select pg_get_constraintdef(oid) into v_def from pg_constraint
    where conrelid = 'clara.agent_receipt_surfaces'::regclass and conname = 'agent_receipt_surfaces_item_check';
@@ -717,5 +737,5 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'fa7b pr-a tail: OK -- wake_propose_client_onboarding resolves at exactly 1 pg_proc row (D1 EMPTY, confirmed); firm_open_questions_kind_check is the exact widened 7-value text; the item/shim_relname registry CHECKs REFUSED two REAL INSERT probes (garbage item, garbage shim_relname), each caught and rolled back, byte-exact live definitions confirmed separately; agent_receipt_surfaces holds 8 rows with f_a7b shim_exists+wired+conforms+19-col+zero-dark; agent_receipts_visible''s 19-column contract and ACL are UNCHANGED; onboarding_agent_receipts is RLS-forced, owner-only, zero app-role DML/grants; onboarding_plans carries the 3 new columns with both honesty CHECKs and the congruence FK, its column count otherwise unchanged; firm_open_questions column count unchanged at 14; wake_propose_client_onboarding is clara_wake_filing-only with exactly 1 filing-allowlist row. No table in workflow/graphile_worker/spike touched.';
+  raise notice 'fa7b pr-a tail: OK -- wake_propose_client_onboarding resolves at exactly 1 pg_proc row (D1 EMPTY, confirmed); firm_open_questions_kind_check is the exact widened 7-value text; the item/shim_relname registry CHECKs REFUSED two REAL INSERT probes (garbage item, garbage shim_relname), each isolated by a lawful companion row and confirmed refused by ITS NAMED constraint (not merely `a` check_violation), each caught and rolled back, byte-exact live definitions confirmed separately; agent_receipt_surfaces holds 8 rows with f_a7b shim_exists+wired+conforms+19-col+zero-dark; agent_receipts_visible''s 19-column contract and ACL are UNCHANGED; onboarding_agent_receipts is RLS-forced, owner-only, zero app-role DML/grants; onboarding_plans carries the 3 new columns with both honesty CHECKs and the congruence FK, its column count otherwise unchanged; firm_open_questions column count unchanged at 14; wake_propose_client_onboarding is clara_wake_filing-only with exactly 1 filing-allowlist row. No table in workflow/graphile_worker/spike touched.';
 end $fa7b_pra_tail$;
