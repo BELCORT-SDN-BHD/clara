@@ -87,7 +87,17 @@ export async function getOnboardingClient(clientId: string, opts: Opts = {}): Pr
  *  access class as onboarding_plans/items: direct `clara_authenticated`
  *  SELECT grant, no DML (0017:5114-5122). Deliberately checked so this
  *  card's opening-position gate is HONEST (never a false denial the DB
- *  would actually allow) rather than skipped outright. */
+ *  would actually allow) rather than skipped outright.
+ *
+ *  rev-t11 (re-verify note, not a finding): this function THROWS on a
+ *  failed read — never catch it here to degrade to a boolean. If a future
+ *  lane ever adds a `.catch(...)` fallback, the fallback value MUST be
+ *  `true` (opening position assumed captured), never `false`. `false` on
+ *  an absent read would DISABLE Confirm on a gate this card cannot prove
+ *  is warranted — review law 2's "absence is not evidence" violated in
+ *  disguise, just aimed at over-blocking instead of under-blocking. The
+ *  current behaviour (propagate → the whole card withdraws into its own
+ *  error state) is correct: the absence is surfaced, never guessed. */
 export async function hasFinalizedOpeningSeed(clientId: string, planId: string, opts: Opts = {}): Promise<boolean> {
   const rows = await getRows<{ id: string }>("opening_seed_registry", {
     select: "id",
