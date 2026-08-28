@@ -19,7 +19,7 @@ import {
   CLR, PG, ROLES, assertRaises, opk, rootQuery, roleQuery, human,
   wakeActor, runAs, namedCall, ensureReady, buildWorld, mintWake, endPool, getPool,
 } from "./rig-fixtures.mjs";
-import { seedVerifiedDocument, ensureFirmNarrowAttribution } from "./rig-docs-fixtures.mjs";
+import { seedVerifiedDocument, ensureFirmNarrowAttribution, seedExtraction, seedRegion } from "./rig-docs-fixtures.mjs";
 
 /** Run `fn` inside ONE transaction that is ALWAYS rolled back -- mirrors f-a7-pi.test.mjs's own
  *  helper of the same name. Used for adversarial probes that must leave no residue even if the
@@ -87,6 +87,18 @@ const validBasis = (extra = {}) => ({
   citations: [{ region: "invoice.customer_name", note: "printed party name" }],
   ...extra,
 });
+
+/** 裁-22: `wake_propose_client_onboarding`'s p_basis is now DB-resolved -- a citation must
+ *  name a real region_id of the document actually being proposed. Cells that reach the
+ *  resolver (the happy path, the idempotent replay, and the D-3 honesty test's own setup call)
+ *  need a REAL, resolvable basis; every other cell here refuses before the resolver ever runs
+ *  (document/name-family/duplicate-question/authorization), so `validBasis()`'s pre-裁-22 fake
+ *  shape stays exactly right for them -- unchanged, deliberately. */
+async function resolvableBasis(documentId, extra = {}) {
+  const extraction = await seedExtraction({ firm: world.firms.A, document: documentId });
+  const region = await seedRegion({ firm: world.firms.A, extraction });
+  return { sightings: 1, citations: [{ region_id: region }], ...extra };
+}
 
 async function mintFiling(onBehalfOf = null) {
   return mintWake({ kind: "filing", firm: world.firms.A, onBehalfOf });
@@ -248,7 +260,8 @@ test("wake_propose_client_onboarding: happy path opens an 'onboarding_proposed' 
   const doc = await freshDoc();
   const authorization = await freshAuthorization(doc.sha256);
   const proposedName = `Newco ${randomUUID().slice(0, 8)} Sdn Bhd`;
-  const r = await wakeProposeClientOnboarding(secret, { document: doc.documentId, proposedName, authorization });
+  const basis = await resolvableBasis(doc.documentId);
+  const r = await wakeProposeClientOnboarding(secret, { document: doc.documentId, proposedName, authorization, basis });
   const result = r.rows[0].result;
   assert.ok(result.question_id, "returns a question_id");
   assert.ok(result.receipt_id, "returns a receipt_id");
@@ -294,8 +307,9 @@ test("wake_propose_client_onboarding: idempotent replay on the same op_key retur
   // unrelated cells never collide on op_key), which would itself make two "replay" calls hash
   // differently. A genuine replay resends every hashed input, including the name, unchanged.
   const proposedName = `Northgate ${randomUUID().slice(0, 8)} Sdn Bhd`;
-  const first = await wakeProposeClientOnboarding(secret, { document: doc.documentId, proposedName, authorization, opKey });
-  const second = await wakeProposeClientOnboarding(secret, { document: doc.documentId, proposedName, authorization, opKey });
+  const basis = await resolvableBasis(doc.documentId);
+  const first = await wakeProposeClientOnboarding(secret, { document: doc.documentId, proposedName, authorization, opKey, basis });
+  const second = await wakeProposeClientOnboarding(secret, { document: doc.documentId, proposedName, authorization, opKey, basis });
   assert.deepEqual(second.rows[0].result, first.rows[0].result, "replay returns the identical receipt");
   const n = await rootQuery("select count(*)::int n from clara.onboarding_agent_receipts where document_id=$1", [doc.documentId]);
   assert.equal(n.rows[0].n, 1, "exactly one receipt row, not two");
@@ -432,7 +446,7 @@ test("wake_propose_client_onboarding: refuses a second open proposal on the same
   const { secret } = await mintFiling();
   const doc = await freshDoc();
   const auth1 = await freshAuthorization(doc.sha256);
-  await wakeProposeClientOnboarding(secret, { document: doc.documentId, authorization: auth1 });
+  await wakeProposeClientOnboarding(secret, { document: doc.documentId, authorization: auth1, basis: await resolvableBasis(doc.documentId) });
   const auth2 = await freshAuthorization(doc.sha256);
   const err = await assertRaises(CLR.badRequest,
     () => wakeProposeClientOnboarding(secret, { document: doc.documentId, authorization: auth2 }),
@@ -464,7 +478,7 @@ test("wake_propose_client_onboarding: an authorization minted for a DIFFERENT do
   const row = await rootQuery("select consumed_at from clara.firm_egress_dispatch_authorizations where id=$1", [authorization]);
   assert.equal(row.rows[0].consumed_at, null, "a mismatched authorization is NOT consumed, and stays live for its legitimate dispatch");
   // Proves it: the SAME authorization now succeeds against its real document.
-  const r = await wakeProposeClientOnboarding(secret, { document: docA.documentId, authorization });
+  const r = await wakeProposeClientOnboarding(secret, { document: docA.documentId, authorization, basis: await resolvableBasis(docA.documentId) });
   assert.ok(r.rows[0].result.question_id, "the preserved authorization is still usable for its own document");
 });
 
@@ -473,7 +487,7 @@ test("wake_propose_client_onboarding: refuses an already-consumed authorization 
   const { secret } = await mintFiling();
   const doc = await freshDoc();
   const authorization = await freshAuthorization(doc.sha256);
-  await wakeProposeClientOnboarding(secret, { document: doc.documentId, authorization });
+  await wakeProposeClientOnboarding(secret, { document: doc.documentId, authorization, basis: await resolvableBasis(doc.documentId) });
   const doc2 = await freshDoc();
   await assertRaises("CLR28",
     () => wakeProposeClientOnboarding(secret, { document: doc2.documentId, authorization }),
@@ -678,7 +692,8 @@ test("census: onboarding_plans honesty CHECKs -- opened_from_question/opener_mod
   const doc = await freshDoc();
   const authorization = await freshAuthorization(doc.sha256);
   const { secret } = await mintFiling();
-  const proposal = await wakeProposeClientOnboarding(secret, { document: doc.documentId, authorization });
+  const basis = await resolvableBasis(doc.documentId);
+  const proposal = await wakeProposeClientOnboarding(secret, { document: doc.documentId, authorization, basis });
   const questionId = proposal.rows[0].result.question_id;
 
   await assert.rejects(
