@@ -24,7 +24,7 @@ import type { AccountRow } from "@/lib/registers/accounts";
 
 export function FaAccountProfilesPanel({ clientId, accounts }: { clientId: string; accounts: AccountRow[] }) {
   const t = useTranslations("FixedAssetsDepreciation.profiles");
-  const { data: profiles, err, clr, busy, act } = useHydratedPart(sessionTokenAccessor, (s) => loadFaAccountProfiles(s, clientId));
+  const { data: profiles, loading, err, clr, busy, act } = useHydratedPart(sessionTokenAccessor, (s) => loadFaAccountProfiles(s, clientId));
 
   return (
     <div className="flex flex-col gap-2">
@@ -37,7 +37,11 @@ export function FaAccountProfilesPanel({ clientId, accounts }: { clientId: strin
           {err}
         </StateBanner>
       ) : null}
-      {!profiles || profiles.length === 0 ? (
+      {/* N1 (mechanical sweep, 2026-08-28): `loading` gates the empty claim —
+          without it, "no profiles enrolled" could paint while the first read
+          is still in flight (or had already failed), which is the SAME
+          false-absence shape review law 2 exists to catch. */}
+      {loading ? null : !profiles || profiles.length === 0 ? (
         <EmptyState className="text-xs">{t("empty")}</EmptyState>
       ) : (
         <ul className="flex flex-col gap-1">

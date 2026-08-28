@@ -21,7 +21,7 @@ import { FaDoorDialog } from "./FaDoorDialog";
 export function DepreciationRunsPanel({ clientId, hasLiveAuthority }: { clientId: string; hasLiveAuthority: boolean }) {
   const t = useTranslations("FixedAssetsDepreciation.runs");
   const tc = useTranslations("Common");
-  const { data: runs, err, clr, busy, act } = useHydratedPart(sessionTokenAccessor, (s) => listDepreciationRuns(s, clientId));
+  const { data: runs, loading, err, clr, busy, act } = useHydratedPart(sessionTokenAccessor, (s) => listDepreciationRuns(s, clientId));
 
   return (
     <div className="flex flex-col gap-2">
@@ -33,9 +33,11 @@ export function DepreciationRunsPanel({ clientId, hasLiveAuthority }: { clientId
           {err}
         </StateBanner>
       ) : null}
+      {/* N1 (mechanical sweep, 2026-08-28): `loading` gates the empty claim —
+          the same shape as fa-account-profiles-panel.tsx's own fix. */}
       {!runs ? (
         err ? <StateBanner tone="error" className="text-xs">{String(err)}</StateBanner> : null
-      ) : runs.length === 0 ? (
+      ) : !loading && runs.length === 0 ? (
         <EmptyState className="text-xs">{t("empty")}</EmptyState>
       ) : (
         <DataTableCard>
