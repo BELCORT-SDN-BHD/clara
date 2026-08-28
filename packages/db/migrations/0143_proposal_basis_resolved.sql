@@ -1,5 +1,5 @@
--- UNNUMBERED_proposal_basis_resolved.sql -- 裁-22 (docs/plan/active/mohe-grill-rulings-
--- 2026-08-28.md): agent proposal bases become DB-RESOLVED citations. Number claimed at MERGE
+-- 0143_proposal_basis_resolved.sql -- 裁-22 (docs/plan/active/mohe-grill-rulings-
+-- 2026-08-28.md): agent proposal bases become DB-RESOLVED citations. Number 0143 claimed at MERGE
 -- (standing law, AGENTS.md + .claude/rules/db-migrations.md). Authored against a main frontier
 -- of 0142_fa7b_pr_a_client_onboarding_open.
 --

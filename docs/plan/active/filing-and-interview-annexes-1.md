@@ -26,7 +26,7 @@
 | `dismiss_firm_question` | `(p_question, p_reason, p_op_key)` | bookkeeper+ | |
 | `wake_reattribute_document` | `(p_filing, p_expected_revision, p_to_client, p_reason, p_rationale, p_model, p_op_key)` | `clara_wake_filing` | **unposted only**; retire + re-file in one txn; emits `egress.misrouted` |
 | `wake_propose_filing_correction` | `(p_document, p_from_client, p_to_client, p_reason, p_rationale, p_model, p_op_key)` | `clara_wake_filing` | writes `filing_corrections` with `maker = agent_user_id()`; opens a firm question; emits `egress.misrouted` |
-| `wake_propose_identifier_promotion` | `(p_client, p_document uuid, p_kind, p_value, p_sightings int, p_citations jsonb, p_rationale, p_model, p_op_key)` | `clara_wake_filing` | the typed proposal card; `p_citations` DB-resolved against `p_document` since 裁-22 (`UNNUMBERED_proposal_basis_resolved.sql`) |
+| `wake_propose_identifier_promotion` | `(p_client, p_document uuid, p_kind, p_value, p_sightings int, p_citations jsonb, p_rationale, p_model, p_op_key)` | `clara_wake_filing` | the typed proposal card; `p_citations` DB-resolved against `p_document` since 裁-22 (`0143_proposal_basis_resolved.sql`) |
 | `confirm_identifier_promotion` | `(p_proposal, p_op_key)` | bookkeeper+ | calls `add_client_identifier` **unchanged**; derives the inner op-key |
 | `grant|activate|deactivate|revoke_firm_egress_purpose` | `(p_purpose, p_moment, p_evidence_document, p_scope_note, p_op_key)` variants | **owner** | the firm-narrow family; 0090's four-verb shape |
 | `prepare_firm_egress_dispatch` | `(p_firm, p_purpose, p_moment, p_event_seq, p_event_type, p_document_sha256) → jsonb` | `clara_runtime` | uniform `unknown` refusals; 120 s wall-clock TTL |

@@ -1,6 +1,6 @@
 // 裁-22 (docs/plan/active/mohe-grill-rulings-2026-08-28.md) -- agent proposal bases become
 // DB-RESOLVED citations. Design of record: the migration's own header
-// (packages/db/migrations/UNNUMBERED_proposal_basis_resolved.sql, claimed as 0143 on this rig).
+// (packages/db/migrations/0143_proposal_basis_resolved.sql, numbered 0143 at merge).
 //
 // PART A exercises clara._resolve_proposal_basis DIRECTLY (root bypasses its ACL, same idiom
 // pi's own tests use for _identifier_promotion_core) -- every refusal class, the document-SET
