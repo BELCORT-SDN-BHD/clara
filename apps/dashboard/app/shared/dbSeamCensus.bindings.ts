@@ -270,6 +270,30 @@ export const UNCONSUMED_BASELINE: Record<string, string> = {
   // [round-9 fix wave, lane N2] same story as get_adjustment_run above (list_
   // adjustment_runs' own closure reaches clara._adj_correction_door too).
   list_adjustment_runs: "entry verb wall wall_advice",
+  // [F-A4 PR-2a, 0140 §D4] `schedule` / `target_account` / `target_accounts` are the three keys
+  // clara._adj_template_json gained when PR-2a recut it for F2 wall 3's VISIBLE half. This is the
+  // ratchet doing exactly its job: the DB now publishes the judged expense account and the
+  // per-occurrence schedule, and NO dashboard surface renders either yet.
+  //
+  // TRACED THE OTHER SIDE, per this ledger's own convention (the asset_id / standing_template_* /
+  // round-11 entries above): unlike those, this is NOT a closure over-approximation. The keys reach
+  // the wire on this read — list_adjustment_templates returns _adj_template_json's envelope whole —
+  // and `grep -rn "target_accounts\|target_account\|schedule" apps/dashboard/app` finds ZERO
+  // consumers. So this is LIVE unrendered debt, which is the WDB-G14 shape this ratchet exists to
+  // surface, and it must not be quietly narrowed.
+  //
+  // IT IS ALSO ALREADY ASSIGNED, which is why it is recorded rather than fixed here. The design of
+  // record names the owner in advance: "F2 wall 3 adds an obligation to that door, not a new door:
+  // the schedule and target account must be VISIBLE there (§D4's projection), with correction by
+  // decline-and-re-propose — a PR-3 dashboard item named here so it is not discovered late"
+  // (docs/plan/active/fa4-pr2-design-part2-2026-08-27.md §6). PR-2a is the DB train; it ships the
+  // projection so "visible" is implementable at all. When PR-3's sign surface reads them, this line
+  // shrinks — and if it does not shrink, the stale-entry arm of this same ratchet says so.
+  //
+  // MEASURED, not reasoned: CLARA_RIG_DB=1 with CLARA_PSQL_BIN + PG* against a rig migrated to the
+  // 0140 frontier (135 migrations). Direction 2 flagged exactly these three on exactly this read
+  // and nothing else — the replacement line the failure printed, verbatim.
+  list_adjustment_templates: "schedule target_account target_accounts",
   // list_bank_rule_candidates and list_bank_rules RETIRED with F-A3 (Annex I) —
   // the bank-rules learn loop both belonged to is dropped whole; no dashboard
   // caller remains for either.

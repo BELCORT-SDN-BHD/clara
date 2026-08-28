@@ -1028,10 +1028,15 @@ export const BANK_AGENCY_F_A3_PR3_COHORT = ["confirm_bank_identifier_promotion"]
 //
 //   the TWELVE wake wrappers — clara_wake_interactive ONLY (design close-key-1 Annex E.1's own
 //   grant column), reached by clara_wake_write_login. The design ruled THIRTEEN;
-//   wake_establish_prepayment_schedule is PARKED on two measured blockers (its delegates
-//   propose_adjustment_template / sign_adjustment_template have no extracted cores, and Annex
-//   B.2's "term from the bound document's facts" names no DB-owned carrier) — see the
-//   migration's own header. Named here as a deliberate absence, not forgotten.
+//   wake_establish_prepayment_schedule was PARKED on two measured blockers (its delegates had no
+//   extracted cores, and Annex B.2's "term from the bound document's facts" named no DB-owned
+//   carrier) — see 0138's own header.
+//   *** THE PARK IS OVER: F-A4 PR-2a UNPARKS IT. *** Under R6 the unpark SHRANK to one core
+//   extraction (signing stays a human ADMIN act), and the carrier now exists as
+//   clara.document_service_periods. The thirteenth name is NOT added to this list on purpose: it
+//   lives in F_A4_PR2A_COHORT below, so this twelve-name cohort stays TRUE of a PR-1c-only
+//   estate — cohortFailures() fails a PARTIAL cohort by design, so folding it here would red
+//   every 0138-only database (design Annex B.3, measured not assumed).
 const F_A4_PR1C_WAKE_FNS = [
   "wake_list_fiscal_years", "wake_get_close_plan", "wake_get_close_readiness", "wake_verify_close",
   "wake_snapshot_state", "wake_dry_run_close_readiness", "wake_open_fiscal_year", "wake_begin_close",
@@ -1072,6 +1077,32 @@ const F_A4_PR1C_UNGRANTED_FNS = [
 export const F_A4_PR1C_COHORT = [
   ...F_A4_PR1C_WAKE_FNS, ...F_A4_PR1C_RUNTIME_FNS, ...F_A4_PR1C_HUMAN_FNS,
   ...F_A4_PR1C_UNGRANTED_FNS,
+];
+
+// ---------------------------------------------------------------------------------------------
+// F-A4 PR-2a — THE PREPAYMENT LIMB. Its own cohort, NEVER folded into PR-1c's (design Annex B.3):
+// folding would red every 0138-only database, because cohortFailures() tolerates a WHOLLY absent
+// cohort and fails a PARTIAL one by design. That is measured behaviour, not an assumption.
+//
+//   THE THIRTEENTH WAKE WRAPPER. PR-1c's roster above names TWELVE and records the thirteenth as a
+//   deliberate absence; PR-2a UNPARKS it, and the fold-seam law says a gate pinning a defect must
+//   flip when the defect is fixed. It lives here rather than in that list so the twelve-name
+//   cohort stays true of a PR-1c-only estate.
+const F_A4_PR2A_WAKE_FNS = ["wake_establish_prepayment_schedule"];
+//   the one human door — clara_authenticated ONLY, bookkeeper floor body-enforced. HUMAN-ONLY BY
+//   LAW (design §13 item 3): a service period read off a document by a model is a model-generated
+//   value, so there is no wake wrapper for it and never will be under hard constraint 2.
+const F_A4_PR2A_HUMAN_FNS = ["record_document_service_period"];
+//   the ungranted internals — the evaluator, the agent core, the extracted propose core, the
+//   schedule resolver/canonicaliser, the carrier's two trigger functions, and the service-period
+//   core built door->core from birth so Annex C's promoter has a consumer to reach for.
+const F_A4_PR2A_UNGRANTED_FNS = [
+  "prepayment_schedule_v1", "_agent_prepayment_schedule_core", "_propose_adjustment_template_core",
+  "_adj_period_lines", "_adj_canon_schedule", "_record_document_service_period_core",
+  "_tf_document_service_period_region_congruent", "_tf_dsp_supersede_only",
+];
+export const F_A4_PR2A_COHORT = [
+  ...F_A4_PR2A_WAKE_FNS, ...F_A4_PR2A_HUMAN_FNS, ...F_A4_PR2A_UNGRANTED_FNS,
 ];
 
 export const ALLOWED = {
@@ -1164,6 +1195,11 @@ export const ALLOWED = {
     // settle_close_proposal (the review card's terminal door). clara_authenticated ONLY — see the
     // block above.
     ...F_A4_PR1C_HUMAN_FNS,
+    // F-A4 PR-2a: record_document_service_period, the ONE human door that anchors a prepayment
+    // term to a document. clara_authenticated ONLY, bookkeeper floor body-enforced -- and
+    // HUMAN-ONLY BY LAW: there is no wake wrapper for it, because a period read off a document by
+    // a model is a model-generated value (hard constraint 2, design §13 item 3).
+    ...F_A4_PR2A_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1192,7 +1228,11 @@ export const ALLOWED = {
     // design's own grant column (Annex E.1), and the wake_fn_allowlist's close_prep rows are the
     // KIND gate on top of it: an `interactive` chat credential holding this EXECUTE still fails
     // assert_wake_allowed('interactive','wake_begin_close') because no such row exists.
-    ...F_A4_PR1C_WAKE_FNS]),
+    ...F_A4_PR1C_WAKE_FNS,
+    // F-A4 PR-2a's thirteenth wrapper -- the ONE new privilege in that whole train (NON-GOAL 3:
+    // no floor moves anywhere). DRAFT-ONLY by construction: it reaches only the propose core, and
+    // status='live' is written by clara.sign_adjustment_template alone, which holds no wake grant.
+    ...F_A4_PR2A_WAKE_FNS]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
   // F-A6 PR-1 — BOTH new roles are KEYS, and that is the whole point of adding them (E.2/C11,
   // GM-6): `grantMatrixFailures` iterates Object.keys(ALLOWED), so a role that is not a key is
@@ -1452,6 +1492,13 @@ export async function grantMatrixFailures() {
   const closeLimbLive = F_A4_PR1C_COHORT.filter((n) => liveNames.has(n));
   if (closeLimbLive.length !== 0) {
     failures.push(...cohortFailures("F-A4/PR-1c close-domain agent limb", F_A4_PR1C_COHORT, liveNames));
+  }
+  // PR-2a rides its OWN cohort for the reason Annex B.3 states: a wholly-absent cohort is tolerated
+  // (a PR-1c-only estate), a PARTIAL one fails. Folding these names into PR-1c's list would have
+  // red every 0138-only database.
+  const prepayLive = F_A4_PR2A_COHORT.filter((n) => liveNames.has(n));
+  if (prepayLive.length !== 0) {
+    failures.push(...cohortFailures("F-A4/PR-2a prepayment limb", F_A4_PR2A_COHORT, liveNames));
   }
   return failures;
 }

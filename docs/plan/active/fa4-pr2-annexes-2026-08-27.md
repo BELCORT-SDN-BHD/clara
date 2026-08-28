@@ -10,7 +10,7 @@ Nothing here is independent of the design; every annex is cited from it by secti
 
 ## Annex A · The battery — **moved to its own file**
 
-The forty-four walls, each with its cell AND its mutant, plus the fixtures and the armed-skip
+The forty-five walls, each with its cell AND its mutant, plus the fixtures and the armed-skip
 statement, are in `docs/plan/active/fa4-pr2-battery-2026-08-27.md`. Split out when the F1/F2
 fold pushed this file past the 500-line gate; it is cited as **Annex A** throughout the design.
 
