@@ -272,3 +272,86 @@ export function getCounterpartyStatement(
   const fn = domain === "ar" ? getCustomerStatement : getSupplierStatement;
   return fn(clientId, counterpartyId, from, to, opts);
 }
+
+// =====================================================================
+// The merge preview — the wave's heaviest-treatment surface (port-wave plan
+// §5's note on merge_counterparties + the Mobbin grounding's ManyChat-shaped
+// "named, separate preview step"). Composed from THREE fresh reads, never a
+// re-read of already-loaded state (the Mobbin doc's own warning: "the counts
+// could be stale or paginated differently from what the merge door will
+// actually act on") — the DB owns every figure this shows; this module only
+// assembles the three responses into one shape for the card to render.
+// =====================================================================
+
+/** `kind` -> the aging/statement domain it lives in — `loadAging`'s and
+ *  `getCounterpartyStatement`'s own dispatch, restated here because the merge
+ *  picker starts from a `CounterpartyKind`, not a domain. */
+export function domainForKind(kind: CounterpartyKind): AgingDomain {
+  return kind === "customer" ? "ar" : "ap";
+}
+
+export type CounterpartyMergeSide = {
+  counterparty: CounterpartyRow;
+  /** Live (non-retired) aliases only — a retired alias carries no bearing on
+   *  what a human judging this merge needs to see. */
+  aliases: CounterpartyAliasRow[];
+  /** This side's row from a FRESH ar_aging/ap_aging read, or `null` when the
+   *  side carries no currently-outstanding open items (a real, DB-confirmed
+   *  absence — `_aging_core` simply omits a counterparty with nothing
+   *  outstanding, never a placeholder for "not read yet"). */
+  aging: AgingCounterpartyRow | null;
+};
+
+export type CounterpartyMergePreview = {
+  domain: AgingDomain;
+  as_of: string;
+  survivor: CounterpartyMergeSide;
+  merged: CounterpartyMergeSide;
+};
+
+/** Three PARALLEL fresh reads (counterparties, counterparty_aliases, a full
+ *  ar_aging/ap_aging pass), assembled into the two sides the preview card
+ *  renders. Throws (never returns a partial/guessed shape) if either id is
+ *  missing from the fresh counterparties read — the caller's DataState
+ *  renders that as a real read failure, not a silent empty preview. */
+export async function loadCounterpartyMergePreview(
+  session: SessionTokenAccessor,
+  clientId: string,
+  kind: CounterpartyKind,
+  survivorId: string,
+  mergedId: string,
+  asOf: string,
+  opts: Opts = {},
+): Promise<CounterpartyMergePreview> {
+  const domain = domainForKind(kind);
+  const [counterparties, aliases, aging] = await Promise.all([
+    getRows<CounterpartyRow>("counterparties", {
+      select: COUNTERPARTY_COLS,
+      filters: { client_id: `eq.${clientId}`, id: `in.(${survivorId},${mergedId})` },
+      session,
+      signal: opts.signal,
+    }),
+    getRows<CounterpartyAliasRow>("counterparty_aliases", {
+      select: ALIAS_COLS,
+      filters: { client_id: `eq.${clientId}`, counterparty_id: `in.(${survivorId},${mergedId})`, retired_at: "is.null" },
+      order: "created_at.asc",
+      session,
+      signal: opts.signal,
+    }),
+    loadAging(session, domain, clientId, asOf),
+  ]);
+
+  const side = (id: string): CounterpartyMergeSide => {
+    const counterparty = counterparties.find((c) => c.id === id);
+    if (!counterparty) {
+      throw new Error(`loadCounterpartyMergePreview: counterparty ${id} not found in the fresh read`);
+    }
+    return {
+      counterparty,
+      aliases: aliases.filter((a) => a.counterparty_id === id),
+      aging: aging.counterparties.find((r) => r.counterparty_id === id) ?? null,
+    };
+  };
+
+  return { domain, as_of: asOf, survivor: side(survivorId), merged: side(mergedId) };
+}
