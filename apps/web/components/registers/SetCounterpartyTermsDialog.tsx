@@ -47,7 +47,8 @@ export function SetCounterpartyTermsDialog({
       confirmLabel={t("confirm")}
       busy={busy}
       confirmDisabled={parsed === null}
-      onConfirm={() => onSubmit(parsed as number)}
+      // N4 (independent review): a typed guard, not a cast.
+      onConfirm={() => (parsed === null ? Promise.resolve() : onSubmit(parsed))}
     >
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="cp-terms-days">{t("daysLabel")}</Label>

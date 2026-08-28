@@ -68,6 +68,16 @@ export function CounterpartyHygienePanel({ clientId }: { clientId: string }) {
     void reload();
   }, [kind, reload]);
 
+  // F4 (independent review, fix-required): the sibling shape
+  // (staff-advances-register.tsx) — before the FIRST successful load,
+  // "still loading" and "the read itself failed" are mutually exclusive,
+  // never shown together. A post-load act() refusal (create/rename/merge/…)
+  // is a SEPARATE err banner further down, inside the loaded render, where
+  // `data` is real.
+  if (!data) {
+    return err ? <StateBanner tone="error">{err}</StateBanner> : <LoadingState>{t("loading")}</LoadingState>;
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <SectionHeader
@@ -94,9 +104,7 @@ export function CounterpartyHygienePanel({ clientId }: { clientId: string }) {
         ))}
       </div>
 
-      {!data ? (
-        <LoadingState>{t("loading")}</LoadingState>
-      ) : data.counterparties.length === 0 ? (
+      {data.counterparties.length === 0 ? (
         <EmptyState>{t("empty")}</EmptyState>
       ) : (
         <ul className="flex flex-col gap-3">

@@ -1382,7 +1382,7 @@
     "merge": {
       "trigger": "Merge…",
       "title": "Merge — {name}",
-      "consequence": "Merging is destructive and irreversible. Every open item, statement history and coding rule on the merged party moves to the survivor, and the merged party is retired for good — there is no un-merge door.",
+      "consequence": "Merging retires the party that does not survive, for good — there is no un-merge door. The exact effect is listed on the next step, once you name the other party.",
       "otherLabel": "Merge with",
       "otherPlaceholder": "Select a counterparty",
       "roleLabel": "Which party survives?",
@@ -1406,12 +1406,21 @@
       "tin": "TIN",
       "terms": "Terms (days)",
       "outstanding": "Outstanding",
-      "openItems": "Open items"
+      "openItems": "Open items",
+      "whatChangesHeading": "What this merge actually does",
+      "whatChanges1": "{merged} is marked merged into {survivor} and retired — this cannot be undone.",
+      "whatChanges2": "From now on, new activity naming {merged} attributes to and reads as {survivor}'s.",
+      "whatChanges3": "{merged}'s own live coding rule (if any) retires; a replacement is proposed on {survivor} only if {survivor} does not already have one of that kind.",
+      "whatChanges4": "{merged}'s existing open items and its own outstanding balance stay recorded under {merged} until settled — this merge does not move them.",
+      "whatChanges5": "Aliases are not shown here — this build has no read for them."
     },
     "statement": {
-      "heading": "Statement — {name}",
+      "heading": "Statement — {name} · {from} to {to}",
       "loading": "Loading the statement…",
-      "empty": "No movement in this counterparty's statement.",
+      "empty": "No movement in this counterparty's statement for this period.",
+      "fromLabel": "From",
+      "toFixed": "to {date} (today)",
+      "redirectedNote": "{merged} was merged into {survivor}; this is {survivor}'s own statement.",
       "date": "Date",
       "type": "Type",
       "label": "Label",

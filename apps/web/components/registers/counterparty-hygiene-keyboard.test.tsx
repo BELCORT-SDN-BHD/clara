@@ -120,8 +120,16 @@ test("Create Counterparty dialog: opens on click, reaches every field and Confir
 
       const cancelButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Cancel"));
       assert.ok(cancelButton, "the Cancel control must render as a real <button>");
-      await h.fireEvent(cancelButton as never, "click");
+      await h.act(() => { clickButton(cancelButton as never); });
       for (let i = 0; i < 6; i++) await h.settle();
+
+      // DISCRIMINATING post-condition (F5, independent review): the dialog's
+      // own Cancel control must be GONE from document.body — true only if
+      // the click genuinely closed the dialog, not merely true because the
+      // trigger (which lives outside the portal and was never removed) is
+      // still there regardless of whether Cancel did anything at all.
+      const cancelStillThere = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Cancel"));
+      assert.equal(cancelStillThere, null, "the dialog must have actually closed — Cancel's own control is gone from the DOM");
 
       const triggerAfterClose = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Create counterparty"));
       assert.ok(
@@ -191,8 +199,14 @@ test("Merge Counterparties dialog: the destructive confirm is gated by REAL prev
       assert.ok(mergeButton, "the destructive Merge control must be reachable, distinct from the trigger");
       assert.equal((mergeButton as unknown as { disabled: boolean }).disabled, false, "Merge enables once the preview has genuinely loaded");
 
-      await h.fireEvent(cancelButton as never, "click");
+      await h.act(() => { clickButton(cancelButton as never); });
       for (let i = 0; i < 6; i++) await h.settle();
+
+      // DISCRIMINATING post-condition (F5): the destructive Merge button
+      // itself must be GONE from document.body — true only if Cancel
+      // actually closed the dialog.
+      const mergeStillThere = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Merge");
+      assert.equal(mergeStillThere, null, "the dialog must have actually closed — the destructive Merge control is gone from the DOM");
 
       const triggerAfterClose = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Merge…"));
       assert.ok(

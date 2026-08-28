@@ -84,9 +84,13 @@ export function AgingRegister({ clientId }: { clientId: string }) {
               <TableHead />
             </TableRow>
           </TableHeader>
+          {/* N3 (independent review): aria-selected is invalid on a <tr> in a
+              plain (non-grid/listbox) table — dropped below. The "View
+              statement" button per row is the accessible affordance; a data
+              attribute carries the selected-styling hook instead. */}
           <TableBody>
             {rows.map((r) => (
-              <TableRow key={r.counterparty_id} aria-selected={r.counterparty_id === selectedCounterpartyId}>
+              <TableRow key={r.counterparty_id} data-selected={r.counterparty_id === selectedCounterpartyId || undefined}>
                 <TableCell>{r.counterparty_name ?? r.counterparty_id.slice(0, 8)}</TableCell>
                 <TableCell>{fmtCents(r.current_cents, tc("centsUnsafe"))}</TableCell>
                 <TableCell>{fmtCents(r.d31_60_cents, tc("centsUnsafe"))}</TableCell>
@@ -134,6 +138,11 @@ export function AgingRegister({ clientId }: { clientId: string }) {
           counterpartyId={selectedRow.counterparty_id}
           counterpartyName={selectedRow.counterparty_name ?? selectedRow.counterparty_id.slice(0, 8)}
           agingItems={selectedRow.items}
+          // F7 (independent review, fix-required): re-read aging after every
+          // apply_open_items/unallocate_group act — this table's own
+          // outstanding figures and the Apply dialog's candidate pool
+          // (agingItems, above) must never keep pre-act values.
+          onActed={reload}
         />
       ) : null}
 

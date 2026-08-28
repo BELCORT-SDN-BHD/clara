@@ -16,7 +16,7 @@ import { useTranslations } from "next-intl";
 import { businessToday } from "@/lib/business-date";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadCounterpartyMergePreview, type CounterpartyMergePreview, type CounterpartyKind, type CounterpartyRow } from "@/lib/registers/counterparty";
-import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -51,6 +51,7 @@ export function MergeCounterpartiesDialog({
   onConfirm: (survivorId: string, mergedId: string, reason: string) => Promise<void>;
 }) {
   const t = useTranslations("ArApCounterparty.merge");
+  const tMergePreview = useTranslations("ArApCounterparty.mergePreview");
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>("pick");
   const [otherId, setOtherId] = useState("");
@@ -61,6 +62,9 @@ export function MergeCounterpartiesDialog({
 
   const survivorId = thisIsSurvivor ? counterparty.id : otherId;
   const mergedId = thisIsSurvivor ? otherId : counterparty.id;
+  const otherName = candidates.find((c) => c.id === otherId)?.name ?? otherId;
+  const survivorName = thisIsSurvivor ? counterparty.name : otherName;
+  const mergedName = thisIsSurvivor ? otherName : counterparty.name;
 
   function resetAndClose() {
     setOpen(false);
@@ -133,7 +137,11 @@ export function MergeCounterpartiesDialog({
               </>
             )}
             <DialogFooter>
-              <DialogClose render={<Button variant="ghost" />}>{t("cancel")}</DialogClose>
+              {/* F5 (independent review): plain onClick, not DialogClose —
+                  see ArApCounterpartyDoorDialog.tsx's own comment for why. */}
+              <Button variant="ghost" onClick={resetAndClose}>
+                {t("cancel")}
+              </Button>
               <Button disabled={!otherId || reason.trim().length === 0} onClick={() => void goToPreview()}>
                 {t("previewButton")}
               </Button>
@@ -145,12 +153,34 @@ export function MergeCounterpartiesDialog({
             {!preview.loading && preview.error ? (
               <StateBanner tone="error">{preview.error instanceof Error ? preview.error.message : String(preview.error)}</StateBanner>
             ) : null}
-            {!preview.loading && preview.data ? <CounterpartyMergePreviewCard preview={preview.data} /> : null}
+            {!preview.loading && preview.data ? (
+              <>
+                <CounterpartyMergePreviewCard preview={preview.data} />
+                {/* F2 (independent review, fix-required): the exact live effect
+                    of merge_counterparties, on the PREVIEW step, right where the
+                    destructive control lives — not the earlier pick step, which
+                    a human has already moved past by the time the button matters. */}
+                <div className="flex flex-col gap-1.5 rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                  <p className="font-medium text-foreground">{tMergePreview("whatChangesHeading")}</p>
+                  <ul className="flex list-disc flex-col gap-1 pl-4">
+                    <li>{tMergePreview("whatChanges1", { merged: mergedName, survivor: survivorName })}</li>
+                    <li>{tMergePreview("whatChanges2", { merged: mergedName, survivor: survivorName })}</li>
+                    <li>{tMergePreview("whatChanges3", { merged: mergedName, survivor: survivorName })}</li>
+                    <li>{tMergePreview("whatChanges4", { merged: mergedName })}</li>
+                    <li>{tMergePreview("whatChanges5")}</li>
+                  </ul>
+                </div>
+              </>
+            ) : null}
             <DialogFooter>
               <Button variant="ghost" onClick={() => setStep("pick")}>
                 {t("back")}
               </Button>
-              <DialogClose render={<Button variant="ghost" />}>{t("cancel")}</DialogClose>
+              {/* F5 (independent review): plain onClick, not DialogClose —
+                  see ArApCounterpartyDoorDialog.tsx's own comment for why. */}
+              <Button variant="ghost" onClick={resetAndClose}>
+                {t("cancel")}
+              </Button>
               <Button
                 variant="destructive"
                 disabled={busy || preview.loading || !preview.data}

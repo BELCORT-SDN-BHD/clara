@@ -236,10 +236,16 @@ export type CounterpartyStatement = {
 };
 
 /** clara.customer_statement(p_client, p_counterparty, p_from, p_to) — 0040:4069,
- *  bookkeeper+. `from`/`to` nullable at the wire; the DB's `_statement_core` treats a
- *  null `from` as "since the beginning" and a null `to` as required-by-caller here
- *  (this module always sends a real `to`, following aging.ts's `businessToday()`
- *  precedent at the call site). */
+ *  bookkeeper+. F1 (independent review, fix-required): `from` is nullable AT THE
+ *  WIRE but `_statement_core` (0040:4013) NEVER treats a null `from` as "since the
+ *  beginning" — every predicate that uses it is `BETWEEN p_from AND p_to` or
+ *  `< p_from`, and Postgres's three-valued logic makes both of those NULL (never
+ *  TRUE) when `p_from` is null, so a null `from` returns a genuinely EMPTY
+ *  statement (zero rows, zero opening balance) rather than the full history — the
+ *  opposite of what the old docstring here claimed, proven on a live rig. The
+ *  caller (components/registers/counterparty-statement-panel.tsx) MUST always send
+ *  a real `from` — never null in practice, even though the type still allows it for
+ *  a caller with a genuine reason to see the DB's own empty-range behaviour. */
 export function getCustomerStatement(
   clientId: string,
   counterpartyId: string,
@@ -283,10 +289,41 @@ export function getCounterpartyStatement(
   return fn(clientId, counterpartyId, from, to, opts);
 }
 
+/** F1 (independent review, fix-required): the statement panel's own default
+ *  `from` — 1 January of `asOf`'s year, the reviewer's stated fallback for
+ *  when no fiscal-year start is available to this workbench (T1's own
+ *  domain, not read here). Every caller-supplied opening balance before this
+ *  date is still carried whole in `opening_balance_cents` — nothing before
+ *  `from` is lost, only folded into the opening figure instead of itemised. */
+export function defaultStatementFrom(asOf: string): string {
+  return `${asOf.slice(0, 4)}-01-01`;
+}
+
+/** A single counterparty by id — direct RLS table read, same grant as
+ *  `loadCounterparties`. Used ONLY for the F3 fix: when a statement's own
+ *  `counterparty_id` differs from the id the caller asked for (a merged
+ *  party's statement canonicalises to its survivor, `_canonical_counterparty`
+ *  inside `_statement_core`), this looks up the SURVIVOR's real name so the
+ *  UI never labels the survivor's money with the merged party's name. */
+export async function loadCounterpartyById(
+  session: SessionTokenAccessor,
+  clientId: string,
+  id: string,
+  opts: Opts = {},
+): Promise<CounterpartyRow | null> {
+  const rows = await getRows<CounterpartyRow>("counterparties", {
+    select: COUNTERPARTY_COLS,
+    filters: { client_id: `eq.${clientId}`, id: `eq.${id}` },
+    session,
+    signal: opts.signal,
+  });
+  return rows[0] ?? null;
+}
+
 // =====================================================================
 // The merge preview — the wave's heaviest-treatment surface (port-wave plan
 // §5's note on merge_counterparties + the Mobbin grounding's ManyChat-shaped
-// "named, separate preview step"). Composed from THREE fresh reads, never a
+// "named, separate preview step"). Composed from TWO fresh reads, never a
 // re-read of already-loaded state (the Mobbin doc's own warning: "the counts
 // could be stale or paginated differently from what the merge door will
 // actually act on") — the DB owns every figure this shows; this module only

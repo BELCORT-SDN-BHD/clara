@@ -57,7 +57,11 @@ export function ApplyOpenItemsDialog({
       confirmLabel={t("confirm")}
       busy={busy}
       confirmDisabled={!canSubmit}
-      onConfirm={() => onSubmit(sourceItemId, targetItemId, amountCents as number, reason)}
+      // N4 (independent review): a typed guard, not a cast — `canSubmit`
+      // already gates whether this can fire, but TS cannot see that from
+      // here; this narrows `amountCents` to `number` for real instead of
+      // asserting it.
+      onConfirm={() => (amountCents === null ? Promise.resolve() : onSubmit(sourceItemId, targetItemId, amountCents, reason))}
     >
       {items.length < 2 ? (
         <p className="text-sm text-muted-foreground">{t("noCandidateItems")}</p>

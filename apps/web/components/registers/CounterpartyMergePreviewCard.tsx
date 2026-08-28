@@ -19,7 +19,7 @@
 // picker, upstream of this card).
 
 import { useTranslations } from "next-intl";
-import { fmtCents } from "@/lib/registers/money";
+import { fmtCents, CENTS_UNAVAILABLE } from "@/lib/registers/money";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { CounterpartyMergePreview, CounterpartyMergeSide } from "@/lib/registers/counterparty";
 
@@ -48,7 +48,11 @@ function SideColumn({ label, side, tc }: { label: string; side: CounterpartyMerg
         </div>
         <div className="flex justify-between gap-2">
           <dt>{t("openItems")}</dt>
-          <dd>{side.aging?.items.length ?? 0}</dd>
+          {/* N2 (independent review): the SAME absent placeholder as the
+              outstanding row above — a literal "0" beside a "—" on the same
+              absent-aging row would read as two different claims about one
+              fact, on a destructive consent screen. */}
+          <dd>{side.aging ? side.aging.items.length : CENTS_UNAVAILABLE}</dd>
         </div>
       </dl>
     </div>

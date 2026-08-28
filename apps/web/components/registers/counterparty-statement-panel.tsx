@@ -6,16 +6,31 @@
 // file's own AR/AP-toggle precedent: a small self-contained read+write
 // surface, re-mounted (via the caller's `key`) on every counterparty
 // selection change rather than re-derived in place.
+//
+// F1 (independent review, fix-required): `p_from` is NEVER sent null — see
+// counterparty.ts's own header on getCustomerStatement/getSupplierStatement
+// for the proof that a null `from` makes `_statement_core` return zero rows
+// and zero opening balance, not "since the beginning". `from` defaults to
+// `defaultStatementFrom(to)` and is a real, editable control.
+//
+// F3 (independent review, fix-required): `_statement_core` canonicalises
+// through `_canonical_counterparty` — a merged party's statement silently
+// becomes its SURVIVOR's own statement. This panel trusts the statement
+// PAYLOAD's own `counterparty_id`, never the id it asked for, for both the
+// heading and an explicit redirect note when the two differ.
 
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { businessToday } from "@/lib/business-date";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import {
   getCounterpartyStatement,
+  loadCounterpartyById,
   loadCounterpartyOpenItems,
   loadOpenItemAllocationsForItems,
   unallocateCandidateGroups,
+  defaultStatementFrom,
 } from "@/lib/registers/counterparty";
 import type { AgingDomain } from "@/lib/registers/aging";
 import { applyOpenItems, unallocateGroup } from "@/lib/registers/counterparty-doors";
@@ -23,19 +38,33 @@ import { fmtCents } from "@/lib/registers/money";
 import { SectionHeader } from "@/components/common/section-header";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ApplyOpenItemsDialog } from "./ApplyOpenItemsDialog";
 import { UnallocateGroupDialog } from "./UnallocateGroupDialog";
 import type { AgingItem } from "@/lib/registers/aging";
 import type { SessionTokenAccessor } from "@/lib/session";
 
-async function loadPanelData(session: SessionTokenAccessor, clientId: string, domain: AgingDomain, counterpartyId: string, asOf: string) {
+async function loadPanelData(
+  session: SessionTokenAccessor,
+  clientId: string,
+  domain: AgingDomain,
+  counterpartyId: string,
+  from: string,
+  to: string,
+) {
   const [statement, openItems] = await Promise.all([
-    getCounterpartyStatement(domain, clientId, counterpartyId, null, asOf, { session }),
+    getCounterpartyStatement(domain, clientId, counterpartyId, from, to, { session }),
     loadCounterpartyOpenItems(session, clientId, domain, counterpartyId),
   ]);
   const allocations = await loadOpenItemAllocationsForItems(session, clientId, openItems.map((i) => i.id));
-  return { statement, allocations };
+  // F3: fetch the redirect target's real name ONLY when the payload's own
+  // identity differs from what we asked for — a fresh, positive read, never
+  // a guess from data this component already had lying around.
+  const redirectedTo =
+    statement.counterparty_id !== counterpartyId ? await loadCounterpartyById(session, clientId, statement.counterparty_id) : null;
+  return { statement, allocations, redirectedTo };
 }
 
 export function CounterpartyStatementPanel({
@@ -44,6 +73,7 @@ export function CounterpartyStatementPanel({
   counterpartyId,
   counterpartyName,
   agingItems,
+  onActed,
 }: {
   clientId: string;
   domain: AgingDomain;
@@ -52,26 +82,57 @@ export function CounterpartyStatementPanel({
   /** The currently-outstanding items for THIS counterparty, from the
    *  caller's own just-read aging row — Apply's candidate pool. */
   agingItems: AgingItem[];
+  /** F7 (independent review, fix-required): called after every SUCCESSFUL
+   *  apply_open_items/unallocate_group act. This panel's own reload already
+   *  re-derives its own statement/allocations; the caller's aging table and
+   *  its own Apply-dialog candidate pool (`agingItems`, above) live in the
+   *  PARENT's state and would otherwise keep pre-act `outstanding_cents`
+   *  until an unrelated re-render — "every caller re-reads after every act,
+   *  no exceptions" extends to the sibling surface too. */
+  onActed?: () => void;
 }) {
   const t = useTranslations("ArApCounterparty.statement");
   const tc = useTranslations("Common");
-  const asOf = businessToday();
-  const { data, busy, err, clr, act } = useHydratedPart(sessionTokenAccessor, (s) => loadPanelData(s, clientId, domain, counterpartyId, asOf));
+  const to = businessToday();
+  const [from, setFrom] = useState(() => defaultStatementFrom(to));
+  const { data, busy, err, clr, act, reload } = useHydratedPart(sessionTokenAccessor, (s) =>
+    loadPanelData(s, clientId, domain, counterpartyId, from, to),
+  );
+
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    void reload();
+  }, [from, reload]);
 
   if (!data) {
     return err ? <StateBanner tone="error">{err}</StateBanner> : <LoadingState>{t("loading")}</LoadingState>;
   }
 
   const groups = unallocateCandidateGroups(data.allocations);
+  const heading = data.redirectedTo ? data.redirectedTo.name : counterpartyName;
 
   return (
     <div className="flex flex-col gap-4">
-      <SectionHeader level={2}>{t("heading", { name: counterpartyName })}</SectionHeader>
+      <SectionHeader level={2}>{t("heading", { name: heading, from, to })}</SectionHeader>
+      {data.redirectedTo && (
+        <StateBanner tone="info">{t("redirectedNote", { merged: counterpartyName, survivor: data.redirectedTo.name })}</StateBanner>
+      )}
       {err && (
         <StateBanner tone="error" code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}>
           {err}
         </StateBanner>
       )}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="cp-statement-from">{t("fromLabel")}</Label>
+          <Input id="cp-statement-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </div>
+        <p className="pb-1.5 text-xs text-muted-foreground">{t("toFixed", { date: to })}</p>
+      </div>
       {data.statement.rows.length === 0 ? (
         <EmptyState>{t("empty")}</EmptyState>
       ) : (
@@ -117,10 +178,12 @@ export function CounterpartyStatementPanel({
               items={agingItems}
               busy={busy}
               onSubmit={(sourceItemId, targetItemId, amountCents, reason) =>
-                act(() =>
-                  applyOpenItems(clientId, [{ sourceItemId, targetItemId, amountCents }], reason, { session: sessionTokenAccessor }).then(
-                    () => undefined,
-                  ),
+                act(
+                  () =>
+                    applyOpenItems(clientId, [{ sourceItemId, targetItemId, amountCents }], reason, { session: sessionTokenAccessor }).then(
+                      () => undefined,
+                    ),
+                  onActed,
                 )
               }
             />
@@ -141,7 +204,10 @@ export function CounterpartyStatementPanel({
                   group={g}
                   busy={busy}
                   onSubmit={(applicationGroupId, reason) =>
-                    act(() => unallocateGroup(clientId, applicationGroupId, reason, { session: sessionTokenAccessor }).then(() => undefined))
+                    act(
+                      () => unallocateGroup(clientId, applicationGroupId, reason, { session: sessionTokenAccessor }).then(() => undefined),
+                      onActed,
+                    )
                   }
                 />
               </li>
