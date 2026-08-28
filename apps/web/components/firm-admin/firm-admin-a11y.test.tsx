@@ -305,3 +305,95 @@ test("vendor-bindings panel: the Sign dialog (proposed row) and the Revoke dialo
     },
   );
 });
+
+// --- F3(a)/(b) regression pins (independent re-verify, 2026-08-28) ---------
+//
+// The fix round's own tests never actually exercised the CLIENTS or
+// COUNTERPARTIES read FAILING — every assertion ran against a happy-path
+// mock, so reverting either fix left the shipped suite green. These two
+// cells drive the real failure path and pin the fix's own observable
+// behaviour: L8(a), a fix round pins what it fixed.
+
+// --- F3(a) regression -------------------------------------------------------
+
+const REGISTER_ENVELOPE_FOR_FAILED_CLIENTS = {
+  watermark: "w1",
+  counts: { ready: 0, needs_review: 0, needs_you: 0, open_drafts: 0, open_questions: 0, open_tasks: 0, compliance_watches: 1, lint_findings: 0 },
+  sweep: { open_run: false, last_finalized_at: null, last_ack_at: null },
+  rows: [],
+  next_cursor: null,
+  compliance: {
+    stale_evaluator: false,
+    clients: [
+      {
+        client_id: "11111111-2222-3333-4444-555555555555", service_group: "digital_services", state: "crossed",
+        confirmed_included_cents: 50000000, unknown_or_mixed_cents: 0, screening_proxy_cents: 500000,
+        earliest_crossing_month: "2026-07-01", application_due: "2026-08-28", future_method_status: "attested_below",
+      },
+    ],
+  },
+};
+
+test("F3(a) REGRESSION: a failed client-names read DISCLOSES itself — the register must never show raw ids silently", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rpc/list_review_queue")) return jsonResponse(REGISTER_ENVELOPE_FOR_FAILED_CLIENTS);
+      if (url.includes("/rest/v1/clients")) return jsonResponse({ message: "clients read failed" }, 500);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App(createElement(ComplianceRegisterPanel), "Compliance register"));
+      try {
+        for (let i = 0; i < 6; i++) await h.settle();
+        const txt = h.text();
+        // The fallback itself is fine — silence about it is not.
+        assert.match(txt, /11111111-2222-3333-4444-555555555555/, "the raw client_id fallback still renders");
+        assert.match(
+          txt,
+          /Client names could not be loaded/,
+          "review law 2: a degraded read must SAY it degraded — absence is not evidence of 'no name'",
+        );
+        assert.match(txt, /clients read failed/, "and the read's own verbatim message must ride along");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+// --- F3(b) regression -------------------------------------------------------
+
+test("F3(b) REGRESSION: a failed counterparties read KEEPS the Propose door and explains itself inside the dialog", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
+      if (url.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS);
+      if (url.includes("/rest/v1/counterparties")) return jsonResponse({ message: "counterparties read failed" }, 500);
+      if (url.includes("/rpc/get_vendor_binding")) return jsonResponse(BINDING_DETAIL);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const { h, body } = await mountVendorBindingsWithClientSelected();
+      try {
+        const trigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Propose binding"));
+        assert.ok(
+          trigger,
+          "the Propose trigger must render even when the counterparties read failed — a failed READ must never look like 'you may not do this'",
+        );
+        await h.fireEvent(trigger as never, "click");
+        for (let i = 0; i < 6; i++) await h.settle();
+        const txt = textOf(body as never);
+        assert.match(txt, /counterparties read failed/, "the read's verbatim message must render INSIDE the dialog body");
+        assert.ok(
+          findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Retry"),
+          "a Retry control must be offered",
+        );
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
