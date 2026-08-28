@@ -164,9 +164,8 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 
 Registered but not scheduled. Sources of record in brackets.
 
-**THE DEBT-CLEARING SPRINT IS NEXT (owner mandate, 2026-08-24): everything except full Track B
-clears in the 磨合 window.** New items folded in from the W2/W3 review ladders (2026-08-25) —
-the forward-obligations block and the F-A5b/W4 items below also ride this sprint:
+**THE DEBT-CLEARING SPRINT IS NEXT (owner mandate, 2026-08-24): everything except full Track B clears in the 磨合 window.** W2/W3 ladder items (2026-08-25), the forward-obligations block and the F-A5b/W4 items below ride it:
+- **裁-22 (2026-08-29) — agent proposal bases become DB-RESOLVED citations**, both proposal doors in one migration pair, before beta (`mohe-grill-rulings-2026-08-28.md`); with the receipt-contract `trigger_id` looseness and the name-bound wake allowlist recorded there as backlog.
 - **π-E1's `betaLanded` check is SELF-REFERENTIAL** (blind at n ∈ {0,6}) — gate on the
   `schema_migrations` stem like `wb-0020`'s idiom; covered twice already, not a hole.
 - **N1** — `fa5-pr3-real-seal-drill.mjs` has no CI leg, decision item: weekly sweep or not.
