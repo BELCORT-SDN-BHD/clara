@@ -29,6 +29,17 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
   return null;
 }
 
+// S2 (independent review): CELL-scoped reading, not a page-text search — a
+// row is found by an anchor cell's own text, then its OWN <td> children are
+// read in DOM order, so an assertion checks the exact cell a mutant could
+// have corrupted, never "does this string appear ANYWHERE on the page".
+function findRowByAnchor(root: Node, anchorText: string): Node | null {
+  return findIn(root, (n) => n.tagName === "TR" && (n.childNodes ?? []).some((c) => textOf(c as never).includes(anchorText)));
+}
+function cellTexts(row: Node): string[] {
+  return (row.childNodes ?? []).filter((c) => c.tagName === "TD").map((c) => textOf(c as never).trim());
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -53,15 +64,25 @@ const VENDORS = [
 ];
 const CUSTOMERS = [
   { id: "cu1", firm_id: "f1", client_id: "c1", kind: "customer", name: "ABC Trading", name_normalized: "abctrading", registration_no: null, tin: null, payment_terms_days: 30, merged_into: null, retired_at: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+  { id: "cu2", firm_id: "f1", client_id: "c1", kind: "customer", name: "XYZ Corp", name_normalized: "xyzcorp", registration_no: null, tin: null, payment_terms_days: 30, merged_into: null, retired_at: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
 ];
-// M8/M12/M13 (independent review, fix-required): every fixture cents value
-// is DISTINCT and non-round on purpose — a mutant that swaps which field
-// feeds a rendered amount, or that drops a `+`/`-`, produces a DIFFERENT
-// exact string here, never a coincidentally-matching round number.
+// M8/M12/M13/S2 (independent review, fix-required): every fixture cents
+// value is DISTINCT and non-round on purpose, WITHIN a row (current !=
+// total) and ACROSS rows (two counterparties, so the footer is a REAL sum,
+// not one row's own total copied). S2's own finding: the old single-row
+// fixture had current_cents == total_cents == totals.current_cents ==
+// totals.total_cents (all 123456), so ANY of those four cells could be
+// corrupted independently and the SAME page-text search still passed —
+// non-discriminating. Every assertion below is now CELL-scoped (its own
+// row, its own column), not a whole-page text search.
 const AR_AGING = {
   as_of: "2026-08-28", domain: "ar",
-  counterparties: [{ counterparty_id: "cu1", counterparty_name: "ABC Trading", current_cents: 123456, d31_60_cents: 0, d61_90_cents: 0, d91_plus_cents: 0, total_cents: 123456, items: [{ item_id: "i1", item_kind: "invoice", item_date: "2026-08-01", due_date: "2026-08-31", overdue: false, outstanding_cents: 123456, bucket: "current" }] }],
-  totals: { current_cents: 123456, d31_60_cents: 0, d61_90_cents: 0, d91_plus_cents: 0, total_cents: 123456 },
+  counterparties: [
+    { counterparty_id: "cu1", counterparty_name: "ABC Trading", current_cents: 10001, d31_60_cents: 20002, d61_90_cents: 30003, d91_plus_cents: 40004, total_cents: 100010, items: [{ item_id: "i1", item_kind: "invoice", item_date: "2026-08-01", due_date: "2026-08-31", overdue: false, outstanding_cents: 100010, bucket: "current" }] },
+    { counterparty_id: "cu2", counterparty_name: "XYZ Corp", current_cents: 50005, d31_60_cents: 60006, d61_90_cents: 70007, d91_plus_cents: 80008, total_cents: 260026, items: [{ item_id: "i3", item_kind: "invoice", item_date: "2026-08-02", due_date: "2026-09-01", overdue: false, outstanding_cents: 260026, bucket: "current" }] },
+  ],
+  // A REAL sum of the two rows above, not an independently-chosen figure.
+  totals: { current_cents: 60006, d31_60_cents: 80008, d61_90_cents: 100010, d91_plus_cents: 120012, total_cents: 360036 },
 };
 const AP_AGING = {
   as_of: "2026-08-28", domain: "ap",
@@ -121,10 +142,34 @@ test("aging tab (AR table + counterparty hygiene panel), collapsed, has zero a11
       for (let i = 0; i < 4; i++) await h.settle();
       assert.match(h.text(), /ABC Trading/, "the aging table must have loaded far enough to show the real counterparty");
       assert.match(h.text(), /Lost Invention Sdn Bhd/, "the hygiene panel (default vendor tab) must have loaded far enough to show a real vendor");
-      // M14 (independent review): the aging table's own DB-returned client
-      // total, exact string — this component test inherited a pre-existing
-      // gap (no assertion at all on the totals row) that this closes.
-      assert.match(h.text(), /RM 1,234\.56/, "the aging table's own client-total row must render the DB's exact figure, never a client-computed one");
+
+      // M14/S2 (independent review): CELL-scoped, not page-text — each row's
+      // own bucket columns, and the footer's own real sum, each read from
+      // its OWN <td>, never a whole-page string search that a corrupted
+      // sibling cell could satisfy just as well.
+      const cu1Row = findRowByAnchor(h.container as never, "ABC Trading");
+      assert.ok(cu1Row, "the ABC Trading aging row must render");
+      const cu1Cells = cellTexts(cu1Row);
+      assert.equal(cu1Cells[1], "RM 100.01", "cu1's own current-bucket cell");
+      assert.equal(cu1Cells[2], "RM 200.02", "cu1's own 31-60 cell");
+      assert.equal(cu1Cells[3], "RM 300.03", "cu1's own 61-90 cell");
+      assert.equal(cu1Cells[4], "RM 400.04", "cu1's own 91+ cell");
+      assert.equal(cu1Cells[5], "RM 1,000.10", "cu1's own total cell — the DB's, not this row's own bucket sum");
+
+      const cu2Row = findRowByAnchor(h.container as never, "XYZ Corp");
+      assert.ok(cu2Row, "the XYZ Corp aging row must render (a second row, so the footer is a real sum)");
+      const cu2Cells = cellTexts(cu2Row);
+      assert.equal(cu2Cells[1], "RM 500.05", "cu2's own current-bucket cell");
+      assert.equal(cu2Cells[5], "RM 2,600.26", "cu2's own total cell");
+
+      const totalsRow = findRowByAnchor(h.container as never, "Client total");
+      assert.ok(totalsRow, "the client-totals footer row must render");
+      const totalsCells = cellTexts(totalsRow);
+      assert.equal(totalsCells[1], "RM 600.06", "the footer's own current-bucket cell — the DB's summed figure");
+      assert.equal(totalsCells[2], "RM 800.08", "the footer's own 31-60 cell");
+      assert.equal(totalsCells[3], "RM 1,000.10", "the footer's own 61-90 cell");
+      assert.equal(totalsCells[4], "RM 1,200.12", "the footer's own 91+ cell");
+      assert.equal(totalsCells[5], "RM 3,600.36", "the footer's own total cell — the DB's, never computed here (hard constraint 2)");
 
       const violations = checkAccessibility(body as never);
       assert.deepEqual(violations, [], `collapsed: ${JSON.stringify(violations)}`);
@@ -232,6 +277,85 @@ test("Merge Counterparties dialog OPEN through the preview step has zero a11y vi
 
       const violations = checkAccessibility(body as never);
       assert.deepEqual(violations, [], `merge dialog at preview step: ${JSON.stringify(violations)}`);
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+// S3 (independent review, fix-required): the redirect note and heading must
+// hold even when the survivor NAME lookup itself fails — the divergence
+// (`payload.counterparty_id !== the id clicked`) is known before that lookup
+// is even attempted, so a failed/empty lookup must never look identical to
+// "no redirect happened" (the exact fail-open the previous round left: the
+// heading silently fell back to the MERGED party's own name).
+const STATEMENT_REDIRECTED = { ...STATEMENT, counterparty_id: "survivor1" };
+
+test("S3: a redirect whose survivor-name lookup returns NULL still shows the redirect note, never the merged party's name as heading", async () => {
+  async function mockFetchNullLookup(url: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const u = String(url);
+    if (u.includes("/rpc/customer_statement")) return jsonResponse(STATEMENT_REDIRECTED);
+    if (u.includes("/rest/v1/counterparties?") && u.includes("id=eq.survivor1")) return jsonResponse([]); // genuinely not found
+    return mockFetch(url, init);
+  }
+  await withMockedEnv(mockFetchNullLookup, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("View statement"));
+      assert.ok(trigger, "the View statement trigger must render");
+      await h.fireEvent(trigger! as never, "click");
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      const bodyText = textOf(body as never);
+      assert.match(bodyText, /could not be read/, "the redirect note must render even though the name lookup came back empty");
+      assert.match(bodyText, /survivor1/, "the note/heading must name the survivor by id when its name is unavailable");
+      assert.doesNotMatch(
+        bodyText.split("could not be read")[0] ?? "",
+        /Statement — ABC Trading/,
+        "the heading must NEVER read as ABC Trading's own statement — that is the exact S3 mislabel",
+      );
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+test("S3: a redirect whose survivor-name lookup 403s still shows the redirect note, never the merged party's name as heading", async () => {
+  async function mockFetch403Lookup(url: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const u = String(url);
+    if (u.includes("/rpc/customer_statement")) return jsonResponse(STATEMENT_REDIRECTED);
+    if (u.includes("/rest/v1/counterparties?") && u.includes("id=eq.survivor1")) return jsonResponse({ message: "permission denied" }, 403);
+    return mockFetch(url, init);
+  }
+  await withMockedEnv(mockFetch403Lookup, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("View statement"));
+      assert.ok(trigger, "the View statement trigger must render");
+      await h.fireEvent(trigger! as never, "click");
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      // The statement itself still loads fine (that read succeeded) — only
+      // the name lookup failed, so the rest of the panel must not collapse
+      // into a generic error either.
+      assert.match(textOf(body as never), /RM 543\.21/, "the statement content itself still renders — only the NAME lookup failed, not the whole panel");
+
+      const bodyText = textOf(body as never);
+      assert.match(bodyText, /could not be read/, "the redirect note must render even though the name lookup itself errored");
+      assert.match(bodyText, /survivor1/, "the note/heading must name the survivor by id when its name is unavailable");
+      assert.doesNotMatch(
+        bodyText.split("could not be read")[0] ?? "",
+        /Statement — ABC Trading/,
+        "the heading must NEVER read as ABC Trading's own statement — that is the exact S3 mislabel",
+      );
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();
