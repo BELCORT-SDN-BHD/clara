@@ -32,6 +32,23 @@ type Stub = Record<string, unknown>;
 // without crashing.
 class HTMLElementStub {}
 
+// T9 fix round (re-verify): the SAME missing-global class of crash, found
+// one layer deeper — @base-ui/react's floating-ui-react internals
+// (FloatingFocusManager's `getEventType`, reached on a Dialog's SECOND
+// open/close cycle via base-ui's OWN internal `store.setOpen()`, e.g.
+// DialogClose's Cancel button — DoorDialog's Confirm never reaches this at
+// all, since its own close is a plain React `setOpen(false)`, not base-ui's
+// internal store) does `event instanceof win.KeyboardEvent` /
+// `win.FocusEvent` / `win.MouseEvent` with NO fallback for an undefined
+// global — the identical "right-hand side of instanceof is not an object"
+// shape the HTMLElement stubs above exist to prevent, just for three
+// different globals. Each is an empty marker class exactly like
+// HTMLElementStub: no dialog-close test needs to construct a real one, only
+// to test an ordinary object AGAINST one and get `false`.
+class KeyboardEventStub {}
+class MouseEventStub {}
+class FocusEventStub {}
+
 // react-dom's OWN controlled-input change detection (inputValueTracking.js's
 // `trackValueOnNode`) requires `Object.getOwnPropertyDescriptor(node.
 // constructor.prototype, 'value' | 'checked')` to already exist with BOTH a
@@ -171,6 +188,8 @@ function installDom(): void {
     ["HTMLElement", HTMLElementStub], ["HTMLInputElement", HTMLInputElementStub],
     ["HTMLSelectElement", HTMLSelectElementStub], ["HTMLButtonElement", HTMLButtonElementStub],
     ["HTMLTextAreaElement", HTMLTextAreaElementStub], ["HTMLAnchorElement", HTMLAnchorElementStub],
+    // See KeyboardEventStub's own header above.
+    ["KeyboardEvent", KeyboardEventStub], ["MouseEvent", MouseEventStub], ["FocusEvent", FocusEventStub],
   ] as const) {
     (globalThis as Stub)[name] = cls;
     win[name] = cls;

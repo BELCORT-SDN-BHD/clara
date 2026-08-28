@@ -231,6 +231,48 @@ test("SeedingBatchesPanel: zero violations, collapsed and with the Tick dialog O
   });
 });
 
+test("SeedingBatchesPanel: F1 regression pin — batches 200 + proposals 401 renders the ERROR BANNER, never a permanent loading spinner", async () => {
+  // F1 (independent review, HIGH — re-verify round): the reviewer's own
+  // mutation reverts SeedingBatchesPanel's `loadErr = batches.err ??
+  // proposals.err` gate back to `batches.err` alone and stays GREEN today
+  // without this pin — an empty pin un-fixes itself on the next edit. This
+  // test asserts the ERROR banner renders (never LoadingState's own
+  // "Loading seeding batches…" text), which the pre-fix gate could never
+  // do for a proposals-only failure: `!proposals.data` stays true forever
+  // with `batches.err` null, so the old gate fell through to the spinner
+  // branch and stayed there.
+  const impl = (async (u: RequestInfo | URL) => {
+    const url = String(u);
+    if (url.includes("/seeding_batches")) {
+      return jsonResponse([{ id: "b1", client_id: "c1", source_document_id: "doc1", source_sha256: "f".repeat(64), state: "open", stats: {}, created_by: "u1", created_at: "2026-07-01T00:00:00Z", completed_at: null, completed_by: null, cancelled_at: null, cancelled_by: null, cancel_reason: null }]);
+    }
+    if (url.includes("/seeding_proposals")) {
+      return jsonResponse({ message: "session rejected (401)" }, 401);
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const h = await renderComponent(App(createElement(SeedingBatchesPanel, { clientId: "c1", session: sessionTokenAccessor }), "Reports"));
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 6; i++) await h.settle();
+      assert.doesNotMatch(
+        h.text(),
+        /Loading seeding batches/,
+        "must NOT be stuck on the loading spinner — batches succeeded, proposals failed, and the pre-fix gate never noticed the latter",
+      );
+      assert.match(h.text(), /Could not load seeding batches/, "the error banner must render, naming the failure honestly");
+      assert.match(h.text(), /session rejected \(401\)/, "the proposals read's own failure message must reach the banner");
+      assert.deepEqual(checkAccessibility(body as never), [], "the error-banner state itself has zero structural a11y violations");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
 test("WikiCurationPanel: zero violations, collapsed and with the Retire dialog OPEN", async () => {
   const impl = (async (u: RequestInfo | URL) => {
     const url = String(u);

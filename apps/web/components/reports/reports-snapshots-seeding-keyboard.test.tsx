@@ -44,6 +44,18 @@ async function clickConfirm(node: Node): Promise<void> {
   await onClick({
     type: "click", target: node, currentTarget: node, bubbles: true, cancelable: true,
     defaultPrevented: false, isTrusted: true, timeStamp: Date.now(),
+    // Re-verify round: also reachable via THIS helper is DialogClose (the
+    // Cancel button), whose own handleClick reads `event.nativeEvent.target`
+    // to build base-ui's internal close-event details, then floating-ui's
+    // FloatingFocusManager resolves `ownerWindow(getTarget(nativeEvent))`
+    // off it — DoorDialog's own Confirm never touches `nativeEvent` at all
+    // (its close is a plain React setOpen(false), not base-ui's internal
+    // store), so this was invisible until Cancel needed the SAME direct-
+    // invoke treatment. A nested fake `nativeEvent` with a real `target`
+    // (this stub node, whose `ownerDocument`/`defaultView` chain the harness
+    // already wires up) keeps that resolution on its normal, non-throwing
+    // path.
+    nativeEvent: { type: "click", target: node, currentTarget: node },
     preventDefault() {}, stopPropagation() {}, persist() {},
   });
 }
@@ -208,7 +220,7 @@ test("T9 (tick-proposal door): the trigger is keyboard-reachable and Enter/Space
 // ("Requeue" / "Retire"), so every lookup below disambiguates by OBJECT
 // IDENTITY (`!== trigger`), never text alone.
 
-test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm starts DISABLED on an empty reason, enables once typed, the drift checkbox is keyboard-reachable on the SECOND open, and Confirm re-gates on it", async () => {
+test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm starts DISABLED on an empty reason, enables once typed, the drift checkbox is keyboard-reachable on the SECOND open, Confirm re-gates on it, and a THIRD open (after a plain cancel) resets the checkbox + reason + Confirm again — F4's pin", async () => {
   const impl = (async (u: RequestInfo | URL) => {
     const url = String(u);
     if (url.includes("/render_jobs")) {
@@ -231,6 +243,12 @@ test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm start
       for (let i = 0; i < 4; i++) await h.settle();
       let trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Requeue"));
       assert.ok(trigger, "the Requeue trigger must render for a failed job");
+      // base-ui's FloatingFocusManager tracks the previously-focused element
+      // to restore focus to on close — establishing REAL focus here (as
+      // every other T9 keyboard test already does) keeps that mechanism on
+      // its normal path once this test starts closing/reopening the dialog
+      // repeatedly below.
+      (trigger as unknown as { focus: () => void }).focus();
       await h.fireEvent(trigger!, "click");
       for (let i = 0; i < 6; i++) await h.settle();
 
@@ -270,6 +288,7 @@ test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm start
       // and exercised — on the dialog's NEXT open). ---
       trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Requeue"));
       assert.ok(trigger, "the Requeue trigger must still render after the refusal");
+      (trigger as unknown as { focus: () => void }).focus();
       await h.fireEvent(trigger!, "click");
       for (let i = 0; i < 6; i++) await h.settle();
 
@@ -282,7 +301,16 @@ test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm start
       assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations with the checkbox visible");
 
       const reasonFieldSecond = findIn(body as never, (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type !== "checkbox");
-      assert.ok(reasonFieldSecond, "the reason field must be reachable again (it resets on open — F4)");
+      assert.ok(reasonFieldSecond, "the reason field must be reachable again");
+      // F4 pin (independent review, re-verify round): PRESENCE alone does not
+      // prove the reset — the field could just as easily have carried the
+      // FIRST open's leftover value forward. Assert the VALUE is actually
+      // empty.
+      assert.equal(
+        (reasonFieldSecond as unknown as { value: string }).value,
+        "",
+        "the reason field must be RESET (empty), not carrying the first open's leftover text — F4",
+      );
       await h.act(() => { setFieldValue(reasonFieldSecond as never, "accepting the drift"); });
       for (let i = 0; i < 2; i++) await h.settle();
 
@@ -307,6 +335,41 @@ test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm start
         (confirmSecond as unknown as { disabled: boolean }).disabled,
         false,
         "checking the drift consent box ENABLES Confirm — the gate moved to the checkbox, it did not disappear",
+      );
+
+      // F4 pin (independent review, re-verify round): close WITHOUT
+      // submitting (Cancel, not Confirm — `drift` itself must survive this
+      // close, since it is not reset; only `acceptDrift`/`reason` are), then
+      // reopen and prove the checkbox comes back UNCHECKED and Confirm
+      // re-gates — a fresh deliberate act on EVERY open, not just the second
+      // one.
+      const cancelSecond = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Cancel"));
+      assert.ok(cancelSecond, "the Cancel control must be reachable on the second open too");
+      await h.act(() => clickConfirm(cancelSecond as never));
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Requeue"));
+      assert.ok(trigger, "the Requeue trigger must still render after cancelling");
+      (trigger as unknown as { focus: () => void }).focus();
+      await h.fireEvent(trigger!, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const checkboxThird = findIn(body as never, (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type === "checkbox");
+      assert.ok(checkboxThird, "the drift checkbox must still render on the THIRD open — `drift` itself is not reset by a cancel");
+      assert.equal(
+        (checkboxThird as unknown as { checked: boolean }).checked,
+        false,
+        "the checkbox must come back UNCHECKED on this new open — acceptDrift is NOT carried forward from the prior open's tick",
+      );
+
+      const confirmThird = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Requeue" && (n as unknown) !== (trigger as unknown),
+      );
+      assert.equal(
+        (confirmThird as unknown as { disabled: boolean }).disabled,
+        true,
+        "Confirm must be disabled again on this new open — the earlier tick must not leak forward",
       );
     } finally {
       await h.unmount();
