@@ -919,6 +919,7 @@
       "voided": "Voided"
     },
     "accounts": {
+      "heading": "Chart of accounts",
       "empty": "No accounts in this client's chart of accounts yet.",
       "code": "Code",
       "name": "Name",
@@ -1098,7 +1099,127 @@
       "cancel": "Cancel"
     }
   },
-  "AdjustmentsAccounts": {},
+  "AdjustmentsAccounts": {
+    "dialog": { "cancel": "Cancel", "working": "Working…" },
+    "linesEditor": {
+      "lineNo": "#",
+      "account": "Account",
+      "debit": "Debit",
+      "credit": "Credit",
+      "selectAccount": "Select an account…",
+      "removeLine": "Remove line",
+      "presentationSumLabel": "Sum (presentation only)",
+      "notBalanced": "Debits and credits do not balance yet — the DB will refuse an unbalanced entry.",
+      "addLine": "Add line"
+    },
+    "proposeTemplate": {
+      "trigger": "Propose template",
+      "title": "Propose a recurring adjustment template",
+      "description": "An admin must sign this before it can run. Lines are the template's own recipe — every occurrence posts them unchanged.",
+      "nameLabel": "Name",
+      "cadenceLabel": "Cadence",
+      "cadence": { "monthly": "Monthly", "annual": "Annual" },
+      "autoReverseLabel": "Auto-reverse each occurrence at the start of the next period",
+      "startDateLabel": "Start date",
+      "endDateLabel": "End date (optional)",
+      "memoLabel": "Memo template",
+      "memoHint": "The memo every occurrence carries — required, since it is the only description a scheduled run posts with."
+    },
+    "signTemplate": {
+      "trigger": "Sign",
+      "title": "Sign \"{name}\"",
+      "description": "Signing is admin-only. This re-checks the template's dates are still the first/last day of a period under the client's CURRENT fiscal year — a stale window refuses rather than posting on the wrong dates."
+    },
+    "retireTemplate": {
+      "trigger": "Retire",
+      "title": "Retire \"{name}\"",
+      "description": "Stops the template being run. A reason is required. Refused while an occurrence draft for this template is still outstanding — approve or withdraw it first.",
+      "reasonLabel": "Reason"
+    },
+    "runDue": {
+      "due": "An adjustment run is due for {start} – {end}.",
+      "nothingDue": "No adjustment run is due right now.",
+      "allBlocked": "Every live template's next period is blocked — see the run history below.",
+      "clientNotFound": "Client not found.",
+      "unknownReason": "Not due ({reason})."
+    },
+    "runHistory": {
+      "heading": "Run history",
+      "subheading": "Every adjustment run, with its own correction affordance where the DB says one applies.",
+      "empty": "No adjustment runs recorded for this client.",
+      "period": "Period",
+      "mode": "Mode",
+      "modePost": "Posted",
+      "modeDraft": "Draft",
+      "amount": "Amount",
+      "correction": "Correction",
+      "pairInFlight": "A pair reversal is already in flight ({status}) — see the ledger below.",
+      "soloOccurrenceNote": "This run is a solo occurrence, not an auto-reverse pair — correct it from the Journals tab.",
+      "wallFallback": "Not correctable right now ({wall}).",
+      "unavailable": "Could not load run history — see the error above."
+    },
+    "runNow": {
+      "trigger": "Run now",
+      "title": "Run an adjustment manually",
+      "description": "The period must exactly match the live template's own cadence window, and must have already ended.",
+      "templateLabel": "Template",
+      "selectTemplate": "Select a live template…",
+      "noLiveTemplates": "No live templates yet — sign one above first.",
+      "periodStartLabel": "Period start",
+      "periodEndLabel": "Period end"
+    },
+    "reversePair": {
+      "trigger": "Reverse pair",
+      "title": "Reverse this adjustment pair",
+      "description": "Mints two draft corrections (one per half of the auto-reverse pair) for a distinct checker to approve or cancel below — this does not post anything itself.",
+      "reasonLabel": "Reason"
+    },
+    "pairLedger": {
+      "heading": "Pair-reversal ledger",
+      "unavailable": "Could not load the pair-reversal ledger — see the error above.",
+      "empty": "No pair reversals raised for this client.",
+      "raised": "Raised",
+      "status": "Status",
+      "statuses": { "pending": "Pending", "approving": "Approving", "completed": "Completed", "cancelled": "Cancelled" }
+    },
+    "approvePair": {
+      "trigger": "Approve",
+      "title": "Approve this pair reversal",
+      "description": "A distinct checker act — the DB re-derives both corrections are byte-exact leg-swaps of the halves they reverse before approving either.",
+      "attestationLabel": "Attestation (optional)"
+    },
+    "cancelPair": {
+      "trigger": "Cancel",
+      "title": "Cancel this pair reversal",
+      "description": "Withdraws both draft corrections. A reason is required. Only possible while both halves are still drafts.",
+      "reasonLabel": "Reason"
+    },
+    "upsertAccount": {
+      "addTrigger": "Add account",
+      "editTrigger": "Edit",
+      "addTitle": "Add an account",
+      "editTitle": "Edit account {code}",
+      "description": "Create or update a row in this client's chart of accounts. Confirming ALWAYS leaves the account active — editing a currently-inactive account reactivates it.",
+      "reactivateHint": "This account is currently inactive — confirming this edit reactivates it.",
+      "codeLabel": "Account code",
+      "nameLabel": "Name",
+      "typeLabel": "Type",
+      "types": { "asset": "Asset", "liability": "Liability", "equity": "Equity", "income": "Income", "expense": "Expense" },
+      "classLabel": "Class (optional)",
+      "classNone": "None",
+      "classes": { "payable": "Payable", "receivable": "Receivable" },
+      "specialLabel": "Special account slot (optional)",
+      "specialNone": "None — an ordinary account",
+      "specials": {
+        "rounding": "Rounding",
+        "sst_output": "SST output",
+        "sst_purchase_cost": "SST purchase cost",
+        "opening_balance_equity": "Opening balance equity",
+        "retained_earnings": "Retained earnings"
+      },
+      "specialHint": "These five slots are usually provisioned at onboarding — only change one if you know it needs correcting."
+    }
+  },
   "StaffAdvances": {
     "loading": "Loading staff advances…",
     "ledgerHeading": "Staff advances",
