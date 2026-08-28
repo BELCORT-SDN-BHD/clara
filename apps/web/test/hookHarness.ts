@@ -269,13 +269,25 @@ export function setFieldValue(node: Stub, value: string): void {
  *  an open portaled Dialog whose `onClick` is the CALLER'S OWN plain
  *  function (a door dialog's confirm button, wired straight to `onConfirm`)
  *  — proven end to end (journals-governance-keyboard.test.tsx's WITHDRAW
- *  confirm test). It does NOT work for `@base-ui/react`'s own `DialogClose`
- *  (Cancel): that component's internal click handler chain
- *  (FloatingFocusManager) calls `event instanceof KeyboardEvent`, and this
- *  harness's fake DOM defines no such global — a SEPARATE, deeper gap this
- *  function does not close (recorded, not fixed, at the T6 fix-round site
- *  that found it). A plain host button OUTSIDE any portal still works fine
- *  through `h.fireEvent`. */
+ *  confirm test).
+ *
+ *  TRUED at the T6/T9 meet-point merge: this ALSO now drives `@base-ui/
+ *  react`'s own `DialogClose` (Cancel) — installDom's KeyboardEventStub/
+ *  MouseEventStub/FocusEventStub (see their own header above) close the gap
+ *  that used to throw "right-hand side of instanceof is not an object" out
+ *  of FloatingFocusManager's `getEventType`, which DialogClose's internal
+ *  close-handling chain reaches on a Dialog's open/close cycle. Confirmed
+ *  empirically (a probe against a live DialogClose Cancel button, this same
+ *  meet-point commit): `clickButton` needs no special-cased event shape for
+ *  DialogClose either — the SAME call this function already makes for a
+ *  plain consumer onClick closes it too, verbatim, no `nativeEvent` field
+ *  required. What this function still cannot reach is REAL browser hit-
+ *  testing — pointer-events, overlay stacking, z-index, anything that needs
+ *  an actual layout/paint engine to resolve which element a coordinate
+ *  would hit; there is no layout engine in this harness, so a click always
+ *  "lands" on whatever node you hand it, never on what a browser would
+ *  actually resolve underneath a real cursor position. That is a narrower,
+ *  and different, gap than the one this paragraph used to describe. */
 export function clickButton(node: Stub): void {
   const propsKey = Object.keys(node as object).find((k) => k.startsWith("__reactProps"));
   const props = propsKey ? (node as unknown as Record<string, { onClick?: (e: unknown) => void }>)[propsKey] : undefined;
