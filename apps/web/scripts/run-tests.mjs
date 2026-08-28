@@ -4,8 +4,10 @@
  * plan §3.1). Reads test/manifest.txt (one test file path per line) and
  * spawns `node --import ./test/bootstrap.mjs --import tsx --test <paths...>`
  * with those paths as positional arguments — the same invocation
- * package.json's `test` script used to hardcode as a single 68-path,
- * 2,152-character line. Moving the enumeration here means adding a test file
+ * package.json's `test` script used to hardcode as a single 70-argument
+ * (69 real test-file paths + a trailing bare `tests/`), 2,239-character
+ * line (measured at pre-seam `main`, `apps/web/package.json:13`, commit
+ * `33f152b`). Moving the enumeration here means adding a test file
  * is a one-line diff to a text file, not an edit to a line long enough that a
  * git conflict resolved "take theirs" could silently delete another train's
  * tests with nothing going red (apps/web/AGENTS.md: the Node 20 test runner

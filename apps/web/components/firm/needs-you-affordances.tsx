@@ -46,14 +46,40 @@ export type NeedsYouAffordance = ComponentType<NeedsYouAffordanceProps>;
 
 /** Row kinds with no entry here render no inline act — a same-page link into
  *  the object that owns their verbs remains the whole affordance, exactly as
- *  it is today for every kind but open_question. */
-export const NEEDS_YOU_AFFORDANCES: Partial<Record<ReviewQueueRowKind, NeedsYouAffordance>> = {
-  open_question: OpenQuestionAffordance,
-};
+ *  it is today for every kind but open_question.
+ *
+ *  BUILT ON A NULL-PROTOTYPE OBJECT (independent review, fix-required,
+ *  2026-08-28): a plain `{}` literal inherits `Object.prototype`, so
+ *  `NEEDS_YOU_AFFORDANCES["constructor"]` and `["toString"]` resolve to
+ *  INHERITED FUNCTIONS rather than `undefined` — proven to regress main's
+ *  clean no-render behavior (a THROW for `"constructor"`, the literal text
+ *  `"[object Undefined]"` rendered for `"toString"`). `row.row_kind` is not
+ *  DB-reachable as either value today, but this table is the exemplar every
+ *  later train's own row-kind registry copies (T3/T5/T7/T10), so the
+ *  mechanism is fixed at its root rather than trusted to every future copy
+ *  independently avoiding the trap. `Object.assign` onto `Object.create(null)`
+ *  — never a plain object literal — for every entry added here, present and
+ *  future. */
+export const NEEDS_YOU_AFFORDANCES: Partial<Record<ReviewQueueRowKind, NeedsYouAffordance>> = Object.assign(
+  Object.create(null),
+  {
+    open_question: OpenQuestionAffordance,
+  } satisfies Partial<Record<ReviewQueueRowKind, NeedsYouAffordance>>,
+);
 
 /** Looked up by row_kind (a `string` on the wire — see ReviewQueueRow) rather
  *  than the narrowed type, so a caller can pass `row.row_kind` directly after
- *  its own isKnownReviewQueueRowKind check without re-widening it back. */
+ *  its own isKnownReviewQueueRowKind check without re-widening it back.
+ *
+ *  `Object.hasOwn` is the SECOND belt (independent review, fix-required,
+ *  2026-08-28) — kept even though NEEDS_YOU_AFFORDANCES' null prototype
+ *  already makes an inherited-property hit impossible today: a maintainer
+ *  who later spreads this table into a plain object elsewhere, or copies
+ *  this getter's shape without noticing the null-proto construction above,
+ *  still gets a getter that is safe on its own. `Object.hasOwn` is a static
+ *  method (never called ON the table), so it is unaffected by the table
+ *  having no prototype at all. */
 export function getNeedsYouAffordance(rowKind: string): NeedsYouAffordance | undefined {
+  if (!Object.hasOwn(NEEDS_YOU_AFFORDANCES, rowKind)) return undefined;
   return NEEDS_YOU_AFFORDANCES[rowKind as ReviewQueueRowKind];
 }

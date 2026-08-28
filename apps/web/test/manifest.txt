@@ -2,10 +2,13 @@
 #
 # One test file path per line, relative to apps/web/. This is the ONE
 # checked-in source of truth for which files `pnpm test` runs — it replaces
-# the single 68-path, one-line `--test` argument list package.json's `test`
-# script used to hardcode (a 2 KB line a git conflict could silently truncate
-# with nothing going red; apps/web/AGENTS.md: the Node 20 test runner does
-# NOT directory-scan for `.test.ts`/`.test.tsx`).
+# the single 70-argument (69 real test-file paths + a trailing bare
+# `tests/`), 2,239-character, one-line `--test` argument list
+# package.json's `test` script used to hardcode (measured at pre-seam
+# `main`, `apps/web/package.json:13`, commit `33f152b`) — a line a git
+# conflict could silently truncate with nothing going red; apps/web/
+# AGENTS.md: the Node 20 test runner does NOT directory-scan for
+# `.test.ts`/`.test.tsx`).
 #
 # apps/web/scripts/run-tests.mjs reads this file and feeds every line to
 # `node --test`. apps/web/scripts/check-test-manifest.mjs (wired into `pnpm
@@ -29,6 +32,7 @@ components/close/close-components.test.tsx
 components/close/close-keyboard.test.tsx
 components/documents/documents-a11y.test.tsx
 components/firm/needs-you-a11y.test.tsx
+components/firm/needs-you-affordances.test.ts
 components/firm/needs-you-gaps.test.tsx
 components/journals/journals-a11y.test.tsx
 components/journals/journals-keyboard.test.tsx
