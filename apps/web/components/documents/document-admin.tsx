@@ -4,10 +4,34 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { placeLegalHold, releaseLegalHold, setDocumentKind } from "@/lib/documents/doors";
+import {
+  classifyConsentEvidenceDocument, placeLegalHold, releaseLegalHold,
+  requestReextraction, setDocumentKind,
+} from "@/lib/documents/doors";
+import { DocumentsDoorDialog } from "./DocumentsDoorDialog";
 import { SectionHeader } from "@/components/common/section-header";
-import { DOCUMENT_KINDS, type DocumentRow } from "@/lib/documents/types";
+import { StateBanner } from "@/components/common/state";
+import { DOCUMENT_KINDS, type DocumentRow, type RequestReextractionResult } from "@/lib/documents/types";
+
+/** A CHECKED lookup from the DB's `admission` string to its own translation
+ *  key — never a `t(\`reextraction.admission.${x}\` as ...)` cast (the exact
+ *  "hides it from tsc" shape FIX-1, components/firm/needs-you-row.tsx's own
+ *  header, was independently caught and banned for). An admission value
+ *  outside the four named doors (types.ts's own header enumerates them)
+ *  renders the raw DB string honestly rather than a translated label it
+ *  cannot prove is right — the same "closed world with an honest fallback"
+ *  idiom lib/documents/copy.ts's filingBasisKey uses. */
+function reextractionAdmissionLabel(admission: string, t: (key: string) => string): string {
+  switch (admission) {
+    case "reextraction": return t("reextraction.admission.reextraction");
+    case "receipt_backfill": return t("reextraction.admission.receipt_backfill");
+    case "filed_bootstrap": return t("reextraction.admission.filed_bootstrap");
+    case "failed_retry": return t("reextraction.admission.failed_retry");
+    default: return admission;
+  }
+}
 
 /**
  * Classify (set_document_kind, bookkeeper+, reason REQUIRED — the DB refuses CLR10
@@ -24,9 +48,14 @@ export function DocumentAdmin({
   onCorrect: () => void;
 }) {
   const t = useTranslations("ClientDocuments");
+  const tg = useTranslations("DraftsDocumentGovernance");
   const [kind, setKind] = useState("");
   const [kindReason, setKindReason] = useState("");
   const [holdReason, setHoldReason] = useState("");
+  const [reextractReason, setReextractReason] = useState("");
+  const [reextractOutcome, setReextractOutcome] = useState<RequestReextractionResult | null>(null);
+  const [consentReason, setConsentReason] = useState("");
+  const [consentPriorKind, setConsentPriorKind] = useState<string | null>(null);
 
   return (
     <div className="flex flex-col gap-3">
@@ -84,6 +113,69 @@ export function DocumentAdmin({
           <Button size="sm" variant="outline" onClick={onCorrect}>{t("correctWrongClient")}</Button>
         </div>
         <p className="text-xs text-muted-foreground">{t("adminPrivilegedNote")}</p>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <SectionHeader level={4}>{tg("reextraction.trigger")}</SectionHeader>
+        <div className="flex flex-wrap items-center gap-2">
+          <DocumentsDoorDialog
+            triggerLabel={tg("reextraction.trigger")}
+            title={tg("reextraction.title")}
+            description={tg("reextraction.description")}
+            confirmLabel={tg("reextraction.confirm")}
+            busy={busy}
+            confirmDisabled={!reextractReason.trim()}
+            onConfirm={() => act(async () => {
+              const out = await requestReextraction(doc.id, reextractReason.trim());
+              setReextractOutcome(out);
+              setReextractReason("");
+            })}
+          >
+            <Textarea
+              aria-label={tg("reextraction.reasonLabel")}
+              placeholder={tg("reextraction.reasonPlaceholder")}
+              value={reextractReason}
+              onChange={(e) => setReextractReason(e.target.value)}
+            />
+          </DocumentsDoorDialog>
+        </div>
+        {reextractOutcome && (
+          <StateBanner tone="info" title={tg("reextraction.outcomeHeading")}>
+            {reextractionAdmissionLabel(reextractOutcome.admission, tg)}
+            {reextractOutcome.status === "queued" && ` — ${tg("reextraction.outcomeStatusQueued", { version: reextractOutcome.version_n ?? 0 })}`}
+            {reextractOutcome.status === "failed" && ` — ${tg("reextraction.outcomeStatusFailed")}`}
+            {reextractOutcome.reused && ` — ${tg("reextraction.outcomeReused")}`}
+          </StateBanner>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <SectionHeader level={4}>{tg("consentEvidence.trigger")}</SectionHeader>
+        <div className="flex flex-wrap items-center gap-2">
+          <DocumentsDoorDialog
+            triggerLabel={tg("consentEvidence.trigger")}
+            title={tg("consentEvidence.title")}
+            description={tg("consentEvidence.description")}
+            confirmLabel={tg("consentEvidence.confirm")}
+            busy={busy}
+            confirmDisabled={!consentReason.trim()}
+            onConfirm={() => act(async () => {
+              const out = await classifyConsentEvidenceDocument(doc.id, consentReason.trim());
+              setConsentPriorKind(out.prior_kind);
+              setConsentReason("");
+            })}
+          >
+            <Textarea
+              aria-label={tg("consentEvidence.reasonLabel")}
+              placeholder={tg("consentEvidence.reasonPlaceholder")}
+              value={consentReason}
+              onChange={(e) => setConsentReason(e.target.value)}
+            />
+          </DocumentsDoorDialog>
+        </div>
+        {consentPriorKind !== null && (
+          <p className="text-xs text-muted-foreground">{tg("consentEvidence.priorKindNote", { priorKind: consentPriorKind })}</p>
+        )}
       </div>
     </div>
   );
