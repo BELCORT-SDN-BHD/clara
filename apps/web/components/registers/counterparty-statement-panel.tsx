@@ -31,6 +31,7 @@ import {
   loadOpenItemAllocationsForItems,
   unallocateCandidateGroups,
   defaultStatementFrom,
+  type CounterpartyRow,
 } from "@/lib/registers/counterparty";
 import type { AgingDomain } from "@/lib/registers/aging";
 import { applyOpenItems, unallocateGroup } from "@/lib/registers/counterparty-doors";
@@ -59,12 +60,25 @@ async function loadPanelData(
     loadCounterpartyOpenItems(session, clientId, domain, counterpartyId),
   ]);
   const allocations = await loadOpenItemAllocationsForItems(session, clientId, openItems.map((i) => i.id));
-  // F3: fetch the redirect target's real name ONLY when the payload's own
-  // identity differs from what we asked for — a fresh, positive read, never
-  // a guess from data this component already had lying around.
-  const redirectedTo =
-    statement.counterparty_id !== counterpartyId ? await loadCounterpartyById(session, clientId, statement.counterparty_id) : null;
-  return { statement, allocations, redirectedTo };
+  // F3/S3 (independent review): the divergence itself — `redirected` — is
+  // known the instant the statement comes back, BEFORE any name lookup is
+  // attempted. `redirectedTo` (the SURVIVOR's row, for its name) is a
+  // best-effort read on top of that already-known fact: if it 404s/403s/
+  // errors, that failure degrades ONLY the displayed name, never the
+  // divergence verdict itself — a name-lookup hiccup must never fall back to
+  // rendering the MERGED party's name as though nothing happened (the S3
+  // fail-open the previous round left: `redirectedTo` was the only signal,
+  // so a failed lookup silently looked identical to "no redirect at all").
+  const redirected = statement.counterparty_id !== counterpartyId;
+  let redirectedTo: CounterpartyRow | null = null;
+  if (redirected) {
+    try {
+      redirectedTo = await loadCounterpartyById(session, clientId, statement.counterparty_id);
+    } catch {
+      redirectedTo = null; // the lookup itself failed — `redirected` stays true regardless
+    }
+  }
+  return { statement, allocations, redirected, redirectedTo };
 }
 
 export function CounterpartyStatementPanel({
@@ -113,13 +127,22 @@ export function CounterpartyStatementPanel({
   }
 
   const groups = unallocateCandidateGroups(data.allocations);
-  const heading = data.redirectedTo ? data.redirectedTo.name : counterpartyName;
+  // S3 (independent review, fix-required): the heading falls back to
+  // counterpartyName ONLY when there is genuinely no redirect —
+  // `data.redirected` is known independently of whether the name lookup
+  // itself succeeded, so a failed/null lookup can never silently re-use the
+  // MERGED party's name as if the statement were really its own.
+  const heading = !data.redirected ? counterpartyName : data.redirectedTo ? data.redirectedTo.name : data.statement.counterparty_id;
 
   return (
     <div className="flex flex-col gap-4">
       <SectionHeader level={2}>{t("heading", { name: heading, from, to })}</SectionHeader>
-      {data.redirectedTo && (
-        <StateBanner tone="info">{t("redirectedNote", { merged: counterpartyName, survivor: data.redirectedTo.name })}</StateBanner>
+      {data.redirected && (
+        <StateBanner tone="info">
+          {data.redirectedTo
+            ? t("redirectedNote", { merged: counterpartyName, survivor: data.redirectedTo.name })
+            : t("redirectedNoteUnknownName", { merged: counterpartyName, survivorId: data.statement.counterparty_id })}
+        </StateBanner>
       )}
       {err && (
         <StateBanner tone="error" code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}>
