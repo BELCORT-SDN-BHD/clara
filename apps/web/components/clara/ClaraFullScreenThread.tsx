@@ -25,10 +25,16 @@ export function ClaraFullScreenThread({
   threadId,
   returnHref,
   auth = sessionTokenAccessor,
+  clientId,
 }: {
   threadId: string;
   returnHref: string;
   auth?: SessionTokenAccessor;
+  /** T11 (port-wave plan §4 T11): threaded straight to ClaraThreadView's own
+   *  `OnboardingChecklistCard` mount — set by the client-scoped escalation
+   *  route (`/clients/[clientId]/clara/[threadId]`), absent from the
+   *  firm-altitude one (`/clara/[threadId]`). */
+  clientId?: string;
 }) {
   const t = useTranslations("Clara.fullScreen");
 
@@ -50,7 +56,7 @@ export function ClaraFullScreenThread({
         </div>
       </header>
       <div className="mx-auto min-h-0 w-full max-w-3xl flex-1">
-        <ClaraThreadView auth={auth} threadId={threadId} variant="full" />
+        <ClaraThreadView auth={auth} threadId={threadId} variant="full" clientId={clientId} />
       </div>
     </div>
   );

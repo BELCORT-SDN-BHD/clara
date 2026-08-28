@@ -27,6 +27,10 @@
 components/bank/bank-a11y.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
+components/clara/ClaraThreadView.onboarding.test.tsx
+components/clara/onboarding-checklist-a11y.test.tsx
+components/clara/onboarding-checklist-keyboard.test.tsx
+components/clara/onboarding-checklist.test.tsx
 components/close/close-a11y.test.tsx
 components/close/close-components.test.tsx
 components/close/close-keyboard.test.tsx
@@ -116,6 +120,7 @@ lib/journals/balance.test.ts
 lib/journals/diff-reads.test.ts
 lib/journals/governance-doors.test.ts
 lib/journals/use-journals-workbench.test.ts
+lib/onboarding/api.test.ts
 lib/parts/catalog.test.tsx
 lib/parts/hooks.test.ts
 lib/parts/single-fire-guard.test.ts

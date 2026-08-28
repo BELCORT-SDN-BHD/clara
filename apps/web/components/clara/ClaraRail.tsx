@@ -84,7 +84,7 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
         </div>
       </header>
       <div className="min-h-0 flex-1">
-        <ClaraThreadView auth={auth} threadId={threadId} resolveError={error} variant="rail" />
+        <ClaraThreadView auth={auth} threadId={threadId} resolveError={error} variant="rail" clientId={clientId} />
       </div>
     </aside>
   );
