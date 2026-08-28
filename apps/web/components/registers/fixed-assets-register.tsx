@@ -17,6 +17,7 @@
 // needs-you-inbox.tsx precedent), never replacing data that already loaded once.
 
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import { useAsyncRead } from "@/lib/firm/use-async-read";
 import { loadFixedAssets } from "@/lib/registers/fixed-assets";
 import { loadChartOfAccounts } from "@/lib/registers/accounts";
@@ -25,6 +26,7 @@ import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DataState, ErrorMessage } from "@/components/firm/data-state";
+import { LoadingState } from "@/components/common/state";
 import { CompleteParticularsDialog, ReviseParticularsDialog, DisposeDialog } from "./fa-row-actions";
 import { FaAccountProfilesPanel } from "./fa-account-profiles-panel";
 import { FaRegisterTieBanner } from "./fa-register-tie-banner";
@@ -32,6 +34,7 @@ import { DepreciationAuthorityPanel } from "./depreciation-authority-panel";
 
 export function FixedAssetsRegister({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientRegisters.fixedAssets");
+  const tFa = useTranslations("FixedAssetsDepreciation");
   const tc = useTranslations("Common");
   const { data, loading, error, busy, act } = useAsyncRead(() => loadFixedAssets(sessionTokenAccessor, clientId));
   const accountsRead = useAsyncRead(() => loadChartOfAccounts(sessionTokenAccessor, clientId));
@@ -81,16 +84,33 @@ export function FixedAssetsRegister({ clientId }: { clientId: string }) {
                   <TableCell className="font-medium">{fmtCents(a.nbv_cents, tc("centsUnsafe"))}</TableCell>
                   <TableCell className="text-muted-foreground">{a.method ? (methodLabels[a.method] ?? a.method) : "—"}</TableCell>
                   <TableCell>
-                    <div className="flex flex-wrap justify-end gap-1.5">
-                      {!a.particulars_complete && (a.status === "pending" || a.status === "active") ? (
-                        <CompleteParticularsDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={act} />
+                    <div className="flex flex-col items-end gap-1.5">
+                      {/* F7 (independent review, fix-required, 2026-08-28):
+                          the freeze note now renders on the ROW, before the
+                          human ever opens Dispose — with a real link into the
+                          Journals tab, the object that owns the draft's own
+                          approve/withdraw verbs (no per-entry route exists in
+                          this build, so the link goes to the tab, honestly —
+                          never a fabricated deep link). */}
+                      {a.disposal_draft_outstanding ? (
+                        <p className="text-right text-xs text-warning">
+                          {tFa("actions.disposalDraftOutstandingRow", { entryId: a.disposal_draft_entry_id?.slice(0, 8) ?? "—" })}{" "}
+                          <Link href={`/clients/${clientId}/journals`} className="underline-offset-4 hover:underline">
+                            {tFa("actions.disposalDraftOutstandingLink")}
+                          </Link>
+                        </p>
                       ) : null}
-                      {a.particulars_complete && a.status === "active" ? (
-                        <ReviseParticularsDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={act} />
-                      ) : null}
-                      {a.status === "active" ? (
-                        <DisposeDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={act} />
-                      ) : null}
+                      <div className="flex flex-wrap justify-end gap-1.5">
+                        {!a.particulars_complete && (a.status === "pending" || a.status === "active") ? (
+                          <CompleteParticularsDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={act} />
+                        ) : null}
+                        {a.particulars_complete && a.status === "active" ? (
+                          <ReviseParticularsDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={act} />
+                        ) : null}
+                        {a.status === "active" ? (
+                          <DisposeDialog clientId={clientId} asset={a} accounts={accounts} busy={busy} act={act} />
+                        ) : null}
+                      </div>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -101,9 +121,16 @@ export function FixedAssetsRegister({ clientId }: { clientId: string }) {
         {data && data.incomplete_count > 0 ? (
           <p className="text-xs text-warning">{t("incompleteNote", { count: data.incomplete_count })}</p>
         ) : null}
+        {/* F5 (independent review, fix-required, 2026-08-28): the account
+            pickers inside Dispose/enrol depend on this read; a failed or
+            still-loading chart of accounts used to fail SILENTLY, leaving
+            those dialogs permanently unconfirmable with no visible reason
+            (the unopenable-door class — absence is not evidence). */}
+        {accountsRead.error ? <ErrorMessage error={accountsRead.error} /> : null}
+        {accountsRead.loading ? <LoadingState className="text-xs">{tFa("chartAccountsLoading")}</LoadingState> : null}
       </div>
 
-      <FaAccountProfilesPanel clientId={clientId} assets={rows} accounts={accounts} />
+      <FaAccountProfilesPanel clientId={clientId} accounts={accounts} />
       <FaRegisterTieBanner clientId={clientId} />
       <DepreciationAuthorityPanel clientId={clientId} />
     </div>

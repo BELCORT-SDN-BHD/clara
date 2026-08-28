@@ -11,7 +11,15 @@ import type { SessionTokenAccessor } from "@/lib/session";
 
 export type FaDepreciationAuthority = {
   id: string;
-  status: "proposed" | "live" | "retired";
+  /** F6 (independent review, fix-required, 2026-08-28): NARROWED to the two
+   *  values get_depreciation_authority's own live query can actually return
+   *  — it selects `where status in ('live','proposed') order by (live
+   *  first) limit 1`, so a client whose ONLY authority is retired gets
+   *  `authority: null` back, never a retired row. `retired` genuinely
+   *  exists on `clara.fa_depreciation_authorities` (the table this read
+   *  projects from), but this READ never surfaces it — a `retired` arm here
+   *  was dead code the live body can never trigger. */
+  status: "proposed" | "live";
   cadence: "monthly" | "annual";
   proposed_by: string;
   signed_by: string | null;

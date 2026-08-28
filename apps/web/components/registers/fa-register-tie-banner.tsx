@@ -39,25 +39,45 @@ export function FaRegisterTieBanner({ clientId }: { clientId: string }) {
             {data.accounts.length === 0 ? (
               <EmptyState className="text-xs">{t("empty")}</EmptyState>
             ) : (
+              // F4 (independent review, fix-required, 2026-08-28): the prior
+              // single generic Register/GL/Diff triple picked ONE side per
+              // row keyed on `cost_reported_here` (which means "first row in
+              // the walk for this asset account", not "which side broke") —
+              // a row could show a 0.00 diff while the OTHER side it hid was
+              // genuinely broken. Both DB-owned comparison pairs render on
+              // every row now; cost is blanked (never zeroed) on a
+              // non-first row of the same asset account, matching the DB's
+              // own dedup convention (fa_register_tie's SQL comment: "cost
+              // is reported on the account's first row only") so summing
+              // this column across rows still reproduces the account's real
+              // cost rather than a multiple of it.
               <DataTableCard>
                 <TableHeader>
                   <TableRow>
                     <TableHead>{t("assetAccountCol")}</TableHead>
                     <TableHead>{t("accumAccountCol")}</TableHead>
-                    <TableHead>{t("registerCol")}</TableHead>
-                    <TableHead>{t("glCol")}</TableHead>
-                    <TableHead>{t("diffCol")}</TableHead>
+                    <TableHead>{t("registerCostCol")}</TableHead>
+                    <TableHead>{t("glCostCol")}</TableHead>
+                    <TableHead>{t("costDiffCol")}</TableHead>
+                    <TableHead>{t("registerAccumCol")}</TableHead>
+                    <TableHead>{t("glAccumCol")}</TableHead>
+                    <TableHead>{t("accumDiffCol")}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {data.accounts.map((row, i) => (
                     <TableRow key={`${row.asset_account}:${row.accum_account ?? ""}:${i}`}>
-                      <TableCell>{row.cost_reported_here ? row.asset_account : ""}</TableCell>
+                      <TableCell>{row.asset_account}</TableCell>
                       <TableCell className="text-muted-foreground">{row.accum_account ?? "—"}</TableCell>
-                      <TableCell>{row.cost_reported_here ? fmtCents(row.register_cost_cents, tc("centsUnsafe")) : fmtCents(row.register_accum_cents, tc("centsUnsafe"))}</TableCell>
-                      <TableCell>{row.cost_reported_here ? fmtCents(row.gl_cost_cents, tc("centsUnsafe")) : fmtCents(row.gl_accum_cents, tc("centsUnsafe"))}</TableCell>
-                      <TableCell className={(row.cost_reported_here ? row.cost_diff_cents : row.accum_diff_cents) !== 0 ? "text-error" : ""}>
-                        {fmtCents(row.cost_reported_here ? row.cost_diff_cents : row.accum_diff_cents, tc("centsUnsafe"))}
+                      <TableCell>{row.cost_reported_here ? fmtCents(row.register_cost_cents, tc("centsUnsafe")) : "—"}</TableCell>
+                      <TableCell>{row.cost_reported_here ? fmtCents(row.gl_cost_cents, tc("centsUnsafe")) : "—"}</TableCell>
+                      <TableCell className={row.cost_reported_here && row.cost_diff_cents !== 0 ? "text-error" : ""}>
+                        {row.cost_reported_here ? fmtCents(row.cost_diff_cents, tc("centsUnsafe")) : "—"}
+                      </TableCell>
+                      <TableCell>{fmtCents(row.register_accum_cents, tc("centsUnsafe"))}</TableCell>
+                      <TableCell>{fmtCents(row.gl_accum_cents, tc("centsUnsafe"))}</TableCell>
+                      <TableCell className={row.accum_diff_cents !== 0 ? "text-error" : ""}>
+                        {fmtCents(row.accum_diff_cents, tc("centsUnsafe"))}
                       </TableCell>
                     </TableRow>
                   ))}

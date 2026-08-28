@@ -19,7 +19,14 @@ import {
 } from "@/lib/registers/depreciation";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 
-const STATUS_VARIANT = { proposed: "outline", live: "default", retired: "secondary" } as const;
+// F6 (independent review, fix-required, 2026-08-28): only `proposed`/`live`
+// ever reach this component — see lib/registers/depreciation.ts's
+// `FaDepreciationAuthority.status` for why `retired` was dead code here (a
+// retired-only client's `get_depreciation_authority` returns
+// `authority: null`, which the `!au` branch below already renders
+// correctly as "none proposed" — the same honest state a fresh client and a
+// just-retired client share).
+const STATUS_VARIANT = { proposed: "outline", live: "default" } as const;
 
 export function AuthorityCeremony({
   clientId,
@@ -54,8 +61,7 @@ export function AuthorityCeremony({
           ) : null}
           <div className="flex gap-2">
             {au.status === "proposed" ? <SignDialog clientId={clientId} authorityId={au.id} busy={busy} act={act} /> : null}
-            {au.status !== "retired" ? <RetireDialog clientId={clientId} authorityId={au.id} busy={busy} act={act} /> : null}
-            {au.status === "retired" ? <ProposeDialog clientId={clientId} busy={busy} act={act} /> : null}
+            <RetireDialog clientId={clientId} authorityId={au.id} busy={busy} act={act} />
           </div>
         </div>
       )}

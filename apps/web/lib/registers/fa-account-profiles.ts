@@ -10,9 +10,50 @@
 // reserved-account refusal is the DOOR's own CLR37 — this module states no
 // client-side account-picking rule of its own; the caller offers a COA
 // dropdown and lets the door refuse.
+//
+// F2/F3 (independent review, fix-required, 2026-08-28): `clara.
+// fa_account_profiles` is a real SELECT grant to `clara_authenticated`
+// (verified at the live catalog — forced RLS, `p_fa_account_profiles_human`
+// scopes by `firm_id = jwt_firm()`), the Q3 read-the-tables mechanism
+// lib/registers/accounts.ts already uses for `coa_accounts`. The panel used
+// to DERIVE its rows from the register's own asset-row projections instead —
+// a second, un-synced implementation of the same enumeration the DB already
+// answers directly, which (a) made an enrol with no register row yet give
+// zero feedback (the `fa_account_profiles WHERE active` half was invisible)
+// and (b) produced phantom Retire triggers for disposed/superseded/
+// future-dated rows that could only ever CLR37. Read the relation directly
+// instead — `loadFaAccountProfiles` below — so `useHydratedPart`'s `act()`
+// genuinely re-reads the real enrolment state after every upsert/retire.
 
+import { getRows } from "../read";
 import { callDoor } from "../doors";
 import type { SessionTokenAccessor } from "@/lib/session";
+
+export type FaAccountProfileRow = {
+  id: string;
+  asset_account_code: string;
+  accum_depr_account_code: string | null;
+  depr_expense_account_code: string | null;
+  active: boolean;
+  enrolled_at: string;
+  retired_at: string | null;
+};
+
+const FA_ACCOUNT_PROFILE_COLS =
+  "id,asset_account_code,accum_depr_account_code,depr_expense_account_code,active,enrolled_at,retired_at";
+
+/** Every ACTIVE fixed-asset account profile for this client — the live
+ *  enrolment state a new asset's cost account defaults from. No explicit
+ *  firm filter (RLS + `p_fa_account_profiles_human` already scope it, the
+ *  same idiom lib/registers/accounts.ts's loadChartOfAccounts uses). */
+export function loadFaAccountProfiles(session: SessionTokenAccessor, clientId: string): Promise<FaAccountProfileRow[]> {
+  return getRows<FaAccountProfileRow>("fa_account_profiles", {
+    select: FA_ACCOUNT_PROFILE_COLS,
+    filters: { client_id: `eq.${clientId}`, active: "eq.true" },
+    order: "asset_account_code.asc",
+    session,
+  });
+}
 
 /** clara.upsert_fa_account_profile(p_client, p_asset_account, p_accum_account,
  *  p_depr_expense_account, p_op_key) — bookkeeper+. `accumAccount`/

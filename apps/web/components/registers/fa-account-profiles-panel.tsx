@@ -1,12 +1,14 @@
 "use client";
 
 // The (cost, accumulated, expense) account-profile panel — clara.
-// fa_account_profiles is read as part of clara.list_fixed_assets's own
-// envelope today has no dedicated list read, so this panel derives its rows
-// from the SAME accounts list a client already loaded (an active COA
-// account carrying a fixed-asset role, surfaced via the accounts register's
-// own read) rather than inventing a second relation read. Governed writes:
-// upsert_fa_account_profile / retire_fa_account_profile.
+// fa_account_profiles read directly (F2/F3 fix, independent review: this
+// relation is genuinely SELECT-granted to clara_authenticated, the Q3
+// read-the-tables mechanism lib/registers/accounts.ts already uses for
+// coa_accounts — never derived from the register's own asset rows, which
+// went dark on an enrol with no register row yet and produced phantom
+// Retire triggers on disposed/superseded rows). Governed writes:
+// upsert_fa_account_profile / retire_fa_account_profile; `act()` re-reads
+// this SAME relation after every one.
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
@@ -15,31 +17,14 @@ import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState, StateBanner } from "@/components/common/state";
 import { NativeSelect } from "@/components/common/native-select";
 import { useHydratedPart } from "@/lib/parts/hooks";
-import { upsertFaAccountProfile, retireFaAccountProfile } from "@/lib/registers/fa-account-profiles";
+import { loadFaAccountProfiles, upsertFaAccountProfile, retireFaAccountProfile } from "@/lib/registers/fa-account-profiles";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { FaDoorDialog } from "./FaDoorDialog";
-import type { FixedAssetRow } from "@/lib/registers/fixed-assets";
 import type { AccountRow } from "@/lib/registers/accounts";
 
-/** Derived, never a second read: one row per DISTINCT (asset_account,
- *  accum_account) pair any non-unwound register row currently carries — the
- *  same population `fa_register_tie`'s own walk enumerates (fixed-assets.ts's
- *  `FaTieAccountRow`), read here off the register the panel's own caller
- *  already loaded. */
-function deriveProfiles(assets: FixedAssetRow[]): { assetAccount: string; accumAccount: string | null }[] {
-  const seen = new Map<string, { assetAccount: string; accumAccount: string | null }>();
-  for (const a of assets) {
-    if (!a.asset_account || a.status === "unwound") continue;
-    const key = `${a.asset_account}::${a.accum_account ?? ""}`;
-    if (!seen.has(key)) seen.set(key, { assetAccount: a.asset_account, accumAccount: a.accum_account });
-  }
-  return [...seen.values()].sort((x, y) => x.assetAccount.localeCompare(y.assetAccount));
-}
-
-export function FaAccountProfilesPanel({ clientId, assets, accounts }: { clientId: string; assets: FixedAssetRow[]; accounts: AccountRow[] }) {
+export function FaAccountProfilesPanel({ clientId, accounts }: { clientId: string; accounts: AccountRow[] }) {
   const t = useTranslations("FixedAssetsDepreciation.profiles");
-  const { err, clr, busy, act } = useHydratedPart<null>(sessionTokenAccessor, () => Promise.resolve(null));
-  const profiles = deriveProfiles(assets);
+  const { data: profiles, err, clr, busy, act } = useHydratedPart(sessionTokenAccessor, (s) => loadFaAccountProfiles(s, clientId));
 
   return (
     <div className="flex flex-col gap-2">
@@ -52,16 +37,16 @@ export function FaAccountProfilesPanel({ clientId, assets, accounts }: { clientI
           {err}
         </StateBanner>
       ) : null}
-      {profiles.length === 0 ? (
+      {!profiles || profiles.length === 0 ? (
         <EmptyState className="text-xs">{t("empty")}</EmptyState>
       ) : (
         <ul className="flex flex-col gap-1">
           {profiles.map((p) => (
-            <li key={`${p.assetAccount}:${p.accumAccount ?? ""}`} className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant="secondary">{p.assetAccount}</Badge>
+            <li key={p.id} className="flex flex-wrap items-center gap-2 text-xs">
+              <Badge variant="secondary">{p.asset_account_code}</Badge>
               <span className="text-muted-foreground">→</span>
-              <span>{p.accumAccount ?? "—"}</span>
-              <RetireDialog clientId={clientId} assetAccount={p.assetAccount} busy={busy} act={act} />
+              <span>{p.accum_depr_account_code ?? "—"}</span>
+              <RetireDialog clientId={clientId} assetAccount={p.asset_account_code} busy={busy} act={act} />
             </li>
           ))}
         </ul>

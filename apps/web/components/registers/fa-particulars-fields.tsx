@@ -9,13 +9,56 @@
 // revise/the inline affordance share one field layout without sharing a
 // dialog shell (each of those is a genuinely different door).
 
+import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/common/native-select";
+import { parseAmountToCents, fmtCents } from "@/lib/registers/money";
 import type { FaParticularsInput } from "@/lib/registers/fixed-assets";
 
 const METHODS = ["straight_line", "reducing_balance", "none"] as const;
+
+/** F1 (independent review, fix-required, 2026-08-28): the residual field used
+ *  to re-derive its displayed string from `residualCents` on every render
+ *  (`(cents/100).toFixed(2)`) — the exact bug components/journals/
+ *  use-amount-input.ts exists to kill (its own header: React's
+ *  `restoreStateOfTarget` resets a controlled input back to the DERIVED
+ *  string whenever the parent re-renders with the SAME cents value the last
+ *  keystroke produced, discarding every digit after the first — typing "5"
+ *  then "0" landed RM5.00, not RM50.00). Fixed the SAME way that file fixes
+ *  it: hold the raw typed string in local state, resync from the prop ONLY
+ *  when it changed for a reason other than this hook's own last emission —
+ *  but parse with lib/registers/money.ts's precise BigInt
+ *  `parseAmountToCents` (never a float `Math.round(n*100)`), since this is
+ *  the registers domain's own money module, not journals'. Exported so the
+ *  regression this exists to prove — typing "5" then "0" — is testable via
+ *  test/hookHarness.ts's `renderHook`, the same instrument
+ *  use-amount-input.test.ts uses for the identical property. */
+export function useResidualCentsField(
+  residualCents: number | null | undefined,
+  onChange: (cents: number | null) => void,
+) {
+  const [raw, setRaw] = useState(() => (residualCents != null ? (residualCents / 100).toFixed(2) : ""));
+  const lastEmitted = useRef<number | null>(residualCents ?? null);
+
+  useEffect(() => {
+    const external = residualCents ?? null;
+    if (external !== lastEmitted.current) {
+      setRaw(external != null ? (external / 100).toFixed(2) : "");
+      lastEmitted.current = external;
+    }
+  }, [residualCents]);
+
+  function handleChange(v: string) {
+    setRaw(v);
+    const parsed = v.trim() === "" ? null : parseAmountToCents(v);
+    lastEmitted.current = parsed;
+    onChange(parsed);
+  }
+
+  return { raw, handleChange };
+}
 
 export function FaParticularsFields({
   idPrefix,
@@ -29,6 +72,7 @@ export function FaParticularsFields({
   const t = useTranslations("FixedAssetsDepreciation.particulars");
 
   const patch = (p: Partial<FaParticularsInput>) => onChange({ ...value, ...p });
+  const residual = useResidualCentsField(value.residual_cents, (cents) => patch({ residual_cents: cents }));
 
   return (
     <div className="grid gap-2 sm:grid-cols-2">
@@ -100,12 +144,12 @@ export function FaParticularsFields({
             id={`${idPrefix}-residual`}
             inputMode="decimal"
             placeholder="0.00"
-            value={value.residual_cents != null ? (value.residual_cents / 100).toFixed(2) : ""}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              patch({ residual_cents: e.target.value === "" || !Number.isFinite(n) ? null : Math.round(n * 100) });
-            }}
+            value={residual.raw}
+            onChange={(e) => residual.handleChange(e.target.value)}
           />
+          {value.residual_cents != null ? (
+            <p className="text-xs text-muted-foreground">{fmtCents(value.residual_cents)}</p>
+          ) : null}
         </div>
       ) : null}
       <div className="grid gap-1.5 sm:col-span-2">

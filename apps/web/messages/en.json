@@ -978,6 +978,7 @@
     }
   },
   "FixedAssetsDepreciation": {
+    "chartAccountsLoading": "Loading the chart of accounts — the Complete/Dispose account pickers need this to finish before they can be confirmed.",
     "dialog": { "cancel": "Cancel", "working": "Working…" },
     "particulars": {
       "methodLabel": "Depreciation method",
@@ -1010,7 +1011,8 @@
       "memoLabel": "Memo (optional)",
       "costPortionLabel": "Partial disposal — cost portion (RM, optional)",
       "costPortionHint": "Leave blank to dispose the whole asset.",
-      "disposalDraftOutstanding": "A disposal is already drafted for this asset — approve or withdraw it before raising another."
+      "disposalDraftOutstandingRow": "A disposal is already drafted (entry {entryId}) — approve or withdraw it before raising another.",
+      "disposalDraftOutstandingLink": "Open the Journals tab"
     },
     "profiles": {
       "heading": "Account profiles",
@@ -1040,16 +1042,19 @@
       "pendingDraftNote": "{count} row(s) sit behind an unposted opening draft, excluded from both sides.",
       "assetAccountCol": "Cost account",
       "accumAccountCol": "Accumulated account",
-      "registerCol": "Register",
-      "glCol": "GL",
-      "diffCol": "Difference",
+      "registerCostCol": "Register cost",
+      "glCostCol": "GL cost",
+      "costDiffCol": "Cost difference",
+      "registerAccumCol": "Register accumulated",
+      "glAccumCol": "GL accumulated",
+      "accumDiffCol": "Accumulated difference",
       "empty": "No fixed-asset accounts enrolled yet."
     },
     "authority": {
       "heading": "Depreciation authority",
       "subheading": "The cadence Clara is authorised to run scheduled depreciation on.",
       "none": "No depreciation authority has been proposed for this client yet.",
-      "status": { "proposed": "Proposed", "live": "Live", "retired": "Retired" },
+      "status": { "proposed": "Proposed", "live": "Live" },
       "cadenceLabel": "Cadence",
       "cadence": { "monthly": "Monthly", "annual": "Annual" },
       "rampEarned": "Autopost ramp earned — a reviewed run has posted under this authority.",

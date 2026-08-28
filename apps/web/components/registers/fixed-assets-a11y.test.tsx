@@ -65,11 +65,19 @@ const COA = [
 const TIE = { client_id: "c1", as_of: "2026-08-27", tie: true, accounts: [], incomplete_count: 1, pending_draft_count: 0 };
 const AUTHORITY = { client_id: "c1", authority: null, ramp_earned: false, fy_end: { month: 12, day: 31, fallback: true }, high_stakes_threshold_cents: 500000 };
 const RUNS = { client_id: "c1", runs: [] };
+// F2/F3 (independent review, fix-required, 2026-08-28): FaAccountProfilesPanel
+// now reads clara.fa_account_profiles directly (getRows) — a real fixture
+// row here proves the panel's happy path renders, not merely that an
+// "unexpected fetch" error banner (also a11y-clean) painted over it.
+const FA_PROFILES = [
+  { id: "p1", asset_account_code: "1500", accum_depr_account_code: "1510", depr_expense_account_code: "6200", active: true, enrolled_at: "2026-01-01T00:00:00Z", retired_at: null },
+];
 
 const mockFetch = (async (u: RequestInfo | URL) => {
   const url = String(u);
   if (url.includes("/rpc/list_fixed_assets")) return jsonResponse(ASSETS_ENVELOPE);
   if (url.includes("/rest/v1/coa_accounts")) return jsonResponse(COA);
+  if (url.includes("/rest/v1/fa_account_profiles")) return jsonResponse(FA_PROFILES);
   if (url.includes("/rpc/fa_register_tie")) return jsonResponse(TIE);
   if (url.includes("/rpc/get_depreciation_authority")) return jsonResponse(AUTHORITY);
   if (url.includes("/rpc/list_depreciation_runs")) return jsonResponse(RUNS);
@@ -95,6 +103,7 @@ test("fixed-assets register (collapsed) has zero a11y violations", async () => {
     try {
       for (let i = 0; i < 4; i++) await h.settle();
       assert.match(h.text(), /Delivery van/, "the register must have loaded far enough to show a real row");
+      assert.match(h.text(), /1500/, "F2/F3 fix: the account-profiles panel must render the REAL enrolled profile it read from clara.fa_account_profiles, not an error banner from an unmocked fetch");
       assert.deepEqual(checkAccessibility(h.container as never), []);
     } finally {
       await h.unmount();

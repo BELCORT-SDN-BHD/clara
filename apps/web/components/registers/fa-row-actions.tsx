@@ -100,10 +100,13 @@ export function ReviseParticularsDialog({ clientId, asset, busy, act }: RowActio
 
 /** Dispose — one un-dead draft per asset (the door's own CLR39
  *  `disposal_draft_outstanding` wall); `asset.disposal_draft_outstanding` is
- *  the register's own PROJECTION of that same predicate (`_fa_asset_json`),
- *  rendered as a note here rather than hiding the trigger — the door stays
- *  the wall (constraint: never pre-hide on a client-side guess), this is
- *  visibility only. */
+ *  the register's own PROJECTION of that same predicate (`_fa_asset_json`).
+ *  F7 (independent review, fix-required, 2026-08-28): the visibility note
+ *  now renders on the REGISTER ROW itself (fixed-assets-register.tsx), not
+ *  inside this dialog — a human deciding whether to open Dispose at all
+ *  needs to see the freeze BEFORE opening it, which is the whole reason the
+ *  projection exists. The trigger stays enabled either way (constraint:
+ *  never pre-hide on a client-side guess — the door is still the wall). */
 export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActionsProps) {
   const t = useTranslations("FixedAssetsDepreciation.actions");
   const [disposalDate, setDisposalDate] = useState("");
@@ -148,9 +151,6 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActio
       }}
     >
       <div className="flex flex-col gap-2">
-        {asset.disposal_draft_outstanding ? (
-          <p className="text-xs text-warning">{t("disposalDraftOutstanding")}</p>
-        ) : null}
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="grid gap-1.5">
             <Label htmlFor={`fa-disp-date-${asset.id}`}>{t("disposalDateLabel")}</Label>
