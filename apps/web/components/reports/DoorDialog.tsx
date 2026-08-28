@@ -32,6 +32,7 @@ export function DoorDialog({
   busy,
   confirmDisabled,
   onConfirm,
+  onOpenChange,
   children,
 }: {
   triggerLabel: string;
@@ -48,6 +49,12 @@ export function DoorDialog({
    *  permanently unopenable. */
   confirmDisabled?: boolean;
   onConfirm: () => Promise<void>;
+  /** Additive (T9 fix round, F4/F9): fires on EVERY open/close transition —
+   *  a caller that wants a fresh deliberate act each time the dialog opens
+   *  (a freshly-minted op_key, a reset consent checkbox) hooks this rather
+   *  than re-deriving open state of its own. Optional; every existing caller
+   *  that does not pass it is unaffected. */
+  onOpenChange?: (open: boolean) => void;
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -58,7 +65,13 @@ export function DoorDialog({
   const guardRef = useRef(createSingleFireGuard());
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        onOpenChange?.(v);
+      }}
+    >
       <DialogTrigger render={<Button variant={triggerVariant} size="sm" />}>
         {triggerLabel}
       </DialogTrigger>

@@ -171,7 +171,7 @@ test("WITHDRAW confirm: a real click on Confirm calls onWithdraw and closes the 
     const confirmButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Withdraw draft$/) !== null);
     assert.ok(confirmButton, "confirm must render once the reason is typed");
 
-    await h.act(() => { clickButton(confirmButton as never); });
+    await h.act(() => clickButton(confirmButton as never));
     for (let i = 0; i < 6; i++) await h.settle();
 
     assert.equal(calls.length, 1, "onWithdraw must be called exactly once");
