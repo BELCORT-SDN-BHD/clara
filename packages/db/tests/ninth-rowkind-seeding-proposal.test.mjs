@@ -17,13 +17,16 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  opk, endPool, printLaneNotes, noteLane,
+  opk, endPool, printLaneNotes, noteLane, rootQuery, humanQuery,
   wbEnsureReady, fail0017,
   buildWaveBWorld, onboardingClient,
   filedDocument, setDocumentKind,
   createSeedingBatch, tickProposal, declineProposal, proposalRows,
+  cancelSeedingBatch, completeSeedingBatch, batchRow,
 } from "./wave-b/wb-fixtures.mjs";
 import { listReviewQueue, humanPersona } from "./wave-a-reads.mjs";
+import { seedCitedDocument, freshResolution, draftEntryV3, billLines, ev, FIELD, openQuestion } from "./wave-a-fixtures.mjs";
+import { advWorld, freshAdvClient, disburse, mon, dayIn, x42EnsureReady } from "./x42-adv-world.mjs";
 
 let live = false;
 let w = null;
@@ -173,22 +176,167 @@ test("裁-17 zero/one/two-client differential: the row appears IFF an open propo
   noteLane("裁-17 differential: 0/1/2-client population proven, batch-level aggregation across two open batches proven, decide-to-disappear symmetry proven");
 });
 
-test("裁-17 the eight pre-existing row_kinds survive at their FULL 30-key shape (a differential on the key SET, never a bare count) — client_name/batch_ids/open_proposal_count are always null elsewhere", async () => {
+test("MED-2 (Codex cross-model review, fec6ab5b, escalated HIGH by rev-nr): STRANDED ROWS — a proposal left 'proposed' by a CANCELLED or COMPLETED batch must NOT chase (SeedingBatchesPanel hides Tick/Decline once the owning batch is no longer open)", async () => {
   fail0017(live);
-  const { users, clients } = w;
+  const { users, firms } = w;
 
-  // A cheap, otherwise-unused open_question row (A2) alongside the ninth kind's
-  // own rows from the previous cell — both walked through the SAME envelope.
-  const { openQuestion } = await import("./wave-a-fixtures.mjs");
-  await openQuestion(users.alice, { client: clients.A2, scopeKind: "client", scopeId: clients.A2 }).catch((e) => noteLane(`openQuestion setup: ${e.code ?? e.message}`));
+  // Cancel path: one open batch, one open proposal, present (positive control) —
+  // then cancel the BATCH (never the proposal) and the row must vanish, even
+  // though the proposal itself stays 'proposed' forever (0017/0118 census: no
+  // batch-reopen door and no third writer of seeding_proposals.state).
+  const cancelClient = await onboardingClient(users.alice, `${w.prefix}_med2cancel`);
+  const cancelDoc = await priorGlDoc(users.alice, { firm: firms.A, client: cancelClient.client });
+  const cancelBatchR = await createSeedingBatch({
+    client: cancelClient.client, document: cancelDoc.documentId,
+    proposals: [proposal("wf:med2-cancel", "MED-2 cancel-path fact.")],
+  });
+  const cancelBatchId = cancelBatchR.batch_id ?? cancelBatchR.id;
 
-  const page = await listReviewQueue(humanPersona(users.alice), { scope: {}, limit: 500 });
-  const rows = allRows(page);
-  assert.ok(rows.length > 0, "mandatory setup: the envelope carries at least one row to differential-check");
+  const beforeCancel = seedingRows(await listReviewQueue(humanPersona(users.alice), { scope: { client_id: cancelClient.client } }));
+  assert.equal(beforeCancel.length, 1, "positive control: the OPEN batch's row is present before cancellation");
 
-  const kindsSeen = new Set();
+  await cancelSeedingBatch(users.hana, { batch: cancelBatchId, reason: "MED-2 rig cancel", opKey: opk("med2cancel") });
+  assert.equal((await batchRow(cancelBatchId)).state, "cancelled", "mandatory setup: the batch is genuinely cancelled");
+  const cancelProps = await proposalRows(cancelBatchId);
+  assert.equal(cancelProps[0].state, "proposed", "mandatory setup (the stranding itself): the proposal is STILL 'proposed' after its batch is cancelled — no third writer moves it");
+  await assert.rejects(
+    () => tickProposal(users.hana, { proposal: cancelProps[0].id, opKey: opk("med2cancelrefuse") }),
+    (e) => e.code === "CLR34",
+    "the panel's own tick door refuses CLR34 'seeding batch is not open' on the cancelled batch's proposal",
+  );
+
+  const afterCancel = seedingRows(await listReviewQueue(humanPersona(users.alice), { scope: { client_id: cancelClient.client } }));
+  assert.equal(afterCancel.length, 0, "MED-2: the row is GONE once the owning batch is cancelled, even though the proposal is still 'proposed'");
+
+  // Complete path: two open proposals, tick ONE, complete the batch with the
+  // OTHER still 'proposed' (0017's own S4 cell: "unticked proposals STAY
+  // 'proposed' after completion" — completeSeedingBatch's own receipt names
+  // this still_proposed count, a DESIGNED-IN normal outcome, not an edge case).
+  const completeClient = await onboardingClient(users.alice, `${w.prefix}_med2complete`);
+  const completeDoc = await priorGlDoc(users.alice, { firm: firms.A, client: completeClient.client });
+  const completeBatchR = await createSeedingBatch({
+    client: completeClient.client, document: completeDoc.documentId,
+    proposals: [
+      proposal("wf:med2-complete-a", "MED-2 complete-path fact A."),
+      proposal("wf:med2-complete-b", "MED-2 complete-path fact B."),
+    ],
+  });
+  const completeBatchId = completeBatchR.batch_id ?? completeBatchR.id;
+  const completeProps = await proposalRows(completeBatchId);
+  assert.equal(completeProps.length, 2, "mandatory setup: two proposals landed");
+
+  const beforeComplete = seedingRows(await listReviewQueue(humanPersona(users.alice), { scope: { client_id: completeClient.client } }));
+  assert.equal(beforeComplete.length, 1, "positive control: the OPEN batch's row is present before completion");
+  assert.equal(beforeComplete[0].open_proposal_count, 2, "positive control: both proposals count while the batch is open");
+
+  await tickProposal(users.hana, { proposal: completeProps[0].id, opKey: opk("med2tick") });
+  const completeReceipt = await completeSeedingBatch(users.hana, { batch: completeBatchId, opKey: opk("med2done") });
+  assert.equal((await batchRow(completeBatchId)).state, "completed", "mandatory setup: the batch is genuinely completed");
+  const stillOpenAfterComplete = (await proposalRows(completeBatchId)).filter((p) => p.state === "proposed");
+  assert.equal(stillOpenAfterComplete.length, 1, "mandatory setup (the stranding itself): ONE proposal is STILL 'proposed' after completion — the designed WB-R2 landing state");
+  if (typeof completeReceipt?.still_proposed === "number") {
+    assert.equal(completeReceipt.still_proposed, 1, "the door's own receipt names the still_proposed count (rev-nr's own census)");
+  }
+  await assert.rejects(
+    () => declineProposal(users.hana, { proposal: stillOpenAfterComplete[0].id, reason: "MED-2 rig", opKey: opk("med2completerefuse") }),
+    (e) => e.code === "CLR34",
+    "the panel's own decline door refuses CLR34 'seeding batch is not open' on the completed batch's still-proposed proposal",
+  );
+
+  const afterComplete = seedingRows(await listReviewQueue(humanPersona(users.alice), { scope: { client_id: completeClient.client } }));
+  assert.equal(afterComplete.length, 0, "MED-2: the row is GONE once the owning batch completes, even with one proposal STILL 'proposed'");
+
+  noteLane("MED-2: cancel path and complete path both strand a 'proposed' proposal permanently, and the ninth row correctly disappears in both — no route to a row the linked panel can never settle");
+});
+
+test("MED-3 (Codex cross-model review, fec6ab5b): ALL NINE row_kinds, produced through real state, EACH asserted present at its FULL 30-key shape — a missing kind is a FAIL, not a silently-skipped observation", async () => {
+  fail0017(live);
+  const { users, firms, clients } = w;
+  const seen = {};
+  const need = (kind) => { assert.ok(seen[kind], `row_kind='${kind}' never landed in ANY envelope this cell read — MED-3 requires every one of the nine kinds to be OBSERVED, not merely possible`); };
+
+  // client_id A1 hosts: open_question, draft, uncoded_filing, coding_task,
+  // compliance_watch, lint_finding, fixed_asset_incomplete — all firm A, so one
+  // firm-wide read (below) collects them together with A1's OWN
+  // seeding_proposal rows from the earlier cells (different tables, no
+  // interference). A1, not A2: buildWaveBWorld() seeds WB_COA's control
+  // accounts (apCtl/faExp) on A1 ONLY — the draft producer below needs them.
+  const med3Client = clients.A1;
+
+  // 1) open_question — the existing light producer.
+  await openQuestion(users.alice, { client: med3Client, scopeKind: "client", scopeId: med3Client })
+    .catch((e) => noteLane(`MED-3 openQuestion setup: ${e.code ?? e.message}`));
+
+  // 2) draft — a real cited bill on client A2, using buildWaveBWorld's OWN
+  // control accounts (WB_COA.apCtl payable / WB_COA.faExp expense), so no new
+  // CoA setup is needed.
+  const { WB_COA } = await import("./wave-b/wb-fixtures.mjs");
+  const cited = await seedCitedDocument(users.alice, { firm: firms.A, client: med3Client, quote: "RM 700.00" });
+  await draftEntryV3(users.alice, {
+    client: med3Client,
+    resolution: await freshResolution(users.alice, med3Client, { subjectKind: "document", subjectId: cited.documentId }),
+    document: cited.documentId, sha256: cited.sha256,
+    lines: billLines(WB_COA.faExp, WB_COA.apCtl, 70000),
+    vendor: { new: { name: "MED3 DRAFT VENDOR SDN BHD", registration_no: "202301019999" } },
+    evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
+    opKey: opk("med3draft"),
+  });
+
+  // 3) uncoded_filing + 4) coding_task — a SEPARATE plain filed document (never
+  // drafted): uncoded_filing on its own; open_coding_task against the SAME
+  // filing additionally produces coding_task (the two kinds are NOT mutually
+  // exclusive on one filing — coding_task is a human-opened correction/manual
+  // task, uncoded_filing is "no draft/approved entry yet", both true at once).
+  const ctDoc = await filedDocument(users.alice, { firm: firms.A, client: med3Client, kind: null });
+  await humanQuery(
+    users.alice,
+    "select clara.open_coding_task(p_client => $1, p_document => $2, p_filing => $3, p_reason => $4, p_op_key => $5) as r",
+    [med3Client, ctDoc.documentId, ctDoc.filingId, "MED-3 rig probe", opk("med3ct")],
+  );
+
+  // 5) compliance_watch, 6) lint_finding, 7) fixed_asset_incomplete — direct
+  // state seeding (rev-nr/Codex's own "seed one row of each through real
+  // state" permission): each of these three kinds' SHAPE is what this cell
+  // proves, not the compliance evaluator / lint engine / fixed-asset door's
+  // own behaviour (each already has its OWN dedicated battery elsewhere —
+  // a21-read-surfaces, wb-l-lint, x41b0-surface). A raw INSERT into the real
+  // table clara.list_review_queue itself reads is real state by the review's
+  // own words, not a mock.
+  await rootQuery(
+    `insert into clara.compliance_watches(firm_id, client_id, service_group, watch_kind, state)
+     values ($1, $2, 'digital_services', 'sst_registration', 'crossed')`,
+    [firms.A, med3Client],
+  );
+  await rootQuery(
+    `insert into clara.lint_findings(firm_id, client_id, finding_kind, dedupe_key, severity, state)
+     values ($1, $2, 'stale_claim', 'med3-rig-probe', 'critical', 'open')`,
+    [firms.A, med3Client],
+  );
+  await rootQuery(
+    `insert into clara.fixed_assets(firm_id, client_id, description, cost_cents, status)
+     values ($1, $2, 'MED-3 rig probe fixed asset (particulars pending)', 500000, 'active')`,
+    [firms.A, med3Client],
+  );
+
+  // 8) staff_advance_incomplete — the x42 world's own real door chain
+  // (freshAdvClient + disburse), the SAME recipe x42b1-advances.test.mjs's own
+  // r4 cell uses. advWorld() caches wb.buildWaveBWorld() itself, so this lives
+  // in the SAME firm A this whole file already uses.
+  await x42EnsureReady(); // anchors the mon()/dayIn() DB clock reference
+  const aw = await advWorld();
+  const { client: advClient } = await freshAdvClient("med3");
+  await disburse({ client: advClient, cents: 42_000, postingDate: dayIn(mon(-1), 10) });
+
+  // Read: A2/advClient's own client-scoped queue plus the firm-wide read
+  // (which also carries client A1's seeding_proposal rows from earlier cells).
+  const rows = [
+    ...allRows(await listReviewQueue(humanPersona(users.alice), { scope: {}, limit: 500 })),
+    ...allRows(await listReviewQueue(humanPersona(aw.users.alice), { scope: { client_id: advClient }, limit: 500 })),
+  ];
+  assert.ok(rows.length > 0, "mandatory setup: at least one row was read back");
+
   for (const row of rows) {
-    kindsSeen.add(row.row_kind);
+    seen[row.row_kind] = true;
     assert.deepEqual(
       [...Object.keys(row)].sort(), FULL_ROW_KEYS,
       `row_kind='${row.row_kind}' (id=${row.id}) carries a DIFFERENT key set than the pinned 30-key shape — a key was added, dropped or renamed (got ${JSON.stringify([...Object.keys(row)].sort())})`,
@@ -199,9 +347,15 @@ test("裁-17 the eight pre-existing row_kinds survive at their FULL 30-key shape
       assert.equal(row.open_proposal_count, null, `row_kind='${row.row_kind}' must carry open_proposal_count=null (seeding_proposal-only field)`);
     }
   }
-  assert.ok(kindsSeen.has("open_question"), "the open_question fixture actually landed in the envelope");
-  assert.ok(kindsSeen.has("seeding_proposal"), "the seeding_proposal fixture (previous cell) actually landed in the envelope");
-  noteLane(`裁-17 key-set differential: row_kinds observed in this envelope = ${[...kindsSeen].sort().join(",")}`);
+
+  // The MED-3 floor: every one of the nine live kinds is OBSERVED, by name —
+  // a kind absent from `seen` fails THIS assertion, never silently absent from
+  // a passing test.
+  for (const kind of [
+    "draft", "uncoded_filing", "open_question", "coding_task", "compliance_watch",
+    "lint_finding", "fixed_asset_incomplete", "staff_advance_incomplete", "seeding_proposal",
+  ]) need(kind);
+  noteLane(`MED-3: all nine row_kinds observed and shape-checked = ${Object.keys(seen).sort().join(",")}`);
 });
 
 test("裁-17 cross-firm isolation: firm B never sees firm A's seeding_proposal row", async () => {
