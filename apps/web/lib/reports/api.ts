@@ -13,10 +13,16 @@ import type {
   ExportRecipientKind,
   ExportRecipientRow,
   FreeformReadLogRow,
+  PeriodSnapshotRow,
   ReportAgentReceiptRow,
   ReportArtifactRow,
+  RenderJobRow,
   SandboxExportRow,
+  SeedingBatchRow,
+  SeedingProposalRow,
   SignedOriginalCustody,
+  SnapshotState,
+  WikiPageRow,
 } from "./types";
 
 export { DoorRefusal, isDoorRefusal, ReadError, isReadError };
@@ -199,4 +205,145 @@ export async function listReportAgentReceipts(clientId: string, opts: Opts = {})
     order: "at.desc",
     ...opts,
   });
+}
+
+// -----------------------------------------------------------------------------
+// T9 (port-wave) reads — rung-0 census at the live 0140 catalog. See ./types.ts's
+// T9 header for the create_account_set_v1 retirement finding this module does
+// NOT build a surface for.
+
+/** clara.period_snapshots, filtered to one client — `payload` (the frozen
+ *  dataset) is deliberately excluded from the select; see ./types.ts's header. */
+export async function listPeriodSnapshots(clientId: string, opts: Opts = {}): Promise<PeriodSnapshotRow[]> {
+  return getRows<PeriodSnapshotRow>("period_snapshots", {
+    select: "id,client_id,reporting_period_id,period_start,period_end,kind,minted_by,minted_at,books_watermark,dataset_sha256",
+    filters: { client_id: `eq.${clientId}` },
+    order: "period_start.desc",
+    ...opts,
+  });
+}
+
+/** clara.render_jobs, filtered to one client. */
+export async function listRenderJobs(clientId: string, opts: Opts = {}): Promise<RenderJobRow[]> {
+  return getRows<RenderJobRow>("render_jobs", {
+    filters: { client_id: `eq.${clientId}` },
+    order: "enqueued_at.desc",
+    ...opts,
+  });
+}
+
+/** clara.seeding_batches, filtered to one client. */
+export async function listSeedingBatches(clientId: string, opts: Opts = {}): Promise<SeedingBatchRow[]> {
+  return getRows<SeedingBatchRow>("seeding_batches", {
+    filters: { client_id: `eq.${clientId}` },
+    order: "created_at.desc",
+    ...opts,
+  });
+}
+
+/** clara.seeding_proposals, filtered to one client (not scoped to one batch —
+ *  the panel groups client-side by `batch_id`, mirroring the seeding_batches
+ *  read above rather than a per-batch fetch per row). */
+export async function listSeedingProposals(clientId: string, opts: Opts = {}): Promise<SeedingProposalRow[]> {
+  return getRows<SeedingProposalRow>("seeding_proposals", {
+    filters: { client_id: `eq.${clientId}` },
+    order: "created_at.asc",
+    ...opts,
+  });
+}
+
+/** clara.wiki_pages, filtered to one client. */
+export async function listWikiPages(clientId: string, opts: Opts = {}): Promise<WikiPageRow[]> {
+  return getRows<WikiPageRow>("wiki_pages", {
+    filters: { client_id: `eq.${clientId}` },
+    order: "updated_at.desc",
+    ...opts,
+  });
+}
+
+/** clara.mint_month_snapshot(p_client, p_month_start, p_op_key) — bookkeeper+.
+ *  `monthStart` must be the first day of a completed month; the door itself
+ *  refuses "the month has not finished" (CLR10 period_not_complete) rather
+ *  than the UI pre-computing that answer. */
+export async function mintMonthSnapshot(
+  args: { clientId: string; monthStart: string },
+  opts: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "mint_month_snapshot",
+    { p_client: args.clientId, p_month_start: args.monthStart, p_op_key: crypto.randomUUID() },
+    opts,
+  );
+}
+
+/** clara.snapshot_state(p_snapshot) — viewer+. A READ-flavoured RPC (rides
+ *  callDoor as transport, labelled a read at this call site per AGENTS.md's
+ *  carve-out) — never a governed act, so no op_key and no caller-side act(). */
+export async function snapshotState(snapshotId: string, opts: Opts = {}): Promise<SnapshotState> {
+  return callDoor<SnapshotState>("snapshot_state", { p_snapshot: snapshotId }, opts);
+}
+
+/** clara.requeue_render_job(p_job, p_reason, p_accept_drift) — bookkeeper+.
+ *  NO op_key argument on this door (rung-0 finding — the live signature
+ *  differs from every other T9 door): idempotency rides the render_jobs
+ *  unique constraint (one live job per report_run_id+kind) instead. Refuses
+ *  CLR43 `requeue_manifest_drifted` on a re-derived manifest that no longer
+ *  matches the failed job's own pin set unless `acceptDrift` is explicitly
+ *  true — a caller reads the refusal's both-digests detail before choosing
+ *  to accept, never an automatic retry. */
+export async function requeueRenderJob(
+  args: { jobId: string; reason: string; acceptDrift?: boolean },
+  opts: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "requeue_render_job",
+    { p_job: args.jobId, p_reason: args.reason, p_accept_drift: args.acceptDrift ?? false },
+    opts,
+  );
+}
+
+/** clara.cancel_seeding_batch(p_batch, p_reason, p_op_key) — admin+. */
+export async function cancelSeedingBatch(
+  args: { batchId: string; reason: string },
+  opts: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "cancel_seeding_batch",
+    { p_batch: args.batchId, p_reason: args.reason, p_op_key: crypto.randomUUID() },
+    opts,
+  );
+}
+
+/** clara.complete_seeding_batch(p_batch, p_op_key) — admin+. */
+export async function completeSeedingBatch(batchId: string, opts: Opts = {}): Promise<unknown> {
+  return callDoor("complete_seeding_batch", { p_batch: batchId, p_op_key: crypto.randomUUID() }, opts);
+}
+
+/** clara.decline_seeding_proposal(p_proposal, p_reason, p_op_key) — admin+. */
+export async function declineSeedingProposal(
+  args: { proposalId: string; reason: string },
+  opts: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "decline_seeding_proposal",
+    { p_proposal: args.proposalId, p_reason: args.reason, p_op_key: crypto.randomUUID() },
+    opts,
+  );
+}
+
+/** clara.tick_seeding_proposal(p_proposal, p_op_key) — admin+. */
+export async function tickSeedingProposal(proposalId: string, opts: Opts = {}): Promise<unknown> {
+  return callDoor("tick_seeding_proposal", { p_proposal: proposalId, p_op_key: crypto.randomUUID() }, opts);
+}
+
+/** clara.retire_wiki_page(p_page, p_reason, p_op_key) — bookkeeper+. */
+export async function retireWikiPage(
+  args: { pageId: string; reason: string },
+  opts: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "retire_wiki_page",
+    { p_page: args.pageId, p_reason: args.reason, p_op_key: crypto.randomUUID() },
+    opts,
+  );
 }
