@@ -357,7 +357,17 @@ test("filing kind: mints with client_id NULL; refuses with a client", async (t) 
   );
 });
 
-test("filing allowlist: closed world holds exactly the six train-beta rows plus F-A7b PR-a's own (cell 40, corrected scope, widened by F-A7b PR-a)", async (t) => {
+/** True once F-A7b PR-a has landed on this chain -- gates the filing-allowlist census below so
+ *  it reads correctly whether PR-a's migration is applied or held out (a held-out chain, e.g.
+ *  db-slice-frontiers or this file run against a pre-PR-a database, must NOT expect row 8).
+ *  Migration-stem-keyed, per this estate's own idiom (x42-s5-helpers.mjs's appliedStem). */
+async function fa7bPraLanded() {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'fa7b_pr_a_client_onboarding_open$'");
+  return r.rows[0].n > 0;
+}
+
+test("filing allowlist: closed world holds exactly the six train-beta rows, plus F-A7b PR-a's own once that train has landed (cell 40, corrected scope, gated)", async (t) => {
   if (unready(t)) return;
   const r = await rootQuery("select function_name from clara.wake_fn_allowlist where wake_kind='filing' order by 1");
   const got = r.rows.map((x) => x.function_name).sort();
@@ -365,13 +375,18 @@ test("filing allowlist: closed world holds exactly the six train-beta rows plus 
   // still-unclaimed reservation. Row 8, wake_propose_client_onboarding, is F-A7b PR-a's own --
   // this cell is the closed-world floor PR-a's own migration widens, trued here in the same PR
   // (db-tests.md's succession rule: a PR that widens a registered closed world trues the floor
-  // that pins it, in the same PR, rather than leaving the next sweep to find it red).
+  // that pins it, in the same PR, rather than leaving the next sweep to find it red). GATED, not
+  // unconditional (independent review finding F2): an unconditional row-8 expectation reds any
+  // chain that holds PR-a's migration out (46/1 on the beta-only frontier).
+  const praLanded = await fa7bPraLanded();
   const expected = [
     "get_document_extract", "wake_file_document", "wake_open_firm_question",
     "wake_propose_filing_correction", "wake_propose_identifier_promotion", "wake_reattribute_document",
-    "wake_propose_client_onboarding",
+    ...(praLanded ? ["wake_propose_client_onboarding"] : []),
   ].sort();
-  assert.deepEqual(got, expected, "filing allowlist rows 1-6 (train beta) + row 8 (F-A7b PR-a); row 7 (wake_begin_client_onboarding) is F-A7b PR-b's, still unclaimed");
+  assert.deepEqual(got, expected, praLanded
+    ? "filing allowlist rows 1-6 (train beta) + row 8 (F-A7b PR-a, landed); row 7 (wake_begin_client_onboarding) is F-A7b PR-b's, still unclaimed"
+    : "filing allowlist rows 1-6 (train beta) only -- F-A7b PR-a has not landed on this chain");
 });
 
 test("filing allowlist twin: a filing credential cannot call wake_draft_entry", async (t) => {

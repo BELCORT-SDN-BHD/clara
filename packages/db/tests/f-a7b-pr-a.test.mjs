@@ -101,6 +101,43 @@ async function freshAuthorization(documentSha256, moment = "attribution") {
   return result.authorization_id;
 }
 
+/** Fabricate an ALREADY-EXPIRED but otherwise fully live/well-formed authorization for
+ *  `documentSha256`, via a direct INSERT (root) rather than `prepare_firm_egress_dispatch`.
+ *  Two reasons this can't go through the real mint path or a post-mint UPDATE: (1)
+ *  prepare_firm_egress_dispatch's TTL is a hardcoded 120s constant, not caller-tunable, so
+ *  nothing mints a short-lived one to wait out; (2) t_firm_egress_dispatch_authorizations_update
+ *  (0123 S12) refuses ANY update that touches a column other than consumed_at/invalidated_at/
+ *  invalidated_reason -- a first draft of this cell tried `update ... set expires_at = ...` and
+ *  got the trigger's OWN CLR08 ("a dispatch authorization permits exactly one terminal
+ *  transition"), not the conjunct under test. A direct INSERT is untouched by that guard (it
+ *  only fires on UPDATE/DELETE) and lets every OTHER field -- firm, purpose, moment, the
+ *  consent/activation FKs, the document's own sha256 -- be genuinely correct, isolating expiry
+ *  as the one broken conjunct (independent review F6's own requirement: same document, so the
+ *  sha-binding rung does not refuse first and mask it). */
+async function mintExpiredAuthorization(documentSha256) {
+  await ensureFirmNarrowActivated();
+  const live = await rootQuery(
+    `select a.id as activation_id, a.consent_id
+       from clara.firm_egress_purpose_activations a
+       join clara.firm_egress_purpose_consents c
+         on c.id = a.consent_id and c.firm_id = a.firm_id and c.purpose = a.purpose and c.moment = a.moment
+      where a.firm_id = $1 and a.purpose = 'firm_narrow_intake' and a.moment = 'attribution'
+        and a.deactivated_at is null and c.revoked_at is null
+      order by a.activated_at desc limit 1`,
+    [world.firms.A]);
+  assert.ok(live.rows[0], "setup: firm A holds a live firm-narrow 'attribution' activation");
+  const { activation_id, consent_id } = live.rows[0];
+  const r = await rootQuery(
+    `insert into clara.firm_egress_dispatch_authorizations
+       (firm_id, purpose, moment, consent_id, activation_id, event_seq, event_type,
+        document_sha256, issued_at, expires_at)
+       values ($1,'firm_narrow_intake','attribution',$2,$3,1,'document.ingested',$4,
+               now() - interval '200 seconds', now() - interval '1 second')
+       returning id`,
+    [world.firms.A, consent_id, activation_id, documentSha256]);
+  return r.rows[0].id;
+}
+
 /** Activate the firm-narrow 'onboarding_interview' moment too (for the wrong-moment adversarial
  *  cell) -- ONLY moment='attribution' is activated by the default fixture setup. */
 let _interviewMomentArmed = false;
@@ -437,6 +474,20 @@ test("wake_propose_client_onboarding: refuses an authorization minted for the WR
     "onboarding_interview-moment authorization presented to a proposal (which needs 'attribution')");
 });
 
+test("wake_propose_client_onboarding: refuses an authorization whose expires_at has genuinely passed -- the liveness conjunct is load-bearing, not `and true` (independent review F6)", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await freshDoc();
+  // A REAL, fabricated-expired authorization bound to THIS document's sha256 (mintExpiredAuthorization's
+  // own header explains why a post-mint UPDATE cannot do this here) -- everything but expiry is
+  // genuinely correct, so only the `expires_at > statement_timestamp()` conjunct can be what
+  // refuses this call; mutating it into `and true` would flip this cell, and only this cell.
+  const authorization = await mintExpiredAuthorization(doc.sha256);
+  await assertRaises("CLR28",
+    () => wakeProposeClientOnboarding(secret, { document: doc.documentId, authorization }),
+    "an authorization whose expiry has genuinely passed");
+});
+
 // ===========================================================================
 // 7 -- ACL: clara_wake_filing only
 // ===========================================================================
@@ -456,6 +507,32 @@ test("wake_propose_client_onboarding: refuses a non-filing wake credential at th
       [doc.documentId, "Should Not Land Sdn Bhd", JSON.stringify(validBasis()), "x", JSON.stringify(validModel()), null, opk("x")],
     ),
     "proactive credential calling wake_propose_client_onboarding");
+});
+
+test("wake_propose_client_onboarding: a wrong-kind credential presented through the clara_wake_filing EXECUTOR role is refused by the BODY's own kind check (CLR03), not merely the grant layer (independent review F1)", async (t) => {
+  if (unready(t)) return;
+  const doc = await freshDoc();
+  // The cell above proves the ROLE-level wall (clara_wake_proactive holds no EXECUTE at all, so
+  // Postgres refuses at 42501 before the function body ever runs -- it cannot tell "no grant"
+  // apart from "grant exists but assert_wake_allowed refused"). This cell isolates the SECOND
+  // wall: a 'proactive'-kind credential presented via clara_wake_filing (which DOES hold
+  // EXECUTE). wake_context() resolves wake_kind from the CREDENTIAL's own secret, never from the
+  // executing role, so the body must independently refuse this exact mismatch -- deleting the
+  // `perform clara.assert_wake_allowed(...)` line would leave this cell (and only this cell)
+  // green-to-red on a live rig, which is why it exists.
+  const { secret } = await mintWake({ kind: "proactive", firm: world.firms.A });
+  const err = await assertRaises("CLR03",
+    () => runAs(
+      wakeActor("clara_wake_filing", secret),
+      namedCall("wake_propose_client_onboarding", [
+        { name: "p_document" }, { name: "p_proposed_name" }, { name: "p_basis", cast: "jsonb" },
+        { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_authorization" }, { name: "p_op_key" },
+      ]),
+      [doc.documentId, "Should Not Land Either Sdn Bhd", JSON.stringify(validBasis()), "x", JSON.stringify(validModel()), null, opk("x")],
+    ),
+    "a proactive-kind credential executed through clara_wake_filing's own grant");
+  assert.match(err.message, /wake kind proactive may not call wake_propose_client_onboarding/,
+    "the refusal is assert_wake_allowed's own message, naming the exact kind mismatch");
 });
 
 test("grant census: wake_propose_client_onboarding reachable by clara_wake_filing ONLY (not even clara_wake_interactive, unlike wake_file_document)", async (t) => {
@@ -501,6 +578,23 @@ test("census: onboarding_agent_receipts carries forced RLS, owner-only policy, z
   assert.equal(grants.rows[0].n, 0, "no non-owner table grant on onboarding_agent_receipts");
 });
 
+test("census: onboarding_agent_receipts carries EXACTLY one RLS policy (owner-only) -- a pg_policy shape probe, distinct from the grant-count cell above (independent review F6)", async (t) => {
+  if (unready(t)) return;
+  const policies = await rootQuery(
+    `select polname, polroles::regrole[]::text[] as roles, polcmd, polpermissive
+       from pg_policy where polrelid='clara.onboarding_agent_receipts'::regclass`);
+  // Zero non-owner GRANTs (the cell above) does not by itself prove there is no EXTRA permissive
+  // policy sitting alongside the owner one -- a second policy naming clara_fn_owner again, or a
+  // policy with a permissive USING(true) that some later grant could exploit, survives that
+  // count untouched. This reads pg_policy directly.
+  assert.equal(policies.rowCount, 1, "exactly one policy on onboarding_agent_receipts");
+  const p = policies.rows[0];
+  assert.equal(p.polname, "p_onboarding_agent_receipts_owner");
+  assert.deepEqual(p.roles, ["clara_fn_owner"], "the sole policy's role is clara_fn_owner alone");
+  assert.equal(p.polcmd, "*", "FOR ALL");
+  assert.equal(p.polpermissive, true, "a permissive policy (the estate's universal owner-policy shape)");
+});
+
 // ===========================================================================
 // 9 -- D-1a: the widened kind CHECK, both directions
 // ===========================================================================
@@ -514,6 +608,22 @@ test("census: firm_open_questions.kind admits 'onboarding_proposed' and still re
     assert.match(def.rows[0].def, new RegExp(`'${old}'`), `the pre-existing value ${old} still admitted`);
   }
   assert.doesNotMatch(def.rows[0].def, /'not_a_real_kind'/, "a garbage kind is not in the admitted set");
+});
+
+test("census: firm_open_questions.kind CHECK actually REFUSES a garbage value at INSERT time -- not merely absent from its printed text (independent review F6)", async (t) => {
+  if (unready(t)) return;
+  const doc = await freshDoc();
+  // The cell above only greps the constraint's own pg_get_constraintdef TEXT -- a definition
+  // rewritten as `kind = ANY(ARRAY[...]) OR true` would still contain every expected substring
+  // and still pass that cell while admitting anything. This is the behavioral companion: a real
+  // INSERT attempt against the LIVE constraint.
+  await assert.rejects(
+    () => rootQuery(
+      `insert into clara.firm_open_questions(firm_id, document_id, kind, question_text, opened_by)
+         values ($1,$2,'not_a_real_kind','rig bad-kind probe',$3)`,
+      [world.firms.A, doc.documentId, world.users.alice]),
+    (e) => e.code === PG.checkViolation,
+    "a garbage kind value is refused by the live CHECK at insert time");
 });
 
 // ===========================================================================

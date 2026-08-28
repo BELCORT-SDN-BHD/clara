@@ -201,6 +201,17 @@ end $$;
 
 set role clara_fn_owner;
 
+-- PRECAUTIONARY, not load-bearing (independent review F3): three statements below take ACCESS
+-- EXCLUSIVE on firm_open_questions and onboarding_plans (two constraint drop/adds and three ADD
+-- COLUMNs) with the runner's default lock_timeout of 0 (wait forever). Row counts on both
+-- tables are tens on any real chain at this point in the estate's life, so the ALTERs
+-- themselves complete instantly once the lock is granted -- the exposure is lock ACQUISITION
+-- queueing behind a long-running reader on either table, not the ALTER's own duration. A short
+-- bounded wait turns an indefinite hang into a named, retryable failure
+-- (.claude/rules/db-migrations.md: "say in a comment whether the setting is load-bearing or
+-- precautionary").
+set local lock_timeout = '5s';
+
 -- =====================================================================================
 -- SS2 -- (A) D-1a: firm_open_questions.kind WIDENS BY ONE VALUE
 -- =====================================================================================
@@ -409,6 +420,15 @@ begin
   -- HERE, before it can ever re-read its own side effects and refuse itself -- caught on this
   -- train's own rig: a first draft reserved last, and a same-op_key replay tripped the
   -- duplicate-open-proposal wall against the very row its own first call had opened.
+  -- The dedupe key is (document, proposed_name, basis, authorization) -- the four fields that
+  -- IDENTIFY the proposal. p_rationale, p_model and the credential (via_wake_kind/trigger_id,
+  -- both read from wake_context() and never caller-supplied) are deliberately OUTSIDE it: a
+  -- genuine retry of the same call after a network timeout, dropped connection, or a fresh model
+  -- turn re-composing its own prose may regenerate a differently-worded rationale or bump its
+  -- own model_version for the identical proposal, and none of that should turn a legitimate
+  -- replay into an 'op_key reused with different args' conflict (0004:56-58). Reserving before
+  -- any state-dependent check (the comment above) is what makes this replay-tolerant hash safe:
+  -- the four identifying fields are exactly what the caller committed to when it minted p_op_key.
   v_dedupe := clara._reserve_op(w.firm_id, 'wake_propose_client_onboarding', p_op_key,
     clara._hash(jsonb_build_object('document', p_document, 'proposed_name', v_name,
       'basis', p_basis, 'authorization', p_authorization)));
@@ -521,21 +541,32 @@ begin
       coalesce(v_def, '(absent)') using errcode = 'CLR10';
   end if;
 
-  -- (3) D-4's registry widening, exercised (not merely described) in both directions: the seven
-  --     pre-existing digit-only items still match, the new 'f_a7b'/'_agent_receipt_src_f_a7b'
-  --     match, and a two-letter-suffix garbage value does NOT.
-  if not ('f_a2' ~ '^f_a[0-9]+[a-z]?$' and 'f_a8' ~ '^f_a[0-9]+[a-z]?$'
-      and 'f_a7b' ~ '^f_a[0-9]+[a-z]?$'
-      and '_agent_receipt_src_f_a2' ~ '^_agent_receipt_src_f_a[0-9]+[a-z]?$'
-      and '_agent_receipt_src_f_a7b' ~ '^_agent_receipt_src_f_a[0-9]+[a-z]?$') then
-    raise exception 'fa7b pr-a tail: the widened item/shim_relname regex does not admit the values it must'
+  -- (3) D-4's registry widening, exercised (not merely described) in both directions -- REAL
+  --     INSERT attempts against the LIVE constraint, not a hardcoded regex literal compared
+  --     against itself (independent review F7: the prior form asked whether 'f_a7b' ~
+  --     '^f_a[0-9]+[a-z]?$' is TRUE, which is a fact about the STRING TYPED HERE, never about
+  --     what the database actually enforces -- a tautology that stays green even if the live
+  --     constraint diverges from this file's own claim about it). ADMISSION of 'f_a7b' itself
+  --     is already proven, for real, by SS4.2's own INSERT above (no separate probe needed for
+  --     that half); this proves REFUSAL, for real, isolating each widened column in turn. Each
+  --     probe runs inside its own exception block (an implicit savepoint), so a caught
+  --     check_violation leaves no row behind -- nothing here reaches the append-only wall.
+  begin
+    insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expected_source)
+      values ('f_a7bx', '_probe_kind_a', '_agent_receipt_src_f_a7b', '_probe_source_a');
+    raise exception 'fa7b pr-a tail: a garbage item (f_a7bx, two trailing letters) was WRONGLY ADMITTED by the live item_check'
       using errcode = 'CLR10';
-  end if;
-  if ('f_a7bx' ~ '^f_a[0-9]+[a-z]?$') or ('foo' ~ '^f_a[0-9]+[a-z]?$')
-     or ('_agent_receipt_src_f_a7bx' ~ '^_agent_receipt_src_f_a[0-9]+[a-z]?$') then
-    raise exception 'fa7b pr-a tail: the widened item/shim_relname regex admits garbage it must refuse'
+  exception
+    when check_violation then null; -- expected: the live item_check refuses it, for real
+  end;
+  begin
+    insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expected_source)
+      values ('f_a99y', '_probe_kind_b', '_agent_receipt_src_f_a7bx', '_probe_source_b');
+    raise exception 'fa7b pr-a tail: a garbage shim_relname (two trailing letters) was WRONGLY ADMITTED by the live shim_relname_check'
       using errcode = 'CLR10';
-  end if;
+  exception
+    when check_violation then null; -- expected: the live shim_relname_check refuses it, for real
+  end;
   select pg_get_constraintdef(oid) into v_def from pg_constraint
    where conrelid = 'clara.agent_receipt_surfaces'::regclass and conname = 'agent_receipt_surfaces_item_check';
   if v_def is distinct from 'CHECK ((item ~ ''^f_a[0-9]+[a-z]?$''::text))' then
@@ -686,5 +717,5 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'fa7b pr-a tail: OK -- wake_propose_client_onboarding resolves at exactly 1 pg_proc row (D1 EMPTY, confirmed); firm_open_questions_kind_check is the exact widened 7-value text; the item/shim_relname registry CHECKs are exercised admitting the 7 old + f_a7b and refusing 2-letter-suffix garbage, both byte-exact; agent_receipt_surfaces holds 8 rows with f_a7b shim_exists+wired+conforms+19-col+zero-dark; agent_receipts_visible''s 19-column contract and ACL are UNCHANGED; onboarding_agent_receipts is RLS-forced, owner-only, zero app-role DML/grants; onboarding_plans carries the 3 new columns with both honesty CHECKs and the congruence FK, its column count otherwise unchanged; firm_open_questions column count unchanged at 14; wake_propose_client_onboarding is clara_wake_filing-only with exactly 1 filing-allowlist row. No table in workflow/graphile_worker/spike touched.';
+  raise notice 'fa7b pr-a tail: OK -- wake_propose_client_onboarding resolves at exactly 1 pg_proc row (D1 EMPTY, confirmed); firm_open_questions_kind_check is the exact widened 7-value text; the item/shim_relname registry CHECKs REFUSED two REAL INSERT probes (garbage item, garbage shim_relname), each caught and rolled back, byte-exact live definitions confirmed separately; agent_receipt_surfaces holds 8 rows with f_a7b shim_exists+wired+conforms+19-col+zero-dark; agent_receipts_visible''s 19-column contract and ACL are UNCHANGED; onboarding_agent_receipts is RLS-forced, owner-only, zero app-role DML/grants; onboarding_plans carries the 3 new columns with both honesty CHECKs and the congruence FK, its column count otherwise unchanged; firm_open_questions column count unchanged at 14; wake_propose_client_onboarding is clara_wake_filing-only with exactly 1 filing-allowlist row. No table in workflow/graphile_worker/spike touched.';
 end $fa7b_pra_tail$;
