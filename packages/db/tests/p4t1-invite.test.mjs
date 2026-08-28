@@ -3,6 +3,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { CLR, AGENT_USER_ID, assertRaises, opk, rootQuery, humanQuery, insertUser, createFirm, seedAdmission, getPool } from "./rig-fixtures.mjs";
 import { inviteMember, acceptInvite, revokeInvite, expireInvite, rawInvite, freshPersona } from "./p4t1-fixtures.mjs";
 
@@ -243,13 +244,29 @@ test("p4t1.accept: [F4] a stale op_key + the same token cannot be replayed by an
 //
 // THIS SUITE pushes real decoy `accept_invite` bodies through POSTGRES's OWN regexp_replace,
 // via the migration's EXACT pin SQL copied verbatim (never a JS reimplementation -- review law
-// 3, "spelling is not identity": a JS copy validates a copy, not the deployed pin) -- for FIVE
-// shapes (M2/M3 as standing regression controls the round-2 fix already got right; M5/M6/M9 as
-// the new holes round-3 closes), each proven in BOTH directions: the OLD (round-2, single-
+// 3, "spelling is not identity": a JS copy validates a copy, not the deployed pin) -- for SEVEN
+// shapes (M2/M3 as standing regression controls the round-2 fix already got right; M5/M6/M6b/M9
+// as the new holes round-3 closes), each proven in BOTH directions: the OLD (round-2, single-
 // line-strip) pin's actual outcome, and the NEW (round-3, double-strip + presence-before-order)
 // pin's actual outcome. Every mutation runs inside a rolled-back transaction; the real
-// clara.accept_invite is never touched.
+// clara.accept_invite is never touched. M10 (below) is the drift guard on PIN_F4_NEW itself --
+// review law 3 again, one level up: a hardcoded copy that silently stops matching what 0141
+// actually ships would make every cell above validate a stale pin, not the deployed one.
 // ---------------------------------------------------------------------------
+
+const N2_MIGRATION_PATH = new URL("../migrations/0141_p4_tranche1_invite_rbac.sql", import.meta.url);
+// The double-strip expression, copied VERBATIM from 0141 §K (5b) -- both F4 and F3 use it.
+const N2_STRIP_EXPR = "regexp_replace(regexp_replace(v_bad, '/\\*.*?\\*/', '', 'gs'), '--[^\\n]*', '', 'g')";
+
+test("p4t1.accept: [N2-M10 drift guard] the double-strip expression PIN_F4_NEW/PIN_F3 embed below is byte-identical to what 0141 actually ships -- exactly twice (F4 and F3)", async () => {
+  const migrationSql = readFileSync(N2_MIGRATION_PATH, "utf8");
+  const occurrences = migrationSql.split(N2_STRIP_EXPR).length - 1;
+  assert.equal(
+    occurrences,
+    2,
+    `this suite's embedded pin copy has DRIFTED from 0141's shipped strip -- found ${occurrences} occurrence(s) of the exact expression in the migration, expected exactly 2 (F4 + F3). Update PIN_F4_NEW/PIN_F3 above to match before trusting any other cell in this file.`,
+  );
+});
 
 // PIN_F4_OLD: the F4 pin exactly as it shipped at 2b8c1a7d (round 2) -- raw-prosrc presence,
 // then a SINGLE line-comment strip before the ordering check.
@@ -348,6 +365,26 @@ test("p4t1.accept: [N2-M6] a /* block comment */ naming the wall masks a genuine
   const newOutcome = await underPin(ddl, PIN_F4_NEW);
   assert.equal(oldOutcome, null, "OLD pin: FOOLED -- block comments are not line comments, so /* ... */ survives the single strip and its own text satisfies the order check");
   assert.equal(newOutcome, "CLR10", "NEW pin: block comments are stripped FIRST, so no comment text survives to mask the real dedupe-before-wall order");
+});
+
+test("p4t1.accept: [N2-M6b] a MULTI-LINE /* */ block comment (proving the 'gs' flag actually spans newlines, not merely that block-stripping exists) also cannot mask a mis-ordered body", async () => {
+  const ddl = decoyAccept(
+    `  /* preamble\n     the signed-in email does not match this invite\n     end of note */\n${RESERVE_CALL}\n${WALL_RAISE}`,
+  );
+  const oldOutcome = await underPin(ddl, PIN_F4_OLD);
+  const newOutcome = await underPin(ddl, PIN_F4_NEW);
+  assert.equal(oldOutcome, null, "OLD pin: FOOLED -- same M6 hole, multi-line changes nothing for a strip that never touches block comments at all");
+  assert.equal(newOutcome, "CLR10", "NEW pin: the 'gs' flag lets the block-comment strip span newlines (not just single-line /* */), so a three-line comment is stripped just as completely as a one-line one");
+});
+
+test("p4t1.accept: [N2-M6b correct twin] a correctly-ordered body with an early MULTI-LINE block comment mentioning the dedupe call does not false-alarm under the NEW pin -- even though a block comment surviving the OLD pin's line-only strip WOULD have false-alarmed it", async () => {
+  const ddl = decoyAccept(
+    `  /* preamble\n     this body calls clara._reserve_op below\n     end of note */\n${WALL_RAISE}\n${RESERVE_CALL}`,
+  );
+  const oldOutcome = await underPin(ddl, PIN_F4_OLD);
+  const newOutcome = await underPin(ddl, PIN_F4_NEW);
+  assert.equal(oldOutcome, "CLR10", "OLD pin: FALSE-ALARMS -- the block comment (never stripped) still carries an early '_reserve_op' mention, which the line-only strip leaves intact ahead of the real wall");
+  assert.equal(newOutcome, null, "NEW pin: the whole block comment is gone before the order check ever runs, so the correctly-ordered real code (wall, then dedupe) reads correctly and stays silent");
 });
 
 test("p4t1.accept: [N2-M9] a '--' inside a STRING LITERAL, ahead of the wall text on the same line, erases the wall from the mis-ordered body's stripped code -- the OLD pin was fooled; the NEW pin fails CLOSED because presence is now mandatory on the stripped code", async () => {

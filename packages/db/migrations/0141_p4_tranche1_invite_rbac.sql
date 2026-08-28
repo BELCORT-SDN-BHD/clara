@@ -723,7 +723,9 @@ begin
   --      strings ("does not match this invite", "_reserve_op") are BOTH confirmed absent from
   --      every SQL string literal in this file (grep this file: neither ever appears quoted
   --      except as its own genuine wall/call), so the syntax-blind strip cannot be fooled by a
-  --      literal that does not exist.
+  --      literal that does not exist. FOR THE NEXT EDITOR: if you put `--` inside a message
+  --      literal in this function, this pin will refuse the migration with "no JWT-email wall
+  --      in CODE" -- reword the literal; never weaken the pin.
   select p.prosrc into v_bad from pg_proc p where p.oid = 'clara.accept_invite(text,text,text)'::regprocedure;
   v_code := regexp_replace(regexp_replace(v_bad, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
   if position('does not match this invite' in v_code) = 0 then
