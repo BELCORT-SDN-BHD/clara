@@ -11,6 +11,7 @@ import {
   listDocumentsByIds, listActiveFilingsForClient, listFilingsForDocument,
   listOpenCandidatesForClient, listAttemptsByIds, listExtractionsForDocument,
   listRegionsForExtractionIds, listEntriesForDocument, listFirmClients, readCorrectionPreview,
+  getDocumentExtract,
 } from "./reads";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -173,6 +174,50 @@ test("readCorrectionPreview: a governed refusal (CLR) still surfaces verbatim th
           return true;
         },
       );
+    },
+  );
+});
+
+// --- T6: get_document_extract -----------------------------------------------------
+
+test("getDocumentExtract: posts get_document_extract with document/client/max_chars and returns the envelope verbatim", async () => {
+  let seenFn = ""; let seenBody: unknown;
+  const envelope = {
+    document: { id: "doc-1", sha256: "abc", original_filename: "invoice.pdf", mime_type: "application/pdf", byte_size: 1024, bytes_verified_at: "2026-04-01T00:00:00Z", page_count: 1, extraction_status: "done", document_kind: "invoice", financial_date: "2026-04-01" },
+    unassigned: false,
+    filing: { id: "filing-1", client_id: "c1", filed_at: "2026-04-02T00:00:00Z", basis: "human" },
+    extractions: [{ id: "e1", engine_id: "eng-1", engine_kind: "invoice_facts", version_n: 1, status: "done", page_count: 1, extracted_at: "2026-04-01T00:00:01Z", envelope_text: "{}", raw_sha256: null, normalization_version: null }],
+    regions: [],
+    max_chars: 20000,
+  };
+  await withMockedFetch(
+    async (url, init) => {
+      const s = String(url);
+      seenFn = s.split("/rpc/")[1] ?? "";
+      seenBody = JSON.parse(String(init?.body));
+      return okJson(envelope);
+    },
+    async () => {
+      const out = await getDocumentExtract("doc-1", "c1", 20000, { session: session() });
+      assert.deepEqual(out, envelope);
+    },
+  );
+  assert.equal(seenFn, "get_document_extract");
+  assert.deepEqual(seenBody, { p_document: "doc-1", p_client: "c1", p_max_chars: 20000 });
+});
+
+// F2 (independent review, fix-required): the `admitted` CTE legitimately
+// resolves to zero rows — a document filed to a DIFFERENT client than
+// `p_client` and not unassigned — so the RPC's own 200 response body is the
+// JSON literal `null`, not a refusal. Proves this module returns that `null`
+// VERBATIM (never asserts it away) so the caller can render an honest
+// not-available state instead of a silent blank.
+test("getDocumentExtract: returns null verbatim when the DB admits nothing (wrong-client / not-unassigned), never throws", async () => {
+  await withMockedFetch(
+    async () => okJson(null),
+    async () => {
+      const out = await getDocumentExtract("doc-1", "other-client", 20000, { session: session() });
+      assert.equal(out, null);
     },
   );
 });

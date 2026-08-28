@@ -11,6 +11,7 @@ import { DocumentEvidence } from "./document-evidence";
 import { DocumentEntries } from "./document-entries";
 import { DocumentFilingsHistory } from "./document-filings-history";
 import { DocumentAdmin } from "./document-admin";
+import { DocumentExtractPanel } from "./document-extract-panel";
 import { CorrectionWizard } from "./correction-wizard";
 import { DoorFeedback } from "./door-feedback";
 import { SectionHeader } from "@/components/common/section-header";
@@ -70,6 +71,8 @@ export function DocumentDetail({
         <SectionHeader level={4}>{t("entriesHeading")}</SectionHeader>
         <DocumentEntries entries={data.entries} />
       </section>
+
+      <DocumentExtractPanel documentId={documentId} clientId={clientId} />
 
       <DocumentAdmin document={data.document} busy={busy} act={act} onCorrect={() => setCorrecting(true)} />
 

@@ -31,10 +31,14 @@ components/close/close-a11y.test.tsx
 components/close/close-components.test.tsx
 components/close/close-keyboard.test.tsx
 components/documents/documents-a11y.test.tsx
+components/documents/documents-governance-a11y.test.tsx
+components/documents/documents-governance-keyboard.test.tsx
 components/firm/needs-you-a11y.test.tsx
 components/firm/needs-you-affordances.test.ts
 components/firm/needs-you-gaps.test.tsx
 components/journals/journals-a11y.test.tsx
+components/journals/journals-governance-a11y.test.tsx
+components/journals/journals-governance-keyboard.test.tsx
 components/journals/journals-keyboard.test.tsx
 components/journals/use-amount-input.test.ts
 components/registers/fa-particulars-fields.test.tsx
@@ -74,6 +78,8 @@ lib/firm/use-review-queue.test.ts
 lib/journals/api-compose.test.ts
 lib/journals/api.test.ts
 lib/journals/balance.test.ts
+lib/journals/diff-reads.test.ts
+lib/journals/governance-doors.test.ts
 lib/journals/use-journals-workbench.test.ts
 lib/parts/catalog.test.tsx
 lib/parts/hooks.test.ts

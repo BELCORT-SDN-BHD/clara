@@ -16,8 +16,9 @@ import { Button } from "@/components/ui/button";
 import { DraftsQueuePanel } from "@/components/journals/drafts-queue-panel";
 import { PostedPanel } from "@/components/journals/posted-panel";
 import { ComposeDialog } from "@/components/journals/compose-dialog";
+import { InterruptionsPanel } from "@/components/journals/interruptions-panel";
 
-type Tab = "drafts" | "posted";
+type Tab = "drafts" | "posted" | "clarifications";
 
 export function JournalsWorkbench({ clientId }: { clientId: string }) {
   const t = useTranslations("JournalsWorkbench");
@@ -92,12 +93,14 @@ export function JournalsWorkbench({ clientId }: { clientId: string }) {
         items={[
           { value: "drafts" as const, label: t("tabs.drafts") },
           { value: "posted" as const, label: t("tabs.posted") },
+          { value: "clarifications" as const, label: t("tabs.clarifications", { count: data.interruptions.length }) },
         ]}
         value={tab}
         onSelect={setTab}
       />
       {tab === "drafts" && (
         <DraftsQueuePanel
+          clientId={clientId}
           queueRows={data.queueRows}
           queueCounts={data.queueCounts}
           entries={data.entries}
@@ -110,6 +113,18 @@ export function JournalsWorkbench({ clientId }: { clientId: string }) {
           actingId={workbench.actingId}
           onApprove={(id, rev, attestation) => void workbench.approve(id, rev, attestation)}
           onRevise={(id, lines, rev, onOk) => void workbench.revise(id, lines, rev, onOk)}
+          onApproveRoutine={(id, rev) => void workbench.approveRoutine(id, rev)}
+          onWithdraw={(id, reason, rev, onOk) => workbench.withdraw(id, reason, rev, onOk)}
+        />
+      )}
+      {tab === "clarifications" && (
+        <InterruptionsPanel
+          interruptions={data.interruptions}
+          busy={workbench.busy}
+          err={workbench.err}
+          clr={workbench.clr}
+          actingId={workbench.actingId}
+          onAnswer={(id, answer, onOk) => void workbench.answerClarify(id, answer, onOk)}
         />
       )}
       {tab === "posted" && (

@@ -7,6 +7,7 @@
 
 import { callDoor } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
+import type { RequestAutodraftResult, RequestReextractionResult } from "./types";
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
 
@@ -119,4 +120,78 @@ export async function approveCorrection(
     { p_correction: correctionId, p_plan_hash: planHash, p_attestation: attestation || null, p_op_key: opKey() },
     opts,
   )) as { correction_id: string; status: string };
+}
+
+// --- T6 (port-wave plan §4) ------------------------------------------------------
+
+/** clara.request_autodraft(p_filing uuid) -> jsonb — bookkeeper+. Refuses
+ *  CLR10 (filing required) and CLR11 (active filing not found); every OTHER
+ *  outcome is a 200 response — types.ts's `AutodraftOutcome` header
+ *  enumerates the full closed set `admit_autodraft_task` (the core this
+ *  delegates to) can return: an admission (`admitted`/`re_admitted`/
+ *  `re_admitted_after_withdrawal`), a no-op (`noop_existing`/
+ *  `already_done`), or a real, honest hold (`skipped_direction` — the sales
+ *  lane isn't open yet; `refused_budget` — today's spend cap;
+ *  `refused_attempts` — this filing already burned its attempts;
+ *  `lane_changed` — not in a ready coding lane right now). The caller
+ *  renders `outcome` (never invents different words for it) rather than
+ *  treating anything but the two real CLRs as a failure. */
+export async function requestAutodraft(filingId: string, opts: Opts = {}): Promise<RequestAutodraftResult> {
+  const out = (await callDoor<Record<string, unknown>>("request_autodraft", { p_filing: filingId }, opts)) ?? {};
+  return {
+    outcome: String(out.outcome ?? "unknown"),
+    task_id: typeof out.task_id === "string" ? out.task_id : null,
+    reason: typeof out.reason === "string" ? out.reason : null,
+    lane: typeof out.lane === "string" ? out.lane : null,
+    reasons: out.reasons ?? null,
+    direction: typeof out.direction === "string" ? out.direction : null,
+    cap: typeof out.cap === "number" ? out.cap : null,
+    used: typeof out.used === "number" ? out.used : null,
+  };
+}
+
+/** clara.request_reextraction(p_document uuid, p_reason text, p_op_key text)
+ *  -> jsonb — bookkeeper+. A non-blank reason is required (CLR10 otherwise —
+ *  this module never sends a blank one, but the DB is still the arbiter).
+ *  Refuses CLR11 (foreign document) and CLR16 for every kind-mismatch /
+ *  no-admissible-door case (the four admission doors — reextraction,
+ *  receipt_backfill, filed_bootstrap, failed_retry — governance-doors.ts's
+ *  sibling header on this file walks each one; this client-side module
+ *  replicates none of that judgement, it only names the verb and renders the
+ *  DB's own admission label back). */
+export async function requestReextraction(documentId: string, reason: string, opts: Opts = {}): Promise<RequestReextractionResult> {
+  const out = (await callDoor<Record<string, unknown>>(
+    "request_reextraction",
+    { p_document: documentId, p_reason: reason, p_op_key: opKey() },
+    opts,
+  )) ?? {};
+  return {
+    task_id: typeof out.task_id === "string" ? out.task_id : null,
+    document_id: String(out.document_id ?? documentId),
+    version_n: typeof out.version_n === "number" ? out.version_n : null,
+    status: typeof out.status === "string" ? out.status : null,
+    reused: out.reused === true,
+    admission: String(out.admission ?? "unknown"),
+    lane: typeof out.lane === "string" ? out.lane : null,
+    extraction_id: typeof out.extraction_id === "string" ? out.extraction_id : null,
+    reason: typeof out.reason === "string" ? out.reason : null,
+  };
+}
+
+/** clara.classify_consent_evidence_document(p_document uuid, p_reason text,
+ *  p_op_key text) -> jsonb — OWNER-only (`_human_ctx(role_rank('owner'))`,
+ *  the highest floor any T6 door carries). A non-blank reason is required.
+ *  Refuses CLR11 (foreign document) and CLR28 for both "not an ingested,
+ *  bytes-verified document" (`evidence_mismatch`) and "already carries a
+ *  CODED kind, not other/consent_evidence" (`evidence_kind_conflict`) — both
+ *  rendered verbatim; this module invents no client-side eligibility check
+ *  ahead of the DB's own read. */
+export async function classifyConsentEvidenceDocument(
+  documentId: string, reason: string, opts: Opts = {},
+): Promise<{ document_id: string; document_kind: string; prior_kind: string | null }> {
+  return (await callDoor(
+    "classify_consent_evidence_document",
+    { p_document: documentId, p_reason: reason, p_op_key: opKey() },
+    opts,
+  )) as { document_id: string; document_kind: string; prior_kind: string | null };
 }

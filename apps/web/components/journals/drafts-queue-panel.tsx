@@ -13,11 +13,14 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EmptyState, StateBanner } from "@/components/common/state";
 import { Money } from "@/components/journals/money";
 import { EntryStatusBadge, QueueSectionBadge } from "@/components/journals/entry-status-badge";
 import { EntryLinesEditor } from "@/components/journals/entry-lines-editor";
+import { EntryDiffPanel } from "@/components/journals/entry-diff-panel";
+import { JournalsDoorDialog } from "@/components/journals/JournalsDoorDialog";
 import { sumLines } from "@/lib/journals/balance";
 import type {
   CoaAccountRow,
@@ -30,6 +33,7 @@ import type {
 import type { PartClr } from "@/lib/parts/hooks";
 
 export function DraftsQueuePanel({
+  clientId,
   queueRows,
   queueCounts,
   entries,
@@ -42,7 +46,12 @@ export function DraftsQueuePanel({
   actingId,
   onApprove,
   onRevise,
+  onApproveRoutine,
+  onWithdraw,
 }: {
+  /** T6: threaded to EntryDiffPanel's `get_doc_entry_diff`/`get_entry_diff`
+   *  calls, both of which take `p_client` alongside `p_entry`. */
+  clientId: string;
   queueRows: ReviewQueueRow[];
   queueCounts: ReviewQueueCounts;
   entries: JournalEntryRow[];
@@ -58,6 +67,11 @@ export function DraftsQueuePanel({
   actingId: string | null;
   onApprove: (entryId: string, expectedRevision: string, attestation: string | null) => void;
   onRevise: (entryId: string, lines: EntryLineInput[], expectedRevision: string, onOk: () => void) => void;
+  /** T6: clara.approve_routine_entry — no attestation, self-refuses CLR05 on
+   *  a high-stakes entry (governance-doors.ts's own header). */
+  onApproveRoutine: (entryId: string, expectedRevision: string) => void;
+  /** T6: clara.withdraw_draft — abandons the draft entirely. */
+  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<void>;
 }) {
   const t = useTranslations("JournalsWorkbench.drafts");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -113,6 +127,7 @@ export function DraftsQueuePanel({
               {expanded && entry && (
                 <DraftDetail
                   key={entry.revision_token}
+                  clientId={clientId}
                   entry={entry}
                   lines={entryLines}
                   linesTruncated={linesTruncated}
@@ -122,6 +137,8 @@ export function DraftsQueuePanel({
                   clr={isActing ? clr : null}
                   onApprove={onApprove}
                   onRevise={onRevise}
+                  onApproveRoutine={onApproveRoutine}
+                  onWithdraw={onWithdraw}
                 />
               )}
               {expanded && !entry && <StateBanner tone="error">{t("entryUnavailable")}</StateBanner>}
@@ -134,6 +151,7 @@ export function DraftsQueuePanel({
 }
 
 function DraftDetail({
+  clientId,
   entry,
   lines,
   linesTruncated,
@@ -143,7 +161,10 @@ function DraftDetail({
   clr,
   onApprove,
   onRevise,
+  onApproveRoutine,
+  onWithdraw,
 }: {
+  clientId: string;
   entry: JournalEntryRow;
   lines: JournalLineRow[];
   linesTruncated: boolean;
@@ -153,6 +174,10 @@ function DraftDetail({
   clr: PartClr;
   onApprove: (entryId: string, expectedRevision: string, attestation: string | null) => void;
   onRevise: (entryId: string, lines: EntryLineInput[], expectedRevision: string, onOk: () => void) => void;
+  onApproveRoutine: (entryId: string, expectedRevision: string) => void;
+  /** Returns act()'s own Promise (never rejects — hooks.ts's own contract) so
+   *  JournalsDoorDialog can await it to know when the attempt SETTLED. */
+  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<void>;
 }) {
   const t = useTranslations("JournalsWorkbench.drafts");
   // FIX-5 (independent review): this whole component is now KEYED on
@@ -265,6 +290,77 @@ function DraftDetail({
           </>
         )}
       </div>
+      {!editing && <DraftGovernanceRow clientId={clientId} entry={entry} busy={busy} onApproveRoutine={onApproveRoutine} onWithdraw={onWithdraw} />}
+    </div>
+  );
+}
+
+/** T6: the routine quick-approve, the withdraw door, and the diff/history
+ *  toggle ("the diff IS the decision", port-wave plan §5) — grouped below the
+ *  P3-shipped approve/revise row rather than folded into it, so the two
+ *  approve doors (approveEntry with an attestation, approveRoutineEntry
+ *  without one) stay visually distinct: both are real, DB-gated doors, and
+ *  the DB's own CLR05/CLR06 refusal is the arbiter of which one a given
+ *  entry actually accepts — this component invents no client-side rule about
+ *  which to prefer.
+ *
+ *  F5 (independent review, RATIFIED AS-CONDUCTED, 2026-08-28): approve-
+ *  routine below is a BARE BUTTON, not a JournalsDoorDialog, deliberately
+ *  mirroring its P3 sibling `approveEntry` (drafts-queue-panel.tsx's own
+ *  "Approve" button, same file) rather than the plan §5 table's literal word
+ *  "dialog". Conforming: §5's substance is one governed call + a verbatim
+ *  refusal in the persistent banner + no composed batch — all three hold
+ *  here exactly as they do for `approveEntry`. A no-field confirmation
+ *  dialog around a single click that IS already the confirming act (the row
+ *  is already expanded; the button already reads "Approve (routine)") would
+ *  add friction without adding a real second confirmation step. */
+function DraftGovernanceRow({
+  clientId, entry, busy, onApproveRoutine, onWithdraw,
+}: {
+  clientId: string;
+  entry: JournalEntryRow;
+  busy: boolean;
+  onApproveRoutine: (entryId: string, expectedRevision: string) => void;
+  onWithdraw: (entryId: string, reason: string, expectedRevision: string, onOk: () => void) => Promise<void>;
+}) {
+  const t = useTranslations("DraftsDocumentGovernance");
+  const [showDiff, setShowDiff] = useState(false);
+  const [withdrawReason, setWithdrawReason] = useState("");
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-dashed border-border pt-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy}
+          onClick={() => onApproveRoutine(entry.id, entry.revision_token)}
+        >
+          {t("approveRoutine.trigger")}
+        </Button>
+        <JournalsDoorDialog
+          triggerLabel={t("withdraw.trigger")}
+          triggerVariant="destructive"
+          title={t("withdraw.title")}
+          description={t("withdraw.description")}
+          confirmLabel={t("withdraw.confirm")}
+          busy={busy}
+          confirmDisabled={!withdrawReason.trim()}
+          onConfirm={() => onWithdraw(entry.id, withdrawReason.trim(), entry.revision_token, () => setWithdrawReason(""))}
+        >
+          <Textarea
+            aria-label={t("withdraw.reasonLabel")}
+            placeholder={t("withdraw.reasonPlaceholder")}
+            value={withdrawReason}
+            onChange={(e) => setWithdrawReason(e.target.value)}
+          />
+        </JournalsDoorDialog>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setShowDiff((v) => !v)}>
+          {showDiff ? t("entryDiff.hide") : t("entryDiff.show")}
+        </Button>
+      </div>
+      {showDiff && <EntryDiffPanel key={entry.id} entryId={entry.id} clientId={clientId} />}
     </div>
   );
 }

@@ -231,6 +231,42 @@ export function setFieldValue(node: Stub, value: string): void {
   });
 }
 
+/** Invokes a node's own `onClick` prop DIRECTLY, bypassing `fireEvent`'s
+ *  delegated dispatch entirely — the SAME reasoning `setFieldValue` above
+ *  already documents for `onChange`, discovered chasing a T6 door-dialog
+ *  confirm-click test that silently never reached its handler. `fireEvent`
+ *  dispatches only through `container.__listeners[type]` (this file's own
+ *  header on that function: "React 17+ delegates most interactive events to
+ *  ONE listener registered on the ROOT CONTAINER") — true for content
+ *  committed directly under `container`, but a `@base-ui/react` Dialog's
+ *  open content is a PORTAL into `document.body`, a SEPARATE delegation
+ *  root `fireEvent` never reaches (confirmed: even reading `document.body`'s
+ *  OWN captured listeners and invoking them with a synthetic event did not
+ *  reach the handler — whatever internal root-correlation react-dom's
+ *  dispatcher needs did not resolve correctly for a node whose commit target
+ *  is a portal). Reading `__reactProps$…` directly (react-dom stamps this on
+ *  every committed host node) and calling `onClick` sidesteps the whole
+ *  delegation question. Call this INSIDE `h.act(...)` for a control INSIDE
+ *  an open portaled Dialog whose `onClick` is the CALLER'S OWN plain
+ *  function (a door dialog's confirm button, wired straight to `onConfirm`)
+ *  — proven end to end (journals-governance-keyboard.test.tsx's WITHDRAW
+ *  confirm test). It does NOT work for `@base-ui/react`'s own `DialogClose`
+ *  (Cancel): that component's internal click handler chain
+ *  (FloatingFocusManager) calls `event instanceof KeyboardEvent`, and this
+ *  harness's fake DOM defines no such global — a SEPARATE, deeper gap this
+ *  function does not close (recorded, not fixed, at the T6 fix-round site
+ *  that found it). A plain host button OUTSIDE any portal still works fine
+ *  through `h.fireEvent`. */
+export function clickButton(node: Stub): void {
+  const propsKey = Object.keys(node as object).find((k) => k.startsWith("__reactProps"));
+  const props = propsKey ? (node as unknown as Record<string, { onClick?: (e: unknown) => void }>)[propsKey] : undefined;
+  props?.onClick?.({
+    type: "click", target: node, currentTarget: node, bubbles: true, cancelable: true,
+    defaultPrevented: false, isTrusted: true, timeStamp: Date.now(),
+    preventDefault() {}, stopPropagation() {}, persist() {},
+  });
+}
+
 type Root = { render: (el: unknown) => void; unmount: () => void };
 let createRoot: ((c: unknown) => Root) | null = null;
 
