@@ -176,12 +176,41 @@ export type OpenItemAllocationRow = {
 const ALLOCATION_COLS =
   "id,client_id,domain,item_id,application_group,operation_kind,reverses_allocation_id,amount_cents,reason,created_by,created_at";
 
-/** clara.open_item_allocations, filtered to the given item ids — the raw rows the
- *  unallocate surface groups CLIENT-SIDE by `application_group` for display (a pure
- *  grouping of already-fetched facts, never a legality decision: whether a group is
- *  still unallocatable is `unallocate_group`'s own refusal to make, rendered verbatim
- *  if it fires). Empty `itemIds` short-circuits to `[]` without a network call — an
- *  `item_id=in.()` filter is malformed PostgREST syntax, not merely an empty result. */
+export type ApplicationGroup = { application_group: string; rows: OpenItemAllocationRow[] };
+
+/** PURE grouping over already-fetched facts (the staffAdvanceEnrolCandidates
+ *  precedent, EnrolAccountDialog.tsx — extracted so the narrowing has its own
+ *  test independent of rendering). Groups by `application_group`, keeping
+ *  only groups whose own operation is 'allocate' or 'apply' (an 'unallocate'
+ *  row is itself a negation, never a candidate to negate again) AND that
+ *  have no OTHER row in this same set pointing `reverses_allocation_id` at
+ *  one of their own rows (already unallocated, visibly, in what was just
+ *  read). This is NOT the full legality check — `unallocate_group` itself
+ *  owns that, and a real CLR10 (not_unallocatable / already_unallocated)
+ *  renders verbatim if this presentation filter ever misses a case the DB
+ *  still catches (e.g. a change committed after this read). Rows within
+ *  each group keep their own `amount_cents` — this function never sums
+ *  one. */
+export function unallocateCandidateGroups(rows: OpenItemAllocationRow[]): ApplicationGroup[] {
+  const reversedIds = new Set(rows.filter((r) => r.reverses_allocation_id !== null).map((r) => r.reverses_allocation_id as string));
+  const byGroup = new Map<string, OpenItemAllocationRow[]>();
+  for (const r of rows) {
+    if (r.operation_kind === "unallocate") continue;
+    if (reversedIds.has(r.id)) continue;
+    const existing = byGroup.get(r.application_group);
+    if (existing) existing.push(r);
+    else byGroup.set(r.application_group, [r]);
+  }
+  return Array.from(byGroup.entries()).map(([application_group, groupRows]) => ({ application_group, rows: groupRows }));
+}
+
+/** clara.open_item_allocations, filtered to the given item ids — the raw rows
+ *  `unallocateCandidateGroups` above groups for display (a pure grouping of
+ *  already-fetched facts, never a legality decision: whether a group is
+ *  still unallocatable is `unallocate_group`'s own refusal to make, rendered
+ *  verbatim if it fires). Empty `itemIds` short-circuits to `[]` without a
+ *  network call — an `item_id=in.()` filter is malformed PostgREST syntax,
+ *  not merely an empty result. */
 export function loadOpenItemAllocationsForItems(
   session: SessionTokenAccessor,
   clientId: string,
