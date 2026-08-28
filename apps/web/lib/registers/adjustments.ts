@@ -209,16 +209,18 @@ export function adjustmentRunDue(session: SessionTokenAccessor, clientId: string
 // file's header for the full grounding on every door below.
 // =====================================================================
 
-// F9 (independent review, nit, 2026-08-28): `propose_adjustment_template`'s
-// own line-validation loop reads only `account_code`/`debit_cents`/
-// `credit_cents` off each element — unlike journal/staff-advance lines, it
-// never rejects an unrecognised key, so a per-line `description` MAY ride
-// along uninspected. Whether `clara._adj_canon_lines` (the content-hash
-// canonicalisation the door runs before persisting) preserves or strips it
-// is UNVERIFIED — this module does not claim either way. Deliberately not
-// exposed by this dialog: the memo_template field is already the one
-// description every occurrence carries, and adding an unverified per-line
-// field risks silently promising persistence the DB may not honour.
+// F9 (independent review, nit — trued 2026-08-28 re-verify): `propose_
+// adjustment_template`'s own line-validation loop reads only `account_code`/
+// `debit_cents`/`credit_cents` off each element — unlike journal/staff-
+// advance lines, it never rejects an unrecognised key, so a per-line
+// `description` rides along. CONFIRMED (not merely "may"): `clara._adj_
+// canon_lines` — the content-hash canonicalisation the door runs before
+// persisting — DOES carry it through: `nullif(btrim(coalesce(x.value ->>
+// 'description', '')), '')`, byte-identical at both the 0140 and 0141
+// catalog. Deliberately still NOT exposed by this dialog: the memo_template
+// field is already the one description every occurrence carries, and this
+// train's scope stops at the common case — that decision stands on its own
+// footing now, not on an unresolved "might not persist" doubt.
 export type AdjustmentTemplateLineInput = {
   account_code: string;
   debit_cents: number;

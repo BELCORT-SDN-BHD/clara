@@ -134,3 +134,77 @@ test("a governed refusal (upsert_account) renders verbatim in the register's own
     },
   );
 });
+
+// F5 (independent review, nit, 2026-08-28): editing a currently-inactive
+// account REACTIVATES it (upsert_account's own ON CONFLICT always sets
+// is_active=true) — the dialog must say so plainly, and only for a row that
+// is actually inactive.
+test("F5: editing an INACTIVE account shows the reactivation hint; editing an ACTIVE account does not", async () => {
+  const MIXED_ACCOUNTS = [
+    { client_id: "c1", account_code: "5100", name: "Rent expense", account_type: "expense", account_class: null, special_acc_type: null, is_active: true },
+    { client_id: "c1", account_code: "5200", name: "Old vendor fees", account_type: "expense", account_class: null, special_acc_type: null, is_active: false },
+  ];
+  await withMockedEnv(
+    (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("/rest/v1/coa_accounts?")) return jsonResponse(MIXED_ACCOUNTS);
+      throw new Error(`unexpected fetch: ${u}`);
+    }) as typeof fetch,
+    async () => {
+      const h = await renderComponent(App());
+      const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+      body.appendChild(h.container);
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        assert.match(h.text(), /Old vendor fees \(Inactive\)/, "the inactive row's own marker must render (sanity check on the fixture)");
+
+        // hookHarness.ts's own `find` returns only the FIRST match — walk
+        // manually for the SECOND Edit trigger (the inactive row's; the
+        // active row's Edit renders first, in table order).
+        const editTriggers: unknown[] = [];
+        (function walk(n: { tagName?: string; childNodes?: unknown[] }) {
+          if (n.tagName === "BUTTON" && textOf(n as never) === "Edit") editTriggers.push(n);
+          for (const c of n.childNodes ?? []) walk(c as never);
+        })(h.container as never);
+        assert.equal(editTriggers.length, 2, "both rows' own Edit triggers must render");
+        const inactiveEditTrigger = editTriggers[1];
+        assert.ok(inactiveEditTrigger, "the inactive row's own Edit trigger must render");
+        await h.fireEvent(inactiveEditTrigger as never, "click");
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        assert.match(
+          textOf(body as never),
+          /This account is currently inactive — confirming this edit reactivates it\./,
+          "editing an INACTIVE account must show the reactivation hint",
+        );
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 5; i++) await h.settle();
+      }
+    },
+  );
+});
+
+test("F5: editing an ACTIVE account does NOT show the reactivation hint", async () => {
+  await withMockedEnv(mockFetch, async () => {
+    const h = await renderComponent(App());
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      const editTrigger = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Edit");
+      assert.ok(editTrigger, "the active row's Edit trigger must render");
+      await h.fireEvent(editTrigger! as never, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      assert.doesNotMatch(
+        textOf(body as never),
+        /confirming this edit reactivates it/,
+        "editing an ALREADY-ACTIVE account must never show the reactivation hint",
+      );
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
