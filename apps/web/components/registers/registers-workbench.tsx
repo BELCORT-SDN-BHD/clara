@@ -13,8 +13,8 @@
 // accounting object with a lifecycle), and placed FIRST because it is the
 // earliest-lifecycle object of the six. `client-workspace-nav.tsx`'s
 // CLIENT_TABS stays at its current eight entries — that array was NOT
-// touched by this seam. OpeningRegister below is a NotBuiltNote placeholder;
-// T2 replaces its content with the real workbench when it builds.
+// touched by this seam. OpeningRegister (T2, this build) is now the real
+// seed-lifecycle workbench — components/registers/opening-register.tsx.
 import { useTranslations } from "next-intl";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { SectionTabs } from "@/components/common/section-tabs";
@@ -60,7 +60,7 @@ export function RegistersWorkbench({ clientId }: { clientId: string }) {
         value={active}
         onSelect={setTab}
       />
-      {active === "opening" ? <OpeningRegister /> : null}
+      {active === "opening" ? <OpeningRegister clientId={clientId} /> : null}
       {active === "aging" ? <AgingRegister clientId={clientId} /> : null}
       {active === "fixedAssets" ? <FixedAssetsRegister clientId={clientId} /> : null}
       {active === "adjustments" ? <AdjustmentsRegister clientId={clientId} /> : null}
