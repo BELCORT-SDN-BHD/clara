@@ -27,6 +27,19 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
   return null;
 }
 
+function findAllIn(root: Node, predicate: (n: Node) => boolean): Node[] {
+  const out: Node[] = [];
+  (function walk(n: Node) {
+    if (predicate(n)) out.push(n);
+    for (const c of n.childNodes ?? []) walk(c);
+  })(root);
+  return out;
+}
+
+function byAriaLabel(label: string) {
+  return (n: Node) => (n as unknown as { getAttribute?: (a: string) => string | null }).getAttribute?.("aria-label") === label;
+}
+
 /** The SAME direct-prop-invocation mechanism as hookHarness.ts's own
  *  `setFieldValue` (its header: needed for any base-ui-wrapped control whose
  *  own wrapper reads `event.currentTarget`/`event.nativeEvent` before ever
@@ -284,4 +297,86 @@ test("Book Application dialog OPEN with a real allocation row has zero a11y viol
       for (let i = 0; i < 5; i++) await h.settle();
     }
   });
+});
+
+// F2 REGRESSION (independent review, required ride-along, 2026-08-28): the F2
+// fix (threading book_staff_advance_application's real `status: 'drafted'`
+// receipt through act()'s onOk into the honest "sent to a checker" banner)
+// was measured correct by hand but shipped with no pinning test — the
+// reviewer's mutant F2m (dropping the onOk thread, back to a discarded
+// return value) stayed green. This drives a REAL SUCCESSFUL submit (probe-E
+// shape: a mocked `status: 'drafted'` receipt, not a refusal) through the
+// Book Application dialog's own Confirm button and asserts the drafted
+// banner renders with the real entry id — never a second approval surface.
+test("F2 regression: a status:'drafted' receipt from book_staff_advance_application renders the honest drafted banner", async () => {
+  const DRAFTED_RECEIPT = { status: "drafted", entry_id: "e1234567-89ab-cdef-0123-456789abcdef", application_ids: [], allocated_cents: 50000 };
+  await withMockedEnv(
+    (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("/rpc/book_staff_advance_application")) return jsonResponse(DRAFTED_RECEIPT);
+      return mockFetchWithOutstanding(url);
+    }) as typeof fetch,
+    async () => {
+      const h = await renderComponent(App());
+      const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+      body.appendChild(h.container);
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Book application"));
+        assert.ok(trigger, "the Book Application trigger must render");
+        await h.fireEvent(trigger! as never, "click");
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        // The reason field has no aria-label (a <Label htmlFor>, not an
+        // aria-label) -- found by its own id instead.
+        const reasonField = findIn(
+          body as never,
+          (n) => (n as unknown as { getAttribute?: (a: string) => string | null }).getAttribute?.("id") === "sa-reason",
+        );
+        assert.ok(reasonField, "the reason field must be reachable inside the dialog");
+        await h.act(() => { driveHandler(reasonField as never, "onChange", { value: "August payroll deduction" }); });
+
+        // canSubmit only requires the LINES to balance and carry a positive
+        // debit -- not that every line's account_code is filled (the DB owns
+        // that validation; this dialog's own client-side gate is balance-only)
+        // -- so the two default empty-account lines are left as-is and only
+        // their amounts are set.
+        const debitInputs = findAllIn(body as never, byAriaLabel("Debit"));
+        assert.equal(debitInputs.length, 2, "both default lines' debit fields must be reachable");
+        await h.act(() => { driveHandler(debitInputs[0] as never, "onChange", { value: "500.00" }); });
+
+        const creditInputs = findAllIn(body as never, byAriaLabel("Credit"));
+        assert.equal(creditInputs.length, 2, "both default lines' credit fields must be reachable");
+        await h.act(() => { driveHandler(creditInputs[1] as never, "onChange", { value: "500.00" }); });
+
+        const addAllocation = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Add allocation"));
+        assert.ok(addAllocation, "the Add allocation control must render");
+        await h.act(() => { driveHandler(addAllocation as never, "onClick"); });
+        for (let i = 0; i < 2; i++) await h.settle();
+
+        const allocationAmount = findIn(body as never, byAriaLabel("Amount"));
+        assert.ok(allocationAmount, "the allocation's own amount field must be reachable");
+        await h.act(() => { driveHandler(allocationAmount as never, "onChange", { value: "500.00" }); });
+        for (let i = 0; i < 2; i++) await h.settle();
+
+        const confirmButton = findIn(
+          body as never,
+          (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Book application") && (n as unknown) !== (trigger as unknown),
+        );
+        assert.ok(confirmButton, "the dialog's own Confirm button must be reachable, distinct from the trigger");
+        assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, false, "every canSubmit condition is now satisfied -- Confirm must be enabled");
+
+        await h.act(() => { driveHandler(confirmButton as never, "onClick"); });
+        for (let i = 0; i < 8; i++) await h.settle();
+
+        const bodyText = textOf(body as never);
+        assert.match(bodyText, /Application drafted/, "the honest drafted-branch banner must render -- book_staff_advance_application's own real status, never assumed posted");
+        assert.match(bodyText, /e1234567/, "the real entry id (a short id chip) must render, not a placeholder");
+        assert.doesNotMatch(bodyText, /CLR/, "a successful drafted receipt is not a refusal -- no CLR code should render");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 5; i++) await h.settle();
+      }
+    },
+  );
 });
