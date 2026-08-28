@@ -1,0 +1,214 @@
+"use client";
+
+// The particulars form fields shared by complete_fixed_asset_particulars,
+// revise_fixed_asset_particulars, and the needs-you inline
+// `fixed_asset_incomplete` affordance — the EXACT closed key set
+// `clara._fa_validate_particulars` accepts (lib/registers/fixed-assets.ts's
+// `FaParticularsInput`). A pure controlled-fields component: the caller owns
+// the `FaParticularsInput` state and passes it down whole, so complete/
+// revise/the inline affordance share one field layout without sharing a
+// dialog shell (each of those is a genuinely different door).
+
+import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/common/native-select";
+import { parseAmountToCents, fmtCents } from "@/lib/registers/money";
+import type { FaParticularsInput } from "@/lib/registers/fixed-assets";
+
+const METHODS = ["straight_line", "reducing_balance", "none"] as const;
+
+/** F1 (independent review, fix-required, 2026-08-28): the residual field used
+ *  to re-derive its displayed string from `residualCents` on every render
+ *  (`(cents/100).toFixed(2)`) — the exact bug components/journals/
+ *  use-amount-input.ts exists to kill (its own header: React's
+ *  `restoreStateOfTarget` resets a controlled input back to the DERIVED
+ *  string whenever the parent re-renders with the SAME cents value the last
+ *  keystroke produced, discarding every digit after the first — typing "5"
+ *  then "0" landed RM5.00, not RM50.00). Fixed the SAME way that file fixes
+ *  it: hold the raw typed string in local state, resync from the prop ONLY
+ *  when it changed for a reason other than this hook's own last emission —
+ *  but parse with lib/registers/money.ts's precise BigInt
+ *  `parseAmountToCents` (never a float `Math.round(n*100)`), since this is
+ *  the registers domain's own money module, not journals'. Exported so the
+ *  regression this exists to prove — typing "5" then "0" — is testable via
+ *  test/hookHarness.ts's `renderHook`, the same instrument
+ *  use-amount-input.test.ts uses for the identical property. */
+export function useResidualCentsField(
+  residualCents: number | null | undefined,
+  onChange: (cents: number | null) => void,
+) {
+  const [raw, setRaw] = useState(() => (residualCents != null ? (residualCents / 100).toFixed(2) : ""));
+  const lastEmitted = useRef<number | null>(residualCents ?? null);
+
+  useEffect(() => {
+    const external = residualCents ?? null;
+    if (external !== lastEmitted.current) {
+      setRaw(external != null ? (external / 100).toFixed(2) : "");
+      lastEmitted.current = external;
+    }
+  }, [residualCents]);
+
+  function handleChange(v: string) {
+    setRaw(v);
+    const parsed = v.trim() === "" ? null : parseAmountToCents(v);
+    lastEmitted.current = parsed;
+    onChange(parsed);
+  }
+
+  return { raw, handleChange };
+}
+
+export function FaParticularsFields({
+  idPrefix,
+  value,
+  onChange,
+}: {
+  idPrefix: string;
+  value: FaParticularsInput;
+  onChange: (next: FaParticularsInput) => void;
+}) {
+  const t = useTranslations("FixedAssetsDepreciation.particulars");
+
+  const patch = (p: Partial<FaParticularsInput>) => onChange({ ...value, ...p });
+  const residual = useResidualCentsField(value.residual_cents, (cents) => patch({ residual_cents: cents }));
+
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${idPrefix}-method`}>{t("methodLabel")}</Label>
+        <NativeSelect
+          id={`${idPrefix}-method`}
+          value={value.method}
+          onChange={(e) => {
+            const method = e.target.value as FaParticularsInput["method"];
+            // Method drives which drivers are admitted (the door's own CLR37
+            // `axis:"drivers"` refusal) — clearing the inapplicable ones here
+            // means the confirm click never carries a stale life/rate the new
+            // method would refuse.
+            patch({
+              method,
+              useful_life_months: method === "none" ? null : value.useful_life_months,
+              rate_bps: method === "reducing_balance" ? value.rate_bps : null,
+            });
+          }}
+        >
+          {METHODS.map((m) => (
+            <option key={m} value={m}>
+              {t(`methods.${m}`)}
+            </option>
+          ))}
+        </NativeSelect>
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${idPrefix}-start`}>{t("startDateLabel")}</Label>
+        <Input
+          id={`${idPrefix}-start`}
+          type="date"
+          value={value.start_date}
+          onChange={(e) => patch({ start_date: e.target.value })}
+        />
+      </div>
+      {value.method !== "none" ? (
+        <div className="grid gap-1.5">
+          <Label htmlFor={`${idPrefix}-life`}>{t("usefulLifeLabel")}</Label>
+          <Input
+            id={`${idPrefix}-life`}
+            type="number"
+            min={1}
+            inputMode="numeric"
+            value={value.useful_life_months ?? ""}
+            onChange={(e) => patch({ useful_life_months: e.target.value === "" ? null : Number(e.target.value) })}
+          />
+        </div>
+      ) : null}
+      {value.method === "reducing_balance" ? (
+        <div className="grid gap-1.5">
+          <Label htmlFor={`${idPrefix}-rate`}>{t("rateBpsLabel")}</Label>
+          <Input
+            id={`${idPrefix}-rate`}
+            type="number"
+            min={1}
+            max={10000}
+            inputMode="numeric"
+            value={value.rate_bps ?? ""}
+            onChange={(e) => patch({ rate_bps: e.target.value === "" ? null : Number(e.target.value) })}
+          />
+        </div>
+      ) : null}
+      {value.method !== "none" ? (
+        <div className="grid gap-1.5">
+          <Label htmlFor={`${idPrefix}-residual`}>{t("residualLabel")}</Label>
+          <Input
+            id={`${idPrefix}-residual`}
+            inputMode="decimal"
+            placeholder="0.00"
+            value={residual.raw}
+            onChange={(e) => residual.handleChange(e.target.value)}
+          />
+          {value.residual_cents != null ? (
+            <p className="text-xs text-muted-foreground">{fmtCents(value.residual_cents)}</p>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="grid gap-1.5 sm:col-span-2">
+        <Label htmlFor={`${idPrefix}-desc`}>{t("descriptionLabel")}</Label>
+        <Input
+          id={`${idPrefix}-desc`}
+          value={value.description ?? ""}
+          onChange={(e) => patch({ description: e.target.value === "" ? null : e.target.value })}
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor={`${idPrefix}-caclass`}>{t("caClassLabel")}</Label>
+        <Input
+          id={`${idPrefix}-caclass`}
+          value={value.ca_class ?? ""}
+          onChange={(e) => patch({ ca_class: e.target.value === "" ? null : e.target.value })}
+        />
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={value.is_commercial_vehicle ?? false}
+          onChange={(e) => patch({ is_commercial_vehicle: e.target.checked })}
+        />
+        {t("commercialVehicleLabel")}
+      </label>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={value.is_new ?? false} onChange={(e) => patch({ is_new: e.target.checked })} />
+        {t("isNewLabel")}
+      </label>
+    </div>
+  );
+}
+
+/** The empty starting value every complete/revise/inline-affordance form
+ *  seeds from — `method`/`start_date` are the door's own two ALWAYS-required
+ *  fields (`_fa_validate_particulars`: every method needs a start_date, even
+ *  `none`). */
+export const EMPTY_PARTICULARS: FaParticularsInput = {
+  method: "straight_line",
+  useful_life_months: null,
+  rate_bps: null,
+  residual_cents: null,
+  start_date: "",
+  description: null,
+  ca_class: null,
+  is_commercial_vehicle: null,
+  is_new: null,
+};
+
+/** Client-side completeness gate for the CONFIRM button — a convenience, not
+ *  a wall (the door itself is the wall and re-validates everything). Mirrors
+ *  `_fa_validate_particulars`'s own required-field shape so a human is not
+ *  sent to a CLR37 refusal for an empty date field alone. */
+export function particularsReadyToSubmit(v: FaParticularsInput): boolean {
+  if (!v.start_date) return false;
+  if (v.method === "straight_line") return v.useful_life_months != null && v.useful_life_months > 0;
+  if (v.method === "reducing_balance") {
+    return v.useful_life_months != null && v.useful_life_months > 0 && v.rate_bps != null && v.rate_bps >= 1 && v.rate_bps <= 10000;
+  }
+  return true; // method === "none"
+}
