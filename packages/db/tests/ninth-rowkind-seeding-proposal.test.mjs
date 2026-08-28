@@ -172,7 +172,6 @@ test("裁-17 zero/one/two-client differential: the row appears IFF an open propo
   const oneRowsAfter = seedingRows(page2).filter((r) => r.client_id === one.client);
   assert.equal(oneRowsAfter.length, 1, "client ONE's row is UNAFFECTED by client TWO's decisions");
 
-  w._nine = { zero: zero.client, one: one.client, two, oneBatchId, twoBatchAId, twoBatchBId };
   noteLane("裁-17 differential: 0/1/2-client population proven, batch-level aggregation across two open batches proven, decide-to-disappear symmetry proven");
 });
 
@@ -360,16 +359,28 @@ test("MED-3 (Codex cross-model review, fec6ab5b): ALL NINE row_kinds, produced t
 
 test("裁-17 cross-firm isolation: firm B never sees firm A's seeding_proposal row", async () => {
   fail0017(live);
-  const { users } = w;
-  assert.ok(w._nine, "mandatory setup: the first cell's fixtures (client ONE/TWO) must have run");
+  const { users, firms } = w;
+
+  // rev-nr LOW (fec6ab5b re-verify): this cell used to depend on w._nine, assigned
+  // at the very END of the first cell — a red anywhere earlier in that cell (before
+  // it reaches that assignment) would ALSO red this one, even though isolation was
+  // never actually exercised. OWN fixture, so this cell can fail (or pass)
+  // independently of every other test in this file.
+  const isoClient = await onboardingClient(users.alice, `${w.prefix}_seediso`);
+  const isoDoc = await priorGlDoc(users.alice, { firm: firms.A, client: isoClient.client });
+  await createSeedingBatch({
+    client: isoClient.client, document: isoDoc.documentId,
+    proposals: [proposal("wf:iso", "Cross-firm isolation probe fact.")],
+  });
 
   const daveEnvelope = await listReviewQueue(humanPersona(users.dave), { scope: {}, limit: 500 });
   const daveRows = seedingRows(daveEnvelope);
-  assert.equal(daveRows.length, 0, "firm B (dave) sees ZERO seeding_proposal rows firm-wide (client ONE/TWO both live in firm A)");
-  assert.ok(!daveRows.some((r) => r.client_id === w._nine.one), "firm A's client ONE never appears in firm B's envelope");
+  assert.equal(daveRows.length, 0, "firm B (dave) sees ZERO seeding_proposal rows firm-wide (the isolation client lives in firm A)");
+  assert.ok(!daveRows.some((r) => r.client_id === isoClient.client), "firm A's isolation client never appears in firm B's envelope");
 
-  // The positive control: alice (firm A) still sees client ONE's row — proves
-  // the isolation above is a real firm boundary, not an accidentally-empty read.
+  // The positive control: alice (firm A) still sees the isolation client's row —
+  // proves the isolation above is a real firm boundary, not an accidentally-empty
+  // read (e.g. a broken fixture that never landed a row for anyone).
   const aliceEnvelope = await listReviewQueue(humanPersona(users.alice), { scope: {}, limit: 500 });
-  assert.ok(seedingRows(aliceEnvelope).some((r) => r.client_id === w._nine.one), "positive control: firm A (alice) still sees client ONE's row");
+  assert.ok(seedingRows(aliceEnvelope).some((r) => r.client_id === isoClient.client), "positive control: firm A (alice) still sees the isolation client's row");
 });

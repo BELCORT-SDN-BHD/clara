@@ -418,8 +418,10 @@ begin
   -- clara.list_review_queue for real, and assert a row_kind='seeding_proposal' row
   -- for that client comes back with the right shape -- then force the subtransaction
   -- to unwind (the 0018/0019/0020 CLR99-probe idiom) so NONE of the fixture rows (or
-  -- the local GUC) survive past this block; the rest of the migration already
-  -- committed the real splice before this probe ever ran.
+  -- the local GUC) survive past this block. The probe sees the SPLICED body because
+  -- `execute v_next` above already ran IN THIS SAME transaction (the runner wraps the
+  -- whole file in one) -- not because anything has committed; the splice and this
+  -- probe's forced rollback both commit together as one unit when the file finishes.
   -- =====================================================================
   begin
     v_probe_user := gen_random_uuid();
