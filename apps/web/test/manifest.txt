@@ -1,0 +1,97 @@
+# apps/web test manifest — T0 seam (port-wave plan §3.1).
+#
+# One test file path per line, relative to apps/web/. This is the ONE
+# checked-in source of truth for which files `pnpm test` runs — it replaces
+# the single 68-path, one-line `--test` argument list package.json's `test`
+# script used to hardcode (a 2 KB line a git conflict could silently truncate
+# with nothing going red; apps/web/AGENTS.md: the Node 20 test runner does
+# NOT directory-scan for `.test.ts`/`.test.tsx`).
+#
+# apps/web/scripts/run-tests.mjs reads this file and feeds every line to
+# `node --test`. apps/web/scripts/check-test-manifest.mjs (wired into `pnpm
+# lint`) globs every real `*.test.{ts,tsx,js,jsx,mjs,cjs}` file on disk and
+# fails the build if one is missing here — a file added to the tree without a
+# line here now goes RED, not silently unrun.
+#
+# One path per line, alphabetical by directory then name: an eleven-train
+# wave each appending 2-5 lines lands them in different alphabetical
+# neighborhoods, so a merge conflict is between the FEW trains that share a
+# directory, never a whole-line collision across all eleven (port-wave plan
+# §3.1's own reasoning for moving off the single line).
+#
+# Blank lines and lines starting with # are ignored by both scripts above.
+
+components/bank/bank-a11y.test.tsx
+components/bank/matching-section.test.tsx
+components/bank/reconciliation-section.test.tsx
+components/close/close-a11y.test.tsx
+components/close/close-components.test.tsx
+components/close/close-keyboard.test.tsx
+components/documents/documents-a11y.test.tsx
+components/firm/needs-you-a11y.test.tsx
+components/firm/needs-you-gaps.test.tsx
+components/journals/journals-a11y.test.tsx
+components/journals/journals-keyboard.test.tsx
+components/journals/use-amount-input.test.ts
+components/reports/reports-components.test.tsx
+lib/bank/agency-doors.test.ts
+lib/bank/doors.test.ts
+lib/bank/error-kind.test.ts
+lib/bank/exception-doors.test.ts
+lib/bank/match-doors.test.ts
+lib/bank/match-reads.test.ts
+lib/bank/money.test.ts
+lib/bank/reads.test.ts
+lib/bank/recon-doors.test.ts
+lib/bank/recon-reads.test.ts
+lib/bank/reload-on-change.test.ts
+lib/bank/table-reads.test.ts
+lib/business-date.test.ts
+lib/close/api.test.ts
+lib/documents/bytes.test.ts
+lib/documents/copy.test.ts
+lib/documents/doors.test.ts
+lib/documents/intake.test.ts
+lib/documents/loaders.test.ts
+lib/documents/open-in-new-tab.test.ts
+lib/documents/reads.test.ts
+lib/documents/runtime-wire.test.ts
+lib/documents/useUploadQueue.test.ts
+lib/doors.test.ts
+lib/firm/needs-you-gaps.test.ts
+lib/firm/needs-you.test.ts
+lib/firm/reads.test.ts
+lib/firm/use-async-read.test.ts
+lib/firm/use-review-queue.test.ts
+lib/journals/api-compose.test.ts
+lib/journals/api.test.ts
+lib/journals/balance.test.ts
+lib/journals/use-journals-workbench.test.ts
+lib/parts/catalog.test.tsx
+lib/parts/hooks.test.ts
+lib/parts/single-fire-guard.test.ts
+lib/read.test.ts
+lib/registers/accounts.test.ts
+lib/registers/adjustments.test.ts
+lib/registers/aging.test.ts
+lib/registers/fixed-assets.test.ts
+lib/registers/knowledge.test.ts
+lib/registers/staff-advances.test.ts
+lib/reports/api.test.ts
+lib/session-accessor.test.ts
+lib/wire.test.ts
+test/a11yRules.test.ts
+test/keyboardWalk.test.ts
+tests/apiLimitBanner.test.mjs
+tests/client-scope.test.ts
+tests/focusRailSubscription.test.mjs
+tests/invite-verification.test.ts
+tests/proxy-matcher.test.ts
+tests/public-key.test.ts
+tests/response-state.test.ts
+tests/safe-redirect.test.ts
+tests/same-origin.test.ts
+tests/streamAuthority.test.mjs
+tests/streamParser.test.mjs
+tests/streamReattach.test.mjs
+tests/token-contrast.test.ts

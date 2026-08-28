@@ -968,5 +968,16 @@
     "passwordLabel": "Password",
     "submit": "Continue",
     "submitting": "Saving…"
-  }
+  },
+  "CloseLifecycle": {},
+  "OpeningCarryDown": {},
+  "FixedAssetsDepreciation": {},
+  "AdjustmentsAccounts": {},
+  "StaffAdvances": {},
+  "DraftsDocumentGovernance": {},
+  "CodingQuestionsSignals": {},
+  "ArApCounterparty": {},
+  "ReportsSnapshotsSeeding": {},
+  "FirmAdminCompliance": {},
+  "ClientOnboarding": {}
 }
