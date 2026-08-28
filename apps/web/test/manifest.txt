@@ -37,6 +37,8 @@ components/firm/needs-you-gaps.test.tsx
 components/journals/journals-a11y.test.tsx
 components/journals/journals-keyboard.test.tsx
 components/journals/use-amount-input.test.ts
+components/registers/fixed-assets-a11y.test.tsx
+components/registers/fixed-assets-keyboard.test.tsx
 components/registers/opening-register.test.tsx
 components/reports/reports-components.test.tsx
 lib/bank/agency-doors.test.ts
@@ -79,6 +81,8 @@ lib/read.test.ts
 lib/registers/accounts.test.ts
 lib/registers/adjustments.test.ts
 lib/registers/aging.test.ts
+lib/registers/depreciation.test.ts
+lib/registers/fa-account-profiles.test.ts
 lib/registers/fixed-assets.test.ts
 lib/registers/knowledge.test.ts
 lib/registers/staff-advances.test.ts
