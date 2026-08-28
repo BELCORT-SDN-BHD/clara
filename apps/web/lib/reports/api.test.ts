@@ -17,6 +17,19 @@ import {
   listFreeformReads,
   listReportAgentReceipts,
   isDoorRefusal,
+  listPeriodSnapshots,
+  listRenderJobs,
+  listSeedingBatches,
+  listSeedingProposals,
+  listWikiPages,
+  mintMonthSnapshot,
+  snapshotState,
+  requeueRenderJob,
+  cancelSeedingBatch,
+  completeSeedingBatch,
+  declineSeedingProposal,
+  tickSeedingProposal,
+  retireWikiPage,
 } from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -241,4 +254,177 @@ test("listReportAgentReceipts GETs report_agent_receipts filtered to one client"
   });
   assert.match(seenUrl, /report_agent_receipts\?/);
   assert.match(seenUrl, /client_id=eq\.c1/);
+});
+
+// --- T9 (port-wave) reads — GET filter/order pinning, one per relation.
+
+test("listPeriodSnapshots GETs period_snapshots filtered+ordered, excluding payload from the select", async () => {
+  let seenUrl = "";
+  const impl = (async (url: RequestInfo | URL) => {
+    seenUrl = String(url);
+    return jsonResponse([{ id: "s1" }], 200);
+  }) as typeof fetch;
+  await withMockedFetch(impl, async () => {
+    await listPeriodSnapshots("c1", { session: fakeSession() });
+  });
+  assert.match(seenUrl, /period_snapshots\?/);
+  assert.match(seenUrl, /client_id=eq\.c1/);
+  assert.match(seenUrl, /order=period_start\.desc/);
+  assert.ok(!decodeURIComponent(seenUrl).includes("payload"), "the frozen dataset payload must not be requested by the list view");
+});
+
+test("listRenderJobs GETs render_jobs filtered+ordered", async () => {
+  let seenUrl = "";
+  const impl = (async (url: RequestInfo | URL) => {
+    seenUrl = String(url);
+    return jsonResponse([], 200);
+  }) as typeof fetch;
+  await withMockedFetch(impl, async () => {
+    await listRenderJobs("c1", { session: fakeSession() });
+  });
+  assert.match(seenUrl, /render_jobs\?/);
+  assert.match(seenUrl, /client_id=eq\.c1/);
+  assert.match(seenUrl, /order=enqueued_at\.desc/);
+});
+
+test("listSeedingBatches / listSeedingProposals GET their own relations, filtered to one client", async () => {
+  const calls: string[] = [];
+  const impl = (async (url: RequestInfo | URL) => {
+    calls.push(String(url));
+    return jsonResponse([], 200);
+  }) as typeof fetch;
+  await withMockedFetch(impl, async () => {
+    await listSeedingBatches("c1", { session: fakeSession() });
+    await listSeedingProposals("c1", { session: fakeSession() });
+  });
+  assert.ok(calls.some((u) => /seeding_batches\?/.test(u) && u.includes("client_id=eq.c1")));
+  assert.ok(calls.some((u) => /seeding_proposals\?/.test(u) && u.includes("client_id=eq.c1")));
+});
+
+test("listWikiPages GETs wiki_pages filtered to one client", async () => {
+  let seenUrl = "";
+  const impl = (async (url: RequestInfo | URL) => {
+    seenUrl = String(url);
+    return jsonResponse([], 200);
+  }) as typeof fetch;
+  await withMockedFetch(impl, async () => {
+    await listWikiPages("c1", { session: fakeSession() });
+  });
+  assert.match(seenUrl, /wiki_pages\?/);
+  assert.match(seenUrl, /client_id=eq\.c1/);
+});
+
+// --- T9 (port-wave) doors — exact posted body shape, arg-name-for-arg-name
+// (the PC1 lesson: a typo in a `p_` key compiles fine and only ever surfaces
+// as a live CLR10, never a type error).
+
+test("mintMonthSnapshot posts the exact mint_month_snapshot body shape, forwarding the CALLER-supplied op_key verbatim (ruling F9 — no internal minting)", async () => {
+  const { impl, calls } = captureFetch({ snapshot_id: "s1" });
+  await withMockedFetch(impl, async () => {
+    await mintMonthSnapshot({ clientId: "c1", monthStart: "2026-06-01", opKey: "caller-supplied-key-1" }, { session: fakeSession() });
+  });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]!.url, /\/rpc\/mint_month_snapshot$/);
+  assert.deepEqual(calls[0]!.body, { p_client: "c1", p_month_start: "2026-06-01", p_op_key: "caller-supplied-key-1" });
+});
+
+// F9 TRUED at re-verify: this pins the WIRE SHAPE only — that
+// mintMonthSnapshot forwards WHATEVER op_key the caller passes, verbatim,
+// never generating its own. It does NOT prove a live replay scenario (no
+// caller in this codebase currently makes two calls with the same key in
+// practice; DoorDialog closes on every confirm attempt, so there is no
+// second click within one open to replay against). See lib/reports/
+// api.ts's mintMonthSnapshot header for the full reasoning.
+test("mintMonthSnapshot forwards the SAME caller-supplied op_key verbatim across two calls — the wire-SHAPE pin, not a live replay proof (F9)", async () => {
+  const { impl, calls } = captureFetch({ snapshot_id: "s1" });
+  await withMockedFetch(impl, async () => {
+    await mintMonthSnapshot({ clientId: "c1", monthStart: "2026-06-01", opKey: "same-key" }, { session: fakeSession() });
+    await mintMonthSnapshot({ clientId: "c1", monthStart: "2026-06-01", opKey: "same-key" }, { session: fakeSession() });
+  });
+  assert.equal(calls[0]!.body.p_op_key, "same-key");
+  assert.equal(calls[1]!.body.p_op_key, "same-key");
+});
+
+test("snapshotState posts p_snapshot and returns the RPC's own text verbatim — a read, not a governed act", async () => {
+  let seenBody: unknown;
+  const impl = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    seenBody = JSON.parse(String(init?.body));
+    return jsonResponse("stale", 200);
+  }) as typeof fetch;
+  await withMockedFetch(impl, async () => {
+    const out = await snapshotState("s1", { session: fakeSession() });
+    assert.equal(out, "stale");
+  });
+  assert.deepEqual(seenBody, { p_snapshot: "s1" });
+});
+
+test("requeueRenderJob posts the exact requeue_render_job body shape — NO op_key (the rung-0 finding: this door's live signature has none)", async () => {
+  const { impl, calls } = captureFetch({ render_job_id: "rj2" });
+  await withMockedFetch(impl, async () => {
+    await requeueRenderJob({ jobId: "rj1", reason: "render timeout", acceptDrift: true }, { session: fakeSession() });
+  });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0]!.url, /\/rpc\/requeue_render_job$/);
+  assert.deepEqual(calls[0]!.body, { p_job: "rj1", p_reason: "render timeout", p_accept_drift: true });
+});
+
+test("requeueRenderJob defaults p_accept_drift to false when omitted", async () => {
+  const { impl, calls } = captureFetch({ render_job_id: "rj2" });
+  await withMockedFetch(impl, async () => {
+    await requeueRenderJob({ jobId: "rj1", reason: "render timeout" }, { session: fakeSession() });
+  });
+  assert.equal(calls[0]!.body.p_accept_drift, false);
+});
+
+test("cancelSeedingBatch posts the exact cancel_seeding_batch body shape, with a fresh op_key", async () => {
+  const { impl, calls } = captureFetch({ status: "cancelled" });
+  await withMockedFetch(impl, async () => {
+    await cancelSeedingBatch({ batchId: "b1", reason: "duplicate upload" }, { session: fakeSession() });
+  });
+  assert.match(calls[0]!.url, /\/rpc\/cancel_seeding_batch$/);
+  assert.equal(calls[0]!.body.p_batch, "b1");
+  assert.equal(calls[0]!.body.p_reason, "duplicate upload");
+  assert.match(String(calls[0]!.body.p_op_key), /^[0-9a-f-]{36}$/);
+});
+
+test("completeSeedingBatch posts the exact complete_seeding_batch body shape, with a fresh op_key", async () => {
+  const { impl, calls } = captureFetch({ status: "completed" });
+  await withMockedFetch(impl, async () => {
+    await completeSeedingBatch("b1", { session: fakeSession() });
+  });
+  assert.match(calls[0]!.url, /\/rpc\/complete_seeding_batch$/);
+  assert.equal(calls[0]!.body.p_batch, "b1");
+  assert.match(String(calls[0]!.body.p_op_key), /^[0-9a-f-]{36}$/);
+});
+
+test("declineSeedingProposal posts the exact decline_seeding_proposal body shape, with a fresh op_key", async () => {
+  const { impl, calls } = captureFetch({ status: "declined" });
+  await withMockedFetch(impl, async () => {
+    await declineSeedingProposal({ proposalId: "p1", reason: "not a match" }, { session: fakeSession() });
+  });
+  assert.match(calls[0]!.url, /\/rpc\/decline_seeding_proposal$/);
+  assert.equal(calls[0]!.body.p_proposal, "p1");
+  assert.equal(calls[0]!.body.p_reason, "not a match");
+  assert.match(String(calls[0]!.body.p_op_key), /^[0-9a-f-]{36}$/);
+});
+
+test("tickSeedingProposal posts the exact tick_seeding_proposal body shape, with a fresh op_key", async () => {
+  const { impl, calls } = captureFetch({ status: "ticked" });
+  await withMockedFetch(impl, async () => {
+    await tickSeedingProposal("p1", { session: fakeSession() });
+  });
+  assert.match(calls[0]!.url, /\/rpc\/tick_seeding_proposal$/);
+  assert.equal(calls[0]!.body.p_proposal, "p1");
+  assert.match(String(calls[0]!.body.p_op_key), /^[0-9a-f-]{36}$/);
+});
+
+test("retireWikiPage posts the exact retire_wiki_page body shape, with a fresh op_key", async () => {
+  const { impl, calls } = captureFetch({ status: "retired" });
+  await withMockedFetch(impl, async () => {
+    await retireWikiPage({ pageId: "w1", reason: "superseded by a newer treatment note" }, { session: fakeSession() });
+  });
+  assert.match(calls[0]!.url, /\/rpc\/retire_wiki_page$/);
+  assert.equal(calls[0]!.body.p_page, "w1");
+  assert.equal(calls[0]!.body.p_reason, "superseded by a newer treatment note");
+  assert.match(String(calls[0]!.body.p_op_key), /^[0-9a-f-]{36}$/);
 });

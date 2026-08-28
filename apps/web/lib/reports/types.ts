@@ -184,3 +184,149 @@ export type ReportAgentReceiptRow = {
   self_approval_attestation: string | null;
   at: string;
 };
+
+// ---------------------------------------------------------------------------
+// T9 (port-wave, 2026-08-28) — snapshots, render jobs, seeding, wiki curation.
+// Rung-0 census against the live catalog (0140 frontier) grounds every shape
+// below; see lib/reports/api.ts's own T9 header for the per-door citations.
+//
+// create_account_set_v1 is DELIBERATELY ABSENT from this module — the rung-0
+// census found it superseded (clara.wake_create_account_set /
+// _agent_create_account_set_core, both live and reversal-proven derivations
+// of the SAME core logic, already cover the capability for the agent lane;
+// grep across apps/web and apps/dashboard finds zero callers of the human
+// door anywhere in this product's history). Reported to the conductor by
+// name as a retirement candidate (OQ-5) rather than built — building a form
+// for it would ship a UI for a body no userflow has ever used.
+
+/** clara.reporting_periods — grain='month' rows are what T9's snapshot
+ *  registry lists; grain='fiscal_year' rows exist for the close domain (T1)
+ *  and are read here too since the relation is shared, but this module's own
+ *  UI only ever mints/lists the month grain. */
+export type ReportingPeriodGrain = "month" | "fiscal_year";
+
+export type ReportingPeriodRow = {
+  id: string;
+  client_id: string;
+  grain: ReportingPeriodGrain;
+  period_start: string;
+  period_end: string;
+  fiscal_year_id: string | null;
+  minted_by: string;
+  minted_at: string;
+};
+
+/** clara.period_snapshots — 'management_accounts' is the only live kind
+ *  (period_snapshots_kind_check). `payload` (the frozen dataset) is
+ *  deliberately excluded from the default select — it is the evidentiary
+ *  content, not a summary figure this list view renders. */
+export type PeriodSnapshotKind = "management_accounts";
+
+export type PeriodSnapshotRow = {
+  id: string;
+  client_id: string;
+  reporting_period_id: string;
+  period_start: string;
+  period_end: string;
+  kind: PeriodSnapshotKind;
+  minted_by: string;
+  minted_at: string;
+  books_watermark: string;
+  dataset_sha256: string;
+};
+
+/** clara.snapshot_state(p_snapshot) — the LATEST clara.snapshot_assessments
+ *  row for a snapshot (assessment CHECK: 'current'|'stale'), or the door's
+ *  own honest 'unknown' when no assessment row exists yet. A read-flavoured
+ *  RPC (AGENTS.md's own carve-out) — rides callDoor as transport, is NOT a
+ *  governed act. */
+export type SnapshotState = "current" | "stale" | "unknown";
+
+/** clara.render_jobs — kind is pinned to the two Tier-1 artifact kinds this
+ *  build already renders (render_jobs_kind_check); state's four values are
+ *  render_jobs_state_check verbatim. */
+export type RenderJobKind = "draft_watermarked" | "pre_sign";
+export type RenderJobState = "claimable" | "running" | "done" | "failed";
+
+export type RenderJobRow = {
+  id: string;
+  client_id: string;
+  report_run_id: string;
+  kind: RenderJobKind;
+  state: RenderJobState;
+  manifest_sha256: string;
+  requested_by: string;
+  attempts: number;
+  max_attempts: number;
+  last_error: Record<string, unknown> | null;
+  supersedes_render_job_id: string | null;
+  requeue_reason: string | null;
+  enqueued_at: string;
+  finished_at: string | null;
+};
+
+/** clara.seeding_batches — one document's coding-seed proposals, born
+ *  'open', terminal at 'completed'/'cancelled' (ck_seeding_batches_terminal). */
+export type SeedingBatchState = "open" | "completed" | "cancelled";
+
+export type SeedingBatchRow = {
+  id: string;
+  client_id: string;
+  source_document_id: string;
+  source_sha256: string;
+  state: SeedingBatchState;
+  stats: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  completed_at: string | null;
+  completed_by: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancel_reason: string | null;
+};
+
+/** clara.seeding_proposals — proposal_kind/state CHECKs verbatim
+ *  (seeding_proposals_proposal_kind_check / _state_check). `payload`/
+ *  `evidence` are opaque jsonb the DB itself never interprets beyond a
+ *  shape check — rendered as data, not summarised. */
+export type SeedingProposalKind = "vendor_account_rule" | "counterparty_birth" | "wiki_fact";
+export type SeedingProposalState = "proposed" | "ticked" | "declined" | "refused";
+
+export type SeedingProposalRow = {
+  id: string;
+  batch_id: string;
+  client_id: string;
+  proposal_kind: SeedingProposalKind;
+  proposal_key: string;
+  payload: Record<string, unknown>;
+  evidence: Record<string, unknown>;
+  state: SeedingProposalState;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_reason: string | null;
+  refuse_reason: string | null;
+  resulting_rule_id: string | null;
+  resulting_counterparty_id: string | null;
+  created_at: string;
+};
+
+/** clara.wiki_pages — page_kind/state CHECKs verbatim (wiki_pages_page_kind_
+ *  check / _state_check). */
+export type WikiPageKind = "profile" | "counterparty" | "treatment" | "recurring_pattern" | "open_question" | "period_context";
+export type WikiPageState = "active" | "retired";
+
+export type WikiPageRow = {
+  id: string;
+  client_id: string;
+  slug: string;
+  page_kind: WikiPageKind;
+  title: string;
+  counterparty_id: string | null;
+  current_version_id: string | null;
+  state: WikiPageState;
+  retired_at: string | null;
+  retired_by: string | null;
+  retire_reason: string | null;
+  created_at: string;
+  updated_at: string;
+};

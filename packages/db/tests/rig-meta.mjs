@@ -1105,6 +1105,21 @@ export const F_A4_PR2A_COHORT = [
   ...F_A4_PR2A_WAKE_FNS, ...F_A4_PR2A_HUMAN_FNS, ...F_A4_PR2A_UNGRANTED_FNS,
 ];
 
+// P4 tranche 1 [invite/RBAC first, docs/plan/active/p4-design-2026-08-27.md]: the FOUR human
+// doors — claim_identity (the identity-gap-closing door, no membership required), invite_member
+// and revoke_invite (admin+), accept_invite (authenticated; walled on JWT-email = invite-email).
+// clara_authenticated ONLY — agent + both wake roles gain ZERO (an invite is a human-lane act by
+// its own nature: the emailed token is the credential, and there is no wake wrapper for any of
+// the four). add_member itself is unlisted here because it already lived in WRITERS pre-P4 and
+// its recut (this tranche extracts _add_member_core from its live body) changes no grant.
+const P4T1_HUMAN_FNS = ["claim_identity", "invite_member", "accept_invite", "revoke_invite"];
+//   the ungranted internals — _jwt_email (the JWT email-claim reader) and the two law-81 cores
+//   claim_identity/accept_invite and add_member/accept_invite share. _create_firm_core is
+//   deliberately NOT here: it is T2's (the approval-queue tranche's) extraction, out of this
+//   cohort's scope by the design's own T1/T2/T3 boundary.
+const P4T1_UNGRANTED_FNS = ["_jwt_email", "_claim_identity_core", "_add_member_core"];
+export const P4T1_COHORT = [...P4T1_HUMAN_FNS, ...P4T1_UNGRANTED_FNS];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1200,6 +1215,8 @@ export const ALLOWED = {
     // HUMAN-ONLY BY LAW: there is no wake wrapper for it, because a period read off a document by
     // a model is a model-generated value (hard constraint 2, design §13 item 3).
     ...F_A4_PR2A_HUMAN_FNS,
+    // P4 tranche 1 [invite/RBAC first] the four human doors — see the block above.
+    ...P4T1_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1499,6 +1516,31 @@ export async function grantMatrixFailures() {
   const prepayLive = F_A4_PR2A_COHORT.filter((n) => liveNames.has(n));
   if (prepayLive.length !== 0) {
     failures.push(...cohortFailures("F-A4/PR-2a prepayment limb", F_A4_PR2A_COHORT, liveNames));
+  }
+  failures.push(...cohortFailures("P4 tranche 1 invite/RBAC first", P4T1_COHORT, liveNames));
+  // Native review C7: cohortFailures() above is proname-only (law 3, "spelling is not
+  // identity") -- it would still read GREEN if a same-named but DIFFERENT-signature overload
+  // silently replaced one of P4T1's seven names (e.g. a future migration adding
+  // clara.claim_identity(text) beside the real clara.claim_identity(text,text)). This is the
+  // signature-exact companion, scoped to P4T1: every cohort member must resolve at the EXACT
+  // signature the migration's own tail census pins, via to_regprocedure -- never a bare-name
+  // lookup -- with the SAME wholly-present-or-wholly-absent tolerance as every other cohort here.
+  const p4t1Sigs = [
+    "clara.claim_identity(text,text)", "clara.invite_member(text,text,text)",
+    "clara.accept_invite(text,text,text)", "clara.revoke_invite(uuid,text)",
+    "clara._jwt_email()", "clara._claim_identity_core(uuid,text,text)",
+    "clara._add_member_core(uuid,uuid,uuid,text)",
+  ];
+  const p4t1SigCheck = await rootQuery(
+    "select sig, to_regprocedure(sig) is not null as ok from unnest($1::text[]) sig", [p4t1Sigs],
+  );
+  const p4t1SigMissing = p4t1SigCheck.rows.filter((r) => !r.ok).map((r) => r.sig);
+  if (p4t1SigMissing.length !== 0 && p4t1SigMissing.length !== p4t1Sigs.length) {
+    failures.push(
+      "P4 tranche 1 invite/RBAC first: signature-exact check found a PARTIAL cohort -- these "
+      + "exact signatures no longer resolve (a same-named, different-signature overload may have "
+      + `silently replaced one): ${p4t1SigMissing.join(", ")}`,
+    );
   }
   return failures;
 }
