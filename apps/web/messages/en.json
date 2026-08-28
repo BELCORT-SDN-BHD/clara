@@ -1322,6 +1322,85 @@
   "CodingQuestionsSignals": {},
   "ArApCounterparty": {},
   "ReportsSnapshotsSeeding": {},
-  "FirmAdminCompliance": {},
+  "FirmAdminCompliance": {
+    "adminNavLabel": "Firm admin sections",
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
+    "needsYou": {
+      "ackTrigger": "Acknowledge",
+      "snoozeTrigger": "Snooze",
+      "resolveTrigger": "Resolve",
+      "submitting": "Submitting…",
+      "rationalePlaceholder": "Rationale",
+      "untilLabel": "Snooze until",
+      "conclusionLabel": "Conclusion",
+      "conclusion": {
+        "registration_recorded": "Registration recorded",
+        "not_liable_documented": "Not liable — documented"
+      },
+      "evidencePlaceholder": "Evidence"
+    },
+    "compliance": {
+      "heading": "Compliance register",
+      "pageDescription": "Every SST-registration watch across the firm that has not yet been resolved.",
+      "staleEvaluator": "The compliance evaluator has not completed a run in the last 48 hours — these figures may be out of date.",
+      "loading": "Loading the compliance register…",
+      "empty": "No open compliance watches for this firm.",
+      "clientNamesUnavailable": "client names",
+      "state": {
+        "monitored": "Monitored",
+        "early_warning": "Early warning",
+        "crossed": "Crossed",
+        "overdue": "Overdue",
+        "resolved": "Resolved"
+      },
+      "confirmedIncluded": "Confirmed included",
+      "unknownOrMixed": "Unknown / mixed",
+      "earliestCrossing": "Earliest crossing month",
+      "applicationDue": "Application due",
+      "centsUnsafe": "(amount out of range — verify in the ledger)"
+    },
+    "vendorBindings": {
+      "pageHeading": "Vendor identity bindings",
+      "pageDescription": "Propose, sign and revoke a vendor's identity binding — a two-person governed ceremony.",
+      "clientPickerLabel": "Client",
+      "clientPickerLoading": "Loading clients…",
+      "clientPickerPlaceholder": "Select a client…",
+      "noClientSelected": "Select a client to see its vendor identity bindings.",
+      "heading": "Vendor identity bindings",
+      "loading": "Loading vendor identity bindings…",
+      "empty": "No vendor identity bindings for this client yet.",
+      "status": {
+        "proposed": "Proposed",
+        "live": "Live",
+        "revoked": "Revoked",
+        "declined": "Declined",
+        "expired": "Expired"
+      },
+      "fingerprint": "Vendor name \"{f1}\" · invoice prefix \"{f2}\"",
+      "evidenceLine": "{evidence} evidence entr{evidence, plural, one {y} other {ies}} · {resolutions} resolution{resolutions, plural, one {} other {s}} · {divergences} divergence{divergences, plural, one {} other {s}} (30d)",
+      "signTrigger": "Sign",
+      "signTitle": "Sign this vendor identity binding",
+      "signDescription": "Signing makes this binding LIVE — future invoices from this vendor auto-bind to the counterparty it names. Requires admin.",
+      "revokeTrigger": "Revoke",
+      "revokeTitle": "Revoke this vendor identity binding",
+      "revokeDescription": "Revoking ends auto-binding for this vendor immediately. A reason is required.",
+      "reasonLabel": "Reason",
+      "proposeTrigger": "Propose binding",
+      "proposeTitle": "Propose a vendor identity binding",
+      "proposeDescription": "The DB derives the binding's own fingerprint from at least three recent approved entries for this vendor — this dialog only names which counterparty to bind.",
+      "counterpartyLabel": "Vendor",
+      "counterpartyPlaceholder": "Select a vendor…"
+    },
+    "sharing": {
+      "loadError": "Could not load this session's sharing state.",
+      "sharedBadge": "Shared with firm",
+      "shareTrigger": "Share with firm",
+      "shareTitle": "Share this conversation with the firm",
+      "shareDescription": "Every member of your firm will be able to read this conversation. This cannot be undone from here."
+    }
+  },
   "ClientOnboarding": {}
 }
