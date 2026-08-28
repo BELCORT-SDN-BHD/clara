@@ -23,6 +23,21 @@ cutover. Full reference: `README.md` here.
 - A migration citation must chase the LIVE body (a later `CREATE OR REPLACE`, a dynamic
   splice) — never cite a migration's first `CREATE` without checking what superseded it.
 
+### Testing a dialog — two laws the port wave paid for
+
+- **`h.fireEvent` silently no-ops on anything inside an OPEN dialog.** Base UI renders open
+  dialog content into a portal on `document.body` — a sibling of the render root, outside the
+  delegated-listener tree `fireEvent` dispatches through. The trigger works (it lives in the
+  container); the Confirm button, the Cancel button and every field inside do not. Drive them
+  with **`clickButton` from `test/hookHarness.ts`**, the one shared instrument: it invokes the
+  real handler on the real node, and it **throws** on a node whose live `disabled` is true —
+  assert the gate, then act. Never hand-roll a local copy; three lanes did, and one of them
+  wrote a test that clicked nothing and passed.
+- **A click test must assert a DISCRIMINATING post-condition** — something that is true only
+  *after* that click. A match that was already true before the click (a word that also appears
+  in a summary line elsewhere on the page) is a vacuous green, and it will survive deleting the
+  very component the test exists to prove.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
