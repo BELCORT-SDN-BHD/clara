@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent } from "../../test/hookHarness";
+import { renderComponent, textOf, clickButton } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
@@ -101,6 +101,70 @@ test("agent tasks panel: a FAILED initial load renders the refusal, never the fa
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {
         await h.unmount();
+      }
+    },
+  );
+});
+
+// M18 (round 3 pin), team-lead-requested: the row-vanish banner (F2/R1's own
+// mechanism), pinned for AgentTasksPanel specifically — the ONLY task is
+// cancelled, cancel_agent_task itself refuses with CLR11 ("task not in your
+// firm" — someone else's write already moved it out of this firm's visible
+// set), and the reload returns ZERO tasks. The banner must render "This was
+// refused" + the CLR11 code + the refusal's own message, exactly as the
+// sibling coding-lane sections' row-vanish pins assert.
+type Node = { tagName?: string; childNodes?: Node[] };
+function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
+  if (predicate(root)) return root;
+  for (const c of root.childNodes ?? []) { const f = findIn(c, predicate); if (f) return f; }
+  return null;
+}
+function realBody(): { appendChild: (c: unknown) => void; removeChild: (c: unknown) => void; childNodes?: unknown[] } {
+  return (globalThis as unknown as { document: { body: unknown } }).document.body as never;
+}
+
+test("agent tasks panel: a refusal whose ONLY row vanishes on the re-read still surfaces a persistent banner with its CLR code", async () => {
+  let refused = false;
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rpc/cancel_agent_task")) {
+        refused = true;
+        return jsonResponse({ code: "CLR11", message: "task not in your firm" }, 400);
+      }
+      if (url.includes("/rest/v1/agent_tasks_visible")) return jsonResponse(refused ? [] : [TASK]);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(
+        createElement(NextIntlClientProvider, {
+          locale: "en",
+          messages,
+          children: createElement("div", null, createElement("h1", null, "Activity"), createElement(AgentTasksPanel)),
+        }),
+      );
+      const body = realBody();
+      body.appendChild(h.container);
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        const trigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Cancel$/) !== null);
+        assert.ok(trigger, "the cancel trigger must render before the refusal");
+        await h.fireEvent(trigger!, "click");
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        const confirmButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Cancel task$/) !== null);
+        assert.ok(confirmButton, "the confirm control must render (this door needs no fields)");
+        await h.act(() => { clickButton(confirmButton as never); });
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        assert.ok(refused, "cancel_agent_task must actually have refused");
+        assert.match(h.text(), /task not in your firm/, "the refusal's own message must surface");
+        assert.match(h.text(), /CLR11/, "the CLR code must survive — proving CodingActionRefusal, not a degraded generic message, rendered it");
+        assert.match(h.text(), /No running agent tasks right now/, "the ONLY row is genuinely gone from the re-read — this is the case the row-vanish banner exists for");
+        assert.match(h.text(), /This was refused/, "the persistent section banner must render with the domain-neutral title");
+      } finally {
+        await h.unmount();
+        if (body.childNodes?.includes(h.container)) body.removeChild(h.container);
       }
     },
   );

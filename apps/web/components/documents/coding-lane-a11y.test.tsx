@@ -449,3 +449,81 @@ test("coding tasks section: a refusal whose row STAYS present attaches to that r
     },
   );
 });
+
+// M8 (round 3 pin), team-lead-requested: the SAME per-row-stays-present shape
+// as the coding-tasks-section test above, pinned for UncodedFilingsList
+// specifically — TWO filings in the SAME lane, the refusal is on ONE of them
+// via open_coding_task, and BOTH filings stay present after the reload (a
+// validation-style refusal). The instrument hazard team-lead flagged: with
+// two rows, `openTaskTrigger` and `openTaskConfirm` are the IDENTICAL string
+// ("Open coding task"), so once the dialog is open there are THREE nodes
+// matching that label (both triggers + the confirm button) — a probe that
+// excludes only the clicked trigger can land on the SIBLING row's trigger and
+// report a false absence (the wave-B lesson this pin exists to close). Both
+// triggers are captured BEFORE the click and excluded together.
+test("uncoded-filings list: a refusal whose row STAYS present attaches to that row alone, never the other row or a section banner", async () => {
+  const FILING_A = { ...UNCODED_FILING, filing_id: "fa3", document_id: "da3", original_filename: "invoice-a.pdf" };
+  const LANE_A = { filing_id: "fa3", lane: "needs_you", reasons: [] };
+  const FILING_B = { ...UNCODED_FILING, filing_id: "fb3", document_id: "db3", original_filename: "invoice-b.pdf" };
+  const LANE_B = { filing_id: "fb3", lane: "needs_you", reasons: [] };
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rpc/open_coding_task")) {
+        return jsonResponse({ code: "CLR24", message: "vendor could not be verified" }, 400);
+      }
+      if (url.includes("/rpc/list_uncoded_filings")) return jsonResponse([FILING_A, FILING_B]);
+      if (url.includes("/rpc/list_coding_lanes")) return jsonResponse([LANE_A, LANE_B]);
+      if (url.includes("/rest/v1/coding_tasks_visible") || url.includes("/rest/v1/lint_findings")) return jsonResponse([]);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(
+        createElement(NextIntlClientProvider, {
+          locale: "en",
+          messages,
+          children: createElement("div", null, createElement("h1", null, "Documents"), createElement(CodingLanePanel, { clientId: "c1" })),
+        }),
+      );
+      const body = realBody();
+      body.appendChild(h.container);
+      try {
+        for (let i = 0; i < 6; i++) await h.settle();
+        // Both filings must each render their own "Open coding task"
+        // trigger — captured up front, BOTH excluded when locating Confirm.
+        const triggers: Node[] = [];
+        (function walk(n: Node) {
+          if (n.tagName === "BUTTON" && textOf(n as never).match(/^Open coding task$/) !== null) triggers.push(n);
+          for (const c of n.childNodes ?? []) walk(c);
+        })(body as never);
+        assert.equal(triggers.length, 2, "both filings must each render their own Open-coding-task trigger");
+        await h.fireEvent(triggers[0]!, "click");
+        for (let i = 0; i < 4; i++) await h.settle();
+
+        const reasonField = findIn(body as never, (n) => n.tagName === "TEXTAREA");
+        await h.act(() => { setFieldValue(reasonField as never, "vendor could not be matched"); });
+        const confirmButton = findIn(
+          body as never,
+          (n) => n.tagName === "BUTTON" && textOf(n as never).match(/^Open coding task$/) !== null && n !== triggers[0] && n !== triggers[1],
+        );
+        assert.ok(confirmButton, "the dialog's own confirm control must be locatable once BOTH triggers are excluded");
+        await h.act(() => { clickButton(confirmButton as never); });
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        assert.match(h.text(), /vendor could not be verified/, "the refusal must surface");
+        assert.match(h.text(), /CLR24/, "the CLR code must survive");
+        assert.doesNotMatch(h.text(), /Nothing in this lane right now/, "BOTH filings are still present — never a fabricated empty claim");
+        assert.match(h.text(), /invoice-a\.pdf/, "the acted-on filing's own row must still be present");
+        assert.match(h.text(), /invoice-b\.pdf/, "the OTHER filing's row must still be present, untouched");
+        const refusalMatches = h.text().match(/This was refused/g) ?? [];
+        assert.equal(
+          refusalMatches.length, 1,
+          "exactly ONE banner may render (the per-row banner on the acted-on filing) — never a second copy on the other row, never a section-level banner on top of it (the row never vanished)",
+        );
+      } finally {
+        await h.unmount();
+        if (body.childNodes?.includes(h.container)) body.removeChild(h.container);
+      }
+    },
+  );
+});
