@@ -18,7 +18,7 @@ import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import messages from "../../messages/en.json";
-import { DocumentExtractContent } from "./document-extract-panel";
+import { DocumentExtractContent, DocumentExtractPanel } from "./document-extract-panel";
 import { DocumentAdmin } from "./document-admin";
 import { DocumentFilingsHistory } from "./document-filings-history";
 import type { DocumentExtractResult, DocumentRow, FilingRow } from "../../lib/documents/types";
@@ -125,6 +125,36 @@ test("DocumentExtractContent has zero violations for a document with no extracti
   } finally {
     await h.unmount();
   }
+});
+
+// F2 PANEL branch (independent review, mutation D — the reads.ts/types.ts
+// test above pins the MODULE's null passthrough; it does not pin the PANEL's
+// own null-branch rendering, which is where the original defect actually
+// lived). Mounts the REAL self-fetching `DocumentExtractPanel` (not the pure
+// `DocumentExtractContent`), opens it via its own toggle (a plain button in
+// `h.container`, no portal involved), mocks `get_document_extract` to return
+// the DB's own legitimate `null` (a document filed to a different client),
+// and asserts the honest not-available copy actually renders — never a
+// silent blank under an open toggle.
+test("DocumentExtractPanel has zero violations and renders the honest not-available state when get_document_extract legitimately returns null", async () => {
+  await withMockedFetch(
+    async () => jsonResponse(null),
+    async () => {
+      const h = await renderComponent(App(ambient(createElement(DocumentExtractPanel, { documentId: "doc-1", clientId: "other-client" }))));
+      try {
+        for (let i = 0; i < 2; i++) await h.settle();
+        const toggle = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^View extraction text$/) !== null);
+        assert.ok(toggle, "the toggle must render as a real button, reachable without any portal");
+        await h.fireEvent(toggle!, "click");
+        for (let i = 0; i < 6; i++) await h.settle();
+        assert.match(h.text(), /isn't available for this client/, "the panel must render the honest not-available state, never a silent blank");
+        const violations = checkAccessibility(h.container as never);
+        assert.deepEqual(violations, [], JSON.stringify(violations));
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
 });
 
 // --- F1: the outcome banners, driven through a real dialog + a mocked door -----
