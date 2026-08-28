@@ -14,6 +14,7 @@
 // coa_accounts row's name or type, so a proprietor's equity account cannot
 // silently appear here as though it were a staff advance.
 
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { businessToday } from "@/lib/business-date";
 import { useHydratedPart } from "@/lib/parts/hooks";
@@ -24,8 +25,9 @@ import {
   completeStaffAdvanceParticulars,
   enrolStaffAdvanceAccount,
   retireStaffAdvanceAccount,
+  type BookStaffAdvanceApplicationResult,
 } from "@/lib/registers/staff-advances-doors";
-import { fmtCents } from "@/lib/registers/money";
+import { fmtCents, shortId } from "@/lib/registers/money";
 import { SectionHeader } from "@/components/common/section-header";
 import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
@@ -44,6 +46,14 @@ export function StaffAdvancesRegister({ clientId }: { clientId: string }) {
   const { data, busy, err, clr, act } = useHydratedPart(sessionTokenAccessor, (s) =>
     loadStaffAdvancesWorkbench(s, clientId, asOf),
   );
+  // F2 (independent review, fix-required): book_staff_advance_application's
+  // own receipt names a real branch — a high-stakes entry lands `status:
+  // 'drafted'` (a distinct checker approves it elsewhere, T6's door) rather
+  // than `'posted'`. `act()` itself only reports success/failure, never the
+  // write's own return value (hydrate-never-trust) — this state is fed by
+  // `onOk`, so the honest status is what actually SHOWS, not merely what this
+  // module's own header claims. A later `'posted'` receipt clears it.
+  const [draftedApplication, setDraftedApplication] = useState<BookStaffAdvanceApplicationResult | null>(null);
 
   if (!data) {
     return err ? <StateBanner tone="error">{err}</StateBanner> : <LoadingState>{t("loading")}</LoadingState>;
@@ -70,7 +80,20 @@ export function StaffAdvancesRegister({ clientId }: { clientId: string }) {
               accounts={data.coaAccounts}
               outstandingAdvances={outstandingAdvances}
               busy={busy}
-              onSubmit={(input) => act(() => bookStaffAdvanceApplication(clientId, input, { session: sessionTokenAccessor }).then(() => undefined))}
+              onSubmit={(input) => {
+                // F2: capture the real receipt in this call's own closure —
+                // `act()` never exposes a write's return value itself
+                // (hydrate-never-trust) — and thread it via `onOk`, which
+                // fires ONLY on this specific call's success.
+                let receipt: BookStaffAdvanceApplicationResult | null = null;
+                return act(
+                  () =>
+                    bookStaffAdvanceApplication(clientId, input, { session: sessionTokenAccessor }).then((r) => {
+                      receipt = r;
+                    }),
+                  () => setDraftedApplication(receipt?.status === "drafted" ? receipt : null),
+                );
+              }}
             />
           }
         >
@@ -79,6 +102,11 @@ export function StaffAdvancesRegister({ clientId }: { clientId: string }) {
         <StateBanner tone={data.tie.tie ? "neutral" : "warning"}>
           {data.tie.tie ? t("tieOk") : t("tieMismatch")}
         </StateBanner>
+        {draftedApplication && (
+          <StateBanner tone="info">
+            {t("applicationDrafted", { entry: shortId(draftedApplication.entry_id) })}
+          </StateBanner>
+        )}
         {data.advances.length === 0 ? (
           <EmptyState>{tReg("empty")}</EmptyState>
         ) : (

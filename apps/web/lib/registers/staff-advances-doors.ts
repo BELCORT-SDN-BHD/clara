@@ -42,8 +42,12 @@
 //   pair refuses CLR10 "allocations_duplicated"). A high-stakes entry lands as a DRAFT
 //   (`status: 'drafted'`, `application_ids: []`) for a distinct checker to approve
 //   elsewhere (T6's `approve_routine_entry`) — this module does not build a second
-//   approval surface for it; the caller sees the honest `status` and the ledger read
-//   afterward shows nothing posted yet.
+//   approval surface for it. This function's own return value is a REPORT, not UI
+//   state (hydrate-never-trust, doors.ts's header) — the caller must thread `status`
+//   through its own `act()` onOk (never assume `useHydratedPart`/`useAsyncRead`
+//   surface a write's return value on their own; they do not) to render the honest
+//   drafted-vs-posted outcome. components/registers/staff-advances-register.tsx does
+//   exactly this (F2, independent review 2026-08-28).
 // clara.staff_advance_statement(p_client,p_account_code,p_from,p_to) — 0043:3269.
 //   viewer+. Every movement (disbursement / application / void) for ONE account_code,
 //   spanning every enrolment GENERATION that ever held it — `generations` names who

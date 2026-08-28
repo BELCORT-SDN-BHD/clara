@@ -984,6 +984,7 @@
     "ledgerHeading": "Staff advances",
     "tieOk": "The register ties to the general ledger.",
     "tieMismatch": "The register does not tie to the general ledger for at least one account — see the statement below to trace the difference.",
+    "applicationDrafted": "Application drafted (entry {entry}) — it is high-stakes, so it was left as a draft for a distinct checker to approve, not posted automatically.",
     "enrolmentsHeading": "Enrolled accounts",
     "noEnrolments": "No staff-advance accounts enrolled for this client yet.",
     "accountCode": "Account",
@@ -1032,7 +1033,7 @@
       "reason": "Reason",
       "linesHeading": "Entry lines",
       "allocationsHeading": "Register allocations",
-      "allocatedSummary": "RM {amount} allocated to outstanding advances",
+      "allocatedSummary": "{amount} allocated to outstanding advances (presentation sum only)",
       "kinds": {
         "payroll_deduction": "Payroll deduction",
         "bank_return": "Bank return",
@@ -1057,7 +1058,7 @@
       "noCandidateAccounts": "No active, asset-typed, non-control accounts are available on this client's chart — add one on the Chart of accounts tab first.",
       "personLabel": "Person",
       "attestationLabel": "Attestation",
-      "attestationHint": "Who this account is for, and whether the balance is a related-party balance. Hard constraint 13: a sole proprietor's own draws are EQUITY, never a staff advance — do not enrol a proprietor's account here.",
+      "attestationHint": "Who this account is for, and whether the balance is a related-party balance. A sole proprietor's own draws are EQUITY, never a staff advance — do not enrol a proprietor's account here.",
       "confirmDedicatedLabel": "I confirm this account is dedicated to this one person only."
     },
     "retireAccount": {
@@ -1077,6 +1078,7 @@
     },
     "statement": {
       "noAccounts": "No enrolled accounts yet — enrol one above to see its statement.",
+      "selectPrompt": "Select an account to see its statement.",
       "accountLabel": "Account",
       "empty": "No movement recorded for this account in the selected range.",
       "date": "Date",
@@ -1084,7 +1086,20 @@
       "amount": "Amount",
       "running": "Running balance",
       "openingLabel": "Opening balance",
-      "closingLabel": "Closing balance"
+      "closingLabel": "Closing balance",
+      "movementKinds": {
+        "disbursement": "Disbursement",
+        "application": "Application",
+        "void": "Void",
+        "unknown": "Unrecognized kind ({kind})"
+      },
+      "applicationKinds": {
+        "payroll_deduction": "Payroll deduction",
+        "bank_return": "Bank return",
+        "claim": "Claim",
+        "correction": "Correction",
+        "unknown": "Unrecognized kind ({kind})"
+      }
     }
   },
   "DraftsDocumentGovernance": {},

@@ -34,7 +34,7 @@ test("getNeedsYouAffordance returns undefined for an unregistered but otherwise 
   assert.equal(getNeedsYouAffordance("some_unregistered_kind"), undefined);
 });
 
-test("getNeedsYouAffordance still resolves the one real, registered entry", () => {
+test("getNeedsYouAffordance still resolves a real, registered entry (open_question)", () => {
   assert.equal(typeof getNeedsYouAffordance("open_question"), "function");
 });
 

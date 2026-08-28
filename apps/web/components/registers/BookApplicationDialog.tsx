@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/common/native-select";
 import { SectionHeader } from "@/components/common/section-header";
 import { businessToday } from "@/lib/business-date";
+import { fmtCents } from "@/lib/registers/money";
 import { StaffAdvanceDoorDialog } from "./StaffAdvanceDoorDialog";
 import { StaffAdvanceLinesEditor, sumStaffAdvanceLines } from "./staff-advance-lines-editor";
 import { StaffAdvanceAllocationsEditor } from "./staff-advance-allocations-editor";
@@ -58,6 +59,7 @@ export function BookApplicationDialog({
   onSubmit: (input: BookStaffAdvanceApplicationInput) => Promise<void>;
 }) {
   const t = useTranslations("StaffAdvances.bookApplication");
+  const tc = useTranslations("Common");
   const [postingDate, setPostingDate] = useState(businessToday);
   const [memo, setMemo] = useState("");
   const [reason, setReason] = useState("");
@@ -119,7 +121,13 @@ export function BookApplicationDialog({
           candidates={outstandingAdvances}
           lineCount={lines.length}
         />
-        <p className="text-xs text-muted-foreground">{t("allocatedSummary", { amount: (allocatedCents / 100).toFixed(2) })}</p>
+        {/* S3 (independent review): a client-side PRESENTATION sum ONLY —
+            routed through the shared fmtCents formatter (never a computed
+            figure the UI trusts as authoritative, hard constraint 2), and
+            labelled as such in the string itself. */}
+        <p className="text-xs text-muted-foreground">
+          {t("allocatedSummary", { amount: fmtCents(allocatedCents, tc("centsUnsafe")) })}
+        </p>
       </div>
     </StaffAdvanceDoorDialog>
   );

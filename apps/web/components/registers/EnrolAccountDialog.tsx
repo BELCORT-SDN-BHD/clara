@@ -18,6 +18,17 @@ import { NativeSelect } from "@/components/common/native-select";
 import { StaffAdvanceDoorDialog } from "./StaffAdvanceDoorDialog";
 import type { AccountRow } from "@/lib/registers/accounts";
 
+/** S1 (independent review): extracted as its own pure, exported function —
+ *  a byte-mirror of `clara._adv_enrolment_admission`'s typing arm (gate (i),
+ *  lib/registers/staff-advances-doors.ts's grounding header) — so the
+ *  narrowing has its own test independent of rendering. Every OTHER
+ *  admission gate (bank binding / shared reservation / clean balance) is
+ *  DB-only and deliberately NOT mirrored here — see this dialog's own
+ *  header. */
+export function staffAdvanceEnrolCandidates(accounts: AccountRow[]): AccountRow[] {
+  return accounts.filter((a) => a.is_active && a.account_type === "asset" && a.account_class === null);
+}
+
 export function EnrolAccountDialog({
   accounts,
   busy,
@@ -28,7 +39,7 @@ export function EnrolAccountDialog({
   onSubmit: (accountCode: string, personLabel: string, confirmDedicated: boolean, attestation: string) => Promise<void>;
 }) {
   const t = useTranslations("StaffAdvances.enrolAccount");
-  const candidates = accounts.filter((a) => a.is_active && a.account_type === "asset" && a.account_class === null);
+  const candidates = staffAdvanceEnrolCandidates(accounts);
   const [accountCode, setAccountCode] = useState("");
   const [personLabel, setPersonLabel] = useState("");
   const [attestation, setAttestation] = useState("");
