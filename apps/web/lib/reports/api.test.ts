@@ -318,16 +318,24 @@ test("listWikiPages GETs wiki_pages filtered to one client", async () => {
 // (the PC1 lesson: a typo in a `p_` key compiles fine and only ever surfaces
 // as a live CLR10, never a type error).
 
-test("mintMonthSnapshot posts the exact mint_month_snapshot body shape, with a fresh op_key", async () => {
+test("mintMonthSnapshot posts the exact mint_month_snapshot body shape, forwarding the CALLER-supplied op_key verbatim (ruling F9 — no internal minting)", async () => {
   const { impl, calls } = captureFetch({ snapshot_id: "s1" });
   await withMockedFetch(impl, async () => {
-    await mintMonthSnapshot({ clientId: "c1", monthStart: "2026-06-01" }, { session: fakeSession() });
+    await mintMonthSnapshot({ clientId: "c1", monthStart: "2026-06-01", opKey: "caller-supplied-key-1" }, { session: fakeSession() });
   });
   assert.equal(calls.length, 1);
   assert.match(calls[0]!.url, /\/rpc\/mint_month_snapshot$/);
-  assert.equal(calls[0]!.body.p_client, "c1");
-  assert.equal(calls[0]!.body.p_month_start, "2026-06-01");
-  assert.match(String(calls[0]!.body.p_op_key), /^[0-9a-f-]{36}$/);
+  assert.deepEqual(calls[0]!.body, { p_client: "c1", p_month_start: "2026-06-01", p_op_key: "caller-supplied-key-1" });
+});
+
+test("mintMonthSnapshot: two calls with the SAME caller-supplied op_key post the SAME p_op_key — the F9 replay shape", async () => {
+  const { impl, calls } = captureFetch({ snapshot_id: "s1" });
+  await withMockedFetch(impl, async () => {
+    await mintMonthSnapshot({ clientId: "c1", monthStart: "2026-06-01", opKey: "same-key" }, { session: fakeSession() });
+    await mintMonthSnapshot({ clientId: "c1", monthStart: "2026-06-01", opKey: "same-key" }, { session: fakeSession() });
+  });
+  assert.equal(calls[0]!.body.p_op_key, "same-key");
+  assert.equal(calls[1]!.body.p_op_key, "same-key");
 });
 
 test("snapshotState posts p_snapshot and returns the RPC's own text verbatim — a read, not a governed act", async () => {

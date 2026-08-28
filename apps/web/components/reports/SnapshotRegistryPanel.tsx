@@ -107,6 +107,12 @@ function SnapshotRow({ snapshot, session }: { snapshot: { id: string; period_sta
 function MintDialog({ clientId, busy, act }: { clientId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
   const t = useTranslations("ReportsSnapshotsSeeding.snapshots.mint");
   const [monthStart, setMonthStart] = useState(() => `${businessToday().slice(0, 7)}-01`);
+  // RULING F9 (independent review): one op_key PER DIALOG OPEN, not per call
+  // — see lib/reports/api.ts's mintMonthSnapshot header for the full
+  // reasoning. Minted once on mount as a safe default (matches the trigger's
+  // first render, before any open has happened) and RE-minted every time the
+  // dialog actually opens, via DoorDialog's onOpenChange.
+  const [opKey, setOpKey] = useState(() => crypto.randomUUID());
   return (
     <DoorDialog
       triggerLabel={t("trigger")}
@@ -115,7 +121,8 @@ function MintDialog({ clientId, busy, act }: { clientId: string; busy: boolean; 
       confirmLabel={t("confirm")}
       busy={busy}
       confirmDisabled={monthStart.trim().length === 0}
-      onConfirm={() => act(async () => { await mintMonthSnapshot({ clientId, monthStart }); })}
+      onConfirm={() => act(async () => { await mintMonthSnapshot({ clientId, monthStart, opKey }); })}
+      onOpenChange={(isOpen) => { if (isOpen) setOpKey(crypto.randomUUID()); }}
     >
       <div className="flex flex-col gap-2">
         <Input aria-label={t("monthPlaceholder")} type="date" value={monthStart} onChange={(e) => setMonthStart(e.target.value)} />

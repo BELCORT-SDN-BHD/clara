@@ -1021,7 +1021,8 @@
         "confirm": "Requeue",
         "reasonPlaceholder": "Reason",
         "driftTitle": "The re-derived request differs from the one that failed",
-        "driftBody": "Something this render depends on moved since the failure. Requeuing again will render a DIFFERENT document from the one that failed.",
+        "driftBody": "Something this render depends on moved since the failure — a verified answer, a published template, a resolved layout. The DB refused a verbatim retry; requeuing again will re-derive from today's state and may render a DIFFERENT document from the one that failed. The full comparison lives in the audit trail.",
+        "driftSupersededLabel": "superseded manifest sha256",
         "driftAcknowledge": "I understand this may render a different document — requeue anyway"
       }
     },

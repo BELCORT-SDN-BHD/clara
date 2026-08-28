@@ -2,10 +2,23 @@
 
 // T9 (port-wave) — the render-job queue (clara.render_jobs). Only a `failed`
 // job is requeueable (rung-0 finding, requeue_render_job's own body); a
-// manifest-drift refusal (CLR43 requeue_manifest_drifted) is rendered
-// verbatim with both digests, and accepting it is a SEPARATE, explicit
-// second confirm — never an automatic retry (AGENTS.md: a DoorRefusal is
-// never retried by this module; the human decides, then calls again).
+// manifest-drift refusal (CLR43 requeue_manifest_drifted) renders the
+// refusal's own message verbatim through the panel's own persistent banner
+// (the door dialog itself closes on any confirm attempt, per house
+// mechanism — see RequeueDialog's own note), and accepting it is a
+// SEPARATE, explicit second confirm on the dialog's NEXT open — never an
+// automatic retry (AGENTS.md: a DoorRefusal is never retried by this
+// module; the human decides, then calls again).
+//
+// F2/F3 (independent review, T9 fix round): the DB's refusal names BOTH
+// digests in its `detail` object, but wire.ts's RefusalError carries no
+// `detail` passthrough — only `.message` (free text) and `.reason` (the one
+// parsed discriminant string). This module cannot render a digest it was
+// never given, so it renders only what IS real: the job's own, ALREADY-
+// LOADED `manifest_sha256`, labelled the SUPERSEDED one — never a fabricated
+// "new" digest. (Chosen over widening RefusalError with a `detail` field —
+// that is a shared-file, cross-consumer change or a broader fix; this is the
+// narrower, in-file one, and the refusal's own message is still shown.)
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
@@ -16,7 +29,7 @@ import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { DoorDialog } from "./DoorDialog";
 import { useHydratedPart } from "@/lib/parts/hooks";
-import { listRenderJobs, requeueRenderJob, isDoorRefusal, DoorRefusal } from "@/lib/reports/api";
+import { listRenderJobs, requeueRenderJob, isDoorRefusal } from "@/lib/reports/api";
 import { businessDateTime } from "@/lib/business-date";
 import type { RenderJobRow, RenderJobState } from "@/lib/reports/types";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -93,22 +106,30 @@ function RenderJobRowView({ job, busy, act }: { job: RenderJobRow; busy: boolean
 function RequeueDialog({ job, busy, act }: { job: RenderJobRow; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
   const t = useTranslations("ReportsSnapshotsSeeding.renderJobs.requeue");
   const [reason, setReason] = useState("");
-  const [drift, setDrift] = useState<{ superseded_manifest_sha256: string; manifest_sha256: string } | null>(null);
+  // F2/F3 (independent review): a plain boolean — no fabricated digest
+  // fields. The only REAL fact available on a drift refusal is the job's
+  // own, already-loaded manifest_sha256 (rendered directly below, labelled
+  // superseded); the refusal carries no `detail` passthrough (see the file
+  // header) to source a "new" digest from.
+  const [drift, setDrift] = useState(false);
   const [acceptDrift, setAcceptDrift] = useState(false);
 
   const submit = () =>
     act(async () => {
       try {
         await requeueRenderJob({ jobId: job.id, reason, acceptDrift });
-        setDrift(null);
+        setDrift(false);
       } catch (e) {
-        // The drift refusal is read here, once, so the SAME dialog can offer
-        // the explicit second confirm — every other refusal still surfaces
-        // verbatim through the panel's own banner via `act`'s reload cycle,
-        // never retried automatically.
+        // The drift refusal is read here, once. DoorDialog's own confirm
+        // button closes on ANY resolved onConfirm — including a caught
+        // failure, since useHydratedPart's act() never rethrows — so this
+        // dialog cannot stay open to offer a same-session second confirm;
+        // the refusal renders through the panel's own persistent banner
+        // (never inside the dialog, per house law), and `drift` (kept, not
+        // reset — see onOpenChange below) is what makes the NEXT open show
+        // the consent checkbox instead of a blank retry.
         if (isDoorRefusal(e) && e.code === "CLR43" && e.reason === "requeue_manifest_drifted") {
-          const detail = (e as DoorRefusal).message;
-          setDrift({ superseded_manifest_sha256: job.manifest_sha256, manifest_sha256: detail });
+          setDrift(true);
         }
         throw e;
       }
@@ -121,8 +142,24 @@ function RequeueDialog({ job, busy, act }: { job: RenderJobRow; busy: boolean; a
       description={t("description")}
       confirmLabel={t("confirm")}
       busy={busy}
-      confirmDisabled={reason.trim().length === 0 || (drift !== null && !acceptDrift)}
+      confirmDisabled={reason.trim().length === 0 || (drift && !acceptDrift)}
       onConfirm={submit}
+      // F4 (independent review, corrected — self-caught while wiring the
+      // fix): `reason` and `acceptDrift` are a FRESH deliberate act every
+      // open, so they reset here. `drift` deliberately does NOT reset: this
+      // door's own DoorDialog closes after EVERY confirm attempt, success or
+      // refusal (act() never rethrows — see submit's own note below), so a
+      // drift finding can only ever be SHOWN on the dialog's NEXT open, after
+      // the human has read the refusal from the panel's persistent banner
+      // and reopens deliberately to accept it. Resetting `drift` here would
+      // make that reopen show nothing, trapping every drifted job in a
+      // refuse-close-reopen loop with no way to ever complete a requeue.
+      onOpenChange={(isOpen) => {
+        if (isOpen) {
+          setReason("");
+          setAcceptDrift(false);
+        }
+      }}
     >
       <div className="flex flex-col gap-2">
         <Input aria-label={t("reasonPlaceholder")} placeholder={t("reasonPlaceholder")} value={reason} onChange={(e) => setReason(e.target.value)} />
@@ -131,6 +168,10 @@ function RequeueDialog({ job, busy, act }: { job: RenderJobRow; busy: boolean; a
             <StateBanner tone="warning" title={t("driftTitle")}>
               {t("driftBody")}
             </StateBanner>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <dt>{t("driftSupersededLabel")}</dt>
+              <dd className="truncate font-mono">{job.manifest_sha256}</dd>
+            </dl>
             <label className="flex items-center gap-2 text-xs text-muted-foreground">
               <input type="checkbox" checked={acceptDrift} onChange={(e) => setAcceptDrift(e.target.checked)} />
               {t("driftAcknowledge")}

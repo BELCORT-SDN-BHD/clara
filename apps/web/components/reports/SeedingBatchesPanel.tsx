@@ -61,13 +61,27 @@ export function SeedingBatchesPanel({ clientId, session }: { clientId: string; s
     proposalsByBatch.set(p.batch_id, list);
   }
 
-  const reload = async () => {
-    await Promise.all([batches.reload(), proposals.reload()]);
-  };
-  const act = async (fn: () => Promise<void>) => {
+  // Batch-scoped acts (cancel/complete) reload proposals too — a completed
+  // batch's stats are DERIVED from proposal state, so the two reads travel
+  // together even though a batch act writes no proposal row of its own.
+  const actBatch = async (fn: () => Promise<void>) => {
     await batches.act(fn);
     await proposals.reload();
   };
+  // F5 (independent review): proposal-scoped acts (tick/decline) ride
+  // proposals' OWN act()-and-reload cycle (part2 §7.1(2)) directly — never a
+  // hand-rolled err state that drops the CLR code, which is what ProposalRow
+  // did before this fix.
+  const actProposal = proposals.act;
+
+  // F1 (independent review, HIGH): the loading/error gate below used to
+  // consult ONLY batches.err — a proposals-only failure (e.g. a 401 on that
+  // one read while batches loaded fine) rendered as a PERMANENT spinner,
+  // since !proposals.data stayed true forever with no err ever surfacing.
+  // Both hooks' err/clr are consulted now, whichever is set.
+  const loadErr = batches.err ?? proposals.err;
+  const loadClr = batches.err ? batches.clr : proposals.clr;
+  const dataReady = batches.data && proposals.data;
 
   return (
     <Card>
@@ -76,25 +90,25 @@ export function SeedingBatchesPanel({ clientId, session }: { clientId: string; s
         <CardDescription className="text-xs">{t("subheading")}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {batches.data && batches.err ? (
-          <StateBanner tone="error" code={batches.clr ? `${batches.clr.code}${batches.clr.reason ? ` · ${batches.clr.reason}` : ""}` : undefined}>
-            {batches.err}
+        {dataReady && loadErr ? (
+          <StateBanner tone="error" code={loadClr ? `${loadClr.code}${loadClr.reason ? ` · ${loadClr.reason}` : ""}` : undefined}>
+            {loadErr}
           </StateBanner>
         ) : null}
-        {!batches.data || !proposals.data ? (
-          batches.err ? <StateBanner tone="error">{t("error", { message: batches.err })}</StateBanner> : <LoadingState>{t("loading")}</LoadingState>
-        ) : batches.data.length === 0 ? (
+        {!dataReady ? (
+          loadErr ? <StateBanner tone="error">{t("error", { message: loadErr })}</StateBanner> : <LoadingState>{t("loading")}</LoadingState>
+        ) : batches.data!.length === 0 ? (
           <EmptyState>{t("empty")}</EmptyState>
         ) : (
           <div className="flex flex-col gap-3">
-            {batches.data.map((b) => (
+            {batches.data!.map((b) => (
               <BatchGroup
                 key={b.id}
                 batch={b}
                 proposals={proposalsByBatch.get(b.id) ?? []}
                 busy={batches.busy || proposals.busy}
-                actBatch={act}
-                reload={reload}
+                actBatch={actBatch}
+                actProposal={actProposal}
               />
             ))}
           </div>
@@ -109,13 +123,13 @@ function BatchGroup({
   proposals,
   busy,
   actBatch,
-  reload,
+  actProposal,
 }: {
   batch: SeedingBatchRow;
   proposals: SeedingProposalRow[];
   busy: boolean;
   actBatch: (fn: () => Promise<void>) => Promise<void>;
-  reload: () => Promise<void>;
+  actProposal: (fn: () => Promise<void>) => Promise<void>;
 }) {
   const t = useTranslations("ReportsSnapshotsSeeding.seeding");
   const openCount = proposals.filter((p) => p.state === "proposed").length;
@@ -140,7 +154,7 @@ function BatchGroup({
       ) : (
         <ul className="flex flex-col gap-2">
           {proposals.map((p) => (
-            <ProposalRow key={p.id} proposal={p} batchOpen={batch.state === "open"} busy={busy} reload={reload} />
+            <ProposalRow key={p.id} proposal={p} batchOpen={batch.state === "open"} busy={busy} act={actProposal} />
           ))}
         </ul>
       )}
@@ -176,29 +190,17 @@ function ProposalRow({
   proposal,
   batchOpen,
   busy,
-  reload,
+  act,
 }: {
   proposal: SeedingProposalRow;
   batchOpen: boolean;
   busy: boolean;
-  reload: () => Promise<void>;
+  // F5 (independent review): the SAME useHydratedPart act()-and-reload shape
+  // every sibling door in this file already uses — a refusal's CLR code +
+  // reason now surfaces through the panel's own top banner (loadErr/loadClr
+  // above), never a hand-rolled local err that drops the code.
+  act: (fn: () => Promise<void>) => Promise<void>;
 }) {
-  const [err, setErr] = useState<string | null>(null);
-  const [working, setWorking] = useState(false);
-
-  const run = (fn: () => Promise<void>) => async () => {
-    setWorking(true);
-    setErr(null);
-    try {
-      await fn();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setWorking(false);
-      await reload();
-    }
-  };
-
   return (
     <li className="flex flex-col gap-1 rounded-md border border-border/60 p-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -206,35 +208,34 @@ function ProposalRow({
         <span className="font-mono text-xs text-card-foreground">{proposal.proposal_kind}</span>
       </div>
       <p className="text-xs text-muted-foreground wrap-anywhere">{JSON.stringify(proposal.payload)}</p>
-      {err ? <StateBanner tone="error">{err}</StateBanner> : null}
       {batchOpen && proposal.state === "proposed" ? (
         <div className="flex flex-wrap gap-2">
-          <TickDialog proposalId={proposal.id} busy={busy || working} run={run} />
-          <DeclineDialog proposalId={proposal.id} busy={busy || working} run={run} />
+          <TickDialog proposalId={proposal.id} busy={busy} act={act} />
+          <DeclineDialog proposalId={proposal.id} busy={busy} act={act} />
         </div>
       ) : null}
     </li>
   );
 }
 
-function TickDialog({ proposalId, busy, run }: { proposalId: string; busy: boolean; run: (fn: () => Promise<void>) => () => Promise<void> }) {
+function TickDialog({ proposalId, busy, act }: { proposalId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
   const t = useTranslations("ReportsSnapshotsSeeding.seeding.tick");
   return (
     <DoorDialog
       triggerLabel={t("trigger")} title={t("title")} description={t("description")} confirmLabel={t("confirm")} busy={busy}
-      onConfirm={run(async () => { await tickSeedingProposal(proposalId); })}
+      onConfirm={() => act(async () => { await tickSeedingProposal(proposalId); })}
     />
   );
 }
 
-function DeclineDialog({ proposalId, busy, run }: { proposalId: string; busy: boolean; run: (fn: () => Promise<void>) => () => Promise<void> }) {
+function DeclineDialog({ proposalId, busy, act }: { proposalId: string; busy: boolean; act: (fn: () => Promise<void>) => Promise<void> }) {
   const t = useTranslations("ReportsSnapshotsSeeding.seeding.decline");
   const [reason, setReason] = useState("");
   return (
     <DoorDialog
       triggerLabel={t("trigger")} title={t("title")} confirmLabel={t("confirm")} busy={busy}
       confirmDisabled={reason.trim().length === 0}
-      onConfirm={run(async () => { await declineSeedingProposal({ proposalId, reason }); })}
+      onConfirm={() => act(async () => { await declineSeedingProposal({ proposalId, reason }); })}
     >
       <Input aria-label={t("reasonPlaceholder")} placeholder={t("reasonPlaceholder")} value={reason} onChange={(e) => setReason(e.target.value)} />
     </DoorDialog>

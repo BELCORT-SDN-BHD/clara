@@ -264,14 +264,27 @@ export async function listWikiPages(clientId: string, opts: Opts = {}): Promise<
 /** clara.mint_month_snapshot(p_client, p_month_start, p_op_key) — bookkeeper+.
  *  `monthStart` must be the first day of a completed month; the door itself
  *  refuses "the month has not finished" (CLR10 period_not_complete) rather
- *  than the UI pre-computing that answer. */
+ *  than the UI pre-computing that answer.
+ *
+ *  RULING F9 (independent review, T9 fix round): `opKey` is CALLER-SUPPLIED,
+ *  never minted in here — a departure from register/supersede's own
+ *  crypto.randomUUID()-per-call shape above, and a THIRD op_key discipline
+ *  alongside M5's per-artifact-stable scheme. The caller (SnapshotRegistryPanel's
+ *  MintDialog) mints ONE key when the dialog OPENS and reuses it for every
+ *  confirm click while it stays open, via DoorDialog's `onOpenChange`: a
+ *  lost-response retry WITHIN one open dialog (a double-click, a network
+ *  timeout after the RPC actually landed) replays the SAME op through
+ *  `_reserve_op`'s own idempotency and returns the ORIGINAL receipt — closing
+ *  and reopening the dialog is the deliberate signal for a genuine re-mint
+ *  (re-minting an already-snapshotted month is itself legitimate; see this
+ *  module's header), so THAT gets a fresh key. */
 export async function mintMonthSnapshot(
-  args: { clientId: string; monthStart: string },
+  args: { clientId: string; monthStart: string; opKey: string },
   opts: Opts = {},
 ): Promise<unknown> {
   return callDoor(
     "mint_month_snapshot",
-    { p_client: args.clientId, p_month_start: args.monthStart, p_op_key: crypto.randomUUID() },
+    { p_client: args.clientId, p_month_start: args.monthStart, p_op_key: args.opKey },
     opts,
   );
 }
@@ -285,12 +298,22 @@ export async function snapshotState(snapshotId: string, opts: Opts = {}): Promis
 
 /** clara.requeue_render_job(p_job, p_reason, p_accept_drift) — bookkeeper+.
  *  NO op_key argument on this door (rung-0 finding — the live signature
- *  differs from every other T9 door): idempotency rides the render_jobs
- *  unique constraint (one live job per report_run_id+kind) instead. Refuses
- *  CLR43 `requeue_manifest_drifted` on a re-derived manifest that no longer
- *  matches the failed job's own pin set unless `acceptDrift` is explicitly
- *  true — a caller reads the refusal's both-digests detail before choosing
- *  to accept, never an automatic retry. */
+ *  differs from every other T9 door). F8 (independent review — right
+ *  conclusion, wrong citation, corrected): idempotency's PRIMARY mechanism
+ *  is the body's own live-successor READ (`select id from render_jobs where
+ *  report_run_id=… and kind=… and state<>'failed'`), which REFUSES before
+ *  ever reaching the insert if a live job already exists for this request.
+ *  The partial unique index (`report_run_id, manifest_sha256 WHERE state <>
+ *  'failed'`) is only the CONCURRENT-INSERT backstop for the race window
+ *  between that read and the insert (the body's own `exception when
+ *  unique_violation` arm) — it is not the mechanism an ordinary sequential
+ *  retry goes through. Refuses CLR43 `requeue_manifest_drifted` on a
+ *  re-derived manifest that no longer matches the failed job's own pin set
+ *  unless `acceptDrift` is explicitly true — never an automatic retry. The
+ *  refusal's wire shape carries no digests (RefusalError has no `detail`
+ *  passthrough — see wire.ts), so the caller renders the job's own,
+ *  already-loaded `manifest_sha256`, labelled the SUPERSEDED one, rather
+ *  than fabricating the new one (see RenderJobQueuePanel.tsx's F2 note). */
 export async function requeueRenderJob(
   args: { jobId: string; reason: string; acceptDrift?: boolean },
   opts: Opts = {},

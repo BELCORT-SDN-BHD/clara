@@ -9,13 +9,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent, textOf } from "../../test/hookHarness";
+import { renderComponent, textOf, setFieldValue, setNativeValue } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource, sessionTokenAccessor } from "../../lib/session-accessor";
 import messages from "../../messages/en.json";
 import { SnapshotRegistryPanel } from "./SnapshotRegistryPanel";
 import { SeedingBatchesPanel } from "./SeedingBatchesPanel";
+import { RenderJobQueuePanel } from "./RenderJobQueuePanel";
+import { WikiCurationPanel } from "./WikiCurationPanel";
 
 enableDomInspection();
 
@@ -27,6 +29,44 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
     if (found) return found;
   }
   return null;
+}
+
+/** DoorDialog's Confirm button is a plain `@base-ui/react` Button with a
+ *  CONSUMER onClick — see reports-snapshots-seeding-a11y.test.tsx's own
+ *  identical helper for the full discovery note (hookHarness's `fireEvent`
+ *  reaches DialogTrigger/DialogClose's PRIMITIVE click handling but never
+ *  this button's wrapped `externalOnClick`). Calls the react fiber's own
+ *  onClick prop directly, exactly like `setFieldValue` does for onChange. */
+async function clickConfirm(node: Node): Promise<void> {
+  const propsKey = Object.keys(node as object).find((k) => k.startsWith("__reactProps"));
+  const onClick = propsKey ? (node as unknown as Record<string, { onClick?: (e: unknown) => unknown }>)[propsKey]?.onClick : undefined;
+  if (!onClick) throw new Error("clickConfirm: no onClick prop found on this node — is it really a Button?");
+  await onClick({
+    type: "click", target: node, currentTarget: node, bubbles: true, cancelable: true,
+    defaultPrevented: false, isTrusted: true, timeStamp: Date.now(),
+    preventDefault() {}, stopPropagation() {}, persist() {},
+  });
+}
+
+/** The SAME portal-boundary gap `clickConfirm` exists for, on a plain
+ *  native `<input type="checkbox">`'s onChange: this checkbox lives inside
+ *  the SAME DialogPortal content (appended to `body`, a SIBLING of
+ *  `h.container`, not a descendant), so `fireEvent`'s delegated dispatch
+ *  through `container.__listeners` never reaches it either — unlike
+ *  matching-section.test.tsx's checkboxes, which sit directly in
+ *  `h.container`'s own tree (no portal), where the identical `fireEvent`
+ *  idiom is proven to work. Calls onChange directly with the node's own
+ *  (already flipped via setNativeValue) `.checked`. */
+async function changeCheckbox(node: Node, checked: boolean): Promise<void> {
+  setNativeValue(node as never, "checked", checked);
+  const propsKey = Object.keys(node as object).find((k) => k.startsWith("__reactProps"));
+  const onChange = propsKey ? (node as unknown as Record<string, { onChange?: (e: unknown) => unknown }>)[propsKey]?.onChange : undefined;
+  if (!onChange) throw new Error("changeCheckbox: no onChange prop found on this node — is it really a checkbox input?");
+  await onChange({
+    type: "change", target: node, currentTarget: node, bubbles: true, cancelable: true,
+    defaultPrevented: false, isTrusted: true, timeStamp: Date.now(),
+    preventDefault() {}, stopPropagation() {}, persist() {},
+  });
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -81,6 +121,22 @@ test("T9 (mint-snapshot door): the trigger is keyboard-reachable, opening it rea
       const monthField = findIn(body as never, (n) => n.tagName === "INPUT");
       assert.ok(monthField, "the dialog must reach its month field");
 
+      // F6 (independent review): the DISABLED PROPERTY itself, not merely
+      // reachability — the P3 unopenable-door class is a control that
+      // RENDERS but never actually admits a click. A month is pre-filled
+      // (SnapshotRegistryPanel defaults to the current month), so Confirm
+      // starts enabled here.
+      const confirmButton = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Mint" && (n as unknown) !== (trigger as unknown),
+      );
+      assert.ok(confirmButton, "the dialog's own Confirm (Mint) button must be reachable, distinct from the trigger");
+      assert.equal(
+        (confirmButton as unknown as { disabled: boolean }).disabled,
+        false,
+        "Confirm must NOT be disabled with a month already filled in — a mutation to confirmDisabled={true} here must go RED",
+      );
+
       const cancelButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never).includes("Cancel"));
       assert.ok(cancelButton, "the Cancel control must render as a real button");
       await h.fireEvent(cancelButton as never, "click");
@@ -129,6 +185,183 @@ test("T9 (tick-proposal door): the trigger is keyboard-reachable and Enter/Space
 
       const confirmButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Tick" && (n as unknown) !== (trigger as unknown));
       assert.ok(confirmButton, "the dialog's own Confirm (Tick) button must be reachable, distinct from the trigger");
+      // F6 (independent review): TickDialog carries no confirmDisabled prop
+      // at all (no reason field), so Confirm must be enabled from open —
+      // this is the exact mutation class (`confirmDisabled={true}` shipping
+      // green) F6 asks to catch; asserting the property, not just presence,
+      // is what makes that mutation go red.
+      assert.equal(
+        (confirmButton as unknown as { disabled: boolean }).disabled,
+        false,
+        "Confirm must NOT be disabled — a mutation to confirmDisabled={true} here must go RED",
+      );
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+// F7 (independent review): the header claimed four doors, tested two — this
+// adds requeue (through the drift-checkbox path, both opens) and retire-wiki.
+// Both this door's Trigger AND Confirm buttons carry the SAME label text
+// ("Requeue" / "Retire"), so every lookup below disambiguates by OBJECT
+// IDENTITY (`!== trigger`), never text alone.
+
+test("T9 (requeue-render-job door, incl. the drift checkbox path): Confirm starts DISABLED on an empty reason, enables once typed, the drift checkbox is keyboard-reachable on the SECOND open, and Confirm re-gates on it", async () => {
+  const impl = (async (u: RequestInfo | URL) => {
+    const url = String(u);
+    if (url.includes("/render_jobs")) {
+      return jsonResponse([{ id: "rj1", client_id: "c1", report_run_id: "run1", kind: "pre_sign", state: "failed", manifest_sha256: "e".repeat(64), requested_by: "u1", attempts: 1, max_attempts: 5, last_error: { code: "render_timeout" }, supersedes_render_job_id: null, requeue_reason: null, enqueued_at: "2026-07-01T00:00:00Z", finished_at: "2026-07-01T00:05:00Z" }]);
+    }
+    if (url.includes("/rpc/requeue_render_job")) {
+      return jsonResponse(
+        { code: "CLR43", message: "the re-derived request differs from the one that failed", details: JSON.stringify({ reason: "requeue_manifest_drifted" }) },
+        400,
+      );
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const h = await renderComponent(App(createElement(RenderJobQueuePanel, { clientId: "c1", session: sessionTokenAccessor })));
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      let trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Requeue"));
+      assert.ok(trigger, "the Requeue trigger must render for a failed job");
+      await h.fireEvent(trigger!, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      let confirmButton = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Requeue" && (n as unknown) !== (trigger as unknown),
+      );
+      assert.ok(confirmButton, "the dialog's own Confirm button must be reachable, distinct from the trigger by IDENTITY (F7 disambiguation)");
+      assert.equal(
+        (confirmButton as unknown as { disabled: boolean }).disabled,
+        true,
+        "Confirm starts DISABLED — the reason field is empty (F6's mutation-proof shape)",
+      );
+
+      const reasonField = findIn(body as never, (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type !== "checkbox");
+      assert.ok(reasonField, "the reason field must be reachable");
+      await h.act(() => { setFieldValue(reasonField as never, "render timeout"); });
+      for (let i = 0; i < 2; i++) await h.settle();
+
+      confirmButton = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Requeue" && (n as unknown) !== (trigger as unknown),
+      );
+      assert.equal(
+        (confirmButton as unknown as { disabled: boolean }).disabled,
+        false,
+        "Confirm ENABLES once the reason is typed — a mutation pinning it disabled must go RED",
+      );
+      assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations, first open");
+
+      await h.act(() => clickConfirm(confirmButton as never));
+      for (let i = 0; i < 8; i++) await h.settle();
+
+      // --- Second open: the drift checkbox must be keyboard-reachable, and
+      // Confirm must re-gate on it (RequeueDialog's own note: the dialog
+      // closes on every attempt, so this consent can only ever be shown —
+      // and exercised — on the dialog's NEXT open). ---
+      trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Requeue"));
+      assert.ok(trigger, "the Requeue trigger must still render after the refusal");
+      await h.fireEvent(trigger!, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      const checkbox = findIn(body as never, (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type === "checkbox");
+      assert.ok(checkbox, "the drift consent checkbox must render on the second open");
+      assert.ok(
+        focusableElements(body as never).includes(checkbox as never),
+        "the drift checkbox must be keyboard-reachable, not merely present",
+      );
+      assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations with the checkbox visible");
+
+      const reasonFieldSecond = findIn(body as never, (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type !== "checkbox");
+      assert.ok(reasonFieldSecond, "the reason field must be reachable again (it resets on open — F4)");
+      await h.act(() => { setFieldValue(reasonFieldSecond as never, "accepting the drift"); });
+      for (let i = 0; i < 2; i++) await h.settle();
+
+      let confirmSecond = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Requeue" && (n as unknown) !== (trigger as unknown),
+      );
+      assert.equal(
+        (confirmSecond as unknown as { disabled: boolean }).disabled,
+        true,
+        "Confirm stays disabled while a KNOWN drift is unacknowledged, even with a reason typed",
+      );
+
+      await h.act(() => changeCheckbox(checkbox as never, true));
+      for (let i = 0; i < 4; i++) await h.settle();
+
+      confirmSecond = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Requeue" && (n as unknown) !== (trigger as unknown),
+      );
+      assert.equal(
+        (confirmSecond as unknown as { disabled: boolean }).disabled,
+        false,
+        "checking the drift consent box ENABLES Confirm — the gate moved to the checkbox, it did not disappear",
+      );
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 5; i++) await h.settle();
+    }
+  });
+});
+
+test("T9 (retire-wiki-page door): Confirm starts DISABLED on an empty reason and enables once typed, distinct from the trigger by IDENTITY", async () => {
+  const impl = (async (u: RequestInfo | URL) => {
+    if (String(u).includes("/wiki_pages")) {
+      return jsonResponse([{ id: "w1", client_id: "c1", slug: "treatment/gst-input-tax", page_kind: "treatment", title: "GST input tax treatment", counterparty_id: null, current_version_id: "v1", state: "active", retired_at: null, retired_by: null, retire_reason: null, created_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-15T00:00:00Z" }]);
+    }
+    throw new Error(`unexpected fetch: ${String(u)}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const h = await renderComponent(App(createElement(WikiCurationPanel, { clientId: "c1", session: sessionTokenAccessor })));
+    const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+    body.appendChild(h.container);
+    try {
+      for (let i = 0; i < 4; i++) await h.settle();
+      const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n).includes("Retire"));
+      assert.ok(trigger, "the Retire trigger must render for an active page");
+      assert.ok(focusableElements(h.container as never).includes(trigger as never), "the trigger must be keyboard-reachable");
+
+      await h.fireEvent(trigger!, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      let confirmButton = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Retire" && (n as unknown) !== (trigger as unknown),
+      );
+      assert.ok(confirmButton, "the dialog's own Confirm button must be reachable, distinct from the trigger by IDENTITY (F7 disambiguation)");
+      assert.equal(
+        (confirmButton as unknown as { disabled: boolean }).disabled,
+        true,
+        "Confirm starts DISABLED — the reason field is empty",
+      );
+
+      const reasonField = findIn(body as never, (n) => n.tagName === "INPUT");
+      assert.ok(reasonField, "the reason field must be reachable");
+      await h.act(() => { setFieldValue(reasonField as never, "superseded by a newer treatment note"); });
+      for (let i = 0; i < 2; i++) await h.settle();
+
+      confirmButton = findIn(
+        body as never,
+        (n) => n.tagName === "BUTTON" && textOf(n as never) === "Retire" && (n as unknown) !== (trigger as unknown),
+      );
+      assert.equal(
+        (confirmButton as unknown as { disabled: boolean }).disabled,
+        false,
+        "Confirm ENABLES once the reason is typed — a mutation pinning it disabled must go RED",
+      );
+      assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the dialog is open");
     } finally {
       await h.unmount();
       for (let i = 0; i < 5; i++) await h.settle();
