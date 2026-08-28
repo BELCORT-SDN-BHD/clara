@@ -13,10 +13,16 @@ import type {
   ExportRecipientKind,
   ExportRecipientRow,
   FreeformReadLogRow,
+  PeriodSnapshotRow,
   ReportAgentReceiptRow,
   ReportArtifactRow,
+  RenderJobRow,
   SandboxExportRow,
+  SeedingBatchRow,
+  SeedingProposalRow,
   SignedOriginalCustody,
+  SnapshotState,
+  WikiPageRow,
 } from "./types";
 
 export { DoorRefusal, isDoorRefusal, ReadError, isReadError };
@@ -199,4 +205,181 @@ export async function listReportAgentReceipts(clientId: string, opts: Opts = {})
     order: "at.desc",
     ...opts,
   });
+}
+
+// -----------------------------------------------------------------------------
+// T9 (port-wave) reads — rung-0 census at the live 0140 catalog. See ./types.ts's
+// T9 header for the create_account_set_v1 retirement finding this module does
+// NOT build a surface for.
+
+/** clara.period_snapshots, filtered to one client — `payload` (the frozen
+ *  dataset) is deliberately excluded from the select; see ./types.ts's header. */
+export async function listPeriodSnapshots(clientId: string, opts: Opts = {}): Promise<PeriodSnapshotRow[]> {
+  return getRows<PeriodSnapshotRow>("period_snapshots", {
+    select: "id,client_id,reporting_period_id,period_start,period_end,kind,minted_by,minted_at,books_watermark,dataset_sha256",
+    filters: { client_id: `eq.${clientId}` },
+    order: "period_start.desc",
+    ...opts,
+  });
+}
+
+/** clara.render_jobs, filtered to one client. */
+export async function listRenderJobs(clientId: string, opts: Opts = {}): Promise<RenderJobRow[]> {
+  return getRows<RenderJobRow>("render_jobs", {
+    filters: { client_id: `eq.${clientId}` },
+    order: "enqueued_at.desc",
+    ...opts,
+  });
+}
+
+/** clara.seeding_batches, filtered to one client. */
+export async function listSeedingBatches(clientId: string, opts: Opts = {}): Promise<SeedingBatchRow[]> {
+  return getRows<SeedingBatchRow>("seeding_batches", {
+    filters: { client_id: `eq.${clientId}` },
+    order: "created_at.desc",
+    ...opts,
+  });
+}
+
+/** clara.seeding_proposals, filtered to one client (not scoped to one batch —
+ *  the panel groups client-side by `batch_id`, mirroring the seeding_batches
+ *  read above rather than a per-batch fetch per row). */
+export async function listSeedingProposals(clientId: string, opts: Opts = {}): Promise<SeedingProposalRow[]> {
+  return getRows<SeedingProposalRow>("seeding_proposals", {
+    filters: { client_id: `eq.${clientId}` },
+    order: "created_at.asc",
+    ...opts,
+  });
+}
+
+/** clara.wiki_pages, filtered to one client. */
+export async function listWikiPages(clientId: string, opts: Opts = {}): Promise<WikiPageRow[]> {
+  return getRows<WikiPageRow>("wiki_pages", {
+    filters: { client_id: `eq.${clientId}` },
+    order: "updated_at.desc",
+    ...opts,
+  });
+}
+
+/** clara.mint_month_snapshot(p_client, p_month_start, p_op_key) — bookkeeper+.
+ *  `monthStart` must be the first day of a completed month; the door itself
+ *  refuses "the month has not finished" (CLR10 period_not_complete) rather
+ *  than the UI pre-computing that answer.
+ *
+ *  RULING F9 (independent review, T9 fix round; TRUED at re-verify): `opKey`
+ *  is CALLER-SUPPLIED, never minted in here — a departure from register/
+ *  supersede's own crypto.randomUUID()-per-call shape above, and a THIRD
+ *  op_key discipline alongside M5's per-artifact-stable scheme. The caller
+ *  (SnapshotRegistryPanel's MintDialog) mints ONE key when the dialog OPENS
+ *  and would reuse it for every confirm click while it stayed open, via
+ *  DoorDialog's `onOpenChange`.
+ *
+ *  SHAPE-ONLY TODAY, not a live replay path — the reviewer proved the
+ *  scenario this was written to protect is currently UNREACHABLE: DoorDialog
+ *  closes the dialog on EVERY resolved confirm (success or refusal —
+ *  useHydratedPart's act() never rethrows), so there is never a SECOND
+ *  confirm click to replay through while the SAME key is still in scope.
+ *  `runOnce`'s single-fire guard independently drops a concurrent double-
+ *  click before it ever reaches this function, and a genuine network-level
+ *  retry (a 504 after the RPC actually landed) can only happen through a
+ *  FRESH dialog open — a NEW key, not a replay of the old one, since the
+ *  dialog already closed. Kept anyway: the caller-owned shape becomes LIVE
+ *  the moment any dialog in this codebase is changed to stay open across a
+ *  failed confirm (a real, plausible future shape — see the F2/F4 notes in
+ *  RenderJobQueuePanel.tsx for a door that already wants exactly that), and
+ *  retrofitting op_key ownership onto every call site at that point would be
+ *  a worse time to do it than now. This file does NOT change DoorDialog's
+ *  close-on-refusal behaviour to make the scenario live — that mechanism is
+ *  house-wide, not this train's to alter. */
+export async function mintMonthSnapshot(
+  args: { clientId: string; monthStart: string; opKey: string },
+  opts: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "mint_month_snapshot",
+    { p_client: args.clientId, p_month_start: args.monthStart, p_op_key: args.opKey },
+    opts,
+  );
+}
+
+/** clara.snapshot_state(p_snapshot) — viewer+. A READ-flavoured RPC (rides
+ *  callDoor as transport, labelled a read at this call site per AGENTS.md's
+ *  carve-out) — never a governed act, so no op_key and no caller-side act(). */
+export async function snapshotState(snapshotId: string, opts: Opts = {}): Promise<SnapshotState> {
+  return callDoor<SnapshotState>("snapshot_state", { p_snapshot: snapshotId }, opts);
+}
+
+/** clara.requeue_render_job(p_job, p_reason, p_accept_drift) — bookkeeper+.
+ *  NO op_key argument on this door (rung-0 finding — the live signature
+ *  differs from every other T9 door). F8 (independent review — right
+ *  conclusion, wrong citation, corrected): idempotency's PRIMARY mechanism
+ *  is the body's own live-successor READ (`select id from render_jobs where
+ *  report_run_id=… and kind=… and state<>'failed'`), which REFUSES before
+ *  ever reaching the insert if a live job already exists for this request.
+ *  The partial unique index (`report_run_id, manifest_sha256 WHERE state <>
+ *  'failed'`) is only the CONCURRENT-INSERT backstop for the race window
+ *  between that read and the insert (the body's own `exception when
+ *  unique_violation` arm) — it is not the mechanism an ordinary sequential
+ *  retry goes through. Refuses CLR43 `requeue_manifest_drifted` on a
+ *  re-derived manifest that no longer matches the failed job's own pin set
+ *  unless `acceptDrift` is explicitly true — never an automatic retry. The
+ *  refusal's wire shape carries no digests (RefusalError has no `detail`
+ *  passthrough — see wire.ts), so the caller renders the job's own,
+ *  already-loaded `manifest_sha256`, labelled the SUPERSEDED one, rather
+ *  than fabricating the new one (see RenderJobQueuePanel.tsx's F2 note). */
+export async function requeueRenderJob(
+  args: { jobId: string; reason: string; acceptDrift?: boolean },
+  opts: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "requeue_render_job",
+    { p_job: args.jobId, p_reason: args.reason, p_accept_drift: args.acceptDrift ?? false },
+    opts,
+  );
+}
+
+/** clara.cancel_seeding_batch(p_batch, p_reason, p_op_key) — admin+. */
+export async function cancelSeedingBatch(
+  args: { batchId: string; reason: string },
+  opts: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "cancel_seeding_batch",
+    { p_batch: args.batchId, p_reason: args.reason, p_op_key: crypto.randomUUID() },
+    opts,
+  );
+}
+
+/** clara.complete_seeding_batch(p_batch, p_op_key) — admin+. */
+export async function completeSeedingBatch(batchId: string, opts: Opts = {}): Promise<unknown> {
+  return callDoor("complete_seeding_batch", { p_batch: batchId, p_op_key: crypto.randomUUID() }, opts);
+}
+
+/** clara.decline_seeding_proposal(p_proposal, p_reason, p_op_key) — admin+. */
+export async function declineSeedingProposal(
+  args: { proposalId: string; reason: string },
+  opts: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "decline_seeding_proposal",
+    { p_proposal: args.proposalId, p_reason: args.reason, p_op_key: crypto.randomUUID() },
+    opts,
+  );
+}
+
+/** clara.tick_seeding_proposal(p_proposal, p_op_key) — admin+. */
+export async function tickSeedingProposal(proposalId: string, opts: Opts = {}): Promise<unknown> {
+  return callDoor("tick_seeding_proposal", { p_proposal: proposalId, p_op_key: crypto.randomUUID() }, opts);
+}
+
+/** clara.retire_wiki_page(p_page, p_reason, p_op_key) — bookkeeper+. */
+export async function retireWikiPage(
+  args: { pageId: string; reason: string },
+  opts: Opts = {},
+): Promise<unknown> {
+  return callDoor(
+    "retire_wiki_page",
+    { p_page: args.pageId, p_reason: args.reason, p_op_key: crypto.randomUUID() },
+    opts,
+  );
 }

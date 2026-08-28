@@ -310,13 +310,16 @@ export async function revokeWake(credentialId) {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-/** Insert a synthetic human user directly (provisioning is the auth plane's job). */
+/** Insert a synthetic human user directly (provisioning is the auth plane's job). Reviewer
+ *  test-hygiene note: the email carries a per-call random suffix so the SAME (prefix, tag) can
+ *  be re-run against an already-used database without a unique_violation on clara.users.email --
+ *  display_name stays the caller's exact deterministic string, since nothing asserts on it. */
 export async function insertUser(prefix, tag) {
   const id = randomUUID();
   await rootQuery("insert into clara.users (id, display_name, email, is_agent) values ($1, $2, $3, false)", [
     id,
     `${prefix}_${tag}`,
-    `${prefix}_${tag}@rig.test`,
+    `${prefix}_${tag}_${id.slice(0, 8)}@rig.test`,
   ]);
   return id;
 }

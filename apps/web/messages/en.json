@@ -1452,7 +1452,101 @@
       "reasonLabel": "Reason"
     }
   },
-  "ReportsSnapshotsSeeding": {},
+  "ReportsSnapshotsSeeding": {
+    "snapshots": {
+      "heading": "Month snapshots",
+      "subheading": "clara.period_snapshots — a frozen management-accounts dataset per completed month.",
+      "loading": "Loading snapshots…",
+      "error": "Could not load snapshots: {message}",
+      "empty": "No snapshots minted yet for this client.",
+      "mintedLabel": "minted",
+      "watermarkLabel": "books watermark",
+      "shaLabel": "dataset sha256",
+      "checkState": "Check state",
+      "checkingState": "Checking…",
+      "mint": {
+        "trigger": "Mint snapshot",
+        "title": "Mint a month snapshot",
+        "description": "clara.mint_month_snapshot — the month must already be complete; re-minting an already-snapshotted month is a legitimate re-snapshot, not an error.",
+        "confirm": "Mint",
+        "monthPlaceholder": "Month",
+        "monthHint": "Pick any day in the month — only the month itself is sent."
+      }
+    },
+    "renderJobs": {
+      "heading": "Render job queue",
+      "subheading": "clara.render_jobs — only a failed job can be requeued.",
+      "loading": "Loading render jobs…",
+      "error": "Could not load render jobs: {message}",
+      "empty": "No render jobs yet for this client.",
+      "attemptsLabel": "{attempts}/{max} attempts",
+      "enqueuedLabel": "enqueued",
+      "requeueReasonLabel": "requeue reason",
+      "lastErrorTitle": "Last error",
+      "requeue": {
+        "trigger": "Requeue",
+        "title": "Requeue this render job",
+        "description": "clara.requeue_render_job — names the incident this successor answers.",
+        "confirm": "Requeue",
+        "reasonPlaceholder": "Reason",
+        "driftTitle": "The re-derived request differs from the one that failed",
+        "driftBody": "Something this render depends on moved since the failure — a verified answer, a published template, a resolved layout. The DB refused a verbatim retry; requeuing again will re-derive from today's state and may render a DIFFERENT document from the one that failed. The full comparison lives in the audit trail.",
+        "driftSupersededLabel": "superseded manifest sha256",
+        "driftAcknowledge": "I understand this may render a different document — requeue anyway"
+      }
+    },
+    "seeding": {
+      "heading": "Seeding batches",
+      "subheading": "clara.seeding_batches / clara.seeding_proposals — coding-seed proposals extracted from a source document.",
+      "loading": "Loading seeding batches…",
+      "error": "Could not load seeding batches: {message}",
+      "empty": "No seeding batches yet for this client.",
+      "openCount": "{count} open proposal(s)",
+      "noProposals": "No proposals in this batch.",
+      "cancelReasonLabel": "cancel reason",
+      "cancelBatch": {
+        "trigger": "Cancel batch",
+        "title": "Cancel this seeding batch",
+        "confirm": "Cancel batch",
+        "reasonPlaceholder": "Reason"
+      },
+      "completeBatch": {
+        "trigger": "Complete batch",
+        "title": "Complete this seeding batch",
+        "description": "clara.complete_seeding_batch — records the batch's final tick/decline/refuse counts.",
+        "confirm": "Complete batch"
+      },
+      "tick": {
+        "trigger": "Tick",
+        "title": "Tick this proposal",
+        "description": "clara.tick_seeding_proposal — accepts the proposal, birthing or binding the counterparty it names.",
+        "confirm": "Tick"
+      },
+      "decline": {
+        "trigger": "Decline",
+        "title": "Decline this proposal",
+        "confirm": "Decline",
+        "reasonPlaceholder": "Reason"
+      }
+    },
+    "wiki": {
+      "heading": "Wiki pages",
+      "subheading": "clara.wiki_pages — treatment notes, vendor rules and period context Clara has recorded for this client.",
+      "editNotice": "There is no human door to author or edit a page's content — wiki_page_versions is written by the seeding-tick projection and by Clara's own agent lane. This surface curates (retires) pages only.",
+      "loading": "Loading wiki pages…",
+      "error": "Could not load wiki pages: {message}",
+      "empty": "No wiki pages yet for this client.",
+      "updatedLabel": "updated",
+      "retireReasonLabel": "retire reason",
+      "retire": {
+        "trigger": "Retire",
+        "title": "Retire this wiki page",
+        "description": "clara.retire_wiki_page — the page's content stays in its version history; it stops being live.",
+        "confirm": "Retire",
+        "reasonPlaceholder": "Reason"
+      }
+    }
+  },
   "FirmAdminCompliance": {},
   "ClientOnboarding": {}
 }
