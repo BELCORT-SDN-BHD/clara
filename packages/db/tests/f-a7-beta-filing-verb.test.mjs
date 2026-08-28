@@ -1118,11 +1118,11 @@ test("wake_propose_identifier_promotion: writes a promotion card, zero client_id
   assert.ok(r.rows[0].result.promotion_id, "promotion_id returned");
   const after2 = await rootQuery("select count(*)::int as n from clara.client_identifiers where client_id=$1", [world.clients.A1]);
   assert.equal(after2.rows[0].n, before.rows[0].n, "no client_identifiers row written by the proposal itself");
-  const card = await rootQuery("select status, sightings, sightings_claimed, citations from clara.client_identifier_promotions where id=$1", [r.rows[0].result.promotion_id]);
+  const card = await rootQuery("select status, sightings, citations from clara.client_identifier_promotions where id=$1", [r.rows[0].result.promotion_id]);
   assert.equal(card.rows[0].status, "proposed");
   assert.equal(card.rows[0].sightings, 1, "裁-22: sightings is DB-derived (one distinct resolved region)");
-  assert.equal(card.rows[0].sightings_claimed, 1, "the model's claim (default 1 in this fixture) survives as an annotation");
   assert.equal(card.rows[0].citations[0].region_id, region, "the persisted citation is the RESOLVED region");
+  assert.equal(card.rows[0].citations[0].kind, "region", "Codex MED-3: the persisted citation carries kind explicitly");
 });
 
 // ===========================================================================

@@ -94,6 +94,7 @@
     },
     "sightingsLabel": "sightings",
     "citationsLabel": "citations",
+    "citationsDetailsHeading": "Resolved citations ({count})",
     "modelLabel": "model",
     "confirm": "Confirm",
     "decline": "Decline"

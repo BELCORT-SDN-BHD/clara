@@ -299,7 +299,7 @@ Measured in `apps/web` (T10, merged as PR #395):
 | `wake_propose_client_onboarding(uuid,text,jsonb,text,jsonb,uuid,text)` | **yes** |
 | `wake_propose_close(uuid,jsonb,text,text,jsonb,text)` | **no** |
 | `wake_propose_filing_correction(uuid,uuid,uuid,text,text,jsonb,text)` | **no** |
-| `wake_propose_identifier_promotion(uuid,text,text,integer,jsonb,text,jsonb,text)` | **no** |
+| `wake_propose_identifier_promotion(uuid,text,text,integer,jsonb,text,jsonb,text)` (superseded by the 9-arg `(uuid,uuid,text,text,integer,jsonb,text,jsonb,text)` -- 裁-22 added `p_document`, `UNNUMBERED_proposal_basis_resolved.sql`; the egress-authorization finding below is unaffected, the DROP+CREATE did not touch it) | **no** |
 
 The one that does is the **intake-time** door: it proposes from a not-yet-attributed document, so
 `firm_narrow_intake` / `moment='attribution'` is the authority that let the bytes leave. The

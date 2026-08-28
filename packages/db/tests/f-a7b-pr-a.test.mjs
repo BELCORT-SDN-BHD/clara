@@ -224,13 +224,31 @@ async function seedNameFamilyCollision() {
   return `${family} Trading Sdn Bhd`;
 }
 
-/** clara.wake_propose_client_onboarding(...) via a filing wake credential. */
-function wakeProposeClientOnboarding(secret, o) {
+/** clara.wake_propose_client_onboarding(...) via a filing wake credential.
+ *  Codex MED-6, ruled 2026-08-29: the DEFAULT basis is now RESOLVABLE on `o.document` (when a
+ *  real document is given) -- an earlier draft's default (`validBasis()`, deliberately
+ *  UNRESOLVABLE) masked a class of finding: deleting an EARLIER wall (rationale, proposed_name,
+ *  model shape) would fall through to the resolver and refuse there too, so a bare
+ *  `assertRaises(CLR.badRequest, ...)` on the EARLIER cell stayed green through the WRONG
+ *  branch. A resolvable default means deleting an earlier wall now falls through to a genuine
+ *  SUCCESS on these cells' otherwise-valid inputs, which a bare assertRaises already catches
+ *  (no exception at all). `o.document` falsy (the null/cross-firm-document cells) falls back to
+ *  the old shape-valid-but-unresolvable placeholder -- those refuse before the basis is ever
+ *  examined, so resolvability does not matter for them and building one would be wasted setup. */
+async function wakeProposeClientOnboarding(secret, o) {
   const specs = [
     { name: "p_document" }, { name: "p_proposed_name" }, { name: "p_basis", cast: "jsonb" },
     { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_authorization" },
     { name: "p_op_key" },
   ];
+  let basis;
+  if ("basis" in o) {
+    basis = o.basis;
+  } else if (o.document) {
+    basis = await resolvableBasis(o.document);
+  } else {
+    basis = validBasis();
+  }
   const vals = [
     o.document ?? null,
     // NOT "Rig ..." -- buildWorld() names every fixture client/firm with a shared "rig_..."
@@ -238,7 +256,7 @@ function wakeProposeClientOnboarding(secret, o) {
     // with world.clients.A1/A2 under clara.name_family_token and trips A14's own wall. A
     // genuinely distinct family avoids that false collision in every OTHER cell.
     "proposedName" in o ? o.proposedName : `Northgate ${randomUUID().slice(0, 8)} Sdn Bhd`,
-    JSON.stringify("basis" in o ? o.basis : validBasis()),
+    JSON.stringify(basis),
     "rationale" in o ? o.rationale : "rig rationale: printed party name matches no known client",
     JSON.stringify("model" in o ? o.model : validModel()),
     o.authorization ?? null,
@@ -318,14 +336,22 @@ test("wake_propose_client_onboarding: idempotent replay on the same op_key retur
 // ===========================================================================
 // 2 -- Tier-A shape refusals
 // ===========================================================================
+// Codex/rev-pb MED-6, ruled 2026-08-29: every early-wall cell below asserts its OWN typed
+// `class` in DETAIL, not merely the shared CLR10 SQLSTATE -- a bare SQLSTATE match cannot tell
+// "this wall refused, as intended" apart from "a LATER wall (the basis floor, the resolver)
+// refused instead, because the wall under test was deleted and execution fell through". The
+// default basis is resolvable now (the helper's own header above), so a deleted wall here would
+// otherwise fall all the way through to a genuine SUCCESS -- but asserting the reason directly
+// is the stronger, non-inferential proof.
 test("wake_propose_client_onboarding: refuses a blank proposed_name", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
   const doc = await freshDoc();
   const authorization = await freshAuthorization(doc.sha256);
-  await assertRaises(CLR.badRequest,
+  const err = await assertRaises(CLR.badRequest,
     () => wakeProposeClientOnboarding(secret, { document: doc.documentId, proposedName: "   ", authorization }),
     "blank proposed_name");
+  assert.match(err.detail ?? "", /"class":"proposed_name"/, "the refusal names ITS OWN wall");
 });
 
 test("wake_propose_client_onboarding: refuses a proposed_name over 500 characters", async (t) => {
@@ -333,9 +359,10 @@ test("wake_propose_client_onboarding: refuses a proposed_name over 500 character
   const { secret } = await mintFiling();
   const doc = await freshDoc();
   const authorization = await freshAuthorization(doc.sha256);
-  await assertRaises(CLR.badRequest,
+  const err = await assertRaises(CLR.badRequest,
     () => wakeProposeClientOnboarding(secret, { document: doc.documentId, proposedName: "X".repeat(501), authorization }),
     "over-long proposed_name");
+  assert.match(err.detail ?? "", /"class":"proposed_name"/, "the refusal names ITS OWN wall");
 });
 
 test("wake_propose_client_onboarding: refuses a blank rationale", async (t) => {
@@ -343,9 +370,10 @@ test("wake_propose_client_onboarding: refuses a blank rationale", async (t) => {
   const { secret } = await mintFiling();
   const doc = await freshDoc();
   const authorization = await freshAuthorization(doc.sha256);
-  await assertRaises(CLR.badRequest,
+  const err = await assertRaises(CLR.badRequest,
     () => wakeProposeClientOnboarding(secret, { document: doc.documentId, rationale: " ", authorization }),
     "blank rationale");
+  assert.match(err.detail ?? "", /"class":"rationale"/, "the refusal names ITS OWN wall");
 });
 
 test("wake_propose_client_onboarding: refuses an incomplete model snapshot", async (t) => {
@@ -353,26 +381,33 @@ test("wake_propose_client_onboarding: refuses an incomplete model snapshot", asy
   const { secret } = await mintFiling();
   const doc = await freshDoc();
   const authorization = await freshAuthorization(doc.sha256);
-  await assertRaises(CLR.badRequest,
+  const err = await assertRaises(CLR.badRequest,
     () => wakeProposeClientOnboarding(secret, { document: doc.documentId, model: { provider: "openai", model: "x" }, authorization }),
     "model missing version");
+  assert.match(err.detail ?? "", /"class":"model_snapshot"/, "the refusal names ITS OWN wall");
 });
 
 test("wake_propose_client_onboarding: refuses a document that does not exist", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
-  await assertRaises(CLR.badRequest,
+  const err = await assertRaises(CLR.badRequest,
     () => wakeProposeClientOnboarding(secret, { document: null, authorization: null }),
     "null document");
+  assert.match(err.detail ?? "", /"class":"document"/, "the refusal names ITS OWN wall");
 });
 
 test("wake_propose_client_onboarding: refuses a document belonging to another firm (CLR11, no existence oracle)", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
   const docB = await seedVerifiedDocument({ firm: world.firms.B, kind: "invoice" });
-  await assertRaises(CLR.notFound,
-    () => wakeProposeClientOnboarding(secret, { document: docB.documentId, authorization: null }),
+  // Explicit basis, NOT the default -- resolvableBasis(docB.documentId) would try to seed a
+  // firm-A extraction against a genuinely firm-B document, violating
+  // fk_document_extractions_document. This cell refuses at the cross-firm document check, well
+  // before any basis is ever examined, so a shape-valid placeholder is all it needs.
+  const err = await assertRaises(CLR.notFound,
+    () => wakeProposeClientOnboarding(secret, { document: docB.documentId, authorization: null, basis: validBasis() }),
     "cross-firm document");
+  assert.match(err.detail ?? "", /"reason":"cross_firm"/, "the refusal names ITS OWN reason (A8: no existence oracle, so this same reason covers a nonexistent document too)");
 });
 
 // ===========================================================================
@@ -448,8 +483,12 @@ test("wake_propose_client_onboarding: refuses a second open proposal on the same
   const auth1 = await freshAuthorization(doc.sha256);
   await wakeProposeClientOnboarding(secret, { document: doc.documentId, authorization: auth1, basis: await resolvableBasis(doc.documentId) });
   const auth2 = await freshAuthorization(doc.sha256);
+  // Explicit basis, NOT the default -- this second call refuses at the duplicate-open-proposal
+  // wall (BEFORE the resolver ever runs), so a resolvable basis is unneeded; the default would
+  // try to seed a SECOND extraction of the same (document,engine_id,version_n), colliding with
+  // the first call's own fixture.
   const err = await assertRaises(CLR.badRequest,
-    () => wakeProposeClientOnboarding(secret, { document: doc.documentId, authorization: auth2 }),
+    () => wakeProposeClientOnboarding(secret, { document: doc.documentId, authorization: auth2, basis: validBasis() }),
     "second open proposal, same document");
   assert.match(err.detail ?? "", /already_open/, "the refusal names the already-open reason");
 });

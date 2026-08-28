@@ -83,13 +83,27 @@
 -- BEFORE that authorization is consumed -- a citation that fails to resolve must never burn a
 -- one-time-use authorization on a proposal that is about to refuse anyway.
 --
--- THE SIGHTINGS LAW: DERIVED, NEVER THE CALLER'S. `sightings` on both doors' persisted records
--- is now the COUNT OF DISTINCT RESOLVED REGIONS the resolver actually walked -- never the
--- caller's claimed number. The caller's original claim is kept, honestly, as a NON-AUTHORITATIVE
--- annotation: a new `client_identifier_promotions.sightings_claimed` column for Door 1 (its
--- `citations`/`sightings` columns are typed and CHECKed, so the annotation needed a column of its
--- own); `onboarding_agent_receipts.verdict` / `firm_open_questions.candidates` are both freeform
--- jsonb for Door 2, so its annotation rides inside the same `basis` object as `sightings_model`.
+-- THE SIGHTINGS LAW: DERIVED, NEVER THE CALLER'S -- AND THE CALLER'S RAW CLAIM IS PERSISTED
+-- NOWHERE. `sightings` on both doors' persisted records is the COUNT OF DISTINCT RESOLVED
+-- REGIONS the resolver actually walked; it is the ONLY sightings any durable row carries.
+-- RULING (Codex HIGH-2, 2026-08-29; grounds measured independently by rev-pb, A2): an earlier
+-- draft of this file kept the caller's original claim as a "non-authoritative annotation" --
+-- `client_identifier_promotions.sightings_claimed` for Door 1, `sightings_model` inside Door 2's
+-- `basis` object. THE TWO HAD DIFFERENT GROUNDS, measured as a real bookkeeper would read them,
+-- not assumed alike: `sightings_claimed` was in fact UNREACHABLE by any human read surface --
+-- `client_identifier_promotions_visible` (0137) names its 15 columns explicitly and was never
+-- widened to include it, and the base table's own SELECT grant is `clara_fn_owner` only -- so
+-- its column is dropped on the OWNER'S RULING (裁-22's own instruction, "DB-resolved bases, not
+-- a record of the guess"), not because it leaked anywhere. `sightings_model`, by contrast, WAS
+-- genuinely REACHABLE, through TWO separate human views: `firm_open_questions_visible` projects
+-- `candidates` verbatim (a human sees the model's claimed "3" sitting beside the DB's derived
+-- "1"), and `agent_receipts_visible` ALSO surfaces it independently, through the f_a7b receipt
+-- shim (`_agent_receipt_src_f_a7b`) reading `onboarding_agent_receipts.verdict`. PRD SS6
+-- invariant 1 forbids a model-claimed numeral in a durable, human-visible place regardless of
+-- which specific view carries it. Neither column nor key exists in this file at all -- the
+-- caller's `p_sightings`/`p_basis->'sightings'` value is read only to build the resolver's INPUT
+-- (which the resolver ignores; it derives its own count from the citations) and is never written
+-- to any table, receipt, or candidate.
 --
 -- D1 WRITE-QUIESCE INVENTORY -- TWO LIVE AUDITED WRITER BODIES REPLACED, BOTH `filing`-wake-kind-
 -- only (credential class: `clara_wake_filing` exclusively; no interactive/proactive/bank/runtime
@@ -101,6 +115,19 @@
 --      (uuid,text,jsonb,text,jsonb,uuid,text). ACL/allowlist row untouched by CoR.
 -- `clara._identifier_promotion_core` is explicitly NOT in this inventory -- untouched, its
 -- prosrc sha re-pinned byte-identical at the tail.
+--
+-- A SECOND, DISTINCT DEPLOY-TIME CONSEQUENCE, NAMED HERE (rev-pb NEW-1, 2026-08-29): Door 1's
+-- `_reserve_op` fingerprint CHANGED (0126's live shape was `{client,kind,value}`; Door 1's own
+-- HIGH-1 fix above widens it to `{client,document,kind,value,sightings,citations}`). Any
+-- `clara.op_receipts` row for `fn='wake_propose_identifier_promotion'` reserved BEFORE this
+-- migration and replayed with the SAME op_key AFTER it recomputes a DIFFERENT request_hash --
+-- `_reserve_op` (0004:46-58) compares the recomputed hash against the stored one and raises
+-- `op_key reused with different args` on any mismatch, so a genuine caller retry across the
+-- deploy boundary refuses instead of replaying. This is NOT a D1 write-quiesce hazard (no
+-- in-flight PL/pgSQL call spans it -- op_receipts rows are written and read, never re-hashed
+-- mid-call) -- it is a ceremony-time population fact the tail below CENSUSES (a real count, read
+-- by the operator) rather than papers over. Door 2 is an unchanged-fingerprint CoR and is
+-- unaffected.
 --
 -- MIGRATION NUMBER claimed at MERGE time. Rig-authored and replayed as 0143 against a fresh
 -- chain baselined through 0142 (frontier confirmed live); the numbered copy is never committed.
@@ -118,12 +145,6 @@ begin
 
   if to_regprocedure('clara._resolve_proposal_basis(uuid[],uuid,jsonb)') is not null then
     raise exception 'proposal_basis_resolved prestate: clara._resolve_proposal_basis already exists -- already applied'
-      using errcode = 'CLR10';
-  end if;
-  if exists (select 1 from pg_attribute a
-              where a.attrelid = 'clara.client_identifier_promotions'::regclass
-                and a.attnum > 0 and not a.attisdropped and a.attname = 'sightings_claimed') then
-    raise exception 'proposal_basis_resolved prestate: client_identifier_promotions already carries sightings_claimed'
       using errcode = 'CLR10';
   end if;
   if to_regprocedure('clara.wake_propose_identifier_promotion(uuid,uuid,text,text,int,jsonb,text,jsonb,text)') is not null then
@@ -206,7 +227,7 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'proposal_basis_resolved prestate: clean -- frontier 0142, both live bodies pinned by exact prosrc sha256, _identifier_promotion_core pinned as the DO-NOT-TOUCH baseline, the citations/sightings CHECK floor read byte-exact, prerequisites present, both allowlist rows present exactly once, sightings_claimed and the new resolver/9-arg overload both absent';
+  raise notice 'proposal_basis_resolved prestate: clean -- frontier 0142, both live bodies pinned by exact prosrc sha256, _identifier_promotion_core pinned as the DO-NOT-TOUCH baseline, the citations/sightings CHECK floor read byte-exact, prerequisites present, both allowlist rows present exactly once, the new resolver/9-arg overload both absent';
 end
 $pre$;
 
@@ -259,14 +280,23 @@ begin
   end if;
 
   for e in select elem from jsonb_array_elements(v_citations) as z(elem) loop
-    -- KIND DISPATCH (裁-21's own reserved widening, header above). Absent kind on a well-formed
-    -- object defaults to 'region' (today's two doors' only shape, unchanged); any non-object
-    -- element or any OTHER kind -- including the reserved-but-unbuilt 'fact' -- refuses
-    -- fail-closed here, before this loop's region-resolution arm ever runs. This is the ONE
-    -- dispatch point a future kind='fact' arm joins; nothing else in this function changes.
-    v_kind := null;
+    -- KIND DISPATCH (裁-21's own reserved widening, header above; canonical + fail-closed per
+    -- Codex MED-3, 2026-08-29, ruled). ONLY an ABSENT `kind` key defaults to 'region' (today's
+    -- two doors' only implemented shape). Once the key is PRESENT, its value must be the exact
+    -- literal 'region' or this citation refuses -- a present JSON null, an empty string, blank
+    -- whitespace, or any other text (including the reserved-but-unbuilt 'fact') all refuse
+    -- fail-closed, exactly like an unrecognised kind; none of them silently collapse to
+    -- 'region' the way an earlier draft's coalesce/nullif chain did. A non-object element never
+    -- reaches the `?` (key-exists) operator at all and refuses via the same gate. This is the
+    -- ONE dispatch point a future kind='fact' arm joins; nothing else in this function changes.
     if jsonb_typeof(e.elem) = 'object' then
-      v_kind := coalesce(nullif(btrim(coalesce(e.elem->>'kind','')),''), 'region');
+      if e.elem ? 'kind' then
+        v_kind := e.elem->>'kind';
+      else
+        v_kind := 'region';
+      end if;
+    else
+      v_kind := null;
     end if;
     if v_kind is distinct from 'region' then
       raise exception 'this proposal basis citation kind is not resolvable by this door' using errcode = 'CLR10',
@@ -297,6 +327,13 @@ begin
       join clara.document_extractions de on de.id = r.extraction_id
       where r.id = v_region;
 
+    -- The `v_row.firm_id is distinct from p_firm` conjunct is DEFENSE-IN-DEPTH, not currently
+    -- reachable by any lawful fixture (rev-pb A1, measured 2026-08-29): the composite FK
+    -- `fk_document_extractions_document (document_id, firm_id) references documents(id, firm_id)`
+    -- (0007) and the `_tf_stamp_document_pipeline` stamp trigger both independently force
+    -- document_extractions.firm_id to agree with its document's own -- an incongruent row is not
+    -- a representable state today. NEVER remove this conjunct on the strength of that fact: it is
+    -- exactly what would catch a FUTURE migration that weakens either guard.
     if v_row.id is null or v_row.firm_id is distinct from p_firm
        or not (v_row.document_id = any(v_docs)) then
       raise exception 'a proposal citation does not resolve to a live region of this proposal''s document set'
@@ -320,8 +357,12 @@ begin
 
     if not (v_region = any(v_seen)) then
       v_seen := v_seen || v_region;
+      -- Codex MED-3: the CANONICAL persisted citation carries kind:'region' explicitly (never
+      -- omitted) -- 裁-21's own future kind='fact' arm dispatches on this same field, so every
+      -- resolved citation this function has EVER produced must already be self-describing.
       v_resolved := v_resolved || jsonb_build_array(jsonb_build_object(
-        'region_id', v_row.id, 'extraction_id', v_row.extraction_id, 'document_id', v_row.document_id));
+        'region_id', v_row.id, 'extraction_id', v_row.extraction_id, 'document_id', v_row.document_id,
+        'kind', 'region'));
     end if;
   end loop;
 
@@ -333,17 +374,20 @@ comment on function clara._resolve_proposal_basis(uuid[],uuid,jsonb) is
   'proposal door calls AFTER its own _reserve_op, never before -- a genuine replay is served '
   'from the reservation cache without re-resolving. p_documents is a SET (a single-document door '
   'passes array[p_document]): every member is proven real + firm-congruent up front. Every '
-  'citation carries a kind (absent defaults to ''region'', today''s only implemented arm; any '
-  'other value, including the RESERVED-but-unbuilt ''fact'' -- 裁-21''s COA-template door -- '
-  'refuses fail-closed); a region citation names a region_id (the SAME key clara.'
-  '_write_entry_evidence''s own p_evidence shape and wake_file_document''s Tier-A verdict.'
-  'citations already use at this DB boundary -- no third shape invented) that resolves to a '
-  'clara.document_regions row of SOME document in the set, at THAT document''s CURRENT (newest '
-  'done, per engine_kind) extraction generation. Any null, malformed, unknown-kind, foreign-'
-  'document, foreign-firm or stale-generation citation refuses CLR10 basis_unresolved, naming '
-  'the offending element in DETAIL. Returns the RESOLVED basis: the distinct resolved regions '
-  '(region_id + extraction_id + which document each belongs to, first-seen order, deduped) and '
-  'sightings DERIVED as their count across the whole set -- never the caller''s claimed number. '
+  'citation carries a kind: ONLY an ABSENT key defaults to ''region'' (today''s only implemented '
+  'arm); a PRESENT key must be the exact literal ''region'' or the citation refuses fail-closed '
+  '-- JSON null, empty, whitespace, or the RESERVED-but-unbuilt ''fact'' (裁-21''s COA-template '
+  'door) all refuse, none silently collapse (Codex MED-3, 2026-08-29). A region citation names a '
+  'region_id (the SAME key clara._write_entry_evidence''s own p_evidence shape and wake_file_'
+  'document''s Tier-A verdict.citations already use at this DB boundary -- no third shape '
+  'invented) that resolves to a clara.document_regions row of SOME document in the set, at THAT '
+  'document''s CURRENT (newest done, per engine_kind) extraction generation. Any null, '
+  'malformed, unknown-kind, foreign-document, foreign-firm or stale-generation citation refuses '
+  'CLR10 basis_unresolved, naming the offending element in DETAIL. Returns the RESOLVED basis: '
+  'the distinct resolved regions -- region_id + extraction_id + which document each belongs to '
+  '+ kind:''region'' (always explicit, never omitted -- Codex MED-3), first-seen order, deduped '
+  '-- and sightings DERIVED as their count across the whole set -- never the caller''s claimed '
+  'number, persisted nowhere (Codex HIGH-2). '
   'Ungranted: reachable only from inside a SECURITY DEFINER door, exactly like '
   '_write_entry_evidence and _identifier_promotion_core.';
 revoke all on function clara._resolve_proposal_basis(uuid[],uuid,jsonb) from public;
@@ -377,18 +421,7 @@ create function pg_temp._x_proposal_basis_generation_planprobe(p_document uuid, 
 $probe2$;
 
 -- =====================================================================================
--- SECTION 2 -- client_identifier_promotions.sightings_claimed. ADD COLUMN only, no CHECK (an
--- honest, non-authoritative annotation of the caller's original claim -- nothing ever reads it
--- for a decision, so it is never constrained the way the DB-derived `sightings` column is).
--- =====================================================================================
-alter table clara.client_identifier_promotions add column sightings_claimed int;
-comment on column clara.client_identifier_promotions.sightings_claimed is
-  '裁-22: the model''s ORIGINALLY claimed sightings count, kept as an honest annotation only. '
-  '`sightings` above is DB-DERIVED (the count of distinct resolved document_regions) and is the '
-  'authoritative column; this one is never read for a decision.';
-
--- =====================================================================================
--- SECTION 3 -- Door 1: clara.wake_propose_identifier_promotion gains the triggering document
+-- SECTION 2 -- Door 1: clara.wake_propose_identifier_promotion gains the triggering document
 -- + DB-resolved citations. Signature CHANGE (old 8-arg -> new 9-arg): CREATE OR REPLACE cannot
 -- change a parameter list without leaving the OLD overload shadow-reachable, so this is an
 -- explicit DROP + CREATE, not a CoR. Every prior wall string is preserved verbatim below; the
@@ -434,33 +467,41 @@ begin
     raise exception 'an identifier promotion needs the triggering document' using errcode='CLR10',
       detail='{"reason":"invalid_request","class":"document"}';
   end if;
+  -- Codex HIGH-1 (2026-08-29, ruled): the fingerprint MUST cover the basis, not just
+  -- client/document/kind/value -- otherwise a replay of op_key O carrying a foreign/superseded/
+  -- null citation would return Door 1's CACHED SUCCESS for the genuine first call (line below,
+  -- `if v_dedupe is not null then return v_dedupe`) instead of either `op_key reused with
+  -- different args` (clara._reserve_op's own contract, 0004:43-58) or the resolver's own
+  -- `basis_unresolved` -- a caller could silently launder a bad citation through a stale op_key.
+  -- Door 2 has always fingerprinted its own basis (`'basis', p_basis` below); this makes Door 1
+  -- match it exactly. p_citations is passed straight through (already jsonb -- Postgres jsonb
+  -- storage is itself canonical: the SAME value always serializes to the SAME text via `::text`,
+  -- which is all `clara._hash` reads, regardless of the caller's own key/whitespace formatting).
   v_dedupe := clara._reserve_op(w.firm_id,'wake_propose_identifier_promotion',p_op_key,
-    clara._hash(jsonb_build_object('client',p_client,'document',p_document,'kind',p_kind,'value',p_value)));
+    clara._hash(jsonb_build_object('client',p_client,'document',p_document,'kind',p_kind,
+      'value',p_value,'sightings',p_sightings,'citations',p_citations)));
   if v_dedupe is not null then return v_dedupe; end if;
   -- 裁-22: RESOLUTION AFTER RESERVATION, deliberately. A single-document door passes its one
   -- document as a one-element set (裁-18b's own widening, header above).
   v_resolved := clara._resolve_proposal_basis(array[p_document], w.firm_id,
     jsonb_build_object('sightings', p_sightings, 'citations', p_citations));
+  -- Codex HIGH-2 (2026-08-29, ruled): p_sightings' raw value is used ABOVE only to build the
+  -- resolver's input (which the resolver ignores -- it derives its own count) and is written to
+  -- NO durable column anywhere -- `sightings` below is always v_resolved's DERIVED count alone.
   v_id := clara._identifier_promotion_core(clara.agent_user_id(), w.firm_id, w.on_behalf_of,
     w.wake_kind, p_client, p_kind, p_value,
     (v_resolved->>'sightings')::int, v_resolved->'citations', p_rationale, p_model);
-  -- The caller's ORIGINALLY claimed sightings, kept as an honest, non-authoritative annotation --
-  -- client_identifier_promotions.sightings above is now DB-DERIVED, never p_sightings.
-  -- _identifier_promotion_core's own INSERT is untouched (no sightings_claimed argument), so
-  -- this is a second, deliberate write to the row this same call just minted, inside the same
-  -- SECURITY DEFINER transaction -- the table carries no append-only trigger (only no-truncate;
-  -- 0103 SS6's "settle in place" design), so this is a lawful, in-scope UPDATE.
-  update clara.client_identifier_promotions set sightings_claimed = p_sightings where id = v_id;
   return clara._finish_op(w.firm_id,'wake_propose_identifier_promotion',p_op_key,
     jsonb_build_object('promotion_id', v_id));
 end $fn$;
 comment on function clara.wake_propose_identifier_promotion(uuid,uuid,text,text,int,jsonb,text,jsonb,text) is
   '裁-22: gains p_document (the triggering document) and DB-resolves p_citations against it via '
-  'clara._resolve_proposal_basis (called array[p_document]-wrapped, after _reserve_op). '
-  'client_identifier_promotions.sightings is now DB-derived; the caller''s original claim is '
-  'kept honestly in the new sightings_claimed column, annotation only. Every prior wall (op_key/'
-  'rationale/model shape) is byte-preserved from the pre-裁-22 8-arg body. Delegates to the '
-  'UNTOUCHED clara._identifier_promotion_core (0103), which stays reachable by nobody else.';
+  'clara._resolve_proposal_basis (called array[p_document]-wrapped, after _reserve_op, whose '
+  'own fingerprint now covers sightings+citations too -- Codex HIGH-1). '
+  'client_identifier_promotions.sightings is DB-derived and is the ONLY sightings any durable '
+  'row carries -- the caller''s raw claim is persisted nowhere (Codex HIGH-2). Every prior wall '
+  '(op_key/rationale/model shape) is byte-preserved from the pre-裁-22 8-arg body. Delegates to '
+  'the UNTOUCHED clara._identifier_promotion_core (0103), which stays reachable by nobody else.';
 revoke all on function clara.wake_propose_identifier_promotion(uuid,uuid,text,text,int,jsonb,text,jsonb,text) from public;
 grant execute on function clara.wake_propose_identifier_promotion(uuid,uuid,text,text,int,jsonb,text,jsonb,text)
   to clara_wake_filing;
@@ -468,7 +509,7 @@ grant execute on function clara.wake_propose_identifier_promotion(uuid,uuid,text
 reset role;
 
 -- =====================================================================================
--- SECTION 4 -- Door 2: clara.wake_propose_client_onboarding DB-resolves p_basis. Same
+-- SECTION 3 -- Door 2: clara.wake_propose_client_onboarding DB-resolves p_basis. Same
 -- signature -- CREATE OR REPLACE preserves the ACL and the allowlist row untouched. Every
 -- prior wall is byte-preserved verbatim below; the ONLY changes are the new resolver call
 -- (placed AFTER the authorization is proven live but BEFORE it is consumed, its one document
@@ -583,10 +624,12 @@ begin
   -- CONSUMED. A citation that fails to resolve must never burn a one-time-use authorization on
   -- a proposal that is about to refuse anyway. One document, wrapped as a one-element set
   -- (裁-18b's own widening, header above).
+  -- Codex HIGH-2 (2026-08-29, ruled): p_basis->'sightings' (the caller's raw claim) is read
+  -- ONLY by the shape-floor check above -- it is NEVER copied into v_resolved_basis. The
+  -- receipt and the firm_open_questions candidate below carry the DERIVED sightings alone.
   v_resolved := clara._resolve_proposal_basis(array[p_document], w.firm_id, p_basis);
   v_resolved_basis := jsonb_build_object(
-    'citations', v_resolved->'citations', 'sightings', v_resolved->'sightings',
-    'sightings_model', p_basis->'sightings');
+    'citations', v_resolved->'citations', 'sightings', v_resolved->'sightings');
 
   update clara.firm_egress_dispatch_authorizations set consumed_at = statement_timestamp()
     where id = v_auth.id;
@@ -615,18 +658,21 @@ comment on function clara.wake_propose_client_onboarding(uuid,text,jsonb,text,js
   'proposed''; no new carrier. A14''s negative acceptance step is a hard refusal here, before '
   'any receipt is written. 裁-22: p_basis is now DB-resolved via clara._resolve_proposal_basis '
   '(array[p_document]-wrapped), called after the authorization is proven live but before it is '
-  'consumed; the receipt and the firm_open_questions candidate persist the RESOLVED basis, '
-  'never the model''s raw claim -- kept as sightings_model, annotation only.';
+  'consumed; the receipt and the firm_open_questions candidate persist the RESOLVED basis '
+  '(citations + DERIVED sightings) alone -- the caller''s raw claimed sightings is persisted '
+  'NOWHERE (Codex HIGH-2, 2026-08-29): PRD SS6 invariant 1 forbids a model-claimed numeral in a '
+  'durable, human-visible place, and firm_open_questions_visible/apps/web project candidates '
+  'verbatim.';
 
 reset role;
 
 -- =====================================================================================
--- SECTION 5 -- TAIL. Every claim re-read from the live catalog; raises on failure.
+-- SECTION 4 -- TAIL. Every claim re-read from the live catalog; raises on failure.
 -- =====================================================================================
 do $tail$
 declare
   v_src text; v_sha text; v_def text; v_n int; v_acl text; v_core_sha_pre text;
-  v_legacy_promotions int; v_legacy_onboarding int;
+  v_legacy_promotions int; v_legacy_onboarding int; v_stale_reservations int;
 begin
   -- (1) The resolver: exact signature, SECURITY DEFINER, search_path pinned, owned by
   -- clara_fn_owner, and reachable by NO application role at all (ungranted, like its siblings).
@@ -656,17 +702,27 @@ begin
      or position('not (v_row.document_id = any(v_docs))' in v_src) = 0
      or position('v_doc_count <> array_length(v_docs,1)' in v_src) = 0
      or position('v_kind is distinct from ''region''' in v_src) = 0
-     or position('coalesce(nullif(btrim(coalesce(e.elem->>''kind'',''''))' in v_src) = 0 then
+     or position('if e.elem ? ''kind'' then' in v_src) = 0
+     or position('''kind'', ''region''' in v_src) = 0 then
     raise exception 'proposal_basis_resolved tail: _resolve_proposal_basis is missing an expected refusal/generation/docset/kind-dispatch rung'
       using errcode = 'CLR10';
   end if;
+  -- Codex MED-3 (2026-08-29, ruled): the old collapsing coalesce/nullif/btrim chain (which let
+  -- a PRESENT null/""/whitespace kind silently default to 'region') must be GONE -- its absence
+  -- is the behavioral proof the fail-closed recut actually shipped, not merely a differently-
+  -- worded comment above it.
+  if position('coalesce(nullif(btrim(coalesce(e.elem->>''kind''' in v_src) <> 0 then
+    raise exception 'proposal_basis_resolved tail: _resolve_proposal_basis still carries the pre-MED-3 kind-collapsing expression'
+      using errcode = 'CLR10';
+  end if;
 
-  -- (2) client_identifier_promotions: sightings_claimed present, nullable, no CHECK; the two
-  -- pre-existing CHECKs this file's header calls "a floor under the resolver" are BYTE-UNCHANGED.
-  if not exists (select 1 from pg_attribute
-      where attrelid = 'clara.client_identifier_promotions'::regclass and attname = 'sightings_claimed'
-        and attnum > 0 and not attisdropped and not attnotnull) then
-    raise exception 'proposal_basis_resolved tail: client_identifier_promotions.sightings_claimed was not added as a NULLABLE column'
+  -- (2) client_identifier_promotions: the citations/sightings CHECKs this file's header calls
+  -- "a floor under the resolver" are BYTE-UNCHANGED, and the table carries NO sightings_claimed
+  -- column (Codex HIGH-2, ruled 2026-08-29: the caller's raw claim is persisted nowhere at all).
+  if exists (select 1 from pg_attribute
+      where attrelid = 'clara.client_identifier_promotions'::regclass
+        and attnum > 0 and not attisdropped and attname = 'sightings_claimed') then
+    raise exception 'proposal_basis_resolved tail: client_identifier_promotions carries sightings_claimed -- Codex HIGH-2 ruled this column DROPPED'
       using errcode = 'CLR10';
   end if;
   select v from _proposal_basis_pre where k = 'citations_check' into v_def;
@@ -724,9 +780,21 @@ begin
       using errcode = 'CLR10';
   end if;
   if position('"reason":"invalid_request","class":"document"' in v_src) = 0
-     or position('clara._resolve_proposal_basis(array[p_document], w.firm_id' in v_src) = 0
-     or position('update clara.client_identifier_promotions set sightings_claimed = p_sightings' in v_src) = 0 then
+     or position('clara._resolve_proposal_basis(array[p_document], w.firm_id' in v_src) = 0 then
     raise exception 'proposal_basis_resolved tail: the recut wake_propose_identifier_promotion is missing an expected 裁-22 addition'
+      using errcode = 'CLR10';
+  end if;
+  -- Codex HIGH-1 (2026-08-29, ruled): the reservation fingerprint covers sightings+citations too
+  -- -- proven by TEXT, not merely by the mutant battery, since a battery gap is exactly what let
+  -- this ship missing in the first place.
+  if position('''client'',p_client,''document'',p_document,''kind'',p_kind,' in v_src) = 0
+     or position('''value'',p_value,''sightings'',p_sightings,''citations'',p_citations' in v_src) = 0 then
+    raise exception 'proposal_basis_resolved tail: wake_propose_identifier_promotion''s _reserve_op fingerprint does not cover sightings+citations'
+      using errcode = 'CLR10';
+  end if;
+  -- Codex HIGH-2 (2026-08-29, ruled): no trace of a persisted raw claim anywhere in this body.
+  if position('sightings_claimed' in v_src) <> 0 then
+    raise exception 'proposal_basis_resolved tail: wake_propose_identifier_promotion still references sightings_claimed'
       using errcode = 'CLR10';
   end if;
 
@@ -762,9 +830,15 @@ begin
     end if;
   end loop;
   if position('clara._resolve_proposal_basis(array[p_document], w.firm_id, p_basis)' in v_src) = 0
-     or position('''sightings_model'', p_basis->''sightings''' in v_src) = 0
      or position('jsonb_build_object(''proposed_name'', v_name, ''basis'', v_resolved_basis)' in v_src) = 0 then
     raise exception 'proposal_basis_resolved tail: the recut wake_propose_client_onboarding is missing an expected 裁-22 addition'
+      using errcode = 'CLR10';
+  end if;
+  -- Codex HIGH-2 (2026-08-29, ruled): no trace of a persisted raw claim anywhere in this body --
+  -- the earlier draft's `sightings_model` key is gone, positively re-asserted absent, not merely
+  -- un-asserted-present.
+  if position('sightings_model' in v_src) <> 0 then
+    raise exception 'proposal_basis_resolved tail: wake_propose_client_onboarding still references sightings_model'
       using errcode = 'CLR10';
   end if;
   if position('clara._resolve_proposal_basis(array[p_document], w.firm_id, p_basis)' in v_src)
@@ -815,15 +889,22 @@ begin
   select count(*) into v_legacy_promotions from clara.client_identifier_promotions p
     where exists (
       select 1 from jsonb_array_elements(p.citations) c(elem)
-       where jsonb_typeof(elem) <> 'object' or elem->>'region_id' is null);
+       where jsonb_typeof(elem) <> 'object' or elem->>'region_id' is null or elem->>'kind' is distinct from 'region');
   select count(*) into v_legacy_onboarding from clara.firm_open_questions q
     where q.kind = 'onboarding_proposed'
       and exists (
         select 1 from jsonb_array_elements(coalesce(q.candidates,'[]'::jsonb)) cand(elem),
              jsonb_array_elements(coalesce(elem->'basis'->'citations','[]'::jsonb)) c(citelem)
-         where jsonb_typeof(citelem) <> 'object' or citelem->>'region_id' is null);
+         where jsonb_typeof(citelem) <> 'object' or citelem->>'region_id' is null or citelem->>'kind' is distinct from 'region');
 
-  raise notice 'proposal_basis_resolved tail: OK -- _resolve_proposal_basis(uuid[],uuid,jsonb) installed (ungranted, SECURITY DEFINER, three parse-probes analyzed clean); client_identifier_promotions.sightings_claimed added (nullable, no CHECK), the citations/sightings CHECK floor byte-unchanged; wake_propose_identifier_promotion recut 8-arg->9-arg (old overload GONE, exactly one overload survives, ACL clara_fn_owner+clara_wake_filing only, every prior wall string present); wake_propose_client_onboarding CoR''d at its unchanged 7-arg signature (ACL byte-unchanged, every prior wall string present, the resolver call precedes the authorization-consume UPDATE by text order); _identifier_promotion_core byte-identical to its pinned prestate sha; both filing-allowlist rows survive exactly once; reachability is clara_wake_filing-only on both wrappers and NO ROLE AT ALL on the resolver/core. LIVE-ROW CENSUS (report-only, no rewrite): % client_identifier_promotions row(s) and % onboarding-proposed firm_open_questions row(s) carry a pre-裁-22 (non-region_id-keyed) citations shape -- left exactly as written; confirm/decline never re-validate citations, so an old card is unaffected; any FUTURE re-proposal on the same subject goes through the resolved doors this file ships.', v_legacy_promotions, v_legacy_onboarding;
+  -- rev-pb NEW-1: the stale-reservation population, read (never rewritten -- op_receipts is
+  -- audit-append-only) so the ceremony operator sees the exact number of Door-1 reservations
+  -- whose next replay will refuse `op_key reused with different args` instead of serving the
+  -- cached result, because Door 1's fingerprint widened (HIGH-1, header above).
+  select count(*) into v_stale_reservations from clara.op_receipts
+    where fn = 'wake_propose_identifier_promotion';
+
+  raise notice 'proposal_basis_resolved tail: OK -- _resolve_proposal_basis(uuid[],uuid,jsonb) installed (ungranted, SECURITY DEFINER, three parse-probes analyzed clean, kind dispatch fail-closed/canonical per MED-3); client_identifier_promotions carries NO sightings_claimed column, the citations/sightings CHECK floor byte-unchanged; wake_propose_identifier_promotion recut 8-arg->9-arg (old overload GONE, exactly one overload survives, ACL clara_fn_owner+clara_wake_filing only, every prior wall string present, its _reserve_op fingerprint now covers sightings+citations per HIGH-1, no sightings_claimed reference survives per HIGH-2); wake_propose_client_onboarding CoR''d at its unchanged 7-arg signature (ACL byte-unchanged, every prior wall string present, the resolver call precedes the authorization-consume UPDATE by text order, no sightings_model reference survives per HIGH-2); _identifier_promotion_core byte-identical to its pinned prestate sha; both filing-allowlist rows survive exactly once; reachability is clara_wake_filing-only on both wrappers and NO ROLE AT ALL on the resolver/core. LIVE-ROW CENSUS (report-only, no rewrite): % client_identifier_promotions row(s) and % onboarding-proposed firm_open_questions row(s) carry a pre-裁-22 or pre-MED-3 (non-region_id-keyed or non-canonical-kind) citations shape -- left exactly as written; confirm/decline never re-validate citations, so an old card is unaffected; any FUTURE re-proposal on the same subject goes through the resolved doors this file ships. STALE-RESERVATION CENSUS (rev-pb NEW-1, report-only): % existing clara.op_receipts row(s) for fn=wake_propose_identifier_promotion -- a replay of any of these op_keys after this deploy recomputes a DIFFERENT hash (the fingerprint widened) and refuses op_key-reused-with-different-args instead of serving the cached result; a genuinely new call under a fresh op_key is entirely unaffected.', v_legacy_promotions, v_legacy_onboarding, v_stale_reservations;
 end
 $tail$;
 
