@@ -19,8 +19,13 @@ import { useHydratedPart } from "@/lib/parts/hooks";
 import { listFiscalYears } from "@/lib/close/api";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
 import { EmptyState } from "@/components/common/state";
+import { SectionHeader } from "@/components/common/section-header";
 import { FiscalYearPicker } from "./FiscalYearPicker";
+import { FiscalYearOpener } from "./FiscalYearOpener";
 import { ClosePlanPanel } from "./ClosePlanPanel";
+import { ClosePrepHoldPanel } from "./ClosePrepHoldPanel";
+import { FutureAttestationPanel } from "./FutureAttestationPanel";
+import { AgentActReceiptsPanel } from "./AgentActReceiptsPanel";
 
 export function ClosePage({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientClose");
@@ -30,6 +35,12 @@ export function ClosePage({ clientId }: { clientId: string }) {
   return (
     <PageShell>
       <PageHeader title={t("heading")} description={t("body")} />
+
+      {/* T1: client-scoped (not fiscal-year-scoped) — mounted once, above the
+          picker, since opening the FIRST fiscal year is the precondition for
+          everything below it (port-wave-plan §9.3's FIRST-EXECUTION note). */}
+      <FiscalYearOpener clientId={clientId} session={sessionTokenAccessor} onOpened={years.reload} />
+
       <FiscalYearPicker years={years.data} err={years.err} selected={fiscalYearId} onSelect={setFiscalYearId} />
       {fiscalYearId ? (
         <ClosePlanPanel
@@ -42,6 +53,20 @@ export function ClosePage({ clientId }: { clientId: string }) {
       ) : (
         <EmptyState>{t("plan.selectPrompt")}</EmptyState>
       )}
+
+      {/* T1: the remaining client-scoped (not fiscal-year-scoped) doors —
+          hold/release_close_prep, record_future_attestation,
+          list_agent_act_receipts. Each owns its own read/reload; none
+          depends on which fiscal year is selected above. */}
+      <section className="flex flex-col gap-2">
+        <SectionHeader level={2}>{t("closePrep.heading")}</SectionHeader>
+        <ClosePrepHoldPanel clientId={clientId} session={sessionTokenAccessor} />
+      </section>
+      <section className="flex flex-col gap-2">
+        <SectionHeader level={2}>{t("futureAttestation.heading")}</SectionHeader>
+        <FutureAttestationPanel clientId={clientId} session={sessionTokenAccessor} />
+      </section>
+      <AgentActReceiptsPanel clientId={clientId} session={sessionTokenAccessor} />
     </PageShell>
   );
 }
