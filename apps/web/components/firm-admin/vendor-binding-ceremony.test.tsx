@@ -150,3 +150,39 @@ test("Sign refusal (CLR04, insufficient rank): a real click through the dialog's
     }
   });
 });
+
+// 裁-18a (mohe-grill-rulings, 2026-08-28) copy re-true pin: before this ruling landed,
+// signDescription claimed "the same admin who proposed it may also sign it" — the DB now
+// REFUSES exactly that (a signer<>proposer wall, unconditional even for a single-admin firm),
+// so the old claim would be actively false if it survived. This cell opens the real Sign
+// dialog (no confirm — just the description that renders while the human is deciding) and
+// pins both halves: the corrected copy renders, and the retired copy does not.
+test("Sign dialog description states the signer<>proposer rule (裁-18a), not the retired same-admin claim", async () => {
+  const impl = (async (url: RequestInfo | URL) => {
+    const u = String(url);
+    if (u.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
+    if (u.includes("/rpc/list_vendor_bindings")) return jsonResponse(BINDINGS);
+    if (u.includes("/rest/v1/counterparties")) return jsonResponse(COUNTERPARTIES);
+    if (u.includes("/rpc/get_vendor_binding")) return jsonResponse(BINDING_DETAIL);
+    throw new Error(`unexpected fetch: ${u}`);
+  }) as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const { h, body } = await mount();
+    try {
+      const signTrigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Sign");
+      assert.ok(signTrigger, "the Sign trigger must render");
+      await h.fireEvent(signTrigger! as never, "click");
+      for (let i = 0; i < 4; i++) await h.settle();
+
+      const dialogText = textOf(body as never);
+      assert.match(dialogText, /an admin who did not propose this binding/,
+        "the corrected copy (裁-18a) must render in the open Sign dialog");
+      assert.doesNotMatch(dialogText, /the same admin who proposed it may also sign it/,
+        "the retired, now-false copy must not render");
+    } finally {
+      await h.unmount();
+      for (let i = 0; i < 3; i++) await h.settle();
+    }
+  });
+});

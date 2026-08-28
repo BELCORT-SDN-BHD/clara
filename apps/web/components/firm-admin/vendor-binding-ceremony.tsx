@@ -5,15 +5,19 @@
 // components/registers/fa-authority-ceremony.tsx's own header names, itself
 // the propose/sign/retire pattern this ceremony mirrors). A RANK-gated
 // governed act: propose/revoke are bookkeeper+, sign is ADMIN+
-// (lib/firm-admin/vendor-bindings.ts's own header). TRUED (F1, independent
-// review, 2026-08-28): the live `sign_vendor_identity_binding` body never
-// reads `created_by` — it is a RANK separation, not a PERSON separation, so
-// the same admin who proposed a binding may also sign it alone. This
-// component does not claim otherwise, and adds no client-side proposer≠signer
-// gate the DB itself does not enforce (a DB-side wall is an owner question,
-// raised separately). The Sign trigger is NEVER pre-hidden on a client-side
-// role guess; every viewer sees it, and a bookkeeper who clicks it gets the
-// DB's own CLR04 refusal, verbatim.
+// (lib/firm-admin/vendor-bindings.ts's own header). RE-TRUED (裁-18a,
+// mohe-grill-rulings, 2026-08-28, pre-beta hardening batch): the live
+// `sign_vendor_identity_binding` body NOW reads `created_by` and refuses
+// when the signer is the same person who proposed the binding — a PERSON
+// separation on top of the RANK floor, not merely rank-gated. STRICT: no
+// relaxation for a single-admin firm; the refusal names both lawful ways out
+// (let Clara propose it, or a different admin signs it). This component
+// still adds no client-side proposer≠signer gate — the DB's own wall is the
+// wall, matching the estate's standing convention (a DoorRefusal renders
+// verbatim, never pre-guessed client-side). The Sign trigger is NEVER
+// pre-hidden on a client-side role OR identity guess; every viewer sees it,
+// and a caller who clicks it gets the DB's own CLR04 refusal, verbatim —
+// whether that refusal is the rank floor or the signer≠proposer wall.
 //
 // F2 (independent review, fix-required, 2026-08-28): `get_vendor_binding` had
 // zero production consumers — a consent must show what it approves. Both the

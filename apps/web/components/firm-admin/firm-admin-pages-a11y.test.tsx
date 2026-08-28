@@ -167,7 +167,15 @@ test("/admin/vendor-bindings page composition (PageHeader + the real VendorBindi
       const h = await renderComponent(withMessages(createElement(AdminVendorBindingsPageShadow)));
       try {
         for (let i = 0; i < 3; i++) await h.settle();
-        assert.match(textOf(h.container as never), /Vendor identity bindings/, "the page's own h1 must render");
+        const pageText = textOf(h.container as never);
+        assert.match(pageText, /Vendor identity bindings/, "the page's own h1 must render");
+        // 裁-18a (mohe-grill-rulings, 2026-08-28): re-true pin. The pre-hardening copy claimed
+        // "not required to be different people" -- the DB now REFUSES a self-sign (a person
+        // separation on top of the rank floor, unconditional even for a single-admin firm),
+        // so that claim would be actively wrong if it survived. Pinning both halves: the
+        // corrected phrase renders, and the retired phrase does not.
+        assert.match(pageText, /did not propose it/, "pageDescription must state the signer<>proposer rule, corrected");
+        assert.doesNotMatch(pageText, /not required to be different people/, "the retired, now-false claim must not render");
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {

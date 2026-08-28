@@ -224,6 +224,57 @@ test("debt-C2 · users_visible: exactly id + display_name -- email is not just p
   });
 
 // ---------------------------------------------------------------------------------------
+// 裁-15 (mohe-grill-rulings, 2026-08-28) · THE ESTATE security_barrier CENSUS. This lane's own
+// header (0137 §H) named the debt: all six same-shape masked views (this file's three PLUS
+// P4/0141's firm_members_visible / firm_invites_visible / caller_context) share the exact
+// idiom, but only P4's three carried the reloption. The hardening-batch migration closes that
+// gap by ALTERing this file's three views in place; this cell census-proves the estate-wide
+// end state directly from the catalog, mirroring p4t1-reads.test.mjs's own [C1] cell (which
+// covers only P4's three) rather than duplicating it, and states BOTH halves so the reloption
+// is never mistaken for a masking guarantee it does not provide — a role-floor/target-list
+// masking regression on any of the six would NOT be caught by this cell; debt-A1/B1/C1 above
+// and p4t1-reads.test.mjs's own masking cells are what prove those independently.
+// ---------------------------------------------------------------------------------------
+
+test("debt-BAR1 · 裁-15 estate census — ALL SIX same-shape masked views carry security_barrier, and the reloption is proven to buy pushdown-ordering, not target-list masking", async (t) => {
+  if (gate(t)) return;
+  const SIX = [
+    "users_visible", "firm_open_questions_visible", "client_identifier_promotions_visible",
+    "firm_members_visible", "firm_invites_visible", "caller_context",
+  ];
+  const r = await rootQuery(
+    `select c.relname, c.reloptions
+       from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'clara' and c.relname = any($1)`,
+    [SIX],
+  );
+  assert.equal(r.rows.length, 6, "all six same-shape masked views must resolve on the catalog");
+  for (const view of SIX) {
+    const row = r.rows.find((x) => x.relname === view);
+    assert.ok(row, `${view} must exist`);
+    assert.ok(
+      Array.isArray(row.reloptions) && row.reloptions.includes("security_barrier=true"),
+      `${view} must carry security_barrier=true`,
+    );
+  }
+
+  // WHAT IT DOES NOT BUY, re-proven here (not merely stated in a comment): security_barrier
+  // governs qual-PUSHDOWN ORDER, never column projection. users_visible's own masking is
+  // structural (it never selects email/is_agent/created_at at all, proven by debt-C2's column
+  // census); this half instead re-proves client_identifier_promotions_visible's UNMASKED
+  // columns (value_normalized, model — deliberately visible per 0137's own header) are still
+  // returned in full under the reloption, so a reader cannot mistake "carries
+  // security_barrier" for "therefore also masks more than it already did".
+  const pid = await proposeCard(world.firms.A, world.clients.A2, "bank_account", "1234567890");
+  const asBob = await humanQuery(world.users.bob,
+    "select value_normalized, model from clara.client_identifier_promotions_visible where id = $1", [pid]);
+  assert.equal(asBob.rowCount, 1);
+  assert.equal(asBob.rows[0].value_normalized, "1234567890",
+    "security_barrier changes nothing about which columns this view projects — value_normalized is still unmasked");
+  assert.equal(asBob.rows[0].model.provider, "anthropic", "model attribution is still unmasked under the reloption");
+});
+
+// ---------------------------------------------------------------------------------------
 // D · THE ACL WALL — cross-role reach + the adversarial twin
 // ---------------------------------------------------------------------------------------
 
