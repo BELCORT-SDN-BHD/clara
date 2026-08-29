@@ -178,16 +178,43 @@ test("f-a3.1a-a every extracted core is the PRE-EXTRACTION body byte-for-byte: i
   const pr1bApplied = (await rootQuery(
     "select count(*)::int as n from clara.schema_migrations where version ~ '^[0-9]{4}_f_a3_pr1b_agent_limb$'",
   )).rows[0].n === 1;
+  // 裁-41 (the clara.client_identifiers UNIQUE) legitimately re-CoRs a FIFTH core:
+  // `_add_bank_account_core` gains the narrow unique_violation -> race-backstop map on its two
+  // guarded client_identifiers inserts. Same frozen-window shape as PR-1b's four above, and the
+  // same legitimacy — that migration's §0.7 pins THIS core's prosrc sha to PR-1a's output by
+  // exact sha and hard-aborts if it has moved, then proves at its own tail that reversing its
+  // three named fragments reproduces that pinned pre-image BYTE-FOR-BYTE. The inversion this cell
+  // performs is therefore re-proved at the moment the body changed, by the successor.
+  //
+  // GATED ON A CATALOG WITNESS READ BY PROPERTY. Not on a migration number — the file is
+  // UNNUMBERED until merge, so a number-keyed gate would be wrong on the branch and stale after.
+  // Not on a bare name either (law 3): the index must exist AND actually be unique and valid. An
+  // index carrying that name which is not unique is not the wall, and must not open the window.
+  const SUPERSEDED_BY_CID_UNIQUE = new Set(["_add_bank_account_core"]);
+  const cidUniqueApplied = (await rootQuery(
+    `select coalesce((select i.indisunique and i.indisvalid and i.indislive
+                        from pg_index i
+                       where i.indexrelid = to_regclass('clara.uq_client_identifiers_client_kind_value')),
+                     false) as ok`,
+  )).rows[0].ok;
   let windowed = 0;
+  const windowedNames = [];
   for (const spec of NINE) {
     const row = byName.get(core(spec.fn));
-    if (pr1bApplied && SUPERSEDED_BY_PR1B.has(core(spec.fn))) {
+    const windowReason =
+      pr1bApplied && SUPERSEDED_BY_PR1B.has(core(spec.fn))
+        ? "recut by PR-1b (whose §0 pre-state pin re-proved this core was byte-exactly PR-1a's output at its apply)"
+        : cidUniqueApplied && SUPERSEDED_BY_CID_UNIQUE.has(core(spec.fn))
+          ? "recut by 裁-41's client_identifiers UNIQUE (whose §0.7 sha pin and tail surgical-delta re-substitution re-proved this core was byte-exactly PR-1a's output at its apply)"
+          : null;
+    if (windowReason) {
       // Presence (asserted above) + the un-windowed invariant still hold; the inversion is
       // the successor's own tail's business now.
       assert.ok(!row.prosrc.includes("clara._human_ctx("),
         `clara.${core(spec.fn)} resolves NO human context of its own — an invariant every successor recut must keep`);
       windowed += 1;
-      noteLane(`f-a3.1a-a clara.${core(spec.fn)}: recut by PR-1b (whose §0 pre-state pin re-proved this core was byte-exactly PR-1a's output at its apply) — the pure-extraction inversion is a pre-PR-1b-window claim for this core`);
+      windowedNames.push(core(spec.fn));
+      noteLane(`f-a3.1a-a clara.${core(spec.fn)}: ${windowReason} — the pure-extraction inversion is a pre-successor-window claim for this core`);
       continue;
     }
     const block = ctxBlock(spec.fn);
@@ -205,7 +232,7 @@ test("f-a3.1a-a every extracted core is the PRE-EXTRACTION body byte-for-byte: i
     assert.ok(!row.prosrc.includes("clara._human_ctx("),
       `clara.${core(spec.fn)} resolves NO human context of its own — it takes one, which is the point of the extraction`);
   }
-  noteLane(`f-a3.1a-a ${NINE.length - windowed} cores inverted to their pinned pre-extraction shas${windowed ? ` (${windowed} recut by PR-1b, inversion windowed)` : ""}`);
+  noteLane(`f-a3.1a-a ${NINE.length - windowed} cores inverted to their pinned pre-extraction shas${windowed ? ` (${windowed} recut by a later migration, inversion windowed: ${windowedNames.join(", ")})` : ""}`);
 });
 
 // ===========================================================================

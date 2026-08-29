@@ -287,6 +287,15 @@ begin
             from clara.client_identifiers
            group by client_id, kind, value_normalized
           having count(*) > 1) g;
+  -- THE "IT NEVER DEDUPES" RULING, MADE MECHANICAL. Everything above states the promise; this
+  -- line is what keeps it. The row count is stashed here and the TAIL REFUSES if it moved by so
+  -- much as one row — the same idiom this file already uses for ACLs and function bodies, applied
+  -- to the one claim the header repeats most. Without it, a future edit that "helpfully" disabled
+  -- t_client_identifiers_append_only and deleted the losing rows would apply CLEAN and pass every
+  -- other check in this file, which is exactly what an adversarial review demonstrated.
+  insert into _cid_uniq_pre(k,v)
+    select 'row_count', (select count(*) from clara.client_identifiers)::text;
+
   if v_dups > 0 then
     raise exception 'client_identifiers_unique prestate: % duplicate identifier group(s) already exist and must be resolved by a human before this wall can be raised: %', v_dups, v_list
       using errcode = 'CLR10',
@@ -1057,7 +1066,17 @@ begin
       v_val text := 'zzprobe' || replace(gen_random_uuid()::text,'-','');
       v_hit boolean; v_admitted boolean; v_state text;
     begin
-      select c.id, c.firm_id into v_c, v_f from clara.clients c order by c.id limit 1;
+      -- PREFER a client whose firm actually HAS a sibling, so the sibling-ADMIT arm — the one
+      -- that proves 0007:235's conflict is still representable — actually runs. A bare
+      -- `order by c.id limit 1` is a uuid lottery: on a seeded rig it picked a single-client firm
+      -- and the strongest arm of this probe silently reported "not exercised". Falls back to the
+      -- plain pick so a genuinely sibling-less database still exercises the refusal half.
+      select c.id, c.firm_id into v_c, v_f from clara.clients c
+       where exists (select 1 from clara.clients s where s.firm_id = c.firm_id and s.id <> c.id)
+       order by c.id limit 1;
+      if v_c is null then
+        select c.id, c.firm_id into v_c, v_f from clara.clients c order by c.id limit 1;
+      end if;
       select u.id into v_u from clara.users u order by u.id limit 1;
       select c.id into v_c2 from clara.clients c where c.firm_id = v_f and c.id <> v_c order by c.id limit 1;
       if v_c is not null and v_u is not null then
@@ -1111,6 +1130,20 @@ begin
   select count(*) into v_rows from clara.client_identifiers;
   select count(*) into v_dups from (select 1 from clara.client_identifiers
     group by client_id, kind, value_normalized having count(*) > 1) d;
+
+  -- (9) THE ROW COUNT IS UNMOVED — "this migration NEVER dedupes", enforced rather than promised.
+  -- The header says it three times and §0.6's refusal is built on it, but until this check every
+  -- word of that was prose: a body that disabled t_client_identifiers_append_only, deleted the
+  -- losing rows and re-enabled the trigger would have applied CLEAN through every other assertion
+  -- in this file. It is checked LAST so it also covers anything §1-§3 might have done, and it is
+  -- an EXACT equality, not a >= : this file may not add a row either. The tail probe's own inserts
+  -- are discarded by its forced rollback before this reads, which is what makes an exact compare
+  -- safe here.
+  select v from _cid_uniq_pre where k = 'row_count' into v_pre;
+  if v_rows::text is distinct from v_pre then
+    raise exception 'client_identifiers_unique tail: clara.client_identifiers row count MOVED during this migration (pre %, post %) -- this file never dedupes and never writes; a deviation here means a body deleted or inserted identity rows behind the append-only trigger', v_pre, v_rows
+      using errcode = 'CLR10';
+  end if;
 
   raise notice 'client_identifiers_unique tail: OK -- uq_client_identifiers_client_kind_value (client_id,kind,value_normalized) is unique+valid+ready+live with NO predicate and indnullsnotdistinct=false, censused BY PROPERTY (indisunique/indisvalid/indisready/indislive + key column list + predicate), never by name; client_identifiers now carries exactly 3 unique indexes (was 2). The NON-unique ix_client_identifiers_match is byte-identical to its prestate definition and still NOT unique, so sibling-client conflicts stay representable. Forced RLS, the append-only trigger and the three NOT NULL key columns are unmoved. BOTH recut bodies changed genuinely, keep their exact prior ACLs and their SECURITY DEFINER/search_path/clara_fn_owner posture, keep every prior wall string (add_client_identifier''s op reservation re-measured POSITIONALLY as still preceding its client check), and each SURGICAL-DELTA RE-SUBSTITUTION reproduces its pinned pre-image BYTE-FOR-BYTE -- including _add_bank_account_core, whose pre-image exists in no file because 0119 spliced it. _add_bank_account_core is still reachable by NO application role (measured through has_function_privilege). The 4 DO-NOT-TOUCH bodies (confirm_identifier_promotion, _confirm_bank_identifier_promotion_core, _identifier_promotion_core, _claim_identity_core) are byte-identical to their pins. The prosrc-text writer census (NOT closed-world -- §0.8 names what it cannot see; the INDEX binds those) still reads exactly 2 functions and BOTH carry the NARROW re-raise guard line, matched on the guard itself rather than on a bare mention of the index name. Behavioural probe: %. LIVE CENSUS (report-only): % client_identifiers row(s), % duplicate group(s). D1 OWED: clara.add_client_identifier(uuid,text,text,text), clara._add_bank_account_core(jsonb,uuid,text,text,text,text,uuid,text). No table in workflow/graphile_worker/spike touched.',
     v_probe, v_rows, v_dups;

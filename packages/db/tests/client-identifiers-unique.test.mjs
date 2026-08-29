@@ -575,7 +575,7 @@ test("ci-11 · the PRE-FLIGHT's positive control: the migration's own duplicate 
   assert.match(r.rows[0].list, /n=2/, "ci-11: ...and how many rows are in the group");
 });
 
-test("ci-12 · the wall's STRUCTURE, read by property, and the closed-world writer census", async (t) => {
+test("ci-12 · the wall's STRUCTURE, read by property, and the prosrc-text writer census", async (t) => {
   if (gate(t)) return;
   const ix = (await rootQuery(
     `select i.indisunique, i.indisvalid, i.indisready, i.indislive, i.indnullsnotdistinct,
@@ -606,7 +606,9 @@ test("ci-12 · the wall's STRUCTURE, read by property, and the closed-world writ
   assert.equal(match.indisunique, false,
     "ix_client_identifiers_match must stay NON-unique — promoting it would wall sibling clients out of a shared value");
 
-  // CLOSED-WORLD: the same instrument the migration's own §0.8/§4(7) census uses. A writer added
+  // PROSRC-TEXT CENSUS, not closed-world (§0.8 of the migration names what it cannot see: a
+  // run-time-assembled name, a quoted identifier, a BEGIN ATOMIC body, a view/rule, and every
+  // client-side writer — the INDEX is what binds those). Same instrument as §0.8/§4(7). A writer added
   // later without the map would surface HERE, on every run, rather than as a raw 23505 in
   // production.
   // `maps` matches THE GUARD LINE, not the bare index name. Both bodies also mention the index in
