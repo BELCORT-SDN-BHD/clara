@@ -775,6 +775,12 @@ begin
     end if;
   end if;
 
+  -- SERIALISE version allocation per (firm, template_key) -- 0059's own
+  -- pg_advisory_xact_lock(hashtextextended(...)) idiom. Without it two concurrent forks of the
+  -- same key both read the same max(version) and one loses to uq_coa_templates_firm_version with
+  -- a bare 23505 that names nothing. The lock is transaction-scoped, so it releases with the
+  -- door's own commit or rollback; a second admin simply waits and gets the next version.
+  perform pg_advisory_xact_lock(hashtextextended(c.firm::text || ':' || p_template_key, 0));
   select coalesce(max(version), 0) + 1 into v_version from clara.coa_templates
    where scope = 'firm' and firm_id = c.firm and template_key = p_template_key;
 
