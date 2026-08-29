@@ -2,7 +2,7 @@
 //
 // SPEC OF RECORD. `docs/plan/active/metering-design.md` §3.3 (gates 3,4,5,7) + §3.4;
 // `docs/plan/active/metering-annexes.md` Annex C cells C.10–C.13, C.22, C.23; the migration
-// `UNNUMBERED_f_a9_pr_1b_brake_census.sql`. LAW: digest law 76 / §9 "meter, never cap"
+// `0151_f_a9_pr_1b_brake_census.sql` (the number claimed at merge prep). LAW: digest law 76 / §9 "meter, never cap"
 // (owner ruling TA-P12 = A, 2026-08-22 Track-A sitting, widened by the 2026-08-23 gate-6/7
 // split); law 6 (append-only history); law 22 (a visible record must not lie).
 //

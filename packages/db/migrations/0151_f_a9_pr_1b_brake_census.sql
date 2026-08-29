@@ -1,13 +1,15 @@
--- UNNUMBERED_f_a9_pr_1b_brake_census.sql -- Wave-F Track A, F-A9 PR-1B:
+-- 0151_f_a9_pr_1b_brake_census.sql -- Wave-F Track A, F-A9 PR-1B:
 -- THE BRAKE CENSUS'S DB HALF. The unattended lane's spend brakes are REMOVED, the
 -- engine-protective concurrency floor is KEPT and its refusal string RENAMED off the
 -- one it shared with two spend caps, and `clara.firm_limits`' three now-dead cap columns
 -- are disposed -- in that order, in one file, under ONE D1 write-quiesce window.
 --
--- Authored UNNUMBERED; the number is claimed at MERGE PREPARATION (standing law,
+-- Authored UNNUMBERED; the number 0151 was CLAIMED at merge preparation 2026-08-30 (behind
+-- 0148 the dup-open wall · 0149 裁-19's read layer · 0150 the COA template; standing law,
 -- AGENTS.md + .claude/rules/db-migrations.md). Nothing in this file or in the battery
 -- keys on the number -- the prestate pins every live body it replaces by prosrc SHA-256
--- and the battery gates on the migration STEM (`f_a9_pr_1b_brake_census`).
+-- and the battery gates on the migration STEM (`f_a9_pr_1b_brake_census`). The body is
+-- byte-identical to the reviewed tip 42d201a8 (independent review CLEAR, 2026-08-30).
 --
 -- LAW OF RECORD. Digest law 76 / SS9 -- "meter, never cap": per-call usage is RECORDED,
 -- and a spend-shaped brake on a professional's own work is not the product's to hold.
