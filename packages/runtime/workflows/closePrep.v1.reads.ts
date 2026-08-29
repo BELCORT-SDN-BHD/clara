@@ -42,6 +42,30 @@ export function newCloseRunRecord(): CloseRunRecord {
  * both feed closeOpKey, which must reproduce the database's own derivation exactly or
  * _close_wake_ctx refuses with CLR10 'op_key_not_derived'. Passing the wrong subject here is
  * therefore a LOUD failure, not a silent mis-scope: the DB checks our arithmetic on every call.
+ *
+ * WHAT NAMED NOTATION BOUGHT, AND WHAT IT DID NOT — stated here because an overstated safety
+ * claim in a frozen file is what makes the next author careless (independent review).
+ *   CLOSED: "which DB parameter is this?" A wrong or misplaced NAME is a loud parse error, every
+ *     call site is self-documenting, and G1B-I3 machine-checks the names against the catalog in
+ *     order. The four silent prose-transposition cases can no longer be written by NAME.
+ *   OPEN:  "which VALUE is bound to this placeholder?" `p_narrative => $3` is right only while $3
+ *     holds the narrative. Write `p_narrative => $4, p_rationale => $3` and case A is back, with
+ *     the names looking perfect.
+ *
+ * AND ON THIS LANE THAT MAPPING IS SPLIT ACROSS TWO FILES, which is the part worth guarding: each
+ * call site supplies $1..$n through `argsBefore`, and THIS function appends the tail three. Every
+ * site's tail placeholder numbers therefore encode an assumption about that append order which is
+ * stated nowhere. Add one argument to an argsBefore array without bumping the tail numbers and the
+ * rationale lands in the new parameter's slot — same-typed, non-blank, silent.
+ *
+ * THE GUARD BELOW BOUNDS EXACTLY THAT. It re-derives the expected placeholder count from the
+ * values actually being sent and checks the SQL agrees, and it checks the tail three are bound to
+ * the last three placeholders BY NAME. It cannot catch a swap WITHIN argsBefore (the call site
+ * owns that, and G1B-E2a is what exercises it) — but it does catch the drift class, which is the
+ * one that arrives later, from an edit that looks local and safe.
+ *
+ * A THROW IS THE RIGHT REFUSAL: it happens before any credential is minted, and the caller turns
+ * it into a named refusal the model can read.
  */
 export async function callCloseVerb(
   ctx: CloseTaskContext,
@@ -52,10 +76,28 @@ export async function callCloseVerb(
   rationale: string,
   modelId: string,
 ): Promise<unknown> {
-  const opKey = closeOpKey(ctx.taskId, verb, subjectId);
-  return closeScoped(ctx, (c: PgExec) =>
-    c.query(sql, [...argsBefore, rationale, JSON.stringify(closeModelIdentity(modelId)), opKey]).then((r) => r.rows[0]?.r ?? null),
-  );
+  const values = [...argsBefore, rationale, JSON.stringify(closeModelIdentity(modelId)), closeOpKey(ctx.taskId, verb, subjectId)];
+  assertTailBinding(verb, sql, values.length);
+  return closeScoped(ctx, (c: PgExec) => c.query(sql, values).then((r) => r.rows[0]?.r ?? null));
+}
+
+/** The three names this helper always appends, in the order it appends them. Every one of 0138's
+ *  twelve wrappers ends with exactly this triple — verified against all twelve signatures. */
+const TAIL = ["p_rationale", "p_model", "p_op_key"] as const;
+
+export function assertTailBinding(verb: string, sql: string, valueCount: number): void {
+  const placeholders = new Set([...sql.matchAll(/\$(\d+)/g)].map((m) => Number(m[1])));
+  if (placeholders.size !== valueCount || Math.max(...placeholders) !== valueCount) {
+    throw new Error(
+      `${verb}: SQL binds ${placeholders.size} distinct placeholders (max $${Math.max(...placeholders)}) but ${valueCount} values are being sent — a call site's argsBefore and its tail numbering have drifted apart`,
+    );
+  }
+  TAIL.forEach((name, k) => {
+    const n = valueCount - TAIL.length + 1 + k;
+    if (!new RegExp(`\\b${name}\\s*=>\\s*\\$${n}\\b`).test(sql)) {
+      throw new Error(`${verb}: expected \`${name} => $${n}\` — callCloseVerb appends ${TAIL.join(", ")} as the last three values, and this SQL does not bind them there`);
+    }
+  });
 }
 
 /** A close wrapper's jsonb reply, read POSITIVELY for admission.
@@ -136,10 +178,12 @@ export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec:
         read(
           "wake_get_close_readiness",
           fiscal_year_id,
-          // TWO ADJACENT UUIDs — transposition case B. Named notation makes the swap
-          // inexpressible rather than merely unlikely: `p_client => $2` is a different call, not
-          // a differently-ordered one, and the database rejects a wrong NAME loudly at parse time
-          // instead of silently reading one client's readiness under another's pin.
+          // TWO ADJACENT UUIDs — transposition case B. Named notation closes ONE HALF of that
+          // hazard and it is worth being exact about which: a wrong or misplaced NAME is now a
+          // loud parse error rather than a silent mis-scope, and G1B-I3 machine-checks the names
+          // against the catalog in order. What it does NOT close is the placeholder-to-VALUE
+          // mapping: `p_client => $1` is correct only while $1 holds the client id. See
+          // callCloseVerb's own header for the residual, and for the guard that bounds it.
           "select clara.wake_get_close_readiness(p_client => $1, p_fy => $2, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [ctx.clientId, fiscal_year_id],
           rationale,

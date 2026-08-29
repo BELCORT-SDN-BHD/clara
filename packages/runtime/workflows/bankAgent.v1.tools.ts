@@ -170,7 +170,10 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
               // non-blank so both guards pass, and 0129:1052 parses the op key by POSITION
               // (split_part(key,':',2)); prose yields '' -> NULL, so the freshness check falls
               // back to its loose client+digest match and ADMITS the act, storing each value in
-              // the other's column. Named notation makes the swap unwritable.
+              // the other's column. Named notation makes the NAME half safe. The value half is
+              // still positional — but on THIS lane the SQL and its value array are one
+              // expression, so both halves are read together at a glance; the close lane's are
+              // split across two files, which is why its helper carries an extra guard.
               .query("select clara.wake_match_bank_line(p_client => $1, p_lines => $2::jsonb, p_entries => $3::jsonb, p_adjustments => $4::jsonb, p_ack_period_exceptions => $5, p_rationale => $6, p_model => $7::jsonb, p_inputs_digest => $8, p_op_key => $9) as r", [
                 ctx.clientId,
                 JSON.stringify(lines),

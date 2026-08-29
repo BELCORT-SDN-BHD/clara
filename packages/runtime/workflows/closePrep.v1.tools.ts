@@ -87,10 +87,10 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         write(
           "wake_open_fiscal_year",
           ctx.clientId,
-          // TRANSPOSITION CASE C: p_label and p_rationale are both free-form text, and both guards
-          // are only "non-blank" — a swap would have SUCCEEDED, minting a fiscal year whose label
-          // is a sentence of prose and whose receipt rationale is a year name. Named notation
-          // makes that unwritable.
+          // TRANSPOSITION CASE C: p_label and p_rationale are both free-form text and both guards
+          // are only "non-blank" — a swap SUCCEEDS, minting a fiscal year whose label is a
+          // sentence of prose and whose receipt rationale is a year name. Named notation makes
+          // the NAME half safe; the value half is still positional (callCloseVerb's header).
           "select clara.wake_open_fiscal_year(p_client => $1, p_label => $2, p_starts_on => $3::date, p_rationale => $4, p_model => $5::jsonb, p_op_key => $6) as r",
           [ctx.clientId, label, starts_on],
           rationale,
@@ -170,11 +170,12 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         write(
           "wake_propose_close",
           close_run_id,
-          // TRANSPOSITION CASE A, and the worst of the four: p_narrative and p_rationale are
-          // adjacent, both free-form text, both guarded only as non-blank. A swap SUCCEEDS —
-          // and the narrative is the text a human reads to settle the proposal, so the reader
-          // would get the internal rationale while the audit receipt got the client-facing
-          // narrative. No error, no rung, no way to tell from either side.
+          // TRANSPOSITION CASE A, the worst of the four: p_narrative and p_rationale are adjacent,
+          // both free-form text, both guarded only as non-blank. A swap SUCCEEDS — and the
+          // narrative is what a human reads to settle the proposal, so the reader would get the
+          // internal rationale while the audit receipt got the client-facing narrative. No error,
+          // no rung, no way to tell from either side. Named notation makes the NAME half safe;
+          // the value half is still positional, and callCloseVerb's guard bounds what remains.
           "select clara.wake_propose_close(p_close_run => $1, p_drafted => $2::jsonb, p_narrative => $3, p_rationale => $4, p_model => $5::jsonb, p_op_key => $6) as r",
           [close_run_id, JSON.stringify(drafted), narrative],
           rationale,

@@ -304,6 +304,34 @@ test("G1B-I3 EVERY DB call matches its function's LIVE declared arity AND argume
   }
 });
 
+test("G1B-I6 the close helper refuses a call site whose tail numbering has drifted", { skip: skip0138 }, async () => {
+  // NAMED NOTATION CLOSED THE *NAME* HALF, NOT THE *VALUE* HALF (independent review). On the close
+  // lane the placeholder-to-value mapping is split across two files: each call site supplies
+  // $1..$n, and callCloseVerb appends the tail three. Every site's tail numbers therefore encode
+  // an assumption about that append order. Add an argument to an argsBefore array without bumping
+  // the tail and the rationale lands in the new parameter's slot — same-typed, non-blank, silent.
+  // assertTailBinding bounds that drift class; this cell proves it is not decorative.
+  const reads = await import("../workflows/closePrep.v1.reads.ts");
+  const GOOD = "select clara.wake_abandon_close(p_close_run => $1, p_reason => $2, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r";
+
+  // POSITIVE CONTROL FIRST: the real, shipping SQL for this verb must pass at its real value
+  // count. Without this, every negative below could be passing because the guard rejects
+  // everything.
+  assert.doesNotThrow(() => reads.assertTailBinding("wake_abandon_close", GOOD, 5));
+
+  // DRIFT: a sixth value with the tail left at $3-$5. This is the exact edit the guard exists for.
+  assert.throws(() => reads.assertTailBinding("wake_abandon_close", GOOD, 6), /drifted apart/);
+  // The mirror: a site that renumbered the tail but did not add the value.
+  const RENUMBERED = "select clara.wake_abandon_close(p_close_run => $1, p_reason => $2, p_new => $3, p_rationale => $4, p_model => $5::jsonb, p_op_key => $6) as r";
+  assert.throws(() => reads.assertTailBinding("wake_abandon_close", RENUMBERED, 5), /drifted apart/);
+  assert.doesNotThrow(() => reads.assertTailBinding("wake_abandon_close", RENUMBERED, 6));
+
+  // TAIL BOUND TO THE WRONG PLACEHOLDERS at a correct count — the transposition shape itself,
+  // caught by NAME rather than by arithmetic.
+  const SWAPPED = "select clara.wake_abandon_close(p_close_run => $1, p_reason => $2, p_rationale => $4, p_model => $3::jsonb, p_op_key => $5) as r";
+  assert.throws(() => reads.assertTailBinding("wake_abandon_close", SWAPPED, 5), /p_rationale => \$3/);
+});
+
 test("G1B-I4 NEITHER body can write a receipt — every receipt is the verb's own in-txn act", { skip: skip0138 }, async () => {
   // THE HONEST SHAPE OF "settled with the expected receipts". These two bodies write ZERO
   // receipts themselves: bank_agent_receipts is written inside _agent_bank_receipt and
