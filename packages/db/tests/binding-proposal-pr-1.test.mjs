@@ -31,7 +31,7 @@ import {
   signLive, withPostTimeControl, postTimeControlLive, POST_TIME_MARKER,
   recutApproveCore, restoreApproveCore, seedClientHardIdentifier
 } from "./x36-vendor-binding-helpers.mjs";
-import { insertUser, addMember, createClient } from "./rig-fixtures.mjs";
+import { insertUser, addMember, createClient, upsertAccount, COA } from "./rig-fixtures.mjs";
 import {
   bp1Live, failBp1, reasonOf, mintCred, MODEL, WAKE_ROLE,
   proposeAsAgent, listCandidates, declineBinding, resetDecline,
@@ -2325,7 +2325,20 @@ test("bp1.A3h FOLD-7's own tail — a RECORDED identifier that cannot be COMPARE
   // ordering (that cell records a TIN on A2), and client_identifiers is append-only -- there is no
   // undo. A fresh client is cheaper than an order dependency.
   const dim = await createClient(w.users.alice, { name: `A3h Dim Identity ${opk("a3hc")}`, opKey: opk("a3hck") });
+  // …and pay for it, twice, both measured rather than assumed:
+  // (1) THE BOOKS. buildWorld's clients arrive with a chart; a client born here arrives with
+  //     none, and seedWindow posts a supplier bill — Dr expense / Cr payable — so BOTH accounts
+  //     have to exist or the fixture dies on fk_jl_account long before reaching the wall.
   await seedPayableAccount(w.firms.A, dim);
+  await upsertAccount(w.users.alice,
+    { client: dim, code: COA.expense, name: "Expense", type: "expense", opKey: opk("a3hexp") });
+  // (2) THE ROSTER. createClient drives the legacy onboarding bridge, which MINTS AND REMOVES a
+  //     temporary admin — so birthing a client mid-battery plants a fresh departure inside H5's
+  //     90-day window and makes firm A non-solo for every roster cell after this one. before()
+  //     ages out exactly this artefact for exactly this reason; a cell that creates a client owes
+  //     the same correction at the same moment. Measured the hard way: bp1.B1-roster went red on
+  //     the first run of this cell, from ninety lines away.
+  await ageOutPriorDepartures(w.firms.A);
   // The fixture is inserted RAW, deliberately: seedClientHardIdentifier folds its value through
   // the alphanumeric normaliser, which would turn '---' into '' and trip 0007's CHECK. The whole
   // point is a value that CHECK admits and the norm function cannot compare.
