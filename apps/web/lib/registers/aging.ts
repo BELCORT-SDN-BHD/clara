@@ -1,6 +1,17 @@
 // AR/AP aging — clara.ar_aging / clara.ap_aging(p_client, p_as_of, p_segment)
 // (packages/db/migrations/0040_wave_c_c_tieout.sql:3989-4008), bookkeeper+, granted
-// at 0040:4790-4801. Pre-bucketed by the DB (clara._aging_core, 0040:3932-3986) —
+// at 0040:4790-4801.
+//
+// BODY OF RECORD — NOT 0040's TEXT. `clara._aging_core` is a CoR'd body: 0040 created it
+// and 裁-19 PR-1 (the counterparty-merge read layer) SPLICED it, so the live definition is
+// `pg_get_functiondef` on the catalog, never any one migration's source. What the splice
+// changed for THIS module: aging now groups by the CANONICAL party (a merged counterparty
+// stops being its own row and folds into its survivor), each per-counterparty object gains
+// `resolution` ('canonical' | 'unresolved'), and each item gains
+// `recorded_counterparty_id` — the party the invoice was actually raised under. The bucket
+// keys, the `totals` shape and the no-client-side-sums rule below are unchanged.
+//
+// Pre-bucketed by the DB (clara._aging_core) —
 // current/31-60/61-90/91+ cents per counterparty, plus a DB-summed `totals` row; this
 // module never sums a bucket itself (hard constraint 2). `p_segment` is a reserved,
 // always-null forward hook (0040:3993-3995) — never sent as anything but null today.

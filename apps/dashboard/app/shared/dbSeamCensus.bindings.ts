@@ -207,9 +207,20 @@ export const UNCONSUMED_BASELINE: Record<string, string> = {
   // no period for a manual run to send). Widening blocked[] to carry the refusal's own `remedy`
   // is a DB-side ABI decision, recorded as a residual for the next ladder round, NOT taken here.
   adjustment_run_due: "account_class account_code asset_id axis cadence colliding_elements correction_entry correction_entry_id correction_posting_date correction_verb correction_wall correction_wall_advice domain entry_id first_period_in_window last_period_any last_period_in_window name owner_ref posting_date role standing_in_window standing_template_id standing_template_status status",
-  ap_aging: "as_of domain",
-  ar_aging: "as_of domain",
-  customer_statement: "closing_balance_cents counterparty_id domain from opening_balance_cents to",
+  // [裁-19 PR-1, 0149_counterparty_merge_pr_1] `recorded_counterparty_id` / `resolution` JOINED the
+  // two aging lines, and `recorded_counterparty_id` the two statement lines, with the canonicalising
+  // read layer: every open item now carries the counterparty it was RECORDED against beside the
+  // canonical one it is FOLDED under (裁-35 S0 — rows never move; the read layer folds), plus the
+  // `resolution` word that says which. The retiring apps/dashboard renders neither (its aging and
+  // statement surfaces predate merges); apps/web's counterparty card is where the fold is shown
+  // (裁-19 PR-2's frontend home, named in that PR body). Direction 2 flagged exactly these on exactly
+  // these four reads and nothing else — the replacement lines the CI failure printed, verbatim
+  // (run 33275461166, db-estate, after #427's refresh onto 0148). The review ladder had run the
+  // dashboard suite WITHOUT CLARA_RIG_DB=1, which is the same blind spot the round-10 entry above
+  // records — the rig-backed census is found only by RUNNING it the way CI does.
+  ap_aging: "as_of domain recorded_counterparty_id resolution",
+  ar_aging: "as_of domain recorded_counterparty_id resolution",
+  customer_statement: "closing_balance_cents counterparty_id domain from opening_balance_cents recorded_counterparty_id to",
   // [round-7 F-F3 correction] This comment used to say "the tie strip renders
   // neither X nor Y" — FALSE, measured: there is no tie strip. `faRegisterTie()`
   // (assetsApi.ts) is called from NO `.tsx` component anywhere in the dashboard
@@ -317,7 +328,7 @@ export const UNCONSUMED_BASELINE: Record<string, string> = {
   list_review_queue: "attempts_cap attempts_remaining attempts_used autodraft batch_ids blocked_reason client_name corroborated corroboration_ineligible currency customer_name customer_registration explicit_non_myr extraction_id invoice_date invoice_id last_origin last_refusal last_run_id open_proposal_count origin_attribution parked rounding_cents rule_backed sweep_eligible tax_total_cents total_cents total_excl_tax_cents total_fact_hash total_region_id type_code updated_at version_n",
   list_uncoded_filings: "basis document_kind extraction_status financial_date mime_type",
   list_unmatched_lines: "bank_account_display line_no value_date",
-  supplier_statement: "closing_balance_cents counterparty_id domain from opening_balance_cents to",
+  supplier_statement: "closing_balance_cents counterparty_id domain from opening_balance_cents recorded_counterparty_id to",
 };
 
 /** [round-7 F-F3] DIRECTION 3 (partial) — reads whose wire wrapper is called

@@ -233,7 +233,14 @@ volatile.
 
 ### B.2 · The two closed-world censuses (live catalog)
 
-**C2 — the 32 bodies that call `_canonical_counterparty`.** `_agent_settle_from_bank_line_core` ·
+**C2 — the bodies that call `_canonical_counterparty`. TRUED 2026-08-29: the set is 33, not 32**
+— `add_counterparty_alias` joined at `0145` (P4 tranche-2), after this annex was written.
+PR-1's prestate re-derives the number live and **aborts** if it is not 33, and its tail asserts
+the post-state set is exactly those 33 **plus `_aging_core`** (34), compared as a SET in both
+directions rather than as two sorted strings — `pg_proc.proname` is type `name` (C collation)
+while a text array sorts under the database collation, so a string compare reds a correct census.
+**The list below is the original 32; read it with `add_counterparty_alias` appended.**
+`_agent_settle_from_bank_line_core` ·
 `_allocate_payment_core` · `_allocate_receipt_core` · `apply_open_items` · `_approve_entry_core` ·
 `_coding_lane_core` · `_complete_bank_reconciliation_core` · `_derive_vendor_binding_proposal` ·
 `dismiss_open_question` · `_draft_entry_core` · `_draft_opening_item_core` · `get_context_pack` ·
@@ -247,6 +254,18 @@ volatile.
 **`_aging_core` is NOT a member — that absence IS finding M2.** A tail census in PR-1 re-runs this
 query and asserts the membership set is the above **plus `_aging_core`**, so a future body that
 drops the resolver fails loudly.
+
+**THE RAW CENSUS ALONE IS NOT SUFFICIENT, and PR-1 carries the fix.** `prosrc like
+'%_canonical_counterparty%'` matches a COMMENT as readily as a call, so a body that lost the
+resolver from its CODE while keeping the name in a comment would still be counted a member — and
+this estate has a live instance of exactly that: **`clara.apply_open_items` is returned by a raw
+`_aging_core` census on the strength of one comment line.** PR-1's tail therefore adds a
+**comment-stripped, CALL-SHAPED** postcheck for all three recut bodies (block comments stripped
+first, then line comments — the `0141`/`0146` HIGH-1 order), asserting
+`clara._canonical_counterparty(` appears **2 / 5 / 2** times IN CODE in `_aging_core` /
+`_statement_core` / `list_open_items_by_counterparty`. Cell **cm.10** runs the same instrument
+from outside **with a negative control** that builds a comment-only mutant and proves the raw
+census still says YES while the comment-stripped one correctly says ZERO.
 
 **C1 — 42 bodies name `open_items`.** The ten that read `counterparty_id` as a dimension are
 listed in the survey §3/C1. The remaining 32 read items by id, by entry or by count and are
