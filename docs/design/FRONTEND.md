@@ -34,8 +34,14 @@ something stable to describe.
 
 ## Pointer
 
-The dashboard package is `apps/dashboard` (Next.js on Cloudflare Pages, `app.clarabook.com`).
-Until this file is populated, its shipped routes and components are the only source of truth
-for current frontend behavior — read the code, not a spec. **apps/web** (branch
-`frontend/web`) replaces `apps/dashboard` at cutover; see
-`docs/plan/active/frontend-handoff-2026-08-23.md` + its 08-24 addendum.
+The outgoing dashboard package is `apps/dashboard` (Next.js on Cloudflare Pages,
+`app.clarabook.com`) — still what is DEPLOYED until the P6 cutover PR. **`apps/web` is the
+source of truth for frontend behaviour**: it is on `main` (not a branch), carries P1–P3 plus
+the whole port wave, and replaces `apps/dashboard` at cutover. Until this file is populated,
+read `apps/web`'s code and its `README.md`, not a spec. See
+`docs/plan/active/port-wave-plan-2026-08-28.md` for the cutover plan and
+`docs/plan/active/frontend-handoff-2026-08-23.md` + its 08-24 addendum for the original
+handoff. *(Trued 2026-08-29, P-4 of `docs/plan/active/mohe-alignment-audit-2026-08-29.md`:
+this pointer named the branch `frontend/web` and called `apps/dashboard` "the only source of
+truth for current frontend behavior". This file's own emptiness stays scheduled — owner
+ruling Q7-B, Wave G.)*

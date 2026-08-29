@@ -1,19 +1,29 @@
 # apps/web — Clara's production frontend
 
-**Status: P1–P3 merged in full; the port wave's T0 seam is in flight.** The shell (Supabase
-SSR invite-only auth, the two-level workspace chrome, the Clara rail + full-screen thread
-escalation, the 18-part catalog renderer, `⌘K`) and the full P3 product workbench (journals,
-documents, bank, close, reports, registers, knowledge) are landed. It replaces
-`apps/dashboard` **at cutover**, not before — see
+**Status: P1–P3 and the whole port wave (T0–T11, 11/11) are merged on `main`.** The shell
+(Supabase SSR invite-only auth, the two-level workspace chrome, the Clara rail + full-screen
+thread escalation, the 22-part catalog renderer, `⌘K`) and the full P3 product workbench
+(journals, documents, bank, close, reports, registers, knowledge) are landed, and the port
+wave has since filled those workbenches with the ported door/read surface. Still ahead: the
+**P4** firm-admin UI tranche (design of record merged, build not started) and the **P6**
+polish + cutover wave. It replaces `apps/dashboard` **at cutover**, not before — see
 `docs/plan/active/port-wave-plan-2026-08-28.md` for the current cutover plan
 (`docs/plan/active/frontend-handoff-2026-08-23.md` §0.1 is the original at-cutover ruling).
+
+*(Trued 2026-08-29, P-3 of `docs/plan/active/mohe-alignment-audit-2026-08-29.md`. The line
+above read "the port wave's T0 seam is in flight" — last touched by the T0 seam PR itself,
+with all eleven trains merging after it and none re-truing it. `apps/web/AGENTS.md` routes
+every agent to this file as the full reference, so a lane grounding per the harness was
+being told the shipped product did not exist.)*
 
 ## What this is
 
 Next.js App Router, TypeScript strict, deployed to Cloudflare Workers via
-`@opennextjs/cloudflare`. Branch `frontend/web`. Build order and phase definitions:
-`docs/plan/active/mohe-grill-rulings-2026-08-27.md` Q9 — this scaffold is **P1**; the shell
-(auth, `⌘K`, rail+thread, the 18-part renderer) is **P2**; the workbench screens are **P3**.
+`@opennextjs/cloudflare`. On `main` since the P1/P2 folds — the `frontend/web` integration
+branch it was originally built on is history, not the place to look. Build order and phase
+definitions: `docs/plan/active/mohe-grill-rulings-2026-08-27.md` Q9 — this scaffold is
+**P1**; the shell (auth, `⌘K`, rail+thread, the part-catalog renderer) is **P2**; the
+workbench screens are **P3**.
 
 **The rulings this scaffold builds to** (read before touching anything here):
 
@@ -74,6 +84,9 @@ routing"](https://next-intl.dev/docs/usage/configuration#static-request-locale) 
 (`i18n/request.ts` returns a static locale, no middleware, no `[locale]` segment). This
 matches owner ruling Q5: UI chrome is English-first for beta, but every string goes through
 next-intl from day one so hardcoded strings can be lint-banned once product screens land.
+The screens have landed; **that ban is still owed** — see `eslint.config.mjs`, which carries
+the Q4 raw-colour ban (2026-08-29) but not yet its Q5 string sibling, and the PR that landed
+the colour half for the measurement of what the string half would cost.
 Statutory/client-facing instruments (PDPA notices, client authorization letters, watermark
 locale) are a **separate**, later surface that ships BM+EN from day one per Q5 — not this UI
 chrome skeleton. Messages live in `messages/en.json`.
@@ -101,8 +114,10 @@ app/(full)/    — the Clara full-screen escalation routes (/clara/:threadId and
 app/login · app/invite/[token] · app/logout — the auth surfaces (proxy-gated).
 ```
 
-The workbench tab pages are placeholder shells — the real data surfaces (hydrate-never-trust
-reads, governed doors) land per-journey in P3.
+Every workbench tab page mounts a real workbench: hydrate-never-trust reads through
+`lib/read.ts`'s `getRows`, governed writes through `lib/doors.ts`'s `callDoor`. They landed
+per-journey in P3 and were filled out by the port wave's eleven trains. *(Trued 2026-08-29,
+P-3: this paragraph read "the workbench tab pages are placeholder shells".)*
 
 ## Cloudflare
 
@@ -283,10 +298,24 @@ the history stack. What remains is template and log hygiene:
 
 ## What is deliberately NOT here yet
 
-The P2 fold has landed the full shell: Supabase SSR invite-only auth (`proxy.ts`,
+The P2 fold landed the full shell: Supabase SSR invite-only auth (`proxy.ts`,
 `lib/supabase/`, `app/login`, `app/invite/[token]`, `app/logout`), the Clara rail/thread
-surfaces (`components/clara/`), the 18-part catalog renderer (`components/parts/`,
-`lib/parts/`), and `⌘K` (`components/command/`). Still absent: product data fetching and
-the workbench screens — journals, documents, bank, close, reports, registers, knowledge
-all build in P3. See `docs/plan/active/mohe-grill-rulings-2026-08-27.md` Q9 for the phase
-plan.
+surfaces (`components/clara/`), the part-catalog renderer (`components/parts/`,
+`lib/parts/`), and `⌘K` (`components/command/`). P3 and the port wave then landed product
+data fetching and every workbench screen — journals, documents, bank, close, reports,
+registers, knowledge.
+
+**Still absent** (trued 2026-08-29, P-3 — this section previously listed the whole P3
+workbench here, contradicting the real workbenches those routes mount):
+
+- The **P4 firm-admin UI tranche** — firm creation, staff invite/roster, capabilities and
+  the metering rollup. The design of record is merged (#376) and the DB half is live
+  (`0141`, `0145`); the web build has not started.
+- The **P6 polish + cutover wave** — the `chatTurn_v15` wire bump's four Q8 part kinds
+  (裁-20), the WCAG 2.2 SC 2.5.8 target-size gate (裁-13), the Clara mascot (裁-14), the
+  R3 focus-ring recut, and the cutover PR that retires `apps/dashboard`.
+- **⌘K "Do"** — still a statically disabled row (see `lib/command/routes.ts` for Go, which
+  is live and mechanically checked by `lib/command/routes.test.ts`).
+
+See `docs/plan/active/mohe-grill-rulings-2026-08-27.md` Q9 for the phase plan and
+`docs/plan/active/port-wave-plan-2026-08-28-part2.md` §8 for P6's specification.

@@ -34,7 +34,7 @@ digest law 74 (ADR-0071/G4); the shipped fact: `docs/ARCHITECTURE.md` §6 as tru
 
 ## Status
 
-- [ ] Owner has read both proposed texts word by word and approved / edited them.
-- [ ] Docs PR lands the approved wording (single-lane docs review, ADR-0069).
+- [x] Owner has read both proposed texts word by word and approved them **unedited** — 2026-08-29 morning sitting, via the one-question grill ("批准，照原文进 PRD"); recorded as 裁-30 in `mohe-grill-rulings-2026-08-29.md`.
+- [x] Docs PR lands the approved wording (single-lane docs review, ADR-0069) — PRD §4 item 15 replaced and §6 invariant 1's sentence appended, verbatim from above.
 
-*Until both boxes tick, PRD.md is untouched for this item.*
+*Both boxes ticked 2026-08-29; this draft is now the provenance record for the PRD text.*
