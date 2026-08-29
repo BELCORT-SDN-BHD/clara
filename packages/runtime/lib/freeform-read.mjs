@@ -58,9 +58,22 @@ export const FREEFORM_LOGIN = "clara_freeform_login";
 export const FREEFORM_ROLE = "clara_freeform_ro";
 export const FREEFORM_DSN_VAR = "CLARA_FREEFORM_DATABASE_URL";
 
-export const FREEFORM_POOL_MAX = Number(process.env.CLARA_FREEFORM_POOL_MAX || 2);
+/** Read when the pool is CREATED, not at module load — the same discipline as the timeout
+ *  below, and for a second reason here: it lets the battery pin the pool to ONE connection so
+ *  "the next checkout landed on the same backend" is a measured fact rather than a hope. */
+export function freeformPoolMax() {
+  const n = Number(process.env.CLARA_FREEFORM_POOL_MAX || 2);
+  return Number.isInteger(n) && n >= 1 && n <= 20 ? n : 2;
+}
+
+/** `clara.wake_freeform_read`'s own `c_deadline_ms` (0131 §6.1). Recorded here so the ordering
+ *  claim below is checkable, NOT as a second source of truth — the DB owns the number, and it is
+ *  the clamp's floor because a session timeout at or under it would fire first and destroy the
+ *  receipt that deadline exists to commit. */
+export const FREEFORM_VERB_DEADLINE_MS = 5000;
 
 export const FREEFORM_STATEMENT_TIMEOUT_DEFAULT_MS = 15000;
+
 /**
  * H-4's wall, in milliseconds. Looser than the verb's own in-loop deadline on purpose (see the
  * header).
@@ -70,18 +83,65 @@ export const FREEFORM_STATEMENT_TIMEOUT_DEFAULT_MS = 15000;
  * see the change take effect on the next read — not only after a process restart that a lane in
  * trouble may be some way from getting. It also makes the number measurable: the battery moves
  * it and watches the kill time move with it, which is the only way to prove the bound is THIS
- * GUC and not something else in the stack that happens to be near the same duration. Reading it
- * later cannot widen anything a caller controls: the value comes from the process environment,
- * exactly as `CLARA_STATEMENT_TIMEOUT_MS` does for every other pool, and no argument reaches it.
+ * GUC and not something else in the stack that happens to be near the same duration.
+ *
+ * IT IS CLAMPED, AND THAT IS THE POINT (cross-model review, 2026-08-29). The first cut read the
+ * env with `Number(x || default)`, which accepted ANY numeric string — and
+ * `CLARA_FREEFORM_STATEMENT_TIMEOUT_MS=0` is the one value that means UNLIMITED in PostgreSQL.
+ * A single character in a secret would therefore have emitted `set statement_timeout = 0` and
+ * silently DELETED the only wall that bounds a stalled FETCH, with every test still green
+ * because every test asserts the statement it expects rather than the number inside it. A wall a
+ * config typo can remove is not a wall.
+ *
+ * THE FLOOR IS THE VERB'S OWN IN-LOOP DEADLINE, EXCLUSIVE. That deadline is 5 s and it commits a
+ * receipt naming `read_timeout`; a session timeout at or under it would fire FIRST, killing the
+ * transaction (a Tier-D death) and destroying the very audit record the design put there.
+ *
+ * THERE IS NO CEILING, DELIBERATELY. An operator may have a good reason to RAISE the backstop —
+ * a slow replica, a one-off investigation — and a cap would turn a judgement call into a refused
+ * lane. The hazard this function exists to close is a wall being REMOVED, not a wall being made
+ * looser.
+ *
+ * A BAD VALUE FALLS BACK TO THE DEFAULT, LOUDLY, RATHER THAN THROWING. The wall stays up either
+ * way, and refusing to boot over a mistyped tuning knob would take the whole world down (the
+ * assert runs before Nitro) to fix a value that has a perfectly safe default. The warning names
+ * the variable, the value and the substitution, so the mistake is visible in the first log line
+ * rather than inferred from behaviour later.
  */
 export function freeformStatementTimeoutMs() {
-  return Number(process.env.CLARA_FREEFORM_STATEMENT_TIMEOUT_MS || FREEFORM_STATEMENT_TIMEOUT_DEFAULT_MS);
+  const raw = process.env.CLARA_FREEFORM_STATEMENT_TIMEOUT_MS;
+  if (raw === undefined || raw === null || String(raw).trim() === "") return FREEFORM_STATEMENT_TIMEOUT_DEFAULT_MS;
+  return clampFreeformStatementTimeout(String(raw));
 }
-/** `clara.wake_freeform_read`'s own `c_deadline_ms` (0131 §6.1). Recorded here so the
- *  ordering claim in the header is checkable, NOT as a second source of truth — the DB owns
- *  the number and a cell asserts this module's backstop is strictly the looser of the two. */
-export const FREEFORM_VERB_DEADLINE_MS = 5000;
 
+/**
+ * Coerce one candidate value, or fall back to the default with a warning. Exported so the BOOT
+ * path and the per-read path share ONE definition — a second copy of a rule is how a boot check
+ * comes to bless a value the read path then rejects.
+ * @param {string} raw the environment's own text, never a pre-coerced number
+ * @param {(m: string) => void} [warn]
+ */
+export function clampFreeformStatementTimeout(raw, warn = (m) => console.warn(m)) {
+  const text = String(raw).trim();
+  // Parsed from the TEXT, not through `Number()` alone: `Number("0x2710")` is 10000 and
+  // `Number("1e999")` is Infinity, so a coercion-only read admits shapes an operator never meant
+  // to write and one that is not a number at all. Only a plain run of digits is a millisecond
+  // count. (Surrounding whitespace is trimmed first: a secret pasted with a trailing newline is
+  // an operator who meant the number.)
+  const ms = /^[0-9]+$/.test(text) ? Number(text) : Number.NaN;
+  if (!Number.isInteger(ms) || !Number.isFinite(ms) || ms <= FREEFORM_VERB_DEADLINE_MS) {
+    warn(
+      `[clara-runtime] CLARA_FREEFORM_STATEMENT_TIMEOUT_MS is ${JSON.stringify(raw)} — not a whole number of ` +
+        `milliseconds greater than the verb's own ${FREEFORM_VERB_DEADLINE_MS}ms in-loop deadline. ` +
+        `0 means UNLIMITED in PostgreSQL and would delete the only wall that bounds a stalled FETCH; anything at or ` +
+        `below ${FREEFORM_VERB_DEADLINE_MS} would fire before that deadline and destroy the receipt it exists to ` +
+        `commit. Using the default ${FREEFORM_STATEMENT_TIMEOUT_DEFAULT_MS}ms instead. There is no upper limit — ` +
+        `raise it freely if you mean to.`,
+    );
+    return FREEFORM_STATEMENT_TIMEOUT_DEFAULT_MS;
+  }
+  return ms;
+}
 const IDLE_IN_TXN_TIMEOUT_MS = Number(process.env.CLARA_IDLE_IN_TXN_TIMEOUT_MS || 15000);
 const CONNECT_TIMEOUT_MS = Number(process.env.CLARA_CONNECT_TIMEOUT_MS || 5000);
 
@@ -137,7 +197,7 @@ function freeformConfig() {
   } else {
     base = { connectionString: dsn };
   }
-  return { ...base, max: FREEFORM_POOL_MAX, connectionTimeoutMillis: CONNECT_TIMEOUT_MS };
+  return { ...base, max: freeformPoolMax(), connectionTimeoutMillis: CONNECT_TIMEOUT_MS };
 }
 
 let _freeformPool = null;
@@ -163,6 +223,11 @@ export function getFreeformPool() {
  * image boots, or the whole world fails closed.
  */
 export function assertFreeformPoolConfig() {
+  // H-4's clamp runs FIRST and in EVERY mode, test included — so a mistyped tuning knob is named
+  // in the FIRST log line at boot rather than inferred from behaviour weeks later. It never
+  // throws: a bad value falls back to the safe default, and the read path clamps again anyway.
+  // This is the boot half of "clamped at boot AND on every dynamic read".
+  freeformStatementTimeoutMs();
   if (TEST_MODE) return;
   if (!process.env[FREEFORM_DSN_VAR]) {
     throw new Error(
@@ -204,6 +269,11 @@ export async function withFreeformRead(args, deps = {}) {
   if (typeof taskId !== "string" || taskId === "") throw new Error("withFreeformRead: the triggering task id is required — the receipt binds the read to the turn");
   if (typeof opKey !== "string" || opKey === "") throw new Error("withFreeformRead: an op key is required");
 
+  // H-4, the per-read half: build the setup BEFORE checking a connection out, so a bad band
+  // value refuses without ever holding a pool slot (and without a half-configured session
+  // reaching the server at all).
+  const setup = freeformSetupSql();
+
   const pool = deps.pool ?? getFreeformPool();
   const client = await pool.connect();
   let broken = false;
@@ -212,7 +282,7 @@ export async function withFreeformRead(args, deps = {}) {
   };
   client.on("error", onErr);
   try {
-    await client.query(freeformSetupSql()); // H-4: the timer is armed BEFORE the verb call.
+    await client.query(setup); // H-4: the timer is armed BEFORE the verb call.
     await client.query("begin");
     await client.query(FREEFORM_SECRET_SQL, [secret]);
     try {

@@ -164,6 +164,9 @@ test("f-a6.pr2.h4.env: the operator's own env moves the wall, and is read per ch
   assert.equal(ff.freeformStatementTimeoutMs(), ff.FREEFORM_STATEMENT_TIMEOUT_DEFAULT_MS, "and restores");
 });
 
+// H-4's fail-closed BAND (HIGH-2) and the exactly-once metering shape (HIGH-1) are pinned in
+// f-a6-pr2-fixround-unit.test.mjs, named for the round that minted them.
+
 // =============================================================================================
 // 3 · H-5 — DISCARD ALL on release, on every path.
 // =============================================================================================
@@ -481,34 +484,11 @@ test("f-a6.pr2.prompt: v15's system prompt is v14's plus the freeform guidance, 
   assert.match(prompt.FREEFORM_GUIDANCE, /Do NOT add a/, "the model is told not to write its own scope filter (TA-P9 A(1))");
 });
 
-// =============================================================================================
-// 9 · Parts — no new kind, and a refusal reaches the transcript.
-// =============================================================================================
-
-test("f-a6.pr2.parts.no-new-kind: a SUCCESSFUL read promotes only the tool_call/tool_result pair", () => {
-  const content = [
-    { type: "tool-call", toolCallId: "c1", toolName: tool.FREEFORM_READ_TOOL, input: { sql: "select 1", purpose: "p" } },
-    { type: "tool-result", toolCallId: "c1", toolName: tool.FREEFORM_READ_TOOL, output: { ok: true, read: { ok: true, outcome: "ok", read_id: 3, rows: [] } } },
-  ];
-  const parts = prompt.toTypedParts_v15(content);
-  assert.deepEqual(parts.map((p) => p.type), ["tool_call", "tool_result"], "PART_CATALOG is untouched — freeform_result is P6's later wire bump");
-});
-
-test("f-a6.pr2.parts.refusal: a refused read DOES reach the transcript, deduped on code+reason+message", () => {
-  const refusal = tool.freeformRefusal("result_row_cap");
-  const one = { type: "tool-result", toolCallId: "c1", toolName: tool.FREEFORM_READ_TOOL, output: { ok: false, refusal } };
-  const two = { type: "tool-result", toolCallId: "c2", toolName: tool.FREEFORM_READ_TOOL, output: { ok: false, refusal } };
-  const parts = prompt.toTypedParts_v15([one, two]);
-  assert.equal(parts.filter((p) => p.type === "refusal").length, 1, "two identical refusals collapse to one transcript entry");
-  assert.equal(parts.filter((p) => p.type === "tool_result").length, 2, "both calls still show as tool results");
-});
-
-test("f-a6.pr2.parts.not-acting-intent: a freeform read is NOT coding intent (C-19 is about acts, not reads)", () => {
-  assert.equal(prompt.hasCodingIntent_v15([{ type: "tool-call", toolCallId: "c1", toolName: tool.FREEFORM_READ_TOOL, input: {} }]), false);
-});
+// The PARTS cells (no new kind; a refusal reaches the transcript; a read is not acting intent)
+// live in f-a6-pr2-fixround-unit.test.mjs beside the prompt-wording cell they belong with.
 
 // =============================================================================================
-// 10 · The registry repoint.
+// 9 · The registry repoint.
 // =============================================================================================
 
 test("f-a6.pr2.registry: chatTurn: repoints to v15, and v14 stays exported and IS its own function", () => {

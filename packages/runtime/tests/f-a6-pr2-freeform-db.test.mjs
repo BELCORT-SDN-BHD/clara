@@ -135,10 +135,10 @@ test("f-a6.pr2.db.pinned: a client-bound session's read compiles the pin FROM TH
 // H-4 · a stalled FETCH is bounded, and the bound MOVES WITH the pool's own GUC.
 // =============================================================================================
 
-test("f-a6.pr2.db.h4: a 20-second fetch is killed at the pool's session statement_timeout, and the kill time tracks it", { skip }, async () => {
+test("f-a6.pr2.db.h4: a 30-second fetch is killed at the pool's session statement_timeout, and the kill time tracks it", { skip }, async () => {
   const f = await turnFixture("fa6h4", { home: true });
   const prior = process.env.CLARA_FREEFORM_STATEMENT_TIMEOUT_MS;
-  const stall = "select pg_sleep(20)::text as x";
+  const stall = "select pg_sleep(30)::text as x";
   const arm = async (ms, opKey) => {
     process.env.CLARA_FREEFORM_STATEMENT_TIMEOUT_MS = String(ms);
     const t0 = Date.now();
@@ -151,15 +151,20 @@ test("f-a6.pr2.db.h4: a 20-second fetch is killed at the pool's session statemen
     return { elapsed: Date.now() - t0, err };
   };
   try {
-    const a = await arm(2000, `freeform:${f.taskId}:0:1`);
-    const b = await arm(6000, `freeform:${f.taskId}:0:2`);
+    // BOTH ARMS ARE ABOVE THE CLAMP'S FLOOR. This cell's first cut used 2000, and the fix round
+    // made that value CLAMP to the default — so the cell measured 15s twice and went red, which
+    // is the clamp proving itself through a test that was not written for it. A bound at or under
+    // the verb's own 5 s in-loop deadline would fire before the receipted path could commit, so
+    // the floor is exclusive and this cell now sits above it on both sides.
+    const a = await arm(6000, `freeform:${f.taskId}:0:1`);
+    const b = await arm(15000, `freeform:${f.taskId}:0:2`);
     assert.ok(a.err, "the stalled fetch must NOT return — it is killed");
     assert.equal(a.err.code, "57014", `expected query_canceled, got ${a.err.code}: ${a.err.message}`);
-    assert.ok(a.elapsed < 12000, `killed well before the payload's own 20s — took ${a.elapsed}ms`);
+    assert.ok(a.elapsed < 25000, `killed well before the payload's own 30s — took ${a.elapsed}ms`);
     assert.ok(b.err && b.err.code === "57014", "the same payload is killed at the larger bound too");
     assert.ok(
       b.elapsed > a.elapsed + 1500,
-      `the kill time must MOVE WITH the GUC (2s arm ${a.elapsed}ms vs 6s arm ${b.elapsed}ms) — otherwise something else is doing the bounding`,
+      `the kill time must MOVE WITH the GUC (6s arm ${a.elapsed}ms vs 15s arm ${b.elapsed}ms) — otherwise something else is doing the bounding`,
     );
     // TIER D, stated rather than papered over: the transaction died with the statement, so there
     // is no committed receipt. The runtime's task record is the honest home (design §3.5 Tier D).
