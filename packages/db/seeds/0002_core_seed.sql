@@ -45,9 +45,21 @@ begin
   -- 裁-16b (pre-beta hardening batch): firm_admissions stores token_hash only. k_tok_a/k_tok_b
   -- stay as VALUES (public, checked-in synthetic constants, not secrets) -- only the target
   -- column changes; create_firm(k_tok_a, ...) below is called with the SAME plaintext uuid.
-  insert into clara.firm_admissions (token_hash, note) values
-    (sha256(convert_to(k_tok_a::text, 'UTF8')), 'synthetic firm A bootstrap'),
-    (sha256(convert_to(k_tok_b::text, 'UTF8')), 'synthetic firm B bootstrap');
+  -- FRONTIER-AWARE (sweep red 2026-08-29, run 33243191540): the wb-0020 upgrade drill seeds at
+  -- migration 0019, where the table still keys on the plaintext `token uuid` and the hash column
+  -- does not exist. The shape is read from the catalog at run time; PL/pgSQL resolves a
+  -- statement's columns only when that statement executes, so the branch not taken is never
+  -- planned. Neither branch is guessed at: a table with neither column fails loudly.
+  if exists (select 1 from pg_attribute
+             where attrelid = 'clara.firm_admissions'::regclass and attname = 'token_hash' and not attisdropped) then
+    insert into clara.firm_admissions (token_hash, note) values
+      (sha256(convert_to(k_tok_a::text, 'UTF8')), 'synthetic firm A bootstrap'),
+      (sha256(convert_to(k_tok_b::text, 'UTF8')), 'synthetic firm B bootstrap');
+  else
+    insert into clara.firm_admissions (token, note) values
+      (k_tok_a, 'synthetic firm A bootstrap'),
+      (k_tok_b, 'synthetic firm B bootstrap');
+  end if;
 
   -- ===== FIRM A (alice owner, bob bookkeeper): two clients =====
   perform set_config('request.jwt.claims', json_build_object('sub', k_alice)::text, true);
