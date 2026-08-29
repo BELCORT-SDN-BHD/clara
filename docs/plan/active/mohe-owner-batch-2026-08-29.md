@@ -98,12 +98,23 @@ ruling of the night). The full records are in the named files; the rulings ledge
 - `wake_propose_identifier_promotion` has NO duplicate-open wall (0103) — two concurrent
   proposals both admitted; Door 2 and 裁-18b carry a partial unique; backlog.
 - 裁-22's changed replay fingerprint refuses any `op_receipts` row reserved BEFORE the migration
-  — the tail prints the count for the ceremony operator (0 on every rig; live unknown).
+  — the tail prints the count for the ceremony operator: **0 on live at the 03:17Z window** (closed).
 - The separation-of-duties wall (裁-18a) is per-user-uuid: one human with two accounts in one
   firm defeats it — identity provisioning is the real wall (for the 裁-18b design).
 - `approve_opening_seed` / `approve_opening_correction` require a serializable pin that NO
-  migration sets (the manual wave-b 0017 Part-A ceremony artifact) — verified on LIVE at the
-  next sleeper read; T2 renders the operator hint on that exact refusal.
+  migration sets (the manual wave-b 0017 Part-A ceremony artifact) — **READ ON LIVE at the
+  03:17Z window: both carry `default_transaction_isolation=serializable` in `proconfig`** — the
+  pin is applied; closed. T2's operator hint stays as a belt.
+- **EMAIL-WALL on the admission token (hardening B's finding, re-verified against 0145) — YOURS:**
+  `create_firm` binds an admission token to NO identity: any non-agent subject with no active
+  membership who holds the plaintext can consume it and become that firm's owner (a pure bearer
+  credential; `accept_invite` is email-matched). 裁-16 hashes it at rest but does not change WHO
+  may present it. **Rec:** bind admission tokens to an email at issue, in P4's UI tranche (the
+  signup page already collects it). **Default until ruled:** unchanged (bearer).
+- Record-only (裁-16): a REPLAY of `invite_member`'s op_key returns the hash-only receipt — no
+  plaintext — so a courier that must re-send needs the token from the FIRST call (zero callers
+  today; the invite door is cutover-owed). `p4-design-2026-08-27-annex.md:343`'s plaintext lookup
+  line is trued in B's PR.
 - The P4-2 battery left an agent-owned OPEN registration request behind on any DB it touched
   pre-fix (rev-p4t2 F5) — the Wave-G factory reset clears it.
 - Docs to true at the next harness-sync: port-wave-plan part2 §12 OQ-1's claim that #375 wired

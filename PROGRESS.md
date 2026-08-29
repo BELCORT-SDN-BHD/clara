@@ -7,14 +7,14 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
-*(as of 2026-08-29 06:00 — **THE 磨合 WINDOW IS SPRINTING: P1-P3 + the night train #368-#384
-MERGED** — **LIVE 136/`0141`** (as-run `docs/plan/completed/mohe-0141-apply-asrun.md`);
-**`0142` F-A7b PR-a MERGED #401 (windowless, NOT yet ceremonied)** · the 裁-18b/19/21 design
-sets #402-#404 · **PORT WAVE: T0 + WAVES A, B AND C — 11/11 trains: T11 #405 + T1 #406 MERGED,
-T2 #407 auto-merge armed** · **the pre-beta backend queue is in its final re-verifies** (P4
-tranche-2 `8ecb8e67` · 裁-22 `58bb6812` · 裁-17 `e7323c99` · hardening A in its fix round
-[widened to ELEVEN barrier views after a demonstrated cross-tenant leak] · hardening B held
-until P4-2 merges) — **the owner's morning batch is `docs/plan/active/mohe-owner-batch-2026-08-29.md`**)*
+*(as of 2026-08-29 11:30 — **THE 磨合 WINDOW IS SPRINTING: P1-P3 + the night train #368-#384
+MERGED** · **PORT WAVE COMPLETE — 11/11 trains on main** (Wave C: T11 #405 · T1 #406 · T2 #407) ·
+**THE PRE-BETA BACKEND QUEUE IS MERGED AND LIVE: `0142` F-A7b PR-a #401 · `0143` 裁-22 #409 ·
+`0144` hardening A #410 (ELEVEN barrier views after a demonstrated cross-tenant leak) · `0145` P4
+tranche-2 #411 · `0146` 裁-17 #412 — ceremonied in ONE ~51-s D1 window 2026-08-29 03:17Z, LIVE
+141/`0146`**, as-run `docs/plan/completed/mohe-0142-0146-apply-asrun.md` · **hardening B (裁-16)
+rebased onto `0145`, in dual review (branch db/hardening-b, claims `0147`)** — **the owner's morning batch
+is `docs/plan/active/mohe-owner-batch-2026-08-29.md`**)*
 
 - **THE 磨合 (frontend integration) WINDOW OPENED 2026-08-26/27** — its own session, per
   `docs/plan/active/mohe-session-handoff-2026-08-26.md`; `chatTurn_v14` deployed +
@@ -128,8 +128,8 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 1. **THE FRONTEND 磨合 WINDOW IS OPEN AND RUNNING** — pre-flight discharged, P1-P3 merged,
    the night train #368-#384 merged, `0139`+`0140` ceremonied (live 135); the port wave is
    running (posture bullet above carries the full list and the Wave-A instrument laws).
-   **In flight (2026-08-29 dawn)**: T2 #407 auto-merge · the pre-beta backend queue's final
-   re-verifies (P4 tranche-2 → claims `0143` at merge · 裁-22 · 裁-17 · hardening A, ELEVEN views) → ONE combined D1 ceremony (`0142` windowless + P4-2 + 裁-22 + hardening A; 裁-17 is a reader) · then hardening B (裁-16) · the 裁-18b/19/21 builds after the owner's gate questions (`mohe-owner-batch-2026-08-29.md`). **Still owed in this window** (owner rulings,
+   **In flight (2026-08-29 late morning)**: hardening B (裁-16, `0147`) in dual review — a Codex
+   HIGH (legacy plaintext invite receipts replayable) in its fix round, then its own D1 window · the 裁-18b/19/21 builds after the owner's gate questions (`mohe-owner-batch-2026-08-29.md`) · T8's alias-panel wiring onto `counterparty_aliases_visible` and PR-e's proposal card (P6) · the `0133` operator-flag act for BELCORT (owner-timed). **Still owed in this window** (owner rulings,
    `harness-audit-rulings-2026-08-26.md`): the F-A7b train · all three firm tiers' UI
    (tier-3 LIVE AT BETA behind its own security gate) · **the pricing-amounts sitting**
    (before P4 ships) · the R2 PRD two-tier wording (drafted + owner-approved 2026-08-27,
