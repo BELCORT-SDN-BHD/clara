@@ -7,6 +7,16 @@
 // Arg names are EXACT, pinned in migration 0038/0040: list_open_items_by_
 // counterparty(p_client, p_domain, p_counterparty), list_bank_match_
 // candidates(p_client, p_bank_account), list_unmatched_lines(p_client).
+//
+// BODY OF RECORD — NOT 0038's TEXT — for list_open_items_by_counterparty. That body is
+// CoR'd: 0038 created it and 裁-19 PR-1 SPLICED it, so the live definition is
+// `pg_get_functiondef` on the catalog. TWO things changed there, and the second is a
+// BEHAVIOUR CHANGE this module will see. (1) M9: the body passed the FIRM id where a CLIENT
+// id was expected, so the resolver returned NULL and the door returned `[]` FOR EVERY
+// COUNTERPARTY, ALWAYS, since 0038 — the picker below has never rendered a non-empty list.
+// It will now. (2) The item predicate canonicalises, so asking under a merged party's id and
+// under its survivor's returns the same union. The signature, the arg names and the row
+// shape are unchanged; nothing in this file needed editing.
 
 import { callDoor } from "../doors";
 import type { BankReadOptions } from "./reads";
