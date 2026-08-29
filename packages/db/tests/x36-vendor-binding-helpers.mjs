@@ -63,8 +63,11 @@ const APPROVE_CORE_SIG = "clara._approve_entry_core(jsonb,uuid,uuid,text,text)";
  *  never a migration-name proxy — review law 3: a name is a projection of the thing.) */
 export async function postTimeControlLive() {
   try {
+    // Comment-stripped, the same instrument the door itself uses — otherwise this helper and the
+    // wall it reports on could disagree, and a fixture that disagrees with the door is worse than
+    // no fixture at all.
     const r = await rootQuery(
-      `select position($1 in coalesce(p.prosrc,'')) > 0 as ok
+      `select position($1 in regexp_replace(regexp_replace(coalesce(p.prosrc,''), '/\\*.*?\\*/', '', 'gs'), '--[^\n]*', '', 'g')) > 0 as ok
          from pg_proc p where p.oid = to_regprocedure($2)`,
       [POST_TIME_MARKER, APPROVE_CORE_SIG]);
     return r.rows[0]?.ok === true;
@@ -94,14 +97,17 @@ export async function withPostTimeControl(fn) {
   const original = (await rootQuery(
     "select pg_get_functiondef($1::regprocedure) as def", [APPROVE_CORE_SIG])).rows[0].def;
   const before = await sha();
-  const needle = "AS $function$";
+  // REAL CODE, not a comment: the door's witness is comment-stripped, precisely so a marker in a
+  // comment cannot pass for a deployed control. A declared variable whose NAME carries the marker
+  // is the cheapest honest plant — it survives stripping and does nothing.
+  const needle = "\ndeclare";
   if (!original.includes(needle)) {
     throw new Error(
-      `withPostTimeControl: '${needle}' is absent from pg_get_functiondef(${APPROVE_CORE_SIG}), so the `
-      + "marker would not be planted and the cell would prove the opposite of what it claims.");
+      `withPostTimeControl: '${JSON.stringify(needle)}' is absent from pg_get_functiondef(${APPROVE_CORE_SIG}), `
+      + "so the marker would not be planted and the cell would prove the opposite of what it claims.");
   }
   const planted = original.replace(
-    needle, `${needle}\n-- ${POST_TIME_MARKER} (rig fixture: PR-3's ratified marker, planted and removed)`);
+    needle, `${needle}\n  v_${POST_TIME_MARKER} boolean := true; -- rig fixture: planted and removed`);
   if (planted === original) throw new Error("withPostTimeControl: the plant changed nothing");
   await rootQuery(`set role clara_fn_owner; ${planted}`);
   if (!(await postTimeControlLive())) {

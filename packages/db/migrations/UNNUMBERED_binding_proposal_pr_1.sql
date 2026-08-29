@@ -2659,7 +2659,13 @@ begin
   -- SO THE WITNESS IS THE BODY ITSELF -- the approve path resolved by EXACT SIGNATURE, carrying
   -- the ratified marker PR-3 mints. Until PR-3 lands this REFUSES, deliberately: PR-1's ceremony
   -- now FOLLOWS PR-3's, or the refusal ships and PR-3 lifts it. Both are stated in the PR body.
-  select p.prosrc into v_src from pg_proc p
+  -- COMMENT-STRIPPED, deliberately: a marker sitting in a COMMENT is a claim, and this gate must
+  -- read a fact. PR-3 mints it as real code -- the estate's own idiom is a declared variable whose
+  -- NAME carries the marker, which survives stripping and costs nothing. (The prestate's mirror
+  -- check reads the RAW body instead, because there the assertion is an ABSENCE and the stricter
+  -- reading is the fail-closed one: even a comment mention should stop this file landing.)
+  select regexp_replace(regexp_replace(p.prosrc, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g')
+    into v_src from pg_proc p
    where p.oid = to_regprocedure('clara._approve_entry_core(jsonb,uuid,uuid,text,text)');
   if v_src is null or position('binding_post_time_recheck_v1' in v_src) = 0 then
     raise exception 'the post-time binding re-check is not deployed on the approve path'
