@@ -18,6 +18,13 @@
 > the gate's own §1 lens list still applies to §3 as written, plus the new write half. The gate
 > itself has **not** run; the build may not start.
 >
+> **OQ-8 IS RULED — 2026-08-30 (裁-35), §2.2 below: S0, NO WRITE DOOR.** PR-1's build hit a
+> ruling-vs-ruling collision (裁-24's physical variant vs 裁-24's own OQ-3) and the re-measured
+> census came back at **23 bodies plus a doubled sealed metric**. **The hybrid narrows back to the
+> read layer**: PR-1's READ layer + carrier + M9 + taxonomy stand as shipped, the write half is
+> **closed**, and the `item_date`-provenance obligation the 裁-24 ruling created for this gate
+> closes with it.
+>
 > *(Historical, pre-ruling:)* **Prerequisite that outranks the gate: OQ-1.** The design **dissents
 > from 裁-19's stated mechanism** (§3.1/D-01). If the owner rules that the ruling meant the
 > physical move literally, this design set is superseded, not amended, and a new PR-0 opens for a
@@ -92,6 +99,33 @@ show why a ruling went the way it did. Ruling of record: `mohe-grill-rulings-202
   entanglement rungs plus OQ-1's frozen-year clause cover it.
 - **OQ-6 — RULED 2026-08-29 (裁-24): fix M9 INSIDE PR-1**, named, as recommended.
 - **OQ-7 — RULED 2026-08-29 (裁-24): `context_update`**, as recommended.
+
+### 2.2 · OQ-8 — the re-home WRITE door, a ruling-vs-ruling collision. **RULED 2026-08-30 (裁-35): S0**
+
+**Raised by PR-1's own build**, not by this gate: 裁-24's physical variant cannot be built as
+ruled without colliding with 裁-24's own OQ-3. The subledger belts canonicalise on every ladder,
+so a minted re-home row **doubles the group sum** and is refused by `_tf_subledger_item_belt`; the
+lawful superseded-exclusion predicate would have to enter every body that reads open items —
+including `_metric_input_dataset_v1`, which **OQ-3 ruled "leave"**. PR-1 therefore shipped the
+READ layer + the carrier + M9 + the taxonomy, and **held the write door for this ruling**.
+
+| arm | what it is | what it costs — **as re-measured by the independent reviewer**, not as first estimated |
+|---|---|---|
+| **S1** | ruling-literal: append the re-home pair and teach every reader to exclude superseded rows | **23 bodies**, not the build's first "~10" — both belts, the classifier and **every** allocator; a supersession column on an append-only table; **every journal approve in the estate inside the D1 quiesce**; and a **DOUBLED sealed metric**, because `_metric_input_dataset_v1` reads `open_items` directly. The OQ-1-vs-OQ-3 collision is real, measured, not rhetorical |
+| **S2** | §3.2's **net-zero PAIR** on a new entry carrying the **ORIGINAL** `item_date` (**D-13 verified: nothing constrains `item_date`**) | small radius, breaks nothing — but a **permanent presentational fiction**: three item rows per re-homed debt, the merged invoice still open in every picker, and real journal entries minted for a hygiene act |
+| **S0** | keep the read layer; **decline the write half** | nothing new. PR-1's measurements show **all three of 裁-19's stated outcomes already hold**: aging consolidates, both reports read the same money, and an un-merge is the carrier reversed |
+
+**Recommendation put to the owner: S0**, with **S2** as the physical fallback if he insisted on
+rows moving, and **S1 refused on measurement**.
+
+> **RULED 2026-08-30 (裁-35): S0 — NO WRITE DOOR.** The read layer plus the carrier meet the
+> outcomes 裁-19 asked for, **measured rather than argued**. **S1 is refused on measurement**
+> (23 bodies · the sealed-metric doubling · the OQ-3 collision). **S2 is declined** — a fiction
+> that is cheap today is a fiction forever. **D-01's hybrid narrows back to the read layer**, and
+> §3.2's re-home-pair sketch, together with the `item_date`-provenance obligation 裁-24 created
+> for this gate, is **closed, not deferred**. Ruling of record: `mohe-grill-rulings-2026-08-29.md`
+> §裁-35, which also records the owner's asked-for definition of **fail-closed** — *the safe-side
+> default while undecided (refuse rather than pass)*, never "pick the worst option".
 
 ---
 

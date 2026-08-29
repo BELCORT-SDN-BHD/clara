@@ -365,7 +365,7 @@ Codex's three questions are all **already ruled** (§2 — 裁-32 answers "who i
 conductor's (a) answers "what does 14 days mean", (b) answers "what does decline suppress"). Four
 were raised here, each with a recommendation, its cost and a fail-closed default.
 
-> **STATUS 2026-08-29 — O1, O2 and O3 are RULED by delegation; O4 stays with the owner.** The
+> **STATUS — O1/O2/O3 RULED by delegation 2026-08-29; O4 RULED by the owner 2026-08-30 (裁-40).** The
 > recommendations below are kept **verbatim as argued**, per the estate's gate-record convention: a
 > record that erases what was recommended cannot show why a ruling went the other way. **O2 went
 > against this pass's recommendation** and is annotated as such.
@@ -414,12 +414,14 @@ claim/reconcile/health. **Fail-closed default: ship the row disabled and do not 
 the sweep is then dead code, which is safe only if B5's in-door sweep landed, so O4 and B5 must be
 decided together.
 
-> **NOT RULED — O4 stays with the owner. PR-4 is HELD, unbuilt, until he rules.** This is the one
-> question the delegation did not take, and it is the right one to reserve: enabling the source is a
-> wake-engine rollout, not a registry row (M6). **The hold has a consequence PR-1 must absorb:** with
-> PR-4 unbuilt there is no clock, so **B5's in-door stale-`proposed` sweep is now load-bearing, not
-> belt-and-braces** — it is the only thing standing between the widened `('proposed','live')` index and
-> the permanent per-vendor deadlock. Ship it in PR-1 or the deadlock is live with no scheduled drain.
+> **RULED 2026-08-30 (裁-40) — as recommended, WIDENED into ONE ceremony: the clock switches open
+> TOGETHER at the G1 rollout, before Wave G** (`bank_agent`, `close_prep`, this item's
+> binding-expiry source, and `tax_prep` — a fourth added the same sitting by 裁-44). Each is flipped
+> by the **operator owner** through `set_wake_source_enabled`, the conductor walking the audited
+> law-71 door as his delegate (constraint 14, ADR-0075), receipted — and **only after each wake body
+> is built and reviewed**. **PR-4 is therefore BUILT, not held** (§裁-40 of the ledger). **What it
+> does NOT relax: B5's in-door stale-`proposed` sweep still ships in PR-1** — the clock starts only
+> at the ceremony, after PR-1 merges, and until then that sweep is the deadlock's only drain.
 
 ## 8 · The fold list, PR by PR
 
@@ -444,8 +446,8 @@ D1 inventory is now TWO writer bodies (`sign_` + `propose_`).**
    (ruled (b)); the read verb surfaces it.
 6. **B5** — unique over `('proposed','live')` + advisory key + conflict translation (ruled (c)),
    **plus** the stale-`proposed` expiry sweep in both writers, **plus** the duplicate preflight (N4).
-   **The sweep is now load-bearing, not optional: O4 is unruled, so PR-4 is held and there is no
-   clock.** Shipping the widened index without the in-door sweep ships the deadlock with no drain.
+   **The sweep stays load-bearing even under 裁-40: the clock does not run until the G1 ceremony,
+   which is after PR-1 merges.** The widened index without the in-door sweep ships the deadlock.
 7. **B6** — distinct document ids / sha256s / normalized invoice ids, duplicate-overrides excluded,
    posting-date span **and** trusted `approved_at` span ≥14 days (ruled (a)).
 8. **B7** — basis must cover all three documents' `invoice.vendor_name` / `invoice.invoice_id` regions
@@ -469,11 +471,11 @@ annotate-and-post on expired (O3 as ruled)**;
 apply `name_family_is_ambiguous` (C1). **M3**: re-point or retire `post_control_absent`. Add concurrent
 revoke / expiry / re-extraction tests.
 
-**PR-4 — the expiry sweep engine source. HELD, UNBUILT, until the owner rules O4.** When it is built,
-**M6**: exact disabled-at-birth registry row, due predicate, workflow export + model pin, pool,
-idempotent core; enable **only** via `set_wake_source_enabled`; receipt every run **and** every
-`proposed→expired` transition (law 80). **While it is held, PR-1's in-door sweep (B5) is the only
-drain** — do not let the widened index ship without it.
+**PR-4 — the expiry sweep engine source. BUILT (裁-40 released the hold).** **M6**: exact
+disabled-at-birth registry row, due predicate, workflow export + model pin, pool, idempotent core;
+enable **only** via `set_wake_source_enabled`, at the G1 ceremony with the other two sources; receipt
+every run **and** every `proposed→expired` transition (law 80). PR-1's in-door sweep (B5) still ships:
+it is the only drain until that ceremony runs.
 
 **Frontend train.** **M4** delete the copy-flip item (and re-cut the copy for 裁-32's wider wall) ·
 **M2** rationale plain, separated, labelled · **N2** model labelled self-reported · **M5** read through
