@@ -416,9 +416,12 @@ moving one door is cheap; creating a surface for one door now is not.
 ## 13 · The Mobbin grounding debt
 
 The house rule — *"ground every NEW product flow in a Mobbin reference first"* — is recorded
-as R5, which put the Mobbin MCP into the repo's `.mcp.json` specifically so *"every future
-lane"* could find it. This wave has **four new flows**, and P4 separately records **three**
-still unmet:
+as R5, which APPROVED putting the Mobbin MCP into the repo's `.mcp.json` specifically so
+*"every future lane"* could find it. **The stanza landed 2026-08-29** (P-2 of the alignment
+audit); this sentence previously asserted it as accomplished fact while `.mcp.json` carried
+only `codebase-memory-mcp` and `shadcn` — an independent lane found the same gap at
+`p4-mobbin-grounding-2026-08-28.md:258-263`. This wave has **four new flows**, and P4
+separately records **three** still unmet:
 
 | Flow | Owner | Why it is NEW |
 |---|---|---|

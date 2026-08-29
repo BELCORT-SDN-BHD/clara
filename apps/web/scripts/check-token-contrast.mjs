@@ -269,6 +269,8 @@ export const PAIR_SPECS = [
     source: "components/clara/ClaraFullScreenThread.tsx heading (text-clara), whose <header> carries no background of its own and inherits the full-screen container's bg-background — a distinct real pair from clara-on-card above since the P3 polish's canvas swap, even though both resolve to the same hex today (same token-drift rationale as sidebar-accent-foreground-on-sidebar-accent)." },
   { id: "primary-on-background", fg: (h) => h("primary"), bg: (h) => h("background"), threshold: 4.5,
     source: "inline text links — components/firm/client-register-list.tsx, components/firm/needs-you-row.tsx (text-primary underline)" },
+  { id: "primary-on-card", fg: (h) => h("primary"), bg: (h) => h("card"), threshold: 4.5,
+    source: "components/parts/PartSummaryCard.tsx's optional `link` (text-primary underline) — the SAME inline-link idiom as primary-on-background above, but drawn inside the receipt card's own bg-card panel, so it is its own pair for the same token-drift reason clara-on-card/clara-on-background are two entries. Consumed by the four chatTurn_v14 receipt cards (MBB-4): entry_posted's journals link and question_opened's Needs-you link." },
 
   // --- Semantic state colours: plain text AND their own -muted containers ---
   { id: "warning-on-background", fg: (h) => h("warning"), bg: (h) => h("background"), threshold: 4.5,

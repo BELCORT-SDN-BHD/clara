@@ -3,10 +3,11 @@ import { isStatusResolverType } from "../../lib/parts/catalog";
 import { Badge } from "./PartBadge";
 import { StateBanner } from "../common/state";
 import { PartSummaryCard, type SummaryRow } from "./PartSummaryCard";
+import { BankActCard, BankPackCard, EntryPostedCard, QuestionOpenedCard } from "./V14ReceiptCards";
 
 // The fail-closed part renderer (contract §3.1 / frontend-handoff-2026-08-23 §3.1,
 // apps/dashboard/app/chat/parts.tsx's TranscriptParts precedent). MECHANISM ported,
-// not the look: every one of the catalog's 18 live types renders SOMETHING visible
+// not the look: every one of the catalog's 22 live types renders SOMETHING visible
 // (or the declared-nothing resolver case); an unrecognised kind renders the visible
 // fallback chip below, never nothing — text-to-hydration, never text-to-code.
 //
@@ -152,6 +153,18 @@ export function PartRenderer({ part }: { part: ClaraPart }) {
     const { title, rows, note } = summaryOf(part as Extract<ClaraPart, { type: SummaryPartType }>);
     return <PartSummaryCard title={title} rows={rows} note={note} />;
   }
+
+  // The four chatTurn_v14 receipt kinds (MBB-4). Each has a REAL card of its own in
+  // ./V14ReceiptCards.tsx rather than a row in SUMMARY_TYPES above, because each
+  // carries content the generic ids-only shape cannot show: the receipt vector, the
+  // question's own text, the governed verb, the grounding digest. These are the ONLY
+  // branches in this file whose copy routes through next-intl — the ten summary
+  // titles above are still hardcoded English, an older debt this change does not
+  // silently widen and does not pretend to have paid.
+  if (part.type === "entry_posted") return <EntryPostedCard part={part} />;
+  if (part.type === "question_opened") return <QuestionOpenedCard part={part} />;
+  if (part.type === "bank_act") return <BankActCard part={part} />;
+  if (part.type === "bank_pack") return <BankPackCard part={part} />;
 
   // tool_result / tool_error resolve their call's chip — render nothing (the one
   // place this is declared is the catalog's STATUS_RESOLVER_TYPES).
