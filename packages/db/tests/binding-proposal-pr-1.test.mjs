@@ -1507,7 +1507,7 @@ test("bp1.O1 the retro census SEES a would-fail binding and REVOKES NOTHING", as
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
   await sign(w.users.alice, { binding: p.binding_id });
   const before = await humanQuery(w.users.alice,
-    "select count(*)::int c from clara.binding_identity_census() where binding_id=$1", [p.binding_id]);
+    "select count(*)::int c from clara.binding_identity_review() where binding_id=$1", [p.binding_id]);
   assert.equal(before.rows[0].c, 0, "a clean live binding is NOT a finding");
 
   // Now make its family ambiguous AFTER the fact — a same-token sibling appears, exactly the
@@ -1518,7 +1518,7 @@ test("bp1.O1 the retro census SEES a would-fail binding and REVOKES NOTHING", as
       `${cp.name.split(" ")[0]}othersdnbhd`.toLowerCase()]);
 
   const after = await humanQuery(w.users.alice,
-    "select would_fail from clara.binding_identity_census() where binding_id=$1", [p.binding_id]);
+    "select would_fail from clara.binding_identity_review() where binding_id=$1", [p.binding_id]);
   assert.equal(after.rowCount, 1, "the census now names it");
   assert.equal(after.rows[0].would_fail, "binding_name_family_ambiguous");
   // …and the binding is UNTOUCHED. The census is a read.
@@ -1527,10 +1527,10 @@ test("bp1.O1 the retro census SEES a would-fail binding and REVOKES NOTHING", as
   assert.equal(row.revoked_at, null);
   // Admin floor, and firm-scoped: another firm's owner sees nothing of ours.
   await assertRaises(CLR.authz,
-    () => humanQuery(w.users.bob, "select * from clara.binding_identity_census()"),
+    () => humanQuery(w.users.bob, "select * from clara.binding_identity_review()"),
     "a bookkeeper running the census");
   const other = await humanQuery(w.users.dave,
-    "select count(*)::int c from clara.binding_identity_census() where binding_id=$1", [p.binding_id]);
+    "select count(*)::int c from clara.binding_identity_review() where binding_id=$1", [p.binding_id]);
   assert.equal(other.rows[0].c, 0, "another firm's admin sees none of our bindings");
 });
 

@@ -528,13 +528,13 @@ const VENDOR_BINDING_0028_HUMAN_FNS = [
 // clara_authenticated surface: decline (the other half of the two-party shape), its named
 // reset (a decline suppresses BOTH proposal writers, so there must be a way out),
 // eligible_binding_signer_count (the sign dialog reads it to know whether to ask for 裁-32's
-// self-approval attestation) and binding_identity_census (a read-only review list; it revokes
+// self-approval attestation) and binding_identity_review (a read-only review list; it revokes
 // nothing). Written down UNCONDITIONALLY, unlike the closed-world ROSTERS this PR also touches:
 // grantMatrixFailures sweeps the LIVE catalog and only judges functions that exist, so a name
 // here that a pinned-frontier chain has not got is simply never reached.
 const BINDING_PROPOSAL_PR1_HUMAN_FNS = [
   "decline_vendor_identity_binding", "reset_binding_decline",
-  "eligible_binding_signer_count", "binding_identity_census",
+  "eligible_binding_signer_count", "binding_identity_review",
 ];
 /** …and the two wake verbs, on `filing` AND `interactive` (G1 arm A) — the same chat-parity
  *  shape wake_file_document already set: one allowlist row per kind, the grant on both roles. */
