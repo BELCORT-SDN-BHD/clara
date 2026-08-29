@@ -55,6 +55,17 @@ async function piApplied() {
  *  wrapper's own presence, never on the agent_receipt_surfaces row the pi-A1/A7/A9/E1 cells
  *  below are themselves reading — a self-referential gate would read "the row vanished" as
  *  "PR-a absent" and pass either way, the same trap pi-E1's own betaLanded comment names. */
+/** 裁-18b PR-1 registers a NINTH receipt-surface member (pb_binding) and TWO more filing-kind
+ *  allowlist rows. Gated exactly like praLanded below, and by the same catalog witness rather
+ *  than a migration number: the file ships UNNUMBERED and the conductor claims its number at
+ *  merge, so an exact-signature to_regprocedure is the only stable witness (review law 3). */
+async function bp1Landed() {
+  const r = await rootQuery(
+    "select to_regprocedure("
+    + "'clara.wake_propose_vendor_identity_binding(uuid,uuid,jsonb,text,jsonb,text)') is not null as ok");
+  return r.rows[0].ok;
+}
+
 async function praLanded() {
   const r = await rootQuery(
     "select to_regprocedure("
@@ -114,10 +125,13 @@ test("pi-A1 · the seven shims are registered, present, conforming, and unwired 
   + "later train has since landed", async (t) => {
   if (gate(t)) return;
   const pra = await praLanded();
+  const bp1 = await bp1Landed();
   const r = await rootQuery("select * from clara.agent_receipt_source_census() order by item");
+  // 'pb_binding' sorts AFTER every 'f_a*' item, so it appends — the census orders by item.
   const expectedItems = ["f_a2", "f_a3", "f_a4", "f_a5", "f_a6", "f_a7"]
     .concat(pra ? ["f_a7b"] : [])
-    .concat(["f_a8"]);
+    .concat(["f_a8"])
+    .concat(bp1 ? ["pb_binding"] : []);
   assert.deepEqual(r.rows.map((x) => x.item), expectedItems,
     "the closed world is TA-P4 A's five plus F-A3 and F-A7 itself, plus F-A7b PR-a's own eighth "
     + "member (onboarding_agent_receipts) once that train has landed");
@@ -129,8 +143,12 @@ test("pi-A1 · the seven shims are registered, present, conforming, and unwired 
   // exceptions to the closed world below. F-A7b PR-a's f_a7b is a THIRD, different shape: it
   // is the eighth (not one of pi's original seven) and its migration wires it from the start —
   // there is no unwired-stub phase for it to have passed through.
+  // pb_binding is the same shape as f_a7b: born wired by its own migration, never an unwired
+  // stub, and the FIRST member outside the f_a* family (裁-18b PR-1 widened the registry key to
+  // a pb_* family for the pre-beta ruling queue, which has no Wave-F number to claim honestly).
   const WIRED = { f_a6: "freeform_read_log", f_a7: "agent_filing_receipts",
-    ...(pra ? { f_a7b: "onboarding_agent_receipts" } : {}) };
+    ...(pra ? { f_a7b: "onboarding_agent_receipts" } : {}),
+    ...(bp1 ? { pb_binding: "binding_agent_receipts" } : {}) };
   for (const row of r.rows) {
     assert.equal(row.shim_exists, true, `${row.item}: shim exists`);
     assert.equal(row.conforms, true, `${row.item}: shim conforms to the contract`);
@@ -344,10 +362,11 @@ test("pi-A6 · the union REACHES a wired member, and the census sees the wiring 
 test("pi-A7 · the shims are NOT directly readable — the one entrance is one", async (t) => {
   if (gate(t)) return;
   const pra = await praLanded();
+  const bp1 = await bp1Landed();
   const roles = [ROLES.authenticated, ROLES.agentRo, ROLES.wakeInteractive, ROLES.runtime];
   const shims = (await rootQuery("select shim_relname from clara.agent_receipt_surfaces order by item"))
     .rows.map((r) => r.shim_relname);
-  assert.equal(shims.length, pra ? 8 : 7);
+  assert.equal(shims.length, (pra ? 8 : 7) + (bp1 ? 1 : 0));
   for (const role of roles) {
     for (const shim of shims) {
       const r = await rootQuery(
@@ -366,6 +385,7 @@ test("pi-A9 · THE ACL CENSUS — zero non-owner grantees on every internal rece
   + "census FAILS when one is granted", async (t) => {
     if (gate(t)) return;
     const pra = await praLanded();
+    const bp1 = await bp1Landed();
     // This is not defence-in-depth; it is the wall. Each shim is a plain view owned by
     // clara_fn_owner over a firm-scoped table, and every governed clara table carries
     // `p_<t>_owner for all to clara_fn_owner using (true)` — so each shim INDIVIDUALLY sees every
@@ -391,8 +411,9 @@ test("pi-A9 · THE ACL CENSUS — zero non-owner grantees on every internal rece
       `select count(*)::int as n from pg_class c join pg_namespace n on n.oid = c.relnamespace
         where n.nspname = 'clara' and c.relkind = 'v'
           and (c.relname like '\\_agent\\_receipt\\_src\\_%' or c.relname = '_agent_receipts_all')`);
-    assert.equal(seen.rows[0].n, pra ? 9 : 8,
-      pra ? "eight shims (incl. F-A7b PR-a's f_a7b) plus the raw union" : "seven shims plus the raw union");
+    assert.equal(seen.rows[0].n, (pra ? 9 : 8) + (bp1 ? 1 : 0),
+      `${pra ? "eight shims (incl. F-A7b PR-a's f_a7b)" : "seven shims"}${
+        bp1 ? " plus 裁-18b PR-1's pb_binding" : ""} plus the raw union`);
     // THE ADVERSARIAL TWIN. Grant one, and the SAME census must name it. A census never shown to
     // fail is a claim, not a wall.
     await inRolledBackTx(async (client) => {
@@ -839,7 +860,10 @@ test("pi-E1 · pi itself minted NO wake authority — any filing-kind rows, wrap
   // zero), but the total is no longer beta's alone once PR-a has also landed. Gated on the
   // wrapper's own presence, not on this very count (praLanded's own header explains why).
   const praLandedFlag = await praLanded();
-  assert.equal(rows.rows[0].n, (betaLanded ? 6 : 0) + (praLandedFlag ? 1 : 0),
+  // 裁-18b PR-1 is a FOURTH contributor to the same 'filing' kind: its proposal door and its
+  // eligibility read (G1 arm A). Same delta shape, same catalog-witness gate.
+  const bp1LandedFlag = await bp1Landed();
+  assert.equal(rows.rows[0].n, (betaLanded ? 6 : 0) + (praLandedFlag ? 1 : 0) + (bp1LandedFlag ? 2 : 0),
     "the filing kind and its rows are train beta's plus F-A7b PR-a's own — zero if neither has "
     + "landed, beta's pinned six plus PR-a's pinned one once each respectively has");
   const wrappers = await rootQuery(

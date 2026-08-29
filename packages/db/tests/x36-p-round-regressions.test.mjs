@@ -185,18 +185,24 @@ async function bindLive(cp, pageVendor, invoiceIds) {
       w.firms.A,
       `p-window-${cp.id}-${index}`,
     );
+    // 裁-18b PR-1 (the wall-introducing-PR law): the invoice ids here were ALREADY distinct, so
+    // only the trusted clock needed truing — approval now tracks the posting dates and the
+    // extraction is backdated ahead of it, or the frozen derivation refuses `evidence_restated`
+    // before the new span wall is ever reached.
     await seedF123Evidence(
       w.firms.A,
       doc.id,
       { name: pageVendor, reg: cp.reg },
       invoiceIds[index],
+      pageVendor,
+      `${postingDate}T00:00:00Z`,
     );
     await seedApprovedEntry(
       w.firms.A,
       w.clients.A1,
       cp.id,
       doc,
-      { postingDate },
+      { postingDate, approvedAt: `${postingDate}T09:00:00Z` },
     );
   }
   const proposed = await propose(w.users.bob, {

@@ -66,15 +66,22 @@ async function seedWindow(tag, vendorNameTexts) {
   const invoiceId = `EZSEC30-${randomUUID().slice(0, 8)}`;
   for (const [i, postingDate] of PASSING_DATES.entries()) {
     const doc = await seedBareDocument(w.firms.A, `${tag}-${i}-${postingDate}`);
+    // 裁-18b PR-1 (the wall-introducing-PR law): DISTINCT printed invoice ids, and approval
+    // tracking the posting dates. Two walls now sit above the frozen window — three scans of one
+    // invoice is one invoice, and a corpus approved in a single minute has not been observed
+    // over fourteen days. The ids are `${invoiceId}1/2/3`, so their longest common prefix is
+    // EXACTLY `invoiceId` and every cell below that reads f2_invoice_prefix is unchanged.
     await seedF123Evidence(
       w.firms.A,
       doc.id,
       cp,
-      invoiceId,
+      `${invoiceId}${i + 1}`,
       vendorNameTexts[i],
+      `${postingDate}T00:00:00Z`,
     );
     await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc, {
       postingDate,
+      approvedAt: `${postingDate}T09:00:00Z`,
     });
   }
   return { cp, invoiceId };
