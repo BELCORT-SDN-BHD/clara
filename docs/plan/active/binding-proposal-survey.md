@@ -66,7 +66,7 @@ binding row. §3 of the design turns that into a stronger floor, not a weaker on
 | body | prosrc sha256 | bytes |
 |---|---|---|
 | `clara.propose_vendor_identity_binding(jsonb,text)` | `610ef1dfc18f963122ed2012e49a96b06526b93baca2f269fa054a76302f7fc7` | 3374 |
-| `clara.sign_vendor_identity_binding(uuid,text)` | `bff40d61c1df2db40062f592b1c5c65b468934f5796cb0c8a3d4be4a7594312e` | 3244 |
+| `clara.sign_vendor_identity_binding(uuid,text)` | `bff40d61c1df2db40062f592b1c5c65b468934f5796cb0c8a3d4be4a7594312e` (pre-hardening-batch) / `5285581ec371856d525fb47d2cfabc6e72b3a37285b291390e8c7aa34034e941` (post, the pre-beta hardening batch's 裁-18a signer<>proposer wall, measured on this file's own rig via `encode(sha256(convert_to(prosrc,'UTF8')),'hex')`) | 3244 (pre) / 4694 (post, octet_length) |
 | `clara.revoke_vendor_identity_binding(uuid,text,text)` | `b0b566b36d84b17469425a86fdfd4c68fcaebea6dd793b3edb2f1bce609433ce` | 2100 |
 | `clara._derive_vendor_binding_proposal(uuid,uuid,uuid)` | `de0f58078f23ef2c6ce3f4a82cb29691a3633e3b8b9c48ae90babc53e7ee043c` | 8059 |
 | `clara._resolve_vendor_binding(uuid,uuid,uuid)` | `ed60c1aa3dbd8b3b02964ba843bdd906429e0ff5f4e36f52c15064e6c8ce23c2` | 4627 |
@@ -299,7 +299,7 @@ Measured in `apps/web` (T10, merged as PR #395):
 | `wake_propose_client_onboarding(uuid,text,jsonb,text,jsonb,uuid,text)` | **yes** |
 | `wake_propose_close(uuid,jsonb,text,text,jsonb,text)` | **no** |
 | `wake_propose_filing_correction(uuid,uuid,uuid,text,text,jsonb,text)` | **no** |
-| `wake_propose_identifier_promotion(uuid,text,text,integer,jsonb,text,jsonb,text)` | **no** |
+| `wake_propose_identifier_promotion(uuid,text,text,integer,jsonb,text,jsonb,text)` (superseded by the 9-arg `(uuid,uuid,text,text,integer,jsonb,text,jsonb,text)` -- 裁-22 added `p_document`, `0143_proposal_basis_resolved.sql`; the egress-authorization finding below is unaffected, the DROP+CREATE did not touch it) | **no** |
 
 The one that does is the **intake-time** door: it proposes from a not-yet-attributed document, so
 `firm_narrow_intake` / `moment='attribution'` is the authority that let the bytes leave. The
@@ -378,7 +378,7 @@ it (§3.1), and records the sweep as the named future extension (annexes E, non-
 | # | absence | the search |
 |---|---|---|
 | A1 | any wake wrapper over a binding verb | `pg_proc` where `proname ~ 'vendor_binding|wake.*vendor'` → 4 rows, all human/internal (`_derive_…`, `_resolve_…`, `get_vendor_binding`, `list_vendor_bindings`) |
-| A2 | any DB wall reading `created_by` in the sign path | live `sign_vendor_identity_binding` body: `created_by` does not appear |
+| A2 | ~~any DB wall reading `created_by` in the sign path~~ **CLOSED by the pre-beta hardening batch (裁-18a, 2026-08-29)** — `sign_vendor_identity_binding` now reads `created_by` and refuses (CLR04, DETAIL reason `signer_is_proposer`) when the signer is the binding's own proposer. True at survey time (pre-hardening `sign_vendor_identity_binding` body: `created_by` did not appear); this row is retained as the record of the absence this item's own hardening pass closed, not as a current fact. |
 | A3 | a `declined` transition | `status` CHECK admits `'declined'`; **no verb ever writes it** (`prosrc ~ 'declined'` over the binding family → none) |
 | A4 | an expiry sweep | `status='expired'` is written only opportunistically inside `propose_` (`:750-754`) and `sign_` (`:834-839`), never on a clock |
 | A5 | a binding read on the agent side | no `clara_agent_ro` grant on `list_vendor_bindings` / `get_vendor_binding` |

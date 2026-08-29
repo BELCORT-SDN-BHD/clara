@@ -47,14 +47,21 @@ export function CentsInput({
   cents,
   onChange,
   ariaLabel,
+  id,
 }: {
   cents: number;
   onChange: (cents: number) => void;
   ariaLabel: string;
+  /** Fix round (rev-t2, N2): optional — additive, backward-compatible.
+   *  Threading a real `id` lets a caller's `<Label htmlFor>` associate
+   *  natively instead of relying on `ariaLabel` alone; every existing
+   *  caller that omits it keeps its prior (unset) `id` behaviour unchanged. */
+  id?: string;
 }) {
   const { raw, handleChange } = useCentsInput(cents, onChange);
   return (
     <Input
+      id={id}
       aria-label={ariaLabel}
       type="number"
       step="0.01"
