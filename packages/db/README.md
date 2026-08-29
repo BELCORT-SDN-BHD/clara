@@ -151,6 +151,20 @@ ships a writer-body change.
 (Design authority: `docs/plan/completed/slice3-event-spine-contract.md` v2.2 §D1; the in-flight-body
 behaviour is a PostgreSQL property, not a Clara mechanism.)
 
+> **D2 — re-witness a witnessed control.** A migration that `CREATE OR REPLACE`s a body named in
+> `clara.control_witnesses` **must re-witness it in the same file** — update that row's
+> `prosrc_sha` to the sha256 of the reviewed new body. The registry exists because a control had
+> been "proven" first by a migration ledger row (append-only, so permanently true long after
+> `0118` dropped the control it named) and then by a marker string in the body (a text projection:
+> a string literal, a nested dollar-quoted body or an unused variable all satisfy it). The gate
+> now opens for the reviewed BYTES and nothing else, which means a recut without a re-witness
+> **closes the gate and its door starts refusing** — deliberately, because a control whose body
+> changed without review is a control nobody has reviewed. The instrument is
+> `encode(sha256(convert_to(prosrc,'UTF8')),'hex')` — prosrc, never `pg_get_functiondef`.
+> `packages/db/tests/binding-proposal-pr-1.test.mjs`'s `bp1.C3-registry` cell asserts every
+> registered witness still matches its live body, so a forgotten re-witness reds the suite rather
+> than surfacing as a door that has quietly stopped working.
+
 ## Transaction-isolation pins
 
 Every migration opens **READ COMMITTED**, stated explicitly on the `BEGIN` and then
