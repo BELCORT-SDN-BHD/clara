@@ -14,9 +14,37 @@
 -- docs/plan/active/coa-template-gate-record.md (the gate, CLOSED, all twelve RULED 裁-23).
 -- THE RULINGS OVERRIDE THE DESIGN WHERE THEY DIFFER.
 --
--- THE SEED DATA: docs/plan/research/coa-template-2026-08-29.json -- 31 families, 100 accounts
--- verbatim, plus TWO provisional equity families (2 accounts) the conductor ruled in on
--- 2026-08-29 to close the entity_type coverage the dossier itself named as a gap, so 33/102,
+-- THE SEED DATA: TWO committed dossiers, merged additively, plus ONE provisional family.
+--   docs/plan/research/coa-template-2026-08-29.json          -- 31 families, 100 accounts
+--   docs/plan/research/coa-template-addendum-2026-08-29.json -- 16 families (9 new + 6 Q8
+--     reclassifications + 1 re-key), 41 accounts of which 40 are new and 6460 is the addendum's
+--     OWN declared no-op re-ship (its `notes` say so: the account is unchanged, the family
+--     upsert is what matters).
+-- Merged: 40 families / 140 accounts, zero real collisions. Plus this lane's ONE remaining
+-- provisional family (equity_other, 1 account) -- so 41/141 shipped.
+--
+-- WHAT THE ADDENDUM CHANGED, and why it had to. The reviewer measured that the first pass's
+-- starter carried NO PPE beyond motor vehicles, NO borrowings/HP/lease, NO current or deferred
+-- tax, NO directors' accounts and NO intangibles -- MPERS 4.2 minimum FACE items, which D-13
+-- names as the spine. It also measured that all ten "(Tax-Split)" families were `opt_in` with
+-- EMPTY trim keys, so no axis could ever propose them and D-8's core-only branch planted no
+-- entertainment and no depreciation account at all -- Q8's ruled benefit defeated in practice
+-- while the family cut looked right on paper. The addendum adds the missing MPERS items and
+-- reclassifies six add-back families to `core`; three stay `opt_in` for reasons its SS2 gives,
+-- and private_and_proprietor_expenses becomes `opt_in` keyed to sole_prop/partnership.
+--
+-- THE SOCIETY LABEL COLLISION, recorded here rather than solved here (conductor ruling,
+-- 2026-08-29; the addendum's own known_gaps names it unresolved). The core equity_common family
+-- ships 3900 Retained Earnings unconditionally -- a core family cannot carry entity_type trim
+-- keys, and inventing one for a society would break ck_coa_family_core_unkeyed and the whole
+-- core-applies-to-everyone rule with it. For a society "Retained Earnings" is the wrong concept
+-- entirely; 3040 Accumulated Fund is the right one, and the addendum ships it. So a society
+-- applying this template gets BOTH, one mislabelled for its entity type. PR-a seeds both
+-- exactly as the research ships them; THE RELABEL IS PR-b's APPLY-TIME JOB (the apply maps 3900
+-- to the entity variant's label). Naming it here is the point: the next lane inherits a written
+-- obligation, not a surprise.
+--
+-- Everything below is 31+16 families / 100+40 accounts,
 -- written by the 裁-23/Q1 research lane the owner ruled must precede PR-0, whose draft he
 -- WAIVED his review of (gate record Q1). Its reasoning is
 -- docs/plan/research/coa-template-research-2026-08-29.md. Every family row below carries the
@@ -1367,32 +1395,29 @@ begin
     ('fnb_hospitality', 'Food and Beverage / Hospitality', 'by_industry', 'firm practice, keyed to MSIC 2008 Section I (Accommodation and Food Service Activities); service charge is distinct from SST per RMCD''s own position (coa-template-research-2026-08-29.md SS6)', 160, array['I']::text[], array['55','56']::text[], '{}'::text[], '{}'::text[], 'MSIC 2008'),
     ('motor_vehicles', 'Motor Vehicles', 'opt_in', 'firm practice', 170, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('foreign_currency', 'Foreign Currency', 'opt_in', 'firm practice', 180, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('entertainment', 'Entertainment (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1)(l)/s.18; PR 4/2015 - the partial-deduction restriction and its named full-deduction exceptions. The restriction rate and the exception list are F-T3''s effective-dated tables, never this row', 190, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('donations_approved', 'Donations - Approved Institutions (Tax-Split)', 'opt_in', 'ITA 1967 s.44(6) - deductible to the Government/State/local authority without cap, or to a DGIR-approved institution subject to the statutory ceiling on aggregate income. The ceiling itself is F-T3''s, never this row', 200, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('donations_unapproved', 'Donations - Unapproved / Non-Deductible (Tax-Split)', 'opt_in', 'ITA 1967 s.44(6) by omission - not within the approved mechanism, non-deductible', 210, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('fines_and_penalties', 'Fines and Penalties (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1) read with s.33(1); case law (Aspac Lubricants (M) Sdn Bhd v KPHDN) - no dedicated Public Ruling', 220, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('depreciation_and_amortisation', 'Depreciation and Amortisation (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1)(k) disallows book depreciation; s.19 + Schedule 3 substitute capital allowances; PR 12/2014, PR 6/2015', 230, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('entertainment', 'Entertainment (Tax-Split)', 'core', 'ITA 1967 s.39(1)(l)/s.18; PR 4/2015 - the partial-deduction restriction and its named full-deduction exceptions; the rate and the exception list are F-T3''s effective-dated tables, never this row. RECLASSIFIED from opt_in to core this pass - Q8''s ruling is that tax-sensitive expenses land automatically for every client; any client-facing business incurs entertainment costs at some point (coa-template-addendum-2026-08-29.md SS2)', 190, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('donations_approved', 'Donations - Approved Institutions (Tax-Split)', 'core', 'ITA 1967 s.44(6) - deductible to the Government/State/local authority without cap, or to a DGIR-approved institution subject to the statutory ceiling on aggregate income (the ceiling itself is F-T3''s, never this row). RECLASSIFIED from opt_in to core this pass - corporate giving is common enough across Malaysian SMEs and the account costs nothing unused (coa-template-addendum-2026-08-29.md SS2)', 200, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('donations_unapproved', 'Donations - Unapproved / Non-Deductible (Tax-Split)', 'core', 'ITA 1967 s.44(6) by omission - not within the approved mechanism, non-deductible. RECLASSIFIED from opt_in to core this pass - paired with donations_approved; a firm cannot know in advance which bucket a donation lands in without both accounts present (coa-template-addendum-2026-08-29.md SS2)', 210, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('fines_and_penalties', 'Fines and Penalties (Tax-Split)', 'core', 'ITA 1967 s.39(1) read with s.33(1); case law (Aspac Lubricants (M) Sdn Bhd v KPHDN) - no dedicated Public Ruling. RECLASSIFIED from opt_in to core this pass - near-universal, a traffic summons alone makes this likely for any business with a vehicle or premises (coa-template-addendum-2026-08-29.md SS2)', 220, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('depreciation_and_amortisation', 'Depreciation and Amortisation (Tax-Split)', 'core', 'ITA 1967 s.39(1)(k) disallows book depreciation; s.19 + Schedule 3 substitute capital allowances; PR 12/2014, PR 6/2015. RECLASSIFIED from opt_in to core this pass - universal, and this addendum alone adds a full PPE-by-class section, so every business with any capitalised asset needs this account (coa-template-addendum-2026-08-29.md SS2)', 230, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('leave_passage', 'Leave Passage (Tax-Split)', 'opt_in', 'ITA 1967 s.13(1)(b); PR 1/2003 - the fare portion is non-deductible to the employer; food/accommodation/incidentals are treated as entertainment instead', 240, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('private_and_proprietor_expenses', 'Private and Proprietor''s Expenses (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1)(a) - domestic/private expenditure - no dedicated Public Ruling', 250, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('motor_running_costs', 'Motor Vehicle Running Costs (Tax-Split)', 'opt_in', 'ITA 1967 Schedule 3 Para 2/2A - the qualifying-expenditure cap for non-commercial vehicles; PR 6/2015; running-cost apportionment under s.33(1)/s.39(1)(a). The cap amounts are F-T3''s effective-dated tables, never this row', 260, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('private_and_proprietor_expenses', 'Private and Proprietor''s Expenses (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1)(a) - domestic/private expenditure - no dedicated Public Ruling. RE-KEYED this pass from a blank opt_in to entity_types: [sole_prop, partnership] - genuinely entity-type-conditional; the account exists to catch a sole proprietor''s or partner''s personal expenses run through the business. A Sdn Bhd''s equivalent case (a director''s personal spending) is caught instead by the new director_and_related_party_balances family (coa-template-addendum-2026-08-29.md SS1.7, SS2)', 250, '{}'::text[], '{}'::text[], '{}'::text[], array['sole_prop','partnership']::text[], null),
+    ('motor_running_costs', 'Motor Vehicle Running Costs (Tax-Split)', 'opt_in', 'ITA 1967 Schedule 3 Para 2/2A - the qualifying-expenditure cap for non-commercial vehicles (the cap amounts are F-T3''s effective-dated tables, never this row); PR 6/2015; running-cost apportionment under s.33(1)/s.39(1)(a)', 260, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('club_subscriptions_and_entrance_fees', 'Club Subscriptions and Entrance Fees (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1)(m) - standalone disallowance, distinct from the entertainment restriction in s.39(1)(l) - no dedicated Public Ruling', 270, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('doubtful_debts_and_provisions', 'Doubtful Debts and Unapproved Provisions (Tax-Split)', 'opt_in', 'ITA 1967 s.34(2); PR 4/2019 (replaces PR 1/2002) - a specific provision is deductible, a general provision is not; s.39(1)(c) for unapproved pension/provident fund contributions', 280, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('doubtful_debts_and_provisions', 'Doubtful Debts and Unapproved Provisions (Tax-Split)', 'core', 'ITA 1967 s.34(2); PR 4/2019 (replaces PR 1/2002) - a specific provision is deductible, a general provision is not; s.39(1)(c) for unapproved pension/provident fund contributions. RECLASSIFIED from opt_in to core this pass - trade_receivables (the account this pairs against) is itself core; nearly every business extends some credit and eventually risks a bad debt (coa-template-addendum-2026-08-29.md SS2)', 280, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('equity_company', 'Equity - Company', 'opt_in', 'Companies Act 2016 s.74 (no-par-value regime, effective 2017-01-31); MPERS 4.11(f)/4.12', 290, '{}'::text[], '{}'::text[], '{}'::text[], array['sdn_bhd','bhd']::text[], null),
     ('equity_sole_prop', 'Equity - Sole Proprietorship', 'opt_in', 'firm practice per professional convention (ACCA FA2; IFRS for SMEs Module 4 worked examples) - no capital/current split for a sole proprietor, capital and drawings only. Hard constraint 13: a sole proprietor''s own account is EQUITY, never a staff advance.', 300, '{}'::text[], '{}'::text[], '{}'::text[], array['sole_prop']::text[], null),
     ('equity_partnership', 'Equity - Partnership', 'opt_in', 'firm practice per professional convention (ACCA FA2; IFRS for SMEs Module 4 S4.13) - capital and current accounts per partner; profit-sharing ratio governed by the Partnership Act 1961, not an accounting standard', 310, '{}'::text[], '{}'::text[], '{}'::text[], array['partnership','llp']::text[], null),
-    -- THE TWO PROVISIONAL VARIANTS (conductor ruling under delegation, 2026-08-29; HIGH-2).
-    -- clara.client_fact_keys' live entity_type enum admits EIGHT values, and the research
-    -- covered five. The dossier NAMED the gap ("society and cooperative ... have no
-    -- equity_variants entry ... a client recorded with entity_type=society|cooperative|other
-    -- needs a manual equity build") and shipping the gap unchanged would leave a client whose
-    -- entity type the product ADMITS with no equity section at all -- the trim would hand them
-    -- retained earnings and nothing else. These two families close the coverage; their content
-    -- is deliberately minimal and their basis says so IN THE ROW rather than in a comment, so a
-    -- reader of the data -- not just of this file -- knows an owner review is owed. The tail
-    -- proves coverage against the LIVE enum, so a ninth entity type widens the enum and reds
-    -- this migration''s own successor rather than silently uncovering a client.
-    ('equity_society_cooperative', 'Equity - Society or Cooperative (Provisional)', 'opt_in', 'not researched - provisional; owner review owed. Placed to close the entity_type coverage the 2026-08-29 research dossier itself named as a gap (SS7 item 8). Societies Act 1966 / Co-operative Societies Act 1993 govern these entities'' funds, and neither was read by that dossier', 320, '{}'::text[], '{}'::text[], '{}'::text[], array['society','cooperative']::text[], null),
-    ('equity_other', 'Equity - Other Entity Type (Provisional)', 'opt_in', 'not researched - provisional; owner review owed. Placed to close the entity_type coverage the 2026-08-29 research dossier itself named as a gap (SS7 item 8). entity_type=other is by construction unenumerated, so no single instrument governs it and the firm authors the real section on first use', 330, '{}'::text[], '{}'::text[], '{}'::text[], array['other']::text[], null)
+    ('property_plant_equipment_general', 'Property, Plant and Equipment (General)', 'core', 'MPERS 4.2(e); MPERS 4.11(a) and 17.31(d)/(e) require per-class disclosure of gross cost and accumulated depreciation - a single PPE line cannot satisfy this', 320, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('land_and_buildings', 'Owner-Occupied Land and Buildings', 'opt_in', 'MPERS 4.2(e) - split from the core PPE-by-class family because most Malaysian SMEs rent their premises (see core premises_and_admin family) rather than own the land/building they operate from', 330, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('equity_other', 'Equity - Other Entity Type (Provisional)', 'opt_in', 'not researched - provisional; owner review owed. Placed to close the entity_type coverage neither research pass reaches: entity_type=other is by construction unenumerated, so no single instrument governs it and the firm authors the real section on first use', 335, '{}'::text[], '{}'::text[], '{}'::text[], array['other']::text[], null),
+    ('intangible_assets', 'Intangible Assets', 'opt_in', 'MPERS 4.2(g)', 340, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('borrowings_and_lease_liabilities', 'Borrowings and Lease Liabilities', 'core', 'MPERS 4.2(m) financial liabilities; MPERS 20.4/20.9/20.11 for the finance-lease ''outstanding liability'' terminology (MPERS keeps the pre-MFRS16 finance/operating lease dual model); hire-purchase creditor + interest-suspense is a genuinely distinct Malaysian SME liability class from a bank term loan (coa-template-addendum-2026-08-29.md SS1.4)', 350, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('tax_liabilities', 'Current and Deferred Tax', 'core', 'MPERS 4.2(n)/(o); MPERS 29.4 (current tax liability recognition) and 29.14 (deferred tax liability recognition) are unconditional recognition requirements, not disclosure-only', 360, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('provisions', 'Provisions', 'opt_in', 'MPERS 4.2(p); MPERS Section 21''s own recognition test scopes this to when a present obligation exists - not every entity has one. Lower-priority addition, included at minimum (one generic account) to satisfy the letter of 4.2(p)', 370, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('director_and_related_party_balances', 'Director and Related Party Balances', 'opt_in', 'MPERS 33.2(a)(i) (director as key management personnel = related party); 33.9(b) (outstanding-balance disclosure); 33.12(g) (loans as a named disclosable transaction class). Routine Malaysian Sdn Bhd practice, confirmed via a real AutoCount client export naming a director''s current account', 380, '{}'::text[], '{}'::text[], '{}'::text[], array['sdn_bhd','bhd']::text[], null),
+    ('equity_society', 'Equity - Society', 'opt_in', 'firm practice per Malaysian convention (Societies Act 1966 context) - ''Accumulated Fund'' confirmed via the national Form 5 (SPM) Principles of Accounts curriculum and ROS Form 9 filing convention, not a single regulatory pronouncement (coa-template-addendum-2026-08-29.md SS3.1). NOTE: the core equity_common family''s ''Retained Earnings'' label is imperfect for a society - a named, unresolved gap, see known_gaps below', 390, '{}'::text[], '{}'::text[], '{}'::text[], array['society']::text[], null),
+    ('equity_cooperative', 'Equity - Co-operative', 'opt_in', 'Co-operative Societies Act 1993 (Act 502) s.2 (Share/Syer definition - ''Share Capital'' is the Act''s own term); s.57(1) (Statutory Reserve Fund, a graduated rate - NOT carried as a number in this JSON, see coa-template-addendum-2026-08-29.md SS3.2 and SS5 item 1 for the primary-source-verification caveat); s.57(2) (Co-operative Education/Development Trust Funds, rate set by Ministerial determination, not fixed in the Act)', 400, '{}'::text[], '{}'::text[], '{}'::text[], array['cooperative']::text[], null)
     ) as x(family_key, label, inclusion, basis, sort_ordinal, msic_sections, msic_divisions,
            trade_natures, entity_types, msic_edition);
 
@@ -1418,11 +1443,42 @@ begin
     ('cash_and_bank', '1020', 'Bank Current Account', 'asset', null, null, 30),
     ('cash_and_bank', '1030', 'Bank Savings Account', 'asset', null, null, 40),
     ('cash_and_bank', '1040', 'Fixed / Time Deposit', 'asset', null, null, 50),
+    ('foreign_currency', '1050', 'Foreign Currency Bank Account', 'asset', null, null, 10),
     ('trade_receivables', '1100', 'Trade Receivables Control', 'asset', 'receivable', null, 10),
     ('trade_receivables', '1110', 'Other Receivables', 'asset', null, null, 20),
     ('trade_receivables', '1120', 'Deposits Paid', 'asset', null, null, 30),
     ('trade_receivables', '1130', 'Prepayments', 'asset', null, null, 40),
+    ('tax_liabilities', '1140', 'Tax Recoverable', 'asset', null, null, 10),
+    ('tax_liabilities', '1150', 'Deferred Tax Asset', 'asset', null, null, 20),
+    ('director_and_related_party_balances', '1160', 'Amount Due from Director(s)', 'asset', null, null, 10),
+    ('director_and_related_party_balances', '1170', 'Amount Due from Related Companies', 'asset', null, null, 20),
     ('trade_receivables', '1190', 'Allowance for Doubtful Debts', 'asset', null, null, 50),
+    ('inventory_and_cogs', '1200', 'Inventory / Stock', 'asset', null, null, 10),
+    ('manufacturing', '1210', 'Raw Materials Inventory', 'asset', null, null, 10),
+    ('manufacturing', '1220', 'Work-in-Progress Inventory', 'asset', null, null, 20),
+    ('manufacturing', '1230', 'Finished Goods Inventory', 'asset', null, null, 30),
+    ('construction_contracts', '1300', 'Contract Assets (Amount Due from Customers)', 'asset', null, null, 10),
+    ('construction_contracts', '1310', 'Retention Receivable', 'asset', null, null, 20),
+    ('professional_services', '1320', 'Unbilled Receivables (Work-in-Progress)', 'asset', null, null, 20),
+    ('professional_services', '1330', 'Disbursements Recoverable', 'asset', null, null, 30),
+    ('motor_vehicles', '1400', 'Motor Vehicles at Cost', 'asset', null, null, 10),
+    ('motor_vehicles', '1410', 'Accumulated Depreciation - Motor Vehicles', 'asset', null, null, 20),
+    ('property_plant_equipment_general', '1500', 'Plant and Machinery', 'asset', null, null, 10),
+    ('property_plant_equipment_general', '1510', 'Accumulated Depreciation - Plant and Machinery', 'asset', null, null, 20),
+    ('property_plant_equipment_general', '1520', 'Furniture and Fittings', 'asset', null, null, 30),
+    ('property_plant_equipment_general', '1530', 'Accumulated Depreciation - Furniture and Fittings', 'asset', null, null, 40),
+    ('property_plant_equipment_general', '1540', 'Office Equipment', 'asset', null, null, 50),
+    ('property_plant_equipment_general', '1550', 'Accumulated Depreciation - Office Equipment', 'asset', null, null, 60),
+    ('property_plant_equipment_general', '1560', 'Computer and ICT Equipment', 'asset', null, null, 70),
+    ('property_plant_equipment_general', '1570', 'Accumulated Depreciation - Computer and ICT Equipment', 'asset', null, null, 80),
+    ('property_plant_equipment_general', '1580', 'Renovation and Leasehold Improvements', 'asset', null, null, 90),
+    ('property_plant_equipment_general', '1590', 'Accumulated Depreciation - Renovation and Leasehold Improvements', 'asset', null, null, 100),
+    ('land_and_buildings', '1600', 'Freehold Land', 'asset', null, null, 10),
+    ('land_and_buildings', '1610', 'Buildings', 'asset', null, null, 20),
+    ('land_and_buildings', '1620', 'Accumulated Depreciation - Buildings', 'asset', null, null, 30),
+    ('intangible_assets', '1700', 'Computer Software', 'asset', null, null, 10),
+    ('intangible_assets', '1710', 'Accumulated Amortisation - Computer Software', 'asset', null, null, 20),
+    ('intangible_assets', '1720', 'Goodwill', 'asset', null, null, 30),
     ('trade_payables', '2000', 'Trade Payables Control', 'liability', 'payable', null, 10),
     ('trade_payables', '2010', 'Other Payables', 'liability', null, null, 20),
     ('trade_payables', '2020', 'Accruals', 'liability', null, null, 30),
@@ -1432,10 +1488,58 @@ begin
     ('statutory_payables', '2130', 'PCB (MTD) Payable', 'liability', null, null, 40),
     ('statutory_payables', '2140', 'HRDF (HRD Corp) Levy Payable', 'liability', null, null, 50),
     ('statutory_payables', '2150', 'SST Output Tax Payable', 'liability', null, 'sst_output', 60),
+    ('director_and_related_party_balances', '2160', 'Amount Due to Director(s)', 'liability', null, null, 30),
+    ('director_and_related_party_balances', '2170', 'Amount Due to Related Companies', 'liability', null, null, 40),
+    ('equity_company', '2180', 'Dividends Payable', 'liability', null, null, 40),
+    ('construction_contracts', '2200', 'Contract Liabilities (Amount Due to Customers)', 'liability', null, null, 30),
+    ('construction_contracts', '2210', 'Retention Payable', 'liability', null, null, 40),
+    ('fnb_hospitality', '2300', 'Service Charge Payable', 'liability', null, null, 40),
+    ('borrowings_and_lease_liabilities', '2400', 'Bank Overdraft', 'liability', null, null, 10),
+    ('borrowings_and_lease_liabilities', '2410', 'Bank Term Loan - Current Portion', 'liability', null, null, 20),
+    ('borrowings_and_lease_liabilities', '2420', 'Bank Term Loan - Non-Current Portion', 'liability', null, null, 30),
+    ('borrowings_and_lease_liabilities', '2430', 'Hire Purchase Creditor', 'liability', null, null, 40),
+    ('borrowings_and_lease_liabilities', '2440', 'Hire Purchase Interest Suspense', 'liability', null, null, 50),
+    ('borrowings_and_lease_liabilities', '2450', 'Finance Lease Obligation', 'liability', null, null, 60),
+    ('tax_liabilities', '2500', 'Current Tax Payable', 'liability', null, null, 30),
+    ('tax_liabilities', '2510', 'Deferred Tax Liability', 'liability', null, null, 40),
+    ('provisions', '2600', 'Provisions', 'liability', null, null, 10),
+    ('equity_cooperative', '2700', 'Co-operative Education Trust Fund Payable', 'liability', null, null, 30),
+    ('equity_cooperative', '2710', 'Co-operative Development Trust Fund Payable', 'liability', null, null, 40),
+    ('equity_cooperative', '2720', 'Dividend Payable to Members', 'liability', null, null, 50),
+    ('equity_company', '3000', 'Share Capital', 'equity', null, null, 10),
+    ('equity_sole_prop', '3010', 'Proprietor''s Capital Account', 'equity', null, null, 10),
+    ('equity_partnership', '3020', 'Partners'' Capital Accounts', 'equity', null, null, 10),
+    ('equity_partnership', '3030', 'Partners'' Current Accounts', 'equity', null, null, 20),
+    ('equity_society', '3040', 'Accumulated Fund', 'equity', null, null, 10),
+    ('equity_other', '3050', 'Capital / Retained Earnings (Other Entity Type)', 'equity', null, null, 10),
+    ('equity_cooperative', '3060', 'Share Capital (Members'' Shares)', 'equity', null, null, 10),
+    ('equity_company', '3100', 'Reserves (Other)', 'equity', null, null, 20),
+    ('equity_cooperative', '3110', 'Statutory Reserve Fund', 'equity', null, null, 20),
+    ('equity_company', '3800', 'Dividends Paid', 'equity', null, null, 30),
+    ('equity_sole_prop', '3810', 'Proprietor''s Drawings', 'equity', null, null, 20),
+    ('equity_partnership', '3820', 'Partners'' Drawings', 'equity', null, null, 30),
     ('equity_common', '3900', 'Retained Earnings', 'equity', null, 'retained_earnings', 10),
     ('revenue', '4000', 'Sales / Fees Income', 'income', null, null, 10),
     ('revenue', '4010', 'Other Operating Income', 'income', null, null, 20),
+    ('property_rental', '4100', 'Rental Income', 'income', null, null, 10),
+    ('construction_contracts', '4200', 'Construction Contract Revenue', 'income', null, null, 50),
+    ('professional_services', '4300', 'Fee Income by Service Line', 'income', null, null, 10),
+    ('fnb_hospitality', '4400', 'Food and Beverage Sales', 'income', null, null, 10),
+    ('equity_society', '4500', 'Subscriptions / Membership Fees', 'income', null, null, 20),
+    ('equity_society', '4510', 'Entrance / Registration Fees', 'income', null, null, 30),
     ('revenue', '4900', 'Other Income (Non-Operating)', 'income', null, null, 30),
+    ('inventory_and_cogs', '5000', 'Purchases', 'expense', null, null, 20),
+    ('inventory_and_cogs', '5010', 'Carriage Inwards', 'expense', null, null, 30),
+    ('inventory_and_cogs', '5020', 'Opening Stock', 'expense', null, null, 40),
+    ('inventory_and_cogs', '5030', 'Closing Stock', 'expense', null, null, 50),
+    ('inventory_and_cogs', '5040', 'Cost of Sales', 'expense', null, null, 60),
+    ('manufacturing', '5100', 'Direct Labour', 'expense', null, null, 40),
+    ('manufacturing', '5110', 'Factory Overheads', 'expense', null, null, 50),
+    ('manufacturing', '5120', 'Factory Rental and Utilities', 'expense', null, null, 60),
+    ('construction_contracts', '5200', 'Subcontractor Costs', 'expense', null, null, 60),
+    ('professional_services', '5300', 'Subcontracted Professional Fees', 'expense', null, null, 40),
+    ('fnb_hospitality', '5400', 'Food Cost', 'expense', null, null, 20),
+    ('fnb_hospitality', '5410', 'Beverage Cost', 'expense', null, null, 30),
     ('employment_costs', '6000', 'Salaries and Wages', 'expense', null, null, 10),
     ('employment_costs', '6010', 'EPF Contribution (Employer)', 'expense', null, null, 20),
     ('employment_costs', '6020', 'SOCSO Contribution (Employer)', 'expense', null, null, 30),
@@ -1451,48 +1555,11 @@ begin
     ('premises_and_admin', '6150', 'Professional Fees (Legal, Accounting, Secretarial)', 'expense', null, null, 60),
     ('premises_and_admin', '6160', 'Repairs and Maintenance', 'expense', null, null, 70),
     ('premises_and_admin', '6170', 'General Administrative Expenses', 'expense', null, null, 80),
-    ('finance_costs', '6800', 'Bank Charges', 'expense', null, null, 10),
-    ('finance_costs', '6810', 'Interest Expense', 'expense', null, null, 20),
-    ('finance_costs', '6820', 'Realised Foreign Exchange Gain / Loss', 'expense', null, null, 30),
-    ('finance_costs', '6830', 'Unrealised Foreign Exchange Gain / Loss', 'expense', null, null, 40),
-    ('system_roles', '9900', 'Opening Balance Equity', 'equity', null, 'opening_balance_equity', 10),
-    ('system_roles', '9910', 'Rounding', 'expense', null, 'rounding', 20),
-    ('system_roles', '9920', 'SST Purchase Cost', 'expense', null, 'sst_purchase_cost', 30),
-    ('inventory_and_cogs', '1200', 'Inventory / Stock', 'asset', null, null, 10),
-    ('inventory_and_cogs', '5000', 'Purchases', 'expense', null, null, 20),
-    ('inventory_and_cogs', '5010', 'Carriage Inwards', 'expense', null, null, 30),
-    ('inventory_and_cogs', '5020', 'Opening Stock', 'expense', null, null, 40),
-    ('inventory_and_cogs', '5030', 'Closing Stock', 'expense', null, null, 50),
-    ('inventory_and_cogs', '5040', 'Cost of Sales', 'expense', null, null, 60),
-    ('manufacturing', '1210', 'Raw Materials Inventory', 'asset', null, null, 10),
-    ('manufacturing', '1220', 'Work-in-Progress Inventory', 'asset', null, null, 20),
-    ('manufacturing', '1230', 'Finished Goods Inventory', 'asset', null, null, 30),
-    ('manufacturing', '5100', 'Direct Labour', 'expense', null, null, 40),
-    ('manufacturing', '5110', 'Factory Overheads', 'expense', null, null, 50),
-    ('manufacturing', '5120', 'Factory Rental and Utilities', 'expense', null, null, 60),
-    ('property_rental', '4100', 'Rental Income', 'income', null, null, 10),
     ('property_rental', '6200', 'Quit Rent (Cukai Tanah)', 'expense', null, null, 20),
     ('property_rental', '6210', 'Assessment (Cukai Pintu / Taksiran)', 'expense', null, null, 30),
     ('property_rental', '6220', 'Property Maintenance and Sinking Fund', 'expense', null, null, 40),
     ('property_rental', '6230', 'Letting Agent Commission', 'expense', null, null, 50),
-    ('construction_contracts', '1300', 'Contract Assets (Amount Due from Customers)', 'asset', null, null, 10),
-    ('construction_contracts', '1310', 'Retention Receivable', 'asset', null, null, 20),
-    ('construction_contracts', '2200', 'Contract Liabilities (Amount Due to Customers)', 'liability', null, null, 30),
-    ('construction_contracts', '2210', 'Retention Payable', 'liability', null, null, 40),
-    ('construction_contracts', '4200', 'Construction Contract Revenue', 'income', null, null, 50),
-    ('construction_contracts', '5200', 'Subcontractor Costs', 'expense', null, null, 60),
-    ('professional_services', '4300', 'Fee Income by Service Line', 'income', null, null, 10),
-    ('professional_services', '1320', 'Unbilled Receivables (Work-in-Progress)', 'asset', null, null, 20),
-    ('professional_services', '1330', 'Disbursements Recoverable', 'asset', null, null, 30),
-    ('professional_services', '5300', 'Subcontracted Professional Fees', 'expense', null, null, 40),
-    ('fnb_hospitality', '4400', 'Food and Beverage Sales', 'income', null, null, 10),
-    ('fnb_hospitality', '5400', 'Food Cost', 'expense', null, null, 20),
-    ('fnb_hospitality', '5410', 'Beverage Cost', 'expense', null, null, 30),
-    ('fnb_hospitality', '2300', 'Service Charge Payable', 'liability', null, null, 40),
-    ('motor_vehicles', '1400', 'Motor Vehicles at Cost', 'asset', null, null, 10),
-    ('motor_vehicles', '1410', 'Accumulated Depreciation - Motor Vehicles', 'asset', null, null, 20),
     ('motor_vehicles', '6300', 'Road Tax and Insurance - Motor Vehicles', 'expense', null, null, 30),
-    ('foreign_currency', '1050', 'Foreign Currency Bank Account', 'asset', null, null, 10),
     ('entertainment', '6400', 'Entertainment Expenses', 'expense', null, null, 10),
     ('donations_approved', '6410', 'Donations - Approved Institutions', 'expense', null, null, 10),
     ('donations_unapproved', '6420', 'Donations - Unapproved / Non-Deductible', 'expense', null, null, 10),
@@ -1505,19 +1572,13 @@ begin
     ('doubtful_debts_and_provisions', '6490', 'Provision for Doubtful Debts - Specific', 'expense', null, null, 10),
     ('doubtful_debts_and_provisions', '6491', 'Provision for Doubtful Debts - General', 'expense', null, null, 20),
     ('doubtful_debts_and_provisions', '6492', 'Unapproved Pension / Provident Fund Contributions', 'expense', null, null, 30),
-    ('equity_company', '3000', 'Share Capital', 'equity', null, null, 10),
-    ('equity_company', '3100', 'Reserves (Other)', 'equity', null, null, 20),
-    ('equity_company', '3800', 'Dividends Paid', 'equity', null, null, 30),
-    ('equity_sole_prop', '3010', 'Proprietor''s Capital Account', 'equity', null, null, 10),
-    ('equity_sole_prop', '3810', 'Proprietor''s Drawings', 'equity', null, null, 20),
-    ('equity_partnership', '3020', 'Partners'' Capital Accounts', 'equity', null, null, 10),
-    ('equity_partnership', '3030', 'Partners'' Current Accounts', 'equity', null, null, 20),
-    ('equity_partnership', '3820', 'Partners'' Drawings', 'equity', null, null, 30),
-    -- The two provisional variants' one account each (HIGH-2). Neither carries a
-    -- special_acc_type: 3900 already holds retained_earnings, and uq_coa_tmpl_special admits
-    -- exactly one row per marker per template -- these are ordinary equity lines a firm renames.
-    ('equity_society_cooperative', '3040', 'Accumulated Funds', 'equity', null, null, 10),
-    ('equity_other', '3050', 'Capital / Retained Earnings (Other Entity Type)', 'equity', null, null, 10)
+    ('finance_costs', '6800', 'Bank Charges', 'expense', null, null, 10),
+    ('finance_costs', '6810', 'Interest Expense', 'expense', null, null, 20),
+    ('finance_costs', '6820', 'Realised Foreign Exchange Gain / Loss', 'expense', null, null, 30),
+    ('finance_costs', '6830', 'Unrealised Foreign Exchange Gain / Loss', 'expense', null, null, 40),
+    ('system_roles', '9900', 'Opening Balance Equity', 'equity', null, 'opening_balance_equity', 10),
+    ('system_roles', '9910', 'Rounding', 'expense', null, 'rounding', 20),
+    ('system_roles', '9920', 'SST Purchase Cost', 'expense', null, 'sst_purchase_cost', 30)
     ) as y(family_key, account_code, name, account_type, account_class, special_acc_type, sort_ordinal)
     -- ================================================================================
     -- THE ANNOTATION BLOCK -- 23 rows, kept as its own reviewable list because this is the
@@ -1529,35 +1590,35 @@ begin
     -- settles against; F-T1/F-T2 contribute their own later.
     -- ================================================================================
     left join (values
-    ('2100', null, 'epf'),                                        -- EPF (KWSP) Payable
-    ('2110', null, 'socso'),                                      -- SOCSO (PERKESO) Payable
-    ('2120', null, 'eis'),                                        -- EIS (SIP) Payable
-    ('2130', null, 'pcb_mtd'),                                    -- PCB (MTD) Payable
-    ('2140', null, 'hrdf'),                                       -- HRDF (HRD Corp) Levy Payable
-    ('2150', null, 'sst_output'),                                 -- SST Output Tax Payable
-    ('6010', null, 'epf'),                                        -- EPF Contribution (Employer)
-    ('6020', null, 'socso'),                                      -- SOCSO Contribution (Employer)
-    ('6030', null, 'eis'),                                        -- EIS Contribution (Employer)
-    ('6040', null, 'hrdf'),                                       -- HRDF (HRD Corp) Levy Expense
-    ('9920', null, 'sst_input'),                                  -- SST Purchase Cost
-    ('6400', 'entertainment', null),                              -- ITA 1967 s.39(1)(l)/s.18; PR 4/2015
-    ('6410', 'donations_approved', null),                         -- ITA 1967 s.44(6), approved institution
-    ('6420', 'donations_unapproved', null),                       -- ITA 1967 s.44(6) by omission
-    ('6430', 'fines_and_penalties', null),                        -- ITA 1967 s.39(1) with s.33(1)
-    ('6440', 'depreciation_and_amortisation', null),              -- ITA 1967 s.39(1)(k); s.19 + Sch 3
-    ('6450', 'leave_passage', null),                              -- ITA 1967 s.13(1)(b); PR 1/2003
-    ('6460', 'private_and_proprietor_expenses', null),            -- ITA 1967 s.39(1)(a)
-    ('6470', 'motor_running_costs', null),                        -- ITA 1967 Sch 3 Para 2/2A; PR 6/2015
-    ('6480', 'club_subscriptions_and_entrance_fees', null),       -- ITA 1967 s.39(1)(m)
-    ('6490', 'doubtful_debts_specific', null),                    -- ITA 1967 s.34(2); PR 4/2019
-    ('6491', 'doubtful_debts_general', null),                     -- ITA 1967 s.34(2), general = non-deductible
-    ('6492', 'unapproved_provident_fund', null)                   -- ITA 1967 s.39(1)(c)
+    ('2100', null, 'epf'),
+    ('2110', null, 'socso'),
+    ('2120', null, 'eis'),
+    ('2130', null, 'pcb_mtd'),
+    ('2140', null, 'hrdf'),
+    ('2150', null, 'sst_output'),
+    ('6010', null, 'epf'),
+    ('6020', null, 'socso'),
+    ('6030', null, 'eis'),
+    ('6040', null, 'hrdf'),
+    ('6400', 'entertainment', null),
+    ('6410', 'donations_approved', null),
+    ('6420', 'donations_unapproved', null),
+    ('6430', 'fines_and_penalties', null),
+    ('6440', 'depreciation_and_amortisation', null),
+    ('6450', 'leave_passage', null),
+    ('6460', 'private_and_proprietor_expenses', null),
+    ('6470', 'motor_running_costs', null),
+    ('6480', 'club_subscriptions_and_entrance_fees', null),
+    ('6490', 'doubtful_debts_specific', null),
+    ('6491', 'doubtful_debts_general', null),
+    ('6492', 'unapproved_provident_fund', null),
+    ('9920', null, 'sst_input')
     ) as h(account_code, add_back_class, statutory) on h.account_code = y.account_code;
 
   select count(*) into v_families from clara.coa_template_families where template_id = v_id;
   select count(*) into v_accounts from clara.coa_template_accounts where template_id = v_id;
-  if v_families <> 33 or v_accounts <> 102 then
-    raise exception 'S7: seeded % families and % accounts, expected 33 and 102', v_families, v_accounts
+  if v_families <> 41 or v_accounts <> 141 then
+    raise exception 'S7: seeded % families and % accounts, expected 41 and 141', v_families, v_accounts
       using errcode = 'CLR10';
   end if;
 
@@ -1566,7 +1627,7 @@ begin
      set state = 'published', published_at = now(), content_sha256 = v_sha
    where id = v_id;
 
-  raise notice 'coa-template PR-a seed: platform starter my_sme_starter v1 PUBLISHED -- % families (31 research + 2 provisional equity), % accounts, content_sha256 %',
+  raise notice 'coa-template PR-a seed: platform starter my_sme_starter v1 PUBLISHED -- % families (40 merged research + 1 provisional equity), % accounts, content_sha256 %',
     v_families, v_accounts, encode(v_sha, 'hex');
 end $seed$;
 
@@ -1835,21 +1896,35 @@ begin
 
   select count(*) into v_n from clara.coa_template_families where template_id = v_tmpl;
   select count(*) into v_m from clara.coa_template_accounts where template_id = v_tmpl;
-  if v_n <> 33 or v_m <> 102 then
-    raise exception 'S8: seed census -- % families / % accounts, expected 33 / 102', v_n, v_m using errcode = 'CLR10';
+  if v_n <> 41 or v_m <> 141 then
+    raise exception 'S8: seed census -- % families / % accounts, expected 41 / 141', v_n, v_m using errcode = 'CLR10';
   end if;
   select string_agg(t.inclusion || '=' || t.n::text, ' · ' order by t.inclusion) into v_txt
     from (select inclusion, count(*) n from clara.coa_template_families
            where template_id = v_tmpl group by inclusion) t;
-  if v_txt is distinct from 'by_industry=6 · core=10 · opt_in=17' then
-    raise exception 'S8: family inclusion census is %, expected by_industry=6 · core=10 · opt_in=17', v_txt
+  if v_txt is distinct from 'by_industry=6 · core=19 · opt_in=16' then
+    raise exception 'S8: family inclusion census is %, expected by_industry=6 · core=19 · opt_in=16', v_txt
       using errcode = 'CLR10';
   end if;
   select count(*) into v_n from clara.coa_template_accounts a
     join clara.coa_template_families f on f.template_id = a.template_id and f.family_key = a.family_key
    where a.template_id = v_tmpl and f.inclusion = 'core';
-  if v_n <> 45 then
-    raise exception 'S8: expected 45 accounts in core families, found %', v_n using errcode = 'CLR10';
+  -- Q8's ruled BENEFIT, measured rather than assumed: after the addendum's reclassification the
+  -- ten tax-split families are mostly CORE, so D-8's core-only branch now plants entertainment,
+  -- depreciation, fines and the rest for every client -- which is the whole point of cutting
+  -- them out of "Operating Expenses" in the first place. 73, not 45.
+  if v_n <> 73 then
+    raise exception 'S8: expected 73 accounts in core families, found %', v_n using errcode = 'CLR10';
+  end if;
+  -- The six reclassified add-back families are CORE and therefore UNKEYED -- the core-unkeyed
+  -- law and the reclassification have to hold together or the trim silently drops them again.
+  select string_agg(family_key, ', ' order by family_key) into v_bad
+    from clara.coa_template_families
+   where template_id = v_tmpl and inclusion <> 'core' and family_key in
+     ('entertainment','donations_approved','donations_unapproved','fines_and_penalties',
+      'depreciation_and_amortisation','doubtful_debts_and_provisions');
+  if v_bad is not null then
+    raise exception 'S8: these Q8-reclassified add-back families are not core: %', v_bad using errcode = 'CLR10';
   end if;
   -- Q2: every seeded code is the ruled PLAIN 4-digit form -- the FIRST branch of
   -- ck_coa_account_code_0009, never the NNN-XXXX branch the owner ruled out.
@@ -1959,19 +2034,29 @@ begin
   select string_agg(f.family_key || '->' || array_to_string(f.entity_types, '+'), ' · ' order by f.family_key)
     into v_txt from clara.coa_template_families f
    where f.template_id = v_tmpl and f.entity_types <> '{}';
-  if v_txt is distinct from 'equity_company->sdn_bhd+bhd · equity_other->other · equity_partnership->partnership+llp · equity_society_cooperative->society+cooperative · equity_sole_prop->sole_prop' then
-    raise exception 'S8: the entity-type equity swap census is %', v_txt using errcode = 'CLR10';
+  if v_txt is distinct from 'director_and_related_party_balances->sdn_bhd+bhd · equity_company->sdn_bhd+bhd · equity_cooperative->cooperative · equity_other->other · equity_partnership->partnership+llp · equity_society->society · equity_sole_prop->sole_prop · private_and_proprietor_expenses->sole_prop+partnership' then
+    raise exception 'S8: the entity-type keyed-family census is %', v_txt using errcode = 'CLR10';
   end if;
   -- (7b) COVERAGE, not containment (HIGH-2). The census above proves the seed's entity_types are
   --      a SUBSET of the live enum; that is silent about the direction that actually hurts -- a
-  --      value the product ADMITS with no equity family behind it. This walks the LIVE
-  --      ENTITY_TYPES_V2 vocabulary and requires EXACTLY ONE family per value, so a ninth entity
-  --      type widening client_fact_keys reds this assertion instead of silently uncovering a
-  --      client. Read from the catalog, never from a list this file carries.
+  --      value the product ADMITS with no equity section behind it. This walks the LIVE
+  --      ENTITY_TYPES_V2 vocabulary and requires EXACTLY ONE EQUITY family per value, so a ninth
+  --      entity type widening client_fact_keys reds this assertion instead of silently
+  --      uncovering a client. Read from the catalog, never from a list this file carries.
+  --
+  --      "EQUITY family" is a PROPERTY, never the `equity_` spelling (review law 3): a family
+  --      that carries entity_types AND at least one equity-typed account. Two families carry
+  --      entity_types and are NOT equity sections -- director_and_related_party_balances
+  --      (sdn_bhd/bhd, asset+liability rows) and private_and_proprietor_expenses
+  --      (sole_prop/partnership, an expense row) -- and a name-keyed rule would have counted
+  --      them and reported a false double-cover.
   select string_agg(z.v || '=' || z.n::text, ' · ' order by z.v) into v_txt
     from (select v.value as v,
                  (select count(*)::int from clara.coa_template_families f
-                   where f.template_id = v_tmpl and f.entity_types @> array[v.value]) as n
+                   where f.template_id = v_tmpl and f.entity_types @> array[v.value]
+                     and exists (select 1 from clara.coa_template_accounts a
+                                  where a.template_id = v_tmpl and a.family_key = f.family_key
+                                    and a.account_type = 'equity')) as n
             from clara.client_fact_keys k,
                  lateral jsonb_array_elements_text(k.allowed_values) as v(value)
            where k.fact_key = 'entity_type') z
@@ -2149,5 +2234,5 @@ begin
     raise exception 'S8: clara.chart_templates now has % columns, expected the untouched 6', v_n using errcode = 'CLR10';
   end if;
 
-  raise notice 'coa-template PR-a tail: OK -- FOUR relations (coa_templates · coa_template_families · coa_template_accounts · coa_template_adoptions), each owned by clara_fn_owner with ENABLE+FORCE RLS and EXACTLY its policy pair (owner ALL true/true + a SELECT-only clara_authenticated read), non-owner reach exactly clara_authenticated:SELECT on all four and ZERO agent/wake/runtime/freeform reach; the header read is the EXPLICIT-scope form (scope=platform OR firm_id=jwt_firm(), no NULL inference) and both child reads derive scope+firm from the parent; ALL SEVEN mirrored predicates on coa_template_accounts are byte-equal to coa_accounts'' live ck_coa_account_code_0009 / account_type / class / special / OBE / RE / SST-purchase-cost; 5 partial UNIQUEs asserted by property; 6 triggers by name (2 freeze + 4 no-truncate); 9 doors reach clara_authenticated+clara_fn_owner ONLY with PUBLIC revoked, the 7 writers SECURITY DEFINER with a pinned search_path and the 2 reads INVOKER so RLS decides, and 4 internals (2 helpers + 2 trigger fns) reachable by NO app role. SEED: platform starter my_sme_starter v1 PUBLISHED with a null author and a null publisher, 31 families (core=10 · by_industry=6 · opt_in=15) and 100 accounts, 45 of them in core families, EVERY code the ruled plain-4-digit form, the five special markers one each (RE=3900 · OBE=9900 · rounding=9910 · sst_output=2150 · sst_purchase_cost=9920), the equity swap disjoint across sdn_bhd+bhd / sole_prop / partnership+llp, 5 MSIC-keyed families all stamped MSIC 2008, zero core families keyed, every trade_nature and entity_type inside the LIVE client_fact_keys vocabulary, every family carrying a basis and at least one account, and the stored content_sha256 reproducing from the rows. ANNOTATION HINTS: exactly the twelve researched add-back leaves on twelve accounts, the eleven statutory tags at their exact codes, tax_sensitive agreeing with add_back_class on every row, the extend-only CHECK proved in BOTH directions (all twelve admitted, an unlisted leaf REFUSED, an add-back class on a non-tax-sensitive row REFUSED) by a probe built and discarded in a forced-rollback subtransaction, ZERO tax_* relations in schema clara, and coa_template_accounts holding exactly ONE foreign key -- its own family. ZERO coa_template_adoptions rows -- PR-a plants no client chart. D1 INVENTORY EMPTY, PROVEN BY WHOLE-CATALOG DIFFERENTIAL: every pre-existing clara function byte-identical on prosrc/ACL/owner, and the added set pinned as a signature MAP of exactly this file''s own thirteen. Constraint 15 holds: workflow/graphile_worker/spike relation counts unmoved and none of this file''s names inside them; the dataviz clara.chart_templates pair untouched at 6 columns.';
+  raise notice 'coa-template PR-a tail: OK -- FOUR relations (coa_templates · coa_template_families · coa_template_accounts · coa_template_adoptions), each owned by clara_fn_owner with ENABLE+FORCE RLS and EXACTLY its policy pair (owner ALL true/true + a SELECT-only clara_authenticated read), non-owner reach exactly clara_authenticated:SELECT on all four and ZERO agent/wake/runtime/freeform reach; the header read is the EXPLICIT-scope form (scope=platform OR firm_id=jwt_firm(), no NULL inference) and both child reads derive scope+firm from the parent; ALL SEVEN mirrored predicates on coa_template_accounts are byte-equal to coa_accounts'' live ck_coa_account_code_0009 / account_type / class / special / OBE / RE / SST-purchase-cost; 5 partial UNIQUEs asserted by property; 8 triggers by name (2 freeze + 4 no-truncate + the adoption congruence guard and its no-truncate); 9 doors reach clara_authenticated+clara_fn_owner ONLY with PUBLIC revoked, the 7 writers SECURITY DEFINER with a pinned search_path and the 2 reads INVOKER so RLS decides, and 5 internals (2 helpers + 3 trigger fns) reachable by NO app role. SEED: platform starter my_sme_starter v1 PUBLISHED with a null author and a null publisher, 41 families (core=19 · by_industry=6 · opt_in=16) and 141 accounts, 73 of them in core families, EVERY code the ruled plain-4-digit form, the five special markers one each (RE=3900 · OBE=9900 · rounding=9910 · sst_output=2150 · sst_purchase_cost=9920), EXACTLY ONE equity family per live entity_type (equity identified by PROPERTY, not by the equity_ spelling), 5 MSIC-keyed families all stamped MSIC 2008, zero core families keyed, every trade_nature and entity_type inside the LIVE client_fact_keys vocabulary, every family carrying a basis and at least one account, and the stored content_sha256 reproducing from the rows. ANNOTATION HINTS: exactly the twelve researched add-back leaves on twelve accounts, the eleven statutory tags at their exact codes, tax_sensitive agreeing with add_back_class on every row, the extend-only CHECK proved in BOTH directions (all twelve admitted, an unlisted leaf REFUSED, an add-back class on a non-tax-sensitive row REFUSED) by a probe built and discarded in a forced-rollback subtransaction, ZERO tax_* relations in schema clara, and coa_template_accounts holding exactly ONE foreign key -- its own family. ZERO coa_template_adoptions rows -- PR-a plants no client chart. D1 INVENTORY EMPTY, PROVEN BY WHOLE-CATALOG DIFFERENTIAL: every pre-existing clara function byte-identical on prosrc/ACL/owner, and the added set pinned as a signature MAP of exactly this file''s own fourteen. Constraint 15 holds: workflow/graphile_worker/spike relation counts unmoved and none of this file''s names inside them; the dataviz clara.chart_templates pair untouched at 6 columns.';
 end $s8$;

@@ -49,7 +49,7 @@ import {
   platformTemplate, rawTemplate, snapshotTemplate, templateCounts,
   withRolledBackTx, raisedCode, refusalReason,
   waitBlockedByOrThrow, openHumanTxn, openHumanAutocommit, releaseSession,
-  researchJson, templateMap,
+  templateMap, mergedResearch,
 } from "./coa-template-pr-a-helpers.mjs";
 
 /** The account door's exact signature -- pinned once, used by the ACL census and the mutants. */
@@ -281,11 +281,11 @@ test("C1 · the platform starter is PUBLISHED, migration-authored, and content-h
   assert.equal(rehash.rows[0].ok, true, "the stored content hash does not reproduce from the seeded rows");
 });
 
-test("C2 · the seed's structural invariants -- 33 families / 102 accounts, by inclusion, by code form", async (t) => {
+test("C2 · the seed's structural invariants -- 41 families / 141 accounts, by inclusion, by code form", async (t) => {
   if (unready(t)) return;
   const counts = await templateCounts(platform.id);
-  assert.equal(counts.families, 33, "31 research families + the 2 provisional equity variants");
-  assert.equal(counts.accounts, 102);
+  assert.equal(counts.families, 41, "40 merged research families + the 1 provisional equity variant");
+  assert.equal(counts.accounts, 141);
 
   const byIncl = await rootQuery(
     "select inclusion, count(*)::int n from clara.coa_template_families where template_id=$1 group by 1 order by 1",
@@ -293,7 +293,7 @@ test("C2 · the seed's structural invariants -- 33 families / 102 accounts, by i
   );
   assert.deepEqual(
     Object.fromEntries(byIncl.rows.map((r) => [r.inclusion, r.n])),
-    { by_industry: 6, core: 10, opt_in: 17 },
+    { by_industry: 6, core: 19, opt_in: 16 },
   );
 
   // A MAP, not a count (the roster-maps-not-counts lesson): every special marker and its code.
@@ -348,11 +348,18 @@ test("C3 · Q10 the equity swap, Q12 the MSIC 2008 edition stamp, Q11 the statut
   assert.deepEqual(
     Object.fromEntries(equity.rows.map((r) => [r.family_key, r.entity_types])),
     {
+      // The EQUITY sections...
       equity_company: ["sdn_bhd", "bhd"],
+      equity_cooperative: ["cooperative"],
       equity_other: ["other"],
       equity_partnership: ["partnership", "llp"],
-      equity_society_cooperative: ["society", "cooperative"],
+      equity_society: ["society"],
       equity_sole_prop: ["sole_prop"],
+      // ...and the two families that are entity-keyed WITHOUT being equity sections. They are
+      // listed here on purpose: the coverage rule in J2 has to exclude them by PROPERTY, and a
+      // map that hid them would make that exclusion look like an accident.
+      director_and_related_party_balances: ["sdn_bhd", "bhd"],
+      private_and_proprietor_expenses: ["sole_prop", "partnership"],
     },
   );
   // equity_common (Retained Earnings) is CORE and applies in every case.
@@ -497,9 +504,9 @@ test("D1 · POSITIVE: a bookkeeper of firm A and an owner of firm B are BOTH ret
     const ids = rows.map((r) => r.template_id);
     assert.ok(ids.includes(platform.id), `${who} cannot see the platform starter`);
     const fam = await humanFamilyCodes(sub, platform.id);
-    assert.equal(fam.length, 33, `${who} cannot read the platform starter's families`);
+    assert.equal(fam.length, 41, `${who} cannot read the platform starter's families`);
     const acc = await humanAccountCodes(sub, platform.id);
-    assert.equal(acc.length, 102, `${who} cannot read the platform starter's accounts`);
+    assert.equal(acc.length, 141, `${who} cannot read the platform starter's accounts`);
     const doc = await getTemplate(sub, platform.id);
     assert.equal(doc.template_id, platform.id, `${who} cannot get_coa_template the platform starter`);
   }
@@ -515,7 +522,7 @@ test("D2 · NEGATIVE: firm B sees none of firm A's firm-scoped template, header 
   assert.deepEqual(await humanAccountCodes(world.users.dave, publishedFork), [], "firm B can read firm A's accounts");
   assert.equal(await getTemplate(world.users.dave, publishedFork), null, "get_coa_template leaks across firms");
   // And firm A really can read its own content -- the positive control for the two [] above.
-  assert.equal((await humanFamilyCodes(world.users.alice, publishedFork)).length, 33);
+  assert.equal((await humanFamilyCodes(world.users.alice, publishedFork)).length, 41);
 });
 
 // =============================================================================================
@@ -530,8 +537,8 @@ test("E1 · fork happy path: a published source is COPIED into a new firm draft 
   });
   assert.equal(out.state, "draft");
   assert.equal(out.version, 1);
-  assert.equal(out.families, 33);
-  assert.equal(out.accounts, 102);
+  assert.equal(out.families, 41);
+  assert.equal(out.accounts, 141);
   const row = await rawTemplate(out.template_id);
   assert.equal(row.scope, "firm");
   assert.equal(row.firm_id, world.firms.A);
@@ -819,8 +826,8 @@ test("G1 · publish stamps the publisher, the time and the content hash", async 
   });
   const out = await publishTemplate(world.users.alice, { template: f.template_id, opKey: opk("pub") });
   assert.equal(out.state, "published");
-  assert.equal(out.families, 33);
-  assert.equal(out.accounts, 102);
+  assert.equal(out.families, 41);
+  assert.equal(out.accounts, 141);
   const row = await rawTemplate(f.template_id);
   assert.equal(row.state, "published");
   assert.equal(row.published_by, world.users.alice);
@@ -963,12 +970,12 @@ test("H3 · get_coa_template returns the whole document, and list_coa_templates 
   const doc = await getTemplate(world.users.alice, platform.id);
   assert.equal(doc.scope, "platform");
   assert.equal(doc.state, "published");
-  assert.equal(doc.families.length, 33);
-  assert.equal(doc.accounts.length, 102);
+  assert.equal(doc.families.length, 41);
+  assert.equal(doc.accounts.length, 141);
   assert.equal(doc.content_sha256, platform.content_sha256.toString("hex"));
   const listed = (await listTemplates(world.users.alice)).find((r) => r.template_id === platform.id);
-  assert.equal(listed.families, 33);
-  assert.equal(listed.accounts, 102);
+  assert.equal(listed.families, 41);
+  assert.equal(listed.accounts, 141);
 });
 
 // =============================================================================================
@@ -1343,7 +1350,10 @@ test("J2 · HIGH-2 EVERY live entity_type value has exactly one equity family (c
   const cov = await rootQuery(
     `select v.value as ev,
             (select count(*)::int from clara.coa_template_families f
-              where f.template_id = $1 and f.entity_types @> array[v.value]) as n
+              where f.template_id = $1 and f.entity_types @> array[v.value]
+                and exists (select 1 from clara.coa_template_accounts a
+                             where a.template_id = $1 and a.family_key = f.family_key
+                               and a.account_type = 'equity')) as n
        from clara.client_fact_keys k, lateral jsonb_array_elements_text(k.allowed_values) as v(value)
       where k.fact_key = 'entity_type' order by v.value`,
     [platform.id],
@@ -1352,17 +1362,36 @@ test("J2 · HIGH-2 EVERY live entity_type value has exactly one equity family (c
   const bad = cov.rows.filter((r) => r.n !== 1).map((r) => `${r.ev}=${r.n}`);
   assert.deepEqual(bad, [], "an entity_type the product ADMITS has no equity family (or has two)");
 
-  // The two provisional variants say so IN THE ROW -- a reader of the DATA, not just of the
-  // migration, has to be able to see that an owner review is owed.
+  // The ONE remaining provisional variant says so IN THE ROW -- a reader of the DATA, not just
+  // of the migration, has to be able to see that an owner review is owed. society and
+  // cooperative are no longer provisional: the addendum researched both, so this lane's earlier
+  // equity_society_cooperative placeholder is SUPERSEDED and must be gone.
   const prov = await rootQuery(
-    "select family_key, basis from clara.coa_template_families where template_id=$1 and family_key in ('equity_society_cooperative','equity_other') order by family_key",
+    "select family_key, basis from clara.coa_template_families where template_id=$1 and basis like '%provisional%' order by family_key",
     [platform.id],
   );
-  assert.equal(prov.rows.length, 2);
-  for (const r of prov.rows) {
-    assert.match(r.basis, /not researched - provisional; owner review owed/,
-      `${r.family_key}: a provisional family must declare itself provisional in its own basis`);
-  }
+  assert.deepEqual(prov.rows.map((r) => r.family_key), ["equity_other"],
+    "exactly one family should still be provisional -- society and cooperative are researched now");
+  assert.match(prov.rows[0].basis, /not researched - provisional; owner review owed/);
+  const superseded = await rootQuery(
+    "select count(*)::int n from clara.coa_template_families where template_id=$1 and family_key='equity_society_cooperative'",
+    [platform.id],
+  );
+  assert.equal(superseded.rows[0].n, 0, "the superseded placeholder is still shipped");
+
+  // THE SOCIETY LABEL COLLISION, recorded as PR-b's job (conductor ruling): a society gets BOTH
+  // the core 3900 Retained Earnings and its own 3040 Accumulated Fund. PR-a ships both exactly
+  // as the research does; this cell pins that state so PR-b's relabel has something to change,
+  // and so nobody "fixes" it here by keying the core family.
+  const collision = await rootQuery(
+    `select (select inclusion from clara.coa_template_families where template_id=$1 and family_key='equity_common') as re_family,
+            (select entity_types from clara.coa_template_families where template_id=$1 and family_key='equity_common') as re_keys,
+            (select count(*)::int from clara.coa_template_accounts where template_id=$1 and account_code in ('3900','3040')) as both`,
+    [platform.id],
+  );
+  assert.equal(collision.rows[0].re_family, "core", "equity_common must stay core -- it applies to every client");
+  assert.deepEqual(collision.rows[0].re_keys, [], "a core family may never carry entity_type trim keys");
+  assert.equal(collision.rows[0].both, 2, "a society must receive BOTH 3900 and 3040 -- PR-b relabels at apply time");
 });
 
 test("J2m · MUTANT M12: widening the LIVE entity_type enum makes the coverage cell go RED", async (t) => {
@@ -1373,7 +1402,10 @@ test("J2m · MUTANT M12: widening the LIVE entity_type enum makes the coverage c
         `select count(*)::int as n from (
            select v.value as ev,
                   (select count(*)::int from clara.coa_template_families f
-                    where f.template_id = $1 and f.entity_types @> array[v.value]) as n
+                    where f.template_id = $1 and f.entity_types @> array[v.value]
+                      and exists (select 1 from clara.coa_template_accounts a
+                                   where a.template_id = $1 and a.family_key = f.family_key
+                                     and a.account_type = 'equity')) as n
              from clara.client_fact_keys k, lateral jsonb_array_elements_text(k.allowed_values) as v(value)
             where k.fact_key = 'entity_type') z where z.n <> 1`,
         [platform.id],
@@ -1457,19 +1489,45 @@ test("J3m · MUTANT: the numeral census can say NO -- a planted rate is caught",
   });
 });
 
-test("J4 · MED-1 the shipped rows reproduce the COMMITTED research JSON, field by field", async (t) => {
+test("J4 · MED-1 the shipped rows reproduce BOTH COMMITTED dossiers, merged, field by field", async (t) => {
   if (unready(t)) return;
-  const j = researchJson();
+  const { families: mf, accounts: ma, noops, base, add } = mergedResearch();
+  const j = { families: [...mf.values()], accounts: [...ma.values()] };
   const map = await templateMap(platform.id);
+  // The merge itself, pinned: the addendum is additive and its ONE account overlap is its own
+  // declared no-op. A silent re-ship that CHANGED a field would be a content change wearing an
+  // additive label.
+  assert.equal(base.families.length, 31);
+  assert.equal(base.accounts.length, 100);
+  assert.equal(add.families.length, 16);
+  assert.equal(add.accounts.length, 41);
+  assert.deepEqual(noops, ["6460"], "the addendum's only account overlap must be its declared no-op");
+  const reship = add.accounts.find((a) => a.account_code === "6460");
+  const original = base.accounts.find((a) => a.account_code === "6460");
+  for (const k of ["name", "account_type", "account_class", "special_acc_type", "family_key",
+    "sort_ordinal", "tax_sensitive", "add_back_class", "statutory"]) {
+    assert.equal(reship[k] ?? null, original[k] ?? null, `6460.${k} changed under a "no-op" re-ship`);
+  }
+  assert.equal(mf.size, 40, "the two dossiers merge to 40 families");
+  assert.equal(ma.size, 140, "the two dossiers merge to 140 accounts");
+  // Q8's reclassification, read off the MERGED expectation rather than asserted from prose.
+  const reclassified = ["entertainment", "donations_approved", "donations_unapproved",
+    "fines_and_penalties", "depreciation_and_amortisation", "doubtful_debts_and_provisions"];
+  for (const k of reclassified) {
+    assert.equal(base.families.find((f) => f.family_key === k).inclusion, "opt_in", `${k} was opt_in before`);
+    assert.equal(mf.get(k).inclusion, "core", `${k} must be core after the addendum`);
+    assert.deepEqual(map.families[k].entity_types, [], `${k} is core and must therefore be unkeyed`);
+  }
+  for (const k of ["leave_passage", "motor_running_costs", "club_subscriptions_and_entrance_fees"]) {
+    assert.equal(mf.get(k).inclusion, "opt_in", `${k} stays opt_in per the addendum's own SS2`);
+  }
+  assert.deepEqual(mf.get("private_and_proprietor_expenses").entity_types, ["sole_prop", "partnership"]);
   // The four basis rows the constraint-2 fold rewrote: compared by RULE, not by equality, and
   // named here so the divergence is deliberate and visible rather than a silent exemption.
   const STRIPPED = new Set([
     "entertainment", "donations_approved", "motor_running_costs", "club_subscriptions_and_entrance_fees",
   ]);
-  const PROVISIONAL = new Set(["equity_society_cooperative", "equity_other"]);
-
-  assert.equal(j.families.length, 31);
-  assert.equal(j.accounts.length, 100);
+  const PROVISIONAL = new Set(["equity_other"]);
 
   for (const f of j.families) {
     const row = map.families[f.family_key];
@@ -1510,7 +1568,24 @@ test("J4 · MED-1 the shipped rows reproduce the COMMITTED research JSON, field 
   const extraFam = Object.keys(map.families).filter((k) => !j.families.some((f) => f.family_key === k));
   assert.deepEqual(extraFam.sort(), [...PROVISIONAL].sort(), "unexplained extra families in the shipped seed");
   const extraAcc = Object.keys(map.accounts).filter((k) => !j.accounts.some((a) => a.account_code === k));
-  assert.deepEqual(extraAcc.sort(), ["3040", "3050"], "unexplained extra accounts in the shipped seed");
+  assert.deepEqual(extraAcc.sort(), ["3050"], "unexplained extra accounts in the shipped seed");
+});
+
+test("J4b · CONSTRAINT 2 over the merged set: the addendum introduced no numeral into a column", async (t) => {
+  if (unready(t)) return;
+  const { families: mf, accounts: ma } = mergedResearch();
+  const NUM = (s) => typeof s === "string" && (/%/.test(s) || /\b(RM|MYR)\s?[0-9]/i.test(s) || /[0-9]{1,3}(,[0-9]{3})+/.test(s));
+  // The DOSSIERS may carry numerals in prose the migration then strips -- what must be true is
+  // that every numeral-bearing field is one of the four this lane strips BY NAME. A fifth would
+  // ship a rate into a durable column, which is exactly the finding this cell descends from.
+  const numeric = [...mf.values()].filter((f) => NUM(f.basis)).map((f) => f.family_key).sort();
+  assert.deepEqual(numeric,
+    ["club_subscriptions_and_entrance_fees", "donations_approved", "entertainment", "motor_running_costs"],
+    "a dossier family basis carries a numeral that this lane does not strip by name");
+  for (const a of ma.values()) {
+    assert.equal(NUM(a.name), false, `account ${a.account_code}: a numeral in the shipped NAME column`);
+    assert.equal(NUM(a.add_back_class) || NUM(a.statutory), false, `account ${a.account_code}: a numeral in a hint column`);
+  }
 });
 
 test("J5 · MED-2 an adoption cannot name a false version, or another firm's private template", async (t) => {

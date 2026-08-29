@@ -342,6 +342,34 @@ export function researchJson() {
   );
 }
 
+export function researchAddendumJson() {
+  return JSON.parse(
+    readFileSync(new URL("../../../docs/plan/research/coa-template-addendum-2026-08-29.json", import.meta.url), "utf8"),
+  );
+}
+
+/**
+ * The MERGED expectation, derived here from BOTH committed dossiers by the addendum's own
+ * additive rules -- families upsert by family_key, accounts append, one declared no-op re-ship.
+ * Deriving it (rather than re-typing the merged result) is what makes the cell a comparison
+ * against the research instead of against a second copy of the seed.
+ */
+export function mergedResearch() {
+  const base = researchJson();
+  const add = researchAddendumJson();
+  const families = new Map(base.families.map((f) => [f.family_key, { ...f }]));
+  for (const f of add.families ?? []) {
+    families.set(f.family_key, families.has(f.family_key) ? { ...families.get(f.family_key), ...f } : { ...f });
+  }
+  const accounts = new Map(base.accounts.map((a) => [a.account_code, { ...a }]));
+  const noops = [];
+  for (const a of add.accounts ?? []) {
+    if (accounts.has(a.account_code)) noops.push(a.account_code);
+    else accounts.set(a.account_code, { ...a });
+  }
+  return { families, accounts, noops, base, add };
+}
+
 /** The DB's own complete family/account map for a template — every column the JSON carries. */
 export async function templateMap(id) {
   const fam = await rootQuery(
