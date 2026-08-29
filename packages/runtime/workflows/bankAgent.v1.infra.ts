@@ -231,14 +231,32 @@ export async function bankScoped<T>(ctx: { firmId: string; clientId: string }, f
  *  key carries no parseable task field, which is the looser contract the unattended lane's own
  *  fixtures happened to get; this lane opts INTO the strict one.
  *
- *  NO ORDINAL, AND THAT IS THE FIX RATHER THAN THE OMISSION (independent review, S2). An earlier
- *  version carried the call's position within the run, which defeated the very idempotency the
- *  key exists for: the estate's op-key semantics are that a REPEAT of the same act is a REPLAY of
- *  its stored outcome, and an ordinal makes the second identical call a NEW operation that runs
- *  again. It was also not replay-deterministic — a model is free to order its tool calls
- *  differently on a WDK retry, so the same act could come back with a different ordinal and act
- *  twice. The key is now (verb, task, subject), which is the same shape 0138 derives for the
- *  close lane and for the same stated reason (0138:1259-1265).
+ *  NO ORDINAL ON A WRITE, AND THAT IS THE FIX RATHER THAN THE OMISSION (independent review, S2).
+ *  An earlier version carried the call's position within the run, which defeated the very
+ *  idempotency the key exists for: the estate's op-key semantics are that a REPEAT of the same
+ *  act is a REPLAY of its stored outcome, and an ordinal makes the second identical call a NEW
+ *  operation that runs again. It was also not replay-deterministic — a model is free to order its
+ *  tool calls differently on a WDK retry, so the same act could come back with a different
+ *  ordinal and act twice. A write's key is now (verb, task, content), the same shape 0138 derives
+ *  for the close lane and for the same stated reason (0138:1259-1265).
+ *
+ *  A READ IS THE OPPOSITE CASE, AND THE ASYMMETRY IS DELIBERATE (independent review, S8 — a
+ *  regression the S2 fix itself introduced, caught before it shipped). The hazard S2 closes is
+ *  double-ACTING: a books write must not run twice. A pack read mints nothing and writes only its
+ *  own receipt, so running it twice is free BY CONSTRUCTION — which is exactly why the DB exempts
+ *  pack_read from the admitted-act cap, in its own words: "re-reading the pack is the NORMAL
+ *  shape, not an edge case" (0121:4349).
+ *
+ *  Made uniform, a constant pack key BREAKS that re-read, and breaks it only sometimes — the
+ *  worse of the two failure modes. `_agent_bank_receipt` is on-conflict-do-nothing plus a
+ *  read-back identity check that compares `inputs_digest`; a second pack read whose digest is
+ *  UNCHANGED passes, and one whose digest MOVED raises CLR10 op_key_identity_mismatch. The digest
+ *  moves precisely when the run has been working (a match drops those lines out of the unmatched
+ *  set, 0121:5727-5728) — so the one re-read a careful pass makes, "check my work after acting",
+ *  is the one that fails, and it fails as an oracle-safe authority refusal that names nothing
+ *  about op keys. Hence: writes are content-derived, reads carry a counter. Non-determinism
+ *  across a WDK retry is harmless for a read — the retry re-reads and writes a second pack_read
+ *  receipt, which is the shape the exemption exists for.
  *
  *  THE SUBJECT IS LOWERCASED because a model may hand back an uppercase uuid while the database
  *  renders every uuid lowercase (S3). Two spellings of one id must not be two operations. */

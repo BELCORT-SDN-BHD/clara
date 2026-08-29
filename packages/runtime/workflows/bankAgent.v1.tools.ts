@@ -37,10 +37,12 @@ function refusal(e: unknown): { error: string } {
 }
 
 /** The mutable per-run record. One per tool set, i.e. per model-step execution attempt. */
-export type BankRunRecord = { digest: string | null; admitted: number };
+/** `packReads` counts pack reads ONLY, and only to keep their op keys distinct — see bankOpKey's
+ *  own header for why a read carries a counter and a write must not (S2/S8). */
+export type BankRunRecord = { digest: string | null; admitted: number; packReads: number };
 
 export function newBankRunRecord(): BankRunRecord {
-  return { digest: null, admitted: 0 };
+  return { digest: null, admitted: 0, packReads: 0 };
 }
 
 /** Count a bank act, from a CLOSED WORLD OF THREE REPLY SHAPES.
@@ -85,10 +87,13 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
       }),
       execute: async ({ rationale }: { rationale: string }) => {
         try {
-          const opKey = bankOpKey("pack", ctx.taskId, ctx.bankAccountId);
+          // A READ CARRIES A COUNTER (S8). Re-reading the pack after acting is the normal shape
+          // the DB explicitly designs for; a constant key would make exactly that re-read raise
+          // CLR10 op_key_identity_mismatch, because acting MOVES the pack digest. See bankOpKey.
+          const opKey = bankOpKey("pack", ctx.taskId, `${ctx.bankAccountId}_${(rec.packReads += 1)}`);
           const pack = await bankScoped(ctx, (c: PgExec) =>
             c
-              .query("select clara.wake_get_bank_pack($1,$2,$3,$4::jsonb,$5) as pack", [
+              .query("select clara.wake_get_bank_pack(p_client => $1, p_bank_account => $2, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as pack", [
                 ctx.clientId,
                 ctx.bankAccountId,
                 rationale,
@@ -160,7 +165,13 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
           const opKey = bankOpKey("match", ctx.taskId, [...lines].sort().join("_"));
           return await bankScoped(ctx, (c: PgExec) =>
             c
-              .query("select clara.wake_match_bank_line($1,$2::jsonb,$3::jsonb,$4::jsonb,$5,$6,$7::jsonb,$8,$9) as r", [
+              // TRANSPOSITION CASE D, the bank tail: p_rationale, p_inputs_digest and p_op_key are
+              // three adjacent texts. The rationale/op_key swap is the dangerous one — both are
+              // non-blank so both guards pass, and 0129:1052 parses the op key by POSITION
+              // (split_part(key,':',2)); prose yields '' -> NULL, so the freshness check falls
+              // back to its loose client+digest match and ADMITS the act, storing each value in
+              // the other's column. Named notation makes the swap unwritable.
+              .query("select clara.wake_match_bank_line(p_client => $1, p_lines => $2::jsonb, p_entries => $3::jsonb, p_adjustments => $4::jsonb, p_ack_period_exceptions => $5, p_rationale => $6, p_model => $7::jsonb, p_inputs_digest => $8, p_op_key => $9) as r", [
                 ctx.clientId,
                 JSON.stringify(lines),
                 JSON.stringify(entries),
@@ -204,7 +215,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
               // $4::uuid — p_evidence_document is always NULL from this lane (an unattended pass
               // cites no evidence document), and a BARE null gives the planner no type to infer.
               // Cast explicitly rather than rely on there happening to be one overload today.
-              .query("select clara.wake_propose_bank_line_exception($1,$2,$3,$4::uuid,$5,$6::jsonb,$7,$8) as r", [
+              .query("select clara.wake_propose_bank_line_exception(p_line => $1, p_kind => $2, p_reason => $3, p_evidence_document => $4::uuid, p_rationale => $5, p_model => $6::jsonb, p_inputs_digest => $7, p_op_key => $8) as r", [
                 line_id,
                 kind,
                 reason,
@@ -249,7 +260,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
             c
               // $5::int — p_times_seen is declared int and the driver sends a JS number as text;
               // cast so the coercion is stated here rather than left to overload resolution.
-              .query("select clara.wake_propose_bank_identifier_promotion($1,$2,$3,$4,$5::int,$6,$7::jsonb,$8,$9) as r", [
+              .query("select clara.wake_propose_bank_identifier_promotion(p_client => $1, p_counterparty => $2, p_identifier_kind => $3, p_identifier_value => $4, p_times_seen => $5::int, p_rationale => $6, p_model => $7::jsonb, p_inputs_digest => $8, p_op_key => $9) as r", [
                 ctx.clientId,
                 a.counterparty_id,
                 a.identifier_kind,

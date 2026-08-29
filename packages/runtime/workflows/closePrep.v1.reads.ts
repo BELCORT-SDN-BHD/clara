@@ -107,14 +107,26 @@ export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec:
       description: "List this client's fiscal years: which are open, reopened or closed, and when each ends. Start here.",
       inputSchema: z.object({ rationale: RATIONALE }),
       execute: ({ rationale }: { rationale: string }) =>
-        read("wake_list_fiscal_years", ctx.clientId, "select clara.wake_list_fiscal_years($1,$2,$3::jsonb,$4) as r", [ctx.clientId], rationale),
+        read(
+          "wake_list_fiscal_years",
+          ctx.clientId,
+          "select clara.wake_list_fiscal_years(p_client => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
+          [ctx.clientId],
+          rationale,
+        ),
     }),
 
     [READ_TOOLS.CLOSE_PLAN]: tool({
       description: "Read the close plan for one fiscal year — the ordered steps a close of this year involves.",
       inputSchema: z.object({ fiscal_year_id: z.string().uuid(), rationale: RATIONALE }),
       execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) =>
-        read("wake_get_close_plan", fiscal_year_id, "select clara.wake_get_close_plan($1,$2,$3::jsonb,$4) as r", [fiscal_year_id], rationale),
+        read(
+          "wake_get_close_plan",
+          fiscal_year_id,
+          "select clara.wake_get_close_plan(p_fiscal_year_id => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
+          [fiscal_year_id],
+          rationale,
+        ),
     }),
 
     [READ_TOOLS.READINESS]: tool({
@@ -124,7 +136,11 @@ export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec:
         read(
           "wake_get_close_readiness",
           fiscal_year_id,
-          "select clara.wake_get_close_readiness($1,$2,$3,$4::jsonb,$5) as r",
+          // TWO ADJACENT UUIDs — transposition case B. Named notation makes the swap
+          // inexpressible rather than merely unlikely: `p_client => $2` is a different call, not
+          // a differently-ordered one, and the database rejects a wrong NAME loudly at parse time
+          // instead of silently reading one client's readiness under another's pin.
+          "select clara.wake_get_close_readiness(p_client => $1, p_fy => $2, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [ctx.clientId, fiscal_year_id],
           rationale,
         ),
@@ -137,7 +153,7 @@ export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec:
         read(
           "wake_dry_run_close_readiness",
           fiscal_year_id,
-          "select clara.wake_dry_run_close_readiness($1,$2,$3,$4::jsonb,$5) as r",
+          "select clara.wake_dry_run_close_readiness(p_client => $1, p_fy => $2, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [ctx.clientId, fiscal_year_id],
           rationale,
         ),
@@ -147,14 +163,26 @@ export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec:
       description: "Verify an existing close receipt — what it covers and whether it still holds.",
       inputSchema: z.object({ close_receipt_id: z.string().uuid(), rationale: RATIONALE }),
       execute: ({ close_receipt_id, rationale }: { close_receipt_id: string; rationale: string }) =>
-        read("wake_verify_close", close_receipt_id, "select clara.wake_verify_close($1,$2,$3::jsonb,$4) as r", [close_receipt_id], rationale),
+        read(
+          "wake_verify_close",
+          close_receipt_id,
+          "select clara.wake_verify_close(p_receipt => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
+          [close_receipt_id],
+          rationale,
+        ),
     }),
 
     [READ_TOOLS.SNAPSHOT_STATE]: tool({
       description: "Read the state of one period snapshot.",
       inputSchema: z.object({ snapshot_id: z.string().uuid(), rationale: RATIONALE }),
       execute: ({ snapshot_id, rationale }: { snapshot_id: string; rationale: string }) =>
-        read("wake_snapshot_state", snapshot_id, "select clara.wake_snapshot_state($1,$2,$3::jsonb,$4) as r", [snapshot_id], rationale),
+        read(
+          "wake_snapshot_state",
+          snapshot_id,
+          "select clara.wake_snapshot_state(p_snapshot => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
+          [snapshot_id],
+          rationale,
+        ),
     }),
   };
 }

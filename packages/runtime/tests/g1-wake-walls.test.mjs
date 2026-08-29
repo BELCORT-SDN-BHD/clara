@@ -223,7 +223,7 @@ test("G1B-I2 the bank classifier's closed world of three reply shapes — DRIVEN
   assert.doesNotMatch(body, /'outcome'\s*,\s*'admitted'/, "still no uniform admitted key in the reply");
 });
 
-test("G1B-I3 EVERY DB call in both tool sets matches its function's LIVE declared arity", { skip: skip0138 }, async () => {
+test("G1B-I3 EVERY DB call matches its function's LIVE declared arity AND argument names, in order", { skip: skip0138 }, async () => {
   // THE HIGHEST-VALUE MECHANICAL CHECK IN THIS FILE. Sixteen hand-written parameter lists across
   // two frozen tool sets, every one of them a chance to drop or transpose an argument — and an
   // arity slip is not a crash a reviewer would see: it is a wrong write, or a refusal blamed on
@@ -234,13 +234,16 @@ test("G1B-I3 EVERY DB call in both tool sets matches its function's LIVE declare
   // a projection of the function; pg_proc IS the function). A verb whose name resolves to more
   // than one overload fails here too — an ambiguous call is not a checked call.
   //
-  // WHAT THIS GATE CANNOT SEE, said plainly so it is never mistaken for a shape review. Arity is
-  // the OUTER ENVELOPE only. It cannot catch (a) a TRANSPOSITION of two same-typed arguments —
-  // swap the two uuids of wake_get_close_readiness and the count is still 5 — nor (b) a wrong
-  // jsonb SUB-SHAPE inside a correctly-positioned argument, which is where every shape defect
-  // this PR found actually lived (a uuid array where objects were needed; an object where a
-  // non-empty array was needed). Both classes are caught only by a call that reaches the verb.
-  // This cell closes a real class permanently; it does not stand in for the other two.
+  // WHAT THIS GATE CAN AND CANNOT SEE, said plainly so it is never mistaken for a shape review.
+  // It now covers TWO classes: arity (the outer envelope) and ORDER — the latter only because
+  // every call is written in named notation, which is what makes a transposition expressible as a
+  // wrong NAME rather than an invisible wrong position.
+  //
+  // IT STILL CANNOT SEE a wrong jsonb SUB-SHAPE inside a correctly-named argument, which is where
+  // every shape defect this PR found actually lived: a uuid array where objects were needed, an
+  // object where a non-empty array was needed, a model identity with the wrong two keys. Perfect
+  // arity, perfect names, wrong contents. Only a call that reaches the verb catches that class —
+  // cell G1B-E2a is that instrument, and it is why it exists.
   const { readFileSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
   const dir = fileURLToPath(new URL("../workflows/", import.meta.url));
@@ -262,7 +265,8 @@ test("G1B-I3 EVERY DB call in both tool sets matches its function's LIVE declare
       assert.equal(depth, 0, `unbalanced parentheses in a clara.${m[1]} call in ${f}`);
       const span = src.slice(m.index + m[0].length, i - 1);
       const placeholders = new Set([...span.matchAll(/\$(\d+)/g)].map((x) => Number(x[1])));
-      calls.push({ file: f, name: m[1], max: Math.max(...placeholders), distinct: placeholders.size });
+      const names = [...span.matchAll(/(\w+)\s*=>/g)].map((x) => x[1]);
+      calls.push({ file: f, name: m[1], span, max: Math.max(...placeholders), distinct: placeholders.size, names });
     }
   }
   // 4 bank + 12 close = 16. Pinned as a COUNT so a future call that silently stops matching the
@@ -279,6 +283,24 @@ test("G1B-I3 EVERY DB call in both tool sets matches its function's LIVE declare
     const declared = Number(r.rows[0].pronargs);
     assert.equal(c.max, declared, `clara.${c.name} (${c.file}): highest placeholder $${c.max} but the verb declares ${declared} args — [${r.rows[0].ident}]`);
     assert.equal(c.distinct, declared, `clara.${c.name} (${c.file}): ${c.distinct} distinct placeholders but the verb declares ${declared} — a repeated or skipped $n`);
+
+    // AND NOW THE ORDER GATE, which is what named notation buys and arity alone never could.
+    // Every argument must be written `p_name => $n`, and the names must be the catalog's own, IN
+    // ORDER. That closes the four transposition cases the database cannot see for itself — the
+    // adjacent free-form prose pairs (p_narrative/p_rationale, p_reason/p_rationale,
+    // p_label/p_rationale, and the bank rationale/op_key tail) whose swap SUCCEEDS and writes each
+    // value into the other's column with no error anywhere.
+    const catalogNames = r.rows[0].ident.split(",").map((s) => s.trim().split(/\s+/)[0]);
+    assert.equal(
+      c.names.length,
+      declared,
+      `clara.${c.name} (${c.file}): must use NAMED argument notation for every argument (p_x => $n) — saw ${c.names.length} of ${declared}. Positional notation lets two same-typed arguments be silently transposed.`,
+    );
+    assert.deepEqual(
+      c.names,
+      catalogNames,
+      `clara.${c.name} (${c.file}): argument names must match the catalog IN ORDER.\n  call:    ${c.names.join(", ")}\n  catalog: ${catalogNames.join(", ")}`,
+    );
   }
 });
 

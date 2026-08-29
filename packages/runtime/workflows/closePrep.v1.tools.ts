@@ -57,7 +57,7 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         write(
           "wake_run_depreciation_catchup",
           ctx.clientId,
-          "select clara.wake_run_depreciation_catchup($1,$2::date,$3,$4::jsonb,$5) as r",
+          "select clara.wake_run_depreciation_catchup(p_client => $1, p_through => $2::date, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [ctx.clientId, through],
           rationale,
         ),
@@ -70,7 +70,7 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         write(
           "wake_mint_month_snapshot",
           ctx.clientId,
-          "select clara.wake_mint_month_snapshot($1,$2::date,$3,$4::jsonb,$5) as r",
+          "select clara.wake_mint_month_snapshot(p_client => $1, p_month_start => $2::date, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [ctx.clientId, month_start],
           rationale,
         ),
@@ -87,7 +87,11 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         write(
           "wake_open_fiscal_year",
           ctx.clientId,
-          "select clara.wake_open_fiscal_year($1,$2,$3::date,$4,$5::jsonb,$6) as r",
+          // TRANSPOSITION CASE C: p_label and p_rationale are both free-form text, and both guards
+          // are only "non-blank" — a swap would have SUCCEEDED, minting a fiscal year whose label
+          // is a sentence of prose and whose receipt rationale is a year name. Named notation
+          // makes that unwritable.
+          "select clara.wake_open_fiscal_year(p_client => $1, p_label => $2, p_starts_on => $3::date, p_rationale => $4, p_model => $5::jsonb, p_op_key => $6) as r",
           [ctx.clientId, label, starts_on],
           rationale,
         ),
@@ -101,7 +105,7 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         const reply = await write(
           "wake_begin_close",
           fiscal_year_id,
-          "select clara.wake_begin_close($1,$2,$3::jsonb,$4) as r",
+          "select clara.wake_begin_close(p_fy => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
           [fiscal_year_id],
           rationale,
         );
@@ -166,7 +170,12 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         write(
           "wake_propose_close",
           close_run_id,
-          "select clara.wake_propose_close($1,$2::jsonb,$3,$4,$5::jsonb,$6) as r",
+          // TRANSPOSITION CASE A, and the worst of the four: p_narrative and p_rationale are
+          // adjacent, both free-form text, both guarded only as non-blank. A swap SUCCEEDS —
+          // and the narrative is the text a human reads to settle the proposal, so the reader
+          // would get the internal rationale while the audit receipt got the client-facing
+          // narrative. No error, no rung, no way to tell from either side.
+          "select clara.wake_propose_close(p_close_run => $1, p_drafted => $2::jsonb, p_narrative => $3, p_rationale => $4, p_model => $5::jsonb, p_op_key => $6) as r",
           [close_run_id, JSON.stringify(drafted), narrative],
           rationale,
         ),
@@ -184,7 +193,9 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         write(
           "wake_abandon_close",
           close_run_id,
-          "select clara.wake_abandon_close($1,$2,$3,$4::jsonb,$5) as r",
+          // TRANSPOSITION CASE A's sibling: p_reason and p_rationale, adjacent, both prose, both
+          // non-blank-guarded. Same silent swap, same fix.
+          "select clara.wake_abandon_close(p_close_run => $1, p_reason => $2, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [close_run_id, reason],
           rationale,
         ),
