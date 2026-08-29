@@ -2245,15 +2245,22 @@ test("bp1.W10c S-1 — the maker/checker principal is FROZEN by the signature", 
   // its HISTORY. Not attacker-reachable (zero app-role DML), so this is depth — but "the
   // principal behind a signature is append-only" must be true structurally, not by nobody trying.
   const { cp, basis } = await eligibleVendor("W10c");
-  const p = await proposeAsAgent(await interactiveActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  // A FILING proposal, deliberately: it has no director, so `effective_proposer` is Clara's uuid
+  // and any admin may sign it. An `interactive` one would be DIRECTED by alice — the only admin
+  // in this world at this point in the file — and would land on 裁-32's solo-attestation arm,
+  // which is a different cell's subject (S2b). directed_by being NULL here costs this cell
+  // nothing: moving it to a value on a signed row is exactly what the freeze must refuse.
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
 
   // POSITIVE CONTROL FIRST: while the row is UNSIGNED the freeze does not fire.
   await rootQuery("update clara.vendor_identity_bindings set directed_by=$2 where id=$1",
     [p.binding_id, w.users.bob]);
   assert.equal((await bindingRow(p.binding_id)).directed_by, w.users.bob,
     "control: an unsigned proposal's director may still move");
-  await rootQuery("update clara.vendor_identity_bindings set directed_by=$2 where id=$1",
-    [p.binding_id, w.users.alice]);
+  // …and back to NULL, not to alice: a directed proposal alice signs herself lands on 裁-32's
+  // solo arm (this world's firm A has one admin), which is S2b's subject and not this cell's.
+  await rootQuery("update clara.vendor_identity_bindings set directed_by=null where id=$1",
+    [p.binding_id]);
 
   await signLive(w.users.alice, { binding: p.binding_id });
   // …and now every principal-bearing column is frozen, ONE UPDATE PER COLUMN so a green result
