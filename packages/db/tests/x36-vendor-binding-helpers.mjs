@@ -199,6 +199,31 @@ export async function has29() {
 // is idempotent within a single buildWorld() run) rather than through upsert_account -- these
 // helpers already direct-insert documents/entries/lines for the same isolation reason, and
 // upsert_account's p_account_class plumbing is incidental to what this battery tests.
+/**
+ * Record the client's OWN hard identifier (裁-18b PR-1 fold, FOLD-7).
+ *
+ * WHY EVERY BINDING FIXTURE NEEDS THIS NOW. `_binding_extra_blocker` refuses a "vendor" hard id
+ * that is the CLIENT'S own — a mislabelled customer block would otherwise bind the client to
+ * itself. That wall cannot be evaluated for a client with no recorded identifier, and reading the
+ * resulting no-match as "so it is not the client's" would be absence-as-evidence: the exact case
+ * the wall exists to catch produces exactly that no-match. So the door refuses
+ * `binding_client_identity_unproven` instead, and a client without a recorded SSM/TIN gets no
+ * vendor binding at all. buildWorld records none (measured: zero rows estate-wide on a seeded
+ * rig), so every battery that proposes a binding records one here.
+ *
+ * The value is random per call and therefore cannot collide with a fixture vendor's registration
+ * — a collision would make the own-client wall fire for the wrong reason.
+ */
+export async function seedClientHardIdentifier(firm, client, { kind = "ssm", value = null } = {}) {
+  const v = value ?? `CLI${randomUUID().replace(/-/g, "").slice(0, 10).toUpperCase()}`;
+  await rootQuery(
+    `insert into clara.client_identifiers(firm_id,client_id,kind,value_normalized,added_by)
+     values($1,$2,$3,$4,
+       (select user_id from clara.firm_memberships where firm_id=$1 and status='active' limit 1))`,
+    [firm, client, kind, foldAlnum(v)]);
+  return foldAlnum(v);
+}
+
 export const AP_ACCOUNT = "2000";
 export async function seedPayableAccount(firm, client) {
   await rootQuery(

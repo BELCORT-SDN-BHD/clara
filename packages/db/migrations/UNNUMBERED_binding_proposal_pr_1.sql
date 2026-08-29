@@ -242,6 +242,7 @@ begin
                  ('clara._binding_hard_id_norm(text)'),
                  ('clara._binding_doc_fingerprint(uuid)'),
                  ('clara._tf_agent_receipt_surface_conforms()'),
+                 ('clara.binding_signer_roster(uuid)'),
                  ('clara._tf_control_witness_identity_frozen()'),
                  ('clara.sign_vendor_identity_binding(uuid,text,text)')) t(n)
    where to_regprocedure(t.n) is not null;
@@ -259,7 +260,7 @@ begin
       'decline_vendor_identity_binding','reset_binding_decline','_binding_extra_blocker',
       'eligible_binding_signer_count','_binding_suppression','_expire_stale_proposals',
       'binding_identity_review','_binding_lock_pair','_binding_hard_id_norm',
-      '_binding_doc_fingerprint','_tf_agent_receipt_surface_conforms',
+      '_binding_doc_fingerprint','_tf_agent_receipt_surface_conforms','binding_signer_roster',
       '_tf_control_witness_identity_frozen');
   if v_missing is not null then
     raise exception 'binding proposal pr-1 prestate: pg_proc already carries name(s) under some arity: %', v_missing
@@ -1769,6 +1770,25 @@ begin
   -- mislabelled customer block wearing a vendor's clothes, and binding on it would bind the
   -- client to itself. clara.client_identifiers (0007:222) is the estate's own register of a
   -- client's tin/ssm, so this reads the identity the firm actually recorded.
+  --
+  -- FOLD-7 (round-3 pass): ABSENCE IS NOT EVIDENCE (review law 2). The first cut read "no
+  -- matching client_identifiers row" as "so it is not the client's id" -- but a client with NO
+  -- recorded identifier at all produces exactly that same no-match, and the wall would then wave
+  -- through the very case it exists to catch. 0049:967 already refuses to score a kindless
+  -- registration as a miss, for the same reason and in the same estate.
+  -- FAIL-CLOSED, and the cost is named: a client whose SSM/TIN the firm has not recorded gets NO
+  -- vendor binding until somebody records one. That is a real thing to ask of a Malaysian SME's
+  -- onboarding, and it is the honest trade -- the alternative is a wall that silently cannot be
+  -- evaluated. Both doors and the eligibility read say so in the same word, so the card can tell
+  -- the human what to do rather than what went wrong.
+  -- NOT "both kinds must be recorded": many SMEs have an SSM long before a TIN, and demanding
+  -- both would strand them for a reason that has nothing to do with this vendor. One is enough
+  -- to evaluate against; a TIN-only client simply cannot detect its own SSM mislabelled as a
+  -- vendor id, and that residual is recorded in the annex rather than papered over.
+  if not exists (select 1 from clara.client_identifiers ci
+                  where ci.client_id = p_client and ci.kind in ('tin','ssm')) then
+    return 'binding_client_identity_unproven';
+  end if;
   if exists (select 1 from clara.client_identifiers ci
               where ci.client_id = p_client and ci.kind in ('tin','ssm')
                 and clara._binding_hard_id_norm(ci.value_normalized) = any (v_hard_ids)) then
@@ -2578,6 +2598,42 @@ $$;
 -- and takes the firm as an ARGUMENT -- the exact caller-supplied-tenant shape 0002:453-458
 -- records the estate paying for once. Before this wall a firm-A owner could read firm B's admin
 -- headcount by passing B's uuid. It refuses instead.
+-- FOLD-8 (round-3 pass): ONE QUERY, ONE SNAPSHOT. The solo refusal reports both the COUNT and the
+-- date the window opens, and an earlier cut read them in separate statements — which under READ
+-- COMMITTED are separate snapshots, so a membership change landing between them could produce a
+-- refusal whose number and whose date describe different worlds. A receipt that is internally
+-- inconsistent is worse than one that is merely coarse. Everything the wall and its explanation
+-- need comes out of this one row.
+create function clara.binding_signer_roster(p_firm uuid)
+  returns table(eligible int, active int, removed_within_window int, solo_window_opens_at timestamptz)
+  language sql stable security definer set search_path = clara, pg_temp as $fn$
+  with active_admins as (
+    select m.user_id from clara.firm_memberships m join clara.users u on u.id = m.user_id
+     where m.firm_id = p_firm and m.status = 'active'
+       and clara.role_rank(m.role) >= clara.role_rank('admin') and u.is_agent = false
+  ), departed as (
+    select distinct m.user_id, m.removed_at
+      from clara.firm_memberships m join clara.users u on u.id = m.user_id
+     where m.firm_id = p_firm and m.status = 'removed'
+       and clara.role_rank(m.role) >= clara.role_rank('admin') and u.is_agent = false
+       and m.removed_at is not null and m.removed_at > now() - interval '90 days'
+       and m.user_id not in (select user_id from active_admins)
+  )
+  select (select count(*)::int from active_admins)
+           + (select count(distinct user_id)::int from departed),
+         (select count(*)::int from active_admins),
+         (select count(distinct user_id)::int from departed),
+         (select max(removed_at) + interval '90 days' from departed);
+$fn$;
+comment on function clara.binding_signer_roster(uuid) is
+  '裁-32 / H5 / FOLD-8: the whole solo-signer picture in ONE snapshot -- the durable count, the '
+  'LIVE active count, how many of the count are departures still inside the 90-day window, and '
+  'the date that window opens. sign_vendor_identity_binding reads this once, so the number it '
+  'enforces and the date it reports can never describe different worlds (they were two statements, '
+  'and two statements under READ COMMITTED are two snapshots). Ungranted: the firm-congruent door '
+  'is clara.eligible_binding_signer_count.';
+revoke all on function clara.binding_signer_roster(uuid) from public;
+
 create function clara.eligible_binding_signer_count(p_firm uuid)
   returns integer language plpgsql stable security definer set search_path = clara, pg_temp as $fn$
 declare v_n int;
@@ -2586,28 +2642,14 @@ begin
     raise exception 'firm not yours' using errcode = 'CLR11',
       detail = '{"reason":"cross_firm","class":"firm"}';
   end if;
-  select
-      (select count(*) from clara.firm_memberships m join clara.users u on u.id = m.user_id
-        where m.firm_id = p_firm and m.status = 'active'
-          and clara.role_rank(m.role) >= clara.role_rank('admin') and u.is_agent = false)
-    -- NO PENDING-INVITE ARM (ruled 2026-08-30, round 2). An earlier cut counted pending admin+
-    -- invites on the reasoning that a firm which has already ASKED somebody is not solo. Measured
-    -- against the attack, that arm does nothing: an invite can only make the count STRICTER, and
-    -- a firm that is solo before an invite is solo again after it is revoked — the laundering the
-    -- window exists to close is the REMOVED-MEMBER path, and that is the arm below. An invitee is
-    -- not a signer; counting one only put a number in front of the wall that the wall does not
-    -- enforce, which is the defect eligible_checker_count was rejected for in the first place.
-    + (select count(distinct m.user_id)
-         from clara.firm_memberships m join clara.users u on u.id = m.user_id
-        where m.firm_id = p_firm and m.status = 'removed'
-          and clara.role_rank(m.role) >= clara.role_rank('admin') and u.is_agent = false
-          and m.removed_at is not null and m.removed_at > now() - interval '90 days'
-          -- ...and only where they are not ALREADY counted as active above, so a re-add is one
-          -- person, not two.
-          and not exists (select 1 from clara.firm_memberships m2
-                           where m2.firm_id = m.firm_id and m2.user_id = m.user_id
-                             and m2.status = 'active'))
-    into v_n;
+  -- ONE definition of the roster, in clara.binding_signer_roster (FOLD-8). This door is the
+  -- firm-congruent, granted face of it and nothing more -- a second copy of the arithmetic here
+  -- is exactly how the count the wall enforces and the count a card shows start to disagree.
+  -- NO PENDING-INVITE ARM (ruled 2026-08-30, round 2): an invite can only make the count
+  -- STRICTER, and a firm solo before one is solo again after a revoke -- the laundering the
+  -- window closes is the REMOVED-MEMBER path. An invitee is not a signer, and counting one only
+  -- put a number in front of a wall that the wall does not enforce.
+  select r.eligible into v_n from clara.binding_signer_roster(p_firm) r;
   return v_n;
 end $fn$;
 comment on function clara.eligible_binding_signer_count(uuid) is
@@ -2659,7 +2701,7 @@ declare
   c record; v_dedupe jsonb; b record; v_derived jsonb;
   v_stored_evidence jsonb; v_pair record;
   v_self boolean := false; v_self_reason text;
-  v_count int; v_epoch timestamptz; v_active int; v_opens timestamptz;
+  v_count int; v_epoch timestamptz; v_roster record; v_expected oid;
   v_suppressed text; v_blocker text; v_stored_basis jsonb; v_src text; v_wit record;
 begin
   c:=clara._human_ctx(clara.role_rank('admin'));
@@ -2718,7 +2760,10 @@ begin
     if b.directed_by is distinct from c.actor then
       raise exception 'the signer cannot be the same person who proposed this binding; let Clara propose it, or add a second admin' using errcode='CLR04',detail='{"reason":"signer_is_proposer"}';
     end if;
-    v_count := clara.eligible_binding_signer_count(c.firm);
+    -- FOLD-8: ONE read, ONE snapshot. The number the wall enforces and the date the refusal
+    -- reports come out of the same row, so they can never describe different worlds.
+    select * into v_roster from clara.binding_signer_roster(c.firm);
+    v_count := v_roster.eligible;
     if v_count >= 2 then
       -- FOLD-5: WHEN THE SECOND SIGNER IS A MEMORY, SAY SO AND SAY WHEN IT EXPIRES. The durable
       -- window counts an admin+ who LEFT within 90 days, so a firm with one active admin can be
@@ -2726,23 +2771,12 @@ begin
       -- by doing anything at all. That is a true refusal delivered as a false instruction. The
       -- WALL is unchanged -- the 90-day window is ruled -- but the refusal now names the ARM it
       -- came from and the DATE the window opens, so the human is told the number they can act on.
-      select count(*) into v_active
-        from clara.firm_memberships m join clara.users u on u.id = m.user_id
-       where m.firm_id = c.firm and m.status = 'active'
-         and clara.role_rank(m.role) >= clara.role_rank('admin') and u.is_agent = false;
-      if v_active < 2 then
-        select max(m.removed_at) + interval '90 days' into v_opens
-          from clara.firm_memberships m join clara.users u on u.id = m.user_id
-         where m.firm_id = c.firm and m.status = 'removed'
-           and clara.role_rank(m.role) >= clara.role_rank('admin') and u.is_agent = false
-           and m.removed_at is not null and m.removed_at > now() - interval '90 days'
-           and not exists (select 1 from clara.firm_memberships m2
-                            where m2.firm_id = m.firm_id and m2.user_id = m.user_id
-                              and m2.status = 'active');
+      if v_roster.active < 2 then
         raise exception 'this firm had another admin within the last ninety days, so it does not count as a solo firm yet; ask them to sign, or wait until the window closes'
           using errcode='CLR04',
           detail=jsonb_build_object('reason','signer_is_proposer','arm','removed_within_window',
-                                    'solo_window_opens_at', v_opens)::text;
+                                    'active_signers', v_roster.active,
+                                    'solo_window_opens_at', v_roster.solo_window_opens_at)::text;
       end if;
       raise exception 'the signer cannot be the same person who proposed this binding; let Clara propose it, or add a second admin' using errcode='CLR04',detail='{"reason":"signer_is_proposer"}';
     elsif nullif(btrim(coalesce(p_attestation,'')),'') is null then
@@ -2875,14 +2909,23 @@ begin
   -- file's own rig fixture proved it by planting exactly such a variable. The gate now asks
   -- clara.control_witnesses which BODY was reviewed and whether the live one is still it. Nothing
   -- a later author writes can satisfy that; only the reviewed bytes can.
+  -- FOLD-6 (round-3 pass): THE DOOR PINS WHICH BODY, THE REGISTRY ONLY PINS WHICH BYTES.
+  -- An earlier cut hashed whatever `proc` the registry row named — so a witness minted against
+  -- some other live function, carrying that function's REAL sha, would have opened this gate.
+  -- A registry is a place to record an answer, never a place to be told the question. The
+  -- expected identity is written HERE, in the door, resolved by exact signature to an OID, and
+  -- the registry row must name that same OID before its sha is even looked at.
+  v_expected := to_regprocedure('clara._approve_entry_core(jsonb,uuid,uuid,text,text)');
   select w.proc, w.prosrc_sha into v_wit
     from clara.control_witnesses w where w.control = 'binding_post_time_recheck_v1';
-  if not found or to_regprocedure(v_wit.proc) is null then
+  if not found
+     or v_expected is null
+     or to_regprocedure(v_wit.proc) is distinct from v_expected then
     raise exception 'the post-time binding re-check is not deployed on the approve path'
       using errcode='CLR36',detail='{"reason":"post_time_control_absent"}';
   end if;
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_src
-    from pg_proc p where p.oid = to_regprocedure(v_wit.proc);
+    from pg_proc p where p.oid = v_expected;
   if v_src is distinct from v_wit.prosrc_sha then
     raise exception 'the post-time binding re-check is not deployed on the approve path'
       using errcode='CLR36',detail='{"reason":"post_time_control_absent"}';
@@ -3160,7 +3203,7 @@ begin
                  ('_binding_suppression'),('_expire_stale_proposals'),
                  ('binding_identity_review'),('_binding_lock_pair'),
                  ('_binding_hard_id_norm'),('_binding_doc_fingerprint'),
-                 ('_tf_agent_receipt_surface_conforms'),
+                 ('_tf_agent_receipt_surface_conforms'),('binding_signer_roster'),
                  ('_tf_control_witness_identity_frozen'),
                  ('sign_vendor_identity_binding')) t(n)
     left join lateral (select count(*)::int c from pg_proc p join pg_namespace n2 on n2.oid = p.pronamespace
@@ -3668,7 +3711,10 @@ begin
       ('clara._binding_doc_fingerprint(uuid)','clara_wake_interactive'),
       ('clara._binding_hard_id_norm(text)','clara_authenticated'),
       ('clara._binding_hard_id_norm(text)','clara_wake_filing'),
-      ('clara._binding_hard_id_norm(text)','clara_wake_interactive')
+      ('clara._binding_hard_id_norm(text)','clara_wake_interactive'),
+      ('clara.binding_signer_roster(uuid)','clara_authenticated'),
+      ('clara.binding_signer_roster(uuid)','clara_wake_filing'),
+      ('clara.binding_signer_roster(uuid)','clara_wake_interactive')
     ) t(fn, rolname)
    where has_function_privilege(t.rolname, t.fn, 'EXECUTE');
   if v_bad is not null then
@@ -3942,6 +3988,6 @@ begin
     raise exception 'binding proposal pr-1 tail: object count in workflow/graphile_worker/spike MOVED' using errcode = 'CLR10';
   end if;
 
-  raise notice 'binding proposal pr-1 tail: OK -- D1 INVENTORY = THREE WRITER BODIES (propose_vendor_identity_binding recut in place, its delta proven by RE-SUBSTITUTION against the byte-exact prestate; sign_vendor_identity_binding DROPped at (uuid,text) and recreated at (uuid,text,text) with the 2-arg overload proven GONE and its ACL re-made; _tf_vendor_identity_binding_update CoR-ed, its five 0028 guard terms surviving verbatim beside nine new maker/checker ones, all read on the comment-stripped live prosrc). The OTHER 16 DO-NOT-TOUCH bodies re-pin BYTE-IDENTICAL to their SS1 prosrc stash (incl. _approve_entry_core, left undisturbed for PR-3''s own pre-image; _derive_vendor_binding_proposal re-pinned against de0f5807... and _coding_lane_core against 721a6704... independently of the stash), and each of the 16 new function NAMES (plus the recut signer) resolves at exactly one pg_proc row under every arity. G4: the registry refused a REAL mismatched-pair probe by ck_agent_receipt_surfaces_shim_matches_item EXACTLY (both halves individually lawful, so nothing else could have refused it), refused a REAL uppercase item/shim probe by one of the two widened regexes (isolation between THEM is structurally impossible once the pairing CHECK exists, and the file says so rather than asserting an evaluation order), and ADMITTED a real f_a42 probe -- the pre-existing f_a family survived the pb_ widening -- with both widened definitions read byte-exact; agent_receipt_surfaces holds 9 rows, pb_binding is shim_exists+wired+conforms+19-col+zero-dark, the census returns 9, agent_receipts_visible''s 19-column contract is unchanged and nothing is dark. binding_agent_receipts: RLS enabled+forced, owner-only, ZERO non-owner grants, ZERO app-role DML across 8 roles, both append-only triggers attached. vendor_identity_bindings: 12 new columns at the right type/nullability (17+12=29 total), 10 new CHECKs + 2 composite DEFERRABLE FKs present (the firm-congruent receipt pointer and its RECIPROCAL twin, so a same-firm receipt of another binding cannot be swapped in), ck_vib_proposed_by_agent_honest read from the catalog as a BIDIRECTIONAL EQUALITY, and effective_proposer GENERATED so no writer can set it to disagree with the columns it comes from. G8 + gate B5: uq_vib_one_active_binding asserted BY PROPERTY from pg_index (unique+valid+ready+live, keys {client_id,counterparty_id}, predicate status IN (proposed,live) -- a proposed-ONLY predicate loses the propose-vs-sign transition race), never by name; uq_vib_one_live unmoved. ACL: both wake verbs EXECUTE-able by clara_wake_filing AND clara_wake_interactive and by none of 6 other roles; decline / reset_binding_decline / eligible_binding_signer_count / binding_identity_review and the recut signer are clara_authenticated-only; every internal (_binding_extra_blocker, _binding_suppression, _expire_stale_proposals, _derive_vendor_binding_basis, _propose_vendor_binding_agent_core) is ungranted; exactly 4 allowlist rows, all 4 ruled, and NO non-ruled wake kind names either verb. EVENT-TYPE REGISTRY + TRIGGER TAXONOMY (the FIFTH and SIXTH shared surfaces, neither in annex G-f -- they are a COUPLED PAIR and registering in one alone is the half-registration the estate''s coverage census refuses): exactly 4 new members, all client_scoped, kb_binding.* 3->7, the whole registry moved by exactly +4, each carrying its ruled decision at the ACTIVE taxonomy version (agent_proposed=notification following kb_binding.proposed; declined/decline_reset/expired=ignore following signed/revoked), coverage proven WHOLE over the ENTIRE registry both before and after, and the taxonomy version count UNMOVED (additive registration, never a flip), and an UNREGISTERED type is STILL refused by the live trigger via a real insert probe -- registering two names opened no hole. NO new role (14, unmoved -- no roles-bootstrap twin owed), NO wake_credentials CHECK change, NO wake_engine_sources row (2, both still disabled -- PR-4''s). clara.control_witnesses ships EMPTY, RLS enabled+forced, zero non-owner grants, both guard triggers attached -- the post-time interlock is keyed on IDENTITY (a witnessed prosrc sha) and is therefore CLOSED until PR-3 mints its row. No table in workflow/graphile_worker/spike touched.';
+  raise notice 'binding proposal pr-1 tail: OK -- D1 INVENTORY = THREE WRITER BODIES (propose_vendor_identity_binding recut in place, its delta proven by RE-SUBSTITUTION against the byte-exact prestate; sign_vendor_identity_binding DROPped at (uuid,text) and recreated at (uuid,text,text) with the 2-arg overload proven GONE and its ACL re-made; _tf_vendor_identity_binding_update CoR-ed, its five 0028 guard terms surviving verbatim beside nine new maker/checker ones, all read on the comment-stripped live prosrc). The OTHER 16 DO-NOT-TOUCH bodies re-pin BYTE-IDENTICAL to their SS1 prosrc stash (incl. _approve_entry_core, left undisturbed for PR-3''s own pre-image; _derive_vendor_binding_proposal re-pinned against de0f5807... and _coding_lane_core against 721a6704... independently of the stash), and each of the 17 new function NAMES (plus the recut signer) resolves at exactly one pg_proc row under every arity. G4: the registry refused a REAL mismatched-pair probe by ck_agent_receipt_surfaces_shim_matches_item EXACTLY (both halves individually lawful, so nothing else could have refused it), refused a REAL uppercase item/shim probe by one of the two widened regexes (isolation between THEM is structurally impossible once the pairing CHECK exists, and the file says so rather than asserting an evaluation order), and ADMITTED a real f_a42 probe -- the pre-existing f_a family survived the pb_ widening -- with both widened definitions read byte-exact; agent_receipt_surfaces holds 9 rows, pb_binding is shim_exists+wired+conforms+19-col+zero-dark, the census returns 9, agent_receipts_visible''s 19-column contract is unchanged and nothing is dark. binding_agent_receipts: RLS enabled+forced, owner-only, ZERO non-owner grants, ZERO app-role DML across 8 roles, both append-only triggers attached. vendor_identity_bindings: 12 new columns at the right type/nullability (17+12=29 total), 10 new CHECKs + 2 composite DEFERRABLE FKs present (the firm-congruent receipt pointer and its RECIPROCAL twin, so a same-firm receipt of another binding cannot be swapped in), ck_vib_proposed_by_agent_honest read from the catalog as a BIDIRECTIONAL EQUALITY, and effective_proposer GENERATED so no writer can set it to disagree with the columns it comes from. G8 + gate B5: uq_vib_one_active_binding asserted BY PROPERTY from pg_index (unique+valid+ready+live, keys {client_id,counterparty_id}, predicate status IN (proposed,live) -- a proposed-ONLY predicate loses the propose-vs-sign transition race), never by name; uq_vib_one_live unmoved. ACL: both wake verbs EXECUTE-able by clara_wake_filing AND clara_wake_interactive and by none of 6 other roles; decline / reset_binding_decline / eligible_binding_signer_count / binding_identity_review and the recut signer are clara_authenticated-only; every internal (_binding_extra_blocker, _binding_suppression, _expire_stale_proposals, _derive_vendor_binding_basis, _propose_vendor_binding_agent_core) is ungranted; exactly 4 allowlist rows, all 4 ruled, and NO non-ruled wake kind names either verb. EVENT-TYPE REGISTRY + TRIGGER TAXONOMY (the FIFTH and SIXTH shared surfaces, neither in annex G-f -- they are a COUPLED PAIR and registering in one alone is the half-registration the estate''s coverage census refuses): exactly 4 new members, all client_scoped, kb_binding.* 3->7, the whole registry moved by exactly +4, each carrying its ruled decision at the ACTIVE taxonomy version (agent_proposed=notification following kb_binding.proposed; declined/decline_reset/expired=ignore following signed/revoked), coverage proven WHOLE over the ENTIRE registry both before and after, and the taxonomy version count UNMOVED (additive registration, never a flip), and an UNREGISTERED type is STILL refused by the live trigger via a real insert probe -- registering two names opened no hole. NO new role (14, unmoved -- no roles-bootstrap twin owed), NO wake_credentials CHECK change, NO wake_engine_sources row (2, both still disabled -- PR-4''s). clara.control_witnesses ships EMPTY, RLS enabled+forced, zero non-owner grants, both guard triggers attached -- the post-time interlock is keyed on IDENTITY (a witnessed prosrc sha) and is therefore CLOSED until PR-3 mints its row. No table in workflow/graphile_worker/spike touched.';
 end
 $bp1_tail$;

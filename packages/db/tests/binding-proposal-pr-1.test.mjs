@@ -29,7 +29,7 @@ import { buildWorld } from "./x1-helpers.mjs";
 import {
   has28, has29, seedPayableAccount, propose, sign, revoke,
   signLive, withPostTimeControl, postTimeControlLive, POST_TIME_MARKER,
-  recutApproveCore, restoreApproveCore,
+  recutApproveCore, restoreApproveCore, seedClientHardIdentifier
 } from "./x36-vendor-binding-helpers.mjs";
 import { insertUser, addMember } from "./rig-fixtures.mjs";
 import {
@@ -68,6 +68,10 @@ before(async () => {
   if (!live) return;
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
+  // FOLD-7: the own-client identifier wall cannot be EVALUATED for a client with no recorded
+  // hard identifier, and reading that no-match as "not the client's" would be absence-as-evidence
+  // — so the door refuses instead. buildWorld records none; every binding window needs one.
+  await seedClientHardIdentifier(w.firms.A, w.clients.A1);
   await seedPayableAccount(w.firms.A, w.clients.A2);
   // H5: the world's own onboarding-bridge machinery leaves one departed admin per client inside
   // the 90-day roster window, so no firm it builds is SOLO and 裁-32's solo arm would be
@@ -2195,6 +2199,126 @@ test("bp1.C3-identity — TEXT does not open the gate, in any of the three shape
   const signed = await withPostTimeControl(
     () => sign(w.users.alice, { binding: p.binding_id, opKey: opk("c3ok") }));
   assert.equal(signed.status, "live", "recut AND witnessed — the gate opens for the reviewed bytes");
+});
+
+test("bp1.C3-wrong-proc FOLD-6 — a witness naming ANOTHER live function, with its REAL sha, refuses", async () => {
+  failBp1(live);
+  // A registry is a place to record an ANSWER, never a place to be told the QUESTION. An earlier
+  // cut hashed whatever `proc` the row named, so a witness minted against some unrelated live
+  // function — carrying that function's genuine sha, so every internal consistency check passed —
+  // would have opened this gate. The door now writes the expected identity itself and resolves it
+  // to an OID; the row must name THAT before its sha is even looked at.
+  const { cp, basis } = await eligibleVendor("C3wp");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  const other = "clara._binding_normalize(text)";
+  const otherSha = (await rootQuery(
+    "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as s from pg_proc p where p.oid = $1::regprocedure",
+    [other])).rows[0].s;
+  await rootQuery(
+    `insert into clara.control_witnesses(control, proc, prosrc_sha, minted_in_migration)
+     values ($1, $2, $3, 'rig-fixture:C3-wrong-proc')`, [POST_TIME_MARKER, other, otherSha]);
+  try {
+    // The witness is internally PERFECT — the function exists and the sha is its real one.
+    const consistent = await rootQuery(
+      `select (encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') = w.prosrc_sha) as ok
+         from clara.control_witnesses w join pg_proc p on p.oid = to_regprocedure(w.proc)
+        where w.control = $1`, [POST_TIME_MARKER]);
+    assert.equal(consistent.rows[0].ok, true,
+      "control: the wrong-proc witness is internally consistent — only the door's own pin can refuse it");
+    const err = await assertRaises("CLR36",
+      () => sign(w.users.alice, { binding: p.binding_id, opKey: opk("c3wp") }),
+      "a witness pointing at the wrong function");
+    assert.equal(reasonOf(err), "post_time_control_absent");
+  } finally {
+    await rootQuery("delete from clara.control_witnesses where control = $1", [POST_TIME_MARKER]);
+  }
+});
+
+test("bp1.C3-spoof-under-stale FOLD-6 — the three marker shapes refuse under a STALE witness too", async () => {
+  failBp1(live);
+  // bp1.C3-identity drives the three text shapes against an EMPTY registry. This drives them
+  // against a registry that HAS a row for the right function whose sha is stale — the state a
+  // later lane creates by recutting a witnessed control and forgetting to re-witness. Text still
+  // buys nothing: the gate compares bytes, and these are not the reviewed bytes either.
+  const { cp, basis } = await eligibleVendor("C3su");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  const sig = "clara._approve_entry_core(jsonb,uuid,uuid,text,text)";
+  const baseSha = (await rootQuery(
+    "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as s from pg_proc p where p.oid = $1::regprocedure",
+    [sig])).rows[0].s;
+  await rootQuery(
+    `insert into clara.control_witnesses(control, proc, prosrc_sha, minted_in_migration)
+     values ($1, $2, repeat('a', 64), 'rig-fixture:C3-stale')`, [POST_TIME_MARKER, sig]);
+  try {
+    for (const [label, edit] of [
+      ["string-literal", (def) => def.replace("\ndeclare", "\ndeclare\n  v_c3 text := 'binding_post_time_recheck_v1';")],
+      ["dollar-body", (def) => def.replace("\ndeclare", "\ndeclare\n  v_c3 text := $c3$ binding_post_time_recheck_v1 $c3$;")],
+      ["unused-variable", (def) => def.replace("\ndeclare", "\ndeclare\n  v_binding_post_time_recheck_v1 boolean := true;")],
+    ]) {
+      const { original } = await recutApproveCore(edit);
+      const err = await assertRaises("CLR36",
+        () => sign(w.users.alice, { binding: p.binding_id, opKey: opk(`c3su${label.slice(0, 6)}`) }),
+        `${label} under a stale witness`);
+      assert.equal(reasonOf(err), "post_time_control_absent", `${label}: refused for the control reason`);
+      await restoreApproveCore(original, baseSha);
+    }
+  } finally {
+    await rootQuery("delete from clara.control_witnesses where control = $1", [POST_TIME_MARKER]);
+  }
+});
+
+test("bp1.A3g FOLD-7 — a client with NO recorded hard identifier cannot bind at all", async () => {
+  failBp1(live);
+  // ABSENCE IS NOT EVIDENCE. The own-client wall asks "is this vendor id the CLIENT'S own?" — and
+  // a client with no recorded identifier answers "no match" for exactly the same reason a genuinely
+  // foreign vendor does. The wall cannot be evaluated, so the door refuses rather than waving the
+  // case through. The cost is real and named: record the client's SSM/TIN first.
+  const bare = w.clients.A2;   // seedPayableAccount'd in before(), but NO identifier recorded
+  const zero = await rootQuery(
+    "select count(*)::int c from clara.client_identifiers where client_id=$1 and kind in ('tin','ssm')",
+    [bare]);
+  assert.equal(zero.rows[0].c, 0, "control: this client really has no recorded hard identifier");
+  const cpBare = await seedWindow(w, "A3g-bare", { dates: DATES_OK, client: bare });
+  const e1 = await assertRaises("CLR36",
+    async () => proposeAsAgent(await filingActor(),
+      { client: bare, counterparty: cpBare.id, basis: { citations: [{ region_id: cpBare.id }] } }),
+    "a client with no recorded identifier");
+  assert.match(e1.message, /binding_client_identity_unproven/);
+  const row = (await listCandidates(await filingActor(), bare))
+    .find((x) => x.counterparty_id === cpBare.id);
+  assert.equal(row?.reason, "binding_client_identity_unproven", "the read verb says the same word");
+
+  // ONE kind is enough to evaluate against — NOT both. Many Malaysian SMEs hold an SSM long
+  // before a TIN, and demanding both would strand them for a reason unrelated to this vendor.
+  await seedClientHardIdentifier(w.firms.A, bare, { kind: "tin" });
+  const cpOk = await seedWindow(w, "A3g-ok", { dates: DATES_OK, client: bare });
+  const basisOk = await lawfulBasis(w.firms.A, bare, cpOk.id);
+  const ok = await proposeAsAgent(await filingActor(),
+    { client: bare, counterparty: cpOk.id, basis: basisOk });
+  assert.equal(ok.status, "proposed", "a TIN-only client evaluates against the TIN and proceeds");
+
+  // …and the wall still fires for that one recorded kind.
+  const clash = await rootQuery(
+    "select value_normalized v from clara.client_identifiers where client_id=$1 and kind='tin'", [bare]);
+  const cpClash = await seedUniqueFamilyVendor(w.firms.A, bare, "A3g-clash",
+    { registration: clash.rows[0].v });
+  await seedWindow(w, "A3g-clash", { dates: DATES_OK, client: bare, vendor: cpClash });
+  const e2 = await assertRaises("CLR36",
+    async () => proposeAsAgent(await filingActor(),
+      { client: bare, counterparty: cpClash.id, basis: { citations: [{ region_id: cpClash.id }] } }),
+    "a vendor whose id is the client's own TIN");
+  assert.match(e2.message, /binding_identifier_is_own_client/);
+});
+
+test("bp1.B1-invite-src — the live signer-count body contains no firm_invites read", async () => {
+  failBp1(live);
+  // The arm was dropped in the second fold round; this pins that it stayed dropped, in CODE
+  // rather than by the count happening to agree on one fixture.
+  for (const sig of [SIGNER_COUNT_SIG, "clara.binding_signer_roster(uuid)"]) {
+    const r = await rootQuery(strippedSrc, [sig]);
+    assert.ok(!r.rows[0].src.includes("firm_invites"),
+      `${sig} still reads firm_invites — an invitee is not a signer`);
+  }
 });
 
 test("bp1.C3-registry — every registered witness still matches its live body", async () => {

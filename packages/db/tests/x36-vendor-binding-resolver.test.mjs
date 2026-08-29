@@ -32,7 +32,7 @@ import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import {
   has28, has29, seedPayableAccount, seedLiveBinding, seedBareDocument, seedF123Evidence, signLive,
-  seedVendorCounterparty, seedApprovedEntry, propose, sign,
+  seedVendorCounterparty, seedApprovedEntry, propose, seedClientHardIdentifier,
 } from "./x36-vendor-binding-helpers.mjs";
 
 let has0028 = false;
@@ -45,6 +45,10 @@ before(async () => {
   if (!has0028) { noteLane("0028 absent -- x36-vendor-binding-resolver battery FAILS loudly rather than skipping"); return; }
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
+  // FOLD-7: the own-client identifier wall cannot be EVALUATED for a client with no recorded
+  // hard identifier, and reading that no-match as "not the client's" would be absence-as-evidence
+  // — so the door refuses instead. buildWorld records none; every binding window needs one.
+  await seedClientHardIdentifier(w.firms.A, w.clients.A1);
 });
 after(async () => { printLaneNotes("x36-vendor-binding-resolver"); await endPool(); });
 

@@ -288,7 +288,7 @@ const SALES_LANE_0046_RETIRED_F_A2_PR3_CLOCK_NAMES = ["preview_ocr_sales_evidenc
 const BINDING_PROPOSAL_PR1_CLOCK_NAMES = [
   "_expire_stale_proposals", "_propose_vendor_binding_agent_core",
   "decline_vendor_identity_binding", "wake_list_binding_candidates",
-  "eligible_binding_signer_count",
+  "eligible_binding_signer_count", "binding_signer_roster",
 ];
 
 const CLIENT_FACTS_0055_CLOCK_NAMES = ["record_client_fact"];

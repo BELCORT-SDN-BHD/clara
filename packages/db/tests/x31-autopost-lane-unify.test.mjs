@@ -53,7 +53,7 @@ import {
   seedF123Evidence,
   seedPayableAccount,
   seedVendorCounterparty,
-  signLive,
+  signLive, seedClientHardIdentifier
 } from "./x36-vendor-binding-helpers.mjs";
 
 const AMOUNT = 100_000;
@@ -426,6 +426,10 @@ before(async () => {
   await requireReady();
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
+  // FOLD-7: the own-client identifier wall cannot be EVALUATED for a client with no recorded
+  // hard identifier, and reading that no-match as "not the client's" would be absence-as-evidence
+  // — so the door refuses instead. buildWorld records none; every binding window needs one.
+  await seedClientHardIdentifier(w.firms.A, w.clients.A1);
   await upsertPayableAccount(w.users.alice, {
     client: w.clients.A1,
     code: "400-000",
