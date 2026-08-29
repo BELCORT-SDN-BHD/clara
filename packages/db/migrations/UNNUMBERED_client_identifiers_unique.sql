@@ -605,6 +605,22 @@ begin
   -- that is not this index) and it RE-READS the row rather than inferring
   -- presence from the 23505. Both rows carry kind='bank_account', already
   -- CHECK-admitted (0007:227).
+  --
+  -- WHY THE NARROW GUARD HERE IS DEFENCE-IN-DEPTH AND NOT A LIVE BRANCH -- read this
+  -- before "simplifying" either check away. In THIS function the narrow guard and the
+  -- re-read are NOT independent: the re-read's predicate is BYTE-IDENTICAL to the
+  -- pre-check's above it. So whenever the pre-check let the insert through, the
+  -- re-read finds nothing and falls to `raise`, which re-raises the ORIGINAL
+  -- exception unchanged -- exactly what the narrow guard would have done. The guard
+  -- changes the outcome only in a DOUBLY concurrent case: a concurrent commit of this
+  -- same (client, kind, value) AND a foreign unique index violated on the same
+  -- insert, with Postgres reporting the foreign one. No rig cell constructs that and
+  -- none should -- it would have to branch its own assertion on which of two violated
+  -- indexes the server named first. The guard is kept because it is the estate's
+  -- idiom and because any future edit that desynchronises the pre-check from the
+  -- re-read makes it load-bearing again that same day. clara.add_client_identifier is
+  -- the OPPOSITE case: no re-read, so its guard is the only thing between a foreign
+  -- 23505 and a mislabelled CLR10, and rig cell ci-9 kills that mutant behaviourally.
   if not exists (select 1 from clara.client_identifiers
       where firm_id = c.firm and client_id = p_client and kind = 'bank_account'
         and value_normalized = v_house) then
@@ -911,7 +927,23 @@ begin
   -- uses at its bank_accounts insert. The handler is NARROW (re-raises anything
   -- that is not this index) and it RE-READS the row rather than inferring
   -- presence from the 23505. Both rows carry kind='bank_account', already
-  -- CHECK-admitted (0007:227).$g1$, $g2$  -- THE TWO GUARDED client_identifiers INSERTS. Append-only
+  -- CHECK-admitted (0007:227).
+  --
+  -- WHY THE NARROW GUARD HERE IS DEFENCE-IN-DEPTH AND NOT A LIVE BRANCH -- read this
+  -- before "simplifying" either check away. In THIS function the narrow guard and the
+  -- re-read are NOT independent: the re-read's predicate is BYTE-IDENTICAL to the
+  -- pre-check's above it. So whenever the pre-check let the insert through, the
+  -- re-read finds nothing and falls to `raise`, which re-raises the ORIGINAL
+  -- exception unchanged -- exactly what the narrow guard would have done. The guard
+  -- changes the outcome only in a DOUBLY concurrent case: a concurrent commit of this
+  -- same (client, kind, value) AND a foreign unique index violated on the same
+  -- insert, with Postgres reporting the foreign one. No rig cell constructs that and
+  -- none should -- it would have to branch its own assertion on which of two violated
+  -- indexes the server named first. The guard is kept because it is the estate's
+  -- idiom and because any future edit that desynchronises the pre-check from the
+  -- re-read makes it load-bearing again that same day. clara.add_client_identifier is
+  -- the OPPOSITE case: no re-read, so its guard is the only thing between a foreign
+  -- 23505 and a mislabelled CLR10, and rig cell ci-9 kills that mutant behaviourally.$g1$, $g2$  -- THE TWO GUARDED client_identifiers INSERTS. Append-only
   -- (t_client_identifiers_append_only, 0007:679-680): if-not-exists, NEVER
   -- upsert -- there is no unique index to ON CONFLICT against, deliberately
   -- (0007:235-237, sibling-client conflicts must stay representable), so the

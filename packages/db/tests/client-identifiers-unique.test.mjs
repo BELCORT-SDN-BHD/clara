@@ -15,11 +15,16 @@
 //     worthless next to a wall that refuses everything. In particular ci-3 proves the sibling
 //     conflict 0007:235 kept representable is STILL representable — the same value on a
 //     different client — which is the one thing this ruling must not have broken.
-//   * NARROWNESS is proven PER WRITER, because the two handlers are separate code: ci-9 covers
-//     clara.add_client_identifier and ci-9b covers clara._add_bank_account_core. Drop the
-//     `if v_con is distinct from ... then raise` line from ONE writer and exactly ONE of the two
-//     reds. An earlier draft of this header claimed ci-9 covered "either writer" — it does not,
-//     and that false claim is what left _add_bank_account_core's narrowness unguarded.
+//   * NARROWNESS is proven PER WRITER, and the two proofs are NOT the same strength — say so
+//     rather than let the naming imply symmetry. ci-9 is a behavioural mutant-kill for
+//     clara.add_client_identifier: it has no re-read, so deleting its narrow guard turns a
+//     foreign 23505 into the typed CLR10 and ci-9 reds. ci-9b covers
+//     clara._add_bank_account_core, where the guard and the re-read share a predicate and are
+//     therefore NOT separable — ci-9b proves the handler does not SWALLOW a foreign violation
+//     (it escapes raw, naming the constraint that fired), but deleting that writer's guard does
+//     NOT red it. There, the guard's standing coverage is ci-12's `guards` count, which is
+//     STATIC. Two earlier drafts of this header over-claimed here — first that ci-9 covered
+//     "either writer", then that ci-9b killed the guard mutant. Neither was true.
 //   * ci-8 and ci-10 are the INTERLEAVE cells: two sessions, the block PROVEN with
 //     waitBlockedByOrThrow (pg_blocking_pids), never a sleep. Drop the index and no side ever
 //     blocks, so they red. ci-10b is NOT one of them — its winner COMMITS before the loser's
@@ -473,12 +478,24 @@ test("ci-9 · NARROWNESS: a unique_violation that is NOT this index's escapes th
 });
 
 FORMS.forEach(([form, where], i) => {
-  test(`ci-9b.${form} · NARROWNESS, second writer: a FOREIGN unique_violation at ${where} escapes _add_bank_account_core RAW too`, async (t) => {
+  test(`ci-9b.${form} · NO-SWALLOW, second writer: a FOREIGN unique_violation at ${where} escapes _add_bank_account_core RAW, carrying the constraint that fired`, async (t) => {
     if (gate(t)) return;
-    // ci-9 covers add_client_identifier ONLY. The two writers' handlers are separate code — and
-    // so are the bank core's OWN two — so this runs per guarded insert. It also probes a path
-    // ci-9 structurally cannot: here the narrow re-raise must survive the CONTINUE branch, i.e.
-    // the handler must not read "some unique_violation happened" as licence to carry on.
+    // WHAT THIS CELL PROVES, stated exactly, because an earlier draft of it over-claimed. It
+    // proves the bank core does NOT SWALLOW a foreign unique_violation: the call fails, raw, with
+    // the constraint that actually fired. That is the property that matters at this door — its
+    // handler has a CONTINUE branch, and a continue on a foreign violation would carry on past a
+    // write that never happened.
+    //
+    // WHAT IT DOES NOT PROVE, and cannot: it is not a mutant-kill for the narrow guard here.
+    // Delete `if v_con is distinct from ... then raise; end if` from this handler and this cell
+    // STILL PASSES — the re-read below it filters on `client_id = p_client`, this cell plants the
+    // colliding row on a DIFFERENT client, so the re-read finds nothing, falls to the bare
+    // `raise`, and re-raises the identical 23505 with the identical constraint name. The guard
+    // and the re-read are not separable in this writer (see the migration's own note beside the
+    // handler: their predicates coincide). The narrow guard's standing coverage here is STATIC —
+    // ci-12's `guards` count going 2 -> 1 — not behavioural, and the PR's re-verify recipe says
+    // so rather than promising a mutant kill it will not get. ci-9 IS the behavioural kill, for
+    // add_client_identifier, which has no re-read to mask it.
     const sc = await bankScaffold(`ci9b${form}`, String(1704 + i));
     const planted = sc[form];
     const idx = `ci9b_foreign_uq_${form}`;
