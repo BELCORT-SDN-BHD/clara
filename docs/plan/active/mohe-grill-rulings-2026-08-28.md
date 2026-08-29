@@ -337,3 +337,164 @@ shape floor stands and PR-e's card must say "basis unresolved" on a null/empty e
   constraint 14, Wave C after F-A7b merges (裁-8), the pre-beta queue as parallel lanes, every
   code change through the full ladder. Owner-level questions batch to the morning; nothing
   irreversible outside the grants is taken overnight.
+
+## 裁-23 … 裁-28 · The 2026-08-29 morning sitting (one question per turn, 大白话 each)
+
+*The overnight batch (`mohe-owner-batch-2026-08-29.md`) was taken the same way as the 08-28
+sitting: every open decision put one at a time, in 大白话, cost of each arm stated, ruled on the
+spot. Six entries. An OVERRULED or WIDENED recommendation is marked as such, and a dissent that
+was argued stays on file — a ruling that overrides a recommendation must still show what was
+argued.*
+
+### 裁-23 · 裁-21's COA-template gate — all TWELVE ruled, plus the maintenance model
+
+Each answer is written onto its own question in `coa-template-gate-record.md`; the ones that move
+the design are these.
+
+- **Q1 — there is no existing BELCORT chart, so the template is RESEARCH-DERIVED.** Official
+  Malaysian sources + Malaysian accounting best practice + what mainstream Malaysian accounting
+  software ships, **newest editions**; the agent adopts the best practice it finds and
+  **publishes it directly — no owner review of the draft**: *"你自己找到了 best practices 后不用我审,
+  直接用"*. The gate's fail-closed default (an MPERS-grounded draft left unpublished for the owner
+  to publish) is **superseded**: the template ships **published**, and it still applies to no
+  client until a human clicks.
+- **Q2 — numbering follows the same researched best practice, and explicitly NEITHER legacy
+  convention**: *"两个都不要用旧的东西"* — not the estate seed's 4-digit blocks by habit, not ROME
+  PROPERTIES' carried-down `300-000`. **OVERRULED:** the recommendation was "4-digit blocks"; the
+  research decides, not either incumbent.
+- **Q3 — Clara proposes the trim → a bookkeeper may EDIT the proposal (toggle families) and
+  applies it → an admin publishes the template.** Per the recommendation, **widened** by the
+  owner's own confirmation that the proposal is editable before it is applied and that accounts
+  can be added or removed afterwards.
+- **Q4 — BELCORT's chart wins on a takeover**: the predecessor's trial balance is mapped onto it
+  at opening balances, two charts on one client are refused, and the "answer no at onboarding"
+  escape hatch stays. Per the recommendation.
+- **Q5 — not automatic.** A separate human click after the client is created, consistent with Q3.
+  Per the recommendation.
+- **Q6 — industry unknown at apply time: Clara ASKS FIRST.** An in-thread question to the human;
+  she proposes the full trim once it is answered, and the core family may be applied meanwhile.
+  She never guesses the industry from the client's name. **WIDENED:** the recommendation was
+  core-only with the absent axis named; the ask is now part of the behaviour, not a fallback.
+- **Q7 — add the `trade_nature` interview question** (goods / services / both).
+- **Q8 — tax-sensitive expenses in their own accounts: YES, and the LIST comes from the
+  research** (LHDN add-back items, newest edition) — **not** fixed to the eight the design
+  proposed. **WIDENED:** the shape is the recommendation's, the content is the research's.
+- **Q9 — re-word the onboarding question** to *"Start this client from the firm's standard chart
+  of accounts"*; the "LHDN-aligned" claim goes.
+- **Q10 — the equity section swaps by entity type** (Sdn Bhd / sole proprietor / partnership).
+- **Q11 — statutory-payable names follow mainstream Malaysian naming, per the research** — no
+  fixed BELCORT wording. **WIDENED:** the recommendation asked the owner for his own words; he
+  handed the question to the same research lane.
+- **Q12 — MSIC 2008, with an edition stamp on every recorded code.**
+
+**The COA maintenance model** (the owner asked for it in the same turn, so it is ruled, not a
+note): it is **NOT a background sync**. Clara proposes at onboarding; a later template edit never
+touches an applied chart (D-2's copy-versioning is the structural reason); the **drift READ**
+shows divergence; Clara may **PROPOSE single-account additions in chat** (`wake_upsert_account`
+is already allowlisted for `interactive_client`) — every structural change is propose → human
+click; and a human may also maintain the chart by hand.
+
+**Build consequence.** A **research lane precedes PR-0** — official sources + best practice + a
+survey of what mainstream Malaysian software ships, newest editions. The template ships
+PUBLISHED (the owner waived the review) and applies to no client until the human click. The
+design is trued at Q1/Q3/Q6/Q8/Q11 and their D-numbers.
+
+### 裁-24 · 裁-19's OQ-1 — PHYSICAL, in the append-only shape (a HYBRID; amended, not superseded)
+
+**The gating question** was whether 裁-19's *"merge moves the open items"* named the OUTCOME or
+the MECHANISM. The design recommended the canonicalising READ layer and dissented from the
+mechanism on constraint-1 grounds (D-01). **Ruled in two steps, both on the record.** The owner
+first chose *"physically rewrite the invoice rows"*. **The orchestrator's DISSENT was put and is
+recorded:** the append-only wall is the audit chain, and constraint 14's operative clause forbids
+weakening a product mechanism for convenience. The owner then chose the variant that **keeps**
+the wall:
+
+> For every **OPEN** item of the merged party in an **UNFROZEN** period, **append a "re-home
+> pair"** — the old row marked **superseded**, a new row under the **survivor** carrying the
+> **ORIGINAL date** (so aging is preserved) and a **back-pointer** to the old one. An **un-merge
+> appends the reverse pair.** **Frozen fiscal years are not touched at all** — those rows fold in
+> the **READ layer only**, and sealed snapshots stay as they are.
+
+So the canonicalising read layer **STAYS** — it is what frozen years use — **and** a re-home
+**WRITE door is added** over it for open items in open periods. **D-01 becomes a HYBRID, and the
+design set is AMENDED, not superseded.**
+
+The other six:
+
+- **OQ-2** — keep a visible `recorded_counterparty_id` on aging and statement rows: **YES.**
+- **OQ-3** — sealed snapshots keep the **recorded** party: **LEAVE.**
+- **OQ-4** — the un-merge floor is **admin, human-signed — and Clara MAY PROPOSE an un-merge** as
+  a needs-you item; the admin clicks. **WIDENED** from "admin, human-only, no agent path".
+- **OQ-5** — **no separate closed-FY rung**: the six entanglement rungs plus OQ-1's frozen-year
+  clause cover it.
+- **OQ-6** — fix **M9** (`list_open_items_by_counterparty` passing the firm id where a client id
+  is expected) **INSIDE PR-1**, named in the PR body.
+- **OQ-7** — `counterparty.unmerged` → **`context_update`**.
+
+### 裁-25 · 裁-18b's binding-proposal gate — eight ruled, one OVERRULED, one WIDENED
+
+- **G1 — arm A.** Wake kinds `filing` + `interactive`; triggers (i) the filing lane's own turn
+  after it files an invoice and (ii) the human ask from the *admin / vendor-bindings* panel;
+  **no clock sweep as the trigger** — but see G7, where the **expiry** sweep is ruled in on its
+  own grounds. The read verb `wake_list_binding_candidates` ships.
+- **G2 — closed by fact, not by ruling.** 裁-22 merged as `0143` carrying
+  `_resolve_proposal_basis(p_documents uuid[], …)` — the document-SET shape the gate asked for.
+  There is nothing left to widen and **PR-2 does not hold**.
+- **G3 — the DB computes eligibility and Clara asks the read verb**; `_coding_lane_core` is
+  untouched. The owner asked why the LLM should not just count: counting is an authoritative
+  number (PRD §6), one fact gets one definition, and the read verb **is** her check.
+- **G4 — arm A.** Widen the receipt-surface registry key to a `pb_*` family and register
+  `pb_binding`.
+- **G5 — the premise changed.** 裁-17's ninth `row_kind` is live at `0146`, so the "sequence
+  after it" question is moot: the **tenth row_kind SHIPS**, as its own PR inside this item (the
+  door first, the inbox row next).
+- **G6 — OVERRULED.** The recommendation was to record the vanished post-time binding re-check
+  and build it elsewhere. The owner **restores it INSIDE 裁-18**, as its own PR with its own D1
+  window (`_approve_entry_core` is replaced); **the item's dates move.** Explained to him before
+  the ruling: the draft-time check survives, the post-time one retired with `execute_rule_post`
+  at `0118`, and the exposure is a stale identity attribution, not a wrong number.
+- **G7 — WIDENED: BOTH ride this item.** The `decline` verb (admin floor, reason required,
+  audited, `proposed → declined`, read by the loop brake) **and** the expiry sweep (a new engine
+  source plus its enable ceremony; both existing sources stay disabled). The recommendation had
+  the sweep severed.
+- **G8 — take it.** The partial unique index, one open proposal per (client, vendor); the human
+  door's second manual proposal now refuses `binding_conflict`.
+
+**Build consequence — 裁-18b becomes FIVE PRs:** PR-1 the door + `wake_list_binding_candidates` +
+`decline` + the one-open-proposal index + the `pb_*` registry widening · PR-2 the tenth
+`row_kind` · PR-3 the post-time re-check (`_approve_entry_core`, **its own D1 window**) · PR-4
+the expiry sweep engine source (+ the enable ceremony) · plus the basis wiring onto `0143`.
+**Two D1 windows minimum** — PR-3's, and PR-1's if any live writer body turns out to move.
+
+### 裁-26 · The admission token gains an EMAIL WALL — bound at issue, in P4's UI tranche
+
+**Context put (hardening B's finding, re-verified against `0145`):** `create_firm` binds an
+admission token to **no identity** — any non-agent subject with no active membership who holds
+the plaintext can consume it and become that firm's owner. It is a pure bearer credential, where
+`accept_invite` is email-matched. 裁-16 hashes the token at rest; it does not change **who** may
+present it. **Ruled (per the recommendation):** **bind admission tokens to an email at issue**,
+landing in **P4's UI tranche** — the signup page already collects the address. Until it ships the
+default stands and the token is a bearer credential.
+
+### 裁-27 · T11 N2 — "Amend resolution" ships, at P6
+
+**Context put:** the DB door `resolve_onboarding_plan_item` happily re-resolves an item in any
+state; the card disables settled items; the card is the ONLY surface, so a mis-typed answer is
+uncorrectable from inside the product. **Ruled: arm (b) — "Amend resolution" is allowed on a
+RESOLVED onboarding item**, filed to **P6**. The append-only audit trail already exists, so the
+amend is a new resolution row, never an edit of the old one. Supersedes the fail-closed default.
+
+### 裁-28 · The pricing amounts — NOT RULED; the owner brings his own plan
+
+The pricing-amounts sitting (R8c) was put and the owner **declined to rule today**: he will bring
+his own pricing plan. **The conductor's obligation instead of a ruling:** prepare a data-backed
+brief — the **cost floor measured from live LLM usage**, and the **Malaysian market band** — so
+the owner's plan meets numbers rather than a blank page. **Recorded impact, so nobody treats this
+as a blocker it is not:** it does **not** block the build and does not block beta; it **does**
+block the Stripe product/price objects, the checkout's price display and the first day anyone is
+charged — so it is needed **before P4's checkout wiring**, not before P4.
+
+**What this sitting leaves for the queue.** 裁-21 gains a **research lane before PR-0** · 裁-19
+becomes a **hybrid** (read layer + an append-only re-home write door, frozen years read-only) ·
+裁-18b becomes **five PRs and two D1 windows** · 裁-26 files to **P4's UI tranche** · 裁-27 files
+to **P6** · 裁-28 stays open with a conductor brief owed and a named deadline.
