@@ -762,6 +762,26 @@ const ONBOARDING_OPEN_F_A7B_PR_A_CLOCK_NAMES = ["wake_propose_client_onboarding"
 // entry would red every such leg on a one-name diff that says nothing about clock discipline.
 const G1_WAKE_ENGINE_CLOCK_NAMES = ["set_wake_source_enabled"];
 
+// [裁-21 PR-a, `coa_template_pr_a` -- number claimed at merge prep]: exactly TWO of the
+// thirteen new bodies carry a bare clock token, MEASURED by re-running arm (D)'s own detector
+// over the whole lane surface on the rig, never inferred from the shapes. Both are the SAME
+// "the audit stamp is the clock" idiom every other human writer already on this roster carries
+// (set_wake_source_enabled's enabled_at, set_bank_agency_hold's set_at, cancel_agent_task's
+// cancelled_at):
+//   publish_coa_template  -- `published_at = now()` on the draft->published stamp
+//   retire_coa_template   -- `retired_at   = now()` on the published->retired stamp
+// NEITHER derives a DATE from the session clock, and that is a property of the schema rather
+// than of the bodies' discipline: clara.coa_templates carries NO date-typed column at all --
+// created_at / published_at / retired_at are timestamptz, and the trim keys are text[]. The
+// other eleven bodies are clean on the same detector (the four editor doors, fork, both reads,
+// the two ungranted helpers and both freeze triggers -- coa_template_adoptions' proposed_at /
+// adopted_at are written by PR-b's doors, not by anything in this PR).
+// GATED ON THE MIGRATION STEM, NEVER A NUMBER, for the reason every entry above states: the
+// file is numbered at MERGE, and db-slice-frontiers runs this battery against databases pinned
+// at earlier frontiers where these two functions do not exist -- an unconditional entry would
+// red every such leg on a two-name diff that says nothing about clock discipline.
+const COA_TEMPLATE_PR_A_CLOCK_NAMES = ["publish_coa_template", "retire_coa_template"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -828,6 +848,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("p4_tranche1_invite_rbac$")) names.push(...P4T1_CLOCK_NAMES);
   if (await appliedStem("fa7b_pr_a_client_onboarding_open$")) names.push(...ONBOARDING_OPEN_F_A7B_PR_A_CLOCK_NAMES);
   if (await appliedStem("p4_tranche2_registration_operator_alias$")) names.push(...P4T2_CLOCK_NAMES);
+  if (await appliedStem("coa_template_pr_a$")) names.push(...COA_TEMPLATE_PR_A_CLOCK_NAMES);
   return names.sort();
 }
 

@@ -1130,6 +1130,39 @@ const P4T2_HUMAN_FNS = ["request_firm_registration", "approve_firm_registration"
 const P4T2_UNGRANTED_FNS = ["_create_firm_core"];
 export const P4T2_COHORT = [...P4T2_HUMAN_FNS, ...P4T2_UNGRANTED_FNS];
 
+// 裁-21 PR-a (`coa_template_pr_a` — number claimed at merge prep): the firm-level standard
+// chart of accounts, TEMPLATE half. NINE human doors, clara_authenticated ONLY — agent + both
+// wake roles + clara_runtime gain ZERO, and that is the design's own claim rather than an
+// omission: 裁-21 adds no agent path to the BULK act at all (design D-5/Annex E — "one
+// rationale covering forty accounts is not forty rationales"), so there is no wake sibling for
+// any of these and no allowlist row is minted anywhere in this PR.
+//   fork_coa_template · upsert/remove_coa_template_family · upsert/remove_coa_template_account ·
+//   publish_coa_template · retire_coa_template — the seven WRITERS, admin floor body-enforced
+//   via `_human_ctx(role_rank('admin'))` (gate ruling Q3: SETTING the firm's standard is a
+//   policy act, using it is daily work — the bookkeeper-floored apply is PR-b's).
+//   list_coa_templates · get_coa_template — the two READS, and they are INVOKER-rights on
+//   purpose (the trial_balance idiom): their floor is clara_authenticated + the tables' own
+//   scoped RLS, not a rank check, because db-migrations.md requires the SELECT grant that a
+//   rank check inside a reader would be defeated by. Same posture as coa_accounts' own
+//   p_coa_accounts_human on the real chart.
+const COA_TEMPLATE_PR_A_HUMAN_FNS = [
+  "fork_coa_template", "upsert_coa_template_family", "remove_coa_template_family",
+  "upsert_coa_template_account", "remove_coa_template_account",
+  "publish_coa_template", "retire_coa_template",
+  "list_coa_templates", "get_coa_template",
+];
+// The FOUR internals — the content-hash helper, the shared edit guard, and the two publication
+// -freeze trigger functions — are granted to NOBODY, so the sweep's expected-false is the
+// assertion that they are reachable only as clara_fn_owner internals. Enumerated here (not
+// omitted) so the cohort census can catch one of them being retired or renamed.
+const COA_TEMPLATE_PR_A_UNGRANTED_FNS = [
+  "_coa_template_content_sha256", "_coa_template_for_edit",
+  "_tf_coa_template_freeze", "_tf_coa_template_child_freeze",
+];
+export const COA_TEMPLATE_PR_A_COHORT = [
+  ...COA_TEMPLATE_PR_A_HUMAN_FNS, ...COA_TEMPLATE_PR_A_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1230,6 +1263,10 @@ export const ALLOWED = {
     // P4 tranche 2 [registration + operator approval, 裁-11] the three human doors — see the
     // block above.
     ...P4T2_HUMAN_FNS,
+    // 裁-21 PR-a [the firm-level standard chart of accounts, TEMPLATE half] the seven admin
+    // writers + the two invoker-rights reads — clara_authenticated ONLY; agent + both wake
+    // roles gain ZERO, by the design's own non-goal rather than by omission. See the block above.
+    ...COA_TEMPLATE_PR_A_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1556,6 +1593,10 @@ export async function grantMatrixFailures() {
     );
   }
   failures.push(...cohortFailures("P4 tranche 2 registration + operator approval", P4T2_COHORT, liveNames));
+  // 裁-21 PR-a — frontier-tolerant by cohortFailures' own rule: a cohort that is entirely
+  // absent (every pre-PR-a chain) returns no failure, while a PARTIAL cohort — one of the
+  // thirteen retired or renamed without truing this roster — is caught by name.
+  failures.push(...cohortFailures("裁-21 PR-a COA template", COA_TEMPLATE_PR_A_COHORT, liveNames));
   // The same signature-exact companion as P4T1's above, scoped to P4T2's own four names --
   // review law 3 applied from the start this round, not discovered by a later mutant panel.
   const p4t2Sigs = [
