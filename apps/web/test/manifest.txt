@@ -109,6 +109,7 @@ lib/coding/doors.test.ts
 lib/coding/loaders.test.ts
 lib/coding/reads.test.ts
 lib/close/api.test.ts
+lib/command/routes.test.ts
 lib/documents/bytes.test.ts
 lib/documents/copy.test.ts
 lib/documents/doors.test.ts
