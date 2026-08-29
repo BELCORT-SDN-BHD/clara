@@ -154,6 +154,14 @@ Written down because a wall whose edges are not stated will be trusted past them
   foreign vendor gives, and reading it as the second is absence-as-evidence (`0049:967` refuses
   the same inference one lane over). The FE surfaces it as *"record this client's SSM or TIN
   first"*, not as an error.
+- **"Recorded" is not yet "comparable" — the rung's own hairline tail.** Rung 1 asks whether a
+  `client_identifiers` row of kind `tin`/`ssm` exists; rung 2 compares it through
+  `clara._binding_hard_id_norm`, which is NULL for a value carrying no alphanumerics at all.
+  `0007:228` forbids only a blank after `btrim`, so a recorded identifier of `"---"` clears rung 1
+  and is invisible to rung 2 — the same absence-cannot-be-evaluated shape, one level down. The fix
+  is one conjunct (`… is not null` on rung 1, so both rungs range over the same set) and it can
+  only tighten. **Open, awaiting a ruling** — recorded here rather than argued away from `0007`'s
+  CHECK, which would be exactly the derivation this annex refuses one bullet up.
 - **ONE recorded kind is enough, and that leaves a hole.** Requiring both would strand the many
   Malaysian SMEs that hold an SSM long before a TIN, for a reason unrelated to the vendor being
   bound. The consequence: **a TIN-only client cannot detect its own SSM mislabelled as a vendor
