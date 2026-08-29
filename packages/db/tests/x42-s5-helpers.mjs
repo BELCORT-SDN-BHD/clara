@@ -278,17 +278,25 @@ const SALES_LANE_0046_RETIRED_F_A2_PR3_CLOCK_NAMES = ["preview_ocr_sales_evidenc
  *  nothing about clock discipline. The stem (not the number) is the witness because the migration
  *  ships UNNUMBERED and the conductor claims its number at merge.
  *
- *  FIFTH NAME ADDED BY THE 2026-08-30 FOLD ROUND: eligible_binding_signer_count. It was a bare
- *  `count(*)` over active memberships and read no clock at all; H5 made it a DURABLE ROSTER
- *  WINDOW, so it now reads `now()` twice — an invite's `expires_at > now()` and the 90-day
- *  departure window. Both are wall-clock TTLs over timestamptz columns, the lawful class; the
- *  function derives no DATE from the session clock. Added here because the roster is a MEASURED
- *  census of the bodies that read a bare clock token, and a wall that grows a clock read without
- *  joining it is exactly the drift this floor exists to catch. */
+ *  FIFTH NAME, AND IT MOVED HOUSE TWICE IN ONE DAY. The 2026-08-30 fold round first added
+ *  `eligible_binding_signer_count`: it had been a bare `count(*)` over active memberships and read
+ *  no clock at all, and H5 made it a DURABLE ROSTER WINDOW reading `now()` for the 90-day
+ *  departure window. FOLD-8, the same day, then lifted that arithmetic OUT of it into
+ *  `clara.binding_signer_roster` so the count and the date the refusal reports come from ONE
+ *  snapshot — and the count door became a firm-congruent wrapper with no clock read left in it.
+ *  So the fifth name is `binding_signer_roster`, and `eligible_binding_signer_count` is NOT on
+ *  this roster: measured on the live catalog (`position('now()' in prosrc)` — false for the
+ *  count door, true for the roster), not inferred from which one the wall is spelled after.
+ *  The window is a wall-clock TTL over a timestamptz column, the lawful class; the function
+ *  derives no DATE from the session clock.
+ *
+ *  The roster is a MEASURED census, so it is trued at the tip that SHIPS, never at the tip that
+ *  was reviewed — carrying the earlier name forward reds this floor exactly as loudly as omitting
+ *  the new one, which is the property that made the move visible at all. */
 const BINDING_PROPOSAL_PR1_CLOCK_NAMES = [
   "_expire_stale_proposals", "_propose_vendor_binding_agent_core",
   "decline_vendor_identity_binding", "wake_list_binding_candidates",
-  "eligible_binding_signer_count", "binding_signer_roster",
+  "binding_signer_roster",
 ];
 
 const CLIENT_FACTS_0055_CLOCK_NAMES = ["record_client_fact"];
