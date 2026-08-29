@@ -16,9 +16,11 @@
 //
 // MERGE NOTE: this gate is NOT wired into packages/db/package.json's --import chain --
 // deliberately, matching every F-A7 sibling (f-a7-alpha/-beta/-a7b-pr-a/proposal-basis-
-// preintegration-gate.mjs), none of which is wired either. The package-wide sweep always runs
-// against a chain that carries this migration (CI applies HEAD's migrations first), so the
-// allow-missing arm is only ever needed by a hand-run against a pre-MBB-7(a) database --
-// preload it explicitly then:
+// preintegration-gate.mjs), none of which is wired either. Once the migration is NUMBERED
+// (0148, claimed at merge prep) the package-wide sweep runs against a chain that carries it
+// (CI applies HEAD's migrations first) -- while the file was UNNUMBERED the runner skipped it
+// and the battery went RED in the sweep, which is the fail-never-skip shape working as
+// designed (independent review 2026-08-29). The allow-missing arm is therefore only ever
+// needed by a hand-run against a pre-MBB-7(a) database -- preload it explicitly then:
 //   node --test --import ./tests/promotion-dup-open-wall-preintegration-gate.mjs tests/
 process.env.CLARA_ALLOW_MISSING_PROMOTION_DUP_WALL = "1";

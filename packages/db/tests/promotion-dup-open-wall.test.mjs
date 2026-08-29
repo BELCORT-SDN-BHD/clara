@@ -1,6 +1,6 @@
 // MBB-7(a) -- the STRUCTURAL duplicate-open wall on the two agent proposal doors.
 // Design of record: the migration's own header (packages/db/migrations/
-// UNNUMBERED_promotion_dup_open_wall.sql, numbered at merge; rig-replayed as 0153).
+// 0148_promotion_dup_open_wall.sql, the number claimed at merge prep; rig-replayed as 0153).
 //
 // WHAT IS UNDER TEST, and what each part discriminates:
 //   PART A -- Door 1 (clara.wake_propose_identifier_promotion): the partial unique index

@@ -1,7 +1,9 @@
--- UNNUMBERED_promotion_dup_open_wall.sql -- MBB-7(a) (PROGRESS.md "Known issues", 2026-08-29
+-- 0148_promotion_dup_open_wall.sql -- MBB-7(a) (PROGRESS.md "Known issues", 2026-08-29
 -- dawn reviews item 3; owner batch item 12): the two agent PROPOSAL doors get a STRUCTURAL
--- duplicate-open wall. Number claimed at MERGE time (standing law, AGENTS.md + .claude/rules/
--- db-migrations.md); rig-replayed as 0153 against a chain baselined through the live frontier.
+-- duplicate-open wall. Number CLAIMED at merge prep 2026-08-29: 0148, one past the live
+-- frontier 0147 (standing law, AGENTS.md + .claude/rules/db-migrations.md); rig-replayed as
+-- 0153 during the build and by the independent review against the same 0147 chain -- the
+-- number is comment-only, the body is byte-identical to the reviewed file.
 --
 -- =====================================================================================
 -- THE GAP THIS FILE CLOSES -- MEASURED, NOT ASSUMED
