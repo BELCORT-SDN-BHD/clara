@@ -267,6 +267,11 @@ not buildable as written. **→ OQ-12.**
 Each card: **one question · the options · what each costs · the recommendation · the fail-closed default
 if the sitting does not reach it.**
 
+> **ALL SIX ARE RULED — OQ-1 by 裁-33 (2026-08-29 evening), OQ-7/8/10/11/12 by 裁-38 (2026-08-30).**
+> Ledger: `mohe-grill-rulings-2026-08-29.md`. The cards below are kept **verbatim as argued** and each
+> carries its ruling at the end of its own recommendation, so the ruling reads against the argument.
+> **OQ-2/OQ-3/OQ-9 stay lane-open.**
+
 ### D.1 · OQ-1 — what is F-T3's acceptance bar, given there is no oracle?
 
 **Unchanged in substance; the gate's argument is now sharper, and there IS a concrete alternative.**
@@ -288,7 +293,7 @@ R5 is not left unbarred.*
 **Cost of being wrong:** a wrong bottom line on a document a human signs and files. **Fail-closed
 default if unanswered: PR-1 through PR-6 build and merge; PR-7 (the artifacts) does NOT.** The ladder is
 computable and inspectable; nothing reaches `issued`. That keeps the lane moving without letting an
-unbarred number become a sealed statement.
+unbarred number become a sealed statement. — **RULED 2026-08-29 (裁-33): NO GOLDEN BAR.** The hand-worked ladder was declined, so **this fail-closed default IS the standing shape**: PR-1 through PR-6 merge, **PR-7 is not built for beta**, and the `issued` transition is walled by a **named refusal** — a wall a later lane must deliberately remove, not a gap it can drift through. F-T3 ships **draft-only**.
 
 ### D.2 · OQ-7 — whose signature signs a treatment code?
 
@@ -305,7 +310,7 @@ act is *reviewing ~12-40 pre-drafted code rows*, not authoring them.
 **Recommendation: (b).** It also answers D.3's "tax lead" by the same name.
 **Fail-closed default: `owner_signed_by` is `NOT NULL` and an unsigned code is unusable** — so with no
 ruling, PR-1 seeds the code rows **unsigned** and every treatment refuses `treatment_code_unsigned`.
-Nothing computes wrongly; it simply does not compute.
+Nothing computes wrongly; it simply does not compute. — **RULED 2026-08-30 (裁-38): (b), as recommended.** A named licensed tax agent (who may be the owner), licence reference recorded on the signature row; codes seed unsigned and stay unusable until he signs.
 
 ### D.3 · OQ-8 governance half — who owns the annual duty to true the law?
 
@@ -318,7 +323,7 @@ Nothing computes wrongly; it simply does not compute.
 | (c) nobody named | nothing | this is how it silently breaks |
 
 **Recommendation: (a), with (b) as the automatic fallback that says it fell back.**
-**Fail-closed default: (b).** The design already specifies the fallback, so (c) cannot happen by drift.
+**Fail-closed default: (b).** The design already specifies the fallback, so (c) cannot happen by drift. — **RULED 2026-08-30 (裁-38): (a) with (b) as the automatic, self-announcing fallback, as recommended.** A named tax lead owns the annual true-up; the owner catches it when nobody is named, and the fallback says that it fell back.
 
 ### D.4 · **NEW — OQ-10 · a fixed asset's CA classification becomes uncorrectable. Which door reopens it?**
 
@@ -341,7 +346,7 @@ belongs in the mutable set the way `status` does.
 **Cost of being wrong: (c) is the silent version of the same failure** — it looks like the design working
 (a named refusal) while actually meaning capital allowances never compute for any real client.
 **Fail-closed default if unanswered: (c)** — R5 refuses `ca_class_unassigned` by name for every asset,
-which is honest but makes F-T3's most arithmetically intricate half dead on arrival.
+which is honest but makes F-T3's most arithmetically intricate half dead on arrival. — **RULED 2026-08-30 (裁-38): (a), as recommended.** PR-3 adds the human `set_ca_classification` door (bookkeeper+, audited, reasoned) inside the D1 window it already owns; the three CA columns join the unconditional allowlist with that door as their only writer.
 
 ### D.5 · **NEW — OQ-11 · the s.44(6) donation cap is a return-level figure the add-back model cannot express.**
 
@@ -359,7 +364,7 @@ does not exist until R7. `fraction_bp × movement` structurally cannot express i
 
 **Recommendation: (a).** The design already refuses six other things by name for exactly this reason;
 this is the seventh. **Fail-closed default: (a).** **(c) must never be the default** — it is the only
-option that produces a wrong number silently.
+option that produces a wrong number silently. — **RULED 2026-08-30 (裁-38): (a), as recommended.** An approved-institution donation is REFUSED by name and the human keys it; **a flat 100% add-back is refused as a default outright**, in the owner's own decision, because it silently overstates the charge on a signed return.
 
 ### D.6 · **NEW — OQ-12 · CP204 is for a year that has no period object. Where do R11's cells live?**
 
@@ -375,7 +380,7 @@ to a period; every `report_run` names one.
 | (c) stamp R11's cells on `p_ya`'s period | nothing | the cell says it is about a year it is not about; `metric_cell_periods` becomes a lie |
 
 **Recommendation: (a).** It is the only option that adds no shared-surface change and no untruth.
-**Fail-closed default: (a).**
+**Fail-closed default: (a).** — **RULED 2026-08-30 (裁-38): (a), as recommended.** The CP204 pack requires the target YA's fiscal year to be OPEN and refuses otherwise; `reporting_periods.grain` gains no third value.
 
 *Unchanged and lane-open: **OQ-2** (no fixed-asset population — now sharpened, since the rig confirms
 `fixed_assets` is empty even after seed), **OQ-3** (partial official-source access), **OQ-9** (does the

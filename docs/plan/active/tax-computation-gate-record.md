@@ -314,14 +314,38 @@ corrected**, and P-6 now names itself as one of PR-3's **three** prestate pins.
 
 ---
 
-## 6 · Owner items — none, and the standing cards are untouched
+## 6 · Owner items — none from the fold; the standing cards are now RULED
 
 **F-T3 carried no owner-reserved finding, and the fold created none.** Every one of the twenty-two is a
 lane decision made against the Act, the live catalog or the harness's own laws, and each is recorded as
 a D-item with its rejected alternative.
 
-**The design's standing open questions stand exactly as v1.2 left them**, unmoved and unanswered by
-this fold:
+> **THE SIX STANDING CARDS ARE RULED — 裁-33 (2026-08-29 evening) and 裁-38 (2026-08-30).** Ledger:
+> `mohe-grill-rulings-2026-08-29.md`; the cards themselves, with their options and costs, are in
+> `tax-computation-pr0-replay-2026-08-29.md` §4.
+>
+> - **OQ-1 — RULED (裁-33): NO GOLDEN BAR.** The hand-worked ladder was declined; **the fail-closed
+>   default becomes the standing shape.** PR-1…PR-6 may merge; **PR-7 (artifacts) is NOT built for
+>   beta and nothing reaches `issued`**, walled by a named refusal rather than by convention. F-T3
+>   ships **draft-only**: the ladder computes, a human reads it, nothing seals.
+> - **OQ-7 — RULED (裁-38): as recommended.** A **named licensed tax agent** (who may be the owner),
+>   **licence reference recorded** on the signature row. Codes seed unsigned and every treatment
+>   refuses `treatment_code_unsigned` until signed.
+> - **OQ-8's governance half — RULED (裁-38): as recommended.** A **named tax lead**, with **the owner
+>   as an automatic, self-announcing fallback**.
+> - **OQ-10 — RULED (裁-38): arm (a).** PR-3 adds the human `set_ca_classification` door, riding the
+>   D1 window PR-3 already owns. Without it `ca_class` freezes at CLR13 and **R5 refuses for every
+>   asset in the estate**.
+> - **OQ-11 — RULED (裁-38): arm (a).** v1 supports only the s.33(1) add-back of an unapproved-body
+>   donation; an approved-institution donation **refuses by name** and the human keys it. **A flat
+>   100% add-back is never the default** — it is the one arm that produces a wrong number silently.
+> - **OQ-12 — RULED (裁-38): arm (a).** The CP204 pack requires the target YA's fiscal year to be
+>   **OPEN** and refuses otherwise. No third `reporting_periods.grain` value.
+>
+> **OQ-2, OQ-3 and OQ-9 stay lane-open**, unchanged by either sitting.
+
+**The recommendations below are kept verbatim as the fold left them**, so the ruling can be read
+against what was argued:
 
 - **OQ-1 — the acceptance oracle** (card D.1). No Form C, no tax computation, no CP204 and no
   fixed-asset register in the corpus; ADR-0075 says none exists or is owed. Recommendation on the
