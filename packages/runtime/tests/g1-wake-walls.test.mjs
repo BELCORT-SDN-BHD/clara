@@ -359,20 +359,31 @@ test("G1B-H1 a bank WRITE before any pack read is refused locally, by name, and 
   assert.equal(rec.digest, null, "a fresh record — and a WDK REPLAY rebuilds exactly this, which is why it fails closed");
   const ctx = { taskId: randomUUID(), firmId: randomUUID(), clientId: randomUUID(), bankAccountId: randomUUID(), dueReason: null };
   const built = tools.buildBankAgentTools(ctx, rig.DEFAULT_MODEL, rec);
+  // EVERY FIXTURE VALUE BELOW IS LEGAL AGAINST THE DB's OWN ROSTERS, deliberately. An earlier
+  // version used "bank_charge" and "ref" — both ILLEGAL (0121:5546, :5618) — and nothing ever
+  // reded, which was itself the evidence that no cell reached a verb. A guard cell must fail for
+  // the reason it names, so its inputs must be valid in every OTHER respect.
   for (const name of ["match_bank_line", "propose_line_exception", "propose_identifier_promotion"]) {
     const args =
       name === "match_bank_line"
-        ? { lines: [randomUUID()], entries: [randomUUID()], rationale: "r" }
+        ? { lines: [randomUUID()], entries: [{ entry_id: randomUUID(), matched_cents: 1000 }], rationale: "r" }
         : name === "propose_line_exception"
-          ? { line_id: randomUUID(), kind: "bank_charge", reason: "r", rationale: "r" }
-          : { counterparty_id: randomUUID(), identifier_kind: "ref", identifier_value: "X", times_seen: 2, rationale: "r" };
+          ? { line_id: randomUUID(), kind: "bank_error", reason: "r", rationale: "r" }
+          : { counterparty_id: randomUUID(), identifier_kind: "tin", identifier_value: "X", times_seen: 2, rationale: "r" };
     const res = await built[name].execute(args);
     assert.match(String(res.error), /get_bank_pack first/, `${name} must refuse before any pack read`);
   }
-  // NEGATIVE CONTROL so the guard is not vacuous: with a digest recorded, the guard no longer
-  // fires — the call proceeds to the database (and fails there, on a fabricated client id,
-  // which is the DB's refusal to make, not this guard's).
+
+  // THE NEGATIVE CONTROL, and its earlier version was FALSE — an independent review caught it.
+  // It claimed the call "proceeds to the database" and fails there on a fabricated client id. It
+  // did not: with no pools injected, `pools()` throws "runtime pools not injected" the moment
+  // bankScoped is reached, so the assertion passed on a message about POOLS and the cell would
+  // have been identical had bankScoped not existed at all. What it can honestly show is exactly
+  // one step further than the guard: the LOCAL guard stood aside and the call reached the pool
+  // layer. So that is what it now asserts — by NAME, not by the absence of the other message.
   rec.digest = "deadbeef";
-  const proceeded = await built.propose_line_exception.execute({ line_id: randomUUID(), kind: "k", reason: "r", rationale: "r" });
-  assert.doesNotMatch(String(proceeded.error ?? ""), /get_bank_pack first/, "with a digest the local guard stands aside");
+  const proceeded = await built.propose_line_exception.execute({ line_id: randomUUID(), kind: "disputed", reason: "r", rationale: "r" });
+  const msg = String(proceeded.error ?? "");
+  assert.doesNotMatch(msg, /get_bank_pack first/, "with a digest the local guard stands aside");
+  assert.match(msg, /runtime pools not injected/, "and the call reaches the pool layer — the next thing after the guard, named rather than inferred");
 });
