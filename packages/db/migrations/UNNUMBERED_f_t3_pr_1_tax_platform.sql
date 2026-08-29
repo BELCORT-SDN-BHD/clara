@@ -97,15 +97,28 @@
 --       (e) capital_allowance_rates before YA2023. L6 states the three rates without a start
 --           year; inferring one would be a claim about history nobody measured. Earlier YAs
 --           refuse by name.
--- (8) The reason-row seed is TWENTY-THREE rows, not the twenty-two the replay's build brief
+-- (8) The reason-row seed is TWENTY-FOUR rows, not the twenty-two the replay's build brief
 --     names. Twenty-two are the closed ladder vocabulary (part 2 section 9's twenty-one plus
---     delta D-9's close_snapshot_missing_pl_rows) and are asserted as a closed set. The
---     twenty-third is `s44_6_relief_unmodelled`, minted by OQ-11's fail-closed default
---     (departure 3): part 2 section 9's own law is that "a string with no reason row cannot
---     be persisted at all, only raised", so a refusal the code table now names by column
---     WITHOUT a reason row would be exactly the defect cell C21 exists to catch. It is
---     seeded separately and counted separately, and it retires the day the owner rules
---     OQ-11 the other way.
+--     delta D-9's close_snapshot_missing_pl_rows) and are asserted as a closed set. The other
+--     two are RULING rows, each seeded and counted separately so the closed set stays closed,
+--     and each retiring the day its ruling changes. Both exist for the same reason: part 2
+--     section 9's own law is that "a string with no reason row cannot be persisted at all,
+--     only raised", so a refusal named anywhere WITHOUT a reason row is exactly the defect
+--     cell C21 exists to catch.
+--       * `s44_6_relief_unmodelled` -- OQ-11's fail-closed default (departure 3), named by
+--         the REFUSE_DONATION_S44_6 code's own refusal_reason_key column.
+--       * `tax_issue_unavailable` -- 裁-33 (owner, 2026-08-29): there is NO golden bar, a tax
+--         computation goes to DRAFT ONLY and is never `issued`, and PR-7 (the artifacts) is
+--         not built for beta. `report_runs` KEEPS its pre-existing `issued` value -- it is
+--         Wave-E's enum, shared with every report class, and narrowing it would be a
+--         shared-surface change for one item's convenience (law 81) -- so the TRANSITION is
+--         walled by name instead, and this row is the name. The wall itself is PR-7's, which
+--         is why the string ships before the verb that raises it.
+-- (9) 裁-33's other half is a PROPERTY of this file rather than a row: none of the six
+--     relations carries a lifecycle-state column at all, so nothing here can presume that an
+--     issued state exists. Proven positively in the tail by a column census over
+--     status/state/lifecycle_state/issue_mode/issued_at/issued_by, not by the absence of a
+--     state machine -- absence is not evidence.
 --
 -- =====================================================================================
 -- CITATION CONFLICTS -- measured, carried in the rows themselves, adjudicated at signature.
@@ -132,9 +145,15 @@
 -- =====================================================================================
 -- Every relation and function this file installs is NEW. No live body is replaced, so no
 -- in-flight PL/pgSQL call can span this migration and silently run an old body. That claim
--- is NOT left as a comment: section S0 snapshots pg_get_functiondef for EVERY function in
--- schema clara before any DDL runs, and section S9 re-reads the whole catalog and refuses if
--- a single pre-existing definition moved. A whole-catalog census, not a spot check.
+-- is NOT left as a comment: section S0 snapshots `prosrc` PLUS every catalog attribute that
+-- decides how a body executes -- language, SECURITY DEFINER, volatility, strictness,
+-- leakproof, OWNER, SET config, return type/setof, argument types and the ACL -- for EVERY
+-- function in schema clara before any DDL runs, and the S10 tail re-reads the whole catalog
+-- and refuses if a single pre-existing one moved, if one vanished, or if anything beyond the
+-- one new trigger function appeared. A whole-catalog census, not a spot check -- and
+-- deliberately NOT built on `pg_get_functiondef`, which the replay MEASURED renders neither
+-- the owner nor the ACL (M0 D-4), so a functiondef-based census would be blind to exactly the
+-- silent change it exists to catch.
 set local statement_timeout = '5min'; -- precautionary, not load-bearing: six empty tables,
   -- one trigger function, and roughly 130 seeded rows. Nothing here scans a book.
 
@@ -144,8 +163,23 @@ set local statement_timeout = '5min'; -- precautionary, not load-bearing: six em
 -- replay against main = 7e9180df; this re-measures it at apply time, because the frontier
 -- moves under a branch.
 -- =====================================================================================
+-- THE D1 INSTRUMENT, and why it is NOT pg_get_functiondef. The replay MEASURED (M0 D-4) that
+-- `pg_get_functiondef` renders body, language, volatility, SECURITY DEFINER, strictness,
+-- cost/rows and SET config -- but NOT the owner and NOT the ACL: an `alter function … owner
+-- to` leaves its hash unchanged. A D1 census built on it would therefore be blind to exactly
+-- the class of silent change it exists to catch. This snapshots `prosrc` (the body an
+-- in-flight PL/pgSQL call actually runs -- the thing the D1 obligation is about) PLUS every
+-- catalog attribute that decides how that body executes, INCLUDING the two functiondef drops.
+-- It is also, incidentally, the shape the wiki dynamic-SQL gate can prove non-wiki: a
+-- `pg_get_functiondef` read outside that gate's one exempt statement grammar is an
+-- unattributed change-of-record patch site and fails closed, correctly.
 create temp table _ft3_pr1_pre_fn on commit drop as
-  select p.oid, sha256(convert_to(pg_get_functiondef(p.oid), 'UTF8')) as def_sha
+  select p.oid,
+         md5(p.prosrc)          as src_md5,
+         p.prolang, p.prosecdef, p.provolatile, p.proisstrict, p.proleakproof,
+         p.proowner, p.proconfig, p.prorettype, p.proretset,
+         p.proargtypes::text    as argtypes,
+         p.proacl::text         as acl
     from pg_proc p
    where p.pronamespace = 'clara'::regnamespace and p.prokind = 'f';
 
@@ -1084,7 +1118,7 @@ values
   (null, 'rate_row_missing_for_ya', 1, 'absent', '—',
    '{"rungs":"R5,R10","fix":"seed the band, capital-allowance rate or threshold row for this year of assessment by PR. A rate is NEVER carried forward from the previous year. Covers the deliberately-absent ICT class (survey U1) and sva_annual_cap (survey U2)"}', '2020-01-01'),
   (null, 'citation_missing', 1, 'refused', '—',
-   '{"artifact":"statement","fix":"every add-back dataset point must resolve to at least one tax_authorities row; a treatment without a citation cannot be sealed"}', '2020-01-01'),
+   '{"artifact":"statement","fix":"every add-back dataset point must resolve to at least one tax_authorities row; a treatment without a citation cannot reach the draft statement"}', '2020-01-01'),
   -- R5, the capital-allowance walls.
   (null, 'ca_class_unassigned', 1, 'absent', '—',
    '{"rung":"R5","oq":"OQ-10","fix":"assign the asset''s ca_class. MEASURED HAZARD: the immutability allowlist admits ca_class only while the depreciation particulars are incomplete, so a fully-registered asset may have no in-product door to be classified through until OQ-10 is ruled"}', '2020-01-01'),
@@ -1110,7 +1144,18 @@ values
   (null, 'prior_estimate_unknown', 1, 'absent', '—',
    '{"rung":"R11","fix":"record the cp204_filings row for the computed year of assessment. The 85% floor is said beside the estimate rather than silently omitted; the estimate itself still computes"}', '2020-01-01'),
   (null, 'form_version_superseded', 1, 'refused', '—',
-   '{"artifact":"pack","fix":"re-map the field pack to the published form edition through publish_tax_form_field_map. A field id that moved between editions is how a correct number lands in the wrong box"}', '2020-01-01');
+   '{"artifact":"pack","fix":"re-map the field pack to the published form edition through publish_tax_form_field_map. A field id that moved between editions is how a correct number lands in the wrong box"}', '2020-01-01'),
+  -- 裁-33 (owner, 2026-08-29): there is NO golden bar and a tax computation goes to DRAFT
+  -- ONLY, never `issued`; PR-7 (the artifacts) is not built for beta. `report_runs` keeps its
+  -- pre-existing `issued` value -- it is Wave-E's enum, shared with every other report class,
+  -- and narrowing it would be a shared-surface change for one item's convenience -- so the
+  -- TRANSITION is walled by name instead. Seeded here because part 2 section 9's law is that a
+  -- string with no reason row can be raised but never persisted: PR-7's wall, whenever it is
+  -- built, needs its name to already exist. Nothing in THIS PR's six relations carries a
+  -- lifecycle-state column at all (proven positively in S10), so nothing here presumes an
+  -- issued state exists.
+  (null, 'tax_issue_unavailable', 1, 'refused', '—',
+   '{"ruling":"裁-33","artifact":"statement,pack","fix":"a tax computation is a DRAFT for a human professional to review and key; it is never issued from Clara. The terminal state for beta is draft, and no F-T3 verb transitions a report_run to issued"}', '2020-01-01');
 
 reset role;
 
@@ -1154,7 +1199,18 @@ begin
     into v_moved
     from _ft3_pr1_pre_fn pre
     join pg_proc p on p.oid = pre.oid
-   where sha256(convert_to(pg_get_functiondef(p.oid), 'UTF8')) is distinct from pre.def_sha;
+   where md5(p.prosrc)       is distinct from pre.src_md5
+      or p.prolang           is distinct from pre.prolang
+      or p.prosecdef         is distinct from pre.prosecdef
+      or p.provolatile       is distinct from pre.provolatile
+      or p.proisstrict       is distinct from pre.proisstrict
+      or p.proleakproof      is distinct from pre.proleakproof
+      or p.proowner          is distinct from pre.proowner
+      or p.proconfig         is distinct from pre.proconfig
+      or p.prorettype        is distinct from pre.prorettype
+      or p.proretset         is distinct from pre.proretset
+      or p.proargtypes::text is distinct from pre.argtypes
+      or p.proacl::text      is distinct from pre.acl;
   if v_moved is not null then
     raise exception 'S10: D1 INVENTORY VIOLATED -- this file moved the definition of: %', v_moved
       using errcode = 'CLR10';
@@ -1362,9 +1418,33 @@ begin
     raise exception 'S10: the OQ-11 fail-closed reason row (s44_6_relief_unmodelled) landed % times, expected 1', v_n
       using errcode = 'CLR10';
   end if;
+  select count(*) into v_n from clara.metric_na_reason_versions
+    where reason_key = 'tax_issue_unavailable' and firm_id is null and version = 1
+      and cell_status = 'refused';
+  if v_n <> 1 then
+    raise exception 'S10: the 裁-33 draft-only reason row (tax_issue_unavailable) landed % times as a platform refused row, expected 1', v_n
+      using errcode = 'CLR10';
+  end if;
   select count(*) into v_n from clara.metric_na_reason_versions;
-  if v_n <> 32 then
-    raise exception 'S10: metric_na_reason_versions holds % rows, expected 32 (the 9 pre-existing + 22 ladder + 1 OQ-11)', v_n
+  if v_n <> 33 then
+    raise exception 'S10: metric_na_reason_versions holds % rows, expected 33 (the 9 pre-existing + 22 ladder + 1 OQ-11 + 1 裁-33)', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  -- (10b) 裁-33's OTHER half, proven POSITIVELY rather than by the absence of a state machine:
+  --       not one of the six relations carries a lifecycle-state column, so nothing this file
+  --       builds can presume that an `issued` state exists. `report_runs` keeps its own
+  --       pre-existing `issued` value (Wave-E's enum, shared with every report class); the
+  --       TRANSITION is what tax_issue_unavailable walls, and that wall is PR-7's to build --
+  --       which 裁-33 rules is not built for beta at all.
+  select string_agg(c.relname || '.' || a.attname, ', ' order by c.relname, a.attname)
+    into v_txt
+    from pg_attribute a join pg_class c on c.oid = a.attrelid
+   where a.attrelid = any (select ('clara.' || x)::regclass from unnest(v_relations) x)
+     and a.attnum > 0 and not a.attisdropped
+     and a.attname in ('status', 'state', 'lifecycle_state', 'issue_mode', 'issued_at', 'issued_by');
+  if v_txt is not null then
+    raise exception 'S10: 裁-33 -- an F-T3 platform relation carries a lifecycle-state column (%), so this file would presume a state machine it must not have', v_txt
       using errcode = 'CLR10';
   end if;
 
@@ -1388,7 +1468,7 @@ begin
     left join clara.tax_authorities a on a.id = c.authority_id where a.id is null;
   if v_n <> 0 then raise exception 'S10: % code(s) name an authority that does not resolve', v_n using errcode = 'CLR10'; end if;
 
-  raise notice 'F-T3 PR-1 S10 tail census: 6 platform relations (tax_authorities, tax_treatment_codes, tax_rate_bands, capital_allowance_rates, tax_thresholds, tax_add_back_class_map), each owned by clara_fn_owner with ENABLE+FORCE RLS, exactly 1 unconditional clara_fn_owner policy, relacl NULL (true closed world, clean 6-role roster diagnosis), no firm_id column, and 3 triggers (immutable / no-delete / no-truncate). 1 new function: clara._tf_ft3_law_row_immutable(), SECURITY DEFINER, clara_fn_owner-owned, PUBLIC execute revoked. D1 PROVEN EMPTY by whole-catalog census: every pre-existing clara function definition byte-identical, none dropped, exactly one added.';
+  raise notice 'F-T3 PR-1 S10 tail census: 6 platform relations (tax_authorities, tax_treatment_codes, tax_rate_bands, capital_allowance_rates, tax_thresholds, tax_add_back_class_map), each owned by clara_fn_owner with ENABLE+FORCE RLS, exactly 1 unconditional clara_fn_owner policy, relacl NULL (true closed world, clean 6-role roster diagnosis), no firm_id column, and 3 triggers (immutable / no-delete / no-truncate). 1 new function: clara._tf_ft3_law_row_immutable(), SECURITY DEFINER, clara_fn_owner-owned, PUBLIC execute revoked. D1 PROVEN EMPTY by whole-catalog census over prosrc + language + SECURITY DEFINER + volatility + strictness + leakproof + OWNER + SET config + return type + setof + argument types + ACL -- twelve attributes, deliberately NOT the functiondef renderer, which the replay measured renders neither the owner nor the ACL: every pre-existing clara function unchanged on all twelve, none dropped, exactly one added.';
   raise notice 'F-T3 PR-1 seeded rows: 26 tax_authorities (22 official_primary + 1 official_secondary + 3 reference_only_unfetched, the three carrying a valid_through of 2026-08-29 so the law-review belt raises them on its FIRST run rather than in a January mid-filing) | 13 tax_treatment_codes, ALL UNSIGNED (OQ-7 fail-closed: every treatment refuses treatment_code_unsigned until a named licensed tax agent signs) | 12 tax_rate_bands (company_msmc 3 bands x YA2023-2025, company_standard 1 band x YA2023-2025) | 5 capital_allowance_rates | 38 tax_thresholds (12 keys x YA2023-2025 + msmc_foreign_holding_max_bp x YA2024-2025) | 12 tax_add_back_class_map rows covering all 12 裁-21 research leaves exactly once, donations_approved -> REFUSE_DONATION_S44_6 (OQ-11).';
-  raise notice 'F-T3 PR-1 refusal vocabulary: 22 ladder rows (part 2 section 9''s 21 + delta D-9 close_snapshot_missing_pl_rows) + 1 OQ-11 row (s44_6_relief_unmodelled) = 23 new metric_na_reason_versions rows, every one firm_id = NULL / version = 1 / effective_from 2020-01-01; table now holds 32. DELIBERATE ABSENCES, each proven by a zero COUNT not by a comment: ICT capital-allowance class (survey U1) = 0 rows | sva_annual_cap (survey U2) = 0 rows | exclude-direction codes = 0 rows | individual rate bands = 0 rows | YA2023 msmc_foreign_holding_max_bp = 0 rows.';
+  raise notice 'F-T3 PR-1 refusal vocabulary: 22 ladder rows (part 2 section 9''s 21 + delta D-9 close_snapshot_missing_pl_rows) + 1 OQ-11 row (s44_6_relief_unmodelled) + 1 裁-33 row (tax_issue_unavailable, the draft-only wall) = 24 new metric_na_reason_versions rows, every one firm_id = NULL / version = 1 / effective_from 2020-01-01; table now holds 33. 裁-33 also proven positively: not one of the six relations carries a status/state/issue_mode/issued_at/issued_by column, so nothing built here presumes an issued state exists. DELIBERATE ABSENCES, each proven by a zero COUNT not by a comment: ICT capital-allowance class (survey U1) = 0 rows | sva_annual_cap (survey U2) = 0 rows | exclude-direction codes = 0 rows | individual rate bands = 0 rows | YA2023 msmc_foreign_holding_max_bp = 0 rows.';
 end $s10$;

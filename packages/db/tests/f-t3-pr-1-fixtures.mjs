@@ -76,6 +76,20 @@ export const LADDER_REASONS = {
  *  owner rules OQ-11 the other way. */
 export const OQ11_REASON = "s44_6_relief_unmodelled";
 
+/** 裁-33 (owner, 2026-08-29): there is NO golden bar, a tax computation goes to DRAFT ONLY and
+ *  is never `issued`, and PR-7 (the artifacts) is not built for beta. `report_runs` keeps its
+ *  pre-existing `issued` value — Wave-E's enum, shared with every report class — so the
+ *  TRANSITION is walled by name instead. Counted separately from the closed ladder set, like
+ *  OQ11_REASON, so a ruling row can never be mistaken for ladder vocabulary. */
+export const RULING_33_REASON = "tax_issue_unavailable";
+
+/** Column names that would mean an F-T3 platform relation carries a lifecycle state. 裁-33's
+ *  other half is that NONE of them appears on any of the six — proven by census, not by the
+ *  absence of a state machine. */
+export const LIFECYCLE_COLUMNS = [
+  "status", "state", "lifecycle_state", "issue_mode", "issued_at", "issued_by",
+];
+
 export async function tableApplied() {
   const r = await rootQuery(
     `select count(*)::int n from pg_class c join pg_namespace ns on ns.oid = c.relnamespace

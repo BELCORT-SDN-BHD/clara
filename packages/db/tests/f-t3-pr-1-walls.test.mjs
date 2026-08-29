@@ -20,8 +20,8 @@ import assert from "node:assert/strict";
 import { rootQuery, roleQuery, endPool, assertRaises, ROLES } from "./rig-fixtures.mjs";
 import { truncateGuardError } from "./rig-txn.mjs";
 import {
-  RELATIONS, tableApplied, inRolledBackTx, authorityRow, codeRow, insertLawRow, insertMutant,
-  freshAuthority,
+  RELATIONS, LIFECYCLE_COLUMNS, tableApplied, inRolledBackTx, authorityRow, codeRow,
+  insertLawRow, insertMutant, freshAuthority,
 } from "./f-t3-pr-1-fixtures.mjs";
 
 let live = false;
@@ -396,6 +396,30 @@ test("ft3-H1 · the five deliberate absences are absent, and the instrument that
       const after0 = await rootQuery(count);
       assert.equal(after0.rows[0].n, 0, `${label}: the probe row did not survive the cell`);
     }
+  });
+
+test("ft3-H2 · 裁-33: not one of the six relations carries a lifecycle-state column, so nothing "
+  + "this PR builds presumes an issued state exists -- a column CENSUS, never the absence of a "
+  + "state machine, and the same census DOES find one on clara.report_runs", async (t) => {
+    if (gate(t)) return;
+    const r = await rootQuery(
+      `select c.relname, a.attname from pg_attribute a join pg_class c on c.oid = a.attrelid
+        where a.attrelid = any (select ('clara.' || x)::regclass from unnest($1::text[]) x)
+          and a.attnum > 0 and not a.attisdropped and a.attname = any ($2)
+        order by c.relname, a.attname`, [RELATIONS, LIFECYCLE_COLUMNS]);
+    assert.deepEqual(r.rows, [],
+      "no status / state / lifecycle_state / issue_mode / issued_at / issued_by column on any F-T3 platform relation");
+
+    // Positive control. clara.report_runs is the Wave-E relation that genuinely carries the
+    // `issued` lifecycle 裁-33 rules F-T3 must never drive; the SAME query answers YES there.
+    // A census that has only ever said NO has not been shown able to say YES.
+    const control = await rootQuery(
+      `select a.attname from pg_attribute a
+        where a.attrelid = 'clara.report_runs'::regclass and a.attnum > 0
+          and not a.attisdropped and a.attname = any ($1) order by a.attname`,
+      [LIFECYCLE_COLUMNS]);
+    assert.ok(control.rowCount > 0,
+      "the same census DOES find lifecycle columns on clara.report_runs -- so the empty result above is a measurement, not a broken query");
   });
 
 // ---------------------------------------------------------------------------------------

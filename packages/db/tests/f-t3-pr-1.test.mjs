@@ -1,23 +1,22 @@
 // F-T3 PR-1 -- the six PLATFORM tax-law relations, their seeded law, and the refusal-reason
-// vocabulary the whole computation ladder persists through. Migration:
-// packages/db/migrations/UNNUMBERED_f_t3_pr_1_tax_platform.sql (numbered at MERGE).
+// vocabulary the whole computation ladder persists through.
+// Migration: packages/db/migrations/UNNUMBERED_f_t3_pr_1_tax_platform.sql (numbered at MERGE).
 //
 // THIS FILE: sections A (closed-world structure census), B (the ACL / two-firm isolation
 // proof, with positive controls), C (the seeded law's invariants) and D (the refusal
-// vocabulary). The mutant panel, the immutability walls and the deliberate-absence
-// instruments live in the sibling f-t3-pr-1-walls.test.mjs (same fixtures module; split only
-// to stay under the file-size gate).
+// vocabulary). The mutant panel, the immutability walls, the deliberate-absence instruments
+// and 裁-33's no-lifecycle-column wall live in the sibling f-t3-pr-1-walls.test.mjs (same
+// fixtures module; split only to stay under the file-size gate).
 //
-// Section A deliberately duplicates the migration's own S10 tail. The tail proves the
-// migration built the shape on ITS OWN rig, at ITS OWN moment; this proves the shape SURVIVES
-// on a database that then ran every other migration in the estate, re-derived independently
-// of the migration's text.
+// Section A deliberately duplicates the migration's own S10 tail: the tail proves the
+// migration built the shape on ITS OWN rig at ITS OWN moment, this proves the shape SURVIVES
+// on a database that then ran every other migration in the estate, re-derived independently.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, roleQuery, endPool, ROLES } from "./rig-fixtures.mjs";
+import { rootQuery, endPool, ROLES } from "./rig-fixtures.mjs";
 import {
-  RELATIONS, CODES, RESEARCH_LEAVES, LADDER_REASONS, OQ11_REASON,
+  RELATIONS, CODES, RESEARCH_LEAVES, LADDER_REASONS, OQ11_REASON, RULING_33_REASON,
   tableApplied, inRolledBackTx, reachCensus,
 } from "./f-t3-pr-1-fixtures.mjs";
 
@@ -25,12 +24,11 @@ let live = false;
 before(async () => { live = await tableApplied(); });
 after(async () => { await endPool(); });
 
-/** Two-armed gate. A PACKAGE-WIDE run may precede this migration, so
- *  tests/f-t3-pr-1-preintegration-gate.mjs (preloaded by the package test script) sets
- *  CLARA_ALLOW_MISSING_FT3_TAX_PLATFORM and this suite skips LOUDLY. A FOCUSED run does not
- *  preload the gate, so an unmigrated database FAILS here instead of greening by skipping
- *  every cell -- which is indistinguishable from a real pass. Final acceptance is that
- *  focused shape, with the variable UNSET, and counts zero skips. */
+/** Two-armed gate. A PACKAGE-WIDE run may precede this migration, so the preintegration gate
+ *  (preloaded by the package test script) sets CLARA_ALLOW_MISSING_FT3_TAX_PLATFORM and this
+ *  suite skips LOUDLY. A FOCUSED run does not preload it, so an unmigrated database FAILS here
+ *  instead of greening by skipping every cell -- indistinguishable from a real pass. Final
+ *  acceptance is that focused shape, variable UNSET, zero skips. */
 const gate = (t) => {
   if (!live) {
     if (process.env.CLARA_ALLOW_MISSING_FT3_TAX_PLATFORM === "1") {
@@ -457,12 +455,27 @@ test("ft3-D3 · OQ-11's fail-closed row is seeded and counted SEPARATELY from th
     assert.equal(r.rows[0].semantics.oq, "OQ-11");
   });
 
-test("ft3-D4 · the table now holds exactly 32 rows: the 9 pre-existing Wave-E rows, the 22 "
-  + "ladder rows, and the 1 OQ-11 row -- a closed-world count, so a stray 24th F-T3 string "
-  + "cannot hide", async (t) => {
+test("ft3-D3b · 裁-33's draft-only wall has its NAME seeded: a tax computation goes to DRAFT only "
+  + "and is never issued, so PR-7's transition wall has a persistable string before the verb "
+  + "that raises it exists", async (t) => {
+    if (gate(t)) return;
+    const r = await rootQuery(
+      `select cell_status, firm_id, version, semantics from clara.metric_na_reason_versions
+        where reason_key = $1`, [RULING_33_REASON]);
+    assert.equal(r.rowCount, 1);
+    assert.equal(r.rows[0].cell_status, "refused");
+    assert.equal(r.rows[0].firm_id, null);
+    assert.equal(r.rows[0].version, 1);
+    assert.equal(r.rows[0].semantics.ruling, "裁-33");
+  });
+
+// 裁-33's OTHER half — no F-T3 relation carries a lifecycle-state column — is ft3-H2.
+test("ft3-D4 · the table now holds exactly 33 rows: the 9 pre-existing Wave-E rows, the 22 "
+  + "ladder rows, and the 2 ruling rows (OQ-11 + 裁-33) -- a closed-world count, so a stray "
+  + "25th F-T3 string cannot hide", async (t) => {
     if (gate(t)) return;
     const r = await rootQuery("select count(*)::int n from clara.metric_na_reason_versions");
-    assert.equal(r.rows[0].n, 32);
+    assert.equal(r.rows[0].n, 33);
     const pre = await rootQuery(
       `select count(*)::int n from clara.metric_na_reason_versions
         where reason_key = any (array['divide_by_zero','negative_denominator','absent',
