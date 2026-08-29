@@ -1,6 +1,6 @@
 // F-T3 PR-1 -- the walls. Sibling of f-t3-pr-1.test.mjs (same fixtures module; split only to
 // stay under the file-size gate).
-// Migration: packages/db/migrations/UNNUMBERED_f_t3_pr_1_tax_platform.sql (numbered at MERGE).
+// Migration: packages/db/migrations/0152_f_t3_pr_1_tax_platform.sql (authored UNNUMBERED; number claimed at merge prep 2026-08-30).
 //
 // THIS FILE: E (the CHECK mutant panel -- each mutant pinned to the EXACT constraint name,
 // because one that fails for the wrong reason has proven nothing about the wall it aimed at),

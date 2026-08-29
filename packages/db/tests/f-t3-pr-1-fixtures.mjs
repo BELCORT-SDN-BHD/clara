@@ -2,8 +2,8 @@
 // NOT a test file itself (the name does not end in `.test.mjs`, so `node --test` ignores it)
 // -- the statutory-deadlines-fixtures.mjs / x56-fixtures.mjs convention.
 //
-// Migration: packages/db/migrations/UNNUMBERED_f_t3_pr_1_tax_platform.sql (numbered at MERGE,
-// hard constraint 10). Design of record, in precedence order: the PR-0 rig replay
+// Migration: packages/db/migrations/0152_f_t3_pr_1_tax_platform.sql (authored UNNUMBERED, the
+// number claimed at MERGE PREP 2026-08-30 -- hard constraint 10). Design of record, in precedence order: the PR-0 rig replay
 // (docs/plan/active/tax-computation-pr0-replay-2026-08-29.md, the MEASURED ground), then
 // docs/plan/active/tax-computation-design.md v1.3 + -design-part2.md + -annexes-2-mechanics.md.
 //

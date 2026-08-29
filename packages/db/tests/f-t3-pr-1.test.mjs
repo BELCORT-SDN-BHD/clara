@@ -1,6 +1,6 @@
 // F-T3 PR-1 -- the six PLATFORM tax-law relations, their seeded law, and the refusal-reason
 // vocabulary the whole computation ladder persists through.
-// Migration: packages/db/migrations/UNNUMBERED_f_t3_pr_1_tax_platform.sql (numbered at MERGE).
+// Migration: packages/db/migrations/0152_f_t3_pr_1_tax_platform.sql (authored UNNUMBERED; number claimed at merge prep 2026-08-30).
 //
 // THIS FILE: sections A (closed-world structure census), C (the seeded law's invariants) and
 // D (the refusal vocabulary). Two siblings share its fixtures module, split only to stay under

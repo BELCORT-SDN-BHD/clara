@@ -151,9 +151,10 @@ fraction_bp int check 0..10000, **requires_apportionment bool**, **refusal_reaso
 statutory_ref, effective_ya_from, effective_ya_to, authority_id → tax_authorities, **conflict**,
 **notes**, valid_through, owner_signed_by, owner_signed_at, revision, superseded_by)`.
 **[v1.3, three build-time departures, each recorded in the migration's own DEPARTURES REGISTER.]**
-**(a0) THE SIGNATURE DOOR IS OWED, AND IT OWES ONE COLUMN PR-1 DID NOT BUILD.** OQ-7's
-recommendation (a) is *"a named licensed tax agent (who may be the owner), **licence reference
-recorded on the signature row**"*. `tax_treatment_codes` carries `owner_signed_by` (a
+**(a0) THE SIGNATURE DOOR IS OWED, AND IT OWES ONE COLUMN PR-1 DID NOT BUILD.** OQ-7 is now
+**RULED (裁-38, owner, 2026-08-29 — as recommended; recorded in the gate record's ruling block
+and `docs/plan/active/mohe-grill-rulings-2026-08-29.md`)**: *"a named licensed tax agent (who may be the owner),
+**licence reference recorded on the signature row**"* — a ruling, no longer a recommendation. `tax_treatment_codes` carries `owner_signed_by` (a
 `clara.users` FK) and `owner_signed_at` — **there is no column for the licence reference**, so as
 built the signature records WHO but not the professional credential the ruling makes the point of
 it. That is deliberate for PR-1 (the codes seed unsigned; nothing can be signed yet) and it is a

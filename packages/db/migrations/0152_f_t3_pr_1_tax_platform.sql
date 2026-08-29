@@ -1,13 +1,14 @@
--- UNNUMBERED_f_t3_pr_1_tax_platform.sql -- F-T3 PR-1: the six PLATFORM-scoped tax-law
+-- 0152_f_t3_pr_1_tax_platform.sql -- F-T3 PR-1: the six PLATFORM-scoped tax-law
 -- relations, the developer-seeded law that fills them, the refusal-reason vocabulary the
 -- whole F-T3 ladder persists through, and the COA template's add_back_class -> treatment-code
 -- mapping table.
 --
--- MIGRATION NUMBER: DELIBERATELY UNCLAIMED (standing law, AGENTS.md constraint 10 --
--- "numbers are claimed at MERGE time, not at authoring"). This file ships as
--- UNNUMBERED_* and is renamed to its claimed number in the merge commit. Every internal
--- self-reference uses the STABLE STEM `f_t3_pr_1_tax_platform` (the seeded_in_migration
--- column below), never a number, so the rename moves nothing.
+-- MIGRATION NUMBER: 0152, claimed at MERGE PREP on 2026-08-30 (standing law, AGENTS.md
+-- constraint 10 -- "numbers are claimed at MERGE time, not at authoring"). The file was
+-- authored and reviewed as UNNUMBERED_f_t3_pr_1_tax_platform.sql (independent review CLEAR at
+-- f-t3/pr-1 @ 6a682ca0). Every internal self-reference uses the STABLE STEM
+-- `f_t3_pr_1_tax_platform` (the seeded_in_migration column below), never a number, so the
+-- rename moved nothing.
 --
 -- DESIGN OF RECORD, in precedence order:
 --   1. docs/plan/active/tax-computation-pr0-replay-2026-08-29.md  -- the MEASURED ground.
