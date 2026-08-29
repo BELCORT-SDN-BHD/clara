@@ -693,7 +693,7 @@ begin
   insert into _bp1_pre(k, v) values ('event_types_total',
     (select count(*)::text from clara.event_types));
 
-  raise notice 'binding proposal pr-1 prestate: clean -- frontier 0147; 2 new relations + 11 new function names absent under EVERY arity (and the signer''s new 3-arg overload absent too); vendor_identity_bindings is the pre-existing 17-column shape carrying none of the 10 new columns, no uq_vib_one_active_binding, and NO (client, counterparty) pair already carrying more than one proposed/live row (the widened index''s refusing preflight); the allowlist carries ZERO binding rows (of 88 over 7 kinds); agent_receipt_surfaces holds exactly 8 rows with both closed-world regexes read BYTE-EXACT at their live f_a-only text; the status CHECK already admits ''declined'' and ck_vib_revoked read live as the honesty idiom the declined pair mirrors; 裁-22''s clara._resolve_proposal_basis(uuid[],uuid,jsonb) resolves at EXACTLY ONE pg_proc row with prosrc dddd2747...; the 裁-18a signer<>proposer wall is POSITIVELY present in sign_vendor_identity_binding as an ACTOR COMPARISON (prosrc 5285581e...); 18 DO-NOT-TOUCH bodies stashed by prosrc sha256 with _derive_vendor_binding_proposal pinned at de0f5807... and _coding_lane_core at 721a6704...; 20 live functions + 18 live relations + 4 roles present; both wake kinds already in the credential CHECK (no closed world widened there); exactly one is_agent user row and agent_user_id() is IMMUTABLE (P-2''s precondition).';
+  raise notice 'binding proposal pr-1 prestate: clean -- frontier 0147+; 2 new relations + 15 new function names absent under EVERY arity (and the signer''s new 3-arg overload absent too); vendor_identity_bindings is the pre-existing 17-column shape carrying none of the 12 new columns, no uq_vib_one_active_binding, and NO (client, counterparty) pair already carrying more than one proposed/live row (the widened index''s refusing preflight); the allowlist carries ZERO binding rows (of 88 over 7 kinds); agent_receipt_surfaces holds exactly 8 rows with both closed-world regexes read BYTE-EXACT at their live f_a-only text; the status CHECK already admits ''declined'' and ck_vib_revoked read live as the honesty idiom the declined pair mirrors; 裁-22''s clara._resolve_proposal_basis(uuid[],uuid,jsonb) resolves at EXACTLY ONE pg_proc row with prosrc dddd2747...; the 裁-18a signer<>proposer wall is POSITIVELY present in sign_vendor_identity_binding as an ACTOR COMPARISON (prosrc 5285581e...); 19 DO-NOT-TOUCH bodies stashed by prosrc sha256 (the THREE this file recuts among them, each additionally pinned against a literal: propose 610ef1df..., sign 5285581e..., the t_vib_frozen body cfd20933...) with _derive_vendor_binding_proposal pinned at de0f5807... and _coding_lane_core at 721a6704...; 20 live functions + 18 live relations + 4 roles present; both wake kinds already in the credential CHECK (no closed world widened there); exactly one is_agent user row and agent_user_id() is IMMUTABLE (P-2''s precondition).';
 end
 $bp1_pre$;
 
@@ -900,7 +900,10 @@ create view clara._agent_receipt_src_pb_binding as
     'firm'::text                                      as scope
   from clara.binding_agent_receipts r;
 
-select clara._assert_receipt_surface_conforms('_agent_receipt_src_pb_binding');
+-- (The explicit conformance assert used to sit HERE. It cannot: clara._assert_receipt_surface_
+-- conforms refuses an UNREGISTERED shim (0103:426-429), and the registry row now lands after the
+-- trigger below. Measured on the rig, not reasoned about -- the from-scratch replay refused with
+-- "receipt surface _agent_receipt_src_pb_binding is not registered". It runs after the INSERT.)
 
 -- L-14 (2026-08-30 adversarial pass): THE REGISTRY IS APPEND-ONLY, SO AN UNCONFORMING ROW IS
 -- PERMANENT. clara.agent_receipt_surfaces carries _tf_append_only, so a row whose shim_relname
@@ -932,9 +935,15 @@ create trigger t_agent_receipt_surfaces_conforms
   after insert on clara.agent_receipt_surfaces
   for each row execute function clara._tf_agent_receipt_surface_conforms();
 
--- ...and only NOW the registry row, with its shim already standing.
+-- ...and only NOW the registry row, with its shim already standing. The trigger above asserts
+-- conformance as this INSERT lands.
 insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expected_source) values
   ('pb_binding','binding_agent','_agent_receipt_src_pb_binding','binding_agent_receipts');
+
+-- The explicit call the estate's own idiom asks every member migration for (F-A7 D-6), kept as
+-- BELT beside the trigger rather than replaced by it: the trigger guards every FUTURE row, this
+-- line says out loud that THIS one conforms, and a reader looking for the idiom finds it.
+select clara._assert_receipt_surface_conforms('_agent_receipt_src_pb_binding');
 
 -- The NINTH union arm. clara.agent_receipts_visible is UNTOUCHED; the eight existing arms are
 -- reproduced from the LIVE view definition read on the rig, never from 0142's text.
