@@ -975,8 +975,10 @@ begin
   select count(*) into v_n from pg_proc p
    where p.pronamespace = 'clara'::regnamespace
      and p.prosrc ~* '(insert[[:space:]]+into|merge[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+(clara[[:space:]]*\.[[:space:]]*)?client_identifiers([^A-Za-z0-9_]|$)'
-     and p.prosrc like '%if v_con is distinct from ''uq_client_identifiers_client_kind_value'' then raise; end if%'
-     and p.prosrc like '%get stacked diagnostics v_con = constraint_name%';
+     -- position(), not LIKE: the index name is full of underscores, and LIKE reads `_` as a
+     -- single-character wildcard, so a LIKE pattern here is looser than it looks.
+     and position('if v_con is distinct from ''uq_client_identifiers_client_kind_value'' then raise; end if' in p.prosrc) > 0
+     and position('get stacked diagnostics v_con = constraint_name' in p.prosrc) > 0;
   if v_n <> 2 then
     raise exception 'client_identifiers_unique tail: only % of the 2 writers carry the NARROW re-raise guard line (a comment naming the index does not count)', v_n using errcode = 'CLR10';
   end if;
