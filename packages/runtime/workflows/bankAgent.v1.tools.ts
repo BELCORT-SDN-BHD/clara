@@ -43,12 +43,29 @@ export function newBankRunRecord(): BankRunRecord {
   return { digest: null, ordinal: 0, admitted: 0 };
 }
 
-/** A verb's jsonb reply, read POSITIVELY for admission. Only a reply that actually SAYS it was
- *  admitted counts as an act (review law 2: absence is not evidence, and neither is a
- *  non-throwing call). Everything else is reported to the model as-is and counted as nothing. */
+/** Count a bank act, from a CLOSED WORLD OF THREE REPLY SHAPES.
+ *
+ *  THE BANK CORES DO NOT CARRY A UNIFORM ADMITTED MARKER, and that was measured rather than
+ *  assumed: a refusal returns {status:'refused', ...} (0121:6008, :6023, :6238, :6255), but a
+ *  SUCCESS returns the delegate's OWN result verbatim — `return v_res` (0121:6027), whose shape
+ *  differs per verb (a match id here, an op receipt there). The 'admitted' vocabulary exists only
+ *  on `bank_agent_receipts.outcome`, which the verb writes internally and which clara_runtime
+ *  cannot read (measured on the rig: SELECT is granted to clara_authenticated and clara_fn_owner
+ *  ONLY). So there is no single positive key to test, and inventing one would be worse than
+ *  naming the limitation.
+ *
+ *  THE CLOSED WORLD, enumerated, is what makes this honest rather than absence-based: a call that
+ *  THREW never reaches here (the caller turned it into {error}); a DB refusal says
+ *  status='refused'; everything else is a real delegate result. Three shapes, no fourth.
+ *
+ *  WHAT THIS COUNT DRIVES, so the blast radius is on the record: the metering row's `outcome`
+ *  label and the run's own returned outcome kind. BOTH the 'acted' and 'nothing_due' kinds settle
+ *  the task COMPLETED, and no value derived here is ever passed into a DB verb — so a
+ *  misclassification costs a wrong metering label, never a wrong number in the books
+ *  (constraint 2). */
 function countIfAdmitted(rec: BankRunRecord, reply: unknown): unknown {
-  const verdict = (reply as { outcome?: unknown; verdict?: unknown })?.outcome ?? (reply as { verdict?: unknown })?.verdict;
-  if (verdict === "admitted") rec.admitted += 1;
+  const r = reply as { status?: unknown; error?: unknown } | null;
+  if (r && typeof r === "object" && r.error === undefined && r.status !== "refused") rec.admitted += 1;
   return reply;
 }
 

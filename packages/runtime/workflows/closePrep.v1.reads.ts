@@ -58,11 +58,20 @@ export async function callCloseVerb(
   );
 }
 
-/** A verb's jsonb reply, read POSITIVELY for admission (review law 2: a non-throwing call is not
- *  evidence that anything happened). */
+/** A close wrapper's jsonb reply, read POSITIVELY for admission.
+ *
+ *  THE KEY IS `status` AND THE ADMITTED VALUE IS 'acted' — read off 0138's own agent cores
+ *  (e.g. `_agent_begin_close_core`, 0138:2100 / :2107), not guessed. An earlier draft of this
+ *  function looked for `outcome === 'admitted'`, which is the BANK lane's receipt vocabulary and
+ *  appears nowhere in a close reply: it would have counted zero acts on every successful run, so
+ *  every proposing pass would have settled as though it had found nothing to do. Caught by
+ *  reading the migration, not by a test — which is exactly why the cell below pins it.
+ *
+ *  Review law 2 holds: this counts what the reply SAYS, never the absence of an error. A call
+ *  that threw never reaches here at all (the caller turns it into a refusal object), and a
+ *  refusal reply says 'refused' in the same field. */
 export function countIfAdmitted(rec: CloseRunRecord, reply: unknown): unknown {
-  const verdict = (reply as { outcome?: unknown; verdict?: unknown })?.outcome ?? (reply as { verdict?: unknown })?.verdict;
-  if (verdict === "admitted") rec.acts += 1;
+  if ((reply as { status?: unknown } | null)?.status === "acted") rec.acts += 1;
   return reply;
 }
 

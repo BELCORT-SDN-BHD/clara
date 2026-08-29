@@ -105,10 +105,15 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
           [fiscal_year_id],
           rationale,
         );
-        // Remember the run id the DATABASE returned, so the propose/abandon tools below can be
-        // grounded in this run's own work. Read positively off the reply — never reconstructed.
-        const id = (reply as { close_run_id?: unknown; subject_id?: unknown } | null)?.close_run_id;
-        if (typeof id === "string") rec.closeRunId = id;
+        // Remember the run id the DATABASE returned. THE PATH IS `result.close_run_id`, NESTED —
+        // `_agent_begin_close_core` returns {status, receipt_id, result} on the acted path
+        // (0138:2107) and the run id lives inside `result` (0138:2104 reads it from there for the
+        // receipt). An earlier draft read it off the top level and would have recorded null on
+        // every successful begin. Read off the reply, never reconstructed; diagnostics only —
+        // the model still names the close run explicitly on propose/abandon, so nothing depends
+        // on this being populated.
+        const result = (reply as { result?: { close_run_id?: unknown } } | null)?.result;
+        if (typeof result?.close_run_id === "string") rec.closeRunId = result.close_run_id;
         return reply;
       },
     }),

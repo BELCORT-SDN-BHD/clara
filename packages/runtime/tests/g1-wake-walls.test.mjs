@@ -156,6 +156,58 @@ test("G1B-G1 assertProductionPoolConfig does NOT require the bank DSN; getBankPo
 //     difference between a readable refusal and a CLR code nobody can act on.
 // =====================================================================================
 
+// =====================================================================================
+// I · THE REPLY CLASSIFIERS, pinned against the SHAPES THE MIGRATIONS ACTUALLY RETURN.
+//     Both were WRONG in an earlier draft and neither test nor typecheck could see it —
+//     they are pure shape agreements with a jsonb blob, so the pin is the only instrument.
+// =====================================================================================
+
+test("G1B-I1 the close classifier reads status='acted' — the shape 0138's own cores return", { skip: skip0138 }, async () => {
+  const reads = await import("../workflows/closePrep.v1.reads.ts");
+  const mk = () => reads.newCloseRunRecord();
+
+  // THE SHAPES, read out of the migration source rather than invented, so this cell fails if the
+  // DB's own vocabulary ever moves: _agent_begin_close_core returns {status:'acted',receipt_id,
+  // result} on success and {status:'refused',receipt_id,rung_vector} on refusal.
+  const src = await rig.rootQuery(
+    "select prosrc from pg_proc where oid = 'clara._agent_begin_close_core(jsonb,uuid,text,jsonb,text)'::regprocedure",
+  );
+  const body = String(src.rows[0].prosrc);
+  assert.match(body, /'status',\s*'acted'/, "the LIVE body must still return status='acted' on the acted path");
+  assert.match(body, /'status',\s*'refused'/, "and status='refused' on the refused path");
+  assert.doesNotMatch(body, /'outcome',\s*'admitted'/, "the bank lane's 'admitted' vocabulary must NOT appear here");
+
+  let rec = mk();
+  reads.countIfAdmitted(rec, { status: "acted", receipt_id: randomUUID(), result: { close_run_id: randomUUID() } });
+  assert.equal(rec.acts, 1, "an acted reply counts");
+  rec = mk();
+  reads.countIfAdmitted(rec, { status: "refused", rung_vector: [{ rung: "B3" }] });
+  reads.countIfAdmitted(rec, { error: "refused (CLR03): …" });
+  reads.countIfAdmitted(rec, null);
+  reads.countIfAdmitted(rec, { outcome: "admitted" }); // the WRONG vocabulary must count nothing
+  assert.equal(rec.acts, 0, "nothing else counts — and the bank lane's own key counts nothing here");
+});
+
+test("G1B-I2 the bank classifier's closed world of three reply shapes", { skip }, async () => {
+  const tools = await import("../workflows/bankAgent.v1.tools.ts");
+  const ctx = { taskId: randomUUID(), firmId: randomUUID(), clientId: randomUUID(), bankAccountId: randomUUID(), dueReason: null };
+  const rec = tools.newBankRunRecord();
+  rec.digest = "deadbeef";
+  const built = tools.buildBankAgentTools(ctx, "m", rec);
+  assert.ok(built, "the tool set builds");
+
+  // The bank cores return the DELEGATE's own result on success (0121:6027, `return v_res`) — no
+  // uniform 'admitted' key exists to test, which is why the classifier enumerates the closed
+  // world instead. Pin that the LIVE core still has no such key, so a future recut that adds one
+  // makes this cell fail rather than silently leaving the classifier weaker than it could be.
+  const src = await rig.rootQuery(
+    "select prosrc from pg_proc where oid = 'clara._agent_match_bank_line_core(uuid,jsonb,jsonb,jsonb,boolean,text,jsonb,text,text)'::regprocedure",
+  );
+  const body = String(src.rows[0].prosrc);
+  assert.match(body, /'status'\s*,\s*'refused'/, "a refusal still says status='refused'");
+  assert.match(body, /return v_res;/, "and a success still returns the delegate's own result verbatim");
+});
+
 test("G1B-H1 a bank WRITE before any pack read is refused locally, by name, and never reaches the database", { skip }, async () => {
   const tools = await import("../workflows/bankAgent.v1.tools.ts");
   const rec = tools.newBankRunRecord();
