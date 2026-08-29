@@ -49,6 +49,8 @@ const DECLINE_SIG = "clara.decline_vendor_identity_binding(uuid,text,text)";
 const BLOCKER_SIG = "clara._binding_extra_blocker(uuid,uuid,uuid,jsonb,jsonb)";
 const SUPPRESSION_SIG = "clara._binding_suppression(uuid,uuid,uuid)";
 const SIGN_SIG = "clara.sign_vendor_identity_binding(uuid,text,text)";
+const SIGNER_COUNT_SIG = "clara.eligible_binding_signer_count(uuid)";
+const FREEZE_SIG = "clara._tf_vendor_identity_binding_update()";
 /** The comment-stripped live body of a function — the only honest instrument for "is this wall
  *  in the CODE", since every wall this battery pins is also DESCRIBED in a comment beside it. */
 const strippedSrc = String.raw`select regexp_replace(regexp_replace(p.prosrc, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g') as src
@@ -2320,6 +2322,100 @@ test("bp1.R5b M9 — the pb_ token grammar, five shapes, driven against the LIVE
   assert.equal(n.rows[0].c, 9, "no probe row survived");
 });
 
+test("bp1.E-count-m MUTANT — without the firm wall the cross-tenant read answers", async () => {
+  failBp1(live);
+  await withMutant(SIGNER_COUNT_SIG,
+    [["  if p_firm is null or p_firm is distinct from clara.jwt_firm() then", "  if false then"]],
+    async () => {
+      const r = await humanQuery(w.users.alice,
+        "select clara.eligible_binding_signer_count($1) as n", [w.firms.B]);
+      assert.ok(Number(r.rows[0].n) >= 1,
+        "without the wall a firm-A owner reads firm B's admin headcount — the oracle the wall closes");
+    });
+});
+
+test("bp1.W16dm MUTANT — without the override conjunct the waved-past entry counts", async () => {
+  failBp1(live);
+  const cp = await seedWindow(w, "W16dm", { dates: DATES_OK, duplicateOverrideOn: [1] });
+  const basis = await lawfulBasis(w.firms.A, w.clients.A1, cp.id);
+  await withMutant(BLOCKER_SIG, [["  if coalesce(v_overrides,0) > 0 then", "  if false then"]],
+    async () => {
+      const r = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+      assert.equal(r.status, "proposed",
+        "without the conjunct an entry a human waved past the duplicate guard is corpus evidence");
+    });
+});
+
+test("bp1.W16em MUTANT — without N-8's own word the ambiguous corpus hides under the other one", async () => {
+  failBp1(live);
+  const cp = await seedWindow(w, "W16em", { dates: DATES_OK });
+  const doc = (await evidenceDocuments(w.firms.A, w.clients.A1, cp.id))[0];
+  await rootQuery(
+    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+     select $1, x.id, 'page_polygon', '{"page":1,"polygon":[0,0,1,1]}'::jsonb,
+            'invoice.invoice_id', 'W16EM-EXTRA-0009', 1.0
+       from clara.document_extractions x
+      where x.document_id=$2 and x.engine_kind='invoice_facts' and x.status='done'
+      order by x.version_n desc, x.id desc limit 1`,
+    [w.firms.A, doc]);
+  // Without its own rung, four printed ids fall through to the three-scans word — which is a
+  // DIFFERENT fact, and a card that says "this looks like one invoice three times" about a
+  // document whose extraction simply found two candidates is telling the reader something false.
+  await withMutant(BLOCKER_SIG, [["  if coalesce(v_n_prints,0) > 3 then", "  if false then"]],
+    async () => {
+      const err = await assertRaises("CLR36",
+        async () => proposeAsAgent(await filingActor(),
+          { client: w.clients.A1, counterparty: cp.id, basis: { citations: [{ region_id: cp.id }] } }),
+        "four printed ids with the ambiguity rung removed");
+      assert.match(err.message, /binding_corpus_not_distinct/,
+        "without N-8's rung the ambiguous corpus is reported as three scans of one invoice");
+    });
+});
+
+test("bp1.E7m MUTANT — with the stale row counted as open, the read reports a loop brake that is not there", async () => {
+  failBp1(live);
+  const { cp, basis } = await eligibleVendor("E7m");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  await rootQuery(
+    `update clara.vendor_identity_bindings
+        set created_at = now() - interval '13 months', expires_at = now() - interval '1 month'
+      where id = $1`, [p.binding_id]);
+  await withMutant(READ_SIG, [[
+    "and b.status = 'proposed'\n                      and b.expires_at > now()),",
+    "and b.status = 'proposed'),",
+  ]], async () => {
+    const row = (await listCandidates(await filingActor(), w.clients.A1))
+      .find((x) => x.counterparty_id === cp.id);
+    assert.equal(row.has_open_proposal, true,
+      "with the expiry predicate gone the read calls a dead proposal an open one — which is why "
+      + "the first cut had to CALL the expiry writer from inside a STABLE read");
+    assert.equal(row.reason, "binding_proposal_open");
+  });
+});
+
+test("bp1.W10cm MUTANT — without the principal freeze, the maker/checker behind a signature moves", async () => {
+  failBp1(live);
+  const { cp, basis } = await eligibleVendor("W10cm");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  await signLive(w.users.alice, { binding: p.binding_id });
+  await withMutant(FREEZE_SIG, [[
+    "  if old.signed_at is not null\n     and (new.created_by is distinct from old.created_by",
+    "  if false\n     and (new.created_by is distinct from old.created_by",
+  ]], async () => {
+    await rootQuery("update clara.vendor_identity_bindings set signed_by=$2 where id=$1",
+      [p.binding_id, w.users.bob]);
+    assert.equal((await bindingRow(p.binding_id)).signed_by, w.users.bob,
+      "without the freeze the signature's own principal can be rewritten after the fact");
+    await rootQuery("update clara.vendor_identity_bindings set signed_by=$2 where id=$1",
+      [p.binding_id, w.users.alice]);
+  });
+  // …and 0028's five-field content freeze answered throughout, untouched by the mutant.
+  const e = await assertRaises("CLR36",
+    () => rootQuery("update clara.vendor_identity_bindings set content_hash=$2 where id=$1",
+      [p.binding_id, "1".repeat(64)]), "content on a signed row, after the mutant was restored");
+  assert.match(e.message, /vendor binding content is frozen/);
+});
+
 test("bp1.R6 L-14 — a registry row naming a NONEXISTENT shim is refused at INSERT", async () => {
   failBp1(live);
   // clara.agent_receipt_surfaces is APPEND-ONLY, so a row whose shim_relname names a relation
@@ -2335,6 +2431,37 @@ test("bp1.R6 L-14 — a registry row naming a NONEXISTENT shim is refused at INS
   const n = await rootQuery(
     "select count(*)::int c from clara.agent_receipt_surfaces where item='pb_ghost'");
   assert.equal(n.rows[0].c, 0, "nothing permanent was left behind");
+});
+
+test("bp1.R6m MUTANT — without the conformance trigger the permanent ghost row is ADMITTED", async () => {
+  failBp1(live);
+  // The mutant runs inside an explicit transaction that ROLLS BACK, because that is the only way
+  // to unwind it: clara.agent_receipt_surfaces is append-only, so the very row this cell admits
+  // could not be deleted afterwards — which is the finding, demonstrated by the shape of its own
+  // proof. Dropping the trigger is likewise rolled back, so no later cell sees a weakened table.
+  await twoSessions(async (c1) => {
+    await c1.query("begin");
+    await c1.query("drop trigger t_agent_receipt_surfaces_conforms on clara.agent_receipt_surfaces");
+    await c1.query(
+      `insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expected_source)
+       values ('pb_ghost','probe_kind_g','_agent_receipt_src_pb_ghost','probe_source_g')`);
+    const seen = await c1.query(
+      "select count(*)::int c from clara.agent_receipt_surfaces where item='pb_ghost'");
+    assert.equal(seen.rows[0].c, 1,
+      "without the trigger a row naming no relation is admitted — and it would be PERMANENT");
+    const census = await c1.query(
+      "select shim_exists from clara.agent_receipt_source_census() where item='pb_ghost'");
+    assert.equal(census.rows[0].shim_exists, false,
+      "…and the source census would report shim_exists=false for it, forever, with no way back");
+    await c1.query("rollback");
+  });
+  // The trigger and the registry are exactly as they were.
+  const back = await rootQuery(
+    `select count(*)::int c from pg_trigger
+      where tgrelid='clara.agent_receipt_surfaces'::regclass and tgname='t_agent_receipt_surfaces_conforms'`);
+  assert.equal(back.rows[0].c, 1, "the trigger is back");
+  const rows = await rootQuery("select count(*)::int c from clara.agent_receipt_surfaces");
+  assert.equal(rows.rows[0].c, 9, "…and no ghost row survived the rollback");
 });
 
 // ===========================================================================
@@ -2389,6 +2516,37 @@ test("bp1.B1-roster H5 — remove the second admin, self-sign, re-add: the windo
   const readded = await humanQuery(w.users.alice,
     "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
   assert.equal(readded.rows[0].n, 2, "a removed-then-re-added admin counts ONCE");
+});
+
+test("bp1.B1-roster-m MUTANT — a LIVE headcount lets the remove/self-sign/re-add manoeuvre through", async () => {
+  failBp1(live);
+  // The count is the whole wall here, so the mutant reverts it to what it was before H5: a bare
+  // count of currently-active admin+ memberships. The manoeuvre then succeeds, which is the
+  // measurement — B1-roster above could otherwise be refusing for some unrelated reason.
+  const second = await insertUser(`${w.prefix}_h5m`, "admin3");
+  await addMember(w.users.alice, { firm: w.firms.A, user: second, role: "admin", opKey: opk("h5madd") });
+  const membership = (await rootQuery(
+    "select id from clara.firm_memberships where firm_id=$1 and user_id=$2 and status='active'",
+    [w.firms.A, second])).rows[0].id;
+  const { cp, basis } = await eligibleVendor("H5m");
+  const p = await proposeAsAgent(await interactiveActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  await humanQuery(w.users.alice,
+    "select clara.remove_member(p_membership => $1, p_op_key => $2)", [membership, opk("h5mrm")]);
+
+  await withPostTimeControl(() => withMutant(SIGNER_COUNT_SIG, [
+    ["    + (select count(*) from clara.firm_invites i", "    + 0 * (select count(*) from clara.firm_invites i"],
+    ["    + (select count(distinct m.user_id)", "    + 0 * (select count(distinct m.user_id)"],
+  ], async () => {
+    const live1 = await humanQuery(w.users.alice,
+      "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
+    assert.equal(Number(live1.rows[0].n), 1,
+      "control: the mutant really is the old live-headcount count");
+    const signed = await humanQuery(w.users.alice,
+      "select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2, p_attestation => $3) as result",
+      [p.binding_id, opk("h5msign"), "I am the only admin now"]);
+    assert.equal(signed.rows[0].result.status, "live",
+      "with a live headcount the manoeuvre lands a binding with no second party — the attack H5 closes");
+  }));
 });
 
 test("bp1.B1-invite H5 — a PENDING admin invite is not a solo firm", async () => {
