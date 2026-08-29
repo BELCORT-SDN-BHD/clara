@@ -548,6 +548,15 @@ alter table clara.agent_receipt_surfaces drop constraint agent_receipt_surfaces_
 alter table clara.agent_receipt_surfaces add constraint agent_receipt_surfaces_shim_relname_check
   check (shim_relname ~ '^_agent_receipt_src_(f_a[0-9]+[a-z]?|pb_[a-z][a-z0-9_]*)$');
 
+-- THE PAIRING, made structural (2026-08-29 adversarial pass, MED-9). Two independent regexes can
+-- BOTH pass while the row still lies: item='pb_binding' with shim='_agent_receipt_src_f_a2' is
+-- admitted by the pair above and points the register at another member's shim. The register's
+-- whole job is that a receipt cannot be written where a human cannot read it, so the item and its
+-- shim must be ONE fact. All eight pre-existing rows already satisfy this, so it validates clean
+-- rather than needing a data pass -- measured on the rig, not assumed.
+alter table clara.agent_receipt_surfaces add constraint ck_agent_receipt_surfaces_shim_matches_item
+  check (shim_relname = '_agent_receipt_src_' || item);
+
 insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expected_source) values
   ('pb_binding','binding_agent','_agent_receipt_src_pb_binding','binding_agent_receipts');
 
@@ -1540,27 +1549,38 @@ begin
   --     already proven for real by SS3's own INSERT. These prove REFUSAL, each isolating ONE
   --     column by making every other column lawful and unique, and each confirming the refusal
   --     came from ITS NAMED constraint via get stacked diagnostics.
+  -- PROBE 1, THE PAIRING (MED-9), fully isolating: BOTH values are individually lawful under
+  --   their own regexes, so ck_agent_receipt_surfaces_shim_matches_item is the ONLY constraint
+  --   that can refuse this row. Without it the register could point pb_binding at another
+  --   member's shim and the nine-row census would still read green.
   begin
     insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expected_source)
-      values ('pb_Binding', 'probe_kind_a', '_agent_receipt_src_pb_probea', 'probe_source_a');
-    raise exception 'binding proposal pr-1 tail: a garbage item (pb_Binding, uppercase) was WRONGLY ADMITTED by the live item_check'
+      values ('pb_probea', 'probe_kind_a', '_agent_receipt_src_pb_probeb', 'probe_source_a');
+    raise exception 'binding proposal pr-1 tail: a MISMATCHED item/shim pair was WRONGLY ADMITTED -- the register can point a member at another member''s shim'
       using errcode = 'CLR10';
   exception when check_violation then
     get stacked diagnostics v_constraint = constraint_name;
-    if v_constraint is distinct from 'agent_receipt_surfaces_item_check' then
-      raise exception 'binding proposal pr-1 tail: probe 1 was refused by % instead of agent_receipt_surfaces_item_check -- the probe does not isolate what it claims to', v_constraint
+    if v_constraint is distinct from 'ck_agent_receipt_surfaces_shim_matches_item' then
+      raise exception 'binding proposal pr-1 tail: the pairing probe was refused by % instead of ck_agent_receipt_surfaces_shim_matches_item -- it does not isolate what it claims to', v_constraint
         using errcode = 'CLR10';
     end if;
   end;
+  -- PROBE 2, THE WIDENED REGEXES. Isolation is now STRUCTURALLY IMPOSSIBLE and that is stated
+  --   rather than faked: the pairing CHECK above forces shim_relname = '_agent_receipt_src_' ||
+  --   item, and the two regexes carry the SAME alternation, so any item that fails item_check
+  --   produces the only shim the pairing admits -- which fails shim_relname_check too. An
+  --   earlier draft asserted one exact constraint name here and would have been asserting an
+  --   unspecified evaluation order. So this probe asserts refusal by one of the TWO named regex
+  --   constraints, and never by anything else.
   begin
     insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expected_source)
-      values ('pb_probeb', 'probe_kind_b', '_agent_receipt_src_pb_Probeb', 'probe_source_b');
-    raise exception 'binding proposal pr-1 tail: a garbage shim_relname (uppercase) was WRONGLY ADMITTED by the live shim_relname_check'
+      values ('pb_Probe', 'probe_kind_b', '_agent_receipt_src_pb_Probe', 'probe_source_b');
+    raise exception 'binding proposal pr-1 tail: a garbage item/shim (uppercase) was WRONGLY ADMITTED by the live regexes'
       using errcode = 'CLR10';
   exception when check_violation then
     get stacked diagnostics v_constraint = constraint_name;
-    if v_constraint is distinct from 'agent_receipt_surfaces_shim_relname_check' then
-      raise exception 'binding proposal pr-1 tail: probe 2 was refused by % instead of agent_receipt_surfaces_shim_relname_check', v_constraint
+    if v_constraint not in ('agent_receipt_surfaces_item_check','agent_receipt_surfaces_shim_relname_check') then
+      raise exception 'binding proposal pr-1 tail: the regex probe was refused by %, which is neither widened regex', v_constraint
         using errcode = 'CLR10';
     end if;
   end;
@@ -1902,6 +1922,6 @@ begin
     raise exception 'binding proposal pr-1 tail: object count in workflow/graphile_worker/spike MOVED' using errcode = 'CLR10';
   end if;
 
-  raise notice 'binding proposal pr-1 tail: OK -- D1 INVENTORY EMPTY, PROVEN: all 18 DO-NOT-TOUCH bodies re-pin BYTE-IDENTICAL to their SS1 prosrc stash (incl. _approve_entry_core, left undisturbed for PR-3''s own pre-image; _derive_vendor_binding_proposal re-pinned against de0f5807... and _coding_lane_core against 721a6704... independently of the stash), and each of the 5 new function NAMES resolves at exactly one pg_proc row under every arity. G4: the item/shim_relname registry CHECKs REFUSED two REAL uppercase INSERT probes, each isolated by lawful companion columns and confirmed refused by ITS NAMED constraint, and ADMITTED a real f_a42 probe -- the pre-existing f_a family survived the pb_ widening -- with both widened definitions read byte-exact; agent_receipt_surfaces holds 9 rows, pb_binding is shim_exists+wired+conforms+19-col+zero-dark, the census returns 9, agent_receipts_visible''s 19-column contract is unchanged and nothing is dark. binding_agent_receipts: RLS enabled+forced, owner-only, ZERO non-owner grants, ZERO app-role DML across 8 roles, both append-only triggers attached. vendor_identity_bindings: 6 new columns at the right type/nullability (17+6=23 total), 5 new CHECKs + 1 composite FK present, and ck_vib_proposed_by_agent_honest read from the catalog as a BIDIRECTIONAL EQUALITY. G8: uq_vib_one_open_proposal asserted BY PROPERTY from pg_index (unique+valid+ready+live, keys {client_id,counterparty_id}, predicate status=''proposed''), never by name; uq_vib_one_live unmoved. ACL: both wake verbs EXECUTE-able by clara_wake_filing AND clara_wake_interactive and by none of 6 other roles; decline is clara_authenticated-only; both internals ungranted; exactly 4 allowlist rows, all 4 ruled, and NO non-ruled wake kind names either verb. EVENT-TYPE REGISTRY (the FIFTH shared surface, absent from annex G-f): exactly 2 new members, both client_scoped, kb_binding.* 3->5, the whole registry moved by exactly +2, and an UNREGISTERED type is STILL refused by the live trigger via a real insert probe -- registering two names opened no hole. NO new role (14, unmoved -- no roles-bootstrap twin owed), NO wake_credentials CHECK change, NO wake_engine_sources row (2, both still disabled -- PR-4''s). No table in workflow/graphile_worker/spike touched.';
+  raise notice 'binding proposal pr-1 tail: OK -- D1 INVENTORY EMPTY, PROVEN: all 18 DO-NOT-TOUCH bodies re-pin BYTE-IDENTICAL to their SS1 prosrc stash (incl. _approve_entry_core, left undisturbed for PR-3''s own pre-image; _derive_vendor_binding_proposal re-pinned against de0f5807... and _coding_lane_core against 721a6704... independently of the stash), and each of the 5 new function NAMES resolves at exactly one pg_proc row under every arity. G4: the registry refused a REAL mismatched-pair probe by ck_agent_receipt_surfaces_shim_matches_item EXACTLY (both halves individually lawful, so nothing else could have refused it), refused a REAL uppercase item/shim probe by one of the two widened regexes (isolation between THEM is structurally impossible once the pairing CHECK exists, and the file says so rather than asserting an evaluation order), and ADMITTED a real f_a42 probe -- the pre-existing f_a family survived the pb_ widening -- with both widened definitions read byte-exact; agent_receipt_surfaces holds 9 rows, pb_binding is shim_exists+wired+conforms+19-col+zero-dark, the census returns 9, agent_receipts_visible''s 19-column contract is unchanged and nothing is dark. binding_agent_receipts: RLS enabled+forced, owner-only, ZERO non-owner grants, ZERO app-role DML across 8 roles, both append-only triggers attached. vendor_identity_bindings: 6 new columns at the right type/nullability (17+6=23 total), 5 new CHECKs + 1 composite FK present, and ck_vib_proposed_by_agent_honest read from the catalog as a BIDIRECTIONAL EQUALITY. G8: uq_vib_one_open_proposal asserted BY PROPERTY from pg_index (unique+valid+ready+live, keys {client_id,counterparty_id}, predicate status=''proposed''), never by name; uq_vib_one_live unmoved. ACL: both wake verbs EXECUTE-able by clara_wake_filing AND clara_wake_interactive and by none of 6 other roles; decline is clara_authenticated-only; both internals ungranted; exactly 4 allowlist rows, all 4 ruled, and NO non-ruled wake kind names either verb. EVENT-TYPE REGISTRY (the FIFTH shared surface, absent from annex G-f): exactly 2 new members, both client_scoped, kb_binding.* 3->5, the whole registry moved by exactly +2, and an UNREGISTERED type is STILL refused by the live trigger via a real insert probe -- registering two names opened no hole. NO new role (14, unmoved -- no roles-bootstrap twin owed), NO wake_credentials CHECK change, NO wake_engine_sources row (2, both still disabled -- PR-4''s). No table in workflow/graphile_worker/spike touched.';
 end
 $bp1_tail$;
