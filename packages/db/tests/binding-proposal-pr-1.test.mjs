@@ -1498,6 +1498,42 @@ test("bp1.R5 the registry census is 9, pb_binding conforms, and nothing is dark"
   assert.equal(dark.rows[0].c, 0);
 });
 
+test("bp1.O1 the retro census SEES a would-fail binding and REVOKES NOTHING", async () => {
+  failBp1(live);
+  // The identity walls sit above the byte-frozen derivation, so they guard NEW proposals only.
+  // A binding signed before them stays live — revoking it unattended would be a migration
+  // overruling a human's signature. What is owed instead is visibility, and this is it.
+  const { cp, basis } = await eligibleVendor("O1");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  await sign(w.users.alice, { binding: p.binding_id });
+  const before = await humanQuery(w.users.alice,
+    "select count(*)::int c from clara.binding_identity_census() where binding_id=$1", [p.binding_id]);
+  assert.equal(before.rows[0].c, 0, "a clean live binding is NOT a finding");
+
+  // Now make its family ambiguous AFTER the fact — a same-token sibling appears, exactly the
+  // situation the census exists to surface.
+  const sibling = await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "O1-sib");
+  await rootQuery("update clara.counterparties set name=$2, name_normalized=$3 where id=$1",
+    [sibling.id, `${cp.name.split(" ")[0]} OTHER SDN BHD`,
+      `${cp.name.split(" ")[0]}othersdnbhd`.toLowerCase()]);
+
+  const after = await humanQuery(w.users.alice,
+    "select would_fail from clara.binding_identity_census() where binding_id=$1", [p.binding_id]);
+  assert.equal(after.rowCount, 1, "the census now names it");
+  assert.equal(after.rows[0].would_fail, "binding_name_family_ambiguous");
+  // …and the binding is UNTOUCHED. The census is a read.
+  const row = await bindingRow(p.binding_id);
+  assert.equal(row.status, "live");
+  assert.equal(row.revoked_at, null);
+  // Admin floor, and firm-scoped: another firm's owner sees nothing of ours.
+  await assertRaises(CLR.authz,
+    () => humanQuery(w.users.bob, "select * from clara.binding_identity_census()"),
+    "a bookkeeper running the census");
+  const other = await humanQuery(w.users.dave,
+    "select count(*)::int c from clara.binding_identity_census() where binding_id=$1", [p.binding_id]);
+  assert.equal(other.rows[0].c, 0, "another firm's admin sees none of our bindings");
+});
+
 // ===========================================================================
 // F — THE FROZEN SURFACES. One derivation, two doors.
 // ===========================================================================

@@ -137,6 +137,7 @@ begin
                  ('clara.eligible_binding_signer_count(uuid)'),
                  ('clara._binding_suppression(uuid,uuid,uuid)'),
                  ('clara._expire_stale_proposals(uuid,uuid,uuid)'),
+                 ('clara.binding_identity_census()'),
                  ('clara.sign_vendor_identity_binding(uuid,text,text)')) t(n)
    where to_regprocedure(t.n) is not null;
   if v_missing is not null then
@@ -151,7 +152,8 @@ begin
      ('_derive_vendor_binding_basis','_propose_vendor_binding_agent_core',
       'wake_propose_vendor_identity_binding','wake_list_binding_candidates',
       'decline_vendor_identity_binding','reset_binding_decline','_binding_extra_blocker',
-      'eligible_binding_signer_count','_binding_suppression','_expire_stale_proposals');
+      'eligible_binding_signer_count','_binding_suppression','_expire_stale_proposals',
+      'binding_identity_census');
   if v_missing is not null then
     raise exception 'binding proposal pr-1 prestate: pg_proc already carries name(s) under some arity: %', v_missing
       using errcode = 'CLR10';
@@ -1908,8 +1910,92 @@ end
 $$;
 
 -- =====================================================================================
+-- SS10b4 -- O1: the RETRO CENSUS. Read-only. No auto-revoke.
+-- =====================================================================================
+-- C1's identity rungs are NOT applied retroactively (gate ruling O1, under delegation). They sit
+-- ABOVE the frozen derivation, so they can only guard proposals made from now on: a binding
+-- signed last month was signed against the walls that existed last month, and silently revoking
+-- it would be this migration deciding, unattended, that a human's signature was wrong.
+-- What IS owed is VISIBILITY. This census answers one question honestly -- "which live bindings
+-- would not be proposable today, and why" -- and does nothing else with the answer. Acting on a
+-- row is a human's call through the existing revoke door.
+create function clara.binding_identity_census()
+  returns table(binding_id uuid, client_id uuid, counterparty_id uuid,
+                counterparty_name text, signed_at timestamptz, would_fail text)
+  language plpgsql stable security definer set search_path = clara, pg_temp as $fn$
+declare c record; b record; v_derived jsonb; v_reason text;
+begin
+  c := clara._human_ctx(clara.role_rank('admin'));
+  for b in
+    select v.id, v.client_id, v.counterparty_id, v.signed_at, cp.name
+      from clara.vendor_identity_bindings v
+      join clara.counterparties cp on cp.id = v.counterparty_id
+     where v.firm_id = c.firm and v.status = 'live'
+     order by v.signed_at desc nulls last, v.id
+  loop
+    -- THE CORPUS IS READ FROM THE BINDING'S OWN STORED EVIDENCE, never re-derived. Calling
+    -- clara._derive_vendor_binding_proposal here would ALWAYS raise binding_conflict -- its last
+    -- rung refuses when a live binding exists, and the live binding in question is this one --
+    -- so the walls would never be reached and the census would report a clean estate no matter
+    -- what. Measured on the rig: the first draft did exactly that and returned zero rows for a
+    -- binding it should have named. The stored evidence is also the RIGHT corpus to judge: it is
+    -- the one this binding actually rests on.
+    v_reason := null;
+    select jsonb_build_object('evidence', coalesce(jsonb_agg(jsonb_build_object(
+             'entry_id', ev.entry_id, 'document_id', ev.document_id,
+             'facts_extraction_id', ev.facts_extraction_id,
+             'ocr_extraction_id', ev.ocr_extraction_id)), '[]'::jsonb))
+      into v_derived
+      from clara.vendor_identity_binding_evidence ev
+     where ev.binding_id = b.id;
+    begin
+      v_reason := clara._binding_extra_blocker(c.firm, b.client_id, b.counterparty_id, v_derived,
+        clara._derive_vendor_binding_basis(c.firm, b.client_id, b.counterparty_id));
+    exception when others then
+      -- A census that dies on one bad row tells the operator nothing about the other 200.
+      v_reason := 'census_error: ' || sqlerrm;
+    end;
+    if v_reason is not null then
+      binding_id := b.id; client_id := b.client_id; counterparty_id := b.counterparty_id;
+      counterparty_name := b.name; signed_at := b.signed_at; would_fail := v_reason;
+      return next;
+    end if;
+  end loop;
+end $fn$;
+comment on function clara.binding_identity_census() is
+  '裁-18b PR-1 (gate ruling O1): a READ-ONLY census of LIVE vendor identity bindings whose corpus '
+  'would NOT pass the identity walls this PR adds -- an ambiguous name family, a non-distinct '
+  'corpus, no elapsed observation, or an unproven printed identifier. It REVOKES NOTHING. The '
+  'walls sit above the byte-frozen derivation and therefore guard new proposals only; a binding '
+  'signed before them was signed against the walls that existed then, and revoking it unattended '
+  'would be a migration overruling a human signature. Acting on a row is an admin''s call through '
+  'the existing revoke door. Admin floor, firm-scoped. Frontend home: the admin / vendor-bindings '
+  'panel, as a review list.';
+revoke all on function clara.binding_identity_census() from public;
+grant execute on function clara.binding_identity_census() to clara_authenticated;
+
+-- =====================================================================================
 -- SS10c -- clara.reset_binding_decline: the named human door out of a decline (ruling (b))
 -- =====================================================================================
+-- THE DECLINE VERB SPECIFICATION (gate M7 -- annex A never carried one, so it is written here,
+-- in the file that builds it, rather than left implicit):
+--   clara.decline_vendor_identity_binding(p_binding uuid, p_reason text, p_op_key text) -> jsonb
+--     floor        ADMIN (_human_ctx(role_rank('admin'))) -- the SIGNER's floor, because
+--                  declining is that same decision said the other way.
+--     reason       REQUIRED, non-blank; refused CLR36 decline_reason_required otherwise.
+--     transition   'proposed' -> 'declined' ONLY; any other source status refuses CLR36
+--                  binding_not_proposed. Terminal: a declined row cannot be declined twice.
+--     durability   stamps declined_by / declined_at / decline_reason, CHECK-paired by
+--                  ck_vib_declined so the status and the stamp cannot disagree.
+--     audit        one clara.audit_log row (fn='decline_vendor_identity_binding') AND one
+--                  clara.domain_events row (event_type='kb_binding.declined', registered by
+--                  this file in SS3a).
+--     idempotency  _reserve_op / _finish_op over (binding_id, reason), like every other door.
+--     effect       SUPPRESSES the pair in BOTH proposal writers and in the eligibility read,
+--                  via clara._binding_suppression -- not merely a hint to Clara (gate B4).
+--     way out      clara.reset_binding_decline, below: the SAME admin floor, its own reason,
+--                  its own audit + kb_binding.decline_reset event. Without it a single "no"
+--                  would mean "never, by anyone, forever".
 -- Suppression is PERMANENT until a human explicitly lifts it. Without this door "no" would mean
 -- "never, by anyone, forever" -- a product that cannot correct its own refusal. Admin floor (the
 -- same rank that declined), reason required, audited and evented. It does NOT re-propose: it
@@ -2022,7 +2108,7 @@ begin
                  ('decline_vendor_identity_binding'),('reset_binding_decline'),
                  ('_binding_extra_blocker'),('eligible_binding_signer_count'),
                  ('_binding_suppression'),('_expire_stale_proposals'),
-                 ('sign_vendor_identity_binding')) t(n)
+                 ('binding_identity_census'),('sign_vendor_identity_binding')) t(n)
     left join lateral (select count(*)::int c from pg_proc p join pg_namespace n2 on n2.oid = p.pronamespace
                         where n2.nspname = 'clara' and p.proname = t.n) k on true
    where coalesce(k.c,0) <> 1;
