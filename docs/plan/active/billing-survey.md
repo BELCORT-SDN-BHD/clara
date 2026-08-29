@@ -126,12 +126,16 @@ row below is a Read of the cited body, with its enclosing verb and its refusal n
 | **posting** | `clara._assert_client_operational(p_client, p_firm)` — `0017_wave_b.sql:1664`, guard `:1673`, whose own message names the rule: *"client is not active — operational consumers exclude onboarding/archived clients (WB-R1)"*. Its caller is `0017:62`'s `do $cor$` splice into **`clara._draft_entry_core(...)`**, the shared core every entry-drafting/posting path routes through; the splice's own comment (`0017:54`) is *"O8.1: generic draft/wake drafting becomes active-only"*, and it **widened** the previous wall from "reject archived only" to "reject anything non-active" | **CLR10** |
 
 Two further shapes, recorded because they are *different animals* and a census that lumps them
-would be lying: `clara.run_client_lint(p_client, p_op_key)` (`0017:4672`) **silently SKIPS** a
-non-active client — no exception, no errcode, a `status:'skipped'` result — and the sweep
-discovery paths exclude non-active clients by a JOIN predicate rather than a refusal
+would be lying. **(a) SILENT SKIP, not refusal:** `clara.run_client_lint(p_client, p_op_key)`
+(body `0017:4657`, guard `:4672`) returns `status:'skipped'` for a non-active client — no
+exception, no errcode — and `clara.run_lint_all(p_op_key)` (body `0017:4917`) simply loops
+`where c.status='active'` (`:4928`). **(b) DISCOVERY PREDICATE, not a door:** the sweep paths
+exclude non-active clients by a JOIN
 (`join clara.clients oc on oc.id=df.client_id and oc.status='active'`: `0017:179`, `:211`;
 `0024:530`; `0025:161`; `0026:377`, `:1399`; `0038:6215`; `0090:1141`), as does the compliance
-watch loop (`0016:866`).
+watch loop (`0016:866`). Neither class is a wall — a caller that reaches the underlying work by
+another path is not stopped by them — which is why the three walls above are the ones 裁-42⑩
+actually rests on.
 
 **So 裁-42⑩ costs the design ZERO new walls — and that is the finding, not a convenience.**
 What it costs instead is a **decision**: the walls are keyed on `status='active'`, so whether
