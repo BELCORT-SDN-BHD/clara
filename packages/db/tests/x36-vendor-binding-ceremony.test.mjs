@@ -346,21 +346,37 @@ test("x36c.9 sign_vendor_identity_binding still refuses a binding whose created_
   // original (pre-fix-round) draft of this wall got wrong -- measured by the independent
   // reviewer executing exactly this scenario. The constraint is restored in `finally` so
   // this cell never leaves the shared rig's schema drifted for any other test.
+  // THE DRIFT IS SIMULATED BY AN INSERT, NOT AN UPDATE (裁-18b PR-1 fold, FOLD-2). created_by is
+  // PROVENANCE and frozen from the insert onward now, so `update … set created_by = null` is
+  // refused by the freeze trigger and this cell would be measuring THAT wall instead of the one
+  // it names. A row born with a null principal is the same simulated drift and reaches the arm
+  // under test; ck_vib_proposed_by_agent_honest evaluates to NULL on it, which a CHECK admits.
   await rootQuery("alter table clara.vendor_identity_bindings alter column created_by drop not null");
+  let nulled = null;
   try {
-    await rootQuery("update clara.vendor_identity_bindings set created_by = null where id = $1", [proposed.binding_id]);
+    nulled = (await rootQuery(
+      `insert into clara.vendor_identity_bindings(
+          firm_id,client_id,counterparty_id,status,f1_vendor_name_norm,f2_invoice_prefix,
+          registration_at_signing,content_hash,created_by,expires_at)
+       select firm_id,client_id,counterparty_id,'proposed',f1_vendor_name_norm,f2_invoice_prefix,
+              registration_at_signing,content_hash,null,expires_at
+         from clara.vendor_identity_bindings where id=$1
+       returning id`, [proposed.binding_id])).rows[0].id;
+    const check = await rootQuery(
+      "select created_by from clara.vendor_identity_bindings where id=$1", [nulled]);
+    assert.equal(check.rows[0].created_by, null, "fixture: the row really carries a NULL principal");
     try {
-      await sign(w.users.alice, { binding: proposed.binding_id });
+      await sign(w.users.alice, { binding: nulled, opKey: opk("c9null") });
       assert.fail("sign_vendor_identity_binding must refuse a NULL created_by, not silently sign it live (the fail-open this cell regression-pins)");
     } catch (e) {
       assert.equal(e.code, "CLR04", `expected CLR04, got ${e.code}: ${e.message}`);
       assert.equal(reasonOf(e), "signer_is_proposer", `expected the wall's reason token even on the defensive NULL arm, got: ${JSON.stringify(e.detail)}`);
     }
   } finally {
-    // Restore, as owner: a nulled row from THIS cell's own probe would otherwise still be
-    // sitting there too -- clean it up before re-adding the constraint, or the ALTER itself
-    // would refuse on the very row this cell created.
-    await rootQuery("update clara.vendor_identity_bindings set created_by = $1 where id = $2", [w.users.bob, proposed.binding_id]);
+    // The probe row would block the ALTER, and it cannot be UPDATEd into shape (provenance is
+    // frozen) — so it is DELETEd. Nothing references it: it was never signed and has no evidence
+    // rows, no receipt and no audit line of its own.
+    if (nulled) await rootQuery("delete from clara.vendor_identity_bindings where id=$1", [nulled]);
     await rootQuery("alter table clara.vendor_identity_bindings alter column created_by set not null");
   }
 });

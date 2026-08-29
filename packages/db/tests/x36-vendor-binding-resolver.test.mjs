@@ -31,7 +31,7 @@ import { rootQuery, endPool } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import {
-  has28, has29, seedPayableAccount, seedLiveBinding, seedBareDocument, seedF123Evidence,
+  has28, has29, seedPayableAccount, seedLiveBinding, seedBareDocument, seedF123Evidence, signLive,
   seedVendorCounterparty, seedApprovedEntry, propose, sign,
 } from "./x36-vendor-binding-helpers.mjs";
 
@@ -94,14 +94,23 @@ async function bindLiveWithInvoiceId(cp, invoiceId, evidenceIdentity = cp) {
     // `invoiceId` — this helper's whole contract ("f2_invoice_prefix ends up being that whole
     // string") is preserved byte-for-byte, and every cell below still reads the prefix it
     // expects. The approved_at/extracted_at backdating is the trusted-clock wall's requirement.
+    // corpus: true (裁-18b PR-1 fold) — this IS a binding window, so each document prints a hard
+    // identifier and its own economic facts. The identifier printed is the TARGET counterparty's,
+    // not evidenceIdentity's: W18 asks whether the page proves the identity of the party being
+    // bound, and the whole point of this helper is that the page's NAME is a trading name while
+    // the registration on it is the real vendor's. Economics derive from the (distinct) printed
+    // invoice ids, so the three documents fingerprint differently as three real invoices should.
     await seedF123Evidence(w.firms.A, doc.id, evidenceIdentity, `${invoiceId}${i + 1}`,
-      evidenceIdentity.name, `${d}T00:00:00Z`);
+      evidenceIdentity.name, `${d}T00:00:00Z`, { corpus: true, printedRegistration: cp.reg });
     await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc,
       { postingDate: d, approvedAt: `${d}T09:00:00Z` });
     i += 1;
   }
   const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
-  return sign(w.users.alice, { binding: proposed.binding_id });
+  // signLive: the post-time re-check is proven by a witnessed prosrc sha now (裁-18b PR-1 finding
+  // C3), so signing refuses until PR-3 mints the witness; the helper performs PR-3's two acts and
+  // undoes both.
+  return signLive(w.users.alice, { binding: proposed.binding_id });
 }
 
 /** Add one more top-band OCR region to a document's (already-seeded) ocr extraction,
