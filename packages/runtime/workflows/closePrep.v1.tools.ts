@@ -1,0 +1,165 @@
+// @frozen
+//
+// FROZEN — part of the closePrep_v1 closure (see closePrep.v1.infra.ts for what this class is).
+//
+// THIS FILE (tools) — the SIX write wrappers, and the assembler that joins them to the six reads
+// in closePrep.v1.reads.ts. Twelve tools total: exactly the twelve 0138 minted, no more.
+//
+// THE THIRTEENTH IS DELIBERATELY ABSENT. wake_establish_prepayment_schedule is F-A4 PR-2b's own
+// (parked at the time this closure was built) and is NOT exposed here. When it lands it belongs
+// to closePrep_v2, with its own review — not to an edit of this frozen body.
+//
+// SO IS EVERY LAW-71 ACT, AND THAT WALL IS THE DATABASE'S, NOT THIS FILE'S. settle_close_proposal,
+// finalize_close, attest_close_exception and reopen_fiscal_year are granted to
+// clara_authenticated ONLY: the agent entrance is cut below the close_and_attest capability gate
+// (0138 §G's own note that "NEITHER entrance reaches the other's wall"). Their absence from this
+// tool set is convenience for the model, never the containment — the containment is that
+// clara_wake_interactive holds no EXECUTE on them at all, which the battery proves BY CALLING
+// them and reading the refusal, never by reading this comment.
+
+import { tool } from "ai";
+import { z } from "zod";
+import { WRITE_TOOLS } from "./closePrep.v1.prompt.js";
+import {
+  buildCloseReadTools,
+  callCloseVerb,
+  closeRefusal,
+  countIfAdmitted,
+  type CloseRunRecord,
+} from "./closePrep.v1.reads.js";
+import type { CloseTaskContext } from "./closePrep.v1.infra.js";
+
+const RATIONALE = z.string().min(1).describe("Why this act, in plain words a bookkeeper can check tomorrow.");
+
+export { newCloseRunRecord, type CloseRunRecord } from "./closePrep.v1.reads.js";
+
+export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec: CloseRunRecord) {
+  const write = async (verb: string, subject: string, sql: string, args: unknown[], rationale: string) => {
+    try {
+      const reply = await callCloseVerb(ctx, verb, subject, sql, args, rationale, modelId);
+      return countIfAdmitted(rec, reply);
+    } catch (e) {
+      return closeRefusal(e);
+    }
+  };
+
+  return {
+    ...buildCloseReadTools(ctx, modelId, rec),
+
+    [WRITE_TOOLS.DEPRECIATION]: tool({
+      description:
+        "Run the depreciation catch-up through a date. Do this BEFORE beginning a close: after the freeze these periods cannot clear at all. Requires a live human-signed depreciation authority — you execute an authority, you never sign one.",
+      inputSchema: z.object({
+        through: z.string().describe("An ISO date (YYYY-MM-DD). A date beyond the book clock is refused, correctly."),
+        rationale: RATIONALE,
+      }),
+      execute: ({ through, rationale }: { through: string; rationale: string }) =>
+        write(
+          "wake_run_depreciation_catchup",
+          ctx.clientId,
+          "select clara.wake_run_depreciation_catchup($1,$2::date,$3,$4::jsonb,$5) as r",
+          [ctx.clientId, through],
+          rationale,
+        ),
+    }),
+
+    [WRITE_TOOLS.SNAPSHOT_MINT]: tool({
+      description: "Mint the month snapshot for a month start date, where one is owed.",
+      inputSchema: z.object({ month_start: z.string().describe("An ISO date (YYYY-MM-DD), the first of the month."), rationale: RATIONALE }),
+      execute: ({ month_start, rationale }: { month_start: string; rationale: string }) =>
+        write(
+          "wake_mint_month_snapshot",
+          ctx.clientId,
+          "select clara.wake_mint_month_snapshot($1,$2::date,$3,$4::jsonb,$5) as r",
+          [ctx.clientId, month_start],
+          rationale,
+        ),
+    }),
+
+    [WRITE_TOOLS.OPEN_FY]: tool({
+      description: "Open a NEW fiscal year for this client. Only when the year that should follow the one ending does not exist yet.",
+      inputSchema: z.object({
+        label: z.string().min(1).describe("The year's label, in the client's own existing convention."),
+        starts_on: z.string().describe("An ISO date (YYYY-MM-DD) — the day after the previous year ends."),
+        rationale: RATIONALE,
+      }),
+      execute: ({ label, starts_on, rationale }: { label: string; starts_on: string; rationale: string }) =>
+        write(
+          "wake_open_fiscal_year",
+          ctx.clientId,
+          "select clara.wake_open_fiscal_year($1,$2,$3::date,$4,$5::jsonb,$6) as r",
+          [ctx.clientId, label, starts_on],
+          rationale,
+        ),
+    }),
+
+    [WRITE_TOOLS.BEGIN]: tool({
+      description:
+        "Open the close RUN for a fiscal year. This starts the preparation; it does not close anything. Read readiness first, and clear the mechanical blockers first.",
+      inputSchema: z.object({ fiscal_year_id: z.string().uuid(), rationale: RATIONALE }),
+      execute: async ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) => {
+        const reply = await write(
+          "wake_begin_close",
+          fiscal_year_id,
+          "select clara.wake_begin_close($1,$2,$3::jsonb,$4) as r",
+          [fiscal_year_id],
+          rationale,
+        );
+        // Remember the run id the DATABASE returned, so the propose/abandon tools below can be
+        // grounded in this run's own work. Read positively off the reply — never reconstructed.
+        const id = (reply as { close_run_id?: unknown; subject_id?: unknown } | null)?.close_run_id;
+        if (typeof id === "string") rec.closeRunId = id;
+        return reply;
+      },
+    }),
+
+    [WRITE_TOOLS.PROPOSE]: tool({
+      description:
+        "Record the close proposal: what you drafted and the narrative explaining it. This is the run's real output — a human settles it, you never do.",
+      inputSchema: z.object({
+        close_run_id: z.string().uuid(),
+        drafted: z
+          .record(z.string(), z.unknown())
+          .describe("The drafted close content, as an object. Every figure in it must have come from a read or a database reply."),
+        narrative: z.string().min(1).describe("The explanation a bookkeeper reads in the morning. Never imply a human decision has been made."),
+        rationale: RATIONALE,
+      }),
+      execute: ({
+        close_run_id,
+        drafted,
+        narrative,
+        rationale,
+      }: {
+        close_run_id: string;
+        drafted: Record<string, unknown>;
+        narrative: string;
+        rationale: string;
+      }) =>
+        write(
+          "wake_propose_close",
+          close_run_id,
+          "select clara.wake_propose_close($1,$2::jsonb,$3,$4,$5::jsonb,$6) as r",
+          [close_run_id, JSON.stringify(drafted), narrative],
+          rationale,
+        ),
+    }),
+
+    [WRITE_TOOLS.ABANDON]: tool({
+      description:
+        "Abandon a close run you opened, with an honest reason. An abandoned run with a clear reason is a good outcome; a half-open run nobody can interpret is not.",
+      inputSchema: z.object({
+        close_run_id: z.string().uuid(),
+        reason: z.string().min(1).describe("What made this run un-continuable. Concrete, not apologetic."),
+        rationale: RATIONALE,
+      }),
+      execute: ({ close_run_id, reason, rationale }: { close_run_id: string; reason: string; rationale: string }) =>
+        write(
+          "wake_abandon_close",
+          close_run_id,
+          "select clara.wake_abandon_close($1,$2,$3,$4::jsonb,$5) as r",
+          [close_run_id, reason],
+          rationale,
+        ),
+    }),
+  };
+}

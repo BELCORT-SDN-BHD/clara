@@ -1,0 +1,122 @@
+// @frozen
+//
+// FROZEN — part of the bankAgent_v1 closure (see bankAgent.v1.infra.ts for what this class is).
+//
+// THIS FILE (impl) — the three durable steps: claim, run the model, settle. Each is a WDK
+// "use step", so each commits its own transaction before the next can begin, and a crash
+// resumes at the step boundary rather than replaying the whole run.
+//
+// THE ORDER IS THE CONTRACT. Claim first, always: nothing consequential — no credential mint,
+// no tool call, no egress — may happen before this run has proven its own task still says
+// 'running' and belongs to it. That is the closing wall wake-engine.mjs's module header names
+// as this build's own obligation (#5/#8), and putting it anywhere but first would defeat it.
+
+import { streamText, isStepCount } from "ai";
+import { getWritable, getWorkflowMetadata } from "workflow";
+import {
+  pools,
+  claimBankTask,
+  settleBankTask,
+  resolveModel,
+  type BankTaskContext,
+  type ClaimOutcome,
+  type PgExec,
+} from "./bankAgent.v1.infra.js";
+import { SYSTEM_PROMPT_BANK_AGENT_V1, BANK_AGENT_STEP_BUDGET, type BankAgentOutcome } from "./bankAgent.v1.prompt.js";
+import { buildBankAgentTools, newBankRunRecord } from "./bankAgent.v1.tools.js";
+import { bankAgentEngineId, recordBankAgentUsage } from "./bankAgent.v1.usage.js";
+
+/** STEP 1 — the CAS-and-bind. Returns a plain, non-secret verdict; a false claim is a clean
+ *  stand-down the workflow entry turns into a no-op return, never a thrown error. */
+export async function claimBankTaskStep(taskId: string): Promise<ClaimOutcome> {
+  "use step";
+  const { workflowRunId } = getWorkflowMetadata();
+  return pools().withRuntime((c: PgExec) => claimBankTask(c, taskId, workflowRunId));
+}
+
+/** The model pass's own reduced result. NOTHING SECRET CROSSES THIS BOUNDARY — the credential
+ *  was minted, used and discarded inside the step below (the secret law), and what returns is a
+ *  count, a note and token numbers. */
+export type BankModelResult = { outcome: BankAgentOutcome; usageTokens: number };
+
+/**
+ * STEP 2 — one model pass over the four tools.
+ *
+ * WHY THE ADMITTED COUNT COMES FROM THE TOOL RECORD, NOT THE MODEL'S SUMMARY. The model's
+ * closing text is prose for a human; it is not evidence of what happened. The record counts
+ * only replies the DATABASE itself marked admitted (bankAgent.v1.tools.ts's countIfAdmitted),
+ * so "acted" is a read of the books, never the model's claim about the books. Constraint 2 in
+ * its narrowest form: no model-generated numeral reaches a durable row, and the settle record's
+ * own act count is derived from DB replies alone.
+ */
+export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: string): Promise<BankModelResult> {
+  "use step";
+  const startedAt = Date.now();
+  const rec = newBankRunRecord();
+  const tools = buildBankAgentTools(ctx, modelId, rec);
+  const dueLine = ctx.dueReason
+    ? `The clock woke you because: ${ctx.dueReason}. Confirm that against the pack before you act on it.`
+    : "The clock woke you for this account. Read the pack and work out what, if anything, is due.";
+
+  // The two casts below: the provider union is not expressible against the test-injected mock,
+  // and a heterogeneous tool map is not expressible as one AI-SDK tool type. The same two casts
+  // every sibling lane in this estate carries (autoDraft.v9.impl.ts), for the same two reasons.
+  const result = streamText({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    model: resolveModel(modelId) as any,
+    system: SYSTEM_PROMPT_BANK_AGENT_V1,
+    messages: [{ role: "user", content: dueLine }],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tools: tools as any,
+    stopWhen: [isStepCount(BANK_AGENT_STEP_BUDGET)],
+  });
+
+  // The WDK writable is drained even though nothing subscribes to this lane's stream: leaving
+  // it unread would leak the writer's lock for the rest of the step. The parts themselves are
+  // deliberately discarded — an unattended pass has no viewer, and its durable record is the
+  // receipts the DB verbs wrote, never a transcript.
+  const writer = getWritable<unknown>().getWriter();
+  let text = "";
+  let usage: { inputTokens?: number; outputTokens?: number } = {};
+  try {
+    for await (const part of result.fullStream) {
+      if ((part as { type?: string }).type === "text-delta") {
+        const delta = (part as { text?: string }).text;
+        if (typeof delta === "string") text += delta;
+      }
+    }
+    usage = ((await result.usage) ?? {}) as { inputTokens?: number; outputTokens?: number };
+  } catch (err) {
+    await recordBankAgentUsage(ctx, bankAgentEngineId(modelId), { durationMs: Date.now() - startedAt }, "error");
+    throw err;
+  } finally {
+    writer.releaseLock();
+  }
+
+  await recordBankAgentUsage(
+    ctx,
+    bankAgentEngineId(modelId),
+    { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, durationMs: Date.now() - startedAt },
+    rec.admitted > 0 ? "success" : "refused",
+  );
+
+  const usageTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+  if (rec.admitted > 0) return { outcome: { kind: "acted", acts: rec.admitted }, usageTokens };
+  // A pass that read the pack and lawfully found nothing to do is a SUCCESS, not a failure —
+  // "stopping early is a correct outcome" is in the prompt because it is true of the settle too.
+  if (rec.digest !== null) {
+    return { outcome: { kind: "nothing_due", note: text.slice(0, 500) || "nothing due on this account" }, usageTokens };
+  }
+  // Never even read the pack: the run cannot say it looked, so it must not settle as though it
+  // did. Absence is not evidence (review law 2) — this falls through to the failed branch.
+  return {
+    outcome: { kind: "refused", code: "model_error", message: text.slice(0, 500) || "the run ended without reading the bank pack" },
+    usageTokens,
+  };
+}
+
+/** STEP 3 — the settlement. One verb, both projections, idempotent on replay. */
+export async function settleBankTaskStep(taskId: string, outcome: "completed" | "failed", errorCode: string | null): Promise<void> {
+  "use step";
+  await pools().withRuntime((c: PgExec) => settleBankTask(c, taskId, outcome, errorCode));
+}
