@@ -31,7 +31,7 @@ import {
 } from "./x36-vendor-binding-helpers.mjs";
 import {
   bp1Live, failBp1, reasonOf, mintCred, MODEL, WAKE_ROLE,
-  proposeAsAgent, listCandidates, declineBinding,
+  proposeAsAgent, listCandidates, declineBinding, resetDecline,
   derivedBasis, lawfulBasis, evidenceDocuments, foreignRegion,
   supersedeInvoiceFactsKeepingRegions, seedVendorNoRegistration, mergeAway,
   seedWindow, seedUniqueFamilyVendor, DATES_OK, withMutant, withoutConstraint,
@@ -846,9 +846,31 @@ test("bp1.D3 THE LOOP BRAKE — Clara never re-proposes what a human declined (w
   assert.equal(row.reason, "binding_declined");
   assert.equal(row.has_declined_proposal, true);
 
-  // (c) …and the HUMAN door is untouched: a person may always propose again.
+  // (c) …and so does the HUMAN door. This is conductor ruling (b), 2026-08-29, OVERRULING this
+  //     item's own design: a suppression only Clara honours is not an invariant, and the
+  //     adversarial pass's attack was one line — decline the card, then call the unchanged human
+  //     door. `propose_vendor_identity_binding` is RECUT by this PR and now refuses the same way.
+  const e2 = await assertRaises("CLR36",
+    () => propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id }),
+    "the HUMAN door after a decline");
+  assert.match(e2.message, /binding_declined/);
+  assert.equal(reasonOf(e2), "binding_declined");
+
+  // (d) …and the suppression is liftable, by a NAMED human door and nothing else. Without this
+  //     a single "no" would mean "never, by anyone, forever".
+  await assertRaises(CLR.authz,
+    () => resetDecline(w.users.bob, { binding: p.binding_id }), "a bookkeeper lifting a decline");
+  await assertRaises("CLR36",
+    () => resetDecline(w.users.alice, { binding: p.binding_id, reason: "  " }), "no reason given");
+  const reset = await resetDecline(w.users.alice, { binding: p.binding_id, reason: "vendor confirmed by phone" });
+  assert.equal(reset.status, "expired", "the declined row becomes expired — history, not deletion");
+  const after = await bindingRow(p.binding_id);
+  assert.equal(after.declined_by, w.users.alice, "who declined stays on the row as audit history");
+  assert.equal(after.declined_at, null, "…and the stamp clears, because ck_vib_declined pairs it with the status");
+
+  // (e) both doors work again, and only now.
   const again = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
-  assert.equal(again.status, "proposed", "the decline brakes CLARA, never the human");
+  assert.equal(again.status, "proposed", "after an explicit reset the pair may be proposed again");
 });
 
 test("bp1.D3m MUTANT — removing the declined brake lets Clara re-propose a refused pair", async () => {
@@ -1393,8 +1415,6 @@ test("bp1.F1 the byte-frozen bodies are unmoved (prosrc sha256, the live catalog
       "de0f58078f23ef2c6ce3f4a82cb29691a3633e3b8b9c48ae90babc53e7ee043c",
     "clara._coding_lane_core(uuid,uuid)":
       "721a6704e3284679103537bdda56bf741422041e16dda0f4654394f1d9506fda",
-    "clara.propose_vendor_identity_binding(jsonb,text)":
-      "610ef1dfc18f963122ed2012e49a96b06526b93baca2f269fa054a76302f7fc7",
     "clara.sign_vendor_identity_binding(uuid,text)":
       "5285581ec371856d525fb47d2cfabc6e72b3a37285b291390e8c7aa34034e941",
     "clara.revoke_vendor_identity_binding(uuid,text,text)":
@@ -1408,6 +1428,16 @@ test("bp1.F1 the byte-frozen bodies are unmoved (prosrc sha256, the live catalog
       [sig]);
     assert.equal(r.rows[0].s, expected, `${sig} drifted`);
   }
+  // `propose_vendor_identity_binding` is DELIBERATELY not in that list any more: this PR recuts
+  // it (conductor ruling (b)). Asserted as a CHANGE from its pre-image rather than pinned to a
+  // new literal, because the migration's own tail already proves the delta byte-for-byte by
+  // re-substitution — pinning the post-image here too would only duplicate that, and would go
+  // stale on every comment edit.
+  const recut = await rootQuery(
+    "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') s from pg_proc p where p.oid=$1::regprocedure",
+    ["clara.propose_vendor_identity_binding(jsonb,text)"]);
+  assert.notEqual(recut.rows[0].s, "610ef1dfc18f963122ed2012e49a96b06526b93baca2f269fa054a76302f7fc7",
+    "the human proposal door must NO LONGER be its 0028 pre-image — ruling (b) did not land");
 });
 
 test("bp1.F2 ONE derivation, TWO doors — the five content fields are byte-identical", async () => {

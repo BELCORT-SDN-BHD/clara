@@ -101,6 +101,14 @@ export async function declineBinding(sub, { binding, reason = "rig decline", opK
   return r.rows[0].result;
 }
 
+/** clara.reset_binding_decline — the named human door out of a decline (ruling (b)). */
+export async function resetDecline(sub, { binding, reason = "rig reset", opKey } = {}) {
+  const specs = [{ name: "p_binding" }, { name: "p_reason" }, { name: "p_op_key" }];
+  const r = await humanQuery(sub, namedCall("reset_binding_decline", specs),
+    [binding, reason, opKey ?? opk("vbreset")]);
+  return r.rows[0].result;
+}
+
 // ---------------------------------------------------------------------------
 // Basis construction — the citations Clara claims to have read.
 // ---------------------------------------------------------------------------

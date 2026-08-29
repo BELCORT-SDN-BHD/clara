@@ -127,7 +127,9 @@ begin
                  ('clara._propose_vendor_binding_agent_core(uuid,uuid,text,uuid,uuid,uuid,jsonb,text,jsonb,text)'),
                  ('clara.wake_propose_vendor_identity_binding(uuid,uuid,jsonb,text,jsonb,text)'),
                  ('clara.wake_list_binding_candidates(uuid)'),
-                 ('clara.decline_vendor_identity_binding(uuid,text,text)')) t(n)
+                 ('clara.decline_vendor_identity_binding(uuid,text,text)'),
+                 ('clara.reset_binding_decline(uuid,text,text)'),
+                 ('clara._binding_extra_blocker(uuid,uuid,uuid,jsonb,jsonb)')) t(n)
    where to_regprocedure(t.n) is not null;
   if v_missing is not null then
     raise exception 'binding proposal pr-1 prestate: function(s) already present: %', v_missing using errcode = 'CLR10';
@@ -140,7 +142,7 @@ begin
    where n.nspname = 'clara' and p.proname in
      ('_derive_vendor_binding_basis','_propose_vendor_binding_agent_core',
       'wake_propose_vendor_identity_binding','wake_list_binding_candidates',
-      'decline_vendor_identity_binding');
+      'decline_vendor_identity_binding','reset_binding_decline','_binding_extra_blocker');
   if v_missing is not null then
     raise exception 'binding proposal pr-1 prestate: pg_proc already carries name(s) under some arity: %', v_missing
       using errcode = 'CLR10';
@@ -237,7 +239,7 @@ begin
       using errcode = 'CLR10';
   end if;
   select string_agg(t.n, ', ' order by t.n) into v_missing
-    from (values ('kb_binding.agent_proposed'),('kb_binding.declined')) t(n)
+    from (values ('kb_binding.agent_proposed'),('kb_binding.declined'),('kb_binding.decline_reset')) t(n)
    where exists (select 1 from clara.event_types e where e.name = t.n);
   if v_missing is not null then
     raise exception 'binding proposal pr-1 prestate: clara.event_types already carries: %', v_missing using errcode = 'CLR10';
@@ -444,6 +446,8 @@ begin
   insert into _bp1_pre(k, v) values ('foreign_objs',
     (select coalesce(count(*),0)::text from pg_class c join pg_namespace n2 on n2.oid = c.relnamespace
       where n2.nspname in ('workflow','graphile_worker','spike')));
+  insert into _bp1_pre(k, v) values ('propose.prosrc',
+    (select p.prosrc from pg_proc p where p.oid = 'clara.propose_vendor_identity_binding(jsonb,text)'::regprocedure));
   insert into _bp1_pre(k, v) values ('event_types_total',
     (select count(*)::text from clara.event_types));
 
@@ -571,7 +575,8 @@ insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expec
 -- body adds it.
 insert into clara.event_types(name, client_scoped, description) values
   ('kb_binding.agent_proposed', true, 'Clara proposed a vendor identity binding (裁-18b)'),
-  ('kb_binding.declined',       true, 'A human admin declined a proposed vendor identity binding (裁-18b/G7)');
+  ('kb_binding.declined',       true, 'A human admin declined a proposed vendor identity binding (裁-18b/G7)'),
+  ('kb_binding.decline_reset', true, 'An admin lifted a binding decline so the pair may be proposed again (裁-18b)');
 
 -- The shim -- a real projection from the start. subject_id is coalesce(binding_id,
 -- counterparty_id) so a receipt without a binding row still names the thing it was about.
@@ -1467,6 +1472,204 @@ comment on function clara.decline_vendor_identity_binding(uuid,text,text) is
   'never re-proposes what a human refused. Frontend home: the admin / vendor-bindings panel, '
   'beside Sign in the proposal dialog.';
 
+-- =====================================================================================
+-- SS10b -- D1 BODY 1 of 2: clara.propose_vendor_identity_binding, RECUT.
+-- =====================================================================================
+-- Conductor rulings (b) and (c), 2026-08-29, from the cross-model adversarial pass. The design
+-- said the decline was "read by the loop brake" and that this PR replaced ZERO writer bodies.
+-- Both are overruled: a suppression that only the READ verb honours is not an invariant, and the
+-- audit's own attack is one line long -- decline the card, then call the UNCHANGED human door.
+--
+-- THREE SPLICES, and nothing else. The re-substitution proof in the tail strips exactly these
+-- three blocks from the new body and asserts what remains is the prestate BYTE-FOR-BYTE, so a
+-- fourth change anywhere in this 3.3 KB body fails the migration rather than shipping unnoticed.
+--   (1) the shared (client, counterparty) advisory key -- ruling (c). Both proposal doors, the
+--       signer and the decline take it, so a lawful second actor WAITS instead of racing to a
+--       typed refusal on a row that was mid-flight.
+--   (2) the declined-history wall -- ruling (b). Same shape as the agent core's W14. A human may
+--       still re-propose after an explicit RESET (clara.reset_binding_decline), which is what
+--       keeps "a human said no" from becoming "nobody may ever ask again".
+--   (3) the post-derivation identity walls -- ruling (e). A poisoned corpus is a poisoned corpus
+--       whoever proposes from it; law 79's predicate belongs at EVERY proposal point, not just
+--       Clara's.
+set role clara_fn_owner;
+
+create or replace function clara.propose_vendor_identity_binding(
+  p_proposal jsonb,
+  p_op_key text
+) returns jsonb
+language plpgsql security definer
+set search_path to clara,pg_temp
+as $$
+declare
+  c record; v_dedupe jsonb; v_client uuid; v_counterparty uuid;
+  v_derived jsonb; v_binding uuid;
+  v_blocker text;
+begin
+  c:=clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
+  if p_proposal is null or jsonb_typeof(p_proposal)<>'object'
+     or not (p_proposal ? 'client_id')
+     or not (p_proposal ? 'counterparty_id')
+     or exists (
+       select 1 from jsonb_object_keys(p_proposal) k
+       where k not in ('client_id','counterparty_id')
+     ) then
+    raise exception 'binding_proposal_malformed' using errcode='CLR36';
+  end if;
+  begin
+    v_client:=(p_proposal->>'client_id')::uuid;
+    v_counterparty:=(p_proposal->>'counterparty_id')::uuid;
+  exception when others then
+    raise exception 'binding_proposal_malformed' using errcode='CLR36';
+  end;
+  if v_client is null or v_counterparty is null then
+    raise exception 'binding_proposal_malformed' using errcode='CLR36';
+  end if;
+  if not exists (
+    select 1 from clara.clients where id=v_client and firm_id=c.firm
+  ) then
+    raise exception 'client not in your firm' using errcode='CLR11';
+  end if;
+
+  v_dedupe:=clara._reserve_op(c.firm,'propose_vendor_identity_binding',p_op_key,
+    clara._hash(jsonb_build_object(
+      'client_id',v_client,'counterparty_id',v_counterparty)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  perform pg_advisory_xact_lock(
+    hashtextextended(v_client::text || ':' || v_counterparty::text, 0));
+  if exists (
+    select 1 from clara.vendor_identity_bindings b
+    where b.firm_id=c.firm and b.client_id=v_client
+      and b.counterparty_id=v_counterparty and b.status='declined'
+  ) then
+    raise exception 'binding_declined' using errcode='CLR36',
+      detail='{"reason":"binding_declined","class":"loop_brake"}';
+  end if;
+
+  update clara.vendor_identity_bindings
+    set status='expired'
+  where firm_id=c.firm and client_id=v_client
+    and counterparty_id=v_counterparty
+    and status='live' and expires_at<=now();
+
+  v_derived:=clara._derive_vendor_binding_proposal(
+    c.firm,v_client,v_counterparty);
+  v_blocker:=clara._binding_extra_blocker(c.firm,v_client,
+    (v_derived->>'counterparty_id')::uuid, v_derived,
+    clara._derive_vendor_binding_basis(c.firm,v_client,
+      (v_derived->>'counterparty_id')::uuid));
+  if v_blocker is not null then
+    raise exception '%', v_blocker using errcode='CLR36',
+      detail=jsonb_build_object('reason',v_blocker,'class','identity')::text;
+  end if;
+  begin
+    insert into clara.vendor_identity_bindings(
+      firm_id,client_id,counterparty_id,status,
+      f1_vendor_name_norm,f2_invoice_prefix,registration_at_signing,
+      content_hash,created_by,expires_at
+    ) values (
+      c.firm,v_client,(v_derived->>'counterparty_id')::uuid,'proposed',
+      v_derived->>'f1_vendor_name_norm',
+      v_derived->>'f2_invoice_prefix',
+      v_derived->>'registration_at_signing',
+      v_derived->>'content_hash',c.actor,now()+interval '12 months'
+    ) returning id into v_binding;
+  exception when unique_violation then
+    raise exception 'binding_conflict' using errcode='CLR36';
+  end;
+
+  insert into clara.vendor_identity_binding_evidence(
+    binding_id,firm_id,client_id,entry_id,document_id,
+    facts_extraction_id,ocr_extraction_id
+  )
+  select v_binding,c.firm,v_client,
+    (x->>'entry_id')::uuid,(x->>'document_id')::uuid,
+    (x->>'facts_extraction_id')::uuid,(x->>'ocr_extraction_id')::uuid
+  from jsonb_array_elements(v_derived->'evidence') x;
+
+  perform clara._audit(c.firm,c.actor,null,null,
+    'propose_vendor_identity_binding',null,
+    jsonb_build_object('binding_id',v_binding,'client_id',v_client,
+      'counterparty_id',v_derived->>'counterparty_id','op_key',p_op_key));
+  perform clara._append_event(c.firm,'kb_binding.proposed',v_client,c.actor,
+    null,null,null,null,null,
+    jsonb_build_object('binding_id',v_binding,
+      'counterparty_id',v_derived->>'counterparty_id'));
+
+  return clara._finish_op(c.firm,'propose_vendor_identity_binding',p_op_key,
+    jsonb_build_object('binding_id',v_binding,'status','proposed')
+      || (v_derived - 'client_id' - 'counterparty_id'));
+end
+$$;
+
+-- =====================================================================================
+-- SS10c -- clara.reset_binding_decline: the named human door out of a decline (ruling (b))
+-- =====================================================================================
+-- Suppression is PERMANENT until a human explicitly lifts it. Without this door "no" would mean
+-- "never, by anyone, forever" -- a product that cannot correct its own refusal. Admin floor (the
+-- same rank that declined), reason required, audited and evented. It does NOT re-propose: it
+-- clears the block and leaves the next proposal to whoever wants to make it.
+create function clara.reset_binding_decline(
+    p_binding uuid, p_reason text, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fn$
+declare c record; v_dedupe jsonb; b record; v_reason text;
+begin
+  c := clara._human_ctx(clara.role_rank('admin'));
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10';
+  end if;
+  if p_binding is null then
+    raise exception 'binding is required' using errcode = 'CLR10';
+  end if;
+  v_reason := nullif(btrim(coalesce(p_reason, '')), '');
+  if v_reason is null then
+    raise exception 'a reset reason is required' using errcode = 'CLR36',
+      detail = '{"reason":"reset_reason_required"}';
+  end if;
+  v_dedupe := clara._reserve_op(c.firm, 'reset_binding_decline', p_op_key,
+    clara._hash(jsonb_build_object('binding_id', p_binding, 'reason', v_reason)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  select * into b from clara.vendor_identity_bindings where id = p_binding for update;
+  if not found or b.firm_id <> c.firm then
+    raise exception 'binding not found' using errcode = 'CLR11';
+  end if;
+  if b.status <> 'declined' then
+    raise exception 'binding_not_declined' using errcode = 'CLR36';
+  end if;
+  perform pg_advisory_xact_lock(
+    hashtextextended(b.client_id::text || ':' || b.counterparty_id::text, 0));
+
+  -- The declined row becomes 'expired' rather than being deleted or re-opened: the decline is
+  -- audit history and stays readable, and 'expired' is the estate's existing terminal status
+  -- that no wall keys on. The decline stamps are DELIBERATELY left in place -- ck_vib_declined
+  -- pairs declined_at with status='declined', so they are cleared in the same statement.
+  update clara.vendor_identity_bindings
+     set status = 'expired', declined_at = null, decline_reason = null
+   where id = p_binding;
+
+  perform clara._audit(c.firm, c.actor, null, null,
+    'reset_binding_decline', null,
+    jsonb_build_object('binding_id', p_binding, 'client_id', b.client_id,
+      'counterparty_id', b.counterparty_id, 'reason', v_reason,
+      'declined_by', b.declined_by, 'declined_at', b.declined_at, 'op_key', p_op_key));
+  perform clara._append_event(c.firm, 'kb_binding.decline_reset', b.client_id, c.actor,
+    null, null, null, null, null,
+    jsonb_build_object('binding_id', p_binding, 'counterparty_id', b.counterparty_id));
+  return clara._finish_op(c.firm, 'reset_binding_decline', p_op_key,
+    jsonb_build_object('binding_id', p_binding, 'status', 'expired'));
+end $fn$;
+comment on function clara.reset_binding_decline(uuid,text,text) is
+  '裁-18b PR-1 (conductor ruling (b), 2026-08-29): the NAMED human door out of a decline. A '
+  'decline suppresses BOTH proposal writers permanently -- so without this door a single "no" '
+  'would mean "never, by anyone, forever", and a product that cannot correct its own refusal is '
+  'a defect. Admin floor (the rank that declined), reason required, audited and evented. Moves '
+  'the row to ''expired'' rather than deleting it, so the decline stays readable as history. It '
+  'does NOT re-propose. Frontend home: the admin / vendor-bindings panel, on a declined row.';
+
 reset role;
 
 -- =====================================================================================
@@ -1483,6 +1686,9 @@ grant execute on function clara.wake_list_binding_candidates(uuid)
 revoke all on function clara.decline_vendor_identity_binding(uuid,text,text) from public;
 grant execute on function clara.decline_vendor_identity_binding(uuid,text,text) to clara_authenticated;
 
+revoke all on function clara.reset_binding_decline(uuid,text,text) from public;
+grant execute on function clara.reset_binding_decline(uuid,text,text) to clara_authenticated;
+
 insert into clara.wake_fn_allowlist(wake_kind, function_name) values
   ('filing',     'wake_propose_vendor_identity_binding'),
   ('interactive','wake_propose_vendor_identity_binding'),
@@ -1493,14 +1699,15 @@ insert into clara.wake_fn_allowlist(wake_kind, function_name) values
 -- SS12 -- TAIL SELF-PROOF. Raises on failure; every claim is RE-READ from the live catalog.
 -- =====================================================================================
 do $bp1_tail$
-declare v_bad text; v_n int; v_def text; v_census record; v_constraint text; v_sha text; v_idx record; v_src text;
+declare v_bad text; v_n int; v_def text; v_census record; v_constraint text; v_sha text; v_idx record; v_src text; v_stripped text;
 begin
   -- (1) THE D1 CLAIM, PROVEN AS A CENSUS: each of the five new function NAMES resolves at exactly
   --     one pg_proc row -- no overload was shadowed into existence, and nothing was replaced.
   select string_agg(format('%s x%s', t.n, coalesce(k.c,0)), ', ' order by t.n) into v_bad
     from (values ('_derive_vendor_binding_basis'),('_propose_vendor_binding_agent_core'),
                  ('wake_propose_vendor_identity_binding'),('wake_list_binding_candidates'),
-                 ('decline_vendor_identity_binding')) t(n)
+                 ('decline_vendor_identity_binding'),('reset_binding_decline'),
+                 ('_binding_extra_blocker')) t(n)
     left join lateral (select count(*)::int c from pg_proc p join pg_namespace n2 on n2.oid = p.pronamespace
                         where n2.nspname = 'clara' and p.proname = t.n) k on true
    where coalesce(k.c,0) <> 1;
@@ -1518,14 +1725,74 @@ begin
     from _bp1_pre pre
     join lateral (select encode(sha256(convert_to(
            (select p.prosrc from pg_proc p where p.oid = pre.k::regprocedure), 'UTF8')), 'hex') as sha) now on true
-   where pre.k not in ('foreign_objs','event_types_total') and now.sha is distinct from pre.v;
+   where pre.k not in ('foreign_objs','event_types_total','propose.prosrc',
+                       'clara.propose_vendor_identity_binding(jsonb,text)')
+     and now.sha is distinct from pre.v;
   if v_bad is not null then
     raise exception 'binding proposal pr-1 tail: a DO-NOT-TOUCH body CHANGED -- the D1 inventory is not empty: %', v_bad
       using errcode = 'CLR10';
   end if;
-  if (select count(*) from _bp1_pre where k not in ('foreign_objs','event_types_total')) <> 18 then
-    raise exception 'binding proposal pr-1 tail: the re-pin covered % bodies, expected 18',
-      (select count(*) from _bp1_pre where k not in ('foreign_objs','event_types_total')) using errcode = 'CLR10';
+  if (select count(*) from _bp1_pre where k not in ('foreign_objs','event_types_total','propose.prosrc',
+        'clara.propose_vendor_identity_binding(jsonb,text)')) <> 17 then
+    raise exception 'binding proposal pr-1 tail: the re-pin covered % bodies, expected 17 (18 stashed, minus the one body this file deliberately replaces)',
+      (select count(*) from _bp1_pre where k not in ('foreign_objs','event_types_total','propose.prosrc',
+        'clara.propose_vendor_identity_binding(jsonb,text)')) using errcode = 'CLR10';
+  end if;
+
+  -- (2b) D1 BODY 1 of 2 -- THE SURGICAL DELTA, proven by RE-SUBSTITUTION (0144/0147's own
+  --      discipline, and the only thing that turns "three splices and nothing else" into a
+  --      measurement). Strip EXACTLY the three blocks this file spliced into
+  --      clara.propose_vendor_identity_binding; what remains must be the SS1 prestate body
+  --      BYTE-FOR-BYTE. A fourth change anywhere in that 3.3 KB body fails the migration here
+  --      rather than shipping unnoticed under a comment that says it did not happen.
+  select p.prosrc into v_src from pg_proc p
+   where p.oid = 'clara.propose_vendor_identity_binding(jsonb,text)'::regprocedure;
+  if v_src is null then
+    raise exception 'binding proposal pr-1 tail: propose_vendor_identity_binding is GONE' using errcode = 'CLR10';
+  end if;
+  if encode(sha256(convert_to(v_src,'UTF8')),'hex')
+     = (select v from _bp1_pre where k = 'clara.propose_vendor_identity_binding(jsonb,text)') then
+    raise exception 'binding proposal pr-1 tail: propose_vendor_identity_binding is UNCHANGED -- the decline suppression ruling (b) did not land'
+      using errcode = 'CLR10';
+  end if;
+  v_stripped := v_src;
+  v_stripped := replace(v_stripped, $blk$
+  v_blocker text;$blk$, '');
+  v_stripped := replace(v_stripped, $blk$
+  perform pg_advisory_xact_lock(
+    hashtextextended(v_client::text || ':' || v_counterparty::text, 0));
+  if exists (
+    select 1 from clara.vendor_identity_bindings b
+    where b.firm_id=c.firm and b.client_id=v_client
+      and b.counterparty_id=v_counterparty and b.status='declined'
+  ) then
+    raise exception 'binding_declined' using errcode='CLR36',
+      detail='{"reason":"binding_declined","class":"loop_brake"}';
+  end if;$blk$, '');
+  v_stripped := replace(v_stripped, $blk$
+  v_blocker:=clara._binding_extra_blocker(c.firm,v_client,
+    (v_derived->>'counterparty_id')::uuid, v_derived,
+    clara._derive_vendor_binding_basis(c.firm,v_client,
+      (v_derived->>'counterparty_id')::uuid));
+  if v_blocker is not null then
+    raise exception '%', v_blocker using errcode='CLR36',
+      detail=jsonb_build_object('reason',v_blocker,'class','identity')::text;
+  end if;$blk$, '');
+  if v_stripped <> (select v from _bp1_pre where k = 'propose.prosrc') then
+    raise exception 'binding proposal pr-1 tail: stripping the THREE spliced blocks from the new propose_vendor_identity_binding does NOT reproduce the prestate body byte-for-byte -- this file changed something beyond the three ruled splices (stripped length %, prestate length %)',
+      length(v_stripped), length((select v from _bp1_pre where k = 'propose.prosrc'))
+      using errcode = 'CLR10';
+  end if;
+  -- ...and every PRIOR wall string survives, read in CODE. A re-substitution proof shows nothing
+  -- ELSE changed; these show the walls that were already there are still there.
+  select string_agg(t.n, ', ' order by t.n) into v_bad
+    from (values ('binding_proposal_malformed'),('client not in your firm'),
+                 ('binding_conflict'),('_derive_vendor_binding_proposal'),
+                 ('vendor_identity_binding_evidence'),('kb_binding.proposed')) t(n)
+   where position(t.n in v_src) = 0;
+  if v_bad is not null then
+    raise exception 'binding proposal pr-1 tail: propose_vendor_identity_binding lost prior wall string(s): %', v_bad
+      using errcode = 'CLR10';
   end if;
   -- The two that carry the design, re-pinned against their literals as well as against the stash
   -- (a stash that was itself wrong would compare equal to itself).
@@ -1888,18 +2155,18 @@ begin
   --      append-only guard on clara.domain_events forbids a DELETE, the same lesson §(3)'s f_a42
   --      probe learned on clara.agent_receipt_surfaces).
   select string_agg(t.n, ', ' order by t.n) into v_bad
-    from (values ('kb_binding.agent_proposed'),('kb_binding.declined')) t(n)
+    from (values ('kb_binding.agent_proposed'),('kb_binding.declined'),('kb_binding.decline_reset')) t(n)
    where not exists (select 1 from clara.event_types e where e.name = t.n and e.client_scoped);
   if v_bad is not null then
     raise exception 'binding proposal pr-1 tail: event_types is missing (or not client_scoped): %', v_bad
       using errcode = 'CLR10';
   end if;
-  if (select count(*) from clara.event_types where name like 'kb_binding.%') <> 5 then
-    raise exception 'binding proposal pr-1 tail: clara.event_types carries % kb_binding.* member(s), expected 3+2=5',
+  if (select count(*) from clara.event_types where name like 'kb_binding.%') <> 6 then
+    raise exception 'binding proposal pr-1 tail: clara.event_types carries % kb_binding.* member(s), expected 3+3=6',
       (select count(*) from clara.event_types where name like 'kb_binding.%') using errcode = 'CLR10';
   end if;
   if (select count(*)::text from clara.event_types)
-     is distinct from ((select v from _bp1_pre where k = 'event_types_total')::int + 2)::text then
+     is distinct from ((select v from _bp1_pre where k = 'event_types_total')::int + 3)::text then
     raise exception 'binding proposal pr-1 tail: clara.event_types moved by something other than this file''s 2 rows (was %, now %)',
       (select v from _bp1_pre where k = 'event_types_total'),
       (select count(*)::text from clara.event_types) using errcode = 'CLR10';
