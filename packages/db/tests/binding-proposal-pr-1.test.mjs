@@ -1317,11 +1317,17 @@ test("bp1.A3d C1 — a matching AND a foreign identifier on one document REFUSES
   // foreign value is once LOWER than the true one and once HIGHER.
   for (const [tag, foreign] of [["A3d-lo", "000000000000"], ["A3d-hi", "zzz999999999"]]) {
     const cp = await seedWindow(w, tag, { dates: DATES_OK, extraRegistrations: [foreign] });
+    // SCOPED to this counterparty's own evidence documents. An unscoped count over the whole
+    // catalog reads every earlier run's rows too — the rig is shared and this battery is run more
+    // than once against it, so a global control measures the DATABASE's history, not the fixture.
     const printed = await rootQuery(
-      `select count(*)::int c from clara.document_regions r
+      `select count(distinct x.document_id)::int c from clara.document_regions r
         join clara.document_extractions x on x.id=r.extraction_id
        where x.engine_kind='invoice_facts' and r.field_path='invoice.vendor_registration'
-         and r.text_content=$1`, [foreign]);
+         and r.text_content=$1
+         and x.document_id in (select ev.document_id from clara.journal_lines l
+                                 join clara.journal_entries ev on ev.id=l.entry_id
+                                where l.counterparty_id=$2)`, [foreign, cp.id]);
     assert.equal(printed.rows[0].c, 3, `${tag} fixture: the foreign value is really on all three documents`);
     const err = await assertRaises("CLR36",
       async () => proposeAsAgent(await filingActor(),
