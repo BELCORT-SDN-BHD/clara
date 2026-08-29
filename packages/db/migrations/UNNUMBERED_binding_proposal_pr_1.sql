@@ -1960,7 +1960,14 @@ begin
   --      time as well. NULL is the ONLY case that reaches here, because it is the one
   --      wake_context explicitly admits. A branch no path can enter is the unreachable-arm defect
   --      this same PR deleted `failing_rungs` for; keeping it "as depth" would be keeping a
-  --      promise, not a wall. The battery drives all three walls and names which is which.
+  --      promise, not a wall. The battery drives each of the three DIRECTOR walls above (the
+  --      minter's, wake_context's and this one) and names which is which.
+  --      NOT PHRASED AS A COUNT (ruled 2026-08-30, round-3 verification): `x42-r10-o3`'s c4
+  --      floor sweeps EVERY body in schema clara for an in-source claim about how many walls
+  --      there are, and it is right to -- a stale count is how the next author concludes a set
+  --      is closed. An unqualified count phrase here read as a claim about ITS set (the
+  --      advance-side reversal walls) and reddened a registered closed-wave floor. Naming the
+  --      set is the fix; an allowlist entry would have taught the floor to look away.
   if p_wake_kind = 'interactive' and p_obo is null then
     raise exception 'an interactive binding proposal must name the human who directed it'
       using errcode = 'CLR10',

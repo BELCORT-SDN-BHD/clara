@@ -437,14 +437,6 @@ test("x42.r10o3.c4 the advance-side reversal wall roster is EXACT and every in-s
     // clara.reverse_entry cannot raise at all (enrolment window, date ordering, and round 9's
     // unregistered mirror). Three of the five, correctly.
     ["_wdb_line_booking_block", /three more decide/i],
-    // 裁-18b PR-1. A DIFFERENT SET ENTIRELY, not a subset of the five: the three DIRECTOR walls
-    // at the vendor-binding proposal door (`mint_wake_credential` refuses a non-standing
-    // principal; `wake_context` drops a credential whose director lost standing; this body
-    // refuses a null `on_behalf_of`). The scan is deliberately estate-wide, so a claim in an
-    // unrelated body reaches it — and the honest answer is to NAME the other set here rather
-    // than to reword the comment until the detector stops firing, which is how a broad pattern
-    // quietly rots. Inert until this PR's migration lands: the function does not exist before it.
-    ["_propose_vendor_binding_agent_core", /^all three walls$/i],
   ]);
   const bad = [];
   for (const r of rows) {
