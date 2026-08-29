@@ -102,6 +102,16 @@ export function poolsV15(): ClaraPoolsV15 {
 }
 
 /**
+ * THE MINT RULE, IN ONE PLACE. Two call sites need it — `freeformScoped` (which credential to
+ * MINT) and the tool's metering row (which `via_wake_kind` to RECORD) — and a second copy of a
+ * one-line rule is how a ledger comes to describe a mint that did not happen. They read the same
+ * function instead, so the label cannot drift from the act it labels.
+ */
+export function freeformWakeKindFor(ctx: _ToolCtx): "interactive" | "interactive_client" {
+  return ctx.clientId ? "interactive_client" : "interactive";
+}
+
+/**
  * THE MINT CENSUS (design §3.8, D-23) — see this file's header, addition 2.
  *
  * A client-bound session mints `interactive_client` pinned to that client; a HOME session (no
@@ -120,9 +130,10 @@ export function poolsV15(): ClaraPoolsV15 {
  */
 export async function freeformScoped(ctx: _ToolCtx, args: FreeformReadArgs): Promise<FreeformReadResult | null> {
   const p = poolsV15();
-  const { secret } = ctx.clientId
-    ? await p.mintWakeCredentialClientObo(ctx.firmId, ctx.createdBy, ctx.clientId)
-    : await p.mintWakeCredentialObo(ctx.firmId, ctx.createdBy);
+  const { secret } =
+    freeformWakeKindFor(ctx) === "interactive_client"
+      ? await p.mintWakeCredentialClientObo(ctx.firmId, ctx.createdBy, ctx.clientId as string)
+      : await p.mintWakeCredentialObo(ctx.firmId, ctx.createdBy);
   return p.withFreeformRead({
     secret,
     sql: args.sql,

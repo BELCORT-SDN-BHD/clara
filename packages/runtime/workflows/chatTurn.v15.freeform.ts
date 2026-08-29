@@ -39,7 +39,7 @@
 import { z } from "zod";
 import type { RefusalPart } from "./chatTurn.v10.prompt.js";
 import { readToolRefusalMessage } from "./chatTurn.v10.errors.js";
-import { freeformScoped, type FreeformReadResult, type ToolCtx } from "./chatTurn.v15.infra.js";
+import { freeformScoped, freeformWakeKindFor, type FreeformReadResult, type ToolCtx } from "./chatTurn.v15.infra.js";
 import { freeformEngineId, recordFreeformUsage } from "./chatTurn.v15.usage.js";
 
 export const FREEFORM_READ_TOOL = "read_books_freeform";
@@ -212,7 +212,9 @@ export async function runFreeformRead(
 ): Promise<FreeformReadToolResult> {
   const opKey = freeformOpKey(ctx.taskId, segment, seq);
   const engineId = freeformEngineId(modelId);
-  const viaWakeKind = ctx.clientId ? "interactive_client" : "interactive";
+  // The SAME function `freeformScoped` branches on, never a second copy of the rule — so the
+  // ledger cannot record a kind different from the one that was actually minted.
+  const viaWakeKind = freeformWakeKindFor(ctx);
   const startedAt = Date.now();
   try {
     const raw = await freeformScoped(ctx, { sql: input.sql, purpose: input.purpose, opKey, rowCap: input.row_cap ?? null });

@@ -473,7 +473,7 @@
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v15.freeform.ts": {
-      "sha256": "416448400de6178b6b2bd0935ce9b1212d4da5d9bba12cfb50f7671a1dd6108f",
+      "sha256": "c796290c814d544d156b5f9523ae15e2b4ec1078ca2cc21afa46f861d80f3aec",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v15.impl.ts": {
@@ -481,7 +481,7 @@
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v15.infra.ts": {
-      "sha256": "b686faaad2b7ae80f746fdcf21cde6febe77a544b5de2b0ea3170e7ea352812c",
+      "sha256": "221ae96223dfacdd2d1fee476774ef6f8a10c70d1a9bc3f01b97f2f1dfcabcac",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v15.prompt.ts": {

@@ -257,6 +257,15 @@ test("f-a6.pr2.mint.turn-binding: the taskId comes from the CONTEXT, never from 
   assert.equal(call.args.secret, "s2", "the pinned credential's secret is the one used");
 });
 
+test("f-a6.pr2.mint.one-rule: the kind the credential is MINTED under and the kind the LEDGER records come from one function", () => {
+  assert.equal(infra.freeformWakeKindFor(PINNED_CTX), "interactive_client");
+  assert.equal(infra.freeformWakeKindFor(HOME_CTX), "interactive");
+  assert.equal(infra.freeformWakeKindFor({ ...PINNED_CTX, clientId: "" }), "interactive", "an empty string is not a pin");
+  // The two consumers are pinned together by the metering cells below, which assert the recorded
+  // kind for both ctx shapes — a second copy of this rule is how a ledger comes to describe a
+  // mint that did not happen.
+});
+
 test("f-a6.pr2.pools.positive-read: an image whose startWorld predates this PR is refused by NAME, not by a TypeError", () => {
   const prior = globalThis.__claraPools;
   globalThis.__claraPools = { mintWakeCredentialObo: async () => ({}), withRuntime: async () => ({}) };
