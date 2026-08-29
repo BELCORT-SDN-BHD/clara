@@ -18,6 +18,8 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import {
   rootQuery, roleQuery, endPool, ROLES, CLR, assertRaisesOneOf,
 } from "./rig-helpers.mjs";
@@ -306,6 +308,96 @@ test("sst_threshold_schedule: both G/I seed rows survive the ALTER byte-for-byte
   }
 });
 
+test("sst_threshold_schedule: the READ SURFACE is censused, not described (F-R1) — TWO policies pinned by name, exactly one non-owner grant (clara_freeform_ro SELECT, 0131), and a closed 13-column world; the sibling rate table stays closed at one policy and ZERO grants", async (t) => {
+  if (skipHere(t)) return;
+  // WHY THIS CELL EXISTS. The migration used to say in prose that this table carried "one owner
+  // policy, nothing else" — true at the 0127 frontier it was written against, FALSE at 0147:
+  // 0131 (F-A6 freeform read) added a second policy and a table-level SELECT grant. Prose is what
+  // went stale, so the posture is now measured. It matters because the grant is TABLE-level, not
+  // column-level: the ALTER widens this table 5 -> 13 columns and the freeform lane sees all of
+  // the new ones. Accepted for PR-1 (every added column is NULL on every row, the lane is
+  // arm-gated, every read is logged) — and pinned HERE so the PR that first populates
+  // recorded_by / source_document_id trips this census and re-reviews that reach.
+  const pol = (await rootQuery(
+    `select polname,
+            coalesce((select string_agg(pg_get_userbyid(rr)::text, ',' order by pg_get_userbyid(rr)::text)
+                        from unnest(polroles) rr), 'PUBLIC') as roles,
+            polcmd::text as cmd
+       from pg_policy where polrelid='clara.sst_threshold_schedule'::regclass order by polname`,
+  )).rows;
+  assert.deepEqual(
+    pol.map((p) => `${p.polname}|${p.roles}|${p.cmd}`),
+    [
+      "p_sst_threshold_schedule_freeform|clara_freeform_ro|r",
+      "p_sst_threshold_schedule_owner|clara_fn_owner|*",
+    ],
+    "sst_threshold_schedule carries EXACTLY these two policies — the 0016 owner policy and 0131's SELECT-only freeform read; a third would be a read surface nobody reviewed",
+  );
+  const grants = (await rootQuery(
+    `select grantee, privilege_type from information_schema.table_privileges
+      where table_schema='clara' and table_name='sst_threshold_schedule' and grantee <> 'clara_fn_owner'
+      order by grantee, privilege_type`,
+  )).rows;
+  assert.deepEqual(
+    grants.map((g) => `${g.grantee} ${g.privilege_type}`),
+    ["clara_freeform_ro SELECT"],
+    "exactly ONE non-owner grant on sst_threshold_schedule, and it is read-only (0131:1316-1329) — no lane may write it",
+  );
+  // The column count is the other half of F-R1: it is what turns "the freeform lane can read this
+  // table" into a bounded statement. 5 pre-ALTER + the 8 this file adds = 13, closed-world.
+  const cols = (await rootQuery(
+    `select column_name from information_schema.columns
+      where table_schema='clara' and table_name='sst_threshold_schedule' order by column_name`,
+  )).rows.map((r) => r.column_name);
+  assert.deepEqual(
+    cols,
+    ["basis", "basis_kind", "effective_from", "effective_to", "id", "item_no", "recorded_by",
+      "service_group", "source_document_id", "source_note", "superseded_at", "superseded_by",
+      "threshold_cents"],
+    `sst_threshold_schedule is a closed 13-column world after the ALTER (5 original + 8 added) — every one of them inside clara_freeform_ro's table-level read (got: ${cols.join(", ")})`,
+  );
+  // The delegation ruling's own premise, re-measured rather than assumed: the eight added columns
+  // are NULL on every row, so the widened read surface currently exposes nothing at all.
+  const populated = (await rootQuery(
+    `select count(*)::int as n from clara.sst_threshold_schedule
+      where recorded_by is not null or basis is not null or basis_kind is not null
+         or source_document_id is not null or superseded_by is not null or superseded_at is not null`,
+  )).rows[0].n;
+  assert.equal(populated, 0, "every governed-origin/supersession column is NULL on every row — the basis on which PR-1's widened freeform reach was accepted; the PR that changes this re-reviews it");
+
+  // The CONTRAST, asserted rather than implied: the two reference tables' postures diverge, and
+  // the new one is the closed one.
+  const ratePol = (await rootQuery(
+    "select polname from pg_policy where polrelid='clara.sst_rate_schedule'::regclass order by polname",
+  )).rows.map((r) => r.polname);
+  assert.deepEqual(ratePol, ["p_sst_rate_schedule_owner"], "sst_rate_schedule carries the owner policy alone");
+  const rateGrants = (await rootQuery(
+    `select count(*)::int as n from information_schema.table_privileges
+      where table_schema='clara' and table_name='sst_rate_schedule' and grantee <> 'clara_fn_owner'`,
+  )).rows[0].n;
+  assert.equal(rateGrants, 0, "sst_rate_schedule carries ZERO non-owner grants of any kind — Annex A.1's closed posture, unlike its sibling");
+  noteLane("sst_threshold_schedule read surface censused: 2 policies, 1 grant (clara_freeform_ro SELECT), 13 columns all-NULL on the 8 added; sst_rate_schedule: 1 policy, 0 grants.");
+});
+
+test("sst_threshold_schedule: STANDING TRIPWIRE for Annex G.1 — zero per-item rows exist (item_no <> '*'), because the five frozen 0016 readers are all keyed on service_group ALONE and none of them can disambiguate one", async (t) => {
+  if (skipHere(t)) return;
+  // This ALTER makes a per-item threshold row structurally possible (that is V-6 defect 2's whole
+  // repair) while the five live readers — ack_compliance_watch, evaluate_sst_watch,
+  // evaluate_sst_watches_all, record_future_attestation, set_turnover_classification — still read
+  // by service_group with no item_no or superseded_by filter, and a multi-row `SELECT ... INTO`
+  // in Postgres silently keeps the LAST row rather than raising. So the capability lands before
+  // the safe way to use it. That obligation was previously reachable only through two dead
+  // pointers; it is now enforced here as well as written down.
+  const offenders = (await rootQuery(
+    "select service_group, item_no from clara.sst_threshold_schedule where item_no <> '*' order by service_group, item_no",
+  )).rows;
+  assert.deepEqual(
+    offenders,
+    [],
+    `NO per-item threshold row may exist until the five group-grain readers gain a successor body that disambiguates by item_no, or are PROVEN safe under the per-item shape — docs/plan/active/sst-engine-annexes-2.md Annex G.1. Seeding one silently changes what an existing watch evaluates. Found: ${offenders.map((r) => `${r.service_group}/${r.item_no}`).join(", ")}`,
+  );
+});
+
 test("sst_threshold_schedule: F3 — immutable + supersede now mirrors its sibling exactly. Before this fix DELETE and an out-of-shape UPDATE of a live row were BOTH allowed (measured); now they refuse", async (t) => {
   if (skipHere(t)) return;
   // UNLIKE the sst_rate_schedule probe above, this one MUST roll back rather than leave a
@@ -501,6 +593,29 @@ test("reachable closure ROSTER: derived from pg_roles (never a literal), floor-p
   )).rows[0].n;
   assert.equal(publicReach, 0, `zero clara.* functions are PUBLIC-executable (default or explicit ACL) — otherwise the named-role roots roster is incomplete and the closure claim below is worth less than it reads (got ${publicReach})`);
   noteLane(`reachable-closure roots roster MEASURED at ${roles.length} role(s): ${roles.join(", ")}`);
+});
+
+test("reachable closure FLOOR CROSS-CHECK (O-1): the eight-name non-vacuity floor exists in TWO copies — this file's CLOSURE_ROLES_FLOOR and the migration's own v_floor — and they are proven EQUAL rather than assumed to have been edited together", async (t) => {
+  if (skipHere(t)) return;
+  // Two copies of one constant, in two languages, with no link between them: edit one and the
+  // other silently keeps guarding the old set, so the floor stops meaning what both files claim.
+  // A DO block leaves nothing in the catalog to compare against, so the comparison is made
+  // against the migration FILE — located by its stable STEM, never by number, because the
+  // conductor renumbers it at merge.
+  const dir = join(import.meta.dirname, "..", "migrations");
+  const file = readdirSync(dir).find((f) => /_f_t1_sst_reference_tables\.sql$/.test(f));
+  assert.ok(file, `the F-T1 migration resolves by stem in ${dir} — this cross-check reads the file, so a rename must fail loudly rather than skip`);
+  const sql = readFileSync(join(dir, file), "utf8");
+  const decl = /v_floor\s+text\[\]\s*:=\s*array\[([^\]]*)\]/.exec(sql);
+  assert.ok(decl, "the migration still declares v_floor as an array literal — if this stops matching, the cross-check is reading nothing and must be re-cut, not deleted");
+  const sqlFloor = [...decl[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  assert.ok(sqlFloor.length > 0, "the parsed SQL floor is non-empty — a regex that matched but captured nothing would make this cell vacuous");
+  assert.deepEqual(
+    [...sqlFloor].sort(),
+    [...CLOSURE_ROLES_FLOOR].sort(),
+    `the migration's v_floor and this battery's CLOSURE_ROLES_FLOOR name the SAME eight structural lane roles (SQL: ${sqlFloor.join(", ")} | JS: ${CLOSURE_ROLES_FLOOR.join(", ")})`,
+  );
+  noteLane(`floor cross-check: migration ${file} and this battery agree on ${sqlFloor.length} structural lane role(s).`);
 });
 
 test("reachable closure: currently ZERO writers reach sst_threshold_schedule or sst_rate_schedule (no governed door exists yet; the two new F3 trigger functions are neither granted nor called by anything, so they never enter the closure)", async (t) => {

@@ -33,6 +33,27 @@
 -- PUBLIC-executable census so the named-role roster is provably complete. Nothing was relaxed;
 -- the scan got strictly WIDER (405 roots/783 functions -> 418/800, measured on the rebase rig).
 --
+-- DELTA REVIEW OF THAT REBASE (2026-08-29) -- four more premises trued before they become
+-- immutable at apply. All four were things this FILE ASSERTED that the 0147 catalog contradicts,
+-- or pointers that resolve to nothing:
+--   F-R1 a SECOND drifted premise: S1 claimed sst_threshold_schedule carries "one owner policy,
+--        nothing else". It carries TWO policies and a table-level grant since 0131. Trued at S1
+--        with the freeform-reach consequence named and an obligation attached; both policies,
+--        the grant and the column count are now CENSUSED by the battery, not described.
+--   F-R2 the closure assertion floored its ROSTER but not its ROOTS/REACHED -- a scan aimed at a
+--        nonexistent schema printed "assertion OK" over a planted offender. Both are floored now
+--        and both counts are printed.
+--   F-R3 Annex G.1's obligation was reachable only through two dead pointers; repointed, and a
+--        standing tripwire added so the obligation is enforced rather than merely written down.
+--   F-R4 the roots delta (13) and the closure delta (17) were conflated; both stated as measured.
+--
+-- THE BATTERY IS SINGLE-SHOT PER DATABASE, BY DESIGN, AND SAYS SO HERE (O-3). Its immutability
+-- cell inserts two throwaway rows into clara.sst_rate_schedule, which is append-only with a
+-- DELETE trigger, so they cannot be cleaned up; its seed cell asserts exactly TEN rows. Running
+-- the battery twice against the SAME database therefore fails the second time on the row count
+-- and on uq_sst_rate_schedule_live -- correctly, and not a defect. CI gets a fresh database per
+-- run, which is the shape this is written for.
+--
 -- SCOPE, EXACTLY (design-part2.md S8 PR-1 row, as widened by the fix round above): (1)
 -- clara.sst_rate_schedule, greenfield, + a narrow cited seed with its verified predecessors --
 -- (2) the reachable-closure write assertion, armed for BOTH SST reference tables -- (3) the
@@ -216,10 +237,35 @@ create unique index uq_sst_rate_schedule_live on clara.sst_rate_schedule (tax_ty
 alter table clara.sst_rate_schedule enable row level security;
 alter table clara.sst_rate_schedule force row level security;
 create policy p_sst_rate_schedule_owner on clara.sst_rate_schedule for all to clara_fn_owner using (true) with check (true);
--- Zero direct app-role grants (Annex A.1): reference tables are read only through a DEFINER
--- evaluator, never queried directly by a human or agent role -- the SAME posture the live
--- sst_threshold_schedule already carries (confirmed at the bytes: one owner policy, nothing
--- else). No GRANT statement follows for any clara_* lane role.
+-- Zero direct app-role grants for THIS table (Annex A.1): the rate schedule is read only through
+-- a DEFINER evaluator, never queried directly by a human or agent role. No GRANT statement
+-- follows for any clara_* lane role, and the battery pins that closed world.
+--
+-- THE SIBLING'S POSTURE IS NO LONGER THE SAME, AND THIS FILE USED TO SAY IT WAS (rebase fix,
+-- 2026-08-29 -- F-R1). At the 0127 frontier this lane was built on, clara.sst_threshold_schedule
+-- carried ONE owner policy and nothing else, and the sentence here said so. MEASURED at 0147 it
+-- carries TWO policies and a table-level grant:
+--   * p_sst_threshold_schedule_owner    -- 0016, for all to clara_fn_owner
+--   * p_sst_threshold_schedule_freeform -- 0131:1430, FOR SELECT TO clara_freeform_ro,
+--                                          using (clara._freeform_admitted())
+--   * grant select on ... clara.sst_threshold_schedule to clara_freeform_ro -- 0131:1316-1329
+-- So the two tables' postures DIVERGE: sst_rate_schedule is closed, sst_threshold_schedule is
+-- readable by the F-A6 freeform lane behind its arm. Both are now censused by name in the
+-- battery rather than described in prose, because prose is what went stale here.
+--
+-- CONSEQUENCE THIS FILE MUST OWN, NOT DISCOVER LATER: section 3's ALTER is additive, and
+-- clara_freeform_ro's grant is TABLE-level, not column-level -- so widening the table from FIVE
+-- columns to THIRTEEN widens what the freeform read lane can see on it by the same eight
+-- columns, recorded_by (-> clara.users) and source_document_id (-> clara.documents) among them.
+-- ACCEPTED FOR NOW, on measured grounds and not on convenience: every one of the eight is NULL
+-- on both live rows and on every row this file writes (nothing here populates a governed
+-- recorder), the lane is arm-gated by clara._freeform_admitted() so an unarmed session reads
+-- nothing at all, and every freeform read is logged to clara.freeform_read_log. There is no new
+-- FK-traversal reach either: the freeform lane already holds select on clara.users and
+-- clara.documents (0131:1328), so a populated id would name a row that lane can already read.
+-- OBLIGATION, NAMED HERE SO IT CANNOT BE LOST: the PR that first POPULATES recorded_by or
+-- source_document_id on this table re-reviews that freeform reach before doing so -- at that
+-- moment the columns stop being uniformly NULL and the acceptance above expires with them.
 
 -- Immutable + supersede, enforced at the trigger layer (the client_facts idiom, S2.1): a row is
 -- never DELETEd, never TRUNCATEd, and its only lawful UPDATE is the one-time supersession stamp.
@@ -390,8 +436,17 @@ alter table clara.sst_threshold_schedule add constraint sst_threshold_schedule_t
 -- V-6 defect 2: the PK grain (service_group, effective_from) cannot hold PER-ITEM thresholds
 -- (Group H item 1 NIL vs items 2-4 RM1m; Group I items 14-16 RM1.5m vs the group's RM500k).
 -- item_no default '*' means "group-wide" so the two live seed rows (G, I) stay valid untouched;
--- a later per-item row overrides by specificity -- BUT NOT YET SAFE: see this migration's tail
--- note and Annex A.1's addendum on the five frozen group-grain readers (F6, doc-only this PR).
+-- a later per-item row overrides by specificity -- BUT NOT YET SAFE.
+--
+-- POINTER TRUED (rebase fix, 2026-08-29 -- F-R3). This comment used to send a reader to "this
+-- migration's tail note and Annex A.1's addendum", and NEITHER EXISTS: there is no such tail note
+-- in this file and no such addendum in `sst-engine-annexes.md`. The obligation has exactly one
+-- home, and it is `docs/plan/active/sst-engine-annexes-2.md` Annex G.1 ("The five frozen 0016
+-- group-grain readers have no successor-body owner yet", at :407 as written). A dead pointer on
+-- an obligation that outlives this PR is how the obligation gets lost, so it is now a live one --
+-- and the battery carries a STANDING TRIPWIRE (`count(*) where item_no <> '*'` must be 0) that
+-- reds the moment anyone seeds the per-item row this ALTER makes structurally possible, naming
+-- G.1 in its failure message rather than relying on a reader having followed a comment.
 alter table clara.sst_threshold_schedule add column item_no text not null default '*';
 alter table clara.sst_threshold_schedule drop constraint sst_threshold_schedule_pkey;
 alter table clara.sst_threshold_schedule add constraint sst_threshold_schedule_pkey
@@ -463,6 +518,8 @@ declare
     'clara_wake_write_login'];
   v_missing text[];
   v_public_reachable int;
+  v_roots_n int;
+  v_reached_n int;
 begin
   -- ROOTS ROSTER -- MEASURED AT APPLY TIME, NOT A LITERAL (REBASE FIX, 2026-08-29). Every
   -- clara_* role except the table/function owner clara_fn_owner. The first draft (2026-08-24)
@@ -470,12 +527,21 @@ begin
   -- (0127); by the 0147 frontier this file actually lands on, the estate had minted FIVE more
   -- (clara_freeform_ro + clara_freeform_login, 0131; clara_wake_bank + clara_wake_bank_login,
   -- 0130; clara_wake_filing, 0123/0142), and MEASURED on the rebase rig the literal reached
-  -- 405 roots / 783 functions where the catalog reaches 418 / 800 -- seventeen functions,
-  -- including all seven clara_wake_filing doors and all fourteen clara_wake_bank doors, were
-  -- OUTSIDE the scan. The outcome is unchanged (zero writers under either roster, because no
-  -- clara.* function writes either table at all today), but a literal roster is an instrument
-  -- that goes stale silently, which is the whole failure this assertion exists to prevent. It
-  -- is now DERIVED, so it cannot be stale at whatever frontier the file applies onto.
+  -- 405 roots / 783 functions where the catalog reaches 418 / 800.
+  --
+  -- THE TWO DELTAS ARE DIFFERENT NUMBERS AND THIS COMMENT USED TO CONFLATE THEM (rebase fix
+  -- 2026-08-29 -- F-R4; it read "seventeen functions, including all seven filing doors and all
+  -- fourteen bank doors, were outside the scan", which is arithmetically wrong). Measured:
+  --   ROOTS delta = 13 (418 - 405) -- the doors the literal roster could not see AT ALL.
+  --     Broken down: all 7 clara_freeform_ro doors, 5 of the 7 clara_wake_filing doors, and
+  --     1 of the 14 clara_wake_bank doors. The other 2 filing and 13 bank doors were ALREADY
+  --     roots via a second grant to a role the literal did name -- 7 + 5 + 1 = 13.
+  --   CLOSURE delta = 17 (800 - 783) -- those 13 roots plus the 4 further clara.* functions
+  --     reachable only through them.
+  -- The outcome is unchanged either way (zero writers under either roster, because no clara.*
+  -- function writes either table at all today), but a literal roster is an instrument that goes
+  -- stale silently, which is the whole failure this assertion exists to prevent. It is now
+  -- DERIVED, so it cannot be stale at whatever frontier the file applies onto.
   --
   -- A derivation can also be vacuous -- a mis-spelled LIKE pattern returns {} and the scan then
   -- passes having read nothing. So the derived roster is proven against a NAMED FLOOR (the eight
@@ -495,6 +561,14 @@ begin
   -- lane role while holding no named grant at all. MEASURED here rather than assumed away: the
   -- estate revokes PUBLIC on every clara function, so the count is zero and the named-roster
   -- scan below is complete. If it ever stops being zero, this refuses instead of passing blind.
+  --
+  -- PLACEMENT IS DELIBERATE AND LOAD-BEARING: this census runs BEFORE the roots query, not after.
+  -- The roots query calls aclexplode(coalesce(p.proacl, '{}'::aclitem[])), and a NULL proacl
+  -- there coerces to an empty aclitem[] that Postgres rejects with the opaque
+  -- "ACL arrays must be one-dimensional" -- a reader would then be debugging a cast error
+  -- instead of reading the real finding, which is that a clara function is PUBLIC-executable.
+  -- Measured during the rebase review (mutant M5). Running the census first turns that into a
+  -- named refusal that says what is actually wrong.
   select count(*) into v_public_reachable
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'clara'
@@ -519,6 +593,17 @@ begin
       join pg_roles r on r.oid = a.grantee
      where n.nspname = 'clara' and a.privilege_type = 'EXECUTE'
        and r.rolname = any(v_roster);
+    v_roots_n := coalesce(array_length(v_frontier, 1), 0);
+
+    -- NON-VACUITY FLOOR ON THE SCAN ITSELF (rebase fix, 2026-08-29 -- F-R2). The roster above is
+    -- floor-proven, but a proven roster does not prove the SCAN read anything: mutant M7 re-aimed
+    -- this roots query at a schema that does not exist and the block still printed "assertion OK"
+    -- with a real offender planted in the catalog. An empty offender list is evidence ONLY if the
+    -- scan had a populated corpus, so the corpus is asserted before the emptiness is believed.
+    if v_roots_n = 0 then
+      raise exception 'f_t1_sst_reference_tables: the reachable-closure roots query for % returned ZERO functions on a roster of % role(s) -- the scan read nothing, so its "no writers" verdict would be vacuous',
+        v_target, coalesce(array_length(v_roster, 1), 0) using errcode = 'CLR10';
+    end if;
 
     v_iterations := 0;
     while array_length(v_frontier, 1) > 0 and v_iterations < 25 loop
@@ -540,6 +625,16 @@ begin
         v_target, v_frontier using errcode = 'CLR10';
     end if;
 
+    -- The second half of F-R2's floor: the closure must CONTAIN its roots (the loop's first
+    -- iteration appends v_frontier into v_reached, so anything less means the walk never ran) and
+    -- must have gone STRICTLY past them, which is what makes this a transitive scan rather than a
+    -- roots-only one. This is the SQL-side twin of the battery's own roots-inside-closure cell.
+    v_reached_n := coalesce(array_length(v_reached, 1), 0);
+    if v_reached_n <= v_roots_n then
+      raise exception 'f_t1_sst_reference_tables: the reachable closure for % holds % function(s) against % root(s) -- the transitive walk added nothing, so the scan is roots-only and its verdict does not cover the ungranted-core class this assertion exists for',
+        v_target, v_reached_n, v_roots_n using errcode = 'CLR10';
+    end if;
+
     select string_agg(p.proname, ', ') into v_offenders
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'clara' and p.proname = any(v_reached)
@@ -550,8 +645,10 @@ begin
     end if;
   end loop;
 
-  raise notice 'F-T1 PR-1 reachable-closure write assertion OK: for BOTH clara.sst_threshold_schedule and clara.sst_rate_schedule, no lane-role-granted function -- and no ungranted clara.* function reachable from one, transitively through clara.-qualified calls -- writes INSERT/UPDATE/DELETE against the table. Both stay migration-only. ROOTS ROSTER, MEASURED AT THIS APPLY (% role(s), never a literal): %. Zero clara.* functions are PUBLIC-executable, so a named-role roster misses nothing.',
-    array_length(v_roster, 1), v_roster;
+  -- Every count below is coalesce()d: array_length() on an empty array returns NULL, not 0, and a
+  -- notice that reads "<NULL> role(s)" tells a ceremony reader nothing (mutant M4).
+  raise notice 'F-T1 PR-1 reachable-closure write assertion OK: for BOTH clara.sst_threshold_schedule and clara.sst_rate_schedule, no lane-role-granted function -- and no ungranted clara.* function reachable from one, transitively through clara.-qualified calls -- writes INSERT/UPDATE/DELETE against the table. Both stay migration-only. SCAN CORPUS, MEASURED AT THIS APPLY (never a literal): % role(s) in the roots roster -> % root function(s) -> % function(s) in the transitive closure; roster: %. The closure was asserted non-empty and a strict superset of its roots BEFORE the empty offender list was believed, and zero clara.* functions are PUBLIC-executable, so a named-role roster misses nothing.',
+    coalesce(array_length(v_roster, 1), 0), coalesce(v_roots_n, 0), coalesce(v_reached_n, 0), v_roster;
 end $reachable_closure$;
 
 reset role;
