@@ -260,6 +260,27 @@ begin
   --      _tf_validate_domain_event trigger. Read the REGISTRY, not a CHECK on a relation that
   --      does not exist -- the first draft of this file did the latter and mistook an empty
   --      result for an open world.
+  if to_regclass('clara.trigger_taxonomy') is null or to_regclass('clara.taxonomy_active') is null then
+    raise exception 'binding proposal pr-1 prestate: clara.trigger_taxonomy / clara.taxonomy_active are absent -- event_types is HALF of a coupled pair and this file must register into both'
+      using errcode = 'CLR10';
+  end if;
+  if (select count(*) from clara.taxonomy_active) <> 1 then
+    raise exception 'binding proposal pr-1 prestate: clara.taxonomy_active does not name exactly one active version'
+      using errcode = 'CLR10';
+  end if;
+  -- COVERAGE IS WHOLE BEFORE THIS FILE RUNS. If it were already broken, the tail's own coverage
+  -- cell would fail for somebody else's reason and this file would be blamed for it.
+  if exists (select 1 from clara.event_types e
+              where not exists (select 1 from clara.trigger_taxonomy t
+                                 where t.event_type = e.name
+                                   and t.version = (select version from clara.taxonomy_active))) then
+    raise exception 'binding proposal pr-1 prestate: event_type/trigger_taxonomy coverage is ALREADY incomplete at the active version, before this file adds anything: %',
+      (select string_agg(e.name, ', ' order by e.name) from clara.event_types e
+        where not exists (select 1 from clara.trigger_taxonomy t
+                           where t.event_type = e.name
+                             and t.version = (select version from clara.taxonomy_active)))
+      using errcode = 'CLR10';
+  end if;
   if to_regclass('clara.event_types') is null then
     raise exception 'binding proposal pr-1 prestate: clara.event_types is absent -- the event gate this file registers into does not exist'
       using errcode = 'CLR10';
@@ -481,6 +502,8 @@ begin
     (select p.prosrc from pg_proc p where p.oid = 'clara.sign_vendor_identity_binding(uuid,text)'::regprocedure));
   insert into _bp1_pre(k, v) values ('propose.prosrc',
     (select p.prosrc from pg_proc p where p.oid = 'clara.propose_vendor_identity_binding(jsonb,text)'::regprocedure));
+  insert into _bp1_pre(k, v) values ('taxonomy_versions',
+    (select count(*)::text from clara.taxonomy_versions));
   insert into _bp1_pre(k, v) values ('event_types_total',
     (select count(*)::text from clara.event_types));
 
@@ -612,11 +635,39 @@ insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expec
 -- are client_scoped (a binding is always a client's), matching the three kb_binding.* members
 -- 0028 registered. This surface is NOT in the design's annex G-f shared-surface ledger; the PR
 -- body adds it.
-insert into clara.event_types(name, client_scoped, description) values
-  ('kb_binding.agent_proposed', true, 'Clara proposed a vendor identity binding (裁-18b)'),
-  ('kb_binding.declined',       true, 'A human admin declined a proposed vendor identity binding (裁-18b/G7)'),
-  ('kb_binding.decline_reset', true, 'An admin lifted a binding decline or revocation so the pair may be proposed again (裁-18b)'),
-  ('kb_binding.expired',       true, 'A stale proposed vendor identity binding passed its expiry (裁-18b/B5)');
+-- clara.event_types AND clara.trigger_taxonomy ARE A COUPLED PAIR, and registering in one alone
+-- is a half-registration the estate's own coverage census refuses ("coverage stays WHOLE"). An
+-- earlier draft of this file did exactly that -- four event types, no taxonomy rows -- and the
+-- full @clara/db sweep caught it. So this is the 0138:2508 / 0145 §G idiom verbatim: insert the
+-- types, and register each at whichever taxonomy version is CURRENTLY ACTIVE, additively, with
+-- NO version flip. That makes the event-type registry the SIXTH named shared surface this file
+-- touches -- annex G-f lists four, and even this file's own earlier header said five.
+--
+-- THE DECISIONS, each against its own precedent rather than picked:
+--   kb_binding.agent_proposed -> notification. It is the SAME act as kb_binding.proposed, which
+--     0028 registered as `notification`: a proposal card a human must answer. If Clara's
+--     proposals were quieter than a human's, the two-party shape would be one-sided.
+--   kb_binding.declined / .decline_reset -> ignore, following kb_binding.signed and
+--     kb_binding.revoked. A terminal decision does not need to ping the person who just took it.
+--   kb_binding.expired -> ignore. It is an automatic housekeeping transition; the operationally
+--     useful signal is already the propose door's `stale_proposals_expired` audit count and
+--     clara.binding_identity_census. NAMED FOR PR-4: when the CLOCKED sweep lands, revisit
+--     whether a proposal ageing out UNREAD deserves a notification -- an expiry nobody sees is
+--     a card nobody answered, and that is a product fact, not a database one.
+with inserted_types as (
+  insert into clara.event_types(name, client_scoped, description)
+    values
+      ('kb_binding.agent_proposed', true, 'Clara proposed a vendor identity binding (裁-18b)'),
+      ('kb_binding.declined',       true, 'A human admin declined a proposed vendor identity binding (裁-18b/G7)'),
+      ('kb_binding.decline_reset',  true, 'An admin lifted a binding decline or revocation so the pair may be proposed again (裁-18b)'),
+      ('kb_binding.expired',        true, 'A stale proposed vendor identity binding passed its expiry (裁-18b/B5)')
+    on conflict (name) do nothing returning name
+)
+insert into clara.trigger_taxonomy(version, event_type, decision, note)
+select a.version, i.name,
+       case when i.name = 'kb_binding.agent_proposed' then 'notification' else 'ignore' end,
+       null
+  from inserted_types i cross join clara.taxonomy_active a;
 
 -- The shim -- a real projection from the start. subject_id is coalesce(binding_id,
 -- counterparty_id) so a receipt without a binding row still names the thing it was about.
@@ -1402,7 +1453,11 @@ begin
   perform clara._audit(p_firm, p_actor, p_obo, p_wake_kind,
     'wake_propose_vendor_identity_binding', null,
     jsonb_build_object('binding_id', v_binding, 'client_id', p_client,
-      'counterparty_id', v_cp, 'receipt_id', v_receipt, 'op_key', p_op_key));
+      'counterparty_id', v_cp, 'receipt_id', v_receipt, 'op_key', p_op_key,
+      -- How many stale proposals this call had to drain first. Operationally load-bearing while
+      -- PR-4's clock is unbuilt: a firm seeing this climb is a firm whose proposals are ageing
+      -- out unread, which is a product signal, not a database one.
+      'stale_proposals_expired', v_expired));
   perform clara._append_event(p_firm, 'kb_binding.agent_proposed', p_client, p_actor,
     p_obo, p_wake_kind, null, null, null,
     jsonb_build_object('binding_id', v_binding, 'counterparty_id', v_cp, 'receipt_id', v_receipt));
@@ -2170,7 +2225,7 @@ begin
     from _bp1_pre pre
     join lateral (select encode(sha256(convert_to(
            (select p.prosrc from pg_proc p where p.oid = pre.k::regprocedure), 'UTF8')), 'hex') as sha) now on true
-   where pre.k not in ('foreign_objs','event_types_total','propose.prosrc','sign.prosrc',
+   where pre.k not in ('foreign_objs','event_types_total','taxonomy_versions','propose.prosrc','sign.prosrc',
                        'clara.propose_vendor_identity_binding(jsonb,text)',
                        'clara.sign_vendor_identity_binding(uuid,text)')
      and now.sha is distinct from pre.v;
@@ -2178,11 +2233,11 @@ begin
     raise exception 'binding proposal pr-1 tail: a DO-NOT-TOUCH body CHANGED -- the D1 inventory is not empty: %', v_bad
       using errcode = 'CLR10';
   end if;
-  if (select count(*) from _bp1_pre where k not in ('foreign_objs','event_types_total','propose.prosrc','sign.prosrc',
+  if (select count(*) from _bp1_pre where k not in ('foreign_objs','event_types_total','taxonomy_versions','propose.prosrc','sign.prosrc',
         'clara.propose_vendor_identity_binding(jsonb,text)',
         'clara.sign_vendor_identity_binding(uuid,text)')) <> 16 then
     raise exception 'binding proposal pr-1 tail: the re-pin covered % bodies, expected 16 (18 stashed, minus the TWO bodies this file deliberately replaces)',
-      (select count(*) from _bp1_pre where k not in ('foreign_objs','event_types_total','propose.prosrc','sign.prosrc',
+      (select count(*) from _bp1_pre where k not in ('foreign_objs','event_types_total','taxonomy_versions','propose.prosrc','sign.prosrc',
         'clara.propose_vendor_identity_binding(jsonb,text)',
         'clara.sign_vendor_identity_binding(uuid,text)')) using errcode = 'CLR10';
   end if;
@@ -2629,6 +2684,39 @@ begin
     raise exception 'binding proposal pr-1 tail: event_types is missing (or not client_scoped): %', v_bad
       using errcode = 'CLR10';
   end if;
+  -- THE COUPLING, at the ACTIVE version, with each decision as ruled. A type registered
+  -- without its taxonomy row is a half-registration the estate's coverage census refuses -- and
+  -- an earlier draft of this file shipped exactly that until the full sweep caught it.
+  select string_agg(format('%s->%s', t.n, coalesce(k.d,'(NO TAXONOMY ROW)')), ', ' order by t.n)
+    into v_bad
+    from (values ('kb_binding.agent_proposed','notification'),
+                 ('kb_binding.declined','ignore'),
+                 ('kb_binding.decline_reset','ignore'),
+                 ('kb_binding.expired','ignore')) t(n, want)
+    left join lateral (select tt.decision d from clara.trigger_taxonomy tt
+                        join clara.taxonomy_active a on a.version = tt.version
+                       where tt.event_type = t.n) k on true
+   where k.d is distinct from t.want;
+  if v_bad is not null then
+    raise exception 'binding proposal pr-1 tail: taxonomy decision missing or wrong at the ACTIVE version: %', v_bad
+      using errcode = 'CLR10';
+  end if;
+  -- …and coverage is WHOLE, over the whole registry, not just this file's four.
+  select string_agg(e.name, ', ' order by e.name) into v_bad
+    from clara.event_types e
+   where not exists (select 1 from clara.trigger_taxonomy t
+                      where t.event_type = e.name
+                        and t.version = (select version from clara.taxonomy_active));
+  if v_bad is not null then
+    raise exception 'binding proposal pr-1 tail: event_type/trigger_taxonomy coverage is INCOMPLETE at the active version: %', v_bad
+      using errcode = 'CLR10';
+  end if;
+  -- NO VERSION FLIP: this file registers additively into the version that was already active.
+  if (select count(*) from clara.taxonomy_versions) is distinct from
+     (select v::int from _bp1_pre where k = 'taxonomy_versions') then
+    raise exception 'binding proposal pr-1 tail: the taxonomy VERSION COUNT moved -- this file registers additively into the ACTIVE version and must never flip it'
+      using errcode = 'CLR10';
+  end if;
   if (select count(*) from clara.event_types where name like 'kb_binding.%') <> 7 then
     raise exception 'binding proposal pr-1 tail: clara.event_types carries % kb_binding.* member(s), expected 3+4=7',
       (select count(*) from clara.event_types where name like 'kb_binding.%') using errcode = 'CLR10';
@@ -2657,6 +2745,6 @@ begin
     raise exception 'binding proposal pr-1 tail: object count in workflow/graphile_worker/spike MOVED' using errcode = 'CLR10';
   end if;
 
-  raise notice 'binding proposal pr-1 tail: OK -- D1 INVENTORY = TWO WRITER BODIES (propose_vendor_identity_binding recut in place, its delta proven by RE-SUBSTITUTION against the byte-exact prestate; sign_vendor_identity_binding DROPped at (uuid,text) and recreated at (uuid,text,text) with the 2-arg overload proven GONE and its ACL re-made). The OTHER 16 DO-NOT-TOUCH bodies re-pin BYTE-IDENTICAL to their SS1 prosrc stash (incl. _approve_entry_core, left undisturbed for PR-3''s own pre-image; _derive_vendor_binding_proposal re-pinned against de0f5807... and _coding_lane_core against 721a6704... independently of the stash), and each of the 11 new function NAMES (plus the recut signer) resolves at exactly one pg_proc row under every arity. G4: the registry refused a REAL mismatched-pair probe by ck_agent_receipt_surfaces_shim_matches_item EXACTLY (both halves individually lawful, so nothing else could have refused it), refused a REAL uppercase item/shim probe by one of the two widened regexes (isolation between THEM is structurally impossible once the pairing CHECK exists, and the file says so rather than asserting an evaluation order), and ADMITTED a real f_a42 probe -- the pre-existing f_a family survived the pb_ widening -- with both widened definitions read byte-exact; agent_receipt_surfaces holds 9 rows, pb_binding is shim_exists+wired+conforms+19-col+zero-dark, the census returns 9, agent_receipts_visible''s 19-column contract is unchanged and nothing is dark. binding_agent_receipts: RLS enabled+forced, owner-only, ZERO non-owner grants, ZERO app-role DML across 8 roles, both append-only triggers attached. vendor_identity_bindings: 10 new columns at the right type/nullability (17+10=27 total), 8 new CHECKs + 1 composite DEFERRABLE FK present, ck_vib_proposed_by_agent_honest read from the catalog as a BIDIRECTIONAL EQUALITY, and effective_proposer GENERATED so no writer can set it to disagree with the columns it comes from. G8 + gate B5: uq_vib_one_active_binding asserted BY PROPERTY from pg_index (unique+valid+ready+live, keys {client_id,counterparty_id}, predicate status IN (proposed,live) -- a proposed-ONLY predicate loses the propose-vs-sign transition race), never by name; uq_vib_one_live unmoved. ACL: both wake verbs EXECUTE-able by clara_wake_filing AND clara_wake_interactive and by none of 6 other roles; decline / reset_binding_decline / eligible_binding_signer_count / binding_identity_census and the recut signer are clara_authenticated-only; every internal (_binding_extra_blocker, _binding_suppression, _expire_stale_proposals, _derive_vendor_binding_basis, _propose_vendor_binding_agent_core) is ungranted; exactly 4 allowlist rows, all 4 ruled, and NO non-ruled wake kind names either verb. EVENT-TYPE REGISTRY (the FIFTH shared surface, absent from annex G-f): exactly 4 new members, all client_scoped, kb_binding.* 3->7, the whole registry moved by exactly +4, and an UNREGISTERED type is STILL refused by the live trigger via a real insert probe -- registering two names opened no hole. NO new role (14, unmoved -- no roles-bootstrap twin owed), NO wake_credentials CHECK change, NO wake_engine_sources row (2, both still disabled -- PR-4''s). No table in workflow/graphile_worker/spike touched.';
+  raise notice 'binding proposal pr-1 tail: OK -- D1 INVENTORY = TWO WRITER BODIES (propose_vendor_identity_binding recut in place, its delta proven by RE-SUBSTITUTION against the byte-exact prestate; sign_vendor_identity_binding DROPped at (uuid,text) and recreated at (uuid,text,text) with the 2-arg overload proven GONE and its ACL re-made). The OTHER 16 DO-NOT-TOUCH bodies re-pin BYTE-IDENTICAL to their SS1 prosrc stash (incl. _approve_entry_core, left undisturbed for PR-3''s own pre-image; _derive_vendor_binding_proposal re-pinned against de0f5807... and _coding_lane_core against 721a6704... independently of the stash), and each of the 11 new function NAMES (plus the recut signer) resolves at exactly one pg_proc row under every arity. G4: the registry refused a REAL mismatched-pair probe by ck_agent_receipt_surfaces_shim_matches_item EXACTLY (both halves individually lawful, so nothing else could have refused it), refused a REAL uppercase item/shim probe by one of the two widened regexes (isolation between THEM is structurally impossible once the pairing CHECK exists, and the file says so rather than asserting an evaluation order), and ADMITTED a real f_a42 probe -- the pre-existing f_a family survived the pb_ widening -- with both widened definitions read byte-exact; agent_receipt_surfaces holds 9 rows, pb_binding is shim_exists+wired+conforms+19-col+zero-dark, the census returns 9, agent_receipts_visible''s 19-column contract is unchanged and nothing is dark. binding_agent_receipts: RLS enabled+forced, owner-only, ZERO non-owner grants, ZERO app-role DML across 8 roles, both append-only triggers attached. vendor_identity_bindings: 10 new columns at the right type/nullability (17+10=27 total), 8 new CHECKs + 1 composite DEFERRABLE FK present, ck_vib_proposed_by_agent_honest read from the catalog as a BIDIRECTIONAL EQUALITY, and effective_proposer GENERATED so no writer can set it to disagree with the columns it comes from. G8 + gate B5: uq_vib_one_active_binding asserted BY PROPERTY from pg_index (unique+valid+ready+live, keys {client_id,counterparty_id}, predicate status IN (proposed,live) -- a proposed-ONLY predicate loses the propose-vs-sign transition race), never by name; uq_vib_one_live unmoved. ACL: both wake verbs EXECUTE-able by clara_wake_filing AND clara_wake_interactive and by none of 6 other roles; decline / reset_binding_decline / eligible_binding_signer_count / binding_identity_census and the recut signer are clara_authenticated-only; every internal (_binding_extra_blocker, _binding_suppression, _expire_stale_proposals, _derive_vendor_binding_basis, _propose_vendor_binding_agent_core) is ungranted; exactly 4 allowlist rows, all 4 ruled, and NO non-ruled wake kind names either verb. EVENT-TYPE REGISTRY + TRIGGER TAXONOMY (the FIFTH and SIXTH shared surfaces, neither in annex G-f -- they are a COUPLED PAIR and registering in one alone is the half-registration the estate''s coverage census refuses): exactly 4 new members, all client_scoped, kb_binding.* 3->7, the whole registry moved by exactly +4, each carrying its ruled decision at the ACTIVE taxonomy version (agent_proposed=notification following kb_binding.proposed; declined/decline_reset/expired=ignore following signed/revoked), coverage proven WHOLE over the ENTIRE registry both before and after, and the taxonomy version count UNMOVED (additive registration, never a flip), and an UNREGISTERED type is STILL refused by the live trigger via a real insert probe -- registering two names opened no hole. NO new role (14, unmoved -- no roles-bootstrap twin owed), NO wake_credentials CHECK change, NO wake_engine_sources row (2, both still disabled -- PR-4''s). No table in workflow/graphile_worker/spike touched.';
 end
 $bp1_tail$;
