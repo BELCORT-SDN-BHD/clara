@@ -197,7 +197,29 @@ test("G1B-I8 N11 — a run whose reads worked but whose ACTS were all blocked by
 
   // A run that ACTED is unaffected even with a fault somewhere in it: infraFaults is consulted
   // only in the zero-act branches, so it can never turn a successful run into a failed one.
+  // N12 — BUT THE FAULT IS NOT DISCARDED. A partial success stays a success (the acts landed with
+  // durable receipts, and failing would throw real work away), yet this is precisely the run
+  // nobody looks at, so the fault must still say so. It goes out through onUsageProblem, whose
+  // stated purpose is that a lane which hit trouble does not look healthy. Driven, not asserted.
   assert.equal(close.classifyCloseOutcome({ acts: 2, reads: 6, infraFaults: 3 }, "").kind, "proposed");
+
+  // N12 — BUT THE FAULT IS NOT DISCARDED. A partial success stays a success, yet this is exactly
+  // the run nobody looks at, so the fault still says so through onUsageProblem.
+  //
+  // THE SIGNAL IS A PURE FUNCTION AND THE EMISSION IS IN THE STEP, and that split was forced by
+  // the BUILD, not chosen for tidiness: calling the usage module from the classifier pulled
+  // `node:crypto` (via closeOpKey) into WORKFLOW scope and the WDK bundler refused the build
+  // outright — "Move this function into a step function". Steps may use Node modules; workflow-
+  // scope code may not. So the testable half is infraFaultNote and the emission sits in the step.
+  assert.match(
+    String(close.infraFaultNote({ acts: 2, infraFaults: 3 })),
+    /3 tool call\(s\) never reached the database/,
+    "a partial success reports its fault, and says how many and whose it was",
+  );
+  assert.equal(close.infraFaultNote({ acts: 2, infraFaults: 0 }), null, "a clean run stays silent — the signal has to mean something");
+  assert.equal(close.infraFaultNote({ acts: 0, infraFaults: 3 }), null, "and a zero-act run is the OTHER branch's business, not this signal's");
+  assert.match(String(bank.infraFaultNote({ admitted: 1, infraFaults: 4 })), /4 tool call\(s\) never reached the database/, "same on the bank lane");
+  assert.equal(bank.infraFaultNote({ admitted: 1, infraFaults: 0 }), null);
 
   // S9's own branch, re-driven here through the extracted function so both attributions are
   // pinned in one place: zero reads + our fault = internal; zero reads + no fault = model_error.

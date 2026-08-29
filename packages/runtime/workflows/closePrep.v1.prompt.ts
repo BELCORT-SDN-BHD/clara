@@ -99,8 +99,18 @@ export const SYSTEM_PROMPT_CLOSE_PREP_V1 = [
  *   0138:465-466    model_name / model_version, NOT NULL and non-blank on the table
  *
  * `provider` rides along for provenance — extra keys are ignored by every reader above — but it
- * is decoration, and `name`/`version` are the contract. Pinned by cell G1B-I5, which reads the
- * LIVE prosrc rather than trusting this comment.
+ * is decoration, and `name`/`version` are the contract.
+ *
+ * PINNED BY CELL G1B-E2a, BEHAVIOURALLY: it calls a real wrapper through a real task-bound
+ * credential and asserts `status === 'acted'`, and it is mutant-proven — restoring the bank-shaped
+ * identity reds it with the database's own {"rung":"B2","token":"receipt_incomplete"}. That is a
+ * stronger guarantee than a prosrc read, because it proves the contract HOLDS rather than that the
+ * migration still spells it this way.
+ * (This sentence previously cited a "G1B-I5" that does not exist — caught by an independent
+ * review. The property was pinned the whole time; the citation was not. Worth recording, because
+ * the sentence's own point is "do not trust this comment, trust the cell", and a reader who
+ * checked it would have found nothing and been unable to tell an unguarded contract from a stale
+ * reference.)
  */
 export function closeModelIdentity(modelId: string): { name: string; version: string; provider: string } {
   return { name: modelId, version: "closePrep_v1", provider: "openai" };

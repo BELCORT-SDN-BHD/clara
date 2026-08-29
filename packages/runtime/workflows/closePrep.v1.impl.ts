@@ -20,7 +20,7 @@ import {
 } from "./closePrep.v1.infra.js";
 import { SYSTEM_PROMPT_CLOSE_PREP_V1, CLOSE_PREP_STEP_BUDGET, type ClosePrepOutcome } from "./closePrep.v1.prompt.js";
 import { buildClosePrepTools, newCloseRunRecord } from "./closePrep.v1.tools.js";
-import { closePrepEngineId, recordClosePrepUsage } from "./closePrep.v1.usage.js";
+import { closePrepEngineId, recordClosePrepUsage, onUsageProblem } from "./closePrep.v1.usage.js";
 
 /** STEP 1 — the CAS-and-bind. A false claim is a clean stand-down, never a thrown error. */
 export async function claimCloseTaskStep(taskId: string): Promise<ClaimOutcome> {
@@ -109,8 +109,31 @@ export async function runClosePrepModelStep(ctx: CloseTaskContext, modelId: stri
     rec.acts > 0 ? "success" : "refused",
   );
 
+  // N12 (independent review) — A PARTIAL SUCCESS IS STILL A SUCCESS: the acts landed with durable
+  // receipts, and failing the run would discard real work. But this is precisely the run nobody
+  // looks at, so a fault on our side must not vanish. It goes out through the sink whose stated
+  // purpose is exactly this — "a lane that has stopped metering says so instead of looking
+  // healthy". No behaviour change; one signal.
+  //
+  // EMITTED HERE, INSIDE THE STEP, AND THAT PLACEMENT IS LOAD-BEARING — the build taught it. An
+  // earlier draft called onUsageProblem from classifyCloseOutcome, and the WDK bundler refused
+  // the whole build: reaching the usage module from that function pulled `node:crypto` (via
+  // closeOpKey in the infra module) into WORKFLOW scope, where Node modules are unavailable
+  // ("Move this function into a step function"). Steps may use Node modules; workflow-scope code
+  // may not. So the classifier stays PURE and testable, and the side effect lives in the step.
+  const note = infraFaultNote(rec);
+  if (note) onUsageProblem({ reason: "write_failed", detail: note });
+
   const usageTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
   return { outcome: classifyCloseOutcome(rec, text), usageTokens };
+}
+
+/** The N12 signal, as a PURE function so it can be driven by a cell (the emission itself lives in
+ *  the step, for the build reason above). Null when there is nothing to say — a clean run must
+ *  stay silent, or the signal becomes noise a reader learns to ignore. */
+export function infraFaultNote(rec: { acts: number; infraFaults: number }): string | null {
+  if (rec.acts <= 0 || rec.infraFaults <= 0) return null;
+  return `close_prep run succeeded with ${rec.acts} act(s) but ${rec.infraFaults} tool call(s) never reached the database`;
 }
 
 /**

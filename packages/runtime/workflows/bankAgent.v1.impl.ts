@@ -24,7 +24,7 @@ import {
 } from "./bankAgent.v1.infra.js";
 import { SYSTEM_PROMPT_BANK_AGENT_V1, BANK_AGENT_STEP_BUDGET, type BankAgentOutcome } from "./bankAgent.v1.prompt.js";
 import { buildBankAgentTools, newBankRunRecord } from "./bankAgent.v1.tools.js";
-import { bankAgentEngineId, recordBankAgentUsage } from "./bankAgent.v1.usage.js";
+import { bankAgentEngineId, recordBankAgentUsage, onUsageProblem } from "./bankAgent.v1.usage.js";
 
 /** STEP 1 — the CAS-and-bind. Returns a plain, non-secret verdict; a false claim is a clean
  *  stand-down the workflow entry turns into a no-op return, never a thrown error. */
@@ -121,8 +121,23 @@ export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: strin
     rec.admitted > 0 ? "success" : "refused",
   );
 
+  // N12 — a partial success stays a success (the acts landed with durable receipts), but the fault
+  // does not vanish. EMITTED HERE, INSIDE THE STEP, and that placement is load-bearing: calling
+  // the usage module from the pure classifier pulls `node:crypto` into WORKFLOW scope and the WDK
+  // bundler refuses the build outright. Steps may use Node modules; workflow-scope code may not.
+  // See closePrep.v1.impl.ts's own copy for the full note.
+  const note = infraFaultNote(rec);
+  if (note) onUsageProblem({ reason: "write_failed", detail: note });
+
   const usageTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
   return { outcome: classifyBankOutcome(rec, text), usageTokens };
+}
+
+/** The N12 signal, PURE so a cell can drive it; the emission lives in the step above. Null when
+ *  there is nothing to say — a clean run stays silent, or the signal becomes noise. */
+export function infraFaultNote(rec: { admitted: number; infraFaults: number }): string | null {
+  if (rec.admitted <= 0 || rec.infraFaults <= 0) return null;
+  return `bank_agent run succeeded with ${rec.admitted} act(s) but ${rec.infraFaults} tool call(s) never reached the database`;
 }
 
 /** THE SETTLE DECISION, extracted so it can be driven directly — see closePrep.v1.impl.ts's own
