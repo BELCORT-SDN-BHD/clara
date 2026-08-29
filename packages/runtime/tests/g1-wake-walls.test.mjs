@@ -248,6 +248,47 @@ test("G1B-I3 EVERY DB call in both tool sets matches its function's LIVE declare
   }
 });
 
+test("G1B-I4 NEITHER body can write a receipt — every receipt is the verb's own in-txn act", { skip: skip0138 }, async () => {
+  // THE HONEST SHAPE OF "settled with the expected receipts". These two bodies write ZERO
+  // receipts themselves: bank_agent_receipts is written inside _agent_bank_receipt and
+  // agent_act_receipts inside _agent_close_receipt, both in the SAME transaction as their DML,
+  // and the DB's own batteries prove those fire. What is THIS lane's to prove is the other half
+  // — that the bodies cannot fabricate or skip one — and that is measured two ways.
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const dir = fileURLToPath(new URL("../workflows/", import.meta.url));
+
+  // (1) STRUCTURAL: no member of either frozen closure contains an INSERT/UPDATE/DELETE against a
+  // receipt table. A body that could write one could write a receipt for an act it never took.
+  const members = readdirSync(dir).filter((f) => /^(bankAgent|closePrep)\.v1/.test(f));
+  assert.ok(members.length >= 13, `expected both closures present, saw ${members.length}`);
+  for (const f of members) {
+    const src = readFileSync(dir + f, "utf8");
+    // Comments legitimately NAME the tables; only a SQL write against one is the defect.
+    const writes = src.match(/(insert\s+into|update|delete\s+from)\s+clara\.(bank_agent_receipts|agent_act_receipts)/gi);
+    assert.equal(writes, null, `${f} must never write a receipt table directly, found: ${writes}`);
+  }
+
+  // (2) THE WALL, measured on the LIVE catalog rather than trusted from (1): neither role the
+  // bodies run under holds ANY write privilege on either receipt table. Even a future edit that
+  // slipped an INSERT past (1) would be refused by the database.
+  const r = await rig.rootQuery(
+    `select table_name, grantee, privilege_type from information_schema.table_privileges
+      where table_schema='clara' and table_name in ('bank_agent_receipts','agent_act_receipts')
+        and grantee in ('clara_runtime','clara_wake_bank','clara_wake_interactive')
+        and privilege_type in ('INSERT','UPDATE','DELETE')`,
+  );
+  assert.equal(r.rows.length, 0, `no lane role may write a receipt directly, found: ${JSON.stringify(r.rows)}`);
+
+  // POSITIVE CONTROL, so "no rows" is not merely an empty table or a typo'd table name: the two
+  // tables DO exist and DO carry grants to somebody.
+  const exists = await rig.rootQuery(
+    `select count(*)::int as n from information_schema.table_privileges
+      where table_schema='clara' and table_name in ('bank_agent_receipts','agent_act_receipts')`,
+  );
+  assert.ok(exists.rows[0].n > 0, "the receipt tables must exist and carry grants — otherwise the wall above is vacuous");
+});
+
 test("G1B-H1 a bank WRITE before any pack read is refused locally, by name, and never reaches the database", { skip }, async () => {
   const tools = await import("../workflows/bankAgent.v1.tools.ts");
   const rec = tools.newBankRunRecord();
