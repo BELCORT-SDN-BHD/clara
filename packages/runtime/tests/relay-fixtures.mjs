@@ -378,12 +378,23 @@ export async function insertUser(prefix, tag) {
 // `$1::uuid::text` (independent review 2026-08-29): create_firm hashes the CANONICAL uuid
 // rendering, so a write that hashed the caller's raw spelling would store a row no reader can
 // ever find. Same fix, same reason, as packages/db/tests/rig-fixtures.mjs' seedAdmission.
+// FRONTIER-AWARE (sweep red 2026-08-29, run 33241919853): the column set is read from the
+// catalog on every call -- before 0147 the table keys on the plaintext `token uuid`; from 0147
+// only `token_hash` exists. Same shape as the db fixture; the caller always gets the PLAINTEXT.
 export async function seedAdmission(note = "relay rig admission") {
   const token = randomUUID();
-  await rootQuery(
-    "insert into clara.firm_admissions (token_hash, note) values (sha256(convert_to($1::uuid::text,'UTF8')), $2)",
-    [token, note],
+  const shape = await rootQuery(
+    "select bool_or(column_name = 'token_hash') as hashed from information_schema.columns " +
+      "where table_schema = 'clara' and table_name = 'firm_admissions' and column_name in ('token','token_hash')",
   );
+  if (shape.rows[0]?.hashed === true) {
+    await rootQuery(
+      "insert into clara.firm_admissions (token_hash, note) values (sha256(convert_to($1::uuid::text,'UTF8')), $2)",
+      [token, note],
+    );
+  } else {
+    await rootQuery("insert into clara.firm_admissions (token, note) values ($1::uuid, $2)", [token, note]);
+  }
   return token;
 }
 
