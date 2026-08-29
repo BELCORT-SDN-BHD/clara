@@ -275,8 +275,8 @@ test("cm.11 (D-01) the merge moves NO row, and every body PR-1 swore it does not
   for (const w of witnesses) {
     assert.equal(await bodySha(w), shasBefore[w], `cm.11: ${w} is byte-unchanged`);
   }
-  assert.equal(counterpartyRow(p.merged) === null, false, "cm.11: the merged identity row still exists (retired, never deleted)");
   const m = await counterpartyRow(p.merged);
+  assert.ok(m, "cm.11: the merged identity row still EXISTS (retired, never deleted — PRD invariant 8)");
   assert.equal(m.merged_into, p.survivor, "cm.11: and it points at its survivor");
   assert.notEqual(m.retired_at, null, "cm.11: and is retired");
 });
@@ -323,7 +323,7 @@ test("cm.13 (S-2, W2/W3/W4) the carrier admits EXACTLY one reversal stamp, and r
   const edit = await caught(() => rootQuery("update clara.counterparty_merges set reason='rewritten' where id=$1", [row.id]));
   assert.equal(edit?.code, "CLR08", "cm.13 (W3): a non-reversal column cannot be edited");
   const half = await caught(() => rootQuery("update clara.counterparty_merges set unmerged_at=now() where id=$1", [row.id]));
-  assert.ok(half, "cm.13: half a reversal stamp is refused");
+  assert.equal(half?.code, "CLR08", "cm.13: HALF a reversal stamp (a timestamp with no actor and no reason) is refused by the trigger, not silently taken");
 
   // THE ADMITTED DIRECTION — a wall that only ever refuses has not been proven to do anything.
   await rootQuery(
@@ -404,11 +404,10 @@ test("cm.16 (W5/W6/W7/W8) the carrier's four declarative walls each refuse, by t
   });
   await mergeCp(sub, { client, survivor: p.survivor, merged: p.merged });
   const row = (await carrierRows(client)).find((r) => r.merged_id === p.merged);
-  const ins = (cols, vals) => rootQuery(
-    `insert into clara.counterparty_merges(firm_id,client_id,survivor_id,merged_id,reason,merged_by,op_key${cols}) values ($1,$2,$3,$4,$5,$6,$7${vals})`,
-    [row.firm_id, row.client_id, row.survivor_id, row.merged_id, "cm1 mutant", row.merged_by, `cm1-mutant-${Math.random()}`]);
-
-  const dupLive = await caught(() => ins("", ""));
+  const dupLive = await caught(() => rootQuery(
+    `insert into clara.counterparty_merges(firm_id,client_id,survivor_id,merged_id,reason,merged_by,op_key)
+     values ($1,$2,$3,$4,'cm1 mutant',$5,'cm1-duplive')`,
+    [row.firm_id, row.client_id, row.survivor_id, row.merged_id, row.merged_by]));
   assert.equal(dupLive?.code, "23505", "cm.16 (W5): a party can be LIVE-merged at most once — the partial unique index refuses the second");
   const trio = await caught(() => rootQuery(
     `insert into clara.counterparty_merges(firm_id,client_id,survivor_id,merged_id,reason,merged_by,op_key,unmerged_at)
