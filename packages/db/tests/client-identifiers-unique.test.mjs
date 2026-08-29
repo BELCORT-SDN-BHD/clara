@@ -15,20 +15,27 @@
 //     worthless next to a wall that refuses everything. In particular ci-3 proves the sibling
 //     conflict 0007:235 kept representable is STILL representable — the same value on a
 //     different client — which is the one thing this ruling must not have broken.
-//   * ci-9 is the NARROWNESS cell: a unique_violation that is NOT this index's must escape the
-//     handler untouched as a raw 23505. Relabel every unique_violation in either writer (drop
-//     the `if v_con is distinct from ... then raise` line) and ONLY this cell reds — which is
-//     exactly why it exists.
-//   * ci-8 and ci-10 are the two-session cells. They PROVE the interleave with
-//     waitBlockedByOrThrow (pg_blocking_pids), never a sleep. Drop the index and neither side
-//     ever blocks, so both red.
-//   * ci-10 additionally pins the asymmetry: _add_bank_account_core's handler CONTINUES after
-//     re-reading the row (its two writes mean "ensure present", never "mint"), where
-//     add_client_identifier REFUSES. A handler copied blindly from one to the other reds here.
-//   * ci-11 is the pre-flight's positive control INSIDE the battery. The real refusal cannot be
-//     provoked against a live database once the index exists (that proof is a rig ceremony, and
-//     it is recorded in the PR body); what is regression-guarded here is that the census
-//     EXPRESSION the migration refuses on actually finds and names a duplicate group.
+//   * NARROWNESS is proven PER WRITER, because the two handlers are separate code: ci-9 covers
+//     clara.add_client_identifier and ci-9b covers clara._add_bank_account_core. Drop the
+//     `if v_con is distinct from ... then raise` line from ONE writer and exactly ONE of the two
+//     reds. An earlier draft of this header claimed ci-9 covered "either writer" — it does not,
+//     and that false claim is what left _add_bank_account_core's narrowness unguarded.
+//   * ci-8, ci-10 and ci-10b are the two-session cells. They PROVE the interleave with
+//     waitBlockedByOrThrow (pg_blocking_pids), never a sleep. Drop the index and no side ever
+//     blocks, so they red.
+//   * ci-10 pins the asymmetry: _add_bank_account_core's handler CONTINUES where
+//     add_client_identifier REFUSES. But ci-10 alone does NOT prove the RE-READ inside that
+//     handler — under READ COMMITTED the winner's row is visible, so deleting the re-read leaves
+//     ci-10 green. ci-10b is the cell that makes the re-read load-bearing: it runs the loser at
+//     REPEATABLE READ, where the 23505 still fires but the re-read genuinely CANNOT see the
+//     committed row, so the handler must re-raise and the caller must see a RAW 23505. Delete the
+//     re-read and ci-10b goes green-on-success instead — it discriminates in both directions.
+//   * ci-11 exercises a COPY of the pre-flight's census expression, re-typed inline — it cannot
+//     see drift in the migration's own §0.6 text, because it never reads it. Stated plainly so
+//     nobody mistakes it for a drift guard: what it proves is that a GROUP BY/HAVING of this
+//     shape finds and NAMES a duplicate group and does not sweep in a singleton. The real
+//     end-to-end refusal cannot be provoked against a live database once the index exists; that
+//     proof is a rig ceremony and it is recorded in the PR body.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -320,6 +327,59 @@ test("ci-10 · _add_bank_account_core's backstop CONTINUES: a concurrently-commi
     "ci-10: exactly one identifier row — T1's, kept; the loser wrote none and raised none");
 });
 
+/** Stand up a bank-candidate chart account and pick an active institution. Shared by ci-10b/ci-9b
+ *  so the two cells differ only in the property they probe. */
+async function bankScaffold(tag) {
+  const coaCode = `1${String(700 + Math.floor(Math.random() * 280))}`;
+  await upsertAccount(world.users.alice,
+    { client: world.clients.A2, code: coaCode, name: `${tag} bank ${coaCode}`, type: "asset", opKey: opk(`${tag}coa`) });
+  const inst = (await rootQuery("select code from clara.bank_institutions where active order by code limit 1")).rows[0];
+  assert.ok(inst, `${tag}: the chain must carry at least one active bank institution`);
+  return { coaCode, bankCode: inst.code, number: `7${randomUUID().replace(/\D/g, "").padEnd(9, "1").slice(0, 9)}` };
+}
+
+test("ci-10b · the RE-READ is load-bearing: at REPEATABLE READ the backstop CANNOT see the winner's row and must RE-RAISE, not continue", async (t) => {
+  if (gate(t)) return;
+  // ci-10 proves the handler CONTINUES. It cannot prove the re-read, because under READ COMMITTED
+  // the winner's row is visible and "continue unconditionally" reaches the same answer. This cell
+  // makes the re-read the only thing standing between a correct refusal and a silent continue:
+  // at REPEATABLE READ the 23505 still fires (unique enforcement is snapshot-INDEPENDENT), but
+  // the handler's re-read runs against a snapshot taken BEFORE the winner committed and so comes
+  // back empty. Law 2 says that must fall through to the fail-closed branch — a raw re-raise —
+  // never to an inferred "the row must be there".
+  const { coaCode, bankCode, number } = await bankScaffold("ci10b");
+  const client = world.clients.A2;
+  const firm = world.firms.A;
+  const t2 = await humanSession(world.users.alice);
+  let outcome = null;
+  try {
+    await t2.c.query("begin isolation level repeatable read");
+    // FORCE the snapshot now — REPEATABLE READ takes it at the first real query, not at BEGIN.
+    await t2.c.query("select 1 from clara.clients limit 1");
+    // Only NOW does the winner write and COMMIT, so its row is invisible to t2's snapshot.
+    await rootQuery(
+      `insert into clara.client_identifiers(firm_id,client_id,kind,value_normalized,added_by)
+         values ($1,$2,'bank_account',$3,$4)`, [firm, client, number, world.users.alice]);
+    outcome = await t2.c.query(
+      `select clara.add_bank_account(p_client => $1, p_coa_account_code => $2, p_bank_code => $3,
+         p_account_number => $4, p_bank_name_display => 'CI10b Bank', p_op_key => $5) as r`,
+      [client, coaCode, bankCode, number, opk("ci10b")]).then((r) => ({ ok: true, r })).catch((e) => ({ ok: false, e }));
+  } finally {
+    await releaseSession(t2);
+  }
+  assert.equal(outcome.ok, false,
+    "ci-10b: the backstop must NOT continue when its re-read comes back empty — a continue here would be the handler INFERRING the row exists from the 23505 alone (review law 2), which is exactly the bug this cell exists to catch");
+  // The exact SQLSTATE is secondary and deliberately not over-pinned: what is load-bearing is
+  // that the call FAILED rather than continuing. A 23505 is the expected shape; a 40001 would
+  // mean this server serialises the conflict instead, which is still a refusal, still fail-closed.
+  assert.ok(["23505", "40001"].includes(outcome.e?.code),
+    `ci-10b: expected the re-raised conflict (23505, or 40001 if this server serialises it) — got ${outcome.e?.code} — ${outcome.e?.message}`);
+  if (outcome.e?.code === "23505") {
+    assert.equal(outcome.e.constraint, INDEX,
+      `ci-10b: the re-raise must carry THIS index's name, untouched (got ${outcome.e.constraint ?? "(none)"})`);
+  }
+});
+
 // ---------------------------------------------------------------------------------------
 // D · NARROWNESS, STRUCTURE, AND THE PRE-FLIGHT'S POSITIVE CONTROL
 // ---------------------------------------------------------------------------------------
@@ -371,6 +431,63 @@ test("ci-9 · NARROWNESS: a unique_violation that is NOT this index's escapes th
     `ci-9: a FOREIGN unique_violation must escape the narrow handler RAW, never relabelled as the typed CLR10 (got ${err.code} — ${err.message})`);
   assert.equal(err.constraint, "ci9_foreign_uq",
     `ci-9: and it must still name the constraint that actually fired (got ${err.constraint ?? "(none)"})`);
+});
+
+test("ci-9b · NARROWNESS, second writer: a FOREIGN unique_violation inside _add_bank_account_core's guarded insert escapes RAW too", async (t) => {
+  if (gate(t)) return;
+  // ci-9 covers add_client_identifier ONLY. The two handlers are separate code, so relabelling
+  // one leaves the other unproven — this cell is the second writer's own guard. It also probes a
+  // path ci-9 structurally cannot: here the narrow re-raise must survive the CONTINUE branch,
+  // i.e. the handler must not treat "some unique_violation happened" as licence to carry on.
+  const { coaCode, bankCode, number } = await bankScaffold("ci9b");
+  const client = world.clients.A2;
+  let err = null;
+  let created = false;
+  const c = await getPool().connect();
+  try {
+    for (let i = 0; ; i++) {
+      try {
+        await c.query("begin");
+        await c.query("set local lock_timeout = '4s'");
+        // Scoped to exactly this probe's value, so creating it cannot collide with data already
+        // on the table, and it dies with the rollback below.
+        await c.query(
+          `create unique index ci9b_foreign_uq on clara.client_identifiers (value_normalized)
+             where value_normalized = '${number}'`);
+        created = true;
+        break;
+      } catch (e) {
+        await c.query("rollback").catch(() => {});
+        if ((e.code === "55P03" || e.code === "40P01") && i < 6) { await new Promise((r) => setTimeout(r, 120)); continue; }
+        throw e;
+      }
+    }
+    // A DIFFERENT client takes the value first: 裁-41's index is NOT violated by what follows
+    // (ci-3 proves that case is admitted), but ci9b_foreign_uq is.
+    await c.query(
+      `insert into clara.client_identifiers(firm_id,client_id,kind,value_normalized,added_by)
+         values ($1,$2,'bank_account',$3,$4)`,
+      [world.firms.A, world.clients.A1, number, world.users.alice]);
+    await c.query(`set role ${ROLES.authenticated}`);
+    await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: world.users.alice, role: "authenticated" })]);
+    try {
+      await c.query(
+        `select clara.add_bank_account(p_client => $1, p_coa_account_code => $2, p_bank_code => $3,
+           p_account_number => $4, p_bank_name_display => 'CI9b Bank', p_op_key => $5)`,
+        [client, coaCode, bankCode, number, opk("ci9b")]);
+    } catch (e) { err = e; }
+  } finally {
+    await c.query("rollback").catch(() => {});
+    await c.query("reset role").catch(() => {});
+    await c.query("reset all").catch(() => {});
+    c.release();
+  }
+  assert.ok(created, "ci-9b: the foreign index must actually have been created, or this cell proves nothing");
+  assert.ok(err, "ci-9b: the foreign unique index must still refuse the write");
+  assert.equal(err.code, "23505",
+    `ci-9b: a FOREIGN unique_violation must escape _add_bank_account_core's handler RAW — never swallowed by its continue branch, never relabelled (got ${err.code} — ${err.message})`);
+  assert.equal(err.constraint, "ci9b_foreign_uq",
+    `ci-9b: and it must still name the constraint that actually fired (got ${err.constraint ?? "(none)"})`);
 });
 
 test("ci-11 · the PRE-FLIGHT's positive control: the migration's own duplicate census finds and NAMES a duplicate group", async (t) => {
@@ -432,15 +549,29 @@ test("ci-12 · the wall's STRUCTURE, read by property, and the closed-world writ
   // CLOSED-WORLD: the same instrument the migration's own §0.8/§4(7) census uses. A writer added
   // later without the map would surface HERE, on every run, rather than as a raw 23505 in
   // production.
+  // `maps` matches THE GUARD LINE, not the bare index name. Both bodies also mention the index in
+  // a comment, so a bare-name probe would report true for a body that had lost its handler
+  // entirely — the standing post-merge guard would then be satisfied by prose.
   const writers = await rootQuery(
-    `select p.oid::regprocedure::text as sig, (p.prosrc ~ $1) as maps
+    `select p.oid::regprocedure::text as sig,
+            (p.prosrc like '%get stacked diagnostics v_con = constraint_name%'
+             and p.prosrc like '%if v_con is distinct from ''' || $1 || ''' then raise; end if%') as maps,
+            (length(p.prosrc) - length(replace(p.prosrc, 'if v_con is distinct from ''' || $1 || ''' then raise; end if', '')))
+              / length('if v_con is distinct from ''' || $1 || ''' then raise; end if') as guards
        from pg_proc p
       where p.pronamespace = 'clara'::regnamespace
-        and p.prosrc ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+(clara[[:space:]]*\\.[[:space:]]*)?client_identifiers([^A-Za-z0-9_]|$)'
+        and p.prosrc ~* '(insert[[:space:]]+into|merge[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+(clara[[:space:]]*\\.[[:space:]]*)?client_identifiers([^A-Za-z0-9_]|$)'
       order by 1`, [INDEX]);
   assert.deepEqual(writers.rows.map((r) => r.sig).sort(), [
     "clara._add_bank_account_core(jsonb,uuid,text,text,text,text,uuid,text)",
     "clara.add_client_identifier(uuid,text,text,text)",
-  ], "exactly two functions write clara.client_identifiers — a third needs the unique_violation map before it merges");
-  assert.ok(writers.rows.every((r) => r.maps), `both writers must name ${INDEX} in a narrow handler`);
+  ], "exactly two clara functions name a DML against clara.client_identifiers — a third needs the unique_violation map before it merges");
+  assert.ok(writers.rows.every((r) => r.maps),
+    `both writers must carry the NARROW re-raise guard for ${INDEX} — a comment naming the index does not count`);
+  // One guard per guarded insert: add_client_identifier has one write, _add_bank_account_core has
+  // two. A handler deleted from just ONE of the bank core's two inserts is caught here.
+  const byName = new Map(writers.rows.map((r) => [r.sig, Number(r.guards)]));
+  assert.equal(byName.get("clara.add_client_identifier(uuid,text,text,text)"), 1);
+  assert.equal(byName.get("clara._add_bank_account_core(jsonb,uuid,text,text,text,text,uuid,text)"), 2,
+    "_add_bank_account_core guards BOTH of its client_identifiers inserts, not just the first");
 });

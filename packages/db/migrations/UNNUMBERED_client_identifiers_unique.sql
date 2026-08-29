@@ -96,9 +96,22 @@
 -- artifacts (attribution attempts, promotion cards' identifier_id) may already point at a
 -- specific one. The table is also append-only by trigger (t_client_identifiers_append_only,
 -- 0007:679), so there is no in-migration delete path that would not first have to defeat the
--- estate's own wall. The operator's recipe is in the refusal's HINT. On every rig measured at
--- authoring the count is ZERO (migrate-only AND migrate+seed both read 0 rows), and the census
--- count is printed at the tail either way.
+-- estate's own wall. The operator's recipe is in the refusal's HINT, and it names two routes
+-- because there is NO retire verb for an identifier (the append-only trigger blocks UPDATE and
+-- DELETE, and no `retire_client_identifier` counterpart to `retire_client_alias` exists).
+--
+-- READINESS, SCOPED HONESTLY -- read this before scheduling the D1 window. What was measured at
+-- authoring is RIGS: migrate-only and migrate+seed both read ZERO duplicate groups, so CI and
+-- every throwaway pass cleanly. That is NOT a statement about the live estate, and it must not be
+-- read as one. **The live estate is documented IN THIS REPO to carry duplicates**:
+-- packages/db/deploy/client-identifiers-0049-seed.sql:29-30 records, as a measured statement
+-- about the live BELCORT database, that ROME SECRETARY holds "four rows for two values" -- i.e.
+-- TWO duplicate groups, the residue of re-running that seed without a stable op_key. Nothing in
+-- the migration chain clears them. So §0.6 is EXPECTED to refuse the first live attempt, and the
+-- ceremony must resolve those groups first. ROME SECRETARY is a resettable fixture under
+-- constraint 13, so route (a) -- the Wave-G reset -- is the likely answer; the PR body carries
+-- the live count and the owner's ruling on which route applies. The census count is printed at
+-- the tail on every run either way.
 --
 -- =====================================================================================
 -- D1 WRITE-QUIESCE INVENTORY -- TWO LIVE AUDITED WRITER BODIES REPLACED
@@ -126,10 +139,22 @@
 -- BYTE-IDENTICAL at the tail, so "we did not touch it" is a measurement, not a promise:
 --   * clara.confirm_identifier_promotion(uuid,text) -- 裁-41's own headline door. It calls
 --     add_client_identifier and lets the refusal propagate; giving it a second, hand-rolled
---     check would put the same judgement in two places and let them drift.
+--     check would put the same judgement in two places and let them drift. PROVEN by rig cells
+--     ci-6 (the two-card arc; the losing card stays `proposed`) and ci-7 (it can still be
+--     declined afterwards, so the refusal is not a dead end).
 --   * clara._confirm_bank_identifier_promotion_core(jsonb,uuid,text) -- the bank confirm door,
 --     same reason. (It ALSO cannot reach the new index with a statutory kind at all: its own
 --     MUST-2c wall refuses anything but identifier_kind = 'bank_account'.)
+--     STATED AS THE GAP IT IS, rather than left to read as covered: this door has NO cell of its
+--     own in the 裁-41 battery. Its inheritance is argued structurally (it calls the same
+--     add_client_identifier and does not wrap the call), not measured. It is also shaped
+--     DIFFERENTLY from the door above -- it settles its proposal AFTER the write
+--     (`update clara.bank_agent_proposals set status='accepted'`), so the refusal must roll the
+--     whole call back and leave the proposal `open`, and its own `promotion_not_confirmed`
+--     branch becomes dead for this path because the inner door now raises instead of returning
+--     without an id. Owed follow-up: one cell mirroring ci-6 through
+--     clara.confirm_bank_identifier_promotion, asserting the CLR10/already_recorded propagates
+--     AND the bank_agent_proposals row is still 'open'. Named in the PR body.
 --   * clara._identifier_promotion_core(uuid,uuid,uuid,text,uuid,text,text,int,jsonb,text,jsonb)
 --     -- 0143's standing byte-identity commitment, re-honoured by 0148 and by this file.
 --   * clara._claim_identity_core(uuid,text,text) -- named in this lane's brief and censused for
@@ -149,9 +174,11 @@
 -- NO NEW `clara_authenticated` DOOR, so .claude/rules/db-migrations.md's frontend-home rule does
 -- not engage: this file creates no function, grants no role anything, and adds no verb. The
 -- change is visible to the toolface only as a refusal on doors that already have a home --
--- the identifier-promotion confirm card and the bank identifier-promotion confirm card
--- (apps/dashboard/app/bank/BankWorkbench.tsx and the review-queue promotion cards), plus the
--- existing add-identifier and add-bank-account journeys. The PR body names them.
+-- the identifier-promotion confirm card (apps/web/components/firm/identifier-promotion-row.tsx,
+-- which already carries the DECLINE affordance the refusal leaves a user needing) and the bank
+-- identifier-promotion confirm card (apps/web/lib/bank/agency-doors.ts;
+-- apps/dashboard/app/shared/bankApi.ts -> BankWorkbench.tsx), plus the existing add-bank-account
+-- journey, whose toolface behaviour is UNCHANGED. The PR body names them.
 
 -- Precautionary, not load-bearing. The table is small on every environment measured (the tail
 -- prints its real cardinality) and a CREATE UNIQUE INDEX over it is a sub-second pass. The cap
@@ -244,7 +271,9 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  create temp table _cid_uniq_pre(k text primary key, v text);
+  -- ON COMMIT DROP: the tail reads this in the SAME transaction, so it survives exactly as long
+  -- as it is needed and does not outlive the migration into the runner's session.
+  create temp table _cid_uniq_pre(k text primary key, v text) on commit drop;
   insert into _cid_uniq_pre(k,v)
     values ('match_ix_def', pg_get_indexdef('clara.ix_client_identifiers_match'::regclass));
 
@@ -260,7 +289,7 @@ begin
   if v_dups > 0 then
     raise exception 'client_identifiers_unique prestate: % duplicate identifier group(s) already exist and must be resolved by a human before this wall can be raised: %', v_dups, v_list
       using errcode = 'CLR10',
-        hint = 'This migration NEVER dedupes. clara.client_identifiers is append-only by trigger, and downstream rows (client_identifier_promotions.identifier_id, attribution attempts) may already name a specific duplicate. Decide which row is the record of truth with the owner, migrate the dependents onto it through the real audited doors, retire the loser deliberately, then re-run.';
+        hint = 'This migration NEVER dedupes. There is also NO retire verb for a client identifier -- t_client_identifiers_append_only (0007:679) blocks UPDATE and DELETE, and unlike clara.retire_client_alias no counterpart exists -- so do not go looking for one. TWO followable routes, and which applies is the OWNER''s call, not this file''s. (a) FIXTURE FIRM (constraint 13 -- ROME PROPERTIES / ROME SECRETARY / BEE CREATIVE SOLUTION / ROME PUBLIC ADVISORY / Alara / Borneo): the duplicates ride the Wave-G factory reset; re-run this migration on the reset estate and it passes with nothing hand-edited. (b) OPERATOR FIRM (BELCORT) or a group the owner rules must be preserved: an owner-authorised ceremony that, as clara_fn_owner inside one transaction, disables t_client_identifiers_append_only, deletes the losing rows named above, re-enables the trigger, and receipts what it did -- after re-pointing any client_identifier_promotions.identifier_id that names a loser. Route (b) touches the append-only wall and is therefore an owner decision, never an agent one.';
   end if;
 
   -- 0.7 The two bodies being REPLACED, pinned by exact prosrc sha256 (the 0090/0143/0148 idiom),
@@ -317,17 +346,31 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- 0.8 THE CLOSED-WORLD WRITER CENSUS. This is what makes the D1 inventory a measurement rather
-  -- than a reading list: enumerate every function in `clara` whose body executes DML against this
+  -- 0.8 THE PROSRC-TEXT WRITER CENSUS. It makes the D1 inventory a measurement rather than a
+  -- reading list: enumerate every function in `clara` whose PROSRC TEXT names a DML against this
   -- table -- schema-qualified or bare, since every one of them pins search_path to clara -- and
-  -- refuse unless the set is EXACTLY the two this file maps. A third writer merged between
-  -- authoring and deploy stops the migration instead of shipping past its map.
+  -- refuse unless the set is EXACTLY the two this file maps. A third PL/pgSQL writer merged
+  -- between authoring and deploy stops the migration instead of shipping past its map.
+  --
+  -- WHAT IT IS NOT, named so the next author trusts its actual reach and not the word "census"
+  -- (an earlier draft of this file called it CLOSED-WORLD; it is not, and the difference matters
+  -- because every gap below fails OPEN -- a writer it cannot see ships with no map and hands its
+  -- callers a raw 23505). It does NOT see: a table name assembled at run time
+  -- (`execute format('insert into %I.client_identifiers', ...)`); a quoted identifier
+  -- (`clara."client_identifiers"`); a SQL-standard-body (BEGIN ATOMIC) function, whose prosrc is
+  -- a serialized parse tree naming the table by OID rather than by text; a writer reached through
+  -- a view or rule; and -- the one that actually exists today -- EVERY NON-FUNCTION writer, i.e.
+  -- any client-side INSERT. The rig battery's own fixtures and
+  -- packages/db/deploy/client-identifiers-0049-seed.sql are exactly that shape. Those are walled
+  -- by the INDEX, which binds every writer including ones nothing can enumerate; this census
+  -- exists only to keep the TYPED-REFUSAL map complete across the function surface.
+  -- The false-POSITIVE direction (a comment naming a DML) fails closed and is fine.
   select coalesce(string_agg(sig, E'\n  ' order by sig), '(none)'), count(*)
     into v_sigs, v_n
     from (select p.oid::regprocedure::text as sig
             from pg_proc p
            where p.pronamespace = 'clara'::regnamespace
-             and p.prosrc ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+(clara[[:space:]]*\.[[:space:]]*)?client_identifiers([^A-Za-z0-9_]|$)') w;
+             and p.prosrc ~* '(insert[[:space:]]+into|merge[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+(clara[[:space:]]*\.[[:space:]]*)?client_identifiers([^A-Za-z0-9_]|$)') w;
   if v_n <> 2
      or position('clara.add_client_identifier(uuid,text,text,text)' in v_sigs) = 0
      or position('clara._add_bank_account_core(jsonb,uuid,text,text,text,text,uuid,text)' in v_sigs) = 0 then
@@ -914,24 +957,28 @@ begin
     end if;
   end loop;
 
-  -- (7) THE CLOSED-WORLD WRITER CENSUS, RE-RUN. Same instrument as §0.8: the set of functions
-  -- executing DML against this table is still exactly the two this file mapped, and both now
-  -- carry the narrow handler.
+  -- (7) THE PROSRC-TEXT WRITER CENSUS, RE-RUN. Same instrument as §0.8 (and the same stated
+  -- limits): the set of clara functions naming a DML against this table is still exactly the two
+  -- this file mapped, and both now carry the narrow handler.
   select coalesce(string_agg(sig, ', ' order by sig), '(none)'), count(*)
     into v_sigs, v_n
     from (select p.oid::regprocedure::text as sig
             from pg_proc p
            where p.pronamespace = 'clara'::regnamespace
-             and p.prosrc ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+(clara[[:space:]]*\.[[:space:]]*)?client_identifiers([^A-Za-z0-9_]|$)') w;
+             and p.prosrc ~* '(insert[[:space:]]+into|merge[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+(clara[[:space:]]*\.[[:space:]]*)?client_identifiers([^A-Za-z0-9_]|$)') w;
   if v_n <> 2 then
     raise exception 'client_identifiers_unique tail: the writer census reads % function(s), expected 2. Found: %', v_n, v_sigs using errcode = 'CLR10';
   end if;
+  -- MATCHED ON THE GUARD LINE, NOT THE BARE NAME. Both bodies also mention the index in a COMMENT,
+  -- so a body that had lost its handler entirely would still satisfy a bare-name probe -- which
+  -- would then let this very notice claim "both carry a narrow handler" over a body that does not.
   select count(*) into v_n from pg_proc p
    where p.pronamespace = 'clara'::regnamespace
-     and p.prosrc ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+(clara[[:space:]]*\.[[:space:]]*)?client_identifiers([^A-Za-z0-9_]|$)'
-     and p.prosrc ~ 'uq_client_identifiers_client_kind_value';
+     and p.prosrc ~* '(insert[[:space:]]+into|merge[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+(clara[[:space:]]*\.[[:space:]]*)?client_identifiers([^A-Za-z0-9_]|$)'
+     and p.prosrc like '%if v_con is distinct from ''uq_client_identifiers_client_kind_value'' then raise; end if%'
+     and p.prosrc like '%get stacked diagnostics v_con = constraint_name%';
   if v_n <> 2 then
-    raise exception 'client_identifiers_unique tail: only % of the 2 writers name uq_client_identifiers_client_kind_value in a handler', v_n using errcode = 'CLR10';
+    raise exception 'client_identifiers_unique tail: only % of the 2 writers carry the NARROW re-raise guard line (a comment naming the index does not count)', v_n using errcode = 'CLR10';
   end if;
 
   -- (8a) THE INSTRUMENT PROBE -- MANDATORY, and it fails this migration if it fails. Both narrow
@@ -1009,6 +1056,17 @@ begin
   exception
     when sqlstate 'CLR99' then null; -- the probe's own forced rollback; every row it wrote is discarded
     when sqlstate 'CLR10' then raise; -- a genuine wall failure above is NOT swallowed here
+    -- A 23505 REACHING HERE IS A WALL-TOO-BROAD FINDING, NOT A SKIP. Two of the probe's
+    -- statements are ADMITTING controls (a different value on the same client; the same value on
+    -- a SIBLING client). Their whole purpose is to fail if the index refuses more than 裁-41 says
+    -- it should -- and the `when others` arm below would have reported exactly that as a benign
+    -- "not exercised", passing the migration. The FIRST insert cannot collide (v_val is
+    -- gen_random_uuid()-derived and the duplicate attempt is caught by its own inner handler), so
+    -- a unique_violation escaping to here can only mean an admitting control was walled.
+    when unique_violation then
+      get stacked diagnostics v_con = constraint_name;
+      raise exception 'client_identifiers_unique tail: an ADMITTING control in the live probe was REFUSED by % -- the wall is BROADER than 裁-41 (a different value on one client, or the same value on a sibling client, must both still be admitted)', coalesce(v_con,'<unnamed>')
+        using errcode = 'CLR10';
     when others then
       get stacked diagnostics v_con = returned_sqlstate;
       v_probe := 'not exercised (the probe''s own scaffolding raised ' || coalesce(v_con,'?') ||
