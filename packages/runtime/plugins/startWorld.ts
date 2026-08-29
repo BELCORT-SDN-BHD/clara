@@ -8,6 +8,10 @@ import {
   withRuntime,
   withRead,
 } from "../lib/pools.mjs";
+// F-A6 PR-2: the audited freeform read's ONE wrapper. Injected beside the rest of the pool API
+// so chatTurn_v15's frozen steps reach it the same way they reach every other pool helper (they
+// never import a lib module). Its own header carries H-4/H-5/S-1.
+import { withFreeformRead } from "../lib/freeform-read.mjs";
 import { startControlListener, productionControlDeps } from "../lib/control.mjs";
 import { startLeaderLoop } from "../lib/leader.mjs";
 import { startMatcherLoop } from "../lib/matcher.mjs";
@@ -68,6 +72,11 @@ export default definePlugin(() => {
     withWriteWakeScoped,
     withRuntime,
     withRead,
+    // F-A6 PR-2 (chatTurn_v15): the audited freeform read. Unlike every other member here it
+    // takes NO callback — it accepts the read's arguments and issues exactly one statement,
+    // which is S-1's structural half (lib/freeform-read.mjs's header). Earlier chatTurn
+    // versions ignore the extra member, as they already ignore the write-floor ones.
+    withFreeformRead,
   };
   (globalThis as unknown as { __claraDocumentServices?: unknown }).__claraDocumentServices = makeDocumentServices();
   (globalThis as unknown as { __claraInvoiceFactsServices?: unknown }).__claraInvoiceFactsServices = makeInvoiceFactsServices();
