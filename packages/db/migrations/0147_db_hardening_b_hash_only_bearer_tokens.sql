@@ -97,7 +97,11 @@
 -- accepted, which is a positive read of the catalog rather than an inference from 0146's diff.
 -- If any later migration does recut either body, this file refuses at §0 and names the observed
 -- hash instead of silently applying a surgery derived from text that no longer exists. The
--- migration NUMBER is claimed at merge and is not a premise of anything below.
+-- migration NUMBER is claimed at merge and is not a premise of anything below. CLAIMED at merge
+-- prep, 2026-08-29: 0147, one past 0146 (裁-17). The pinned pre-images are still 0145's, because
+-- 0145 is where these two bodies were last recut -- the number this file carries and the frontier
+-- its surgery was derived against are independent facts, and §0 is what reconciles them on every
+-- apply.
 --
 -- This file was authored and rig-tested against the pre-0145 frontier and deliberately HELD
 -- unpushed: P4 tranche-2 was, at that moment, CoR-ing create_firm / set_member_role / add_member /
@@ -733,8 +737,10 @@ $blk$;
   end if;
 
   -- (3b) HIGH-1: NOT ONE invite_member receipt still carries a plaintext `token`, and the
-  --      population §B2 rewrote is the population §0 measured -- a before/after DELTA, so a
-  --      rig that happened to hold zero legacy receipts cannot pass this vacuously.
+  --      population §B2 rewrote is the population §0 measured -- a before/after DELTA. NON-VACUOUS
+  --      WHENEVER LEGACY ROWS EXIST; the populated drill (tests/hrd-b-upgrade-drill.test.mjs) is
+  --      what supplies them. Measured, not assumed: on a zero-receipt database the scrub-dropped
+  --      mutant applies cleanly past this check, which is exactly why that drill has to exist.
   select count(*)::int into v_n
     from clara.op_receipts where fn = 'invite_member' and jsonb_typeof(result) = 'object' and result ? 'token';
   if v_n > 0 then
