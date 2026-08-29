@@ -111,7 +111,7 @@ const FIXTURES = {
     advance_id: "d1000000-0000-4000-8000-000000000001",
     question_text: "Staff advance (particulars pending) — 610-000 RM1,200.00",
   }),
-  // 裁-17 (mohe-grill-rulings-2026-08-28.md, UNNUMBERED_ninth_rowkind_seeding_
+  // 裁-17 (mohe-grill-rulings-2026-08-28.md, 0146_ninth_rowkind_seeding_
   // proposal.sql): BATCH-LEVEL — one row per client with >=1 OPEN
   // clara.seeding_proposals row. This app's own tick/decline surface
   // (app/seeding/SeedingBatchView.tsx) already owns the act; this catalog

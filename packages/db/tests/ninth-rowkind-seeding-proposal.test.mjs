@@ -34,7 +34,7 @@ let w = null;
 // The full, exact 30-key shape every clara.list_review_queue row carries after
 // this migration (27 pre-existing + client_name/batch_ids/open_proposal_count).
 // Sourced from the LIVE json builder (packages/db/migrations/
-// UNNUMBERED_ninth_rowkind_seeding_proposal.sql splice (c)), never re-typed by
+// 0146_ninth_rowkind_seeding_proposal.sql splice (c)), never re-typed by
 // hand from a migration's first text.
 const FULL_ROW_KEYS = [
   "row_kind", "section", "sort", "client_id", "counterparty_id", "filing_id",

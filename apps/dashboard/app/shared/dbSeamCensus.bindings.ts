@@ -308,7 +308,7 @@ export const UNCONSUMED_BASELINE: Record<string, string> = {
   // over KEPT history -- only the dashboard stopped rendering it, so it is genuinely,
   // permanently unconsumed rather than a gap to close.
   // `batch_ids`/`client_name`/`open_proposal_count` JOINED this line with 裁-17
-  // (UNNUMBERED_ninth_rowkind_seeding_proposal.sql, mohe-grill-rulings-2026-08-28.md):
+  // (0146_ninth_rowkind_seeding_proposal.sql, mohe-grill-rulings-2026-08-28.md):
   // the ninth row_kind='seeding_proposal' is projected on the wire (queueKindCatalog.ts
   // renders it honestly via FallbackDetail/question_text, per that file's own header) but
   // this app has no dedicated card for its three new keys — Direction 2 flagged exactly

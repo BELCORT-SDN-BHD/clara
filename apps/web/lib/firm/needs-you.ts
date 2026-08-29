@@ -20,7 +20,7 @@
 //     incomplete and the queue is the only thing that ever asks for it), `asset_id`.
 //   - 0043_wave_d_b1_staff_advances.sql:3553-3692 (S3.8) — copies 0041's shape
 //     exactly for row_kind='staff_advance_incomplete', `advance_id`.
-//   - UNNUMBERED_ninth_rowkind_seeding_proposal.sql (裁-17,
+//   - 0146_ninth_rowkind_seeding_proposal.sql (裁-17,
 //     docs/plan/active/mohe-grill-rulings-2026-08-28.md) — adds row_kind='seeding_proposal',
 //     BATCH-LEVEL (one row per client with >=1 OPEN clara.seeding_proposals row, aggregated
 //     across every open batch that client owns). Unlike asset_id/advance_id, its three new
@@ -91,7 +91,7 @@ export const REVIEW_QUEUE_ROW_KINDS = [
   "lint_finding",
   "fixed_asset_incomplete",
   "staff_advance_incomplete",
-  // 裁-17 (UNNUMBERED_ninth_rowkind_seeding_proposal.sql): batch-level, one row
+  // 裁-17 (0146_ninth_rowkind_seeding_proposal.sql): batch-level, one row
   // per client with >=1 OPEN clara.seeding_proposals row.
   "seeding_proposal",
 ] as const;

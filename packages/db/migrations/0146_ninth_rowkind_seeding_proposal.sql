@@ -97,6 +97,11 @@
 -- assertion on the real returned row, built and discarded inside a forced-rollback
 -- subtransaction (the 0018/0019/0020 `CLR99`-probe idiom) so nothing synthetic
 -- survives past this migration's own commit.
+--
+-- MEASURED (merge-prep replay, 0001-0146 onto the 0145 frontier): prosrc sha256
+-- 74be2568...aaf1cfa (0145 pre-image, unchanged since 0043 -- 0143/0144/0145 never
+-- touch this fn) -> dd2dee4f...eac6c8ed (post-splice); owner/ACL byte-identical; a
+-- READER (STABLE SECURITY DEFINER) -- no D1 write-quiesce owed.
 -- =====================================================================================
 
 set role clara_fn_owner;
@@ -371,16 +376,9 @@ begin
         using errcode = 'CLR10';
     end if;
   end loop;
-  -- finding_id itself: 8 CTEs now each carry exactly one `finding_id` token in
-  -- their column list (the literal text moved -- `null::uuid finding_id,null::text
-  -- client_name...` and `lf.id finding_id,null::text client_name...` -- but the
-  -- bare token `finding_id` as a column NAME still occurs once per producing CTE,
-  -- plus once more in seeding_rows' own null::uuid finding_id, plus once in the
-  -- json builder's own 'finding_id',p.finding_id key -- 8 (CTEs) + 1 (json key) = 9
-  -- times as the exact substring 'finding_id,' immediately followed by the next
-  -- column, OR verified simpler: both original anchors are proven present above,
-  -- and the seeding_rows CTE supplies the ninth `null::uuid finding_id` occurrence
-  -- of the ORIGINAL anchor text, so the total must now read 8.
+  -- finding_id itself: the literal text moved (`null::uuid finding_id,null::text
+  -- client_name...`) but the bare `null::uuid finding_id` anchor still occurs once
+  -- per pre-existing CTE (7) PLUS once more in seeding_rows' own copy -- 8 total.
   v_n := (length(v_code) - length(replace(v_code, 'null::uuid finding_id', ''))) / length('null::uuid finding_id');
   if v_n <> 8 then
     raise exception 'ninth-rowkind postcheck: null::uuid finding_id now occurs % time(s) IN CODE, expected 8 (the 7 pre-existing CTEs + this migration''s own seeding_rows)', v_n
