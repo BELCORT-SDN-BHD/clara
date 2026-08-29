@@ -1,11 +1,23 @@
 -- UNNUMBERED_binding_proposal_pr_1.sql -- 裁-18b PR-1: the Clara vendor-binding PROPOSAL door.
 -- Number claimed at MERGE PREPARATION (standing law, AGENTS.md + .claude/rules/db-migrations.md).
--- Authored as 0150 against a main frontier of 0147_db_hardening_b_hash_only_bearer_tokens, and
--- REBASED 2026-08-30 onto 0148_promotion_dup_open_wall (143 files) -- which CoRs
--- clara._firm_question_core at the SAME signature and touches none of the closed worlds this
--- file counts (allowlist rows, agent_receipt_surfaces, event_types, the role set), measured
--- rather than assumed. The prestate's frontier rung stays keyed on 0147 as a FLOOR, so a later
--- sibling landing between authoring and merge does not turn a true premise into a false abort.
+-- Authored as 0150 against a main frontier of 0147_db_hardening_b_hash_only_bearer_tokens, then
+-- REPLAYED 2026-08-30 as 0152 onto a frontier of 0151_f_a9_pr_1b_brake_census (146 files), in
+-- two moves as main ran ahead of this branch:
+--   · 0148_promotion_dup_open_wall -- CoRs clara._firm_question_core at the SAME signature.
+--   · 0149 counterparty merge · 0150 COA template · 0151 F-A9 brake census.
+-- NONE of them moves a premise this file asserts, and that is MEASURED on a pristine 0151
+-- replay rather than argued: all seven pinned bodies hash byte-identical (610ef1df / 5285581e /
+-- cfd20933 / de0f5807 / 721a6704 / dddd2747 / d5ab4afc), and every SS1 count still holds --
+-- agent_receipt_surfaces 8, kb_binding.* event types 3, roles 14, the 17-column shape, allowlist
+-- 88 with zero binding rows, wake sources 2/0 enabled, one is_agent user, control_witnesses
+-- absent. 0149 is the nearest miss and it lands clear: it recuts _aging_core, _statement_core,
+-- list_open_items_by_counterparty and merge_counterparties, leaves _canonical_counterparty and
+-- _tf_counterparty_update_0011 byte-untouched (its own S7 proves that by sha), and its only
+-- shared-catalog write is `counterparty.*` event types -- which this file's pin does not reach,
+-- because that pin is scoped to `kb_binding.%` with the estate total asserted as a DELTA.
+-- The prestate's frontier rung stays keyed on 0147 as a FLOOR, so a later sibling landing
+-- between authoring and merge does not turn a true premise into a false abort -- which is
+-- exactly what happened three times over, and why it is a floor.
 --
 -- Design of record: docs/plan/active/binding-proposal-design.md, as AMENDED by its own
 -- "Rulings applied 2026-08-29 (裁-25)" header block. Gate record:
@@ -1785,8 +1797,19 @@ begin
   -- both would strand them for a reason that has nothing to do with this vendor. One is enough
   -- to evaluate against; a TIN-only client simply cannot detect its own SSM mislabelled as a
   -- vendor id, and that residual is recorded in the annex rather than papered over.
+  --
+  -- RECORDED IS NOT COMPARABLE (2026-08-30, the fold's own tail, ruled). The first cut of THIS
+  -- rung asked only whether a row existed. But the comparison one rung down runs every value
+  -- through clara._binding_hard_id_norm, which is NULL for a value carrying no alphanumerics at
+  -- all -- and 0007:228 forbids only a blank after btrim, so a recorded identifier of '---'
+  -- satisfied "a row exists" and was invisible to the wall in the same breath. That is FOLD-7's
+  -- own defect one level down: absence of a COMPARABLE identifier read as presence of one.
+  -- The two rungs now range over exactly the same set, so the question this rung answers is the
+  -- question the next rung asks. Leaning on 0007's CHECK to argue the case away would be reading
+  -- another table's constraint as evidence about this one's values.
   if not exists (select 1 from clara.client_identifiers ci
-                  where ci.client_id = p_client and ci.kind in ('tin','ssm')) then
+                  where ci.client_id = p_client and ci.kind in ('tin','ssm')
+                    and clara._binding_hard_id_norm(ci.value_normalized) is not null) then
     return 'binding_client_identity_unproven';
   end if;
   if exists (select 1 from clara.client_identifiers ci

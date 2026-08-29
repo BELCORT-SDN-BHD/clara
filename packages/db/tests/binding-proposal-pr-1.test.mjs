@@ -31,7 +31,7 @@ import {
   signLive, withPostTimeControl, postTimeControlLive, POST_TIME_MARKER,
   recutApproveCore, restoreApproveCore, seedClientHardIdentifier
 } from "./x36-vendor-binding-helpers.mjs";
-import { insertUser, addMember } from "./rig-fixtures.mjs";
+import { insertUser, addMember, createClient } from "./rig-fixtures.mjs";
 import {
   bp1Live, failBp1, reasonOf, mintCred, MODEL, WAKE_ROLE,
   proposeAsAgent, listCandidates, declineBinding, resetDecline,
@@ -2309,6 +2309,62 @@ test("bp1.A3g FOLD-7 — a client with NO recorded hard identifier cannot bind a
       { client: bare, counterparty: cpClash.id, basis: { citations: [{ region_id: cpClash.id }] } }),
     "a vendor whose id is the client's own TIN");
   assert.match(e2.message, /binding_identifier_is_own_client/);
+});
+
+test("bp1.A3h FOLD-7's own tail — a RECORDED identifier that cannot be COMPARED is not a recorded identifier", async () => {
+  failBp1(live);
+  // A3g proves the wall refuses when the firm has recorded NOTHING. This proves the harder half,
+  // which the first cut of that rung got wrong: rung 1 asked only "does a client_identifiers row
+  // exist?", while the comparison one rung down runs every value through
+  // clara._binding_hard_id_norm -- NULL for a value carrying no alphanumerics at all. 0007:228
+  // forbids only a blank after btrim, so '---' is a row the estate's own CHECK admits and the
+  // wall can never evaluate: rung 1 said "identity known", rung 2 silently could not look. That is
+  // FOLD-7's defect one level down, and it is the case the wall exists to catch.
+  //
+  // ITS OWN CLIENT, born through the audited door. Reusing A2 would couple this cell to A3g's
+  // ordering (that cell records a TIN on A2), and client_identifiers is append-only -- there is no
+  // undo. A fresh client is cheaper than an order dependency.
+  const dim = await createClient(w.users.alice, { name: `A3h Dim Identity ${opk("a3hc")}`, opKey: opk("a3hck") });
+  await seedPayableAccount(w.firms.A, dim);
+  // The fixture is inserted RAW, deliberately: seedClientHardIdentifier folds its value through
+  // the alphanumeric normaliser, which would turn '---' into '' and trip 0007's CHECK. The whole
+  // point is a value that CHECK admits and the norm function cannot compare.
+  await rootQuery(
+    `insert into clara.client_identifiers(firm_id,client_id,kind,value_normalized,added_by)
+     values($1,$2,'tin','---',
+       (select user_id from clara.firm_memberships where firm_id=$1 and status='active' limit 1))`,
+    [w.firms.A, dim]);
+  const fixture = await rootQuery(
+    `select count(*)::int rows_recorded,
+            count(*) filter (where clara._binding_hard_id_norm(ci.value_normalized) is not null)::int comparable
+       from clara.client_identifiers ci
+      where ci.client_id = $1 and ci.kind in ('tin','ssm')`, [dim]);
+  assert.equal(fixture.rows[0].rows_recorded, 1,
+    "control: the firm HAS recorded an identifier — rung 1's old question answers YES");
+  assert.equal(fixture.rows[0].comparable, 0,
+    "control: …and NOT ONE of them survives the normaliser the comparison uses");
+
+  // A window that clears every other wall, so the identity rung is the only thing left standing.
+  const cp = await seedWindow(w, "A3h", { dates: DATES_OK, client: dim });
+  const basis = await lawfulBasis(w.firms.A, dim, cp.id);
+  const err = await assertRaises("CLR36",
+    async () => proposeAsAgent(await filingActor(), { client: dim, counterparty: cp.id, basis }),
+    "a client whose only recorded identifier normalises to NULL");
+  assert.match(err.message, /binding_client_identity_unproven/);
+  const row = (await listCandidates(await filingActor(), dim)).find((x) => x.counterparty_id === cp.id);
+  assert.equal(row?.reason, "binding_client_identity_unproven", "the read verb says the same word");
+
+  // RED-BEFORE, as a mutant rather than as a memory: revert the conjunct and the SAME fixture
+  // walks straight past the wall into a live proposal. Without this the cell could be passing
+  // because some unrelated rung refused, and the conjunct would be unmeasured.
+  await withMutant(BLOCKER_SIG, [
+    ["and clara._binding_hard_id_norm(ci.value_normalized) is not null) then", "and true) then"],
+  ], async () => {
+    const admitted = await proposeAsAgent(await filingActor(),
+      { client: dim, counterparty: cp.id, basis });
+    assert.equal(admitted.status, "proposed",
+      "without the conjunct the door treats an uncomparable identifier as a known identity and PROPOSES — the fail-open this rung closes");
+  });
 });
 
 test("bp1.B1-invite-src — the live signer-count body contains no firm_invites read", async () => {
