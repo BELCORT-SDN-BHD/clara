@@ -98,10 +98,37 @@
 --   N-8         >3 printed invoice ids gets its own word, corpus_invoice_id_ambiguous.
 --   S-1         the freeze trigger covers the maker/checker principal -- D1 BODY THREE.
 --
+-- THE SECOND FOLD ROUND (same day, after round-2 reviews of the first). Five more, each ruled:
+--   FOLD-1  the post-time witness becomes IDENTITY. clara.control_witnesses holds the exact
+--           regprocedure and the sha256 of the body that was REVIEWED; the gate opens for those
+--           bytes and nothing else. It had been a ledger row (permanently true), then a marker
+--           STRING in the body -- still a text projection a string literal, a nested dollar body
+--           or an unused variable satisfies. STANDING OBLIGATION: a migration that recuts a
+--           witnessed body must re-witness it, or that control's gate closes. See D2 in
+--           packages/db/README.md and the cell bp1.C3-registry, which reds the SUITE on a drift.
+--   FOLD-2  PROVENANCE is frozen from the INSERT, not from the signature -- who proposed, on
+--           whose instruction, which model, which receipt. Plus a RECIPROCAL receipt FK (the
+--           receipt a binding names must name it back) and two identifier walls: a "vendor" id
+--           that is the CLIENT'S own, and the same id stated on both sides of one page.
+--   FOLD-3  the 0028 postverify's probe 10 is succession-aware (0118 dropped the body it read).
+--   FOLD-4  the annex and two comments stop claiming the eligibility read calls the sweep.
+--   FOLD-5  when the solo arm refuses SOLELY through the departed-admin window, the refusal names
+--           that arm and the date the window opens -- "add a second admin" to a firm with nobody
+--           to add is a true refusal delivered as a false instruction.
+--   ...and the pending-invite arm is DROPPED from the signer count: an invitee is not a signer,
+--   and the arm only put a number in front of a wall that the wall does not enforce.
+--
+-- TWO WALLS THIS ROUND DELETED RATHER THAN KEPT, both because the rig showed them unreachable:
+-- H4's non-standing-director arm (clara.wake_context() already refuses the whole credential,
+-- 0011:1146-1151, and the minter refuses at mint) and the marker-string search FOLD-1 replaced.
+-- A branch no path can enter is the same defect as `failing_rungs`: a promise, not a wall.
+--
 -- ONE RULING NOT EXECUTED VERBATIM, and said here rather than buried in a report. N-5 ruled the
 -- `b.effective_proposer is null` arm deleted as structurally unreachable. It IS unreachable on
 -- the live shape -- created_by is NOT NULL (0028:65) -- but x36c.9 reaches it FOR REAL by
--- dropping that NOT NULL and driving the door, and that cell exists because an independent
+-- dropping that NOT NULL, INSERTING a row born with a null principal (an UPDATE would now be
+-- refused by FOLD-2's provenance freeze, which is a different wall), and driving the door
+-- against it. That cell exists because an independent
 -- reviewer measured a genuine fail-open there (0144 LOW-5). Deleting a branch a registered
 -- regression pin exercises is proof deletion, so the BRANCH stays and the argument for it goes.
 --
