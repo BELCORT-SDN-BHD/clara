@@ -11,11 +11,18 @@
 > branch inside a live identity trigger, and a re-cut of the two reports a professional uses to
 > chase money. The author's own read is not sufficient for any of it.
 >
-> **Prerequisite that outranks the gate: OQ-1.** The design **dissents from 裁-19's stated
-> mechanism** (§3.1/D-01). If the owner rules that the ruling meant the physical move literally,
-> this design set is superseded, not amended, and a new PR-0 opens for a materially larger item.
-> The gate should run **after** OQ-1 is ruled, or its findings against §3 may be findings against
-> a shape that is about to change.
+> **THE SEVEN OWNER QUESTIONS ARE RULED — 2026-08-29 (裁-24), §2.1 below.** OQ-1 came back
+> **PHYSICAL, in the append-only shape**: the canonicalising read layer STAYS (frozen years and
+> history use it) **and** an appended **re-home pair** write door is added for OPEN items in
+> UNFROZEN periods. **D-01 becomes a HYBRID and the design set is AMENDED, not superseded** — so
+> the gate's own §1 lens list still applies to §3 as written, plus the new write half. The gate
+> itself has **not** run; the build may not start.
+>
+> *(Historical, pre-ruling:)* **Prerequisite that outranks the gate: OQ-1.** The design **dissents
+> from 裁-19's stated mechanism** (§3.1/D-01). If the owner rules that the ruling meant the
+> physical move literally, this design set is superseded, not amended, and a new PR-0 opens for a
+> materially larger item. The gate should run **after** OQ-1 is ruled, or its findings against §3
+> may be findings against a shape that is about to change.
 
 ---
 
@@ -53,13 +60,50 @@ proceeds on the recommendation under the standing delegation, EXCEPT OQ-1, which
 | **OQ-6** | fix **M9** (`list_open_items_by_counterparty` inert since `0038`) inside this PR, or sever it? | **inside PR-1**, named as its own finding in the PR body — it is the same three-line surface and the same census | sever (costs a second review + ceremony slot) |
 | **OQ-7** | the `counterparty.unmerged` taxonomy decision at active version 2 | **`context_update`**, matching `counterparty.created` | `ignore`, matching `counterparty.merged` |
 
+### 2.1 · The rulings — 2026-08-29 (裁-24)
+
+The recommendations above are kept verbatim; a gate record that erases what was argued cannot
+show why a ruling went the way it did. Ruling of record: `mohe-grill-rulings-2026-08-28.md`
+§裁-24.
+
+- **OQ-1 — RULED 2026-08-29 (裁-24): OVERRULED, and then narrowed by the owner himself into a
+  HYBRID.** The owner first chose *"physically rewrite the invoice rows"*; **the orchestrator's
+  dissent was put and is recorded** (the append-only wall is the audit chain; constraint 14's
+  operative clause). He then chose the physical variant that keeps the wall: **for every OPEN
+  item of the merged party in an UNFROZEN period, append a "re-home pair"** — the old row marked
+  **superseded**, a new row under the **survivor** carrying the **ORIGINAL date** (aging
+  preserved) and a **back-pointer** to the old one; **an un-merge appends the reverse pair**.
+  **Frozen fiscal years are untouched and fold in the READ layer only**; sealed snapshots are
+  unchanged. So the read layer of §3.3 **stays** and a write door is **added** over it. **D-01
+  becomes hybrid; the set is AMENDED, not superseded**, and §7/R-1's "the build restarts at a new
+  PR-0" narrows to the write half's own design. **Obligation this ruling creates for the gate:**
+  §3.2's sketch dated the pair at `_book_today()`; the ruling requires the ORIGINAL date, so the
+  `item_date` provenance question §3.2 already named ("an `item_date` provenance column, or the
+  aging honestly reporting the re-home date") is now **load-bearing and must be answered with a
+  D-number and a cell**, against `0037:713-715`'s current-bucket rule.
+- **OQ-2 — RULED 2026-08-29 (裁-24): YES**, as recommended. A visible `recorded_counterparty_id`
+  stays on aging and statement rows.
+- **OQ-3 — RULED 2026-08-29 (裁-24): LEAVE**, as recommended. Sealed snapshots keep the recorded
+  party.
+- **OQ-4 — RULED 2026-08-29 (裁-24): WIDENED.** Admin, human-signed — **and Clara MAY PROPOSE an
+  un-merge** as a needs-you item, with the admin clicking. The recommendation was "admin,
+  human-only, no wake wrapper"; the propose half is new authority and needs its own design.
+- **OQ-5 — RULED 2026-08-29 (裁-24): no separate closed-FY rung**, as recommended — the six
+  entanglement rungs plus OQ-1's frozen-year clause cover it.
+- **OQ-6 — RULED 2026-08-29 (裁-24): fix M9 INSIDE PR-1**, named, as recommended.
+- **OQ-7 — RULED 2026-08-29 (裁-24): `context_update`**, as recommended.
+
 ---
 
 ## 3 · What the gate must FOLD into v2 (open obligations, regardless of findings)
 
 1. **The OQ-1 ruling, in the design's own words**, with the dissent kept on file either way
    (`orchestrator dissent recorded` is the estate's idiom — a ruling that overrides a
-   recommendation must still show what was argued).
+   recommendation must still show what was argued). **Ruled 2026-08-29 (裁-24): the hybrid.** The
+   fold this now owes is the WRITE half — the re-home pair's shape (superseded marker,
+   back-pointer, original date), its period gate (OPEN items in UNFROZEN periods only), the
+   reverse pair the un-merge appends, and the belt/congruence cells for every minted pair — each
+   with its own D-number, plus the OQ-4 propose-an-un-merge door.
 2. **L5's answer as a numbered decision.** Whichever way it goes, `_aging_core`'s behaviour on an
    unresolvable party is judgement logic and needs its own D-number and its own cell.
 3. **The U-rung completeness verdict (L6)** — either "the six are complete, here is the closed-world

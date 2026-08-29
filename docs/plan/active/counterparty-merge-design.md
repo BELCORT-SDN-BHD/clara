@@ -23,6 +23,38 @@
 > grounds, at **D-01**. The dissent is recorded, priced, and put to the owner as **OQ-1**; if
 > OQ-1 returns "physically move them", §3.2's alternative is what ships and §7's R-1/R-2 are the
 > registered cost.
+>
+> ---
+>
+> ## Rulings applied 2026-08-29 (裁-24) — D-01 becomes a HYBRID
+>
+> **All seven owner questions are ruled** (`counterparty-merge-gate-record.md` §2.1; ledger
+> `mohe-grill-rulings-2026-08-28.md` §裁-24). **The text below is NOT rewritten** — it is the
+> argument the ruling was made against, and the estate's idiom keeps it. What now binds:
+>
+> - **OQ-1 — PHYSICAL, in the append-only shape.** The owner first chose to rewrite the invoice
+>   rows; **the orchestrator's dissent was put and recorded**; he then chose the variant that
+>   keeps the wall. **For every OPEN item of the merged party in an UNFROZEN period, the merge
+>   APPENDS a "re-home pair"** — the old row marked **superseded**, a new row under the
+>   **survivor** carrying the **ORIGINAL date** (aging preserved) with a **back-pointer** to the
+>   old one; **the un-merge appends the reverse pair**. **Frozen fiscal years are untouched** and
+>   fold through the READ layer only; sealed snapshots are unchanged. **So §3.3's canonicalising
+>   read layer STAYS** (it is what frozen years and history use) **and the write door of §3.2 is
+>   ADDED over it.** D-01 is hybrid; **the set is AMENDED, not superseded.**
+> - **The one thing §3.2 must change to be buildable as ruled:** it dated the minted pair at
+>   `_book_today()`; the ruling requires the ORIGINAL date. The provenance question §3.2 already
+>   named — an `item_date` provenance column, or the aging reporting the re-home date — is now
+>   **load-bearing**, must carry its own D-number and cell, and is answered against
+>   `0037:713-715`'s current-bucket rule. **`_tf_append_only` is not weakened**: the pair is an
+>   INSERT, and the wall's own refusal cell stays in the battery.
+> - **OQ-2 YES · OQ-3 LEAVE · OQ-5 no closed-FY rung · OQ-6 M9 inside PR-1 · OQ-7
+>   `context_update`** — all as recommended.
+> - **OQ-4 WIDENED:** admin, human-signed, **and Clara MAY PROPOSE an un-merge** as a needs-you
+>   item (the admin clicks). §3.5's "no agent verb, no wake wrapper" non-goal is **overtaken** for
+>   the propose half only — the un-merge itself stays human.
+> - **§7/R-1 narrows** rather than firing whole: the build does not restart, but the **write
+>   half** (the pair's shape, its period gate, the reverse pair, belt/congruence cells for every
+>   minted pair) and the **OQ-4 propose door** are new design owed before PR-1.
 
 ---
 
@@ -57,6 +89,12 @@
 ## 3 · The design
 
 ### 3.1 D-01 — the re-home is a CANONICALISING READ LAYER, not a physical move
+
+> **RULED 2026-08-29 (裁-24): HYBRID.** The read layer below **stays and is built as written** —
+> it is what frozen years, history and every non-open item resolve through. **On top of it**, a
+> re-home WRITE door is added for OPEN items in UNFROZEN periods (the header block's ruling; the
+> mechanism sketch is §3.2, amended there). The seven grounds below remain the record of why the
+> write half is fenced to open items in open periods rather than applied to everything.
 
 **Decision (the recommendation §4/OQ-1 puts to the owner).** `merge_counterparties` continues to
 leave `open_items` and `open_item_allocations` **exactly where they are**, and every read that
@@ -104,6 +142,15 @@ minted pair; and an un-merge that must move money back. **The read layer costs t
 and one census.**
 
 ### 3.2 What ships if OQ-1 returns "physically move them"
+
+> **RULED 2026-08-29 (裁-24): this half SHIPS — and with three amendments.** (1) It is **fenced
+> to OPEN items in UNFROZEN periods**; a frozen year is not touched at all, so
+> `rehome_period_locked` becomes the *fence*, not an edge case. (2) The pair carries the
+> **ORIGINAL `item_date`**, not `_book_today()` — the `item_date` provenance the paragraph below
+> already flags as owed is now the load-bearing decision, and it needs its own D-number, its own
+> cell and an answer to `0037:713-715`. (3) The old row is **marked superseded** and the new row
+> **back-points** to it, and **the un-merge appends the reverse pair** rather than clearing a
+> column. The paragraph below is kept as the sketch it was; it is not yet the design.
 
 Recorded, not built, so the alternative is not re-designed under time pressure:
 `merge_counterparties` gains a step that, per merged-party item with non-zero outstanding, mints a
@@ -290,6 +337,10 @@ still see which name the invoice was raised under (the `recorded_counterparty_id
 
 ## 4 · Owner questions I could not settle
 
+> **ALL SEVEN RULED 2026-08-29 (裁-24)** — the rulings are written per-question in
+> `counterparty-merge-gate-record.md` §2.1 and summarised in this design's header block. The
+> table below is the recommendation set as it was put, kept for the record.
+
 Under the standing delegation the build proceeds on the recommendation; escalate only if a law or
 a ruling would change. Grounds and each alternative's cost: **Annex D.2**.
 
@@ -306,6 +357,13 @@ a ruling would change. Grounds and each alternative's cost: **Annex D.2**.
 ---
 
 ## 5 · Build sequence
+
+> **Trued 2026-08-29 (裁-24).** OQ-1 is ruled, so prerequisite (i) is **discharged** — but the
+> hybrid adds work this sequence does not yet carry: **the re-home write door** (mechanism,
+> period fence, `item_date` provenance, the superseded marker and back-pointer, belt/congruence
+> cells) lands with **PR-1**, the **reverse pair** with **PR-2**'s un-merge, and **OQ-4's
+> propose-an-un-merge needs-you door** is new scope inside PR-2 or its own PR. The gate (PR-0)
+> still has not run, and it now attacks the write half too.
 
 **Prerequisites.** (i) **OQ-1 ruled** — the whole shape hangs on it; the build does not start
 before it. (ii) 裁-11 (`counterparty_aliases` human read, P4 tranche-2) is **not** a hard
@@ -367,13 +425,20 @@ carrying post-merge cross-party activity (P2).
 
 | # | risk, registered |
 |---|---|
-| **R-1** | **The design dissents from the ruling's stated mechanism.** If OQ-1 returns "move them physically", §3.2 is a sketch and not a design — the build restarts at a PR-0 for a materially bigger item (item pairs, a re-home group carrier, period-lock handling, belt congruence, and an un-merge that moves money back) |
+| **R-1** | **The design dissents from the ruling's stated mechanism.** If OQ-1 returns "move them physically", §3.2 is a sketch and not a design — the build restarts at a PR-0 for a materially bigger item (item pairs, a re-home group carrier, period-lock handling, belt congruence, and an un-merge that moves money back). **FIRED, and NARROWED, 2026-08-29 (裁-24):** the hybrid keeps the read layer, so the build does not restart — but every item this row names is now genuinely owed for the write half, at open items in unfrozen periods, and §3.2 is still a sketch |
 | **R-2** | **A read-layer merge is invisible at the SQL prompt.** Anyone querying `open_items` directly still sees the old party. Mitigated by `recorded_counterparty_id` being explicit in every read's payload and by the `counterparty_merges` table being human-readable — never by a comment |
 | **R-3** | **`_canonical_counterparty` is now on the hot path of the two heaviest reads.** It is `stable` and index-backed by primary key, and aging already calls `_subledger_outstanding_asof` per item, but the plan changes; the build measures `ar_aging` on a thousand-item fixture and publishes the number rather than assuming |
 | **R-4** | **U1-U6 will refuse un-merges that a human believes are safe.** That is the design's intent (a named refusal beats a partial reversal), and it will feel like an obstruction. The messages name the specific blocking group/rule and the route out |
 | **R-5** | **M9's fix changes a shipped UI's behaviour** from "no candidates" to "candidates" in bank matching. Correct, and it will look like a new feature; the release note says so (P3) |
 | **R-6** | **Two D1 windows instead of one** (D-10). The residual is a second ceremony night |
 | **R-7** | **裁-11 and this item both touch the hygiene panel.** Merge order is the conductor's; neither blocks the other, and the un-merge preview degrades honestly if the alias read is not yet granted |
+
+> **Three non-goals moved 2026-08-29 (裁-24)**, and are listed here so nobody reads the sentence
+> below as still standing: **"no agent verb, no wake wrapper"** is overtaken for OQ-4's
+> propose-an-un-merge door only · **"no bulk back-population… D-01 moves no data"** is false of
+> the write half, so what an already-existing merge gets on the day the door ships is an open
+> question the gate must answer · the un-merge is no longer only a column-clear. Everything else
+> below stands.
 
 - **Non-goals.** No change to what a merge REFUSES (`0015`'s six guards stand) · no cross-kind or
   cross-client merge · no agent verb, no wake wrapper, no `wake_fn_allowlist` row · no change to

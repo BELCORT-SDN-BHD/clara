@@ -1,10 +1,23 @@
-# 裁-21 — the standard chart of accounts: THE GATE · **OPEN**
+# 裁-21 — the standard chart of accounts: THE GATE · **CLOSED, all twelve RULED 2026-08-29**
 
-> **STATUS: OPEN.** The gate has not sat. This is the must-answer set the owner reads, written
-> to the standing grill protocol — **one question per turn, 大白话, the cost of each choice
-> stated, a recommendation with its reason, and a fail-closed default the design proceeds on if
-> the question is deferred.** Nothing in `coa-template-design.md` is build-authorised until this
-> record closes.
+> **STATUS: CLOSED — the sitting ran 2026-08-29 and all twelve are RULED (裁-23).** Each question
+> keeps its recommendation, its cost and its fail-closed default verbatim, with the ruling
+> written underneath; a gate record that erases what was argued cannot show why a ruling went the
+> way it did. Ruling of record: `mohe-grill-rulings-2026-08-28.md` §裁-23.
+>
+> **The headline: there is no existing BELCORT chart, so the template is RESEARCH-DERIVED and the
+> owner waived his review of the draft** — the agent adopts the best practice it finds across
+> official Malaysian sources, Malaysian accounting best practice and what mainstream Malaysian
+> software ships (newest editions) and **publishes it directly**. **A research lane therefore
+> precedes PR-0**, and Q2/Q8/Q11 route to that same research rather than to a fixed answer.
+> **Q2 was OVERRULED** (neither legacy numbering convention, by habit or otherwise) and **Q6
+> WIDENED** (Clara asks first when the industry is unknown).
+>
+> *(Historical, pre-ruling:)* **The gate has not sat.** This is the must-answer set the owner
+> reads, written to the standing grill protocol — **one question per turn, 大白话, the cost of
+> each choice stated, a recommendation with its reason, and a fail-closed default the design
+> proceeds on if the question is deferred.** Nothing in `coa-template-design.md` is
+> build-authorised until this record closes.
 >
 > **Every question below is answerable in ONE LINE by a Malaysian accounting-firm principal.**
 > That is deliberate: none of these is a database question dressed up as a domain question. The
@@ -71,6 +84,15 @@ which is a normal act, not a migration. **So this question does not block the bu
 
 **Fail-closed default:** we author the MPERS-grounded draft, in `draft` state, unpublished.
 
+**RULED 2026-08-29 (裁-23) — there is no existing BELCORT chart; the template is
+RESEARCH-DERIVED, and the owner WAIVED his review of the draft.** Sources: official Malaysian
+sources + Malaysian accounting best practice + what mainstream Malaysian accounting software
+ships, **newest editions**; the agent adopts the best practice it finds and **publishes it
+directly** — *"你自己找到了 best practices 后不用我审, 直接用"*. **This supersedes the fail-closed
+default**: the template ships **published**, not as an unpublished draft awaiting the owner. It
+still applies to no client until a human clicks (Q3/Q5). **Build consequence: a research lane
+precedes PR-0.**
+
 ---
 
 ### Q2 · What numbering do you use?
@@ -90,6 +112,13 @@ across clients is exactly the drift 裁-21 exists to stop, so **pick one and we 
 
 **Fail-closed default:** 4-digit blocks.
 
+**RULED 2026-08-29 (裁-23) — OVERRULED: neither legacy convention. Follow the researched best
+practice.** *"两个都不要用旧的东西"* — not the estate seed's 4-digit blocks carried by habit, and not
+ROME PROPERTIES' inherited `300-000`. The numbering comes out of the same Q1 research as the
+chart itself, and whatever it lands on is held firm-wide. **The recommendation (4-digit blocks)
+and this fail-closed default are both set aside**; if the research independently arrives at
+4-digit blocks, that is a research finding, not the incumbent surviving.
+
 ---
 
 ### Q3 · Who applies the standard chart to a new client?
@@ -106,6 +135,13 @@ client, which will be worked around within a month, and a worked-around control 
 none.
 
 **Fail-closed default:** bookkeeper applies, admin publishes.
+
+**RULED 2026-08-29 (裁-23) — as recommended, with the edit step made explicit.** The chain is
+**Clara proposes the trim → a bookkeeper may EDIT the proposal (toggling families) and applies it
+→ an admin publishes the template.** The owner confirmed both halves in his own words: the
+proposal is editable before it is applied, and accounts can be added or removed afterwards. The
+apply door's `p_families text[]` argument and `add_coa_template_family` are where that lands —
+**no new permissive door.**
 
 ---
 
@@ -133,6 +169,11 @@ chart, which is the problem you asked us to fix.
 
 **Fail-closed default:** template first, balances mapped onto it.
 
+**RULED 2026-08-29 (裁-23) — as recommended: BELCORT's chart wins.** The predecessor's trial
+balance is mapped onto it when the opening balances are entered; two charts on one client are
+refused; the escape hatch (answer "no" at onboarding and build it their way, the client then
+listed off-standard) **stays**.
+
 ---
 
 ### Q5 · Should the chart be applied automatically when the client is created?
@@ -152,6 +193,10 @@ where anyone actually *looks* at the chart. **We recommend against it, and the r
 about review quality first and deployment cost second.**
 
 **Fail-closed default:** a separate human click.
+
+**RULED 2026-08-29 (裁-23) — as recommended: NOT automatic.** A separate human click after the
+client is created, consistent with Q3. `commit_client_onboarding` is not touched, so §7's D1
+inventory stays EMPTY.
 
 ---
 
@@ -173,6 +218,12 @@ nothing.
 
 **Fail-closed default:** core accounts only, absence stated.
 
+**RULED 2026-08-29 (裁-23) — WIDENED: Clara ASKS FIRST.** When the industry is unknown at apply
+time she puts an **in-thread question to the human**, and proposes the full trim once it is
+answered; **the core family may be applied meanwhile**. She still **never guesses the industry
+from the client's name.** The recommendation (core-only plus the absent axis named) becomes the
+interim state, not the end state — the ask is behaviour the design now owes, at D-8.
+
 ---
 
 ### Q7 · Should the interview ask what the business actually does?
@@ -193,6 +244,9 @@ benefits from it.
 weaker signal, and the close keeps saying "unknown" where it could say something.
 
 **Fail-closed default:** add it.
+
+**RULED 2026-08-29 (裁-23) — as recommended: ADD the `trade_nature` question** (goods / services
+/ both), one question, three choices, riding `clientOnboarding_v4`.
 
 ---
 
@@ -219,6 +273,13 @@ has not been built yet — we are not building half of it early.
 
 **Fail-closed default:** cut the families this way.
 
+**RULED 2026-08-29 (裁-23) — YES on the shape; WIDENED on the content: the LIST comes from the
+research.** Tax-sensitive expenses get their own accounts, and the set of them is **the LHDN
+add-back items per the researched best practice, newest edition** — **not fixed to the eight
+proposed above**, which become a floor to check the research against rather than the answer. The
+scope note stands unchanged: this decides how the chart is CUT; the tax treatment codes are
+F-T3's.
+
 ---
 
 ### Q9 · The onboarding question's wording
@@ -234,6 +295,9 @@ a professional user.
 minting, so there is no extra deployment.
 
 **Fail-closed default:** change it.
+
+**RULED 2026-08-29 (裁-23) — as recommended: re-word it** to *"Start this client from the firm's
+standard chart of accounts"*; the unsupportable "LHDN-aligned" claim goes.
 
 ---
 
@@ -252,6 +316,9 @@ proprietor and partnership needs the equity section rebuilt by hand.
 
 **Fail-closed default:** swap by entity type.
 
+**RULED 2026-08-29 (裁-23) — as recommended: the equity section swaps by entity type** (Sdn Bhd /
+sole proprietor / partnership).
+
 ---
 
 ### Q11 · What do you call the statutory payables?
@@ -268,6 +335,12 @@ Payable · SST Output Tax Payable` and you rename them in the editor later, whic
 **Cost of deferring:** none — renaming an account on the template is an ordinary act.
 
 **Fail-closed default:** the English names above.
+
+**RULED 2026-08-29 (裁-23) — WIDENED: mainstream Malaysian naming, per the research.** The owner
+did **not** hand over a BELCORT wording; he routed the question to the same Q1 research lane —
+whatever mainstream Malaysian practice and software call these accounts is what the template
+carries. The English names above remain the fallback only if the research finds no dominant
+convention, and renaming on the template stays an ordinary act.
 
 ---
 
@@ -287,6 +360,26 @@ five-digit code, precisely so an edition change does not silently break it.
 **Cost of deferring:** the codes stay ambiguous, and someone pays for it in 2027.
 
 **Fail-closed default:** MSIC 2008, edition stamped.
+
+**RULED 2026-08-29 (裁-23) — as recommended: MSIC 2008, with an edition stamp on every recorded
+code.** The trim keys on the broad level, not the five-digit leaf, so an edition change cannot
+silently break it.
+
+---
+
+## 1a · The COA maintenance model — RULED 2026-08-29 (裁-23)
+
+The owner asked, in the same sitting, how the firm's chart is maintained after the first apply.
+It is **NOT a background sync**, and the answer is a ruling, not a note:
+
+- **Clara proposes at onboarding.** That is the only moment a whole chart arrives.
+- **A later template edit never touches an applied chart.** The reason is structural, not
+  disciplinary — the apply COPIES rows (design **D-2**), so nothing points back at the template.
+- **The drift READ shows divergence** (design **D-11**) — a read, never a wall.
+- **Clara may PROPOSE single-account additions in chat**: `wake_upsert_account` is already
+  allowlisted for `interactive_client` (survey F3), so this needs no new authority. Every
+  **structural** change stays propose → human click.
+- **Humans may also maintain the chart manually**, exactly as they do today.
 
 ---
 

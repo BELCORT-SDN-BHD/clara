@@ -1,8 +1,29 @@
 # 裁-21 — the firm-level standard chart of accounts: DESIGN **v1 DRAFT**
 
-> **DRAFT — the gate has not sat.** Every line labelled **NEEDS-DECISION** carries its question
-> in **`coa-template-gate-record.md`**, which is **OPEN**. Nothing here is a build authorisation
-> until that record closes.
+> **RULINGS APPLIED 2026-08-29 (裁-23) — the gate CLOSED; all twelve ruled, per-question in
+> `coa-template-gate-record.md` (ledger `mohe-grill-rulings-2026-08-28.md` §裁-23). Every
+> **NEEDS-DECISION** line below is answered there; the text below is **not rewritten** — it is
+> the argument the rulings were made against.** What now binds, where it moves this design:
+> **Q1** the template is RESEARCH-DERIVED (official sources + Malaysian best practice + what
+> mainstream Malaysian software ships, newest editions) and **the owner waived his review of the
+> draft** — a **research lane precedes PR-0** and its output is what Annex B's family list must
+> become; **D-13's four rules stand** (basis named or "firm practice", SSMxT a cross-check, the
+> rows still reviewed DATA in a migration, never a one-click import) · **Q2 OVERRULED — neither
+> legacy numbering convention**, so Annex B.5's 4-digit recommendation is set aside and the
+> research decides · **Q6 WIDENED — Clara ASKS FIRST** when the industry is unknown (core family
+> meanwhile), so **D-8's fail-closed branch is the interim state, not the end state**, and the
+> in-thread ask is behaviour this design now owes · **Q8 WIDENED — the add-back LIST comes from
+> the research**, D-14's eight families becoming a floor to check it against (the tax COLUMN's
+> deferral to F-T3 PR-4 is untouched) · **Q11 WIDENED — mainstream Malaysian naming per the
+> research**, Annex B.1's English names only a fallback · **Q3** Clara proposes → a bookkeeper
+> **edits** (D-3's `p_families`) and applies → an admin publishes · **Q4 · Q5 · Q7 · Q9 · Q10 ·
+> Q12 as designed** (so **§7's D1 inventory stays EMPTY**) · **the maintenance model is RULED**
+> (gate record §1a) and is exactly D-2 + D-11 + the already-allowlisted `wake_upsert_account`.
+> **One reconciliation named rather than assumed:** Q1 ships the template **published** while Q3
+> keeps **admin publishes** as the in-product act — the seeded platform template arrives
+> published through the migration ladder, the admin floor governs a firm's own fork afterwards
+> (D-2). If the build finds a shape where those two meet, that is an owner question, never a
+> silent choice.
 >
 > **Design doc of record for 裁-21** (`mohe-grill-rulings-2026-08-28.md` `:276-286`). Estate
 > as-found: **`coa-template-survey.md`** (findings F1-F10, replay ledger P-1…P-12 — **two

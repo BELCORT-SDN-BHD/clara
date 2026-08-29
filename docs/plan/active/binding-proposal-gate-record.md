@@ -1,12 +1,24 @@
 # 裁-18b — the Clara vendor-binding PROPOSAL door: GATE RECORD
 
-> **STATUS: OPEN.** Eight questions stand for the owner (Tao). Each carries the 大白话 briefing,
-> the cost of each arm, and **the lane's recommendation with its reason**. Per the standing grill
-> protocol the sitting runs **one question per turn**; this file is the minute-book and is
-> updated in place as each is ruled.
+> **STATUS: CLOSED — all eight RULED 2026-08-29 (裁-25).** Each question below carries its ruling
+> under its recommendation; the recommendations are kept verbatim, because a gate record that
+> erases what was argued cannot show why a ruling went the way it did. Ruling of record:
+> `mohe-grill-rulings-2026-08-28.md` §裁-25. **G6 was OVERRULED** (the post-time re-check is
+> restored inside this item) and **G7 WIDENED** (the expiry sweep rides too); **G2 closed by
+> fact** — `0143` shipped the document-SET resolver. **The gating three (G1/G2/G4) are ruled, so
+> the first DB PR may open.**
 >
-> **No DB PR opens before G1, G2 and G4 are ruled** — those three change what gets built. G3 and
-> G6-G8 change scope; G5 changes sequencing only.
+> **The ruled build sequence — FIVE PRs, two D1 windows minimum:** PR-1 the door +
+> `wake_list_binding_candidates` + `decline` + the one-open-proposal partial unique index + the
+> `pb_*` registry widening · PR-2 the tenth `row_kind` · PR-3 the post-time re-check
+> (`_approve_entry_core`, **its own D1 window**) · PR-4 the expiry sweep engine source (+ enable
+> ceremony) · plus the basis wiring onto `0143`. The design's own §4 table predates the ruling
+> and is kept as history; **where the two disagree the ruling governs**, and the build lane owes
+> an explicit re-home of the design's two frontend trains into this numbering — the sitting did
+> not renumber them.
+>
+> *(Historical, pre-ruling:)* **No DB PR opens before G1, G2 and G4 are ruled** — those three
+> change what gets built. G3 and G6-G8 change scope; G5 changes sequencing only.
 >
 > Set of record: `binding-proposal-survey.md` (as-found) · `binding-proposal-design.md` (the
 > design) · `binding-proposal-annexes.md` (verbs · battery · D1 · risks · cross-lane).
@@ -52,7 +64,11 @@ sources are still disabled, survey §4).
 > probing every vendor and reading the error. The sweep is recorded as the named future extension
 > (annexes E, N3), not built.
 
-**RULED:** *(pending)*
+**RULED 2026-08-29 (裁-25) — arm A, as recommended.** Wake kinds `filing` + `interactive`;
+triggers (i) the filing lane's own turn after it files an invoice and (ii) the human ask from the
+*admin / vendor-bindings* panel; **no clock sweep as the trigger.** `wake_list_binding_candidates`
+ships. *(The EXPIRY sweep is nevertheless ruled IN under G7, on its own grounds — it is not this
+question's trigger sweep.)*
 
 ---
 
@@ -80,7 +96,10 @@ argument** — the count of matching approved invoices is derived by the DB and 
 > widens it — it does not ship a local copy of the resolver, because that mints exactly the
 > fourth un-verified basis 裁-22 exists to abolish.
 
-**RULED:** *(pending)*
+**RULED 2026-08-29 (裁-25) — CLOSED BY FACT, not by a choice.** 裁-22 merged as `0143` carrying
+`_resolve_proposal_basis(p_documents uuid[], …)` — the document-SET shape this question asked
+for. There is nothing left to widen and **PR-2 does not hold**; the basis wiring onto `0143` is
+build work, not a gate item.
 
 ---
 
@@ -97,7 +116,10 @@ places computing one fact, which the estate's own rule (TA-P11's test) forbids �
 > through `wake_list_binding_candidates`, which is the same predicate the derivation uses, so
 > there is exactly one definition of "ready to propose".
 
-**RULED:** *(pending)*
+**RULED 2026-08-29 (裁-25) — no, as recommended.** The DB computes eligibility and Clara asks the
+read verb; `_coding_lane_core` is untouched. The owner asked why the LLM should not simply count,
+and the answer is on the record: **counting is an authoritative number** (PRD §6), one fact gets
+one definition, and the read verb **is** her check.
 
 ---
 
@@ -120,7 +142,8 @@ Wave-F number, and the pre-beta queue will mint more receipt-bearing doors (裁-
 > honestly: it touches a named shared surface twice (item + shim_relname), so the conductor is
 > told before authoring.
 
-**RULED:** *(pending)*
+**RULED 2026-08-29 (裁-25) — arm A, as recommended.** Widen the receipt-surface registry key to a
+`pb_*` family and register **`pb_binding`**. The pre-beta queue will use the family again.
 
 ---
 
@@ -136,7 +159,9 @@ one shared body in the same window.
 > already looking; train 2 adds the tenth row kind once 裁-17's ninth has merged. The proposal is
 > visible from day one either way — the inbox row is a convenience, not the surface.
 
-**RULED:** *(pending)*
+**RULED 2026-08-29 (裁-25) — the PREMISE CHANGED, so the question is moot.** 裁-17's ninth
+`row_kind` is **live at `0146`**, which is the condition the recommendation was waiting on. The
+**tenth `row_kind` SHIPS**, as its own PR inside this item — the door first, the inbox row next.
 
 ---
 
@@ -162,7 +187,12 @@ walls — it is a stale *identity* authority.
 > 裁-18a, sized honestly. **If the owner wants it inside 裁-18, it becomes its own PR with its own
 > ceremony and this item's dates move.**
 
-**RULED:** *(pending)*
+**RULED 2026-08-29 (裁-25) — OVERRULED: RESTORE it, inside 裁-18.** The post-time binding
+re-check comes back as **its own PR with its own D1 window** (`_approve_entry_core` is replaced),
+and **this item's dates move** — exactly the cost the recommendation priced. Put to the owner
+before the ruling: the draft-time check survives, the post-time one retired with
+`execute_rule_post` at `0118`, and the exposure is a stale identity attribution, not a wrong
+number. He took it anyway.
 
 ---
 
@@ -183,7 +213,10 @@ walls — it is a stale *identity* authority.
 > `wake_list_binding_candidates` can also read it, so Clara does not re-propose what a human
 > refused (risk R7). The expiry sweep needs a clock and belongs with the G1 engine work.
 
-**RULED:** *(pending)*
+**RULED 2026-08-29 (裁-25) — WIDENED: BOTH ride this item.** The `decline` verb as recommended
+(admin floor, reason required, audited, `proposed → declined`, read by the loop brake) **and**
+the expiry sweep, which the recommendation had severed — as a **new engine source plus its enable
+ceremony**, with both existing sources staying disabled.
 
 ---
 
@@ -200,7 +233,9 @@ the existing "binding conflict" message.
 > estate's existing typed one (`binding_conflict`), so nothing new appears in the UI's error
 > vocabulary; the battery proves it on both paths (annexes C, W7-a/b).
 
-**RULED:** *(pending)*
+**RULED 2026-08-29 (裁-25) — take it, as recommended.** The partial unique index ships, one open
+proposal per (client, vendor); the human door's second manual proposal refuses
+`binding_conflict`, and that behaviour change is accepted knowingly.
 
 ---
 

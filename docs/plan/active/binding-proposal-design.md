@@ -15,6 +15,37 @@
 > (`docs/adr/README.md`), and the four rulings 裁-18(a)/(b)/(c) and 裁-22. Every PR takes the
 > uniform ADR-061 ladder; **§3.4 in full is judgement logic** (review law 1).
 >
+> ---
+>
+> ## Rulings applied 2026-08-29 (裁-25) — the gate is CLOSED, and the item grew
+>
+> All eight gate questions are ruled (`binding-proposal-gate-record.md`; ledger
+> `mohe-grill-rulings-2026-08-28.md` §裁-25). **The text below is not rewritten** — it is what was
+> argued. What now binds, in the order it changes this design:
+>
+> - **G6 OVERRULED — the post-time binding re-check is RESTORED inside this item**, as its own PR
+>   with **its own D1 window** (`_approve_entry_core` is replaced). **§5 item 4 and the headline's
+>   "zero audited writer bodies" no longer describe the item as a whole**: they remain true of
+>   PR-1/PR-2, and are false of the restored-check PR. **The item's dates move.**
+> - **G7 WIDENED — the expiry sweep rides too**, as a new engine source plus its enable ceremony
+>   (both existing sources stay disabled), alongside the `decline` verb. **§5 item 5 is
+>   overtaken**, and §3.1's "no sweep" stands only for the *trigger* sweep of G1, never for the
+>   expiry one.
+> - **G5's premise changed** — 裁-17's ninth `row_kind` is **live at `0146`** — so §3.6's train 2
+>   is unblocked: **the tenth `row_kind` ships** as its own PR inside this item.
+> - **G2 closed by fact:** `0143` shipped `_resolve_proposal_basis(p_documents uuid[], …)`, the
+>   document-SET signature §3.2 asked for. **PR-2 does not hold**; the basis wiring onto `0143`
+>   is build work.
+> - **G1 (arm A: `filing` + `interactive`, event + human ask), G3 (`_coding_lane_core`
+>   untouched), G4 (`pb_*`, register `pb_binding`), G8 (the partial unique index) — all as this
+>   design recommended.**
+> - **The ruled build sequence is FIVE PRs / two D1 windows minimum**, and it renumbers §4:
+>   PR-1 the door + `wake_list_binding_candidates` + `decline` + the index + the `pb_*` widening ·
+>   PR-2 the tenth `row_kind` · PR-3 the post-time re-check (own window) · PR-4 the expiry sweep ·
+>   plus the `0143` basis wiring. **§4's table is the pre-ruling sequence, kept as history; where
+>   the two disagree the ruling governs**, and the build lane owes an explicit re-home of §4's two
+>   frontend trains (old PR-4/PR-5) into the ruled numbering — the sitting did not renumber them.
+>
 > **The headline.** This item replaces **zero audited writer bodies**. The binding table already
 > carries a `status='proposed'` lifecycle, `sign_vendor_identity_binding` already refuses anything
 > that is not `proposed` and re-derives before signing, and `created_by` already accepts the
@@ -329,6 +360,10 @@ or nothing (annexes E, N4).
 
 ## 4 · The build sequence
 
+> **Superseded in part by 裁-25 (2026-08-29)** — see the header block's ruled sequence: five PRs,
+> two D1 windows minimum, with the post-time re-check and the expiry sweep now inside this item
+> and the tenth `row_kind` unblocked. The table below is the pre-ruling shape, kept as history.
+
 | PR | scope | D1 | ceremony |
 |---|---|---|---|
 | **PR-1 (additive)** | `_derive_vendor_binding_basis` · the three honest-label columns + W10/W11/W12 · `uq_vib_one_open_proposal` · `binding_agent_receipts` + shim + registry row + the two regex widenings + the ninth union arm | **EMPTY** — no PL/pgSQL body replaced; one view (`_agent_receipts_all`) CoR'd, which is not a D1 event (0142 §0's own reasoning) | none |
@@ -351,11 +386,17 @@ that would mint a third door for 裁-22 to fix (annexes E, R2).
    `proposed` row and re-derives. 裁-18a's wall is that lane's PR.
 3. **It does not touch `_coding_lane_core`.** No second count of a fact the derivation already
    computes (gate question G3).
-4. **It does not restore the post-time re-check** (S5). Real gap, `_approve_entry_core` blast
-   radius, its own ruling — gate question G6.
-5. **It does not add a `decline` verb or an expiry sweep** (A3/A4) — gate question G7.
+4. ~~**It does not restore the post-time re-check** (S5).~~ **OVERRULED 2026-08-29 (裁-25): it
+   DOES** — its own PR, its own D1 window, `_approve_entry_core` replaced. The blast radius this
+   line names is real and is now this item's to carry.
+5. ~~**It does not add a `decline` verb or an expiry sweep** (A3/A4).~~ **WIDENED 2026-08-29
+   (裁-25): BOTH ride** — the `decline` verb, and the expiry sweep as a new engine source with
+   its enable ceremony (both existing sources stay disabled).
 6. **It does not mint a wake kind, a role, a login pool, a `wake_engine_sources` row or a
-   workflow export.**
+   workflow export.** **Partly overtaken 2026-08-29 (裁-25):** the wake kind, the role and the
+   login pool still stand — but G7's expiry sweep **is** a new `wake_engine_sources` row with the
+   workflow half and the enable ceremony that go with it. It ships disabled-by-default like every
+   other source, and it is the sweep PR's, not PR-1's.
 7. **It does not take an egress authorization** (S9) and therefore does not widen the egress
    purpose CHECK.
 8. **It does not let Clara sign, decline, revoke or shorten an expiry.** The door proposes. The
