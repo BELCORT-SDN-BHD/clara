@@ -146,7 +146,9 @@ allowlist, W3 firm congruence, W5 rationale/model shape, W6's *shape* half, W13'
 **Tier B** = W4 counterparty liveness, W6's *resolution* half, W7 duplicate-open, W8 live binding, and
 C1's new identity rungs — the eligibility refusals a human wants a record of. If the owner wants **no
 refusal receipts**, `failing_rungs`, the nullable `binding_id`, the CHECK's refusal half and cell R-2
-must be **deleted**, not left unreachable. **Owner question O2 (§7).**
+must be **deleted**, not left unreachable. **RULED (§7 O2): no refusal receipts — the door raises, and
+the dead vocabulary is DELETED.** The half that mattered is closed: nothing unwritable stays in the
+schema.
 
 ### B3 · The design calls `_resolve_proposal_basis` with the WRONG SIGNATURE `[N]` · PR-1
 
@@ -361,7 +363,12 @@ malformed near-misses, with an exact nine-member census.
 
 Codex's three questions are all **already ruled** (§2 — 裁-32 answers "who is the maker", the
 conductor's (a) answers "what does 14 days mean", (b) answers "what does decline suppress"). Four
-questions remain, each with a recommendation, its cost and a fail-closed default.
+were raised here, each with a recommendation, its cost and a fail-closed default.
+
+> **STATUS 2026-08-29 — O1, O2 and O3 are RULED by delegation; O4 stays with the owner.** The
+> recommendations below are kept **verbatim as argued**, per the estate's gate-record convention: a
+> record that erases what was recommended cannot show why a ruling went the other way. **O2 went
+> against this pass's recommendation** and is annotated as such.
 
 **O1 · Do C1's identity rungs apply RETROACTIVELY to bindings already signed?** *(大白话: the fix stops
 future wrong-vendor bindings. It does not check the ones already signed under the old, weaker rule.)*
@@ -371,12 +378,24 @@ name arm or whose family is ambiguous, and a human decides. Cost: one read verb 
 **Fail-closed default: run the census and report; do not auto-revoke** — a mass revoke strands posting
 for vendors that are probably fine.
 
+> **RULED (delegation, 2026-08-29) — as recommended: a READ-ONLY CENSUS, no retroactive revoke.**
+
 **O2 · Does a REFUSED proposal write a receipt (B2)?** **Recommend: yes, Tier B** — the eligibility
 refusals are exactly what a human wants a record of, and the estate has the idiom. Cost: the door
 returns a verdict for Tier B instead of raising, which changes its contract and its battery.
 **Fail-closed default: no refusal receipts — and then DELETE `failing_rungs`, the nullable
 `binding_id`, the CHECK's refusal half and cell R-2.** Leaving unreachable vocabulary is the one answer
 that is wrong either way.
+
+> **RULED (delegation, 2026-08-29) — AGAINST this recommendation: NO refusal-receipt rows.** The door
+> **raises**, as designed, and stays a pure Tier-A ladder. **The dead vocabulary is therefore DELETED,
+> not left standing** — the fail-closed arm above, taken deliberately: PR-1 drops `failing_rungs`, the
+> nullable `binding_id`, the refusal half of `ck_bar_proposed_iff_clean` and battery cell R-2, and
+> `binding_id` becomes `NOT NULL` with the shim's `subject_id` reading it directly rather than
+> `coalesce(binding_id, counterparty_id)`. **B1's defect is closed by deletion, which is the half that
+> mattered**: what this record refused to allow was an unwritable refusal shape left in the schema as
+> vocabulary nothing can produce. A refused proposal now leaves an audit line and no receipt — the same
+> posture `0126` records for its own Tier A ("Tier A stays unreceipted").
 
 **O3 · PR-3's re-check semantics on EXPIRY vs REVOCATION (B8)?** *(大白话: revoked means a human took
 the authority away; expired means a clock ran out, maybe two days ago, on an entry drafted last week.)*
@@ -385,12 +404,22 @@ the authority away; expired means a clock ran out, maybe two days ago, on an ent
 **Fail-closed default: refuse both, WITH the reversal bypass** — the bypass is not optional under any
 arm.
 
+> **RULED (delegation, 2026-08-29) — as recommended: REFUSE on revoked, ANNOTATE-and-post on expired,
+> REVERSALS BYPASS.** The `e.vendor_binding_id is not null` gate rides with it.
+
 **O4 · Is a housekeeping sweep the right FIRST live wake-engine source (M6)?** **Recommend: yes, but
 name it as the engine's rollout in the PR body** and watch `wakeEngineHealth`'s
 `held_for_disabled_source` / `cancel_requested_stuck`. A cheap job is a good first exercise of
 claim/reconcile/health. **Fail-closed default: ship the row disabled and do not run the ceremony** —
 the sweep is then dead code, which is safe only if B5's in-door sweep landed, so O4 and B5 must be
 decided together.
+
+> **NOT RULED — O4 stays with the owner. PR-4 is HELD, unbuilt, until he rules.** This is the one
+> question the delegation did not take, and it is the right one to reserve: enabling the source is a
+> wake-engine rollout, not a registry row (M6). **The hold has a consequence PR-1 must absorb:** with
+> PR-4 unbuilt there is no clock, so **B5's in-door stale-`proposed` sweep is now load-bearing, not
+> belt-and-braces** — it is the only thing standing between the widened `('proposed','live')` index and
+> the permanent per-vendor deadlock. Ship it in PR-1 or the deadlock is live with no scheduled drain.
 
 ## 8 · The fold list, PR by PR
 
@@ -403,13 +432,20 @@ D1 inventory is now TWO writer bodies (`sign_` + `propose_`).**
 2. **B1** — persist `directed_by`, derive `effective_proposer`, compare the signer to it with standing
    re-read (the `0084:123` idiom); adoption for director-less; solo firm signs with the PRD §2
    attestation (裁-32). Touches `sign_vendor_identity_binding`.
-3. **B2** — declare the Tier A / Tier B split (or delete the refusal vocabulary) per **O2**.
+3. **B2** — per **O2 as ruled: DELETE the refusal vocabulary.** Drop `failing_rungs`, the refusal half
+   of `ck_bar_proposed_iff_clean` and battery cell R-2; make `binding_id` `NOT NULL`; the shim's
+   `subject_id` reads `r.binding_id::text`, not `coalesce(binding_id, counterparty_id)`. The door stays
+   a pure Tier-A raising ladder. **Cross-check before merging:** M1's honesty checks and this deletion
+   both touch the same columns — with `binding_id NOT NULL` the receipt→binding FK is now always
+   enforced, which makes M1's deferrable-FK + pre-minted-uuid ordering mandatory rather than optional.
 4. **B3** — call `_resolve_proposal_basis(array[…3 doc ids…], w.firm_id, p_basis)`; core
    `SECURITY DEFINER` owned by `clara_fn_owner`.
 5. **B4** — durable decline **and revoke** suppression in **both** writers + a named human reset door
    (ruled (b)); the read verb surfaces it.
 6. **B5** — unique over `('proposed','live')` + advisory key + conflict translation (ruled (c)),
    **plus** the stale-`proposed` expiry sweep in both writers, **plus** the duplicate preflight (N4).
+   **The sweep is now load-bearing, not optional: O4 is unruled, so PR-4 is held and there is no
+   clock.** Shipping the widened index without the in-door sweep ships the deadlock with no drain.
 7. **B6** — distinct document ids / sha256s / normalized invoice ids, duplicate-overrides excluded,
    posting-date span **and** trusted `approved_at` span ≥14 days (ruled (a)).
 8. **B7** — basis must cover all three documents' `invoice.vendor_name` / `invoice.invoice_id` regions
@@ -417,21 +453,27 @@ D1 inventory is now TWO writer bodies (`sign_` + `propose_`).**
 9. **M1** deferrable FK + pre-minted uuids + bidirectional honesty checks · **M2** 4000-char rationale
    cap · **M8** door-side `sightings` closed-key check · **M9** byte-exact `pb_*` regexes + pairing ·
    **N1** call the derivation once · **M4** post-hardening sha; re-take A.5 at `0147`.
-10. **M7** — fold G1–G8 + 裁-32 + the technical rulings into design/annexes **before** authoring, and
-    add the missing `decline` verb specification.
+10. **M7** — fold G1–G8 + 裁-32 + the technical rulings **and O1/O2/O3** into design/annexes **before**
+    authoring, and add the missing `decline` verb specification.
+11. **O1 as ruled** — ship `binding_identity_review()`, a read-only census of live bindings whose F3
+    could only have passed on the name arm or whose counterparty family is ambiguous. No retroactive
+    revoke; a human decides per row.
 
 **PR-2 — the tenth `row_kind`.** **N3**: splice against `0146`'s post-splice sha, re-censused at merge.
 
 **PR-3 — the post-time re-check.** **B8**: write the contract first; **splice, never retype**; **port
 from `0046:1364-1420`, not `0029`**; port the full fourteen-step control (lock the exact binding, re-read
 facts/OCR, re-validate receipt shape, re-resolve counterparty, the first-reason-wins ladder, persist
-`phase='post'`); gate on `e.vendor_binding_id is not null`; reversals bypass; semantics per **O3**;
+`phase='post'`); gate on `e.vendor_binding_id is not null`; **reversals bypass; refuse on revoked,
+annotate-and-post on expired (O3 as ruled)**;
 apply `name_family_is_ambiguous` (C1). **M3**: re-point or retire `post_control_absent`. Add concurrent
 revoke / expiry / re-extraction tests.
 
-**PR-4 — the expiry sweep engine source.** **M6**: exact disabled-at-birth registry row, due predicate,
-workflow export + model pin, pool, idempotent core; enable **only** via `set_wake_source_enabled`;
-receipt every run **and** every `proposed→expired` transition (law 80). Rollout named per **O4**.
+**PR-4 — the expiry sweep engine source. HELD, UNBUILT, until the owner rules O4.** When it is built,
+**M6**: exact disabled-at-birth registry row, due predicate, workflow export + model pin, pool,
+idempotent core; enable **only** via `set_wake_source_enabled`; receipt every run **and** every
+`proposed→expired` transition (law 80). **While it is held, PR-1's in-door sweep (B5) is the only
+drain** — do not let the widened index ship without it.
 
 **Frontend train.** **M4** delete the copy-flip item (and re-cut the copy for 裁-32's wider wall) ·
 **M2** rationale plain, separated, labelled · **N2** model labelled self-reported · **M5** read through
