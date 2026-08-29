@@ -129,14 +129,19 @@ export function clampFreeformStatementTimeout(raw, warn = (m) => console.warn(m)
   // count. (Surrounding whitespace is trimmed first: a secret pasted with a trailing newline is
   // an operator who meant the number.)
   const ms = /^[0-9]+$/.test(text) ? Number(text) : Number.NaN;
-  if (!Number.isInteger(ms) || !Number.isFinite(ms) || ms <= FREEFORM_VERB_DEADLINE_MS) {
+  // The INT_MAX arm is NOT a ceiling in disguise — raising the backstop stays free right up to
+  // it. Above it PostgreSQL refuses the parameter outright (22023), so the read already fails
+  // closed; what it does NOT do is tell the operator why, and an opaque per-read SQL error is a
+  // worse diagnosis than this warning. Rejecting here turns the same outcome into a named one.
+  if (!Number.isInteger(ms) || !Number.isFinite(ms) || ms <= FREEFORM_VERB_DEADLINE_MS || ms > 2147483647) {
     warn(
       `[clara-runtime] CLARA_FREEFORM_STATEMENT_TIMEOUT_MS is ${JSON.stringify(raw)} — not a whole number of ` +
         `milliseconds greater than the verb's own ${FREEFORM_VERB_DEADLINE_MS}ms in-loop deadline. ` +
         `0 means UNLIMITED in PostgreSQL and would delete the only wall that bounds a stalled FETCH; anything at or ` +
         `below ${FREEFORM_VERB_DEADLINE_MS} would fire before that deadline and destroy the receipt it exists to ` +
-        `commit. Using the default ${FREEFORM_STATEMENT_TIMEOUT_DEFAULT_MS}ms instead. There is no upper limit — ` +
-        `raise it freely if you mean to.`,
+        `commit. Using the default ${FREEFORM_STATEMENT_TIMEOUT_DEFAULT_MS}ms instead. There is no upper limit short ` +
+        `of PostgreSQL's own 2147483647, above which it refuses the parameter itself (22023) — raise it freely if ` +
+        `you mean to.`,
     );
     return FREEFORM_STATEMENT_TIMEOUT_DEFAULT_MS;
   }

@@ -109,8 +109,9 @@ Azure.
 ## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
 
 `chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-08-29 (F-A6 PR-2): the
-registry pins `chatTurn: chatTurn_v15` and `autoDraft: autoDraft_v9`** — repo frontier is 147
-migration files, live through `0147_db_hardening_b_hash_only_bearer_tokens`. **The SERVING
+registry pins `chatTurn: chatTurn_v15` and `autoDraft: autoDraft_v9`** — repo frontier is 142
+migration files, live through `0147_db_hardening_b_hash_only_bearer_tokens` (0147 is the highest
+NUMBER, not a count — the numbering has gaps). **The SERVING
 Fly bundle, measured 2026-08-26 in-VM, still carries `chatTurn_v13` + `autoDraft_v9`** —
 `chatTurn_v14` was registered and never deployed, and **v15 supersedes it before either ships**,
 so the next deploy moves the serving bundle v13 → v15 in one step (`PROGRESS.md`'s pre-flight

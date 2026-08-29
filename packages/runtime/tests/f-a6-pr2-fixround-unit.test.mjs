@@ -72,6 +72,7 @@ test("f-a6.pr2.h4.env-fails-closed: a bad value can never emit `= 0`, NaN, or a 
     ["0x2710", "Number() would read this as 10000; a plain run of digits it is not"],
     ["12000ms", "a unit suffix"],
     ["4999", "below the in-loop deadline"],
+    ["2147483648", "one over INT_MAX — PostgreSQL refuses the parameter itself (22023), so this is fail-closed either way; rejecting it here buys the operator the loud warning instead of an opaque per-read SQL error"],
   ];
   try {
     for (const [value, why] of bad) {
@@ -100,7 +101,7 @@ test("f-a6.pr2.h4.env-fails-closed: a bad value can never emit `= 0`, NaN, or a 
 
     // GOOD VALUES PASS THROUGH UNTOUCHED, including ones ABOVE the old cut's proposed ceiling —
     // there is deliberately no upper limit.
-    for (const good of ["5001", "12000", "15000", "60000", "600000"]) {
+    for (const good of ["5001", "12000", "15000", "60000", "600000", "2147483647"]) {
       process.env.CLARA_FREEFORM_STATEMENT_TIMEOUT_MS = good;
       assert.equal(ff.freeformStatementTimeoutMs(), Number(good), `${good} is a legitimate operator choice`);
       assert.ok(ff.freeformSetupSql().includes(`set statement_timeout = ${good}`));
