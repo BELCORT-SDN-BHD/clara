@@ -128,8 +128,7 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    running (posture bullet above carries the full list and the Wave-A instrument laws).
    **In flight (2026-08-29, after the morning sitting)**: hardening B is DONE — merged (#414) and APPLIED (`0147`, live 142) · **the three ruled builds** — 裁-21's **research lane before PR-0** (裁-23), 裁-19 as a **HYBRID** (the read layer plus an appended re-home pair for OPEN items in UNFROZEN periods, frozen years read-layer only; 裁-24), 裁-18b now **FIVE PRs / two D1 windows** (the post-time re-check restored, the expiry sweep rides; 裁-25) · 裁-26 (admission-token email wall) → **P4's UI tranche**, 裁-27 ("Amend resolution") → **P6** · T8's alias-panel wiring onto `counterparty_aliases_visible` and PR-e's proposal card (P6) · the `0133` operator-flag act for BELCORT (owner-timed). **Still owed in this window** (owner rulings,
    `harness-audit-rulings-2026-08-26.md`): the F-A7b train · all three firm tiers' UI
-   (tier-3 LIVE AT BETA behind its own security gate) · **the pricing amounts — NOT ruled (裁-28): the owner brings his own plan, the conductor owes the cost-floor + market-band brief, and it blocks the Stripe objects / checkout price / first charged day → needed before P4's CHECKOUT WIRING** · the R2 PRD two-tier wording (drafted + owner-approved 2026-08-27,
-   `docs/plan/active/r2-prd-two-tier-wording-draft-2026-08-27.md` — the PRD edit still owed)
+   (tier-3 LIVE AT BETA behind its own security gate) · **the pricing amounts — NOT ruled (裁-28): the owner brings his own plan, the conductor owes the cost-floor + market-band brief, and it blocks the Stripe objects / checkout price / first charged day → needed before P4's CHECKOUT WIRING** · ~~the R2 PRD two-tier wording~~ — **LANDED 2026-08-29 (裁-30: the two sentences approved verbatim by the owner and written into PRD §4 item 15 + §6 invariant 1)**
    · the live-data e2e walk (Q9 rung 5). Then **Wave G: factory reset + estate e2e + beta
    live**.
 2. **Owner-key acceptance items** (the constitutional human half): ~~the #43 sitting~~ —
@@ -148,7 +147,7 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    mechanism-smoke right after ceremony, SCALE legs fold into Wave-G; p50 ~T0+48h → ~T0+36h).
 4. ~~**THE TRACK-A DESIGN FAN-OUT + BUILD**~~ — **DONE** (all seven sets v2-gated 2026-08-22;
    build DONE for F-A2/F-A3/F-A4/F-A5/F-A6 v1/F-A5b through card-1/F-A7 across W1+D-a+W2W3+W4).
-   Remaining: F-A8 · F-A9 PR-1A · F-A5b PR-3 render worker · F-A6 v2 · Track B.
+   **Remaining, re-censused 2026-08-29 and RULED INTO THE SPRINT (裁-29, `mohe-grill-rulings-2026-08-29.md`)**: G1's two wake sources still `enabled=false` on live (F-A3/F-A4 wake bodies + flip) · F-A6 PR-2 runtime (`packages/runtime` has ZERO callers of `wake_freeform_read`) · the reports chain walked end to end + F-A5b PR-3 (download) · F-T3 (PR-0 gate → build; both hard gates live) · F-A9 **PR-1B** (PR-1A is `0110`, live — the old "PR-1A" here was STALE) · F-A4 PR-2b · F-T1 (rebase → merge → window) · F-T2 rows (8 owner questions → next batch). **Beta-era by the same ruling:** F-A8 · F-A6 v2 · F-T4's remainder.
 5. ~~**THE OWNER'S DIGEST SIGN-OFF**~~ — **GIVEN 2026-08-22** (laws 78-81 + the four annotated
    laws ratified; every named follow-up landed or ruled — #287, invariant-(a) home, R1, corpus,
    CI overhaul, OQ-2/3/5, R-OWNER, C6). **Still open for the owner**: FX-lite build timing ·

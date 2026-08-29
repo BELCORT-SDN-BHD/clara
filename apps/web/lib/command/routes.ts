@@ -9,27 +9,38 @@
  *                     documents · bank · close · reports · registers ·
  *                     knowledge.
  *
- * SYNC NOTE (authored on `web/p2-cmdk`, forked from `origin/frontend/web` @
- * 36d2bb0, 2026-08-27): at authoring time `apps/web/app/` holds exactly two
- * pages — `(firm)/page.tsx` ("/") and `(firm)/clients/[clientId]/page.tsx`
- * ("/clients/:clientId") — so every entry below is annotated `status:
- * "built"` (a page.tsx exists at that path today) or `status: "planned"`
- * (the path matches the ruled IA but nothing renders there yet; it is P3
- * workbench-tab / P3-P4 firm-surface work per Q9). This file is a STAND-IN:
- * the sibling auth/rail lanes (p2-auth, p2-rail) may land their own nav
- * source of truth in the same window. When that merges, or when P3 starts
- * building real tab pages, re-derive this manifest from the live `app/`
- * tree instead of hand-maintaining it — do not let `status: "built"` drift
- * from what actually has a page.tsx.
+ * SYNC NOTE — TRUED 2026-08-29 (MBB-5, docs/plan/active/mohe-alignment-audit-
+ * 2026-08-29.md §2). The original note recorded that at P2 authoring time
+ * `apps/web/app/` held exactly two pages, so most entries were annotated
+ * `status: "planned"`, and it told the next lane to "re-derive this manifest
+ * from the live `app/` tree instead of hand-maintaining it". That never
+ * happened: P3 and all eleven port-wave trains landed real pages and left
+ * this file alone, so ten of fifteen Go rows were wrong in one direction or
+ * the other — `needsYou` pointed at `/inbox`, a path with no page.tsx
+ * anywhere in the tree, and nine live workbenches were badged "Not built
+ * yet" on the surface most likely to be exercised in a demo.
  *
- * Every `href` is a real Next.js path. Selecting a "planned" entry performs
- * a REAL client-side navigation — Next's own not-found rendering is what a
- * visitor sees, which is an honest "nothing built here yet" response, not a
- * fake success. That is why Go is allowed to index the full ruled IA now
- * (unlike Do, which must show no fake dispatch at all): navigation never
- * pretends an outcome, so listing an in-progress destination and being
- * truthful about `status` is enough to satisfy the "no affordance may look
- * live when it is not" corollary (frontend-handoff-2026-08-23.md §5, Q9).
+ * `status` is now BOTH-WAYS MECHANICAL. ./routes.test.ts globs the real
+ * `app/` tree, derives every URL a `page.tsx` serves, and asserts three
+ * things: a "built" row has a page; a row whose page exists is marked
+ * "built" (no false "Not built yet" badge); and every listed href resolves
+ * to a page at all. That third assertion is deliberately STRICTER than the
+ * original rationale below, and the /inbox row is why: §9.2 of the port-wave
+ * plan specified the backstop as "every `status` checked against whether a
+ * `page.tsx` exists at that path", and /inbox PASSED that check — status was
+ * "planned" and no page existed. Status-to-tree could never see a route
+ * pointing at a path nobody ever intends to build.
+ *
+ * Every `href` is a real Next.js path. The original rationale for listing an
+ * unbuilt destination — a "planned" entry navigates for real, and Next's own
+ * not-found rendering is an honest "nothing here yet", not a fake success —
+ * still holds for a path the IA genuinely reserves. It is kept here because
+ * it is why Go may index the ruled IA at all (unlike Do, which must show no
+ * fake dispatch): navigation never pretends an outcome. What it can no
+ * longer excuse is a row pointing somewhere the tree does not go — hence the
+ * third assertion. There are no "planned" rows today; a future one must land
+ * with its page in the same PR (port-wave plan §3.6: truing this file is
+ * part of a train's OWN merge, never a later sweep).
  */
 
 export type CommandRouteStatus = "built" | "planned";
@@ -66,24 +77,32 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
     keywords: ["home", "dashboard"],
   },
   {
+    // TRUED (MBB-5, 2026-08-29): the href was `/inbox`, which no page.tsx has
+    // ever served — `grep -rn "/inbox" apps/web` returned this line and nothing
+    // else, and next.config.ts declares no redirects/rewrites. The real page has
+    // been `app/(firm)/needs-you/page.tsx` since P3. Selecting the flagship
+    // cross-client inbox from the app's universal entry point landed on Next's
+    // bare 404, OUTSIDE the firm shell.
     id: "needsYou",
     scope: "firm",
-    href: "/inbox",
-    status: "planned",
+    href: "/needs-you",
+    status: "built",
     keywords: ["needs you", "inbox", "exceptions", "proactive"],
   },
   {
+    // TRUED (MBB-5): app/(firm)/clients/page.tsx is live.
     id: "clientRegister",
     scope: "firm",
     href: "/clients",
-    status: "planned",
+    status: "built",
     keywords: ["clients", "register", "book of clients"],
   },
   {
+    // TRUED (MBB-5): app/(firm)/activity/page.tsx is live.
     id: "firmActivity",
     scope: "firm",
     href: "/activity",
-    status: "planned",
+    status: "built",
     keywords: ["activity", "receipts", "open register", "audit"],
   },
   {
@@ -123,6 +142,11 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
  * `clientId` (see `resolveClientIdFromPathname` below) — ⌘K never invents a
  * client to navigate into.
  */
+// TRUED (MBB-5, 2026-08-29): all seven workbench tabs below read `status:
+// "planned"` while every one of them has had a real page.tsx mounting a real
+// workbench since P3 (#364/#367) and the port wave. `messages/en.json`'s
+// `plannedBadge` resolves to the literal string "Not built yet", so ⌘K told
+// every user the entire shipped product was unbuilt.
 export const CLIENT_ROUTES: ClientCommandRoute[] = [
   {
     id: "clientWorkspaceHome",
@@ -135,49 +159,49 @@ export const CLIENT_ROUTES: ClientCommandRoute[] = [
     id: "journals",
     scope: "client",
     href: (clientId) => `/clients/${clientId}/journals`,
-    status: "planned",
+    status: "built",
     keywords: ["journals", "entries", "je", "drafts"],
   },
   {
     id: "documents",
     scope: "client",
     href: (clientId) => `/clients/${clientId}/documents`,
-    status: "planned",
+    status: "built",
     keywords: ["documents", "ocr", "evidence", "upload"],
   },
   {
     id: "bank",
     scope: "client",
     href: (clientId) => `/clients/${clientId}/bank`,
-    status: "planned",
+    status: "built",
     keywords: ["bank", "reconciliation", "statement", "matching"],
   },
   {
     id: "close",
     scope: "client",
     href: (clientId) => `/clients/${clientId}/close`,
-    status: "planned",
+    status: "built",
     keywords: ["close", "period", "fiscal year"],
   },
   {
     id: "reports",
     scope: "client",
     href: (clientId) => `/clients/${clientId}/reports`,
-    status: "planned",
+    status: "built",
     keywords: ["reports", "statutory", "export"],
   },
   {
     id: "registers",
     scope: "client",
     href: (clientId) => `/clients/${clientId}/registers`,
-    status: "planned",
+    status: "built",
     keywords: ["registers", "aging", "fixed assets", "advances"],
   },
   {
     id: "knowledge",
     scope: "client",
     href: (clientId) => `/clients/${clientId}/knowledge`,
-    status: "planned",
+    status: "built",
     keywords: ["knowledge", "wiki", "context"],
   },
 ];

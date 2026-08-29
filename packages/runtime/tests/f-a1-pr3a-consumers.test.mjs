@@ -44,10 +44,14 @@ after(async () => {
 // 1. Registry sanity + the widened kind literal, in source.
 // ===========================================================================
 
-test("registry.ts pins autoDraft_v9/chatTurn_v14 and still exports superseded v8/v13/v12 (policy (c))", () => {
+// F-A6 PR-2 moved the chatTurn pin v14 -> v15 (the audited freeform read); autoDraft is
+// untouched. v14's assertion does not become wrong, it becomes a POLICY (c) assertion — the
+// same ladder every prior bump added to. EXTENDED, never re-cut.
+test("registry.ts pins autoDraft_v9/chatTurn_v15 and still exports superseded v8/v14/v13/v12 (policy (c))", () => {
   assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v9");
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v14");
+  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v15");
   assert.equal(typeof registryMod.autoDraft_v8, "function");
+  assert.equal(typeof registryMod.chatTurn_v14, "function");
   assert.equal(typeof registryMod.chatTurn_v13, "function");
   assert.equal(typeof registryMod.chatTurn_v12, "function");
 });

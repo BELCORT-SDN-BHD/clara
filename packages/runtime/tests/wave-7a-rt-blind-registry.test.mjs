@@ -21,6 +21,7 @@ const registry = await import("../workflows/registry.ts");
 const entryAutoDraftV9 = await import("../workflows/autoDraft.v9.ts");
 const entryChatTurnV13 = await import("../workflows/chatTurn.v13.ts");
 const entryChatTurnV14 = await import("../workflows/chatTurn.v14.ts");
+const entryChatTurnV15 = await import("../workflows/chatTurn.v15.ts");
 const entryAutoDraftV8 = await import("../workflows/autoDraft.v8.ts");
 const entryAutoDraftV7 = await import("../workflows/autoDraft.v7.ts");
 const entryAutoDraftV6 = await import("../workflows/autoDraft.v6.ts");
@@ -55,8 +56,15 @@ test("registry pins autoDraft to the v9 export", () => {
   assert.equal(registry.workflows.autoDraft, entryAutoDraftV9.autoDraft_v9);
 });
 
-test("registry pins chatTurn to the v14 export", () => {
-  assert.equal(registry.workflows.chatTurn, entryChatTurnV14.chatTurn_v14);
+// F-A6 PR-2 (the audited freeform read) has now moved the chatTurn pin again — v14 -> v15,
+// autoDraft untouched — and v14's own assertion becomes a policy (c) assertion in its turn.
+test("registry pins chatTurn to the v15 export", () => {
+  assert.equal(registry.workflows.chatTurn, entryChatTurnV15.chatTurn_v15);
+});
+
+test("registry still EXPORTS chatTurn_v14 so no parked v14 run is stranded (Appendix A policy (c))", () => {
+  assert.equal(typeof registry.chatTurn_v14, "function");
+  assert.equal(registry.chatTurn_v14, entryChatTurnV14.chatTurn_v14);
 });
 
 test("registry still EXPORTS chatTurn_v13 so no parked v13 run is stranded (Appendix A policy (c))", () => {

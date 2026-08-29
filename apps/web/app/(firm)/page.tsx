@@ -3,12 +3,16 @@ import { getTranslations } from "next-intl/server";
 import { PageHeader, PageShell } from "@/components/common/page-shell";
 
 /**
- * Firm-altitude home ("/") — honest empty state, P2 shell only.
+ * Firm-altitude home ("/") — still an honest empty state: a title and an
+ * orientation line, no summary of its own.
  *
- * P1 foundation scaffold, now inside the P2 firm shell
- * (app/(firm)/layout.tsx). The real surface (Needs-you inbox, client
- * register, firm activity/receipts feed, admin) is P3/P4 work, per the IA
- * ruling: docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.
+ * TRUED 2026-08-29 (MBB-6). The four firm-altitude surfaces the IA ruling
+ * names (docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3) — the
+ * Needs-you inbox, the client register, firm activity, admin — are BUILT and
+ * each has its own page, reachable from the sidebar (components/firm-nav.tsx)
+ * and from ⌘K. What is still absent is a firm-home ROLL-UP over them, which
+ * is why this page renders a header and nothing else. The old copy said the
+ * surfaces themselves were "built in P3/P4"; P3 shipped 2026-08-27.
  */
 export default async function FirmHomePage() {
   const t = await getTranslations("FirmHome");
