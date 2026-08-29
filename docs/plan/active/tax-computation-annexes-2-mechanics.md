@@ -97,10 +97,18 @@ with a NULL `client_id` and `proactive` with a non-NULL one each raise a check_v
 ```
 ck_wake_credentials_kind_0011   -- SEVEN kinds live, not three:
   interactive · proactive · autodraft · interactive_client · close_prep · bank_agent · filing
-ck_wake_credentials_client_0011 -- SIX arms, not two:
-  autodraft / interactive_client / close_prep / bank_agent  require a client_id
-  interactive / proactive / filing                          require none
+ck_wake_credentials_client_0011 -- FIVE top-level OR arms over those seven kinds, not two:
+  autodraft            AND client_id IS NOT NULL
+  wake_kind = ANY(interactive, proactive, filing) AND client_id IS NULL   -- one arm, three kinds
+  interactive_client   AND client_id IS NOT NULL
+  close_prep           AND client_id IS NOT NULL
+  bank_agent           AND client_id IS NOT NULL
 ```
+
+*The arm count is **five**, counted structurally from `pg_get_constraintdef` at paren depth 0 —
+not seven, because the three client-less kinds share a single `= ANY(...)` arm. An earlier draft
+of this block said "six", which was neither the kind count nor the arm count; it is corrected here
+from the measurement rather than swapped for another remembered number.*
 
 - The two client-scoped writes carry a `p_client` and act on one client's books, so they are
   **`autodraft`** — the kind whose CHECK *requires* a non-null `client_id`.
@@ -143,6 +151,17 @@ fraction_bp int check 0..10000, **requires_apportionment bool**, **refusal_reaso
 statutory_ref, effective_ya_from, effective_ya_to, authority_id → tax_authorities, **conflict**,
 **notes**, valid_through, owner_signed_by, owner_signed_at, revision, superseded_by)`.
 **[v1.3, three build-time departures, each recorded in the migration's own DEPARTURES REGISTER.]**
+**(a0) THE SIGNATURE DOOR IS OWED, AND IT OWES ONE COLUMN PR-1 DID NOT BUILD.** OQ-7's
+recommendation (a) is *"a named licensed tax agent (who may be the owner), **licence reference
+recorded on the signature row**"*. `tax_treatment_codes` carries `owner_signed_by` (a
+`clara.users` FK) and `owner_signed_at` — **there is no column for the licence reference**, so as
+built the signature records WHO but not the professional credential the ruling makes the point of
+it. That is deliberate for PR-1 (the codes seed unsigned; nothing can be signed yet) and it is a
+real gap the moment a signing door exists. **Whoever builds that door adds
+`owner_signed_licence_ref text` alongside it**, paired into the existing signature CHECK so all
+three move together, and widens the one-way-once arm to cover it. Recorded here rather than
+guessed into the table now, because a column nothing writes is a column nobody maintains.
+
 **(a) `owner_signed_*` is NULLABLE, not NOT NULL** — OQ-7's fail-closed default is "PR-1 seeds the
 codes UNSIGNED and every treatment refuses `treatment_code_unsigned`", which a NOT NULL column cannot
 express. The wall moves to the named refusal plus a paired CHECK plus a **one-way-once** signature

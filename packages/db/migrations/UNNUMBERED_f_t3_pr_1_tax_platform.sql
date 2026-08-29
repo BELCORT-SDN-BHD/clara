@@ -66,6 +66,18 @@
 --     `mixed_account_needs_split` (part 2 section 9's own worked example is literally "a
 --     motor-expenses account holding both commercial fuel and private petrol") instead of
 --     defaulting. PR-2 OWES that branch; this file only records the fact on the row.
+-- (4b) OBLIGATION HANDED TO PR-2, stated here because this file creates the hazard and PR-2
+--     is where it becomes a wrong number. `ADDBACK_MOTOR_RUNNING_PRIVATE_PORTION` seeds
+--     `fraction_bp = 10000` WITH `requires_apportionment = true`. Design section 2's evaluator
+--     rule is `code.fraction_bp * COALESCE(apportionment_bp, 10000) / 10000`, so an evaluator
+--     that reads the fraction and ignores the flag adds back **100% of a mixed-use vehicle's
+--     running costs** whenever the human has not keyed a percentage -- silently, with no
+--     refusal, on every client that owns a car. That is this PR's single largest
+--     silent-overstatement path. **PR-2 MUST branch on `requires_apportionment` BEFORE the
+--     COALESCE and refuse `mixed_account_needs_split` when `apportionment_bp` is null**, never
+--     fall through to the default. The flag exists only to make that branch possible; it
+--     enforces nothing by itself, and this file cannot enforce it from here.
+--
 -- (5) clara.tax_add_back_class_map is a SIXTH platform relation the design set never named.
 --     Conductor's assignment, recorded at replay section 5: the COA template stores the
 --     citation-backed HINT (`add_back_class`) on a template account; F-T3 owns the map from
@@ -218,9 +230,23 @@ declare
     'losses_brought_forward_unknown', 'loss_relief_rules_unread',
     'entity_transparent_no_entity_charge', 'prior_estimate_unknown', 'citation_missing',
     'entity_identifier_missing', 'mixed_account_needs_split', 'form_version_superseded',
-    'close_snapshot_missing_pl_rows', 's44_6_relief_unmodelled'
+    'close_snapshot_missing_pl_rows', 's44_6_relief_unmodelled', 'tax_issue_unavailable'
+  ];
+  -- The NINE Wave-E keys this file seeds alongside and must not disturb. Named here so the
+  -- prestate can scope its premise to them rather than counting the whole shared catalog.
+  v_wave_e_reasons constant text[] := array[
+    'divide_by_zero', 'negative_denominator', 'absent', 'prior_period_absent',
+    'account_set_drift', 'account_set_resolution_absent', 'account_set_resolution_ambiguous',
+    'account_set_expansion', 'sign_presentation_mismatch'
   ];
 begin
+  -- The freedom net must cover EVERY key S9.7 seeds, or a key minted by another lane between
+  -- now and then lands as a duplicate meaning without the net noticing. 24, not 23: the count
+  -- is asserted here rather than trusted, because the net and the seed are 900 lines apart.
+  if cardinality(v_reason_keys) <> 24 then
+    raise exception 'S0: the reason-key freedom net lists % keys, but S9.7 seeds 24 (22 ladder + OQ-11 + 裁-33)', cardinality(v_reason_keys)
+      using errcode = 'CLR10';
+  end if;
   -- (1) All fourteen relation names are free.
   foreach v_name in array v_relations loop
     if to_regclass('clara.' || v_name) is not null then
@@ -260,23 +286,37 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- (5) clara.metric_na_reason_versions is the shape this file seeds into. Measured at the
-  --     replay (delta D-6): NINE rows, every one firm_id = NULL, and 'ok' is not a legal
-  --     cell_status. All three are re-measured here.
+  -- (5) clara.metric_na_reason_versions is the shape this file seeds into.
+  --
+  --     SCOPED, NOT COUNTED -- and this is a FIX, not a preference. The first cut of this
+  --     prestate asserted `count(*) = 9` over the whole table plus `count(*) where firm_id is
+  --     not null = 0`. Both are totals over a SHARED, append-only estate catalog this file does
+  --     not own, and both were MEASURED to abort the migration over rows that are perfectly
+  --     lawful and none of its business: a later platform VERSION of a Wave-E key (the tail
+  --     below and cell ft3-D4 both explicitly call that "that lane's business"), or any
+  --     firm-scoped reason row (cell ft3-I1 proves the column takes one). The identical defect
+  --     was found and fixed in the tail first; leaving it here would have made the prestate the
+  --     surviving copy of the bug -- a fix that does not sweep every instance of its own class.
+  --
+  --     The premise this file actually depends on is delta D-6's: the NINE Wave-E rows exist as
+  --     PLATFORM VERSION-1 rows. That predicate no other lane can move -- those rows already
+  --     exist, so `unique nulls not distinct (firm_id, reason_key, version)` forbids a second --
+  --     which makes it the only form of the check that cannot abort a real ceremony.
   if to_regclass('clara.metric_na_reason_versions') is null then
     raise exception 'S0: clara.metric_na_reason_versions is missing -- F-T3 PR-1 has nowhere to seed its refusal vocabulary'
       using errcode = 'CLR10';
   end if;
-  select count(*) into v_n from clara.metric_na_reason_versions;
+  select count(*) into v_n from clara.metric_na_reason_versions
+    where firm_id is null and version = 1 and reason_key = any (v_wave_e_reasons);
   if v_n <> 9 then
-    raise exception 'S0: clara.metric_na_reason_versions holds % row(s), expected the 9 measured at the replay -- the premise moved', v_n
+    raise exception 'S0: the 9 Wave-E platform v1 reason rows count % -- delta D-6''s premise moved', v_n
       using errcode = 'CLR10';
   end if;
-  select count(*) into v_n from clara.metric_na_reason_versions where firm_id is not null;
-  if v_n <> 0 then
-    raise exception 'S0: % metric_na_reason_versions row(s) carry a firm_id -- the platform-row premise (delta D-6) moved', v_n
-      using errcode = 'CLR10';
-  end if;
+  -- The by-name collision net. This is the check that actually protects F-T3: a key already
+  -- present means another lane owns that string and this file would be minting a SECOND meaning
+  -- for a refusal a human reads (law 81). It was UNREACHABLE behind the whole-table total above
+  -- -- any pre-existing F-T3 key would have tripped the count first, with a message about the
+  -- wrong thing. Cell ft3-A8 plants one and asserts THIS refusal by name.
   select count(*) into v_n from clara.metric_na_reason_versions
     where reason_key = any (v_reason_keys);
   if v_n <> 0 then
@@ -312,16 +352,17 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- (8) clara.client_fact_keys holds exactly FIVE rows. F-T3 mints NO fact key and never
-  --     calls record_client_fact (design section 4.1, D-21/D-22); the replay measured five,
-  --     correcting the design set's "four". Asserted so a SIXTH appearing under this file
-  --     is noticed here rather than in PR-2.
-  select count(*) into v_n from clara.client_fact_keys;
-  if v_n <> 5 then
-    raise exception 'S0: clara.client_fact_keys holds % row(s), expected the 5 measured at the replay', v_n
-      using errcode = 'CLR10';
-  end if;
-
+  -- (8) DELETED, deliberately: `clara.client_fact_keys holds exactly FIVE rows`.
+  --     It was a tripwire for an OBSERVATION, not a premise. This file mints no fact key,
+  --     never calls record_client_fact (design section 4.1, D-21/D-22) and does not read the
+  --     table anywhere -- so nothing it builds depends on the count, while a SIXTH key added
+  --     by any of the several estate lanes that legitimately grow that catalog would have
+  --     aborted this migration, and a ceremony with it, over a row that is none of its
+  --     business. Same class as the na_reason totals fixed at (5): a prestate asserts the
+  --     premises this file's own correctness rests on, and nothing else. The replay's
+  --     five-vs-four correction is recorded where it belongs -- the design set and PR-2's
+  --     battery, which is the PR that actually reads these keys.
+  --
   -- (9) clara.fixed_assets ALREADY carries its (id, firm_id, client_id) unique constraint.
   --     This is delta D-7's evidence, re-measured: mechanics M4 says "fixed_assets has no
   --     (id, firm_id, client_id) unique to bind to ... PR-3 adds uq_fa_id_tenant", and the
@@ -338,7 +379,7 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice 'F-T3 PR-1 S0 prestate: OK -- 14 relation names free, 11 verb names free, 23 reason keys free, na_reason table = 9 platform rows with the 3-value status domain, the catalog-scope na_reason arm present, client_fact_keys = 5, uq_fixed_assets_id_firm_client present (delta D-7 re-measured).';
+  raise notice 'F-T3 PR-1 S0 prestate: OK -- 14 relation names free, 11 verb names free, all 24 reason keys free by NAME, the 9 Wave-E platform v1 rows present (scoped, never a whole-table count on a shared catalog this file does not own), the 3-value cell_status domain, the catalog-scope na_reason arm with its `pf is not null` conjunct, and uq_fixed_assets_id_firm_client present (delta D-7 re-measured).';
 end $s0$;
 
 -- =====================================================================================
@@ -1158,7 +1199,8 @@ values
    '{"rung":"R11","fix":"record the cp204_filings row for the computed year of assessment. The 85% floor is said beside the estimate rather than silently omitted; the estimate itself still computes"}', '2020-01-01'),
   (null, 'form_version_superseded', 1, 'refused', '—',
    '{"artifact":"pack","fix":"re-map the field pack to the published form edition through publish_tax_form_field_map. A field id that moved between editions is how a correct number lands in the wrong box"}', '2020-01-01'),
-  -- 裁-33 (owner, 2026-08-29): there is NO golden bar and a tax computation goes to DRAFT
+  -- 裁-33 (owner, 2026-08-29; ledgered at docs/plan/active/mohe-grill-rulings-2026-08-29.md):
+  -- there is NO golden bar and a tax computation goes to DRAFT
   -- ONLY, never `issued`; PR-7 (the artifacts) is not built for beta. `report_runs` keeps its
   -- pre-existing `issued` value -- it is Wave-E's enum, shared with every other report class,
   -- and narrowing it would be a shared-surface change for one item's convenience -- so the
@@ -1168,7 +1210,7 @@ values
   -- lifecycle-state column at all (proven positively in S10), so nothing here presumes an
   -- issued state exists.
   (null, 'tax_issue_unavailable', 1, 'refused', '—',
-   '{"ruling":"裁-33","artifact":"statement,pack","fix":"a tax computation is a DRAFT for a human professional to review and key; it is never issued from Clara. The terminal state for beta is draft, and no F-T3 verb transitions a report_run to issued"}', '2020-01-01');
+   '{"ruling":"裁-33","ruling_source":"docs/plan/active/mohe-grill-rulings-2026-08-29.md 裁-33","artifact":"statement,pack","fix":"a tax computation is a DRAFT for a human professional to review and key; it is never issued from Clara. The terminal state for beta is draft, and no F-T3 verb transitions a report_run to issued"}', '2020-01-01');
 
 reset role;
 

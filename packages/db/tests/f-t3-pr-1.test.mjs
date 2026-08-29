@@ -5,19 +5,17 @@
 // THIS FILE: sections A (closed-world structure census), C (the seeded law's invariants) and
 // D (the refusal vocabulary). Two siblings share its fixtures module, split only to stay under
 // the file-size gate: f-t3-pr-1-isolation.test.mjs (the ACL census and the two-firm proof) and
-// f-t3-pr-1-walls.test.mjs (the mutant panel, the immutability walls, the deliberate-absence
-// instruments and 裁-33's no-lifecycle-column census).
+// f-t3-pr-1-walls.test.mjs (mutants, immutability, the absences, 裁-33's column census).
 //
-// Section A deliberately duplicates the migration's own S10 tail: the tail proves the
-// migration built the shape on ITS OWN rig at ITS OWN moment, this proves the shape SURVIVES
-// on a database that then ran every other migration in the estate, re-derived independently.
+// Section A duplicates the migration's own S10 tail on purpose: the tail proves the shape on
+// ITS OWN rig at ITS OWN moment, this proves it SURVIVES every later migration in the estate.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, endPool } from "./rig-fixtures.mjs";
+import { rootQuery, endPool, ROLES } from "./rig-fixtures.mjs";
 import {
   RELATIONS, CODES, RESEARCH_LEAVES, LADDER_REASONS, OQ11_REASON, RULING_33_REASON,
-  tableApplied,
+  tableApplied, inRolledBackTx,
 } from "./f-t3-pr-1-fixtures.mjs";
 
 let live = false;
@@ -30,15 +28,13 @@ after(async () => { await endPool(); });
  *  instead of greening by skipping every cell -- indistinguishable from a real pass. Final
  *  acceptance is that focused shape, variable UNSET, zero skips. */
 const gate = (t) => {
-  if (!live) {
-    if (process.env.CLARA_ALLOW_MISSING_FT3_TAX_PLATFORM === "1") {
-      console.warn("SKIP f-t3-pr-1: the migration is not applied to this database (explicit pre-integration run).");
-      t.skip("F-T3 PR-1 tax platform relations not applied -- explicit pre-integration run");
-      return true;
-    }
-    assert.fail("the F-T3 PR-1 tax platform relations are required for a focused or post-migration run: apply the migration, or set CLARA_ALLOW_MISSING_FT3_TAX_PLATFORM=1 for the package-wide pre-integration sweep");
+  if (live) return false;
+  if (process.env.CLARA_ALLOW_MISSING_FT3_TAX_PLATFORM === "1") {
+    console.warn("SKIP f-t3-pr-1: the migration is not applied to this database (explicit pre-integration run).");
+    t.skip("F-T3 PR-1 tax platform relations not applied -- explicit pre-integration run");
+    return true;
   }
-  return false;
+  assert.fail("the F-T3 PR-1 tax platform relations are required for a focused or post-migration run: apply the migration, or set CLARA_ALLOW_MISSING_FT3_TAX_PLATFORM=1 for the package-wide pre-integration sweep");
 };
 
 // ---------------------------------------------------------------------------------------
@@ -164,6 +160,56 @@ test("ft3-A7 · every live-row partial unique index exists with its exact predic
   }
 });
 
+test("ft3-A8 · THE PRESTATE COLLISION NET, resurrected and proven: it was unreachable while a "
+  + "whole-table count(*) stood in front of it -- any pre-existing key tripped the total first, "
+  + "with a message about the wrong thing", async (t) => {
+    if (gate(t)) return;
+    // S0's two na_reason arms, replayed against planted rows in a rolled-back transaction (an
+    // applied migration cannot be re-run). The SCOPED premise is proven to survive exactly the
+    // three foreign-row shapes that broke the old whole-table totals.
+    const firm = await rootQuery("select id from clara.firms limit 1");
+    const waveE = `array['divide_by_zero','negative_denominator','absent','prior_period_absent',
+      'account_set_drift','account_set_resolution_absent','account_set_resolution_ambiguous',
+      'account_set_expansion','sign_presentation_mismatch']`;
+
+    // A RUN-UNIQUE version: the unique is (firm_id, reason_key, version) NULLS NOT DISTINCT, so
+    // a fixed version collides with whatever an earlier run or another lane already planted --
+    // the same reused-rig hazard this PR keeps finding, here in a fixture.
+    const v = 900000 + (process.pid % 1000);
+    const ins = (scope, key, ver) =>
+      `insert into clara.metric_na_reason_versions (firm_id, reason_key, version, cell_status,
+         display_token, semantics, effective_from)
+       values (${scope}, '${key}', ${ver}, 'absent', '-', '{}'::jsonb, '2020-01-01')`;
+    const plants = [
+      ["a later PLATFORM version of a Wave-E key (that lane's business)", ins("null", "divide_by_zero", v)],
+      ["a FIRM-SCOPED reason row (ft3-I1 proves the column takes one)", ins("$1", `x_ft3_foreign_${process.pid}`, 1)],
+      ["a firm-scoped copy of a Wave-E key", ins("$1", "absent", v)],
+    ];
+    for (const [label, sql] of plants) {
+      await inRolledBackTx(async (c) => {
+        await c.query(`set role ${ROLES.fnOwner}`);
+        await c.query(sql, sql.includes("$1") ? [firm.rows[0].id] : []);
+        const scoped = await c.query(
+          `select count(*)::int n from clara.metric_na_reason_versions
+            where firm_id is null and version = 1 and reason_key = any (${waveE})`);
+        assert.equal(scoped.rows[0].n, 9,
+          `${label}: S0's SCOPED premise still measures 9 -- this is the row shape that aborted the old whole-table count`);
+      });
+    }
+
+    // And the collision net itself: an F-T3 key already present must be SEEN by the by-name arm.
+    await inRolledBackTx(async (c) => {
+      await c.query(`set role ${ROLES.fnOwner}`);
+      const key = `x_ft3_collision_${process.pid}`;
+      const net = `select count(*)::int n from clara.metric_na_reason_versions
+                    where reason_key = any (array['${key}'])`;
+      assert.equal((await c.query(net)).rows[0].n, 0);
+      await c.query(ins("null", key, 1));
+      assert.equal((await c.query(net)).rows[0].n, 1,
+        "S0's by-name net counts a pre-existing key -- the arm that raises 'another lane owns one of these strings'");
+    });
+  });
+
 // ---------------------------------------------------------------------------------------
 // C · THE SEEDED LAW
 // ---------------------------------------------------------------------------------------
@@ -234,7 +280,8 @@ test("ft3-C4 · the add_back_class map is TOTAL over the twelve 裁-21 research 
       `select m.add_back_class, m.code, c.code is not null as code_resolves
          from clara.tax_add_back_class_map m
          left join clara.tax_treatment_codes c on c.code = m.code
-        where m.superseded_at is null order by m.add_back_class`);
+        where m.superseded_at is null and m.seeded_in_migration = 'f_t3_pr_1_tax_platform'
+        order by m.add_back_class`);
     assert.deepEqual(r.rows.map((x) => x.add_back_class), RESEARCH_LEAVES,
       "exactly the twelve leaves of docs/plan/research/coa-template-2026-08-29.json, each once");
     for (const row of r.rows) {
@@ -250,7 +297,8 @@ test("ft3-C5 · donations_approved maps to the REFUSE code, not to any add-back 
       `select m.code, c.direction, c.fraction_bp, c.refusal_reason_key
          from clara.tax_add_back_class_map m
          join clara.tax_treatment_codes c on c.code = m.code
-        where m.add_back_class = 'donations_approved' and m.superseded_at is null`);
+        where m.add_back_class = 'donations_approved' and m.superseded_at is null
+          and m.seeded_in_migration = 'f_t3_pr_1_tax_platform'`);
     assert.equal(r.rowCount, 1);
     assert.equal(r.rows[0].direction, "refuse");
     assert.equal(r.rows[0].fraction_bp, null, "a refuse code carries no numeral to apply");
@@ -261,7 +309,8 @@ test("ft3-C5 · donations_approved maps to the REFUSE code, not to any add-back 
     const unapproved = await rootQuery(
       `select c.direction, c.fraction_bp from clara.tax_add_back_class_map m
          join clara.tax_treatment_codes c on c.code = m.code
-        where m.add_back_class = 'donations_unapproved' and m.superseded_at is null`);
+        where m.add_back_class = 'donations_unapproved' and m.superseded_at is null
+          and m.seeded_in_migration = 'f_t3_pr_1_tax_platform'`);
     assert.equal(unapproved.rows[0].direction, "add_back");
     assert.equal(unapproved.rows[0].fraction_bp, 10000);
   });
@@ -296,6 +345,7 @@ test("ft3-C7 · the rate bands are the PR 8/2025 MSMC ladder plus the standard r
     const r = await rootQuery(
       `select regime, ya, band_lower_cents::bigint, band_upper_cents::bigint, rate_bp
          from clara.tax_rate_bands where superseded_at is null
+          and seeded_in_migration = 'f_t3_pr_1_tax_platform'
         order by regime, ya, band_lower_cents`);
     assert.equal(r.rowCount, 12);
     for (const ya of [2023, 2024, 2025]) {
@@ -314,7 +364,8 @@ test("ft3-C8 · the thresholds cover twelve keys across YA2023-YA2025 plus the Y
     if (gate(t)) return;
     const r = await rootQuery(
       `select key, ya, value_cents::bigint, value_bp, value_int from clara.tax_thresholds
-        where superseded_at is null order by key, ya`);
+        where superseded_at is null and seeded_in_migration = 'f_t3_pr_1_tax_platform'
+        order by key, ya`);
     assert.equal(r.rowCount, 38);
     for (const row of r.rows) {
       const set = [row.value_cents, row.value_bp, row.value_int].filter((v) => v !== null);
@@ -402,10 +453,9 @@ test("ft3-D3b · 裁-33's draft-only wall has its NAME seeded: a tax computation
 
 // 裁-33's OTHER half — no F-T3 relation carries a lifecycle-state column — is ft3-H2.
 // ft3-D4 is scoped to F-T3's own keys, NEVER a table-wide count(*):
-// clara.metric_na_reason_versions is a SHARED, append-only, estate-wide catalog that other
-// batteries in this same suite also write to, so an absolute total measures the whole RUN
-// rather than this migration. A focused run hides that; a full sweep does not — which is
-// exactly the obligation statutory-deadlines-ddl.test.mjs records for its own table.
+// clara.metric_na_reason_versions is a SHARED, append-only, estate-wide catalog other batteries
+// in this same suite also write to, so an absolute total measures the whole RUN rather than this
+// migration -- hidden by a focused run, exposed by a sweep (statutory-deadlines' own obligation).
 test("ft3-D4 · F-T3's OWN 24 keys are a closed world -- exactly one row each, no duplicate "
   + "version -- and the nine Wave-E rows are untouched", async (t) => {
   if (gate(t)) return;
