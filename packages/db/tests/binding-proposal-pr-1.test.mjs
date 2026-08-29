@@ -38,7 +38,7 @@ import {
   supersedeInvoiceFactsKeepingRegions, seedVendorNoRegistration, mergeAway,
   seedWindow, seedUniqueFamilyVendor, DATES_OK, withMutant, withoutConstraint,
   plantRegistrationRegion, twoSessions, asHumanSession, asWakeSession,
-  waitBlockedByOrThrow,
+  waitBlockedByOrThrow, ageOutPriorDepartures,
 } from "./binding-proposal-pr-1-helpers.mjs";
 
 const CORE_SIG =
@@ -68,6 +68,11 @@ before(async () => {
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
   await seedPayableAccount(w.firms.A, w.clients.A2);
+  // H5: the world's own onboarding-bridge machinery leaves one departed admin per client inside
+  // the 90-day roster window, so no firm it builds is SOLO and 裁-32's solo arm would be
+  // unreachable. Age those out; every roster move the cells themselves make stays inside it.
+  // See ageOutPriorDepartures' own header for why this is a fixture correction, not a relaxation.
+  for (const firm of [w.firms.A, w.firms.B]) await ageOutPriorDepartures(firm);
 });
 after(async () => { printLaneNotes("binding-proposal-pr-1"); await endPool(); });
 
@@ -1332,9 +1337,12 @@ test("bp1.A3e N-1 — the wall is KIND-AWARE: the target's TIN is as good as its
   // (0049:955-965 censused the whole live invoice.* vocabulary and found no vendor-taxid path).
   // A wall that only knew registration_normalized would refuse an honest vendor printing its TIN,
   // so the comparison is against every hard identifier the counterparty row carries.
-  const cp = await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "A3e");
   const tin = `C${randomSuffix()}${randomSuffix()}`;
-  await rootQuery("update clara.counterparties set tin=$2 where id=$1", [cp.id, tin]);
+  // The tin is set AT INSERT: clara._tf_counterparty_update_0011 is a positive column whitelist
+  // (name / terms / merge only) and refuses `update … set tin=…` outright with CLR08 'illegal
+  // counterparty mutation'. Measured on the rig, which is why this fixture builds rather than
+  // patches — the substrate's own rule, not a convenience.
+  const cp = await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "A3e", { tin });
   // The page prints the TIN, not the SSM number — and both are the target's, so it is clean.
   await seedWindow(w, "A3e", { dates: DATES_OK, vendor: cp, printedRegistration: tin });
   const basis = await lawfulBasis(w.firms.A, w.clients.A1, cp.id);
@@ -1344,9 +1352,8 @@ test("bp1.A3e N-1 — the wall is KIND-AWARE: the target's TIN is as good as its
   // …and a page printing the target's SSM number AND its TIN is still clean — two true things
   // are not a contradiction, which is the case a naive "every region must equal registration"
   // rule would have refused.
-  const both = await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "A3e-both");
   const tin2 = `C${randomSuffix()}${randomSuffix()}`;
-  await rootQuery("update clara.counterparties set tin=$2 where id=$1", [both.id, tin2]);
+  const both = await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "A3e-both", { tin: tin2 });
   await seedWindow(w, "A3e-both", { dates: DATES_OK, vendor: both, extraRegistrations: [tin2] });
   const basis2 = await lawfulBasis(w.firms.A, w.clients.A1, both.id);
   const ok2 = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: both.id, basis: basis2 });
@@ -1416,8 +1423,11 @@ test("bp1.W16d M-12 — an entry approved under a duplicate_override cannot be c
   // the entry is approved, so a cell that stamped an approved row would be refused for a reason
   // that has nothing to do with this wall).
   const cp = await seedWindow(w, "W16d", { dates: DATES_OK, duplicateOverrideOn: [1] });
+  // count(DISTINCT j.id), not count(*): a supplier-bill entry carries TWO lines naming the same
+  // counterparty (the expense debit and the payable credit), so a bare count over the join reads
+  // two for one entry — a fixture control that measures the join instead of the fixture.
   const flagged = await rootQuery(
-    `select count(*)::int c from clara.journal_entries j
+    `select count(distinct j.id)::int c from clara.journal_entries j
        join clara.journal_lines l on l.entry_id=j.id
       where l.counterparty_id=$1 and j.flags ? 'duplicate_override'`, [cp.id]);
   assert.equal(flagged.rows[0].c, 1, "fixture: exactly one corpus entry carries the override");
@@ -1932,15 +1942,29 @@ test("bp1.B1c H4 — an `interactive` credential with a NULL on_behalf_of REFUSE
 
 test("bp1.B1d H4 — a NON-STANDING director refuses too, and `filing` is untouched", async () => {
   failBp1(live);
-  // (a) carol is a VIEWER of firm A — a real user of the right firm who still cannot direct a
-  //     binding proposal. That is the discriminating shape: the wall is about STANDING, not
-  //     about existence.
+  // (a) STANDING LOST BETWEEN MINT AND USE — the only shape the door's own standing rung can
+  //     reach, and the measurement that establishes it. clara.mint_wake_credential ALREADY
+  //     refuses a non-standing on_behalf_of at MINT time ("on_behalf_of must be an active
+  //     bookkeeper+ of the firm" — driven here, with carol the viewer, so the claim is measured
+  //     rather than assumed). What the minter cannot cover is the WINDOW: a credential is live
+  //     for minutes, and a director can be removed inside it. So the door checks again.
   const a = await eligibleVendor("B1d-a");
-  const cViewer = await mintCred({ kind: "interactive", firm: w.firms.A, onBehalfOf: w.users.carol });
+  await assertRaises(CLR.badRequest,
+    () => mintCred({ kind: "interactive", firm: w.firms.A, onBehalfOf: w.users.carol }),
+    "the MINTER already refuses a viewer as on_behalf_of");
+
+  const bk = await insertUser(`${w.prefix}_b1d`, "bk");
+  await addMember(w.users.alice, { firm: w.firms.A, user: bk, role: "bookkeeper", opKey: opk("b1dadd") });
+  const cLost = await mintCred({ kind: "interactive", firm: w.firms.A, onBehalfOf: bk });
+  const mem = (await rootQuery(
+    "select id from clara.firm_memberships where firm_id=$1 and user_id=$2 and status='active'",
+    [w.firms.A, bk])).rows[0].id;
+  await humanQuery(w.users.alice,
+    "select clara.remove_member(p_membership => $1, p_op_key => $2)", [mem, opk("b1drm")]);
   const e1 = await assertRaises(CLR.badRequest,
-    () => proposeAsAgent({ role: WAKE_ROLE.interactive, ...cViewer },
+    () => proposeAsAgent({ role: WAKE_ROLE.interactive, ...cLost },
       { client: w.clients.A1, counterparty: a.cp.id, basis: a.basis }),
-    "a viewer directing an interactive proposal");
+    "a director who lost standing after the credential was minted");
   assert.equal(reasonOf(e1), "interactive_director_required");
   assert.match(e1.detail, /"constraint":"active_bookkeeper"/);
 
@@ -2523,15 +2547,25 @@ test("bp1.B1-roster-m MUTANT — a LIVE headcount lets the remove/self-sign/re-a
   // The count is the whole wall here, so the mutant reverts it to what it was before H5: a bare
   // count of currently-active admin+ memberships. The manoeuvre then succeeds, which is the
   // measurement — B1-roster above could otherwise be refusing for some unrelated reason.
-  const second = await insertUser(`${w.prefix}_h5m`, "admin3");
-  await addMember(w.users.alice, { firm: w.firms.A, user: second, role: "admin", opKey: opk("h5madd") });
-  const membership = (await rootQuery(
-    "select id from clara.firm_memberships where firm_id=$1 and user_id=$2 and status='active'",
-    [w.firms.A, second])).rows[0].id;
+  // Independent of whatever the cells above left behind: remove EVERY active admin+ membership
+  // except alice's, through the audited door. That is the state the mutant needs — one active
+  // admin, several departed ones — and computing it rather than assuming it keeps this cell from
+  // silently measuring the previous cell's leftovers.
+  const others = await rootQuery(
+    `select m.id from clara.firm_memberships m
+      where m.firm_id=$1 and m.status='active' and m.user_id<>$2
+        and clara.role_rank(m.role) >= clara.role_rank('admin')`,
+    [w.firms.A, w.users.alice]);
+  for (const row of others.rows) {
+    await humanQuery(w.users.alice,
+      "select clara.remove_member(p_membership => $1, p_op_key => $2)", [row.id, opk(`h5mrm${row.id.slice(0, 6)}`)]);
+  }
   const { cp, basis } = await eligibleVendor("H5m");
   const p = await proposeAsAgent(await interactiveActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await humanQuery(w.users.alice,
-    "select clara.remove_member(p_membership => $1, p_op_key => $2)", [membership, opk("h5mrm")]);
+  const durable = await humanQuery(w.users.alice,
+    "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
+  assert.ok(Number(durable.rows[0].n) >= 2,
+    `control: the DURABLE window still sees the departures, got ${durable.rows[0].n}`);
 
   await withPostTimeControl(() => withMutant(SIGNER_COUNT_SIG, [
     ["    + (select count(*) from clara.firm_invites i", "    + 0 * (select count(*) from clara.firm_invites i"],

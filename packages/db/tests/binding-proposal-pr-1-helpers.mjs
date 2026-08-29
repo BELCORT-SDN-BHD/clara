@@ -255,18 +255,47 @@ const foldAlnum = (s) => s.toLowerCase().replace(/[^a-zA-Z0-9]/g, "");
  *  sharing clara.name_family_token(name) — and x36's shared builder names them all
  *  "EZACCOUNT SECRETARY …", so the SECOND one makes a family and W15 rightly refuses both.
  *  A shared fixture that trips a real wall is a fixture defect, not a wall defect. */
-export async function seedUniqueFamilyVendor(firm, client, tag, { registration = null } = {}) {
+export async function seedUniqueFamilyVendor(firm, client, tag, { registration = null, tin = null } = {}) {
   const lead = `VND${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
   const name = `${lead} SUPPLIES SDN BHD`;
   const reg = registration ?? `2019${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+  // `tin` is set AT INSERT, never by a later UPDATE: clara._tf_counterparty_update_0011 is a
+  // positive column whitelist admitting only name/terms/merge, so `update … set tin=…` is refused
+  // CLR08 'illegal counterparty mutation'. Measured on the rig, not reasoned about.
   const r = await rootQuery(
-    `insert into clara.counterparties(firm_id,client_id,kind,name,name_normalized,registration_no,registration_normalized,created_by)
-     values($1,$2,'vendor',$3,$5,$4,$6,
+    `insert into clara.counterparties(firm_id,client_id,kind,name,name_normalized,registration_no,registration_normalized,tin,created_by)
+     values($1,$2,'vendor',$3,$5,$4,$6,$7,
        (select user_id from clara.firm_memberships where firm_id=$1 and status='active' limit 1))
      returning id`,
-    [firm, client, name, reg, foldAlnum(name), foldAlnum(reg)],
+    [firm, client, name, reg, foldAlnum(name), foldAlnum(reg), tin],
   );
-  return { id: r.rows[0].id, name, nameNorm: foldAlnum(name), reg, regNorm: foldAlnum(reg), lead };
+  return { id: r.rows[0].id, name, nameNorm: foldAlnum(name), reg, regNorm: foldAlnum(reg), tin, lead };
+}
+
+/**
+ * Age every departure the WORLD ARRIVED WITH out of the 90-day roster window (H5).
+ *
+ * WHY THIS IS A FIXTURE CORRECTION AND NOT A WALL RELAXATION. buildWorld's legacy-onboarding
+ * bridge (rig-fixtures.mjs:106-111) mints a TEMPORARY admin, uses it as the distinct checker for
+ * commit_client_onboarding, and removes it again — once per client. So every firm this rig builds
+ * arrives carrying one or two admin+ memberships that ended seconds ago, and
+ * clara.eligible_binding_signer_count rightly counts them: a firm that had a second admin last
+ * month is a firm that can have one again. That is the wall working, and in production it is the
+ * fail-closed direction. But it means NO firm in a freshly built world is solo, and 裁-32's solo
+ * arm would then be untestable — a fixture that cannot reach the case is not evidence about it.
+ *
+ * So the machinery's own departures are pushed past the window, and nothing else is touched: the
+ * roster moves each CELL makes are all inside it, which is exactly what those cells measure.
+ */
+export async function ageOutPriorDepartures(firm) {
+  const r = await rootQuery(
+    `update clara.firm_memberships
+        set removed_at = removed_at - interval '200 days'
+      where firm_id = $1 and status = 'removed' and removed_at is not null
+        and removed_at > now() - interval '90 days'
+      returning id`,
+    [firm]);
+  return r.rowCount;
 }
 
 /** x36's seedF123Evidence, re-cut with the three knobs this battery's new walls need — a
