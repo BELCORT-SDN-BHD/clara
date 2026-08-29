@@ -130,8 +130,17 @@ export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: strin
   }
   // Never even read the pack: the run cannot say it looked, so it must not settle as though it
   // did. Absence is not evidence (review law 2) — this falls through to the failed branch.
+  // AND IT MUST NOT BLAME THE MODEL FOR OUR BUGS (S9). A tool call that never reached the database
+  // — pools, a credential mint, a driver fault — means whatever went wrong was ours, and
+  // `internal` is the honest code. Only a run where the model genuinely never called a tool, or
+  // every call was a real DB verdict, is 'model_error'. This is the one field a dead-letter triage
+  // reads first.
   return {
-    outcome: { kind: "refused", code: "model_error", message: text.slice(0, 500) || "the run ended without reading the bank pack" },
+    outcome: {
+      kind: "refused",
+      code: rec.infraFaults > 0 ? "internal" : "model_error",
+      message: text.slice(0, 500) || "the run ended without reading the bank pack",
+    },
     usageTokens,
   };
 }

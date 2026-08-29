@@ -18,10 +18,28 @@ import { z } from "zod";
 import { READ_TOOLS, closeModelIdentity } from "./closePrep.v1.prompt.js";
 import { closeScoped, closeOpKey, type CloseTaskContext, type PgExec } from "./closePrep.v1.infra.js";
 
+/**
+ * DID THE DATABASE JUDGE THIS REQUEST, or did the call never reach it?
+ *
+ * Only the estate's own typed refusal codes count as a verdict. That is a POSITIVE test on the
+ * one signal that actually means "the DB considered this and said no" — and everything else falls
+ * to the other branch, which is the fail-safe direction here: a permission misconfiguration, a
+ * pools injection failure, assertTailBinding's throw, a driver-level ECONNREFUSED. None of those
+ * is the model's fault, and treating an unrecognised error as "the DB spoke" would blame it.
+ */
+function isDbVerdict(e: unknown): boolean {
+  const code = (e as { code?: unknown })?.code;
+  return typeof code === "string" && /^CLR\d{2}$/.test(code);
+}
+
 /** One oracle-safe refusal for every authority/tenant fault, identical regardless of whether the
- *  subject exists — a refusal that varies with existence is an existence oracle. */
-export function closeRefusal(e: unknown): { error: string } {
+ *  subject exists — a refusal that varies with existence is an existence oracle.
+ *
+ *  IT ALSO RECORDS WHO IS AT FAULT, which is why it takes the record (S9, independent review).
+ *  See CloseRunRecord.infraFaults. */
+export function closeRefusal(rec: CloseRunRecord, e: unknown): { error: string } {
   const code = (e as { code?: string })?.code;
+  if (!isDbVerdict(e)) rec.infraFaults += 1;
   if (code === "CLR03" || code === "CLR04" || code === "CLR10" || code === "CLR11") {
     return { error: `refused (${code}): this act is not available to this run on this client.` };
   }
@@ -29,12 +47,25 @@ export function closeRefusal(e: unknown): { error: string } {
   return { error: `the act did not go through: ${message}` };
 }
 
-/** The per-run record. `acts` counts only replies the DATABASE marked admitted — never the
- *  model's account of what it did (constraint 2 in its narrowest form). */
-export type CloseRunRecord = { reads: number; acts: number; closeRunId: string | null };
+/** The per-run record.
+ *
+ *  `acts` counts only replies the DATABASE marked admitted — never the model's account of what it
+ *  did (constraint 2 in its narrowest form).
+ *
+ *  `infraFaults` counts tool calls that NEVER REACHED the database, and it exists to stop this
+ *  lane blaming the model for its own bugs (S9, independent review). Every zero-read run used to
+ *  settle `error_code = 'model_error'`, but the causes that land there are not all the model:
+ *  pools not injected, a credential mint failure, a CLR-less driver fault, and now
+ *  assertTailBinding's throw — a code defect in a frozen body, recorded on a durable audit field
+ *  as the model's fault. Since that guard fires on a STATIC property, one drifted call site would
+ *  have settled EVERY close task 'model_error' until somebody noticed. `internal` exists in the
+ *  agent_tasks roster (0006:153-154) for precisely this, and bankAgent.v1.ts's own comment already
+ *  calls it "the honest answer to 'we do not know'". A run where the model simply never called a
+ *  tool still settles 'model_error', which stays correct. */
+export type CloseRunRecord = { reads: number; acts: number; infraFaults: number; closeRunId: string | null };
 
 export function newCloseRunRecord(): CloseRunRecord {
-  return { reads: 0, acts: 0, closeRunId: null };
+  return { reads: 0, acts: 0, infraFaults: 0, closeRunId: null };
 }
 
 /**
@@ -64,8 +95,15 @@ export function newCloseRunRecord(): CloseRunRecord {
  * owns that, and G1B-E2a is what exercises it) — but it does catch the drift class, which is the
  * one that arrives later, from an edit that looks local and safe.
  *
- * A THROW IS THE RIGHT REFUSAL: it happens before any credential is minted, and the caller turns
- * it into a named refusal the model can read.
+ * A THROW IS THE RIGHT REFUSAL: it happens before any credential is minted (closeScoped is where
+ * the mint lives, and it runs after this), and the caller turns it into a named refusal.
+ *
+ * WHAT THIS GUARD IS, PRECISELY (N10): it validates a STATIC property — `sql` is a string literal
+ * and `values.length` is fixed by a fixed-length array at each site, so nothing here varies
+ * between calls. It can therefore only ever fire on the FIRST call of a broken site, and on every
+ * call after, identically. That makes it defence-in-depth, not a wall. THE INSTRUMENT THAT
+ * ACTUALLY CATCHES THE DRIFT CLASS AT THE MOMENT IT IS INTRODUCED IS CELL G1B-I6 — if this header
+ * is ever trimmed, keep that sentence and drop the rest.
  */
 export async function callCloseVerb(
   ctx: CloseTaskContext,
@@ -140,7 +178,7 @@ export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec:
       if ((out as { status?: unknown } | null)?.status === "acted") rec.reads += 1;
       return out;
     } catch (e) {
-      return closeRefusal(e);
+      return closeRefusal(rec, e);
     }
   };
 

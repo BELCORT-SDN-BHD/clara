@@ -304,6 +304,38 @@ test("G1B-I3 EVERY DB call matches its function's LIVE declared arity AND argume
   }
 });
 
+test("G1B-I7 a fault that never reached the database is OURS, not the model's", { skip: skip0138 }, async () => {
+  // S9 (independent review): every zero-read run used to settle error_code='model_error', but the
+  // causes landing there are not all the model — pools not injected, a credential mint failure, a
+  // driver fault, and assertTailBinding's throw, which is a CODE DEFECT IN A FROZEN BODY being
+  // recorded on a durable audit field as the model's fault. Since that guard fires on a static
+  // property, ONE drifted call site would have settled EVERY close task 'model_error' until
+  // somebody noticed. error_code is the first field a dead-letter triage reads.
+  const reads = await import("../workflows/closePrep.v1.reads.ts");
+
+  // A CLR-coded refusal IS the database judging the request — not our fault, not counted.
+  const dbVerdict = reads.newCloseRunRecord();
+  for (const code of ["CLR03", "CLR04", "CLR10", "CLR11"]) {
+    const e = Object.assign(new Error("refused"), { code });
+    reads.closeRefusal(dbVerdict, e);
+  }
+  assert.equal(dbVerdict.infraFaults, 0, "four real DB verdicts are not infrastructure faults");
+
+  // Everything else never reached the database, whatever it carries.
+  const ours = reads.newCloseRunRecord();
+  reads.closeRefusal(ours, new Error("runtime pools not injected (globalThis.__claraPools)"));
+  reads.closeRefusal(ours, new Error("wake_abandon_close: SQL binds 5 distinct placeholders ... drifted apart"));
+  reads.closeRefusal(ours, Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }));
+  reads.closeRefusal(ours, "a bare string, not an Error at all");
+  assert.equal(ours.infraFaults, 4, "a pools failure, the tail guard, a driver fault and a non-Error are all OURS");
+
+  // THE ORACLE-SAFETY PROPERTY MUST SURVIVE THE CHANGE: a CLR refusal's message must still be
+  // identical across the four codes' families, so it cannot become an existence oracle.
+  const m03 = reads.closeRefusal(reads.newCloseRunRecord(), Object.assign(new Error("x"), { code: "CLR03" })).error;
+  const m11 = reads.closeRefusal(reads.newCloseRunRecord(), Object.assign(new Error("totally different"), { code: "CLR11" })).error;
+  assert.equal(m03.replace("CLR03", "X"), m11.replace("CLR11", "X"), "the refusal text must not vary with the underlying message");
+});
+
 test("G1B-I6 the close helper refuses a call site whose tail numbering has drifted", { skip: skip0138 }, async () => {
   // NAMED NOTATION CLOSED THE *NAME* HALF, NOT THE *VALUE* HALF (independent review). On the close
   // lane the placeholder-to-value mapping is split across two files: each call site supplies

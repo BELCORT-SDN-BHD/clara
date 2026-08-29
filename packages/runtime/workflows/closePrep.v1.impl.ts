@@ -118,8 +118,18 @@ export async function runClosePrepModelStep(ctx: CloseTaskContext, modelId: stri
   }
   // Never read anything at all: the run cannot say it looked, so it must not settle as though it
   // did. Absence is not evidence (review law 2) — this falls to the failed branch.
+  //
+  // BUT IT MUST NOT BLAME THE MODEL FOR OUR BUGS (S9). If any tool call never reached the database
+  // — pools, a credential mint, assertTailBinding's throw, a driver fault — then whatever went
+  // wrong was ours, and `internal` is the honest code. Only a run where the model genuinely never
+  // called a tool, or every call was a real DB verdict, is 'model_error'. This is the one field a
+  // dead-letter triage reads first, so a wrong attribution here is expensive later.
   return {
-    outcome: { kind: "refused", code: "model_error", message: text.slice(0, 500) || "the run ended without reading anything" },
+    outcome: {
+      kind: "refused",
+      code: rec.infraFaults > 0 ? "internal" : "model_error",
+      message: text.slice(0, 500) || "the run ended without reading anything",
+    },
     usageTokens,
   };
 }

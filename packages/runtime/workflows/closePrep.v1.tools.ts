@@ -39,7 +39,7 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
       const reply = await callCloseVerb(ctx, verb, subject, sql, args, rationale, modelId);
       return countIfAdmitted(rec, reply);
     } catch (e) {
-      return closeRefusal(e);
+      return closeRefusal(rec, e);
     }
   };
 

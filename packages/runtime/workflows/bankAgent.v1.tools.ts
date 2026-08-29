@@ -24,11 +24,23 @@ import { z } from "zod";
 import { PACK_TOOL, MATCH_TOOL, EXCEPTION_TOOL, PROMOTION_TOOL, bankModelIdentity } from "./bankAgent.v1.prompt.js";
 import { bankScoped, bankOpKey, type BankTaskContext, type PgExec } from "./bankAgent.v1.infra.js";
 
+/** DID THE DATABASE JUDGE THIS, or did the call never reach it? Only the estate's own typed
+ *  refusal codes count as a verdict — a POSITIVE test on the one signal that means "the DB
+ *  considered this and said no". Everything else (pools, a mint failure, a driver fault) falls to
+ *  the other branch, which is the fail-safe direction: none of those is the model's fault. */
+function isDbVerdict(e: unknown): boolean {
+  const code = (e as { code?: unknown })?.code;
+  return typeof code === "string" && /^CLR\d{2}$/.test(code);
+}
+
 /** One oracle-safe refusal string for every authority/tenant fault, identical regardless of
  *  whether the subject exists — the same shape autoDraft's safeRead uses, for the same reason:
- *  a refusal that varies with existence is an existence oracle. */
-function refusal(e: unknown): { error: string } {
+ *  a refusal that varies with existence is an existence oracle.
+ *
+ *  IT ALSO RECORDS WHO IS AT FAULT (S9) — see BankRunRecord.infraFaults. */
+function refusal(rec: BankRunRecord, e: unknown): { error: string } {
   const code = (e as { code?: string })?.code;
+  if (!isDbVerdict(e)) rec.infraFaults += 1;
   if (code === "CLR03" || code === "CLR04" || code === "CLR10" || code === "CLR11") {
     return { error: `refused (${code}): this act is not available to this run on this client.` };
   }
@@ -39,10 +51,12 @@ function refusal(e: unknown): { error: string } {
 /** The mutable per-run record. One per tool set, i.e. per model-step execution attempt. */
 /** `packReads` counts pack reads ONLY, and only to keep their op keys distinct — see bankOpKey's
  *  own header for why a read carries a counter and a write must not (S2/S8). */
-export type BankRunRecord = { digest: string | null; admitted: number; packReads: number };
+/** `infraFaults` counts tool calls that NEVER REACHED the database, so this lane cannot blame the
+ *  model for its own bugs (S9) — see closePrep.v1.reads.ts's own record for the full statement. */
+export type BankRunRecord = { digest: string | null; admitted: number; packReads: number; infraFaults: number };
 
 export function newBankRunRecord(): BankRunRecord {
-  return { digest: null, admitted: 0, packReads: 0 };
+  return { digest: null, admitted: 0, packReads: 0, infraFaults: 0 };
 }
 
 /** Count a bank act, from a CLOSED WORLD OF THREE REPLY SHAPES.
@@ -107,7 +121,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
           if (typeof digest === "string" && digest.length > 0) rec.digest = digest;
           return pack;
         } catch (e) {
-          return refusal(e);
+          return refusal(rec, e);
         }
       },
     }),
@@ -188,7 +202,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
               .then((r) => countIfAdmitted(rec, r.rows[0]?.r ?? null)),
           );
         } catch (e) {
-          return refusal(e);
+          return refusal(rec, e);
         }
       },
     }),
@@ -231,7 +245,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
               .then((r) => countIfAdmitted(rec, r.rows[0]?.r ?? null)),
           );
         } catch (e) {
-          return refusal(e);
+          return refusal(rec, e);
         }
       },
     }),
@@ -277,7 +291,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
               .then((r) => countIfAdmitted(rec, r.rows[0]?.r ?? null)),
           );
         } catch (e) {
-          return refusal(e);
+          return refusal(rec, e);
         }
       },
     }),
