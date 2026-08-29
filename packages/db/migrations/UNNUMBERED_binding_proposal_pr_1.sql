@@ -94,14 +94,18 @@
 -- =====================================================================================
 -- Every wall in this file RAISEs. A raise rolls back the whole call, so no refused proposal can
 -- leave a receipt behind: there is no path today that writes a binding_agent_receipts row with a
--- non-empty failing_rungs. This is a DELIBERATE deviation from the design annexes' cell R-2,
--- which assumed a non-raising refusal path this door does not have (and which PostgreSQL cannot
--- give it without an autonomous transaction). The `failing_rungs` column still exists -- the
--- 19-column receipt contract REQUIRES it at ordinal 13 -- and ck_bar_proposed_iff_clean is a
--- REAL wall over it, proven in the tail by direct INSERT probes in BOTH lying directions. It is
--- the shape a future non-raising refusal path must satisfy; it is not a description of a
--- behaviour that exists. Absence is not evidence, so the absence is named here rather than left
--- for a reviewer to discover.
+-- refusal row at all. This is a DELIBERATE deviation from the design annexes' cell R-2, which
+-- assumed a non-raising refusal path this door does not have (and which PostgreSQL cannot give
+-- it without an autonomous transaction; 0126:158-170 says the same thing about its own doors).
+-- AN EARLIER DRAFT OF THIS FILE KEPT THE VOCABULARY ANYWAY -- a `failing_rungs` column, a
+-- nullable `binding_id`, and a ck_bar_proposed_iff_clean CHECK pairing them -- described as "the
+-- shape a future refusal path must satisfy". The independent gate ruled that out (O2/B2) and was
+-- right to: a vocabulary no code can write is not a wall, it is a promise, and a reader who finds
+-- `failing_rungs` on a receipt table reasonably concludes refusals are recorded there. They are
+-- not. So `binding_id` is NOT NULL, the CHECK is gone, the column is gone, and the 19-column
+-- contract's ordinal-13 slot is filled by an honest empty constant in the shim. Every row that
+-- exists IS a clean proposal, and the type now says so. Refusals are evidenced on the wake
+-- task/turn path, exactly as 0126's doors evidence theirs.
 --
 -- =====================================================================================
 -- SS1 -- PRESTATE. Fail-closed; an absent or wrong-shaped premise aborts the apply, loudly.
@@ -131,6 +135,8 @@ begin
                  ('clara.reset_binding_decline(uuid,text,text)'),
                  ('clara._binding_extra_blocker(uuid,uuid,uuid,jsonb,jsonb)'),
                  ('clara.eligible_binding_signer_count(uuid)'),
+                 ('clara._binding_suppression(uuid,uuid,uuid)'),
+                 ('clara._expire_stale_proposals(uuid,uuid,uuid)'),
                  ('clara.sign_vendor_identity_binding(uuid,text,text)')) t(n)
    where to_regprocedure(t.n) is not null;
   if v_missing is not null then
@@ -145,7 +151,7 @@ begin
      ('_derive_vendor_binding_basis','_propose_vendor_binding_agent_core',
       'wake_propose_vendor_identity_binding','wake_list_binding_candidates',
       'decline_vendor_identity_binding','reset_binding_decline','_binding_extra_blocker',
-      'eligible_binding_signer_count');
+      'eligible_binding_signer_count','_binding_suppression','_expire_stale_proposals');
   if v_missing is not null then
     raise exception 'binding proposal pr-1 prestate: pg_proc already carries name(s) under some arity: %', v_missing
       using errcode = 'CLR10';
@@ -242,7 +248,7 @@ begin
       using errcode = 'CLR10';
   end if;
   select string_agg(t.n, ', ' order by t.n) into v_missing
-    from (values ('kb_binding.agent_proposed'),('kb_binding.declined'),('kb_binding.decline_reset')) t(n)
+    from (values ('kb_binding.agent_proposed'),('kb_binding.declined'),('kb_binding.decline_reset'),('kb_binding.expired')) t(n)
    where exists (select 1 from clara.event_types e where e.name = t.n);
   if v_missing is not null then
     raise exception 'binding proposal pr-1 prestate: clara.event_types already carries: %', v_missing using errcode = 'CLR10';
@@ -482,12 +488,13 @@ create table clara.binding_agent_receipts (
   firm_id          uuid        not null references clara.firms(id),
   client_id        uuid        not null,
   counterparty_id  uuid        not null,
-  binding_id       uuid,
+  binding_id       uuid        not null,
   model            text,
   model_version    text,
-  rationale        text        not null check (btrim(rationale) <> ''),
+  -- M2 (gate, 2026-08-29): a length cap. `rationale` is model-authored prose rendered on a human
+  -- card; unbounded text is a denial-of-reading surface as much as a storage one.
+  rationale        text        not null check (btrim(rationale) <> '' and length(rationale) <= 4000),
   verdict          jsonb       not null check (jsonb_typeof(verdict) = 'object'),
-  failing_rungs    text[]      not null default '{}'::text[],
   via_wake_kind    text        not null,
   trigger_kind     text        not null check (trigger_kind in ('wake_task','wake_credential')),
   trigger_id       text        not null check (btrim(trigger_id) <> ''),
@@ -501,20 +508,25 @@ create table clara.binding_agent_receipts (
     references clara.clients(id, firm_id),
   constraint fk_bar_counterparty foreign key (counterparty_id, firm_id, client_id)
     references clara.counterparties(id, firm_id, client_id),
+  -- M1 (gate): DEFERRABLE INITIALLY DEFERRED. The receipt and the binding reference each other,
+  -- so one write has to go second. An earlier draft inserted the binding, then the receipt, then
+  -- UPDATEd the binding to point at it -- an update on a row written moments earlier, purely to
+  -- satisfy ordering. With both FKs deferred to COMMIT the two rows are inserted with pre-minted
+  -- uuids and no update is needed at all.
   constraint fk_bar_binding foreign key (binding_id, firm_id, client_id)
-    references clara.vendor_identity_bindings(id, firm_id, client_id),
-  constraint ck_bar_proposed_iff_clean
-    check ((binding_id is not null) = (failing_rungs = '{}'::text[]))
+    references clara.vendor_identity_bindings(id, firm_id, client_id)
+    deferrable initially deferred
 );
 comment on table clara.binding_agent_receipts is
   '裁-18b PR-1: one row per Clara vendor-binding proposal act. client_id and counterparty_id are '
   'both NOT NULL -- unlike F-A7b''s plan-tied acts, every member of this family is client- AND '
-  'counterparty-scoped, so a nullable here would be a wall nothing needs. binding_id is nullable '
-  'and paired with failing_rungs by ck_bar_proposed_iff_clean (the 0126 filed-iff-clean idiom in '
-  'the form that is TRUE for this act rather than borrowed and relaxed): TODAY every refusal in '
-  'clara._propose_vendor_binding_agent_core RAISEs, so no live path writes a dirty row -- the '
-  'CHECK is the wall a future non-raising refusal path must satisfy, and the migration''s own '
-  'header says so plainly rather than implying a behaviour that does not exist. '
+  'counterparty-scoped, so a nullable here would be a wall nothing needs. binding_id is NOT NULL '
+  'and there is no failing_rungs column: every wall in clara._propose_vendor_binding_agent_core '
+  'RAISEs, a raise rolls the row back, so a REFUSAL RECEIPT IS NOT A REPRESENTABLE STATE HERE '
+  '(gate ruling O2/B2, 2026-08-29 -- an earlier draft carried the vocabulary anyway and it was '
+  'struck out: a shape no code can write is a promise, not a wall). The 19-column receipt '
+  'contract''s ordinal-13 failing_rungs is satisfied by an honest empty constant in the shim. '
+  'Every row that exists IS a clean proposal. '
   'THE TRIGGER PAIR IS HONEST -- trigger_id NAMES WHAT trigger_kind SAYS IT IS. ''wake_task'' '
   'carries a REAL clara.agent_tasks id (read from the credential via clara._wake_task_id()); '
   '''wake_credential'' carries the credential uuid UNDER ITS OWN NAME. Conductor ruling '
@@ -581,7 +593,8 @@ insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expec
 insert into clara.event_types(name, client_scoped, description) values
   ('kb_binding.agent_proposed', true, 'Clara proposed a vendor identity binding (裁-18b)'),
   ('kb_binding.declined',       true, 'A human admin declined a proposed vendor identity binding (裁-18b/G7)'),
-  ('kb_binding.decline_reset', true, 'An admin lifted a binding decline so the pair may be proposed again (裁-18b)');
+  ('kb_binding.decline_reset', true, 'An admin lifted a binding decline or revocation so the pair may be proposed again (裁-18b)'),
+  ('kb_binding.expired',       true, 'A stale proposed vendor identity binding passed its expiry (裁-18b/B5)');
 
 -- The shim -- a real projection from the start. subject_id is coalesce(binding_id,
 -- counterparty_id) so a receipt without a binding row still names the thing it was about.
@@ -591,7 +604,9 @@ create view clara._agent_receipt_src_pb_binding as
     r.id::text                                        as receipt_id,
     r.firm_id                                         as firm_id,
     r.client_id                                       as client_id,
-    coalesce(r.binding_id, r.counterparty_id)::text   as subject_id,
+    -- binding_id is NOT NULL (gate O2/B2), so the coalesce an earlier draft carried here was
+    -- dead code describing a receipt shape that cannot exist. The subject IS the binding.
+    r.binding_id::text                                as subject_id,
     r.acting_actor                                    as acting_actor,
     r.on_behalf_of                                    as on_behalf_of,
     r.created_at                                      as occurred_at,
@@ -599,7 +614,13 @@ create view clara._agent_receipt_src_pb_binding as
     r.model_version                                   as model_version,
     r.rationale                                       as rationale,
     r.verdict                                         as verdict,
-    r.failing_rungs                                   as failing_rungs,
+    -- B2 (gate ruling O2, 2026-08-29): the 19-column contract REQUIRES a failing_rungs at
+    -- ordinal 13, but this door has no refusal-receipt path to fill it -- every wall RAISEs,
+    -- and a raise rolls the row back (0126:158-170 says exactly this). So the column is gone
+    -- from the TABLE and the contract is satisfied by an honest empty constant: every row
+    -- that exists IS a clean proposal. Refusals are evidenced on the wake task/turn path,
+    -- like 0126's own doors.
+    '{}'::text[]                                      as failing_rungs,
     r.via_wake_kind                                   as via_wake_kind,
     r.trigger_kind                                    as trigger_kind,
     r.trigger_id                                      as trigger_id,
@@ -666,8 +687,13 @@ alter table clara.vendor_identity_bindings add constraint ck_vib_proposal_receip
   check (proposal_receipt_id is null or proposed_by_agent);
 -- W12, receipt congruence -- a STRUCTURAL composite FK, never a bare uuid: the receipt must
 -- belong to the SAME firm as the binding (0142's fk_onboarding_plans_opened_from_question idiom).
+-- DEFERRABLE INITIALLY DEFERRED, the twin of fk_bar_binding (M1): the two rows reference each
+-- other, so with BOTH FKs checked at COMMIT the door inserts them in either order with
+-- pre-minted uuids and no post-insert UPDATE. Deferring the check does not weaken it -- the
+-- transaction still cannot commit with either side dangling.
 alter table clara.vendor_identity_bindings add constraint fk_vib_proposal_receipt
-  foreign key (proposal_receipt_id, firm_id) references clara.binding_agent_receipts(id, firm_id);
+  foreign key (proposal_receipt_id, firm_id) references clara.binding_agent_receipts(id, firm_id)
+  deferrable initially deferred;
 -- The decline pair, mirroring the LIVE ck_vib_revoked read byte-exact in SS1(c). Reusing
 -- revoked_by/revoked_at for a decline is not merely dishonest, it is IMPOSSIBLE: ck_vib_revoked
 -- says (status='revoked') = (revoked_at is not null), so a declined row stamping revoked_at
@@ -876,6 +902,81 @@ revoke all on function clara._derive_vendor_binding_basis(uuid,uuid,uuid) from p
 --        model chose.
 --   14-17 the writes.
 -- =====================================================================================
+-- SS6a -- clara._binding_suppression: THE HUMAN "NO", ONCE (gate B4, ruling (b))
+-- =====================================================================================
+-- Two terminal human decisions suppress a pair, and BOTH proposal writers plus the read verb
+-- consult this one body:
+--   'declined'  -- a human refused the proposal card.
+--   'revoked'   -- a human ended a binding that had been LIVE (0028:936-939). The gate found
+--                  this one: the frozen derivation only refuses on a LIVE binding, and no index
+--                  covers a revoked row, so a vendor a human deliberately un-bound would be
+--                  re-proposed on the very next filing turn. Revoking is a stronger statement
+--                  than declining -- somebody trusted this binding, watched it work, and took it
+--                  away again -- so it would be perverse for it to suppress less.
+-- Both are lifted only by the named human door, clara.reset_binding_decline.
+create function clara._binding_suppression(p_firm uuid, p_client uuid, p_counterparty uuid)
+  returns text language sql stable security definer set search_path = clara, pg_temp as $fn$
+  select b.status from clara.vendor_identity_bindings b
+   where b.firm_id = p_firm and b.client_id = p_client and b.counterparty_id = p_counterparty
+     and b.status in ('declined','revoked')
+   order by case b.status when 'revoked' then 0 else 1 end, b.created_at desc
+   limit 1;
+$fn$;
+comment on function clara._binding_suppression(uuid,uuid,uuid) is
+  '裁-18b PR-1 (gate B4): returns ''declined'' or ''revoked'' when a human has terminally said no '
+  'to this (client, counterparty), else NULL. ONE definition, consulted by both proposal writers '
+  'and by clara.wake_list_binding_candidates. Revoked suppresses because the frozen derivation '
+  'only refuses on a LIVE binding and no index covers a revoked row -- without this, a vendor a '
+  'human deliberately un-bound is re-proposed on the next filing turn. Lifted only by '
+  'clara.reset_binding_decline.';
+revoke all on function clara._binding_suppression(uuid,uuid,uuid) from public;
+
+-- =====================================================================================
+-- SS6a2 -- clara._expire_stale_proposals: the in-door stale-`proposed` sweep (gate B5)
+-- =====================================================================================
+-- THE TRAP THE GATE FOUND: nothing in the estate has ever expired a `proposed` row. Every
+-- `status='expired'` write in 0028 filters `status='live'`. That was harmless while a stale
+-- proposal merely sat there -- but with uq_vib_one_active_binding covering ('proposed','live'),
+-- a twelve-month-old proposal becomes BOTH unsignable (sign refuses binding_expired) AND
+-- un-re-proposable (the index refuses the new row). The pair would be permanently stuck, and the
+-- only visible symptom would be a `binding_conflict` nobody could act on.
+-- So both proposal writers and the read verb call this FIRST: expire past-expiry `proposed` rows
+-- for the pair, audited and evented per act. A clocked sweep over the whole estate is PR-4's
+-- (law 80's receipt obligation bites there, where the act is unattended); this is the in-door
+-- half that keeps the door itself from deadlocking on its own index.
+create function clara._expire_stale_proposals(p_firm uuid, p_client uuid, p_counterparty uuid)
+  returns integer language plpgsql security definer set search_path = clara, pg_temp as $fn$
+declare r record; v_n int := 0;
+begin
+  for r in
+    update clara.vendor_identity_bindings
+       set status = 'expired'
+     where firm_id = p_firm and client_id = p_client and counterparty_id = p_counterparty
+       and status = 'proposed' and expires_at <= now()
+    returning id, client_id, counterparty_id, created_by
+  loop
+    v_n := v_n + 1;
+    perform clara._audit(p_firm, clara.agent_user_id(), null, null,
+      'expire_stale_binding_proposal', null,
+      jsonb_build_object('binding_id', r.id, 'client_id', r.client_id,
+        'counterparty_id', r.counterparty_id, 'proposed_by', r.created_by));
+    perform clara._append_event(p_firm, 'kb_binding.expired', r.client_id,
+      clara.agent_user_id(), null, null, null, null, null,
+      jsonb_build_object('binding_id', r.id, 'counterparty_id', r.counterparty_id));
+  end loop;
+  return v_n;
+end $fn$;
+comment on function clara._expire_stale_proposals(uuid,uuid,uuid) is
+  '裁-18b PR-1 (gate B5): expires past-expiry `proposed` rows for one (client, counterparty), '
+  'audited and evented per row. Nothing in the estate had ever expired a proposed row -- every '
+  'status=''expired'' write in 0028 filters status=''live'' -- which, once '
+  'uq_vib_one_active_binding covers (''proposed'',''live''), would leave a stale proposal both '
+  'unsignable and un-re-proposable, stuck forever behind a binding_conflict nobody could act on. '
+  'Called FIRST by both proposal writers and by the eligibility read. The CLOCKED estate-wide '
+  'sweep is PR-4''s, where law 80''s receipt obligation applies to an unattended act.';
+revoke all on function clara._expire_stale_proposals(uuid,uuid,uuid) from public;
+
+-- =====================================================================================
 -- SS6b -- clara._binding_extra_blocker: THE POST-DERIVATION IDENTITY WALLS, ONCE.
 -- =====================================================================================
 -- Every wall the 2026-08-29 cross-model adversarial pass added sits HERE, in one body that the
@@ -901,7 +1002,7 @@ begin
     from clara.counterparties c where c.id = p_counterparty;
 
   -- W15 -- LAW 79'S FAMILY-COLLISION PREDICATE (conductor ruling (e); the CRITICAL finding of
-  -- the 2026-08-29 pass). The predicate has existed since 0103:755 and no binding path has ever
+  -- the 2026-08-29 pass). The predicate has existed since 0103:781 and no binding path has ever
   -- called it.
   -- THE ATTACK IT CLOSES: misattribute and approve three crafted `ROME...`-family invoices
   -- against vendor A. The derivation then stores vendor B's stable LCP beside vendor A's
@@ -994,9 +1095,10 @@ create function clara._propose_vendor_binding_agent_core(
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fn$
 declare
   v_dedupe jsonb; v_derived jsonb; v_basis jsonb; v_resolved jsonb;
-  v_docs uuid[]; v_binding uuid; v_receipt uuid; v_cp uuid;
+  v_docs uuid[]; v_binding uuid; v_receipt uuid := gen_random_uuid(); v_cp uuid;
   v_rationale text; v_trigger_kind text; v_trigger_id text;
   v_blocker text; v_bad_field int; v_bad_f1 int; v_bad_f2 int; v_covered int;
+  v_expired int; v_suppressed text;
 begin
   -- (3) op_key.
   if nullif(btrim(coalesce(p_op_key, '')), '') is null then
@@ -1069,11 +1171,19 @@ begin
   --      a read verb Clara may choose not to call is not a brake. The HUMAN door is untouched:
   --      a person may always propose again, which is why this rung lives here and not in
   --      _derive_vendor_binding_proposal.
-  if exists (select 1 from clara.vendor_identity_bindings b
-              where b.firm_id = p_firm and b.client_id = p_client
-                and b.counterparty_id = p_counterparty and b.status = 'declined') then
-    raise exception 'binding_declined' using errcode = 'CLR36',
-      detail = '{"reason":"binding_declined","class":"loop_brake"}';
+  -- (10a) THE STALE-PROPOSED SWEEP, FIRST (gate B5). With uq_vib_one_active_binding covering
+  --       ('proposed','live'), a past-expiry proposal would otherwise make the pair permanently
+  --       stuck -- unsignable AND un-re-proposable.
+  v_expired := clara._expire_stale_proposals(p_firm, p_client, p_counterparty);
+
+  -- (10) W14, THE SUPPRESSION WALL (gate B4, ruling (b)). A human's terminal "no" -- DECLINED or
+  --      REVOKED -- and Clara does not ask again. Revoked is the one the gate found: the frozen
+  --      derivation refuses only on a LIVE binding and no index covers a revoked row, so a
+  --      vendor a human deliberately un-bound was re-proposed on the next filing turn.
+  v_suppressed := clara._binding_suppression(p_firm, p_client, p_counterparty);
+  if v_suppressed is not null then
+    raise exception 'binding_%', v_suppressed using errcode = 'CLR36',
+      detail = jsonb_build_object('reason', 'binding_' || v_suppressed, 'class', 'loop_brake')::text;
   end if;
 
   -- (11) The frozen derivation. W4 and W8 are ITS rungs, delegated unchanged -- this door
@@ -1171,7 +1281,8 @@ begin
     insert into clara.vendor_identity_bindings(
         firm_id, client_id, counterparty_id, status,
         f1_vendor_name_norm, f2_invoice_prefix, registration_at_signing,
-        content_hash, created_by, expires_at, proposed_by_agent, proposer_model, directed_by)
+        content_hash, created_by, expires_at, proposed_by_agent, proposer_model, directed_by,
+        proposal_receipt_id)
       values (
         p_firm, p_client, v_cp, 'proposed',
         v_derived->>'f1_vendor_name_norm',
@@ -1187,7 +1298,8 @@ begin
         -- treating them as a director would make every clocked proposal unsignable by the one
         -- person most likely to be looking at it. Measured on the rig: with filing included,
         -- the whole normal flow fell into the solo-attestation arm.
-        case when p_wake_kind = 'interactive' then p_obo else null end)
+        case when p_wake_kind = 'interactive' then p_obo else null end,
+        v_receipt)
       returning id into v_binding;
   exception when unique_violation then
     raise exception 'binding_conflict' using errcode = 'CLR36',
@@ -1232,10 +1344,10 @@ begin
     v_trigger_kind := 'wake_credential'; v_trigger_id := p_credential::text;
   end if;
   insert into clara.binding_agent_receipts(
-      firm_id, client_id, counterparty_id, binding_id, model, model_version,
+      id, firm_id, client_id, counterparty_id, binding_id, model, model_version,
       rationale, verdict, via_wake_kind, trigger_kind, trigger_id, acting_actor, on_behalf_of)
     values (
-      p_firm, p_client, v_cp, v_binding, p_model->>'model', p_model->>'version',
+      v_receipt, p_firm, p_client, v_cp, v_binding, p_model->>'model', p_model->>'version',
       v_rationale,
       jsonb_build_object(
         'outcome', 'proposed',
@@ -1251,10 +1363,7 @@ begin
           'window_span_days', v_basis->'window_span_days',
           'distinct_posting_dates', v_basis->'distinct_posting_dates',
           'evidence_documents', v_basis->'evidence_documents')),
-      p_wake_kind, v_trigger_kind, v_trigger_id, p_actor, p_obo)
-    returning id into v_receipt;
-
-  update clara.vendor_identity_bindings set proposal_receipt_id = v_receipt where id = v_binding;
+      p_wake_kind, v_trigger_kind, v_trigger_id, p_actor, p_obo);
 
   -- (17) Audit + event, mirroring the human door's own pair so one act reads the same way on
   --      both axes. The event type `kb_binding.agent_proposed` is NEW and is registered by §3a
@@ -1338,7 +1447,7 @@ create function clara.wake_list_binding_candidates(p_client uuid)
   language plpgsql stable security definer set search_path = clara, pg_temp as $fn$
 declare
   w record; cp record; v_reason text; v_ok boolean; v_basis jsonb; v_derived jsonb;
-  v_open boolean; v_live boolean; v_declined boolean;
+  v_open boolean; v_live boolean; v_suppressed text;
 begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode = 'CLR03'; end if;
@@ -1360,14 +1469,14 @@ begin
        and c.merged_into is null and c.retired_at is null
      order by c.name, c.id
   loop
+    perform clara._expire_stale_proposals(w.firm_id, p_client, cp.id);
     select exists (select 1 from clara.vendor_identity_bindings b
                     where b.client_id = p_client and b.counterparty_id = cp.id and b.status = 'proposed'),
            exists (select 1 from clara.vendor_identity_bindings b
                     where b.client_id = p_client and b.counterparty_id = cp.id and b.status = 'live'
                       and b.expires_at > now()),
-           exists (select 1 from clara.vendor_identity_bindings b
-                    where b.client_id = p_client and b.counterparty_id = cp.id and b.status = 'declined')
-      into v_open, v_live, v_declined;
+           clara._binding_suppression(w.firm_id, p_client, cp.id)
+      into v_open, v_live, v_suppressed;
 
     v_basis := clara._derive_vendor_binding_basis(w.firm_id, p_client, cp.id);
 
@@ -1397,8 +1506,8 @@ begin
     -- The loop brakes, in precedence order. A human's "no" outranks everything: Clara must not
     -- re-propose what a human declined (risk R7), and the proposal door refuses it too (W14), so
     -- this row and that wall agree.
-    if v_declined then
-      v_ok := false; v_reason := 'binding_declined';
+    if v_suppressed is not null then
+      v_ok := false; v_reason := 'binding_' || v_suppressed;
     elsif v_open then
       v_ok := false; v_reason := 'binding_proposal_open';
     end if;
@@ -1410,7 +1519,7 @@ begin
     matched_approved_entries := coalesce((v_basis->>'matched_approved_entries')::int, 0);
     has_open_proposal := v_open;
     has_live_binding := v_live;
-    has_declined_proposal := v_declined;
+    has_declined_proposal := v_suppressed is not null;
     return next;
   end loop;
 end $fn$;
@@ -1516,7 +1625,7 @@ as $$
 declare
   c record; v_dedupe jsonb; v_client uuid; v_counterparty uuid;
   v_derived jsonb; v_binding uuid;
-  v_blocker text;
+  v_blocker text; v_suppressed text;
 begin
   c:=clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key)='' then
@@ -1552,13 +1661,11 @@ begin
   if v_dedupe is not null then return v_dedupe; end if;
   perform pg_advisory_xact_lock(
     hashtextextended(v_client::text || ':' || v_counterparty::text, 0));
-  if exists (
-    select 1 from clara.vendor_identity_bindings b
-    where b.firm_id=c.firm and b.client_id=v_client
-      and b.counterparty_id=v_counterparty and b.status='declined'
-  ) then
-    raise exception 'binding_declined' using errcode='CLR36',
-      detail='{"reason":"binding_declined","class":"loop_brake"}';
+  perform clara._expire_stale_proposals(c.firm,v_client,v_counterparty);
+  v_suppressed:=clara._binding_suppression(c.firm,v_client,v_counterparty);
+  if v_suppressed is not null then
+    raise exception 'binding_%', v_suppressed using errcode='CLR36',
+      detail=jsonb_build_object('reason','binding_'||v_suppressed,'class','loop_brake')::text;
   end if;
 
   update clara.vendor_identity_bindings
@@ -1832,8 +1939,8 @@ begin
   if not found or b.firm_id <> c.firm then
     raise exception 'binding not found' using errcode = 'CLR11';
   end if;
-  if b.status <> 'declined' then
-    raise exception 'binding_not_declined' using errcode = 'CLR36';
+  if b.status not in ('declined','revoked') then
+    raise exception 'binding_not_suppressing' using errcode = 'CLR36';
   end if;
   perform pg_advisory_xact_lock(
     hashtextextended(b.client_id::text || ':' || b.counterparty_id::text, 0));
@@ -1842,8 +1949,14 @@ begin
   -- audit history and stays readable, and 'expired' is the estate's existing terminal status
   -- that no wall keys on. The decline stamps are DELIBERATELY left in place -- ck_vib_declined
   -- pairs declined_at with status='declined', so they are cleared in the same statement.
+  -- Both stamp pairs clear, because both are CHECK-paired to their own status: ck_vib_declined
+  -- pairs declined_at with 'declined', and 0028's ck_vib_revoked pairs revoked_at with
+  -- 'revoked'. Leaving either stamp behind on an 'expired' row violates its own CHECK — caught
+  -- on the rig by the revoke arm of this door's own battery cell.
   update clara.vendor_identity_bindings
-     set status = 'expired', declined_at = null, decline_reason = null
+     set status = 'expired',
+         declined_at = null, decline_reason = null,
+         revoked_at = null, revoke_reason = null
    where id = p_binding;
 
   perform clara._audit(c.firm, c.actor, null, null,
@@ -1908,6 +2021,7 @@ begin
                  ('wake_propose_vendor_identity_binding'),('wake_list_binding_candidates'),
                  ('decline_vendor_identity_binding'),('reset_binding_decline'),
                  ('_binding_extra_blocker'),('eligible_binding_signer_count'),
+                 ('_binding_suppression'),('_expire_stale_proposals'),
                  ('sign_vendor_identity_binding')) t(n)
     left join lateral (select count(*)::int c from pg_proc p join pg_namespace n2 on n2.oid = p.pronamespace
                         where n2.nspname = 'clara' and p.proname = t.n) k on true
@@ -1961,17 +2075,15 @@ begin
   end if;
   v_stripped := v_src;
   v_stripped := replace(v_stripped, $blk$
-  v_blocker text;$blk$, '');
+  v_blocker text; v_suppressed text;$blk$, '');
   v_stripped := replace(v_stripped, $blk$
   perform pg_advisory_xact_lock(
     hashtextextended(v_client::text || ':' || v_counterparty::text, 0));
-  if exists (
-    select 1 from clara.vendor_identity_bindings b
-    where b.firm_id=c.firm and b.client_id=v_client
-      and b.counterparty_id=v_counterparty and b.status='declined'
-  ) then
-    raise exception 'binding_declined' using errcode='CLR36',
-      detail='{"reason":"binding_declined","class":"loop_brake"}';
+  perform clara._expire_stale_proposals(c.firm,v_client,v_counterparty);
+  v_suppressed:=clara._binding_suppression(c.firm,v_client,v_counterparty);
+  if v_suppressed is not null then
+    raise exception 'binding_%', v_suppressed using errcode='CLR36',
+      detail=jsonb_build_object('reason','binding_'||v_suppressed,'class','loop_brake')::text;
   end if;$blk$, '');
   v_stripped := replace(v_stripped, $blk$
   v_blocker:=clara._binding_extra_blocker(c.firm,v_client,
@@ -2359,18 +2471,18 @@ begin
   --      append-only guard on clara.domain_events forbids a DELETE, the same lesson §(3)'s f_a42
   --      probe learned on clara.agent_receipt_surfaces).
   select string_agg(t.n, ', ' order by t.n) into v_bad
-    from (values ('kb_binding.agent_proposed'),('kb_binding.declined'),('kb_binding.decline_reset')) t(n)
+    from (values ('kb_binding.agent_proposed'),('kb_binding.declined'),('kb_binding.decline_reset'),('kb_binding.expired')) t(n)
    where not exists (select 1 from clara.event_types e where e.name = t.n and e.client_scoped);
   if v_bad is not null then
     raise exception 'binding proposal pr-1 tail: event_types is missing (or not client_scoped): %', v_bad
       using errcode = 'CLR10';
   end if;
-  if (select count(*) from clara.event_types where name like 'kb_binding.%') <> 6 then
-    raise exception 'binding proposal pr-1 tail: clara.event_types carries % kb_binding.* member(s), expected 3+3=6',
+  if (select count(*) from clara.event_types where name like 'kb_binding.%') <> 7 then
+    raise exception 'binding proposal pr-1 tail: clara.event_types carries % kb_binding.* member(s), expected 3+4=7',
       (select count(*) from clara.event_types where name like 'kb_binding.%') using errcode = 'CLR10';
   end if;
   if (select count(*)::text from clara.event_types)
-     is distinct from ((select v from _bp1_pre where k = 'event_types_total')::int + 3)::text then
+     is distinct from ((select v from _bp1_pre where k = 'event_types_total')::int + 4)::text then
     raise exception 'binding proposal pr-1 tail: clara.event_types moved by something other than this file''s 2 rows (was %, now %)',
       (select v from _bp1_pre where k = 'event_types_total'),
       (select count(*)::text from clara.event_types) using errcode = 'CLR10';

@@ -27,7 +27,7 @@ import {
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import {
-  has28, has29, seedPayableAccount, propose, sign,
+  has28, has29, seedPayableAccount, propose, sign, revoke,
 } from "./x36-vendor-binding-helpers.mjs";
 import {
   bp1Live, failBp1, reasonOf, mintCred, MODEL, WAKE_ROLE,
@@ -43,6 +43,7 @@ const DOOR_SIG = "clara.wake_propose_vendor_identity_binding(uuid,uuid,jsonb,tex
 const READ_SIG = "clara.wake_list_binding_candidates(uuid)";
 const DECLINE_SIG = "clara.decline_vendor_identity_binding(uuid,text,text)";
 const BLOCKER_SIG = "clara._binding_extra_blocker(uuid,uuid,uuid,jsonb,jsonb)";
+const SUPPRESSION_SIG = "clara._binding_suppression(uuid,uuid,uuid)";
 
 let live = false;
 let w = null;
@@ -136,7 +137,6 @@ test("bp1.B1 filing credential through clara_wake_filing — ADMITTED, one propo
   const cid = await rootQuery(
     "select id from clara.wake_credentials where id = $1::uuid", [rec.trigger_id]);
   assert.equal(cid.rowCount, 1, "trigger_id resolves to a REAL wake credential row");
-  assert.deepEqual(rec.failing_rungs, []);
   assert.equal(rec.binding_id, r.binding_id);
 });
 
@@ -158,11 +158,17 @@ test("bp1.B2b the trigger contract — 'chat_turn' is NOT admitted, and 'wake_ta
   const { cp, basis } = await eligibleVendor("B2b");
   // (a) the value this table deliberately did NOT carry over from the estate's other two receipt
   //     tables is genuinely absent from the closed world — measured, not merely not-written.
+  // A REAL binding_id: the column is NOT NULL now (gate O2/B2), so a null one would be refused
+  // by 23502 before the trigger_kind CHECK is ever reached — the probe has to isolate the
+  // constraint it names.
+  const other = await eligibleVendor("B2b-anchor");
+  const anchor = await proposeAsAgent(await filingActor(),
+    { client: w.clients.A1, counterparty: other.cp.id, basis: other.basis });
   await assertRaises(PG.checkViolation, () => rootQuery(
     `insert into clara.binding_agent_receipts(firm_id,client_id,counterparty_id,binding_id,rationale,
         verdict,via_wake_kind,trigger_kind,trigger_id,acting_actor)
-     values($1,$2,$3,null,'probe','{}'::jsonb,'filing','chat_turn','x',$4)`,
-    [w.firms.A, w.clients.A1, cp.id, AGENT_USER_ID]), "chat_turn");
+     values($1,$2,$3,$5,'probe','{}'::jsonb,'filing','chat_turn','x',$4)`,
+    [w.firms.A, w.clients.A1, other.cp.id, AGENT_USER_ID, anchor.binding_id]), "chat_turn");
   // (b) the wake_task branch is REAL, not dead plumbing: attach an agent_tasks row to a filing
   //     credential and the receipt records THAT id, under 'wake_task'. No product path can mint
   //     such a credential for this door today (mint_wake_credential_for_task admits close_prep
@@ -878,14 +884,81 @@ test("bp1.D3m MUTANT — removing the declined brake lets Clara re-propose a ref
   const { cp, basis } = await eligibleVendor("D3m");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
   await declineBinding(w.users.alice, { binding: p.binding_id, reason: "no" });
-  // The needle is the MINIMAL fragment unique to the brake — `b.status = 'declined'` appears
-  // nowhere else in the core (this door never writes that status). A whole-block needle was the
-  // first attempt and it broke the moment the brake gained a firm_id conjunct; withMutant threw
-  // rather than running a silent no-op "mutant", which is the guard doing its job.
-  await withMutant(CORE_SIG, [["b.status = 'declined'", "false"]], async () => {
+  // The suppression moved into clara._binding_suppression when the gate ruled it must cover
+  // REVOKED as well and bind BOTH writers (B4) — so the mutant follows it there. withMutant
+  // threw the moment the old needle went stale rather than running a silent no-op "mutant",
+  // which is the guard doing its job twice now.
+  await withMutant(SUPPRESSION_SIG,
+    [["b.status in ('declined','revoked')", "false"]], async () => {
     const r = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
     assert.equal(r.status, "proposed", "without the brake the human's 'no' is ignored");
   });
+});
+
+test("bp1.D4 B4 — a REVOKED binding suppresses too, in both writers and the read", async () => {
+  failBp1(live);
+  // THE GATE'S FINDING: the frozen derivation refuses only on a LIVE binding, and no index
+  // covers a revoked row — so a vendor a human deliberately UN-BOUND was re-proposed on the very
+  // next filing turn. Revoking is a stronger statement than declining (somebody trusted this
+  // binding, watched it work, and took it away), so it would be perverse to suppress less.
+  const { cp, basis } = await eligibleVendor("D4");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  await sign(w.users.alice, { binding: p.binding_id });
+  await revoke(w.users.bob, { binding: p.binding_id, reason: "wrong vendor after all" });
+
+  const e1 = await assertRaises("CLR36",
+    async () => proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis }),
+    "Clara re-proposing a revoked pair");
+  assert.equal(reasonOf(e1), "binding_revoked");
+  const e2 = await assertRaises("CLR36",
+    () => propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id }),
+    "a human re-proposing a revoked pair");
+  assert.equal(reasonOf(e2), "binding_revoked");
+  const row = (await listCandidates(await filingActor(), w.clients.A1))
+    .find((x) => x.counterparty_id === cp.id);
+  assert.equal(row.eligible, false);
+  assert.equal(row.reason, "binding_revoked");
+  // …and the same named door lifts it.
+  await resetDecline(w.users.alice, { binding: p.binding_id, reason: "vendor re-confirmed" });
+  const again = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  assert.equal(again.status, "proposed");
+});
+
+test("bp1.D5 B5 — a stale PROPOSED row is expired in-door, so the widened index cannot deadlock", async () => {
+  failBp1(live);
+  // THE TRAP: nothing in the estate had ever expired a `proposed` row — every status='expired'
+  // write in 0028 filters status='live'. Once uq_vib_one_active_binding covers ('proposed',
+  // 'live'), a past-expiry proposal is BOTH unsignable (binding_expired) and un-re-proposable
+  // (the index), and the pair is stuck forever behind a binding_conflict nobody can act on.
+  // With PR-4's clock unbuilt, this in-door sweep is the ONLY drain.
+  const { cp, basis } = await eligibleVendor("D5");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  // Age it past expiry. ck_vib_expiry caps expires_at at created_at + 1 year, so both move.
+  await rootQuery(
+    `update clara.vendor_identity_bindings
+        set created_at = now() - interval '13 months', expires_at = now() - interval '1 month'
+      where id = $1`, [p.binding_id]);
+  // The stale row really is in the index's way first — the control that makes this discriminating.
+  const stuck = await rootQuery(
+    "select count(*)::int c from clara.vendor_identity_bindings where id=$1 and status='proposed'",
+    [p.binding_id]);
+  assert.equal(stuck.rows[0].c, 1, "control: the stale row is still 'proposed' before the door runs");
+
+  const fresh = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  assert.equal(fresh.status, "proposed", "the door drained the stale row and admitted a fresh proposal");
+  assert.notEqual(fresh.binding_id, p.binding_id);
+  const old = await bindingRow(p.binding_id);
+  assert.equal(old.status, "expired", "the stale row was expired, not deleted — it stays as history");
+  // The sweep is AUDITED and EVENTED per row (law 80's shape; the clocked estate-wide sweep is
+  // PR-4's, where the act is unattended).
+  const ev = await rootQuery(
+    "select count(*)::int c from clara.domain_events where event_type='kb_binding.expired' and (payload->>'binding_id')=$1",
+    [p.binding_id]);
+  assert.equal(ev.rows[0].c, 1);
+  const aud = await rootQuery(
+    "select count(*)::int c from clara.audit_log where fn='expire_stale_binding_proposal' and (args->>'binding_id')=$1",
+    [p.binding_id]);
+  assert.equal(aud.rows[0].c, 1);
 });
 
 // ===========================================================================
@@ -1351,26 +1424,32 @@ test("bp1.R1 the receipt reproduces the card from DB-OWNED inputs only", async (
   }
 });
 
-test("bp1.R2 ck_bar_proposed_iff_clean refuses BOTH lying shapes", async () => {
+test("bp1.R2 O2/B2 — a refusal receipt is not a REPRESENTABLE state, and the type says so", async () => {
   failBp1(live);
-  const { cp, basis } = await eligibleVendor("R2");
-  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  // The table is append-only, so both probes are INSERTs of a fresh row, not updates.
-  const base = {
-    firm: w.firms.A, client: w.clients.A1, cp: cp.id,
-    rationale: "probe", verdict: JSON.stringify({ outcome: "refused" }),
-  };
-  const ins = (bindingId, rungs) => rootQuery(
-    `insert into clara.binding_agent_receipts(firm_id,client_id,counterparty_id,binding_id,rationale,verdict,
-        failing_rungs,via_wake_kind,trigger_kind,trigger_id,acting_actor)
-     values($1,$2,$3,$4,$5,$6::jsonb,$7::text[],'filing','wake_credential','probe',$8)`,
-    [base.firm, base.client, base.cp, bindingId, base.rationale, base.verdict, rungs, AGENT_USER_ID]);
-  // (a) clean (no failing rungs) but no binding — a refusal pretending to be a proposal
-  const e1 = await assertRaises(PG.checkViolation, () => ins(null, []), "no binding, no failing rungs");
-  assert.equal(e1.constraint, "ck_bar_proposed_iff_clean");
-  // (b) a binding AND failing rungs — a proposal pretending to be a refusal
-  const e2 = await assertRaises(PG.checkViolation, () => ins(p.binding_id, ["w6"]), "binding + failing rungs");
-  assert.equal(e2.constraint, "ck_bar_proposed_iff_clean");
+  // The gate struck out this table's refusal vocabulary: every wall RAISEs, a raise rolls the
+  // row back, so no code can ever write a refusal receipt. What used to be a `failing_rungs`
+  // column and a ck_bar_proposed_iff_clean CHECK is now simply a NOT NULL binding_id.
+  // (a) the column is GONE from the table — asserted from the catalog, not from the migration.
+  const cols = await rootQuery(
+    `select count(*)::int c from information_schema.columns
+      where table_schema='clara' and table_name='binding_agent_receipts' and column_name='failing_rungs'`);
+  assert.equal(cols.rows[0].c, 0, "failing_rungs must not exist on the table");
+  // (b) …and a bindingless receipt is refused by NOT NULL, the simplest wall that is true.
+  const { cp } = await eligibleVendor("R2");
+  await assertRaises("23502", () => rootQuery(
+    `insert into clara.binding_agent_receipts(firm_id,client_id,counterparty_id,binding_id,rationale,
+        verdict,via_wake_kind,trigger_kind,trigger_id,acting_actor)
+     values($1,$2,$3,null,'probe','{}'::jsonb,'filing','wake_credential','probe',$4)`,
+    [w.firms.A, w.clients.A1, cp.id, AGENT_USER_ID]),
+    "a receipt with no binding");
+  // (c) the 19-column contract is still satisfied: the shim projects ordinal 13 as an honest
+  //     empty constant, so a human reading agent_receipts_visible sees a well-formed row.
+  const shim = await rootQuery(
+    `select a.attname, format_type(a.atttypid,a.atttypmod) t
+       from pg_attribute a where a.attrelid='clara._agent_receipt_src_pb_binding'::regclass
+        and a.attnum=13`);
+  assert.equal(shim.rows[0].attname, "failing_rungs");
+  assert.equal(shim.rows[0].t, "text[]");
 });
 
 test("bp1.R3 append-only — update and delete on the receipt are refused", async () => {
