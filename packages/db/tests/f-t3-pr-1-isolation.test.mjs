@@ -22,6 +22,8 @@ const gate = (t) => {
   }
   assert.fail("the F-T3 PR-1 tax platform relations are required for a focused or post-migration run: apply the migration, or set CLARA_ALLOW_MISSING_FT3_TAX_PLATFORM=1 for the package-wide pre-integration sweep");
 };
+
+// ---------------------------------------------------------------------------------------
 // THE ACL CENSUS AND THE TWO-FIRM ISOLATION PROOF. These six carry no firm dimension by
 // design, so "cross-tenant" means something sharper than a scoped read: NO tenant-facing role
 // reaches them AT ALL, and forced RLS admits zero rows to any firm's session even with a stray
