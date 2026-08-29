@@ -42,23 +42,25 @@ test("admission: same-session concurrent turn is rejected CLR13", { skip }, asyn
 // pre-change body; this is the post-change half). It used to assert that a firm at/over
 // its daily token limit was REFUSED CLR14. The owner ruled that gate out (TA-P12 = A, the
 // 2026-08-22 Track-A sitting; digest law 76 "meter, never cap"), so the same fixture must
-// now ADMIT — and the absence is MEASURED, not merely unobserved: the firm's own limit is
-// read back at 1 and its recorded UTC-day usage is read back far above it, which is the
-// exact state that raised CLR14 before the hotfix.
-test("admission: the daily token budget gate is GONE — a firm far over its own daily_token_limit still admits (F-A9 PR-0)", { skip }, async () => {
+// now ADMIT.
+// F-A9 PR-1B RE-CUT IT AGAIN: `firm_limits.daily_token_limit` is now a DROPPED column, so
+// the per-firm pin it used to write would raise 42703. The premise is still MEASURED, not
+// merely unobserved — the column's ABSENCE is asserted positively, and the recorded
+// UTC-day usage is read back far above the fn-constant default (1,000,000) the pre-hotfix
+// body fell back to for a firm carrying no limit row. That is the exact state that raised
+// CLR14 before, expressed in the only terms the schema still has.
+test("admission: the daily token budget gate is GONE and so is its column — a firm far over the old fn-constant default still admits (F-A9 PR-0 → PR-1B)", { skip }, async () => {
   const { owner, client, firm } = await rig.buildFirm("adm3");
   const session = await rig.createChatSession({ author: owner, client });
-  // Owner-only ledger + limits row: pin a limit of 1 and a usage total 1,000,000× it.
-  const limit = await rig.rootQuery(
-    "insert into clara.firm_limits (firm_id, daily_token_limit) values ($1, 1) on conflict (firm_id) do update set daily_token_limit=1 returning daily_token_limit",
-    [firm],
+  const deadCol = await rig.rootQuery(
+    "select column_name from information_schema.columns where table_schema='clara' and table_name='firm_limits' and column_name='daily_token_limit'",
   );
-  assert.equal(Number(limit.rows[0].daily_token_limit), 1, "the firm's daily_token_limit really is pinned to 1");
+  assert.equal(deadCol.rowCount, 0, "firm_limits.daily_token_limit is DROPPED at F-A9 PR-1B — there is no per-firm cap left to pin");
   const used = await rig.rootQuery(
-    "insert into clara.firm_usage_daily (firm_id, usage_date, tokens_used) values ($1, (now() at time zone 'UTC')::date, 1000000) on conflict (firm_id, usage_date) do update set tokens_used=excluded.tokens_used returning tokens_used",
+    "insert into clara.firm_usage_daily (firm_id, usage_date, tokens_used) values ($1, (now() at time zone 'UTC')::date, 5000000) on conflict (firm_id, usage_date) do update set tokens_used=excluded.tokens_used returning tokens_used",
     [firm],
   );
-  assert.ok(Number(used.rows[0].tokens_used) > 1, "the firm's recorded UTC-day usage really is far above its own limit");
+  assert.ok(Number(used.rows[0].tokens_used) > 1000000, "the firm's recorded UTC-day usage really is far above the fn-constant default the removed gate used");
 
   const admitted = await rig.beginChatTurn({ session, author: owner, turnKey: "b1" });
   assert.ok(admitted?.task_id, `an over-limit admission returns a task (got ${JSON.stringify(admitted)})`);

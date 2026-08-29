@@ -83,9 +83,14 @@ const RECONNECT_MAX_MS = 5000;
  *                                     honourable through the unattended door. It is a SEPARATE
  *                                     token, not a reuse of 're_admitted', because it reports a
  *                                     different event — see 0053's header.
- *  noop_existing / already_done / refused_budget / refused_attempts / lane_changed /
- *  skipped_direction all wrote their own sweep_run_item (where run-bound) and must NOT enqueue
- *  (idempotency + no double-spend). Pure. */
+ *  noop_existing / already_done / refused_budget / refused_concurrency / refused_attempts /
+ *  lane_changed / skipped_direction all wrote their own sweep_run_item (where run-bound) and
+ *  must NOT enqueue (idempotency + no double-spend). `refused_concurrency` is F-A9 PR-1B's
+ *  rename of the engine-protective concurrency refusal off the string it used to share with
+ *  two now-removed spend caps; `refused_budget` stays listed because historical rows and
+ *  receipts still carry it (law 6). NOTE THE SHAPE: this predicate is an ADMITTING allowlist,
+ *  never a refusal denylist, so a new refusal spelling is non-admitting BY CONSTRUCTION and
+ *  no consumer has to learn it to stay safe. Pure. */
 export function admissionNeedsStart(outcome) {
   return outcome === "admitted"
     || outcome === "re_admitted"
