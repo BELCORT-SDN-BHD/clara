@@ -30,6 +30,7 @@ import { UncodedFilingAffordance } from "./uncoded-filing-affordance";
 import { CodingTaskAffordance } from "./coding-task-affordance";
 import { LintFindingAffordance } from "./lint-finding-affordance";
 import { ComplianceWatchAffordance } from "./compliance-watch-affordance";
+import { SeedingProposalAffordance } from "./seeding-proposal-affordance";
 
 export type NeedsYouAffordanceProps = {
   row: ReviewQueueRow;
@@ -50,9 +51,19 @@ export type NeedsYouAffordanceProps = {
 
 export type NeedsYouAffordance = ComponentType<NeedsYouAffordanceProps>;
 
-/** Row kinds with no entry here render no inline act — a same-page link into
- *  the object that owns their verbs remains the whole affordance, exactly as
- *  it is today for every kind but open_question.
+/** Row kinds mapped to `null` render no inline act — a same-page link into
+ *  the object that owns their verbs remains the whole affordance (today:
+ *  `draft` alone).
+ *
+ *  A CLOSED, EXHAUSTIVE `Record<ReviewQueueRowKind, ...>` (Codex cross-model
+ *  review, fec6ab5b, MED-4) — not `Partial<>`. The prior `Partial<>` shape let
+ *  a tenth row_kind join `REVIEW_QUEUE_ROW_KINDS` (lib/firm/needs-you.ts) with
+ *  NO entry here and still pass `pnpm typecheck` clean (mutant-proven: an
+ *  appended kind with no matching line compiled at exit 0) — a missing
+ *  affordance would degrade silently to "no inline act", never a build
+ *  failure. Every kind now needs an EXPLICIT line, `null` included, so the
+ *  closed Record itself is 裁-18b's tenth-kind pin: an omission is a
+ *  TYPECHECK failure, not a runtime nothing-renders.
  *
  *  BUILT ON A NULL-PROTOTYPE OBJECT (independent review, fix-required,
  *  2026-08-28): a plain `{}` literal inherits `Object.prototype`, so
@@ -66,9 +77,11 @@ export type NeedsYouAffordance = ComponentType<NeedsYouAffordanceProps>;
  *  independently avoiding the trap. `Object.assign` onto `Object.create(null)`
  *  — never a plain object literal — for every entry added here, present and
  *  future. */
-export const NEEDS_YOU_AFFORDANCES: Partial<Record<ReviewQueueRowKind, NeedsYouAffordance>> = Object.assign(
+export const NEEDS_YOU_AFFORDANCES: Record<ReviewQueueRowKind, NeedsYouAffordance | null> = Object.assign(
   Object.create(null),
   {
+    // No inline act for a draft: the journals tab owns revise/approve/reject.
+    draft: null,
     open_question: OpenQuestionAffordance,
     // T5 (port-wave plan §3.2, §5's staffAdvances row): the inline "complete
     // particulars" act on a staff_advance_incomplete row — see
@@ -91,7 +104,11 @@ export const NEEDS_YOU_AFFORDANCES: Partial<Record<ReviewQueueRowKind, NeedsYouA
     // inline acts on a compliance_watch row — see
     // ./compliance-watch-affordance.tsx's own header for the grounding.
     compliance_watch: ComplianceWatchAffordance,
-  } satisfies Partial<Record<ReviewQueueRowKind, NeedsYouAffordance>>,
+    // 裁-17 (mohe-grill-rulings-2026-08-28.md): a LINK-ONLY affordance — the
+    // tick/decline acts stay on T9's SeedingBatchesPanel; see
+    // ./seeding-proposal-affordance.tsx's own header for the grounding.
+    seeding_proposal: SeedingProposalAffordance,
+  } satisfies Record<ReviewQueueRowKind, NeedsYouAffordance | null>,
 );
 
 /** Looked up by row_kind (a `string` on the wire — see ReviewQueueRow) rather
@@ -105,8 +122,12 @@ export const NEEDS_YOU_AFFORDANCES: Partial<Record<ReviewQueueRowKind, NeedsYouA
  *  this getter's shape without noticing the null-proto construction above,
  *  still gets a getter that is safe on its own. `Object.hasOwn` is a static
  *  method (never called ON the table), so it is unaffected by the table
- *  having no prototype at all. */
-export function getNeedsYouAffordance(rowKind: string): NeedsYouAffordance | undefined {
+ *  having no prototype at all. Returns `null` for a KNOWN kind with no inline
+ *  act (e.g. `draft`) and `undefined` for an unknown/hostile key — both are
+ *  falsy, so every caller's `Affordance ? <Affordance .../> : null` render
+ *  guard treats them identically; the distinction exists for callers that
+ *  care WHY nothing rendered. */
+export function getNeedsYouAffordance(rowKind: string): NeedsYouAffordance | null | undefined {
   if (!Object.hasOwn(NEEDS_YOU_AFFORDANCES, rowKind)) return undefined;
   return NEEDS_YOU_AFFORDANCES[rowKind as ReviewQueueRowKind];
 }

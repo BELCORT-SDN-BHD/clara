@@ -13,10 +13,12 @@ import {
   reviewQueueRowKey,
   isActingRowAttached,
   shouldShowQueueErrorBanner,
+  REVIEW_QUEUE_ROW_KINDS,
   type ReviewQueueRow,
 } from "./needs-you";
 import { isDoorRefusal } from "../doors";
 import type { SessionTokenAccessor } from "@/lib/session";
+import messages from "../../messages/en.json";
 
 function row(overrides: Partial<ReviewQueueRow> = {}): ReviewQueueRow {
   return {
@@ -45,6 +47,9 @@ function row(overrides: Partial<ReviewQueueRow> = {}): ReviewQueueRow {
     finding_id: null,
     asset_id: null,
     advance_id: null,
+    client_name: null,
+    batch_ids: null,
+    open_proposal_count: null,
     ...overrides,
   };
 }
@@ -181,4 +186,28 @@ test("shouldShowQueueErrorBanner: the acting row is still present -> false (the 
 test("shouldShowQueueErrorBanner: the acting row VANISHED -> true (R1's regression fix)", () => {
   const rows = [row({ id: "q2" })]; // q1 vanished — the refusal must still surface SOMEWHERE
   assert.equal(shouldShowQueueErrorBanner(true, new Error("CLR10: question is not open"), rows, "open_question:q1"), true);
+});
+
+// MED-4 (Codex cross-model review, fec6ab5b): pin (5) of the tenth-row_kind
+// exhaustiveness fix — the CLOSED registry (needs-you-affordances.tsx) only
+// pins whether a row_kind carries an INLINE ACT; it says nothing about
+// whether the row_kind has a real LABEL. The FIX-1 gap this repeats
+// (needs-you-row.tsx's own header: "four of the eight LIVE row kinds had no
+// label and rendered as a raw next-intl key path... to a professional") was
+// fixed by gating the LOOKUP (isKnownReviewQueueRowKind), never by proving
+// every kind actually HAS a label in messages/en.json — a kind that IS known
+// but whose label entry silently went missing would still render the raw
+// key path. This cell is that missing proof: every REVIEW_QUEUE_ROW_KINDS
+// member must resolve to a real, non-empty string under NeedsYou.rowKind.
+// Mutant (rev-nr's shape): append a row_kind to REVIEW_QUEUE_ROW_KINDS with
+// no matching messages/en.json entry — this cell reds; the closed registry
+// in needs-you-affordances.tsx separately reds `pnpm typecheck` for the same
+// mutant (pin (4)) — together the two pins close 裁-18b's tenth kind on both
+// axes (act + label).
+test("every REVIEW_QUEUE_ROW_KINDS member has a real messages/en.json label (never a missing/raw key path)", () => {
+  const labels = (messages as { NeedsYou: { rowKind: Record<string, string> } }).NeedsYou.rowKind;
+  for (const kind of REVIEW_QUEUE_ROW_KINDS) {
+    assert.equal(typeof labels[kind], "string", `NeedsYou.rowKind.${kind} is missing from messages/en.json`);
+    assert.ok(labels[kind]!.length > 0, `NeedsYou.rowKind.${kind} is an empty label`);
+  }
 });

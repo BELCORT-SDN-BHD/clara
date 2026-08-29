@@ -34,6 +34,7 @@ function row(): ReviewQueueRow {
     question_text: null, created_at: "2026-08-01T00:00:00Z", id: "adv1",
     coding_kind: null, watch_id: null, tier: null, finding_id: null,
     asset_id: null, advance_id: "adv1",
+    client_name: null, batch_ids: null, open_proposal_count: null,
   };
 }
 

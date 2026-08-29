@@ -307,7 +307,14 @@ export const UNCONSUMED_BASELINE: Record<string, string> = {
   // (list_review_queue itself, 0011:3788) is UNTOUCHED and keeps publishing the key honestly
   // over KEPT history -- only the dashboard stopped rendering it, so it is genuinely,
   // permanently unconsumed rather than a gap to close.
-  list_review_queue: "attempts_cap attempts_remaining attempts_used autodraft blocked_reason corroborated corroboration_ineligible currency customer_name customer_registration explicit_non_myr extraction_id invoice_date invoice_id last_origin last_refusal last_run_id origin_attribution parked rounding_cents rule_backed sweep_eligible tax_total_cents total_cents total_excl_tax_cents total_fact_hash total_region_id type_code updated_at version_n",
+  // `batch_ids`/`client_name`/`open_proposal_count` JOINED this line with 裁-17
+  // (0146_ninth_rowkind_seeding_proposal.sql, mohe-grill-rulings-2026-08-28.md):
+  // the ninth row_kind='seeding_proposal' is projected on the wire (queueKindCatalog.ts
+  // renders it honestly via FallbackDetail/question_text, per that file's own header) but
+  // this app has no dedicated card for its three new keys — Direction 2 flagged exactly
+  // these three on exactly this read and nothing else; the replacement line the failure
+  // printed, verbatim.
+  list_review_queue: "attempts_cap attempts_remaining attempts_used autodraft batch_ids blocked_reason client_name corroborated corroboration_ineligible currency customer_name customer_registration explicit_non_myr extraction_id invoice_date invoice_id last_origin last_refusal last_run_id open_proposal_count origin_attribution parked rounding_cents rule_backed sweep_eligible tax_total_cents total_cents total_excl_tax_cents total_fact_hash total_region_id type_code updated_at version_n",
   list_uncoded_filings: "basis document_kind extraction_status financial_date mime_type",
   list_unmatched_lines: "bank_account_display line_no value_date",
   supplier_statement: "closing_balance_cents counterparty_id domain from opening_balance_cents to",
