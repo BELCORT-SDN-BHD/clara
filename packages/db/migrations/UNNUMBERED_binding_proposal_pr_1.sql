@@ -1438,8 +1438,13 @@ begin
   -- live invoice.* vocabulary and found no vendor-taxid path), so a document printing the
   -- vendor's TIN is printing a TRUE identifier and a wall that only knew the SSM number would
   -- refuse an honest corpus. Both are folded the same alphanumeric way the column itself is.
-  v_hard_ids := array_remove(array[clara._binding_hard_id_norm(v_registration),
-                                   clara._binding_hard_id_norm(v_tin)], null);
+  -- Built by unnest+filter rather than array_remove(..., null): removing NULLs with a value
+  -- comparison is exactly the kind of thing that reads as obviously-correct and is worth not
+  -- depending on. This form says what it means.
+  select coalesce(array_agg(x), '{}'::text[]) into v_hard_ids
+    from unnest(array[clara._binding_hard_id_norm(v_registration),
+                      clara._binding_hard_id_norm(v_tin)]) x
+   where x is not null;
 
   -- W15 -- LAW 79'S FAMILY-COLLISION PREDICATE (conductor ruling (e); the CRITICAL finding of
   -- the 2026-08-29 pass). The predicate has existed since 0103:781 and no binding path has ever

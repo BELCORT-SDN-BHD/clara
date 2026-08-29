@@ -24,7 +24,7 @@ import {
 import {
   FULL_ABSENT_RECEIPT, has28, has29, propose, seedApprovedEntry,
   seedBareDocument, seedF123Evidence, seedPassingWindow,
-  seedPayableAccount, seedVendorCounterparty, sign, signLive,
+  seedPayableAccount, seedVendorCounterparty, signLive,
 } from "./x36-vendor-binding-helpers.mjs";
 
 const EZSEC_FRAGMENTS = [

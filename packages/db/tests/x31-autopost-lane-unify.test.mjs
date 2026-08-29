@@ -53,7 +53,6 @@ import {
   seedF123Evidence,
   seedPayableAccount,
   seedVendorCounterparty,
-  sign,
   signLive,
 } from "./x36-vendor-binding-helpers.mjs";
 

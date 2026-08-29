@@ -39,6 +39,17 @@
 -- comments and `/* ... */` block comments before normalizing whitespace. A
 -- deleted guard pasted back as a comment therefore cannot satisfy a probe.
 --
+-- STALE PROBE, RECORDED RATHER THAN SILENTLY LEFT (2026-08-30, 裁-18b PR-1
+-- fold round, N-6). Probe 10 (~line 326) pins `clara.execute_rule_post
+-- (uuid,text)`. That function was DROPPED by migration
+-- 0118_f_a2_cutover_retirement.sql (its S1 drop list, line 212) when the
+-- rules tier F-A2 retired -- so probe 10 has raised `undefined_function`
+-- against any database past 0118 since that migration landed, on a file
+-- this comment does not otherwise touch. NOT deleted here: retiring this
+-- probe (and this whole file's relationship to a rules tier that no longer
+-- exists) is a separate, owner-batched cleanup. Recorded so a reader does
+-- not mistake the silence for the probe still proving something.
+--
 -- THE HONEST FRAMING. This file is BELT, not exhaustive proof of the proposal,
 -- signature, revocation, F1/F2/F3, draft override, or divergence semantics.
 -- Those are behavioral and adversarial rig responsibilities. These probes
@@ -186,7 +197,7 @@ begin
       when 'propose_vendor_identity_binding'
         then 'clara.propose_vendor_identity_binding(jsonb,text)'::regprocedure
       when 'sign_vendor_identity_binding'
-        then 'clara.sign_vendor_identity_binding(uuid,text)'::regprocedure
+        then 'clara.sign_vendor_identity_binding(uuid,text,text)'::regprocedure
       else 'clara.revoke_vendor_identity_binding(uuid,text,text)'::regprocedure
     end into v_sig;
     select pg_get_functiondef(v_sig) into v_src;
@@ -221,20 +232,32 @@ begin
     end if;
   end loop;
 
-  -- Signing interlock: executable (comment-stripped) source must carry BOTH the
-  -- exact 0029 ledger version and the named refusal token.
+  -- Signing interlock: executable (comment-stripped) source must carry the CATALOG WITNESS.
+  --
+  -- RE-POINTED 2026-08-30 (裁-18b PR-1 fold, finding C3). This probe used to demand the exact
+  -- string `0029_vendor_binding_executor` and a read of `clara.schema_migrations`. That is the
+  -- defect it was meant to guard against, wearing the shape of a guard: the ledger is append-only,
+  -- so the row has been present ever since 0029 applied and can never stop being, while the
+  -- control it stood for lived in `clara.execute_rule_post` -- which `0118` DROPPED. The interlock
+  -- was therefore permanently OPEN and this probe was permanently GREEN, together.
+  -- So the probe now demands the opposite: the ledger read must be GONE, and the body must resolve
+  -- the approve path by EXACT SIGNATURE and look for the ratified marker PR-3 mints. Both
+  -- directions, because "the old read is absent" alone would pass on a body that checks nothing.
   select pg_get_functiondef(
-    'clara.sign_vendor_identity_binding(uuid,text)'::regprocedure)
+    'clara.sign_vendor_identity_binding(uuid,text,text)'::regprocedure)
     into v_src;
   v_norm:=lower(regexp_replace(
     regexp_replace(
       regexp_replace(v_src,'/\*[\s\S]*?\*/','','g'),
       '--[^\n]*','','g'),
     '\s+',' ','g'));
-  if position('0029_vendor_binding_executor' in v_norm)=0
-     or position('post_control_absent' in v_norm)=0
-     or position('from clara.schema_migrations' in v_norm)=0 then
-    raise exception '0028 postverify: sign_vendor_identity_binding lacks the executable 0029 post_control_absent interlock';
+  if position('0029_vendor_binding_executor' in v_norm)<>0 then
+    raise exception '0028 postverify: sign_vendor_identity_binding still reads the 0029 LEDGER ROW -- that row is permanent and the control it named was dropped at 0118, so the interlock it guards is permanently open';
+  end if;
+  if position('post_time_control_absent' in v_norm)=0
+     or position('binding_post_time_recheck_v1' in v_norm)=0
+     or position('clara._approve_entry_core(jsonb,uuid,uuid,text,text)' in v_norm)=0 then
+    raise exception '0028 postverify: sign_vendor_identity_binding lacks the executable post_time_control_absent catalog witness on the approve path';
   end if;
 
   -- (6b) read verbs share the bookkeeper floor and authenticated-only grant.
