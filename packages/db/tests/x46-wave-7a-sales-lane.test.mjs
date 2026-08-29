@@ -779,6 +779,25 @@ test("C6 the canonical lock order is STRUCTURAL: the firm advisory precedes EVER
   // it carries no ordering hazard). If a future edit adds a third firm-scoped row lock, arm
   // (b) catches it without needing this list updated — it is DEFAULT-DENY over every
   // lock-taking shape, not a search for the tables named here.
+  //
+  // F-A9 PR-1B RE-CUT THE firm_usage_daily MARKER, and the reason is this arm's own lesson.
+  // The marker used to be `from clara.firm_usage_daily` — the `select tokens_used ... for
+  // update` that fed the token-budget refusal. That refusal is REMOVED (digest law 76,
+  // "meter, never cap"), and with it the only `from` clause on that relation.
+  //
+  // THE DURABLE ROW LOCK ON THIS PATH IS NOW THE ADMITTED PATH'S
+  // `update clara.firm_usage_daily set tokens_used=tokens_used+p_reserve_tokens`. Stated
+  // precisely because the imprecise version is tempting and wrong: the earlier
+  // `insert ... on conflict (firm_id,usage_date) DO NOTHING` does NOT retain a row lock —
+  // DO NOTHING takes no lock on the conflicting row and releases what it briefly held
+  // (only ON CONFLICT DO UPDATE locks it). It is still listed as an acquisition marker
+  // because it is the EARLIEST statement touching the relation and this arm compares the
+  // EARLIEST: if the ordering holds for the earliest touch it holds for the UPDATE that
+  // follows it, so the conclusion is unchanged and the arm stays conservative.
+  //
+  // Keying the marker on a `from` clause would have quietly stopped testing this lock the
+  // moment the read went away — which is exactly what happened, and is why the markers are
+  // now the WRITE statements that actually take it.
   const src = (await rootQuery(
     `select prosrc from pg_proc where pronamespace='clara'::regnamespace
        and proname='admit_autodraft_task'`)).rows[0].prosrc;
@@ -789,11 +808,20 @@ test("C6 the canonical lock order is STRUCTURAL: the firm advisory precedes EVER
   assert.ok(advisoryAt > 0, "mandatory setup: the sales branch acquires the firm advisory lock");
 
   // (a) every firm-scoped row lock that follows the branch start comes AFTER the advisory.
-  for (const [rel, marker] of [
-    ["clara.sales_backfill_batches", "from clara.sales_backfill_batches b"],
-    ["clara.firm_usage_daily", "from clara.firm_usage_daily"],
+  //
+  // EACH RELATION CARRIES ITS OWN LIST OF ACQUISITION MARKERS, and the EARLIEST is the one
+  // compared — never a bare relation name. A bare name is satisfied by a COMMENT (law 3:
+  // spelling is not identity), so a future edit that only MENTIONS the table in prose above
+  // the advisory would flip this arm without moving a single lock.
+  const earliestOf = (markers) => {
+    const hits = markers.map((m) => src.indexOf(m, salesAt)).filter((i) => i > 0);
+    return hits.length ? Math.min(...hits) : -1;
+  };
+  for (const [rel, markers] of [
+    ["clara.sales_backfill_batches", ["from clara.sales_backfill_batches b"]],
+    ["clara.firm_usage_daily", ["insert into clara.firm_usage_daily", "update clara.firm_usage_daily"]],
   ]) {
-    const at = src.indexOf(marker, salesAt);
+    const at = earliestOf(markers);
     assert.ok(at > 0, `mandatory setup: ${rel} is locked somewhere at or after the sales branch`);
     assert.ok(advisoryAt < at,
       `the firm advisory lock must be acquired BEFORE the ${rel} row lock — the retry path already `

@@ -203,7 +203,8 @@ test("§0.4 held and awaiting_input tasks consume NO compute slot; the cap still
 // the old cell was the pre-change half, run for real against the pre-change
 // body, and this is the post-change half. Design record:
 // `docs/plan/active/metering-design.md` §3.3 gate 1; the cells are Annex C's
-// C.9 (below) and C.9b (PR-1B's, once the column itself is dropped).
+// C.9 (the PR-0 half, now retired) and C.9b (below, PR-1B's — the column is
+// dropped, so the successor proves the same law with no column in existence).
 //
 // WHAT DID *NOT* CHANGE, and is asserted here rather than assumed:
 //   * the CONCURRENCY floor (`max_concurrent_runs`) — engine protection, law
@@ -212,14 +213,18 @@ test("§0.4 held and awaiting_input tasks consume NO compute slot; the cap still
 //     `settle_chat_turn` lands the task's CHECKPOINTED sum exactly once;
 //   * the namespaced admission guard's serialization (the X7 proven block).
 //
-// RETIREMENT NOTE FOR THE NEXT LANE. C.9 writes `firm_limits.daily_token_limit`
-// on purpose: that is what makes its admission a MEASURED over-limit admission
-// rather than an unobserved one. F-A9 PR-1B drops that column, so C.9 retires
-// with it and C.9b (same law, no column) succeeds it. Do not "fix" C.9 by
-// deleting the column write — delete the cell and land C.9b.
+// RETIREMENT DONE — C.9 → C.9b AT F-A9 PR-1B. C.9 wrote
+// `firm_limits.daily_token_limit` on purpose: that is what made its admission a
+// MEASURED over-limit admission rather than an unobserved one. PR-1B DROPS that
+// column, so the write can no longer be made (42703) and C.9 is succeeded here
+// by C.9b, exactly as its own retirement note instructed: the cell now proves
+// the same law with NO column in existence, and the premise it can no longer
+// pin per-firm it pins against the fn-constant default (1,000,000) the removed
+// body fell back to — the recorded UTC-day usage is driven far above THAT, and
+// the absence of the column is itself asserted rather than inferred.
 // ===========================================================================
 
-test("§6 [C.9] the chat daily token cap is REMOVED: a firm pinned far OVER its own daily_token_limit still ADMITS; the concurrency floor alone still refuses, and its copy names runs, never tokens", async (t) => {
+test("§6 [C.9b] the chat daily token cap is REMOVED AND ITS COLUMN IS GONE: with no firm_limits token column in existence, a firm far over the old fn-constant default still ADMITS; the concurrency floor alone still refuses, and its copy names runs, never tokens", async (t) => {
   if (unready(t)) return;
   const { firm, owner, sessions } = await firmWithSessions("c9", DEFAULT_RUN_CAP + 3);
 
@@ -234,18 +239,22 @@ test("§6 [C.9] the chat daily token cap is REMOVED: a firm pinned far OVER its 
   assert.ok(col, "a daily token-usage counter column was found");
 
   // THE PREMISE IS MEASURED, NOT ASSUMED. Absence is only evidence when the
-  // state that WOULD have refused is proven to be the state under test: the
-  // firm's own limit is read back at 1, and its recorded UTC-day usage is read
-  // back far above it. Both writes go through a read that can say NO.
+  // state that WOULD have refused is proven to be the state under test. C.9
+  // pinned the firm's own limit to 1; PR-1B dropped that column, so C.9b pins
+  // the two things that still exist: the column is POSITIVELY ABSENT, and the
+  // recorded UTC-day usage is read back far above the fn-constant default
+  // (1,000,000) the removed body fell back to for a firm with no row.
+  const deadCol = await rootQuery(
+    "select column_name from information_schema.columns where table_schema='clara' and table_name='firm_limits' and column_name='daily_token_limit'");
+  assert.equal(deadCol.rowCount, 0, "firm_limits.daily_token_limit is DROPPED at F-A9 PR-1B — C.9b's whole point is that there is no column left to pin");
   const pinned = await rootQuery(
-    `insert into clara.firm_limits (firm_id, daily_token_limit, max_concurrent_runs) values ($1, 1, $2)
-       on conflict (firm_id) do update set daily_token_limit = 1, max_concurrent_runs = $2
-     returning daily_token_limit, max_concurrent_runs`, [firm, DEFAULT_RUN_CAP]);
-  assert.equal(Number(pinned.rows[0].daily_token_limit), 1, "the firm's daily_token_limit really is pinned to 1");
+    `insert into clara.firm_limits (firm_id, max_concurrent_runs) values ($1, $2)
+       on conflict (firm_id) do update set max_concurrent_runs = $2
+     returning max_concurrent_runs`, [firm, DEFAULT_RUN_CAP]);
   assert.equal(Number(pinned.rows[0].max_concurrent_runs), DEFAULT_RUN_CAP, `the firm's max_concurrent_runs really is pinned to ${DEFAULT_RUN_CAP}`);
-  assert.ok((await setDailyUsage(firm, col, DEFAULT_DAILY_TOKENS)) >= 1, "the daily usage row was pinned");
+  assert.ok((await setDailyUsage(firm, col, DEFAULT_DAILY_TOKENS + 1_000_000)) >= 1, "the daily usage row was pinned");
   const used = Number((await usageSnapshot(firm))[0]?.[col]);
-  assert.ok(used > 1, `the firm's recorded UTC-day usage (${used}) is far ABOVE its own limit (1) — exactly the state the pre-hotfix body refused with CLR14`);
+  assert.ok(used > 1_000_000, `the firm's recorded UTC-day usage (${used}) is far ABOVE the fn-constant default (1,000,000) the pre-hotfix body would have refused at with CLR14`);
 
   // (a) POSITIVE-BY-ABSENCE, and the absence is measured: the admission returns a
   // task id AND a real queued row stands behind it (a receipt with no row would
@@ -280,7 +289,7 @@ test("§6 [C.9] the chat daily token cap is REMOVED: a firm pinned far OVER its 
   const copy = `${refused.message} ${refused.detail ?? ""} ${refused.hint ?? ""}`;
   assert.match(copy, /run|concurren|cap|slot/i, `the surviving refusal names WHICH limit (runs) — got: ${refused.message}`);
   assert.doesNotMatch(copy, /token|budget|daily/i, `the surviving refusal must not be spelled as a spend budget — got: ${refused.message}`);
-  noteLane(`C.9: over-limit admission succeeded (task ${task}); the surviving CLR14 reads "${refused.message}"`);
+  noteLane(`C.9b: over-limit admission succeeded with NO token-limit column in existence (task ${task}); the surviving CLR14 reads "${refused.message}"`);
 });
 
 test("§6 the METER survives the brake's removal: concurrent admissions still serialize on the firm guard (PROVEN blocked), admission moves no counter, and each settle lands its CHECKPOINTED tokens exactly once", async (t) => {

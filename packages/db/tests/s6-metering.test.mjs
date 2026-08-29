@@ -170,12 +170,19 @@ test("status honesty: a failed invoice_facts task never touched documents.extrac
 });
 
 // ===========================================================================
-// Limit path — CLR18 (the S5 metering code family) when the facts pass is
-// unaffordable. The exact limit lever is contract-silent → we assert the code
-// family only when a limit can be forced; otherwise record the expectation.
+// Limit path — RETIRED AS A REFUSAL AT F-A9 PR-1B, kept as a METER probe.
+// This probe used to attempt to force a CLR18 page-budget refusal on the facts
+// pass and record an unverified-interface note when it could not. The owner
+// ruled that budget REMOVE (2026-08-23; design §3.3 gate 7 — the migration's
+// own author calls it the firm's vendor spend, so digest law 76 reaches it),
+// and F-A9 PR-1B removed it from both `_reserve_processing_call` and
+// `_settle_processing_call`. The probe therefore no longer expects a refusal
+// at all; what it still records is that the pass RUNS and is METERED. Its
+// lever was always contract-silent, so it stays soft — the hard, measured
+// proof of the removal lives in `x38.z1` and `f-a9-pr-1b.test.mjs`.
 // ===========================================================================
 
-test("limit: an unaffordable facts reservation refuses with CLR18 (or lands failed('budget')) — never egresses over budget", async (t) => {
+test("limit: a facts reservation past the firm's page budget is NOT refused any more (meter, never cap) — and it never egresses unrecorded", async (t) => {
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A2);
@@ -190,24 +197,18 @@ test("limit: an unaffordable facts reservation refuses with CLR18 (or lands fail
   // invoice_facts lane to exercise ITS downstream machinery, so it mints directly.
   await mintLegacyInvoiceFactsTask(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
-  // Either the claim/persist refuses CLR18, OR the task lands failed('budget') honestly.
-  // The exact enrichment-budget LEVER is contract-silent (companion §5: "Filing
-  // NEVER blocks on enrichment budget" — the budget is a per-call reservation, not
-  // necessarily firm_document_limits.pages_per_day). So this probe ATTEMPTS to force
-  // the limit; if pages_per_day=0 does not trip it, that is recorded as an unverified
-  // interface expectation (the CLR18 facts-limit path needs runtime/L4 coverage),
-  // NOT a hard failure on a lever the spec does not pin.
-  let refused = false;
+  // F-A9 PR-1B: no CLR18 page-budget refusal exists on this path any more. A CLR18 raised
+  // HERE would now mean some OTHER wall fired (the lane predicate, a concurrency floor,
+  // a malformed reservation) — worth a lane note, never a pass.
+  let raised = null;
   try {
     await claimTask(task.id, { egressApproved: true });
     await persistInvoiceFacts(task.id, [factField(FIELD.total, "RM 5,000.00"), factField(FIELD.currency, "MYR")]);
   } catch (e) {
-    refused = e.code === "CLR18";
-    if (!refused && e.code !== undefined) noteLane(`facts over-budget raised ${e.code} (expected CLR18 or a graceful failed('budget')) — inspect`);
+    raised = e.code ?? String(e);
+    noteLane(`facts pass past the (removed) page budget raised ${raised} — F-A9 PR-1B removed the spend refusal, so this is some OTHER wall; inspect`);
   }
   const st = await taskStatus(task.id);
-  if (!(refused || st.status === "failed")) {
-    noteLane(`FINDING(candidate): a facts pass reserved+settled+completed with firm_document_limits.pages_per_day=0 (status=${st.status}) — the CLR18 facts-limit path was NOT triggered by the daily page budget. Verify the enrichment-budget lever + the CLR18 path at the runtime/L4 level (lever is contract-silent).`);
-  }
-  assert.ok(true, "facts limit probe recorded (lever contract-silent — see lane notes)");
+  noteLane(`facts pass past the retired page budget: status=${st.status}${raised ? ` (raised ${raised})` : ""} — meter, never cap`);
+  assert.ok(true, "facts meter probe recorded (lever contract-silent — see lane notes)");
 });

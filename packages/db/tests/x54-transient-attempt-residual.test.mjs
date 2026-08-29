@@ -34,15 +34,16 @@ let ready = false;
 let world = null;
 
 /** Operator-set per-firm limits (the x47 / wave-a-budget precedent): these cells admit real
- *  autodraft tasks on a SHARED firm, so the daily token budget and the concurrent-sweep cap
- *  would otherwise run out mid-file and return refused_budget — failing the cells for a
- *  reason that has nothing to do with the residual under test. */
+ *  autodraft tasks on a SHARED firm, so the concurrent-sweep cap would otherwise run out
+ *  mid-file and return a refusal — failing the cells for a reason that has nothing to do
+ *  with the residual under test.
+ *  F-A9 PR-1B: the daily-token-budget half of this lift is gone with its two columns
+ *  (digest law 76, meter never cap); only the KEPT concurrency floor is still liftable. */
 async function setFirmLimit(firm) {
   await rootQuery(
-    `insert into clara.firm_limits (firm_id, daily_token_limit, sweep_budget_share, max_concurrent_sweeps)
-     values ($1,50000000,0.9,999)
-     on conflict (firm_id) do update set daily_token_limit=excluded.daily_token_limit,
-       sweep_budget_share=excluded.sweep_budget_share, max_concurrent_sweeps=excluded.max_concurrent_sweeps`,
+    `insert into clara.firm_limits (firm_id, max_concurrent_sweeps)
+     values ($1,999)
+     on conflict (firm_id) do update set max_concurrent_sweeps=excluded.max_concurrent_sweeps`,
     [firm],
   ).catch((e) => noteLane(`setFirmLimit failed (${e.code}) — firm_limits shape may differ`));
 }

@@ -72,24 +72,31 @@ test("§2 _tf_no_truncate + append-only: the new tables refuse a superuser TRUNC
 // New columns (PINS §2 / companion §2/§4/§5).
 // ===========================================================================
 
-test("§2 new columns: counterparties.merged_into + retired_at; wake_credentials.client_id; firm_limits.sweep_budget_share + max_concurrent_sweeps", async (t) => {
+// F-A9 PR-1B: the `sweep_budget_share` half of this Slice-4 contract is RETIRED, not
+// relaxed. The column is dropped (owner ruling TA-P12 = A; digest law 76), so a cell that
+// positively asserts it EXISTS with a 0.60 default is no longer a contract — it is a pin
+// on a decision that has been reversed. The `max_concurrent_sweeps` half is KEPT and
+// still asserted in full, and the retired half is replaced by its own positive-by-absence
+// assertion below rather than silently dropped (a deleted assertion proves nothing).
+test("§2 new columns: counterparties.merged_into + retired_at; wake_credentials.client_id; firm_limits.max_concurrent_sweeps", async (t) => {
   if (skipUnready(t, ready)) return;
   const cp = await columnsOf("counterparties");
   assert.ok(cp.has("merged_into"), "counterparties.merged_into (self-FK, immutable-once-set)");
   assert.ok(cp.has("retired_at"), "counterparties.retired_at (merge sets it; companion §2 note)");
   assert.ok((await columnsOf("wake_credentials")).has("client_id"), "wake_credentials.client_id (autodraft pinning)");
   const fl = await columnsOf("firm_limits");
-  assert.ok(fl.has("sweep_budget_share"), "firm_limits.sweep_budget_share (default 0.60)");
   assert.ok(fl.has("max_concurrent_sweeps"), "firm_limits.max_concurrent_sweeps (default 2)");
 });
 
-test("§2 firm_limits new-column defaults: sweep_budget_share=0.60, max_concurrent_sweeps=2", async (t) => {
+test("§2 firm_limits: max_concurrent_sweeps=2 survives; the three F-A9-retired cap columns are GONE", async (t) => {
   if (skipUnready(t, ready)) return;
   const r = await rootQuery(
-    "select column_name, column_default from information_schema.columns where table_schema='clara' and table_name='firm_limits' and column_name in ('sweep_budget_share','max_concurrent_sweeps')");
+    "select column_name, column_default from information_schema.columns where table_schema='clara' and table_name='firm_limits' and column_name in ('sweep_budget_share','max_concurrent_sweeps','daily_token_limit','sales_admission_daily_cap')");
   const def = new Map(r.rows.map((x) => [x.column_name, x.column_default ?? ""]));
-  assert.ok((def.get("sweep_budget_share") ?? "").includes("0.6"), `sweep_budget_share default 0.60 (got ${def.get("sweep_budget_share")})`);
   assert.ok((def.get("max_concurrent_sweeps") ?? "").includes("2"), `max_concurrent_sweeps default 2 (got ${def.get("max_concurrent_sweeps")})`);
+  for (const dead of ["sweep_budget_share", "daily_token_limit", "sales_admission_daily_cap"]) {
+    assert.equal(def.has(dead), false, `firm_limits.${dead} is DROPPED at F-A9 PR-1B (meter, never cap) — it is still present`);
+  }
 });
 
 test("§2 wake_credentials.client_id CHECK: non-null iff wake_kind='autodraft' (companion §4)", async (t) => {
@@ -112,7 +119,9 @@ test("§2 widened CHECKs: wake_credentials.wake_kind + agent_tasks.kind admit 'a
 test("§2 CHECK domains on the new tables: sweep_run_items.outcome, coding_rules.status, open_questions.scope_kind, autodraft_attempts.state", async (t) => {
   if (skipUnready(t, ready)) return;
   const item = await checkDefs("sweep_run_items");
-  for (const o of ["drafted", "skipped_lane", "refused_budget", "refused_attempts", "noop_existing"]) assert.ok(item.includes(`'${o}'`), `sweep_run_items.outcome admits '${o}'`);
+  // 'refused_concurrency' joins at F-A9 PR-1B and 'refused_budget' STAYS: the swap is
+  // extend-only, so every value the pre-F-A9 CHECK admitted is still admitted (law 6).
+  for (const o of ["drafted", "skipped_lane", "refused_budget", "refused_concurrency", "refused_attempts", "noop_existing"]) assert.ok(item.includes(`'${o}'`), `sweep_run_items.outcome admits '${o}'`);
   const rule = await checkDefs("coding_rules");
   for (const s of ["proposed", "live", "declined", "retired"]) assert.ok(rule.includes(`'${s}'`), `coding_rules.status admits '${s}'`);
   const q = await checkDefs("open_questions");

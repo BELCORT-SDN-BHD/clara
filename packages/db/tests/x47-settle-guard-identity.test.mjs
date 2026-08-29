@@ -53,28 +53,28 @@ before(async () => {
     for (const c of [world.clients.A1, world.clients.A2]) {
       await upsertPayableAccount(world.users.alice, { client: c, code: AP, name: "Trade Creditors", opKey: opk("x47ap") });
       await upsertAccountClassed(world.users.alice, { client: c, code: EXP, name: "Prof Fees", type: "expense", opKey: opk("x47exp") });
-      // Five cells each admit a real autodraft task on a SHARED firm, so the per-firm daily
-      // token budget and the concurrent-sweep cap both run out mid-file and admissions start
-      // returning 'refused_budget' — which would fail every cell for a reason that has nothing
-      // to do with the guard under test. Lifted the same way wave-a-budget.test.mjs lifts them
-      // (operator-set firm_limits, root). NB: max_concurrent_sweeps is raised rather than
-      // trusted at its default of 2 because a run-bound admission opens its sweep run BEFORE
-      // admitting, so the run's own row counts toward its own cap — §7-A FINDING F5.
-      await setFirmLimit(await firmOf(c), { daily: 50_000_000, share: 0.9, maxSweeps: 999 });
+      // Five cells each admit a real autodraft task on a SHARED firm, so the concurrent-sweep
+      // cap would otherwise run out mid-file and admissions start returning a refusal —
+      // which would fail every cell for a reason that has nothing to do with the guard under
+      // test. Lifted the same way wave-a-budget.test.mjs lifts it (operator-set firm_limits,
+      // root). NB: max_concurrent_sweeps is raised rather than trusted at its default of 2
+      // because a run-bound admission opens its sweep run BEFORE admitting, so the run's own
+      // row counts toward its own cap — §7-A FINDING F5.
+      // F-A9 PR-1B: the per-firm daily TOKEN budget half of this lift is gone with its two
+      // columns (digest law 76) — there is no spend brake left here to raise.
+      await setFirmLimit(await firmOf(c), { maxSweeps: 999 });
     }
   }
 });
 
 /** Operator-set per-firm limits (rig lever, root — the wave-a-budget/s6-metering precedent). */
-async function setFirmLimit(firm, { daily, share, maxSweeps }) {
+async function setFirmLimit(firm, { maxSweeps }) {
   await rootQuery(
-    `insert into clara.firm_limits (firm_id, daily_token_limit, sweep_budget_share, max_concurrent_sweeps)
-     values ($1,$2,$3,$4)
+    `insert into clara.firm_limits (firm_id, max_concurrent_sweeps)
+     values ($1,$2)
      on conflict (firm_id) do update
-       set daily_token_limit=excluded.daily_token_limit,
-           sweep_budget_share=excluded.sweep_budget_share,
-           max_concurrent_sweeps=excluded.max_concurrent_sweeps`,
-    [firm, daily, share, maxSweeps],
+       set max_concurrent_sweeps=excluded.max_concurrent_sweeps`,
+    [firm, maxSweeps],
   ).catch((e) => noteLane(`setFirmLimit failed (${e.code}) — firm_limits shape may differ`));
 }
 after(async () => { printLaneNotes("x47-settle-guard"); printSkipCount("x47-settle-guard"); await endPool(); });

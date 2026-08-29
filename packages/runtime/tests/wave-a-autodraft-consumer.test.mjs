@@ -66,6 +66,11 @@ test("admissionNeedsStart enqueues on ALL THREE task-minting outcomes — every 
   for (const o of [
     "noop_existing",
     "refused_budget",
+    // F-A9 PR-1B renamed the engine-protective concurrency refusal off the string it shared
+    // with two now-removed spend caps. It must be non-admitting for the SAME reason every
+    // other refusal is — and it already is, because this predicate is an ADMITTING allowlist
+    // rather than a refusal denylist. Pinned here so the property is proven, not inferred.
+    "refused_concurrency",
     "refused_attempts",
     "lane_changed",
     "skipped_lane",
