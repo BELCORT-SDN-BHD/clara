@@ -826,7 +826,14 @@ comment on table clara.control_witnesses is
   'STANDING OBLIGATION: any migration that CREATE OR REPLACEs a witnessed body must RE-WITNESS it '
   'in the same file, or the control''s gate closes and its door refuses until somebody does. '
   'There is NO runtime verb: re-witnessing is a MIGRATION act, run as clara_fn_owner, and no '
-  'application role holds any DML on this table at all.';
+  'application role holds any DML on this table at all. '
+  'DELIBERATELY NOT APPEND-ONLY, and please do not "harden" it into one. UPDATE and DELETE are '
+  'migration acts here on purpose: a control can be RETIRED, and an append-only witness registry '
+  'would hold a row that outlived its control with no lawful way to remove it -- which is exactly '
+  'the defect this same migration fixed one table over, where clara.agent_receipt_surfaces IS '
+  'append-only and a member naming a nonexistent shim would have been permanent (L-14). What '
+  'protects this table is that no application role can write it and RLS is forced, plus '
+  't_control_witnesses_identity_frozen: a witness may be RE-MINTED, never RE-POINTED.';
 comment on column clara.control_witnesses.prosrc_sha is
   'sha256(convert_to(prosrc,''UTF8'')) -- prosrc, never pg_get_functiondef, which folds in '
   'ACL-independent decoration and would drift on an unrelated GRANT.';

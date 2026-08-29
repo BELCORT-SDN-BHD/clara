@@ -2743,8 +2743,10 @@ test("bp1.B1-roster-m MUTANT — a LIVE headcount lets the remove/self-sign/re-a
   assert.ok(Number(durable.rows[0].n) >= 2,
     `control: the DURABLE window still sees the departures, got ${durable.rows[0].n}`);
 
+  // ONE needle: the pending-invite arm was dropped in the second fold round, so the durable half
+  // of the count is now exactly the departed-admin term. (withMutant threw the moment the second
+  // needle went stale rather than running a silent no-op — the guard doing its job a third time.)
   await withPostTimeControl(() => withMutant(SIGNER_COUNT_SIG, [
-    ["    + (select count(*) from clara.firm_invites i", "    + 0 * (select count(*) from clara.firm_invites i"],
     ["    + (select count(distinct m.user_id)", "    + 0 * (select count(distinct m.user_id)"],
   ], async () => {
     const live1 = await humanQuery(w.users.alice,
