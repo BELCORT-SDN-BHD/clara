@@ -260,16 +260,18 @@ async function hrdAFamily() {
   return r.rows.map((x) => x.relname);
 }
 
-test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived same-shape family (eleven at 0143) carries security_barrier, and the reloption is proven to buy pushdown-ordering, not target-list masking", async (t) => {
+test("debt-BAR1 · 裁-15 estate census — EVERY member of the catalog-derived same-shape family (thirteen once P4 tranche-2 lands) carries security_barrier, and the reloption is proven to buy pushdown-ordering, not target-list masking", async (t) => {
   if (gate(t)) return;
   const family = await hrdAFamily();
   assert.deepEqual(family, [
     "agent_receipts_visible", "agent_tasks_visible", "caller_context",
     "client_identifier_promotions_visible", "coding_tasks_visible",
+    "counterparty_aliases_visible",
     "document_intakes_visible", "document_processing_tasks_visible",
     "firm_invites_visible", "firm_members_visible", "firm_open_questions_visible",
+    "firm_registration_requests_visible",
     "users_visible",
-  ], "the catalog-derived family must be exactly the eleven expected members, closed-world");
+  ], "the catalog-derived family must be exactly the thirteen expected members, closed-world -- P4 tranche-2 (0145) landed both firm_registration_requests_visible (anticipated by this file's own header comment) and counterparty_aliases_visible (a round-4 addition this file's author could not have known about -- 裁-11's masked-view mechanism was chosen AFTER this file merged, to satisfy wave-a-shape's fn-fronted-only invariant)");
 
   const r = await rootQuery(
     `select c.relname, c.reloptions

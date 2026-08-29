@@ -349,6 +349,18 @@ const F_A4_PR2A_CLOCK_NAMES = ["_record_document_service_period_core"];
 // silent pass.
 const P4T1_CLOCK_NAMES = ["accept_invite", "invite_member", "revoke_invite"];
 
+// P4 tranche 2 [registration + operator approval]: three lawful bare-clock readers, all
+// timestamptz stamps, none date-typed -- `_create_firm_core` stamps `reviewed_at := now()` on
+// the onboarding plan it opens (byte-identical to the live create_firm body's own pre-extraction
+// line, moved not added); `approve_firm_registration` and `reject_firm_registration` each stamp
+// `decided_at := now()` on the registration request row. `create_firm`'s OWN `consumed_at :=
+// now()` line is untouched by the extraction and was already in the base roster pre-P4.
+// `request_firm_registration` is deliberately ABSENT: its only clock touch is the
+// `created_at timestamptz not null default now()` COLUMN DEFAULT, which lives in the table DDL,
+// never in this function's own prosrc -- arm (D)'s detector reads prosrc, so a column default
+// is invisible to it by construction, not by omission.
+const P4T2_CLOCK_NAMES = ["_create_firm_core", "approve_firm_registration", "reject_firm_registration"];
+
 // 0057 [Wave E lane γ]: ONE lawful bare-clock reader. clara.verify_snapshot stamps
 // `'verified_at', now()` on the jsonb payload it RETURNS — a display timestamptz that says
 // when the recomputation ran, and it lands in no column and in no date-typed accounting
@@ -815,6 +827,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a4_pr_2a_prepayment_limb$")) names.push(...F_A4_PR2A_CLOCK_NAMES);
   if (await appliedStem("p4_tranche1_invite_rbac$")) names.push(...P4T1_CLOCK_NAMES);
   if (await appliedStem("fa7b_pr_a_client_onboarding_open$")) names.push(...ONBOARDING_OPEN_F_A7B_PR_A_CLOCK_NAMES);
+  if (await appliedStem("p4_tranche2_registration_operator_alias$")) names.push(...P4T2_CLOCK_NAMES);
   return names.sort();
 }
 
