@@ -264,17 +264,18 @@ test("[R2-F6]: reconcile_sweep_runs RECOVERS the active client's staged work and
     // NO attempt (my earlier readyFiling stage compared null==null, the exact
     // vacuity the memo called). primeReadyFiling resolves to an EXISTING vendor.
     const rf = await primeReadyFiling(w.users.alice, { client: c, amount: 400_000, vendorName: `F6 PRIMED ${tag}` });
-    // lift the sweep metering (the wave-a-budget setFirmLimit idiom): a large
-    // daily token limit AND max_concurrent_sweeps — each stage auto-opens its
-    // own run, and the second admission would otherwise draw the cap's
-    // refused_budget. The RECONCILER, not the metering gate, is under test.
+    // lift the sweep CONCURRENCY floor (the wave-a-budget setFirmLimit idiom): each stage
+    // auto-opens its own run, and the second admission would otherwise draw the cap's
+    // refusal. The RECONCILER, not the admission gate, is under test.
+    // F-A9 PR-1B: the daily_token_limit half of this lift is GONE with the column — the
+    // spend brake it lifted no longer exists, so there is nothing left to raise.
     const lim = await rootQuery(
-      "update clara.firm_limits set daily_token_limit = $2, max_concurrent_sweeps = $3 where firm_id=$1",
-      [w.firms.A, 10_000_000, 10]);
+      "update clara.firm_limits set max_concurrent_sweeps = $2 where firm_id=$1",
+      [w.firms.A, 10]);
     if (lim.rowCount === 0) {
       await rootQuery(
-        "insert into clara.firm_limits (firm_id, daily_token_limit, max_concurrent_sweeps) values ($1,$2,$3) on conflict (firm_id) do update set daily_token_limit=$2, max_concurrent_sweeps=$3",
-        [w.firms.A, 10_000_000, 10]).catch(() => {});
+        "insert into clara.firm_limits (firm_id, max_concurrent_sweeps) values ($1,$2) on conflict (firm_id) do update set max_concurrent_sweeps=$2",
+        [w.firms.A, 10]).catch(() => {});
     }
     const admit = await admitAutodraft({ filing: rf.filingId });
     const budgetCtx = async () => JSON.stringify({

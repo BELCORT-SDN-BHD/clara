@@ -171,7 +171,12 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "_adj_run_occurrence_core", "_adv_assert_proposal", "_adv_enrolment_at", "_adv_on_approve", "_adv_reversal_admission", "_adv_window_closed_under",
   "_approve_entry_core", "_approve_opening_entry", "_derive_vendor_binding_proposal", "_draft_entry_core", "_enqueue_invoice_facts_core",
   "_fa_on_approve", "_pair_reverse_core", "_publish_wiki_page_version_core", "_record_onboarding_contributor",
-  "_refund_document_reservation", "_refund_processing_call", "_reserve_document_ingest", "_reserve_processing_call", "_resize_document_reservation",
+  "_refund_document_reservation", "_refund_processing_call", "_reserve_document_ingest", "_resize_document_reservation",
+  // `_reserve_processing_call` LEFT this base array at F-A9 PR-1B and is now a REVERSE-gated
+  // cohort (PROCESSING_CALL_PRE_F_A9_PR1B_CLOCK_NAMES, below) — pushed back on any database
+  // that has not applied the brake census, exactly like begin_chat_turn's PR-0 gate.
+  // `_settle_processing_call` STAYS: PR-1B removes the same page budget from it, but its
+  // settle UPDATE still stamps `settled_at=now()` (measured, not assumed).
   "_resolve_vendor_binding", "_seed_verified_document", "_settle_document_reservation", "_settle_from_bank_line_core", "_settle_processing_call",
   "_tf_agent_task_insert", "_tf_agent_task_update", "_tf_autodraft_attempt_update", "_tf_coding_task_update", "_tf_counterparty_update_0011",
   "_tf_document_intake_update", "_tf_fa_movement_belt", "_tf_filing_correction_update", "_tf_firm_document_limits_upsert", "_tf_fixed_assets_immutable_0017",
@@ -749,6 +754,26 @@ const F_A7_PI_CLOCK_NAMES = [
 // the train renumbers — and a silently-wrong roster is exactly the drift arm (D) catches.
 const CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES = ["begin_chat_turn"];
 
+// F-A9 PR-1B [the brake census, `f_a9_pr_1b_brake_census` at whatever number merge claimed]:
+// THE SECOND REVERSE COHORT, minted for exactly PR-0's reason and gated exactly PR-0's way.
+// clara._reserve_processing_call is on the roster ONLY because of the two
+// `now() at time zone 'utc'` reads inside its per-UTC-day PAGE BUDGET — the sum it took
+// across document_ingest_reservations and processing_call_reservations before refusing
+// CLR18 past `firm_document_limits.pages_per_day`. The owner ruled that gate REMOVE
+// (2026-08-23, design §3.3 gate 7; the migration's own author calls the budget the firm's
+// vendor spend, so law 76 reaches it), and with the block goes the body's last clock read.
+// MEASURED, NOT PREDICTED: the migration's tail runs THIS FILE's detector expression against
+// the recut body and refuses to succeed if it still flags.
+//
+// TWO NEIGHBOURS DELIBERATELY DO NOT MOVE, and both are re-measured by the same tail:
+//   * `_settle_processing_call` — PR-1B removes the identical budget from it too (gate 7's
+//     back half), but its settle UPDATE still stamps `settled_at=now()`, so it STAYS.
+//   * `admit_autodraft_task` — PR-1B removes two spend brakes from it, but `v_today`'s
+//     remaining uses (the firm_usage_daily reserve write and autodraft_attempts.usage_date)
+//     survive, so it STAYS. Survey §A.5(5) predicted this; the tail measures it.
+// GATED ON THE MIGRATION STEM, NEVER A NUMBER — the file is numbered at MERGE.
+const PROCESSING_CALL_PRE_F_A9_PR1B_CLOCK_NAMES = ["_reserve_processing_call"];
+
 // F-A3 PR-1b [the bank-agency agent limb, `f_a3_pr1b_agent_limb` at whatever number merge
 // claimed]: two genuinely new bodies, neither a rename. `set_bank_agency_hold`'s `now()` is
 // the hold row's own `set_at` timestamptz default idiom — the same shape every other human
@@ -796,6 +821,26 @@ const ONBOARDING_OPEN_F_A7B_PR_A_CLOCK_NAMES = ["wake_propose_client_onboarding"
 // entry would red every such leg on a one-name diff that says nothing about clock discipline.
 const G1_WAKE_ENGINE_CLOCK_NAMES = ["set_wake_source_enabled"];
 
+// [裁-21 PR-a, `coa_template_pr_a` -- number claimed at merge prep]: exactly TWO of the
+// thirteen new bodies carry a bare clock token, MEASURED by re-running arm (D)'s own detector
+// over the whole lane surface on the rig, never inferred from the shapes. Both are the SAME
+// "the audit stamp is the clock" idiom every other human writer already on this roster carries
+// (set_wake_source_enabled's enabled_at, set_bank_agency_hold's set_at, cancel_agent_task's
+// cancelled_at):
+//   publish_coa_template  -- `published_at = now()` on the draft->published stamp
+//   retire_coa_template   -- `retired_at   = now()` on the published->retired stamp
+// NEITHER derives a DATE from the session clock, and that is a property of the schema rather
+// than of the bodies' discipline: clara.coa_templates carries NO date-typed column at all --
+// created_at / published_at / retired_at are timestamptz, and the trim keys are text[]. The
+// other eleven bodies are clean on the same detector (the four editor doors, fork, both reads,
+// the two ungranted helpers and both freeze triggers -- coa_template_adoptions' proposed_at /
+// adopted_at are written by PR-b's doors, not by anything in this PR).
+// GATED ON THE MIGRATION STEM, NEVER A NUMBER, for the reason every entry above states: the
+// file is numbered at MERGE, and db-slice-frontiers runs this battery against databases pinned
+// at earlier frontiers where these two functions do not exist -- an unconditional entry would
+// red every such leg on a two-name diff that says nothing about clock discipline.
+const COA_TEMPLATE_PR_A_CLOCK_NAMES = ["publish_coa_template", "retire_coa_template"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -835,6 +880,8 @@ export async function s5BareTokenRoster(query) {
   // REVERSE gate — see CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES. `not applied` pushes the name
   // BACK, so a database at an earlier frontier still expects the clock-reading body it has.
   if (!(await appliedStem("f_a9_chat_token_cap$"))) names.push(...CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES);
+  // REVERSE gate — see PROCESSING_CALL_PRE_F_A9_PR1B_CLOCK_NAMES. Same direction, same reason.
+  if (!(await appliedStem("f_a9_pr_1b_brake_census$"))) names.push(...PROCESSING_CALL_PRE_F_A9_PR1B_CLOCK_NAMES);
   if (await appliedStem("f_a3_pr1a_core_extractions$")) {
     names.push(...F_A3_PR1A_CLOCK_NAMES_ADDED);
     for (const n of F_A3_PR1A_CLOCK_NAMES_REMOVED) {
@@ -863,6 +910,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("p4_tranche1_invite_rbac$")) names.push(...P4T1_CLOCK_NAMES);
   if (await appliedStem("fa7b_pr_a_client_onboarding_open$")) names.push(...ONBOARDING_OPEN_F_A7B_PR_A_CLOCK_NAMES);
   if (await appliedStem("p4_tranche2_registration_operator_alias$")) names.push(...P4T2_CLOCK_NAMES);
+  if (await appliedStem("coa_template_pr_a$")) names.push(...COA_TEMPLATE_PR_A_CLOCK_NAMES);
   return names.sort();
 }
 

@@ -1148,6 +1148,102 @@ const P4T2_HUMAN_FNS = ["request_firm_registration", "approve_firm_registration"
 const P4T2_UNGRANTED_FNS = ["_create_firm_core"];
 export const P4T2_COHORT = [...P4T2_HUMAN_FNS, ...P4T2_UNGRANTED_FNS];
 
+// 裁-21 PR-a (`coa_template_pr_a` — number claimed at merge prep): the firm-level standard
+// chart of accounts, TEMPLATE half. NINE human doors, clara_authenticated ONLY — agent + both
+// wake roles + clara_runtime gain ZERO, and that is the design's own claim rather than an
+// omission: 裁-21 adds no agent path to the BULK act at all (design D-5/Annex E — "one
+// rationale covering forty accounts is not forty rationales"), so there is no wake sibling for
+// any of these and no allowlist row is minted anywhere in this PR.
+//   fork_coa_template · upsert/remove_coa_template_family · upsert/remove_coa_template_account ·
+//   publish_coa_template · retire_coa_template — the seven WRITERS, admin floor body-enforced
+//   via `_human_ctx(role_rank('admin'))` (gate ruling Q3: SETTING the firm's standard is a
+//   policy act, using it is daily work — the bookkeeper-floored apply is PR-b's).
+//   list_coa_templates · get_coa_template — the two READS, and they are INVOKER-rights on
+//   purpose (the trial_balance idiom): their floor is clara_authenticated + the tables' own
+//   scoped RLS, not a rank check, because db-migrations.md requires the SELECT grant that a
+//   rank check inside a reader would be defeated by. Same posture as coa_accounts' own
+//   p_coa_accounts_human on the real chart.
+const COA_TEMPLATE_PR_A_HUMAN_FNS = [
+  "fork_coa_template", "upsert_coa_template_family", "remove_coa_template_family",
+  "upsert_coa_template_account", "remove_coa_template_account",
+  "publish_coa_template", "retire_coa_template",
+  "list_coa_templates", "get_coa_template",
+];
+// The FOUR internals — the content-hash helper, the shared edit guard, and the two publication
+// -freeze trigger functions — are granted to NOBODY, so the sweep's expected-false is the
+// assertion that they are reachable only as clara_fn_owner internals. Enumerated here (not
+// omitted) so the cohort census can catch one of them being retired or renamed.
+const COA_TEMPLATE_PR_A_UNGRANTED_FNS = [
+  "_coa_template_content_sha256", "_coa_template_for_edit",
+  "_tf_coa_template_freeze", "_tf_coa_template_child_freeze",
+];
+export const COA_TEMPLATE_PR_A_COHORT = [
+  ...COA_TEMPLATE_PR_A_HUMAN_FNS, ...COA_TEMPLATE_PR_A_UNGRANTED_FNS,
+];
+// LAW 3 COMPANION (independent review, MED-3): every roster above feeds cohortFailures PRONAMES,
+// and a proname is a projection of a function, not the function. A door recut to a different
+// argument list, or a same-named overload landing beside it, changes what `clara_authenticated`
+// can actually call while leaving every name-keyed census green. These are the EXACT signatures
+// -- resolved with to_regprocedure, which fails on a wrong arg list and on an ambiguous name --
+// so the roster pins the callable identity rather than its spelling.
+export const COA_TEMPLATE_PR_A_SIGS = [
+  "clara.fork_coa_template(uuid,text,text,text,text,text)",
+  "clara.upsert_coa_template_family(uuid,text,text,text,text,integer,text[],text[],text,text[],text[],text)",
+  "clara.remove_coa_template_family(uuid,text,text)",
+  "clara.upsert_coa_template_account(uuid,text,text,text,text,text,text,integer,boolean,text,text,text)",
+  "clara.remove_coa_template_account(uuid,text,text)",
+  "clara.publish_coa_template(uuid,text)",
+  "clara.retire_coa_template(uuid,text)",
+  "clara.list_coa_templates()",
+  "clara.get_coa_template(uuid)",
+  "clara._coa_template_content_sha256(uuid)",
+  "clara._coa_template_for_edit(uuid,uuid)",
+  "clara._tf_coa_template_freeze()",
+  "clara._tf_coa_template_child_freeze()",
+  "clara._tf_coa_adoption_template_congruent()",
+];
+
+/** Frontier-tolerant exact-signature census: silent where the cohort has not landed (every
+ *  pre-PR-a chain), and by-name where it has -- an unresolvable signature, or a second overload
+ *  sharing one of these pronames, is reported rather than passed over.
+ *
+ *  WHO CALLS THIS, and who deliberately does NOT. It is invoked from
+ *  `coa-template-pr-a.test.mjs` (cell J7), which the estate suite runs on every db PR against a
+ *  chain that carries PR-a. It is NOT wired into `grantMatrixFailures()` and must not be: that
+ *  function is reached by `rig-isolation.test.mjs`, which `db-slice-frontiers` runs against
+ *  databases pinned at 0042-0045 frontiers. Folding an exact-signature roster into it would put
+ *  a to_regprocedure lookup for fourteen bodies that do not exist there on every frontier leg --
+ *  the frontier-tolerance arm above would swallow it silently, which is worse than not asking.
+ *  The split is deliberate: the PRONAME census rides the frontier legs, the SIGNATURE census
+ *  rides the battery that only ever runs where the signatures exist. */
+export async function coaTemplateSigFailures() {
+  const live = await rootQuery(
+    `select s as sig, to_regprocedure(s) is not null as ok from unnest($1::text[]) s`,
+    [COA_TEMPLATE_PR_A_SIGS],
+  );
+  const missing = live.rows.filter((r) => !r.ok).map((r) => r.sig);
+  // The whole cohort absent = a pre-PR-a frontier, which is not a failure. Anything else is.
+  if (missing.length === COA_TEMPLATE_PR_A_SIGS.length) return [];
+  const failures = missing.length
+    ? [`裁-21 PR-a exact-signature roster is PARTIAL — these do not resolve via to_regprocedure: `
+       + `${missing.join(", ")}. A door recut to a different argument list leaves every `
+       + `proname-keyed census green; this is the cell that does not.`]
+    : [];
+  const dupes = await rootQuery(
+    `select p.proname, count(*)::int as n
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname = any($1::text[])
+      group by p.proname having count(*) > 1 order by p.proname`,
+    [COA_TEMPLATE_PR_A_COHORT],
+  );
+  if (dupes.rowCount) {
+    failures.push(`裁-21 PR-a names carry more than one overload: `
+      + `${dupes.rows.map((r) => `${r.proname} x${r.n}`).join(", ")} — the grant matrix and the `
+      + `cohort census both key on proname and would not see the second one.`);
+  }
+  return failures;
+}
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -1250,6 +1346,10 @@ export const ALLOWED = {
     ...P4T2_HUMAN_FNS,
     // 裁-18b PR-1 the four human binding doors — see the block above.
     ...BINDING_PROPOSAL_PR1_HUMAN_FNS,
+    // 裁-21 PR-a [the firm-level standard chart of accounts, TEMPLATE half] the seven admin
+    // writers + the two invoker-rights reads — clara_authenticated ONLY; agent + both wake
+    // roles gain ZERO, by the design's own non-goal rather than by omission. See the block above.
+    ...COA_TEMPLATE_PR_A_HUMAN_FNS,
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -1576,6 +1676,10 @@ export async function grantMatrixFailures() {
     );
   }
   failures.push(...cohortFailures("P4 tranche 2 registration + operator approval", P4T2_COHORT, liveNames));
+  // 裁-21 PR-a — frontier-tolerant by cohortFailures' own rule: a cohort that is entirely
+  // absent (every pre-PR-a chain) returns no failure, while a PARTIAL cohort — one of the
+  // thirteen retired or renamed without truing this roster — is caught by name.
+  failures.push(...cohortFailures("裁-21 PR-a COA template", COA_TEMPLATE_PR_A_COHORT, liveNames));
   // The same signature-exact companion as P4T1's above, scoped to P4T2's own four names --
   // review law 3 applied from the start this round, not discovered by a later mutant panel.
   const p4t2Sigs = [
