@@ -355,13 +355,17 @@ test("x36c.9 sign_vendor_identity_binding still refuses a binding whose created_
   let nulled = null;
   try {
     nulled = (await rootQuery(
+      // 'declined', not 'proposed': uq_vib_one_active_binding covers ('proposed','live') and the
+      // pair already carries the real proposal, so a second proposed row is refused 23505 before
+      // the cell reaches its subject. The status is irrelevant to what is under test — sign's
+      // NULL-principal arm fires BEFORE its status rung, which the refusal token below proves.
       `insert into clara.vendor_identity_bindings(
           firm_id,client_id,counterparty_id,status,f1_vendor_name_norm,f2_invoice_prefix,
-          registration_at_signing,content_hash,created_by,expires_at)
-       select firm_id,client_id,counterparty_id,'proposed',f1_vendor_name_norm,f2_invoice_prefix,
-              registration_at_signing,content_hash,null,expires_at
+          registration_at_signing,content_hash,created_by,expires_at,declined_at,declined_by)
+       select firm_id,client_id,counterparty_id,'declined',f1_vendor_name_norm,f2_invoice_prefix,
+              registration_at_signing,content_hash,null,expires_at,now(),$2
          from clara.vendor_identity_bindings where id=$1
-       returning id`, [proposed.binding_id])).rows[0].id;
+       returning id`, [proposed.binding_id, w.users.alice])).rows[0].id;
     const check = await rootQuery(
       "select created_by from clara.vendor_identity_bindings where id=$1", [nulled]);
     assert.equal(check.rows[0].created_by, null, "fixture: the row really carries a NULL principal");
