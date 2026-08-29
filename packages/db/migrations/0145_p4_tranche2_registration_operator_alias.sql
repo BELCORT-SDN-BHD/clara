@@ -1277,8 +1277,9 @@ begin
     raise exception 'p4t2 tail: reject_firm_registration''s dedupe hash is not bound to c.actor (F10)' using errcode = 'CLR10';
   end if;
 
-  -- (4e) request_firm_registration carries its OWN is_agent wall and F6's arg-mismatch refusal --
-  --      comment-stripped CODE (F4), not merely present in raw text.
+  -- (4h) request_firm_registration carries its OWN is_agent wall and F6's arg-mismatch refusal --
+  --      comment-stripped CODE (F4), not merely present in raw text. (Round 4 nit: this cell was
+  --      mislabeled (4e), duplicating add_member's own label above -- renumbered, no logic change.)
   select p.prosrc into v_bad from pg_proc p where p.oid = 'clara.request_firm_registration(text,text,text)'::regprocedure;
   v_code := regexp_replace(regexp_replace(v_bad, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
   if position('the agent identity cannot request a firm registration' in v_code) = 0 then
