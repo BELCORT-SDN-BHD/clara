@@ -2,11 +2,10 @@
 
 > Annexes to `tax-computation-design.md` (§1-§7) and `tax-computation-design-part2.md` (§8-§13), on
 > `tax-computation-survey.md`. The verb set, the surface DDL, tenancy/RLS, the disposal machinery, the
-> belt and the behavioural battery are in **`tax-computation-annexes-2-mechanics.md`**.
-> **A** mechanics and a worked ladder · **B** decision register D-1..D-26 · **C** predictions to
-> discharge at PR-0's rig replay · **D** the question register — **three RULED, three carded for the
-> owner's sitting, three lane-open** · **E** the standing maintenance duty the `law_review_due` belt
-> watches. Design stage: **no code authored, no rig run**.
+> belt, the battery and the v1.3 replay ledger are in **`tax-computation-annexes-2-mechanics.md`**.
+> **A** mechanics and a worked ladder · **B** decision register D-1..D-26 · **C** predictions, ALL
+> DISCHARGED at the 2026-08-29 replay · **D** the question register (three RULED, three carded,
+> three lane-open) · **E** the belt's maintenance duty. **v1.3: the replay HAS run; every delta is §M0.**
 >
 > **v2, 2026-08-23 — the PR-0 gate fold.** **D-18..D-26** minted for the nine gate corrections that
 > changed a mechanism · **D-3 and D-7 RE-CUT** (the fact-key route and the disposal column, both
@@ -67,9 +66,10 @@ Apportionment across two YAs is out of v1 (part 2 §13).
 Everything is **integer cents**. No floating point enters a durable artifact.
 
 - **The sign rule, which v1.2 never stated** *(gate material; **D-18**)*. `snapshot->'pl_rows'` carries
-  `movement_cents = (debit − credit) at ends_on − (debit − credit) at starts_on−1` (`0056:2142-2159`),
-  so an **income** account's movement is **negative** and an **expense** account's is positive — the
-  close's own net figure has to negate the income side to build `pl_net_cents` (`0056:2145`). The
+  `movement_cents = (debit − credit) at ends_on − (debit − credit) at starts_on−1` (**`0128:307`**;
+  *v1.3, M0 D-1: `0056:2142-2159` pointed at a `finalize_close` body superseded TWICE by the `0120` and `0128` CoRs; re-read at the LIVE body, the substance holds*), so an **income** account's
+  movement is **negative** and an **expense** account's is positive — the close's own net figure has
+  to negate the income side to build `pl_net_cents` (**`0128:307`**). The
   evaluator therefore normalises **by `account_type`, never by `direction`**:
   `amount_cents := case a.account_type when 'expense' then mv when 'income' then -mv end`.
   That yields a positive magnitude for a normal expense or income, R2 adds and R3 subtracts, and a
@@ -280,8 +280,8 @@ discharged.
 | **P-6** *(pin corrected)* | `dispose_fixed_asset`'s live body is what **`0041:3643`** shows — the `create function` line; `:3644` is the parameter continuation. Bodies are spliced across generations, so the file text is not the live body regardless. | `pg_get_functiondef`; record the `prosrc` sha256 as **one of PR-3's three** prestate pins (D-26) |
 | **P-7** | `publish_report_template_version` refuses `report_class='statutory'` from the agent principal and accepts it from the human admin verb. | exercise both arms — a refusal that cannot say NO has a meaningless YES |
 | **P-8** | `fixed_assets.ca_class` has no CHECK domain restricting it to the classes the CA rate table will key on. | `pg_get_constraintdef`; if it does, PR-1's rate-table keys must match it exactly |
-| **P-9** | `evaluator_versions.deployed` cannot be flipped by a plain UPDATE — `_tf_evaluator_deploy_once` (`0060:93-100`) is the only door. | attempt the plain UPDATE on the rig |
-| **P-10** | D-16's two load-bearing properties hold as reported: `verify_evaluator_freeze()` covers **undeployed** rows, and its hash moves when only a member's **ACL / owner / `search_path`** changes (body untouched). | Reported measured by the conductor (L19-verified) — **F-T3 still re-measures both** on its own rig, because a design that collapsed twelve members to one on the strength of these two facts may not hold them on hearsay. Register an undeployed row → confirm it freezes; then `alter function … owner to` / `set search_path` → confirm the checker raises. |
+| **P-9** ~~cannot be flipped by a plain UPDATE~~ **RE-CUT (v1.3, M0 D-3)** | **MEASURED: a plain `update … set deployed=true` from the BARE migration principal SUCCEEDS.** The wall is `_tf_evaluator_deploy_once`'s three conjuncts — `current_user = session_user` (under `set role clara_fn_owner` it raises **CLR08** *evaluator deployment requires the migration ceremony principal*), **one-way-once per row ever** (a second flip, an un-deploy and a born-deployed INSERT all raise CLR08), and a `verify_evaluator_freeze()` precheck. **`deploy-evaluator-version.mjs` is the RECIPE, not the wall.** | discharged |
+| **P-10** **HALF-REFUTED (v1.3, M0 D-4)** | **(a) CONFIRMED behaviourally** — all 8 registry rows are `deployed=false` on a fresh rig, the checker returns `{"ok":true,"verified_deployed":0,"verified_registered":8}`, and mutating an UNDEPLOYED member's `search_path` raises CLR10. **(b) REFUTED on two of three limbs** — `alter function … owner to` leaves the functiondef sha UNCHANGED and the checker passes; `grant execute` likewise; only `set search_path` moves it. `pg_get_functiondef` renders body, language, volatility, SECURITY DEFINER, strictness, cost/rows and SET config — **not** the owner and **not** the ACL. **D-16's ruling survives on a different, measured argument** (M0 D-4). | discharged |
 | **P-11** *(gate fold)* | `clara._tf_fixed_assets_immutable_0017()`'s live `v_mutable` is exactly the six lifecycle columns, and an UPDATE writing `disposal_value_cents` on an approved row raises CLR13 `fa_baseline_immutable`. | `pg_get_functiondef` for the live array; then force the UPDATE on a rig-seeded approved asset and read the SQLSTATE. **A guard that has never refused anything is a guard that was never asked** — so the pre-splice refusal is measured, not assumed, before PR-3 widens it. |
 | **P-12** *(gate fold)* | `clara._fa_on_approve` — **not** `dispose_fixed_asset` — is the body that writes `clara.fixed_assets` on a disposal, on both the full and the partial-supersede paths. | on a rig, run a full disposal and a partial one end to end; establish which function's statement wrote the row versions by trace or a temporary audit hook, rather than by reading either file's text |
 | **P-13** *(gate fold)* | `metric_cells` refuses a non-`ok` cell with a NULL `na_reason_version_id` (`0058:261-262`), and `t_scope_cell_na_reason` refuses a cross-firm reason binding. | attempt both inserts on the rig; **both arms** — a refusal that cannot say NO has a meaningless YES |

@@ -1,5 +1,14 @@
-# F-T3 — the draft tax computation: design (v2, gate-folded 2026-08-23)
+# F-T3 — the draft tax computation: design (v1.3, replay-trued 2026-08-29)
 
+> **v1.3, 2026-08-29 — the PR-0 REPLAY fold. `tax-computation-pr0-replay-2026-08-29.md` is the
+> MEASURED ground and OVERRIDES this set wherever the two differ.** Every DB claim in v2 was a
+> design-stage *source read*; the replay applied `0001`→`0147` on a throwaway and measured them.
+> **The eleven deltas, the three new owner questions and the fail-closed defaults PR-1 BUILDS for
+> all five open ones are `tax-computation-annexes-2-mechanics.md` §M0.** The two that would
+> otherwise have been built wrong: **D-7** — `uq_fixed_assets_id_firm_client UNIQUE (id, firm_id,
+> client_id)` ALREADY exists, so **PR-3 must NOT add `uq_fa_id_tenant`**; **D-9** — the close belt
+> enforces `closing_position` **only**, so `pl_rows` earns a twenty-second refusal string.
+>
 > **Design of record for Wave-F Track-B item F-T3 — part 1 of 2 (§1-§7).**
 > **`tax-computation-design-part2.md` carries §8-§13** (artifacts, the refusal vocabulary, the
 > battery, the PR ladder, sequencing, scope). Reads on `tax-computation-survey.md`,
@@ -10,27 +19,12 @@
 > Contract: `wave-f-contract.md:406-408`. Owner ruling 2026-08-23: **ALL-IN in Wave F**.
 >
 > **v2, 2026-08-23 — the PR-0 gate fold.** The gate confirmed **11 blockers, 11 materials and one
-> nit** against v1.2 and refuted nine. Every one is folded; the record, with a fold disposition per
-> finding, is `tax-computation-gate-record.md`. The ten that changed a mechanism:
->
-> | What was wrong in v1.2 | Where it is fixed |
-> |---|---|
-> | The ladder read `closing_position`, which is **balance-sheet-only**; the per-account P&L movement is `snapshot->'pl_rows'`, and the sign rule was never stated | §3, A.2 (**D-18**) |
-> | The **two loss deductions were in each other's rung** and the s.44(6) cap sat on the wrong base | §3 R7/R8 (**D-19**) |
-> | The **carry-forward inputs did not exist** anywhere in the estate; the ladder deducted zero silently | §4.2 (**D-19**) |
-> | `record_client_fact` **cannot carry F-T3's facts** — no valid time, a fail-closed dispatch, CLR04 in a migration — and `tin`/`ssm` already have a governed home | §4.1 (**D-21, D-22**) |
-> | A basis period diverging from the sealed fiscal year computed anyway | §3 R1 (**D-23**) |
-> | The **human-keyed guarantee was a NOT-NULL check the agent satisfies** | §2 (**D-24**) |
-> | **No wake door** for any of the three agent writes | §3.1 (**D-25**) |
-> | The disposal value is **not** the accounting proceeds; the FA immutability allowlist excludes the new column; the disposal verb does not write the register row | §5, mechanics §M3 (**D-7 re-cut, D-26**) |
-> | The frozen evaluator read tables created in a **later** PR | part 2 §11 |
-> | Ten new relations with **no tenancy or RLS shape**, and every refusal string missing its `metric_na_reason_versions` row | mechanics §M4, part 2 §9 |
->
-> **Carried forward unchanged where the fold did not touch them:** §3's ONE evaluator member (D-16) ·
-> the name-only-wall scoping obligation, re-homed onto F-T3's own attribute catalog (D-17) ·
-> OQ-6 → R-L25 · OQ-4 → REFUSE · OQ-5 → the pinned-version PACK · OQ-8's product half.
->
-> **Design-stage only. No code authored, no rig run.** Every DB cite is source-read; replay is PR-0's.
+> nit** against v1.2 and refuted nine; every one is folded. **`tax-computation-gate-record.md` is
+> the authority for what each finding was and where it was folded — its §0 carries the ten that
+> changed a mechanism, and that table is not restated here.** **Carried forward unchanged:** §3's
+> ONE evaluator member (D-16, whose RATIONALE v1.3 replaces — see M0 D-4 — while the ruling
+> stands) · D-17's name-only-wall scoping · OQ-6 → R-L25 · OQ-4 → REFUSE · OQ-5 → the
+> pinned-version PACK · OQ-8's product half.
 
 ---
 
@@ -112,13 +106,15 @@ cannot cite the wrong paragraph on Tuesday and the right one on Wednesday.
 
 ## 3 · The ladder as ONE evaluator member
 
-> **[RE-CUT 2026-08-23 — conductor, measured.]** v1.1 registered **~12 members, one per rung**. Wrong,
-> for a measured reason: **`verify_evaluator_freeze()` iterates `evaluator_versions` with no
-> `where deployed`, and hashes the FULL `pg_get_functiondef`.** So **(a)** registration freezes
-> immediately — **`deployed:false` buys nothing**; **(b)** a later ACL, owner or `search_path` change to
-> any member raises **at that later lane's apply, pointing at F-T3**. Twelve members = twelve bodies
-> frozen estate-wide and twelve chances to hand a red migration to a lane that never heard of this
-> item. **(D-16.)**
+> **[RE-CUT 2026-08-23 — conductor. RATIONALE REPLACED 2026-08-29 at the replay; the RULING
+> stands.]** v1.1 registered **~12 members, one per rung**. Wrong — but v2's stated reason ("a later
+> **ACL, owner** or `search_path` change to any member raises") is HALF-REFUTED: `pg_get_functiondef`
+> renders neither the owner nor the ACL. The ruling rests on the two measurements that DO hold —
+> `verify_evaluator_freeze()` ignores `deployed` entirely (so registration freezes immediately and
+> `deployed:false` buys nothing), and closures **SHARE** members (so one helper's attribute change
+> raises for every closure naming it, at that later lane's apply, **pointing at F-T3**). Full
+> measurement: **M0 D-4**. Twelve members = twelve bodies frozen estate-wide and twelve chances to
+> hand a red migration to a lane that never heard of this item. **(D-16.)**
 
 **ONE registered member**, self-contained, calling **nothing but built-ins**:
 `clara.evaluate_tax_computation_v1(p_client uuid, p_ya int) returns setof clara.tax_computation_line` —
@@ -362,17 +358,16 @@ account from `mixed_account_needs_split`.
 ### 4.6 · `valid_through` and the law-review belt — [GRANTED 2026-08-23, OQ-8's product half]
 
 A refusal is the right behaviour when a rate row is missing, and it is a **terrible first warning**: the
-firm discovers it in January, mid-filing, on a client's return. The seeded law tables therefore carry
-their own expiry, and something wakes before it.
-
-**Every row in `tax_rate_bands`, `capital_allowance_rates`, `tax_thresholds` and `tax_authorities`
-carries `valid_through`** — the last date the row is known-current, set at seed time from the source's
-own scope. It is **not** an automatic invalidation: past `valid_through` the row still computes, and the
-belt has already raised the question. **`law_review_due`** is a periodic belt, a **consumer of F-A4's
-clock** (law 80), entered through `wake_raise_law_review_due` on the `proactive` kind (§3.1); it reads
-the seeded tables and raises **one typed question to the firm's tax lead** per row expiring inside the
-horizon. **Its five belt properties, its recipient rule and its resolution rule are in mechanics §M5.**
-This is the product half of Annex E's standing duty; the **governance** half stays OQ-8's card.
+firm discovers it in January, mid-filing, on a client's return. So **every row in `tax_rate_bands`,
+`capital_allowance_rates`, `tax_thresholds` and `tax_authorities` carries `valid_through`** — the last
+date the row is known-current, set at seed time from the source's own scope, and **not** an automatic
+invalidation: past it the row still computes and the belt has already asked. **`law_review_due`** is a
+periodic belt, a **consumer of F-A4's clock** (law 80), entered through `wake_raise_law_review_due` on
+the `proactive` kind (§3.1); it raises **one typed question to the firm's tax lead** per row expiring
+inside the horizon. **Its five belt properties, its recipient rule and its resolution rule are in
+mechanics §M5.** Product half of Annex E's standing duty; the **governance** half stays OQ-8's card,
+whose fail-closed default — the firm owner as an automatic fallback that **says it fell back** — M5
+property 5 builds.
 
 ---
 
@@ -473,8 +468,14 @@ differ by exactly one year on a statutory floor.
   `(client, ya_target)`. **No row ⇒ `basis_period_undetermined` naming `ya_target`** — never a silent
   fallback to the computed year's `months`, which differs in exactly the first-period, change-of-date
   and cessation cases A.1 exists for.
-- **The cell's period.** `metric_cell_periods` (`0058:265-269`) binds every cell to a concrete
-  `reporting_periods` row, so R11's cells are stamped on `ya_target`'s period and R1-R10's on `p_ya`'s.
+- **The cell's period — NOT BUILDABLE AS WRITTEN** *(v1.3, measured; M0 **D-11**)*.
+  `metric_cell_periods` (`0058:265-269`) binds every cell to a concrete `reporting_periods` row, and
+  R1-R10's are `p_ya`'s. But `grain` is `CHECK (grain in ('month','fiscal_year'))` and
+  `ck_rp_fy_present` makes `grain='fiscal_year'` ⟺ a `fiscal_years` row — and `ya_target`'s fiscal
+  year has not been opened, by s.107C(1)-(2)'s own timing. **There is no year-of-assessment grain.**
+  **→ OQ-12**, default (a) BUILT: **the CP204 pack requires `ya_target`'s fiscal year to be OPEN and
+  refuses `cp204_target_year_unopened` otherwise** — the only option adding neither a shared-surface
+  change (a third `grain` value on a live Wave-E table) nor an untruth.
 
 `cp204_instalments_v1`: equal monthly instalments due on the **15th of each calendar month**, beginning
 at **month 2** for an established taxpayer and **month 6** for one that first commenced operation with a
@@ -493,8 +494,6 @@ one. Where `actual − estimate > 0.30 × actual`, exposure = `0.10 × (actual �
 **Narrative** — commentary and pack, never a provision, never a posting. And a taxpayer that has **not
 commenced operations** need not furnish CP204 (Filing Programme 2026 note 3(i)(b)) while a **dormant**
 one must still furnish the return form: both are verdicts of the evaluator, both printed.
-
----
 
 **Continue at `tax-computation-design-part2.md` — §8 the artifacts and the human wall · §9 the refusal
 vocabulary · §10 the battery · §11 the PR ladder · §12 sequencing · §13 what is not in v1.**

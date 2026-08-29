@@ -15,7 +15,7 @@
     "dr:selftest": "node scripts/dr-selftest.mjs",
     "dr:verify": "node scripts/dr-verify.mjs",
     "lint": "eslint .",
-    "test": "node --test --test-concurrency=1 --import ./tests/delta-preintegration-gate.mjs --import ./tests/rs-guard-preintegration-gate.mjs --import ./tests/theta-preintegration-gate.mjs --import ./tests/epsilon-preintegration-gate.mjs --import ./tests/zeta-preintegration-gate.mjs --import ./tests/eta-preintegration-gate.mjs --import ./tests/statutory-deadlines-preintegration-gate.mjs tests/"
+    "test": "node --test --test-concurrency=1 --import ./tests/delta-preintegration-gate.mjs --import ./tests/rs-guard-preintegration-gate.mjs --import ./tests/theta-preintegration-gate.mjs --import ./tests/epsilon-preintegration-gate.mjs --import ./tests/zeta-preintegration-gate.mjs --import ./tests/eta-preintegration-gate.mjs --import ./tests/statutory-deadlines-preintegration-gate.mjs --import ./tests/f-t3-pr-1-preintegration-gate.mjs tests/"
   },
   "dependencies": {
     "pg": "8.20.0"
