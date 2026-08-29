@@ -423,7 +423,11 @@ how a row lands. A rate change is a ticket and a PR. **EPF/SOCSO/EIS, stamp duty
   surviving export; the SST-02 return with per-field mapping + NIL validity +
   imported-taxable-services reverse charge.
 - **F-T2** the payroll deadline calendar (documents→JV flow stays; no engine).
-- **F-T3** (last; may slip v1.1) the draft tax computation: add-backs, capital
+- **F-T3** (last; **NOT slippable** — "may slip v1.1" was SUPERSEDED by the owner's ALL-IN
+  ruling, `docs/product/PRD.md` open-question 4: "the owner ruled F-T3 ALL-IN for Wave F, not
+  slipped to v1.1". Product law wins; this line is trued 2026-08-29 because a stale "may slip"
+  is exactly what a future lane would cite to justify slipping it) the draft tax computation:
+  add-backs, capital
   allowances, chargeable income, Form C/P/B + CP204. The agent prepares and narrates
   (add-back judgement is hers, cited); the human reviews and e-files — always.
 - **F-T4** the fix queue: task #17 `closing_transfer` Fix A (after the sitting's R1) ·

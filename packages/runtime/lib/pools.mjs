@@ -1,9 +1,12 @@
-// The dedicated-login connection pools (Slice 4 two-login base + the Slice-6 write
-// floor = THREE logins now; contract §4.1 / §5). EVERY runtime DB access flows through
+// The dedicated-login connection pools (Slice 4 two-login base + the Slice-6 write floor +
+// Gate G1's bank pool + F-A6's FREEFORM READ pool; contract §4.1 / §5). EVERY runtime DB
+// access flows through
 // here so the P4 discipline is enforced in exactly one place (proven empirically in the
 // S4 probes — see spike/RESULTS + contract §2):
 //
-//   * THREE logins / THREE roles. The runtime pool connects as clara_runtime_login and
+//   * FIVE logins / FIVE roles (three here since Slice 6, plus Gate G1's bank pool and
+//     F-A6's freeform pool, the latter in lib/freeform-read.mjs — see the import below).
+//     The runtime pool connects as clara_runtime_login and
 //     SET ROLEs to clara_runtime on every checkout; the read pool connects as
 //     clara_agent_read_login and SET ROLEs to clara_agent_ro with
 //     default_transaction_read_only=on; the Slice-6 WRITE pool connects as
@@ -41,6 +44,11 @@
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { connConfig, assertNoTargetSplit } from "./relay.mjs";
+// F-A6 PR-2: the FIFTH login (clara_freeform_login) and its ONE wrapper live in their own
+// module — its checkout differs on three load-bearing points (a session statement_timeout set
+// before the call, a DISCARD ALL release, and no callback seam at all), and lib/freeform-read.mjs
+// states each. This file keeps the ONE boot door and the ONE shutdown door by calling into it.
+import { assertFreeformPoolConfig, endFreeformPool } from "./freeform-read.mjs";
 
 const TEST_MODE = process.env.RELAY_TEST_MODE === "1";
 
@@ -120,6 +128,12 @@ export function assertProductionPoolConfig() {
       );
     }
   }
+  // F-A6 (design Annex E.1 / R-4): CLARA_FREEFORM_DATABASE_URL joins this fail-closed set as
+  // the fourth eager member, so clara_freeform_login's ceremony PRECEDES the image — the write
+  // floor's posture, deliberately NOT the bank pool's lazy one (whose ceremony was gated on
+  // its own PR merging; F-A6 PR-1 is merged and ceremonied already). The assert itself lives
+  // beside the pool it guards, with both names as its own constants.
+  assertFreeformPoolConfig();
 }
 
 function loginConfig(which) {
@@ -536,4 +550,5 @@ export async function endPools() {
   if (read) await read.end().catch(() => {});
   if (write) await write.end().catch(() => {});
   if (bank) await bank.end().catch(() => {});
+  await endFreeformPool(); // F-A6: the fifth login's pool, owned by lib/freeform-read.mjs.
 }
