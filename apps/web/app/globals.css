@@ -182,7 +182,26 @@
   --clara-muted: #f4f1fb;
 
   /*
-   * FOCUS TREATMENT, RECORDED DIVERGENCE (not resolved either direction).
+   * FOCUS TREATMENT — RULED 2026-08-27 evening (R3), RECUT STILL OWED.
+   * The owner resolved this divergence in the direction the vendored
+   * primitives already ship: "All focus indicators unify on the shadcn 3px
+   * translucent ring (`focus-visible:ring-3 ring-ring/50`), superseding
+   * contract §9's 2px #1D4ED8 outline. This is a founder amendment of the
+   * ratified contract — a §9 recut PR is owed to clarabook-frontend."
+   * (mohe-grill-rulings-2026-08-27-evening.md R3; classified
+   * DIVERGED-BY-RULING in the 08-28 conformance audit.)
+   *
+   * WHAT IS STILL TRUE OF THE CODE BELOW: nothing has been recut yet. The
+   * flat `:focus-visible` outline is still what this file declares, so the
+   * two idioms still coexist exactly as described below. R3's execution —
+   * one global pass replacing the §9 outline treatment, plus re-deriving
+   * the contrast gate's focus pairs as the ring's COMPOSITED effective
+   * colour (an R2xR3 collision if it fails 3:1 on the cream ground goes
+   * back to the owner, never a unilateral fix) — is a named next step in
+   * PROGRESS.md, not this file's to perform. Only the heading is trued
+   * (2026-08-29): it read "not resolved either direction", which was true
+   * when written and had been superseded by R3 two days later.
+   *
    * The token contract of record (clarabook-frontend g5-design-system/
    * docs/01-TOKEN-CONTRACT.md §9, read at `main` 2026-08-27) specifies the
    * product's focus indicator as "a 2px #1D4ED8 indicator with 2px offset" —
@@ -197,15 +216,15 @@
    * share the SAME colour (`--ring` is `var(--focus)`, #1D4ED8) — only the
    * shape (a crisp 2px outline vs. a soft 3px halo) differs.
    *
-   * Recorded here for the owner's brand sitting, deliberately NOT unified
-   * either direction: rewriting every vendored primitive to the contract's
+   * Recorded here for the owner's brand sitting rather than unified
+   * unilaterally: rewriting every vendored primitive to the contract's
    * flat outline is a visible product-wide look change; relaxing §9 to
-   * bless the vendored idiom is a token-contract change — neither is this
-   * pass's call to make unilaterally (constraint 1, AGENTS.md — a
-   * design-vs-contract collision goes to the owner). See
-   * components/common/section-tabs.tsx and
-   * components/common/native-select.tsx for the two call sites whose
-   * comments point back at this note.
+   * bless the vendored idiom is a token-contract change — neither was that
+   * pass's call to make (constraint 1, AGENTS.md — a design-vs-contract
+   * collision goes to the owner). The sitting happened and R3 took the
+   * second arm; see the heading above. See components/common/
+   * section-tabs.tsx and components/common/native-select.tsx for the two
+   * call sites whose comments point back at this note.
    */
 
   /* Product semantics: identity and interaction stay separate. */

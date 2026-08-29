@@ -46,9 +46,14 @@ generalize from, rather than being guessed ahead of the surfaces that will use i
 
 ## Pointer
 
-**apps/web** (branch `frontend/web`, replacing `apps/dashboard` at cutover — see
-`docs/design/FRONTEND.md`) is where the Codex frontend build's Tailwind/shadcn setup lives and
-where Wave G's real token set will be extracted from. Until cutover, `apps/dashboard`'s plain
-CSS Modules surfaces (see the TRUED banner above) remain the only SHIPPED ground truth.
+**apps/web** (on `main` since the P1/P2 folds — not a branch — replacing `apps/dashboard` at
+cutover; see `docs/design/FRONTEND.md`) is where the Tailwind/shadcn setup lives and where
+Wave G's real token set will be extracted from. It is the tokenised, contrast-gated system of
+record for design: `apps/web/app/globals.css` carries the ported token map with cited
+provenance, and three a11y gates run in CI. `apps/dashboard`'s plain CSS Modules surfaces
+remain what is DEPLOYED until the P6 cutover PR, but they are not where a designer or a lane
+should look for the system. *(Trued 2026-08-29, P-4 of
+`docs/plan/active/mohe-alignment-audit-2026-08-29.md`: this pointer named a branch that no
+longer exists and sent readers to the retiring app as "the only source of truth".)*
 `docs/design/PRODUCT_DESIGN.md` governs precedence and principles; this file governs nothing
-yet.
+yet — its emptiness stays scheduled (owner ruling Q7-B, Wave G).

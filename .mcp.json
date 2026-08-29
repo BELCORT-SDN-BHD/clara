@@ -6,6 +6,10 @@
       "args": [],
       "env": {}
     },
+    "mobbin": {
+      "type": "http",
+      "url": "https://api.mobbin.com/mcp"
+    },
     "shadcn": {
       "type": "stdio",
       "command": "cmd",

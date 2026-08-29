@@ -20,6 +20,63 @@ import js from "@eslint/js";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
+// apps/web only — ban a 3-argument `window.open(...)` call outright (independent
+// review 2026-08-27, R1/R5). WHATWG: a "noopener"/"noreferrer" features string
+// makes `window.open` return `null` UNCONDITIONALLY, which R1 shipped as a
+// regression and R5 found had reappeared, undetected, inside the very adapter
+// meant to prevent it (lib/documents/open-in-new-tab.ts's own type-signature
+// wall covers only THAT file — this rule is the wall that survives a future
+// call site bypassing it entirely). The two-argument `(url, target)` form is
+// never restricted.
+//
+// Hoisted to a const because flat config REPLACES a rule's options rather than
+// merging them: the page-component block below re-declares `no-restricted-syntax`
+// for a subset of the same files, so it has to carry this selector too or
+// window.open would silently go unguarded on exactly the surfaces that call it.
+// One const, two references — never two copies to drift.
+const NO_THREE_ARG_WINDOW_OPEN = {
+  selector: "CallExpression[callee.object.name='window'][callee.property.name='open'][arguments.length>2]",
+  message:
+    "window.open must be called with at most two arguments (url, target). A features string (\"noopener\"/\"noreferrer\"/even \"\") changes its return-value behaviour — WHATWG's noreferrer implies noopener, and noopener makes window.open return null unconditionally (2026-08-27 R1/R5). Use lib/documents/open-in-new-tab.ts's injectable windowOpen instead of calling window.open directly.",
+};
+
+// Owner ruling Q4, 2026-08-27 (docs/plan/active/mohe-grill-rulings-2026-08-27.md
+// :41-42, ratifying the ClaraBook brand system): "raw color values in page
+// components are lint-banned". These two selectors are that ban.
+//
+// WHAT THEY PROTECT, beyond the brand contract. apps/web's contrast gate
+// (apps/web/scripts/check-token-contrast.mjs) is a CLOSED-WORLD check over the
+// token pairs declared in globals.css — it never reads component code. A raw hex
+// in a component therefore escapes not only the token vocabulary but the WCAG
+// 2.1 AA contrast gate entirely. The tree is clean today (measured twice by the
+// 08-29 alignment audit, and again when this rule landed); the point of a gate is
+// to hold it clean through P6's polish wave, which re-touches every colour on
+// every surface across several delegated lanes.
+//
+// SCOPE — `app/**` and `components/**` only, which is what "page components"
+// means. `scripts/` owns the token maths and `tests/` unit-tests it; both hold
+// legitimate hex constants (tests/token-contrast.test.ts alone has ~30) and
+// neither renders anything.
+//
+// NOT BANNED, deliberately: `bg-black/10`, the modal scrim in
+// components/ui/dialog.tsx and command-k-provider.tsx. It is a Tailwind default
+// but a keyword, not a palette step, and tokenising it is a visual decision, not
+// a lint fix — named here so it stays a known residual instead of an invisible
+// carve-out.
+const NO_RAW_COLOR_VALUES = {
+  selector:
+    ":matches(Literal[value=/(#([0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\\b|\\b(rgba?|hsla?|oklch|oklab|lch|lab)\\()/], TemplateElement[value.raw=/(#([0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\\b|\\b(rgba?|hsla?|oklch|oklab|lch|lab)\\()/])",
+  message:
+    "Raw colour value in a page component (owner ruling Q4, 2026-08-27: \"raw color values in page components are lint-banned\"). Every colour comes from a semantic token declared in app/globals.css — `text-foreground`, `bg-card`, `border-error/30` — never a hex, rgb(), hsl() or oklch() literal and never a `bg-[#…]` arbitrary value. A raw colour also escapes scripts/check-token-contrast.mjs, which only reads globals.css, so it is invisible to the WCAG contrast gate.",
+};
+
+const NO_TAILWIND_DEFAULT_PALETTE = {
+  selector:
+    ":matches(Literal[value=/\\b(bg|text|border|ring|fill|stroke|from|via|to|outline|decoration|divide|accent|caret|shadow|placeholder)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3}\\b/], TemplateElement[value.raw=/\\b(bg|text|border|ring|fill|stroke|from|via|to|outline|decoration|divide|accent|caret|shadow|placeholder)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-[0-9]{2,3}\\b/])",
+  message:
+    "Tailwind default-palette class in a page component (owner ruling Q4, 2026-08-27). `bg-red-500`/`text-slate-700` and friends bypass the token map entirely — this product's palette is the semantic set in app/globals.css (`error`, `warning`, `success`, `info`, `muted`, `card`, `clara`, …). Reach for the token whose MEANING matches, not the hue that looks right.",
+};
+
 export default tseslint.config(
   // Global ignores — an object with ONLY `ignores` applies to the whole run.
   {
@@ -95,24 +152,22 @@ export default tseslint.config(
     },
   },
 
-  // apps/web only — ban a 3-argument `window.open(...)` call outright (independent
-  // review 2026-08-27, R1/R5). WHATWG: a "noopener"/"noreferrer" features string
-  // makes `window.open` return `null` UNCONDITIONALLY, which R1 shipped as a
-  // regression and R5 found had reappeared, undetected, inside the very adapter
-  // meant to prevent it (lib/documents/open-in-new-tab.ts's own type-signature
-  // wall covers only THAT file — this rule is the wall that survives a future
-  // call site bypassing it entirely). The two-argument `(url, target)` form is
-  // never restricted.
+  // apps/web, whole package — the window.open wall (see the const's own header).
   {
     files: ["apps/web/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector: "CallExpression[callee.object.name='window'][callee.property.name='open'][arguments.length>2]",
-          message: "window.open must be called with at most two arguments (url, target). A features string (\"noopener\"/\"noreferrer\"/even \"\") changes its return-value behaviour — WHATWG's noreferrer implies noopener, and noopener makes window.open return null unconditionally (2026-08-27 R1/R5). Use lib/documents/open-in-new-tab.ts's injectable windowOpen instead of calling window.open directly.",
-        },
-      ],
+      "no-restricted-syntax": ["error", NO_THREE_ARG_WINDOW_OPEN],
+    },
+  },
+
+  // apps/web page components — the same wall PLUS the Q4 colour ban. This block
+  // matches a SUBSET of the one above and re-declares the same rule, so it
+  // deliberately repeats NO_THREE_ARG_WINDOW_OPEN by reference: flat config
+  // replaces a rule's options, it does not merge them.
+  {
+    files: ["apps/web/app/**/*.{ts,tsx}", "apps/web/components/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": ["error", NO_THREE_ARG_WINDOW_OPEN, NO_RAW_COLOR_VALUES, NO_TAILWIND_DEFAULT_PALETTE],
     },
   },
 );
