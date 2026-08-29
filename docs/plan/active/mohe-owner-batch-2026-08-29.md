@@ -51,16 +51,16 @@ ruling of the night). The full records are in the named files; the rulings ledge
    "fn-fronted only" table set (a standing invariant test); the sibling you told us to copy
    (`counterparties`) does not. Same purpose (humans list aliases; `retire_counterparty_alias`
    gets an honest id), same idiom as the tranche's other read, the invariant kept.
-3c. **The manual sweep after #414 (hardening B, `0147`) went RED — a TEST-FIXTURE fault, not a
-   product one.** The closed-wave drill **§4.11** and all four **D-b frontier legs** failed
-   together: the shared `seedAdmission` fixture follows head and writes `token_hash`, which does
-   not exist at the pre-`0147` frontiers those legs replay. **Fix: the fixture is made
-   frontier-aware — it probes the catalog for the column instead of assuming it** — on branch
-   fix/seed-admission-frontier. **Product code is unaffected**, and **`0147`'s live window
-   waits for that branch's sweep to come back green.** *(The class is in PROGRESS Known issues: a
-   shared fixture that follows head breaks the sweep-only legs, and the closed drills run only on
-   the weekly sweep or a manual dispatch — so a PR that changes a shared fixture must
-   `gh workflow run ci.yml` on its own branch before merge.)*
+3c. **The manual sweep after #414 (hardening B) went RED — a TEST-FIXTURE fault, not a product
+   one — and it is now FIXED and the window has RUN.** The closed-wave drill **§4.11** and all
+   four **D-b frontier legs** failed together: the shared `seedAdmission` fixture followed head
+   and wrote `token_hash`, which does not exist at the pre-`0147` frontiers those legs replay.
+   **#415 made the fixture frontier-aware (it probes the catalog) and its branch sweep turned the
+   four frontier legs green**; product code was never wrong. **`0147` was then ceremonied the
+   same day — LIVE 142/`0147`, a 47-second D1 window, `/ready` 200**; as-run
+   `docs/plan/completed/mohe-0147-apply-asrun.md`. *(The LESSON stays in PROGRESS Known issues:
+   the closed drills run only on the weekly sweep or a manual dispatch, so a PR that changes a
+   shared fixture must `gh workflow run ci.yml` on its own branch before merge.)*
 
 ## Decisions that are YOURS (each: 大白话 · rec · cost · the default that stands)
 
