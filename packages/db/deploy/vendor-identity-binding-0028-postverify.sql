@@ -345,20 +345,37 @@ begin
   raise notice '0028 postverify OK (9/12): persist_invoice_facts locks documents before document_filings';
 
   -- (10) executor delta is exactly the vocabulary split, not additive.
-  select pg_get_functiondef(
-    'clara.execute_rule_post(uuid,text)'::regprocedure) into v_src;
-  v_norm:=lower(regexp_replace(
-    regexp_replace(
-      regexp_replace(v_src,'/\*[\s\S]*?\*/','','g'),
-      '--[^\n]*','','g'),
-    '\s+',' ','g'));
-  if position('ineligible_no_coding_kind' in v_norm)=0
-     or position('ineligible_no_document' in v_norm)=0
-     or position('ineligible_no_counterparty' in v_norm)=0
-     or position('not_eligible_shape' in v_norm)<>0 then
-    raise exception '0028 postverify: execute_rule_post eligibility vocabulary split is incomplete';
+  --
+  -- SUCCESSION-AWARE (2026-08-30, 裁-18b PR-1 fold, N-6 / FOLD-3). clara.execute_rule_post was
+  -- DROPPED by 0118_f_a2_cutover_retirement (its S1 drop list), so on any chain past 0118 the
+  -- regprocedure cast below raises `undefined_function` and takes the whole file with it. The
+  -- db-tests.md succession pattern applies: run the legacy probe only where the body still
+  -- exists, and otherwise WITNESS the retirement positively -- the 0118 stem present in the
+  -- ledger AND the exact signature absent -- rather than skipping on an unexplained absence.
+  -- An absence alone is not evidence (review law 2); an absence beside the migration that caused
+  -- it is.
+  if to_regprocedure('clara.execute_rule_post(uuid,text)') is not null then
+    select pg_get_functiondef(
+      'clara.execute_rule_post(uuid,text)'::regprocedure) into v_src;
+    v_norm:=lower(regexp_replace(
+      regexp_replace(
+        regexp_replace(v_src,'/\*[\s\S]*?\*/','','g'),
+        '--[^\n]*','','g'),
+      '\s+',' ','g'));
+    if position('ineligible_no_coding_kind' in v_norm)=0
+       or position('ineligible_no_document' in v_norm)=0
+       or position('ineligible_no_counterparty' in v_norm)=0
+       or position('not_eligible_shape' in v_norm)<>0 then
+      raise exception '0028 postverify: execute_rule_post eligibility vocabulary split is incomplete';
+    end if;
+    raise notice '0028 postverify OK (10/12): executor eligibility vocabulary is fully split';
+  else
+    if not exists (select 1 from clara.schema_migrations
+                    where version ~ 'f_a2_cutover_retirement$') then
+      raise exception '0028 postverify: clara.execute_rule_post is ABSENT but 0118_f_a2_cutover_retirement is NOT in the ledger -- something removed it that this file cannot account for';
+    end if;
+    raise notice '0028 postverify OK (10/12): executor RETIRED -- clara.execute_rule_post(uuid,text) resolves to nothing and the f_a2_cutover_retirement migration that dropped it is in the ledger; the eligibility-vocabulary probe has no body to read and is correctly not run';
   end if;
-  raise notice '0028 postverify OK (10/12): executor eligibility vocabulary is fully split';
 
   -- (11) The ordinary resolver's CLR23 catch must finish before the Slot-A
   -- binding call, which receives the parsed page candidate and exposes a named

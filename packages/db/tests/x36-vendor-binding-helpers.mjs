@@ -4,7 +4,7 @@
 // x36-vendor-binding-ceremony.test.mjs) shares the exact same fixtures rather than drifting.
 
 import { randomUUID } from "node:crypto";
-import { rootQuery, withActor, humanQuery, namedCall, opk } from "./rig-helpers.mjs";
+import { rootQuery, withActor, humanQuery, namedCall, opk, ROLES } from "./rig-helpers.mjs";
 import { COA } from "./rig-fixtures.mjs";
 
 export async function has28() {
@@ -63,16 +63,56 @@ const APPROVE_CORE_SIG = "clara._approve_entry_core(jsonb,uuid,uuid,text,text)";
  *  never a migration-name proxy — review law 3: a name is a projection of the thing.) */
 export async function postTimeControlLive() {
   try {
-    // Comment-stripped, the same instrument the door itself uses — otherwise this helper and the
-    // wall it reports on could disagree, and a fixture that disagrees with the door is worse than
-    // no fixture at all.
+    // IDENTITY, not text — the same question the door asks, asked the same way. A helper that
+    // reports on a wall by a DIFFERENT instrument than the wall uses is how a fixture ends up
+    // disagreeing with the door it is supposed to be about.
     const r = await rootQuery(
-      `select position($1 in regexp_replace(regexp_replace(coalesce(p.prosrc,''), '/\\*.*?\\*/', '', 'gs'), '--[^\n]*', '', 'g')) > 0 as ok
-         from pg_proc p where p.oid = to_regprocedure($2)`,
-      [POST_TIME_MARKER, APPROVE_CORE_SIG]);
+      `select coalesce(bool_or(
+                encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') = w.prosrc_sha), false) as ok
+         from clara.control_witnesses w
+         join pg_proc p on p.oid = to_regprocedure(w.proc)
+        where w.control = $1`, [POST_TIME_MARKER]);
     return r.rows[0]?.ok === true;
   } catch { return false; }
 }
+
+/** Recut `_approve_entry_core` with `edit(original)` applied, COMMITTED, and return its new
+ *  prosrc sha. Used by withPostTimeControl and by the C3 text-vs-identity panel. */
+export async function recutApproveCore(edit) {
+  const original = (await rootQuery(
+    "select pg_get_functiondef($1::regprocedure) as def", [APPROVE_CORE_SIG])).rows[0].def;
+  const mutated = edit(original);
+  if (mutated === original) throw new Error("recutApproveCore: the edit changed nothing");
+  await rootQuery(`set role ${ROLES.fnOwner}; ${mutated}`);
+  const sha = (await rootQuery(
+    "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as s from pg_proc p where p.oid = $1::regprocedure",
+    [APPROVE_CORE_SIG])).rows[0].s;
+  return { original, sha };
+}
+
+/** Restore `_approve_entry_core` to `def` and verify by sha. */
+export async function restoreApproveCore(def, expectedSha) {
+  await rootQuery(`set role ${ROLES.fnOwner}; ${def}`);
+  const sha = (await rootQuery(
+    "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as s from pg_proc p where p.oid = $1::regprocedure",
+    [APPROVE_CORE_SIG])).rows[0].s;
+  if (sha !== expectedSha) {
+    throw new Error(`restoreApproveCore: RESTORE FAILED (sha ${sha} != ${expectedSha}) — every later cell is untrustworthy`);
+  }
+}
+
+/** The rig's stand-in for PR-3's own recut: plant the marker as REAL CODE. What the gate reads is
+ *  the resulting sha, not this text — the text only makes the stub honest to look at. */
+export const plantMarker = (def) => {
+  const needle = "\ndeclare";
+  if (!def.includes(needle)) {
+    throw new Error(
+      `plantMarker: '\\ndeclare' is absent from the approve path's definition, so nothing would be `
+      + "planted and the cell would prove the opposite of what it claims.");
+  }
+  return def.replace(needle,
+    `${needle}\n  v_${POST_TIME_MARKER} boolean := true; -- rig fixture: planted and removed`);
+};
 
 /**
  * Run `fn()` with PR-3's marker PLANTED on the live approve path, then restore it byte-for-byte.
@@ -91,40 +131,36 @@ export async function postTimeControlLive() {
  * any probe error is re-thrown.
  */
 export async function withPostTimeControl(fn) {
-  const sha = async () => (await rootQuery(
+  const before = (await rootQuery(
     "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as s from pg_proc p where p.oid = $1::regprocedure",
-    [APPROVE_CORE_SIG])).rows[0]?.s ?? null;
-  const original = (await rootQuery(
-    "select pg_get_functiondef($1::regprocedure) as def", [APPROVE_CORE_SIG])).rows[0].def;
-  const before = await sha();
-  // REAL CODE, not a comment: the door's witness is comment-stripped, precisely so a marker in a
-  // comment cannot pass for a deployed control. A declared variable whose NAME carries the marker
-  // is the cheapest honest plant — it survives stripping and does nothing.
-  const needle = "\ndeclare";
-  if (!original.includes(needle)) {
-    throw new Error(
-      `withPostTimeControl: '${JSON.stringify(needle)}' is absent from pg_get_functiondef(${APPROVE_CORE_SIG}), `
-      + "so the marker would not be planted and the cell would prove the opposite of what it claims.");
-  }
-  const planted = original.replace(
-    needle, `${needle}\n  v_${POST_TIME_MARKER} boolean := true; -- rig fixture: planted and removed`);
-  if (planted === original) throw new Error("withPostTimeControl: the plant changed nothing");
-  await rootQuery(`set role clara_fn_owner; ${planted}`);
+    [APPROVE_CORE_SIG])).rows[0].s;
+  // TWO ACTS, in the order PR-3 will perform them: recut the approve path, then WITNESS the body
+  // that was reviewed. Neither alone opens the gate — which is the whole of identity-by-sha, and
+  // is why this fixture is a replay of the MECHANISM rather than a way past it.
+  const { original, sha } = await recutApproveCore(plantMarker);
+  await rootQuery(
+    `insert into clara.control_witnesses(control, proc, prosrc_sha, minted_in_migration)
+     values ($1, $2, $3, 'rig-fixture:withPostTimeControl')`,
+    [POST_TIME_MARKER, APPROVE_CORE_SIG, sha]);
   if (!(await postTimeControlLive())) {
-    await rootQuery(`set role clara_fn_owner; ${original}`);
-    throw new Error("withPostTimeControl: the marker was planted but the witness still says absent");
+    await rootQuery("delete from clara.control_witnesses where control = $1", [POST_TIME_MARKER]);
+    await restoreApproveCore(original, before);
+    throw new Error("withPostTimeControl: witnessed the recut body and the gate still reads CLOSED");
   }
   // No `finally` (eslint no-unsafe-finally, and the reason behind it): a throw from a finally
   // block swallows the probe's own error, which is the one a reader needs. Capture, restore,
   // then decide — and a failed RESTORE outranks a failed probe.
   let out; let probeError = null;
   try { out = await fn(); } catch (e) { probeError = e; }
-  await rootQuery(`set role clara_fn_owner; ${original}`);
-  const after = await sha();
-  if (after !== before) {
+  await rootQuery("delete from clara.control_witnesses where control = $1", [POST_TIME_MARKER]);
+  let restoreError = null;
+  try { await restoreApproveCore(original, before); } catch (e) { restoreError = e; }
+  const left = (await rootQuery(
+    "select count(*)::int c from clara.control_witnesses where control = $1", [POST_TIME_MARKER])).rows[0].c;
+  if (restoreError || left !== 0) {
     throw new Error(
-      `withPostTimeControl: RESTORE FAILED — clara._approve_entry_core is still carrying the marker `
-      + `(sha ${after} != ${before}). Every later cell in this suite is now untrustworthy.`
+      "withPostTimeControl: RESTORE FAILED — every later cell in this suite is now untrustworthy. "
+      + (restoreError ? restoreError.message : `${left} witness row(s) survived`)
       + (probeError ? ` The probe had also failed: ${probeError.message}` : ""));
   }
   if (probeError) throw probeError;

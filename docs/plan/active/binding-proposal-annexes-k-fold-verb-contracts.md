@@ -104,8 +104,15 @@ The named human door out of a decline (gate ruling (b)). Without it a single "no
 ## K.3 — `clara._expire_stale_proposals(p_firm uuid, p_client uuid, p_counterparty uuid) returns integer`
 
 The in-door stale-`proposed` sweep (gate B5). Not a door any role calls directly — an internal,
-ungranted helper called FIRST by both proposal writers and by the eligibility read, for exactly
-one `(client, counterparty)` pair at a time.
+ungranted helper called FIRST by **both proposal writers**, for exactly one
+`(client, counterparty)` pair at a time.
+
+> **NOT by the eligibility read (M8).** `clara.wake_list_binding_candidates` is `STABLE` and
+> calls nothing that writes: it treats a past-expiry `'proposed'` row as non-open **in its own
+> predicate**, which is the same answer this sweep would produce, arrived at without writing. An
+> earlier cut did call this helper from that read, which contradicted the volatility contract,
+> gave the read a stale snapshot over its own side effects, and escaped as an untyped `25006`
+> inside `begin read only`. The drain lives in the locked writer doors and nowhere else.
 
 - **Role floor / grant.** None — `SECURITY DEFINER`, `revoke all … from public`. It has no
   caller-facing floor because it is not itself a caller-facing door.
