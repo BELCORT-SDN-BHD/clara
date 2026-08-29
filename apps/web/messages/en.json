@@ -28,13 +28,20 @@
     "activity": "Activity",
     "admin": "Admin"
   },
+  "NotFound": {
+    "heading": "That page does not exist",
+    "body": "Nothing is served at this address. If you followed a link inside Clara, the link is wrong — not the page.",
+    "navLabel": "Ways back",
+    "firmHome": "Firm home",
+    "needsYou": "Needs you"
+  },
   "FirmHome": {
     "heading": "Firm home",
-    "body": "P1 foundation scaffold — the firm-altitude workspace (Needs-you inbox, client register, firm activity, admin) is built in P3/P4. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+    "body": "The firm-altitude surfaces each have their own page in the sidebar — the Needs-you inbox, the client register, firm activity and admin. This home page carries no summary of its own yet."
   },
   "NeedsYou": {
     "heading": "Needs you",
-    "body": "P2 shell — the cross-client Needs-you inbox is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "body": "Everything waiting on a person, across every client the firm serves.",
     "emptyMessage": "Nothing is waiting on you across any client right now.",
     "countsReady": "Ready",
     "countsNeedsReview": "Needs review",
@@ -103,7 +110,7 @@
   },
   "ClientsRegister": {
     "heading": "Clients",
-    "body": "P2 shell — the client register (every client the firm serves) is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "body": "Every client this firm serves.",
     "emptyMessage": "No clients are visible to this firm yet.",
     "columnName": "Client",
     "columnStatus": "Status",
@@ -120,7 +127,7 @@
   },
   "FirmActivity": {
     "heading": "Activity",
-    "body": "P2 shell — the firm activity/receipts feed is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "body": "The firm-wide receipts and open-register feed.",
     "subheading": "A record of what the agent did across every client — not a queue of what awaits you. See Needs you for that.",
     "visibilityNote": "Receipts are visible to bookkeeper-and-above roles. A more limited role sees an empty feed for that reason, not because nothing happened.",
     "showingRecent": "Showing the most recent 100 events.",
@@ -150,7 +157,7 @@
   },
   "ClientWorkspace": {
     "heading": "Client workspace",
-    "body": "P1 foundation scaffold — the client workspace tabs (journals, documents, bank, close, reports, registers, knowledge) are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "body": "One workspace per client. The accounting objects are tabs — journals, documents, bank, close, reports, registers and knowledge.",
     "clientIdLabel": "Client ID",
     "statusLabel": "Status",
     "createdLabel": "Client since",
@@ -190,6 +197,36 @@
         "user": "You",
         "assistant": "Clara"
       }
+    },
+    "parts": {
+      "entryPosted": {
+        "title": "Entry posted",
+        "entryLabel": "entry",
+        "clientLabel": "client",
+        "receiptLabel": "post receipt",
+        "rungVectorLabel": "Receipt vector",
+        "note": "The entry's lines and amount are read live on the journals workbench — this receipt carries identifiers and the ledger's own verdict, never a figure.",
+        "link": "Open the journals workbench"
+      },
+      "questionOpened": {
+        "title": "Question opened",
+        "questionLabel": "question",
+        "scopeLabel": "scope",
+        "link": "Open Needs you"
+      },
+      "bankAct": {
+        "title": "Bank act",
+        "verbLabel": "verb",
+        "subjectLabel": "subject",
+        "opKeyLabel": "op key",
+        "note": "The act's own outcome is on the ledger's receipt — open the client's Bank tab to read it live."
+      },
+      "bankPack": {
+        "title": "Bank pack read",
+        "accountLabel": "bank account",
+        "digestLabel": "digest",
+        "note": "The digest every bank act in this conversation had to cite. A read only — nothing in the books changed."
+      }
     }
   },
   "CommandPalette": {
@@ -227,7 +264,7 @@
     },
     "do": {
       "heading": "Do",
-      "disabledLabel": "Dispatch a run — wires up in P3",
+      "disabledLabel": "Dispatch a run — not built yet",
       "hint": "Not connected yet"
     }
   },
@@ -461,7 +498,7 @@
   },
   "ClientBank": {
     "heading": "Bank",
-    "body": "P2 shell — accounts, statements, matching and reconciliation are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "body": "Accounts, statements, matching and reconciliation — every figure read live from the DB.",
     "tabs": {
       "navLabel": "Bank sections",
       "accounts": "Accounts",
@@ -945,7 +982,7 @@
   },
   "ClientRegisters": {
     "heading": "Registers",
-    "body": "P2 shell — AR/AP aging, fixed assets, adjustments, staff advances and accounts are built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "body": "AR/AP aging, fixed assets, adjustments, staff advances and accounts — every figure read live from the DB.",
     "tabs": {
       "opening": "Opening",
       "aging": "AR/AP aging",
@@ -1041,7 +1078,7 @@
   },
   "ClientKnowledge": {
     "heading": "Knowledge",
-    "body": "P2 shell — the knowledge/data-library surface is built in P3. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3.",
+    "body": "Durable facts recorded about this client.",
     "subheading": "Durable facts recorded about this client — each with who recorded it, on what basis, and when. A document-attached evidence library lives on the Documents tab, not here.",
     "empty": "No facts have been recorded for this client yet.",
     "columnFact": "Fact",

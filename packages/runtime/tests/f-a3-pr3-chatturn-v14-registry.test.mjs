@@ -26,11 +26,16 @@ test("v13 stays exported and frozen -- no parked run is stranded by the v14 repo
   assert.equal(registry.chatTurn_v13, v13Module.chatTurn_v13, "the registry's chatTurn_v13 export IS chatTurn.v13.ts's own function, not a stand-in");
 });
 
-test("the registry repoints chatTurn: to chatTurn_v14, and v14 is exported alongside v13", () => {
+// F-A6 PR-2 moved the pin v14 -> v15 (the audited freeform read). This cell's SUBJECT is
+// unchanged — v14 is still exported and still IS its own function — but the "is the pin"
+// half becomes a policy (c) half, and the pin assertion moves. EXTENDED, never deleted:
+// deleting it would silently drop the guarantee that v14's parked runs stay reachable.
+test("chatTurn_v14 stays exported and IS its own function; the registry now pins v15 (policy (c))", () => {
   assert.equal(typeof registry.chatTurn_v14, "function", "registry re-exports chatTurn_v14");
   assert.equal(registry.chatTurn_v14, v14Module.chatTurn_v14, "the registry's chatTurn_v14 export IS chatTurn.v14.ts's own function");
-  assert.equal(registry.workflows.chatTurn, v14Module.chatTurn_v14, "workflows.chatTurn === chatTurn_v14");
+  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v15", "F-A6 PR-2 repointed chatTurn: past this file's own v14 pin");
   assert.notEqual(registry.workflows.chatTurn, registry.chatTurn_v13, "the registry no longer points chatTurn: at v13");
+  assert.notEqual(registry.workflows.chatTurn, registry.chatTurn_v14, "...nor at v14");
 });
 
 test("buildToolsV14's tool set is v13's tools UNION the thirteen bank tools -- no v13 tool dropped", () => {
