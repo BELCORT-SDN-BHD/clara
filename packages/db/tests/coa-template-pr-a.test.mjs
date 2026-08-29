@@ -3,7 +3,7 @@
 // Design of record: docs/plan/active/coa-template-design.md (D-1, D-2, D-13) ·
 // docs/plan/active/coa-template-annexes.md Annex C (the battery), Annex F (the DDL) ·
 // docs/plan/active/coa-template-gate-record.md (CLOSED, all twelve RULED 裁-23).
-// Migration: packages/db/migrations/UNNUMBERED_coa_template_pr_a.sql (number claimed at merge).
+// Migration: packages/db/migrations/0150_coa_template_pr_a.sql (the number claimed at merge prep).
 //
 // JUDGEMENT LOGIC under review law 1: clara._coa_template_for_edit's three-rung refusal ladder,
 // every editor door's shape guards, publish_coa_template's emptiness rungs, and the
@@ -1573,6 +1573,19 @@ test("J4 · MED-1 the shipped rows reproduce BOTH COMMITTED dossiers, merged, fi
   assert.deepEqual(extraFam.sort(), [...PROVISIONAL].sort(), "unexplained extra families in the shipped seed");
   const extraAcc = Object.keys(map.accounts).filter((k) => !j.accounts.some((a) => a.account_code === k));
   assert.deepEqual(extraAcc.sort(), ["3050", "6900"], "unexplained extra accounts in the shipped seed");
+  // The two non-dossier rows are pinned by FIELD, not only by key (independent review LOW nit,
+  // merge prep 2026-08-30): retyping 6900 from expense to income -- a P&L face item (MPERS 5.5)
+  // -- would otherwise pass every count and key check above.
+  assert.deepEqual(
+    [map.accounts["6900"].account_type, map.accounts["6900"].family_key, map.families["taxation"].inclusion],
+    ["expense", "taxation", "core"],
+    "6900 Income Tax Expense must stay an expense in the core taxation family",
+  );
+  assert.deepEqual(
+    [map.accounts["3050"].account_type, map.accounts["3050"].family_key, map.families["equity_other"].inclusion],
+    ["equity", "equity_other", "opt_in"],
+    "3050 must stay an equity account in the opt-in provisional equity_other family",
+  );
 });
 
 test("J4b · CONSTRAINT 2 over the merged set: the addendum introduced no numeral into a column", async (t) => {

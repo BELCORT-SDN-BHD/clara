@@ -1,11 +1,12 @@
--- UNNUMBERED_coa_template_pr_a.sql -- 裁-21 PR-a: THE FIRM-LEVEL STANDARD CHART OF ACCOUNTS,
+-- 0150_coa_template_pr_a.sql -- 裁-21 PR-a: THE FIRM-LEVEL STANDARD CHART OF ACCOUNTS,
 -- the TEMPLATE half. Four relations + their RLS/ACL, fork_coa_template, the four editor doors,
 -- publish_coa_template, retire_coa_template, the two reads, and the PLATFORM STARTER SEED ROWS.
 --
--- MIGRATION NUMBER: claimed at MERGE time by the conductor (AGENTS.md constraint 10). This file
--- ships UNNUMBERED on purpose -- `db:migrate` skips an unnumbered file, so it is inert until the
--- conductor renames it against the then-frontier. It was rig-validated as 0148 against a repo
--- frontier of 142 files / 0147_db_hardening_b_hash_only_bearer_tokens.
+-- MIGRATION NUMBER: CLAIMED at merge prep 2026-08-30 by the conductor: 0150, behind 0148 (the
+-- promotion duplicate-open wall) and 0149 (裁-19's read layer) (AGENTS.md constraint 10). The file
+-- shipped UNNUMBERED during the build and was rig-validated as 0148 against a repo frontier of 142
+-- files / 0147 (the build) and re-verified by the independent review against the same chain; the
+-- number is comment-only -- the body is byte-identical to the reviewed tip 9966fc10.
 --
 -- DESIGN OF RECORD: docs/plan/active/coa-template-design.md (D-1, D-2, D-13) ·
 -- docs/plan/active/coa-template-annexes.md Annex F (the DDL), Annex B (the family cut),
