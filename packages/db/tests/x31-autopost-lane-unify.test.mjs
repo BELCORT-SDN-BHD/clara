@@ -54,6 +54,7 @@ import {
   seedPayableAccount,
   seedVendorCounterparty,
   sign,
+  signLive,
 } from "./x36-vendor-binding-helpers.mjs";
 
 const AMOUNT = 100_000;
@@ -462,6 +463,8 @@ test("x31.a a real EZSEC-shaped live evidence window admits end-to-end", async (
       `${windowInvoice}${i + 1}`,
       EZSEC_FRAGMENTS[i],
       `${postingDate}T00:00:00Z`,
+      // corpus: true — the binding window this cell proposes from (裁-18b PR-1 fold, C1 and C2).
+      { corpus: true },
     );
     await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc, {
       postingDate,
@@ -472,7 +475,9 @@ test("x31.a a real EZSEC-shaped live evidence window admits end-to-end", async (
     client: w.clients.A1,
     counterparty: cp.id,
   });
-  const binding = await sign(w.users.alice, {
+  // signLive (裁-18b PR-1 finding C3): signing refuses until PR-3 mints the approve-path
+  // marker; the helper plants it, drives the REAL door, and restores the body byte-for-byte.
+  const binding = await signLive(w.users.alice, {
     binding: proposed.binding_id,
   });
   assert.equal(binding.status, "live");

@@ -34,8 +34,8 @@ import {
   upsertAccountClassed, upsertPayableAccount,
 } from "./wave-a-fixtures.mjs";
 import {
-  has29, propose, seedApprovedEntry, seedBareDocument, seedF123Evidence,
-  seedPayableAccount, seedVendorCounterparty, sign,
+  has29, propose, seedApprovedEntry, seedBareDocument, seedF123Evidence, signLive,
+  seedPayableAccount, seedVendorCounterparty,
 } from "./x36-vendor-binding-helpers.mjs";
 
 let ready = false;
@@ -196,6 +196,10 @@ async function bindLive(cp, pageVendor, invoiceIds) {
       invoiceIds[index],
       pageVendor,
       `${postingDate}T00:00:00Z`,
+      // corpus: true — the binding window bindLive() proposes from (裁-18b PR-1 fold, C1 and C2).
+      // The printed identifier is cp.reg, which is what the page really carries here: this
+      // fixture deliberately gives the PAGE a different vendor NAME from the counterparty row.
+      { corpus: true },
     );
     await seedApprovedEntry(
       w.firms.A,
@@ -209,7 +213,10 @@ async function bindLive(cp, pageVendor, invoiceIds) {
     client: w.clients.A1,
     counterparty: cp.id,
   });
-  return sign(w.users.alice, { binding: proposed.binding_id });
+  // signLive (裁-18b PR-1 finding C3): the post-time re-check is proven by a catalog witness on
+  // the approve path now, so signing refuses until PR-3 mints the marker; the helper plants it,
+  // drives the REAL door, and restores the body byte-for-byte.
+  return signLive(w.users.alice, { binding: proposed.binding_id });
 }
 
 before(async () => {

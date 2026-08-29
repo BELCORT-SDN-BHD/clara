@@ -8,7 +8,64 @@
 // window would let this battery pass against a shape the real derivation never sees.
 
 import { randomUUID } from "node:crypto";
-import { rootQuery, humanQuery, wakeQuery, roleQuery, namedCall, opk, ROLES } from "./rig-helpers.mjs";
+import { rootQuery, humanQuery, wakeQuery, roleQuery, namedCall, opk, ROLES, getPool } from "./rig-helpers.mjs";
+
+// ---------------------------------------------------------------------------
+// TWO-SESSION MACHINERY — the lock-order cells (H6 / M-9 / C-1).
+// ---------------------------------------------------------------------------
+// db-tests.md: two dedicated clients, and PROVE the interleave with pg_blocking_pids, never a
+// sleep — a sleep proves nothing about whether the block actually happened. Copied locally
+// rather than cross-imported from p4t1/p4t2's own local copies, exactly as those two did.
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export async function waitBlockedByOrThrow(pid, blockerPid, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await rootQuery(
+      "select wait_event_type as wet, pg_blocking_pids(pid) as blockers from pg_stat_activity where pid = $1",
+      [pid]);
+    const row = r.rows[0];
+    if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(blockerPid))) return true;
+    await sleep(25);
+  }
+  throw new Error(
+    `waitBlockedByOrThrow: backend ${pid} never observably blocked on blocker ${blockerPid} within ${timeoutMs}ms`);
+}
+
+/** Two dedicated pooled clients, released cleanly whatever happens. `rollback` -> `reset role`
+ *  -> `reset all` on each, in that order: RESET ALL does NOT reset the role, and a SET ROLEd
+ *  connection returned to the pool poisons the next rootQuery (db-tests.md). */
+export async function twoSessions(fn) {
+  const c1 = await getPool().connect();
+  const c2 = await getPool().connect();
+  try {
+    return await fn(c1, c2);
+  } finally {
+    for (const c of [c1, c2]) {
+      try { await c.query("rollback"); } catch { /* not in a txn */ }
+      try { await c.query("reset role"); } catch { /* already reset */ }
+      try { await c.query("reset all"); } catch { /* already reset */ }
+      c.release();
+    }
+  }
+}
+
+/** Put a pooled client into a human (clara_authenticated + jwt) session and return its backend
+ *  pid. `false` on set_config so the claim survives outside an explicit transaction too. */
+export async function asHumanSession(client, sub) {
+  await client.query("set role clara_authenticated");
+  await client.query("select set_config('request.jwt.claims', $1, false)",
+    [JSON.stringify({ sub, role: "authenticated" })]);
+  return (await client.query("select pg_backend_pid() as pid")).rows[0].pid;
+}
+
+/** The same, for a wake executor role carrying a real credential secret. */
+export async function asWakeSession(client, role, secret) {
+  await client.query(`set role ${role}`);
+  await client.query("select set_config('clara.wake_secret', $1, false)", [secret]);
+  return (await client.query("select pg_backend_pid() as pid")).rows[0].pid;
+}
 
 export const WAKE_ROLE = {
   filing: "clara_wake_filing",
@@ -182,8 +239,12 @@ export async function supersedeInvoiceFacts(firm, document) {
 // Window fixtures the eligibility cells need (each a DELIBERATE near-miss).
 // ---------------------------------------------------------------------------
 
-import { seedBareDocument, seedApprovedEntry, FULL_ABSENT_RECEIPT }
+import { seedBareDocument, seedApprovedEntry, FULL_ABSENT_RECEIPT, deriveEconomics }
   from "./x36-vendor-binding-helpers.mjs";
+
+export {
+  postTimeControlLive, withPostTimeControl, signLive, POST_TIME_MARKER,
+} from "./x36-vendor-binding-helpers.mjs";
 
 /** A window with an arbitrary date list and invoice id — the near-miss builder. Returns the
  *  counterparty fixture. THROWS on construction failure (never a silent partial fixture). */
@@ -211,23 +272,35 @@ export async function seedUniqueFamilyVendor(firm, client, tag, { registration =
 /** x36's seedF123Evidence, re-cut with the three knobs this battery's new walls need — a
  *  backdated extracted_at, a printed invoice.vendor_registration region, and a per-document
  *  invoice id. The F1/F2/F3 shapes are otherwise what the shared builder emits. */
-async function seedEvidence(firm, document, cp, invoiceId, { extractedAt, printedRegistration }) {
+async function seedEvidence(firm, document, cp, invoiceId,
+  { extractedAt, printedRegistration, economics = null, extraRegistrations = [] }) {
   const factsExt = randomUUID();
   await rootQuery(
     `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope,extracted_at)
      values($1,$2,$3,'clara-fixture:v1','invoice_facts',1,'done',1,$4::jsonb,$5::timestamptz)`,
     [factsExt, firm, document, JSON.stringify({ vendor_identity: FULL_ABSENT_RECEIPT }), extractedAt],
   );
-  const region = (path, text) => rootQuery(
-    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
-     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$3,$4,1.0)`,
-    [firm, factsExt, path, text]);
+  const region = (path, text, cents = null) => rootQuery(
+    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,monetary_cents,engine_confidence)
+     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$3,$4,$5,1.0)`,
+    [firm, factsExt, path, text, cents]);
   await region("invoice.vendor_name", cp.name);
   await region("invoice.invoice_id", invoiceId);
   // W18's hard identifier. undefined ⇒ print the vendor's own registration (the lawful case);
-  // null ⇒ print none (W18's human-resolution arm carries it); a string ⇒ a MISMATCH.
+  // null ⇒ print none (which now REFUSES — the human-resolution arm was struck by the fold
+  // round, C1/N-1); a string ⇒ a MISMATCH.
   const printed = printedRegistration === undefined ? cp.reg : printedRegistration;
   if (printed !== null) await region("invoice.vendor_registration", printed);
+  // ...and any ADDITIONAL registration regions the cell wants on the same document. The wall now
+  // judges EVERY current-generation region rather than min(text_content), so the order these are
+  // written in must not matter — the H-4 cells drive both sort orders through this one knob.
+  for (const extra of extraRegistrations) await region("invoice.vendor_registration", extra);
+  // C2's economic facts. A SHARED `economics` object across a window's three documents is
+  // exactly "one invoice, three scans" — the A2d attack.
+  const econ = economics ?? deriveEconomics(invoiceId);
+  await region("invoice.invoice_date", econ.date);
+  await region("invoice.currency", econ.currency);
+  await region("invoice.total", econ.total, econ.totalCents);
 
   const ocrExt = randomUUID();
   await rootQuery(
@@ -254,19 +327,27 @@ export async function seedWindow(w, tag, {
   client = null,
   reuseDocument = false,     // one document, three entries → W16's document/sha arm
   printedRegistration,       // undefined = the vendor's own; null = none; text = a MISMATCH
+  extraRegistrations = [],   // additional vendor_registration regions per document (H-4)
   approvedSpanDays = null,   // null = mirror the posting dates (a real elapsed span)
+  sharedEconomics = false,   // ONE invoice's economics on all three documents → C2's A2d attack
+  invoiceIdsPerDoc = null,   // explicit printed id per document (three ALTERED ids, A2d)
+  duplicateOverrideOn = [],  // 0-based indexes whose ENTRY carries flags.duplicate_override (M-12)
   vendor = null,
 } = {}) {
   const cl = client ?? w.clients.A1;
   const cp = vendor ?? await seedUniqueFamilyVendor(w.firms.A, cl, tag);
   const prefix = invoicePrefix ?? `${cp.lead ?? "EZSEC"}-IV-`;
+  // ONE invoice's economics, shared: distinct documents, distinct bytes, even distinct PRINTED
+  // ids — and still one invoice. Seeded from the tag so it is stable within a call and differs
+  // between calls.
+  const shared0 = sharedEconomics ? deriveEconomics(`${tag}-one-invoice`) : null;
   let shared = null;
   let i = 0;
   for (const d of dates) {
     const doc = reuseDocument
       ? (shared ??= await seedBareDocument(w.firms.A, `${tag}-shared`))
       : await seedBareDocument(w.firms.A, `${tag}-${d}-${randomUUID().slice(0, 4)}`);
-    const iv = invoiceId ?? `${prefix}${9001 + i}`;
+    const iv = invoiceIdsPerDoc ? invoiceIdsPerDoc[i] : (invoiceId ?? `${prefix}${9001 + i}`);
     // approved_at defaults to the posting date, so the TRUSTED span mirrors the booked one.
     const approvedAt = approvedSpanDays === null
       ? `${d}T09:00:00Z`
@@ -276,12 +357,42 @@ export async function seedWindow(w, tag, {
     // the cell would be measuring that rung instead of the one under test.
     const extractedAt = new Date(Date.parse(approvedAt) - 86400000).toISOString();
     if (!reuseDocument || i === 0) {
-      await seedEvidence(w.firms.A, doc.id, cp, iv, { extractedAt, printedRegistration });
+      await seedEvidence(w.firms.A, doc.id, cp, iv, {
+        extractedAt, printedRegistration, extraRegistrations,
+        economics: shared0 ?? null,
+      });
     }
-    await seedApprovedEntry(w.firms.A, cl, cp.id, doc, { postingDate: d, approvedAt });
+    await seedApprovedEntry(w.firms.A, cl, cp.id, doc, {
+      postingDate: d,
+      approvedAt,
+      flags: duplicateOverrideOn.includes(i)
+        ? { duplicate_override: { reason: "rig: human waved the duplicate guard", actor: null, at: approvedAt } }
+        : null,
+    });
     i += 1;
   }
   return cp;
+}
+
+/** Add a registration region to an evidence document's CURRENT invoice_facts generation, AFTER
+ *  the proposal exists. Deliberately not a new generation: a v2 extraction moves
+ *  facts_extraction_id, which is inside the frozen derivation's content_hash, so the signer would
+ *  refuse `proposal_drifted` and the cell would be measuring drift instead of the identity wall.
+ *  Adding a region to the SAME generation changes exactly one fact — what the page claims to be. */
+export async function plantRegistrationRegion(firm, document, text) {
+  const r = await rootQuery(
+    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+     select $1, x.id, 'page_polygon', '{"page":1,"polygon":[0,0,1,1]}'::jsonb,
+            'invoice.vendor_registration', $3, 1.0
+       from clara.document_extractions x
+      where x.document_id=$2 and x.engine_kind='invoice_facts' and x.status='done'
+      order by x.version_n desc, x.id desc limit 1
+     returning id`,
+    [firm, document, text]);
+  if (r.rowCount === 0) {
+    throw new Error("plantRegistrationRegion: no current invoice_facts generation — fixture construction FAILED");
+  }
+  return r.rows[0].id;
 }
 
 export const DATES_OK = ["2025-08-25", "2025-08-29", "2025-10-13"];

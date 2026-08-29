@@ -24,7 +24,7 @@ import {
 import {
   FULL_ABSENT_RECEIPT, has28, has29, propose, seedApprovedEntry,
   seedBareDocument, seedF123Evidence, seedPassingWindow,
-  seedPayableAccount, seedVendorCounterparty, sign,
+  seedPayableAccount, seedVendorCounterparty, sign, signLive,
 } from "./x36-vendor-binding-helpers.mjs";
 
 const EZSEC_FRAGMENTS = [
@@ -78,6 +78,9 @@ async function seedWindow(tag, vendorNameTexts) {
       `${invoiceId}${i + 1}`,
       vendorNameTexts[i],
       `${postingDate}T00:00:00Z`,
+      // corpus: true — this IS the binding window x30.1 proposes from, so each document prints
+      // the vendor own hard identifier and its own economic facts (裁-18b PR-1 fold, C1 and C2).
+      { corpus: true },
     );
     await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc, {
       postingDate,
@@ -383,7 +386,11 @@ test("x30.1 real EZSEC window derives the exact LCP, proposes, and signs live", 
     counterparty: seeded.cp.id,
   });
   assert.equal(proposed.f1_vendor_name_norm, EZSEC_LCP);
-  const signed = await sign(w.users.alice, {
+  // signLive, not sign (裁-18b PR-1 finding C3): the post-time binding re-check is proven by a
+  // CATALOG WITNESS on the approve path now, not by the append-only 0029 ledger row, so signing
+  // REFUSES until PR-3 mints the marker. The helper plants it, signs through the REAL audited
+  // door with every other wall live, and restores the body byte-for-byte.
+  const signed = await signLive(w.users.alice, {
     binding: proposed.binding_id,
   });
   assert.equal(signed.status, "live");

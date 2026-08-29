@@ -24,15 +24,22 @@ import { buildWorld } from "./x1-helpers.mjs";
 import { insertUser, addMember } from "./rig-fixtures.mjs";
 import {
   has28, has29, seedPayableAccount, seedPassingWindow, propose, sign, revoke, deriveOrError,
+  postTimeControlLive, withPostTimeControl, signLive,
 } from "./x36-vendor-binding-helpers.mjs";
 
 let has0028 = false;
 let has0029 = false;
+// 裁-18b PR-1 (finding C3): the interlock is no longer keyed on the 0029 LEDGER ROW. That row is
+// append-only and has been present since 0029 applied, while the control it stood for lived in
+// clara.execute_rule_post, which 0118 DROPPED — so the gate it guarded was permanently TRUE. The
+// question a signing cell asks is now whether the APPROVE PATH carries the ratified re-check.
+let postControl = false;
 let w = null;
 
 before(async () => {
   has0028 = await has28();
   has0029 = await has29();
+  postControl = await postTimeControlLive();
   if (!has0028) { noteLane("0028 absent -- x36-vendor-binding-ceremony battery FAILS loudly rather than skipping"); return; }
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
@@ -78,26 +85,39 @@ test("x36c.1 propose_vendor_identity_binding — bookkeeper happy path over a fu
   return r.binding_id;
 });
 
-test("x36c.2 THE INTERLOCK — signing is closed before 0029 and opens only after its ledger row", async () => {
+test("x36c.2 THE INTERLOCK — signing is closed while the post-time CONTROL is absent, and opens with it", async () => {
   requireReady();
+  // RE-POINTED 2026-08-30 (裁-18b PR-1, finding C3). This cell used to key the interlock on the
+  // `0029_vendor_binding_executor` LEDGER ROW. clara.schema_migrations is append-only, so that
+  // row has been present ever since 0029 applied — and the control it stood for lived in
+  // clara.execute_rule_post, which 0118 DROPPED. The gate was therefore permanently TRUE and a
+  // binding could go live for the whole of that window with no post-time re-check behind it. A
+  // name is not the thing (review law 3), and a migration ledger row is the weakest name there
+  // is: it says a file ran once, never that its objects survived. The witness is now the approve
+  // path's own BODY.
   const cp = await seedPassingWindow(w, "C2");
   const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
-  if (has0029) {
+  assert.equal(has0029, true,
+    "the LEDGER row is present — which is exactly why it cannot be the interlock's witness");
+  if (postControl) {
     const signed = await sign(w.users.alice, { binding: proposed.binding_id });
-    assert.equal(signed.status, "live",
-      "the exact 0029 ledger row opens the signing interlock");
+    assert.equal(signed.status, "live", "with the control deployed the interlock is open");
     return;
   }
-  await assertRaises("CLR36",
-    () => sign(w.users.alice, { binding: proposed.binding_id }),
-    "sign before 0029 deploys");
   try {
     await sign(w.users.alice, { binding: proposed.binding_id, opKey: opk("vbsign2") });
-    assert.fail("sign_vendor_identity_binding must throw while 0029 is absent");
+    assert.fail("sign_vendor_identity_binding must throw while the post-time control is absent");
   } catch (e) {
-    assert.match(e.message, /post_control_absent|post-time control not yet deployed/,
-      `expected the post_control_absent interlock, got: ${e.message}`);
+    assert.equal(e.code, "CLR36", `expected CLR36, got ${e.code}: ${e.message}`);
+    assert.match(e.message, /post-time binding re-check is not deployed/,
+      `expected the post_time_control_absent interlock, got: ${e.message}`);
   }
+  // BOTH DIRECTIONS. Plant the ratified marker on the live approve path and the SAME call
+  // succeeds — without this the cell above could be passing because the door refuses everything.
+  const signed = await withPostTimeControl(
+    () => sign(w.users.alice, { binding: proposed.binding_id, opKey: opk("vbsign3") }));
+  assert.equal(signed.status, "live", "the interlock opens on the CONTROL, not on a ledger row");
+  assert.equal(await postTimeControlLive(), false, "…and the marker is removed again afterwards");
 });
 
 test("x36c.3 revoke_vendor_identity_binding refuses binding_not_live against a still-proposed binding", async () => {
@@ -176,15 +196,16 @@ test("x36c.5 sign_vendor_identity_binding refuses the proposer signing their own
     assert.fail("sign_vendor_identity_binding must refuse when the signer is also the proposer");
   } catch (e) {
     assert.equal(e.code, "CLR04", `expected CLR04, got ${e.code}: ${e.message}`);
-    // 裁-32 (2026-08-29) SPLIT this refusal in two, and firm A has exactly ONE admin (alice),
-    // so this fixture lands on the SOLO arm. The strict 裁-18c behaviour this cell was written
-    // for is preserved verbatim for firms with two or more eligible signers — x36c.5b below is
-    // that case, added here rather than left to the 裁-18b battery because THIS is the file
-    // that owns the wall's pins.
-    assert.match(e.message, /state why you are signing your own/,
-      `expected the SOLO arm's message for a one-admin firm, got: ${e.message}`);
-    assert.equal(reasonOf(e), "self_attestation_required",
-      `expected the solo reason token, got: ${JSON.stringify(e.detail)}`);
+    // 裁-32 (2026-08-29) split this refusal in two, and the 2026-08-30 fold round (N-4) put the
+    // MANUAL half back where 裁-18c had it. The relaxation is for the DIRECTED path — "I asked
+    // Clara to propose this, and I am the only admin who could sign it" — not for a human's own
+    // manual proposal, which an earlier cut of this wall let a solo admin self-sign with a text
+    // field. alice proposed this one HERSELF, so she gets 裁-18c's verbatim words in every firm,
+    // solo or not. bp1.S2b holds the directed case, where the attestation genuinely opens.
+    assert.match(e.message, /let Clara propose it, or add a second admin/,
+      `expected 裁-18c's verbatim words on the MANUAL path, got: ${e.message}`);
+    assert.equal(reasonOf(e), "signer_is_proposer",
+      `expected the strict reason token, got: ${JSON.stringify(e.detail)}`);
   }
   // F-B (independent review, measured): the refusal rolled back the WHOLE transaction —
   // _reserve_op's own row for this op_key never survives a RAISE (v2 §G) — so op_receipts
@@ -206,22 +227,26 @@ test("x36c.6 sign_vendor_identity_binding succeeds when a DIFFERENT admin signs 
   const frank = await insertUser(w.prefix, "frank");
   await addMember(w.users.alice, { firm: w.firms.A, user: frank, role: "admin", opKey: opk("vbframk") });
   const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
-  if (has0029) {
-    const signed = await sign(frank, { binding: proposed.binding_id });
-    assert.equal(signed.status, "live", "a different admin's signature succeeds");
-    return;
+  if (!postControl) {
+    // The post-time control is not deployed on this frontier (裁-18b PR-1 finding C3; PR-3 mints
+    // the marker). The wall must NOT be what refuses here — the interlock is, which is itself
+    // evidence the different-signer case got PAST 裁-18a.
+    try {
+      await sign(frank, { binding: proposed.binding_id });
+      assert.fail("sign must throw while the post-time control is absent");
+    } catch (e) {
+      assert.notEqual(reasonOf(e), "signer_is_proposer",
+        `the signer<>proposer wall must NOT fire for a different admin, got detail: ${JSON.stringify(e.detail)}`);
+      assert.match(e.message, /post-time binding re-check is not deployed/,
+        `expected the post_time_control_absent interlock, got: ${e.message}`);
+    }
   }
-  // 0029 absent on this rig frontier: the wall must NOT be what refuses here — the
-  // post_control_absent interlock (x36c.2) is the expected refusal instead, proving the new
-  // wall did not fire on a legitimate different-signer case.
-  try {
-    await sign(frank, { binding: proposed.binding_id });
-    assert.fail("sign must throw while 0029 is absent");
-  } catch (e) {
-    assert.notEqual(reasonOf(e), "signer_is_proposer", `the signer<>proposer wall must NOT fire for a different admin, got detail: ${JSON.stringify(e.detail)}`);
-    assert.match(e.message, /post_control_absent|post-time control not yet deployed/,
-      `expected the post_control_absent interlock, got: ${e.message}`);
-  }
+  // …and the POSITIVE CONTROL runs either way: with the control present the different admin's
+  // signature actually succeeds. Without this the cell would only ever prove a refusal, which is
+  // not what "positive control for 裁-18a" means.
+  const signed = await withPostTimeControl(
+    () => sign(frank, { binding: proposed.binding_id, opKey: opk("vbc6ok") }));
+  assert.equal(signed.status, "live", "a different admin's signature succeeds");
 });
 
 test("x36c.8 sign_vendor_identity_binding admits an ADMIN signing an AGENT-created proposal (裁-18b interlock) — the wall is an actor comparison, never a human-vs-agent rule", async () => {
@@ -270,19 +295,21 @@ test("x36c.8 sign_vendor_identity_binding admits an ADMIN signing an AGENT-creat
   const stored = await rootQuery("select created_by from clara.vendor_identity_bindings where id=$1", [bindingId]);
   assert.equal(stored.rows[0].created_by, agentId, "fixture sanity: created_by is the LIVE clara.agent_user_id(), re-read from the row");
 
-  if (has0029) {
-    const signed = await sign(w.users.alice, { binding: bindingId });
-    assert.equal(signed.status, "live", "an admin signs an agent-created proposal without hitting the signer<>proposer wall");
-    return;
+  if (!postControl) {
+    try {
+      await sign(w.users.alice, { binding: bindingId });
+      assert.fail("sign must throw while the post-time control is absent");
+    } catch (e) {
+      assert.notEqual(reasonOf(e), "signer_is_proposer",
+        `the wall must NOT fire for an admin signing an agent-created proposal, got detail: ${JSON.stringify(e.detail)}`);
+      assert.match(e.message, /post-time binding re-check is not deployed/,
+        `expected the post_time_control_absent interlock, got: ${e.message}`);
+    }
   }
-  try {
-    await sign(w.users.alice, { binding: bindingId });
-    assert.fail("sign must throw while 0029 is absent");
-  } catch (e) {
-    assert.notEqual(reasonOf(e), "signer_is_proposer", `the wall must NOT fire for an admin signing an agent-created proposal, got detail: ${JSON.stringify(e.detail)}`);
-    assert.match(e.message, /post_control_absent|post-time control not yet deployed/,
-      `expected the post_control_absent interlock, got: ${e.message}`);
-  }
+  const signed = await withPostTimeControl(
+    () => sign(w.users.alice, { binding: bindingId, opKey: opk("vbc8ok") }));
+  assert.equal(signed.status, "live",
+    "an admin signs an agent-created proposal without hitting the signer<>proposer wall");
 });
 
 test("x36c.7 sign_vendor_identity_binding's admin+ rank floor is UNTOUCHED by the new wall — a bookkeeper proposer is still refused by RANK, not by the wall", async () => {
@@ -353,7 +380,11 @@ test("x36c.5b 裁-32 — with TWO eligible signers the STRICT 裁-18c refusal is
   await addMember(w.users.alice, {
     firm: w.firms.A, user: secondAdmin, role: "admin", opKey: opk("c5badmin"),
   });
-  const count = await rootQuery("select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
+  // Read through a HUMAN session: the count is firm-congruent as of the 2026-08-30 fold round
+  // (M-10) — a SECURITY DEFINER function with a caller-supplied tenant argument was a cross-tenant
+  // oracle, so it now refuses CLR11 for any firm but the caller's own, and root has no jwt_firm().
+  const count = await humanQuery(w.users.alice,
+    "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
   assert.ok(count.rows[0].n >= 2, `fixture: firm A must now carry >=2 eligible signers, got ${count.rows[0].n}`);
 
   const cp = await seedPassingWindow(w, "C5b");
@@ -378,8 +409,9 @@ test("x36c.5b 裁-32 — with TWO eligible signers the STRICT 裁-18c refusal is
     assert.equal(e.code, "CLR04");
     assert.equal(reasonOf(e), "signer_is_proposer");
   }
-  // The genuine way out still works: the OTHER admin signs.
-  const signed = await sign(secondAdmin, { binding: proposed.binding_id, opKey: opk("c5bok") });
+  // The genuine way out still works: the OTHER admin signs. (Through the real door, with PR-3's
+  // post-time control present — see x36c.2 for why the interlock is now a catalog witness.)
+  const signed = await signLive(secondAdmin, { binding: proposed.binding_id, opKey: opk("c5bok") });
   assert.equal(signed.status, "live");
   assert.equal(signed.self_approved, false, "a two-party signature is not a self-approval");
 });

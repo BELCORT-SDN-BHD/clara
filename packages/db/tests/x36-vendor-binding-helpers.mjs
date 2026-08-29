@@ -42,15 +42,106 @@ export async function revoke(sub, { binding, reason, opKey } = {}) {
   return r.rows[0].result;
 }
 
-/** Propose + sign a binding to 'live' over a fully-qualifying window (requires 0029 --
- *  callers must check has29() first). Returns the live binding's receipt. */
+// ---------------------------------------------------------------------------
+// THE POST-TIME CONTROL INTERLOCK (裁-18b PR-1, finding C3) — and how a fixture
+// that needs a LIVE binding gets one without weakening the door.
+// ---------------------------------------------------------------------------
+// sign_vendor_identity_binding used to "prove" the post-time binding re-check by the presence
+// of the `0029_vendor_binding_executor` row in clara.schema_migrations. That row is in an
+// APPEND-ONLY ledger, so it has been present since 0029 applied and can never stop being —
+// while the control it stood for lived in clara.execute_rule_post, which 0118 DROPPED. The gate
+// was therefore permanently TRUE. PR-1 replaces it with a CATALOG WITNESS: the approve path's
+// own body, resolved by exact signature, carrying the ratified marker PR-3 will mint. Until PR-3
+// lands, signing REFUSES — deliberately.
+//
+// So `has29()` is no longer the right question for any cell, and it is kept only where a cell
+// genuinely asks about the LEDGER. The question a signing cell asks is postTimeControlLive().
+export const POST_TIME_MARKER = "binding_post_time_recheck_v1";
+const APPROVE_CORE_SIG = "clara._approve_entry_core(jsonb,uuid,uuid,text,text)";
+
+/** Does the approve path carry the ratified post-time binding re-check? (Catalog + body marker,
+ *  never a migration-name proxy — review law 3: a name is a projection of the thing.) */
+export async function postTimeControlLive() {
+  try {
+    const r = await rootQuery(
+      `select position($1 in coalesce(p.prosrc,'')) > 0 as ok
+         from pg_proc p where p.oid = to_regprocedure($2)`,
+      [POST_TIME_MARKER, APPROVE_CORE_SIG]);
+    return r.rows[0]?.ok === true;
+  } catch { return false; }
+}
+
+/**
+ * Run `fn()` with PR-3's marker PLANTED on the live approve path, then restore it byte-for-byte.
+ *
+ * WHY THIS AND NOT A ROOT `update … set status='live'`: the mechanism under test in a resolver
+ * or autopost cell is the RESOLVER, not the signer — but a fixture that writes 'live' by hand
+ * stops exercising the audited door altogether, and the estate's rule is that the security
+ * mechanisms are the thing under test and are never bypassed for convenience. Planting the
+ * marker changes exactly ONE fact: whether PR-3's control is deployed. Every other wall in
+ * sign_vendor_identity_binding — the rank floor, 裁-18a, the standing re-read, the drift check,
+ * the suppression wall and the re-run identity walls — still runs for real.
+ *
+ * Same three disciplines as withMutant: the needle must actually be present (a no-op "plant"
+ * would make the caller prove the opposite of what it claims), the change is COMMITTED so a
+ * different pooled connection can see it, and the restore is verified by prosrc sha256 before
+ * any probe error is re-thrown.
+ */
+export async function withPostTimeControl(fn) {
+  const sha = async () => (await rootQuery(
+    "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as s from pg_proc p where p.oid = $1::regprocedure",
+    [APPROVE_CORE_SIG])).rows[0]?.s ?? null;
+  const original = (await rootQuery(
+    "select pg_get_functiondef($1::regprocedure) as def", [APPROVE_CORE_SIG])).rows[0].def;
+  const before = await sha();
+  const needle = "AS $function$";
+  if (!original.includes(needle)) {
+    throw new Error(
+      `withPostTimeControl: '${needle}' is absent from pg_get_functiondef(${APPROVE_CORE_SIG}), so the `
+      + "marker would not be planted and the cell would prove the opposite of what it claims.");
+  }
+  const planted = original.replace(
+    needle, `${needle}\n-- ${POST_TIME_MARKER} (rig fixture: PR-3's ratified marker, planted and removed)`);
+  if (planted === original) throw new Error("withPostTimeControl: the plant changed nothing");
+  await rootQuery(`set role clara_fn_owner; ${planted}`);
+  if (!(await postTimeControlLive())) {
+    await rootQuery(`set role clara_fn_owner; ${original}`);
+    throw new Error("withPostTimeControl: the marker was planted but the witness still says absent");
+  }
+  // No `finally` (eslint no-unsafe-finally, and the reason behind it): a throw from a finally
+  // block swallows the probe's own error, which is the one a reader needs. Capture, restore,
+  // then decide — and a failed RESTORE outranks a failed probe.
+  let out; let probeError = null;
+  try { out = await fn(); } catch (e) { probeError = e; }
+  await rootQuery(`set role clara_fn_owner; ${original}`);
+  const after = await sha();
+  if (after !== before) {
+    throw new Error(
+      `withPostTimeControl: RESTORE FAILED — clara._approve_entry_core is still carrying the marker `
+      + `(sha ${after} != ${before}). Every later cell in this suite is now untrustworthy.`
+      + (probeError ? ` The probe had also failed: ${probeError.message}` : ""));
+  }
+  if (probeError) throw probeError;
+  return out;
+}
+
+/** Sign through the REAL audited door, with PR-3's control present. Use wherever a cell needs a
+ *  LIVE binding; use bare `sign()` wherever the cell is about a refusal. */
+export async function signLive(sub, opts = {}) {
+  return withPostTimeControl(() => sign(sub, opts));
+}
+
+/** Propose + sign a binding to 'live' over a fully-qualifying window. Returns the live binding's
+ *  receipt. */
 export async function seedLiveBinding(w, tag) {
   const cp = await seedPassingWindow(w, tag);
   const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
-  const signed = await sign(w.users.alice, { binding: proposed.binding_id });
+  const signed = await signLive(w.users.alice, { binding: proposed.binding_id });
   return { cp, binding: signed };
 }
 
+/** The 0029 LEDGER row. Kept for the one cell that genuinely asks about the ledger; it is NOT
+ *  the question "is the post-time control deployed" — see postTimeControlLive() above. */
 export async function has29() {
   try {
     const r = await rootQuery(
@@ -78,6 +169,23 @@ export async function seedPayableAccount(firm, client) {
 // Matches ck_counterparties_name_normalized / ...registration_normalized EXACTLY:
 // lower(regexp_replace(x, '[^a-zA-Z0-9]', '', 'g')) -- alphanumeric-only, no spaces.
 const foldAlnum = (s) => s.toLowerCase().replace(/[^a-zA-Z0-9]/g, "");
+
+/** A DETERMINISTIC, per-invoice economic fact set (裁-18b PR-1 fold, C2). Two documents that
+ *  are scans of ONE invoice must share these; two genuinely different invoices must not. Derived
+ *  from the printed invoice id purely so a window's three documents differ by construction —
+ *  callers that mean to build "one invoice, three scans" pass a SHARED `economics` object. */
+export function deriveEconomics(invoiceId) {
+  let h = 0;
+  for (const ch of String(invoiceId ?? "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const cents = 100000 + (h % 900000);
+  const day = 1 + (h % 27);
+  return {
+    date: `2025-07-${String(day).padStart(2, "0")}`,
+    currency: "MYR",
+    totalCents: cents,
+    total: (cents / 100).toFixed(2),
+  };
+}
 
 export async function seedVendorCounterparty(firm, client, tag) {
   // The name must be unique per call, not merely per tag: the resolver battery
@@ -121,7 +229,8 @@ export async function seedBareDocument(firm, tag) {
 
 /** A minimal approved entry, direct-inserted (bypassing draft/approve) so the fixture is
  *  fast and the posting_date/approved_at/document_id are fully controlled. */
-export async function seedApprovedEntry(firm, client, cp, doc, { postingDate, approvedAt = null }) {
+export async function seedApprovedEntry(firm, client, cp, doc,
+  { postingDate, approvedAt = null, flags = null }) {
   const maker = (await rootQuery("select user_id from clara.firm_memberships where firm_id=$1 and status='active' limit 1", [firm])).rows[0].user_id;
   const resolution = (await rootQuery(
     `insert into clara.client_resolutions(firm_id,client_id,subject_kind,subject_id,confidence,method,evidence,resolved_by)
@@ -141,12 +250,20 @@ export async function seedApprovedEntry(firm, client, cp, doc, { postingDate, ap
   // inside ONE explicit transaction (withActor transaction:true) so the deferred check only
   // ever fires once, after the lines exist -- mirroring the real draft/approve lifecycle.
   const entry = await withActor({ transaction: true }, async (pgClient) => {
+    // `flags` is set ON THE DRAFT, deliberately (裁-18b PR-1 fold, M-12 / S-2). The real
+    // duplicate_override is written by revise_entry(p_duplicate_override) while the entry is
+    // still a draft, and clara._tf_entry_immutable refuses ANY flags write once the entry is
+    // approved — so a cell that stamped an approved row would be refused CLR08 and would read as
+    // "the wall already refuses" when it had never reached the wall at all. This fixture already
+    // bypasses draft/approve for speed; carrying the flag through the same door it carries
+    // posting_date through keeps it out of that trap.
     const r = await pgClient.query(
       `insert into clara.journal_entries(firm_id,client_id,status,posting_date,origin,document_id,
-          filing_id,source_doc_sha256,maker_actor,coding_kind)
-       values($1,$2,'draft',$3,'agent',$4,$5,$6,$7,'supplier_bill')
+          filing_id,source_doc_sha256,maker_actor,coding_kind,flags)
+       values($1,$2,'draft',$3,'agent',$4,$5,$6,$7,'supplier_bill',coalesce($8::jsonb,'{}'::jsonb))
        returning id`,
-      [firm, client, postingDate, doc.id, filing, doc.sha, maker],
+      [firm, client, postingDate, doc.id, filing, doc.sha, maker,
+        flags === null ? null : JSON.stringify(flags)],
     );
     const id = r.rows[0].id;
     // A supplier-bill-shaped entry (coding_kind='supplier_bill') requires: no receivable leg,
@@ -207,8 +324,15 @@ export const FULL_ABSENT_RECEIPT = {
  *  _resolve_vendor_binding's own admission gate (Slot A), which the dwell/ceremony
  *  batteries never exercise (they only drive _derive_vendor_binding_proposal, which has no
  *  A.1 vendor_identity check at all) but the resolver/executor batteries do. */
+// `corpus` (裁-18b PR-1 fold): OFF by default, so every EXISTING caller emits byte-identically
+// what it always did. It is turned ON only by the three builders that construct a BINDING WINDOW
+// — the corpus a proposal is derived from, which the fold round's two new walls judge. The
+// resolver battery's post-binding probe documents deliberately do NOT set it: they are inputs to
+// clara._resolve_vendor_binding, and adding an invoice.vendor_registration region there would
+// change what Slot A reads. A shared fixture that quietly moves under another battery is how a
+// green suite starts measuring something else.
 export async function seedF123Evidence(firm, document, cp, invoiceId, vendorNameText = cp.name,
-  extractedAt = null) {
+  extractedAt = null, { corpus = false, economics = null, printedRegistration } = {}) {
   // `extractedAt` (裁-18b PR-1): callers that BACKDATE approved_at must backdate the extraction
   // too, or the derivation's own `facts_restated` rung (extracted_at > approved_at) refuses
   // `evidence_restated` before any later gate is reached. Defaults to the previous behaviour.
@@ -218,16 +342,35 @@ export async function seedF123Evidence(firm, document, cp, invoiceId, vendorName
      values($1,$2,$3,'clara-fixture:v1','invoice_facts',1,'done',1,$4::jsonb,coalesce($5::timestamptz, now()))`,
     [factsExt, firm, document, JSON.stringify({ vendor_identity: FULL_ABSENT_RECEIPT }), extractedAt],
   );
-  await rootQuery(
-    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
-     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'invoice.vendor_name',$3,1.0)`,
-    [firm, factsExt, vendorNameText],
-  );
-  await rootQuery(
-    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
-     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'invoice.invoice_id',$3,1.0)`,
-    [firm, factsExt, invoiceId],
-  );
+  const region = (path, text, cents = null) => rootQuery(
+    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,monetary_cents,engine_confidence)
+     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$3,$4,$5,1.0)`,
+    [firm, factsExt, path, text, cents]);
+  await region("invoice.vendor_name", vendorNameText);
+  await region("invoice.invoice_id", invoiceId);
+  // 裁-18b PR-1 fold (C1 / N-1): THE PRINTED HARD IDENTIFIER. W18's second arm — "or a human
+  // resolved it" — was STRUCK once the review measured that clara.client_resolutions proves
+  // CLIENT attribution, carries no counterparty key at all, and is minted automatically by
+  // file_document for every filed document. Every corpus member must now PRINT an identifier
+  // that is the target's. This builder emitted none, so it leaned on exactly the arm that was
+  // removed: a real vendor invoice prints its registration, and now so does the fixture.
+  // `undefined` ⇒ the vendor's own when this is a corpus document, none otherwise; `null` ⇒ print
+  // none even in a corpus (the A3c shape); a string ⇒ a MISMATCH.
+  const printed = printedRegistration === undefined ? (corpus ? cp.reg : null) : printedRegistration;
+  if (printed !== null && printed !== undefined) await region("invoice.vendor_registration", printed);
+  // ...and (C2) the ECONOMIC FACTS the fingerprint is taken over. Three byte-different scans of
+  // ONE invoice clear every other conjunct — distinct document ids, distinct sha256s, even
+  // distinct printed invoice ids if the attacker alters them — so the wall fingerprints what the
+  // attacker does NOT choose: the issuer id, the date, the currency and the amounts. A fixture
+  // that prints no economics fingerprints the EMPTY set, three of them collide, and a lawful
+  // window would be refused as one invoice photographed three times. Derived from the printed
+  // invoice id so each document of a window differs without the caller having to think about it.
+  const econ = economics ?? (corpus ? deriveEconomics(invoiceId) : null);
+  if (econ) {
+    await region("invoice.invoice_date", econ.date);
+    await region("invoice.currency", econ.currency);
+    await region("invoice.total", econ.total, econ.totalCents);
+  }
   const ocrExt = randomUUID();
   await rootQuery(
     `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope,extracted_at)
@@ -271,7 +414,11 @@ export async function seedPassingWindow(w, tag) {
   let i = 0;
   for (const d of dates) {
     const doc = await seedBareDocument(w.firms.A, `${tag}-${d}`);
-    await seedF123Evidence(w.firms.A, doc.id, cp, `${prefix}${9001 + i}`, cp.name, `${d}T00:00:00Z`);
+    // corpus: true — this IS a binding window, so each document prints the vendor's own hard
+    // identifier and its own economic facts (裁-18b PR-1 fold, C1 and C2). Without them a lawful
+    // window is refused as unproven identity, or as one invoice photographed three times.
+    await seedF123Evidence(w.firms.A, doc.id, cp, `${prefix}${9001 + i}`, cp.name, `${d}T00:00:00Z`,
+      { corpus: true });
     await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc,
       { postingDate: d, approvedAt: `${d}T09:00:00Z` });
     i += 1;

@@ -28,13 +28,17 @@ import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import {
   has28, has29, seedPayableAccount, propose, sign, revoke,
+  signLive, withPostTimeControl, postTimeControlLive, POST_TIME_MARKER,
 } from "./x36-vendor-binding-helpers.mjs";
+import { insertUser, addMember } from "./rig-fixtures.mjs";
 import {
   bp1Live, failBp1, reasonOf, mintCred, MODEL, WAKE_ROLE,
   proposeAsAgent, listCandidates, declineBinding, resetDecline,
   derivedBasis, lawfulBasis, evidenceDocuments, foreignRegion,
   supersedeInvoiceFactsKeepingRegions, seedVendorNoRegistration, mergeAway,
   seedWindow, seedUniqueFamilyVendor, DATES_OK, withMutant, withoutConstraint,
+  plantRegistrationRegion, twoSessions, asHumanSession, asWakeSession,
+  waitBlockedByOrThrow,
 } from "./binding-proposal-pr-1-helpers.mjs";
 
 const CORE_SIG =
@@ -44,6 +48,11 @@ const READ_SIG = "clara.wake_list_binding_candidates(uuid)";
 const DECLINE_SIG = "clara.decline_vendor_identity_binding(uuid,text,text)";
 const BLOCKER_SIG = "clara._binding_extra_blocker(uuid,uuid,uuid,jsonb,jsonb)";
 const SUPPRESSION_SIG = "clara._binding_suppression(uuid,uuid,uuid)";
+const SIGN_SIG = "clara.sign_vendor_identity_binding(uuid,text,text)";
+/** The comment-stripped live body of a function — the only honest instrument for "is this wall
+ *  in the CODE", since every wall this battery pins is also DESCRIBED in a comment beside it. */
+const strippedSrc = String.raw`select regexp_replace(regexp_replace(p.prosrc, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g') as src
+   from pg_proc p where p.oid = $1::regprocedure`;
 
 let live = false;
 let w = null;
@@ -621,7 +630,7 @@ test("bp1.W8 a LIVE binding blocks a fresh proposal — and the refusal comes fr
   failBp1(live);
   const { cp, basis } = await eligibleVendor("W8");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await sign(w.users.alice, { binding: p.binding_id });   // agent proposed ⇒ any admin may sign
+  await signLive(w.users.alice, { binding: p.binding_id });   // agent proposed ⇒ any admin may sign
   const err = await assertRaises("CLR36",
     async () => proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis }),
     "propose over a live binding");
@@ -903,7 +912,7 @@ test("bp1.D4 B4 — a REVOKED binding suppresses too, in both writers and the re
   // binding, watched it work, and took it away), so it would be perverse to suppress less.
   const { cp, basis } = await eligibleVendor("D4");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await sign(w.users.alice, { binding: p.binding_id });
+  await signLive(w.users.alice, { binding: p.binding_id });
   await revoke(w.users.bob, { binding: p.binding_id, reason: "wrong vendor after all" });
 
   const e1 = await assertRaises("CLR36",
@@ -918,10 +927,47 @@ test("bp1.D4 B4 — a REVOKED binding suppresses too, in both writers and the re
     .find((x) => x.counterparty_id === cp.id);
   assert.equal(row.eligible, false);
   assert.equal(row.reason, "binding_revoked");
-  // …and the same named door lifts it.
-  await resetDecline(w.users.alice, { binding: p.binding_id, reason: "vendor re-confirmed" });
-  const again = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
-  assert.equal(again.status, "proposed");
+  // M-11 (2026-08-30, fail-closed pending an owner ruling): THE RESET DOOR DOES NOT LIFT A
+  // REVOCATION. It used to, which meant a human who trusted a binding, watched it post real
+  // entries and then took the authority away could have that undone by the same reason-and-a-
+  // click as a declined card — after which Clara may re-propose the pair on her very next filing
+  // turn. A decline and a revocation are not the same act. What ceremony SHOULD lift a
+  // revocation is an open owner question; until it is answered this refuses, visibly and typed.
+  const e3 = await assertRaises("CLR36",
+    () => resetDecline(w.users.alice, { binding: p.binding_id, reason: "vendor re-confirmed" }),
+    "resetting a REVOKED pair");
+  assert.equal(reasonOf(e3), "binding_revoked_reset_requires_ruling");
+  const still = await bindingRow(p.binding_id);
+  assert.equal(still.status, "revoked", "the revocation stands");
+  assert.ok(still.revoked_at, "…and its stamp is untouched — the reset never cleared it");
+  // …and the pair really is still suppressed on both writers.
+  await assertRaises("CLR36",
+    () => propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id }),
+    "a human re-proposing after a refused reset");
+});
+
+test("bp1.G7c M-11 — the reset lifts a DECLINE, and its receipt names every column it clears", async () => {
+  failBp1(live);
+  const { cp, basis } = await eligibleVendor("G7c");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  await declineBinding(w.users.alice, { binding: p.binding_id, reason: "not this vendor family" });
+  const r = await resetDecline(w.users.alice, { binding: p.binding_id, reason: "confirmed by phone" });
+  assert.equal(r.status, "expired");
+  // THE RECEIPT. An audit line that names some of what it erased and not the rest is a summary,
+  // not a receipt — and `decline_reason` is precisely the thing a later reader will want back,
+  // because it is the only place the human's own words survive.
+  const aud = await rootQuery(
+    "select args from clara.audit_log where fn='reset_binding_decline' and (args->>'binding_id')=$1",
+    [p.binding_id]);
+  assert.equal(aud.rowCount, 1);
+  const args = aud.rows[0].args;
+  assert.equal(args.decline_reason, "not this vendor family", "the cleared reason is in the receipt");
+  assert.equal(args.declined_by, w.users.alice);
+  assert.ok(args.declined_at, "the cleared stamp is in the receipt");
+  assert.equal(args.prior_status, "declined", "…and what the row was before this door touched it");
+  const row = await bindingRow(p.binding_id);
+  assert.equal(row.decline_reason, null, "the row itself no longer carries it");
+  assert.equal(row.declined_by, w.users.alice, "…but WHO said no stays, as history");
 });
 
 test("bp1.D5 B5 — a stale PROPOSED row is expired in-door, so the widened index cannot deadlock", async () => {
@@ -1051,7 +1097,7 @@ test("bp1.E5 a LIVE binding — has_live_binding true", async () => {
   failBp1(live);
   const { cp, basis } = await eligibleVendor("E5");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await sign(w.users.alice, { binding: p.binding_id });
+  await signLive(w.users.alice, { binding: p.binding_id });
   const row = (await listCandidates(await filingActor(), w.clients.A1))
     .find((x) => x.counterparty_id === cp.id);
   assert.equal(row.has_live_binding, true);
@@ -1211,14 +1257,200 @@ test("bp1.A3 W18 — a DIFFERING printed registration is the poisoned-corpus sig
     "a corpus printing a different registration");
   assert.match(e1.message, /binding_identifier_unproven/);
 
-  // (b) THE OR-ARM IS REAL, not a loophole that swallows the wall: a corpus that prints NO
-  //     registration is still admissible, because each document carries a HUMAN identity
-  //     resolution in clara.client_resolutions — the same shape the product's filing path writes.
-  const unprinted = await seedWindow(w, "A3b", { dates: DATES_OK, printedRegistration: null });
-  const basis = await lawfulBasis(w.firms.A, w.clients.A1, unprinted.id);
+  // (b) THE POSITIVE CONTROL that gives (a) its meaning: a corpus printing the vendor's OWN
+  //     registration is admitted. Without it, (a) could be a wall that refuses everything.
+  const clean = await seedWindow(w, "A3b", { dates: DATES_OK });
+  const basis = await lawfulBasis(w.firms.A, w.clients.A1, clean.id);
   const ok = await proposeAsAgent(await filingActor(),
-    { client: w.clients.A1, counterparty: unprinted.id, basis });
-  assert.equal(ok.status, "proposed", "no printed registration + a human resolution ⇒ admitted");
+    { client: w.clients.A1, counterparty: clean.id, basis });
+  assert.equal(ok.status, "proposed", "a corpus printing the target's own registration ⇒ admitted");
+});
+
+test("bp1.A3c C1 — CLIENT ATTRIBUTION IS NOT VENDOR RESOLUTION: no printed registration REFUSES", async () => {
+  failBp1(live);
+  // THE ARM THIS CELL REPLACES. W18's first cut admitted a document that printed NO registration
+  // whenever clara.client_resolutions carried a `method='human'` row for it. Three measurements
+  // killed that arm: the table has NO counterparty column at all (it answers "which CLIENT owns
+  // this document", never "who issued it"); clara.file_document MINTS exactly that row for every
+  // document it files (0007:1405-1409), so the arm was true by construction on the whole product
+  // path; and the reviewer drove the resulting attack end to end.
+  //
+  // THE FIXTURE USES THE ESTATE'S OWN DOOR, not a hand-written row: seedApprovedEntry files each
+  // document through clara.document_filings with a real `method='human'` client_resolutions row,
+  // which is precisely the shape that used to satisfy the struck arm. So this cell measures the
+  // arm being GONE, not a fixture that happens to lack a resolution.
+  const unprinted = await seedWindow(w, "A3c", { dates: DATES_OK, printedRegistration: null });
+  const resolved = await rootQuery(
+    `select count(*)::int c from clara.client_resolutions r
+      where r.client_id=$1 and r.method='human' and r.subject_kind='document'
+        and r.subject_id in (select ev.document_id from clara.journal_lines l
+                               join clara.journal_entries ev on ev.id=l.entry_id
+                              where l.counterparty_id=$2)`,
+    [w.clients.A1, unprinted.id]);
+  assert.equal(resolved.rows[0].c, 3,
+    "fixture control: all three documents DO carry the human client_resolution the struck arm keyed on");
+  const err = await assertRaises("CLR36",
+    async () => proposeAsAgent(await filingActor(),
+      { client: w.clients.A1, counterparty: unprinted.id, basis: { citations: [{ region_id: unprinted.id }] } }),
+    "a corpus printing no registration, with human client resolutions");
+  assert.match(err.message, /binding_identifier_unproven/);
+  // …and the READ says the same word, so Clara is never sent at the door.
+  const row = (await listCandidates(await filingActor(), w.clients.A1))
+    .find((x) => x.counterparty_id === unprinted.id);
+  assert.equal(row?.eligible, false);
+  assert.equal(row?.reason, "binding_identifier_unproven");
+});
+
+test("bp1.A3d C1 — a matching AND a foreign identifier on one document REFUSES, in BOTH sort orders", async () => {
+  failBp1(live);
+  // THE min() DEFECT. The first cut read `min(text_content)` per document, so a page printing the
+  // TRUE registration alongside a foreign one was ACCEPTED whenever the foreign value sorted
+  // first — a collation accident wearing the clothes of a rule. Driven both ways round here,
+  // because a fix that only works for one sort order is the same defect with better luck: the
+  // foreign value is once LOWER than the true one and once HIGHER.
+  for (const [tag, foreign] of [["A3d-lo", "000000000000"], ["A3d-hi", "zzz999999999"]]) {
+    const cp = await seedWindow(w, tag, { dates: DATES_OK, extraRegistrations: [foreign] });
+    const printed = await rootQuery(
+      `select count(*)::int c from clara.document_regions r
+        join clara.document_extractions x on x.id=r.extraction_id
+       where x.engine_kind='invoice_facts' and r.field_path='invoice.vendor_registration'
+         and r.text_content=$1`, [foreign]);
+    assert.equal(printed.rows[0].c, 3, `${tag} fixture: the foreign value is really on all three documents`);
+    const err = await assertRaises("CLR36",
+      async () => proposeAsAgent(await filingActor(),
+        { client: w.clients.A1, counterparty: cp.id, basis: { citations: [{ region_id: cp.id }] } }),
+      `${tag}: a true and a foreign identifier on one page`);
+    assert.match(err.message, /binding_identifier_unproven/, `${tag}: refused for the identity reason`);
+  }
+});
+
+test("bp1.A3e N-1 — the wall is KIND-AWARE: the target's TIN is as good as its SSM number", async () => {
+  failBp1(live);
+  // `invoice.vendor_registration` carries EITHER an SSM number or a TIN and never says which
+  // (0049:955-965 censused the whole live invoice.* vocabulary and found no vendor-taxid path).
+  // A wall that only knew registration_normalized would refuse an honest vendor printing its TIN,
+  // so the comparison is against every hard identifier the counterparty row carries.
+  const cp = await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "A3e");
+  const tin = `C${randomSuffix()}${randomSuffix()}`;
+  await rootQuery("update clara.counterparties set tin=$2 where id=$1", [cp.id, tin]);
+  // The page prints the TIN, not the SSM number — and both are the target's, so it is clean.
+  await seedWindow(w, "A3e", { dates: DATES_OK, vendor: cp, printedRegistration: tin });
+  const basis = await lawfulBasis(w.firms.A, w.clients.A1, cp.id);
+  const ok = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  assert.equal(ok.status, "proposed", "a page printing the target's TIN proves identity as well as its SSM number does");
+
+  // …and a page printing the target's SSM number AND its TIN is still clean — two true things
+  // are not a contradiction, which is the case a naive "every region must equal registration"
+  // rule would have refused.
+  const both = await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "A3e-both");
+  const tin2 = `C${randomSuffix()}${randomSuffix()}`;
+  await rootQuery("update clara.counterparties set tin=$2 where id=$1", [both.id, tin2]);
+  await seedWindow(w, "A3e-both", { dates: DATES_OK, vendor: both, extraRegistrations: [tin2] });
+  const basis2 = await lawfulBasis(w.firms.A, w.clients.A1, both.id);
+  const ok2 = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: both.id, basis: basis2 });
+  assert.equal(ok2.status, "proposed", "the target's own SSM number and TIN on one page is CLEAN");
+});
+
+test("bp1.A2d C2 — three SCANS of one invoice, three ALTERED printed ids, fourteen days: REFUSED", async () => {
+  failBp1(live);
+  // THE SECOND CRITICAL of the 2026-08-29 pass, and the one every other conjunct misses. Three
+  // distinct documents (uq_document_filing_active satisfied), three distinct sha256s
+  // (documents_firm_id_sha256_key satisfied), three DIFFERENT printed invoice ids (W16's own
+  // invoice-id conjunct satisfied) and a real fourteen-day approved_at span (the trusted clock
+  // satisfied) — and it is still ONE invoice photographed three times. Document identity, file
+  // bytes and the printed id are all things the attacker CHOOSES; the economics are not.
+  const cp = await seedWindow(w, "A2d", {
+    dates: DATES_OK,
+    sharedEconomics: true,
+    invoiceIdsPerDoc: ["A2DSCAN-9001", "A2DSCAN-9002", "A2DSCAN-9003"],
+  });
+  // The fixture really is the attack: three distinct docs, three distinct shas, three distinct
+  // printed ids — measured, so a green refusal below cannot be some duller fixture defect.
+  const shape = await rootQuery(
+    `select count(distinct ev.document_id)::int docs, count(distinct d.sha256)::int shas,
+            count(distinct clara._binding_doc_fingerprint(ev.document_id))::int prints
+       from clara.journal_lines l
+       join clara.journal_entries ev on ev.id=l.entry_id
+       join clara.documents d on d.id=ev.document_id
+      where l.counterparty_id=$1`, [cp.id]);
+  assert.equal(shape.rows[0].docs, 3, "fixture: three distinct documents");
+  assert.equal(shape.rows[0].shas, 3, "fixture: three distinct sha256s");
+  assert.equal(shape.rows[0].prints, 1, "fixture: ONE economic fingerprint — it is one invoice");
+
+  const err = await assertRaises("CLR36",
+    async () => proposeAsAgent(await filingActor(),
+      { client: w.clients.A1, counterparty: cp.id, basis: { citations: [{ region_id: cp.id }] } }),
+    "three scans of one invoice with three altered printed ids");
+  assert.match(err.message, /binding_corpus_same_invoice/);
+  const row = (await listCandidates(await filingActor(), w.clients.A1))
+    .find((x) => x.counterparty_id === cp.id);
+  assert.equal(row?.reason, "binding_corpus_same_invoice", "the read verb says the same word");
+});
+
+test("bp1.A2dm MUTANT — without the economic fingerprint the three scans are ADMITTED", async () => {
+  failBp1(live);
+  const cp = await seedWindow(w, "A2dm", {
+    dates: DATES_OK,
+    sharedEconomics: true,
+    invoiceIdsPerDoc: ["A2DMSCAN-9001", "A2DMSCAN-9002", "A2DMSCAN-9003"],
+  });
+  const basis = await lawfulBasis(w.firms.A, w.clients.A1, cp.id);
+  await withMutant(BLOCKER_SIG, [[
+    "  if (select count(distinct clara._binding_doc_fingerprint(e.doc))",
+    "  if (select 3 -- mutant: the fingerprint conjunct removed\n       + 0 * count(distinct clara._binding_doc_fingerprint(e.doc))",
+  ]], async () => {
+    const r = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+    assert.equal(r.status, "proposed",
+      "without the fingerprint, one invoice photographed three times clears every remaining conjunct");
+  });
+});
+
+test("bp1.W16d M-12 — an entry approved under a duplicate_override cannot be corpus evidence", async () => {
+  failBp1(live);
+  // The gate's fold items 6/7 ruled duplicate-overrides excluded, and neither the frozen window
+  // nor the identity walls filtered them: an entry a human deliberately waved past the duplicate
+  // guard is exactly the shape "three real invoices seen fourteen days apart" is meant to keep
+  // out. The flag is stamped on the DRAFT (clara._tf_entry_immutable refuses any flags write once
+  // the entry is approved, so a cell that stamped an approved row would be refused for a reason
+  // that has nothing to do with this wall).
+  const cp = await seedWindow(w, "W16d", { dates: DATES_OK, duplicateOverrideOn: [1] });
+  const flagged = await rootQuery(
+    `select count(*)::int c from clara.journal_entries j
+       join clara.journal_lines l on l.entry_id=j.id
+      where l.counterparty_id=$1 and j.flags ? 'duplicate_override'`, [cp.id]);
+  assert.equal(flagged.rows[0].c, 1, "fixture: exactly one corpus entry carries the override");
+  const err = await assertRaises("CLR36",
+    async () => proposeAsAgent(await filingActor(),
+      { client: w.clients.A1, counterparty: cp.id, basis: { citations: [{ region_id: cp.id }] } }),
+    "a corpus containing a duplicate-override entry");
+  assert.match(err.message, /binding_corpus_duplicate_override/);
+  const row = (await listCandidates(await filingActor(), w.clients.A1))
+    .find((x) => x.counterparty_id === cp.id);
+  assert.equal(row?.reason, "binding_corpus_duplicate_override", "the read verb agrees (G3)");
+});
+
+test("bp1.W16e N-8 — a document carrying TWO printed invoice ids gets its OWN word", async () => {
+  failBp1(live);
+  // `<> 3` refuses four as well as two, and those are different facts: three scans of one invoice
+  // is the poisoning signature, while a page whose extraction found two candidate invoice ids is
+  // merely ambiguous. Reported separately so the card can explain itself.
+  const cp = await seedWindow(w, "W16e", { dates: DATES_OK });
+  const doc = (await evidenceDocuments(w.firms.A, w.clients.A1, cp.id))[0];
+  await rootQuery(
+    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+     select $1, x.id, 'page_polygon', '{"page":1,"polygon":[0,0,1,1]}'::jsonb,
+            'invoice.invoice_id', 'W16E-EXTRA-0009', 1.0
+       from clara.document_extractions x
+      where x.document_id=$2 and x.engine_kind='invoice_facts' and x.status='done'
+      order by x.version_n desc, x.id desc limit 1`,
+    [w.firms.A, doc]);
+  const err = await assertRaises("CLR36",
+    async () => proposeAsAgent(await filingActor(),
+      { client: w.clients.A1, counterparty: cp.id, basis: { citations: [{ region_id: cp.id }] } }),
+    "a document printing two invoice ids");
+  assert.match(err.message, /corpus_invoice_id_ambiguous/);
+  assert.doesNotMatch(err.message, /binding_corpus_not_distinct/,
+    "…and NOT under the three-scans word, which means something else");
 });
 
 test("bp1.A3m MUTANT — without W18 the mismatched-registration corpus is ADMITTED", async () => {
@@ -1272,7 +1504,7 @@ test("bp1.A5 the index covers 'live' — the propose-versus-sign race end state 
   failBp1(live);
   const { cp, basis } = await eligibleVendor("A5");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await sign(w.users.alice, { binding: p.binding_id });
+  await signLive(w.users.alice, { binding: p.binding_id });
   // THE RACE'S END STATE, written directly: a live binding AND a fresh open proposal for one
   // pair. A `where status='proposed'` index cannot forbid it (only one row is proposed) and
   // uq_vib_one_live cannot either (only one row is live) — so a refusal here can ONLY be the
@@ -1334,7 +1566,7 @@ test("bp1.S1 裁-18a — Clara proposes, ANY admin signs; the wall passes BY CON
   failBp1(live);
   const { cp, basis } = await eligibleVendor("S1");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  const s = await sign(w.users.alice, { binding: p.binding_id });
+  const s = await signLive(w.users.alice, { binding: p.binding_id });
   assert.equal(s.status, "live");
   const b = await bindingRow(p.binding_id);
   assert.equal(b.signed_by, w.users.alice);
@@ -1351,23 +1583,61 @@ test("bp1.S2 the wall is an ACTOR COMPARISON — a human self-propose+self-sign 
   const hp = await propose(w.users.alice, { client: w.clients.A1, counterparty: cp.id });
   const err = await assertRaises(CLR.authz,
     () => sign(w.users.alice, { binding: hp.binding_id }), "human self-propose then self-sign");
-  // 裁-32 (2026-08-29) SPLIT this refusal. This world's firm A carries exactly ONE admin, so a
-  // self-sign lands on the SOLO arm: still refused, but with the attestation way out named.
-  // x36-vendor-binding-ceremony.test.mjs's x36c.5b holds the ≥2-signer arm, where 裁-18c's
-  // verbatim words are unchanged — that file owns the wall's pins, so the pin lives there.
+  // N-4 (2026-08-30, fail-closed pending an owner ruling). 裁-32's relaxation is for the DIRECTED
+  // path — "I asked Clara to propose this, and I am the only admin who could sign it". It is NOT
+  // a licence for a human's OWN MANUAL proposal to be self-signed, which is exactly what 裁-18c
+  // refused and what an earlier cut of this cell proved SUCCEEDING. A manual proposal therefore
+  // keeps 裁-18a's wall verbatim, in every firm, solo or not.
+  assert.equal(reasonOf(err), "signer_is_proposer");
+  assert.match(err.message, /let Clara propose it, or add a second admin/);
+  // …and an attestation buys NOTHING on this path. Without this the relaxation would be a
+  // universal bypass wearing a text field.
+  const e2 = await assertRaises(CLR.authz, () => humanQuery(w.users.alice,
+    "select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2, p_attestation => $3) as result",
+    [hp.binding_id, opk("s2att"), "Sole admin of this firm; I checked the three invoices myself."]),
+    "an attestation on a MANUAL self-proposal");
+  assert.equal(reasonOf(e2), "signer_is_proposer",
+    "the attestation must not reach the solo arm from a manual proposal");
+  const row = await bindingRow(hp.binding_id);
+  assert.equal(row.status, "proposed", "nothing went live");
+  assert.equal(row.self_approved, false);
+});
+
+test("bp1.S2b 裁-32 — the DIRECTED interactive path in a solo firm DOES open with an attestation", async () => {
+  failBp1(live);
+  // The other half of N-4, and the case 裁-32 actually ruled: alice asks Clara to propose
+  // (`interactive`, on_behalf_of = alice), Clara proposes, and alice — the firm's only eligible
+  // signer — signs her own directed proposal WITH a written attestation stamped on the row. This
+  // is the deliberate 裁-18c relaxation; without it a solo firm has no path to a live binding at
+  // all, because 裁-32's own finding closes 裁-18c's first named way out for directed proposals.
+  const { cp, basis } = await eligibleVendor("S2b");
+  const p = await proposeAsAgent(await interactiveActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  const before = await bindingRow(p.binding_id);
+  assert.equal(before.directed_by, w.users.alice, "fixture: the proposal really is DIRECTED by the signer");
+  assert.equal(before.effective_proposer, w.users.alice);
+  // No attestation ⇒ the solo arm names the way out rather than refusing outright.
+  const err = await assertRaises(CLR.authz,
+    () => sign(w.users.alice, { binding: p.binding_id }), "solo directed self-sign with no attestation");
   assert.equal(reasonOf(err), "self_attestation_required");
   assert.match(err.message, /state why you are signing your own/);
-  // …and the attestation genuinely opens it, writing the self-approval onto the row where a
-  // reader can see it. This is the 裁-18c relaxation, and it is deliberate: the alternative was
-  // to strand every solo firm, since "let Clara propose" is the path 裁-32 just closed for them.
-  const signed = await humanQuery(w.users.alice,
+  // …and with one, it opens — through the real door, with PR-3's control present.
+  const signed = await withPostTimeControl(() => humanQuery(w.users.alice,
     "select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2, p_attestation => $3) as result",
-    [hp.binding_id, opk("s2att"), "Sole admin of this firm; I checked the three invoices myself."]);
+    [p.binding_id, opk("s2batt"), "Sole admin of this firm; I checked the three invoices myself."]));
   assert.equal(signed.rows[0].result.status, "live");
   assert.equal(signed.rows[0].result.self_approved, true);
-  const row = await bindingRow(hp.binding_id);
+  const row = await bindingRow(p.binding_id);
   assert.equal(row.self_approved, true);
   assert.match(row.self_approval_reason, /Sole admin/);
+  // H5: the NUMBER the wall enforced and the ROSTER it was measured over are on the row, so a
+  // reviewer can see the decision without reconstructing a membership history the estate cannot
+  // reproduce once a row is re-created.
+  assert.equal(row.signer_count_at_signing, 1);
+  assert.ok(row.signer_roster_epoch, "the roster epoch is stamped beside the count");
+  const aud = await rootQuery(
+    "select args from clara.audit_log where fn='sign_vendor_identity_binding' and (args->>'binding_id')=$1",
+    [p.binding_id]);
+  assert.equal(aud.rows[0].args.signer_count_at_signing, 1, "…and the audit line carries it too");
 });
 
 test("bp1.S3 a bookkeeper cannot sign Clara's proposal; another firm's admin cannot see it", async () => {
@@ -1505,7 +1775,7 @@ test("bp1.O1 the retro census SEES a would-fail binding and REVOKES NOTHING", as
   // overruling a human's signature. What is owed instead is visibility, and this is it.
   const { cp, basis } = await eligibleVendor("O1");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  await sign(w.users.alice, { binding: p.binding_id });
+  await signLive(w.users.alice, { binding: p.binding_id });
   const before = await humanQuery(w.users.alice,
     "select count(*)::int c from clara.binding_identity_review() where binding_id=$1", [p.binding_id]);
   assert.equal(before.rows[0].c, 0, "a clean live binding is NOT a finding");
@@ -1624,4 +1894,516 @@ test("bp1.F3 the only status transition this door can cause is null → proposed
     `select count(*)::int c from clara.wake_fn_allowlist
       where function_name in ('sign_vendor_identity_binding','revoke_vendor_identity_binding','decline_vendor_identity_binding')`);
   assert.equal(al.rows[0].c, 0);
+});
+
+// ===========================================================================
+// THE 2026-08-30 FOLD ROUND. Every cell below pins one finding from the three
+// independent review legs (Codex · the native adversarial pass · the standing
+// reviewer). Each is RED before its wall and GREEN after; the ones whose wall
+// lives in a body carry a MUTANT that removes exactly that wall and shows the
+// refusal disappear, because a wall nobody has measured is a wall nobody has.
+// ===========================================================================
+
+test("bp1.B1c H4 — an `interactive` credential with a NULL on_behalf_of REFUSES at the door", async () => {
+  failBp1(live);
+  // THE BYPASS. `interactive` IS the human ask, and 裁-32 measures maker/checker against the
+  // person who made it — but clara.mint_wake_credential PERMITS a null on_behalf_of for this kind
+  // (0133:713). A null director gives a null directed_by, so the GENERATED effective_proposer
+  // falls back to Clara's own uuid and EVERY admin — including the one who clicked "ask Clara" —
+  // clears 裁-18a by construction. A FOREIGN non-null principal was already refused at signing;
+  // NULL was the way past, because a comparison against an unknown principal can never refuse.
+  const { cp, basis } = await eligibleVendor("B1c");
+  const c = await mintCred({ kind: "interactive", firm: w.firms.A, onBehalfOf: null });
+  // Control: the credential really was minted, so the refusal below is this door's wall and not
+  // the minter declining to produce the fixture.
+  assert.ok(c.credentialId, "fixture: mint_wake_credential DOES admit a null on_behalf_of here");
+  const err = await assertRaises(CLR.badRequest,
+    () => proposeAsAgent({ role: WAKE_ROLE.interactive, ...c },
+      { client: w.clients.A1, counterparty: cp.id, basis }),
+    "an interactive proposal with no director");
+  assert.equal(reasonOf(err), "interactive_director_required");
+  assert.match(err.detail, /"constraint":"nonnull"/);
+  const n = await rootQuery(
+    "select count(*)::int c from clara.vendor_identity_bindings where counterparty_id=$1", [cp.id]);
+  assert.equal(n.rows[0].c, 0, "a refusal leaves no card");
+});
+
+test("bp1.B1d H4 — a NON-STANDING director refuses too, and `filing` is untouched", async () => {
+  failBp1(live);
+  // (a) carol is a VIEWER of firm A — a real user of the right firm who still cannot direct a
+  //     binding proposal. That is the discriminating shape: the wall is about STANDING, not
+  //     about existence.
+  const a = await eligibleVendor("B1d-a");
+  const cViewer = await mintCred({ kind: "interactive", firm: w.firms.A, onBehalfOf: w.users.carol });
+  const e1 = await assertRaises(CLR.badRequest,
+    () => proposeAsAgent({ role: WAKE_ROLE.interactive, ...cViewer },
+      { client: w.clients.A1, counterparty: a.cp.id, basis: a.basis }),
+    "a viewer directing an interactive proposal");
+  assert.equal(reasonOf(e1), "interactive_director_required");
+  assert.match(e1.detail, /"constraint":"active_bookkeeper"/);
+
+  // (b) `filing` is DELIBERATELY untouched. An unattended lane has no director by design;
+  //     treating its credential's on_behalf_of as one made every clocked proposal unsignable by
+  //     the person most likely to be looking at it (measured on the rig during the build).
+  const b = await eligibleVendor("B1d-b");
+  const r = await proposeAsAgent(await filingActor(),
+    { client: w.clients.A1, counterparty: b.cp.id, basis: b.basis });
+  assert.equal(r.status, "proposed");
+  const row = await bindingRow(r.binding_id);
+  assert.equal(row.directed_by, null, "a filing-lane proposal has NO director, and that is the design");
+});
+
+test("bp1.B1cm MUTANT — without the director wall the null-director proposal is ADMITTED", async () => {
+  failBp1(live);
+  const { cp, basis } = await eligibleVendor("B1cm");
+  const c = await mintCred({ kind: "interactive", firm: w.firms.A, onBehalfOf: null });
+  await withMutant(CORE_SIG, [["  if p_wake_kind = 'interactive' then", "  if false then"]], async () => {
+    const r = await proposeAsAgent({ role: WAKE_ROLE.interactive, ...c },
+      { client: w.clients.A1, counterparty: cp.id, basis });
+    assert.equal(r.status, "proposed", "without the wall a director-less interactive proposal lands");
+    const row = await bindingRow(r.binding_id);
+    assert.equal(row.directed_by, null);
+    assert.equal(row.effective_proposer, AGENT_USER_ID,
+      "…and the maker/checker principal collapses onto Clara, which is the whole defect");
+  });
+});
+
+test("bp1.E-count M-10 — eligible_binding_signer_count refuses another firm's uuid (CLR11)", async () => {
+  failBp1(live);
+  // SECURITY DEFINER, granted to clara_authenticated, taking the tenant as an ARGUMENT — the
+  // exact caller-supplied-tenant shape 0002:453-458 records the estate paying for once. Before
+  // this wall a firm-A owner could read firm B's admin headcount by passing B's uuid.
+  const mine = await humanQuery(w.users.alice,
+    "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
+  assert.ok(mine.rows[0].n >= 1, "control: the caller's own firm answers");
+  const err = await assertRaises(CLR.notFound, () => humanQuery(w.users.alice,
+    "select clara.eligible_binding_signer_count($1) as n", [w.firms.B]),
+    "a firm-A JWT asking about firm B");
+  assert.equal(reasonOf(err), "cross_firm");
+  // …and the OTHER direction, so this is a wall and not a coincidence of who owns what.
+  const theirs = await humanQuery(w.users.dave,
+    "select clara.eligible_binding_signer_count($1) as n", [w.firms.B]);
+  assert.ok(theirs.rows[0].n >= 1, "firm B's own admin reads firm B");
+  await assertRaises(CLR.notFound, () => humanQuery(w.users.dave,
+    "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]),
+    "a firm-B JWT asking about firm A");
+});
+
+test("bp1.S-postcontrol C3 — the gate refuses when the approve-path control is ABSENT, and opens when it is present", async () => {
+  failBp1(live);
+  // THE FINDING. The gate used to read `exists(… schema_migrations where version='0029_…')`.
+  // That row IS present — ledgers are append-only — while the control it stood for lived in
+  // clara.execute_rule_post, which 0118 DROPPED. So the gate was PERMANENTLY TRUE and a binding
+  // could go live with no post-time re-check behind it for the whole of that window.
+  // BOTH HALVES MEASURED, positively: the ledger row is present, AND the approve path carries no
+  // marker. The pair is the defect; neither half alone is evidence of it.
+  assert.equal(await has29(), true, "control: the 0029 LEDGER row is present (and always will be)");
+  assert.equal(await postTimeControlLive(), false,
+    "control: the approve path does NOT carry the ratified re-check — PR-3 has not landed");
+
+  const { cp, basis } = await eligibleVendor("Spc");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  const err = await assertRaises("CLR36",
+    () => sign(w.users.alice, { binding: p.binding_id }), "signing with no post-time control deployed");
+  assert.equal(reasonOf(err), "post_time_control_absent");
+  assert.equal((await bindingRow(p.binding_id)).status, "proposed", "nothing went live");
+
+  // A POSITIVE CONTROL ON THE INSTRUMENT. Without it this cell could be passing because the door
+  // refuses everything. Plant PR-3's ratified marker on the live approve path, sign the SAME
+  // binding through the SAME door, and the gate opens — then the marker comes off and the body is
+  // verified byte-identical again.
+  const signed = await withPostTimeControl(
+    () => sign(w.users.alice, { binding: p.binding_id, opKey: opk("spcok") }));
+  assert.equal(signed.status, "live", "with the control deployed the very same call succeeds");
+  assert.equal(await postTimeControlLive(), false, "…and the marker is gone again afterwards");
+});
+
+test("bp1.S-postcontrol-src C3 — the gate reads the BODY, never the ledger row", async () => {
+  failBp1(live);
+  // Law 3: a migration ledger row is the weakest possible name for a control — it says a file ran
+  // once, never that its objects survived. Read in CODE on the live prosrc, comment-stripped, so
+  // a later edit that puts the ledger read back fails here rather than in production.
+  const r = await rootQuery(strippedSrc, [SIGN_SIG]);
+  const src = r.rows[0].src;
+  assert.ok(!src.includes("0029_vendor_binding_executor"),
+    "the signer must not read the 0029 ledger row — that row is permanent and proves nothing");
+  assert.ok(src.includes(POST_TIME_MARKER), "the signer reads the ratified body marker");
+  assert.ok(src.includes("clara._approve_entry_core(jsonb,uuid,uuid,text,text)"),
+    "…resolved by EXACT SIGNATURE, never by bare name");
+});
+
+test("bp1.S5a H7 — a family that becomes AMBIGUOUS between propose and sign REFUSES", async () => {
+  failBp1(live);
+  // Sign re-ran the frozen derivation but never the identity walls above it, so a same-family
+  // sibling appearing after the card was raised left the proposal signable. A human answering
+  // "yes" must be answering about the world at the moment of the signature.
+  const { cp, basis } = await eligibleVendor("S5a");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  const sib = await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "S5a-sib");
+  await rootQuery("update clara.counterparties set name=$2, name_normalized=$3 where id=$1",
+    [sib.id, `${cp.name.split(" ")[0]} OTHER SDN BHD`,
+      `${cp.name.split(" ")[0]}othersdnbhd`.toLowerCase()]);
+  const err = await assertRaises("CLR36",
+    () => signLive(w.users.alice, { binding: p.binding_id }), "signing into a newly ambiguous family");
+  assert.match(err.message, /binding_name_family_ambiguous/);
+  assert.equal((await bindingRow(p.binding_id)).status, "proposed");
+});
+
+test("bp1.S5b H7 — a FOREIGN identifier landing on an evidence document before sign REFUSES", async () => {
+  failBp1(live);
+  // The second half of H7, and the one that shows this is not only about names. The region is
+  // added to the CURRENT generation, deliberately not a new one: a v2 extraction moves
+  // facts_extraction_id, which is inside the frozen content_hash, so the signer would refuse
+  // proposal_drifted and this cell would be measuring drift instead of the identity wall.
+  const { cp, basis } = await eligibleVendor("S5b");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  const docs = await evidenceDocuments(w.firms.A, w.clients.A1, cp.id);
+  await plantRegistrationRegion(w.firms.A, docs[0], "199901019999");
+  const err = await assertRaises("CLR36",
+    () => signLive(w.users.alice, { binding: p.binding_id }), "signing a corpus that now contradicts itself");
+  assert.match(err.message, /binding_identifier_unproven/);
+  assert.equal((await bindingRow(p.binding_id)).status, "proposed");
+});
+
+test("bp1.S5m MUTANT — without the sign-time re-run the drifted corpus is signed LIVE", async () => {
+  failBp1(live);
+  const { cp, basis } = await eligibleVendor("S5m");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  const docs = await evidenceDocuments(w.firms.A, w.clients.A1, cp.id);
+  await plantRegistrationRegion(w.firms.A, docs[0], "199901018888");
+  await withPostTimeControl(() => withMutant(SIGN_SIG, [[
+    "  if v_blocker is not null then", "  if false then",
+  ]], async () => {
+    const s = await sign(w.users.alice, { binding: p.binding_id, opKey: opk("s5m") });
+    assert.equal(s.status, "live",
+      "without the re-run a proposal whose corpus stopped proving identity still goes live");
+  }));
+});
+
+test("bp1.W14c C-1 — decline-vs-propose: the propose that unblocks after the decline commits REFUSES", async () => {
+  failBp1(live);
+  // THE CRITICAL of the adversarial pass, driven as an interleave rather than argued. Before the
+  // fix, decline took NO advisory key: T2 could decline inside an open transaction while T1's
+  // propose had already read the suppression as NULL and was blocked only on the unique index —
+  // so when T2 committed, T1's INSERT landed on a pair a human had just refused, and an admin
+  // signed it LIVE while clara._binding_suppression still answered 'declined'.
+  const { cp, basis } = await eligibleVendor("W14c");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+
+  const outcome = await twoSessions(async (c1, c2) => {
+    const pid2 = await asHumanSession(c2, w.users.alice);
+    await c2.query("begin");
+    await c2.query("select set_config('request.jwt.claims', $1, true)",
+      [JSON.stringify({ sub: w.users.alice, role: "authenticated" })]);
+    await c2.query(
+      "select clara.decline_vendor_identity_binding(p_binding => $1, p_reason => $2, p_op_key => $3)",
+      [p.binding_id, "race: not this vendor", opk("w14c-dec")]);
+
+    const pid1 = await asHumanSession(c1, w.users.bob);
+    const t1 = c1.query(
+      "select clara.propose_vendor_identity_binding(p_proposal => $1::jsonb, p_op_key => $2) as result",
+      [JSON.stringify({ client_id: w.clients.A1, counterparty_id: cp.id }), opk("w14c-prop")])
+      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+
+    // PROVE the interleave — pg_blocking_pids, never a sleep.
+    await waitBlockedByOrThrow(pid1, pid2);
+    await c2.query("commit");
+    return t1;
+  });
+
+  assert.equal(outcome.ok, false,
+    "the propose that unblocked after the decline committed must NOT have succeeded");
+  assert.equal(outcome.e.code, "CLR36");
+  assert.match(outcome.e.message, /binding_declined/,
+    `expected the suppression wall, got: ${outcome.e.message}`);
+  const rows = await rootQuery(
+    "select status, count(*)::int c from clara.vendor_identity_bindings where counterparty_id=$1 group by status",
+    [cp.id]);
+  assert.deepEqual(rows.rows.map((x) => [x.status, x.c]), [["declined", 1]]);
+});
+
+test("bp1.D4c H6 — propose-vs-sign takes ONE key in ONE order: T2 waits, and NOBODY deadlocks", async () => {
+  failBp1(live);
+  // Sign used to take the ROW `for update` FIRST and the pair key SECOND — the inverted order the
+  // pass drove to a real 40P01 whose server report named `sign_vendor_identity_binding line 25`.
+  // With one helper and one order the second actor WAITS and then answers lawfully.
+  const { cp, basis } = await eligibleVendor("D4c");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+
+  const outcome = await withPostTimeControl(() => twoSessions(async (c1, c2) => {
+    const pid1 = await asHumanSession(c1, w.users.alice);
+    await c1.query("begin");
+    await c1.query("select set_config('request.jwt.claims', $1, true)",
+      [JSON.stringify({ sub: w.users.alice, role: "authenticated" })]);
+    await c1.query("select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2)",
+      [p.binding_id, opk("d4c-sign")]);
+
+    const pid2 = await asHumanSession(c2, w.users.bob);
+    const t2 = c2.query(
+      "select clara.propose_vendor_identity_binding(p_proposal => $1::jsonb, p_op_key => $2) as result",
+      [JSON.stringify({ client_id: w.clients.A1, counterparty_id: cp.id }), opk("d4c-prop")])
+      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+
+    await waitBlockedByOrThrow(pid2, pid1);
+    await c1.query("commit");
+    return t2;
+  }));
+
+  assert.equal(outcome.ok, false, "a second proposal over a now-live binding must refuse");
+  assert.notEqual(outcome.e.code, "40P01",
+    `NOBODY may deadlock: one key, one order. Got: ${outcome.e.code} ${outcome.e.message}`);
+  assert.match(outcome.e.message, /binding_conflict/,
+    "…and it refuses with the estate's existing typed word, having WAITED rather than raced");
+  assert.equal((await bindingRow(p.binding_id)).status, "live");
+});
+
+test("bp1.D4d H6 — a second row-keyed writer on the same pair waits on the same key, no 40P01", async () => {
+  failBp1(live);
+  // The sweep and the row-keyed doors took no shared key, so they could interleave on one pair.
+  // Here T1 enters the DECLINE door (which now takes the pair key before its row lock) and holds;
+  // T2 enters the PROPOSE door, whose first act is the stale-proposal sweep — the writer that
+  // used to take no key at all. T2 must WAIT rather than race, and neither may deadlock.
+  const { cp, basis } = await eligibleVendor("D4d");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+
+  const outcome = await twoSessions(async (c1, c2) => {
+    const pid1 = await asHumanSession(c1, w.users.alice);
+    await c1.query("begin");
+    await c1.query("select set_config('request.jwt.claims', $1, true)",
+      [JSON.stringify({ sub: w.users.alice, role: "authenticated" })]);
+    await c1.query(
+      "select clara.decline_vendor_identity_binding(p_binding => $1, p_reason => $2, p_op_key => $3)",
+      [p.binding_id, "race: hold the key", opk("d4d-dec")]);
+
+    const pid2 = await asHumanSession(c2, w.users.bob);
+    const t2 = c2.query(
+      "select clara.propose_vendor_identity_binding(p_proposal => $1::jsonb, p_op_key => $2) as result",
+      [JSON.stringify({ client_id: w.clients.A1, counterparty_id: cp.id }), opk("d4d-prop")])
+      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+
+    await waitBlockedByOrThrow(pid2, pid1);
+    await c1.query("commit");
+    return t2;
+  });
+
+  assert.equal(outcome.ok, false);
+  assert.notEqual(outcome.e.code, "40P01",
+    `one key, one order, in every writer. Got: ${outcome.e.code} ${outcome.e.message}`);
+  assert.match(outcome.e.message, /binding_declined/,
+    "the wait produced a CORRECT answer, which is the point of serialising rather than racing");
+});
+
+test("bp1.E7 M8 — the eligibility read WRITES NOTHING, even over a stale proposal", async () => {
+  failBp1(live);
+  // The read was declared `stable` and called the VOLATILE expiry writer, which contradicts
+  // PostgreSQL's own volatility contract, gave the read a stale snapshot over its own side
+  // effects, and escaped as an untyped 25006 the moment anybody called it inside `begin read
+  // only`. It now treats a past-expiry proposal as non-open in the PREDICATE — the same answer
+  // the sweep would have produced, arrived at without writing.
+  const { cp, basis } = await eligibleVendor("E7");
+  const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  await rootQuery(
+    `update clara.vendor_identity_bindings
+        set created_at = now() - interval '13 months', expires_at = now() - interval '1 month'
+      where id = $1`, [p.binding_id]);
+
+  const audBefore = await rootQuery(
+    "select count(*)::int c from clara.audit_log where fn='expire_stale_binding_proposal' and (args->>'binding_id')=$1",
+    [p.binding_id]);
+  const row = (await listCandidates(await filingActor(), w.clients.A1))
+    .find((x) => x.counterparty_id === cp.id);
+  assert.equal(row.has_open_proposal, false, "a past-expiry proposal is NOT an open one");
+  assert.equal(row.eligible, true, "…so the vendor is eligible again, which is the honest answer");
+
+  const after = await bindingRow(p.binding_id);
+  assert.equal(after.status, "proposed", "the READ did not expire the row — the writer doors do that");
+  const audAfter = await rootQuery(
+    "select count(*)::int c from clara.audit_log where fn='expire_stale_binding_proposal' and (args->>'binding_id')=$1",
+    [p.binding_id]);
+  assert.equal(audAfter.rows[0].c, audBefore.rows[0].c, "the read wrote no audit row");
+
+  // …and it survives a READ ONLY transaction, which is the shape that made the defect visible.
+  const c = await mintCred({ kind: "filing", firm: w.firms.A, onBehalfOf: w.users.alice });
+  await twoSessions(async (c1) => {
+    await asWakeSession(c1, WAKE_ROLE.filing, c.secret);
+    await c1.query("begin read only");
+    await c1.query("select set_config('clara.wake_secret', $1, true)", [c.secret]);
+    const r = await c1.query("select * from clara.wake_list_binding_candidates(p_client => $1)",
+      [w.clients.A1]);
+    assert.ok(r.rows.length > 0, "the read returns rows inside a READ ONLY transaction");
+    await c1.query("rollback");
+  });
+});
+
+test("bp1.W10c S-1 — the maker/checker principal is FROZEN by the signature", async () => {
+  failBp1(live);
+  // t_vib_frozen's body was a NEGATIVE list covering five derived content fields. This PR adds
+  // ten columns and four carry the principal behind the signature — directed_by (which the
+  // GENERATED effective_proposer follows), proposed_by_agent, self_approved and
+  // self_approval_reason. The honesty CHECKs do not help: ck_vib_proposed_by_agent_honest is an
+  // EQUALITY, so moving created_by too satisfies it, and a CHECK constrains a row's SHAPE, never
+  // its HISTORY. Not attacker-reachable (zero app-role DML), so this is depth — but "the
+  // principal behind a signature is append-only" must be true structurally, not by nobody trying.
+  const { cp, basis } = await eligibleVendor("W10c");
+  const p = await proposeAsAgent(await interactiveActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+
+  // POSITIVE CONTROL FIRST: while the row is UNSIGNED the freeze does not fire.
+  await rootQuery("update clara.vendor_identity_bindings set directed_by=$2 where id=$1",
+    [p.binding_id, w.users.bob]);
+  assert.equal((await bindingRow(p.binding_id)).directed_by, w.users.bob,
+    "control: an unsigned proposal's director may still move");
+  await rootQuery("update clara.vendor_identity_bindings set directed_by=$2 where id=$1",
+    [p.binding_id, w.users.alice]);
+
+  await signLive(w.users.alice, { binding: p.binding_id });
+  // …and now every principal-bearing column is frozen, ONE UPDATE PER COLUMN so a green result
+  // cannot be one constraint answering for all of them.
+  for (const [col, value] of [
+    ["directed_by", w.users.bob],
+    ["signed_by", w.users.bob],
+    ["self_approved", true],
+    ["self_approval_reason", "after the fact"],
+    ["signer_count_at_signing", 9],
+  ]) {
+    const err = await assertRaises("CLR36",
+      () => rootQuery(
+        `update clara.vendor_identity_bindings set ${col} = $2 where id = $1`, [p.binding_id, value]),
+      `moving ${col} on a SIGNED row`);
+    assert.match(err.message, /signature principal is frozen/, `${col}: the principal freeze answered`);
+  }
+  // …and 0028's own five-field content freeze is UNTOUCHED by the recut — the half a reader
+  // would reasonably fear was lost when the list grew.
+  const e2 = await assertRaises("CLR36",
+    () => rootQuery("update clara.vendor_identity_bindings set content_hash=$2 where id=$1",
+      [p.binding_id, "0".repeat(64)]), "moving content_hash on a signed row");
+  assert.match(e2.message, /vendor binding content is frozen/,
+    "0028's own words, unchanged — the two guards are separate and both live");
+});
+
+test("bp1.R5b M9 — the pb_ token grammar, five shapes, driven against the LIVE constraints", async () => {
+  failBp1(live);
+  // The first cut was `pb_[a-z][a-z0-9_]*` — a CHARACTER CLASS, not a token grammar. It ADMITS
+  // `pb_binding_`, so two keys that read as the same member could both be registered and a reader
+  // could not tell which one the shim belonged to. Driven as REAL inserts against the live
+  // constraints, never by asking whether a pattern typed here matches a string typed here.
+  // (f_a77b / f_a99z rather than the existing f_a7b: re-inserting a REGISTERED item answers with
+  // a primary-key violation about identity, not with the grammar's verdict.)
+  const shapes = [
+    ["pb_", false], ["pb_binding_", false], ["pb_Binding", false],
+    ["f_a77b", true], ["f_a99z", true],
+  ];
+  for (const [item, shouldBeAdmitted] of shapes) {
+    let refusedByGrammar = false;
+    try {
+      await rootQuery(
+        `insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expected_source)
+         values ($1,'probe_kind_r5','_agent_receipt_src_' || $1,'probe_source_r5')`, [item]);
+      await rootQuery("delete from clara.agent_receipt_surfaces where item=$1", [item]);
+    } catch (e) {
+      // 23514 = the grammar (or the pairing CHECK) refused. CLR10 'does not exist' = the grammar
+      // ADMITTED it and the conformance trigger then caught the missing shim — an ADMISSION as
+      // far as this cell is concerned, which is why the two are distinguished rather than lumped.
+      if (e.code === PG.checkViolation) refusedByGrammar = true;
+      else if (e.code !== "CLR10" || !/does not exist/.test(e.message)) throw e;
+    }
+    assert.equal(refusedByGrammar, !shouldBeAdmitted,
+      `${item}: expected ${shouldBeAdmitted ? "ADMITTED" : "REFUSED"} by the token grammar`);
+  }
+  const n = await rootQuery("select count(*)::int c from clara.agent_receipt_surfaces");
+  assert.equal(n.rows[0].c, 9, "no probe row survived");
+});
+
+test("bp1.R6 L-14 — a registry row naming a NONEXISTENT shim is refused at INSERT", async () => {
+  failBp1(live);
+  // clara.agent_receipt_surfaces is APPEND-ONLY, so a row whose shim_relname names a relation
+  // that does not exist would be PERMANENT: agent_receipt_source_census() would report
+  // shim_exists=false for it forever with no lawful way back. Two regexes and a pairing CHECK all
+  // read SPELLING; only clara._assert_receipt_surface_conforms reads the RELATION (law 3).
+  const err = await assertRaises("CLR10", () => rootQuery(
+    `insert into clara.agent_receipt_surfaces(item, receipt_kind, shim_relname, expected_source)
+     values ('pb_ghost','probe_kind_g','_agent_receipt_src_pb_ghost','probe_source_g')`),
+    "a perfectly-spelled row naming no relation");
+  assert.match(err.message, /does not exist/);
+  assert.equal(reasonOf(err), "receipt_surface_absent");
+  const n = await rootQuery(
+    "select count(*)::int c from clara.agent_receipt_surfaces where item='pb_ghost'");
+  assert.equal(n.rows[0].c, 0, "nothing permanent was left behind");
+});
+
+// ===========================================================================
+// LAST IN THE FILE, DELIBERATELY (the x36c.5b convention): every cell below
+// changes firm A's ADMIN ROSTER, and clara.eligible_binding_signer_count now
+// carries a DURABLE 90-day window — so a departure is still counted long after
+// it happens. Nothing after these cells may depend on the firm's headcount.
+// ===========================================================================
+
+test("bp1.B1-roster H5 — remove the second admin, self-sign, re-add: the window REFUSES it", async () => {
+  failBp1(live);
+  // Driven end to end by the adversarial pass. A count of currently-ACTIVE admins is a number the
+  // person it gates can change: remove admin B, become "solo", self-sign your own directed
+  // proposal with an attestation, add B back. Two minutes, fully audited, and the binding is live
+  // with no second party. The durable window counts an admin+ membership ENDED within 90 days, so
+  // the manoeuvre cannot wait itself out inside a signing session.
+  const second = await insertUser(`${w.prefix}_h5`, "admin2");
+  await addMember(w.users.alice, { firm: w.firms.A, user: second, role: "admin", opKey: opk("h5add") });
+  const membership = (await rootQuery(
+    "select id from clara.firm_memberships where firm_id=$1 and user_id=$2 and status='active'",
+    [w.firms.A, second])).rows[0].id;
+
+  const { cp, basis } = await eligibleVendor("H5");
+  const p = await proposeAsAgent(await interactiveActor(), { client: w.clients.A1, counterparty: cp.id, basis });
+  const two = await humanQuery(w.users.alice,
+    "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
+  assert.ok(two.rows[0].n >= 2, `control: two eligible signers before the manoeuvre, got ${two.rows[0].n}`);
+
+  // THE MANOEUVRE, through the estate's own audited door.
+  await humanQuery(w.users.alice,
+    "select clara.remove_member(p_membership => $1, p_op_key => $2)", [membership, opk("h5rm")]);
+  const active = await rootQuery(
+    `select count(*)::int c from clara.firm_memberships
+      where firm_id=$1 and status='active' and clara.role_rank(role) >= clara.role_rank('admin')`,
+    [w.firms.A]);
+  assert.equal(active.rows[0].c, 1, "control: the LIVE headcount really did drop to one");
+
+  const counted = await humanQuery(w.users.alice,
+    "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
+  assert.ok(counted.rows[0].n >= 2,
+    `the DURABLE window still counts the departed admin, got ${counted.rows[0].n}`);
+  const err = await assertRaises(CLR.authz, () => humanQuery(w.users.alice,
+    "select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2, p_attestation => $3) as result",
+    [p.binding_id, opk("h5sign"), "I am the only admin now"]),
+    "self-signing after removing the only other admin");
+  assert.equal(reasonOf(err), "signer_is_proposer",
+    "the strict arm answers — the attestation never becomes available");
+  assert.equal((await bindingRow(p.binding_id)).status, "proposed");
+
+  // …and re-adding is still ONE person: the window must not double-count a re-add.
+  await addMember(w.users.alice, { firm: w.firms.A, user: second, role: "admin", opKey: opk("h5readd") });
+  const readded = await humanQuery(w.users.alice,
+    "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
+  assert.equal(readded.rows[0].n, 2, "a removed-then-re-added admin counts ONCE");
+});
+
+test("bp1.B1-invite H5 — a PENDING admin invite is not a solo firm", async () => {
+  failBp1(live);
+  // A firm that has already asked somebody to be its second admin is not solo, and the invite is
+  // durable evidence of the ask. clara.firm_memberships has no pending state at all (measured:
+  // status is exactly {active, removed}), so the invite table is where that fact lives.
+  const before = await humanQuery(w.users.alice,
+    "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
+  await humanQuery(w.users.alice,
+    "select clara.invite_member(p_email => $1, p_role => $2, p_op_key => $3)",
+    [`h5invite_${Date.now()}@rig.test`, "admin", opk("h5inv")]);
+  const after = await humanQuery(w.users.alice,
+    "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
+  assert.equal(after.rows[0].n, before.rows[0].n + 1,
+    "a pending admin+ invite counts toward the roster");
+  // …and a VIEWER invite does not: the floor is the SIGNER's floor, not "anybody at all".
+  await humanQuery(w.users.alice,
+    "select clara.invite_member(p_email => $1, p_role => $2, p_op_key => $3)",
+    [`h5viewer_${Date.now()}@rig.test`, "viewer", opk("h5invv")]);
+  const afterViewer = await humanQuery(w.users.alice,
+    "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
+  assert.equal(afterViewer.rows[0].n, after.rows[0].n,
+    "a viewer invite is not a second SIGNER");
 });
