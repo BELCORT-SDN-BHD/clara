@@ -55,6 +55,37 @@
 > - **§7/R-1 narrows** rather than firing whole: the build does not restart, but the **write
 >   half** (the pair's shape, its period gate, the reverse pair, belt/congruence cells for every
 >   minted pair) and the **OQ-4 propose door** are new design owed before PR-1.
+>
+> ---
+>
+> ## What PR-1 ACTUALLY shipped — 2026-08-29
+>
+> **PR-1 shipped the READ half, the carrier and M9. THE RE-HOME WRITE DOOR DID NOT LAND WITH IT,
+> and is BLOCKED on a new owner question, OQ-8** (gate record §2.2 — shapes **S0 / S1 / S2**).
+> The reason is structural and was measured at the live catalog, not chosen:
+> `clara._subledger_classify_entry` **canonicalises on every ladder**, so after a merge the two
+> parties are ONE canonical group and `clara._tf_subledger_item_belt` **refuses the minted row**;
+> the lawful superseded-exclusion fix then owes the same predicate to ~10 further live bodies,
+> including both belts, the classifier, and `_metric_input_dataset_v1` — **which OQ-3 RULED
+> "leave"**. A ruled answer against a ruled answer is a hard-constraint-1 collision, so it goes
+> to the owner rather than to a build lane. §5's sequence below is trued accordingly.
+>
+> **`item_date` IS settled** — **D-13**, and it holds under either write shape: the re-home path
+> admits the original `item_date`/`due_date` explicitly through a dedicated core, because nothing
+> (no CHECK, neither belt, not `_tf_open_items_validate`, not the classifier) ties `item_date` to
+> the entry's date; `0037:713-715` is `_subledger_on_approve`'s own derivation, not a wall.
+>
+> **PR-SPLIT DIVERGENCE, recorded:** the `counterparty.unmerged` **event type and its
+> `context_update` taxonomy row shipped in PR-1**, not PR-2 as §5 sequences them.
+> `clara.event_types`' own coverage law (`rig-events-structure` §7 — the active taxonomy must
+> route EVERY catalog row) makes the pair indivisible, so registering the type in PR-1 and
+> routing it in PR-2 would leave the coverage anti-join non-empty for a whole migration.
+>
+> **Also trued by PR-1's measurements:** §3.3's "not recut, and each with its reason" list omits
+> **`clara._snapshot_dataset`**, a real FOURTH consumer of `_aging_core` (it takes the GRAND
+> TOTAL only, so regrouping cannot move it — benign, and re-measured by the migration's own tail).
+> A raw `prosrc` census also returns `clara.apply_open_items`, but its only mention is **in a
+> comment** — refuted at gate record §5/R-02.
 
 ---
 
@@ -198,6 +229,12 @@ p_counterparty)` (**M9, the live defect**), and the item-side predicate
 = <resolved>` (**the re-home**). Cell **A-7** is a positive control: the door returns a non-empty
 list for a party with outstanding items **before** any merge exists — the cell whose absence let
 M9 live since `0038`.
+
+**`_aging_core`'s FOUR live consumers, measured 2026-08-29** (this list was previously implicit
+and short by one): `clara.ar_aging` · `clara.ap_aging` · `clara._control_tie_core` ·
+**`clara._snapshot_dataset`** — the fourth, which consumes the aging **grand total** only and is
+therefore benign under regrouping by exactly the arithmetic (a) rests on. (A raw `prosrc` census
+also returns `clara.apply_open_items`; its only mention is inside a comment — gate record §5/R-02.)
 
 **Not recut, and each with its reason.** `_control_tie_core` (consumes totals only, M4) ·
 `_subledger_outstanding` / `_subledger_outstanding_asof` (item-keyed, party-blind) ·
@@ -364,6 +401,15 @@ a ruling would change. Grounds and each alternative's cost: **Annex D.2**.
 > cells) lands with **PR-1**, the **reverse pair** with **PR-2**'s un-merge, and **OQ-4's
 > propose-an-un-merge needs-you door** is new scope inside PR-2 or its own PR. The gate (PR-0)
 > still has not run, and it now attacks the write half too.
+>
+> **TRUED AGAIN 2026-08-29, AFTER PR-1 WAS BUILT.** The sentence above — "the re-home write door
+> lands with PR-1" — **did not happen and could not.** PR-1 shipped item 2 below (the read layer
+> + the carrier + M9) plus the `counterparty.unmerged` event pair from item 3; **the write door
+> is BLOCKED on OQ-8** (gate record §2.2), on the belt/classifier collision with OQ-3 recorded in
+> this design's header block. It becomes **its own PR, after OQ-8 is ruled**, and its shape (S0 /
+> S1 / S2) decides whether it is a three-body change or a ten-body one. Nothing in PR-1 forecloses
+> any of the three: cell **cm.11** pins both subledger belts, the classifier, `_tf_append_only`,
+> both `_subledger_outstanding*` and `_metric_input_dataset_v1` **byte-unchanged**.
 
 **Prerequisites.** (i) **OQ-1 ruled** — the whole shape hangs on it; the build does not start
 before it. (ii) 裁-11 (`counterparty_aliases` human read, P4 tranche-2) is **not** a hard

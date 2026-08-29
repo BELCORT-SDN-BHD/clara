@@ -43,7 +43,8 @@ export const WREASON = {
   partialConsent: "partial_consent",
   evidenceMismatch: "evidence_mismatch",
   // CLR29 (sweep) — success-shaped payload {outcome:...}; not_finalized raises
-  refusedBudget: "refused_budget",
+  refusedBudget: "refused_budget", // historical rows only after F-A9 PR-1B (law 6)
+  refusedConcurrency: "refused_concurrency", // F-A9 PR-1B: the KEPT engine-protective floor
   refusedAttempts: "refused_attempts",
   laneChanged: "lane_changed",
   noopExisting: "noop_existing",
@@ -204,12 +205,29 @@ export const LANES = { ready: "ready", needsReview: "needs_review", needsYou: "n
 // Outcome vocabularies (PINS §2).
 // ---------------------------------------------------------------------------
 
+// F-A9 PR-1B: `refused_concurrency` joins both rosters, and `refused_budget` is treated
+// DIFFERENTLY in each — because the two rosters answer different questions and law 6 only
+// reaches one of them.
+//
+//   ITEM_OUTCOMES is the sweep_run_items.outcome CHECK: a table that is append-only, so
+//   every row past runs already wrote still carries `refused_budget` forever and
+//   reconcile_sweep_runs still buckets it. It KEEPS the value.
+//
+//   ADMIT_OUTCOMES is the set of outcomes admit_autodraft_task can RETURN. After this
+//   item it cannot return `refused_budget` at all — the two spend caps that emitted it are
+//   removed and the concurrency refusal is renamed. Keeping it here would make the roster
+//   a superset that quietly ACCEPTS a reinstated budget refusal, which is the opposite of
+//   what an allowlist is for. Removed, so wave-a-admission.test.mjs:59,79 and
+//   wave-a-second-run.test.mjs:55 go RED the moment a budget refusal comes back.
+//
+// ('posted' is 0108's and is deliberately absent from ADMIT_OUTCOMES — admit never
+// returns it.)
 /** sweep_run_items.outcome CHECK (PINS §2 / companion §5). */
-export const ITEM_OUTCOMES = ["drafted", "skipped_lane", "refused_budget", "refused_attempts", "noop_existing"];
+export const ITEM_OUTCOMES = ["drafted", "skipped_lane", "refused_budget", "refused_concurrency", "refused_attempts", "noop_existing"];
 /** settle_autodraft_task outcome ∈ (PINS §2). */
 export const SETTLE_OUTCOMES = ["drafted", "skipped_lane", "noop_existing", "failed"];
 /** admit_autodraft_task success-shaped outcomes (PINS §2). */
-export const ADMIT_OUTCOMES = ["admitted", "noop_existing", "refused_attempts", "lane_changed", "refused_budget"];
+export const ADMIT_OUTCOMES = ["admitted", "noop_existing", "refused_attempts", "lane_changed", "refused_concurrency"];
 /** autodraft_attempts.state (PINS §2). */
 export const ATTEMPT_STATES = ["active", "parked", "idle"];
 
@@ -219,7 +237,9 @@ export const ATTEMPT_STATES = ["active", "parked", "idle"];
 
 export const WA_DEFAULTS = {
   reserveTokens: 40000, // CLARA_AUTODRAFT_RESERVE_TOKENS
-  sweepBudgetShare: 0.6, // firm_limits.sweep_budget_share
+  // `sweepBudgetShare` is GONE at F-A9 PR-1B: firm_limits.sweep_budget_share is a dropped
+  // column and the 0.6 bound it fed is a removed brake (digest law 76). Removed rather
+  // than kept-as-a-number so nothing can quietly key a new assertion on a dead default.
   maxConcurrentSweeps: 2, // firm_limits.max_concurrent_sweeps
   catchupSeconds: 300, // CLARA_AUTODRAFT_CATCHUP_SECONDS
 };

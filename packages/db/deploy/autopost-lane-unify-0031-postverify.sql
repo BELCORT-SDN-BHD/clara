@@ -116,11 +116,31 @@ begin
   if position('outcome'',''lane_changed' in v_refusal_slice)=0 then
     raise exception '0031 postverify: the not-ready lane branch no longer returns the lane_changed outcome';
   end if;
-  if position('outcome'',''refused_budget' in v_refusal_slice)=0
-     or (select count(*) from regexp_matches(v_refusal_slice,'outcome'',''refused_budget','g'))<2 then
-    raise exception '0031 postverify: both budget/concurrency-cap refusal branches must return refused_budget directly, ahead of op-key reservation';
+  -- SUCCESSION (F-A9 PR-1B, `f_a9_pr_1b_brake_census`). Before that migration this slice
+  -- carried TWO `outcome','refused_budget` returns: the token-budget refusal and the
+  -- concurrency refusal, which shared one string. PR-1B REMOVES the first (owner ruling
+  -- TA-P12 = A, digest law 76) and RENAMES the second to `refused_concurrency` (law 22), so
+  -- the post-arm expects exactly ONE direct return, spelled the new way. Gated on the
+  -- migration STEM, never a number: the file is numbered at MERGE.
+  -- The property this probe actually protects -- a refusal returns DIRECTLY, ahead of
+  -- op-key reservation, settling no receipt -- is unchanged on both sides of the gate.
+  select count(*)::int into v_n from clara.schema_migrations
+   where version like '%\_f\_a9\_pr\_1b\_brake\_census';
+  if v_n=0 then
+    if position('outcome'',''refused_budget' in v_refusal_slice)=0
+       or (select count(*) from regexp_matches(v_refusal_slice,'outcome'',''refused_budget','g'))<2 then
+      raise exception '0031 postverify: both budget/concurrency-cap refusal branches must return refused_budget directly, ahead of op-key reservation';
+    end if;
+    raise notice '0031 postverify OK (3/6): a not-ready lane AND both budget refusal branches return directly, settling no op_receipts row';
+  else
+    if position('outcome'',''refused_budget' in v_refusal_slice)<>0 then
+      raise exception '0031 postverify: post-F-A9-PR-1B, NO refusal branch may still return refused_budget -- the token budget is removed and the concurrency refusal is renamed refused_concurrency';
+    end if;
+    if (select count(*) from regexp_matches(v_refusal_slice,'outcome'',''refused_concurrency','g'))<>1 then
+      raise exception '0031 postverify: post-F-A9-PR-1B the concurrency refusal branch must return refused_concurrency directly, exactly once, ahead of op-key reservation';
+    end if;
+    raise notice '0031 postverify OK (3/6, post-F-A9-PR-1B): a not-ready lane AND the surviving concurrency refusal return directly, settling no op_receipts row; the removed token-budget branch leaves no refused_budget return behind';
   end if;
-  raise notice '0031 postverify OK (3/6): a not-ready lane AND both budget refusal branches return directly, settling no op_receipts row';
 
   -- (4) the admitted (success) path still reaches _reserve_op/_finish_op --
   -- idempotency is preserved for the outcome that actually creates a task. Exactly

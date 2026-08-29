@@ -770,7 +770,15 @@ test("7A-R5 at most one active (open/paused) backfill batch per client; the batc
   else noteLane("observed: 'paused' ALSO blocks a new open (uniqueness guard covers open+paused, not just open) — contract §1 only pins 'at most one open batch'; this is a stricter-than-worded but non-contradictory shape");
 });
 
-test("7A-R5 a daily admission cap binds (refused_sales_cap) once the firm's per-day sales-admission count is reached", async (t) => {
+// INVERTED at F-A9 PR-1B (law 31 / design cell C.11 + C.23). The cell this replaces set
+// `firm_limits.sales_admission_daily_cap` to 1 and asserted the SECOND same-day sales
+// admission drew refused_budget / refused_sales_cap. The owner ruled that quota REMOVED
+// (TA-P12 = A, digest law 76) and PR-1B drops the column, so both halves of that premise
+// are gone. The successor proves the state the ruling creates, and proves it in the shape
+// that would catch the late-binding trap the removal could have left behind: the cap
+// column does not exist, and a same-day sales admission past the OLD bound still ADMITS
+// rather than raising `column ... does not exist` from the shared select that read it.
+test("[C.11/C.23] the 15/day sales admission quota is GONE: the cap column does not exist and a SECOND same-day sales admission still admits", async (t) => {
   if (skip46(t)) return;
   const w = await buildWorld();
   const { users, clients } = w;
@@ -779,19 +787,22 @@ test("7A-R5 a daily admission cap binds (refused_sales_cap) once the firm's per-
   await addClientIdentifier(users.alice, { client, kind: "ssm", value: "199901000705" }).catch(() => {});
   await upsertAccountClassed(users.alice, { client, code: REC, name: "Trade Debtors", type: "asset", accountClass: "receivable", opKey: opk("caprec") });
   await upsertAccountClassed(users.alice, { client, code: REV, name: "Revenue", type: "income", opKey: opk("caprev") });
-  // Activate FIRST (the writer auto-creates the firm_limits row on conflict-do-
-  // nothing) — only THEN set the cap, or the direct UPDATE below matches zero rows.
   await rootQuery("select clara.set_sales_lane_activation(p_firm=>$1,p_active=>true,p_watermark=>null,p_reason=>'x46 r5cap') as r", [firm]);
-  await rootQuery("update clara.firm_limits set sales_admission_daily_cap=1 where firm_id=$1", [firm]);
+  const col = await rootQuery(
+    "select 1 from information_schema.columns where table_schema='clara' and table_name='firm_limits' and column_name='sales_admission_daily_cap'");
+  assert.equal(col.rowCount, 0, "firm_limits.sales_admission_daily_cap is DROPPED at F-A9 PR-1B — the cap it fed is a removed spend brake");
 
   const f1 = await taxSilentSalesFiling(users.alice, { client, firm, customerName: "CAP BUYER 1", reg: "199901000705" });
   const a1 = await admitAutodraft({ filing: f1.filingId, origin: ORIGIN.oneClick });
-  assert.equal(a1?.outcome, "admitted", `the first of the day admits under a cap of 1 (got ${JSON.stringify(a1)})`);
+  assert.equal(a1?.outcome, "admitted", `the first same-day sales admission admits (got ${JSON.stringify(a1)})`);
 
+  // C.23: the SHARED select at the head of the sales branch was REWRITTEN, not stranded —
+  // PL/pgSQL is late-bound, so a leftover read of the dropped column would surface HERE,
+  // on the first sales-direction admission after the migration, and nowhere earlier.
   const f2 = await taxSilentSalesFiling(users.alice, { client, firm, customerName: "CAP BUYER 2", reg: "199901000705" });
   const a2 = await admitAutodraft({ filing: f2.filingId, origin: ORIGIN.oneClick });
-  assert.equal(a2?.outcome, "refused_budget", `the SECOND same-day sales admission is refused once the cap is used (got ${JSON.stringify(a2)})`);
-  assert.equal(a2?.reason, "refused_sales_cap", `the cap-specific reason token names the gate (got ${a2?.reason})`);
+  assert.equal(a2?.outcome, "admitted", `the SECOND same-day sales admission ALSO admits — the daily quota is removed (got ${JSON.stringify(a2)})`);
+  assert.notEqual(a2?.reason, "refused_sales_cap", "the cap-specific reason token is never emitted again");
 });
 
 // ===========================================================================
