@@ -247,6 +247,20 @@ export const HOP_CONTENT_EXEMPT = new Set([
   // existed pre-rebuild, often as prose lists ("A + B, C") rather than single paths — never a
   // path meant to resolve in THIS tree. See docs/audit/02-salvage-manifest.md's own header.
   "docs/audit/02-salvage-manifest.md",
+  // The 磨合 alignment audit, filed VERBATIM (sha-compared against the lane's own output) as a
+  // dated, cite-only reference record — it is never edited, so a citation inside it can never be
+  // repaired, which is the same condition the prefix exemptions above exist for. Eight of its
+  // ~80 backtick spans do not resolve from the repo root, in four honest classes: git refs
+  // (`origin/web/p4-design`, `refs/heads/feat/vendor-binding-build`, `frontend/web`); a path in
+  // the EXTERNAL clarabook-frontend repo (`docs/01-TOKEN-CONTRACT.md`); apps/web-relative
+  // spellings the audit used because its whole §1.4 is scoped to that package (`proxy.ts`,
+  // `app/`, `scripts/check-test-manifest.mjs` — all three real files under apps/web/); and one
+  // path the report itself names precisely BECAUSE it does not exist
+  // (`0038_wave_c_g2_bank_matching.sql`, its §3 row 1 "Evidence correction"). Exempting this one
+  // file is narrower than allowlisting those eight strings globally, which would blind the gate
+  // to a genuinely broken `scripts/check-test-manifest.mjs` or `proxy.ts` reference anywhere in
+  // the tree. Its existence as a reference TARGET is still validated.
+  "docs/plan/active/mohe-alignment-audit-2026-08-29.md",
 ]);
 
 // An in-document boundary marker: a file declaring that everything below it is a verbatim

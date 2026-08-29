@@ -61,6 +61,14 @@ ruling of the night). The full records are in the named files; the rulings ledge
    `docs/plan/completed/mohe-0147-apply-asrun.md`. *(The LESSON stays in PROGRESS Known issues:
    the closed drills run only on the weekly sweep or a manual dispatch, so a PR that changes a
    shared fixture must `gh workflow run ci.yml` on its own branch before merge.)*
+3d. **裁-21 research (裁-23/Q2): numbering landed on 4-digit blocks** (Bukku · Sage UBS · NCL ·
+   QuickBooks guidance) — the majority-installed AutoCount/SQL/QNE "3-digit-dash" form was
+   rejected because it is structurally ROME PROPERTIES' `300-000` shape the owner excluded;
+   4-digit blocks resemble the estate seed's habit the owner ALSO excluded, so the research chose
+   between the two exclusions by evidence. **Renumbering before publication is cheap; say so if
+   you want a third form.** Dossier: `docs/plan/research/coa-template-research-2026-08-29.md` §2
+   (the four legs, and the road not taken); the draft chart is
+   `docs/plan/research/coa-template-2026-08-29.json`.
 
 ## Decisions that are YOURS (each: 大白话 · rec · cost · the default that stands)
 
