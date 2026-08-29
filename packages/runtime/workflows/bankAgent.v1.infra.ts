@@ -231,10 +231,17 @@ export async function bankScoped<T>(ctx: { firmId: string; clientId: string }, f
  *  key carries no parseable task field, which is the looser contract the unattended lane's own
  *  fixtures happened to get; this lane opts INTO the strict one.
  *
- *  DETERMINISM IS THE OTHER HALF. A WDK replay must produce the SAME key, or the estate's
- *  op-key idempotency cannot recognise the replay and the act runs twice. Every field below is
- *  derived from durable inputs (the task id, the act name, the call ordinal within the run) —
- *  never a clock, never a random. */
-export function bankOpKey(verb: string, taskId: string, ordinal: number, subject: string): string {
-  return `bank-${verb}:${taskId}:${ordinal}:${subject}`;
+ *  NO ORDINAL, AND THAT IS THE FIX RATHER THAN THE OMISSION (independent review, S2). An earlier
+ *  version carried the call's position within the run, which defeated the very idempotency the
+ *  key exists for: the estate's op-key semantics are that a REPEAT of the same act is a REPLAY of
+ *  its stored outcome, and an ordinal makes the second identical call a NEW operation that runs
+ *  again. It was also not replay-deterministic — a model is free to order its tool calls
+ *  differently on a WDK retry, so the same act could come back with a different ordinal and act
+ *  twice. The key is now (verb, task, subject), which is the same shape 0138 derives for the
+ *  close lane and for the same stated reason (0138:1259-1265).
+ *
+ *  THE SUBJECT IS LOWERCASED because a model may hand back an uppercase uuid while the database
+ *  renders every uuid lowercase (S3). Two spellings of one id must not be two operations. */
+export function bankOpKey(verb: string, taskId: string, subject: string): string {
+  return `bank-${verb}:${taskId}:${subject.toLowerCase()}`;
 }

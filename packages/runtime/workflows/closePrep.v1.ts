@@ -40,8 +40,11 @@ export async function closePrep_v1(input: { taskId: string }): Promise<{ taskId:
   // HOLDS IS THE SETTLE'S OWN PRECONDITION — see bankAgent.v1.ts for the full statement. In
   // short: a settle is only this run's to make once the CAS has bound the task to it. If
   // claimCloseTaskStep itself throws (after WDK step retries are exhausted) we never learned
-  // whether we hold the task, so we must NOT settle; the row then sits running-with-no-run,
-  // which reconciler-wake.mjs section A picks up and re-enqueues past grace.
+  // whether we hold the task, so we must NOT settle. BOTH reconciler branches cover the
+  // aftermath and both are named on purpose: §A reenqueueStuckRows takes the UNBOUND row (this
+  // case), §B settleFromEngineTruth takes the BOUND one (a claim that committed then lost its
+  // connection, and our own settle throwing — `settled` is set before the await, so the catch
+  // does not retry it). A row is either bound or it is not; there is no third state to strand in.
   let holds = false;
   const settle = async (outcome: "completed" | "failed", errorCode: string | null) => {
     if (settled || !holds) return;

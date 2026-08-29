@@ -46,9 +46,17 @@ export async function bankAgent_v1(input: { taskId: string }): Promise<{ taskId:
   // held by a DIFFERENT run (the #8 shape) or already settled by a reconciler, and a settle from
   // here would overwrite someone else's truth. The catch block below is exactly where that
   // matters: if claimBankTaskStep ITSELF throws — after WDK step retries are exhausted — we
-  // never learned whether we hold the task, so we must NOT settle. The row then sits
-  // running-with-no-run, which is precisely the shape reconciler-wake.mjs section A picks up and
-  // re-enqueues past grace: visible, recoverable, never stranded.
+  // never learned whether we hold the task, so we must NOT settle.
+  //
+  // BOTH RECOVERY BRANCHES, named, because naming only one misleads the next reader into
+  // concluding the other case strands:
+  //   §A reenqueueStuckRows  — running + workflow_run_id NULL past grace. Covers the claim that
+  //      never committed (this comment's case): the row is unbound, so §A re-enqueues it.
+  //   §B settleFromEngineTruth — running + workflow_run_id NOT NULL. Covers the claim that DID
+  //      commit and then lost its connection before returning, and also the case where our own
+  //      settle throws (settled is set BEFORE the await, so the catch does not retry it): the row
+  //      is bound, invisible to §A, and §B settles it from the engine's own truth.
+  // Between them there is no gap: a row is either bound or it is not.
   let holds = false;
   const settle = async (outcome: "completed" | "failed", errorCode: string | null) => {
     if (settled || !holds) return;

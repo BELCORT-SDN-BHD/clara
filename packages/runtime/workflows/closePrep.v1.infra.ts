@@ -137,8 +137,15 @@ export function resolveModel(modelId: string): unknown {
  * outcome instead of acting twice. A new wake task is a new key, so a released hold is
  * re-MEASURED rather than replayed (0138:1259-1265).
  */
+/** THE IDS ARE LOWERCASED (independent review, S3). The database renders every uuid lowercase,
+ *  so `p_subject::text` is lowercase — but a subject id reaching this function came from a MODEL,
+ *  which may hand back an uppercase spelling of the same id. Hashing the uppercase form produces
+ *  a key the DB's own derivation will never match, and _close_wake_ctx refuses it as
+ *  CLR10 'op_key_not_derived' — a correct act rejected for a cosmetic reason the model cannot
+ *  diagnose. Two spellings of one id must not be two keys. */
 export function closeOpKey(taskId: string, verb: string, subjectId: string): string {
-  return createHash("sha256").update(`${taskId}:${verb}:${subjectId}`, "utf8").digest("hex");
+  const norm = `${taskId.toLowerCase()}:${verb}:${subjectId.toLowerCase()}`;
+  return createHash("sha256").update(norm, "utf8").digest("hex");
 }
 
 /**

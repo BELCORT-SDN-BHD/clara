@@ -37,10 +37,10 @@ function refusal(e: unknown): { error: string } {
 }
 
 /** The mutable per-run record. One per tool set, i.e. per model-step execution attempt. */
-export type BankRunRecord = { digest: string | null; ordinal: number; admitted: number };
+export type BankRunRecord = { digest: string | null; admitted: number };
 
 export function newBankRunRecord(): BankRunRecord {
-  return { digest: null, ordinal: 0, admitted: 0 };
+  return { digest: null, admitted: 0 };
 }
 
 /** Count a bank act, from a CLOSED WORLD OF THREE REPLY SHAPES.
@@ -63,7 +63,7 @@ export function newBankRunRecord(): BankRunRecord {
  *  the task COMPLETED, and no value derived here is ever passed into a DB verb — so a
  *  misclassification costs a wrong metering label, never a wrong number in the books
  *  (constraint 2). */
-function countIfAdmitted(rec: BankRunRecord, reply: unknown): unknown {
+export function countIfAdmitted(rec: BankRunRecord, reply: unknown): unknown {
   const r = reply as { status?: unknown; error?: unknown } | null;
   if (r && typeof r === "object" && r.error === undefined && r.status !== "refused") rec.admitted += 1;
   return reply;
@@ -85,7 +85,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
       }),
       execute: async ({ rationale }: { rationale: string }) => {
         try {
-          const opKey = bankOpKey("pack", ctx.taskId, (rec.ordinal += 1), ctx.bankAccountId);
+          const opKey = bankOpKey("pack", ctx.taskId, ctx.bankAccountId);
           const pack = await bankScoped(ctx, (c: PgExec) =>
             c
               .query("select clara.wake_get_bank_pack($1,$2,$3,$4::jsonb,$5) as pack", [
@@ -111,15 +111,53 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
       description:
         "Link statement lines to approved journal entries. Amounts must tie; the database checks and refuses if they do not. Only lines and entries you saw in the pack.",
       inputSchema: z.object({
+        // `lines` MAY be bare ids: the core accepts a JSON string element OR {line_id}
+        // (0121:5860-5863's own jsonb_typeof branch). `entries` MAY NOT — see below.
         lines: z.array(z.string().uuid()).min(1).describe("Statement line ids from the pack."),
-        entries: z.array(z.string().uuid()).min(1).describe("Approved journal entry ids from the pack's candidates."),
+        // THE ENTRIES ARE OBJECTS, AND A BARE ID IS SILENTLY WORTHLESS. The core reads
+        // elem->>'entry_id' and elem->>'matched_cents' (0121:5864-5869); `->>` on a JSON *string*
+        // element yields NULL, so a bare-id array filters down to zero entries and zero cents —
+        // which then fails tie_nonzero (0121:5897) and is not_evaluable on same_amount_ambiguous
+        // (0121:5909), refusing the act before the delegate is ever reached. An earlier draft
+        // declared this a uuid array, which would have made the ONLY books-writing verb this lane
+        // exposes permanently un-admittable, with a refusal blaming the amounts rather than the
+        // shape. The sibling chat lane already has the right shape
+        // (chatTurn.v14.bankSchemas.ts:42) — this is that contract, re-read from the core.
+        entries: z
+          .array(
+            z.object({
+              entry_id: z.string().uuid().describe("An approved journal entry id from the pack's `candidates`."),
+              matched_cents: z
+                .number()
+                .int()
+                // ZERO IS REFUSED BY THE DELEGATE (0121:1940, CLR10 entries_malformed — "a
+                // non-zero whole matched_cents"). Refusing it here turns a CLR code the model
+                // cannot act on into a schema error it can.
+                .refine((v) => v !== 0, "an entry must settle a non-zero amount")
+                .describe(
+                  "The signed effect on the bank account for THIS entry, in cents — taken from the candidate's own debit_remaining_cents (positive) or credit_remaining_cents (negative). Never computed by you.",
+                ),
+            }),
+          )
+          .min(1)
+          .describe("The entries to match, each with the amount it settles. Amounts must tie against the lines; the database checks."),
         rationale: z.string().min(1).describe("What ties these together, in plain words a bookkeeper can check."),
       }),
-      execute: async ({ lines, entries, rationale }: { lines: string[]; entries: string[]; rationale: string }) => {
+      execute: async ({
+        lines,
+        entries,
+        rationale,
+      }: {
+        lines: string[];
+        entries: Array<{ entry_id: string; matched_cents: number }>;
+        rationale: string;
+      }) => {
         const blocked = needPack();
         if (blocked) return blocked;
         try {
-          const opKey = bankOpKey("match", ctx.taskId, (rec.ordinal += 1), lines.join("_"));
+          // The subject is the SORTED line set, so the same match proposed with its lines in a
+          // different order is the same operation — a replay, not a second act.
+          const opKey = bankOpKey("match", ctx.taskId, [...lines].sort().join("_"));
           return await bankScoped(ctx, (c: PgExec) =>
             c
               .query("select clara.wake_match_bank_line($1,$2::jsonb,$3::jsonb,$4::jsonb,$5,$6,$7::jsonb,$8,$9) as r", [
@@ -146,7 +184,13 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         "PROPOSE an exception on one statement line you cannot match. This writes a proposal for a human to settle; it does not except the line itself.",
       inputSchema: z.object({
         line_id: z.string().uuid(),
-        kind: z.string().min(1).describe("The exception kind, as the pack's own vocabulary names it."),
+        // A CLOSED DB ROSTER, SO A CLOSED SCHEMA. 0121:5546 refuses anything but these two with
+        // CLR10 kind_malformed. Declaring it as free text moved a refusal the model can act on
+        // ("not one of the two allowed values") into a CLR code it cannot — the same argument the
+        // pack-before-write guard above makes.
+        kind: z
+          .enum(["bank_error", "disputed"])
+          .describe("bank_error when the BANK's own line is wrong; disputed when the amount or party is contested."),
         reason: z.string().min(1).describe("What is wrong with this line, concretely."),
         rationale: z.string().min(1).describe("Why an exception rather than a match — name what you ruled out."),
       }),
@@ -154,7 +198,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         const blocked = needPack();
         if (blocked) return blocked;
         try {
-          const opKey = bankOpKey("except", ctx.taskId, (rec.ordinal += 1), line_id);
+          const opKey = bankOpKey("except", ctx.taskId, line_id);
           return await bankScoped(ctx, (c: PgExec) =>
             c
               // $4::uuid — p_evidence_document is always NULL from this lane (an unattended pass
@@ -183,7 +227,9 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         "PROPOSE that a recurring printed identifier on the statement belongs to a counterparty. A proposal for a human, never a change to the books.",
       inputSchema: z.object({
         counterparty_id: z.string().uuid(),
-        identifier_kind: z.string().min(1),
+        // The client_identifiers catalog's own closed roster (0121:5618 refuses anything else
+        // with CLR10 identifier_kind_malformed).
+        identifier_kind: z.enum(["tin", "ssm", "bank_account"]),
         identifier_value: z.string().min(1),
         times_seen: z.number().int().positive().describe("How many times you saw it in the pack. Count, never estimate."),
         rationale: z.string().min(1),
@@ -198,7 +244,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         const blocked = needPack();
         if (blocked) return blocked;
         try {
-          const opKey = bankOpKey("promote", ctx.taskId, (rec.ordinal += 1), a.counterparty_id);
+          const opKey = bankOpKey("promote", ctx.taskId, `${a.counterparty_id}_${a.identifier_kind}_${a.identifier_value}`);
           return await bankScoped(ctx, (c: PgExec) =>
             c
               // $5::int — p_times_seen is declared int and the driver sends a JS number as text;

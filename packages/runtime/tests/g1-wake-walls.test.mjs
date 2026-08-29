@@ -142,7 +142,7 @@ test("G1B-G1 assertProductionPoolConfig does NOT require the bank DSN; getBankPo
   });
   const out = JSON.parse(line.trim().split("\n").pop());
   assert.equal(out.assertThrew, false, `the boot assert must not demand the bank DSN (got: ${out.assertMessage ?? ""})`);
-  assert.equal(out.freeformRequired, true, "POSITIVE CONTROL: the same assert DOES throw when a genuinely eager DSN is missing");
+  assert.equal(out.eagerDsnStillRequired, true, "POSITIVE CONTROL: the same assert DOES throw when a genuinely eager DSN (the WRITE one) is missing");
   assert.equal(out.bankPoolThrew, true, "getBankPool must fail CLOSED — never a shared-identity fallback");
   assert.match(
     String(out.bankPoolMessage),
@@ -188,24 +188,39 @@ test("G1B-I1 the close classifier reads status='acted' — the shape 0138's own 
   assert.equal(rec.acts, 0, "nothing else counts — and the bank lane's own key counts nothing here");
 });
 
-test("G1B-I2 the bank classifier's closed world of three reply shapes", { skip }, async () => {
+test("G1B-I2 the bank classifier's closed world of three reply shapes — DRIVEN, both directions", { skip }, async () => {
   const tools = await import("../workflows/bankAgent.v1.tools.ts");
-  const ctx = { taskId: randomUUID(), firmId: randomUUID(), clientId: randomUUID(), bankAccountId: randomUUID(), dueReason: null };
-  const rec = tools.newBankRunRecord();
-  rec.digest = "deadbeef";
-  const built = tools.buildBankAgentTools(ctx, "m", rec);
-  assert.ok(built, "the tool set builds");
 
-  // The bank cores return the DELEGATE's own result on success (0121:6027, `return v_res`) — no
-  // uniform 'admitted' key exists to test, which is why the classifier enumerates the closed
-  // world instead. Pin that the LIVE core still has no such key, so a future recut that adds one
-  // makes this cell fail rather than silently leaving the classifier weaker than it could be.
+  // AN EARLIER VERSION OF THIS CELL TESTED NOTHING IT WAS NAMED FOR (independent review, S7): it
+  // built the tool set, asserted it was truthy, and then only grepped the prosrc. Deleting the
+  // classifier's body entirely left it green. The fix is the shape I1 already had — DRIVE the
+  // function, both directions — and the prosrc pin stays as the second leg, not the only one.
+  const count = (reply) => {
+    const rec = tools.newBankRunRecord();
+    tools.countIfAdmitted(rec, reply);
+    return rec.admitted;
+  };
+  // The three shapes, using the ACTUAL success payloads the cores return: match →
+  // {match_id, status:'live'} (0121:2306); exception/promotion → {proposal_id, status:'open'}
+  // (0121:5565, :5642).
+  assert.equal(count({ match_id: randomUUID(), status: "live" }), 1, "a match result counts");
+  assert.equal(count({ proposal_id: randomUUID(), status: "open", line_id: randomUUID() }), 1, "a proposal result counts");
+  assert.equal(count({ digest: "abc", lines: [] }), 1, "a pack read with no status at all counts");
+  assert.equal(count({ status: "refused", rung_vector: [{ rung: "M2" }] }), 0, "a DB refusal counts nothing");
+  assert.equal(count({ error: "refused (CLR03): …" }), 0, "a caught throw counts nothing");
+  assert.equal(count(null), 0, "and neither does nothing");
+
+  // THE SECOND LEG: pin that the live cores still have no uniform admitted key, so a future recut
+  // that ADDS one makes this cell fail rather than silently leaving the classifier weaker than it
+  // could be. Scoped honestly — this reads ONE core, and the other three RAISE rather than
+  // returning a refusal, so the closed world is generalised from this one plus that fact.
   const src = await rig.rootQuery(
     "select prosrc from pg_proc where oid = 'clara._agent_match_bank_line_core(uuid,jsonb,jsonb,jsonb,boolean,text,jsonb,text,text)'::regprocedure",
   );
   const body = String(src.rows[0].prosrc);
   assert.match(body, /'status'\s*,\s*'refused'/, "a refusal still says status='refused'");
   assert.match(body, /return v_res;/, "and a success still returns the delegate's own result verbatim");
+  assert.doesNotMatch(body, /'outcome'\s*,\s*'admitted'/, "still no uniform admitted key in the reply");
 });
 
 test("G1B-I3 EVERY DB call in both tool sets matches its function's LIVE declared arity", { skip: skip0138 }, async () => {
@@ -218,6 +233,14 @@ test("G1B-I3 EVERY DB call in both tool sets matches its function's LIVE declare
   // THE INSTRUMENT IS THE CATALOG, NOT THE MIGRATION SOURCE (review law 3: the migration text is
   // a projection of the function; pg_proc IS the function). A verb whose name resolves to more
   // than one overload fails here too — an ambiguous call is not a checked call.
+  //
+  // WHAT THIS GATE CANNOT SEE, said plainly so it is never mistaken for a shape review. Arity is
+  // the OUTER ENVELOPE only. It cannot catch (a) a TRANSPOSITION of two same-typed arguments —
+  // swap the two uuids of wake_get_close_readiness and the count is still 5 — nor (b) a wrong
+  // jsonb SUB-SHAPE inside a correctly-positioned argument, which is where every shape defect
+  // this PR found actually lived (a uuid array where objects were needed; an object where a
+  // non-empty array was needed). Both classes are caught only by a call that reaches the verb.
+  // This cell closes a real class permanently; it does not stand in for the other two.
   const { readFileSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
   const dir = fileURLToPath(new URL("../workflows/", import.meta.url));
@@ -226,8 +249,19 @@ test("G1B-I3 EVERY DB call in both tool sets matches its function's LIVE declare
   const calls = [];
   for (const f of files) {
     const src = readFileSync(dir + f, "utf8");
-    for (const m of src.matchAll(/select\s+clara\.(\w+)\(([^)]*)\)\s+as\s+\w+/g)) {
-      const placeholders = new Set([...m[2].matchAll(/\$(\d+)/g)].map((x) => Number(x[1])));
+    // The argument span is matched with a BALANCED-PAREN walk rather than [^)]*, which would stop
+    // at the first close-paren and silently TRUNCATE a call containing a nested one (a future
+    // `coalesce($1,$2)`) — under-counting its placeholders while still satisfying the count pin.
+    for (const m of src.matchAll(/select\s+clara\.(\w+)\(/g)) {
+      let depth = 1;
+      let i = m.index + m[0].length;
+      for (; i < src.length && depth > 0; i++) {
+        if (src[i] === "(") depth++;
+        else if (src[i] === ")") depth--;
+      }
+      assert.equal(depth, 0, `unbalanced parentheses in a clara.${m[1]} call in ${f}`);
+      const span = src.slice(m.index + m[0].length, i - 1);
+      const placeholders = new Set([...span.matchAll(/\$(\d+)/g)].map((x) => Number(x[1])));
       calls.push({ file: f, name: m[1], max: Math.max(...placeholders), distinct: placeholders.size });
     }
   }
@@ -269,24 +303,54 @@ test("G1B-I4 NEITHER body can write a receipt — every receipt is the verb's ow
     assert.equal(writes, null, `${f} must never write a receipt table directly, found: ${writes}`);
   }
 
-  // (2) THE WALL, measured on the LIVE catalog rather than trusted from (1): neither role the
-  // bodies run under holds ANY write privilege on either receipt table. Even a future edit that
-  // slipped an INSERT past (1) would be refused by the database.
-  const r = await rig.rootQuery(
-    `select table_name, grantee, privilege_type from information_schema.table_privileges
-      where table_schema='clara' and table_name in ('bank_agent_receipts','agent_act_receipts')
-        and grantee in ('clara_runtime','clara_wake_bank','clara_wake_interactive')
-        and privilege_type in ('INSERT','UPDATE','DELETE')`,
-  );
-  assert.equal(r.rows.length, 0, `no lane role may write a receipt directly, found: ${JSON.stringify(r.rows)}`);
+  // (2) THE PRIVILEGE WALL — has_table_privilege, NOT information_schema.table_privileges.
+  // The distinction was an independent review's finding and it is real: table_privileges reports
+  // grants made to a role NAME. It resolves neither role INHERITANCE (a grant to a parent role
+  // these three are members of lands under the PARENT's name) nor PUBLIC (which lands under
+  // grantee='PUBLIC'). Either would return zero rows and pass a cell whose subject could still
+  // write. has_table_privilege answers the question actually being asked — "can this role do
+  // this?" — and resolves both in one call. Same derived-vs-behavioural discipline G1B-F1 uses
+  // one screen up.
+  const ROLES = ["clara_runtime", "clara_wake_bank", "clara_wake_interactive"];
+  const TABLES = ["clara.bank_agent_receipts", "clara.agent_act_receipts"];
+  for (const role of ROLES) {
+    for (const table of TABLES) {
+      const p = await rig.rootQuery(
+        `select has_table_privilege($1,$2,'INSERT') as ins,
+                has_table_privilege($1,$2,'UPDATE') as upd,
+                has_table_privilege($1,$2,'DELETE') as del`,
+        [role, table],
+      );
+      const { ins, upd, del } = p.rows[0];
+      assert.equal(ins, false, `${role} must not INSERT ${table}`);
+      assert.equal(upd, false, `${role} must not UPDATE ${table}`);
+      assert.equal(del, false, `${role} must not DELETE ${table}`);
+    }
+  }
 
-  // POSITIVE CONTROL, so "no rows" is not merely an empty table or a typo'd table name: the two
-  // tables DO exist and DO carry grants to somebody.
-  const exists = await rig.rootQuery(
-    `select count(*)::int as n from information_schema.table_privileges
-      where table_schema='clara' and table_name in ('bank_agent_receipts','agent_act_receipts')`,
+  // POSITIVE CONTROL on the instrument itself: has_table_privilege is not simply answering false
+  // to everything (a wrong role name would throw, but a wrong TABLE name would too — what this
+  // guards is the reader concluding "false everywhere" means "the query works"). The owner CAN
+  // write these tables, and clara_authenticated CAN read them.
+  const control = await rig.rootQuery(
+    `select has_table_privilege('clara_fn_owner','clara.agent_act_receipts','INSERT') as owner_ins,
+            has_table_privilege('clara_authenticated','clara.agent_act_receipts','SELECT') as human_sel`,
   );
-  assert.ok(exists.rows[0].n > 0, "the receipt tables must exist and carry grants — otherwise the wall above is vacuous");
+  assert.equal(control.rows[0].owner_ins, true, "the owner CAN write — so 'false' above is a real answer, not a broken query");
+  assert.equal(control.rows[0].human_sel, true, "and the human read door stays open");
+
+  // (3) THE STRUCTURAL GUARANTEE, which does not depend on any grant census staying empty: both
+  // tables carry forced RLS, so even a granted INSERT from a lane role is refused by policy.
+  const rls = await rig.rootQuery(
+    `select c.relname, c.relrowsecurity, c.relforcerowsecurity
+       from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname='clara' and c.relname in ('bank_agent_receipts','agent_act_receipts')`,
+  );
+  assert.equal(rls.rows.length, 2, "both receipt tables must exist");
+  for (const row of rls.rows) {
+    assert.equal(row.relrowsecurity, true, `${row.relname}: RLS enabled`);
+    assert.equal(row.relforcerowsecurity, true, `${row.relname}: RLS FORCED — the owner is not exempt either`);
+  }
 });
 
 test("G1B-H1 a bank WRITE before any pack read is refused locally, by name, and never reaches the database", { skip }, async () => {

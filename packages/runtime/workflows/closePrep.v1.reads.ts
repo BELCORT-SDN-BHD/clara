@@ -78,10 +78,24 @@ export function countIfAdmitted(rec: CloseRunRecord, reply: unknown): unknown {
 const RATIONALE = z.string().min(1).describe("Why you are making this call, in one plain sentence.");
 
 export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec: CloseRunRecord) {
+  /** A read counts ONLY when the database says it acted.
+   *
+   *  THIS IS THE COUNTER THAT DECIDES WHETHER THE RUN SETTLED HONESTLY, which is why it gets the
+   *  same treatment as `acts` rather than a looser one. An earlier draft incremented whenever the
+   *  call did not THROW — but a close read's refusals do not throw: 0138:1799-1800 says so in
+   *  words ("never raise: the transaction COMMITS so the reason is durable"), and
+   *  `_close_read_gate` returns {status:'refused', …} (0138:1839) exactly like every write core.
+   *  So a run whose every read was refused would have counted six reads, taken the `nothing_due`
+   *  branch, and settled the task COMPLETED — writing twelve durable refused receipts while
+   *  reporting a green night. That is the precise inversion of review law 2, in the one place the
+   *  lane's own honesty depends on it.
+   *
+   *  The acted shape is `_agent_close_read_core`'s own: {status:'acted', receipt_id, result}
+   *  (0138:1852). Same key, same value, same test as the write half — one vocabulary. */
   const read = async (verb: string, subject: string, sql: string, args: unknown[], rationale: string) => {
     try {
       const out = await callCloseVerb(ctx, verb, subject, sql, args, rationale, modelId);
-      rec.reads += 1;
+      if ((out as { status?: unknown } | null)?.status === "acted") rec.reads += 1;
       return out;
     } catch (e) {
       return closeRefusal(e);

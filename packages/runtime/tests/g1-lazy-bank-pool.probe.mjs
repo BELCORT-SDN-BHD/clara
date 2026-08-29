@@ -18,7 +18,7 @@
 // Prints one JSON line to stdout. Any thrown error is caught and reported IN that line, so the
 // parent reads a verdict rather than inferring one from an exit code.
 
-const out = { assertThrew: null, bankPoolThrew: null, bankPoolMessage: null, freeformRequired: null };
+const out = { assertThrew: null, bankPoolThrew: null, bankPoolMessage: null, eagerDsnStillRequired: null };
 
 const pools = await import("../lib/pools.mjs");
 
@@ -41,14 +41,16 @@ try {
 }
 
 // 3. A POSITIVE CONTROL on the assert itself, so "it did not throw" is not vacuous: drop one of
-//    the genuinely eager DSNs and the SAME call must throw. An assert that never throws for any
-//    input would satisfy step 1 while proving nothing.
+//    the genuinely eager DSNs — the WRITE one — and the SAME call must throw. An assert that
+//    never throws for any input would satisfy step 1 while proving nothing. (The field is named
+//    for what it measures: an eager DSN is still required. An earlier name said "freeform", which
+//    described neither the DSN dropped nor the claim proven.)
 delete process.env.CLARA_WRITE_DATABASE_URL;
 try {
   pools.assertProductionPoolConfig();
-  out.freeformRequired = false;
+  out.eagerDsnStillRequired = false;
 } catch {
-  out.freeformRequired = true;
+  out.eagerDsnStillRequired = true;
 }
 
 process.stdout.write(JSON.stringify(out) + "\n");

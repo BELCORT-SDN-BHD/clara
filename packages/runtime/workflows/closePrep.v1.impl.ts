@@ -26,7 +26,20 @@ import { closePrepEngineId, recordClosePrepUsage } from "./closePrep.v1.usage.js
 export async function claimCloseTaskStep(taskId: string): Promise<ClaimOutcome> {
   "use step";
   const { workflowRunId } = getWorkflowMetadata();
+  assertRealRunId(workflowRunId);
   return pools().withRuntime((c: PgExec) => claimCloseTask(c, taskId, workflowRunId));
+}
+
+/** The duplicate-start wall rests on this value being real — see bankAgent.v1.impl.ts's own copy
+ *  for the full statement of the failure mode (a NULL run id makes the claim predicate's first
+ *  disjunct true for every unbound row, so two runs both "hold" the same task). Duplicated rather
+ *  than shared because a frozen closure may not import a mutable module, and importing the bank
+ *  closure's copy would splice two frozen bodies into one hash. A throw is the right refusal: it
+ *  lands before `holds` is set, so nothing settles and the reconciler recovers the row. */
+export function assertRealRunId(runId: unknown): asserts runId is string {
+  if (typeof runId !== "string" || runId.length === 0) {
+    throw new Error(`workflow run id is not a usable identity (${String(runId)}) — refusing to claim, because a null run id makes the duplicate-start CAS pass for every unbound row`);
+  }
 }
 
 /** NOTHING SECRET CROSSES THIS BOUNDARY — the credential was minted, used and discarded inside

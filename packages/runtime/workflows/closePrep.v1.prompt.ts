@@ -56,7 +56,10 @@ export const SYSTEM_PROMPT_CLOSE_PREP_V1 = [
   "   around.",
   `3. Clear what is MECHANICAL and yours to clear. ${WRITE_TOOLS.DEPRECIATION} runs the periods`,
   "   that must clear BEFORE a close begins, because after the freeze they cannot clear at all.",
-  `   ${WRITE_TOOLS.SNAPSHOT_MINT} takes a month snapshot where one is owed.`,
+  `   ${WRITE_TOOLS.SNAPSHOT_MINT} takes a month snapshot where one is owed — AT MOST ONCE per`,
+  "   night. The idempotency key is derived per (task, verb, client), so a second call in the same",
+  "   wake is refused as a replay of the first, whatever month you name. Pick the month that",
+  "   matters and take that one.",
   `4. ${WRITE_TOOLS.BEGIN} opens the close run, then ${WRITE_TOOLS.PROPOSE} records what you`,
   "   drafted and the narrative explaining it. That proposal is the run's real output.",
   `5. If you open a run and then find it cannot proceed, ${WRITE_TOOLS.ABANDON} with the honest`,
@@ -77,9 +80,28 @@ export const SYSTEM_PROMPT_CLOSE_PREP_V1 = [
   "must decide.",
 ].join("\n");
 
-/** The model identity every wrapper demands as p_model (provider, model, version), all three
- *  non-blank. The VERSION is this closure's own frozen identity, so a receipt read months later
- *  says which body acted. */
-export function closeModelIdentity(modelId: string): { provider: string; model: string; version: string } {
-  return { provider: "openai", model: modelId, version: "closePrep_v1" };
+/** The model identity every close wrapper demands as p_model.
+ *
+ * THE KEYS ARE `name` AND `version`, NOT THE BANK LANE'S `provider`/`model`/`version`, and the
+ * difference is not cosmetic — it is the whole lane working or not working. An earlier draft of
+ * this function returned the BANK shape (0121:4965-4967's contract, reused without re-reading
+ * 0138), and the effect was total: rung B2 requires `p_model->>'name'` and `p_model->>'version'`
+ * non-blank (0138:1435-1436), so EVERY one of the twelve wrappers would have returned
+ * {status:'refused', rung_vector:[{rung:'B2',token:'receipt_incomplete'}]}, forever, on every
+ * call. Nothing would have crashed and nothing would have looked wrong — the run would simply
+ * have proposed nothing, every night.
+ *
+ * FOUR INDEPENDENT INSTRUMENTS agree on these key names, and a fifth says the bank's do not
+ * appear here at all (`grep "p_model ->>" 0138` returns ONLY 'name' and 'version'):
+ *   0138:1435-1436  rung B2's own guard
+ *   0138:1364       _agent_close_receipt's placeholder guard
+ *   0138:2318       close_proposals.model_name := btrim(p_model->>'name')
+ *   0138:465-466    model_name / model_version, NOT NULL and non-blank on the table
+ *
+ * `provider` rides along for provenance — extra keys are ignored by every reader above — but it
+ * is decoration, and `name`/`version` are the contract. Pinned by cell G1B-I5, which reads the
+ * LIVE prosrc rather than trusting this comment.
+ */
+export function closeModelIdentity(modelId: string): { name: string; version: string; provider: string } {
+  return { name: modelId, version: "closePrep_v1", provider: "openai" };
 }

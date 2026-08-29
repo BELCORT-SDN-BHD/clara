@@ -31,7 +31,28 @@ import { bankAgentEngineId, recordBankAgentUsage } from "./bankAgent.v1.usage.js
 export async function claimBankTaskStep(taskId: string): Promise<ClaimOutcome> {
   "use step";
   const { workflowRunId } = getWorkflowMetadata();
+  assertRealRunId(workflowRunId);
   return pools().withRuntime((c: PgExec) => claimBankTask(c, taskId, workflowRunId));
+}
+
+/** THE ENTIRE DUPLICATE-START WALL RESTS ON THIS VALUE BEING REAL, so it is checked rather than
+ *  assumed (review law 3: prove an identifier IS what its name claims).
+ *
+ *  The failure mode is silent and total. If workflowRunId were ever null/undefined, the driver
+ *  binds NULL and the claim predicate becomes
+ *    set workflow_run_id = null where … and (workflow_run_id is null or workflow_run_id = null)
+ *  whose FIRST disjunct is true for every unbound row: the claim SUCCEEDS, binds nothing, and two
+ *  concurrent runs both "hold" the same task — #8 defeated completely, with the row additionally
+ *  left running-with-no-run so the reconciler re-enqueues a third.
+ *
+ *  A THROW IS THE RIGHT REFUSAL HERE, not a returned verdict: it happens before `holds` is set,
+ *  so nothing is settled, and the row stays exactly where the reconciler's own recovery expects
+ *  to find it. Under the WDK this value is always populated — that is precisely why an unchecked
+ *  one would never be noticed until the day it was not. */
+export function assertRealRunId(runId: unknown): asserts runId is string {
+  if (typeof runId !== "string" || runId.length === 0) {
+    throw new Error(`workflow run id is not a usable identity (${String(runId)}) — refusing to claim, because a null run id makes the duplicate-start CAS pass for every unbound row`);
+  }
 }
 
 /** The model pass's own reduced result. NOTHING SECRET CROSSES THIS BOUNDARY — the credential

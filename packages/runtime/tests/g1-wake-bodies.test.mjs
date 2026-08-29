@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import * as rig from "./rig.mjs";
 import { runWakeEngineCycle } from "../lib/wake-engine.mjs";
 import {
-  skip, registerSource, BANK_DUE_TYPE, plantHeldWakeTask, plantQueuedClosePrepTask, readTask, readOutbox,
+  skip, skip0138, registerSource, BANK_DUE_TYPE, plantHeldWakeTask, plantQueuedClosePrepTask, readTask, readOutbox,
 } from "./g1-wake-bodies.fixtures.mjs";
 
 const { register } = await import("tsx/esm/api");
@@ -266,6 +266,85 @@ test("G1B-C2 the export the engine dispatches RESOLVES in the registry — spell
       "function",
       `workflow_export '${row.workflow_export}' must resolve to a real export`,
     );
+  }
+});
+
+// =====================================================================================
+// E2E · A REAL VERB CALL, THROUGH THE REAL CREDENTIAL, WITH THE REAL TOOL SET.
+//
+// THIS IS THE INSTRUMENT THE REST OF THE BATTERY DID NOT HAVE, and its absence cost four
+// defects that an independent review found by reading migrations — the only place a jsonb
+// SUB-SHAPE disagreement between this code and the database becomes visible is a call that
+// actually reaches the verb. Typecheck cannot see inside a SQL string; freeze-lint hashes
+// bytes; the arity gate counts arguments. None of them can see that `p_model` was missing
+// the one key rung B2 reads, or that a read's refusal was being counted as a read.
+//
+// The cell deliberately asserts the ADMITTED path, not merely "no throw": a refusal here is
+// indistinguishable from a shape bug, which is exactly how the shape bugs survived.
+// =====================================================================================
+
+test("G1B-E2a a REAL task-bound close credential calling a REAL wrapper is ADMITTED — the shape contract, end to end", { skip: skip0138 }, async () => {
+  const w = await rig.buildFirm("g1be2a");
+  const taskId = await plantQueuedClosePrepTask({ firm: w.firm, client: w.client });
+
+  // The pools the frozen closure reaches through globalThis. Real ones: a runtime connection for
+  // the mint, and the WRITE floor (clara_wake_interactive) the twelve wrappers are granted to.
+  const previous = globalThis.__claraPools;
+  globalThis.__claraPools = {
+    withRuntime: (fn) => rig.asRuntime((c) => fn(c)),
+    mintWakeCredentialForTask: async (kind, firmId, clientId, agentTaskId, ttl) =>
+      rig.asRuntime(async (c) => {
+        const r = await c.query(
+          "select credential_id, secret from clara.mint_wake_credential_for_task($1,$2,$3,$4,$5::interval)",
+          [kind, firmId, clientId, agentTaskId, ttl],
+        );
+        return { secret: String(r.rows[0].secret) };
+      }),
+    // The wake secret is bound TXN-LOCALLY exactly as pools.mjs's own withWriteWakeScoped does —
+    // set_config(..., true), one transaction, committed. Anything looser would not exercise the
+    // wake_context() path the wrappers actually read.
+    withWriteWakeScoped: (secret, fn) =>
+      rig.withActor({ role: "clara_wake_interactive" }, async (c) => {
+        await c.query("begin");
+        await c.query("select set_config('clara.wake_secret', $1, true)", [secret]);
+        try {
+          const out = await fn(c);
+          await c.query("commit");
+          return out;
+        } catch (e) {
+          await c.query("rollback").catch(() => {});
+          throw e;
+        }
+      }),
+  };
+
+  try {
+    const tools = await import("../workflows/closePrep.v1.tools.ts");
+    const rec = tools.newCloseRunRecord();
+    const ctx = { taskId, firmId: w.firm, clientId: w.client };
+    const built = tools.buildClosePrepTools(ctx, rig.DEFAULT_MODEL, rec);
+
+    const out = await built.list_fiscal_years.execute({ rationale: "the nightly close-prep pass is checking which years have ended" });
+
+    // THE ASSERTION THAT MATTERS. A wrong p_model shape, a wrong op-key derivation, an unbound
+    // credential, a client-pin mismatch — every one of them lands as status='refused' (or an
+    // {error} from a raise), and every one of them would have shipped silently.
+    assert.equal(
+      out?.status,
+      "acted",
+      `the wrapper must ADMIT the call — got ${JSON.stringify(out)?.slice(0, 400)}. A 'refused' here is a SHAPE disagreement with the DB, not a books problem.`,
+    );
+    assert.ok(out.receipt_id, "and it wrote its own receipt, in its own transaction");
+    assert.equal(rec.reads, 1, "the read counter counted the ADMITTED read");
+
+    // THE COUNTER'S OTHER DIRECTION, driven for real rather than asserted: the SAME tool called
+    // with a blank rationale is refused by Tier B, and must NOT count. This is the M4 defect's
+    // own regression — an earlier read() counted anything that did not throw.
+    const refused = await built.list_fiscal_years.execute({ rationale: " " });
+    assert.equal(refused?.status, "refused", "a blank rationale is a Tier-B refusal, RETURNED not raised (0138:1799-1800)");
+    assert.equal(rec.reads, 1, "and a refusal does NOT count as a read — otherwise the run settles 'completed' having done nothing");
+  } finally {
+    globalThis.__claraPools = previous;
   }
 });
 

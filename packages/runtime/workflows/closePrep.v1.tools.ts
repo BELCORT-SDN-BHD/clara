@@ -123,9 +123,26 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         "Record the close proposal: what you drafted and the narrative explaining it. This is the run's real output — a human settles it, you never do.",
       inputSchema: z.object({
         close_run_id: z.string().uuid(),
+        // THE SHAPE IS AN ARRAY OF ATTESTATION TEXTS, ONE PER OUTSTANDING GATE ITEM — not a bag
+        // of figures, and not an object. Three instruments: close_proposals.drafted carries
+        // `check (jsonb_typeof(drafted) = 'array')` (0138:464) and its own column comment names
+        // the element shape (0138:463); and the core refuses a non-array, an empty array, any
+        // element missing a non-blank check_key / item_key / text, and any duplicated
+        // (check_key, item_key) pair (0138:2226-2246). An earlier draft declared this a
+        // free-form object, which would have refused the lane's own stated real output — the
+        // proposal a human is meant to settle — on shape, every single time.
         drafted: z
-          .record(z.string(), z.unknown())
-          .describe("The drafted close content, as an object. Every figure in it must have come from a read or a database reply."),
+          .array(
+            z.object({
+              check_key: z.string().min(1).describe("The gate check this text attests to, exactly as get_close_readiness named it."),
+              item_key: z.string().min(1).describe("The outstanding item within that check, exactly as get_close_readiness named it."),
+              text: z.string().min(1).describe("The attestation itself, in plain words a human can accept or reject."),
+            }),
+          )
+          .min(1)
+          .describe(
+            "One attestation per outstanding item. Take every check_key/item_key pair from the readiness read — never invent one, and never repeat a pair.",
+          ),
         narrative: z.string().min(1).describe("The explanation a bookkeeper reads in the morning. Never imply a human decision has been made."),
         rationale: RATIONALE,
       }),
@@ -136,7 +153,13 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         rationale,
       }: {
         close_run_id: string;
-        drafted: Record<string, unknown>;
+        // THE ANNOTATION MUST TRACK THE SCHEMA, and nothing machine-checked will ever tell you it
+        // does not: `tool()`'s execute is loosely typed, so an explicit parameter annotation
+        // OVERRIDES inference rather than being checked against inputSchema. In a frozen file
+        // that makes a stale annotation a lie the next reader has no reason to doubt. This one
+        // was stale for exactly one round (it still said Record<string, unknown> after the schema
+        // became an array) and was caught by an independent review, not by a gate.
+        drafted: Array<{ check_key: string; item_key: string; text: string }>;
         narrative: string;
         rationale: string;
       }) =>
