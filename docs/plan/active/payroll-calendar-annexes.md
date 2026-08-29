@@ -272,8 +272,13 @@ applies: the count of extension sites is re-derived, never taken from any design
 
 ## Annex D · Owner questions
 
-Eight. Each states the question, the options, a recommendation and its cost. **None is
-rhetorical and none is answered here.**
+Eight. Each states the question, the options, a recommendation and its cost.
+
+> **ALL EIGHT ARE RULED — 2026-08-30 (裁-39): every one PER THE DEFAULTS RECOMMENDED HERE.** Ledger:
+> `mohe-grill-rulings-2026-08-29.md` §裁-39. Each question below is kept **verbatim as argued** and
+> carries its ruling at the end of its own recommendation. **F-T2's rows are unblocked**: the lane
+> contributes seed rows against a DDL live and empty since `0139`. *(Pre-ruling, this block read:
+> "None is rhetorical and none is answered here.")*
 
 ### OQ-1 · Staff allowances — a PRD-named Wave-F behaviour with no contract item
 
@@ -295,7 +300,7 @@ two have no shared machinery.
 
 **Cost.** (b) adds a Wave-F item and a design gate. (d) costs nothing today and leaves the PRD
 claiming a capability no contract schedules — the exact `GAP2-6` failure mode this wave exists to
-close.
+close. — **RULED 2026-08-30 (裁-39): (b), as recommended.** Staff allowances get their own contract item and are **NOT folded into F-T2** — an allowance is a *coding* question, a calendar is not; PRD's "coded, never computed" stands.
 
 ### OQ-2 · The Form E grace month — which date does the calendar show?
 
@@ -316,7 +321,7 @@ payment-side exclusion stated on the row. **(d)** Make it a per-firm setting.
 §3.6) rather than inventing a second idiom. **Cost:** one more nullable column on F-A4's DDL, and
 a yearly maintenance duty — the grace is granted by a programme reissued each December, so a row
 asserting 30 April for 2027 before the 2027 programme exists would be a fabricated date.
-**(a) is the safe fallback if the owner does not want that duty.**
+**(a) is the safe fallback if the owner does not want that duty.** — **RULED 2026-08-30 (裁-39): the STATUTORY 31 March is the date of record, with the e-Filing grace month ANNOTATED beside it** and the payment-side exclusion stated on the row. The calendar never silently relies on a concession reissued each December.
 
 ### OQ-3 · The CP21 / CP22 / CP22A / CP22B family — in or out?
 
@@ -334,7 +339,7 @@ no chase. **(c)** In, with a human-entered trigger event.
 row costs one seed row each and zero machinery, and it does not pretend to a trigger Clara
 cannot see. **Cost:** four rows the oracle must be told to skip (a `cadence='event'` member that
 produces no candidates), and a calendar that mixes dated and undated rows — a presentation
-wrinkle on a crude door.
+wrinkle on a crude door. — **RULED 2026-08-30 (裁-39): (b), as recommended — the family is IN, as reference rows.** Visible, with no clock and no chase, because nothing in the books says an employee was hired, left or died.
 
 ### OQ-4 · CP58 — an obligation this lane was not asked to survey
 
@@ -352,7 +357,7 @@ to grade **A** (s.83A, byte-verbatim), and leaving a known 31-March obligation o
 firm will trust is worse than a slightly wider scope. **Note the narrower scope in the Act:**
 s.83A says *"every **company**"*, not "every employer", and the form is **provided to the
 recipient, not filed**. **Cost:** a fourth `client_fact_keys` row
-(`payroll.pays_agent_incentives`) or an honest `not_evaluable` forever.
+(`payroll.pays_agent_incentives`) or an honest `not_evaluable` forever. — **RULED 2026-08-30 (裁-39): CP58 STAYS, and its verdict is `unknown` when the fact is absent — NEVER a verdict.** This overrides the design's provisional unconditional "applies" (gate card OC-3): a chase on every company client regardless of the obligation is the alert-fatigue failure, and `unknown` is the honest state.
 
 ### OQ-5 · A payroll-JV account-role convention
 
@@ -369,7 +374,7 @@ record R-4.
 
 **Recommendation: (a).** One convention, one owner — two lanes inventing account roles is two
 architectures (law 81). **Cost:** F-T2 v1 ships with the weaker anchor, and the JV anchor
-arrives with F-T4.
+arrives with F-T4. — **RULED 2026-08-30 (裁-39): the payroll-JV roles come from the COA TEMPLATE's `statutory` marks (裁-21).** One convention, one owner — and the owner is now named: the firm template, not F-T2 and not a second invention inside F-T4.
 
 ### OQ-6 · The HRD Corp deadline conflict — 15th, or the last day of the following month?
 
@@ -388,7 +393,7 @@ one governs). **(c)** Seed **no** HRD row until HRD Corp is asked in writing and
 (c)'s cost. The earlier date cannot make a client late; the later one can.
 **Cost:** clients whose practice is the last day will see an "overdue" state up to two weeks
 early, every month, for every HRD-liable client — the most likely source of alert fatigue in the
-whole item (risk R-1). The `conflict` flag is what stops that from reading as a hard fact.
+whole item (risk R-1). The `conflict` flag is what stops that from reading as a hard fact. — **RULED 2026-08-30 (裁-39): (a), as recommended — BOTH dates shown, flagged `conflict`, the earlier one governing the reminder.** The earlier date cannot make a client late; the later one can. Writing to HRD Corp stays a standing, unscheduled follow-up.
 
 ### OQ-7 · The weekend rule, and whether BELCORT's own practice differs
 
@@ -415,7 +420,7 @@ and model only the ones that answer.
 than none: it produces a date that *looks* computed and is wrong in Sarawak. **Cost of (a):**
 a public holiday falling on the 15th is silently unhandled — mitigated only by
 `working_day_basis` being on the screen. **Cost of (c):** a new per-client fact, a holiday
-table to maintain forever, and a maintenance duty nobody has been assigned.
+table to maintain forever, and a maintenance duty nobody has been assigned. — **RULED 2026-08-30 (裁-39): (a) for v1, as recommended, and R-L24's directions confirmed** — **EPF rolls FORWARD to Monday**, every other obligation rolls **BACK to Friday**, and **public holidays are EXPLICITLY unhandled** with `working_day_basis` saying so on the screen. A half-right holiday table is worse than none. Part (i) is answered by the same ruling: the conservative roll-back is what the calendar shows.
 
 ### OQ-8 · An EPF / SOCSO / EIS rate table as a fourth Tier-1 table
 
@@ -442,7 +447,7 @@ needs a **deadline**. Opening a fourth Tier-1 table for a consumer that only nar
 without a consumer. The real consumer is **F-T3**, and F-T3 should make the case.
 **Cost:** if the owner later wants Clara to sanity-check a client's EPF figure against the
 Third Schedule, that is a new item — and the survey's F-P8 says a schedule look-up across three
-different wage bases is a bigger build than a rate row anyway.
+different wage bases is a bigger build than a rate row anyway. — **RULED 2026-08-30 (裁-39): (a), as recommended — NO fourth Tier-1 rate table.** F-T2 narrates a deadline; it does not compute a contribution, so it does not need a rate. The real consumer is F-T3, and F-T3 makes its own case.
 
 ---
 

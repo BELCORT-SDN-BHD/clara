@@ -94,23 +94,30 @@ There is deliberately no runtime status route. Human status reads use migration
 `RELAY_TEST_MODE=1` is the only adapter gate: tests inject/localize scanner,
 Storage, and Azure behavior. The real production adapters have no dev bypass.
 
-The connection ceiling is **≈25 sessions** (one fewer since F-A2 PR-3 retired the
-rule_post consumer lane; integrator must confirm Supavisor headroom before
-deploy): runtime pool 5 + read
+The connection ceiling is **≈27 sessions** (F-A2 PR-3 retired the rule_post consumer
+lane; **F-A6 PR-2 adds the freeform pool, +2**; integrator must confirm Supavisor
+headroom before deploy — the ceiling itself is still unmeasured, F-A6 R-4 / P-8): runtime pool 5 + read
 pool 5 + WDK engine 5 + control/router LISTEN 2 + the six consumer-lane leader
 sessions (matcher, autodraft, local_facts, sst_watch, facts_gate,
-classify) 6 + the write pool 2. Document
+classify) 6 + the write pool 2 + **the freeform pool 2**
+(`CLARA_FREEFORM_POOL_MAX`, default 2). The Gate-G1 bank pool's 2 sit outside this
+count until its own ceremony gives `clara_wake_bank_login` a password. Document
 intake and extraction reuse short checkouts from the existing runtime pool; no DB
 connection is held while streaming, scanning, uploading, downloading, or calling
 Azure.
 
 ## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
 
-`chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-08-26: the registry
-(`registry.ts:54,88`) pins `chatTurn: chatTurn_v14` and `autoDraft: autoDraft_v9`** — repo
-frontier is 131 migration files, live through `0136_fix_freeform_basis_types`. **The SERVING
+`chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-08-29 (F-A6 PR-2): the
+registry pins `chatTurn: chatTurn_v15` and `autoDraft: autoDraft_v9`** — repo frontier is 142
+migration files, live through `0147_db_hardening_b_hash_only_bearer_tokens` (0147 is the highest
+NUMBER, not a count — the numbering has gaps). **The SERVING
 Fly bundle, measured 2026-08-26 in-VM, still carries `chatTurn_v13` + `autoDraft_v9`** —
-`chatTurn_v14` is registered but not yet deployed (`PROGRESS.md`'s pre-flight note). v1–v13
+`chatTurn_v14` was registered and never deployed, and **v15 supersedes it before either ships**,
+so the next deploy moves the serving bundle v13 → v15 in one step (`PROGRESS.md`'s pre-flight
+note; the freeform ceremony above is a hard precondition of that deploy). **v15 = F-A6's audited
+freeform read** — one read-only SELECT the model composes and the database runs as
+`clara_freeform_ro`, on the fifth login and its own pool. v1–v14
 stay frozen + reachable for parked runs; v7 = Wave B's
 `'wiki_coding'` pack purpose + the txn-local `clara.pack_consumer` GUC + the
 citation-visible wiki framing; v8 = the Wave-C closing batch; v9 = the §7-A
@@ -135,6 +142,9 @@ bookkeeper+ authority, never a firm-wide grant.
 |---|---|
 | `CLARA_WRITE_DATABASE_URL` | The `clara_wake_write_login` DSN (member of `clara_wake_interactive` alone). REQUIRED in production (fail-closed boot assert). **Deploy order:** 0009 creates the login NOLOGIN; the operator ceremony gives it LOGIN+password and sets this secret — it must be present before the Slice-6 image boots or the world fails closed. |
 | `CLARA_WRITE_POOL_MAX` | Write-pool size (default 2). |
+| `CLARA_FREEFORM_DATABASE_URL` | **F-A6 PR-2.** The `clara_freeform_login` DSN (member of `clara_freeform_ro` alone). REQUIRED in production — **fail-closed boot assert**, and `scripts/serve.mjs:22` *and* `scripts/worker.mjs:17` BOTH call it before importing the built server, so a pre-ceremony deploy takes the **server AND the worker** down, not merely the freeform read. `CLARA_START_WORLD=0` does not exempt you. **Deploy order:** `0131` creates the login NOLOGIN; the operator ceremony gives it LOGIN+password and sets this secret — it must be present before the `chatTurn_v15` image boots. |
+| `CLARA_FREEFORM_POOL_MAX` | Freeform-pool size (default 2). Read when the pool is CREATED. |
+| `CLARA_FREEFORM_STATEMENT_TIMEOUT_MS` | The H-4 backstop: a session `statement_timeout` the POOL sets before calling `wake_freeform_read`, because PostgreSQL arms the statement timer once and a `SET LOCAL` inside the verb cannot bound a single stalled FETCH. Default `15000`. **CLAMPED, not trusted:** anything that is not a whole number of milliseconds strictly greater than the verb's own 5000 ms in-loop deadline falls back to the default with a warning naming the variable and the value — `0` means UNLIMITED in PostgreSQL and would delete the wall, and anything at or below 5000 would fire before the in-loop deadline and destroy the receipt that deadline exists to commit. **There is no upper limit**: raise it freely if you mean to. |
 | (invoice-facts attempt cap) | Owned by the **database** — hard-coded to 3 in `0009`'s enqueue/claim path. There is **no** runtime env var (an env override would be a no-op); Tier B is the honest permanent fallback once the cap is reached. |
 | `CLARA_CLAMD_MIN_BACKOFF_MS` / `CLARA_CLAMD_MAX_BACKOFF_MS` | clamd self-heal backoff (PIN-AB-2): a clamd exit is non-fatal; intake fails closed honestly (`503 scanner_unavailable`) while it restarts. |
 | `CLARA_CLAMD_HEALTHY_RUN_MS` | A clamd run lasting at least this long (default `60000`) is treated as healthy and resets the restart backoff. |
@@ -225,6 +235,46 @@ Migration `0006` creates `clara_runtime_login` + `clara_agent_read_login`
 **NOLOGIN, no password**. Enable LOGIN + set a password for each out-of-band,
 then hand those two credentials to the runtime as the DSN secrets below.
 
+### F-A6: the freeform login ceremony **PRECEDES the chatTurn_v15 image** (do not reorder)
+
+`scripts/serve.mjs` calls `assertProductionPoolConfig()` at line 22 — **before** it imports the
+built Nitro server (line 76) — and `scripts/worker.mjs` does the same at line 17. That assert is
+**fail-closed on `CLARA_FREEFORM_DATABASE_URL`**
+(`lib/pools.mjs` → `lib/freeform-read.mjs`), matching the Slice-6 write floor's posture and F-A6
+design Annex E.1 ("a world that boots without the DSN must refuse to start, so the ceremony
+precedes the image") — and deliberately **not** Gate G1's lazy bank-pool posture, whose ceremony
+was itself gated on that PR merging.
+
+The consequence is blunt and is the reason this section exists: an image shipped before the
+ceremony **does not boot at all** — not "the freeform read is unavailable". HTTP, intake, the
+world and every consumer lane are down with it, **and so is the standalone worker**
+(`scripts/worker.mjs` asserts too), and `CLARA_START_WORLD=0` does **not** exempt you: the
+assert runs before Nitro either way, so even a skeleton health/ready boot fails.
+
+**Run in this order:**
+
+1. Confirm `0131` (F-A6 PR-1) is applied — it is, as of the 2026-08-26 W4 ceremony. **This PR
+   ships no migration of its own**; the whole DB half is already live.
+2. `alter role clara_freeform_login login password '…';` out of band — env-to-env, never printed,
+   never in argv.
+3. `fly secrets set CLARA_FREEFORM_DATABASE_URL=…` (the fifth DSN; see the Secrets list below).
+4. **Then** deploy the `chatTurn_v15` image.
+
+Two optional knobs, both documented in the Slice-6 environment table below:
+`CLARA_FREEFORM_POOL_MAX` (default 2) and `CLARA_FREEFORM_STATEMENT_TIMEOUT_MS` (default
+`15000`), the H-4 backstop — **clamped, never refused**: a value that is not a whole number of
+milliseconds strictly above the verb's own 5000 ms in-loop deadline falls back to the default
+with a warning naming the variable and the value. **There is no upper limit.**
+
+**Session budget after F-A6:** +2 for the freeform pool — see the connection-ceiling paragraph
+above, which is the single count and now reads **≈27**. Confirm Supavisor headroom before
+deploy; the ceiling itself is still unmeasured (F-A6 R-4 / P-8).
+
+**Registry frontier at this image:** `registry.ts` pins `chatTurn: chatTurn_v15` and
+`autoDraft: autoDraft_v9`. `chatTurn_v1..v14` stay exported and frozen for parked runs — which
+is also the asymmetry the rollback preflight below turns on: rolling *forward* strands nothing,
+rolling *back* past this image strands any run parked on `chatTurn_v15`.
+
 ### Secrets (`fly secrets set` — NAMES only; never commit values)
 
 - `OPENAI_API_KEY`
@@ -233,6 +283,8 @@ then hand those two credentials to the runtime as the DSN secrets below.
 - `WORKFLOW_POSTGRES_URL` (the world's DB — session pooler)
 - `CLARA_RUNTIME_DATABASE_URL` (the `clara_runtime_login` DSN)
 - `CLARA_READ_DATABASE_URL` (the `clara_agent_read_login` DSN)
+- `CLARA_FREEFORM_DATABASE_URL` (the `clara_freeform_login` DSN — **fail-closed at boot**; see
+  the freeform ceremony section above, and set it BEFORE the chatTurn_v15 image ships)
 - `CLARA_INTAKE_CORS_ORIGINS`
 - `AZURE_DI_ENDPOINT`, `AZURE_DI_KEY`
 - `CLARA_STORAGE_URL`, `CLARA_STORAGE_ROLE`, `CLARA_STORAGE_ROLE_JWT`

@@ -7,12 +7,19 @@ file wins or it is stale — and truing it is the first thing you do.
 
 ## Current posture
 
-*(as of 2026-08-29 11:30 — **THE 磨合 WINDOW IS SPRINTING: P1-P3 + the night train #368-#384
+*(as of 2026-08-30 03:30 — **THE 磨合 WINDOW IS SPRINTING: P1-P3 + the night train #368-#384
 MERGED** · **PORT WAVE COMPLETE — 11/11 trains on main** (Wave C: T11 #405 · T1 #406 · T2 #407) ·
 **THE PRE-BETA BACKEND QUEUE IS MERGED AND LIVE: `0142` F-A7b PR-a #401 · `0143` 裁-22 #409 ·
 `0144` hardening A #410 (ELEVEN barrier views after a demonstrated cross-tenant leak) · `0145` P4
 tranche-2 #411 · `0146` 裁-17 #412 — ceremonied in ONE ~51-s D1 window 2026-08-29 03:17Z, LIVE
-141/`0146`**, as-run `docs/plan/completed/mohe-0142-0146-apply-asrun.md` · **HARDENING B (裁-16) IS FULLY LANDED: merged #414 AND APPLIED — `0147` ceremonied 2026-08-29 08:46:55Z–08:47:42Z (a 47-s D1 window, `/ready` 200), LIVE 142/`0147`**, as-run `docs/plan/completed/mohe-0147-apply-asrun.md` · **THE 2026-08-29 MORNING SITTING IS RULED — 裁-23…裁-28** (`docs/plan/active/mohe-grill-rulings-2026-08-28.md`): the three pre-beta design gates are CLOSED and `docs/plan/active/mohe-owner-batch-2026-08-29.md` is answered except the pricing amounts)*
+141/`0146`**, as-run `docs/plan/completed/mohe-0142-0146-apply-asrun.md` · **HARDENING B (裁-16) IS FULLY LANDED: merged #414 AND APPLIED — `0147` ceremonied 2026-08-29 08:46:55Z–08:47:42Z (a 47-s D1 window, `/ready` 200), LIVE 142/`0147`**, as-run `docs/plan/completed/mohe-0147-apply-asrun.md` · **F-A6 PR-2 IS MERGED AND DEPLOYED — #423, runtime `v69`, `chatTurn_v15` bundle-proven SERVING, so Clara's audited FREEFORM READ IS LIVE IN CHAT (H-4/H-5/S-1 discharged); deploy ceremony 2026-08-29 18:04Z-18:08Z** · also merged 2026-08-29: **#421** the alignment audit's no-ruling-needed fixes · **#422** the 裁-18b PR-0 design gate record · **#424** the COA research addendum (MPERS 4.2 items + the Q8 reclassification); **#425** (`0148`, the duplicate-open wall on both agent proposal doors) is MERGING · **THE SITTINGS ARE RULED THROUGH 裁-44** — 裁-23…裁-28 on 08-29 morning (`docs/plan/active/mohe-grill-rulings-2026-08-28.md`) and **裁-29…裁-44** in `docs/plan/active/mohe-grill-rulings-2026-08-29.md`; `docs/plan/active/mohe-owner-batch-2026-08-29.md` is answered in both batches **except the pricing AMOUNTS**, the model itself having been ruled at 裁-42)*
+
+- **ELEVEN LANES RAN THIS NIGHT; SIX CARRY A NAMED TIP, 2026-08-30.** CLEAR and merge-train-ready: **裁-21 PR-a**
+  (the firm COA template) at `9966fc10` · **裁-19 PR-1** (the canonicalising read layer + carrier +
+  M9 + taxonomy; the write half is CLOSED by 裁-35) at `808b873d`. In review or re-verify:
+  **F-T3 PR-1** at `62e5bb3a` · **F-A9 PR-1B** at `42d201a8` · **裁-18b PR-1** final diff at
+  `5d23686e` · **F-T1** rebased onto main at `e6f0d8e2`, in its fix round. **Numbers `0149`+ are
+  claimed at MERGE, in dependency order** (constraint 10) — not at authoring, and not by branch age.
 
 - **THE 磨合 (frontend integration) WINDOW OPENED 2026-08-26/27** — its own session, per
   `docs/plan/active/mohe-session-handoff-2026-08-26.md`; `chatTurn_v14` deployed +
@@ -71,7 +78,7 @@ tranche-2 #411 · `0146` 裁-17 #412 — ceremonied in ONE ~51-s D1 window 2026-
   (fact-driven, uuid-pinned, self-proven at apply); `0063` makes lifting it an OWNER act.
 - **Harness hardening live in-repo:** the dispatch-model-guard PreToolUse hook (constraint 5,
   44-case selftest) beside pinned-ids; `.claude/rules/`; the Wave-E δ contract drill.
-- **Runtime:** Fly `clara-runtime`, single machine, `/ready` 200 — last known tag **v66 (2026-08-21)**, carrying **witnessFacts.v2** + **statementFacts_v2** + riders ③④. **MEASURED 2026-08-26 in-VM (labelled, version tag un-re-derived this session):** the serving bundle's registry pins `chatTurn: chatTurn_v13` / `autoDraft: autoDraft_v9` — `chatTurn_v14` is **NOT** yet serving (Next item 1's pre-flight note). The three `CLARA_RENDER_FLY_*` values are bound. Dashboard: Pages `app.clarabook.com`. `clara-backup` daily. `clara-render` hourly.
+- **Runtime:** Fly `clara-runtime`, single machine, `/ready` 200 — **tag `v69`, deployed 2026-08-29 18:04Z-18:08Z with F-A6 PR-2 (#423)**; the serving bundle's registry pins **`chatTurn: chatTurn_v15`**, bundle-proven at the deploy, so **`wake_freeform_read` now has a runtime caller and Clara free-reads in chat**. (The 08-26 measurement that `chatTurn_v14` was not serving is SUPERSEDED by this deploy.) The three `CLARA_RENDER_FLY_*` values are bound. Dashboard: Pages `app.clarabook.com` still serves the OLD `apps/dashboard` until P6's cutover. `clara-backup` daily. `clara-render` hourly.
 - **Books pins:** RS trial balance **3,396,500 = 3,396,500** (`trial_balance_as_of`, re-read
   at every ceremony) · RS customers **11/11 NAME-ONLY** (the enrichment trap holds) ·
   `client_facts` = 7 rows (3 carryover + 3 MSIC + 1 doored entity_type).
@@ -123,14 +130,32 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 
 ## Next
 
-1. **THE FRONTEND 磨合 WINDOW IS OPEN AND RUNNING** — pre-flight discharged, P1-P3 merged,
-   the night train #368-#384 merged, `0139`+`0140` ceremonied (live 135); the port wave is
-   running (posture bullet above carries the full list and the Wave-A instrument laws).
-   **In flight (2026-08-29, after the morning sitting)**: hardening B is DONE — merged (#414) and APPLIED (`0147`, live 142) · **the three ruled builds** — 裁-21's **research lane before PR-0** (裁-23), 裁-19 as a **HYBRID** (the read layer plus an appended re-home pair for OPEN items in UNFROZEN periods, frozen years read-layer only; 裁-24), 裁-18b now **FIVE PRs / two D1 windows** (the post-time re-check restored, the expiry sweep rides; 裁-25) · 裁-26 (admission-token email wall) → **P4's UI tranche**, 裁-27 ("Amend resolution") → **P6** · T8's alias-panel wiring onto `counterparty_aliases_visible` and PR-e's proposal card (P6) · the `0133` operator-flag act for BELCORT (owner-timed). **Still owed in this window** (owner rulings,
-   `harness-audit-rulings-2026-08-26.md`): the F-A7b train · all three firm tiers' UI
-   (tier-3 LIVE AT BETA behind its own security gate) · **the pricing amounts — NOT ruled (裁-28): the owner brings his own plan, the conductor owes the cost-floor + market-band brief, and it blocks the Stripe objects / checkout price / first charged day → needed before P4's CHECKOUT WIRING** · ~~the R2 PRD two-tier wording~~ — **LANDED 2026-08-29 (裁-30: the two sentences approved verbatim by the owner and written into PRD §4 item 15 + §6 invariant 1)**
-   · the live-data e2e walk (Q9 rung 5). Then **Wave G: factory reset + estate e2e + beta
-   live**.
+1. **THE 磨合 WINDOW: the merge train → P4/P6 → the G1 ceremony → Wave G.** *(Numbering unchanged —
+   items 2-5 below keep their long-cited numbers.)*
+   **(a) The merge train is the immediate work** — six named lane tips (posture bullet above);
+   **numbers `0149`+ are claimed at MERGE in dependency order**, never at authoring (constraint 10).
+   **THREE D1 windows are owed and should be BATCHED into one or two:** 裁-19 PR-1 (four writer
+   bodies) · 裁-18b PR-1 (two) · F-A9 PR-1B (**five**, not the design's two — the census was not
+   closed-world) plus `0148`'s two. The bodies do not overlap, and each window costs a quiesce.
+   **(b) P4's UI tranche** — **裁-26**'s email-bound admission token + **裁-36**'s tier-3 security
+   gate (DPA e-sign at signup, no sign no firm · one firm per email, one per IP per day; **no trial
+   quota**). **The BILLING DESIGN SET (裁-42) — survey → design → gate — PRECEDES P4's checkout
+   tranche**; input `docs/plan/active/billing-model-brief-2026-08-30.md`. **The amounts are still
+   open** and block only the Stripe objects, the checkout's price display and the first charged day.
+   **(c) P6** — 裁-34's Tax tab + the firm-level deadline feed + the compliance-register line ·
+   裁-37's ⌘K "Do" behind a live allowlist check · 裁-27's "Amend resolution" · T8's alias-panel
+   wiring and PR-e's proposal card. **P6's ENTRY GATE gains one act (裁-44's standing rule): ONE
+   list of EVERY agentic-facing fail-closed default, for a single "should Clara be bolder here?"
+   pass** — at P6 deliberately, so it is answered against real data.
+   **(d) The G1 rollout ceremony** — 裁-40 as amended by 裁-44: **FOUR sources opened together**
+   (`bank_agent` · `close_prep` · binding-expiry · **`tax_prep`**) by the operator owner through
+   `set_wake_source_enabled`, **after each wake body is built and reviewed**; **裁-43** puts
+   BELCORT's `is_operator` flag in the same ceremony via the Wave-G setup checklist.
+   **(e) Wave G per 裁-31** — factory reset + estate e2e on the **desktop corpus as-is**; the
+   criterion is *every flow walks end to end, reports issue, the period rolls forward*. The oracle
+   gaps are NOT chased; the RPR series pick is the conductor's, recorded in the Wave-G setup doc,
+   and **both Wave-G docs must be trued to that criterion before the run**. Then **beta live**.
+   *(Also owed here: the F-A7b train · the live-data e2e walk, Q9 rung 5.)*
 2. **Owner-key acceptance items** (the constitutional human half): ~~the #43 sitting~~ —
    **DONE 2026-08-16** (three dispositions, merged #249, ceremonied; **E-R14 OPEN**).
    ~~The BEE FY2025 live close~~ — **RULED 2026-08-16, deferred WHOLESALE to the Wave-G reset**
@@ -147,7 +172,7 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    mechanism-smoke right after ceremony, SCALE legs fold into Wave-G; p50 ~T0+48h → ~T0+36h).
 4. ~~**THE TRACK-A DESIGN FAN-OUT + BUILD**~~ — **DONE** (all seven sets v2-gated 2026-08-22;
    build DONE for F-A2/F-A3/F-A4/F-A5/F-A6 v1/F-A5b through card-1/F-A7 across W1+D-a+W2W3+W4).
-   **Remaining, re-censused 2026-08-29 and RULED INTO THE SPRINT (裁-29, `mohe-grill-rulings-2026-08-29.md`)**: G1's two wake sources still `enabled=false` on live (F-A3/F-A4 wake bodies + flip) · F-A6 PR-2 runtime (`packages/runtime` has ZERO callers of `wake_freeform_read`) · the reports chain walked end to end + F-A5b PR-3 (download) · F-T3 (PR-0 gate → build; both hard gates live) · F-A9 **PR-1B** (PR-1A is `0110`, live — the old "PR-1A" here was STALE) · F-A4 PR-2b · F-T1 (rebase → merge → window) · F-T2 rows (8 owner questions → next batch). **Beta-era by the same ruling:** F-A8 · F-A6 v2 · F-T4's remainder.
+   **Remaining, re-censused 2026-08-29 and RULED INTO THE SPRINT (裁-29, `mohe-grill-rulings-2026-08-29.md`)**: G1's wake sources still `enabled=false` on live — now **FOUR** at one ceremony (F-A3/F-A4/裁-18b/`tax_prep` bodies, then the flip; 裁-40 as amended by 裁-44) · ~~F-A6 PR-2 runtime~~ **DONE — merged #423, deployed `v69`, `chatTurn_v15` serving, freeform read live in chat** · the reports chain walked end to end + F-A5b PR-3 (download) · F-T3 (PR-0 gate RAN #420 → PR-1 building; **裁-33/裁-38 ruled its six cards, and 裁-44 adds a PR-9 `tax_prep` wake — tax is agentic**) · F-A9 **PR-1B** (PR-1A is `0110`, live — the old "PR-1A" here was STALE; its D1 is FIVE bodies, not two) · F-A4 PR-2b · F-T1 (rebased `e6f0d8e2` → fix round → merge → window) · F-T2 rows (**its 8 owner questions RULED 2026-08-30, 裁-39 — the lane is unblocked**). **Beta-era by the same ruling:** F-A8 · F-A6 v2 · F-T4's remainder.
 5. ~~**THE OWNER'S DIGEST SIGN-OFF**~~ — **GIVEN 2026-08-22** (laws 78-81 + the four annotated
    laws ratified; every named follow-up landed or ruled — #287, invariant-(a) home, R1, corpus,
    CI overhaul, OQ-2/3/5, R-OWNER, C6). **Still open for the owner**: FX-lite build timing ·
@@ -354,7 +379,7 @@ lint watch · `0084`'s `C:\ct\`-only tooling. Full text archived verbatim 2026-0
 
 - ~~Annex A.4 row 7~~ (RULED+BUILT, `0128` live, `no_preparation` mode) · ~~R-OWNER/B15's second door~~ (BUILT `0106`, #311, tail-proven; D18 stands for direction-SILENT documents only) · ~~the `AGENTS.md` invariant-(a) home~~ (DECIDED (b): PRD §6 invariant 2(b) is the single home) — all resolved; full records archived verbatim in `-part2.md`/`-part3.md`.
 - **The wiki dynamic-SQL gate reads CoR/DO-block comments UN-MASKED** (0097 2026-08-20; hit again by 裁-17 2026-08-29): a create-function phrase quoted in a comment inside dollar-quoting reclassifies the block as a dynamic creator. Workaround: never spell the DDL verb in such a comment. Real fix = mask the block's own comments + a selftest; **re-homed to the F-A2 fix queue.**
-- **Found by the 2026-08-29 dawn reviews, recorded not built around:** (1) **M9 LIVE DEFECT** — `list_open_items_by_counterparty` passes the FIRM id where a CLIENT id is expected (`0038:8006`) → `[]` for every counterparty; dead since 0038; consumed by `apps/web/lib/bank/match-reads.ts` + the dashboard → fix inside 裁-19 PR-1 (OQ-6). (2) The interview asks "Apply the standard LHDN-aligned MPERS Chart of Accounts seed?" (`requiredForCommit`) and NOTHING consumes `coa_seed_decision` — a shipped promise 裁-21 closes. (3) `wake_propose_identifier_promotion` has NO duplicate-open wall (0103; `ix_client_identifier_promotions_open` non-unique) — two concurrent proposals both admitted; Door 2 and 裁-18b carry a partial unique; backlog. (4) `approve_opening_seed`/`approve_opening_correction` require `transaction_isolation='serializable'` that NO migration sets — the manual wave-b 0017 Part-A proconfig pin; verify on LIVE at the next sleeper read (T2 renders the operator hint). (5) T11 N2: the live `resolve_onboarding_plan_item` re-resolves any state; the card disables settled items → **RULED 2026-08-29 (裁-27): "Amend resolution" is allowed on a resolved item, at P6.**
+- **Found by the 2026-08-29 dawn reviews, recorded not built around:** (1) **M9 LIVE DEFECT** — `list_open_items_by_counterparty` passes the FIRM id where a CLIENT id is expected (`0038:8006`) → `[]` for every counterparty; dead since 0038; consumed by `apps/web/lib/bank/match-reads.ts` + the dashboard → fix inside 裁-19 PR-1 (OQ-6). (2) The interview asks "Apply the standard LHDN-aligned MPERS Chart of Accounts seed?" (`requiredForCommit`) and NOTHING consumes `coa_seed_decision` — a shipped promise 裁-21 closes. (3) ~~`wake_propose_identifier_promotion` has NO duplicate-open wall (0103)~~ — **CLOSING at #425 (`0148`), the duplicate-open wall on BOTH agent proposal doors; strike this item when it merges.** **Two successors it does NOT close, both minted by its own review and both pre-beta:** (3a) `wake_open_firm_question` can still mint the FIRST `onboarding_proposed` question with a caller-supplied kind and candidates, **bypassing Door 2's egress authorisation (CLR28), the A14 name-family wall and 裁-22's basis resolution** — the fix is a small migration refusing Door-2-owned kinds from that verb; (3b) 99 `exception when unique_violation` handlers in the chain and only ~15 read `constraint_name` — `0028:769-771` **relabels EVERY unique_violation as `binding_conflict`**; a sweep at the fix queue. **And the identity table itself: RULED 2026-08-30 (裁-41) — `clara.client_identifiers` gains a UNIQUE `(client_id, kind, value_normalized)` before beta, its pre-flight NAMING existing duplicates and REFUSING, never deduping** (`0007:235` left it non-unique by design, so two separately-settled confirms still mint two identical identity rows). (3c) **P1, 裁-19 PR-1** — a counterparty merge made **BEFORE the read layer deploys carries no carrier row and is NOT reversible by PR-2's un-merge door**; the same measurement priced the canonicalising read at **~15% of an aging read** (14-15 µs per open item, ~+14 ms on a 1 000-item book), a third of which a `cross join lateral` rewrite removes in its own round. (3d) **F-A9 PR-1B's two:** `_approve_entry_core`'s refusal prose still names a "budget" gate that no longer exists (a sixth writer body, its own follow-up, with the drafting-trio exact-equality pin re-cut), and **`packages/db/deploy/autopost-lane-unify-0031-postverify.sql` is ALREADY RED at step 4/6 at the `0147` frontier on both sides** — pre-existing and unrelated to F-A9, so a ceremony that runs that postverify today reds; fix queue. (4) `approve_opening_seed`/`approve_opening_correction` require `transaction_isolation='serializable'` that NO migration sets — the manual wave-b 0017 Part-A proconfig pin; verify on LIVE at the next sleeper read (T2 renders the operator hint). (5) T11 N2: the live `resolve_onboarding_plan_item` re-resolves any state; the card disables settled items → **RULED 2026-08-29 (裁-27): "Amend resolution" is allowed on a resolved item, at P6.**
 - ~~**The sweep-red fixture class (2026-08-29, after #414)**~~ — **CLOSED**: the manual sweep went
   RED on the closed-wave drill **§4.11** and all four **D-b frontier legs** because the shared
   `seedAdmission` fixture followed HEAD and wrote `token_hash` at pre-`0147` frontiers; **#415
@@ -365,19 +390,9 @@ lint watch · `0084`'s `C:\ct\`-only tooling. Full text archived verbatim 2026-0
   on its own branch **before merge** — the per-PR legs cannot see those legs at all.
 - **Two backend gaps found by the Wave-B rung-0 census (2026-08-28), recorded — not built around:** (1) `clara.counterparty_aliases` has NO `clara_authenticated` read policy (owner + freeform_ro only, per `pg_policy`), so `retire_counterparty_alias` — itself EXECUTE-granted — has no honest UI path: no granted read returns an alias id. T8 ships the retire dialog UNMOUNTED + a NotBuiltNote. **RULED 2026-08-28 (裁-11, `mohe-grill-rulings-2026-08-28.md`): ADD the policy in P4 DB tranche-2** — copy the `counterparties` table's human-read policy shape verbatim; no D1; PR body names T8's hygiene panel as the home; T8's alias wiring rides along after the ceremony.
   (2) `SweepReceiptPart` renders as an id-only summary card (`PartRenderer.tsx` SUMMARY_TYPES, alongside eight other unhydrated part types), so `acknowledge_sweep_run`/`get_sweep_run` have no UI control — a standing P3-era gap outside the port wave's §5 scope; T7 wired both as lib fns + wire-shape tests and names it on the sweep panel. Both go to the owner's next 待裁 batch. *(The 2026-08-22 resolved quartet — riders ③④⑤ · corroboration 0/33 · ci.yml over 500 · the stranded pair — is archived in `-part2.md`.)*
-- **F-A7 gamma residuals** (independent γ review fold, 2026-08-25; recorded per law-82 — a
-  deferral belongs here, not only in a commit message): **R1** classify egress stays UNGOVERNED
-  by `GOVERNED_EGRESS_PURPOSES` (`packages/runtime/lib/egress.mjs`) until the runtime side lands
-  — the DB half (`document_processing` purpose, the classify consent gate) is complete and
-  gamma's own migration tail already states this is PR-rho's (annexes-2 SSI.1 train rho). **R2**
-  the firm-narrow family has NO `consume_firm_egress_dispatch` verb and no body ever sets
-  `firm_egress_dispatch_authorizations.consumed_at` — the client family's one-shot consume
-  binding has no firm-scoped counterpart yet; `expires_at` is written and read by nothing
-  (decorative at this frontier). Both are β/δ's to build, not gamma's. **R3**
-  `document_intakes.origin` was NOT extended with `onboarding_interview` — annexes-2 §I.2 lists
-  it as one of gamma's ALTER targets, but the pre-activation intake door it would gate did not
-  ship this round (MEASURED: the live CHECK still refuses the value). A deliberate cut, not a
-  miss — recorded so a later lane does not assume the door exists.
+- **F-A7 gamma residuals R1/R2/R3 — ALL THREE STAND; full text archived verbatim 2026-08-30 to `docs/plan/completed/progress-archive-2026-08-part4.md`** (R1 classify egress ungoverned until the
+  runtime side lands · R2 no `consume_firm_egress_dispatch` verb, `expires_at` decorative · R3
+  `document_intakes.origin` never extended with `onboarding_interview`, the live CHECK refuses).
 
 **THE NEXT-ROUND QUEUE (2026-08-21 re-measure; the first four are PROMPT-side — the evaluator
 stays strict, widening it = a frozen-evaluator change with its own version + ceremony).** Five
@@ -467,28 +482,15 @@ records: its ceremony as-runs and the corpus measurement.)*
   header); the THIRD disk-zero event recovered + permanently fixed (87 GB volume prune + the
   owner-run diskpart compact, C: 82 GB free); T0 seam lane dispatched at close; **the
   0139+0140 D1 window RAN same night — live 135/`0140`** (as-run in completed/).
-- **2026-08-25 (THE W2+W3 COMBINED CLOSE)** — the six-car train merged and **CEREMONIED live
-  112→122/`0127`**, Track A's backend fully live; four cars took a first-chain-meeting fix
-  round (lane-brief rules ①-⑦ minted). As-run
-  `docs/plan/completed/wave-f-w2w3-ceremony-asrun.md`.
 - **2026-08-27 (THE 磨合 WINDOW OPENS)** — the opening grill RULED IN FULL
   (`mohe-grill-rulings-2026-08-27.md`); **F-A7b's gate SAT and CLOSED** (BUILD-AUTHORIZED);
   `chatTurn_v14` deployed + bundle-proven; #356-#360 merged. P2's four shell lanes built in
   parallel worktrees through build→review→fix→re-verify; the Codex security pass on auth
   returned two HIGH (anti-cache headers; OTP purpose) — both fixed pre-fold.
-- **2026-08-24 (THE TRAIN NIGHT + W1)** — two CI mechanism fixes (#314 OS-assigned ports; the
-  no-op relation-revoke DR fix); four train cars merged, **W1 ceremonied live 97→103** (as-run
-  #315); F-A7 β's double review ladder CLOSED (owner ruling B10); GM-10 found + Codex-built; the
-  gitleaks all-refs class allowlisted (#319); **the disk-zero incident** (WSL EIO, ~40 min
-  outage, 101 GB pruned, keeper re-armed, owner granted the VHDX compact); the 529 storm bridged
-  by the Codex cross-model substitution.
-- **2026-08-22 (the TRACK-A SITTING · v2 DESIGN LANDING)** — fourteen rulings TA-P1…TA-P14 + all
-  seven design sets to gated v2 (36 files); minute `docs/adr/0074-the-track-a-sitting.md`; full
-  entries archived verbatim to `-part2.md`. Merged #284/#285/#286/#287.
-- **2026-08-23 (the ALIGNMENT GRILL — ADR-0075; the SPLIT PASS)** — the owner widened the
-  test-data authority (posture above carries it in full; digest law 82); digest law 77 ratified
-  (#286); the invariant-(a) product text amended (#287); the SPLIT PASS moved nine at-cap files
-  to their `-part2`/`-log` companions. **F-A9's D17 ruled (R-L19).**
+- *(The **2026-08-22 · 08-23 · 08-24 · 08-25** entries — the Track-A sitting + v2 design landing,
+  the alignment grill and split pass, the train night + W1, and the W2+W3 combined close — moved
+  **verbatim** 2026-08-30 to `docs/plan/completed/progress-archive-2026-08-part4.md` to keep this
+  file inside its cap. Nothing was summarised on the way out.)*
 
 ---
 

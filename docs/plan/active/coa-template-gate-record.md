@@ -119,6 +119,17 @@ chart itself, and whatever it lands on is held firm-wide. **The recommendation (
 and this fail-closed default are both set aside**; if the research independently arrives at
 4-digit blocks, that is a research finding, not the incumbent surviving.
 
+**AMENDMENT — 4-digit blocks ACCEPTED 2026-08-29, as a research finding.** The research lane ran
+and landed on **4-digit blocks** on the evidence (Bukku · Sage UBS · NCL · QuickBooks guidance);
+the majority-installed AutoCount/SQL/QNE "3-digit-dash" form was rejected because it is
+structurally ROME PROPERTIES' `300-000` shape, which 裁-23 excluded. **That left the research
+choosing between the ruling's two exclusions, and it chose by evidence rather than by habit** —
+which is exactly the distinction 裁-23's last sentence drew, so the outcome is the ruling
+honoured, not the incumbent surviving. The owner was told renumbering before publication is
+cheap and did not ask for a third form. Dossier:
+`docs/plan/research/coa-template-research-2026-08-29.md` §2 (the four legs, and the road not
+taken); the draft chart is `docs/plan/research/coa-template-2026-08-29.json`.
+
 ---
 
 ### Q3 · Who applies the standard chart to a new client?
