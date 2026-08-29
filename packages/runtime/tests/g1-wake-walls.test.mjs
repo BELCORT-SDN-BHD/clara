@@ -208,6 +208,46 @@ test("G1B-I2 the bank classifier's closed world of three reply shapes", { skip }
   assert.match(body, /return v_res;/, "and a success still returns the delegate's own result verbatim");
 });
 
+test("G1B-I3 EVERY DB call in both tool sets matches its function's LIVE declared arity", { skip: skip0138 }, async () => {
+  // THE HIGHEST-VALUE MECHANICAL CHECK IN THIS FILE. Sixteen hand-written parameter lists across
+  // two frozen tool sets, every one of them a chance to drop or transpose an argument — and an
+  // arity slip is not a crash a reviewer would see: it is a wrong write, or a refusal blamed on
+  // the wrong thing. Typecheck cannot see inside a SQL string, and no behavioural cell reaches
+  // most of these verbs (they need real books to act on).
+  //
+  // THE INSTRUMENT IS THE CATALOG, NOT THE MIGRATION SOURCE (review law 3: the migration text is
+  // a projection of the function; pg_proc IS the function). A verb whose name resolves to more
+  // than one overload fails here too — an ambiguous call is not a checked call.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const dir = fileURLToPath(new URL("../workflows/", import.meta.url));
+  const files = ["bankAgent.v1.tools.ts", "closePrep.v1.reads.ts", "closePrep.v1.tools.ts"];
+
+  const calls = [];
+  for (const f of files) {
+    const src = readFileSync(dir + f, "utf8");
+    for (const m of src.matchAll(/select\s+clara\.(\w+)\(([^)]*)\)\s+as\s+\w+/g)) {
+      const placeholders = new Set([...m[2].matchAll(/\$(\d+)/g)].map((x) => Number(x[1])));
+      calls.push({ file: f, name: m[1], max: Math.max(...placeholders), distinct: placeholders.size });
+    }
+  }
+  // 4 bank + 12 close = 16. Pinned as a COUNT so a future call that silently stops matching the
+  // regex (a reformat, a renamed alias) is caught here rather than skipped in silence.
+  assert.equal(calls.length, 16, `expected 16 DB calls across the two tool sets, saw ${calls.length}`);
+
+  for (const c of calls) {
+    const r = await rig.rootQuery(
+      `select pg_get_function_identity_arguments(p.oid) as ident, p.pronargs
+         from pg_proc p where p.pronamespace='clara'::regnamespace and p.proname=$1`,
+      [c.name],
+    );
+    assert.equal(r.rows.length, 1, `clara.${c.name} (${c.file}) must resolve to EXACTLY one catalog entry, saw ${r.rows.length}`);
+    const declared = Number(r.rows[0].pronargs);
+    assert.equal(c.max, declared, `clara.${c.name} (${c.file}): highest placeholder $${c.max} but the verb declares ${declared} args — [${r.rows[0].ident}]`);
+    assert.equal(c.distinct, declared, `clara.${c.name} (${c.file}): ${c.distinct} distinct placeholders but the verb declares ${declared} — a repeated or skipped $n`);
+  }
+});
+
 test("G1B-H1 a bank WRITE before any pack read is refused locally, by name, and never reaches the database", { skip }, async () => {
   const tools = await import("../workflows/bankAgent.v1.tools.ts");
   const rec = tools.newBankRunRecord();
