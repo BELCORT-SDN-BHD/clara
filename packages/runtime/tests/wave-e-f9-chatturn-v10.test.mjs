@@ -368,8 +368,13 @@ test("…and the chat lane settles on that transcript, not on a derived outcome 
 // read_document/draft_journal_entry on top of v11's own imports; v13 is F-A2's frozen
 // export, v14 is F-A3 PR-3's. Everything above stays exactly as it was. Only the pin
 // assertion moves, and v13 joins the policy (c) roster.
-test("registry.ts pins chatTurn_v14 and still exports superseded v13/v12/v11/v10/v9/v8 (policy (c))", () => {
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v14");
+// ...and v14 -> v15 at F-A6 PR-2 (the audited freeform read). v15 is a THIN extension: it
+// adds one tool and rebinds the prompt/tools/usage triple; v10's body is still byte-untouched
+// and still reached through the same import chain. Only the pin assertion moves, and v14 joins
+// the policy (c) roster.
+test("registry.ts pins chatTurn_v15 and still exports superseded v14/v13/v12/v11/v10/v9/v8 (policy (c))", () => {
+  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v15");
+  assert.equal(typeof registryMod.chatTurn_v14, "function");
   assert.equal(typeof registryMod.chatTurn_v13, "function");
   assert.equal(typeof registryMod.chatTurn_v12, "function");
   assert.equal(typeof registryMod.chatTurn_v11, "function");
