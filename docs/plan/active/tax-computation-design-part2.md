@@ -23,9 +23,12 @@ the document a Malaysian firm actually attaches and a tax agent actually reviews
 deliverable.
 
 **(2) The field-value packs** — `form_c`, `form_pt`, `form_b`, `form_p`, `cp204`. A field-code → value
-table, so a human keys MyTax without re-deriving anything. **Not a replica of the LHDN form**:
-`publish_report_template_version` refuses a `report_class='statutory'` template from anything but the
-human admin verb (`0069:121`), `statutory_wording` has zero seeded rows, and fixed-layout boxed-form
+table, so a human keys MyTax without re-deriving anything. **Not a replica of the LHDN form**: a
+`report_class='statutory'` template is refused to any wake caller — *v1.3, measured: `0069:121` is
+SUPERSEDED, and the refusal now lives in the CoR'd core `clara._publish_report_template_core(...)` as
+`if p_wake_kind is not null and p_report_class = 'statutory' then raise CLR04
+statutory_template_human`; the human side is a **role floor** (`_human_ctx(role_rank('admin'))`), not
+a second refusal (M0 **D-2**)* — `statutory_wording` has zero seeded rows, and fixed-layout boxed-form
 rendering is unbuilt — the Typst engine carries a chart/line AST only (survey §3.3). A pixel replica in
 v1 would mean either building a form renderer or faking one. **(D-8.)**
 
@@ -87,12 +90,21 @@ it returns a status and a named reason and the ladder continues, so the human se
 once rather than one error at a time. A downstream rung whose input is `not_evaluable` is itself
 `not_evaluable` (part 1 §5's cascade is intended).
 
-The vocabulary — **twenty-one strings, each printable, each with a battery cell (§10) and each with a seeded
+**[v1.3, 2026-08-29 — measured.]** The rows are **PLATFORM rows**: `metric_na_reason_versions` holds
+nine live rows, **every one `firm_id = NULL`**, unique on `(firm_id, reason_key, version) NULLS NOT
+DISTINCT`, with `cell_status ∈ ('undefined','absent','refused')` — **`'ok'` is not a legal value**,
+which the mapping below already respects. `_tf_metric_catalog_scope`'s verdict conjunct **`pf is not
+null`** is what makes a `firm_id = NULL` row lawful for **every** firm. So PR-1's rows land
+`firm_id = NULL`, `version = 1`, `effective_from = '2020-01-01'` (the nine live rows' own value) and
+`display_token = '—'` (likewise). **(M0 D-6.)**
+
+The vocabulary — **twenty-two strings, each printable, each with a battery cell (§10) and each with a seeded
 `metric_na_reason_versions` row**:
 
 | Refusal | Fires when | Maps to |
 |---|---|---|
 | `close_not_sealed` | no active `close_receipts` row for the named fiscal year | `absent` |
+| **`close_snapshot_missing_pl_rows`** *(v1.3, **D-9**)* | the active receipt carries no `pl_rows` array — measured: `_tf_close_receipts_belt` enforces the presence of **`closing_position` only**, so the key the whole ladder reads is present by `finalize_close`'s construction and by **nothing else**; no belt, no CHECK, no trigger | `absent` |
 | `basis_period_undetermined` | no `tax_basis_periods` row for the YA being read (including `ya_target` at R11) | `absent` |
 | **`basis_period_not_coextensive_with_close`** | the asserted period is not exactly the sealed fiscal year's span | `undefined` |
 | `account_untreated` | a non-zero `pl_rows` account has no approved treatment | `undefined` |
@@ -116,6 +128,21 @@ The vocabulary — **twenty-one strings, each printable, each with a battery cel
 
 *(Bold = minted or re-cut by the gate fold. `disposal_proceeds_unavailable` is **retired**: it named an
 absence, and the failure it was written for is a present-but-wrong substitution — part 1 §5.)*
+
+**Two RULING strings ride alongside the closed twenty-two, counted separately so a ruling can never
+be mistaken for ladder vocabulary, and each retiring the day its ruling changes.** Both exist for
+this section's own reason: a string with no reason row can be raised but never persisted, so a
+refusal named anywhere without a row is the defect C21 exists to catch. **PR-1 seeds both.**
+
+| Ruling refusal | Fires when | Maps to |
+|---|---|---|
+| **`s44_6_relief_unmodelled`** *(OQ-11, fail-closed default (a))* | an approved-institution donation is reached at R8. It is an **s.44(6) deduction capped at 10% of aggregate income** — a figure that does not exist until R7 — so `fraction_bp × movement` structurally cannot express it. v1 refuses by name and the human keys the relief. A flat 100% add-back would **overstate the charge**, silently, on every client that donates to an approved institution | `refused` |
+| **`tax_issue_unavailable`** *(**裁-33**, owner, 2026-08-29)* | any attempt to move a tax computation past DRAFT. **There is no golden bar and no `issued` tax computation**: `report_runs` KEEPS its pre-existing `issued` value — Wave-E's enum, shared with every report class, and narrowing it would be a shared-surface change for one item's convenience (law 81) — so the **transition** is walled by name. The wall itself is PR-7's, which 裁-33 rules is **not built for beta**; the string ships first so the wall has a persistable name when it is built | `refused` |
+
+**裁-33's other half is a property, not a row: no F-T3 relation carries a lifecycle state at all.**
+PR-1's six platform relations carry no `status`/`state`/`issue_mode`/`issued_at`/`issued_by` column,
+proven positively by a column census in the migration's tail and by battery cell **H2** — never by
+the absence of a state machine.
 
 **`account_untreated` is the important one, and it now enumerates the right set.** The census runs over
 **`snapshot->'pl_rows'`**, every row of which is non-zero by the receipt's own `mv <> 0` filter: an
@@ -187,13 +214,13 @@ carries a **closed census of every relation its body names**, each with the PR t
 | PR | Content | Judgement? | D1 window |
 |---|---|---|---|
 | **PR-0** | gate record; rig replay at the frontier; the `prosrc`-SHA prestate pins for **all three** PR-3 bodies; discharge Annex C's predictions; the shared-surface note to `conductor` (Tier-1 family, `evaluator_versions`, `fixed_assets`) | — | — |
-| **PR-1** | the five law tables, all **developer-seeded** per R-L25 (**no governed door is built**); `valid_through` on every row; the owner-signature requirement on treatment codes; the seeded law from survey §6.2, the ICT row and the `sva_annual_cap` row deliberately absent; **the twenty-one `metric_na_reason_versions` rows** (§9); the platform-scoped RLS shape | **yes** (missing row, superseded row, unsigned code) | no |
+| **PR-1** *(BUILT 2026-08-29)* | **SIX** platform relations, all **developer-seeded** per R-L25 (**no governed door is built**): the five law tables **plus the `add_back_class` → code mapping table** the conductor assigned at the replay. `valid_through` on every row; the seeded law from survey §6.2; **26** authorities (3 graded `reference_only_unfetched`, `valid_through` set to the day they were named so the belt raises them first run) · **13** codes, **every one UNSIGNED** (OQ-7's fail-closed default: `owner_signed_*` is NULLABLE, not NOT NULL, and the wall is `treatment_code_unsigned` plus a one-way-once signature arm) · **12** rate bands · **5** CA rates · **38** thresholds · **12** map rows covering every 裁-21 leaf exactly once, `donations_approved` → the REFUSE code. **FIVE deliberate absences**, each proven by a zero COUNT rather than a comment: the ICT class (U1), `sva_annual_cap` (U2), the two `EXCLUDE_*` codes (no official-source read grounds one), the individual rate bands (v1 computes no individual entity charge), and a YA2023 foreign-holding row (the test bites from YA2024). **22 ladder + 2 ruling `metric_na_reason_versions` rows** (§9). The platform-scoped RLS shape: forced RLS, one `clara_fn_owner` policy, **zero grants, `relacl` NULL** | **yes** (missing row, superseded row, unsigned code) | **no — proven EMPTY by a whole-catalog `pg_get_functiondef` census, not asserted** |
 | **PR-2** | `tax_basis_periods` (D-1) · `client_tax_attributes` + `record_client_tax_attribute`; the client-scoped RLS shape and composite tenant FKs. **No `client_fact_keys` seed block and no `record_client_fact` call** | **yes** | no |
-| **PR-3** | `disposal_value_cents` + `disposal_value_basis` on `fixed_assets`; `uq_fa_id_tenant`; the `dispose_fixed_asset` signature + body replacement (`0041:3643`); the `_fa_on_approve` body replacement (`0041:2227`); the `_tf_fixed_assets_immutable_0017` allowlist splice; `ca_asset_years` | partial | **yes** (three live bodies) |
+| **PR-3** | `disposal_value_cents` + `disposal_value_basis` on `fixed_assets`; ~~`uq_fa_id_tenant`~~ **DROPPED — M0 D-7: `uq_fixed_assets_id_firm_client UNIQUE (id, firm_id, client_id)` already exists, and `ca_asset_years`' tenant FK binds to it. PR-3 loses one DDL statement and gains nothing**; the `dispose_fixed_asset` signature + body replacement (`0041:3643`, live `prosrc` sha `a2dbb8bd…`); the `_fa_on_approve` body replacement (`0041:2227`, live `prosrc` sha `7ffa9a71…`); the `_tf_fixed_assets_immutable_0017` allowlist splice — **which M0 D-5 makes larger than v2 knew: the allowlist admits `ca_class`/`is_commercial_vehicle`/`is_new` only while the depreciation particulars are INCOMPLETE, so PR-3 must also answer OQ-10 or `ca_class_unassigned` becomes a permanent refusal with no in-product remedy**; `ca_asset_years` | partial | **yes** (three live bodies) |
 | **PR-4** | `tax_account_treatments` + `tax_entry_treatments`; `_tf_tax_treatment_human_only`; `wake_propose_tax_treatment` + core + allowlist row; `approve_tax_treatment` (the human door, `is_agent`-excluding); the citation binding | **yes** + cross-model | no |
 | **PR-5** | `cp204_filings` + `record_cp204_filing`; `tax_carryforwards` + `record_tax_carryforward` — **the last table PR**, moved ahead of the member so nothing the frozen body reads is created after it | **yes** | no |
-| **PR-6** | **`evaluate_tax_computation_v1` — the ONE registered member**, the `evaluator_version` row, the relation census above, `wake_run_tax_computation` + core + allowlist row (the run wrapper materialises cells, `ca_asset_years` and the carry-out rows), the refusal vocabulary | **yes** | no |
-| **PR-7** | the report definitions; the statutory-class template publication (a **human** act); the field-pack map + `publish_tax_form_field_map` **with `form_version` pinned** + `form_version_superseded`; the `report_run` wiring | partial | rides F-A5's |
+| **PR-6** | **`evaluate_tax_computation_v1` — the ONE registered member**, the `evaluator_version` row, the relation census above, `wake_run_tax_computation` + core + allowlist row, the refusal vocabulary. **The wrapper's obligations are LARGER than v2 stated (M0 D-10)**: `metric_cells.evaluation_context_id` is NOT NULL, so it must mint a `metric_evaluation_contexts` row (which itself carries a `snapshot_id` → `metric_input_snapshots`), and the DEFERRED `_tf_metric_cell_provenance_complete` requires `inputs->'normalized_provenance'` to carry **all seven** family keys — `period_ids`, `snapshot_ids`, `account_set_version_ids`, `constant_version_ids`, `entry_ids`, `document_ids`, `presentation_map_version_ids` — an absent key is **not** an empty list, and each must reconstruct its child table exactly or CLR11 fires at commit. **Also: PR-6 must append its `frozen-evaluators.json` entry DARK (`deployed:false`) and say so in its body — `--lock-deployed` is BLANKET, so any other lane running it in that window would light F-T3's evaluator without a ceremony** | **yes** | no |
+| **PR-7** | ~~the report definitions; the statutory-class template publication; the field-pack map + `publish_tax_form_field_map`; the `report_run` wiring~~ — **NOT BUILT FOR BETA (裁-33, owner, 2026-08-29).** There is no golden bar, so a tax computation goes to **DRAFT only** and is never `issued`. `report_runs` keeps its `issued` value; the TRANSITION is walled by name (`tax_issue_unavailable`, seeded in PR-1). When PR-7 is eventually built it inherits that wall, and D-2's correction: the statutory-template refusal now lives in the CoR'd `clara._publish_report_template_core`, not `0069:121` | partial | rides F-A5's |
 | **PR-8** | the `law_review_due` belt — `wake_raise_law_review_due` on `proactive` + its allowlist row, a consumer of F-A4's clock, idempotent per row per horizon, resolving only by a seeded successor | partial | no |
 
 **What moved, and why it is not cosmetic.** v1.2 put `cp204_filings` in PR-6 *after* the member in PR-5,
@@ -216,11 +243,25 @@ F-T3 follows it — **re-derived against merged `main`, never against its design
 merge hazard, and one fewer reason for those lanes to coordinate with this one. What F-T3 does share is
 `clara.fixed_assets` (PR-3) and `evaluator_versions` (PR-6), and PR-0's note names both.
 
-**The evaluator freeze roster: F-T3 is LAST and it appends.** Live claimants in merge order are **F-A5
-PR-2 + the C-flip ceremony → F-A8 PR-1 → F-T3**. **F-A9 is NOT a claimant** — a v1.1 note said it "mints
-the spend evaluator"; that was wrong. Its `llm_usage_events_priced` is a **VIEW**: no `prosrc`,
-invisible to `verify_evaluator_freeze`, unmatched by the lint's `clara.evaluate_*` regex, no registry
-row, no ceremony act.
+**The evaluator freeze roster — CORRECTED 2026-08-29 against `main`; two of v2's three terms were
+wrong (M0 §2).** v2 said "live claimants in merge order are F-A5 **PR-2** + the C-flip ceremony →
+F-A8 PR-1 → F-T3". Measured: the registration is **F-A5 PR-1** (`0111`), PR-2 (`0112`) registers
+nothing, and "the C-flip" is a *deploy* act on PR-1's row that **has already run**; **F-A8 has NOT
+merged** (lane state `design`, no PR, registers nothing today); and two claimants the list omits DID
+land — **F-A5b card-1** (`0135`, `evaluate_metric v2`) and **F-A4 PR-2a** (`0140`,
+`prepayment_schedule v1`, dark). So: **LANDED, in merge order — F-A5 PR-1 → F-A5b card-1 → F-A4
+PR-2a.** F-T3 is the fourth registration if F-A8 slips, the fifth if it lands first.
+**And the ordering constraint is weaker than v2 assumed: the registry and the manifest are both
+append-only and `verify_evaluator_freeze()` iterates every row regardless of order, so F-T3 does NOT
+have to be last.** Merge order matters for exactly one thing — manifest conflict resolution — and
+the standing rule is unchanged: *a manifest conflict is NEVER resolved by dropping another lane's
+key.* **F-A9 is NOT a claimant** — a v1.1 note said it "mints the spend evaluator"; that was wrong.
+Its `llm_usage_events_priced` is a **VIEW**: no `prosrc`, invisible to `verify_evaluator_freeze`,
+unmatched by the lint's `clara.evaluate_*` regex, no registry row, no ceremony act.
+*(Unrelated but measured and NOT F-T3's to fix: `clara.prepayment_schedule_v1` (`0140`) is DB-frozen
+and ABSENT from `frozen-evaluators.json`, because the lint discovers only the `clara.evaluate_*`
+spelling. That is F-A4's half-freeze; F-T3's member is correctly named `clara.evaluate_tax_
+computation_v1` and must stay so.)*
 
 **Hard gates, unchanged (survey §7).** **F-A5 PR-1** (the seal→render closure, gap S9) and **F-A4** (a
 real `close_receipts` row — **F-A4/PR-1a is train position 3**). F-T3's evaluator can be *authored*
@@ -241,11 +282,18 @@ the disposal does not touch.
 **U2** (PR 3/2021, small value assets) gates the `sva_annual_cap` threshold row —
 `rate_row_missing_for_ya` until it is read. Both are R-L25's posture, not new machinery.
 
-**Still open:** no acceptance oracle in the corpus (survey §5, F2) — **OQ-1**, a sitting card. It does
-not block authoring; it blocks *accepting*. The gate sharpened why: every battery cell can pass while
-the bottom line is wrong, and the fold's own R7/R8 re-cut is exactly the class of error only a
-hand-worked ladder catches. **OQ-2, OQ-3, OQ-7, OQ-8's governance half and OQ-9 stand unchanged** — the
-fold decided no owner question and closed none.
+**OQ-1 is RULED — 裁-33 (owner, 2026-08-29): there will be NO golden bar.** Neither the hand-worked
+RPR YA2025 ladder nor any other oracle is built. The consequence is not that the bar is skipped but
+that **the ARTIFACT is**: a tax computation goes to **DRAFT only, never `issued`**, and **PR-7 is not
+built for beta**. That is the fail-closed shape the replay's own card already named as the default
+if the sitting was not reached — the ladder is computable and inspectable, and nothing reaches a
+sealed statement — now made the standing ruling rather than a default. PR-1 seeds the wall's name,
+`tax_issue_unavailable`, so the transition can be refused by name whenever PR-7 is built (§9). **The
+risk this leaves on the record, stated rather than softened:** every battery cell can pass while the
+bottom line is wrong, and the v2 fold's own R7/R8 re-cut is exactly the class of error only a
+hand-worked ladder catches. Draft-only is what keeps that error out of a document a human signs.
+**OQ-2, OQ-3, OQ-7, OQ-8's governance half and OQ-9 stand unchanged**; **OQ-10, OQ-11 and OQ-12** are
+new at the replay and PR-1 builds all three to their fail-closed defaults (M0).
 
 ---
 

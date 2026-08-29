@@ -12,6 +12,41 @@
 
 ---
 
+## M0 · The PR-0 replay deltas — the v1.3 ledger
+
+*Added 2026-08-29 at the replay fold. `tax-computation-pr0-replay-2026-08-29.md` is the
+MEASURED ground and OVERRIDES the design set wherever the two differ: every DB claim in v2
+was a design-stage source read, and the replay applied `0001`→`0147` on a throwaway and
+measured them. This table lives here rather than in the design's header because that file
+has a 500-line budget its own header states; the design carries the pointer and the two
+deltas that would otherwise have been built wrong.*
+
+| # | What v2 said | What the rig MEASURED | Where it is folded |
+|---|---|---|---|
+| **D-1** | the snapshot builders live at `0056:2138-2158` / `0056:2285-2292` | `finalize_close` has **three** definitions (`0056` create, `0120` CoR, `0128` CoR); those cites point at a body superseded **twice**. The substance holds at the live body | §3 R1/R2/R3 · A.2 · gate record GB-1 — re-cite to `0128:307` and `0128:463`/`:473`. *`0056:1544` (`uq_cr_one_active_close`) and `0056:1554` (the belt's refusal text) DO still resolve and are kept* |
+| **D-1b** | GB-1 rests on two independent catalog confirmations | `obj_description('clara.close_receipts')` is **NULL** and the table carries zero column comments — `0056:1503` is a file `--` comment, not a catalog `COMMENT ON`. One catalog confirmation plus one file comment | gate record GB-1's framing |
+| **D-2** | the statutory-template wall is `0069:121` | superseded: the refusal now lives in `clara._publish_report_template_core(...)` as `CLR04 statutory_template_human`, and the human side is a **role floor** (`role_rank('statutory' → 'admin')`), not a second refusal | part 2 §8 · mechanics M1.3 |
+| **D-3** | `deployed` cannot be flipped by a plain UPDATE | a plain UPDATE from the **bare migration principal** SUCCEEDS. The wall is `current_user = session_user` **+** one-way-once **+** a `verify_evaluator_freeze()` precheck; `deploy-evaluator-version.mjs` is the recipe, not the wall | Annex C P-9 |
+| **D-4** | D-16's reason: a later **ACL / owner** / `search_path` change raises | **HALF-REFUTED.** `pg_get_functiondef` renders neither the owner nor the ACL: both change the row and leave the hash alone. Only `search_path` moves it. **The ONE-member ruling stands** on the two measurements that DO hold — the checker ignores `deployed` entirely, and closures **share** members | §3's D-16 block · annexes D-16 |
+| **D-5** | `ca_class` is freely correctable on an approved asset | `_tf_fixed_assets_immutable_0017` admits `ca_class`/`is_commercial_vehicle`/`is_new` **only while `_fa_particulars_complete(OLD)` is false**. Once particulars are complete a `ca_class` UPDATE raises **CLR13** — so a fully-registered, tax-blind asset can never be classified in-product | mechanics M3.4 · part 2 §11 PR-3 · battery C11b · **→ OQ-10** |
+| **D-6** | PR-1 "seeds one row per string" | `metric_na_reason_versions` holds **9 rows, every one `firm_id = NULL`**, unique on `(firm_id, reason_key, version) NULLS NOT DISTINCT`, `cell_status ∈ (undefined, absent, refused)` — `'ok'` is **not** legal. `_tf_metric_catalog_scope`'s conjunct `pf is not null` is what makes a platform row lawful for **every** firm | part 2 §9 — the rows land `firm_id = NULL`, `version = 1`, with an `effective_from` and a `display_token` |
+| **D-7** | PR-3 adds `uq_fa_id_tenant` to `clara.fixed_assets` | **HALF-REFUTED.** `uq_fixed_assets_id_firm_client UNIQUE (id, firm_id, client_id)` **already exists**; the `0003:155` "its PK is `id` alone" cite is stale by the whole Wave-D/E arc. **PR-3 must NOT add it** | mechanics M4 · part 2 §11 PR-3 |
+| **D-8** | the wake CHECKs are as `0011:618-628` shows | the CONCLUSION holds (no new kind, no CHECK extension) but the quoted text is **stale by four kinds**: live domain is `interactive · proactive · autodraft · interactive_client · close_prep · bank_agent · filing`, and the pairing CHECK has **six** arms | mechanics M1.2 |
+| **D-9** | the receipt always carries `pl_rows` | `_tf_close_receipts_belt` enforces the presence of **`closing_position` only**. `pl_rows` is present by `finalize_close`'s construction and by **nothing else** — no belt, no CHECK, no trigger. The whole ladder reads an **unenforced** key | part 2 §9 — a twenty-second refusal string, **`close_snapshot_missing_pl_rows`** → `absent`, plus its reason row and its battery cell |
+| **D-10** | PR-6's wrapper "materialises `metric_cells`" | larger than stated: `metric_cells.evaluation_context_id` is **NOT NULL**, and `_tf_metric_cell_provenance_complete` (DEFERRED) requires `inputs->'normalized_provenance'` to carry **all seven** family keys — an absent key is not an empty list — each reconstructing its child table exactly, or CLR11 fires at commit | part 2 §11 PR-6 |
+| **D-11** | R11's cells are stamped on `ya_target`'s period | `reporting_periods.grain` is `month \| fiscal_year` and `ck_rp_fy_present` makes a `fiscal_year` row require a `fiscal_years` row — and `ya_target`'s year has not begun, by s.107C(1)-(2)'s own timing. **Not buildable as written** | §7 · A.3 R11 · **→ OQ-12** |
+
+**Three new owner questions** join the standing cards, and PR-1 BUILDS all three to their
+fail-closed defaults rather than waiting: **OQ-10** (which door re-opens a frozen `ca_class`;
+default (c), `ca_class_unassigned` refuses by name), **OQ-11** (the s.44(6) donation cap;
+default (a), `s44_6_relief_unmodelled` refuses by name and never a flat 100% add-back),
+**OQ-12** (CP204's target year has no period object; default (a), the pack requires
+`ya_target`'s fiscal year OPEN). **OQ-7**'s default is likewise built: the treatment codes
+seed UNSIGNED and every treatment refuses `treatment_code_unsigned`. **OQ-8**'s default is
+the owner fallback that SAYS it fell back (M5 property 5).
+
+---
+
 ## M1 · The verb set — wake wrappers, ungranted cores, human doors
 
 *(Fold of gate blocker B17; **D-25**. v1.2 named three agent writes — the proposal verb, the run wrapper
@@ -53,13 +88,17 @@ audit-distinguishable from a human's for the life of the record.
 
 ### M1.2 The wake-kind analysis — stated, not assumed
 
-`0011:618-628` carries **two** CHECK families on `clara.wake_credentials`, and both bind:
+`clara.wake_credentials` carries **two** CHECK families and both bind. **[v1.3 — the quoted
+`0011:618-628` text was STALE BY FOUR KINDS; re-derived from the LIVE catalog (M0 D-8). The
+CONCLUSION below is unchanged and now measured: both arms were probed behaviourally — `autodraft`
+with a NULL `client_id` and `proactive` with a non-NULL one each raise a check_violation.]**
 
 ```
-add constraint ck_wake_credentials_kind_0011   check (wake_kind in ('interactive','proactive','autodraft')),
-add constraint ck_wake_credentials_client_0011 check (
-  (wake_kind='autodraft' and client_id is not null)
-  or (wake_kind in ('interactive','proactive') and client_id is null))
+ck_wake_credentials_kind_0011   -- SEVEN kinds live, not three:
+  interactive · proactive · autodraft · interactive_client · close_prep · bank_agent · filing
+ck_wake_credentials_client_0011 -- SIX arms, not two:
+  autodraft / interactive_client / close_prep / bank_agent  require a client_id
+  interactive / proactive / filing                          require none
 ```
 
 - The two client-scoped writes carry a `p_client` and act on one client's books, so they are
@@ -85,7 +124,7 @@ delegated to a human-shaped core.
 | `record_client_tax_attribute` | admin+ | supersede-never-update; `effective_on` is the caller's, `recorded_at` is the clock's |
 | `record_tax_carryforward` | admin+ | a nil assertion is `amount_cents = 0` **with a basis**, never an absent row |
 | `record_cp204_filing` | admin+ | what was actually filed; Clara cannot e-file and therefore cannot know |
-| `publish_tax_form_field_map` | the statutory-class admin verb | rides `publish_report_template_version`'s human-only wall (`0069:121`) |
+| `publish_tax_form_field_map` | the statutory-class admin verb | **[v1.3, M0 D-2]** rides the **admin-rank FLOOR**, not a second refusal: the wake-caller refusal moved out of `0069:121` into the CoR'd `clara._publish_report_template_core(...)` (`CLR04 statutory_template_human` on `p_wake_kind is not null and p_report_class='statutory'`), and the human side resolves `_human_ctx(role_rank('statutory' → 'admin'))`. *PR-7 is not built for beta (裁-33), so this door is deferred with it* |
 
 ---
 
@@ -98,10 +137,22 @@ and are **not repeated** here.
 lhdn_page}, label, url, accessed_at, quote, fetched_by, valid_through, owner_signed_by, owner_signed_at,
 revision, superseded_by, seeded_in_migration)`.
 
-**`tax_treatment_codes`** — `(code pk, direction ∈ {add_back, deduct, allowable, exclude}, fraction_bp
-int check 0..10000, regime, statutory_ref, effective_ya_from, effective_ya_to, authority_id →
-tax_authorities, valid_through, owner_signed_by NOT NULL, owner_signed_at NOT NULL, revision,
-superseded_by)`.
+**`tax_treatment_codes`** — `(code pk, direction ∈ {add_back, deduct, allowable, exclude, **refuse**},
+fraction_bp int check 0..10000, **requires_apportionment bool**, **refusal_reason_key**, regime,
+statutory_ref, effective_ya_from, effective_ya_to, authority_id → tax_authorities, **conflict**,
+**notes**, valid_through, owner_signed_by, owner_signed_at, revision, superseded_by)`.
+**[v1.3, three build-time departures, each recorded in the migration's own DEPARTURES REGISTER.]**
+**(a) `owner_signed_*` is NULLABLE, not NOT NULL** — OQ-7's fail-closed default is "PR-1 seeds the
+codes UNSIGNED and every treatment refuses `treatment_code_unsigned`", which a NOT NULL column cannot
+express. The wall moves to the named refusal plus a paired CHECK plus a **one-way-once** signature
+arm: an unsigned row may be signed exactly once, and a signed row can never be re-signed,
+re-attributed or un-signed. **(b) `direction` gains `refuse`**, paired with `refusal_reason_key` and
+carrying **no** `fraction_bp` — OQ-11's default, because an s.44(6) donation is a return-level
+deduction `fraction × movement` cannot express. **(c) `requires_apportionment`** — the motor
+running-costs family is genuinely mixed, and with `fraction_bp = 10000` and design §2's
+`COALESCE(apportionment_bp, 10000)` rule an ABSENT human apportionment would silently yield a 100%
+add-back and **overstate the charge**. The flag is what lets PR-2 refuse `mixed_account_needs_split`
+instead of defaulting; **PR-2 owes that branch.**
 
 **`tax_rate_bands`** — `(regime ∈ {company_msmc, company_standard, individual_resident,
 individual_non_resident}, ya, band_lower_cents, band_upper_cents NULL, rate_bp, authority_id,
@@ -111,8 +162,11 @@ valid_through, revision, superseded_by, seeded_in_migration)`.
 revision, superseded_by, seeded_in_migration)`. **The ICT 40/20 row is deliberately not seeded** (survey
 U1).
 
-**`tax_thresholds`** — `(ya, key, value_cents NULL, value_bp NULL, authority_id, valid_through, revision,
-superseded_by, seeded_in_migration)` with a CHECK that exactly one value column is non-null. Seeded
+**`tax_thresholds`** — `(ya, key, value_cents NULL, value_bp NULL, **value_int NULL**, authority_id,
+valid_through, revision, superseded_by, seeded_in_migration)` with a CHECK that exactly one value
+column is non-null. **[v1.3: `value_int` is a THIRD value column this list did not carry.
+`loss_carry_forward_years = 10` is a count of years — neither money nor a rate — and storing it as
+`value_cents` (RM0.10) or `value_bp` (0.1%) would be a lie in the column's own units.]** Seeded
 keys and values: `msmc_paid_up_max` RM2,500,000 · `msmc_gross_income_max` RM50,000,000 ·
 `msmc_foreign_holding_max_bp` 2000 · `related_company_paid_up_min` RM2,500,000 · `sva_asset_max`
 RM2,000 · **`sva_annual_cap` RM20,000 — NOT SEEDED until PR 3/2021 (survey U2) is read** ·
@@ -235,6 +289,22 @@ raises `'an approved fixed-asset baseline is immutable'`, errcode `CLR13`, reaso
 UPDATE would raise on the first disposal in the estate** — and R5's balancing allowances and charges
 would never compute for anyone.
 
+**[v1.3 — a SECOND consequence of the same allowlist, measured, that v2 did not see (M0 D-5).]** The
+nine particulars columns include **`ca_class`, `is_commercial_vehicle` and `is_new`**, and they are
+admitted **only while `_fa_particulars_complete(OLD)` is false** — a predicate over
+`depreciation_start_date`, `depreciation_method` and the life/residual/rate trio that says nothing
+about `ca_class`. **Measured: on an approved asset whose depreciation particulars are complete, a
+`ca_class` UPDATE raises CLR13.** So an asset registered fully but tax-blind — which is **every asset
+in the estate today**, by `0041`'s own design note ("NOTHING until Wave F verifies CA facts") — can
+never be classified in-product, `ca_class_unassigned` becomes a permanent refusal with no remedy, and
+**R5 would refuse for every existing asset**. Two knock-ons: battery cell **C11b as written is
+unbuildable** on a particulars-complete asset, and **PR-3 must widen the unconditional allowlist for
+the three CA columns behind a new human door (`set_ca_classification`, bookkeeper+, audited,
+reasoned)** or route the correction through the supersede path. **→ OQ-10**, whose fail-closed default
+(c) — leave it, and R5 refuses by name for every existing asset — is honest but makes F-T3's most
+arithmetically intricate half dead on arrival. PR-1 seeds `ca_class_unassigned` with that hazard named
+in its own `semantics` so the refusal a human reads says what to do about it.
+
 The repo already made this exact mistake once and wrote it down (`0041:864-866`): *"The pre-0041
 allowlist omitted `disposal_entry_id` and `superseded_at`, so the FIRST disposal would have raised
 CLR13."*
@@ -293,14 +363,24 @@ states it in so many words):
   client_id)`. The target `uq_coa_account_id_tenant unique(account_id, firm_id, client_id)` **already
   exists** at `0058:56` and is used by nothing — without the FK a treatment row can name one tenant's
   client and another tenant's account, and the add-back is computed off a foreign account's balance.
-- **`ca_asset_years` names an asset**, and `clara.fixed_assets` has **no** `(id, firm_id, client_id)`
-  unique to bind to — its PK is `id` alone (`0003:155`). **PR-3 adds `constraint uq_fa_id_tenant unique
-  (id, firm_id, client_id)`** — additive DDL, no body replacement — and the table takes
+- **`ca_asset_years` names an asset. [v1.3 — HALF-REFUTED, M0 D-7.]** The claim that
+  `clara.fixed_assets` has no `(id, firm_id, client_id)` unique, "its PK is `id` alone (`0003:155`)",
+  is **stale by the whole Wave-D/E arc**: the table already carries **`uq_fixed_assets_id_firm_client
+  UNIQUE (id, firm_id, client_id)`**, plus `firm_id`, `client_id`,
+  `fk_fa_acquisition_entry_congruent` and `fk_fa_disposal_entry_congruent`. **PR-3 must NOT add
+  `uq_fa_id_tenant`** — it loses one DDL statement and gains nothing. `ca_asset_years` takes
   `foreign key (fixed_asset_id, firm_id, client_id) references clara.fixed_assets (id, firm_id,
-  client_id)`. This is the same move `0058:56` made for `coa_accounts`.
+  client_id)` against the **existing** constraint. *(PR-1's own prestate re-measures this constraint
+  by name AND by `pg_get_constraintdef`, and aborts if it is not there, so the delta is proven by an
+  apply rather than only asserted in a document.)*
 
 **Class B — the six platform-scoped relations.** `tax_authorities` · `tax_treatment_codes` ·
-`tax_rate_bands` · `capital_allowance_rates` · `tax_thresholds` · the field-pack map. These are law and
+`tax_rate_bands` · `capital_allowance_rates` · `tax_thresholds` · **`tax_add_back_class_map`**
+*(v1.3: the conductor's replay-§5 assignment — the 裁-21 COA template stores the citation-backed
+`add_back_class` HINT on a template account, F-T3 owns the map from that hint to its own `ADDBACK_*`
+vocabulary, and a treatment becomes fact only through PR-4's per-client human approve door, so a
+pre-annotated template account is a legitimate pre-seeded PROPOSAL rather than an inference from a
+name)*. **The field-pack map moves to PR-7, which 裁-33 rules is not built for beta.** These are law and
 product vocabulary, not tenant data, and the estate's own effective-dated-policy-table idiom applies —
 `metering-design.md:231-234` states it for `llm_price_table`: **`force row level security` with only an
 owner policy, no `firm_id` column and no `clara_authenticated` grant**, read through a typed DEFINER
@@ -366,7 +446,7 @@ a battery cell" and covered seven of fourteen.
 | **C10b** | **the b/f business loss does not shelter non-business income** | b/f loss > aggregate business SI with non-business SI present → assert R7 floors the deduction at the business aggregate and the excess **carries**; assert total income is **not** reduced below the non-business amount |
 | **C10c** | **the s.44(6) cap sits on aggregate income** | with a current-year loss AND an approved donation present, assert the cap = 10% × R7 (before the s.44(2) deduction), not 10% × (R7 − loss) |
 | C11 | depreciation and CA are not the same read | change `fa_depreciation` only → R2 moves, R5 does not; change an asset's `ca_class` only → R5 moves, R2 does not |
-| **C11b** | an unassigned CA class refuses | null an asset's `ca_class` → `ca_class_unassigned` naming the asset; assign it → computes |
+| **C11b** | an unassigned CA class refuses | null an asset's `ca_class` → `ca_class_unassigned` naming the asset; assign it → computes. **[v1.3, M0 D-5: AS WRITTEN THIS CELL IS UNBUILDABLE on a particulars-complete approved asset — the immutability allowlist admits `ca_class` only while the particulars are INCOMPLETE, so the "assign it" arm raises CLR13. The cell is buildable only after OQ-10 is ruled and PR-3 opens the door; until then it must be authored against a particulars-INCOMPLETE asset and say so, or exit by a named, counted `skipHere`.]** |
 | C12 | the MV QE cap bites both ways | new car, cost 140,000 → QE 100,000; same car `is_new=false` → QE 50,000; commercial van 200,000 → QE 200,000 |
 | C13 | the SVA cap cascade is real, **and the excess is not stranded** | MSMC-eligible → no cap; flip the **C5 SME condition** to fail → the cap applies at RM20,000 **and** IA/AA runs on the balance (non-MSMC, RM35,000 of SVA assets → SVA line 20,000 **and** a non-zero IA/AA line; assert the CA total is **not** 20,000); make the **C2 SME condition** unknown → **`not_evaluable`, not the capped figure** |
 | **C13b** | **a disposal without a statutory value refuses** | approve a disposal with `p_statutory_disposal_value_cents` null → `disposal_value_not_established`; key market value > proceeds → the balancing charge follows the **greater**; assert a below-market proceeds figure alone never computes |
@@ -381,7 +461,8 @@ a battery cell" and covered seven of fourteen.
 | **C18b** | **a missing client identifier refuses the pack** | remove the client's `kind='tin'` row from `client_identifiers` → `entity_identifier_missing`; assert the pack does not render a blank TIN field |
 | **C19** | **a superseded form version refuses the pack** | pin a map to `form_version` X, publish Y → `form_version_superseded`; re-map to Y → renders |
 | **C20** | **a mixed account refuses until it is split or overridden** | flag an account mixed → `mixed_account_needs_split`; add an approved `tax_entry_treatments` row for the exceptional line → computes |
-| **C21** | **every refusal string is persistable** | for each of the twenty-one strings, assert a seeded `metric_na_reason_versions` row exists and a `metric_cell` carrying it inserts; assert a string with **no** reason row cannot be persisted, only raised |
+| **C21** | **every refusal string is persistable** | for each of the twenty-**two** ladder strings **and both ruling strings** (`s44_6_relief_unmodelled`, `tax_issue_unavailable`), assert a seeded `metric_na_reason_versions` row exists and a `metric_cell` carrying it inserts; assert a string with **no** reason row cannot be persisted, only raised. **[v1.3: PR-1 proves the SEED half — the rows exist, are platform-scoped, carry the right `cell_status`, and every REFUSE code's `refusal_reason_key` resolves to one. The `metric_cell` INSERT half is PR-6's, and measured why: `t_scope_cell_na_reason` is a CONSTRAINT trigger (AFTER INSERT, DEFERRABLE INITIALLY IMMEDIATE), so it fires strictly after the NOT NULL checks and after the internal RI FK triggers, whose names sort before it — an incomplete probe row dies on 23502/23503 and never reaches the wall. Reaching it needs a COMPLETE cell, hence a `metric_evaluation_contexts` row, hence a snapshot and a producer version: PR-6's run wrapper.]** |
+| **H2** | **裁-33: no F-T3 relation carries a lifecycle state** | census `status`/`state`/`lifecycle_state`/`issue_mode`/`issued_at`/`issued_by` over all six platform relations → empty; run the SAME census against `clara.report_runs` → non-empty. The positive control is the point: a census that has only ever said NO has not been shown able to say YES |
 
 **A note on C13's cross-references.** v1.2's C10 read "flip C5 to fail → cap applies; make C2 unknown →
 `not_evaluable`", which pointed at the *battery's* C5 (the rate-row cell) and C2 (the numeral wall)
