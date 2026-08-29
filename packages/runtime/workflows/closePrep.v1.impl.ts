@@ -110,11 +110,40 @@ export async function runClosePrepModelStep(ctx: CloseTaskContext, modelId: stri
   );
 
   const usageTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-  if (rec.acts > 0) return { outcome: { kind: "proposed", acts: rec.acts }, usageTokens };
+  return { outcome: classifyCloseOutcome(rec, text), usageTokens };
+}
+
+/**
+ * THE SETTLE DECISION, extracted so it can be driven directly (review law 1: this is judgement
+ * logic — it decides whether the night was a success — and it was previously only reachable
+ * through a model call, i.e. not reachable by any test at all).
+ */
+export function classifyCloseOutcome(
+  rec: { acts: number; reads: number; infraFaults: number },
+  text: string,
+): ClosePrepOutcome {
+  if (rec.acts > 0) return { kind: "proposed", acts: rec.acts };
   // A pass that READ and lawfully found nothing to do is a success — "finding nothing to do is a
   // correct outcome" is in the prompt because it is true of the settle too.
+  //
+  // N11 — BUT ONLY IF NOTHING ON OUR SIDE BROKE. S9 fixed the TOTAL failure's attribution; this is
+  // the PARTIAL one, and it is the shape with no durable trace at all. If the reads succeed and
+  // every WRITE is blocked by our own fault, reads > 0 would take this branch and settle the task
+  // COMPLETED — and for assertTailBinding's throw the failure lands BEFORE the DB call, so no
+  // receipt is written either. A single drifted propose_close call site would mean every close run
+  // reads fine, proposes nothing, and reports a green night with literally nothing on the record.
+  // That is the same silent-green class as M4, one layer up, and worse: M4 at least left twelve
+  // refused receipts behind.
+  //
+  // THE ASYMMETRY DECIDES IT, and for an unattended nightly lane it is not close. A false failure
+  // costs one wasted retry — the next wake picks the client up again. A false SUCCESS costs a
+  // close that silently never gets prepared, invisibly, with nobody looking. So an infra fault in
+  // a zero-act run is reported as a failure even though reads succeeded.
+  if (rec.reads > 0 && rec.acts === 0 && rec.infraFaults > 0) {
+    return { kind: "refused", code: "internal", message: "reads succeeded but every act was blocked by a fault on our side" };
+  }
   if (rec.reads > 0) {
-    return { outcome: { kind: "nothing_due", note: text.slice(0, 500) || "nothing due for this client" }, usageTokens };
+    return { kind: "nothing_due", note: text.slice(0, 500) || "nothing due for this client" };
   }
   // Never read anything at all: the run cannot say it looked, so it must not settle as though it
   // did. Absence is not evidence (review law 2) — this falls to the failed branch.
@@ -125,12 +154,9 @@ export async function runClosePrepModelStep(ctx: CloseTaskContext, modelId: stri
   // called a tool, or every call was a real DB verdict, is 'model_error'. This is the one field a
   // dead-letter triage reads first, so a wrong attribution here is expensive later.
   return {
-    outcome: {
-      kind: "refused",
-      code: rec.infraFaults > 0 ? "internal" : "model_error",
-      message: text.slice(0, 500) || "the run ended without reading anything",
-    },
-    usageTokens,
+    kind: "refused",
+    code: rec.infraFaults > 0 ? "internal" : "model_error",
+    message: text.slice(0, 500) || "the run ended without reading anything",
   };
 }
 

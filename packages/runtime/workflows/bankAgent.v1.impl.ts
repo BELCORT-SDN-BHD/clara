@@ -122,11 +122,28 @@ export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: strin
   );
 
   const usageTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-  if (rec.admitted > 0) return { outcome: { kind: "acted", acts: rec.admitted }, usageTokens };
+  return { outcome: classifyBankOutcome(rec, text), usageTokens };
+}
+
+/** THE SETTLE DECISION, extracted so it can be driven directly — see closePrep.v1.impl.ts's own
+ *  copy for why (review law 1: this decides whether the night was a success, and through the
+ *  model step it was reachable by no test at all). */
+export function classifyBankOutcome(
+  rec: { admitted: number; digest: string | null; infraFaults: number },
+  text: string,
+): BankAgentOutcome {
+  if (rec.admitted > 0) return { kind: "acted", acts: rec.admitted };
   // A pass that read the pack and lawfully found nothing to do is a SUCCESS, not a failure —
   // "stopping early is a correct outcome" is in the prompt because it is true of the settle too.
+  // N11 — the PARTIAL failure, the mirror of closePrep's. If the pack read succeeded and every ACT
+  // was blocked by our own fault, this branch would settle COMPLETED with nothing on the record.
+  // A false failure costs one wasted retry; a false success costs a reconciliation that silently
+  // never happened. For an unattended nightly lane the asymmetry is not close.
+  if (rec.digest !== null && rec.admitted === 0 && rec.infraFaults > 0) {
+    return { kind: "refused", code: "internal", message: "the pack read succeeded but every act was blocked by a fault on our side" };
+  }
   if (rec.digest !== null) {
-    return { outcome: { kind: "nothing_due", note: text.slice(0, 500) || "nothing due on this account" }, usageTokens };
+    return { kind: "nothing_due", note: text.slice(0, 500) || "nothing due on this account" };
   }
   // Never even read the pack: the run cannot say it looked, so it must not settle as though it
   // did. Absence is not evidence (review law 2) — this falls through to the failed branch.
@@ -136,12 +153,9 @@ export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: strin
   // every call was a real DB verdict, is 'model_error'. This is the one field a dead-letter triage
   // reads first.
   return {
-    outcome: {
-      kind: "refused",
-      code: rec.infraFaults > 0 ? "internal" : "model_error",
-      message: text.slice(0, 500) || "the run ended without reading the bank pack",
-    },
-    usageTokens,
+    kind: "refused",
+    code: rec.infraFaults > 0 ? "internal" : "model_error",
+    message: text.slice(0, 500) || "the run ended without reading the bank pack",
   };
 }
 
