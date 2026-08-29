@@ -220,7 +220,13 @@ export async function proposeVendorIdentityBinding(
 /** Admin-floor: sign a proposed binding live. Re-derives the entire floor and
  *  compares byte-for-byte against the stored proposal (CLR36 proposal_drifted on
  *  mismatch); refuses CLR36 post_control_absent while migration
- *  0029_vendor_binding_executor has not been deployed. */
+ *  0029_vendor_binding_executor has not been deployed. As of the pre-beta hardening
+ *  batch (裁-18a): ALSO refuses CLR04 (DETAIL reason "signer_is_proposer") when the
+ *  signer is the same person who proposed the binding — unconditional, no relaxation
+ *  for a single-admin firm; the refusal names both lawful exits ("let Clara propose
+ *  it, or add a second admin"). No page in this app consumes this call today (the
+ *  live surface is apps/web's vendor-bindings panel) — comment trued for accuracy
+ *  regardless. */
 export async function signVendorIdentityBinding(
   token: string, bindingId: string,
 ): Promise<VendorBindingReceipt> {

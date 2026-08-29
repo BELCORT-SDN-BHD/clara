@@ -208,3 +208,18 @@ runs:
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x42_split_upgrade_ci'
         PGDATABASE=clara_x42_split_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
           CLARA_RIG_DB=1 node --test "tests/$DRILL.test.mjs"
+
+    # Hardening-batch Migration A (0144) recut-guard drill (same false-green protection as
+    # the steps above): drives the REAL 0144 file through migrate() against a body mutated
+    # to keep every marker string, and must be REFUSED by the sha256(prosrc) pin; then the
+    # guardless mutant of the same file must be ADMITTED. Reset-gated (replays the chain
+    # below 0144 twice), so it runs ALONE in its OWN throwaway database — the concurrent
+    # all-packages sweep only ever SKIPS it (`.claude/rules/db-tests.md`: a skip-only drill
+    # is a false green).
+    - name: Hardening-A recut-guard drill (isolated DB)
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_hrd_a_recut_ci'
+        PGDATABASE=clara_hrd_a_recut_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+          node --test tests/hrd-a-recut-guard.test.mjs
