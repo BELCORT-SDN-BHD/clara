@@ -51,6 +51,7 @@ const BLOCKER_SIG = "clara._binding_extra_blocker(uuid,uuid,uuid,jsonb,jsonb)";
 const SUPPRESSION_SIG = "clara._binding_suppression(uuid,uuid,uuid)";
 const SIGN_SIG = "clara.sign_vendor_identity_binding(uuid,text,text)";
 const SIGNER_COUNT_SIG = "clara.eligible_binding_signer_count(uuid)";
+const ROSTER_SIG = "clara.binding_signer_roster(uuid)";
 const FREEZE_SIG = "clara._tf_vendor_identity_binding_update()";
 /** The comment-stripped live body of a function — the only honest instrument for "is this wall
  *  in the CODE", since every wall this battery pins is also DESCRIBED in a comment beside it. */
@@ -2314,7 +2315,7 @@ test("bp1.B1-invite-src — the live signer-count body contains no firm_invites 
   failBp1(live);
   // The arm was dropped in the second fold round; this pins that it stayed dropped, in CODE
   // rather than by the count happening to agree on one fixture.
-  for (const sig of [SIGNER_COUNT_SIG, "clara.binding_signer_roster(uuid)"]) {
+  for (const sig of [SIGNER_COUNT_SIG, ROSTER_SIG]) {
     const r = await rootQuery(strippedSrc, [sig]);
     assert.ok(!r.rows[0].src.includes("firm_invites"),
       `${sig} still reads firm_invites — an invitee is not a signer`);
@@ -2867,11 +2868,18 @@ test("bp1.B1-roster-m MUTANT — a LIVE headcount lets the remove/self-sign/re-a
   assert.ok(Number(durable.rows[0].n) >= 2,
     `control: the DURABLE window still sees the departures, got ${durable.rows[0].n}`);
 
-  // ONE needle: the pending-invite arm was dropped in the second fold round, so the durable half
-  // of the count is now exactly the departed-admin term. (withMutant threw the moment the second
-  // needle went stale rather than running a silent no-op — the guard doing its job a third time.)
-  await withPostTimeControl(() => withMutant(SIGNER_COUNT_SIG, [
-    ["    + (select count(distinct m.user_id)", "    + 0 * (select count(distinct m.user_id)"],
+  // ONE needle, and it MOVED HOUSE in the third fold round. The pending-invite arm was dropped in
+  // the second, leaving the departed-admin term as the whole durable half; FOLD-8 then lifted that
+  // arithmetic out of eligible_binding_signer_count into clara.binding_signer_roster, so the count
+  // door is now a firm-congruent wrapper with no arithmetic left to neutralise. Mutating the
+  // ROSTER is also the stronger placement: sign_ reads that same row, so one edit puts both the
+  // wall and the number a human is shown back on the pre-H5 live headcount, which is exactly the
+  // world this cell claims to be measuring. (withMutant threw the moment the old needle went
+  // stale rather than running a silent no-op — the absent-needle guard doing its job a THIRD time
+  // this round, and the third time it was a needle this fold round had itself just moved.)
+  await withPostTimeControl(() => withMutant(ROSTER_SIG, [
+    ["+ (select count(distinct user_id)::int from departed)",
+      "+ 0 * (select count(distinct user_id)::int from departed)"],
   ], async () => {
     const live1 = await humanQuery(w.users.alice,
       "select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
