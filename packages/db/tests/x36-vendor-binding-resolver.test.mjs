@@ -85,10 +85,20 @@ async function resolveOrError(client, document, pageCandidate = null) {
  *  even though F1 (derived purely from evidence text) matches. Defaults to `cp` itself. */
 async function bindLiveWithInvoiceId(cp, invoiceId, evidenceIdentity = cp) {
   const dates = ["2025-08-25", "2025-08-29", "2025-10-13"];
+  let i = 0;
   for (const d of dates) {
     const doc = await seedBareDocument(w.firms.A, `${cp.id}-${d}`);
-    await seedF123Evidence(w.firms.A, doc.id, evidenceIdentity, invoiceId);
-    await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc, { postingDate: d });
+    // 裁-18b PR-1 (the wall-introducing-PR law): the three documents now carry DISTINCT printed
+    // invoice ids, because a corpus wall above the frozen window refuses three scans of one
+    // invoice. The ids are `${invoiceId}1/2/3`, so their longest common prefix is EXACTLY
+    // `invoiceId` — this helper's whole contract ("f2_invoice_prefix ends up being that whole
+    // string") is preserved byte-for-byte, and every cell below still reads the prefix it
+    // expects. The approved_at/extracted_at backdating is the trusted-clock wall's requirement.
+    await seedF123Evidence(w.firms.A, doc.id, evidenceIdentity, `${invoiceId}${i + 1}`,
+      evidenceIdentity.name, `${d}T00:00:00Z`);
+    await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc,
+      { postingDate: d, approvedAt: `${d}T09:00:00Z` });
+    i += 1;
   }
   const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
   return sign(w.users.alice, { binding: proposed.binding_id });

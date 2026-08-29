@@ -87,7 +87,14 @@ export async function seedVendorCounterparty(firm, client, tag) {
   // not-freshly-reset scratch DB (fine on CI's always-fresh DB, but a real trap during
   // local iterative debugging against a persistent one). The random suffix makes this
   // collision-proof regardless of DB freshness.
-  const name = `EZACCOUNT SECRETARY ${tag} ${randomUUID().slice(0, 6)}`;
+  // THE LEADING TOKEN IS UNIQUE PER VENDOR (裁-18b PR-1, the wall-introducing-PR law). It used
+  // to be a constant "EZACCOUNT", with the random part at the END — which made every vendor this
+  // builder produced a member of ONE name family. PR-1 applies law 79's
+  // clara.name_family_is_ambiguous at the proposal point, and it correctly refuses a family with
+  // two members, so a same-token fixture would refuse every binding in this battery. Moving the
+  // random part to the FRONT is the fixture becoming realistic, not the wall being relaxed:
+  // real vendors do not all share a first word.
+  const name = `EZ${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()} SECRETARY ${tag}`;
   const reg = `2023${randomUUID().replace(/-/g, "").slice(0, 8)}`;
   const r = await rootQuery(
     `insert into clara.counterparties(firm_id,client_id,kind,name,name_normalized,registration_no,registration_normalized,created_by)
@@ -200,12 +207,16 @@ export const FULL_ABSENT_RECEIPT = {
  *  _resolve_vendor_binding's own admission gate (Slot A), which the dwell/ceremony
  *  batteries never exercise (they only drive _derive_vendor_binding_proposal, which has no
  *  A.1 vendor_identity check at all) but the resolver/executor batteries do. */
-export async function seedF123Evidence(firm, document, cp, invoiceId, vendorNameText = cp.name) {
+export async function seedF123Evidence(firm, document, cp, invoiceId, vendorNameText = cp.name,
+  extractedAt = null) {
+  // `extractedAt` (裁-18b PR-1): callers that BACKDATE approved_at must backdate the extraction
+  // too, or the derivation's own `facts_restated` rung (extracted_at > approved_at) refuses
+  // `evidence_restated` before any later gate is reached. Defaults to the previous behaviour.
   const factsExt = randomUUID();
   await rootQuery(
-    `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope)
-     values($1,$2,$3,'clara-fixture:v1','invoice_facts',1,'done',1,$4::jsonb)`,
-    [factsExt, firm, document, JSON.stringify({ vendor_identity: FULL_ABSENT_RECEIPT })],
+    `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope,extracted_at)
+     values($1,$2,$3,'clara-fixture:v1','invoice_facts',1,'done',1,$4::jsonb,coalesce($5::timestamptz, now()))`,
+    [factsExt, firm, document, JSON.stringify({ vendor_identity: FULL_ABSENT_RECEIPT }), extractedAt],
   );
   await rootQuery(
     `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
@@ -219,9 +230,9 @@ export async function seedF123Evidence(firm, document, cp, invoiceId, vendorName
   );
   const ocrExt = randomUUID();
   await rootQuery(
-    `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope)
-     values($1,$2,$3,'clara-fixture:v1','ocr',1,'done',1,$4::jsonb)`,
-    [ocrExt, firm, document, JSON.stringify({ pages: [{ page_number: 1, height: 11 }] })],
+    `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope,extracted_at)
+     values($1,$2,$3,'clara-fixture:v1','ocr',1,'done',1,$4::jsonb,coalesce($5::timestamptz, now()))`,
+    [ocrExt, firm, document, JSON.stringify({ pages: [{ page_number: 1, height: 11 }] }), extractedAt],
   );
   // top-band: ymin (y1) = 0.5, height = 11 -> ratio 0.045, well under 0.25.
   await rootQuery(
@@ -248,12 +259,22 @@ export async function deriveOrError(firm, client, cp) {
  *  every _derive_vendor_binding_proposal gate. Returns the counterparty fixture. */
 export async function seedPassingWindow(w, tag) {
   const cp = await seedVendorCounterparty(w.firms.A, w.clients.A1, tag);
-  const invoiceId = `EZSEC-IV-${randomUUID().slice(0, 5)}`;
+  // DISTINCT printed invoice ids sharing a strong prefix, and approved_at tracking the posting
+  // dates (裁-18b PR-1, the wall-introducing-PR law). This builder used to give all three
+  // documents ONE invoice id and approve them all at now(). PR-1 adds two walls above the frozen
+  // window that correctly refuse both shapes — three scans of one invoice is one invoice, and a
+  // corpus approved in a single minute has not been observed over fourteen days. The LCP of
+  // …9001/…9002/…9003 is still well past F2's length and alpha floors, so every gate this
+  // battery exercises is unchanged; the fixture just stopped describing an impossible vendor.
+  const prefix = `EZSEC-IV-${randomUUID().replace(/-/g, "").slice(0, 5).toUpperCase()}-`;
   const dates = ["2025-08-25", "2025-08-29", "2025-10-13"];
+  let i = 0;
   for (const d of dates) {
     const doc = await seedBareDocument(w.firms.A, `${tag}-${d}`);
-    await seedF123Evidence(w.firms.A, doc.id, cp, invoiceId);
-    await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc, { postingDate: d });
+    await seedF123Evidence(w.firms.A, doc.id, cp, `${prefix}${9001 + i}`, cp.name, `${d}T00:00:00Z`);
+    await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc,
+      { postingDate: d, approvedAt: `${d}T09:00:00Z` });
+    i += 1;
   }
   return cp;
 }

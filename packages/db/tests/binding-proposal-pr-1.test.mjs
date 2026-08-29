@@ -1278,8 +1278,23 @@ test("bp1.S2 the wall is an ACTOR COMPARISON — a human self-propose+self-sign 
   const hp = await propose(w.users.alice, { client: w.clients.A1, counterparty: cp.id });
   const err = await assertRaises(CLR.authz,
     () => sign(w.users.alice, { binding: hp.binding_id }), "human self-propose then self-sign");
-  assert.equal(reasonOf(err), "signer_is_proposer");
-  assert.match(err.message, /let Clara propose it, or add a second admin/);
+  // 裁-32 (2026-08-29) SPLIT this refusal. This world's firm A carries exactly ONE admin, so a
+  // self-sign lands on the SOLO arm: still refused, but with the attestation way out named.
+  // x36-vendor-binding-ceremony.test.mjs's x36c.5b holds the ≥2-signer arm, where 裁-18c's
+  // verbatim words are unchanged — that file owns the wall's pins, so the pin lives there.
+  assert.equal(reasonOf(err), "self_attestation_required");
+  assert.match(err.message, /state why you are signing your own/);
+  // …and the attestation genuinely opens it, writing the self-approval onto the row where a
+  // reader can see it. This is the 裁-18c relaxation, and it is deliberate: the alternative was
+  // to strand every solo firm, since "let Clara propose" is the path 裁-32 just closed for them.
+  const signed = await humanQuery(w.users.alice,
+    "select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2, p_attestation => $3) as result",
+    [hp.binding_id, opk("s2att"), "Sole admin of this firm; I checked the three invoices myself."]);
+  assert.equal(signed.rows[0].result.status, "live");
+  assert.equal(signed.rows[0].result.self_approved, true);
+  const row = await bindingRow(hp.binding_id);
+  assert.equal(row.self_approved, true);
+  assert.match(row.self_approval_reason, /Sole admin/);
 });
 
 test("bp1.S3 a bookkeeper cannot sign Clara's proposal; another firm's admin cannot see it", async () => {
@@ -1415,8 +1430,6 @@ test("bp1.F1 the byte-frozen bodies are unmoved (prosrc sha256, the live catalog
       "de0f58078f23ef2c6ce3f4a82cb29691a3633e3b8b9c48ae90babc53e7ee043c",
     "clara._coding_lane_core(uuid,uuid)":
       "721a6704e3284679103537bdda56bf741422041e16dda0f4654394f1d9506fda",
-    "clara.sign_vendor_identity_binding(uuid,text)":
-      "5285581ec371856d525fb47d2cfabc6e72b3a37285b291390e8c7aa34034e941",
     "clara.revoke_vendor_identity_binding(uuid,text,text)":
       "b0b566b36d84b17469425a86fdfd4c68fcaebea6dd793b3edb2f1bce609433ce",
     "clara._resolve_proposal_basis(uuid[],uuid,jsonb)":
@@ -1438,6 +1451,19 @@ test("bp1.F1 the byte-frozen bodies are unmoved (prosrc sha256, the live catalog
     ["clara.propose_vendor_identity_binding(jsonb,text)"]);
   assert.notEqual(recut.rows[0].s, "610ef1dfc18f963122ed2012e49a96b06526b93baca2f269fa054a76302f7fc7",
     "the human proposal door must NO LONGER be its 0028 pre-image — ruling (b) did not land");
+  // The signer is a SIGNATURE change, not a CoR: the 2-arg overload must be GONE (a surviving
+  // one would be shadow-reachable and would still carry the old wall), and the 3-arg one must
+  // resolve. Read by exact signature, never by bare name (review law 3).
+  const sigs = await rootQuery(
+    "select to_regprocedure($1) old2, to_regprocedure($2) new3",
+    ["clara.sign_vendor_identity_binding(uuid,text)",
+      "clara.sign_vendor_identity_binding(uuid,text,text)"]);
+  assert.equal(sigs.rows[0].old2, null, "the 2-arg signer overload must be DROPPED, not left shadow-reachable");
+  assert.ok(sigs.rows[0].new3, "the 3-arg signer must resolve");
+  const signerAcl = await rootQuery(
+    "select has_function_privilege('clara_authenticated', $1, 'EXECUTE') p",
+    ["clara.sign_vendor_identity_binding(uuid,text,text)"]);
+  assert.equal(signerAcl.rows[0].p, true, "DROP destroys the ACL — the grant must have been re-made");
 });
 
 test("bp1.F2 ONE derivation, TWO doors — the five content fields are byte-identical", async () => {
@@ -1473,7 +1499,7 @@ test("bp1.F3 the only status transition this door can cause is null → proposed
   const r = await rootQuery(
     `select string_agg(format('%s=%s', t.fn, t.rol), ', ') bad from (
        select f.fn, rr.rol from (values
-         ('clara.sign_vendor_identity_binding(uuid,text)'),
+         ('clara.sign_vendor_identity_binding(uuid,text,text)'),
          ('clara.revoke_vendor_identity_binding(uuid,text,text)'),
          ('clara.decline_vendor_identity_binding(uuid,text,text)')) f(fn)
        cross join (values ('clara_wake_filing'),('clara_wake_interactive')) rr(rol)) t

@@ -129,7 +129,9 @@ begin
                  ('clara.wake_list_binding_candidates(uuid)'),
                  ('clara.decline_vendor_identity_binding(uuid,text,text)'),
                  ('clara.reset_binding_decline(uuid,text,text)'),
-                 ('clara._binding_extra_blocker(uuid,uuid,uuid,jsonb,jsonb)')) t(n)
+                 ('clara._binding_extra_blocker(uuid,uuid,uuid,jsonb,jsonb)'),
+                 ('clara.eligible_binding_signer_count(uuid)'),
+                 ('clara.sign_vendor_identity_binding(uuid,text,text)')) t(n)
    where to_regprocedure(t.n) is not null;
   if v_missing is not null then
     raise exception 'binding proposal pr-1 prestate: function(s) already present: %', v_missing using errcode = 'CLR10';
@@ -142,7 +144,8 @@ begin
    where n.nspname = 'clara' and p.proname in
      ('_derive_vendor_binding_basis','_propose_vendor_binding_agent_core',
       'wake_propose_vendor_identity_binding','wake_list_binding_candidates',
-      'decline_vendor_identity_binding','reset_binding_decline','_binding_extra_blocker');
+      'decline_vendor_identity_binding','reset_binding_decline','_binding_extra_blocker',
+      'eligible_binding_signer_count');
   if v_missing is not null then
     raise exception 'binding proposal pr-1 prestate: pg_proc already carries name(s) under some arity: %', v_missing
       using errcode = 'CLR10';
@@ -446,6 +449,8 @@ begin
   insert into _bp1_pre(k, v) values ('foreign_objs',
     (select coalesce(count(*),0)::text from pg_class c join pg_namespace n2 on n2.oid = c.relnamespace
       where n2.nspname in ('workflow','graphile_worker','spike')));
+  insert into _bp1_pre(k, v) values ('sign.prosrc',
+    (select p.prosrc from pg_proc p where p.oid = 'clara.sign_vendor_identity_binding(uuid,text)'::regprocedure));
   insert into _bp1_pre(k, v) values ('propose.prosrc',
     (select p.prosrc from pg_proc p where p.oid = 'clara.propose_vendor_identity_binding(jsonb,text)'::regprocedure));
   insert into _bp1_pre(k, v) values ('event_types_total',
@@ -1175,7 +1180,14 @@ begin
         v_derived->>'content_hash',
         clara.agent_user_id(), now() + interval '12 months', true,
         (p_model->>'provider') || '/' || (p_model->>'model') || '/' || (p_model->>'version'),
-        p_obo)
+        -- 裁-32: the DIRECTING HUMAN, and only where one actually exists. `interactive` IS the
+        -- human ask -- somebody clicked "ask Clara to propose", and that person is in the
+        -- credential's on_behalf_of. `filing` is the UNATTENDED lane: its on_behalf_of is
+        -- whoever the credential was minted for, not somebody who asked for THIS proposal, and
+        -- treating them as a director would make every clocked proposal unsignable by the one
+        -- person most likely to be looking at it. Measured on the rig: with filing included,
+        -- the whole normal flow fell into the solo-attestation arm.
+        case when p_wake_kind = 'interactive' then p_obo else null end)
       returning id into v_binding;
   exception when unique_violation then
     raise exception 'binding_conflict' using errcode = 'CLR36',
@@ -1606,6 +1618,189 @@ end
 $$;
 
 -- =====================================================================================
+-- SS10b2 -- clara.eligible_binding_signer_count: the SOLO predicate, at the SIGNER'S floor
+-- =====================================================================================
+-- 裁-32 says to measure the solo case "the way PRD SS2's solo rule is measured elsewhere". The
+-- estate's own arm is in clara._approve_entry_core: `if eligible_checker_count(firm) >= 2 then
+-- refuse distinct_checker; elsif attestation is blank then refuse self_attestation`. This file
+-- reuses that ARM SHAPE exactly -- and deliberately NOT that function.
+-- WHY NOT: clara.eligible_checker_count is floored at BOOKKEEPER (design annex G-b flags it),
+-- while the binding signer floor is ADMIN. A firm with one admin and two bookkeepers counts 3
+-- and would be told "add a second admin" while having none to add -- naming a number that is
+-- not the one the wall enforces. The honest sibling counts the people who could ACTUALLY sign.
+create function clara.eligible_binding_signer_count(p_firm uuid)
+  returns integer language sql stable security definer set search_path = clara, pg_temp as $fn$
+  select count(*)::int from clara.firm_memberships m join clara.users u on u.id = m.user_id
+   where m.firm_id = p_firm and m.status = 'active'
+     and clara.role_rank(m.role) >= clara.role_rank('admin') and u.is_agent = false;
+$fn$;
+comment on function clara.eligible_binding_signer_count(uuid) is
+  '裁-32: how many REAL humans could sign a vendor identity binding in this firm -- the ADMIN-floor '
+  'sibling of clara.eligible_checker_count (which is bookkeeper-floored, design annex G-b). Excludes '
+  'clara.agent_user_id() through u.is_agent = false, exactly as its sibling does. The signer wall '
+  'names this number, so the number has to be the one the wall enforces.';
+revoke all on function clara.eligible_binding_signer_count(uuid) from public;
+grant execute on function clara.eligible_binding_signer_count(uuid) to clara_authenticated;
+
+-- =====================================================================================
+-- SS10b3 -- D1 BODY 2 of 2: clara.sign_vendor_identity_binding, RECUT (裁-32).
+-- =====================================================================================
+-- 裁-18a's wall compares the SIGNER to `created_by`. For an `interactive` proposal that is
+-- Clara's uuid -- while the human who DIRECTED her is sitting in the credential's on_behalf_of
+-- (0011:1143) and is never looked at. So: H clicks "ask Clara to propose", then H signs, and the
+-- wall passes because an agent's uuid is not H's. Law 69 says maker/checker measures the
+-- DIRECTING HUMAN (ADR digest:400) and 0084 already implements exactly that rule elsewhere.
+-- 裁-32 (2026-08-29) rules the fail-closed reading: compare against `effective_proposer`.
+--
+-- THIS RELAXES 裁-18c, AND THAT IS DELIBERATE AND RULED, not an oversight. 裁-18c was STRICT --
+-- no relaxation for a single-admin firm. Under 裁-32 the sole eligible human MAY sign their own
+-- directed proposal, but only with an explicit self-approval attestation that is written onto the
+-- row and rendered on the card. The alternative was to strand every solo firm completely, because
+-- 裁-18c's own first way out ("let Clara propose") is precisely the path this finding closes.
+-- The >=2 case keeps 裁-18c's verbatim refusal words unchanged.
+--
+-- SIGNATURE CHANGE, not a CoR: the attestation is a new parameter, and a parameter list cannot
+-- change under CREATE OR REPLACE without leaving the old overload shadow-reachable (0054's own
+-- prestate class; 0143 hit the same wall). The 2-arg body is DROPped and the 3-arg created with
+-- `p_attestation text default null`, so every existing 2-arg caller -- the panel, x36's battery --
+-- keeps resolving with no edit, and only a solo signer ever needs the third argument.
+drop function clara.sign_vendor_identity_binding(uuid,text);
+
+create function clara.sign_vendor_identity_binding(
+  p_binding uuid,
+  p_op_key text,
+  p_attestation text default null
+) returns jsonb
+language plpgsql security definer
+set search_path to clara,pg_temp
+as $$
+declare
+  c record; v_dedupe jsonb; b record; v_derived jsonb;
+  v_stored_evidence jsonb;
+  v_self boolean := false; v_self_reason text;
+begin
+  c:=clara._human_ctx(clara.role_rank('admin'));
+  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
+  if p_binding is null then
+    raise exception 'binding is required' using errcode='CLR10';
+  end if;
+  v_dedupe:=clara._reserve_op(c.firm,'sign_vendor_identity_binding',p_op_key,
+    clara._hash(jsonb_build_object('binding_id',p_binding)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  select * into b
+  from clara.vendor_identity_bindings
+  where id=p_binding
+  for update;
+  if not found or b.firm_id<>c.firm then
+    raise exception 'binding not found' using errcode='CLR11';
+  end if;
+  perform pg_advisory_xact_lock(
+    hashtextextended(b.client_id::text || ':' || b.counterparty_id::text, 0));
+  -- 裁-18a, as recut by 裁-32 (2026-08-29). The comparison is against effective_proposer -- the
+  -- GENERATED coalesce(directed_by, created_by) -- so an `interactive` proposal is measured
+  -- against the human who directed Clara, not against Clara's uuid. FAIL-CLOSED ON NULL is
+  -- preserved verbatim from 0144's LOW-5 finding: a null principal refuses rather than
+  -- evaluating to NULL and signing LIVE with no separation at all. Separation is ACCOUNT-level;
+  -- the estate has no physical-person principal (0002:187) and 裁-32 records that as a named
+  -- residual rather than pretending otherwise.
+  -- The NULL arm is SEPARATE and is NEVER attestable. 0144's LOW-5 finding was that a bare
+  -- equality evaluates to NULL on a null principal and signs LIVE with no separation at all;
+  -- folding that case into the solo arm below would re-open it in a subtler way -- an unknown
+  -- principal cannot be shown to be distinct from anybody, so no attestation can speak for it.
+  if b.effective_proposer is null then
+    raise exception 'the signer cannot be the same person who proposed this binding; let Clara propose it, or add a second admin' using errcode='CLR04',detail='{"reason":"signer_is_proposer"}';
+  end if;
+  if b.effective_proposer = c.actor then
+    if clara.eligible_binding_signer_count(c.firm) >= 2 then
+      raise exception 'the signer cannot be the same person who proposed this binding; let Clara propose it, or add a second admin' using errcode='CLR04',detail='{"reason":"signer_is_proposer"}';
+    elsif nullif(btrim(coalesce(p_attestation,'')),'') is null then
+      raise exception 'you are the only admin who could sign this, and you directed the proposal; state why you are signing your own' using errcode='CLR04',detail='{"reason":"self_attestation_required"}';
+    else
+      v_self:=true; v_self_reason:=btrim(p_attestation);
+    end if;
+  end if;
+  -- STANDING RE-READ (the 0084:123 idiom, gate B1). A directorship recorded months ago is not
+  -- evidence of standing today: if the human who directed this proposal is no longer an active
+  -- bookkeeper+ member of the firm, the separation it was supposed to provide is gone. Refuse
+  -- rather than silently treat the proposal as director-less -- the fail-closed branch.
+  if b.directed_by is not null and not exists (
+    select 1 from clara.firm_memberships m
+    where m.user_id=b.directed_by and m.firm_id=c.firm and m.status='active'
+      and clara.role_rank(m.role)>=clara.role_rank('bookkeeper')
+  ) then
+    raise exception 'the person who directed this proposal no longer has standing in this firm; it must be proposed again' using errcode='CLR04',detail='{"reason":"director_standing_lost"}';
+  end if;
+  if b.status<>'proposed' then
+    raise exception 'binding_not_proposed' using errcode='CLR36';
+  end if;
+  if b.expires_at<=now() then
+    raise exception 'binding_expired' using errcode='CLR36';
+  end if;
+
+  update clara.vendor_identity_bindings
+    set status='expired'
+  where id<>p_binding
+    and firm_id=c.firm and client_id=b.client_id
+    and counterparty_id=b.counterparty_id
+    and status='live' and expires_at<=now();
+
+  v_derived:=clara._derive_vendor_binding_proposal(
+    c.firm,b.client_id,b.counterparty_id);
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'entry_id',ev.entry_id,
+      'document_id',ev.document_id,
+      'facts_extraction_id',ev.facts_extraction_id,
+      'ocr_extraction_id',ev.ocr_extraction_id,
+      'posting_date',j.posting_date
+    ) order by j.approved_at desc,j.id desc),'[]'::jsonb)
+    into v_stored_evidence
+  from clara.vendor_identity_binding_evidence ev
+  join clara.journal_entries j on j.id=ev.entry_id
+  where ev.binding_id=p_binding;
+
+  if b.f1_vendor_name_norm is distinct from
+       v_derived->>'f1_vendor_name_norm'
+     or b.f2_invoice_prefix is distinct from
+       v_derived->>'f2_invoice_prefix'
+     or b.registration_at_signing is distinct from
+       v_derived->>'registration_at_signing'
+     or b.content_hash is distinct from v_derived->>'content_hash'
+     or v_stored_evidence is distinct from v_derived->'evidence' then
+    raise exception 'proposal_drifted' using errcode='CLR36';
+  end if;
+
+  if not exists (
+    select 1 from clara.schema_migrations
+    where version='0029_vendor_binding_executor'
+  ) then
+    raise exception 'post-time control not yet deployed'
+      using errcode='CLR36',detail='{"reason":"post_control_absent"}';
+  end if;
+
+  update clara.vendor_identity_bindings
+    set status='live',signed_by=c.actor,signed_at=now(),
+        self_approved=v_self,self_approval_reason=v_self_reason
+  where id=p_binding;
+
+  perform clara._audit(c.firm,c.actor,null,null,
+    'sign_vendor_identity_binding',null,
+    jsonb_build_object('binding_id',p_binding,'client_id',b.client_id,
+      'counterparty_id',b.counterparty_id,'op_key',p_op_key,
+      'self_approved',v_self,'effective_proposer',b.effective_proposer));
+  perform clara._append_event(c.firm,'kb_binding.signed',b.client_id,c.actor,
+    null,null,null,null,null,
+    jsonb_build_object('binding_id',p_binding,
+      'counterparty_id',b.counterparty_id,'self_approved',v_self));
+  return clara._finish_op(c.firm,'sign_vendor_identity_binding',p_op_key,
+    jsonb_build_object('binding_id',p_binding,'status','live','self_approved',v_self)
+      || (v_derived - 'client_id' - 'counterparty_id'));
+end
+$$;
+
+-- =====================================================================================
 -- SS10c -- clara.reset_binding_decline: the named human door out of a decline (ruling (b))
 -- =====================================================================================
 -- Suppression is PERMANENT until a human explicitly lifts it. Without this door "no" would mean
@@ -1689,6 +1884,11 @@ grant execute on function clara.decline_vendor_identity_binding(uuid,text,text) 
 revoke all on function clara.reset_binding_decline(uuid,text,text) from public;
 grant execute on function clara.reset_binding_decline(uuid,text,text) to clara_authenticated;
 
+-- DROP destroys the ACL, so the signer's clara_authenticated grant is re-made here. The tail
+-- proves it BY READING has_function_privilege, never by the presence of this line.
+revoke all on function clara.sign_vendor_identity_binding(uuid,text,text) from public;
+grant execute on function clara.sign_vendor_identity_binding(uuid,text,text) to clara_authenticated;
+
 insert into clara.wake_fn_allowlist(wake_kind, function_name) values
   ('filing',     'wake_propose_vendor_identity_binding'),
   ('interactive','wake_propose_vendor_identity_binding'),
@@ -1707,7 +1907,8 @@ begin
     from (values ('_derive_vendor_binding_basis'),('_propose_vendor_binding_agent_core'),
                  ('wake_propose_vendor_identity_binding'),('wake_list_binding_candidates'),
                  ('decline_vendor_identity_binding'),('reset_binding_decline'),
-                 ('_binding_extra_blocker')) t(n)
+                 ('_binding_extra_blocker'),('eligible_binding_signer_count'),
+                 ('sign_vendor_identity_binding')) t(n)
     left join lateral (select count(*)::int c from pg_proc p join pg_namespace n2 on n2.oid = p.pronamespace
                         where n2.nspname = 'clara' and p.proname = t.n) k on true
    where coalesce(k.c,0) <> 1;
@@ -1725,18 +1926,21 @@ begin
     from _bp1_pre pre
     join lateral (select encode(sha256(convert_to(
            (select p.prosrc from pg_proc p where p.oid = pre.k::regprocedure), 'UTF8')), 'hex') as sha) now on true
-   where pre.k not in ('foreign_objs','event_types_total','propose.prosrc',
-                       'clara.propose_vendor_identity_binding(jsonb,text)')
+   where pre.k not in ('foreign_objs','event_types_total','propose.prosrc','sign.prosrc',
+                       'clara.propose_vendor_identity_binding(jsonb,text)',
+                       'clara.sign_vendor_identity_binding(uuid,text)')
      and now.sha is distinct from pre.v;
   if v_bad is not null then
     raise exception 'binding proposal pr-1 tail: a DO-NOT-TOUCH body CHANGED -- the D1 inventory is not empty: %', v_bad
       using errcode = 'CLR10';
   end if;
-  if (select count(*) from _bp1_pre where k not in ('foreign_objs','event_types_total','propose.prosrc',
-        'clara.propose_vendor_identity_binding(jsonb,text)')) <> 17 then
-    raise exception 'binding proposal pr-1 tail: the re-pin covered % bodies, expected 17 (18 stashed, minus the one body this file deliberately replaces)',
-      (select count(*) from _bp1_pre where k not in ('foreign_objs','event_types_total','propose.prosrc',
-        'clara.propose_vendor_identity_binding(jsonb,text)')) using errcode = 'CLR10';
+  if (select count(*) from _bp1_pre where k not in ('foreign_objs','event_types_total','propose.prosrc','sign.prosrc',
+        'clara.propose_vendor_identity_binding(jsonb,text)',
+        'clara.sign_vendor_identity_binding(uuid,text)')) <> 16 then
+    raise exception 'binding proposal pr-1 tail: the re-pin covered % bodies, expected 16 (18 stashed, minus the TWO bodies this file deliberately replaces)',
+      (select count(*) from _bp1_pre where k not in ('foreign_objs','event_types_total','propose.prosrc','sign.prosrc',
+        'clara.propose_vendor_identity_binding(jsonb,text)',
+        'clara.sign_vendor_identity_binding(uuid,text)')) using errcode = 'CLR10';
   end if;
 
   -- (2b) D1 BODY 1 of 2 -- THE SURGICAL DELTA, proven by RE-SUBSTITUTION (0144/0147's own

@@ -18,7 +18,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { opk, assertRaises, endPool, rootQuery } from "./rig-helpers.mjs";
+import { opk, assertRaises, endPool, rootQuery, humanQuery } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import { insertUser, addMember } from "./rig-fixtures.mjs";
@@ -176,11 +176,15 @@ test("x36c.5 sign_vendor_identity_binding refuses the proposer signing their own
     assert.fail("sign_vendor_identity_binding must refuse when the signer is also the proposer");
   } catch (e) {
     assert.equal(e.code, "CLR04", `expected CLR04, got ${e.code}: ${e.message}`);
-    assert.match(e.message, /let Clara propose it, or add a second admin/,
-      `expected the wall's own two-ways-out message in the OWNER'S RULED WORDS, got: ${e.message}`);
-    // MED-3 (independent review, structural, not English-prose matching): the stable reason
-    // token rides the raised DETAIL.
-    assert.equal(reasonOf(e), "signer_is_proposer", `expected the stable reason token, got: ${JSON.stringify(e.detail)}`);
+    // 裁-32 (2026-08-29) SPLIT this refusal in two, and firm A has exactly ONE admin (alice),
+    // so this fixture lands on the SOLO arm. The strict 裁-18c behaviour this cell was written
+    // for is preserved verbatim for firms with two or more eligible signers — x36c.5b below is
+    // that case, added here rather than left to the 裁-18b battery because THIS is the file
+    // that owns the wall's pins.
+    assert.match(e.message, /state why you are signing your own/,
+      `expected the SOLO arm's message for a one-admin firm, got: ${e.message}`);
+    assert.equal(reasonOf(e), "self_attestation_required",
+      `expected the solo reason token, got: ${JSON.stringify(e.detail)}`);
   }
   // F-B (independent review, measured): the refusal rolled back the WHOLE transaction —
   // _reserve_op's own row for this op_key never survives a RAISE (v2 §G) — so op_receipts
@@ -246,8 +250,8 @@ test("x36c.8 sign_vendor_identity_binding admits an ADMIN signing an AGENT-creat
     `insert into clara.vendor_identity_bindings(
        firm_id,client_id,counterparty_id,status,
        f1_vendor_name_norm,f2_invoice_prefix,registration_at_signing,
-       content_hash,created_by,expires_at
-     ) values ($1,$2,$3,'proposed',$4,$5,$6,$7,$8,now()+interval '12 months')
+       content_hash,created_by,expires_at,proposed_by_agent
+     ) values ($1,$2,$3,'proposed',$4,$5,$6,$7,$8,now()+interval '12 months',true)
      returning id`,
     [w.firms.A, w.clients.A1, r.counterparty_id, r.f1_vendor_name_norm, r.f2_invoice_prefix,
       r.registration_at_signing, r.content_hash, agentId],
@@ -332,4 +336,50 @@ test("x36c.9 sign_vendor_identity_binding still refuses a binding whose created_
     await rootQuery("update clara.vendor_identity_bindings set created_by = $1 where id = $2", [w.users.bob, proposed.binding_id]);
     await rootQuery("alter table clara.vendor_identity_bindings alter column created_by set not null");
   }
+});
+
+// LAST IN THE FILE, DELIBERATELY: it adds a SECOND ADMIN to firm A, which changes
+// clara.eligible_binding_signer_count for every cell after it. Placed here so nothing else in
+// this file runs under the changed headcount.
+test("x36c.5b 裁-32 — with TWO eligible signers the STRICT 裁-18c refusal is unchanged, verbatim", async () => {
+  requireReady();
+  // 裁-32 (2026-08-29) split 裁-18a's refusal in two: the solo firm may now self-sign WITH an
+  // attestation, and everyone else still gets the owner's ruled words. x36c.5 above proves the
+  // solo arm (firm A ships with one admin). THIS proves the strict arm is untouched — the half
+  // a reader would reasonably fear was weakened when the solo relaxation landed.
+  // A FRESH user: carol already belongs to firm A as a viewer, and addMember refuses a user who
+  // already belongs to a firm.
+  const secondAdmin = await insertUser(`${w.prefix}_c5b`, "admin2");
+  await addMember(w.users.alice, {
+    firm: w.firms.A, user: secondAdmin, role: "admin", opKey: opk("c5badmin"),
+  });
+  const count = await rootQuery("select clara.eligible_binding_signer_count($1) as n", [w.firms.A]);
+  assert.ok(count.rows[0].n >= 2, `fixture: firm A must now carry >=2 eligible signers, got ${count.rows[0].n}`);
+
+  const cp = await seedPassingWindow(w, "C5b");
+  const proposed = await propose(w.users.alice, { client: w.clients.A1, counterparty: cp.id });
+  try {
+    await sign(w.users.alice, { binding: proposed.binding_id, opKey: opk("c5bsign") });
+    assert.fail("with two eligible signers a self-sign must still refuse");
+  } catch (e) {
+    assert.equal(e.code, "CLR04");
+    assert.match(e.message, /let Clara propose it, or add a second admin/,
+      `expected the OWNER'S RULED WORDS, unchanged, got: ${e.message}`);
+    assert.equal(reasonOf(e), "signer_is_proposer");
+  }
+  // …and an attestation does NOT buy a way past it: the solo arm is reachable only when the
+  // firm genuinely has nobody else. Without this the relaxation would be a universal bypass.
+  try {
+    await humanQuery(w.users.alice,
+      "select clara.sign_vendor_identity_binding(p_binding => $1, p_op_key => $2, p_attestation => $3) as result",
+      [proposed.binding_id, opk("c5batt"), "I am in a hurry"]);
+    assert.fail("an attestation must not buy past the strict arm when another signer exists");
+  } catch (e) {
+    assert.equal(e.code, "CLR04");
+    assert.equal(reasonOf(e), "signer_is_proposer");
+  }
+  // The genuine way out still works: the OTHER admin signs.
+  const signed = await sign(secondAdmin, { binding: proposed.binding_id, opKey: opk("c5bok") });
+  assert.equal(signed.status, "live");
+  assert.equal(signed.self_approved, false, "a two-party signature is not a self-approval");
 });
