@@ -1162,6 +1162,59 @@ const COA_TEMPLATE_PR_A_UNGRANTED_FNS = [
 export const COA_TEMPLATE_PR_A_COHORT = [
   ...COA_TEMPLATE_PR_A_HUMAN_FNS, ...COA_TEMPLATE_PR_A_UNGRANTED_FNS,
 ];
+// LAW 3 COMPANION (independent review, MED-3): every roster above feeds cohortFailures PRONAMES,
+// and a proname is a projection of a function, not the function. A door recut to a different
+// argument list, or a same-named overload landing beside it, changes what `clara_authenticated`
+// can actually call while leaving every name-keyed census green. These are the EXACT signatures
+// -- resolved with to_regprocedure, which fails on a wrong arg list and on an ambiguous name --
+// so the roster pins the callable identity rather than its spelling.
+export const COA_TEMPLATE_PR_A_SIGS = [
+  "clara.fork_coa_template(uuid,text,text,text,text,text)",
+  "clara.upsert_coa_template_family(uuid,text,text,text,text,integer,text[],text[],text,text[],text[],text)",
+  "clara.remove_coa_template_family(uuid,text,text)",
+  "clara.upsert_coa_template_account(uuid,text,text,text,text,text,text,integer,boolean,text,text,text)",
+  "clara.remove_coa_template_account(uuid,text,text)",
+  "clara.publish_coa_template(uuid,text)",
+  "clara.retire_coa_template(uuid,text)",
+  "clara.list_coa_templates()",
+  "clara.get_coa_template(uuid)",
+  "clara._coa_template_content_sha256(uuid)",
+  "clara._coa_template_for_edit(uuid,uuid)",
+  "clara._tf_coa_template_freeze()",
+  "clara._tf_coa_template_child_freeze()",
+  "clara._tf_coa_adoption_template_congruent()",
+];
+
+/** Frontier-tolerant exact-signature census: silent where the cohort has not landed (every
+ *  pre-PR-a chain), and by-name where it has -- an unresolvable signature, or a second overload
+ *  sharing one of these pronames, is reported rather than passed over. */
+export async function coaTemplateSigFailures() {
+  const live = await rootQuery(
+    `select s as sig, to_regprocedure(s) is not null as ok from unnest($1::text[]) s`,
+    [COA_TEMPLATE_PR_A_SIGS],
+  );
+  const missing = live.rows.filter((r) => !r.ok).map((r) => r.sig);
+  // The whole cohort absent = a pre-PR-a frontier, which is not a failure. Anything else is.
+  if (missing.length === COA_TEMPLATE_PR_A_SIGS.length) return [];
+  const failures = missing.length
+    ? [`裁-21 PR-a exact-signature roster is PARTIAL — these do not resolve via to_regprocedure: `
+       + `${missing.join(", ")}. A door recut to a different argument list leaves every `
+       + `proname-keyed census green; this is the cell that does not.`]
+    : [];
+  const dupes = await rootQuery(
+    `select p.proname, count(*)::int as n
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname = any($1::text[])
+      group by p.proname having count(*) > 1 order by p.proname`,
+    [COA_TEMPLATE_PR_A_COHORT],
+  );
+  if (dupes.rowCount) {
+    failures.push(`裁-21 PR-a names carry more than one overload: `
+      + `${dupes.rows.map((r) => `${r.proname} x${r.n}`).join(", ")} — the grant matrix and the `
+      + `cohort census both key on proname and would not see the second one.`);
+  }
+  return failures;
+}
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.

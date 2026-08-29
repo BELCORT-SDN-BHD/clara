@@ -5,6 +5,7 @@
 // Every door is called with NAMED arguments through `namedCall` (rig-helpers.mjs's own idiom),
 // so a parameter RENAME in the migration is a rig failure rather than a silent positional shift.
 
+import { readFileSync } from "node:fs";
 import { getPool, humanQuery, namedCall, rootQuery } from "./rig-fixtures.mjs";
 
 // ---------------------------------------------------------------------------
@@ -266,6 +267,99 @@ export async function withRolledBackTx(fn) {
     }
     client.release();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Two-session machinery (the publish/edit race and the fork allocator)
+// ---------------------------------------------------------------------------
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Poll (bounded) until backend `pid` is observably WAITING on a lock held by `blockerPid`.
+ * db-tests.md: "Wait with waitBlockedByOrThrow (it reads pg_blocking_pids), never a sleep,
+ * which proves nothing about whether the block actually happened." Copied locally rather than
+ * cross-imported from another test area's helper, the p4t1/p4t2 convention.
+ */
+export async function waitBlockedByOrThrow(pid, blockerPid, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await rootQuery(
+      "select wait_event_type as wet, pg_blocking_pids(pid) as blockers from pg_stat_activity where pid = $1",
+      [pid],
+    );
+    const row = r.rows[0];
+    if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(blockerPid))) return true;
+    await sleep(25);
+  }
+  throw new Error(`waitBlockedByOrThrow: backend ${pid} never observably blocked on ${blockerPid} within ${timeoutMs}ms`);
+}
+
+/** A dedicated pooled client impersonating `sub`, inside an OPEN transaction the caller drives. */
+export async function openHumanTxn(sub) {
+  const client = await getPool().connect();
+  await client.query("begin");
+  await client.query("set local role clara_authenticated");
+  await client.query("select set_config('request.jwt.claims', $1, true)", [
+    JSON.stringify({ sub, role: "authenticated" }),
+  ]);
+  const pid = (await client.query("select pg_backend_pid() as pid")).rows[0].pid;
+  return { client, pid };
+}
+
+/** A dedicated pooled client impersonating `sub`, AUTOCOMMITTING (the observing side). */
+export async function openHumanAutocommit(sub) {
+  const client = await getPool().connect();
+  await client.query("set role clara_authenticated");
+  await client.query("select set_config('request.jwt.claims', $1, false)", [
+    JSON.stringify({ sub, role: "authenticated" }),
+  ]);
+  const pid = (await client.query("select pg_backend_pid() as pid")).rows[0].pid;
+  return { client, pid };
+}
+
+export async function releaseSession(s) {
+  if (!s) return;
+  for (const q of ["rollback", "reset role", "reset all"]) {
+    try {
+      await s.client.query(q);
+    } catch {
+      /* best-effort teardown */
+    }
+  }
+  s.client.release();
+}
+
+// ---------------------------------------------------------------------------
+// The committed research JSON — the seed's own source of truth
+// ---------------------------------------------------------------------------
+
+/** Loaded from the REPO, not from a copy this test carries: the cell's whole point is that the
+ *  shipped rows and the committed dossier cannot drift apart unnoticed. */
+export function researchJson() {
+  return JSON.parse(
+    readFileSync(new URL("../../../docs/plan/research/coa-template-2026-08-29.json", import.meta.url), "utf8"),
+  );
+}
+
+/** The DB's own complete family/account map for a template — every column the JSON carries. */
+export async function templateMap(id) {
+  const fam = await rootQuery(
+    `select family_key, label, inclusion, basis, sort_ordinal, msic_sections, msic_divisions,
+            msic_edition, trade_natures, entity_types
+       from clara.coa_template_families where template_id = $1 order by family_key`,
+    [id],
+  );
+  const acc = await rootQuery(
+    `select family_key, account_code, name, account_type, account_class, special_acc_type,
+            sort_ordinal, tax_sensitive, add_back_class, statutory
+       from clara.coa_template_accounts where template_id = $1 order by account_code`,
+    [id],
+  );
+  return {
+    families: Object.fromEntries(fam.rows.map((r) => [r.family_key, r])),
+    accounts: Object.fromEntries(acc.rows.map((r) => [r.account_code, r])),
+  };
 }
 
 /** Did `fn()` raise? Returns the SQLSTATE, or null when the call SUCCEEDED. */

@@ -41,12 +41,15 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { CLR, PG, assertRaises, opk, rootQuery, ensureReady, buildWorld, endPool } from "./rig-fixtures.mjs";
+import { COA_TEMPLATE_PR_A_SIGS, coaTemplateSigFailures } from "./rig-meta.mjs";
 import {
   forkTemplate, upsertFamily, removeFamily, upsertTemplateAccount, removeTemplateAccount,
   publishTemplate, retireTemplate, listTemplates, getTemplate,
   humanFamilyCodes, humanAccountCodes,
   platformTemplate, rawTemplate, snapshotTemplate, templateCounts,
   withRolledBackTx, raisedCode, refusalReason,
+  waitBlockedByOrThrow, openHumanTxn, openHumanAutocommit, releaseSession,
+  researchJson, templateMap,
 } from "./coa-template-pr-a-helpers.mjs";
 
 /** The account door's exact signature -- pinned once, used by the ACL census and the mutants. */
@@ -278,11 +281,11 @@ test("C1 · the platform starter is PUBLISHED, migration-authored, and content-h
   assert.equal(rehash.rows[0].ok, true, "the stored content hash does not reproduce from the seeded rows");
 });
 
-test("C2 · the seed's structural invariants -- 31 families / 100 accounts, by inclusion, by code form", async (t) => {
+test("C2 · the seed's structural invariants -- 33 families / 102 accounts, by inclusion, by code form", async (t) => {
   if (unready(t)) return;
   const counts = await templateCounts(platform.id);
-  assert.equal(counts.families, 31);
-  assert.equal(counts.accounts, 100);
+  assert.equal(counts.families, 33, "31 research families + the 2 provisional equity variants");
+  assert.equal(counts.accounts, 102);
 
   const byIncl = await rootQuery(
     "select inclusion, count(*)::int n from clara.coa_template_families where template_id=$1 group by 1 order by 1",
@@ -290,7 +293,7 @@ test("C2 · the seed's structural invariants -- 31 families / 100 accounts, by i
   );
   assert.deepEqual(
     Object.fromEntries(byIncl.rows.map((r) => [r.inclusion, r.n])),
-    { by_industry: 6, core: 10, opt_in: 15 },
+    { by_industry: 6, core: 10, opt_in: 17 },
   );
 
   // A MAP, not a count (the roster-maps-not-counts lesson): every special marker and its code.
@@ -346,7 +349,9 @@ test("C3 · Q10 the equity swap, Q12 the MSIC 2008 edition stamp, Q11 the statut
     Object.fromEntries(equity.rows.map((r) => [r.family_key, r.entity_types])),
     {
       equity_company: ["sdn_bhd", "bhd"],
+      equity_other: ["other"],
       equity_partnership: ["partnership", "llp"],
+      equity_society_cooperative: ["society", "cooperative"],
       equity_sole_prop: ["sole_prop"],
     },
   );
@@ -492,9 +497,9 @@ test("D1 · POSITIVE: a bookkeeper of firm A and an owner of firm B are BOTH ret
     const ids = rows.map((r) => r.template_id);
     assert.ok(ids.includes(platform.id), `${who} cannot see the platform starter`);
     const fam = await humanFamilyCodes(sub, platform.id);
-    assert.equal(fam.length, 31, `${who} cannot read the platform starter's families`);
+    assert.equal(fam.length, 33, `${who} cannot read the platform starter's families`);
     const acc = await humanAccountCodes(sub, platform.id);
-    assert.equal(acc.length, 100, `${who} cannot read the platform starter's accounts`);
+    assert.equal(acc.length, 102, `${who} cannot read the platform starter's accounts`);
     const doc = await getTemplate(sub, platform.id);
     assert.equal(doc.template_id, platform.id, `${who} cannot get_coa_template the platform starter`);
   }
@@ -510,7 +515,7 @@ test("D2 · NEGATIVE: firm B sees none of firm A's firm-scoped template, header 
   assert.deepEqual(await humanAccountCodes(world.users.dave, publishedFork), [], "firm B can read firm A's accounts");
   assert.equal(await getTemplate(world.users.dave, publishedFork), null, "get_coa_template leaks across firms");
   // And firm A really can read its own content -- the positive control for the two [] above.
-  assert.equal((await humanFamilyCodes(world.users.alice, publishedFork)).length, 31);
+  assert.equal((await humanFamilyCodes(world.users.alice, publishedFork)).length, 33);
 });
 
 // =============================================================================================
@@ -525,8 +530,8 @@ test("E1 · fork happy path: a published source is COPIED into a new firm draft 
   });
   assert.equal(out.state, "draft");
   assert.equal(out.version, 1);
-  assert.equal(out.families, 31);
-  assert.equal(out.accounts, 100);
+  assert.equal(out.families, 33);
+  assert.equal(out.accounts, 102);
   const row = await rawTemplate(out.template_id);
   assert.equal(row.scope, "firm");
   assert.equal(row.firm_id, world.firms.A);
@@ -814,8 +819,8 @@ test("G1 · publish stamps the publisher, the time and the content hash", async 
   });
   const out = await publishTemplate(world.users.alice, { template: f.template_id, opKey: opk("pub") });
   assert.equal(out.state, "published");
-  assert.equal(out.families, 31);
-  assert.equal(out.accounts, 100);
+  assert.equal(out.families, 33);
+  assert.equal(out.accounts, 102);
   const row = await rawTemplate(f.template_id);
   assert.equal(row.state, "published");
   assert.equal(row.published_by, world.users.alice);
@@ -958,12 +963,12 @@ test("H3 · get_coa_template returns the whole document, and list_coa_templates 
   const doc = await getTemplate(world.users.alice, platform.id);
   assert.equal(doc.scope, "platform");
   assert.equal(doc.state, "published");
-  assert.equal(doc.families.length, 31);
-  assert.equal(doc.accounts.length, 100);
+  assert.equal(doc.families.length, 33);
+  assert.equal(doc.accounts.length, 102);
   assert.equal(doc.content_sha256, platform.content_sha256.toString("hex"));
   const listed = (await listTemplates(world.users.alice)).find((r) => r.template_id === platform.id);
-  assert.equal(listed.families, 31);
-  assert.equal(listed.accounts, 100);
+  assert.equal(listed.families, 33);
+  assert.equal(listed.accounts, 102);
 });
 
 // =============================================================================================
@@ -1216,4 +1221,456 @@ test("I-M11 · ck_coa_tmpl_add_back_class: dropping it lets an unlisted add-back
     );
     assert.equal(okRow.rows[0].ok, 1, "a LISTED leaf must be admitted -- a set that admits nothing is not extend-only");
   });
+});
+
+// =============================================================================================
+// J -- THE REVIEW FOLD (Codex law-28 pass + the native pass, 2026-08-29). Every cell here was
+// RED before its fix and is GREEN after; the ones that are two-session prove the interleave
+// with waitBlockedByOrThrow rather than a sleep (db-tests.md).
+// =============================================================================================
+
+test("J1 · HIGH-1 the publish/edit RACE, EDITOR FIRST: publish blocks, then hashes the editor's row", async (t) => {
+  if (unready(t)) return;
+  const f = await forkTemplate(world.users.alice, {
+    source: platform.id, key: nextKey("j1a"), title: "J1a", basis: "b", opKey: opk("fork"),
+  });
+  let t1 = null, t2 = null;
+  try {
+    // T1 -- an editor, INSIDE an open transaction: _coa_template_for_edit takes the header
+    // FOR UPDATE, then the child insert lands. Uncommitted.
+    t1 = await openHumanTxn(world.users.alice);
+    await t1.client.query(
+      `select clara.upsert_coa_template_family(p_template => $1::uuid, p_family_key => 'race_late',
+         p_label => 'Race Late', p_inclusion => 'opt_in', p_basis => 'firm practice',
+         p_sort_ordinal => 950, p_msic_sections => '{}'::text[], p_msic_divisions => '{}'::text[],
+         p_msic_edition => null, p_trade_natures => '{}'::text[], p_entity_types => '{}'::text[],
+         p_op_key => $2::text)`,
+      [f.template_id, opk("j1a_fam")],
+    );
+    await t1.client.query(
+      `select clara.upsert_coa_template_account(p_template => $1::uuid, p_family_key => 'race_late',
+         p_account_code => '7500', p_name => 'Race Late Account', p_account_type => 'expense',
+         p_account_class => null, p_special_acc_type => null, p_sort_ordinal => 10,
+         p_tax_sensitive => false, p_add_back_class => null, p_statutory => null,
+         p_op_key => $2::text)`,
+      [f.template_id, opk("j1a_acc")],
+    );
+
+    // T2 -- a publisher on ANOTHER connection, fired inside T1's open window.
+    t2 = await openHumanAutocommit(world.users.alice);
+    const pub = t2.client
+      .query("select clara.publish_coa_template(p_template => $1::uuid, p_op_key => $2::text) as r",
+        [f.template_id, opk("j1a_pub")])
+      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+
+    // THE INTERLEAVE, PROVEN: without the FOR UPDATE this publish sails past and stamps a hash
+    // over content the editor is still adding.
+    await waitBlockedByOrThrow(t2.pid, t1.pid);
+    await t1.client.query("commit");
+    const out = await pub;
+    assert.equal(out.ok, true, `publish must succeed once the editor commits: ${out.e?.message}`);
+
+    // The published content INCLUDES the editor's row, and the stored hash reproduces from the
+    // rows as they now stand -- the invariant the race broke.
+    const row = await rawTemplate(f.template_id);
+    assert.equal(row.state, "published");
+    const check = await rootQuery(
+      `select clara._coa_template_content_sha256($1) = content_sha256 as ok,
+              (select count(*)::int from clara.coa_template_accounts
+                where template_id = $1 and account_code = '7500') as late
+         from clara.coa_templates where id = $1`,
+      [f.template_id],
+    );
+    assert.equal(check.rows[0].ok, true, "the stored content_sha256 does not reproduce from the published rows");
+    assert.equal(check.rows[0].late, 1, "the editor's row is missing from the template it was published into");
+  } finally {
+    await releaseSession(t1);
+    await releaseSession(t2);
+  }
+});
+
+test("J1b · HIGH-1 the RACE, PUBLISHER FIRST: the editor blocks, then refuses by name", async (t) => {
+  if (unready(t)) return;
+  const f = await forkTemplate(world.users.alice, {
+    source: platform.id, key: nextKey("j1b"), title: "J1b", basis: "b", opKey: opk("fork"),
+  });
+  let t1 = null, t2 = null;
+  try {
+    t1 = await openHumanTxn(world.users.alice);
+    await t1.client.query(
+      "select clara.publish_coa_template(p_template => $1::uuid, p_op_key => $2::text)",
+      [f.template_id, opk("j1b_pub")],
+    );
+    t2 = await openHumanAutocommit(world.users.alice);
+    const edit = t2.client
+      .query(
+        `select clara.upsert_coa_template_family(p_template => $1::uuid, p_family_key => 'race_hollow',
+           p_label => 'Race Hollow', p_inclusion => 'opt_in', p_basis => 'firm practice',
+           p_sort_ordinal => 951, p_msic_sections => '{}'::text[], p_msic_divisions => '{}'::text[],
+           p_msic_edition => null, p_trade_natures => '{}'::text[], p_entity_types => '{}'::text[],
+           p_op_key => $2::text)`,
+        [f.template_id, opk("j1b_fam")],
+      )
+      .then(() => ({ ok: true }), (e) => ({ ok: false, e }));
+
+    await waitBlockedByOrThrow(t2.pid, t1.pid);
+    await t1.client.query("commit");
+    const out = await edit;
+
+    // THE DEFECT THIS CELL EXISTS FOR: unlocked, this editor committed a zero-account family
+    // into an ALREADY PUBLISHED template -- defeating publish's own empty_family rung and
+    // leaving rows that no longer hash to the stored content_sha256.
+    assert.equal(out.ok, false, "an editor must NOT be able to write into a template that was published under it");
+    assert.equal(out.e.code, CLR.badRequest);
+    assert.equal(JSON.parse(out.e.detail).reason, "template_not_draft");
+    const check = await rootQuery(
+      `select clara._coa_template_content_sha256($1) = content_sha256 as ok,
+              (select count(*)::int from clara.coa_template_families
+                where template_id = $1 and family_key = 'race_hollow') as hollow
+         from clara.coa_templates where id = $1`,
+      [f.template_id],
+    );
+    assert.equal(check.rows[0].hollow, 0, "a zero-account family landed in a PUBLISHED template");
+    assert.equal(check.rows[0].ok, true, "the published template's rows no longer reproduce its own hash");
+  } finally {
+    await releaseSession(t1);
+    await releaseSession(t2);
+  }
+});
+
+test("J2 · HIGH-2 EVERY live entity_type value has exactly one equity family (coverage, not containment)", async (t) => {
+  if (unready(t)) return;
+  const cov = await rootQuery(
+    `select v.value as ev,
+            (select count(*)::int from clara.coa_template_families f
+              where f.template_id = $1 and f.entity_types @> array[v.value]) as n
+       from clara.client_fact_keys k, lateral jsonb_array_elements_text(k.allowed_values) as v(value)
+      where k.fact_key = 'entity_type' order by v.value`,
+    [platform.id],
+  );
+  assert.equal(cov.rows.length, 8, "the live ENTITY_TYPES_V2 vocabulary should carry eight values");
+  const bad = cov.rows.filter((r) => r.n !== 1).map((r) => `${r.ev}=${r.n}`);
+  assert.deepEqual(bad, [], "an entity_type the product ADMITS has no equity family (or has two)");
+
+  // The two provisional variants say so IN THE ROW -- a reader of the DATA, not just of the
+  // migration, has to be able to see that an owner review is owed.
+  const prov = await rootQuery(
+    "select family_key, basis from clara.coa_template_families where template_id=$1 and family_key in ('equity_society_cooperative','equity_other') order by family_key",
+    [platform.id],
+  );
+  assert.equal(prov.rows.length, 2);
+  for (const r of prov.rows) {
+    assert.match(r.basis, /not researched - provisional; owner review owed/,
+      `${r.family_key}: a provisional family must declare itself provisional in its own basis`);
+  }
+});
+
+test("J2m · MUTANT M12: widening the LIVE entity_type enum makes the coverage cell go RED", async (t) => {
+  if (unready(t)) return;
+  await withRolledBackTx(async (c) => {
+    const uncovered = async () => {
+      const r = await c.query(
+        `select count(*)::int as n from (
+           select v.value as ev,
+                  (select count(*)::int from clara.coa_template_families f
+                    where f.template_id = $1 and f.entity_types @> array[v.value]) as n
+             from clara.client_fact_keys k, lateral jsonb_array_elements_text(k.allowed_values) as v(value)
+            where k.fact_key = 'entity_type') z where z.n <> 1`,
+        [platform.id],
+      );
+      return r.rows[0].n;
+    };
+    assert.equal(await uncovered(), 0, "control: coverage is already broken before the mutation");
+    // client_fact_keys is append-only, so the trigger comes off as scaffolding; both die with
+    // the rollback. MUTATING THE GUARD'S INPUT is the point: a ninth entity type must red this.
+    await c.query("drop trigger t_client_fact_keys_append_only on clara.client_fact_keys");
+    await c.query(
+      `update clara.client_fact_keys set allowed_values = allowed_values || '["trust"]'::jsonb
+        where fact_key = 'entity_type'`,
+    );
+    assert.equal(await uncovered(), 1,
+      "MUTANT: a ninth entity_type with no equity family must be REPORTED -- otherwise the cell proves containment, not coverage");
+  });
+  const back = await rootQuery(
+    "select jsonb_array_length(allowed_values) n from clara.client_fact_keys where fact_key='entity_type'",
+  );
+  assert.equal(back.rows[0].n, 8, "the mutant leaked out of its transaction");
+});
+
+test("J3 · HIGH-3 no durable basis/hint field carries a numeral-bearing tax assertion (constraint 2)", async (t) => {
+  if (unready(t)) return;
+  const offenders = await rootQuery(
+    `select where_, txt from (
+       select 'coa_templates.basis' as where_, basis as txt from clara.coa_templates where id = $1
+       union all select 'family ' || family_key, basis from clara.coa_template_families where template_id = $1
+       union all select 'account ' || account_code, name from clara.coa_template_accounts where template_id = $1
+       union all select 'account ' || account_code || '.add_back_class', add_back_class
+                   from clara.coa_template_accounts where template_id = $1 and add_back_class is not null
+       union all select 'account ' || account_code || '.statutory', statutory
+                   from clara.coa_template_accounts where template_id = $1 and statutory is not null
+     ) t
+      where t.txt like '%\\%%' or t.txt ~* '\\m(rm|myr)\\s?[0-9]' or t.txt ~ '[0-9]{1,3}(,[0-9]{3})+'`,
+    [platform.id],
+  );
+  assert.deepEqual(offenders.rows.map((r) => `${r.where_}: ${r.txt}`), [],
+    "a rate, a ceiling or a cap in a durable basis row is a model-authored number with no effective-dated authority");
+  // POSITIVE CONTROL (review law 2): the census must still be reading fields that DO carry
+  // citations, or an empty result proves nothing.
+  const cited = await rootQuery(
+    "select count(*)::int n from clara.coa_template_families where template_id=$1 and basis ~ '(ITA 1967|MPERS|PR [0-9]+/[0-9]{4})'",
+    [platform.id],
+  );
+  assert.ok(cited.rows[0].n >= 20, `only ${cited.rows[0].n} basis rows carry a citation -- the census is reading the wrong field`);
+  // And the citations SURVIVED the strip: the four rows the fold rewrote still name their
+  // instrument. Stripping a numeral must not strip the authority with it.
+  const kept = await rootQuery(
+    `select family_key, basis from clara.coa_template_families
+      where template_id=$1 and family_key in
+        ('entertainment','donations_approved','motor_running_costs','club_subscriptions_and_entrance_fees')
+      order by family_key`,
+    [platform.id],
+  );
+  assert.equal(kept.rows.length, 4);
+  for (const r of kept.rows) assert.match(r.basis, /ITA 1967 s\.|ITA 1967 Schedule/, `${r.family_key} lost its citation`);
+});
+
+test("J3m · MUTANT: the numeral census can say NO -- a planted rate is caught", async (t) => {
+  if (unready(t)) return;
+  await withRolledBackTx(async (c) => {
+    const offenders = async () => {
+      const r = await c.query(
+        `select count(*)::int n from clara.coa_template_families
+          where template_id = $1 and (basis like '%\\%%' or basis ~* '\\m(rm|myr)\\s?[0-9]'
+             or basis ~ '[0-9]{1,3}(,[0-9]{3})+')`,
+        [draft],
+      );
+      return r.rows[0].n;
+    };
+    assert.equal(await offenders(), 0, "control: the draft already carries a numeral-bearing basis");
+    await c.query(
+      `update clara.coa_template_families set basis = basis || ' (50% restriction; cap RM50,000)'
+        where template_id = $1 and family_key = 'entertainment'`,
+      [draft],
+    );
+    assert.equal(await offenders(), 1,
+      "MUTANT: a planted rate and a planted ringgit cap must both be caught -- a census that cannot fire is not a census");
+  });
+});
+
+test("J4 · MED-1 the shipped rows reproduce the COMMITTED research JSON, field by field", async (t) => {
+  if (unready(t)) return;
+  const j = researchJson();
+  const map = await templateMap(platform.id);
+  // The four basis rows the constraint-2 fold rewrote: compared by RULE, not by equality, and
+  // named here so the divergence is deliberate and visible rather than a silent exemption.
+  const STRIPPED = new Set([
+    "entertainment", "donations_approved", "motor_running_costs", "club_subscriptions_and_entrance_fees",
+  ]);
+  const PROVISIONAL = new Set(["equity_society_cooperative", "equity_other"]);
+
+  assert.equal(j.families.length, 31);
+  assert.equal(j.accounts.length, 100);
+
+  for (const f of j.families) {
+    const row = map.families[f.family_key];
+    assert.ok(row, `family ${f.family_key} is in the dossier and not in the DB`);
+    assert.equal(row.label, f.label, `${f.family_key}.label`);
+    assert.equal(row.inclusion, f.inclusion, `${f.family_key}.inclusion`);
+    assert.equal(row.sort_ordinal, f.sort_ordinal, `${f.family_key}.sort_ordinal`);
+    assert.deepEqual(row.msic_sections, f.msic_sections, `${f.family_key}.msic_sections`);
+    assert.deepEqual(row.msic_divisions, f.msic_divisions, `${f.family_key}.msic_divisions`);
+    assert.deepEqual(row.trade_natures, f.trade_natures, `${f.family_key}.trade_natures`);
+    assert.deepEqual(row.entity_types, f.entity_types, `${f.family_key}.entity_types`);
+    // Q12's stamp is DERIVED, not carried by the dossier: present exactly where a code is.
+    const keyed = f.msic_sections.length > 0 || f.msic_divisions.length > 0;
+    assert.equal(row.msic_edition, keyed ? "MSIC 2008" : null, `${f.family_key}.msic_edition`);
+    if (STRIPPED.has(f.family_key)) {
+      assert.notEqual(row.basis, f.basis, `${f.family_key}: the fold was supposed to rewrite this basis`);
+      assert.ok(/%|RM ?[0-9]/.test(f.basis), `${f.family_key}: the dossier's own basis should be the numeral-bearing one`);
+      assert.ok(!/%|RM ?[0-9]/.test(row.basis), `${f.family_key}: the shipped basis still carries a numeral`);
+    } else {
+      assert.equal(row.basis, f.basis, `${f.family_key}.basis`);
+    }
+  }
+  for (const a of j.accounts) {
+    const row = map.accounts[a.account_code];
+    assert.ok(row, `account ${a.account_code} is in the dossier and not in the DB`);
+    assert.equal(row.family_key, a.family_key, `${a.account_code}.family_key`);
+    assert.equal(row.name, a.name, `${a.account_code}.name`);
+    assert.equal(row.account_type, a.account_type, `${a.account_code}.account_type`);
+    assert.equal(row.account_class, a.account_class, `${a.account_code}.account_class`);
+    assert.equal(row.special_acc_type, a.special_acc_type, `${a.account_code}.special_acc_type`);
+    assert.equal(row.sort_ordinal, a.sort_ordinal, `${a.account_code}.sort_ordinal`);
+    assert.equal(row.tax_sensitive, Boolean(a.tax_sensitive), `${a.account_code}.tax_sensitive`);
+    assert.equal(row.add_back_class, a.add_back_class ?? null, `${a.account_code}.add_back_class`);
+    assert.equal(row.statutory, a.statutory ?? null, `${a.account_code}.statutory`);
+  }
+  // The other direction: the ONLY rows the DB carries beyond the dossier are the ruled-in
+  // provisional variants. A silent extra family is exactly what a count check would miss.
+  const extraFam = Object.keys(map.families).filter((k) => !j.families.some((f) => f.family_key === k));
+  assert.deepEqual(extraFam.sort(), [...PROVISIONAL].sort(), "unexplained extra families in the shipped seed");
+  const extraAcc = Object.keys(map.accounts).filter((k) => !j.accounts.some((a) => a.account_code === k));
+  assert.deepEqual(extraAcc.sort(), ["3040", "3050"], "unexplained extra accounts in the shipped seed");
+});
+
+test("J5 · MED-2 an adoption cannot name a false version, or another firm's private template", async (t) => {
+  if (unready(t)) return;
+  const ins = (c, template, version, firm) =>
+    c.query(
+      `insert into clara.coa_template_adoptions(firm_id, client_id, template_id, template_version,
+         state, families, adopted_by, adopted_at)
+       values ($1, $2, $3, $4, 'adopted', array['revenue']::text[], $5, now())`,
+      [firm, world.clients.A1, template, version, world.users.alice],
+    );
+  await withRolledBackTx(async (c) => {
+    // (a) the lawful shape -- the positive control the two refusals below are measured against.
+    await ins(c, platform.id, 1, world.firms.A);
+    await c.query("rollback"); await c.query("begin");
+    // (b) a version the template never had.
+    assert.equal(await raisedCode(() => ins(c, platform.id, 99, world.firms.A)), PG.foreignKeyViolation,
+      "an adoption naming version 99 of a template that only has version 1 must be refused by the COMPOSITE fk");
+    await c.query("rollback"); await c.query("begin");
+    // (c) firm A adopting firm B's PRIVATE template -- the FKs are all satisfied; only the
+    //     congruence trigger stands between this and a cross-tenant reference in a durable row.
+    const err = await refusalReason(() => ins(c, publishedFork, 1, world.firms.B));
+    assert.equal(err, "template_not_in_firm",
+      "a firm may adopt only the platform template or one of its own");
+  });
+});
+
+test("J6 · the four adoption biconditionals: every illegal shape refuses, every lawful one admits", async (t) => {
+  if (unready(t)) return;
+  const cases = [
+    // [label, extra columns, extra values, state override, must-refuse]
+    ["an agent proposal with a basis but NO receipt", "proposed_by, proposed_at, basis",
+      `$5::uuid, now(), '{}'::jsonb`, "proposed", true],
+    ["an agent proposal with a receipt but NO basis", "proposed_by, proposed_at, receipt_id",
+      `$5::uuid, now(), null`, "proposed", true],
+    ["a DECLINED row naming an adopter", "adopted_by", `$5::uuid`, "declined", true],
+    ["an adopter with no adopted_at", "adopted_by", `$5::uuid`, "adopted", true],
+    ["[lawful] a human-direct adoption", "adopted_by, adopted_at", `$5::uuid, now()`, "adopted", false],
+    ["[lawful] a plain declined row", "", "", "declined", false],
+  ];
+  await withRolledBackTx(async (c) => {
+    for (const [label, cols, vals, state, mustRefuse] of cases) {
+      await c.query("savepoint s");
+      const sql =
+        `insert into clara.coa_template_adoptions(firm_id, client_id, template_id, template_version,
+           state, families${cols ? ", " + cols : ""})
+         values ($1, $2, $3, 1, $4, array['revenue']::text[]${vals ? ", " + vals : ""})`;
+      const params = vals.includes("$5")
+        ? [world.firms.A, world.clients.A1, platform.id, state, world.users.alice]
+        : [world.firms.A, world.clients.A1, platform.id, state];
+      const code = await raisedCode(() => c.query(sql, params));
+      if (mustRefuse) {
+        assert.equal(code, PG.checkViolation, `${label}: must be REFUSED by a biconditional`);
+      } else {
+        assert.equal(code, null, `${label}: must still be admitted -- a wall that refuses everything proves nothing`);
+      }
+      await c.query("rollback to savepoint s");
+    }
+  });
+});
+
+test("J7 · MED-3 law 3: the doors are pinned by EXACT SIGNATURE, not by proname", async (t) => {
+  if (unready(t)) return;
+  assert.equal(COA_TEMPLATE_PR_A_SIGS.length, 14);
+  assert.deepEqual(await coaTemplateSigFailures(), [],
+    "every door and internal must resolve at its exact signature, with no second overload");
+});
+
+test("J7m · MUTANT M13: a mutated FOREIGN body makes the D1 whole-catalog differential FAIL", async (t) => {
+  if (unready(t)) return;
+  const snap = async (c) =>
+    (await c.query(
+      `select coalesce(md5(string_agg(encode(sha256(convert_to(p.prosrc,'UTF8')),'hex'), '' order by p.oid)), '') as h
+         from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'clara'`,
+    )).rows[0].h;
+  await withRolledBackTx(async (c) => {
+    const before = await snap(c);
+    assert.notEqual(before, "", "control: the catalog snapshot is empty -- the instrument reads nothing");
+    // A FOREIGN body -- nothing this PR authored. The migration's S8 differential compares
+    // exactly this per-function prosrc sha; if a mutated foreign body does not move the
+    // aggregate, the D1-EMPTY proof is measuring nothing.
+    await c.query(
+      "create or replace function clara.role_rank(p_role text) returns int language sql immutable as $$ select case p_role when 'viewer' then 0 when 'bookkeeper' then 1 when 'admin' then 2 when 'owner' then 3 else null end /* M13 */ $$",
+    );
+    assert.notEqual(await snap(c), before,
+      "MUTANT: a changed FOREIGN function body must move the differential -- otherwise D1-EMPTY is a vacuous claim");
+  });
+  const restored = await rootQuery(
+    "select position('M13' in prosrc) as m from pg_proc where oid = 'clara.role_rank(text)'::regprocedure",
+  );
+  assert.equal(Number(restored.rows[0].m), 0, "the mutant leaked out of its transaction");
+});
+
+test("J7m2 · MUTANT M14: a dropped signature plus a same-named WRONG overload makes the roster FAIL", async (t) => {
+  if (unready(t)) return;
+  // The roster logic, run on the MUTATED connection -- rig-meta's own helper uses its own
+  // pooled client and could never see an uncommitted DDL change.
+  const sigFailuresOn = async (c) => {
+    const live = await c.query(
+      "select s as sig, to_regprocedure(s) is not null as ok from unnest($1::text[]) s",
+      [COA_TEMPLATE_PR_A_SIGS],
+    );
+    const missing = live.rows.filter((r) => !r.ok).map((r) => r.sig);
+    const dupes = await c.query(
+      `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname='clara' and p.proname = any($1::text[])
+        group by p.proname having count(*) > 1`,
+      [COA_TEMPLATE_PR_A_SIGS.map((s) => s.replace(/^clara\./, "").replace(/\(.*$/, ""))],
+    );
+    return { missing, dupes: dupes.rows.map((r) => r.proname) };
+  };
+  await withRolledBackTx(async (c) => {
+    const control = await sigFailuresOn(c);
+    assert.deepEqual(control, { missing: [], dupes: [] }, "control: the roster is already broken before the mutation");
+    // The law-3 shape exactly: the NAME survives, the callable identity does not.
+    await c.query("drop function clara.get_coa_template(uuid)");
+    await c.query("create function clara.get_coa_template(p_template text) returns jsonb language sql stable as $$ select '{}'::jsonb $$");
+    const mutated = await sigFailuresOn(c);
+    assert.deepEqual(mutated.missing, ["clara.get_coa_template(uuid)"],
+      "MUTANT: the exact-signature roster must report the recut door -- a proname census would not");
+    // And the proof that a proname census would NOT have caught it: the name is still there.
+    const byName = await c.query(
+      "select count(*)::int n from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname='get_coa_template'",
+    );
+    assert.equal(byName.rows[0].n, 1, "the proname is still present -- which is precisely why proname is not identity");
+  });
+  assert.deepEqual(await coaTemplateSigFailures(), [], "the mutant leaked out of its transaction");
+});
+
+test("J8 · LOW the fork allocator serialises: T2 blocks, then gets the NEXT version, never a 23505", async (t) => {
+  if (unready(t)) return;
+  const key = nextKey("j8");
+  let t1 = null, t2 = null;
+  try {
+    t1 = await openHumanTxn(world.users.alice);
+    const first = await t1.client.query(
+      `select clara.fork_coa_template(p_source => $1::uuid, p_template_key => $2::text,
+         p_title => 'J8 one', p_framework_hint => 'MPERS', p_basis => 'b', p_op_key => $3::text) as r`,
+      [platform.id, key, opk("j8a")],
+    );
+    assert.equal(first.rows[0].r.version, 1);
+
+    t2 = await openHumanAutocommit(world.users.alice);
+    const second = t2.client
+      .query(
+        `select clara.fork_coa_template(p_source => $1::uuid, p_template_key => $2::text,
+           p_title => 'J8 two', p_framework_hint => 'MPERS', p_basis => 'b', p_op_key => $3::text) as r`,
+        [platform.id, key, opk("j8b")],
+      )
+      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+
+    // Without pg_advisory_xact_lock both sessions read max(version)=0 and one loses to
+    // uq_coa_templates_firm_version with a bare 23505 naming nothing.
+    await waitBlockedByOrThrow(t2.pid, t1.pid);
+    await t1.client.query("commit");
+    const out = await second;
+    assert.equal(out.ok, true, `the second fork must SUCCEED, not collide: ${out.e?.code} ${out.e?.message}`);
+    assert.equal(out.r.rows[0].r.version, 2, "the second fork must receive the NEXT version");
+  } finally {
+    await releaseSession(t1);
+    await releaseSession(t2);
+  }
 });

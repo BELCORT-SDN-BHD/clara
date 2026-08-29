@@ -14,7 +14,9 @@
 -- docs/plan/active/coa-template-gate-record.md (the gate, CLOSED, all twelve RULED 裁-23).
 -- THE RULINGS OVERRIDE THE DESIGN WHERE THEY DIFFER.
 --
--- THE SEED DATA: docs/plan/research/coa-template-2026-08-29.json -- 31 families, 100 accounts,
+-- THE SEED DATA: docs/plan/research/coa-template-2026-08-29.json -- 31 families, 100 accounts
+-- verbatim, plus TWO provisional equity families (2 accounts) the conductor ruled in on
+-- 2026-08-29 to close the entity_type coverage the dossier itself named as a gap, so 33/102,
 -- written by the 裁-23/Q1 research lane the owner ruled must precede PR-0, whose draft he
 -- WAIVED his review of (gate record Q1). Its reasoning is
 -- docs/plan/research/coa-template-research-2026-08-29.md. Every family row below carries the
@@ -76,8 +78,8 @@
 -- asserts this; this file PROVES it: S0 snapshots EVERY function in schema clara (oid, prosrc
 -- sha256, proacl, proowner) into a temp table, and the tail re-reads the whole catalog and
 -- requires that every pre-existing function is byte-identical on all three, and that the only
--- additions are exactly this file's own thirteen names (7 writers + 2 reads + 2 internal
--- helpers + 2 trigger functions), pinned as a MAP of signatures rather than a count. A
+-- additions are exactly this file's own fourteen names (7 writers + 2 reads + 2 internal
+-- helpers + 3 trigger functions), pinned as a MAP of signatures rather than a count. A
 -- whole-catalog differential, not a roster probe: a body this file never thought to name
 -- cannot slip past it.
 --
@@ -212,7 +214,8 @@ begin
       'clara.list_coa_templates()',
       'clara.get_coa_template(uuid)',
       'clara._tf_coa_template_freeze()',
-      'clara._tf_coa_template_child_freeze()']) x loop
+      'clara._tf_coa_template_child_freeze()',
+      'clara._tf_coa_adoption_template_congruent()']) x loop
     if to_regprocedure(r.x) is not null then
       raise exception 'S0: % already exists -- refusing to re-birth', r.x using errcode = 'CLR10';
     end if;
@@ -303,7 +306,7 @@ begin
   end loop;
 
   select count(*) into v_n from _coa_pra_fn_snapshot;
-  raise notice 'coa-template PR-a prestate: OK -- 4 relation names and 13 function names all clear; the dataviz chart_templates pair present (the coa_ prefix is load-bearing); all SEVEN mirrored coa_accounts predicates read live and byte-equal to what this file installs (code/type/class/special/OBE/RE/SST-purchase-cost); 8 helpers + 5 referenced relations resolve at exact signatures; clara.clients carries a real unique on (id, firm_id); trade_nature and entity_type both carry a populated allowed_values; % clara function(s) snapshotted for the tail''s whole-catalog D1-EMPTY differential.', v_n;
+  raise notice 'coa-template PR-a prestate: OK -- 4 relation names and 14 function names all clear; the dataviz chart_templates pair present (the coa_ prefix is load-bearing); all SEVEN mirrored coa_accounts predicates read live and byte-equal to what this file installs (code/type/class/special/OBE/RE/SST-purchase-cost); 8 helpers + 5 referenced relations resolve at exact signatures; clara.clients carries a real unique on (id, firm_id); trade_nature and entity_type both carry a populated allowed_values; % clara function(s) snapshotted for the tail''s whole-catalog D1-EMPTY differential.', v_n;
 end $s0$;
 
 -- =====================================================================================
@@ -342,6 +345,10 @@ create table clara.coa_templates (
   retired_at     timestamptz,
 
   constraint coa_templates_pkey primary key (id),
+  -- The target of coa_template_adoptions' COMPOSITE fk (MED-2): an adoption stores the version
+  -- it applied, and without this a stored template_version is a free-floating integer no
+  -- constraint ever checks against the template it names.
+  constraint uq_coa_templates_id_version unique (id, version),
   constraint fk_coa_templates_firm         foreign key (firm_id)      references clara.firms(id),
   constraint fk_coa_templates_forked_from  foreign key (forked_from)  references clara.coa_templates(id),
   constraint fk_coa_templates_created_by   foreign key (created_by)   references clara.users(id),
@@ -515,7 +522,13 @@ create table clara.coa_template_adoptions (
 
   constraint coa_template_adoptions_pkey primary key (id),
   constraint fk_coa_adoption_firm     foreign key (firm_id)     references clara.firms(id),
-  constraint fk_coa_adoption_template foreign key (template_id) references clara.coa_templates(id),
+  -- COMPOSITE (MED-2), not the single-column FK Annex F sketches. The row stores BOTH the
+  -- template and the version it applied -- that pair is the whole point of the record (design
+  -- D-2: "the adoption row records WHICH template version was applied so drift is measurable").
+  -- A single-column FK leaves template_version unchecked, so an adoption could name version 7 of
+  -- a template that only ever had two. The composite makes the pair itself the reference.
+  constraint fk_coa_adoption_template foreign key (template_id, template_version)
+    references clara.coa_templates(id, version),
   constraint fk_coa_adoption_receipt  foreign key (receipt_id)  references clara.onboarding_agent_receipts(id),
   constraint fk_coa_adoption_proposer foreign key (proposed_by) references clara.users(id),
   constraint fk_coa_adoption_adopter  foreign key (adopted_by)  references clara.users(id),
@@ -530,12 +543,22 @@ create table clara.coa_template_adoptions (
   constraint ck_coa_adoption_basis_shape check (basis is null or jsonb_typeof(basis) = 'object'),
   constraint ck_coa_adoption_version  check (template_version > 0),
   constraint ck_coa_adoption_proposed check ((proposed_by is null) = (proposed_at is null)),
-  constraint ck_coa_adoption_adopted  check (
-    (state = 'adopted') = (adopted_by is not null and adopted_at is not null)),
-  -- An agent proposal ALWAYS carries a receipt and a basis; a human-direct adoption carries
-  -- neither. Two-way, so a proposal cannot arrive receipt-less.
-  constraint ck_coa_adoption_agent_receipted check (
-    (proposed_by is null) = (receipt_id is null and basis is null))
+  -- THREE biconditionals, not one conjunction (independent review, 2026-08-29, MEASURED RED
+  -- first). `(state='adopted') = (adopted_by is not null and adopted_at is not null)` reads like
+  -- a two-way wall and is not one: for a NON-adopted row both sides are false whenever EITHER
+  -- stamp is missing, so a 'declined' row naming an adopted_by with a NULL adopted_at was
+  -- ADMITTED. Splitting it makes each half say exactly one thing:
+  --   the adopter exists iff the row is adopted; and the two stamps travel together, always.
+  constraint ck_coa_adoption_adopted    check ((state = 'adopted') = (adopted_by is not null)),
+  constraint ck_coa_adoption_adopted_at check ((adopted_by is null) = (adopted_at is null)),
+  -- Same defect, same shape, and this one guarded the claim that matters most: an agent
+  -- proposal ALWAYS carries a receipt AND a basis; a human-direct adoption carries neither.
+  -- `(proposed_by is null) = (receipt_id is null and basis is null)` only ever forced AT LEAST
+  -- ONE of the two to be present, so a proposal with a basis and NO RECEIPT was ADMITTED --
+  -- exactly the receipt-less agent act the comment promised was impossible. Two independent
+  -- biconditionals, so neither can stand in for the other.
+  constraint ck_coa_adoption_receipted   check ((proposed_by is null) = (receipt_id is null)),
+  constraint ck_coa_adoption_basis_paired check ((proposed_by is null) = (basis is null))
 );
 
 create unique index uq_coa_adoption_live on clara.coa_template_adoptions (client_id) where state = 'adopted';
@@ -586,7 +609,14 @@ create function clara._tf_coa_template_child_freeze() returns trigger
 declare v_state text; v_template uuid;
 begin
   v_template := coalesce(new.template_id, old.template_id);
-  select t.state into v_state from clara.coa_templates t where t.id = v_template;
+  -- FOR SHARE, not a bare read (HIGH-1). An unlocked read here lets a content write commit
+  -- BETWEEN a concurrent publisher's hash computation and its state stamp, leaving a PUBLISHED
+  -- template whose rows do not reproduce its own content_sha256 -- the one thing D-2's
+  -- copy-not-reference promise rests on. The share lock makes the publisher's FOR UPDATE on the
+  -- same header wait for this writer, and vice versa, so the hash is always taken over content
+  -- that cannot move under it. Same-transaction callers already hold the stronger FOR UPDATE
+  -- (every editor door goes through _coa_template_for_edit first), so this never self-blocks.
+  select t.state into v_state from clara.coa_templates t where t.id = v_template for share;
   if v_state is distinct from 'draft' then
     raise exception 'coa template % is %, not a draft -- its families and accounts are frozen',
       v_template, coalesce(v_state, 'missing')
@@ -613,6 +643,36 @@ create trigger t_coa_template_accounts_no_truncate before truncate on clara.coa_
 
 create trigger t_coa_template_adoptions_no_truncate before truncate on clara.coa_template_adoptions
   for each statement execute function clara._tf_no_truncate();
+
+-- MED-2, second half: the composite FK proves the (template, version) PAIR is real, and the
+-- client FK proves the client is the firm's -- but neither says the TEMPLATE is one this firm
+-- may adopt. Without this, firm A could record an adoption of firm B's private template: a
+-- cross-tenant reference written into a durable record, and a drift read that would then
+-- measure A's chart against a template A can't even see. A CHECK cannot express it (it would
+-- have to read coa_templates), so it is a trigger -- the same shape 0058's own tenant-congruence
+-- guards take. The admitted set is exactly the read policy's: a PLATFORM template, or one of
+-- this adoption's own firm.
+create function clara._tf_coa_adoption_template_congruent() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_scope text; v_firm uuid;
+begin
+  select t.scope, t.firm_id into v_scope, v_firm
+    from clara.coa_templates t where t.id = new.template_id;
+  if v_scope is null then
+    raise exception 'adoption names a template that does not exist' using errcode = 'CLR11',
+      detail = '{"reason":"template_not_found"}';
+  end if;
+  if v_scope = 'firm' and v_firm is distinct from new.firm_id then
+    raise exception 'a firm may only adopt the platform template or one of its own'
+      using errcode = 'CLR11', detail = '{"reason":"template_not_in_firm"}';
+  end if;
+  return new;
+end $$;
+revoke all on function clara._tf_coa_adoption_template_congruent() from public;
+
+create trigger t_coa_adoption_template_congruent before insert or update
+  on clara.coa_template_adoptions
+  for each row execute function clara._tf_coa_adoption_template_congruent();
 
 -- =====================================================================================
 -- S3 -- RLS + ACL. Forced on all four (.claude/rules/db-migrations.md), owner policy plus the
@@ -700,12 +760,18 @@ revoke all on function clara._coa_template_content_sha256(uuid) from public;
 --                                        oracle: both look identical to the caller.
 --   CLR10 platform_template_not_editable
 --   CLR10 template_not_draft
+-- VOLATILE, not STABLE, and the header is taken FOR UPDATE (HIGH-1). Both halves are
+-- load-bearing: the row lock is what serialises an edit against a concurrent publish, and a
+-- STABLE label on a body that takes a row lock is a lie to the planner about a function with a
+-- side effect. Holding the lock for the caller's whole transaction is the point -- every editor
+-- door calls this FIRST, so from that moment the header cannot change state underneath it, and
+-- a publisher blocks until the editor commits or rolls back.
 create function clara._coa_template_for_edit(p_template uuid, p_firm uuid)
   returns clara.coa_templates
-  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+  language plpgsql volatile security definer set search_path = clara, pg_temp as $$
 declare t clara.coa_templates;
 begin
-  select * into t from clara.coa_templates where id = p_template;
+  select * into t from clara.coa_templates where id = p_template for update;
   if not found or (t.scope = 'firm' and t.firm_id is distinct from p_firm) then
     raise exception 'template not found in your firm' using errcode = 'CLR11',
       detail = '{"reason":"template_not_found"}';
@@ -1091,6 +1157,11 @@ begin
     clara._hash(jsonb_build_object('t', p_template)));
   if v_dedupe is not null then return v_dedupe; end if;
 
+  -- _coa_template_for_edit takes the header FOR UPDATE, so from here to COMMIT no editor can
+  -- add, change or remove a family or an account on this template: their own doors block on the
+  -- same row, and even a raw owner-level DML blocks on the child trigger's FOR SHARE. That is
+  -- what makes the count / emptiness rungs / hash below a consistent read of ONE content state
+  -- rather than three separate ones (HIGH-1).
   t := clara._coa_template_for_edit(p_template, c.firm);
   select count(*) into v_families from clara.coa_template_families where template_id = t.id;
   select count(*) into v_accounts from clara.coa_template_accounts where template_id = t.id;
@@ -1136,7 +1207,9 @@ begin
     clara._hash(jsonb_build_object('t', p_template)));
   if v_dedupe is not null then return v_dedupe; end if;
 
-  select * into t from clara.coa_templates where id = p_template;
+  -- FOR UPDATE for the same reason publish takes it (HIGH-1): the state test below and the
+  -- stamp that follows must see one header state, not two.
+  select * into t from clara.coa_templates where id = p_template for update;
   if not found or (t.scope = 'firm' and t.firm_id is distinct from c.firm) then
     raise exception 'template not found in your firm' using errcode = 'CLR11',
       detail = '{"reason":"template_not_found"}';
@@ -1294,19 +1367,32 @@ begin
     ('fnb_hospitality', 'Food and Beverage / Hospitality', 'by_industry', 'firm practice, keyed to MSIC 2008 Section I (Accommodation and Food Service Activities); service charge is distinct from SST per RMCD''s own position (coa-template-research-2026-08-29.md SS6)', 160, array['I']::text[], array['55','56']::text[], '{}'::text[], '{}'::text[], 'MSIC 2008'),
     ('motor_vehicles', 'Motor Vehicles', 'opt_in', 'firm practice', 170, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('foreign_currency', 'Foreign Currency', 'opt_in', 'firm practice', 180, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('entertainment', 'Entertainment (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1)(l)/s.18; PR 4/2015 (50% restriction, 8 named 100%-deductible exceptions)', 190, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('donations_approved', 'Donations - Approved Institutions (Tax-Split)', 'opt_in', 'ITA 1967 s.44(6) - deductible to the Government/State/local authority without cap, or to a DGIR-approved institution up to 10% of aggregate income', 200, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('entertainment', 'Entertainment (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1)(l)/s.18; PR 4/2015 - the partial-deduction restriction and its named full-deduction exceptions. The restriction rate and the exception list are F-T3''s effective-dated tables, never this row', 190, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('donations_approved', 'Donations - Approved Institutions (Tax-Split)', 'opt_in', 'ITA 1967 s.44(6) - deductible to the Government/State/local authority without cap, or to a DGIR-approved institution subject to the statutory ceiling on aggregate income. The ceiling itself is F-T3''s, never this row', 200, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('donations_unapproved', 'Donations - Unapproved / Non-Deductible (Tax-Split)', 'opt_in', 'ITA 1967 s.44(6) by omission - not within the approved mechanism, non-deductible', 210, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('fines_and_penalties', 'Fines and Penalties (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1) read with s.33(1); case law (Aspac Lubricants (M) Sdn Bhd v KPHDN) - no dedicated Public Ruling', 220, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('depreciation_and_amortisation', 'Depreciation and Amortisation (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1)(k) disallows book depreciation; s.19 + Schedule 3 substitute capital allowances; PR 12/2014, PR 6/2015', 230, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('leave_passage', 'Leave Passage (Tax-Split)', 'opt_in', 'ITA 1967 s.13(1)(b); PR 1/2003 - the fare portion is non-deductible to the employer; food/accommodation/incidentals are treated as entertainment instead', 240, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('private_and_proprietor_expenses', 'Private and Proprietor''s Expenses (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1)(a) - domestic/private expenditure - no dedicated Public Ruling', 250, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('motor_running_costs', 'Motor Vehicle Running Costs (Tax-Split)', 'opt_in', 'ITA 1967 Schedule 3 Para 2/2A (QE cap for non-commercial vehicles, RM50,000/RM100,000); PR 6/2015; running-cost apportionment under s.33(1)/s.39(1)(a)', 260, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('club_subscriptions_and_entrance_fees', 'Club Subscriptions and Entrance Fees (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1)(m) - standalone disallowance, distinct from the entertainment 50% rule - no dedicated Public Ruling', 270, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('motor_running_costs', 'Motor Vehicle Running Costs (Tax-Split)', 'opt_in', 'ITA 1967 Schedule 3 Para 2/2A - the qualifying-expenditure cap for non-commercial vehicles; PR 6/2015; running-cost apportionment under s.33(1)/s.39(1)(a). The cap amounts are F-T3''s effective-dated tables, never this row', 260, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    ('club_subscriptions_and_entrance_fees', 'Club Subscriptions and Entrance Fees (Tax-Split)', 'opt_in', 'ITA 1967 s.39(1)(m) - standalone disallowance, distinct from the entertainment restriction in s.39(1)(l) - no dedicated Public Ruling', 270, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('doubtful_debts_and_provisions', 'Doubtful Debts and Unapproved Provisions (Tax-Split)', 'opt_in', 'ITA 1967 s.34(2); PR 4/2019 (replaces PR 1/2002) - a specific provision is deductible, a general provision is not; s.39(1)(c) for unapproved pension/provident fund contributions', 280, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('equity_company', 'Equity - Company', 'opt_in', 'Companies Act 2016 s.74 (no-par-value regime, effective 2017-01-31); MPERS 4.11(f)/4.12', 290, '{}'::text[], '{}'::text[], '{}'::text[], array['sdn_bhd','bhd']::text[], null),
     ('equity_sole_prop', 'Equity - Sole Proprietorship', 'opt_in', 'firm practice per professional convention (ACCA FA2; IFRS for SMEs Module 4 worked examples) - no capital/current split for a sole proprietor, capital and drawings only. Hard constraint 13: a sole proprietor''s own account is EQUITY, never a staff advance.', 300, '{}'::text[], '{}'::text[], '{}'::text[], array['sole_prop']::text[], null),
-    ('equity_partnership', 'Equity - Partnership', 'opt_in', 'firm practice per professional convention (ACCA FA2; IFRS for SMEs Module 4 S4.13) - capital and current accounts per partner; profit-sharing ratio governed by the Partnership Act 1961, not an accounting standard', 310, '{}'::text[], '{}'::text[], '{}'::text[], array['partnership','llp']::text[], null)
+    ('equity_partnership', 'Equity - Partnership', 'opt_in', 'firm practice per professional convention (ACCA FA2; IFRS for SMEs Module 4 S4.13) - capital and current accounts per partner; profit-sharing ratio governed by the Partnership Act 1961, not an accounting standard', 310, '{}'::text[], '{}'::text[], '{}'::text[], array['partnership','llp']::text[], null),
+    -- THE TWO PROVISIONAL VARIANTS (conductor ruling under delegation, 2026-08-29; HIGH-2).
+    -- clara.client_fact_keys' live entity_type enum admits EIGHT values, and the research
+    -- covered five. The dossier NAMED the gap ("society and cooperative ... have no
+    -- equity_variants entry ... a client recorded with entity_type=society|cooperative|other
+    -- needs a manual equity build") and shipping the gap unchanged would leave a client whose
+    -- entity type the product ADMITS with no equity section at all -- the trim would hand them
+    -- retained earnings and nothing else. These two families close the coverage; their content
+    -- is deliberately minimal and their basis says so IN THE ROW rather than in a comment, so a
+    -- reader of the data -- not just of this file -- knows an owner review is owed. The tail
+    -- proves coverage against the LIVE enum, so a ninth entity type widens the enum and reds
+    -- this migration''s own successor rather than silently uncovering a client.
+    ('equity_society_cooperative', 'Equity - Society or Cooperative (Provisional)', 'opt_in', 'not researched - provisional; owner review owed. Placed to close the entity_type coverage the 2026-08-29 research dossier itself named as a gap (SS7 item 8). Societies Act 1966 / Co-operative Societies Act 1993 govern these entities'' funds, and neither was read by that dossier', 320, '{}'::text[], '{}'::text[], '{}'::text[], array['society','cooperative']::text[], null),
+    ('equity_other', 'Equity - Other Entity Type (Provisional)', 'opt_in', 'not researched - provisional; owner review owed. Placed to close the entity_type coverage the 2026-08-29 research dossier itself named as a gap (SS7 item 8). entity_type=other is by construction unenumerated, so no single instrument governs it and the firm authors the real section on first use', 330, '{}'::text[], '{}'::text[], '{}'::text[], array['other']::text[], null)
     ) as x(family_key, label, inclusion, basis, sort_ordinal, msic_sections, msic_divisions,
            trade_natures, entity_types, msic_edition);
 
@@ -1426,7 +1512,12 @@ begin
     ('equity_sole_prop', '3810', 'Proprietor''s Drawings', 'equity', null, null, 20),
     ('equity_partnership', '3020', 'Partners'' Capital Accounts', 'equity', null, null, 10),
     ('equity_partnership', '3030', 'Partners'' Current Accounts', 'equity', null, null, 20),
-    ('equity_partnership', '3820', 'Partners'' Drawings', 'equity', null, null, 30)
+    ('equity_partnership', '3820', 'Partners'' Drawings', 'equity', null, null, 30),
+    -- The two provisional variants' one account each (HIGH-2). Neither carries a
+    -- special_acc_type: 3900 already holds retained_earnings, and uq_coa_tmpl_special admits
+    -- exactly one row per marker per template -- these are ordinary equity lines a firm renames.
+    ('equity_society_cooperative', '3040', 'Accumulated Funds', 'equity', null, null, 10),
+    ('equity_other', '3050', 'Capital / Retained Earnings (Other Entity Type)', 'equity', null, null, 10)
     ) as y(family_key, account_code, name, account_type, account_class, special_acc_type, sort_ordinal)
     -- ================================================================================
     -- THE ANNOTATION BLOCK -- 23 rows, kept as its own reviewable list because this is the
@@ -1465,8 +1556,8 @@ begin
 
   select count(*) into v_families from clara.coa_template_families where template_id = v_id;
   select count(*) into v_accounts from clara.coa_template_accounts where template_id = v_id;
-  if v_families <> 31 or v_accounts <> 100 then
-    raise exception 'S7: seeded % families and % accounts, expected 31 and 100', v_families, v_accounts
+  if v_families <> 33 or v_accounts <> 102 then
+    raise exception 'S7: seeded % families and % accounts, expected 33 and 102', v_families, v_accounts
       using errcode = 'CLR10';
   end if;
 
@@ -1475,7 +1566,7 @@ begin
      set state = 'published', published_at = now(), content_sha256 = v_sha
    where id = v_id;
 
-  raise notice 'coa-template PR-a seed: platform starter my_sme_starter v1 PUBLISHED -- % families, % accounts, content_sha256 %',
+  raise notice 'coa-template PR-a seed: platform starter my_sme_starter v1 PUBLISHED -- % families (31 research + 2 provisional equity), % accounts, content_sha256 %',
     v_families, v_accounts, encode(v_sha, 'hex');
 end $seed$;
 
@@ -1624,6 +1715,29 @@ begin
       raise exception 'S8: % trigger census mismatch -- got %', r.x, v_trig using errcode = 'CLR10';
     end if;
   end loop;
+  select coalesce(array_agg(t.tgname order by t.tgname), '{}') into v_trig from pg_trigger t
+   where t.tgrelid = 'clara.coa_template_adoptions'::regclass and not t.tgisinternal;
+  if v_trig <> array['t_coa_adoption_template_congruent','t_coa_template_adoptions_no_truncate'] then
+    raise exception 'S8: coa_template_adoptions trigger census mismatch -- got %', v_trig using errcode = 'CLR10';
+  end if;
+  -- MED-2: the composite FK and its unique target, asserted by DEFINITION rather than by name.
+  if not exists (
+    select 1 from pg_constraint con
+     where con.conrelid = 'clara.coa_template_adoptions'::regclass
+       and con.conname = 'fk_coa_adoption_template'
+       and pg_get_constraintdef(con.oid) =
+           'FOREIGN KEY (template_id, template_version) REFERENCES clara.coa_templates(id, version)') then
+    raise exception 'S8: fk_coa_adoption_template is not the COMPOSITE (template_id, template_version) reference'
+      using errcode = 'CLR10';
+  end if;
+  if not exists (
+    select 1 from pg_constraint con
+     where con.conrelid = 'clara.coa_templates'::regclass
+       and con.conname = 'uq_coa_templates_id_version'
+       and pg_get_constraintdef(con.oid) = 'UNIQUE (id, version)') then
+    raise exception 'S8: uq_coa_templates_id_version is missing or not UNIQUE (id, version)'
+      using errcode = 'CLR10';
+  end if;
 
   -- (6) THE EXECUTE MATRIX: seven writers + two reads reach clara_authenticated ONLY; the two
   --     helpers and the two trigger functions reach nobody but the owner; PUBLIC nowhere.
@@ -1655,7 +1769,8 @@ begin
       'clara._coa_template_content_sha256(uuid)',
       'clara._coa_template_for_edit(uuid,uuid)',
       'clara._tf_coa_template_freeze()',
-      'clara._tf_coa_template_child_freeze()']) x loop
+      'clara._tf_coa_template_child_freeze()',
+      'clara._tf_coa_adoption_template_congruent()']) x loop
     if to_regprocedure(r.x) is null then
       raise exception 'S8: internal % does not resolve', r.x using errcode = 'CLR10';
     end if;
@@ -1720,14 +1835,14 @@ begin
 
   select count(*) into v_n from clara.coa_template_families where template_id = v_tmpl;
   select count(*) into v_m from clara.coa_template_accounts where template_id = v_tmpl;
-  if v_n <> 31 or v_m <> 100 then
-    raise exception 'S8: seed census -- % families / % accounts, expected 31 / 100', v_n, v_m using errcode = 'CLR10';
+  if v_n <> 33 or v_m <> 102 then
+    raise exception 'S8: seed census -- % families / % accounts, expected 33 / 102', v_n, v_m using errcode = 'CLR10';
   end if;
   select string_agg(t.inclusion || '=' || t.n::text, ' · ' order by t.inclusion) into v_txt
     from (select inclusion, count(*) n from clara.coa_template_families
            where template_id = v_tmpl group by inclusion) t;
-  if v_txt is distinct from 'by_industry=6 · core=10 · opt_in=15' then
-    raise exception 'S8: family inclusion census is %, expected by_industry=6 · core=10 · opt_in=15', v_txt
+  if v_txt is distinct from 'by_industry=6 · core=10 · opt_in=17' then
+    raise exception 'S8: family inclusion census is %, expected by_industry=6 · core=10 · opt_in=17', v_txt
       using errcode = 'CLR10';
   end if;
   select count(*) into v_n from clara.coa_template_accounts a
@@ -1844,8 +1959,26 @@ begin
   select string_agg(f.family_key || '->' || array_to_string(f.entity_types, '+'), ' · ' order by f.family_key)
     into v_txt from clara.coa_template_families f
    where f.template_id = v_tmpl and f.entity_types <> '{}';
-  if v_txt is distinct from 'equity_company->sdn_bhd+bhd · equity_partnership->partnership+llp · equity_sole_prop->sole_prop' then
+  if v_txt is distinct from 'equity_company->sdn_bhd+bhd · equity_other->other · equity_partnership->partnership+llp · equity_society_cooperative->society+cooperative · equity_sole_prop->sole_prop' then
     raise exception 'S8: the entity-type equity swap census is %', v_txt using errcode = 'CLR10';
+  end if;
+  -- (7b) COVERAGE, not containment (HIGH-2). The census above proves the seed's entity_types are
+  --      a SUBSET of the live enum; that is silent about the direction that actually hurts -- a
+  --      value the product ADMITS with no equity family behind it. This walks the LIVE
+  --      ENTITY_TYPES_V2 vocabulary and requires EXACTLY ONE family per value, so a ninth entity
+  --      type widening client_fact_keys reds this assertion instead of silently uncovering a
+  --      client. Read from the catalog, never from a list this file carries.
+  select string_agg(z.v || '=' || z.n::text, ' · ' order by z.v) into v_txt
+    from (select v.value as v,
+                 (select count(*)::int from clara.coa_template_families f
+                   where f.template_id = v_tmpl and f.entity_types @> array[v.value]) as n
+            from clara.client_fact_keys k,
+                 lateral jsonb_array_elements_text(k.allowed_values) as v(value)
+           where k.fact_key = 'entity_type') z
+   where z.n <> 1;
+  if v_txt is not null then
+    raise exception 'S8: these live entity_type values do not have EXACTLY ONE equity family: %', v_txt
+      using errcode = 'CLR10';
   end if;
   -- Q12: every family carrying an MSIC key is edition-stamped, and every stamp reads MSIC 2008.
   select count(*) into v_n from clara.coa_template_families
@@ -1880,6 +2013,44 @@ begin
   if v_bad is not null then
     raise exception 'S8: seeded entity_types outside the live client_fact_keys vocabulary: %', v_bad using errcode = 'CLR10';
   end if;
+  -- (7c) CONSTRAINT 2 ON DURABLE PROSE (HIGH-3). A `basis` row is structured DB data a reader
+  --      may act on, so a NUMBER-BEARING tax assertion in one -- a restriction rate, a ceiling,
+  --      a capital-allowance cap -- is a model-authored figure with no effective-dated authority
+  --      behind it, which is exactly what the DB may not own (PRD SS6). CITATIONS stay: section,
+  --      paragraph, Public-Ruling and edition numbers are how a claim is checked, not a claim
+  --      about an amount. So this census refuses a percent sign and a currency figure anywhere
+  --      in a durable basis/hint field, and ADMITS s.39(1)(l), PR 4/2015, Para 2/2A, MSIC 2008.
+  --      The rates and amounts live in the research .md and, when F-T3 lands, in its own
+  --      effective-dated tables.
+  select string_agg(t2.where_ || ': ' || t2.txt, ' | ' order by t2.where_) into v_bad from (
+    select 'coa_templates.basis' as where_, basis as txt from clara.coa_templates where id = v_tmpl
+    union all
+    select 'family ' || family_key, basis from clara.coa_template_families where template_id = v_tmpl
+    union all
+    select 'account ' || account_code, name from clara.coa_template_accounts where template_id = v_tmpl
+    union all
+    select 'account ' || account_code || '.add_back_class', add_back_class
+      from clara.coa_template_accounts where template_id = v_tmpl and add_back_class is not null
+    union all
+    select 'account ' || account_code || '.statutory', statutory
+      from clara.coa_template_accounts where template_id = v_tmpl and statutory is not null
+  ) t2
+   where t2.txt like '%\%%'                                -- a percent sign, anywhere
+      or t2.txt ~* '\m(rm|myr)\s?[0-9]'                    -- a ringgit figure
+      or t2.txt ~ '[0-9]{1,3}(,[0-9]{3})+';                -- a comma-grouped amount
+  if v_bad is not null then
+    raise exception 'S8: a durable basis/hint field carries a numeral-bearing tax assertion (constraint 2 -- citations only): %', v_bad
+      using errcode = 'CLR10';
+  end if;
+  -- The POSITIVE control for the census above: it must still be reading fields that DO carry
+  -- statutory citations, or it is passing over an empty set and proving nothing (review law 2).
+  select count(*) into v_n from clara.coa_template_families
+   where template_id = v_tmpl and basis ~ '(ITA 1967|MPERS|PR [0-9]+/[0-9]{4})';
+  if v_n < 20 then
+    raise exception 'S8: only % family basis rows carry a statutory citation -- the numeral census above is reading the wrong field', v_n
+      using errcode = 'CLR10';
+  end if;
+
   -- Every family has a basis and at least one account (publish_coa_template's own rungs,
   -- re-proved on the seeded content rather than assumed from having called it).
   select string_agg(family_key, ', ' order by family_key) into v_bad
@@ -1889,6 +2060,24 @@ begin
   if v_bad is not null then
     raise exception 'S8: these families have no basis or no accounts: %', v_bad using errcode = 'CLR10';
   end if;
+  -- (7d) The adoption walls, asserted by PREDICATE TEXT rather than by name -- a one-way
+  --      conjunction that merely LOOKS two-way is the defect the independent review found here,
+  --      and a name census would have passed straight over it.
+  for r in select * from (values
+      ('ck_coa_adoption_adopted',      'CHECK (((state = ''adopted''::text) = (adopted_by IS NOT NULL)))'),
+      ('ck_coa_adoption_adopted_at',   'CHECK (((adopted_by IS NULL) = (adopted_at IS NULL)))'),
+      ('ck_coa_adoption_receipted',    'CHECK (((proposed_by IS NULL) = (receipt_id IS NULL)))'),
+      ('ck_coa_adoption_basis_paired', 'CHECK (((proposed_by IS NULL) = (basis IS NULL)))'),
+      ('ck_coa_adoption_proposed',     'CHECK (((proposed_by IS NULL) = (proposed_at IS NULL)))')
+    ) as t(conname, want) loop
+    select pg_get_constraintdef(con.oid) into v_txt from pg_constraint con
+     where con.conrelid = 'clara.coa_template_adoptions'::regclass and con.conname = r.conname;
+    if v_txt is distinct from r.want then
+      raise exception 'S8: % is %, expected %', r.conname, coalesce(v_txt,'<absent>'), r.want
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
   -- Nothing was adopted by anyone: PR-a plants no client chart and no adoption.
   select count(*) into v_n from clara.coa_template_adoptions;
   if v_n <> 0 then
@@ -1930,9 +2119,10 @@ begin
       'clara.remove_coa_template_family(uuid,text,text)',
       'clara.retire_coa_template(uuid,text)',
       'clara.upsert_coa_template_account(uuid,text,text,text,text,text,text,integer,boolean,text,text,text)',
-      'clara.upsert_coa_template_family(uuid,text,text,text,text,integer,text[],text[],text,text[],text[],text)'
+      'clara.upsert_coa_template_family(uuid,text,text,text,text,integer,text[],text[],text,text[],text[],text)',
+      'clara._tf_coa_adoption_template_congruent()'
     ]) x) then
-    raise exception 'S8: the added-function set is % -- expected exactly this file''s own thirteen', coalesce(v_txt,'<none>')
+    raise exception 'S8: the added-function set is % -- expected exactly this file''s own fourteen', coalesce(v_txt,'<none>')
       using errcode = 'CLR10';
   end if;
 
