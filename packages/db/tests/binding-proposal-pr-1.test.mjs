@@ -752,8 +752,11 @@ test("bp1.W10m MUTANT — a ONE-WAY honesty CHECK lets an agent row hide its age
       // dropping the equality alone proves nothing — the row would still be safe, for a different
       // reason. Removing BOTH is what shows the equality is load-bearing on its own layer, and
       // that the two walls are independent rather than one wearing two names.
+      // The mutant removes the provenance RAISE, not its condition: the condition is an
+      // unparenthesised OR chain, so `if false and A or B` still fires on B — a "mutant" that
+      // leaves the wall standing proves the opposite of what it claims. Measured on the rig.
       await withMutant(FREEZE_SIG,
-        [["  if new.created_by is distinct from old.created_by", "  if false and new.created_by is distinct from old.created_by"]],
+        [["    raise exception 'vendor binding provenance is frozen' using errcode='CLR36';", "    null;"]],
         async () => {
           await rootQuery(
             "update clara.vendor_identity_bindings set proposed_by_agent=false, proposer_model=null, proposal_receipt_id=null, directed_by=null where id=$1",
