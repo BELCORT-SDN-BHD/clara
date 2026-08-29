@@ -21,7 +21,9 @@
 --     OWN declared no-op re-ship (its `notes` say so: the account is unchanged, the family
 --     upsert is what matters).
 -- Merged: 40 families / 140 accounts, zero real collisions. Plus this lane's ONE remaining
--- provisional family (equity_other, 1 account) -- so 41/141 shipped.
+-- provisional family (equity_other, 1 account) and ONE family the independent review found
+-- missing from BOTH dossiers (taxation / 6900 Income Tax Expense -- see its own comment in the
+-- seed block) -- so 42 families / 142 accounts shipped.
 --
 -- WHAT THE ADDENDUM CHANGED, and why it had to. The reviewer measured that the first pass's
 -- starter carried NO PPE beyond motor vehicles, NO borrowings/HP/lease, NO current or deferred
@@ -1262,13 +1264,18 @@ end $$;
 -- S5.8 -- THE READS. INVOKER-rights and STABLE, no definer wrapper -- the estate's own
 -- trial_balance idiom (0004:730-739), so RLS decides who sees what and no new read surface is
 -- invented. Departures register (6) states the floor honestly.
+-- search_path IS pinned even though these are INVOKER-rights: the exemplar
+-- (clara.trial_balance, 0004:730-739) pins it too, and for the same reason -- an invoker whose
+-- own search_path puts a schema of theirs ahead of clara would resolve `coa_templates` to a
+-- table they control. Invoker rights decide WHOSE rows are visible; the pin decides WHICH
+-- relation the body means. Measured against the exemplar, not inferred from its shape.
 create function clara.list_coa_templates()
   returns table (template_id uuid, scope text, firm_id uuid, template_key text, version int,
                  title text, framework_hint text, basis text, state text,
                  content_sha256 text, forked_from uuid, created_at timestamptz,
                  published_at timestamptz, retired_at timestamptz,
                  families int, accounts int)
-  language sql stable as $$
+  language sql stable set search_path = clara, pg_temp as $$
   select t.id, t.scope, t.firm_id, t.template_key, t.version, t.title, t.framework_hint,
          t.basis, t.state, encode(t.content_sha256, 'hex'), t.forked_from, t.created_at,
          t.published_at, t.retired_at,
@@ -1279,7 +1286,7 @@ create function clara.list_coa_templates()
 $$;
 
 create function clara.get_coa_template(p_template uuid) returns jsonb
-  language sql stable as $$
+  language sql stable set search_path = clara, pg_temp as $$
   select jsonb_build_object(
     'template_id', t.id, 'scope', t.scope, 'firm_id', t.firm_id,
     'template_key', t.template_key, 'version', t.version, 'title', t.title,
@@ -1386,6 +1393,14 @@ begin
     ('employment_costs', 'Employment Costs', 'core', 'MPERS 5.5 (expense by nature)', 70, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('premises_and_admin', 'Premises and Administrative Expenses', 'core', 'MPERS 5.5 (expense by nature)', 80, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('finance_costs', 'Finance Costs', 'core', 'MPERS 5.5(b)', 90, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
+    -- THE ONE FAMILY NEITHER DOSSIER SHIPPED (independent review, 2026-08-29). MPERS 5.5 names
+    -- tax expense among the NINE minimum statement-of-comprehensive-income face items, and both
+    -- research passes gave taxation a balance-sheet home (tax_liabilities: 1140/1150/2500/2510)
+    -- and no P&L line at all. That is not cosmetic: PRD SS6 invariant 10 refuses a posting to an
+    -- account the chart does not hold, so every client's first tax charge would have had nowhere
+    -- to go and the starter is UNAMENDABLE in-product after merge. CORE, because every entity
+    -- MPERS applies to computes a tax charge -- even a nil one.
+    ('taxation', 'Taxation', 'core', 'MPERS 5.5 - tax expense is one of the nine minimum statement-of-comprehensive-income face items; MPERS Section 29 (Income Tax). The rates and the computation are F-T3''s, never this row', 95, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('system_roles', 'System Roles', 'core', 'firm practice - PRD S6 invariants 7 and 12; the estate''s own rounding/OBE/SST-purchase-cost markers', 100, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('inventory_and_cogs', 'Inventory and Cost of Sales', 'by_industry', 'MPERS 5.5 (expense by nature); cost-of-sales presentation', 110, '{}'::text[], '{}'::text[], array['goods_trading','mixed']::text[], '{}'::text[], null),
     ('manufacturing', 'Manufacturing', 'by_industry', 'firm practice, keyed to MSIC 2008 Section C (Manufacturing)', 120, array['C']::text[], array['10','11','12','13','14','15','16','17','18','19','20','21','22','23','24','25','26','27','28','29','30','31','32','33']::text[], array['goods_trading','mixed']::text[], '{}'::text[], 'MSIC 2008'),
@@ -1410,7 +1425,11 @@ begin
     ('equity_partnership', 'Equity - Partnership', 'opt_in', 'firm practice per professional convention (ACCA FA2; IFRS for SMEs Module 4 S4.13) - capital and current accounts per partner; profit-sharing ratio governed by the Partnership Act 1961, not an accounting standard', 310, '{}'::text[], '{}'::text[], '{}'::text[], array['partnership','llp']::text[], null),
     ('property_plant_equipment_general', 'Property, Plant and Equipment (General)', 'core', 'MPERS 4.2(e); MPERS 4.11(a) and 17.31(d)/(e) require per-class disclosure of gross cost and accumulated depreciation - a single PPE line cannot satisfy this', 320, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('land_and_buildings', 'Owner-Occupied Land and Buildings', 'opt_in', 'MPERS 4.2(e) - split from the core PPE-by-class family because most Malaysian SMEs rent their premises (see core premises_and_admin family) rather than own the land/building they operate from', 330, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
-    ('equity_other', 'Equity - Other Entity Type (Provisional)', 'opt_in', 'not researched - provisional; owner review owed. Placed to close the entity_type coverage neither research pass reaches: entity_type=other is by construction unenumerated, so no single instrument governs it and the firm authors the real section on first use', 335, '{}'::text[], '{}'::text[], '{}'::text[], array['other']::text[], null),
+    -- D-13 item 1 admits exactly two shapes for a basis: an MPERS/statutory paragraph, or the
+    -- words "firm practice" IN AS MANY WORDS. This is the one family that can cite no
+    -- instrument -- entity_type=other is unenumerated by construction, so there is nothing to
+    -- cite -- and it therefore has to take the escape hatch rather than invent an authority.
+    ('equity_other', 'Equity - Other Entity Type (Provisional)', 'opt_in', 'firm practice - provisional, owner review owed. Placed to close the entity_type coverage neither research pass reaches: entity_type=other is by construction unenumerated, so no single instrument governs it and the firm authors the real section on first use', 335, '{}'::text[], '{}'::text[], '{}'::text[], array['other']::text[], null),
     ('intangible_assets', 'Intangible Assets', 'opt_in', 'MPERS 4.2(g)', 340, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('borrowings_and_lease_liabilities', 'Borrowings and Lease Liabilities', 'core', 'MPERS 4.2(m) financial liabilities; MPERS 20.4/20.9/20.11 for the finance-lease ''outstanding liability'' terminology (MPERS keeps the pre-MFRS16 finance/operating lease dual model); hire-purchase creditor + interest-suspense is a genuinely distinct Malaysian SME liability class from a bank term loan (coa-template-addendum-2026-08-29.md SS1.4)', 350, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
     ('tax_liabilities', 'Current and Deferred Tax', 'core', 'MPERS 4.2(n)/(o); MPERS 29.4 (current tax liability recognition) and 29.14 (deferred tax liability recognition) are unconditional recognition requirements, not disclosure-only', 360, '{}'::text[], '{}'::text[], '{}'::text[], '{}'::text[], null),
@@ -1576,6 +1595,10 @@ begin
     ('finance_costs', '6810', 'Interest Expense', 'expense', null, null, 20),
     ('finance_costs', '6820', 'Realised Foreign Exchange Gain / Loss', 'expense', null, null, 30),
     ('finance_costs', '6830', 'Unrealised Foreign Exchange Gain / Loss', 'expense', null, null, 40),
+    -- The P&L tax line neither dossier shipped. account_type='expense' because the live
+    -- coa_accounts CHECK admits no sixth member -- 6900 sits at the end of the 6xxx block, past
+    -- finance costs, which is the dossier's own numbering convention for a non-operating charge.
+    ('taxation', '6900', 'Income Tax Expense', 'expense', null, null, 10),
     ('system_roles', '9900', 'Opening Balance Equity', 'equity', null, 'opening_balance_equity', 10),
     ('system_roles', '9910', 'Rounding', 'expense', null, 'rounding', 20),
     ('system_roles', '9920', 'SST Purchase Cost', 'expense', null, 'sst_purchase_cost', 30)
@@ -1617,8 +1640,8 @@ begin
 
   select count(*) into v_families from clara.coa_template_families where template_id = v_id;
   select count(*) into v_accounts from clara.coa_template_accounts where template_id = v_id;
-  if v_families <> 41 or v_accounts <> 141 then
-    raise exception 'S7: seeded % families and % accounts, expected 41 and 141', v_families, v_accounts
+  if v_families <> 42 or v_accounts <> 142 then
+    raise exception 'S7: seeded % families and % accounts, expected 42 and 142', v_families, v_accounts
       using errcode = 'CLR10';
   end if;
 
@@ -1627,7 +1650,7 @@ begin
      set state = 'published', published_at = now(), content_sha256 = v_sha
    where id = v_id;
 
-  raise notice 'coa-template PR-a seed: platform starter my_sme_starter v1 PUBLISHED -- % families (40 merged research + 1 provisional equity), % accounts, content_sha256 %',
+  raise notice 'coa-template PR-a seed: platform starter my_sme_starter v1 PUBLISHED -- % families (40 merged research + 1 provisional equity + 1 review-added taxation), % accounts, content_sha256 %',
     v_families, v_accounts, encode(v_sha, 'hex');
 end $seed$;
 
@@ -1896,14 +1919,14 @@ begin
 
   select count(*) into v_n from clara.coa_template_families where template_id = v_tmpl;
   select count(*) into v_m from clara.coa_template_accounts where template_id = v_tmpl;
-  if v_n <> 41 or v_m <> 141 then
-    raise exception 'S8: seed census -- % families / % accounts, expected 41 / 141', v_n, v_m using errcode = 'CLR10';
+  if v_n <> 42 or v_m <> 142 then
+    raise exception 'S8: seed census -- % families / % accounts, expected 42 / 142', v_n, v_m using errcode = 'CLR10';
   end if;
   select string_agg(t.inclusion || '=' || t.n::text, ' · ' order by t.inclusion) into v_txt
     from (select inclusion, count(*) n from clara.coa_template_families
            where template_id = v_tmpl group by inclusion) t;
-  if v_txt is distinct from 'by_industry=6 · core=19 · opt_in=16' then
-    raise exception 'S8: family inclusion census is %, expected by_industry=6 · core=19 · opt_in=16', v_txt
+  if v_txt is distinct from 'by_industry=6 · core=20 · opt_in=16' then
+    raise exception 'S8: family inclusion census is %, expected by_industry=6 · core=20 · opt_in=16', v_txt
       using errcode = 'CLR10';
   end if;
   select count(*) into v_n from clara.coa_template_accounts a
@@ -1913,8 +1936,8 @@ begin
   -- ten tax-split families are mostly CORE, so D-8's core-only branch now plants entertainment,
   -- depreciation, fines and the rest for every client -- which is the whole point of cutting
   -- them out of "Operating Expenses" in the first place. 73, not 45.
-  if v_n <> 73 then
-    raise exception 'S8: expected 73 accounts in core families, found %', v_n using errcode = 'CLR10';
+  if v_n <> 74 then
+    raise exception 'S8: expected 74 accounts in core families, found %', v_n using errcode = 'CLR10';
   end if;
   -- The six reclassified add-back families are CORE and therefore UNKEYED -- the core-unkeyed
   -- law and the reclassification have to hold together or the trim silently drops them again.
@@ -2234,5 +2257,5 @@ begin
     raise exception 'S8: clara.chart_templates now has % columns, expected the untouched 6', v_n using errcode = 'CLR10';
   end if;
 
-  raise notice 'coa-template PR-a tail: OK -- FOUR relations (coa_templates · coa_template_families · coa_template_accounts · coa_template_adoptions), each owned by clara_fn_owner with ENABLE+FORCE RLS and EXACTLY its policy pair (owner ALL true/true + a SELECT-only clara_authenticated read), non-owner reach exactly clara_authenticated:SELECT on all four and ZERO agent/wake/runtime/freeform reach; the header read is the EXPLICIT-scope form (scope=platform OR firm_id=jwt_firm(), no NULL inference) and both child reads derive scope+firm from the parent; ALL SEVEN mirrored predicates on coa_template_accounts are byte-equal to coa_accounts'' live ck_coa_account_code_0009 / account_type / class / special / OBE / RE / SST-purchase-cost; 5 partial UNIQUEs asserted by property; 8 triggers by name (2 freeze + 4 no-truncate + the adoption congruence guard and its no-truncate); 9 doors reach clara_authenticated+clara_fn_owner ONLY with PUBLIC revoked, the 7 writers SECURITY DEFINER with a pinned search_path and the 2 reads INVOKER so RLS decides, and 5 internals (2 helpers + 3 trigger fns) reachable by NO app role. SEED: platform starter my_sme_starter v1 PUBLISHED with a null author and a null publisher, 41 families (core=19 · by_industry=6 · opt_in=16) and 141 accounts, 73 of them in core families, EVERY code the ruled plain-4-digit form, the five special markers one each (RE=3900 · OBE=9900 · rounding=9910 · sst_output=2150 · sst_purchase_cost=9920), EXACTLY ONE equity family per live entity_type (equity identified by PROPERTY, not by the equity_ spelling), 5 MSIC-keyed families all stamped MSIC 2008, zero core families keyed, every trade_nature and entity_type inside the LIVE client_fact_keys vocabulary, every family carrying a basis and at least one account, and the stored content_sha256 reproducing from the rows. ANNOTATION HINTS: exactly the twelve researched add-back leaves on twelve accounts, the eleven statutory tags at their exact codes, tax_sensitive agreeing with add_back_class on every row, the extend-only CHECK proved in BOTH directions (all twelve admitted, an unlisted leaf REFUSED, an add-back class on a non-tax-sensitive row REFUSED) by a probe built and discarded in a forced-rollback subtransaction, ZERO tax_* relations in schema clara, and coa_template_accounts holding exactly ONE foreign key -- its own family. ZERO coa_template_adoptions rows -- PR-a plants no client chart. D1 INVENTORY EMPTY, PROVEN BY WHOLE-CATALOG DIFFERENTIAL: every pre-existing clara function byte-identical on prosrc/ACL/owner, and the added set pinned as a signature MAP of exactly this file''s own fourteen. Constraint 15 holds: workflow/graphile_worker/spike relation counts unmoved and none of this file''s names inside them; the dataviz clara.chart_templates pair untouched at 6 columns.';
+  raise notice 'coa-template PR-a tail: OK -- FOUR relations (coa_templates · coa_template_families · coa_template_accounts · coa_template_adoptions), each owned by clara_fn_owner with ENABLE+FORCE RLS and EXACTLY its policy pair (owner ALL true/true + a SELECT-only clara_authenticated read), non-owner reach exactly clara_authenticated:SELECT on all four and ZERO agent/wake/runtime/freeform reach; the header read is the EXPLICIT-scope form (scope=platform OR firm_id=jwt_firm(), no NULL inference) and both child reads derive scope+firm from the parent; ALL SEVEN mirrored predicates on coa_template_accounts are byte-equal to coa_accounts'' live ck_coa_account_code_0009 / account_type / class / special / OBE / RE / SST-purchase-cost; 5 partial UNIQUEs asserted by property; 8 triggers by name (2 freeze + 4 no-truncate + the adoption congruence guard and its no-truncate); 9 doors reach clara_authenticated+clara_fn_owner ONLY with PUBLIC revoked, the 7 writers SECURITY DEFINER with a pinned search_path and the 2 reads INVOKER so RLS decides, and 5 internals (2 helpers + 3 trigger fns) reachable by NO app role. SEED: platform starter my_sme_starter v1 PUBLISHED with a null author and a null publisher, 42 families (core=20 · by_industry=6 · opt_in=16) and 142 accounts, 74 of them in core families, EVERY code the ruled plain-4-digit form, the five special markers one each (RE=3900 · OBE=9900 · rounding=9910 · sst_output=2150 · sst_purchase_cost=9920), EXACTLY ONE equity family per live entity_type (equity identified by PROPERTY, not by the equity_ spelling), 5 MSIC-keyed families all stamped MSIC 2008, zero core families keyed, every trade_nature and entity_type inside the LIVE client_fact_keys vocabulary, every family carrying a basis and at least one account, and the stored content_sha256 reproducing from the rows. ANNOTATION HINTS: exactly the twelve researched add-back leaves on twelve accounts, the eleven statutory tags at their exact codes, tax_sensitive agreeing with add_back_class on every row, the extend-only CHECK proved in BOTH directions (all twelve admitted, an unlisted leaf REFUSED, an add-back class on a non-tax-sensitive row REFUSED) by a probe built and discarded in a forced-rollback subtransaction, ZERO tax_* relations in schema clara, and coa_template_accounts holding exactly ONE foreign key -- its own family. ZERO coa_template_adoptions rows -- PR-a plants no client chart. D1 INVENTORY EMPTY, PROVEN BY WHOLE-CATALOG DIFFERENTIAL: every pre-existing clara function byte-identical on prosrc/ACL/owner, and the added set pinned as a signature MAP of exactly this file''s own fourteen. Constraint 15 holds: workflow/graphile_worker/spike relation counts unmoved and none of this file''s names inside them; the dataviz clara.chart_templates pair untouched at 6 columns.';
 end $s8$;

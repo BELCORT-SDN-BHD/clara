@@ -1187,7 +1187,17 @@ export const COA_TEMPLATE_PR_A_SIGS = [
 
 /** Frontier-tolerant exact-signature census: silent where the cohort has not landed (every
  *  pre-PR-a chain), and by-name where it has -- an unresolvable signature, or a second overload
- *  sharing one of these pronames, is reported rather than passed over. */
+ *  sharing one of these pronames, is reported rather than passed over.
+ *
+ *  WHO CALLS THIS, and who deliberately does NOT. It is invoked from
+ *  `coa-template-pr-a.test.mjs` (cell J7), which the estate suite runs on every db PR against a
+ *  chain that carries PR-a. It is NOT wired into `grantMatrixFailures()` and must not be: that
+ *  function is reached by `rig-isolation.test.mjs`, which `db-slice-frontiers` runs against
+ *  databases pinned at 0042-0045 frontiers. Folding an exact-signature roster into it would put
+ *  a to_regprocedure lookup for fourteen bodies that do not exist there on every frontier leg --
+ *  the frontier-tolerance arm above would swallow it silently, which is worse than not asking.
+ *  The split is deliberate: the PRONAME census rides the frontier legs, the SIGNATURE census
+ *  rides the battery that only ever runs where the signatures exist. */
 export async function coaTemplateSigFailures() {
   const live = await rootQuery(
     `select s as sig, to_regprocedure(s) is not null as ok from unnest($1::text[]) s`,
