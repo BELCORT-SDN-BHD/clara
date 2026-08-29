@@ -265,21 +265,30 @@ const SALES_LANE_0046_RETIRED_F_A2_PR3_CLOCK_NAMES = ["preview_ocr_sales_evidenc
 // 0055 [Wave E lane α]: record_client_fact stamps recorded_at/superseded_at with bare
 // now() — timestamptz audit stamps, the lawful class; the door never derives a DATE
 // from the session clock (its one date read is clara._book_today()'s authority).
-/** 裁-18b PR-1 — the four bodies it adds that read a bare clock token, MEASURED against the live
- *  catalog (the arm (D) diff named exactly these four, no more): _expire_stale_proposals
+/** 裁-18b PR-1 — the bodies it adds that read a bare clock token, MEASURED against the live
+ *  catalog (the arm (D) diff named exactly these, no more): _expire_stale_proposals
  *  (`expires_at <= now()`), _propose_vendor_binding_agent_core (`now() + interval '12 months'`
  *  and its own expiry flip), decline_vendor_identity_binding (`declined_at = now()`) and
- *  wake_list_binding_candidates (`expires_at > now()`). All four are timestamptz stamps or
- *  wall-clock TTLs -- never a DATE derived from the session clock -- which is the lawful-use test
- *  this roster encodes.
+ *  wake_list_binding_candidates (`expires_at > now()`). All are timestamptz stamps or wall-clock
+ *  TTLs -- never a DATE derived from the session clock -- which is the lawful-use test this
+ *  roster encodes.
  *  LEDGER-GATED on the migration STEM, per this file's own :157-164 warning: `db-slice-frontiers`
  *  runs this battery against databases pinned at 0042-0045, where none of these verbs exist, and
- *  an unconditional append would make every one of those legs red with a four-name diff that says
+ *  an unconditional append would make every one of those legs red with a diff that says
  *  nothing about clock discipline. The stem (not the number) is the witness because the migration
- *  ships UNNUMBERED and the conductor claims its number at merge. */
+ *  ships UNNUMBERED and the conductor claims its number at merge.
+ *
+ *  FIFTH NAME ADDED BY THE 2026-08-30 FOLD ROUND: eligible_binding_signer_count. It was a bare
+ *  `count(*)` over active memberships and read no clock at all; H5 made it a DURABLE ROSTER
+ *  WINDOW, so it now reads `now()` twice — an invite's `expires_at > now()` and the 90-day
+ *  departure window. Both are wall-clock TTLs over timestamptz columns, the lawful class; the
+ *  function derives no DATE from the session clock. Added here because the roster is a MEASURED
+ *  census of the bodies that read a bare clock token, and a wall that grows a clock read without
+ *  joining it is exactly the drift this floor exists to catch. */
 const BINDING_PROPOSAL_PR1_CLOCK_NAMES = [
   "_expire_stale_proposals", "_propose_vendor_binding_agent_core",
   "decline_vendor_identity_binding", "wake_list_binding_candidates",
+  "eligible_binding_signer_count",
 ];
 
 const CLIENT_FACTS_0055_CLOCK_NAMES = ["record_client_fact"];

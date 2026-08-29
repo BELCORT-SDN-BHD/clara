@@ -1,7 +1,11 @@
 -- UNNUMBERED_binding_proposal_pr_1.sql -- 裁-18b PR-1: the Clara vendor-binding PROPOSAL door.
 -- Number claimed at MERGE PREPARATION (standing law, AGENTS.md + .claude/rules/db-migrations.md).
--- Authored and rig-replayed as 0150 against a main frontier of
--- 0147_db_hardening_b_hash_only_bearer_tokens (142 files); siblings hold 0148/0149.
+-- Authored as 0150 against a main frontier of 0147_db_hardening_b_hash_only_bearer_tokens, and
+-- REBASED 2026-08-30 onto 0148_promotion_dup_open_wall (143 files) -- which CoRs
+-- clara._firm_question_core at the SAME signature and touches none of the closed worlds this
+-- file counts (allowlist rows, agent_receipt_surfaces, event_types, the role set), measured
+-- rather than assumed. The prestate's frontier rung stays keyed on 0147 as a FLOOR, so a later
+-- sibling landing between authoring and merge does not turn a true premise into a false abort.
 --
 -- Design of record: docs/plan/active/binding-proposal-design.md, as AMENDED by its own
 -- "Rulings applied 2026-08-29 (裁-25)" header block. Gate record:
@@ -473,6 +477,26 @@ begin
     raise exception 'binding proposal pr-1 prestate: _coding_lane_core is not the 721a6704... body G3 rules untouched (got %)',
       (select v from _bp1_pre where k = 'clara._coding_lane_core(uuid,uuid)') using errcode = 'CLR10';
   end if;
+  -- ...AND THE OTHER TWO D1 PRE-IMAGES, pinned against LITERALS as well as stashed. A stash that
+  -- was itself taken off a drifted body compares equal to itself and proves nothing, so the two
+  -- bodies whose SURGICAL DELTA this file proves get a literal each. Instrument, named:
+  -- encode(sha256(convert_to(prosrc,'UTF8')),'hex') -- prosrc, never pg_get_functiondef.
+  --   * propose_vendor_identity_binding: 610ef1df... (0028), independently witnessed on a
+  --     pristine control chain at main.
+  --   * _tf_vendor_identity_binding_update: cfd20933... (0028:198-213). No pristine witness held
+  --     it anywhere -- nobody had ever pinned this trigger body -- so it is DERIVED from 0028's
+  --     own source, which is what PostgreSQL stores verbatim as prosrc, and re-measured HERE
+  --     against the live catalog. If the derivation is wrong the apply aborts, which is the point.
+  if (select v from _bp1_pre where k = 'clara.propose_vendor_identity_binding(jsonb,text)')
+     <> '610ef1dfc18f963122ed2012e49a96b06526b93baca2f269fa054a76302f7fc7' then
+    raise exception 'binding proposal pr-1 prestate: propose_vendor_identity_binding is NOT the 610ef1df... 0028 pre-image this file re-substitutes against (got %)',
+      (select v from _bp1_pre where k = 'clara.propose_vendor_identity_binding(jsonb,text)') using errcode = 'CLR10';
+  end if;
+  if (select v from _bp1_pre where k = 'clara._tf_vendor_identity_binding_update()')
+     <> 'cfd20933278f86e7e741e2326bd8aa7980c4d376ba9cf7461f2580a113cbcb54' then
+    raise exception 'binding proposal pr-1 prestate: _tf_vendor_identity_binding_update is NOT the cfd20933... 0028 freeze body this file re-cuts (got %)',
+      (select v from _bp1_pre where k = 'clara._tf_vendor_identity_binding_update()') using errcode = 'CLR10';
+  end if;
 
   -- (g) The live premises this file builds ON, each named individually.
   select string_agg(t.n, ', ' order by t.n) into v_missing
@@ -623,6 +647,13 @@ begin
     raise exception 'binding proposal pr-1 prestate: clara._approve_entry_core references vendor_binding -- the premise that the approve path carries NO binding re-check has moved'
       using errcode = 'CLR10';
   end if;
+  -- FOR PR-3, recorded rather than pinned: the pristine pre-image of the body PR-3 splices is
+  -- d5ab4afc85f79c2676e047ae1f2a5c622cac81f9877a502ae521531b11a3c637 (witnessed on a pristine
+  -- control chain at main, same instrument). It is DELIBERATELY not a literal check here -- the
+  -- premise this file depends on is "the approve path carries no binding re-check", which the two
+  -- reads above measure directly; a sha literal would additionally abort on an unrelated CoR by
+  -- another lane, which is coupling this file has no reason to buy. The body is still re-pinned
+  -- BYTE-IDENTICAL against its own stash in the tail, so PR-3 inherits an undisturbed pre-image.
   -- (l7) L-14: EVERY existing agent_receipt_surfaces row must already satisfy the TIGHTENED
   --      token grammar and already have a conforming shim, or this file would red a lawful row.
   --      Measured before the widening, not discovered by the ALTER's own validation pass.
