@@ -31,6 +31,7 @@ deltas that would otherwise have been built wrong.*
 | **D-5** | `ca_class` is freely correctable on an approved asset | `_tf_fixed_assets_immutable_0017` admits `ca_class`/`is_commercial_vehicle`/`is_new` **only while `_fa_particulars_complete(OLD)` is false**. Once particulars are complete a `ca_class` UPDATE raises **CLR13** — so a fully-registered, tax-blind asset can never be classified in-product | mechanics M3.4 · part 2 §11 PR-3 · battery C11b · **→ OQ-10** |
 | **D-6** | PR-1 "seeds one row per string" | `metric_na_reason_versions` holds **9 rows, every one `firm_id = NULL`**, unique on `(firm_id, reason_key, version) NULLS NOT DISTINCT`, `cell_status ∈ (undefined, absent, refused)` — `'ok'` is **not** legal. `_tf_metric_catalog_scope`'s conjunct `pf is not null` is what makes a platform row lawful for **every** firm | part 2 §9 — the rows land `firm_id = NULL`, `version = 1`, with an `effective_from` and a `display_token` |
 | **D-7** | PR-3 adds `uq_fa_id_tenant` to `clara.fixed_assets` | **HALF-REFUTED.** `uq_fixed_assets_id_firm_client UNIQUE (id, firm_id, client_id)` **already exists**; the `0003:155` "its PK is `id` alone" cite is stale by the whole Wave-D/E arc. **PR-3 must NOT add it** | mechanics M4 · part 2 §11 PR-3 |
+| **D-7b** *(2026-08-29, from 裁-21 PR-a's replay, re-measured on this lane's own rig)* | `uq_coa_account_id_tenant` "exists and is **used by nothing**" | **WRONG.** Read from `pg_constraint.conindid` — never from a name — **THREE** live FKs already bind to that exact index: `account_set_version_members`, `metric_input_snapshot_contributions`, `metric_input_snapshot_samples`. **The unique is NOT droppable; nothing in PR-1..PR-3 may assume it is, and PR-4 adds a FOURTH dependant rather than the first** | mechanics M4 · gate record §4 |
 | **D-8** | the wake CHECKs are as `0011:618-628` shows | the CONCLUSION holds (no new kind, no CHECK extension) but the quoted text is **stale by four kinds**: live domain is `interactive · proactive · autodraft · interactive_client · close_prep · bank_agent · filing`, and the pairing CHECK has **six** arms | mechanics M1.2 |
 | **D-9** | the receipt always carries `pl_rows` | `_tf_close_receipts_belt` enforces the presence of **`closing_position` only**. `pl_rows` is present by `finalize_close`'s construction and by **nothing else** — no belt, no CHECK, no trigger. The whole ladder reads an **unenforced** key | part 2 §9 — a twenty-second refusal string, **`close_snapshot_missing_pl_rows`** → `absent`, plus its reason row and its battery cell |
 | **D-10** | PR-6's wrapper "materialises `metric_cells`" | larger than stated: `metric_cells.evaluation_context_id` is **NOT NULL**, and `_tf_metric_cell_provenance_complete` (DEFERRED) requires `inputs->'normalized_provenance'` to carry **all seven** family keys — an absent key is not an empty list — each reconstructing its child table exactly, or CLR11 fires at commit | part 2 §11 PR-6 |
@@ -361,7 +362,12 @@ states it in so many words):
 - **`tax_account_treatments` and `tax_entry_treatments` name an account**, so
   `foreign key (account_id, firm_id, client_id) references clara.coa_accounts (account_id, firm_id,
   client_id)`. The target `uq_coa_account_id_tenant unique(account_id, firm_id, client_id)` **already
-  exists** at `0058:56` and is used by nothing — without the FK a treatment row can name one tenant's
+  exists** at `0058:56` — *v1.3, MEASURED and CORRECTED: it is NOT "used by nothing". Read from
+  `pg_constraint.conindid` (never from a name), **THREE** live FKs already bind to that exact index:
+  `account_set_version_members`, `metric_input_snapshot_contributions` and
+  `metric_input_snapshot_samples`, each `FOREIGN KEY (account_id, firm_id, client_id)`. **So the
+  unique is NOT droppable, and nothing in PR-1..PR-3 may assume it is** — PR-4 adds a fourth
+  dependant, it does not create the first* — without the FK a treatment row can name one tenant's
   client and another tenant's account, and the add-back is computed off a foreign account's balance.
 - **`ca_asset_years` names an asset. [v1.3 — HALF-REFUTED, M0 D-7.]** The claim that
   `clara.fixed_assets` has no `(id, firm_id, client_id)` unique, "its PK is `id` alone (`0003:155`)",

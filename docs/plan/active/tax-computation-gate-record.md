@@ -287,10 +287,18 @@ list and are minted by this fold, so four was right for what it read and seven i
 `tax_authorities` · `tax_treatment_codes` · `tax_rate_bands` · `capital_allowance_rates` ·
 `tax_thresholds` · the field-pack map. Two of the seven need a **second** composite binding:
 `tax_account_treatments`/`tax_entry_treatments` to `clara.coa_accounts (account_id, firm_id, client_id)`
-— the target `uq_coa_account_id_tenant` exists at `0058:56` and is used by nothing — and
-`ca_asset_years` to `clara.fixed_assets`, which has **no** such unique (its PK is `id` alone,
-`0003:155`), so **PR-3 adds `uq_fa_id_tenant unique (id, firm_id, client_id)`** first. **Fold:
-mechanics §M4; prediction P-14.**
+— the target `uq_coa_account_id_tenant` exists at `0058:56` ~~and is used by nothing~~ **[v1.3 —
+WRONG, and corrected on-rig: read from `pg_constraint.conindid`, THREE live FKs already bind to that
+exact index — `account_set_version_members`, `metric_input_snapshot_contributions`,
+`metric_input_snapshot_samples`. The unique is therefore NOT droppable and nothing in PR-1..PR-3 may
+assume it is; PR-4 adds a FOURTH dependant rather than the first]** — and
+`ca_asset_years` to `clara.fixed_assets`, ~~which has **no** such unique (its PK is `id` alone,
+`0003:155`), so **PR-3 adds `uq_fa_id_tenant unique (id, firm_id, client_id)`** first~~ **[v1.3 —
+also WRONG, HALF-REFUTED at the replay (M0 D-7): `uq_fixed_assets_id_firm_client UNIQUE (id,
+firm_id, client_id)` ALREADY exists, the `0003:155` cite is stale by the whole Wave-D/E arc, and
+**PR-3 must NOT add `uq_fa_id_tenant`** — it binds to the existing constraint]**. **Fold:
+mechanics §M4; prediction P-14. Both halves of this paragraph were source-reads that the rig
+refuted; this is the class PR-0's replay exists to catch.**
 
 ---
 
