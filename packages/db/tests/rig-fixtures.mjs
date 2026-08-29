@@ -334,13 +334,30 @@ export async function insertUser(prefix, tag) {
  *  spelling is not already canonical -- and this is a WRITE, so the damage is permanent: the
  *  token would be unusable forever with nothing to compare against once the plaintext is gone.
  *  The pre-hardening `where token = $1` was tolerant because Postgres coerced the parameter to
- *  uuid for the comparison; hashing removes that coercion, so the cast has to be explicit. */
+ *  uuid for the comparison; hashing removes that coercion, so the cast has to be explicit.
+ *
+ *  FRONTIER-AWARE (sweep red 2026-08-29, run 33241919853): this fixture is shared by the D-b
+ *  frontier legs and the closed-wave upgrade drills, which run it against chains that stop
+ *  BEFORE 0147 -- where the table still keys on the plaintext `token uuid` and `token_hash`
+ *  does not exist (42703 on every cell). The column set is read from the catalog on EVERY call,
+ *  never cached: one process (a closed drill) may migrate across 0147 between two calls.
+ *  Either shape returns the same thing to the caller -- the PLAINTEXT uuid, which is what
+ *  `create_firm` accepts on both sides of 0147. A table with NEITHER column is not guessed at:
+ *  the insert is attempted in the legacy shape and fails loudly (absence is not evidence). */
 export async function seedAdmission(note = "rig admission") {
   const token = randomUUID();
-  await rootQuery(
-    "insert into clara.firm_admissions (token_hash, note) values (sha256(convert_to($1::uuid::text,'UTF8')), $2)",
-    [token, note],
+  const shape = await rootQuery(
+    "select bool_or(column_name = 'token_hash') as hashed from information_schema.columns " +
+      "where table_schema = 'clara' and table_name = 'firm_admissions' and column_name in ('token','token_hash')",
   );
+  if (shape.rows[0]?.hashed === true) {
+    await rootQuery(
+      "insert into clara.firm_admissions (token_hash, note) values (sha256(convert_to($1::uuid::text,'UTF8')), $2)",
+      [token, note],
+    );
+  } else {
+    await rootQuery("insert into clara.firm_admissions (token, note) values ($1::uuid, $2)", [token, note]);
+  }
   return token;
 }
 
