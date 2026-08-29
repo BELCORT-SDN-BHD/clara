@@ -24,6 +24,15 @@
 -- obligations; the successor reader body and the evaluator-side enforcement are later-PR work.
 -- Every citation this lane did NOT independently re-fetch against a primary source says so.
 --
+-- REBASE (2026-08-29): built and reviewed against the 0127 frontier, rebased onto 0147 and
+-- re-verified there. Every catalog premise this file pins re-derived UNCHANGED at the live
+-- bodies (the prestate's five, the tail's whole census). ONE pin had drifted and is fixed
+-- EXTEND-ONLY in S4: the reachable-closure ROOTS ROSTER was an eight-name literal, complete at
+-- 0127 and short by five roles at 0147 -- it is now DERIVED from pg_roles, floor-proven against
+-- the eight structural names so the derivation cannot pass vacuously, and paired with a
+-- PUBLIC-executable census so the named-role roster is provably complete. Nothing was relaxed;
+-- the scan got strictly WIDER (405 roots/783 functions -> 418/800, measured on the rebase rig).
+--
 -- SCOPE, EXACTLY (design-part2.md S8 PR-1 row, as widened by the fix round above): (1)
 -- clara.sst_rate_schedule, greenfield, + a narrow cited seed with its verified predecessors --
 -- (2) the reachable-closure write assertion, armed for BOTH SST reference tables -- (3) the
@@ -429,7 +438,8 @@ reset role;
 -- =====================================================================================
 -- 4. The reachable-closure write assertion, armed for BOTH SST reference tables. This file's
 --    OWN trued assertion (never an edit to applied 0016): the reachable closure of every
---    lane-role-granted clara.* function, plus the ungranted clara.* functions its prosrc names
+--    lane-role-granted clara.* function -- lane roles MEASURED from pg_roles at apply time, see
+--    the roster note below -- plus the ungranted clara.* functions its prosrc names
 --    (transitively, following clara.-qualified calls -- the estate's proven internal-call
 --    convention, confirmed live at 0044:1652/1927 calling clara._allocate_receipt_core), is
 --    scanned for INSERT/UPDATE/DELETE text against either table. At PR-1 time neither table has
@@ -447,25 +457,68 @@ declare
   v_new text[];
   v_iterations int;
   v_offenders text;
+  v_roster text[];
+  v_floor text[] := array['clara_authenticated', 'clara_agent_ro', 'clara_agent_read_login',
+    'clara_runtime', 'clara_runtime_login', 'clara_wake_interactive', 'clara_wake_proactive',
+    'clara_wake_write_login'];
+  v_missing text[];
+  v_public_reachable int;
 begin
+  -- ROOTS ROSTER -- MEASURED AT APPLY TIME, NOT A LITERAL (REBASE FIX, 2026-08-29). Every
+  -- clara_* role except the table/function owner clara_fn_owner. The first draft (2026-08-24)
+  -- spelled the roster as an eight-name literal that was the full live set at ITS frontier
+  -- (0127); by the 0147 frontier this file actually lands on, the estate had minted FIVE more
+  -- (clara_freeform_ro + clara_freeform_login, 0131; clara_wake_bank + clara_wake_bank_login,
+  -- 0130; clara_wake_filing, 0123/0142), and MEASURED on the rebase rig the literal reached
+  -- 405 roots / 783 functions where the catalog reaches 418 / 800 -- seventeen functions,
+  -- including all seven clara_wake_filing doors and all fourteen clara_wake_bank doors, were
+  -- OUTSIDE the scan. The outcome is unchanged (zero writers under either roster, because no
+  -- clara.* function writes either table at all today), but a literal roster is an instrument
+  -- that goes stale silently, which is the whole failure this assertion exists to prevent. It
+  -- is now DERIVED, so it cannot be stale at whatever frontier the file applies onto.
+  --
+  -- A derivation can also be vacuous -- a mis-spelled LIKE pattern returns {} and the scan then
+  -- passes having read nothing. So the derived roster is proven against a NAMED FLOOR (the eight
+  -- structural lane roles) before it is used, and the roster it actually scanned is printed in
+  -- the tail notice: the ceremony log records what was measured, never merely that it passed.
+  select coalesce(array_agg(rolname order by rolname), '{}'::text[]) into v_roster
+    from pg_roles where rolname like 'clara\_%' and rolname <> 'clara_fn_owner';
+  select coalesce(array_agg(f), '{}'::text[]) into v_missing
+    from unnest(v_floor) f where f <> all(v_roster);
+  if array_length(v_missing, 1) > 0 then
+    raise exception 'f_t1_sst_reference_tables: the derived roots roster is missing structural lane role(s) % -- the derivation read nothing or the estate retired a role; refusing to scan on a roster that cannot be trusted (roster read: %)',
+      v_missing, v_roster using errcode = 'CLR10';
+  end if;
+
+  -- PUBLIC is not a pg_roles row, so the grantee join above cannot see it -- and a clara.*
+  -- function left at the CREATE-time default ACL carries EXECUTE for PUBLIC, reachable by every
+  -- lane role while holding no named grant at all. MEASURED here rather than assumed away: the
+  -- estate revokes PUBLIC on every clara function, so the count is zero and the named-roster
+  -- scan below is complete. If it ever stops being zero, this refuses instead of passing blind.
+  select count(*) into v_public_reachable
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+   where n.nspname = 'clara'
+     and (p.proacl is null
+          or exists (select 1 from aclexplode(p.proacl) a
+                      where a.privilege_type = 'EXECUTE' and a.grantee = 0));
+  if v_public_reachable > 0 then
+    raise exception 'f_t1_sst_reference_tables: % clara.* function(s) are PUBLIC-executable (default or explicit ACL) -- a named-role roots roster cannot see them, so the reachable-closure claim would be incomplete',
+      v_public_reachable using errcode = 'CLR10';
+  end if;
+
   foreach v_target in array array['sst_threshold_schedule', 'sst_rate_schedule'] loop
     v_pattern := '(insert\s+into|update|delete\s+from)\s+(clara\.)?' || v_target || '\M';
     v_reached := '{}'::text[];
 
-    -- Roots: functions with EXECUTE granted to any lane-facing role (every clara_* role except
-    -- the table/function owner, clara_fn_owner) -- the FULL live roster, not merely the six the
-    -- 0016 precedent named (this scan additionally covers clara_agent_read_login and
-    -- clara_wake_write_login, both real login roles that MEMBER OF a role already in the six but
-    -- could in principle carry a direct grant of their own -- absence is not evidence, so both
-    -- are checked directly rather than assumed covered by their parent).
+    -- Roots: functions with EXECUTE granted to any role in the measured roster. Login roles are
+    -- scanned DIRECTLY rather than assumed covered by the group they are MEMBER OF -- absence is
+    -- not evidence, and a login role can in principle carry a direct grant of its own.
     select coalesce(array_agg(distinct p.proname), '{}'::text[]) into v_frontier
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       cross join lateral aclexplode(coalesce(p.proacl, '{}'::aclitem[])) a
       join pg_roles r on r.oid = a.grantee
      where n.nspname = 'clara' and a.privilege_type = 'EXECUTE'
-       and r.rolname in ('clara_authenticated', 'clara_agent_ro', 'clara_agent_read_login',
-         'clara_runtime', 'clara_runtime_login', 'clara_wake_interactive', 'clara_wake_proactive',
-         'clara_wake_write_login');
+       and r.rolname = any(v_roster);
 
     v_iterations := 0;
     while array_length(v_frontier, 1) > 0 and v_iterations < 25 loop
@@ -497,7 +550,8 @@ begin
     end if;
   end loop;
 
-  raise notice 'F-T1 PR-1 reachable-closure write assertion OK: for BOTH clara.sst_threshold_schedule and clara.sst_rate_schedule, no lane-role-granted function -- and no ungranted clara.* function reachable from one, transitively through clara.-qualified calls -- writes INSERT/UPDATE/DELETE against the table. Both stay migration-only.';
+  raise notice 'F-T1 PR-1 reachable-closure write assertion OK: for BOTH clara.sst_threshold_schedule and clara.sst_rate_schedule, no lane-role-granted function -- and no ungranted clara.* function reachable from one, transitively through clara.-qualified calls -- writes INSERT/UPDATE/DELETE against the table. Both stay migration-only. ROOTS ROSTER, MEASURED AT THIS APPLY (% role(s), never a literal): %. Zero clara.* functions are PUBLIC-executable, so a named-role roster misses nothing.',
+    array_length(v_roster, 1), v_roster;
 end $reachable_closure$;
 
 reset role;

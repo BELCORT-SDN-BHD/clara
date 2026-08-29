@@ -401,28 +401,64 @@ test("0016:882-886 schedule-note residual: double-lists a group once an item-gra
 // re-derived independently here in JS rather than trusting the migration's own DO block).
 // ---------------------------------------------------------------------------
 
-const CLOSURE_ROLES = [
+// ROOTS ROSTER — MEASURED FROM pg_roles, NEVER A LITERAL (rebase fix, 2026-08-29). The first
+// draft named eight roles, which was the complete live set at the 0127 frontier this PR was
+// built against. By 0147 the estate had minted five more — clara_freeform_ro /
+// clara_freeform_login (0131), clara_wake_bank / clara_wake_bank_login (0130), clara_wake_filing
+// (0123/0142) — and the literal reached 405 roots / 783 functions where the catalog reaches
+// 418 / 800: seventeen functions, every clara_wake_filing and clara_wake_bank door among them,
+// sat OUTSIDE the scan. The verdict was unchanged (nothing writes either table under either
+// roster) but a scan blind to a lane is exactly the hole this assertion exists to close.
+//
+// CLOSURE_ROLES_FLOOR is the eight STRUCTURAL lane roles, kept as a named non-vacuity floor: a
+// derivation that silently returns [] would otherwise let every closure cell pass having read
+// nothing (the "find vacuity by DELETING" class). The floor is asserted, the derived roster is
+// what gets scanned, and the roster actually used is printed via noteLane so a reader sees it.
+const CLOSURE_ROLES_FLOOR = [
   "clara_authenticated", "clara_agent_ro", "clara_agent_read_login",
   "clara_runtime", "clara_runtime_login", "clara_wake_interactive", "clara_wake_proactive",
   "clara_wake_write_login",
 ];
 
+async function closureRoles() {
+  // rolname is `name`, and array_agg over it yields name[] — an OID node-postgres has no parser
+  // for, so it arrives as the raw literal string "{a,b,c}" rather than an array. Cast to text
+  // so the driver returns a real JS array (measured the hard way on the rebase rig).
+  return (await rootQuery(
+    `select coalesce(array_agg(rolname::text order by rolname::text), '{}'::text[]) as roles
+       from pg_roles where rolname like 'clara\\_%' and rolname <> 'clara_fn_owner'`,
+  )).rows[0].roles;
+}
+
+// VACUITY FIX, 2026-08-29 (found by the roster-widening twin below, on the rebase rig — the
+// original cell could not have found it, which is the whole point of adding a twin that FAILS
+// first). `p.proname` is of type `name`, so `array_agg(p.proname)` yields name[] — an OID
+// node-postgres carries no parser for, and it therefore returned the RAW LITERAL STRING
+// "{a,b,...}" rather than a JS array. `[...new Set([...reached, ...frontier])]` then spread that
+// string into its ~40 distinct CHARACTERS, so `reached` never contained a single root's name and
+// the final offender scan (`p.proname = any($1)`) could match nothing at the root layer at all.
+// The transitive layer still worked (regexp_matches yields text, hence a real text[]), which is
+// exactly why the pre-existing adversarial twin — whose writer is a CALLEE — kept passing while
+// a granted wrapper writing the table DIRECTLY would have sailed through unseen. Every agg is
+// now cast to text. The migration's own PL/pgSQL DO block never carried this defect: there
+// `v_reached := v_reached || v_frontier` concatenates two declared text[]s.
 async function reachableClosureWriters(target) {
   const pattern = `(insert\\s+into|update|delete\\s+from)\\s+(clara\\.)?${target}\\M`;
+  const roles = await closureRoles();
   const roots = (await rootQuery(
-    `select coalesce(array_agg(distinct p.proname), '{}') as fns
+    `select coalesce(array_agg(distinct p.proname::text), '{}'::text[]) as fns
        from pg_proc p join pg_namespace n on n.oid=p.pronamespace
        cross join lateral aclexplode(coalesce(p.proacl,'{}'::aclitem[])) a
        join pg_roles r on r.oid=a.grantee
       where n.nspname='clara' and a.privilege_type='EXECUTE' and r.rolname = any($1)`,
-    [CLOSURE_ROLES],
+    [roles],
   )).rows[0].fns;
   let frontier = roots;
   let reached = [];
   for (let i = 0; i < 25 && frontier.length > 0; i += 1) {
     reached = [...new Set([...reached, ...frontier])];
     const next = (await rootQuery(
-      `select coalesce(array_agg(distinct callee), '{}') as fns from (
+      `select coalesce(array_agg(distinct callee), '{}'::text[]) as fns from (
           select (regexp_matches(p.prosrc, 'clara\\.([a-z_][a-z0-9_]*)\\s*\\(', 'g'))[1] as callee
             from pg_proc p join pg_namespace n on n.oid=p.pronamespace
            where n.nspname='clara' and p.proname = any($1)
@@ -434,18 +470,57 @@ async function reachableClosureWriters(target) {
     )).rows[0].fns;
     frontier = next;
   }
-  const offenders = (await rootQuery(
-    `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-      where n.nspname='clara' and p.proname = any($1) and p.prosrc ~* $2`,
-    [reached, pattern],
-  )).rows.map((r) => r.proname);
-  return offenders;
+  return {
+    offenders: (await rootQuery(
+      `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+        where n.nspname='clara' and p.proname = any($1) and p.prosrc ~* $2`,
+      [reached, pattern],
+    )).rows.map((r) => r.proname),
+    roots,
+    reached,
+  };
 }
+
+test("reachable closure ROSTER: derived from pg_roles (never a literal), floor-proven against the eight structural lane roles, and complete — zero clara.* functions are PUBLIC-executable, which a named-role roster could not see", async (t) => {
+  if (skipHere(t)) return;
+  const roles = await closureRoles();
+  assert.ok(roles.length >= CLOSURE_ROLES_FLOOR.length, `the derived roots roster is not degenerate (got ${roles.length}: ${roles.join(", ") || "(empty)"})`);
+  for (const r of CLOSURE_ROLES_FLOOR) {
+    assert.ok(roles.includes(r), `the derived roots roster contains the structural lane role ${r} — a derivation that lost it would make every closure cell below vacuous (got: ${roles.join(", ")})`);
+  }
+  assert.ok(!roles.includes("clara_fn_owner"), "the table/function owner is excluded from the roots roster — owner privilege is implicit, not a lane");
+  // PUBLIC is not a pg_roles row, so the grantee join in reachableClosureWriters cannot see it,
+  // and a clara.* function left at its CREATE-time default ACL carries EXECUTE for PUBLIC —
+  // reachable from every lane while holding no named grant. MEASURED, never assumed away.
+  const publicReach = (await rootQuery(
+    `select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='clara'
+        and (p.proacl is null
+             or exists (select 1 from aclexplode(p.proacl) a
+                         where a.privilege_type='EXECUTE' and a.grantee=0))`,
+  )).rows[0].n;
+  assert.equal(publicReach, 0, `zero clara.* functions are PUBLIC-executable (default or explicit ACL) — otherwise the named-role roots roster is incomplete and the closure claim below is worth less than it reads (got ${publicReach})`);
+  noteLane(`reachable-closure roots roster MEASURED at ${roles.length} role(s): ${roles.join(", ")}`);
+});
 
 test("reachable closure: currently ZERO writers reach sst_threshold_schedule or sst_rate_schedule (no governed door exists yet; the two new F3 trigger functions are neither granted nor called by anything, so they never enter the closure)", async (t) => {
   if (skipHere(t)) return;
-  assert.deepEqual(await reachableClosureWriters("sst_threshold_schedule"), [], "no reachable writer for sst_threshold_schedule");
-  assert.deepEqual(await reachableClosureWriters("sst_rate_schedule"), [], "no reachable writer for sst_rate_schedule");
+  const thr = await reachableClosureWriters("sst_threshold_schedule");
+  const rate = await reachableClosureWriters("sst_rate_schedule");
+  // NON-VACUITY FIRST, then the emptiness claim: an EMPTY offender list is only evidence if the
+  // scan actually read something. Assert the roots and the closure are populated and that the
+  // closure is a strict superset of the roots (the transitive step genuinely walked), so a scan
+  // that silently read nothing can never be reported as "no writers found".
+  for (const [label, r] of [["sst_threshold_schedule", thr], ["sst_rate_schedule", rate]]) {
+    assert.ok(r.roots.length > 100, `${label}: the roots roster resolved a real population (got ${r.roots.length})`);
+    assert.ok(r.reached.length > r.roots.length, `${label}: the closure walked past its roots (roots ${r.roots.length}, reached ${r.reached.length})`);
+    for (const name of r.roots) {
+      assert.ok(r.reached.includes(name), `${label}: root ${name} is itself inside the scanned closure — the roots must be scanned, not merely used as a starting point`);
+    }
+  }
+  assert.deepEqual(thr.offenders, [], "no reachable writer for sst_threshold_schedule");
+  assert.deepEqual(rate.offenders, [], "no reachable writer for sst_rate_schedule");
+  noteLane(`reachable closure scanned ${rate.roots.length} root(s) into ${rate.reached.length} function(s); zero write either SST reference table.`);
 });
 
 test("reachable closure ADVERSARIAL TWIN: an ungranted core writing sst_rate_schedule, reachable only through a granted wrapper, IS caught by the SAME scan", async (t) => {
@@ -474,7 +549,7 @@ test("reachable closure ADVERSARIAL TWIN: an ungranted core writing sst_rate_sch
     `);
     await rootQuery("grant execute on function clara._ft1_test_adversarial_wrapper() to clara_wake_proactive");
 
-    const found = await reachableClosureWriters("sst_rate_schedule");
+    const found = (await reachableClosureWriters("sst_rate_schedule")).offenders;
     assert.ok(
       found.includes("_ft1_test_adversarial_core"),
       `the reachable-closure scan catches the ungranted core through the granted wrapper (found: ${found.join(", ") || "(none)"})`,
@@ -482,6 +557,43 @@ test("reachable closure ADVERSARIAL TWIN: an ungranted core writing sst_rate_sch
   } finally {
     await rootQuery("drop function if exists clara._ft1_test_adversarial_wrapper()");
     await rootQuery("drop function if exists clara._ft1_test_adversarial_core()");
+    await rootQuery("reset role");
+  }
+});
+
+test("reachable closure ROSTER-WIDENING TWIN: a writer reachable ONLY from a lane role outside the eight structural names is caught — the behavioural proof that the derived roster genuinely widened the scan, not merely its arithmetic", async (t) => {
+  if (skipHere(t)) return;
+  // The rebase fix is worth exactly what it CATCHES. Pick a lane role the original eight-name
+  // literal did not carry — chosen from the live catalog, never spelled, so the cell survives a
+  // role being renamed or retired — and prove a writer granted ONLY to it is now found. Under
+  // the old literal this identical probe came back empty, which is what made the drift silent.
+  const roles = await closureRoles();
+  const extras = roles.filter((r) => !CLOSURE_ROLES_FLOOR.includes(r));
+  assert.ok(
+    extras.length > 0,
+    `the estate carries at least one lane role beyond the eight structural names — if this ever goes false the roster widening is moot and THIS cell must be re-cut rather than deleted (roster: ${roles.join(", ")})`,
+  );
+  const role = extras[0];
+  await rootQuery("set role clara_fn_owner");
+  try {
+    await rootQuery(`
+      create function clara._ft1_test_roster_widening_probe() returns void
+        language plpgsql security definer set search_path to 'clara','pg_temp' as $fn$
+      begin
+        insert into clara.sst_rate_schedule (tax_type, scope_key, rate_kind, rate_bp, effective_from, source_note)
+          values ('sales', '_ft1_roster_widening_probe', 'ad_valorem', 1, current_date, 'roster-widening twin — never a real rate');
+      end $fn$;
+    `);
+    await rootQuery("revoke all on function clara._ft1_test_roster_widening_probe() from public");
+    await rootQuery(`grant execute on function clara._ft1_test_roster_widening_probe() to ${role}`);
+    const found = (await reachableClosureWriters("sst_rate_schedule")).offenders;
+    assert.ok(
+      found.includes("_ft1_test_roster_widening_probe"),
+      `a writer granted only to '${role}' — a role outside the eight structural names — is inside the derived roster's closure (found: ${found.join(", ") || "(none)"})`,
+    );
+    noteLane(`roster-widening twin proved the scan reaches lane role '${role}', which the pre-rebase eight-name literal could not see.`);
+  } finally {
+    await rootQuery("drop function if exists clara._ft1_test_roster_widening_probe()");
     await rootQuery("reset role");
   }
 });
