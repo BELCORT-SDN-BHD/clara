@@ -1,5 +1,6 @@
--- UNNUMBERED_f_t1_sst_reference_tables.sql -- F-T1 (the SST engine) PR-1: the two SST reference
--- tables. Design of record: docs/plan/active/sst-engine-design.md (S1-S4, S1 point 4),
+-- 0153_f_t1_sst_reference_tables.sql -- F-T1 (the SST engine) PR-1: the two SST reference
+-- tables. (Authored as UNNUMBERED_f_t1_sst_reference_tables.sql; number 0153 claimed at merge
+-- prep 2026-08-30, hard constraint 10 -- every self-reference below uses the stable stem.) Design of record: docs/plan/active/sst-engine-design.md (S1-S4, S1 point 4),
 -- -design-part2.md (S8's PR-1 row), -annexes.md (Annex A.1, A.1a, A.9's owner), -annexes-2.md
 -- (Annex C-4/C-5), -gate-record.md + -gate-record-part2.md (OQ-14). Statutory row ids (S-*/V-*)
 -- resolve in sst-engine-survey.md S3, fetched/verified 2026-08-23.
