@@ -76,6 +76,28 @@
 --   A2 clara._aging_core(uuid,uuid,text,date)                — stable read, but called inside
 --      _control_tie_core → _evaluate_one_gate → begin_close/finalize_close. A close spanning
 --      the migration would mix generations across gate evaluations within ONE run.
+--      ITS FOUR LIVE CONSUMERS, measured from the catalog rather than remembered:
+--      clara.ar_aging, clara.ap_aging, clara._control_tie_core, and — the one the design's
+--      §3.3 list omitted — clara._snapshot_dataset, which consumes the aging GRAND TOTAL only.
+--      Regrouping cannot move a grand total, so that fourth consumer is benign by the same
+--      arithmetic §3.3(a) rests on, and S7's own tie/totals rung re-measures it.
+--      PERF — R-3's input, MEASURED on this lane's rig (104 counterparties, 4 000 and 2 800
+--      timed calls, against a no-call control on the identical row set):
+--        unmerged party  0.39 us/call gross - 0.06 us/row control = ~0.33 us MARGINAL
+--        one-hop merged  0.71 us/call gross                       = ~0.65 us MARGINAL
+--      i.e. roughly 0.3 us per CHAIN HOP. The recut calls the resolver TWICE per open item (the
+--      coalesce and the is-null flag) and PostgreSQL does not common-subexpression-eliminate it
+--      across a target list, so the recut's own added cost is ~0.7 us per item on an unmerged
+--      book. A `cross join lateral (select clara._canonical_counterparty(...))` would halve the
+--      call count. NOT TAKEN HERE: it is a second, larger rewrite of a body this file already
+--      replaces under a D1 window, and R-3 asks for the number to be PUBLISHED, not for an
+--      optimisation to ride the same window. Recorded for R-3's own round.
+--      DIVERGENCE, recorded rather than reconciled away: the independent review of cf4c267c
+--      reported 7-10 us/call. This lane cannot reproduce that on its rig by direct timing and
+--      does not adopt a number it did not measure; the likely difference is instrument (an
+--      end-to-end ar_aging on a large fixture, which also pays _subledger_outstanding_asof per
+--      item, versus this direct per-call timing). R-3's own round should settle which
+--      instrument the published number is taken with.
 --   A3 clara._statement_core(uuid,uuid,text,uuid,date,date)  — read-only; a statement rendered
 --      mid-migration would disagree with one rendered a second later.
 --   A4 clara.list_open_items_by_counterparty(uuid,text,uuid) — read-only; a bank-matching
@@ -233,10 +255,18 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  -- (0.6) P4 / P5 — THE TIE DIGEST BASELINE, per client and domain, taken through the OLD
-  -- bodies. S7 re-measures through the NEW ones and refuses on ANY movement. The design
-  -- asserts that regrouping a sum cannot move it (§3.3(a)); this is where that assertion
-  -- becomes a measurement inside the migration itself, on whatever data the target carries.
+  -- (0.6) P4 / P5 — THE TIE BASELINE, per client and domain, taken through the OLD bodies.
+  -- S7 re-measures through the NEW ones and refuses on ANY movement.
+  --
+  -- HONEST ABOUT ITS OWN REACH (fix round F5). On a virgin replay there are ZERO clients, so
+  -- this rung captures nothing and proves nothing; on a freshly seeded chain the clients exist
+  -- but carry no open items, so every baseline is an empty/`control_not_resolvable` object and
+  -- the comparison is TRUE-BUT-CONTENT-FREE. **This rung is a COUNT on a rig and a
+  -- MEASUREMENT only on a populated deploy target.** The battery is where the content proof
+  -- lives (cell cm.5 drives a real merge and byte-compares both the aging `totals` object and
+  -- ar_control_tie across it). To make the ceremony's own reading real rather than assumed,
+  -- S7 RAISES THE BASELINE CONTENT ITSELF, not just how many baselines it took — so the
+  -- operator on the night can see whether the rung had anything to compare.
   for r in select cl.id as client_id, d.domain
              from clara.clients cl cross join (values ('ar'),('ap')) as d(domain) loop
     insert into _cm1_pre(k, v)
@@ -299,11 +329,21 @@ create table clara.counterparty_merges (
   -- when the alias insert hit `on conflict do nothing` — i.e. the alias already existed and
   -- does NOT belong to this merge, so an un-merge must not retire it (M12; the receipt says
   -- alias_restored:false, reason "not_created_by_merge").
-  alias_id                  uuid        references clara.counterparty_aliases(id),
-  retired_rule_id           uuid        references clara.coding_rules(id),
-  reissued_rule_id          uuid        references clara.coding_rules(id),
-  retired_autopost_rule_id  uuid        references clara.coding_rules(id),
-  reissued_autopost_rule_id uuid        references clara.coding_rules(id),
+  --
+  -- ALL FIVE ARE TRIPLE-KEYED, like the two party columns below, and for a sharper reason:
+  -- PR-2's un-merge does not merely READ these ids, it ACTS on them — it retires the alias and
+  -- re-proposes the rule. A single-key FK would let a row of THIS firm/client name an alias or
+  -- a coding rule belonging to ANOTHER tenant, and the reversal would then act across the
+  -- tenancy wall on the strength of a stored id. clara.counterparty_aliases and
+  -- clara.coding_rules both carry `unique(id, firm_id, client_id)` (0011), so the composite
+  -- reference is available and costs nothing. A NULL in any of these columns leaves its FK
+  -- unenforced under MATCH SIMPLE, which is exactly right: "this merge created no alias" and
+  -- "this merge retired no rule" are the recorded facts M12/M11 need.
+  alias_id                  uuid,
+  retired_rule_id           uuid,
+  reissued_rule_id          uuid,
+  retired_autopost_rule_id  uuid,
+  reissued_autopost_rule_id uuid,
 
   -- THE REVERSAL, stamped by PR-2's clara.unmerge_counterparties. All three together or
   -- none — a reversal with no reason is not auditable.
@@ -322,7 +362,17 @@ create table clara.counterparty_merges (
   constraint fk_cm_survivor foreign key (survivor_id, firm_id, client_id)
     references clara.counterparties(id, firm_id, client_id),
   constraint fk_cm_merged foreign key (merged_id, firm_id, client_id)
-    references clara.counterparties(id, firm_id, client_id)
+    references clara.counterparties(id, firm_id, client_id),
+  constraint fk_cm_alias foreign key (alias_id, firm_id, client_id)
+    references clara.counterparty_aliases(id, firm_id, client_id),
+  constraint fk_cm_retired_rule foreign key (retired_rule_id, firm_id, client_id)
+    references clara.coding_rules(id, firm_id, client_id),
+  constraint fk_cm_reissued_rule foreign key (reissued_rule_id, firm_id, client_id)
+    references clara.coding_rules(id, firm_id, client_id),
+  constraint fk_cm_retired_autopost foreign key (retired_autopost_rule_id, firm_id, client_id)
+    references clara.coding_rules(id, firm_id, client_id),
+  constraint fk_cm_reissued_autopost foreign key (reissued_autopost_rule_id, firm_id, client_id)
+    references clara.coding_rules(id, firm_id, client_id)
 );
 
 -- D-12's structural half (M14): a party can be LIVE-merged at most once, so "which merge do
@@ -499,11 +549,21 @@ end $s2$;
 -- row and RAISES CLR23 on a cyclic or over-deep chain. A NULL party must not silently drop
 -- the item, because that would DELETE MONEY FROM A REPORT: the recut coalesces to the raw id
 -- and stamps the counterparty entry "resolution":"unresolved". The RAISE is deliberately not
--- caught — a broken merge chain is a data emergency, and a report that hides it is worse
--- than one that refuses. The cost is named and accepted: ar_aging is reached from
--- _control_tie_core → _evaluate_one_gate, so a cyclic chain takes the close gate down with
--- it. That is the correct failure: a close signed over an unreadable subledger is worse than
--- a close that will not start.
+-- caught here — a broken merge chain is a data emergency, and a report that hides it is
+-- worse than one that refuses.
+--
+-- WHAT THE RAISE ACTUALLY DOES TO A CLOSE — MEASURED, not reasoned. An earlier draft of this
+-- comment said the raise "takes the close gate down with it". That is FALSE, and the true
+-- mechanism is better. clara._measure_one_gate (0104) wraps EVERY gate probe — ar_control_tie
+-- included — in `begin … exception when others then v_state := 'error'; v_measured :=
+-- jsonb_build_object('state','error','sqlstate',sqlstate,'message',sqlerrm); end`. So the
+-- CLR23 is CAUGHT and converted into a TYPED, RECORDED gate result carrying its own sqlstate,
+-- and clara.finalize_close's drawer-1 sweep (0056) then refuses the close outright with CLR41
+-- / reason `drawer1_state_unknown`, naming the check_key. Nothing crashes; the close REFUSES,
+-- by name, with the evidence attached. THIS IS THE ANSWER TO THE GATE RECORD'S L5 — "is
+-- raising out of ar_aging the right failure, or does it take the whole close gate down?" —
+-- and it is L5's own numbered decision: the raise is right BECAUSE the close-gate machinery
+-- already turns it into a typed refusal rather than an outage. Cell cm.20 drives both halves.
 --
 -- `totals` is a SUM OVER per_cp and is therefore invariant under regrouping — asserted
 -- nowhere and MEASURED in S0/S7 against whatever data the target carries.
@@ -680,7 +740,7 @@ do $s7$
 declare
   r record; v_sha text; v_def text; v_code text; v_n int; v_raw int;
   v_names text; v_want text; v_recon text; v_bad text; v_now text;
-  v_pre text; v_msg text := '';
+  v_pre text; v_msg text := ''; v_baselines text;
 begin
   -- (1) THE FOUR REPLACED BODIES: genuinely changed, and each one's pre-image reconstructed
   -- BYTE-FOR-BYTE from the post-image by the inverse of its own splice. A sha that merely
@@ -819,6 +879,33 @@ begin
       using errcode = 'CLR10';
   end if;
 
+  -- (3a) THE CENSUS ABOVE IS A RAW prosrc MATCH, so a body that lost the resolver from its
+  -- CODE while keeping the name in a COMMENT would still be counted a member — the exact
+  -- comment-hiding class 0141/0146's HIGH-1 discipline exists for. Each of the three recut
+  -- bodies therefore carries its own CALL-SHAPED marker check against a COMMENT-STRIPPED copy
+  -- (block comments first, then line comments — the order matters, a block comment must not
+  -- hide a live line comment from the second pass). Annex A.1 promised this for all three;
+  -- only _statement_core and list_open_items_by_counterparty had it. Cell cm.10 runs the same
+  -- instrument from the outside, with a negative control that proves it can say NO.
+  for r in select * from (values
+      ('clara._aging_core(uuid,uuid,text,date)', 2),
+      ('clara._statement_core(uuid,uuid,text,uuid,date,date)', 5),
+      ('clara.list_open_items_by_counterparty(uuid,text,uuid)', 2)
+    ) as t(sig, want) loop
+    select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = r.sig::regprocedure;
+    v_code := regexp_replace(regexp_replace(v_def, '/\*.*?\*/', '', 'gs'), '--[^\n]*', '', 'g');
+    v_n := (length(v_code) - length(replace(v_code, 'clara._canonical_counterparty(', '')))
+           / length('clara._canonical_counterparty(');
+    if v_n < 1 then
+      raise exception 'cpm-pr1 tail (M2 drift guard): % names clara._canonical_counterparty( ZERO times IN CODE -- the raw census counted it a member on a COMMENT alone', r.sig
+        using errcode = 'CLR10';
+    end if;
+    if v_n <> r.want then
+      raise exception 'cpm-pr1 tail (M2 drift guard): % carries % CALL(s) to clara._canonical_counterparty( IN CODE, expected % -- the recut lost or gained a resolver call', r.sig, v_n, r.want
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
   -- (4) M3's postcheck: the resolver appears exactly FIVE times in _statement_core (the cp
   -- CTE plus the four predicates), and ZERO raw predicates survive. Counted IN CODE against a
   -- comment-stripped copy AND raw, so a marker hiding inside a comment cannot mask a site
@@ -875,6 +962,14 @@ begin
     raise exception 'cpm-pr1 tail: an aging TOTALS object MOVED across the recut -- %', v_bad
       using errcode = 'CLR10';
   end if;
+  -- F5: RAISE THE BASELINE CONTENT, not only its count. A rung that says "6 baselines, all
+  -- unmoved" reads as a measurement even when all six were empty; the operator on the
+  -- ceremony night must be able to see WHICH numbers were compared. Truncated so a large
+  -- estate cannot flood the runner's log.
+  select left(string_agg(substr(k, 5) || ' => ' || v, ' | ' order by k), 3000)
+    into v_baselines from _cm1_pre where k like 'tie:%';
+  raise notice 'cpm-pr1 tail (P4 baseline CONTENT, taken through the OLD bodies and reproduced through the NEW ones): %',
+    coalesce(v_baselines, '(NO CLIENTS ON THIS TARGET -- this rung compared NOTHING here; the content proof is battery cell cm.5)');
 
   -- (7) THE CARRIER'S STRUCTURE, read from the catalog rather than from S1's say-so.
   if not exists (select 1 from pg_class c join pg_namespace nn on nn.oid = c.relnamespace
@@ -973,7 +1068,7 @@ begin
     raise exception 'cpm-pr1 tail: the carrier landed in a protected schema' using errcode = 'CLR10';
   end if;
 
-  raise notice 'cpm-pr1 tail: OK -- the READ HALF of 裁-24''s hybrid, the merge carrier and M9, all re-read from the live catalog. FOUR bodies replaced, each PROVEN to be exactly its own splice by a byte-for-byte re-substitution of the pre-image: %. FIFTEEN witness bodies (both subledger belts, _tf_append_only, _canonical_counterparty, _control_tie_core, both _subledger_outstanding readers, _subledger_classify_entry, _metric_input_dataset_v1 [OQ-3 LEAVE], _tf_counterparty_update_0011, the four public wrappers) are byte-UNTOUCHED on prosrc sha256. The _canonical_counterparty caller census moved from the pinned 33 to 34 = the same 33 PLUS _aging_core, so finding M2 is closed and a future body that drops the resolver reds this assertion. _statement_core names the resolver exactly 5 times (the cp CTE + M3''s four sites) with zero raw predicates left in code; list_open_items_by_counterparty carries the M9 firm-for-client spelling zero times, in code and raw. The control tie and the aging TOTALS object are byte-identical across the recut on % client/domain baseline(s) measured through the OLD bodies in the prestate. clara.counterparty_merges: forced RLS, exactly 2 policies (clara_fn_owner ALL + clara_authenticated firm-scoped SELECT), a clean 11-probe role roster, the (merged_id) partial unique index asserted by PROPERTY, 2 user triggers, ZERO rows. counterparty.unmerged is registered and routed context_update at the active version while counterparty.merged still routes ignore, and every event type stays covered. D1 OWED: clara.merge_counterparties(uuid,uuid,uuid,text,text), clara._aging_core(uuid,uuid,text,date), clara._statement_core(uuid,uuid,text,uuid,date,date), clara.list_open_items_by_counterparty(uuid,text,uuid). P1 MEASURED: % pre-existing merge(s) carry NO carrier row and are therefore not reversible by PR-2''s door -- stated in the PR body and owed to PROGRESS.md Known issues, never discovered by a user. THE WRITE HALF OF 裁-24 IS NOT IN THIS FILE: see the header block for the measured reason. No table in workflow/graphile_worker/spike touched.',
+  raise notice 'cpm-pr1 tail: OK -- the READ HALF of 裁-24''s hybrid, the merge carrier and M9, all re-read from the live catalog. FOUR bodies replaced, each PROVEN to be exactly its own splice by a byte-for-byte re-substitution of the pre-image: %. FIFTEEN witness bodies (both subledger belts, _tf_append_only, _canonical_counterparty, _control_tie_core, both _subledger_outstanding readers, _subledger_classify_entry, _metric_input_dataset_v1 [OQ-3 LEAVE], _tf_counterparty_update_0011, the four public wrappers) are byte-UNTOUCHED on prosrc sha256. The _canonical_counterparty caller census moved from the pinned 33 to 34 = the same 33 PLUS _aging_core, so finding M2 is closed and a future body that drops the resolver reds this assertion. _statement_core names the resolver exactly 5 times (the cp CTE + M3''s four sites) with zero raw predicates left in code; list_open_items_by_counterparty carries the M9 firm-for-client spelling zero times, in code and raw. THE M2 DRIFT GUARD IS COMMENT-STRIPPED (F4): all three recut bodies name clara._canonical_counterparty( IN CODE at their expected call counts (2 / 5 / 2), so the raw caller census above cannot be satisfied by a comment alone. The control tie and the aging TOTALS object are unmoved across the recut on % client/domain baseline(s) taken through the OLD bodies -- READ THE BASELINE CONTENT NOTICE ABOVE before calling that a measurement: on a virgin or freshly-seeded rig every baseline is empty, so this rung is a COUNT there and a MEASUREMENT only on a populated target (F5; the content proof is battery cell cm.5). clara.counterparty_merges: forced RLS, exactly 2 policies (clara_fn_owner ALL + clara_authenticated firm-scoped SELECT), a clean 11-probe role roster, the (merged_id) partial unique index asserted by PROPERTY, 2 user triggers, ZERO rows. counterparty.unmerged is registered and routed context_update at the active version while counterparty.merged still routes ignore, and every event type stays covered. D1 OWED: clara.merge_counterparties(uuid,uuid,uuid,text,text), clara._aging_core(uuid,uuid,text,date), clara._statement_core(uuid,uuid,text,uuid,date,date), clara.list_open_items_by_counterparty(uuid,text,uuid). P1 MEASURED: % pre-existing merge(s) carry NO carrier row and are therefore not reversible by PR-2''s door -- stated in the PR body and owed to PROGRESS.md Known issues, never discovered by a user. THE WRITE HALF OF 裁-24 IS NOT IN THIS FILE: see the header block for the measured reason. No table in workflow/graphile_worker/spike touched.',
     v_msg,
     (select v from _cm1_pre where k = 'meta:tie_baselines'),
     (select v from _cm1_pre where k = 'meta:pre_existing_merges');

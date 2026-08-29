@@ -252,6 +252,38 @@ test("cm.10 (A-10) the _canonical_counterparty caller census now includes _aging
   assert.equal(r.rows[0].has_aging, true, "cm.10: _aging_core is a caller — its ABSENCE was finding M2");
   assert.equal(r.rows[0].has_tie, false, "cm.10 (the instrument's positive control): _control_tie_core is NOT a caller, so the census discriminates rather than matching everything");
   assert.ok(r.rows[0].n >= 34, `cm.10: the census carries at least the pinned 33 + _aging_core (got ${r.rows[0].n})`);
+
+  // THE CENSUS ABOVE IS A RAW prosrc MATCH and would count a body whose only mention of the
+  // resolver sits in a COMMENT. Each recut body therefore also carries a CALL-SHAPED marker
+  // count against a COMMENT-STRIPPED copy, at its own expected arity.
+  const stripped = await rootQuery(
+    `select sig, (length(code) - length(replace(code, 'clara._canonical_counterparty(', '')))
+                 / length('clara._canonical_counterparty(') as calls
+       from (select sig, regexp_replace(regexp_replace(pg_get_functiondef(sig::regprocedure), '/\\*.*?\\*/', '', 'gs'), '--[^\\n]*', '', 'g') as code
+               from unnest(array['clara._aging_core(uuid,uuid,text,date)',
+                                 'clara._statement_core(uuid,uuid,text,uuid,date,date)',
+                                 'clara.list_open_items_by_counterparty(uuid,text,uuid)']) as sig) z`);
+  const calls = Object.fromEntries(stripped.rows.map((x) => [x.sig, Number(x.calls)]));
+  assert.deepEqual(calls, {
+    "clara._aging_core(uuid,uuid,text,date)": 2,
+    "clara._statement_core(uuid,uuid,text,uuid,date,date)": 5,
+    "clara.list_open_items_by_counterparty(uuid,text,uuid)": 2,
+  }, "cm.10 (F4): each recut body CALLS the resolver its own number of times IN CODE — the raw census cannot be satisfied by a comment");
+
+  // THE NEGATIVE CONTROL — the mutant this guard exists for. Take the live _aging_core, delete
+  // every real CALL and leave a COMMENT that names the resolver: the raw census still counts it
+  // a member (it can say only YES), and the comment-stripped instrument correctly says ZERO.
+  const mutant = await rootQuery(
+    `with live as (select pg_get_functiondef('clara._aging_core(uuid,uuid,text,date)'::regprocedure) as d),
+          m as (select '-- clara._canonical_counterparty( lives on in this comment only' || E'\\n'
+                       || replace(d, 'clara._canonical_counterparty(', 'clara._NOT_THE_RESOLVER(') as d from live)
+     select (position('_canonical_counterparty' in d) > 0) as raw_says_member,
+            (length(regexp_replace(regexp_replace(d, '/\\*.*?\\*/', '', 'gs'), '--[^\\n]*', '', 'g'))
+             - length(replace(regexp_replace(regexp_replace(d, '/\\*.*?\\*/', '', 'gs'), '--[^\\n]*', '', 'g'), 'clara._canonical_counterparty(', '')))
+             / length('clara._canonical_counterparty(') as code_calls
+       from m`);
+  assert.equal(mutant.rows[0].raw_says_member, true, "cm.10 negative control: the RAW census still calls the comment-only mutant a member — it cannot discriminate");
+  assert.equal(Number(mutant.rows[0].code_calls), 0, "cm.10 negative control: the comment-stripped instrument says ZERO on the same mutant — it CAN say no, which is what makes the guard above evidence");
 });
 
 test("cm.11 (D-01) the merge moves NO row, and every body PR-1 swore it does not touch is byte-unchanged", async (t) => {
@@ -427,8 +459,11 @@ test("cm.16 (W5/W6/W7/W8) the carrier's four declarative walls each refuse, by t
   assert.equal(cross?.code, "23503", "cm.16 (W8): the triple-key FK refuses a party belonging to another client — the tenancy wall is structural, not the writer's care");
 });
 
+// Gated on needBase, NOT needCarrier: the event type and its taxonomy row are carrier-INDEPENDENT
+// (they are catalog vocabulary), so on a pre-PR database this cell must RED rather than skip —
+// otherwise the one cell that proves OQ-7 landed can never say NO.
 test("cm.17 (OQ-7) counterparty.unmerged is registered and routed context_update; counterparty.merged still routes ignore", async (t) => {
-  if (needCarrier(t)) return;
+  if (needBase(t)) return;
   const r = await rootQuery(
     `select (select client_scoped from clara.event_types where name='counterparty.unmerged') as scoped,
             (select tt.decision from clara.trigger_taxonomy tt join clara.taxonomy_active ta on ta.version=tt.version

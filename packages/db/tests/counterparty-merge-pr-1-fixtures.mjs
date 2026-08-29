@@ -13,9 +13,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  rootQuery, humanQuery, namedCall, opk,
+  rootQuery, humanQuery, namedCall, opk, getPool,
   a21EnsureReady, buildWorld, firmOf, grantConsent,
-  upsertAccountClassed, draftEntryV3, approveEntry,
+  upsertAccountClassed, upsertPayableAccount, draftEntryV3, approveEntry,
 } from "./a21-helpers.mjs";
 import {
   EXPN as X38_EXPN, REVN as X38_REVN,
@@ -26,6 +26,7 @@ export { caught, birthCounterparty };
 
 // Suite-scoped COA codes — grepped clean against every other battery's family.
 export const AR_CTL = "379-CM1"; // receivable control
+export const AP_CTL = "479-CM1"; // payable control (so the AP close gate RESOLVES, and ties at 0)
 export const REV = "689-CM1";    // revenue
 
 /** The read-layer substrate probe: the base rig plus the subledger/bank chain every fixture
@@ -45,10 +46,14 @@ export async function cmCarrierReady() {
 
 export async function cmBuildWorld() {
   const world = await buildWorld();
-  for (const [key, sub] of [["A1", "alice"], ["A2", "alice"], ["B1", "dave"]]) {
+  for (const [key, sub] of [["A1", "alice"], ["A2", "alice"], ["B1", "dave"], ["S1", "erin"]]) {
     const client = world.clients[key];
     const who = world.users[sub];
     await upsertAccountClassed(who, { client, code: AR_CTL, name: "Trade Debtors (cm1)", type: "asset", accountClass: "receivable", opKey: opk("cm1-ar") });
+    // The AP control exists so clara._control_tie_core('ap') RESOLVES (and ties at zero) rather
+    // than returning 'unknown'/control_not_resolvable. Without it, cm.20's close refuses on the
+    // AP gate — which sorts BEFORE ar_control_tie — and the cell would pin the wrong refusal.
+    await upsertPayableAccount(who, { client, code: AP_CTL, name: "Trade Creditors (cm1)", opKey: opk("cm1-ap") });
     await upsertAccountClassed(who, { client, code: REV, name: "Revenue (cm1)", type: "income", opKey: opk("cm1-rev") });
     // birthCounterparty codes its two legs to the x38 toolkit's own accounts.
     await upsertAccountClassed(who, { client, code: X38_EXPN, name: "Ordinary expense (x38 toolkit)", type: "expense", opKey: opk("cm1-x38exp") });
@@ -128,6 +133,14 @@ export async function listOpenItems(sub, { client, domain, cp }) {
  *  `{clara_fn_owner=X/clara_fn_owner}` alone) — it is reached in production through the close
  *  gate, not by a human RPC. So the P4 cell drives it as root, which is a READBACK of a
  *  DB-owned number, never a door being bypassed. */
+/** The close-gate probe as the CLOSE actually reaches it: clara._measure_one_gate wraps every
+ *  gate evaluation in its own `exception when others` and returns a TYPED result carrying the
+ *  sqlstate. Root, because the gate machinery is owner-floored. */
+export async function measureGate({ checkKey, client, fy }) {
+  const r = await rootQuery("select clara._measure_one_gate($1, $2, $3) as r", [checkKey, client, fy]);
+  return r.rows[0].r;
+}
+
 export async function arTie({ client, asOf }) {
   const r = await rootQuery("select clara.ar_control_tie($1, $2::date) as r", [client, asOf]);
   return r.rows[0].r;
@@ -152,6 +165,28 @@ export async function recordedPartyMap(client) {
   const r = await rootQuery("select id::text as id, counterparty_id::text as cp from clara.open_items where client_id=$1 order by id", [client]);
   return Object.fromEntries(r.rows.map((x) => [x.id, x.cp]));
 }
+/** Run ONE statement inside a transaction that is ALWAYS rolled back, and return the error it
+ *  raised (or null when it was admitted). A wall cell needs both directions, and the admitted
+ *  direction must not leave a bogus row behind — clara.counterparty_merges refuses DELETE, so a
+ *  probe that committed could never be cleaned up. */
+export async function probeInTxn(sql, params) {
+  const c = await getPool().connect();
+  try {
+    await c.query("begin");
+    try {
+      await c.query(sql, params);
+      return null;
+    } catch (e) {
+      return e;
+    } finally {
+      await c.query("rollback").catch(() => {});
+    }
+  } finally {
+    await c.query("reset all").catch(() => {});
+    c.release();
+  }
+}
+
 export async function bodySha(sig) {
   const r = await rootQuery(
     "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha from pg_proc p where p.oid = $1::regprocedure", [sig]);
