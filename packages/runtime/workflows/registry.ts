@@ -21,6 +21,7 @@ import { chatTurn_v11 } from "./chatTurn.v11.js";
 import { chatTurn_v12 } from "./chatTurn.v12.js";
 import { chatTurn_v13 } from "./chatTurn.v13.js";
 import { chatTurn_v14 } from "./chatTurn.v14.js";
+import { chatTurn_v15 } from "./chatTurn.v15.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -47,11 +48,15 @@ import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
-  // F-A3 PR-3 (OQ-6, BANK CHAT PARITY, owner ruling 2026-08-25): REPOINTED v13 -> v14. See the
-  // note near the bottom of this file for what v14 is and the ORDER its deploy must take against
-  // this PR's migrations (the SS4 allowlist widening AND the sibling grant migration this
-  // runtime half ships, `0130_chatturn_v14_bank_interactive_grants.sql`).
-  chatTurn: chatTurn_v14,
+  // F-A6 PR-2 (THE AUDITED FREEFORM READ, ADR-0074): REPOINTED v14 -> v15. v14's own repoint
+  // note (v13 -> v14, OQ-6 bank chat parity) is preserved near the bottom of this file, with
+  // F-A6's deploy-order note beside it. v15 adds ONE tool and changes nothing else; its DB half
+  // (migration 0131 + the 0136 basis fix) is ALREADY MERGED AND CEREMONIED, so unlike F-A2's
+  // pairing there is no migration riding with this image — what DOES ride with it is the
+  // `clara_freeform_login` LOGIN + password ceremony and the CLARA_FREEFORM_DATABASE_URL secret,
+  // which are a HARD PRECONDITION of the image booting at all (assertProductionPoolConfig is
+  // fail-closed on that DSN — packages/runtime/lib/freeform-read.mjs states why).
+  chatTurn: chatTurn_v15,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -497,7 +502,31 @@ export { chatTurn_v10 };
 export { chatTurn_v11 };
 export { chatTurn_v12 };
 export { chatTurn_v13 };
+// F-A6 PR-2 — THE AUDITED FREEFORM READ (the runtime half) repointed `chatTurn:` v14 -> v15.
+// Design: docs/plan/active/freeform-read-design.md v2 §7 item 4; ruling ADR-0074; the DB half is
+// migration 0131 (merged + ceremonied 2026-08-26) plus 0136's basis fix.
+//
+// WHAT CHANGES, IN ONE PARAGRAPH. v15 is v14 plus ONE tool: `read_books_freeform`, a single
+// read-only SELECT the model composes and the DATABASE runs — as `clara_freeform_ro`, a role
+// holding SELECT on exactly 35 enumerated relations, EXECUTE on seven functions and zero DML
+// anywhere, under 35 role-pinned RLS policies every one of which carries a `_freeform_admitted()`
+// conjunct. No receipt, no read: un-armed, all 35 relations return zero rows. The runtime adds no
+// wall of its own — it mints the credential (client-pinned whenever the session is), binds the
+// read to the triggering turn, calls the ONE verb, and carries the verdict.
+//
+// THE DEPLOY ORDER, AND IT IS NOT F-A2's. No migration rides with this image; 0131 is already
+// live. What rides with it is a CEREMONY: `clara_freeform_login` is created NOLOGIN, and the
+// operator must grant it LOGIN + a password and set `CLARA_FREEFORM_DATABASE_URL` BEFORE this
+// image boots. `assertProductionPoolConfig` is fail-closed on that DSN (the Slice-6 write floor's
+// posture, deliberately not Gate G1's lazy bank one — packages/runtime/lib/freeform-read.mjs
+// carries the reasoning), so a world booted without it refuses to start rather than serving a
+// chat whose newest tool silently 42883s.
+//
+// v14 STAYS FROZEN, BUILT AND EXPORTED so no parked run is stranded (policy (c)) — chat parks are
+// the human-answer kind, so a live run still resuming into v14's body at cutover is the expected
+// case, not a corner one.
 export { chatTurn_v14 };
+export { chatTurn_v15 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
