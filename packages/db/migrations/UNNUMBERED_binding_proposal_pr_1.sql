@@ -1754,19 +1754,21 @@ begin
   --      `filing` is untouched: an unattended lane HAS no director by design (measured on the rig
   --      -- treating a filing credential's on_behalf_of as a director made the whole normal flow
   --      fall into the solo-attestation arm).
-  if p_wake_kind = 'interactive' then
-    if p_obo is null then
-      raise exception 'an interactive binding proposal must name the human who directed it'
-        using errcode = 'CLR10',
-        detail = '{"reason":"interactive_director_required","class":"director","constraint":"nonnull"}';
-    end if;
-    if not exists (select 1 from clara.firm_memberships m
-                    where m.user_id = p_obo and m.firm_id = p_firm and m.status = 'active'
-                      and clara.role_rank(m.role) >= clara.role_rank('bookkeeper')) then
-      raise exception 'the human who directed this proposal has no standing in this firm'
-        using errcode = 'CLR10',
-        detail = '{"reason":"interactive_director_required","class":"director","constraint":"active_bookkeeper"}';
-    end if;
+  --      ONE ARM, NOT TWO -- AND THE SECOND WAS DELETED BECAUSE IT COULD NOT BE REACHED.
+  --      An earlier cut of this wall also refused a director who was not a standing bookkeeper+.
+  --      Driven on the rig, that branch never fires: clara.wake_context() ITSELF filters the
+  --      credential on `c.on_behalf_of is null OR the principal is an active bookkeeper+ of the
+  --      firm` (0011:1146-1151), so a director who loses standing makes the whole credential
+  --      stop resolving and the wrapper raises CLR03 'no valid wake credential' one level above
+  --      this body -- and clara.mint_wake_credential refuses a non-standing principal at MINT
+  --      time as well. NULL is the ONLY case that reaches here, because it is the one
+  --      wake_context explicitly admits. A branch no path can enter is the unreachable-arm defect
+  --      this same PR deleted `failing_rungs` for; keeping it "as depth" would be keeping a
+  --      promise, not a wall. The battery drives all three walls and names which is which.
+  if p_wake_kind = 'interactive' and p_obo is null then
+    raise exception 'an interactive binding proposal must name the human who directed it'
+      using errcode = 'CLR10',
+      detail = '{"reason":"interactive_director_required","class":"director","constraint":"nonnull"}';
   end if;
 
   -- (9) W13, reserve-first (see the ordering law above).

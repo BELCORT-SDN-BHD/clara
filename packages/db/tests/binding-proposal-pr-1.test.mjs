@@ -1946,35 +1946,44 @@ test("bp1.B1c H4 — an `interactive` credential with a NULL on_behalf_of REFUSE
   assert.equal(n.rows[0].c, 0, "a refusal leaves no card");
 });
 
-test("bp1.B1d H4 — a NON-STANDING director refuses too, and `filing` is untouched", async () => {
+test("bp1.B1d H4 — WHERE the standing wall actually lives, and `filing` is untouched", async () => {
   failBp1(live);
-  // (a) STANDING LOST BETWEEN MINT AND USE — the only shape the door's own standing rung can
-  //     reach, and the measurement that establishes it. clara.mint_wake_credential ALREADY
-  //     refuses a non-standing on_behalf_of at MINT time ("on_behalf_of must be an active
-  //     bookkeeper+ of the firm" — driven here, with carol the viewer, so the claim is measured
-  //     rather than assumed). What the minter cannot cover is the WINDOW: a credential is live
-  //     for minutes, and a director can be removed inside it. So the door checks again.
+  // THE MEASUREMENT THAT DELETED A WALL. An earlier cut of the door also refused a director who
+  // was not a standing bookkeeper+. Driven on the rig, that branch is UNREACHABLE — so it is
+  // gone, and this cell proves the two places the estate already enforces it. Recording where a
+  // wall really is beats keeping a second copy that can never fire.
   const a = await eligibleVendor("B1d-a");
+
+  // (a) AT MINT. clara.mint_wake_credential refuses a non-standing principal outright.
   await assertRaises(CLR.badRequest,
     () => mintCred({ kind: "interactive", firm: w.firms.A, onBehalfOf: w.users.carol }),
-    "the MINTER already refuses a viewer as on_behalf_of");
+    "the MINTER refuses a viewer as on_behalf_of");
 
+  // (b) AT USE. clara.wake_context() filters the credential on `on_behalf_of is null OR the
+  //     principal is an active bookkeeper+ of the firm` (0011:1146-1151), so a director who
+  //     loses standing after minting makes the WHOLE CREDENTIAL stop resolving — the wrapper
+  //     raises CLR03 one level above the door. That is why the door's own standing branch could
+  //     never fire, and it is a stronger wall than the one it replaced: it revokes the credential
+  //     rather than refusing one verb.
   const bk = await insertUser(`${w.prefix}_b1d`, "bk");
   await addMember(w.users.alice, { firm: w.firms.A, user: bk, role: "bookkeeper", opKey: opk("b1dadd") });
   const cLost = await mintCred({ kind: "interactive", firm: w.firms.A, onBehalfOf: bk });
+  // Control: while the director HAS standing the same credential works.
+  const ok = await proposeAsAgent({ role: WAKE_ROLE.interactive, ...cLost },
+    { client: w.clients.A1, counterparty: a.cp.id, basis: a.basis });
+  assert.equal(ok.status, "proposed", "control: the credential is live while its director stands");
   const mem = (await rootQuery(
     "select id from clara.firm_memberships where firm_id=$1 and user_id=$2 and status='active'",
     [w.firms.A, bk])).rows[0].id;
   await humanQuery(w.users.alice,
     "select clara.remove_member(p_membership => $1, p_op_key => $2)", [mem, opk("b1drm")]);
-  const e1 = await assertRaises(CLR.badRequest,
+  const lost = await eligibleVendor("B1d-lost");
+  await assertRaises(CLR.wake,
     () => proposeAsAgent({ role: WAKE_ROLE.interactive, ...cLost },
-      { client: w.clients.A1, counterparty: a.cp.id, basis: a.basis }),
-    "a director who lost standing after the credential was minted");
-  assert.equal(reasonOf(e1), "interactive_director_required");
-  assert.match(e1.detail, /"constraint":"active_bookkeeper"/);
+      { client: w.clients.A1, counterparty: lost.cp.id, basis: lost.basis }),
+    "the SAME credential once its director lost standing");
 
-  // (b) `filing` is DELIBERATELY untouched. An unattended lane has no director by design;
+  // (c) `filing` is DELIBERATELY untouched. An unattended lane has no director by design;
   //     treating its credential's on_behalf_of as one made every clocked proposal unsignable by
   //     the person most likely to be looking at it (measured on the rig during the build).
   const b = await eligibleVendor("B1d-b");
