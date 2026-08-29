@@ -1,15 +1,10 @@
 # 裁-19 · counterparty merge re-home + un-merge — PR-0 gate record
 
-> **Status: BUILT — PR-1's READ half (2026-08-29).** The gate's §1 lens list ran against the
-> read half, PR-1 is authored, rig-verified and under review, and **the WRITE half is BLOCKED on
-> a new owner question, OQ-8 (§2.2).** What this file now is: (1) the standing lens list, still
-> live for the write half; (2) the owner questions with the design's recommendation on each,
-> plus the 2026-08-29 rulings and **OQ-8**; (3) the fold obligations, with **2 and 7 DISCHARGED
-> and 4 discharged in part** by PR-1; and (4) a §5 refuted register that is no longer empty.
->
-> *(Historical, pre-build:)* **Status: OPEN.** The design set (`counterparty-merge-survey.md` ·
+> **Status: OPEN.** The design set (`counterparty-merge-survey.md` ·
 > `counterparty-merge-design.md` · `counterparty-merge-annexes.md`) is authored and rig-grounded;
 > the independent judgement-logic review has **not** run and **the build may not start**.
+> This file is (1) the standing list of what the gate must attack, (2) the owner questions with
+> the design's recommendation on each, and (3) what the gate must fold before v2.
 >
 > **Why a gate at all** (review law 1, ADR-061 uniform): this item is judgement logic almost end
 > to end — six refusal rungs on the un-merge, a fail-closed branch in an aging read, one added
@@ -22,6 +17,13 @@
 > UNFROZEN periods. **D-01 becomes a HYBRID and the design set is AMENDED, not superseded** — so
 > the gate's own §1 lens list still applies to §3 as written, plus the new write half. The gate
 > itself has **not** run; the build may not start.
+>
+> **OQ-8 IS RULED — 2026-08-30 (裁-35), §2.2 below: S0, NO WRITE DOOR.** PR-1's build hit a
+> ruling-vs-ruling collision (裁-24's physical variant vs 裁-24's own OQ-3) and the re-measured
+> census came back at **23 bodies plus a doubled sealed metric**. **The hybrid narrows back to the
+> read layer**: PR-1's READ layer + carrier + M9 + taxonomy stand as shipped, the write half is
+> **closed**, and the `item_date`-provenance obligation the 裁-24 ruling created for this gate
+> closes with it.
 >
 > *(Historical, pre-ruling:)* **Prerequisite that outranks the gate: OQ-1.** The design **dissents
 > from 裁-19's stated mechanism** (§3.1/D-01). If the owner rules that the ruling meant the
@@ -98,33 +100,32 @@ show why a ruling went the way it did. Ruling of record: `mohe-grill-rulings-202
 - **OQ-6 — RULED 2026-08-29 (裁-24): fix M9 INSIDE PR-1**, named, as recommended.
 - **OQ-7 — RULED 2026-08-29 (裁-24): `context_update`**, as recommended.
 
-### 2.2 · OQ-8 — the write half's SHAPE. RAISED BY PR-1, NOT YET RULED. ⛔
+### 2.2 · OQ-8 — the re-home WRITE door, a ruling-vs-ruling collision. **RULED 2026-08-30 (裁-35): S0**
 
-**PR-1 built the read half and stopped at the write door**, on a structural fact measured at the
-live catalog rather than on a scoping preference. `clara._subledger_classify_entry`
-**canonicalises the counterparty on every ladder**, so after a merge the merged party and the
-survivor **ARE one canonical group**; `clara._tf_subledger_item_belt` asserts that each
-`(entry, domain, CANONICAL counterparty)` group's SUM and single `item_kind` are exactly what the
-classifier produces, so **a re-homed row doubles its own group and the belt refuses it**, and
-`clara._tf_subledger_entry_belt` then refuses every later write to that entry. A closed-world
-census (`pg_proc.prosrc ~ 'clara[.]open_items'`, **23 bodies**) says the superseded-exclusion fix
-is then owed by `_subledger_classify_entry`, **both belts**, `_subledger_outstanding`/`_asof`,
-`_agent_get_bank_pack_core`, `_subledger_decompose_preview`, `_resolve_and_book_bank_line_core`
-— **and `_metric_input_dataset_v1`, which OQ-3 RULED "leave"**. A ruled answer against a ruled
-answer is a hard-constraint-1 collision.
+**Raised by PR-1's own build**, not by this gate: 裁-24's physical variant cannot be built as
+ruled without colliding with 裁-24's own OQ-3. The subledger belts canonicalise on every ladder,
+so a minted re-home row **doubles the group sum** and is refused by `_tf_subledger_item_belt`; the
+lawful superseded-exclusion predicate would have to enter every body that reads open items —
+including `_metric_input_dataset_v1`, which **OQ-3 ruled "leave"**. PR-1 therefore shipped the
+READ layer + the carrier + M9 + the taxonomy, and **held the write door for this ruling**.
 
-| shape | what it is | cost |
+| arm | what it is | what it costs — **as re-measured by the independent reviewer**, not as first estimated |
 |---|---|---|
-| **S0** | the design's original D-01: read layer only, no write door | zero further work; but 裁-24's "physically append a re-home pair" is not delivered, only its OUTCOME |
-| **S1** | the ruling's literal shape — old row marked superseded (by an appended back-pointer, never an UPDATE), new row under the survivor at the ORIGINAL date | one clean row per debt and a correct item list; ~10 further live bodies recut, including both belts, the classifier, and the sealed-snapshot source — which **reopens OQ-3** and F-A5's reporting-agency gate |
-| **S2** | §3.2's net-zero adjustment pair on a NEW journal entry, minted with the **ORIGINAL** `item_date` | no belt recut (the belts' own "canonical zero-net collapse" comment already blesses the resulting state) and no OQ-3 collision; but the merged party's original invoice stays open offset by an appended −X, so the item list carries THREE rows per re-homed debt, and "the invoice now sits under the survivor" is true only in NET terms |
+| **S1** | ruling-literal: append the re-home pair and teach every reader to exclude superseded rows | **23 bodies**, not the build's first "~10" — both belts, the classifier and **every** allocator; a supersession column on an append-only table; **every journal approve in the estate inside the D1 quiesce**; and a **DOUBLED sealed metric**, because `_metric_input_dataset_v1` reads `open_items` directly. The OQ-1-vs-OQ-3 collision is real, measured, not rhetorical |
+| **S2** | §3.2's **net-zero PAIR** on a new entry carrying the **ORIGINAL** `item_date` (**D-13 verified: nothing constrains `item_date`**) | small radius, breaks nothing — but a **permanent presentational fiction**: three item rows per re-homed debt, the merged invoice still open in every picker, and real journal entries minted for a hygiene act |
+| **S0** | keep the read layer; **decline the write half** | nothing new. PR-1's measurements show **all three of 裁-19's stated outcomes already hold**: aging consolidates, both reports read the same money, and an un-merge is the carrier reversed |
 
-**`item_date` itself is NOT the open question** — it is settled as **D-13** and holds for either
-write shape: the re-home path admits the original `item_date`/`due_date` explicitly through a
-dedicated core (never a hand-INSERT). Measured ground: `open_items.item_date` carries no CHECK
-tying it to the entry, `_tf_open_items_validate` checks only the counterparty KIND, **neither belt
-reads `item_date`**, and the classifier does not emit one — so `0037:713-715`'s "current bucket"
-is `_subledger_on_approve`'s own DERIVATION, a writer default rather than a wall.
+**Recommendation put to the owner: S0**, with **S2** as the physical fallback if he insisted on
+rows moving, and **S1 refused on measurement**.
+
+> **RULED 2026-08-30 (裁-35): S0 — NO WRITE DOOR.** The read layer plus the carrier meet the
+> outcomes 裁-19 asked for, **measured rather than argued**. **S1 is refused on measurement**
+> (23 bodies · the sealed-metric doubling · the OQ-3 collision). **S2 is declined** — a fiction
+> that is cheap today is a fiction forever. **D-01's hybrid narrows back to the read layer**, and
+> §3.2's re-home-pair sketch, together with the `item_date`-provenance obligation 裁-24 created
+> for this gate, is **closed, not deferred**. Ruling of record: `mohe-grill-rulings-2026-08-29.md`
+> §裁-35, which also records the owner's asked-for definition of **fail-closed** — *the safe-side
+> default while undecided (refuse rather than pass)*, never "pick the worst option".
 
 ---
 
@@ -137,18 +138,8 @@ is `_subledger_on_approve`'s own DERIVATION, a writer default rather than a wall
    back-pointer, original date), its period gate (OPEN items in UNFROZEN periods only), the
    reverse pair the un-merge appends, and the belt/congruence cells for every minted pair — each
    with its own D-number, plus the OQ-4 propose-an-un-merge door.
-2. **L5's answer as a numbered decision. ✅ DISCHARGED by PR-1 (2026-08-29), and the premise the
-   question rested on was FALSE.** L5 asked whether raising out of `ar_aging` "takes the whole
-   close gate down with it (`_control_tie_core` → `_evaluate_one_gate`)". **It does not, measured:**
-   `clara._measure_one_gate` (`0104:420-450`) wraps EVERY gate probe in
-   `exception when others → state='error'` and records the **sqlstate** on the result;
-   `clara.finalize_close`'s drawer-1 sweep (`0056:2069-2073`) then refuses the close with **CLR41
-   / `drawer1_state_unknown`**, naming the check_key. So the raise becomes a **typed refusal with
-   its evidence attached**, never an outage — which is why **D-02 stands as written**: coalesce an
-   unresolvable party to the raw id (money never leaves a report), let a cyclic chain raise. PR-1's
-   own first draft asserted the opposite in a comment; that comment is corrected in the migration
-   and the mechanism is now driven end to end by cell **cm.20** (the gate records `state='error'`
-   with `sqlstate='CLR23'`; `finalize_close` refuses CLR41 naming `ar_control_tie`).
+2. **L5's answer as a numbered decision.** Whichever way it goes, `_aging_core`'s behaviour on an
+   unresolvable party is judgement logic and needs its own D-number and its own cell.
 3. **The U-rung completeness verdict (L6)** — either "the six are complete, here is the closed-world
    census that says so", or the seventh rung with its token. **A missing rung is a silent partial
    reversal**, which §3.5 exists to forbid.
@@ -163,12 +154,6 @@ is `_subledger_on_approve`'s own DERIVATION, a writer default rather than a wall
    published — `_canonical_counterparty` is now per-item on the estate's heaviest read.
 7. **The D1 inventory re-derived independently** (Annex B.3). The design lists four bodies in
    window A and two in window B; the gate derives its own list and reconciles.
-   **✅ DISCHARGED for window A (2026-08-29).** PR-1 replaces **exactly four** bodies —
-   `merge_counterparties` (the one audited WRITER), `_aging_core`, `_statement_core`,
-   `list_open_items_by_counterparty` — and the independent review re-derived the same four. Each
-   is proven to be exactly its own splice by a byte-for-byte re-substitution of the pre-image
-   inside the migration, and **fifteen witness bodies** are proven byte-unchanged on `prosrc`
-   sha256 in the same tail. Window B is still PR-2's.
 8. **The frontend string set re-read against the shipped file** (Annex E.1) — T8's strings were
    accurate on 2026-08-28 and the port wave is live; a key that has moved makes E.1 a broken
    contract for PR-3.
@@ -195,11 +180,5 @@ is `_subledger_on_approve`'s own DERIVATION, a writer default rather than a wall
 
 ## 5 · Refuted register
 
-Findings raised and adversarially disproven, recorded so nobody re-raises them.
-
-| # | the claim, as raised | how it was refuted | by |
-|---|---|---|---|
-| **R-01** | *"A raise out of `_aging_core` takes the whole close gate down with it"* — asserted in L5's framing and, at first, in PR-1's own D-02 comment. | **Measured false.** `_measure_one_gate` catches every gate exception and records `state='error'` **with the sqlstate**; `finalize_close`'s drawer-1 sweep then refuses **CLR41 / `drawer1_state_unknown`**. The failure is a typed refusal carrying its evidence, not an outage. Driven end to end by cell **cm.20**. | PR-1 fix round, 2026-08-29 |
-| **R-02** | *"`clara.apply_open_items` is a consumer of `_aging_core`"* — a raw `prosrc` census returns it. | **Refuted by the comment-stripped instrument**: its only mention of `_aging_core` sits in a COMMENT (`-- item_date <= as_of (0040 _aging_core) …`). The true consumer set is **four**: `ar_aging`, `ap_aging`, `_control_tie_core`, `_snapshot_dataset`. This is itself the comment-vs-code class the M2 drift guard now defends against. | PR-1 fix round, 2026-08-29 |
-| **R-03** | *"PR-1's estate run leaves two pre-existing reds on `main`"* (`p4t2.request…` and `A19g approve_opening_seed…`). | **Half refuted.** `p4t2.request` is `ok` on both pristine rigs — it was an artefact of this lane's chunked/retried run, not a `main` red. `A19g` stands as pre-existing. | independent review of cf4c267c |
-| **R-04** | *"M12's NULL `alias_id` branch is a reachable product state"* — implied by the survey's framing. | **Refuted by the doors themselves**: `uq_counterparty_aliases_live_name` is unique on `(client_id, alias_normalized)` client-wide, `add_counterparty_alias` refuses a name colliding with a live canonical counterparty, and `rename_counterparty` refuses a name colliding with another party's live alias. The branch is **defensive**, not reachable; cell **cm.14** seeds the state and says so in its own message. | PR-1, 2026-08-29 |
+*(Empty until the gate runs. Findings raised and adversarially disproven are recorded here so
+nobody re-raises them, per the house convention.)*
