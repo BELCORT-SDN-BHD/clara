@@ -413,17 +413,25 @@ test("ft3-D4 · F-T3's OWN 24 keys are a closed world -- exactly one row each, n
   assert.equal(mine.length, 24, "22 ladder strings + 2 ruling strings");
   const r = await rootQuery(
     `select reason_key, count(*)::int n from clara.metric_na_reason_versions
-      where reason_key = any ($1) group by reason_key`, [mine]);
-  assert.equal(r.rowCount, 24, "every one of F-T3's 24 keys exists");
+      where firm_id is null and version = 1 and reason_key = any ($1) group by reason_key`,
+    [mine]);
+  assert.equal(r.rowCount, 24, "every one of F-T3's 24 keys exists as a platform v1 row");
   for (const row of r.rows) {
-    assert.equal(row.n, 1, `${row.reason_key}: exactly one row -- no duplicate version was minted`);
+    assert.equal(row.n, 1, `${row.reason_key}: exactly one platform v1 row`);
   }
+  // The Wave-E rows F-T3 must not disturb are the PLATFORM VERSION-1 nine, not "every row
+  // carrying a Wave-E key". MEASURED: another battery in this same suite mints `divide_by_zero`
+  // v2/v3/v4 as legitimate platform rows -- the unique is (firm_id, reason_key, version) NULLS
+  // NOT DISTINCT, so a later version is lawful and is that lane's business, not this file's.
+  // `firm_id is null and version = 1` is the predicate no other lane can move: those rows
+  // already exist, so the unique forbids a second one.
   const pre = await rootQuery(
     `select count(*)::int n from clara.metric_na_reason_versions
-      where reason_key = any (array['divide_by_zero','negative_denominator','absent',
+      where firm_id is null and version = 1
+        and reason_key = any (array['divide_by_zero','negative_denominator','absent',
         'prior_period_absent','account_set_drift','account_set_resolution_absent',
         'account_set_resolution_ambiguous','account_set_expansion','sign_presentation_mismatch'])`);
-  assert.equal(pre.rows[0].n, 9, "the nine Wave-E rows are untouched");
+  assert.equal(pre.rows[0].n, 9, "the nine Wave-E platform v1 rows are untouched");
 });
 
 test("ft3-D5 · every REFUSE code's refusal_reason_key resolves to a seeded platform reason "

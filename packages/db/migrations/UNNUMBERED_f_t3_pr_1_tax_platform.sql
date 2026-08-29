@@ -1445,19 +1445,26 @@ begin
   -- tail would abort a REAL ceremony over a row that is none of its business.
   select count(*) into v_n from (
     select n.reason_key from clara.metric_na_reason_versions n
-     where n.reason_key = any (v_ladder_reasons || array['s44_6_relief_unmodelled','tax_issue_unavailable'])
+     where n.firm_id is null and n.version = 1
+       and n.reason_key = any (v_ladder_reasons || array['s44_6_relief_unmodelled','tax_issue_unavailable'])
      group by n.reason_key having count(*) = 1) x;
   if v_n <> 24 then
-    raise exception 'S10: % of F-T3''s 24 reason keys exist exactly once (22 ladder + 1 OQ-11 + 1 裁-33)', v_n
+    raise exception 'S10: % of F-T3''s 24 reason keys exist as exactly one platform v1 row (22 ladder + 1 OQ-11 + 1 裁-33)', v_n
       using errcode = 'CLR10';
   end if;
-  -- And the nine pre-existing Wave-E rows are untouched.
+  -- And the nine pre-existing Wave-E rows are untouched. Scoped to PLATFORM VERSION 1, not to
+  -- "every row carrying a Wave-E key": a LATER version of one of those keys is lawful (the
+  -- unique is (firm_id, reason_key, version) NULLS NOT DISTINCT) and belongs to whichever lane
+  -- minted it. `firm_id is null and version = 1` is the predicate no other lane can move --
+  -- those rows already exist, so the unique forbids a second one -- which makes it the only
+  -- form of this check that cannot abort a real ceremony over somebody else's row.
   select count(*) into v_n from clara.metric_na_reason_versions
-    where reason_key = any (array['divide_by_zero','negative_denominator','absent',
+    where firm_id is null and version = 1
+      and reason_key = any (array['divide_by_zero','negative_denominator','absent',
       'prior_period_absent','account_set_drift','account_set_resolution_absent',
       'account_set_resolution_ambiguous','account_set_expansion','sign_presentation_mismatch']);
   if v_n <> 9 then
-    raise exception 'S10: the 9 pre-existing Wave-E reason rows now count % -- this file must not touch them', v_n
+    raise exception 'S10: the 9 pre-existing Wave-E platform v1 reason rows now count % -- this file must not touch them', v_n
       using errcode = 'CLR10';
   end if;
 
