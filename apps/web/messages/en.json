@@ -190,6 +190,36 @@
         "user": "You",
         "assistant": "Clara"
       }
+    },
+    "parts": {
+      "entryPosted": {
+        "title": "Entry posted",
+        "entryLabel": "entry",
+        "clientLabel": "client",
+        "receiptLabel": "post receipt",
+        "rungVectorLabel": "Receipt vector",
+        "note": "The entry's lines and amount are read live on the journals workbench — this receipt carries identifiers and the ledger's own verdict, never a figure.",
+        "link": "Open the journals workbench"
+      },
+      "questionOpened": {
+        "title": "Question opened",
+        "questionLabel": "question",
+        "scopeLabel": "scope",
+        "link": "Open Needs you"
+      },
+      "bankAct": {
+        "title": "Bank act",
+        "verbLabel": "verb",
+        "subjectLabel": "subject",
+        "opKeyLabel": "op key",
+        "note": "The act's own outcome is on the ledger's receipt — open the client's Bank tab to read it live."
+      },
+      "bankPack": {
+        "title": "Bank pack read",
+        "accountLabel": "bank account",
+        "digestLabel": "digest",
+        "note": "The digest every bank act in this conversation had to cite. A read only — nothing in the books changed."
+      }
     }
   },
   "CommandPalette": {
