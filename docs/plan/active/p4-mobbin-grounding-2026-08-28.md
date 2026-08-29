@@ -261,6 +261,11 @@ nothing in this file changes `p4-design-2026-08-27.md` or its annexes.
    for every later lane" — that addition did not happen in this lane (this session's Mobbin
    access came from the dispatching session's own MCP config, not a repo-committed one) and
    remains open for whoever holds the credential/command to add it.
+   **[LANDED 2026-08-29 — P-2 of `mohe-alignment-audit-2026-08-29.md`. `.mcp.json` now
+   carries `"mobbin": {"type":"http","url":"https://api.mobbin.com/mcp"}`; there was no
+   credential to hold, the server authenticates per user by OAuth at connect time. Recorded
+   here so a third lane does not re-find the same gap — the observation above stands as of
+   its own date.]**
 
 ---
 
