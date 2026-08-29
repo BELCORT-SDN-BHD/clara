@@ -85,24 +85,20 @@ async function primedVendor(client) {
   if (PRIMED.has(client)) return PRIMED.get(client);
   const name = `C9 SWEEP VENDOR ${Date.now().toString(36)} SDN BHD`;
   await ensureChart(OWNER(), client);
-  // THE DAILY SWEEP BUDGET IS RAISED FOR THIS FIRM, and it is a fixture accommodation stated
-  // rather than hidden: `admit_autodraft_task` reserves against `firm_limits.daily_token_limit`
-  // times `sweep_budget_share`, and this file opens a dozen sweeps in one run. Measured: the
-  // default exhausts after three and every later admit answers `refused_budget` -- the FIXTURE
-  // running out of reserve, not the chain failing. The budget gate has its own cells elsewhere;
-  // nothing in C.9 asserts anything about it.
+  // THE CONCURRENT-SWEEP CAP IS RAISED FOR THIS FIRM, and it is a fixture accommodation
+  // stated rather than hidden: this file opens a dozen sweeps in one run.
   // UPSERT, not UPDATE. Measured: most rig firms hold NO `firm_limits` row at all, so an UPDATE
   // touches nothing and `admit_autodraft_task` falls back to its own defaults — including
   // `max_concurrent_sweeps = 2`, which is what actually refused here. Each cell below opens its
   // own run and never finalises it, so the third admission onward hit the concurrent-sweep cap.
+  // F-A9 PR-1B: the daily-token-budget half of this lift is GONE with `daily_token_limit` /
+  // `sweep_budget_share` (digest law 76, meter never cap) — writing them would now raise
+  // 42703, and there is no spend brake left for the fixture to run out of.
   await rootQuery(
-    `insert into clara.firm_limits(firm_id, daily_token_limit, sweep_budget_share,
-        max_concurrent_runs, max_concurrent_sweeps)
-     values((select firm_id from clara.clients where id=$1), 100000000, 0.99, 64, 64)
+    `insert into clara.firm_limits(firm_id, max_concurrent_runs, max_concurrent_sweeps)
+     values((select firm_id from clara.clients where id=$1), 64, 64)
      on conflict (firm_id) do update
-        set daily_token_limit = greatest(coalesce(clara.firm_limits.daily_token_limit,0), 100000000),
-            sweep_budget_share = greatest(coalesce(clara.firm_limits.sweep_budget_share,0), 0.99),
-            max_concurrent_runs = greatest(coalesce(clara.firm_limits.max_concurrent_runs,0), 64),
+        set max_concurrent_runs = greatest(coalesce(clara.firm_limits.max_concurrent_runs,0), 64),
             max_concurrent_sweeps = greatest(coalesce(clara.firm_limits.max_concurrent_sweeps,0), 64)`,
     [client]);
   const seed = await agentPostable(OWNER(), { client, amount: 601000, vendor: { new: { name } } });
@@ -145,14 +141,14 @@ async function postedSweep(client, amount, { post = true, facts = false } = {}) 
   if (facts) await withInvoiceFacts(cited, client, amount, vendorName);
   const run = await openSweepRun({ firm: cited.firm, expected: 1 });
 
-  // ONE TOKEN PER ADMIT. The daily reserve budget is real and this file opens a dozen sweeps:
-  // measured, the default reservation exhausts it partway through and later admits answer
-  // `refused_budget` -- a fixture running out of budget, not a finding about the chain.
+  // ONE TOKEN PER ADMIT, kept from the pre-F-A9 fixture: the reserve is still METERED on
+  // firm_usage_daily even though it no longer gates anything, and a minimal reserve keeps
+  // this fixture's arithmetic out of every other file's way.
   const adm = await admitAutodraft({ filing: cited.filingId, runId: run, reserveTokens: 1 })
     .catch((e) => ({ error: e }));
   if (adm?.error) throw new Error(`postedSweep: admit_autodraft_task refused (${adm.error.code}: ${adm.error.message})`);
   if (!["admitted", "re_admitted"].includes(adm?.outcome)) {
-    throw new Error(`postedSweep: admit did not ADMIT — receipt ${JSON.stringify(adm)}. 'lane_changed' means the filing was already coded (the defect this ordering exists to avoid); 'refused_budget' means the fixture, not the chain, ran out of reserve`);
+    throw new Error(`postedSweep: admit did not ADMIT — receipt ${JSON.stringify(adm)}. 'lane_changed' means the filing was already coded (the defect this ordering exists to avoid); 'refused_concurrency' means the fixture, not the chain, hit the KEPT concurrent-sweep cap`);
   }
   const task = adm?.task_id ?? adm?.task ?? adm?.id ?? null;
   if (!task) throw new Error(`postedSweep: the admit returned no task id — receipt ${JSON.stringify(adm)}`);
