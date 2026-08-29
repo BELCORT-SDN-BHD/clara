@@ -174,19 +174,104 @@ export async function supersedeInvoiceFacts(firm, document) {
 // Window fixtures the eligibility cells need (each a DELIBERATE near-miss).
 // ---------------------------------------------------------------------------
 
-import { seedVendorCounterparty, seedBareDocument, seedF123Evidence, seedApprovedEntry }
+import { seedBareDocument, seedApprovedEntry, FULL_ABSENT_RECEIPT }
   from "./x36-vendor-binding-helpers.mjs";
 
 /** A window with an arbitrary date list and invoice id — the near-miss builder. Returns the
  *  counterparty fixture. THROWS on construction failure (never a silent partial fixture). */
-export async function seedWindow(w, tag, { dates, invoiceId = null, client = null } = {}) {
+const foldAlnum = (s) => s.toLowerCase().replace(/[^a-zA-Z0-9]/g, "");
+
+/** A UNIQUE-FAMILY vendor counterparty. Every fixture vendor gets its OWN leading token,
+ *  because clara.name_family_is_ambiguous counts every client and counterparty of the firm
+ *  sharing clara.name_family_token(name) — and x36's shared builder names them all
+ *  "EZACCOUNT SECRETARY …", so the SECOND one makes a family and W15 rightly refuses both.
+ *  A shared fixture that trips a real wall is a fixture defect, not a wall defect. */
+export async function seedUniqueFamilyVendor(firm, client, tag, { registration = null } = {}) {
+  const lead = `VND${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+  const name = `${lead} SUPPLIES SDN BHD`;
+  const reg = registration ?? `2019${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+  const r = await rootQuery(
+    `insert into clara.counterparties(firm_id,client_id,kind,name,name_normalized,registration_no,registration_normalized,created_by)
+     values($1,$2,'vendor',$3,$5,$4,$6,
+       (select user_id from clara.firm_memberships where firm_id=$1 and status='active' limit 1))
+     returning id`,
+    [firm, client, name, reg, foldAlnum(name), foldAlnum(reg)],
+  );
+  return { id: r.rows[0].id, name, nameNorm: foldAlnum(name), reg, regNorm: foldAlnum(reg), lead };
+}
+
+/** x36's seedF123Evidence, re-cut with the three knobs this battery's new walls need — a
+ *  backdated extracted_at, a printed invoice.vendor_registration region, and a per-document
+ *  invoice id. The F1/F2/F3 shapes are otherwise what the shared builder emits. */
+async function seedEvidence(firm, document, cp, invoiceId, { extractedAt, printedRegistration }) {
+  const factsExt = randomUUID();
+  await rootQuery(
+    `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope,extracted_at)
+     values($1,$2,$3,'clara-fixture:v1','invoice_facts',1,'done',1,$4::jsonb,$5::timestamptz)`,
+    [factsExt, firm, document, JSON.stringify({ vendor_identity: FULL_ABSENT_RECEIPT }), extractedAt],
+  );
+  const region = (path, text) => rootQuery(
+    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$3,$4,1.0)`,
+    [firm, factsExt, path, text]);
+  await region("invoice.vendor_name", cp.name);
+  await region("invoice.invoice_id", invoiceId);
+  // W18's hard identifier. undefined ⇒ print the vendor's own registration (the lawful case);
+  // null ⇒ print none (W18's human-resolution arm carries it); a string ⇒ a MISMATCH.
+  const printed = printedRegistration === undefined ? cp.reg : printedRegistration;
+  if (printed !== null) await region("invoice.vendor_registration", printed);
+
+  const ocrExt = randomUUID();
+  await rootQuery(
+    `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope,extracted_at)
+     values($1,$2,$3,'clara-fixture:v1','ocr',1,'done',1,$4::jsonb,$5::timestamptz)`,
+    [ocrExt, firm, document, JSON.stringify({ pages: [{ page_number: 1, height: 11 }] }), extractedAt],
+  );
+  await rootQuery(
+    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+     values($1,$2,'page_polygon',$3::jsonb,'pages.1.lines.0',$4,1.0)`,
+    [firm, ocrExt, JSON.stringify({ page_number: 1, polygon: [1, 0.5, 2, 0.5, 2, 0.9, 1, 0.9] }),
+      `${cp.name} (${cp.reg})`],
+  );
+}
+
+/** The window builder this battery owns. Self-contained rather than a call into x36's
+ *  seedF123Evidence, because every wall the 2026-08-29 adversarial pass added needs a knob the
+ *  shared builder has no way to express. Each option below exists to build a DELIBERATE
+ *  near-miss for one named wall — there are no decorative parameters here. */
+export async function seedWindow(w, tag, {
+  dates,
+  invoicePrefix = null,
+  invoiceId = null,          // force ONE printed id across all three → W16's invoice_id arm
+  client = null,
+  reuseDocument = false,     // one document, three entries → W16's document/sha arm
+  printedRegistration,       // undefined = the vendor's own; null = none; text = a MISMATCH
+  approvedSpanDays = null,   // null = mirror the posting dates (a real elapsed span)
+  vendor = null,
+} = {}) {
   const cl = client ?? w.clients.A1;
-  const cp = await seedVendorCounterparty(w.firms.A, cl, tag);
-  const iv = invoiceId ?? `EZSEC-IV-${randomUUID().slice(0, 5)}`;
+  const cp = vendor ?? await seedUniqueFamilyVendor(w.firms.A, cl, tag);
+  const prefix = invoicePrefix ?? `${cp.lead ?? "EZSEC"}-IV-`;
+  let shared = null;
+  let i = 0;
   for (const d of dates) {
-    const doc = await seedBareDocument(w.firms.A, `${tag}-${d}-${randomUUID().slice(0, 4)}`);
-    await seedF123Evidence(w.firms.A, doc.id, cp, iv);
-    await seedApprovedEntry(w.firms.A, cl, cp.id, doc, { postingDate: d });
+    const doc = reuseDocument
+      ? (shared ??= await seedBareDocument(w.firms.A, `${tag}-shared`))
+      : await seedBareDocument(w.firms.A, `${tag}-${d}-${randomUUID().slice(0, 4)}`);
+    const iv = invoiceId ?? `${prefix}${9001 + i}`;
+    // approved_at defaults to the posting date, so the TRUSTED span mirrors the booked one.
+    const approvedAt = approvedSpanDays === null
+      ? `${d}T09:00:00Z`
+      : new Date(Date.parse(`${dates[0]}T09:00:00Z`)
+          + (i === 0 ? 0 : approvedSpanDays) * 86400000).toISOString();
+    // Extracted BEFORE approval, or the frozen derivation refuses `evidence_restated` first and
+    // the cell would be measuring that rung instead of the one under test.
+    const extractedAt = new Date(Date.parse(approvedAt) - 86400000).toISOString();
+    if (!reuseDocument || i === 0) {
+      await seedEvidence(w.firms.A, doc.id, cp, iv, { extractedAt, printedRegistration });
+    }
+    await seedApprovedEntry(w.firms.A, cl, cp.id, doc, { postingDate: d, approvedAt });
+    i += 1;
   }
   return cp;
 }
@@ -200,7 +285,7 @@ export const DATES_OK = ["2025-08-25", "2025-08-29", "2025-10-13"];
  *  explicitly out of scope for the name-only guard, so a registration-free vendor is lawful. */
 export async function seedVendorNoRegistration(firm, client, tag) {
   const name = `NOREG VENDOR ${tag} ${randomUUID().slice(0, 6)}`;
-  const norm = name.toLowerCase().replace(/[^a-zA-Z0-9]/g, "");
+  const norm = foldAlnum(name);
   const r = await rootQuery(
     `insert into clara.counterparties(firm_id,client_id,kind,name,name_normalized,created_by)
      values($1,$2,'vendor',$3,$4,

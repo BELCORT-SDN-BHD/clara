@@ -27,8 +27,7 @@ import {
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import {
-  has28, has29, seedPayableAccount, seedPassingWindow, propose, sign,
-  seedBareDocument, seedF123Evidence, seedApprovedEntry,
+  has28, has29, seedPayableAccount, propose, sign,
 } from "./x36-vendor-binding-helpers.mjs";
 import {
   bp1Live, failBp1, reasonOf, mintCred, MODEL, WAKE_ROLE,
@@ -76,10 +75,12 @@ const credOfKind = (kind) => mintCred(CLIENT_BOUND.has(kind)
   ? { kind, firm: w.firms.A, onBehalfOf: null, client: w.clients.A1 }
   : { kind, firm: w.firms.A, onBehalfOf: w.users.alice, client: null });
 
+// A vendor that clears EVERY wall: the frozen ladder, and the four the 2026-08-29 adversarial
+// pass added. x36's seedPassingWindow cannot be used any more — its vendors all share the
+// "EZACCOUNT" family token (W15 refuses the second one) and its three documents carry ONE
+// printed invoice id (W16 refuses that as one invoice seen three times).
 async function eligibleVendor(tag, client = null) {
-  const cp = client
-    ? await seedWindow(w, tag, { dates: DATES_OK, client })
-    : await seedPassingWindow(w, tag);
+  const cp = await seedWindow(w, tag, { dates: DATES_OK, client: client ?? w.clients.A1 });
   const basis = await lawfulBasis(w.firms.A, client ?? w.clients.A1, cp.id);
   return { cp, basis };
 }
@@ -343,11 +344,7 @@ test("bp1.W4 counterparty liveness/attributability — delegated to the frozen d
   // INSERT (vendors are out of scope for the name-only guard), because blanking the column
   // later is likewise outside that update whitelist.
   const blank = await seedVendorNoRegistration(w.firms.A, w.clients.A1, "W4b");
-  for (const d of DATES_OK) {
-    const doc = await seedBareDocument(w.firms.A, `W4b-${d}`);
-    await seedF123Evidence(w.firms.A, doc.id, { ...blank, reg: "NONE" }, "EZSEC-IV-W4B01");
-    await seedApprovedEntry(w.firms.A, w.clients.A1, blank.id, doc, { postingDate: d });
-  }
+  await seedWindow(w, "W4b", { dates: DATES_OK, vendor: { ...blank, reg: "NONE", lead: "NOREG" } });
   const e2 = await assertRaises("CLR36",
     async () => proposeAsAgent(await filingActor(),
       { client: w.clients.A1, counterparty: blank.id, basis: { citations: [{ region_id: blank.id }] } }),
@@ -430,7 +427,7 @@ test("bp1.W6am MUTANT — removing the forbidden-key wall admits a model-asserte
     // And the receipt then records the DB's own resolved count regardless — so even the mutant
     // cannot get 99 into a durable field. The wall is defence in depth over a structural floor.
     const rec = await receiptRow(r.receipt_id);
-    assert.notEqual(rec.verdict.basis.sightings, 99,
+    assert.notEqual(rec.verdict.basis.citation_count, 99,
       "the resolver derives sightings; the model's 99 never becomes the durable number");
   });
 });
@@ -525,10 +522,29 @@ test("bp1.W6m MUTANT — bypassing the shared resolver admits the foreign-docume
     "  v_resolved := clara._resolve_proposal_basis(v_docs, p_firm, p_basis);",
     "  v_resolved := jsonb_build_object('citations', p_basis->'citations', 'sightings', 0);",
   ]], async () => {
+    // DEFENCE IN DEPTH, measured rather than assumed: with the shared resolver bypassed the
+    // foreign citation is still refused — by W17, which re-reads the resolved set and checks
+    // field_path, text and coverage on its own. The two walls are INDEPENDENT, which is exactly
+    // what the 2026-08-29 pass asked for when it found 0143 was a floor and not the whole wall.
+    const err = await assertRaises(CLR.badRequest,
+      async () => proposeAsAgent(await filingActor(),
+        { client: w.clients.A1, counterparty: cp.id, basis: { citations: [{ region_id: other.region }] } }),
+      "resolver bypassed, W17 still standing");
+    assert.equal(reasonOf(err), "basis_citation_contradicts_derivation");
+  });
+  // …and with BOTH removed the citation really is admitted — which is what proves the pair is
+  // the wall, and that neither cell above is passing for an unrelated reason.
+  await withMutant(CORE_SIG, [
+    ["  v_resolved := clara._resolve_proposal_basis(v_docs, p_firm, p_basis);",
+     "  v_resolved := jsonb_build_object('citations', p_basis->'citations', 'sightings', 0);"],
+    ["  if coalesce(v_bad_field,0) > 0 then", "  if false then"],
+    ["  if coalesce(v_bad_f1,0) > 0 or coalesce(v_bad_f2,0) > 0 then", "  if false then"],
+    ["  if coalesce(v_covered,0) <> coalesce(array_length(v_docs,1),0) then", "  if false then"],
+  ], async () => {
     const r = await proposeAsAgent(await filingActor(),
       { client: w.clients.A1, counterparty: cp.id, basis: { citations: [{ region_id: other.region }] } });
     assert.equal(r.status, "proposed",
-      "without the resolver the unchecked citation is ADMITTED — the resolver IS the 裁-22 wall");
+      "with the resolver AND W17 gone the unchecked citation is ADMITTED — together they are the wall");
   });
 });
 
@@ -570,13 +586,13 @@ test("bp1.W7b CROSS-PATH — human-then-agent and agent-then-human BOTH refuse b
     "the human door surfaces the estate's EXISTING typed word — no new error vocabulary in the UI");
 });
 
-test("bp1.W7m MUTANT — dropping uq_vib_one_open_proposal admits the duplicate on BOTH paths", async () => {
+test("bp1.W7m MUTANT — dropping uq_vib_one_active_binding admits the duplicate on BOTH paths", async () => {
   failBp1(live);
   const { cp, basis } = await eligibleVendor("W7m");
   await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
   await withoutConstraint({
-    index: "uq_vib_one_open_proposal",
-    ddl: `create unique index uq_vib_one_open_proposal on clara.vendor_identity_bindings(client_id, counterparty_id) where status = 'proposed'`,
+    index: "uq_vib_one_active_binding",
+    ddl: `create unique index uq_vib_one_active_binding on clara.vendor_identity_bindings(client_id, counterparty_id) where status in ('proposed','live')`,
   }, async () => {
     const r = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
     assert.equal(r.status, "proposed", "without the index the loop is back — a second open proposal is admitted");
@@ -693,7 +709,7 @@ test("bp1.W10m MUTANT — a ONE-WAY honesty CHECK lets an agent row hide its age
       // the same statement — otherwise this cell would be refused by THEM and would prove
       // nothing about the direction under test.
       await rootQuery(
-        "update clara.vendor_identity_bindings set proposed_by_agent=false, proposer_model=null, proposal_receipt_id=null where id=$1",
+        "update clara.vendor_identity_bindings set proposed_by_agent=false, proposer_model=null, proposal_receipt_id=null, directed_by=null where id=$1",
         [agent.binding_id]);
       const b = await bindingRow(agent.binding_id);
       assert.equal(b.proposed_by_agent, false,
@@ -1003,13 +1019,9 @@ test("bp1.S4 proposal_drifted still fires over an AGENT-created row", async () =
   const cp = await seedWindow(w, "S4", { dates: DATES_OK });
   const basis = await lawfulBasis(w.firms.A, w.clients.A1, cp.id);
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  // A fourth approved invoice moves the window, so the re-derivation at sign time differs.
-  await seedWindow(w, "S4-drift", { dates: ["2025-12-01"] });
-  const { seedBareDocument, seedF123Evidence, seedApprovedEntry } =
-    await import("./x36-vendor-binding-helpers.mjs");
-  const doc = await seedBareDocument(w.firms.A, "S4-fourth");
-  await seedF123Evidence(w.firms.A, doc.id, cp, "EZSEC-IV-ZZZZZ");
-  await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc, { postingDate: "2025-12-15" });
+  // A FOURTH approved invoice for the SAME vendor moves the window, so the re-derivation at
+  // sign time differs from the one the proposal was hashed over.
+  await seedWindow(w, "S4-fourth", { dates: ["2025-12-15"], vendor: cp });
   const err = await assertRaises("CLR36", () => sign(w.users.alice, { binding: p.binding_id }), "signing a drifted proposal");
   assert.match(err.message, /proposal_drifted/);
 });
@@ -1038,7 +1050,9 @@ test("bp1.R1 the receipt reproduces the card from DB-OWNED inputs only", async (
   // The persisted basis is the RESOLVER'S OUTPUT AND NOTHING ELSE — its sightings is DERIVED,
   // and the caller's raw citations are persisted NOWHERE (裁-22's HIGH-2 shape: a model-authored
   // list must not sit in a human-readable receipt beside the checked one).
-  assert.equal(rec.verdict.basis.sightings, basis.citations.length);
+  assert.equal(rec.verdict.basis.citation_count, basis.citations.length);
+  assert.equal(rec.verdict.basis.sightings, undefined,
+    "0143's sightings counts REGIONS, not invoices — this door never republishes that word");
   assert.equal(rec.verdict.basis.claimed, undefined, "the model's raw citations are persisted nowhere");
   for (const c of rec.verdict.basis.citations) {
     assert.equal(c.kind, "region", "every resolved citation is self-describing");

@@ -368,7 +368,7 @@ begin
     from (values ('clara.jwt_firm()'),('clara.jwt_sub()'),('clara.actor_role_rank()'),
                  ('clara.role_rank(text)'),('clara._human_ctx(integer)'),
                  ('clara.agent_user_id()'),('clara.wake_context()'),('clara._wake_task_id()'),
-                 ('clara.name_family_is_ambiguous(uuid,text)'),('clara.eligible_checker_count(uuid)'),
+                 ('clara.name_family_is_ambiguous(uuid,text)'),
                  ('clara.assert_wake_allowed(text,text)'),
                  ('clara._reserve_op(uuid,text,text,bytea)'),('clara._finish_op(uuid,text,text,jsonb)'),
                  ('clara._hash(jsonb)'),('clara._audit(uuid,uuid,uuid,text,text,uuid,jsonb)'),
@@ -856,6 +856,118 @@ revoke all on function clara._derive_vendor_binding_basis(uuid,uuid,uuid) from p
 --        THREE evidence documents THE DERIVATION ITSELF SELECTED -- never a document set the
 --        model chose.
 --   14-17 the writes.
+-- =====================================================================================
+-- SS6b -- clara._binding_extra_blocker: THE POST-DERIVATION IDENTITY WALLS, ONCE.
+-- =====================================================================================
+-- Every wall the 2026-08-29 cross-model adversarial pass added sits HERE, in one body that the
+-- proposal writer and the eligibility read BOTH call. Returns the first blocking reason token,
+-- or NULL when the pair is clean. It RAISES nothing: the writer turns a token into its typed
+-- CLR36 refusal, the read verb reports it as `reason`, and the two can therefore never disagree
+-- (G3 -- one fact, one definition).
+--
+-- WHY THESE WALLS ARE HERE AND NOT IN THE WINDOW. Every one of them belongs, logically, inside
+-- clara._derive_vendor_binding_proposal. It cannot go there: its content_hash covers the
+-- evidence array, so recutting it makes every already-`proposed` row un-signable (survey S4),
+-- and G3 rules it untouched. So they are enforced ABOVE it, on the evidence it returns. The
+-- consequence is stated rather than hidden: these walls protect NEW proposals only and do NOT
+-- retro-check rows already sitting at status='proposed' (conductor ruling, 2026-08-29).
+create function clara._binding_extra_blocker(
+    p_firm uuid, p_client uuid, p_counterparty uuid, p_derived jsonb, p_basis jsonb)
+  returns text language plpgsql stable security definer set search_path = clara, pg_temp as $fn$
+declare
+  v_cp_name text; v_registration text; v_bad_doc text;
+  v_n_docs int; v_n_shas int; v_n_invoices int; v_span_days int;
+begin
+  select c.name, c.registration_normalized into v_cp_name, v_registration
+    from clara.counterparties c where c.id = p_counterparty;
+
+  -- W15 -- LAW 79'S FAMILY-COLLISION PREDICATE (conductor ruling (e); the CRITICAL finding of
+  -- the 2026-08-29 pass). The predicate has existed since 0103:755 and no binding path has ever
+  -- called it.
+  -- THE ATTACK IT CLOSES: misattribute and approve three crafted `ROME...`-family invoices
+  -- against vendor A. The derivation then stores vendor B's stable LCP beside vendor A's
+  -- registration -- because F1 is a STABILITY feature matched by PREFIX (0030:29) and F3 accepts
+  -- a NAME SUBSTRING (0028:311). A human signs a card that looks entirely right, and later
+  -- name-only B invoices auto-post to A. In an ambiguous family a name can never authorize
+  -- identity, so the proposal never reaches a card.
+  if clara.name_family_is_ambiguous(p_firm, v_cp_name) then
+    return 'binding_name_family_ambiguous';
+  end if;
+
+  -- W16 -- THE CORPUS IS THREE REAL, DISTINCT, INDEPENDENTLY-OBSERVED INVOICES (ruling (a)).
+  -- The frozen window counts JOURNAL ENTRIES over caller-set POSTING DATES, with no distinct-
+  -- document, hash or invoice-id requirement (0030:129, :181, :201) -- so ONE document booked
+  -- three times with backdated posting dates, or three byte-different uploads of one invoice,
+  -- passes it outright.
+  select count(distinct e.doc), count(distinct d.sha256),
+         (max(j.approved_at)::date - min(j.approved_at)::date)
+    into v_n_docs, v_n_shas, v_span_days
+    from (select (x->>'document_id')::uuid doc, (x->>'entry_id')::uuid ent
+            from jsonb_array_elements(p_derived->'evidence') x) e
+    join clara.documents d on d.id = e.doc
+    join clara.journal_entries j on j.id = e.ent;
+  if coalesce(v_n_docs,0) <> 3 or coalesce(v_n_shas,0) <> 3 then
+    return 'binding_corpus_not_distinct';
+  end if;
+  -- Distinct PRINTED invoice identities, read from the same regions the LCP was taken over.
+  select count(distinct nullif(btrim(f->>'invoice_id_norm'), ''))
+    into v_n_invoices from jsonb_array_elements(p_basis->'f2_evidence') f;
+  if coalesce(v_n_invoices,0) <> 3 then
+    return 'binding_corpus_not_distinct';
+  end if;
+  -- THE TRUSTED CLOCK. posting_date is caller-controlled; approved_at is stamped by the approve
+  -- door and is the only elapsed-OBSERVATION evidence on the row. The frozen window's own
+  -- >=14-day span rides on posting_date alone; this requires the same span over approved_at, so
+  -- "fourteen days apart" means fourteen days of having actually seen the vendor.
+  if coalesce(v_span_days, -1) < 14 then
+    return 'window_too_recent_unobserved';
+  end if;
+
+  -- W18 -- EVERY CORPUS MEMBER CARRIES A HARD IDENTIFIER, OR A HUMAN RESOLVED IT (ruling (e),
+  -- second half). Per evidence document: if it PRINTS a vendor registration, that registration
+  -- must normalise to the target counterparty's own -- a DIFFERING printed registration is the
+  -- poisoned-corpus signature and refuses outright. If it prints none, the document must carry a
+  -- HUMAN identity resolution; a machine attribution alone may not stand up an identity
+  -- authority.
+  select string_agg(distinct q.doc::text, ', ') into v_bad_doc
+    from (
+      select e.doc,
+             (select clara._binding_normalize(min(r.text_content))
+                from clara.document_regions r
+                join clara.document_extractions x on x.id = r.extraction_id
+               where x.document_id = e.doc and x.engine_kind = 'invoice_facts' and x.status = 'done'
+                 and x.version_n = (select max(x2.version_n) from clara.document_extractions x2
+                                     where x2.document_id = e.doc and x2.engine_kind = 'invoice_facts'
+                                       and x2.status = 'done')
+                 and r.field_path = 'invoice.vendor_registration') as printed,
+             exists (select 1 from clara.client_resolutions cr
+                      where cr.subject_kind = 'document' and cr.subject_id = e.doc
+                        and cr.client_id = p_client and cr.method = 'human') as human_resolved
+        from (select distinct (x->>'document_id')::uuid doc
+                from jsonb_array_elements(p_derived->'evidence') x) e
+    ) q
+   where (q.printed is not null
+          and q.printed is distinct from clara._binding_normalize(v_registration))
+      or (q.printed is null and not q.human_resolved);
+  if v_bad_doc is not null then
+    return 'binding_identifier_unproven';
+  end if;
+
+  return null;
+end $fn$;
+comment on function clara._binding_extra_blocker(uuid,uuid,uuid,jsonb,jsonb) is
+  '裁-18b PR-1, from the 2026-08-29 cross-model adversarial pass: the identity walls that belong '
+  'inside clara._derive_vendor_binding_proposal''s window but cannot go there (its content_hash '
+  'covers the evidence array, so recutting it un-signs every open proposal -- survey S4; G3 rules '
+  'it untouched). Law 79''s family-collision predicate, corpus distinctness over document/sha256/'
+  'printed invoice id, a >=14-day span over the TRUSTED approved_at clock rather than the '
+  'caller-set posting_date, and a printed hard-identifier match (or a human identity resolution) '
+  'per corpus member. Returns the first blocking reason token or NULL; raises nothing, so the '
+  'proposal writer and clara.wake_list_binding_candidates share ONE definition and can never '
+  'disagree. Protects NEW proposals only -- rows already at status=''proposed'' are not '
+  're-checked. Ungranted.';
+revoke all on function clara._binding_extra_blocker(uuid,uuid,uuid,jsonb,jsonb) from public;
+
 create function clara._propose_vendor_binding_agent_core(
     p_actor uuid, p_firm uuid, p_obo uuid, p_wake_kind text, p_credential uuid, p_task uuid,
     p_client uuid, p_counterparty uuid, p_basis jsonb,
@@ -865,9 +977,7 @@ declare
   v_dedupe jsonb; v_derived jsonb; v_basis jsonb; v_resolved jsonb;
   v_docs uuid[]; v_binding uuid; v_receipt uuid; v_cp uuid;
   v_rationale text; v_trigger_kind text; v_trigger_id text;
-  v_cp_name text; v_registration text; v_bad_doc text;
-  v_n_docs int; v_n_shas int; v_n_invoices int; v_span_days int;
-  v_bad_field int; v_bad_f1 int; v_bad_f2 int; v_covered int;
+  v_blocker text; v_bad_field int; v_bad_f1 int; v_bad_f2 int; v_covered int;
 begin
   -- (3) op_key.
   if nullif(btrim(coalesce(p_op_key, '')), '') is null then
@@ -960,93 +1070,21 @@ begin
 
   v_derived := clara._derive_vendor_binding_proposal(p_firm, p_client, p_counterparty);
   v_cp := (v_derived->>'counterparty_id')::uuid;
-  select c.name, c.registration_normalized into v_cp_name, v_registration
-    from clara.counterparties c where c.id = v_cp;
-
-  -- (11b) W15 -- LAW 79'S FAMILY-COLLISION PREDICATE, at the PROPOSAL point (conductor ruling
-  --       (e); the CRITICAL finding of the 2026-08-29 cross-model pass). The predicate has
-  --       existed since 0103:755 and no binding path has ever called it.
-  --       THE ATTACK IT CLOSES: misattribute and approve three crafted `ROME...`-family invoices
-  --       against vendor A. The derivation then stores vendor B's stable LCP beside vendor A's
-  --       registration -- because F1 is a STABILITY feature matched by PREFIX (0030:29) and F3
-  --       accepts a NAME SUBSTRING (0028:311). A human signs a card that looks entirely right,
-  --       and later name-only B invoices auto-post to A. In an ambiguous family a name can never
-  --       authorize identity, so the proposal refuses before a card can exist.
-  if clara.name_family_is_ambiguous(p_firm, v_cp_name) then
-    raise exception 'binding_name_family_ambiguous' using errcode = 'CLR36',
-      detail = '{"reason":"name_family_ambiguous","class":"identity"}';
-  end if;
 
   -- (12) The DB's own non-hashed derived block.
   v_basis := clara._derive_vendor_binding_basis(p_firm, p_client, v_cp);
 
-  -- (12b) W16 -- THE CORPUS IS THREE REAL, DISTINCT, INDEPENDENTLY-OBSERVED INVOICES (conductor
-  --       ruling (a)). The frozen window counts JOURNAL ENTRIES over caller-set POSTING DATES,
-  --       with no distinct-document, hash or invoice-id requirement (0030:129, :181, :201) -- so
-  --       ONE document booked three times with backdated posting dates, or three byte-different
-  --       uploads of one invoice, passes it outright. That window cannot be recut here (its
-  --       content_hash covers the evidence array, survey S4), so the missing conjuncts are
-  --       enforced ABOVE it, on the evidence it returns.
-  select count(distinct e.doc), count(distinct d.sha256),
-         (max(j.approved_at)::date - min(j.approved_at)::date)
-    into v_n_docs, v_n_shas, v_span_days
-    from (select (x->>'document_id')::uuid doc, (x->>'entry_id')::uuid ent
-            from jsonb_array_elements(v_derived->'evidence') x) e
-    join clara.documents d on d.id = e.doc
-    join clara.journal_entries j on j.id = e.ent;
-  if coalesce(v_n_docs,0) <> 3 then
-    raise exception 'binding_corpus_not_distinct' using errcode = 'CLR36',
-      detail = '{"reason":"binding_corpus_not_distinct","class":"documents"}';
-  end if;
-  if coalesce(v_n_shas,0) <> 3 then
-    raise exception 'binding_corpus_not_distinct' using errcode = 'CLR36',
-      detail = '{"reason":"binding_corpus_not_distinct","class":"sha256"}';
-  end if;
-  -- Distinct PRINTED invoice identities, read from the same regions the LCP was taken over.
-  select count(distinct nullif(btrim(f->>'invoice_id_norm'), ''))
-    into v_n_invoices
-    from jsonb_array_elements(v_basis->'f2_evidence') f;
-  if coalesce(v_n_invoices,0) <> 3 then
-    raise exception 'binding_corpus_not_distinct' using errcode = 'CLR36',
-      detail = '{"reason":"binding_corpus_not_distinct","class":"invoice_id"}';
-  end if;
-  -- THE TRUSTED CLOCK. posting_date is caller-controlled; approved_at is stamped by the approve
-  -- door and is the only elapsed-OBSERVATION evidence on the row. The frozen window's own
-  -- >=14-day span rides on posting_date alone; this requires the same span over approved_at, so
-  -- "fourteen days apart" means fourteen days of actually having seen the vendor.
-  if coalesce(v_span_days, -1) < 14 then
-    raise exception 'window_too_recent' using errcode = 'CLR36',
-      detail = '{"reason":"window_too_recent","class":"approved_at_span"}';
-  end if;
-
-  -- (12c) W18 -- EVERY CORPUS MEMBER CARRIES A HARD IDENTIFIER, OR A HUMAN RESOLVED IT
-  --       (conductor ruling (e), second half). Per evidence document: if it PRINTS a vendor
-  --       registration, that registration must normalise to the target counterparty's own -- a
-  --       DIFFERING printed registration is the poisoned-corpus signature and refuses outright.
-  --       If it prints none, the document must carry a HUMAN identity resolution; a machine
-  --       attribution alone may not stand up an identity authority.
-  select string_agg(distinct q.doc::text, ', ') into v_bad_doc
-    from (
-      select e.doc,
-             (select clara._binding_normalize(min(r.text_content))
-                from clara.document_regions r
-                join clara.document_extractions x on x.id = r.extraction_id
-               where x.document_id = e.doc and x.engine_kind = 'invoice_facts' and x.status = 'done'
-                 and x.version_n = (select max(x2.version_n) from clara.document_extractions x2
-                                     where x2.document_id = e.doc and x2.engine_kind = 'invoice_facts'
-                                       and x2.status = 'done')
-                 and r.field_path = 'invoice.vendor_registration') as printed,
-             exists (select 1 from clara.client_resolutions cr
-                      where cr.subject_kind = 'document' and cr.subject_id = e.doc
-                        and cr.client_id = p_client and cr.method = 'human') as human_resolved
-        from (select distinct (x->>'document_id')::uuid doc
-                from jsonb_array_elements(v_derived->'evidence') x) e
-    ) q
-   where (q.printed is not null and q.printed is distinct from clara._binding_normalize(v_registration))
-      or (q.printed is null and not q.human_resolved);
-  if v_bad_doc is not null then
-    raise exception 'binding_identifier_unproven' using errcode = 'CLR36',
-      detail = '{"reason":"binding_identifier_unproven","class":"corpus"}';
+  -- (12b) THE POST-DERIVATION IDENTITY WALLS -- W15 (law 79 family collision), W16 (corpus
+  --       distinctness + the trusted approved_at span) and W18 (the printed hard identifier).
+  --       They live in clara._binding_extra_blocker, ONE definition that BOTH this writer and
+  --       clara.wake_list_binding_candidates call. That is not tidiness: G3 rules that one fact
+  --       gets one definition, and a read verb that called a vendor ELIGIBLE that this door will
+  --       refuse would be worse than no read verb at all -- it would send Clara to probe the
+  --       door by refusal, the exact pattern the read verb exists to prevent.
+  v_blocker := clara._binding_extra_blocker(p_firm, p_client, v_cp, v_derived, v_basis);
+  if v_blocker is not null then
+    raise exception '%', v_blocker using errcode = 'CLR36',
+      detail = jsonb_build_object('reason', v_blocker, 'class', 'identity')::text;
   end if;
 
   -- (13) W6, 裁-22: every citation the MODEL supplied is resolved by the SHARED resolver against
@@ -1086,7 +1124,7 @@ begin
                             and not exists (select 1 from jsonb_array_elements(v_basis->'f2_evidence') f
                                              where nullif(btrim(f->>'invoice_id_norm'),'')
                                                    = clara._binding_normalize(c.text_content))),
-         count(distinct c.document_id)
+         count(distinct z.document_id)
     into v_bad_field, v_bad_f1, v_bad_f2, v_covered
     from (select (e->>'region_id')::uuid rid, (e->>'document_id')::uuid document_id
             from jsonb_array_elements(v_resolved->'citations') e) z
@@ -1273,7 +1311,7 @@ create function clara.wake_list_binding_candidates(p_client uuid)
                 has_live_binding boolean, has_declined_proposal boolean)
   language plpgsql stable security definer set search_path = clara, pg_temp as $fn$
 declare
-  w record; cp record; v_reason text; v_ok boolean; v_basis jsonb;
+  w record; cp record; v_reason text; v_ok boolean; v_basis jsonb; v_derived jsonb;
   v_open boolean; v_live boolean; v_declined boolean;
 begin
   select * into w from clara.wake_context();
@@ -1312,12 +1350,23 @@ begin
     -- would turn a real fault into a quiet "not eligible" (review law 2 -- the fail-closed
     -- branch is a REFUSAL, never a silent one).
     begin
-      perform clara._derive_vendor_binding_proposal(w.firm_id, p_client, cp.id);
+      v_derived := clara._derive_vendor_binding_proposal(w.firm_id, p_client, cp.id);
       v_ok := true; v_reason := null;
     exception
       when sqlstate 'CLR36' then
-        v_ok := false; v_reason := sqlerrm;
+        v_ok := false; v_reason := sqlerrm; v_derived := null;
     end;
+
+    -- ...and then the SAME post-derivation identity walls the proposal writer runs, out of the
+    -- SAME body. A vendor that clears the frozen ladder but trips law 79's family collision,
+    -- corpus distinctness, the trusted-clock span or the printed-identifier wall is NOT
+    -- eligible, and this read says so in the writer's own words. Without this the read would
+    -- send Clara at a door that is certain to refuse her -- probing by refusal, the exact
+    -- pattern this verb exists to prevent.
+    if v_ok and v_derived is not null then
+      v_reason := clara._binding_extra_blocker(w.firm_id, p_client, cp.id, v_derived, v_basis);
+      if v_reason is not null then v_ok := false; end if;
+    end if;
 
     -- The loop brakes, in precedence order. A human's "no" outranks everything: Clara must not
     -- re-propose what a human declined (risk R7), and the proposal door refuses it too (W14), so
