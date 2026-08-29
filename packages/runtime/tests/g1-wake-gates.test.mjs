@@ -54,27 +54,55 @@ test("G1B-I1 the close classifier reads status='acted' — the shape 0138's own 
   assert.equal(rec.acts, 0, "nothing else counts — and the bank lane's own key counts nothing here");
 });
 
-test("G1B-I2 the bank classifier's closed world of three reply shapes — DRIVEN, both directions", { skip }, async () => {
+test("G1B-I2 the bank classifier counts a VERB'S OWN admitted shape — positively, never by absence", { skip }, async () => {
   const tools = await import("../workflows/bankAgent.v1.tools.ts");
 
   // AN EARLIER VERSION OF THIS CELL TESTED NOTHING IT WAS NAMED FOR (independent review, S7): it
   // built the tool set, asserted it was truthy, and then only grepped the prosrc. Deleting the
   // classifier's body entirely left it green. The fix is the shape I1 already had — DRIVE the
   // function, both directions — and the prosrc pin stays as the second leg, not the only one.
-  const count = (reply) => {
-    const rec = tools.newBankRunRecord();
-    tools.countIfAdmitted(rec, reply);
-    return rec.admitted;
+  //
+  // 裁-44 / FOLD-5 REPLACED THE SUBJECT ITSELF. countIfAdmitted used to count any object that had
+  // no `error` key and whose status was not 'refused' — absence as evidence, which review law 2
+  // forbids. It is now verb-specific and POSITIVE, so this cell is rebuilt around what each verb
+  // actually returns. It also drops a claim the old cell made that was simply FALSE: it asserted
+  // "a pack read with no status at all counts", but production get_bank_pack never passes its
+  // reply through this function at all — the pack tool records the digest and returns. Counting a
+  // pack read as an act was never a live behaviour, so the cell was pinning a fiction.
+  const count = (verb, reply) => {
+    const rec = tools.newBankRunRecord("cell");
+    tools.countIfAdmitted(rec, verb, reply);
+    return rec;
   };
-  // The three shapes, using the ACTUAL success payloads the cores return: match →
-  // {match_id, status:'live'} (0121:2306); exception/promotion → {proposal_id, status:'open'}
-  // (0121:5565, :5642).
-  assert.equal(count({ match_id: randomUUID(), status: "live" }), 1, "a match result counts");
-  assert.equal(count({ proposal_id: randomUUID(), status: "open", line_id: randomUUID() }), 1, "a proposal result counts");
-  assert.equal(count({ digest: "abc", lines: [] }), 1, "a pack read with no status at all counts");
-  assert.equal(count({ status: "refused", rung_vector: [{ rung: "M2" }] }), 0, "a DB refusal counts nothing");
-  assert.equal(count({ error: "refused (CLR03): …" }), 0, "a caught throw counts nothing");
-  assert.equal(count(null), 0, "and neither does nothing");
+  // The success payloads the cores actually return: match → {match_id, status:'live'}
+  // (0121:1622, and this delegate only inserts 'live' groups, :5840); exception →
+  // {proposal_id, status:'open', line_id} (0121:5566); promotion → {proposal_id, status:'open',
+  // counterparty_id} (0121:5643).
+  assert.equal(count("match", { match_id: randomUUID(), status: "live" }).admitted, 1, "a match result counts");
+  assert.equal(count("exception", { proposal_id: randomUUID(), status: "open", line_id: randomUUID() }).admitted, 1, "an exception proposal counts");
+  assert.equal(count("promotion", { proposal_id: randomUUID(), status: "open", counterparty_id: randomUUID() }).admitted, 1, "a promotion proposal counts");
+
+  // THE CROSS-VERB NEGATIVES, which are exactly what "verb-specific" means and what the old
+  // absence-based test could not express: a proposal's shape is NOT a match's admission.
+  assert.equal(count("match", { proposal_id: randomUUID(), status: "open" }).admitted, 0, "a proposal shape is not a match admission");
+  assert.equal(count("exception", { match_id: randomUUID(), status: "live" }).admitted, 0, "and a match shape is not a proposal admission");
+  assert.equal(count("match", { status: "live" }).admitted, 0, "a 'live' status with no match_id names no act");
+  assert.equal(count("exception", { proposal_id: randomUUID() }).admitted, 0, "and a proposal id with no 'open' status names no open proposal");
+
+  // THE FOURTH REPLY SHAPE THE OLD 'CLOSED WORLD OF THREE' MISSED, and it is a real one:
+  // clara._reserve_op returns {"pending": true} when a reservation exists whose first attempt
+  // never finished (0004:59). It has no error key and no 'refused' status, so the old classifier
+  // counted it as an admitted act — a reservation nobody completed, recorded as work done.
+  assert.equal(count("match", { pending: true }).admitted, 0, "a reserved-but-unfinished op is not an act");
+  assert.equal(count("match", {}).admitted, 0, "an empty object counts zero");
+  assert.equal(count("match", { status: "refused", rung_vector: [{ rung: "M2" }] }).admitted, 0, "a DB refusal counts nothing");
+  assert.equal(count("match", { error: "refused (CLR03): …" }).admitted, 0, "a caught throw counts nothing");
+  assert.equal(count("match", null).admitted, 0, "and neither does nothing");
+
+  // 裁-44 / FOLD-3's own half of this function: everything that is NOT an admission is a REFUSAL,
+  // and the count is what makes a night of them settle failed rather than green.
+  assert.equal(count("match", { status: "refused" }).refusals, 1, "a refusal is counted as one");
+  assert.equal(count("match", { match_id: randomUUID(), status: "live" }).refusals, 0, "and an admission is not");
 
   // THE SECOND LEG: pin that the live cores still have no uniform admitted key, so a future recut
   // that ADDS one makes this cell fail rather than silently leaving the classifier weaker than it
@@ -185,26 +213,32 @@ test("G1B-I8 N11 — a run whose reads worked but whose ACTS were all blocked by
   const close = await import("../workflows/closePrep.v1.impl.ts");
   const bank = await import("../workflows/bankAgent.v1.impl.ts");
 
+  // 裁-44 added three fields to both records (writeAttempts / refusals / cancelledAs). Defaulting
+  // them HERE keeps every N11/S9 case below saying exactly what it used to say — a zero-write run
+  // — rather than silently drifting into FOLD-3's branch and proving something else.
+  const mkClose = (o) => ({ acts: 0, reads: 0, infraFaults: 0, writeAttempts: 0, refusals: 0, cancelledAs: null, ...o });
+  const mkBank = (o) => ({ admitted: 0, digest: null, infraFaults: 0, writeAttempts: 0, refusals: 0, cancelledAs: null, ...o });
+
   // THE DEFECT'S OWN SHAPE — this is the assertion that reds without the fix.
-  const blocked = close.classifyCloseOutcome({ acts: 0, reads: 6, infraFaults: 1 }, "I read everything and proposed nothing.");
+  const blocked = close.classifyCloseOutcome(mkClose({ acts: 0, reads: 6, infraFaults: 1 }), "I read everything and proposed nothing.");
   assert.equal(blocked.kind, "refused", "reads worked, every act was ours to lose — that is a FAILURE, not a quiet night");
   assert.equal(blocked.code, "internal", "and it is OUR code, not the model's");
 
   // THE CASE THAT MUST NOT FIRE, which is what stops this being a blunt instrument: a genuine
   // nothing_due — the model read, found nothing to do, and nothing broke — still settles green.
-  const genuine = close.classifyCloseOutcome({ acts: 0, reads: 6, infraFaults: 0 }, "Nothing is due for this client.");
+  const genuine = close.classifyCloseOutcome(mkClose({ acts: 0, reads: 6, infraFaults: 0 }), "Nothing is due for this client.");
   assert.equal(genuine.kind, "nothing_due", "a real quiet night is still a success — 'finding nothing to do is a correct outcome'");
 
   // A run that ACTED is unaffected even with a fault somewhere in it: infraFaults is consulted
   // only in the zero-act branches, so it can never turn a successful run into a failed one.
+  assert.equal(close.classifyCloseOutcome(mkClose({ acts: 2, reads: 6, infraFaults: 3 }), "").kind, "proposed");
+
   // N12 — BUT THE FAULT IS NOT DISCARDED. A partial success stays a success (the acts landed with
   // durable receipts, and failing would throw real work away), yet this is precisely the run
   // nobody looks at, so the fault must still say so. It goes out through onUsageProblem, whose
   // stated purpose is that a lane which hit trouble does not look healthy. Driven, not asserted.
-  assert.equal(close.classifyCloseOutcome({ acts: 2, reads: 6, infraFaults: 3 }, "").kind, "proposed");
-
-  // N12 — BUT THE FAULT IS NOT DISCARDED. A partial success stays a success, yet this is exactly
-  // the run nobody looks at, so the fault still says so through onUsageProblem.
+  // (裁-44 / FIND-4: this note used to appear TWICE, an editing artifact with no behavioural
+  // consequence; the duplicate is folded away here.)
   //
   // THE SIGNAL IS A PURE FUNCTION AND THE EMISSION IS IN THE STEP, and that split was forced by
   // the BUILD, not chosen for tidiness: calling the usage module from the classifier pulled
@@ -223,16 +257,66 @@ test("G1B-I8 N11 — a run whose reads worked but whose ACTS were all blocked by
 
   // S9's own branch, re-driven here through the extracted function so both attributions are
   // pinned in one place: zero reads + our fault = internal; zero reads + no fault = model_error.
-  assert.equal(close.classifyCloseOutcome({ acts: 0, reads: 0, infraFaults: 1 }, "").code, "internal");
-  assert.equal(close.classifyCloseOutcome({ acts: 0, reads: 0, infraFaults: 0 }, "").code, "model_error");
+  assert.equal(close.classifyCloseOutcome(mkClose({ acts: 0, reads: 0, infraFaults: 1 }), "").code, "internal");
+  assert.equal(close.classifyCloseOutcome(mkClose({ acts: 0, reads: 0, infraFaults: 0 }), "").code, "model_error");
 
   // THE BANK LANE HAS THE IDENTICAL STRUCTURE and the identical four cases — `digest !== null` is
   // its "we read something" signal, exactly as `reads > 0` is close's.
-  assert.equal(bank.classifyBankOutcome({ admitted: 0, digest: "abc", infraFaults: 1 }, "").kind, "refused");
-  assert.equal(bank.classifyBankOutcome({ admitted: 0, digest: "abc", infraFaults: 0 }, "").kind, "nothing_due");
-  assert.equal(bank.classifyBankOutcome({ admitted: 1, digest: "abc", infraFaults: 9 }, "").kind, "acted");
-  assert.equal(bank.classifyBankOutcome({ admitted: 0, digest: null, infraFaults: 1 }, "").code, "internal");
-  assert.equal(bank.classifyBankOutcome({ admitted: 0, digest: null, infraFaults: 0 }, "").code, "model_error");
+  assert.equal(bank.classifyBankOutcome(mkBank({ digest: "abc", infraFaults: 1 }), "").kind, "refused");
+  assert.equal(bank.classifyBankOutcome(mkBank({ digest: "abc", infraFaults: 0 }), "").kind, "nothing_due");
+  assert.equal(bank.classifyBankOutcome(mkBank({ admitted: 1, digest: "abc", infraFaults: 9 }), "").kind, "acted");
+  assert.equal(bank.classifyBankOutcome(mkBank({ digest: null, infraFaults: 1 }), "").code, "internal");
+  assert.equal(bank.classifyBankOutcome(mkBank({ digest: null, infraFaults: 0 }), "").code, "model_error");
+});
+
+test("G1B-I9 裁-44 FOLD-3 — a night that ATTEMPTED writes and admitted none FAILS; FOLD-2 — a cancelled task settles cancelled", { skip: skip0138 }, async () => {
+  // TWO RULINGS, ONE CELL, because they are the same question asked at the same seam: what does a
+  // run's terminal state say about a night in which the model's acts did not land?
+  //
+  // FOLD-3's defect: a typed DB write refusal does not THROW on either lane — the close cores
+  // RETURN {status:'refused'} (0138:1799-1800) and wake_match_bank_line returns the same
+  // (0121:6008). Neither incremented acts nor infraFaults, so `reads > 0` / `digest !== null` took
+  // the nothing_due branch and the task settled COMPLETED. A run in which every single act the
+  // model attempted was rejected reported a green night.
+  //
+  // FOLD-2's defect: a cancel landing mid-pass left the task 'cancel_requested', the pass kept
+  // minting credentials and writing, and the settle then stamped 'completed' over the cancel.
+  const close = await import("../workflows/closePrep.v1.impl.ts");
+  const bank = await import("../workflows/bankAgent.v1.impl.ts");
+  const mkClose = (o) => ({ acts: 0, reads: 0, infraFaults: 0, writeAttempts: 0, refusals: 0, cancelledAs: null, ...o });
+  const mkBank = (o) => ({ admitted: 0, digest: null, infraFaults: 0, writeAttempts: 0, refusals: 0, cancelledAs: null, ...o });
+
+  // ---- FOLD-3, the assertions that RED without the fix (both lanes) -------------------------
+  const closeAllRefused = close.classifyCloseOutcome(mkClose({ reads: 6, writeAttempts: 3, refusals: 3 }), "I tried three times.");
+  assert.equal(closeAllRefused.kind, "refused", "reads fine + every write refused is a FAILED night, not nothing_due");
+  assert.equal(closeAllRefused.code, "model_error", "and with no infra fault the verdicts were the database's on the MODEL's proposals");
+  const bankAllRefused = bank.classifyBankOutcome(mkBank({ digest: "abc", writeAttempts: 2, refusals: 2 }), "");
+  assert.equal(bankAllRefused.kind, "refused", "same on the bank lane");
+  assert.equal(bankAllRefused.code, "model_error");
+
+  // Our fault still outranks the model's when both are present — 'internal' is the honest code.
+  assert.equal(close.classifyCloseOutcome(mkClose({ reads: 6, writeAttempts: 2, refusals: 2, infraFaults: 1 }), "").code, "internal");
+  assert.equal(bank.classifyBankOutcome(mkBank({ digest: "abc", writeAttempts: 2, refusals: 2, infraFaults: 1 }), "").code, "internal");
+
+  // THE CASES THAT MUST NOT FIRE, which is what stops FOLD-3 being a blunt instrument.
+  assert.equal(close.classifyCloseOutcome(mkClose({ reads: 6 }), "nothing to do").kind, "nothing_due", "a run that attempted NO write is still a quiet night");
+  assert.equal(bank.classifyBankOutcome(mkBank({ digest: "abc" }), "nothing due").kind, "nothing_due");
+  const partial = close.classifyCloseOutcome(mkClose({ acts: 1, reads: 6, writeAttempts: 3, refusals: 2 }), "");
+  assert.equal(partial.kind, "proposed", "a PARTIAL admit stays a success — the acts landed with durable receipts");
+  assert.equal(partial.refusals, 2, "but the refusal count travels with it rather than being dropped");
+  const partialBank = bank.classifyBankOutcome(mkBank({ admitted: 1, digest: "abc", writeAttempts: 3, refusals: 2 }), "");
+  assert.equal(partialBank.kind, "acted");
+  assert.equal(partialBank.refusals, 2);
+
+  // ---- FOLD-2, the classifier half (the behavioural half is G1B-CANCEL-1) ------------------
+  // A cancelled task outranks EVERYTHING, admitted acts included: the acts keep their own durable
+  // receipts, but a task somebody cancelled did not complete.
+  const c1 = close.classifyCloseOutcome(mkClose({ acts: 4, reads: 6, cancelledAs: "cancel_requested" }), "");
+  assert.equal(c1.kind, "cancelled", "even a run that ACTED settles the cancellation");
+  assert.equal(c1.observed, "cancel_requested", "and carries what it actually SAW, so the workflow settles on a fact");
+  const b1 = bank.classifyBankOutcome(mkBank({ admitted: 4, digest: "abc", cancelledAs: "cancelled" }), "");
+  assert.equal(b1.kind, "cancelled");
+  assert.equal(b1.observed, "cancelled", "an ALREADY-terminal status is reported as-is — the workflow stands down on it rather than raising CLR13");
 });
 
 test("G1B-I7 a fault that never reached the database is OURS, not the model's", { skip: skip0138 }, async () => {

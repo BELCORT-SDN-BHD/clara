@@ -114,8 +114,31 @@ export async function claimCloseTask(c: PgExec, taskId: string, workflowRunId: s
 /** Settle through clara._settle_wake_task — the same ONE verb both carriers use. A direct_queue
  *  task carries no wakes_outbox row at all, so the outbox cascade is skipped BY CONSTRUCTION
  *  there (v_intent is null), never by a missed match (0133:534-541). */
-export async function settleCloseTask(c: PgExec, taskId: string, outcome: "completed" | "failed", errorCode: string | null): Promise<void> {
-  await c.query("select clara._settle_wake_task($1,$2,$3)", [taskId, outcome, errorCode]);
+export async function settleCloseTask(c: PgExec, taskId: string, outcome: CloseSettleOutcome, errorCode: string | null): Promise<void> {
+  // 裁-44 / FOLD-2(b) — see bankAgent.v1.infra.ts's own copy for the full statement. ONE statement
+  // so the read and the write share a transaction; 'cancel_requested' -> 'cancelled' is the close
+  // arm's own legal edge (0133:436). A cancel already recorded outranks this run's verdict.
+  await c.query(
+    `select clara._settle_wake_task($1,
+        case when (select status from clara.agent_tasks where id = $1) = 'cancel_requested'
+             then 'cancelled' else $2 end,
+        case when (select status from clara.agent_tasks where id = $1) = 'cancel_requested'
+             then null else $3 end)`,
+    [taskId, outcome, errorCode],
+  );
+}
+
+/** The three settlements this lane can write — 'cancelled' is new with 裁-44. */
+export type CloseSettleOutcome = "completed" | "failed" | "cancelled";
+
+/** THE STATUS OF THIS RUN'S OWN TASK, read on the RUNTIME pool (裁-44 / FOLD-2). The claim CAS
+ *  proves the task was 'running' at the START of the run and nothing about the middle; every WRITE
+ *  re-asks before any credential is minted. NULL means no row of this kind, which is not "running"
+ *  and is not guessed around (review law 2). Reads are deliberately not gated. */
+export async function readCloseTaskStatus(c: PgExec, taskId: string): Promise<string | null> {
+  const r = await c.query("select status from clara.agent_tasks where id = $1 and kind = 'close_prep'", [taskId]);
+  const s = r.rows[0]?.status;
+  return typeof s === "string" ? s : null;
 }
 
 export function resolveModel(modelId: string): unknown {

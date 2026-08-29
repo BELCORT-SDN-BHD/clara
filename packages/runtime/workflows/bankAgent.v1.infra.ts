@@ -45,6 +45,24 @@ export type BankPools = {
   mintBankAgentCredential(firmId: string, clientId: string, ttl?: string): Promise<{ secret: string }>;
 };
 
+/** THE STATUS OF THIS RUN'S OWN TASK, read on the RUNTIME pool (裁-44 / FOLD-2).
+ *
+ *  The claim CAS proves the task was 'running' at the START of the run; it proves nothing about
+ *  the middle. A cancel landing after the first admitted read leaves the task 'cancel_requested'
+ *  while the model keeps calling tools — and every later tool would mint a live credential and
+ *  write, under books that already say the run is stopping. So every WRITE re-asks, before any
+ *  mint, and a non-'running' answer refuses locally.
+ *
+ *  NULL means NO ROW OF THIS KIND — which is not "running" and is not guessed around: the caller
+ *  fails closed on it (review law 2). Reads are deliberately NOT gated: a read mints its receipt
+ *  and changes no books, and letting an in-flight read finish is what lets the run settle
+ *  truthfully rather than mid-sentence. */
+export async function readWakeTaskStatus(c: PgExec, taskId: string): Promise<string | null> {
+  const r = await c.query("select status from clara.agent_tasks where id = $1 and kind = 'wake'", [taskId]);
+  const s = r.rows[0]?.status;
+  return typeof s === "string" ? s : null;
+}
+
 export function pools(): BankPools {
   const p = (globalThis as unknown as { __claraPools?: BankPools }).__claraPools;
   if (!p) throw new Error("runtime pools not injected (globalThis.__claraPools) — the supervisor must inject them at boot");
@@ -197,9 +215,28 @@ export async function readBankTaskContext(c: PgExec, intentId: string): Promise<
  *  can never diverge (0133:503-542). Idempotent by its own construction: a re-settle replay
  *  finds the outbox row already settled and affects zero rows there, never a raise, and
  *  error_code is first-write-wins so a later replay can never erase the first cause. */
-export async function settleBankTask(c: PgExec, taskId: string, outcome: "completed" | "failed", errorCode: string | null): Promise<void> {
-  await c.query("select clara._settle_wake_task($1,$2,$3)", [taskId, outcome, errorCode]);
+export async function settleBankTask(c: PgExec, taskId: string, outcome: BankSettleOutcome, errorCode: string | null): Promise<void> {
+  // 裁-44 / FOLD-2(b) — A CANCEL ALREADY RECORDED OUTRANKS THIS RUN'S OWN VERDICT. _settle_wake_task
+  // writes whatever outcome it is handed; a run that finished its model pass while a cancel landed
+  // would otherwise stamp 'completed' over 'cancel_requested' and the cancel would simply vanish.
+  // ONE STATEMENT, so the read and the write share a transaction rather than a window: two separate
+  // pooled queries would each be their own transaction and the cancel could land between them.
+  // The residual is a snapshot race inside that one statement, and the real cure is DB-side (a
+  // settle predicated on status AND workflow_run_id) — booked as G1 PR-2 / the 裁-44 DB pass.
+  // 'cancel_requested' -> 'cancelled' is the transition matrix's own legal edge (0133:415).
+  await c.query(
+    `select clara._settle_wake_task($1,
+        case when (select status from clara.agent_tasks where id = $1) = 'cancel_requested'
+             then 'cancelled' else $2 end,
+        case when (select status from clara.agent_tasks where id = $1) = 'cancel_requested'
+             then null else $3 end)`,
+    [taskId, outcome, errorCode],
+  );
 }
+
+/** The three settlements this lane can write. 'cancelled' is new with 裁-44: a run whose task was
+ *  cancelled out from under it settles the cancellation rather than reporting a night's work. */
+export type BankSettleOutcome = "completed" | "failed" | "cancelled";
 
 /** Resolve the language model. Production uses the OpenAI provider with the snapshot id; a test
  *  injects a mock through globalThis, so no network and no key ever enters a test. Reuses
@@ -254,9 +291,20 @@ export async function bankScoped<T>(ctx: { firmId: string; clientId: string }, f
  *  moves precisely when the run has been working (a match drops those lines out of the unmatched
  *  set, 0121:5727-5728) — so the one re-read a careful pass makes, "check my work after acting",
  *  is the one that fails, and it fails as an oracle-safe authority refusal that names nothing
- *  about op keys. Hence: writes are content-derived, reads carry a counter. Non-determinism
- *  across a WDK retry is harmless for a read — the retry re-reads and writes a second pack_read
- *  receipt, which is the shape the exemption exists for.
+ *  about op keys. Hence: writes are content-derived, reads carry a counter.
+ *
+ *  AND THE COUNTER MUST BE ATTEMPT-UNIQUE, NOT RUN-LOCAL (裁-44 / FOLD-8). This paragraph used to
+ *  end "non-determinism across a WDK retry is harmless for a read — the retry re-reads and writes
+ *  a second pack_read receipt". THAT WAS FALSE, and it was measured false on a rig through the
+ *  real wrappers. newBankRunRecord() restarts the counter at 1, so a retried step's FIRST pack
+ *  read reuses attempt 1's key — while the digest has moved, because the first attempt acted. That
+ *  is exactly the CLR10 op_key_identity_mismatch this paragraph describes, and it is not harmless:
+ *  rec.digest stays null, the pack-before-write guard then blocks every write, and the run settles
+ *  failed/model_error (CLR10 is a DB verdict, so the infra-fault branch never fires) — one retry
+ *  after one admitted act kills the rest of the night and blames the model for it. The counter's
+ *  segment therefore carries the STEP ATTEMPT's own identity, taken from the WDK's getStepMetadata
+ *  (stepId + attempt) in bankAgent.v1.impl.ts and handed to newBankRunRecord. Field 2 stays the
+ *  task id, untouched, because 0129 parses it BY POSITION.
  *
  *  THE SUBJECT IS LOWERCASED because a model may hand back an uppercase uuid while the database
  *  renders every uuid lowercase (S3). Two spellings of one id must not be two operations. */

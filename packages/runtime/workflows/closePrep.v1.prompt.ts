@@ -27,9 +27,28 @@ export const WRITE_TOOLS = {
  *  pass, small enough that a looping model stops loudly rather than spending all night. */
 export const CLOSE_PREP_STEP_BUDGET = 16;
 
+/** The prose cap every model-written string on this lane carries (裁-44 / FOLD-7). 4000 is the
+ *  DATABASE'S OWN number where one exists — clara.agent_act_receipts.rationale is
+ *  `check (btrim(rationale) <> '' and length(rationale) <= 4000)` (0138:362). The other prose
+ *  columns these twelve wrappers write (close_proposals.narrative and .drafted[].text,
+ *  close_runs.end_reason at 0120:1186) carry no length CHECK at all, so 4000 is applied here as
+ *  the estate's own house limit rather than invented. The DB-side CHECKs are booked as G1 PR-2 /
+ *  the 裁-44 DB pass. */
+export const CLOSE_PROSE_MAX = 4000;
+
+/** A fiscal year's LABEL is a name, not prose — clara.fiscal_years.label is display-only and
+ *  guarded solely as non-blank (0056:236), which leaves a whole essay admissible in a column every
+ *  human-facing surface renders inline. 120 is the ruled cap (裁-44 / FOLD-7); deriving the label
+ *  from the client's own convention instead is the DB pass's own question. */
+export const CLOSE_FY_LABEL_MAX = 120;
+
+/** `refusals` rides the PROPOSED kind (裁-44 / FOLD-3) — a partially-admitted night still settles
+ *  COMPLETED, but the count of what was refused travels with it. `cancelled` is 裁-44 / FOLD-2:
+ *  a write gate found this run's own task no longer 'running', and `observed` is what it SAW. */
 export type ClosePrepOutcome =
-  | { kind: "proposed"; acts: number }
+  | { kind: "proposed"; acts: number; refusals: number }
   | { kind: "nothing_due"; note: string }
+  | { kind: "cancelled"; observed: string }
   | { kind: "refused"; code: string; message: string };
 
 export const SYSTEM_PROMPT_CLOSE_PREP_V1 = [

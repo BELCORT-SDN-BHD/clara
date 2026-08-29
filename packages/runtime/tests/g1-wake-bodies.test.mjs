@@ -166,7 +166,13 @@ test("G1B-B1 a completed wake run settles agent_tasks AND wakes_outbox in one ac
   assert.equal(t.status, "completed");
   assert.equal(t.error_code, null, "a completed task NEVER carries an error_code — _settle_wake_task forces that");
   const ob = await readOutbox(intentId);
-  if (ob) assert.equal(ob.status, "settled", "the paired projection moved in the SAME transaction");
+  // 裁-44 / FIND-3 — THIS WAS `if (ob) assert…`, which made the cell's own HEADLINE latently
+  // vacuous: a settle that stopped writing the outbox projection at all (readOutbox returning
+  // null) would have passed silently, and "settles agent_tasks AND wakes_outbox in one act" is
+  // exactly the claim that would then be false. The row is planted three lines up, so its
+  // presence is a fact this cell may assert rather than hope for.
+  assert.ok(ob, "the wakes_outbox row this cell planted must still be there — a missing projection is the defect, not a skip condition");
+  assert.equal(ob.status, "settled", "the paired projection moved in the SAME transaction");
 });
 
 test("G1B-B2 a FAILING run settles 'failed' carrying its reason, first-write-wins", { skip }, async () => {

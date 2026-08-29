@@ -158,8 +158,10 @@ test("G1B-G1 assertProductionPoolConfig does NOT require the bank DSN; getBankPo
 
 test("G1B-H1 a bank WRITE before any pack read is refused locally, by name, and never reaches the database", { skip }, async () => {
   const tools = await import("../workflows/bankAgent.v1.tools.ts");
-  const rec = tools.newBankRunRecord();
-  assert.equal(rec.digest, null, "a fresh record — and a WDK REPLAY rebuilds exactly this, which is why it fails closed");
+  const rec = tools.newBankRunRecord("g1b-h1");
+  assert.equal(rec.pack, null, "a fresh record — and a WDK REPLAY rebuilds exactly this, which is why it fails closed");
+  const lineId = randomUUID();
+  const entryId = randomUUID();
   const ctx = { taskId: randomUUID(), firmId: randomUUID(), clientId: randomUUID(), bankAccountId: randomUUID(), dueReason: null };
   const built = tools.buildBankAgentTools(ctx, rig.DEFAULT_MODEL, rec);
   // EVERY FIXTURE VALUE BELOW IS LEGAL AGAINST THE DB's OWN ROSTERS, deliberately. An earlier
@@ -169,24 +171,98 @@ test("G1B-H1 a bank WRITE before any pack read is refused locally, by name, and 
   for (const name of ["match_bank_line", "propose_line_exception", "propose_identifier_promotion"]) {
     const args =
       name === "match_bank_line"
-        ? { lines: [randomUUID()], entries: [{ entry_id: randomUUID(), matched_cents: 1000 }], rationale: "r" }
+        ? { lines: [lineId], entries: [entryId], rationale: "r" }
         : name === "propose_line_exception"
-          ? { line_id: randomUUID(), kind: "bank_error", reason: "r", rationale: "r" }
+          ? { line_id: lineId, kind: "bank_error", reason: "r", rationale: "r" }
           : { counterparty_id: randomUUID(), identifier_kind: "tin", identifier_value: "X", times_seen: 2, rationale: "r" };
     const res = await built[name].execute(args);
     assert.match(String(res.error), /get_bank_pack first/, `${name} must refuse before any pack read`);
   }
+  // 裁-44 / FOLD-3 — the three refusals above are COUNTED as attempted-and-refused writes, which
+  // is what makes a night of nothing but these settle failed rather than nothing_due.
+  assert.equal(rec.writeAttempts, 3, "each blocked write is still an ATTEMPT");
+  assert.equal(rec.refusals, 3, "and each is a refusal");
+  assert.equal(rec.infraFaults, 0, "a guard refusal is the model's, never ours");
 
   // THE NEGATIVE CONTROL, and its earlier version was FALSE — an independent review caught it.
   // It claimed the call "proceeds to the database" and fails there on a fabricated client id. It
-  // did not: with no pools injected, `pools()` throws "runtime pools not injected" the moment
-  // bankScoped is reached, so the assertion passed on a message about POOLS and the cell would
-  // have been identical had bankScoped not existed at all. What it can honestly show is exactly
-  // one step further than the guard: the LOCAL guard stood aside and the call reached the pool
-  // layer. So that is what it now asserts — by NAME, not by the absence of the other message.
-  rec.digest = "deadbeef";
-  const proceeded = await built.propose_line_exception.execute({ line_id: randomUUID(), kind: "disputed", reason: "r", rationale: "r" });
+  // did not: with no pools injected, `pools()` throws the moment the call reaches the pool layer,
+  // so the assertion passed on a message about POOLS and the cell would have been identical had
+  // bankScoped not existed at all. What it can honestly show is exactly one step further than the
+  // guard: the LOCAL pack guard stood aside and the call reached the pool layer.
+  //
+  // 裁-44 MOVED WHICH POOL IT REACHES FIRST, and that is itself the thing worth pinning. The write
+  // gate now re-reads this run's own task status through the RUNTIME pool BEFORE any credential is
+  // minted (FOLD-2), so an uninjected-pools run fails there — with a REDACTED message (FIND-9),
+  // because a driver message is no use to a model and this refusal is oracle-safe by contract.
+  // The raw cause goes to the runtime log instead.
+  rec.pack = { digest: "d".repeat(64), lineCents: new Map([[lineId, 10000]]), entryCaps: new Map([[entryId, { dr: 10000, cr: 0 }]]) };
+  rec.digest = rec.pack.digest;
+  const proceeded = await built.propose_line_exception.execute({ line_id: lineId, kind: "disputed", reason: "r", rationale: "r" });
   const msg = String(proceeded.error ?? "");
-  assert.doesNotMatch(msg, /get_bank_pack first/, "with a digest the local guard stands aside");
-  assert.match(msg, /runtime pools not injected/, "and the call reaches the pool layer — the next thing after the guard, named rather than inferred");
+  assert.doesNotMatch(msg, /get_bank_pack first/, "with a pack on the record the local pack guard stands aside");
+  assert.match(msg, /could not confirm its own task is still live/, "and the call reaches the FOLD-2 status re-read — the next thing after the guard, named rather than inferred");
+  assert.doesNotMatch(msg, /__claraPools|globalThis|pg|ECONNREFUSED/, "FIND-9: no driver or wiring detail is handed to the model");
+  assert.equal(rec.infraFaults, 1, "and an unreachable database is OURS, so the run settles 'internal' rather than blaming the model");
+});
+
+test("G1B-H2 the PRODUCTION withBankWakeScoped really does SET ROLE clara_wake_bank and bind the secret txn-locally", { skip }, async () => {
+  // WHAT THIS CLOSES, named because an independent review named it: every end-to-end bank cell in
+  // this battery injects its own withBankWakeScoped stub through globalThis, and that stub sets the
+  // role itself. So the SHIPPING helper — lib/pools.mjs's own `set role clara_wake_bank`, which
+  // RELAY_TEST_MODE does NOT bypass (setupSql issues it unconditionally) — was proven by no cell at
+  // all. This drives it directly.
+  //
+  // IT IS CHEAP BECAUSE OF loginConfig's OWN TEST BRANCH, not because of a bypass: with no
+  // CLARA_BANK_DATABASE_URL set, the bank pool connects with the base env identity and then issues
+  // the SAME setup SQL production issues. What is unproven here is only the DSN, which is the
+  // ceremony's own subject and has its own cell (G1B-G1).
+  const pools = await import("../lib/pools.mjs");
+  const w = await rig.buildFirm("g1bh2");
+  const minted = await rig.asRuntime((c) =>
+    c.query("select secret from clara.mint_wake_credential($1,$2,$3,$4::interval,$5)", ["bank_agent", w.firm, null, "5 minutes", w.client]),
+  );
+  const secret = String(minted.rows[0].secret);
+  try {
+    const seen = await pools.withBankWakeScoped(secret, async (c) => {
+      // clara.wake_context() is deliberately NOT reachable from this role (measured here: it
+      // raises "permission denied for function wake_context"), so the credential's own resolution
+      // is proven by the e2e cells' verb calls, not from inside this connection. What IS provable
+      // here — and is what this cell exists for — is the role the helper actually set and the
+      // scope of the binding it made.
+      const r = await c.query(
+        `select current_role::text as role,
+                current_setting('clara.wake_secret', true) = $1 as secret_bound,
+                has_function_privilege('clara.wake_get_bank_pack(uuid,uuid,text,jsonb,text)', 'EXECUTE') as reaches_its_verb`,
+        [secret],
+      );
+      return r.rows[0];
+    });
+    assert.equal(seen.role, "clara_wake_bank", "the production helper's own SET ROLE — the one no other cell reaches");
+    assert.equal(seen.secret_bound, true, "and the secret is bound txn-locally (compared IN SQL, never returned or printed)");
+    assert.equal(seen.reaches_its_verb, true, "and the role it reached is the one that actually holds the lane's grants — not merely a role by that name");
+
+    // THE ANTI-LEAK HALF, which is the property that actually matters on a POOLED connection: a
+    // second run's checkout must see its OWN secret, never the previous run's. Driven with a
+    // genuinely different credential rather than by reasoning about GUC lifetimes — the comparison
+    // happens in SQL, so neither secret is ever returned to this process or printed.
+    const second = await rig.asRuntime((c) =>
+      c.query("select secret from clara.mint_wake_credential($1,$2,$3,$4::interval,$5)", ["bank_agent", w.firm, null, "5 minutes", w.client]),
+    );
+    const secret2 = String(second.rows[0].secret);
+    assert.notEqual(secret2, secret, "two mints, two secrets — otherwise the check below is vacuous");
+    const isolated = await pools.withBankWakeScoped(secret2, async (c) => {
+      const r = await c.query(
+        "select current_setting('clara.wake_secret', true) = $1 as is_mine, current_setting('clara.wake_secret', true) = $2 as is_previous",
+        [secret2, secret],
+      );
+      return r.rows[0];
+    });
+    assert.equal(isolated.is_mine, true, "the second checkout carries its OWN secret");
+    assert.equal(isolated.is_previous, false, "and never the previous run's — a pooled connection does not leak a credential forward");
+  } finally {
+    // This is the only cell in this battery that opens lib/pools.mjs's own pools; close them or
+    // the test process never exits. rig.* uses its own separate pool and is unaffected.
+    await pools.endPools();
+  }
 });

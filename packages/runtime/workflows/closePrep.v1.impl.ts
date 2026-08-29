@@ -14,6 +14,7 @@ import {
   claimCloseTask,
   settleCloseTask,
   resolveModel,
+  type CloseSettleOutcome,
   type CloseTaskContext,
   type ClaimOutcome,
   type PgExec,
@@ -76,7 +77,9 @@ export async function runClosePrepModelStep(ctx: CloseTaskContext, modelId: stri
     ],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tools: tools as any,
-    stopWhen: [isStepCount(CLOSE_PREP_STEP_BUDGET)],
+    // 裁-44 / FOLD-2(a) — a cancel ENDS the pass rather than merely refusing the next act. See
+    // bankAgent.v1.impl.ts's own copy.
+    stopWhen: [isStepCount(CLOSE_PREP_STEP_BUDGET), () => rec.cancelledAs !== null],
   });
 
   // The WDK writable is drained even though nothing subscribes to this lane's stream — leaving
@@ -142,10 +145,14 @@ export function infraFaultNote(rec: { acts: number; infraFaults: number }): stri
  * through a model call, i.e. not reachable by any test at all).
  */
 export function classifyCloseOutcome(
-  rec: { acts: number; reads: number; infraFaults: number },
+  rec: { acts: number; reads: number; infraFaults: number; writeAttempts: number; refusals: number; cancelledAs: string | null },
   text: string,
 ): ClosePrepOutcome {
-  if (rec.acts > 0) return { kind: "proposed", acts: rec.acts };
+  // 裁-44 / FOLD-2 — A CANCELLED TASK OUTRANKS EVERY OTHER VERDICT, admitted acts included. The
+  // acts that landed keep their own durable receipts; what this decides is only what the TASK's
+  // terminal state says, and a task somebody cancelled did not complete.
+  if (rec.cancelledAs !== null) return { kind: "cancelled", observed: rec.cancelledAs };
+  if (rec.acts > 0) return { kind: "proposed", acts: rec.acts, refusals: rec.refusals };
   // A pass that READ and lawfully found nothing to do is a success — "finding nothing to do is a
   // correct outcome" is in the prompt because it is true of the settle too.
   //
@@ -164,6 +171,20 @@ export function classifyCloseOutcome(
   // a zero-act run is reported as a failure even though reads succeeded.
   if (rec.reads > 0 && rec.acts === 0 && rec.infraFaults > 0) {
     return { kind: "refused", code: "internal", message: "reads succeeded but every act was blocked by a fault on our side" };
+  }
+  // 裁-44 / FOLD-3 — WRITES ATTEMPTED, NONE ADMITTED, IS A FAILED NIGHT, and on this lane a typed
+  // DB refusal does NOT throw: _close_read_gate and every write core RETURN {status:'refused'}
+  // (0138:1799-1800, :1839). Before this branch existed, a run that read fine and then had every
+  // single write refused took the nothing_due branch and settled COMPLETED — the same silent-green
+  // class as M4, one layer up. An infra fault is still ours ('internal'); only a run whose
+  // refusals were all real DB verdicts is the model's ('model_error'). Both are 0006's own roster
+  // values (:153-154); nothing is minted here.
+  if (rec.writeAttempts > 0) {
+    return {
+      kind: "refused",
+      code: rec.infraFaults > 0 ? "internal" : "model_error",
+      message: `${rec.writeAttempts} act(s) attempted, none admitted (${rec.refusals} refused)`,
+    };
   }
   if (rec.reads > 0) {
     return { kind: "nothing_due", note: text.slice(0, 500) || "nothing due for this client" };
@@ -184,7 +205,7 @@ export function classifyCloseOutcome(
 }
 
 /** STEP 3 — the settlement. One verb; a direct_queue task has no outbox row to cascade to. */
-export async function settleCloseTaskStep(taskId: string, outcome: "completed" | "failed", errorCode: string | null): Promise<void> {
+export async function settleCloseTaskStep(taskId: string, outcome: CloseSettleOutcome, errorCode: string | null): Promise<void> {
   "use step";
   await pools().withRuntime((c: PgExec) => settleCloseTask(c, taskId, outcome, errorCode));
 }

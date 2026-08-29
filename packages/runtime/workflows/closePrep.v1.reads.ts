@@ -15,7 +15,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { READ_TOOLS, closeModelIdentity } from "./closePrep.v1.prompt.js";
+import { CLOSE_PROSE_MAX, READ_TOOLS, closeModelIdentity } from "./closePrep.v1.prompt.js";
 import { closeScoped, closeOpKey, type CloseTaskContext, type PgExec } from "./closePrep.v1.infra.js";
 
 /**
@@ -39,12 +39,19 @@ function isDbVerdict(e: unknown): boolean {
  *  See CloseRunRecord.infraFaults. */
 export function closeRefusal(rec: CloseRunRecord, e: unknown): { error: string } {
   const code = (e as { code?: string })?.code;
-  if (!isDbVerdict(e)) rec.infraFaults += 1;
+  if (!isDbVerdict(e)) {
+    // 裁-44 / FIND-9 — THE NON-VERDICT BRANCH IS REDACTED TOO. It used to hand the raw driver
+    // message back to the model, which made this function's own oracle-safety claim false for
+    // exactly the errors nobody audits. The model can act on none of it — the fault is ours — so
+    // it gets a fixed sentence and the real message goes to the runtime log.
+    rec.infraFaults += 1;
+    console.warn(`[closePrep_v1] tool call did not reach the database: ${e instanceof Error ? e.message : String(e)}`);
+    return { error: "the act did not go through: something on our side failed before the database saw it. Do not retry it." };
+  }
   if (code === "CLR03" || code === "CLR04" || code === "CLR10" || code === "CLR11") {
     return { error: `refused (${code}): this act is not available to this run on this client.` };
   }
-  const message = e instanceof Error ? e.message : String(e);
-  return { error: `the act did not go through: ${message}` };
+  return { error: `refused (${code}): the database declined this act.` };
 }
 
 /** The per-run record.
@@ -62,10 +69,21 @@ export function closeRefusal(rec: CloseRunRecord, e: unknown): { error: string }
  *  agent_tasks roster (0006:153-154) for precisely this, and bankAgent.v1.ts's own comment already
  *  calls it "the honest answer to 'we do not know'". A run where the model simply never called a
  *  tool still settles 'model_error', which stays correct. */
-export type CloseRunRecord = { reads: number; acts: number; infraFaults: number; closeRunId: string | null };
+export type CloseRunRecord = {
+  reads: number;
+  acts: number;
+  infraFaults: number;
+  closeRunId: string | null;
+  /** 裁-44 / FOLD-3 — writes the model ATTEMPTED, admitted or not (a gate refusal counts). */
+  writeAttempts: number;
+  /** 裁-44 / FOLD-3 — writes REFUSED, locally or by the database. */
+  refusals: number;
+  /** 裁-44 / FOLD-2 — the non-'running' status a write gate actually SAW, or null. */
+  cancelledAs: string | null;
+};
 
 export function newCloseRunRecord(): CloseRunRecord {
-  return { reads: 0, acts: 0, infraFaults: 0, closeRunId: null };
+  return { reads: 0, acts: 0, infraFaults: 0, closeRunId: null, writeAttempts: 0, refusals: 0, cancelledAs: null };
 }
 
 /**
@@ -152,10 +170,15 @@ export function assertTailBinding(verb: string, sql: string, valueCount: number)
  *  refusal reply says 'refused' in the same field. */
 export function countIfAdmitted(rec: CloseRunRecord, reply: unknown): unknown {
   if ((reply as { status?: unknown } | null)?.status === "acted") rec.acts += 1;
+  else rec.refusals += 1;
   return reply;
 }
 
-const RATIONALE = z.string().min(1).describe("Why you are making this call, in one plain sentence.");
+const RATIONALE = z
+  .string()
+  .min(1)
+  .max(CLOSE_PROSE_MAX)
+  .describe("Why you are making this call, in one plain sentence.");
 
 export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec: CloseRunRecord) {
   /** A read counts ONLY when the database says it acted.

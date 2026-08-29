@@ -19,7 +19,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { WRITE_TOOLS } from "./closePrep.v1.prompt.js";
+import { CLOSE_FY_LABEL_MAX, CLOSE_PROSE_MAX, WRITE_TOOLS } from "./closePrep.v1.prompt.js";
 import {
   buildCloseReadTools,
   callCloseVerb,
@@ -27,18 +27,65 @@ import {
   countIfAdmitted,
   type CloseRunRecord,
 } from "./closePrep.v1.reads.js";
-import type { CloseTaskContext } from "./closePrep.v1.infra.js";
+import { pools, readCloseTaskStatus, type CloseTaskContext, type PgExec } from "./closePrep.v1.infra.js";
 
-const RATIONALE = z.string().min(1).describe("Why this act, in plain words a bookkeeper can check tomorrow.");
+const RATIONALE = z
+  .string()
+  .min(1)
+  .max(CLOSE_PROSE_MAX)
+  .describe("Why this act, in plain words a bookkeeper can check tomorrow.");
 
 export { newCloseRunRecord, type CloseRunRecord } from "./closePrep.v1.reads.js";
 
 export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec: CloseRunRecord) {
+  /** A LOCAL refusal — an act the model attempted that never reached the database because this
+   *  closure refused it first. Counted as a refusal, never an infra fault. */
+  const localRefusal = (message: string): { error: string } => {
+    rec.refusals += 1;
+    return { error: message };
+  };
+
+  /**
+   * 裁-44 / FOLD-2(a) — RE-ASK THE BOOKS BEFORE EVERY WRITE, before any credential is minted.
+   *
+   * The claim CAS proved the task was 'running' when the run started; it proves nothing about the
+   * middle. A cancel landing after the first admitted read leaves the task 'cancel_requested'
+   * while the model keeps proposing — and on THIS lane every wrapper mints a fresh TASK-BOUND
+   * credential, so an ungated pass keeps minting live credentials and writing under books that
+   * already say it stopped. Reads are deliberately not gated: a read changes nothing, and letting
+   * one finish is what lets the run settle truthfully rather than mid-sentence.
+   */
+  const guardWrite = async (): Promise<{ error: string } | null> => {
+    rec.writeAttempts += 1;
+    const stopped = () =>
+      localRefusal(`this run's task is no longer running (${rec.cancelledAs}) — stop now; nothing further will be recorded.`);
+    if (rec.cancelledAs !== null) return stopped();
+    let status: string | null;
+    try {
+      status = await pools().withRuntime((c: PgExec) => readCloseTaskStatus(c, ctx.taskId));
+    } catch (e) {
+      // Unknown is not 'running' (review law 2). Fail closed, and attribute it to us: the database
+      // never judged anything here. closeRefusal takes the infra-fault count.
+      closeRefusal(rec, e);
+      return localRefusal("the act did not go through: this run could not confirm its own task is still live. Stop.");
+    }
+    if (status !== "running") {
+      rec.cancelledAs = status ?? "absent";
+      return stopped();
+    }
+    return null;
+  };
+
   const write = async (verb: string, subject: string, sql: string, args: unknown[], rationale: string) => {
+    const blocked = await guardWrite();
+    if (blocked) return blocked;
     try {
       const reply = await callCloseVerb(ctx, verb, subject, sql, args, rationale, modelId);
       return countIfAdmitted(rec, reply);
     } catch (e) {
+      // A thrown write is a refusal as much as a returned one — 裁-44 / FOLD-3 counts both, so a
+      // night in which every act was refused settles failed rather than nothing_due.
+      rec.refusals += 1;
       return closeRefusal(rec, e);
     }
   };
@@ -79,7 +126,10 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
     [WRITE_TOOLS.OPEN_FY]: tool({
       description: "Open a NEW fiscal year for this client. Only when the year that should follow the one ending does not exist yet.",
       inputSchema: z.object({
-        label: z.string().min(1).describe("The year's label, in the client's own existing convention."),
+        // 裁-44 / FOLD-7 — a LABEL is a name, not prose. clara.fiscal_years.label is guarded only
+        // as non-blank (0056:236) and every human surface renders it inline, so an essay here is a
+        // layout defect as well as an injection surface. 120 is the ruled cap.
+        label: z.string().min(1).max(CLOSE_FY_LABEL_MAX).describe("The year's label, in the client's own existing convention."),
         starts_on: z.string().describe("An ISO date (YYYY-MM-DD) — the day after the previous year ends."),
         rationale: RATIONALE,
       }),
@@ -138,16 +188,19 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         drafted: z
           .array(
             z.object({
-              check_key: z.string().min(1).describe("The gate check this text attests to, exactly as get_close_readiness named it."),
-              item_key: z.string().min(1).describe("The outstanding item within that check, exactly as get_close_readiness named it."),
-              text: z.string().min(1).describe("The attestation itself, in plain words a human can accept or reject."),
+              // 裁-44 / FOLD-7 — the two KEYS are echoed back from get_close_readiness's own
+              // vocabulary, so they are identifiers rather than prose; the attestation itself is
+              // prose and takes the house cap.
+              check_key: z.string().min(1).max(CLOSE_FY_LABEL_MAX).describe("The gate check this text attests to, exactly as get_close_readiness named it."),
+              item_key: z.string().min(1).max(CLOSE_FY_LABEL_MAX).describe("The outstanding item within that check, exactly as get_close_readiness named it."),
+              text: z.string().min(1).max(CLOSE_PROSE_MAX).describe("The attestation itself, in plain words a human can accept or reject."),
             }),
           )
           .min(1)
           .describe(
             "One attestation per outstanding item. Take every check_key/item_key pair from the readiness read — never invent one, and never repeat a pair.",
           ),
-        narrative: z.string().min(1).describe("The explanation a bookkeeper reads in the morning. Never imply a human decision has been made."),
+        narrative: z.string().min(1).max(CLOSE_PROSE_MAX).describe("The explanation a bookkeeper reads in the morning. Never imply a human decision has been made."),
         rationale: RATIONALE,
       }),
       execute: ({
@@ -187,7 +240,10 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         "Abandon a close run you opened, with an honest reason. An abandoned run with a clear reason is a good outcome; a half-open run nobody can interpret is not.",
       inputSchema: z.object({
         close_run_id: z.string().uuid(),
-        reason: z.string().min(1).describe("What made this run un-continuable. Concrete, not apologetic."),
+        // 裁-44 / FOLD-7 — this becomes clara.close_runs.end_reason (0120:1186), whose only guard
+        // is non-blank. A structured abandonment-code roster is the DB pass's own question; the
+        // cap is what this PR can do without a migration.
+        reason: z.string().min(1).max(CLOSE_PROSE_MAX).describe("What made this run un-continuable. Concrete, not apologetic."),
         rationale: RATIONALE,
       }),
       execute: ({ close_run_id, reason, rationale }: { close_run_id: string; reason: string; rationale: string }) =>

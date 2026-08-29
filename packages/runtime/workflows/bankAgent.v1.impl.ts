@@ -12,12 +12,13 @@
 // as this build's own obligation (#5/#8), and putting it anywhere but first would defeat it.
 
 import { streamText, isStepCount } from "ai";
-import { getWritable, getWorkflowMetadata } from "workflow";
+import { getWritable, getWorkflowMetadata, getStepMetadata } from "workflow";
 import {
   pools,
   claimBankTask,
   settleBankTask,
   resolveModel,
+  type BankSettleOutcome,
   type BankTaskContext,
   type ClaimOutcome,
   type PgExec,
@@ -73,7 +74,7 @@ export type BankModelResult = { outcome: BankAgentOutcome; usageTokens: number }
 export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: string): Promise<BankModelResult> {
   "use step";
   const startedAt = Date.now();
-  const rec = newBankRunRecord();
+  const rec = newBankRunRecord(stepAttemptKey());
   const tools = buildBankAgentTools(ctx, modelId, rec);
   const dueLine = ctx.dueReason
     ? `The clock woke you because: ${ctx.dueReason}. Confirm that against the pack before you act on it.`
@@ -89,7 +90,11 @@ export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: strin
     messages: [{ role: "user", content: dueLine }],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tools: tools as any,
-    stopWhen: [isStepCount(BANK_AGENT_STEP_BUDGET)],
+    // 裁-44 / FOLD-2(a) — A CANCEL ENDS THE PASS, it does not merely refuse the next act. Once a
+    // write gate has seen this run's own task off 'running', every later tool refuses anyway; this
+    // condition stops the loop rather than letting the model burn its remaining budget arguing
+    // with a task that has already stopped.
+    stopWhen: [isStepCount(BANK_AGENT_STEP_BUDGET), () => rec.cancelledAs !== null],
   });
 
   // The WDK writable is drained even though nothing subscribes to this lane's stream: leaving
@@ -144,10 +149,14 @@ export function infraFaultNote(rec: { admitted: number; infraFaults: number }): 
  *  copy for why (review law 1: this decides whether the night was a success, and through the
  *  model step it was reachable by no test at all). */
 export function classifyBankOutcome(
-  rec: { admitted: number; digest: string | null; infraFaults: number },
+  rec: { admitted: number; digest: string | null; infraFaults: number; writeAttempts: number; refusals: number; cancelledAs: string | null },
   text: string,
 ): BankAgentOutcome {
-  if (rec.admitted > 0) return { kind: "acted", acts: rec.admitted };
+  // 裁-44 / FOLD-2 — A CANCELLED TASK OUTRANKS EVERY OTHER VERDICT, admitted acts included. The
+  // acts that landed before the cancel keep their own durable receipts; what this decides is only
+  // what the TASK's terminal state says, and a task somebody cancelled did not complete.
+  if (rec.cancelledAs !== null) return { kind: "cancelled", observed: rec.cancelledAs };
+  if (rec.admitted > 0) return { kind: "acted", acts: rec.admitted, refusals: rec.refusals };
   // A pass that read the pack and lawfully found nothing to do is a SUCCESS, not a failure —
   // "stopping early is a correct outcome" is in the prompt because it is true of the settle too.
   // N11 — the PARTIAL failure, the mirror of closePrep's. If the pack read succeeded and every ACT
@@ -156,6 +165,21 @@ export function classifyBankOutcome(
   // never happened. For an unattended nightly lane the asymmetry is not close.
   if (rec.digest !== null && rec.admitted === 0 && rec.infraFaults > 0) {
     return { kind: "refused", code: "internal", message: "the pack read succeeded but every act was blocked by a fault on our side" };
+  }
+  // 裁-44 / FOLD-3 — WRITES ATTEMPTED, NONE ADMITTED, IS A FAILED NIGHT. A typed DB refusal does
+  // not throw: wake_match_bank_line RETURNS {status:'refused'} (0121:6008) and the propose verbs
+  // raise CLR codes the tool turns into a refusal object. Before this branch existed, a run that
+  // read the pack and then had EVERY write refused took nothing_due and settled COMPLETED — a
+  // green night in which every single act the model attempted was rejected. Note the ordering: an
+  // infra fault is still OURS ('internal'), and only a run whose refusals were all real verdicts
+  // is the model's ('model_error'). Both live in 0006's own error_code roster (:153-154); no value
+  // is minted here.
+  if (rec.writeAttempts > 0) {
+    return {
+      kind: "refused",
+      code: rec.infraFaults > 0 ? "internal" : "model_error",
+      message: `${rec.writeAttempts} act(s) attempted, none admitted (${rec.refusals} refused)`,
+    };
   }
   if (rec.digest !== null) {
     return { kind: "nothing_due", note: text.slice(0, 500) || "nothing due on this account" };
@@ -174,8 +198,35 @@ export function classifyBankOutcome(
   };
 }
 
+/**
+ * THIS STEP ATTEMPT'S OWN IDENTITY (裁-44 / FOLD-8), for the pack op key's counter segment.
+ *
+ * getStepMetadata is the WDK's own answer and is the one used: stepId identifies the executing
+ * step and `attempt` increments on every retry (@workflow/core's own StepMetadata, read from the
+ * installed package's declaration, not from a doc page). Together they are unique per attempt,
+ * which is exactly and only what the key needs.
+ *
+ * THE FALLBACK IS NOT A SILENT ONE. getStepMetadata throws outside a step context — which is where
+ * every cell in this repo drives these tools from — so a failure here is not necessarily a
+ * production fault, and the honest response is a clock token that is still unique per attempt plus
+ * a warning naming what happened. The FIX holds on either branch; what the WDK branch buys is an
+ * identity rather than a clock.
+ */
+export function stepAttemptKey(): string {
+  try {
+    const m = getStepMetadata() as { stepId?: unknown; attempt?: unknown };
+    if (typeof m?.stepId === "string" && m.stepId.length > 0 && Number.isInteger(m?.attempt)) {
+      return `${m.stepId}#${String(m.attempt)}`;
+    }
+    console.warn("[bankAgent_v1] getStepMetadata returned no usable stepId/attempt — falling back to a clock token for the pack op key");
+  } catch {
+    // Not inside a step (a direct-drive cell). Not an error; just not the WDK's identity.
+  }
+  return `t${Date.now().toString(36)}`;
+}
+
 /** STEP 3 — the settlement. One verb, both projections, idempotent on replay. */
-export async function settleBankTaskStep(taskId: string, outcome: "completed" | "failed", errorCode: string | null): Promise<void> {
+export async function settleBankTaskStep(taskId: string, outcome: BankSettleOutcome, errorCode: string | null): Promise<void> {
   "use step";
   await pools().withRuntime((c: PgExec) => settleBankTask(c, taskId, outcome, errorCode));
 }

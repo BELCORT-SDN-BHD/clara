@@ -46,7 +46,7 @@ export async function closePrep_v1(input: { taskId: string }): Promise<{ taskId:
   // connection, and our own settle throwing — `settled` is set before the await, so the catch
   // does not retry it). A row is either bound or it is not; there is no third state to strand in.
   let holds = false;
-  const settle = async (outcome: "completed" | "failed", errorCode: string | null) => {
+  const settle = async (outcome: "completed" | "failed" | "cancelled", errorCode: string | null) => {
     if (settled || !holds) return;
     settled = true;
     await settleCloseTaskStep(taskId, outcome, errorCode);
@@ -76,6 +76,17 @@ export async function closePrep_v1(input: { taskId: string }): Promise<{ taskId:
     const modelId = process.env.CLARA_CLOSE_PREP_MODEL || process.env.CLARA_CHAT_MODEL || "gpt-5.6-terra";
 
     const run = await runClosePrepModelStep(ctx, modelId);
+    // 裁-44 / FOLD-2 — settle the cancellation AS a cancellation, and only from the one state where
+    // that is a legal transition ('cancel_requested' -> 'cancelled', 0133:436). Any other
+    // non-running status means somebody already settled this row, so this run stands down rather
+    // than raising CLR13 over a terminal state it does not own.
+    if (run.outcome.kind === "cancelled") {
+      if (run.outcome.observed === "cancel_requested") {
+        await settle("cancelled", null);
+        return { taskId, outcome: "cancelled" };
+      }
+      return { taskId, outcome: `stood_down:already_${run.outcome.observed}` };
+    }
     if (run.outcome.kind === "refused") {
       await settle("failed", run.outcome.code === "model_error" ? "model_error" : "internal");
       return { taskId, outcome: "failed" };
@@ -86,7 +97,12 @@ export async function closePrep_v1(input: { taskId: string }): Promise<{ taskId:
     // _agent_close_receipt) plus any clara.close_proposals row wake_propose_close created —
     // this settle records only that the run finished.
     await settle("completed", null);
-    return { taskId, outcome: run.outcome.kind };
+    // The refusal count rides the RETURN: _settle_wake_task nulls error_code on 'completed' by its
+    // own construction (0133:524), so a partially-refused night has nowhere durable to put it.
+    return {
+      taskId,
+      outcome: run.outcome.kind === "proposed" && run.outcome.refusals > 0 ? `proposed:${run.outcome.refusals}_refused` : run.outcome.kind,
+    };
   } catch (err) {
     // A thrown run still owes its task a terminal state. The settle is best-effort so a settle
     // failure cannot swallow the original cause; reconciler-wake.mjs's belt picks up the rest.

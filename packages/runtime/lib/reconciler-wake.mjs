@@ -23,7 +23,7 @@
 //      running->cancel_requested->cancelled (reconcileTasks §C's own two-step shape — a direct
 //      running->cancelled jump is not itself legal in the wake/close_prep matrix either).
 
-import { terminalFor } from "./reconciler.mjs";
+import { isRunNotFound, terminalFor } from "./reconciler.mjs";
 import { TaxonomyHaltError } from "./relay.mjs";
 import { recordTaskDeadLetter, readDeadLetterAttempts, WAKE_ENGINE_ENQUEUE_CONSUMER } from "./wake-engine.mjs";
 
@@ -201,8 +201,21 @@ async function settleFromEngineTruth(client, deps) {
       const es = await getRun(t.workflow_run_id).status;
       engineTerminal = es === "completed" || es === "failed" || es === "cancelled" ? es : null;
     } catch (err) {
-      log(`[reconcile] wake-engine status probe failed task=${t.id}: ${err?.message ?? err}`);
-      continue;
+      // 裁-44 / FOLD-6 — A RUN THE ENGINE NO LONGER HAS IS *LOST*, NOT TRANSIENT. This branch used
+      // to treat every getRun error alike and `continue`, so a bound running task whose engine run
+      // had genuinely vanished (an engine reset, a purged run, a body whose settle never landed)
+      // was skipped on EVERY sweep, forever: §A cannot see it (workflow_run_id is not null) and §B
+      // walked away from it. That is precisely the stranded row _settle_wake_task exists to cure.
+      // reconciler.mjs's own §C has always made this distinction (:276-277) and terminalFor already
+      // maps 'lost' -> failed/engine_lost for a running task (:58); this belt simply asks the same
+      // question with the same instrument. A REAL transient error still skips — isRunNotFound is a
+      // POSITIVE test on not-found, never an absence.
+      if (isRunNotFound(err)) {
+        engineTerminal = "lost";
+      } else {
+        log(`[reconcile] wake-engine status probe failed task=${t.id}: ${err?.message ?? err}`);
+        continue;
+      }
     }
     if (!engineTerminal) continue; // in flight
 

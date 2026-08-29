@@ -58,7 +58,7 @@ export async function bankAgent_v1(input: { taskId: string }): Promise<{ taskId:
   //      is bound, invisible to §A, and §B settles it from the engine's own truth.
   // Between them there is no gap: a row is either bound or it is not.
   let holds = false;
-  const settle = async (outcome: "completed" | "failed", errorCode: string | null) => {
+  const settle = async (outcome: "completed" | "failed" | "cancelled", errorCode: string | null) => {
     if (settled || !holds) return;
     settled = true;
     await settleBankTaskStep(taskId, outcome, errorCode);
@@ -97,6 +97,19 @@ export async function bankAgent_v1(input: { taskId: string }): Promise<{ taskId:
     const modelId = process.env.CLARA_BANK_AGENT_MODEL || process.env.CLARA_CHAT_MODEL || "gpt-5.6-terra";
 
     const run = await runBankAgentModelStep(ctx, modelId);
+    // 裁-44 / FOLD-2 — THE CANCELLATION IS SETTLED AS A CANCELLATION, and only from the one state
+    // where that is a legal transition. 'cancel_requested' -> 'cancelled' is the matrix's own edge
+    // (0133:415); 'running' -> 'cancelled' is NOT, which is why reconciler-wake.mjs repairs in two
+    // steps. Any OTHER non-running status the gate saw means somebody already settled this row —
+    // a reconciler, an operator — so this run stands down rather than raising CLR13 trying to
+    // overwrite a terminal state it does not own. Absence of a legal edge is not permission.
+    if (run.outcome.kind === "cancelled") {
+      if (run.outcome.observed === "cancel_requested") {
+        await settle("cancelled", null);
+        return { taskId, outcome: "cancelled" };
+      }
+      return { taskId, outcome: `stood_down:already_${run.outcome.observed}` };
+    }
     if (run.outcome.kind === "refused") {
       await settle("failed", run.outcome.code === "model_error" ? "model_error" : "internal");
       return { taskId, outcome: "failed" };
@@ -106,7 +119,13 @@ export async function bankAgent_v1(input: { taskId: string }): Promise<{ taskId:
     // verbs wrote in their own transactions (clara.bank_agent_receipts, written inside
     // _agent_bank_receipt by every core) — this settle records only that the run finished.
     await settle("completed", null);
-    return { taskId, outcome: run.outcome.kind };
+    // The refusal count rides the RETURN rather than the settle row: _settle_wake_task nulls
+    // error_code on 'completed' by its own construction (0133:524), so a partially-refused night
+    // has nowhere durable to put it. 裁-44 / FOLD-3's own note.
+    return {
+      taskId,
+      outcome: run.outcome.kind === "acted" && run.outcome.refusals > 0 ? `acted:${run.outcome.refusals}_refused` : run.outcome.kind,
+    };
   } catch (err) {
     // A thrown run still owes its task a terminal state, or the row strands on both
     // projections. The settle is best-effort so a settle failure cannot swallow the original

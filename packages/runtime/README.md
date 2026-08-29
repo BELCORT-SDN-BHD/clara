@@ -46,8 +46,17 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   closure. Prompt + tools live INSIDE the frozen closure by design (§4.9).
 - **Gate G1's universal wake-execution engine** (`lib/wake-engine.mjs` + `lib/reconciler-wake.mjs`,
   migration `0133`): registry-driven off `clara.wake_engine_sources`, consuming the existing
-  wake allowlist unchanged; the sources table ships EMPTY pending F-A3 (`bank_agent`) and F-A4
-  (`close_prep`) each inserting-and-flipping their own row.
+  wake allowlist unchanged. **TRUED 2026-08-30 (裁-44 / FIND-5): the sources table does NOT ship
+  empty** — `0133` §G (`:788-792`) seeds BOTH rows, `bank_agent` and `close_prep`, each
+  `enabled=false`; cell `G1B-C2` asserts exactly that. What F-A3/F-A4 owe is the due-predicate and
+  the emitter, not the registry row, and the FLIP is the owner's own act through
+  `clara.set_wake_source_enabled` at the rollout ceremony.
+- **Gate G1's two wake BODIES** (`workflows/bankAgent.v1*.ts`, `workflows/closePrep.v1*.ts`): the
+  frozen closures the engine dispatches for those two rows — `bankAgent_v1` matches and proposes on
+  one bank account; `closePrep_v1` prepares a year-end close and leaves a proposal a human settles.
+  Neither can settle, finalize, attest or reopen: those four doors are `clara_authenticated`-only
+  and the containment is the database's, not the tool sets'. Both sources stay disabled until the
+  ceremony, and **neither source has a producer yet** — the clock half is F-A3's and F-A4's own.
 
 ## The world is OFF by default
 
