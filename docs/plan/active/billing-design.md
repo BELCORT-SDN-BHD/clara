@@ -39,7 +39,7 @@ what he decided. Each row names where §3 implements it.
 
 **The acceptance criterion the configurability law implies, stated as a test rather than an
 aspiration:** a reviewer must be able to point at the **column** where each configurable value
-lives. §3.1's table is that pointing; Annex C.1 is the cell that proves it mechanically by
+lives. §3.1's table is that pointing; Annex D's cell **T.1** proves it mechanically by
 asserting the column set, so a value that quietly migrates into a function body reddens.
 
 ## 2 · The estate findings that bind §3 (survey §B, in full)
@@ -332,7 +332,7 @@ What it decides is where the two NEW statuses fall. Every wall is a positive
 `scheduled_for_deletion` and `purged` are both outside** — a client whose data is being held for
 deletion must not take documents, be swept, or be posted to, and `_assert_client_operational`'s
 own message already says the rule in words (*"operational consumers exclude onboarding/archived
-clients"*). **No wall is edited.** Annex C carries the *positive* battery cells that prove each
+clients"*). **No wall is edited.** Annex D's cell **T.9** carries the *positive* proof that each
 of the five statuses lands where this paragraph says — because "the wall already excludes it" is
 a derivation, and law 2 says a derivation is not evidence.
 
@@ -351,7 +351,8 @@ a derivation, and law 2 says a derivation is not evidence.
 Direction is the whole design (裁-42's consequences clause): **products and prices are generated
 FROM `billing_plans`, never authored in the Stripe dashboard.** A price that exists only in
 Stripe is a hard-coded price with extra steps, outside the repo where no gate can see it. The
-object map, the current API shapes and the webhook→door table are **Annex C**; three decisions
+object map, the current API shapes and the webhook→door table are **Annex C** (verified against
+the live official Stripe docs, 2026-08-30); three decisions
 belong here because they are design, not mechanics:
 
 1. **The overage is pushed as a one-off invoice item carrying OUR computed amount — never as
@@ -372,7 +373,7 @@ thing, and `0105` exists because a cap was built once and had to be deleted. **N
 floor, refusal or runtime path may read `billing_plans`, `billing_usage_rates`,
 `firm_subscriptions`, `invoices` or `invoice_lines`.** An allowance is an invoice figure.
 
-This is asserted **negatively and mechanically**: Annex C's census cell enumerates every function
+This is asserted **positively and mechanically**: Annex D's cell **T.2** enumerates every function
 whose body references a billing relation and asserts the set equals exactly `{the evaluator, the
 read surface, the issuance door, the Stripe mirror}`. An absence is not evidence (law 2), so the
 proof is a measured set equality, not a grep that found nothing.

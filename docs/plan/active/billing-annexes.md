@@ -144,7 +144,7 @@ For each client, over the cycle `[cycle_start, cycle_end]`:
 - accrual **stops** at a `purge_client` transition, prorated to the day → *"billing stops when
   the holding stops"* (⑥).
 
-**Worked cell (Annex D's C.4, with distinct amounts so a transposition cannot pass).** A
+**Worked cell (Annex D's T.4, with distinct amounts so a transposition cannot pass).** A
 **30-day** cycle. The plan includes **2** seats at **RM40** each and **5** slots at **RM25**
 each, and prices archived retention at **RM7**. The firm holds **4** seats and **8** slots from
 day 1, **adds a 5th seat on day 21** (10 days remaining), and holds **3** clients archived in a
@@ -208,53 +208,53 @@ re-runnable read of that append-only table.
 
 ### D.1 · Battery outline — the cells that must exist
 
-**C.1 · the configurability proof.** Assert `billing_plans`' column set contains a column for
+**T.1 · the configurability proof.** Assert `billing_plans`' column set contains a column for
 each of 裁-42's configurables, **by name**, so a value that migrates into a function body
 reddens. *(The design's own acceptance criterion, made mechanical.)*
 
-**C.2 · the anti-cap census — a POSITIVE set equality, not an absence.** Enumerate every
+**T.2 · the anti-cap census — a POSITIVE set equality, not an absence.** Enumerate every
 `clara` function whose body references any billing relation and assert the set equals exactly
 `{evaluate_firm_billing_v1, get_firm_invoice, issue_invoice, the Stripe mirror verbs}`. An
 absence is not evidence (law 2), so this is measured as an equality in both directions — the
 `S5_25_BARE_TOKEN_ROSTER` discipline applied to a different property.
 
-**C.3 · the state machine, every transition.** One cell per edge, both polarities: each legal
+**T.3 · the state machine, every transition.** One cell per edge, both polarities: each legal
 edge succeeds and writes exactly one `client_lifecycle_events` row; each **illegal** edge refuses
 with its named reason (`active→purged`, `onboarding→scheduled_for_deletion`,
 `purged→anything`, and — the one that matters — `archived→active` **without a free slot**).
 
-**C.4 · proration arithmetic, distinct amounts.** Annex B.3's worked cell plus its siblings:
+**T.4 · proration arithmetic, distinct amounts.** Annex B.3's worked cell plus its siblings:
 mid-cycle seat add · mid-cycle slot add · a removal landing next cycle · a full-cycle segment ·
 a subscription starting mid-cycle. **Every quantity in every cell differs from every other**, so
 a transposed multiplication cannot pass — the "non-discriminating money fixture" lesson.
 
-**C.5 · capacity walls.** Seat wall at each of the four membership sites; slot wall at
+**T.5 · capacity walls.** Seat wall at each of the four membership sites; slot wall at
 `commit_client_onboarding` and `reactivate_client`. Each cell proves the refusal **and** that the
 count is unchanged afterwards (a wall that refuses but half-writes is worse than none).
 
-**C.6 · the overage floor.** `usage < allowance` → R9 is exactly `0`, and the line **is still
+**T.6 · the overage floor.** `usage < allowance` → R9 is exactly `0`, and the line **is still
 emitted** (裁-42⑨). `usage > allowance` → R9 is the difference × the multiplier. `multiplier = 0`
 → R9 is `0` on a positive difference.
 
-**C.7 · allowance expiry.** Cycle N's unused allowance contributes **nothing** to cycle N+1 —
+**T.7 · allowance expiry.** Cycle N's unused allowance contributes **nothing** to cycle N+1 —
 proven by computing two consecutive cycles and asserting R7(N+1) is independent of R8(N).
 
-**C.8 · `amounts_ruled` gates ISSUANCE, not computation.** With the flag false: the evaluator
+**T.8 · `amounts_ruled` gates ISSUANCE, not computation.** With the flag false: the evaluator
 returns a full line set **and** `issue_invoice` refuses `amounts_not_ruled`. With it true: issue
 succeeds. This is the cell that proves 裁-42's *"nothing charges"* is a wall.
 
-**C.9 · the draft caps land where §3.9 says.** For each of the five statuses, positively assert
+**T.9 · the draft caps land where §3.9 says.** For each of the five statuses, positively assert
 whether `file_document`, the autodraft pair and `_draft_entry_core` admit or refuse — **read, not
 derived** (law 2). Five statuses × three walls.
 
-**C.10 · determinism.** The same `(p_firm, p_cycle_start)` evaluated twice, under **two
+**T.10 · determinism.** The same `(p_firm, p_cycle_start)` evaluated twice, under **two
 different session `TimeZone` GUCs**, produces byte-identical lines. F-A9's gate caught exactly
 this class once.
 
-**C.11 · the unpriced tripwire.** A usage row whose engine has no effective rate contributes to
+**T.11 · the unpriced tripwire.** A usage row whose engine has no effective rate contributes to
 `unpriced_calls` and **not** to R8, and the invoice publishes the count.
 
-**C.12 · webhook idempotency.** The same `event_id` delivered twice writes one `stripe_events`
+**T.12 · webhook idempotency.** The same `event_id` delivered twice writes one `stripe_events`
 row and applies once.
 
 ### D.2 · The PR ladder, and the D1 body list
@@ -301,7 +301,7 @@ leg *later*, not on the PR).
    still costs a migration — that risk is inherent to designing before the sitting, and 裁-42
    ordered it that way deliberately.
 2. **The rate table drifts from the ledger's engine namespace.** A `billing_usage_rates` row
-   keyed on a bare model name never matches. *Mitigation:* C.11's tripwire makes the miss
+   keyed on a bare model name never matches. *Mitigation:* T.11's tripwire makes the miss
    **visible as `unpriced_calls`** rather than silently free.
 3. **Stripe and the evaluator disagree** on a licensed line. *Mitigation:* Clara's number is
    authoritative (D12) and a divergence is an alarm; the mirror never adopts Stripe's figure.
