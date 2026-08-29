@@ -41,8 +41,17 @@ export async function bankAgent_v1(input: { taskId: string }): Promise<{ taskId:
   "use workflow";
   const taskId = input.taskId;
   let settled = false;
+  // HOLDS IS THE SETTLE'S OWN PRECONDITION, and it is not bookkeeping. A settle is only this
+  // run's to make once the CAS has actually bound the task to it. Before that, the task may be
+  // held by a DIFFERENT run (the #8 shape) or already settled by a reconciler, and a settle from
+  // here would overwrite someone else's truth. The catch block below is exactly where that
+  // matters: if claimBankTaskStep ITSELF throws — after WDK step retries are exhausted — we
+  // never learned whether we hold the task, so we must NOT settle. The row then sits
+  // running-with-no-run, which is precisely the shape reconciler-wake.mjs section A picks up and
+  // re-enqueues past grace: visible, recoverable, never stranded.
+  let holds = false;
   const settle = async (outcome: "completed" | "failed", errorCode: string | null) => {
-    if (settled) return;
+    if (settled || !holds) return;
     settled = true;
     await settleBankTaskStep(taskId, outcome, errorCode);
   };
@@ -68,11 +77,13 @@ export async function bankAgent_v1(input: { taskId: string }): Promise<{ taskId:
       // readBankTaskContext for the contract this lane depends on), so they settle FAILED and
       // say so, rather than being papered over with a guessed account.
       if (claim.bound) {
+        holds = true;
         await settle("failed", "internal");
         return { taskId, outcome: `failed:${claim.reason}` };
       }
       return { taskId, outcome: `stood_down:${claim.reason}` };
     }
+    holds = true;
 
     const ctx = claim.ctx;
     const modelId = process.env.CLARA_BANK_AGENT_MODEL || process.env.CLARA_CHAT_MODEL || "gpt-5.6-terra";

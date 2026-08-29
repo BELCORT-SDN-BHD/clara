@@ -47,6 +47,53 @@ test("G1B-A1 a running, unbound wake task claims and BINDS this run", { skip }, 
   assert.equal((await readTask(taskId)).workflow_run_id, runId, "the CAS actually bound the run id");
 });
 
+test("G1B-A1b a run whose CLAIM STEP THROWS settles NOTHING — it never learned whether it holds the task", { skip }, async () => {
+  // FOUND BY A SELF-REVIEW PASS, not by a red: the catch block in both entries settles 'failed',
+  // and an earlier draft did so unconditionally. If the claim step itself throws (after WDK step
+  // retries exhaust), this run never learned whether it holds the task — it could be held by a
+  // DIFFERENT run (the #8 shape) — and a settle from there would overwrite someone else's truth.
+  // The `holds` gate closes it: the row is left running-with-no-run, which is exactly the shape
+  // reconciler-wake.mjs section A picks up and re-enqueues past grace.
+  //
+  // THE INSTRUMENT: calling the entry directly (tsx, un-transformed) makes its first step call
+  // getWorkflowMetadata() outside any workflow context, which throws — the genuine "the claim
+  // step threw" shape, produced by the real code path rather than by a stub.
+  // THE POOLS MUST BE INJECTED OR THIS CELL IS VACUOUS, and that was measured: without them,
+  // settleBankTaskStep throws "runtime pools not injected" inside the catch's own
+  // .catch(() => {}), so the task would stay 'running' even with the guard REMOVED — the cell
+  // would pass against the very bug it exists to catch. With a real runtime pool wired in, the
+  // settle path is genuinely reachable, so a green here means the GUARD stopped it, not the
+  // absence of plumbing. (Verified by deleting the guard: the cell reds.)
+  const previousPools = globalThis.__claraPools;
+  globalThis.__claraPools = { withRuntime: (fn) => rig.asRuntime((c) => fn(c)) };
+  const w = await rig.buildFirm("g1ba1b");
+  const { taskId } = await plantHeldWakeTask({ owner: w.owner, client: w.client, payload: { bank_account_id: randomUUID() } });
+  await rig.rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
+  let threw = false;
+  try {
+    await bankEntry.bankAgent_v1({ taskId });
+  } catch {
+    threw = true;
+  }
+  assert.equal(threw, true, "the claim step must genuinely have thrown, or this cell proves nothing");
+  const t = await readTask(taskId);
+  assert.equal(t.status, "running", "the task is UNTOUCHED — no settle was this run's to make");
+  assert.equal(t.workflow_run_id, null, "and still unbound, so the reconciler's re-enqueue path owns it");
+
+  // The SAME shape on the close body, so the gate is proven on both carriers, not just one.
+  const closeTask = await plantQueuedClosePrepTask({ firm: w.firm, client: w.client });
+  await rig.rootQuery("update clara.agent_tasks set status='running' where id=$1", [closeTask]);
+  await assert.rejects(() => closeEntry.closePrep_v1({ taskId: closeTask }));
+  assert.equal((await readTask(closeTask)).status, "running", "closePrep leaves it for the reconciler too");
+
+  // THE NEGATIVE CONTROL for the injection itself: with the same pools wired, a DIRECT settle on
+  // a task this run does hold DOES land. Without this, "the task stayed running" could still be
+  // explained by a settle path that never works at all.
+  await rig.asRuntime((c) => bankInfra.settleBankTask(c, taskId, "failed", "internal"));
+  assert.equal((await readTask(taskId)).status, "failed", "the settle path IS reachable — the guard is what stopped it above");
+  globalThis.__claraPools = previousPools;
+});
+
 test("G1B-A2 the SAME run id re-claims idempotently (a WDK step replay is not a second run)", { skip }, async () => {
   const w = await rig.buildFirm("g1ba2");
   const { taskId } = await plantHeldWakeTask({ owner: w.owner, client: w.client, payload: { bank_account_id: randomUUID() } });

@@ -37,8 +37,14 @@ export async function closePrep_v1(input: { taskId: string }): Promise<{ taskId:
   "use workflow";
   const taskId = input.taskId;
   let settled = false;
+  // HOLDS IS THE SETTLE'S OWN PRECONDITION — see bankAgent.v1.ts for the full statement. In
+  // short: a settle is only this run's to make once the CAS has bound the task to it. If
+  // claimCloseTaskStep itself throws (after WDK step retries are exhausted) we never learned
+  // whether we hold the task, so we must NOT settle; the row then sits running-with-no-run,
+  // which reconciler-wake.mjs section A picks up and re-enqueues past grace.
+  let holds = false;
   const settle = async (outcome: "completed" | "failed", errorCode: string | null) => {
-    if (settled) return;
+    if (settled || !holds) return;
     settled = true;
     await settleCloseTaskStep(taskId, outcome, errorCode);
   };
@@ -55,11 +61,13 @@ export async function closePrep_v1(input: { taskId: string }): Promise<{ taskId:
       // this run, and only then did the task turn out to carry no client. This run holds the
       // task, so it owes it a terminal state — walking away would strand it 'running' forever.
       if (claim.bound) {
+        holds = true;
         await settle("failed", "internal");
         return { taskId, outcome: `failed:${claim.reason}` };
       }
       return { taskId, outcome: `stood_down:${claim.reason}` };
     }
+    holds = true;
 
     const ctx = claim.ctx;
     const modelId = process.env.CLARA_CLOSE_PREP_MODEL || process.env.CLARA_CHAT_MODEL || "gpt-5.6-terra";
