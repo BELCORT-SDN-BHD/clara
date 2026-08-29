@@ -2,11 +2,11 @@
 // vocabulary the whole computation ladder persists through.
 // Migration: packages/db/migrations/UNNUMBERED_f_t3_pr_1_tax_platform.sql (numbered at MERGE).
 //
-// THIS FILE: sections A (closed-world structure census), B (the ACL / two-firm isolation
-// proof, with positive controls), C (the seeded law's invariants) and D (the refusal
-// vocabulary). The mutant panel, the immutability walls, the deliberate-absence instruments
-// and 裁-33's no-lifecycle-column wall live in the sibling f-t3-pr-1-walls.test.mjs (same
-// fixtures module; split only to stay under the file-size gate).
+// THIS FILE: sections A (closed-world structure census), C (the seeded law's invariants) and
+// D (the refusal vocabulary). Two siblings share its fixtures module, split only to stay under
+// the file-size gate: f-t3-pr-1-isolation.test.mjs (the ACL census and the two-firm proof) and
+// f-t3-pr-1-walls.test.mjs (the mutant panel, the immutability walls, the deliberate-absence
+// instruments and 裁-33's no-lifecycle-column census).
 //
 // Section A deliberately duplicates the migration's own S10 tail: the tail proves the
 // migration built the shape on ITS OWN rig at ITS OWN moment, this proves the shape SURVIVES
@@ -14,10 +14,10 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, endPool, ROLES } from "./rig-fixtures.mjs";
+import { rootQuery, endPool } from "./rig-fixtures.mjs";
 import {
   RELATIONS, CODES, RESEARCH_LEAVES, LADDER_REASONS, OQ11_REASON, RULING_33_REASON,
-  tableApplied, inRolledBackTx, reachCensus,
+  tableApplied,
 } from "./f-t3-pr-1-fixtures.mjs";
 
 let live = false;
@@ -165,74 +165,6 @@ test("ft3-A7 · every live-row partial unique index exists with its exact predic
 });
 
 // ---------------------------------------------------------------------------------------
-// B · THE ACL CENSUS AND THE TWO-FIRM ISOLATION PROOF. These six relations carry no firm
-// dimension by design, so "cross-tenant" here means something sharper than a scoped read:
-// NO tenant-facing role reaches them AT ALL, and forced RLS admits zero rows to any firm's
-// session even if a stray grant appears. Both arms carry a positive control, because a
-// census that has only ever said NO has not been shown able to say YES.
-// ---------------------------------------------------------------------------------------
-
-test("ft3-B1 · THE TRUE CLOSED WORLD -- relacl IS NULL on all six (no grantee at all, the "
-  + "one predicate a role this file never named cannot slip past), the six-role roster "
-  + "diagnosis is clean, and the instrument DOES flip under an injected grant", async (t) => {
-    if (gate(t)) return;
-    for (const rel of RELATIONS) {
-      const acl = await rootQuery(
-        `select relacl from pg_class where oid = ('clara.' || $1)::regclass`, [rel]);
-      assert.equal(acl.rows[0].relacl, null, `${rel}: no ACL entry exists at all`);
-    }
-    assert.deepEqual(await reachCensus(), [],
-      "roster diagnosis: no authenticated/agent/wake/runtime/freeform role holds any DML privilege");
-
-    await inRolledBackTx(async (client) => {
-      await client.query(`grant select on clara.tax_treatment_codes to ${ROLES.authenticated}`);
-      const r = await client.query(
-        "select relacl from pg_class where oid = 'clara.tax_treatment_codes'::regclass");
-      assert.notEqual(r.rows[0].relacl, null, "relacl DOES flip non-null under an injected grant");
-      const r2 = await client.query(
-        "select has_table_privilege($1, 'clara.tax_treatment_codes', 'select') as ok",
-        [ROLES.authenticated]);
-      assert.equal(r2.rows[0].ok, true, "has_table_privilege DOES flip true");
-    });
-    const after = await rootQuery(
-      "select relacl from pg_class where oid = 'clara.tax_treatment_codes'::regclass");
-    assert.equal(after.rows[0].relacl, null, "the injected grant did not survive the cell");
-    assert.deepEqual(await reachCensus(), [], "the roster is clean again");
-  });
-
-test("ft3-B2 · TWO FIRMS, six relations: even WITH a stray SELECT grant, forced RLS admits "
-  + "ZERO rows to either firm's clara_authenticated session -- and the same session DOES see "
-  + "rows from a table it is genuinely entitled to (the positive control)", async (t) => {
-    if (gate(t)) return;
-    const firms = await rootQuery("select id from clara.firms order by created_at limit 2");
-    assert.ok(firms.rowCount >= 2,
-      "this cell needs two seeded firms: it proves the wall holds for BOTH, not just for one");
-
-    for (const firm of firms.rows) {
-      await inRolledBackTx(async (client) => {
-        for (const rel of RELATIONS) {
-          await client.query(`grant select on clara.${rel} to ${ROLES.authenticated}`);
-        }
-        await client.query("select set_config('request.jwt.claims', $1, true)",
-          [JSON.stringify({ sub: `x_ft3_probe_${firm.id}`, role: "authenticated" })]);
-        await client.query(`set role ${ROLES.authenticated}`);
-
-        for (const rel of RELATIONS) {
-          const rows = await client.query(`select * from clara.${rel}`);
-          assert.equal(rows.rowCount, 0,
-            `${rel}: FORCE RLS with only the clara_fn_owner policy admits ZERO rows to firm ${firm.id}, even once granted`);
-        }
-        // Positive control: the SAME impersonated session, in the SAME transaction, reads a
-        // table clara_authenticated is genuinely granted. A zero that is really "this role
-        // can read nothing anywhere" would prove nothing about these six.
-        const control = await client.query("select count(*)::int n from clara.client_fact_keys");
-        assert.ok(control.rows[0].n > 0,
-          "the impersonated session CAN read clara.client_fact_keys -- so the six zeros above are the RLS wall, not a dead session");
-      });
-    }
-  });
-
-// ---------------------------------------------------------------------------------------
 // C · THE SEEDED LAW
 // ---------------------------------------------------------------------------------------
 
@@ -264,9 +196,8 @@ test("ft3-C2 · the code set is exactly the thirteen seeded codes, and EVERY ONE
     }
   });
 
-test("ft3-C3 · every code resolves to an authority row, and the three named-but-unopened "
-  + "rulings are graded honestly with a valid_through that puts them in the belt's FIRST "
-  + "horizon rather than at the end of the year", async (t) => {
+test("ft3-C3 · every code resolves to an authority row, and the three named-but-unopened rulings "
+  + "are graded honestly with a valid_through inside the belt's FIRST horizon", async (t) => {
     if (gate(t)) return;
     const orphan = await rootQuery(
       `select c.code from clara.tax_treatment_codes c
@@ -470,19 +401,30 @@ test("ft3-D3b · 裁-33's draft-only wall has its NAME seeded: a tax computation
   });
 
 // 裁-33's OTHER half — no F-T3 relation carries a lifecycle-state column — is ft3-H2.
-test("ft3-D4 · the table now holds exactly 33 rows: the 9 pre-existing Wave-E rows, the 22 "
-  + "ladder rows, and the 2 ruling rows (OQ-11 + 裁-33) -- a closed-world count, so a stray "
-  + "25th F-T3 string cannot hide", async (t) => {
-    if (gate(t)) return;
-    const r = await rootQuery("select count(*)::int n from clara.metric_na_reason_versions");
-    assert.equal(r.rows[0].n, 33);
-    const pre = await rootQuery(
-      `select count(*)::int n from clara.metric_na_reason_versions
-        where reason_key = any (array['divide_by_zero','negative_denominator','absent',
-          'prior_period_absent','account_set_drift','account_set_resolution_absent',
-          'account_set_resolution_ambiguous','account_set_expansion','sign_presentation_mismatch'])`);
-    assert.equal(pre.rows[0].n, 9, "the nine Wave-E rows are untouched");
-  });
+// ft3-D4 is scoped to F-T3's own keys, NEVER a table-wide count(*):
+// clara.metric_na_reason_versions is a SHARED, append-only, estate-wide catalog that other
+// batteries in this same suite also write to, so an absolute total measures the whole RUN
+// rather than this migration. A focused run hides that; a full sweep does not — which is
+// exactly the obligation statutory-deadlines-ddl.test.mjs records for its own table.
+test("ft3-D4 · F-T3's OWN 24 keys are a closed world -- exactly one row each, no duplicate "
+  + "version -- and the nine Wave-E rows are untouched", async (t) => {
+  if (gate(t)) return;
+  const mine = [...Object.keys(LADDER_REASONS), OQ11_REASON, RULING_33_REASON];
+  assert.equal(mine.length, 24, "22 ladder strings + 2 ruling strings");
+  const r = await rootQuery(
+    `select reason_key, count(*)::int n from clara.metric_na_reason_versions
+      where reason_key = any ($1) group by reason_key`, [mine]);
+  assert.equal(r.rowCount, 24, "every one of F-T3's 24 keys exists");
+  for (const row of r.rows) {
+    assert.equal(row.n, 1, `${row.reason_key}: exactly one row -- no duplicate version was minted`);
+  }
+  const pre = await rootQuery(
+    `select count(*)::int n from clara.metric_na_reason_versions
+      where reason_key = any (array['divide_by_zero','negative_denominator','absent',
+        'prior_period_absent','account_set_drift','account_set_resolution_absent',
+        'account_set_resolution_ambiguous','account_set_expansion','sign_presentation_mismatch'])`);
+  assert.equal(pre.rows[0].n, 9, "the nine Wave-E rows are untouched");
+});
 
 test("ft3-D5 · every REFUSE code's refusal_reason_key resolves to a seeded platform reason "
   + "row -- a refusal a code names but no row backs could never reach a metric_cell", async (t) => {

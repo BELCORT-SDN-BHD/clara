@@ -1438,9 +1438,26 @@ begin
     raise exception 'S10: the 裁-33 draft-only reason row (tax_issue_unavailable) landed % times as a platform refused row, expected 1', v_n
       using errcode = 'CLR10';
   end if;
-  select count(*) into v_n from clara.metric_na_reason_versions;
-  if v_n <> 33 then
-    raise exception 'S10: metric_na_reason_versions holds % rows, expected 33 (the 9 pre-existing + 22 ladder + 1 OQ-11 + 1 裁-33)', v_n
+  -- F-T3's OWN keys are the closed world -- exactly one row each, no duplicate version.
+  -- DELIBERATELY NOT a table-wide count(*): clara.metric_na_reason_versions is a SHARED,
+  -- append-only, estate-wide catalog this migration does not own. A total would be a claim
+  -- about every lane's rows, and on any database where another lane has since added one, this
+  -- tail would abort a REAL ceremony over a row that is none of its business.
+  select count(*) into v_n from (
+    select n.reason_key from clara.metric_na_reason_versions n
+     where n.reason_key = any (v_ladder_reasons || array['s44_6_relief_unmodelled','tax_issue_unavailable'])
+     group by n.reason_key having count(*) = 1) x;
+  if v_n <> 24 then
+    raise exception 'S10: % of F-T3''s 24 reason keys exist exactly once (22 ladder + 1 OQ-11 + 1 裁-33)', v_n
+      using errcode = 'CLR10';
+  end if;
+  -- And the nine pre-existing Wave-E rows are untouched.
+  select count(*) into v_n from clara.metric_na_reason_versions
+    where reason_key = any (array['divide_by_zero','negative_denominator','absent',
+      'prior_period_absent','account_set_drift','account_set_resolution_absent',
+      'account_set_resolution_ambiguous','account_set_expansion','sign_presentation_mismatch']);
+  if v_n <> 9 then
+    raise exception 'S10: the 9 pre-existing Wave-E reason rows now count % -- this file must not touch them', v_n
       using errcode = 'CLR10';
   end if;
 
@@ -1483,5 +1500,5 @@ begin
 
   raise notice 'F-T3 PR-1 S10 tail census: 6 platform relations (tax_authorities, tax_treatment_codes, tax_rate_bands, capital_allowance_rates, tax_thresholds, tax_add_back_class_map), each owned by clara_fn_owner with ENABLE+FORCE RLS, exactly 1 unconditional clara_fn_owner policy, relacl NULL (true closed world, clean 6-role roster diagnosis), no firm_id column, and 3 triggers (immutable / no-delete / no-truncate). 1 new function: clara._tf_ft3_law_row_immutable(), SECURITY DEFINER, clara_fn_owner-owned, PUBLIC execute revoked. D1 PROVEN EMPTY by whole-catalog census over prosrc + language + SECURITY DEFINER + volatility + strictness + leakproof + OWNER + SET config + return type + setof + argument types + ACL -- twelve attributes, deliberately NOT the functiondef renderer, which the replay measured renders neither the owner nor the ACL: every pre-existing clara function unchanged on all twelve, none dropped, exactly one added.';
   raise notice 'F-T3 PR-1 seeded rows: 26 tax_authorities (22 official_primary + 1 official_secondary + 3 reference_only_unfetched, the three carrying a valid_through of 2026-08-29 so the law-review belt raises them on its FIRST run rather than in a January mid-filing) | 13 tax_treatment_codes, ALL UNSIGNED (OQ-7 fail-closed: every treatment refuses treatment_code_unsigned until a named licensed tax agent signs) | 12 tax_rate_bands (company_msmc 3 bands x YA2023-2025, company_standard 1 band x YA2023-2025) | 5 capital_allowance_rates | 38 tax_thresholds (12 keys x YA2023-2025 + msmc_foreign_holding_max_bp x YA2024-2025) | 12 tax_add_back_class_map rows covering all 12 裁-21 research leaves exactly once, donations_approved -> REFUSE_DONATION_S44_6 (OQ-11).';
-  raise notice 'F-T3 PR-1 refusal vocabulary: 22 ladder rows (part 2 section 9''s 21 + delta D-9 close_snapshot_missing_pl_rows) + 1 OQ-11 row (s44_6_relief_unmodelled) + 1 裁-33 row (tax_issue_unavailable, the draft-only wall) = 24 new metric_na_reason_versions rows, every one firm_id = NULL / version = 1 / effective_from 2020-01-01; table now holds 33. 裁-33 also proven positively: not one of the six relations carries a status/state/issue_mode/issued_at/issued_by column, so nothing built here presumes an issued state exists. DELIBERATE ABSENCES, each proven by a zero COUNT not by a comment: ICT capital-allowance class (survey U1) = 0 rows | sva_annual_cap (survey U2) = 0 rows | exclude-direction codes = 0 rows | individual rate bands = 0 rows | YA2023 msmc_foreign_holding_max_bp = 0 rows.';
+  raise notice 'F-T3 PR-1 refusal vocabulary: 22 ladder rows (part 2 section 9''s 21 + delta D-9 close_snapshot_missing_pl_rows) + 1 OQ-11 row (s44_6_relief_unmodelled) + 1 裁-33 row (tax_issue_unavailable, the draft-only wall) = 24 new metric_na_reason_versions rows, every one firm_id = NULL / version = 1 / effective_from 2020-01-01, each existing EXACTLY once, with the 9 pre-existing Wave-E rows untouched (scoped to F-T3''s own keys, never a table-wide count on a shared estate catalog this file does not own). 裁-33 also proven positively: not one of the six relations carries a status/state/issue_mode/issued_at/issued_by column, so nothing built here presumes an issued state exists. DELIBERATE ABSENCES, each proven by a zero COUNT not by a comment: ICT capital-allowance class (survey U1) = 0 rows | sva_annual_cap (survey U2) = 0 rows | exclude-direction codes = 0 rows | individual rate bands = 0 rows | YA2023 msmc_foreign_holding_max_bp = 0 rows.';
 end $s10$;
