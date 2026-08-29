@@ -1446,18 +1446,28 @@ test("x38.y reader1/reader2 disagreement on a line amount refuses readers_disagr
 });
 
 // ===========================================================================
-// x38.z1 -- ● BUDGET. Exhausting the firm's page budget fails a FRESH
-// statement_facts enqueue outright, named 'budget' (0038 --
-// _enqueue_invoice_facts_core reserves pages for BOTH azure lanes now and
-// converts a CLR18 page-budget refusal from _reserve_processing_call into a
-// graceful terminal task row, in the SAME call, before the task ever queues).
-// pages_per_day carries a `> 0` CHECK (0007:367), so "no budget left" is
-// staged the way production reaches it: a legal cap the day's reservations
-// have already consumed, never a zero cap. The terminal verdict must reach
-// the spine as the STATEMENT twin -- and never as the invoice twin (the
-// enqueue_invoice_facts wrapper's phantom emit, suppressed by E2b).
+// x38.z1 -- ● BUDGET, INVERTED AT F-A9 PR-1B (law 31; design SS3.3 gate 7).
+//
+// WHAT THIS CELL USED TO PROVE, and why it could not survive. Exhausting the
+// firm's page budget failed a FRESH statement_facts enqueue outright, named
+// 'budget' -- 0038's _enqueue_invoice_facts_core reserves pages for both azure
+// lanes through clara._reserve_processing_call and converts ITS CLR18
+// page-budget refusal into a graceful terminal task row in the same call. The
+// owner ruled that budget REMOVE on 2026-08-23 (the migration's own author
+// calls it the firm's VENDOR SPEND, `0038:7056-7058`, so digest law 76 / SS9
+// "meter, never cap" reaches it), and F-A9 PR-1B removes it from BOTH arms of
+// the reservation pair. A cell whose premise is a removed refusal cannot be
+// repaired by relaxing it, so this is the differential's post-change half:
+// the SAME exhausted-budget fixture must now QUEUE, and the page must still be
+// RESERVED -- the brake is gone, the meter is not.
+//
+// pages_per_day carries a `> 0` CHECK (0007:367), so "no budget left" is still
+// staged the way production reached it: a legal cap the day's reservations
+// have already consumed, never a zero cap. The lane's own conversion branch in
+// _enqueue_invoice_facts_core is now unreachable rather than removed (it is
+// not on PR-1B's D1 list); this cell is what proves it never fires.
 // ===========================================================================
-test("x38.z1 budget: an exhausted page budget fails a fresh statement_facts enqueue with error_code 'budget'", async (t) => {
+test("x38.z1 budget REMOVED: an exhausted page budget no longer fails a fresh statement_facts enqueue — it QUEUES, the page is still reserved, and no 'budget' verdict reaches the spine", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A2;
@@ -1504,15 +1514,22 @@ test("x38.z1 budget: an exhausted page budget fails a fresh statement_facts enqu
     const filed = await filedStatementPdf(sub, { client });
     const task = await enqueueStatement(filed.documentId);
     assert.ok(task, "x38.z1 mandatory setup: the enqueue call returns a task row");
-    assert.equal(task.status, "failed", `an exhausted page budget fails the enqueue call itself, before the task ever queues (got ${JSON.stringify(task)})`);
-    assert.equal(task.error_code, "budget", `the failure is named 'budget' (got ${JSON.stringify(task)})`);
+    assert.equal(task.status, "queued", `an exhausted page budget NO LONGER fails the enqueue — the spend brake is removed (got ${JSON.stringify(task)})`);
+    assert.notEqual(task.error_code, "budget", `no 'budget' verdict is minted any more (got ${JSON.stringify(task)})`);
+    // THE METER SURVIVED THE BRAKE. The reservation row is what F-A9 keeps: the pages are
+    // still RECORDED against the firm, they simply no longer refuse. Read positively --
+    // "the enqueue queued" alone would also be satisfied by a reservation path that had
+    // been deleted outright rather than un-braked.
+    const reserved = await rootQuery(
+      "select pages_reserved, state from clara.processing_call_reservations where task_id=$1", [task.id]);
+    assert.equal(reserved.rowCount, 1, `the metered reservation row still exists for the queued task (got ${JSON.stringify(reserved.rows)})`);
+    assert.ok(Number(reserved.rows[0].pages_reserved) >= 1, `and it records the pages bought (got ${JSON.stringify(reserved.rows[0])})`);
+    assert.ok(await usedPages() > used, "the firm's own UTC-day page ledger moved past the exhausted cap — metered, not capped");
 
     const twin = await rootQuery(
       "select count(*)::int as n from clara.domain_events where document_id=$1 and event_type='document.statement_facts_failed' and payload->>'reason'='budget'",
       [filed.documentId]);
-    // One emit PER refused enqueue call -- filing itself enqueues once and the explicit
-    // call re-attempts, so >=1 is the honest floor (each refusal reports itself).
-    assert.ok(twin.rows[0].n >= 1, "x38.z1: the budget verdict reaches the spine as the STATEMENT twin");
+    assert.equal(twin.rows[0].n, 0, "x38.z1: NO budget verdict reaches the spine any more — _enqueue_invoice_facts_core's conversion branch is unreachable");
     const phantom = await rootQuery(
       "select count(*)::int as n from clara.domain_events where document_id=$1 and event_type='document.invoice_facts_failed'",
       [filed.documentId]);
