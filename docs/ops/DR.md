@@ -448,3 +448,53 @@ leader's dispatch wiring, which can only be done once the machine exists) live i
 **`docs/ops/DR-render.md`** — the `DR-full-drill.md` split precedent. The deploy ceremony was run
 2026-08-15; the re-render drill itself is **still unrun**, and DR-render.md's exercised-evidence
 section keeps those two facts apart.
+
+## 11. Period-snapshot drift check — `clara.verify_snapshot` (owner-ruled DR line)
+
+**Owner ruling of record:** `docs/plan/active/port-wave-plan-2026-08-28.md:82` excepted three
+doors from the port wave by name, each with a destination. `verify_snapshot`'s was "a DR runbook
+line" — it is an **operator instrument, not a product surface**, which is why it has no ⌘K entry
+and no page. This section is that line, owed from 2026-08-28 and written 2026-08-29 (R-3 of
+`docs/plan/active/mohe-alignment-audit-2026-08-29.md`, which grepped this directory for the
+verb and got zero hits).
+
+**What it is.** `clara.verify_snapshot(p_snapshot uuid) returns jsonb`
+(`packages/db/migrations/0057_wave_e_registry_snapshots.sql:938`) recomputes a period snapshot's
+dataset through `clara._snapshot_dataset` — the same recipe the mint used — and diffs the digest
+against the pinned `dataset_sha256`. It **refuses nothing and changes nothing**: `stable`, a
+positive read reporting drift and naming which payload keys moved (`drifted_keys`), alongside
+both digests, the pinned `books_watermark`, and a `comparison` of live-books-now vs pinned-bytes.
+
+**Why a DR runbook owns it.** The staleness triggers on the six covered tables cannot see two
+classes of change, and the function's own comment enumerates them: (a) a fact none of those
+tables owns — a counterparty rename, a chart-of-accounts relabel, a client fact edited through
+`0055`'s door; (b) anything a writer added after `0057` touches, since a table born later carries
+no trigger. **Both are caught only by running this.** In the migration's own words: *"An unrun
+backstop is indistinguishable from an absent one."*
+
+**Read the answer correctly.** It recomputes against the books **as they are now** — Postgres
+cannot reconstruct the read the mint performed — so `drift = true` means "the books no longer
+reproduce these bytes", **not** "the mint was wrong". And `stale but drift = false` is designed,
+not a contradiction: four of the six covered tables own nothing a `management_accounts` dataset
+reads, so a mutation there marks the artifact stale honestly and recomputes identically. The
+payload names that split (`covered_tables_moving_this_payload` / `..._inert_for_this_payload`).
+
+**Running it.** It is `security definer` behind `clara._human_ctx(role_rank('viewer'))` and
+granted to `clara_authenticated` (`0057:1390`), so it needs a real human session context — not a
+superuser psql prompt. Pipe the DSN through the CA-pinned bridge (`docs/ops/dsn-bridge.md`; never
+`sslmode=no-verify`, never a DSN in argv) and set the session claims the way the rig's own
+helpers do (`packages/db/tests/delta-catalog-phase.mjs:311`):
+
+```sql
+set role clara_authenticated;
+select set_config('request.jwt.claims', '{"sub":"<viewer-or-above user uuid>","role":"authenticated"}', true);
+select jsonb_pretty(clara.verify_snapshot('<snapshot uuid>'));
+```
+
+A snapshot outside the caller's firm raises `CLR11` — the same wall every other read has.
+
+**When to run it.** Deliberately NOT folded into either §9 cadence yet: those lists describe
+drills that have been exercised, and this one has **not been run against live**. Fold it into
+quarterly-full once it has been exercised on a throwaway rig, and run it ad hoc before relying on
+a snapshot that spans a class-(a)/(b) event — a counterparty merge or rename, a chart relabel, or
+the first close after a migration adding a writer that touches a figure a snapshot reads.

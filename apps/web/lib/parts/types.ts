@@ -1,6 +1,6 @@
 // The CANONICAL ClaraPart union, ported to apps/web from the LIVE dashboard
 // declaration (apps/dashboard/app/shared/parts.ts:139-161) — mechanism, not look.
-// This is the 18-member union confirmed live by
+// It began as the 18-member union confirmed live by
 // docs/plan/active/codex-frontend-handoff-errata-2026-08-27.md (ii): the
 // frontend-handoff-2026-08-23.md §3.1 count of 21 is STALE — kb_rule_proposal,
 // rule_post_receipt and bank_rule_proposal retired with F-A2/F-A3 and are not
@@ -8,6 +8,19 @@
 // close_proposal, freeform_result) land in a LATER, single batched wire bump
 // (mohe-grill-rulings-2026-08-27.md Q8) — this module and its catalog
 // (./catalog.ts) are built so that bump is an additive edit, not a rewrite.
+//
+// 22 MEMBERS AS OF 2026-08-29 (MBB-4, docs/plan/active/mohe-alignment-audit-
+// 2026-08-29.md §2): the four chatTurn_v14 receipt kinds at the bottom of this
+// file joined the union. They are NOT the Q8 four — that bump is still owed and
+// still lands on top of these, taking the catalog to 26. The v14 four were
+// already ON THE WIRE and rendering as the "Unsupported part" warning chip,
+// because the LIVE registry is `chatTurn: chatTurn_v14`
+// (packages/runtime/workflows/registry.ts:54) and its wire union is
+//   ClaraPartV14 = ClaraPart | EntryPostedPart | QuestionOpenedPart
+//                | BankActPart | BankPackPart
+// (packages/runtime/workflows/chatTurn.v14.prompt.ts:27). Declaring them here
+// is purely additive on the frontend — no runtime version bump is involved,
+// since the emitter already ships them.
 //
 // Every member below carries IDENTIFIERS ONLY (plus the two live-transcript
 // leaf types, `text`/`clarify`, which are themselves the payload) — hydrate-
@@ -96,9 +109,72 @@ export type AdjustmentRunReceiptPart = { type: "adjustment_run_receipt"; client_
  *  summed here. */
 export type StaffAdvancePart = { type: "staff_advance"; client_id: string; advance_id: string; label?: string };
 
-/** The canonical transcript wire union: 18 live members (9 base + 4 Wave-A +
- *  1 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b). Adding a member here without a matching
- *  ./catalog.ts entry fails `tsc` — see catalog.ts's AllCovered/NoExtra guard. */
+// --- The chatTurn_v14 receipt kinds -------------------------------------------
+// Each shape below is TRANSCRIBED from its declaration inside the frozen v14
+// closure, field for field — the runtime is the declarer, this module is the
+// reader. Do not "improve" a field name or widen a type here: a mismatch would
+// make the renderer read a field the wire does not carry.
+
+/** A chat-lane post that the DB ACCEPTED. Declared at
+ *  packages/runtime/workflows/chatTurn.v13.post.ts:101-108, constructed at :218-228
+ *  (`client_id` starts `""` there and is filled with the real client at :333), and
+ *  carried onto the v14 wire by `toTypedParts_v13`, which `toTypedParts_v14`
+ *  re-exports through (chatTurn.v14.prompt.ts:81).
+ *
+ *  IDENTIFIERS AND THE DB'S OWN VERDICT TOKENS ONLY — no lines, no amount, no
+ *  account. The wire carries none, and the card must not invent one
+ *  (apps/web/AGENTS.md: "The UI never invents a number"): the entry's lines and
+ *  total are read on the journals workbench, which is what the card links to. */
+export type EntryPostedPart = {
+  type: "entry_posted";
+  entry_id: string;
+  client_id: string;
+  post_receipt_id: string;
+  /** F-A2's thirteen-rung receipt vector — DB-owned rung → outcome strings. */
+  rung_vector: Record<string, string>;
+  verdict: Record<string, unknown>;
+};
+
+/** The receipt a successful `open_client_question` yields. Declared at
+ *  packages/runtime/workflows/chatTurn.v13.post.ts:111-116, constructed at :403-405.
+ *  Carries NO client_id — the durable question lands in the firm's Needs-you
+ *  queue, which is where this card links. */
+export type QuestionOpenedPart = {
+  type: "question_opened";
+  question_id: string;
+  scope_kind: string;
+  question: string;
+};
+
+/** One admitted bank-lane act, from any of the twelve BANK_ACT_TOOLS. Declared at
+ *  packages/runtime/workflows/chatTurn.v14.bank.ts:77, pushed onto the wire at
+ *  chatTurn.v14.prompt.ts:92 (deduped within a segment by `op_key`). `result` is
+ *  the door's own return payload — an open shape, so the card renders the named
+ *  identifiers and never walks it. */
+export type BankActPart = {
+  type: "bank_act";
+  verb: string;
+  subject_id: string | null;
+  op_key: string;
+  result: Record<string, unknown>;
+};
+
+/** A `get_bank_pack` READ — the grounding digest every bank act must cite.
+ *  Declared at packages/runtime/workflows/chatTurn.v14.bank.ts:79, pushed at
+ *  chatTurn.v14.prompt.ts:94 and deliberately never deduped (each read is a fresh
+ *  receipt). `pack` is an open shape; the card renders the account and the digest,
+ *  which are what make the act auditable. */
+export type BankPackPart = {
+  type: "bank_pack";
+  bank_account_id: string;
+  digest: string;
+  pack: Record<string, unknown>;
+};
+
+/** The canonical transcript wire union: 22 live members (9 base + 4 Wave-A +
+ *  1 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b + 4 chatTurn_v14). Adding a member here
+ *  without a matching ./catalog.ts entry fails `tsc` — see catalog.ts's
+ *  AllCovered/NoExtra guard. */
 export type ClaraPart =
   | { type: "text"; text: string }
   | { type: "tool_call"; tool: string; tool_call_id: string; input: unknown }
@@ -117,4 +193,8 @@ export type ClaraPart =
   | FixedAssetPart
   | DepreciationRunReceiptPart
   | AdjustmentRunReceiptPart
-  | StaffAdvancePart;
+  | StaffAdvancePart
+  | EntryPostedPart
+  | QuestionOpenedPart
+  | BankActPart
+  | BankPackPart;
