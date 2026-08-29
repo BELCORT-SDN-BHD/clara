@@ -142,3 +142,33 @@ ungranted helper called FIRST by **both proposal writers**, for exactly one
   a writer. The clocked, estate-wide sweep (every stale `'proposed'` row, unattended) is PR-4's,
   where law 80's per-run receipt obligation applies — this function is not that sweep and is not
   itself receipted as a "run."
+
+## K.4 — the identity walls' NAMED LIMITS (recorded, not papered over)
+
+Written down because a wall whose edges are not stated will be trusted past them.
+
+- **`binding_client_identity_unproven` is a real cost, not a formality.** A client whose SSM or
+  TIN the firm has not recorded in `clara.client_identifiers` gets **no vendor binding at all**.
+  That is the fail-closed answer to a wall that otherwise cannot be evaluated: "no matching
+  identifier row" is the same answer a client with none gives and a client with a genuinely
+  foreign vendor gives, and reading it as the second is absence-as-evidence (`0049:967` refuses
+  the same inference one lane over). The FE surfaces it as *"record this client's SSM or TIN
+  first"*, not as an error.
+- **ONE recorded kind is enough, and that leaves a hole.** Requiring both would strand the many
+  Malaysian SMEs that hold an SSM long before a TIN, for a reason unrelated to the vendor being
+  bound. The consequence: **a TIN-only client cannot detect its own SSM mislabelled as a vendor
+  id.** The customer-side wall (`binding_identifier_ambiguous_party`) covers the case where the
+  page LABELS that number as the buyer's; the unlabelled case is open until the client records
+  the other kind.
+- **`invoice.vendor_registration` is the extractor's CLAIM that a region is the vendor's**, and
+  these walls trust that claim. A mislabelled customer block is an extraction defect, not a
+  binding defect — except in the two cases above, which are cheap to refuse and never lawful.
+- **The economic fingerprint is not tamper-proof, by design.** Three rescans with EDITED totals
+  are three forged bills a human approved over fourteen days: an insider approving forgeries is
+  outside this wall's threat model, and the wall's job is the ACCIDENTAL and the OPPORTUNISTIC
+  three-scans-of-one-invoice case. The lawful collision — two genuinely different invoices with
+  identical economics — is a fail-closed FALSE REFUSAL carrying its own token, which a human can
+  see and act on.
+- **The later upgrade.** Validated e-invoice supplier identity (MyInvois) makes the issuer's
+  identity cryptographically attested rather than extracted, and retires most of this section.
+  That is P6+, and deliberately not this PR.
