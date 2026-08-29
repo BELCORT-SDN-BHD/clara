@@ -22,8 +22,10 @@ export type CatalogEntry = { renderBranch: true; fixtures: ClaraPart[] };
 
 /** The part types that render a VISIBLE persisted element. Every key here MUST
  *  have a branch in PartRenderer.tsx; the parity test (./catalog.test.tsx) enforces
- *  it. 16 render-branch entries + the 2 STATUS_RESOLVER_TYPES above = 18 total,
- *  matching the live ClaraPart union in ./types.ts exactly. */
+ *  it. 20 render-branch entries + the 2 STATUS_RESOLVER_TYPES above = 22 total,
+ *  matching the live ClaraPart union in ./types.ts exactly. (16 + 2 = 18 until
+ *  2026-08-29, when MBB-4 registered the four chatTurn_v14 receipt kinds the live
+ *  emitter was already putting on the wire.) */
 export const PART_CATALOG = {
   text: {
     renderBranch: true,
@@ -126,6 +128,67 @@ export const PART_CATALOG = {
   staff_advance: {
     renderBranch: true,
     fixtures: [{ type: "staff_advance", client_id: "client-1111", advance_id: "advance-1515" }],
+  },
+
+  // --- The four chatTurn_v14 receipt kinds (MBB-4) ---------------------------
+  // Every fixture below is shaped from the EMITTER's own construction site, not
+  // from a guess: see the per-type citations in ./types.ts.
+  entry_posted: {
+    renderBranch: true,
+    fixtures: [
+      {
+        type: "entry_posted",
+        entry_id: "entry-1616",
+        client_id: "client-1111",
+        post_receipt_id: "receipt-1616",
+        rung_vector: { document_present: "pass", amount_corroborated: "pass", counterparty_resolved: "pass" },
+        verdict: { admitted: true },
+      },
+      // `client_id` is "" between the part's construction (chatTurn.v13.post.ts:223)
+      // and the fill at :333. A card that built `/clients//journals` from that would
+      // be a broken link, so the branch drops the link instead — this fixture is the
+      // reachability proof that it still renders.
+      // (The two fixtures carry the SAME rung_vector KEYS on purpose: `satisfies`
+      // keeps the literal inferred type, and TypeScript unifies a mixed-key array
+      // of object literals by making the odd keys optional-undefined — which then
+      // fails `Record<string, string>`. The empty-vector branch is covered instead
+      // in ../../components/parts/v14-receipt-cards.test.tsx, where the fixture is
+      // annotated `EntryPostedPart` directly.)
+      {
+        type: "entry_posted",
+        entry_id: "entry-1717",
+        client_id: "",
+        post_receipt_id: "receipt-1717",
+        rung_vector: { document_present: "pass", amount_corroborated: "n_a", counterparty_resolved: "n_a" },
+        verdict: {},
+      },
+    ],
+  },
+  question_opened: {
+    renderBranch: true,
+    fixtures: [
+      {
+        type: "question_opened",
+        question_id: "q-1818",
+        scope_kind: "document",
+        question: "Is the BRIGHTPATH invoice a repair or a capital improvement?",
+      },
+    ],
+  },
+  bank_act: {
+    renderBranch: true,
+    fixtures: [
+      { type: "bank_act", verb: "match_bank_line", subject_id: "line-1919", op_key: "op-1919", result: { matched: true } },
+      // subject_id is nullable on the wire (chatTurn.v14.bank.ts:77) — an act with
+      // no single subject (a reconciliation complete, say) must still render.
+      { type: "bank_act", verb: "complete_bank_reconciliation", subject_id: null, op_key: "op-2020", result: {} },
+    ],
+  },
+  bank_pack: {
+    renderBranch: true,
+    fixtures: [
+      { type: "bank_pack", bank_account_id: "acct-2121", digest: "sha256:2121deadbeef", pack: { lines: 12 } },
+    ],
   },
 } satisfies Record<string, CatalogEntry>;
 

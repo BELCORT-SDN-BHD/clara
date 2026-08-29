@@ -10,6 +10,17 @@ import { getRequestConfig } from "next-intl/server";
  * authorization, watermark locale) ship BM+EN separately (docs/ops/legal/);
  * that is a different, later surface from this UI-chrome skeleton.
  *
+ * THE SCREENS HAVE LANDED AND THAT BAN IS STILL OWED (trued 2026-08-29 —
+ * the sentence above read in the future tense long after P3 and the port
+ * wave shipped). eslint.config.mjs now carries Q5's sibling ruling Q4, the
+ * raw-colour ban, but not the string half. Measured while landing Q4: a
+ * `JSXText` selector would catch 7 sites in 2 files today — cheap. What no
+ * selector can see is a hardcoded string passed as a PROP, e.g. the ten card
+ * titles in components/parts/PartRenderer.tsx's `summaryOf`. A JSXText-only
+ * rule would therefore green a file that is still full of them, which is a
+ * worse state than no gate. Both halves belong in one pass, at P6's entry
+ * gate (裁-9's third conformance pass).
+ *
  * This is next-intl's documented "without i18n routing" setup
  * (https://next-intl.dev/docs/usage/configuration#static-request-locale):
  * no middleware, no `[locale]` segment, `getRequestConfig` returns a static

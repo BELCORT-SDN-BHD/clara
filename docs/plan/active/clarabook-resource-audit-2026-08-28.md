@@ -52,7 +52,15 @@ stale integration manifests superseded (Q1; `codex-frontend-handoff-errata-2026-
    P2/P3's reviewed builds; handoff conformance binds at the token/pattern/a11y/motion
    level, not the export-naming level. Recorded here so the gap closes as documentation.
 
-## §4 The one binding-rule delta — OWNER QUESTION (batched, non-blocking)
+## §4 The one binding-rule delta — RULED 裁-13, CONSUMED-AT-P6
+
+> **RULED 2026-08-28 (裁-13, `mohe-grill-rulings-2026-08-28.md:190-196`): ADOPT AT P6, with the
+> CI gate.** The recommendation below was taken — a target-size check lands in
+> `apps/web/test/a11yRules.ts` in the P6 polish wave, honouring the token contract's own
+> `--target-min` documented-exception mechanism, with Q7's formal 2.1 AA bar unchanged and 2.5.8
+> adopted on top of it. That ruling says in its own words that "the resource audit's §4 row moves
+> from OWNER QUESTION to CONSUMED-AT-P6"; this heading is that move, made 2026-08-29. The
+> question as originally put is preserved verbatim below.
 
 **WCAG 2.2 SC 2.5.8 target-size (24×24 px) is mandated twice by the source design system**
 (01-TOKEN-CONTRACT.md §5.2's dedicated `--target-min` token, "spacing exceptions must be
