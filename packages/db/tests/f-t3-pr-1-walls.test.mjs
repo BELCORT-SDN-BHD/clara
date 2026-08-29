@@ -1,19 +1,18 @@
 // F-T3 PR-1 -- the walls. Sibling of f-t3-pr-1.test.mjs (same fixtures module; split only to
-// stay under the file-size gate). Migration:
-// packages/db/migrations/UNNUMBERED_f_t3_pr_1_tax_platform.sql (numbered at MERGE).
+// stay under the file-size gate).
+// Migration: packages/db/migrations/UNNUMBERED_f_t3_pr_1_tax_platform.sql (numbered at MERGE).
 //
-// THIS FILE: sections E (the CHECK mutant panel -- one mutant per wall, each pinned to the
-// EXACT constraint name, because a mutant that fails for the wrong reason has proven nothing
-// about the wall it aimed at), F (the live-row unique walls), G (immutability: supersede-only,
-// the one-way-once signature, append-only, no-truncate, and the TWO lawful updates), H (the
-// deliberate absences, each with a positive control proving the instrument can say YES), and
-// I (the cross-firm platform-reason-row differential).
+// THIS FILE: E (the CHECK mutant panel -- each mutant pinned to the EXACT constraint name,
+// because one that fails for the wrong reason has proven nothing about the wall it aimed at),
+// F (the live-row unique walls), G (immutability: ARM ZERO, supersede-only, the one-way-once
+// signature, append-only, no-truncate, and the TWO lawful updates), H (the deliberate absences
+// and 裁-33's no-lifecycle-column census, each with a positive control), I (the scope binding).
 //
-// Every write goes as clara_fn_owner and every adversarial cell that would otherwise leave a
-// row in a shared, append-only, DELETE-forever-blocked platform table runs inside a rolled-back
-// transaction. The few rows that DO commit carry an `x_ft3test_<pid>_<n>` label/code prefix and
-// are never counted by any seed assertion (which scope on seeded_in_migration instead) -- the
-// obligation statutory-deadlines-ddl.test.mjs records for its own reused-rig case.
+// Every write goes as clara_fn_owner, and every adversarial cell that would otherwise leave a
+// row in a shared, append-only, DELETE-forever-blocked platform table runs in a rolled-back
+// transaction. The few rows that DO commit carry an `x_ft3test_<pid>_<n>` prefix and are never
+// counted by any seed assertion (those scope on seeded_in_migration) -- the obligation
+// statutory-deadlines-ddl.test.mjs records for its own reused-rig case.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -29,15 +28,13 @@ before(async () => { live = await tableApplied(); });
 after(async () => { await endPool(); });
 
 const gate = (t) => {
-  if (!live) {
-    if (process.env.CLARA_ALLOW_MISSING_FT3_TAX_PLATFORM === "1") {
-      console.warn("SKIP f-t3-pr-1-walls: the migration is not applied to this database (explicit pre-integration run).");
-      t.skip("F-T3 PR-1 tax platform relations not applied -- explicit pre-integration run");
-      return true;
-    }
-    assert.fail("the F-T3 PR-1 tax platform relations are required for a focused or post-migration run: apply the migration, or set CLARA_ALLOW_MISSING_FT3_TAX_PLATFORM=1 for the package-wide pre-integration sweep");
+  if (live) return false;
+  if (process.env.CLARA_ALLOW_MISSING_FT3_TAX_PLATFORM === "1") {
+    console.warn("SKIP f-t3-pr-1-walls: the migration is not applied to this database (explicit pre-integration run).");
+    t.skip("F-T3 PR-1 tax platform relations not applied -- explicit pre-integration run");
+    return true;
   }
-  return false;
+  assert.fail("the F-T3 PR-1 tax platform relations are required for a focused or post-migration run: apply the migration, or set CLARA_ALLOW_MISSING_FT3_TAX_PLATFORM=1 for the package-wide pre-integration sweep");
 };
 
 // ---------------------------------------------------------------------------------------
@@ -45,8 +42,7 @@ const gate = (t) => {
 // ---------------------------------------------------------------------------------------
 
 test("ft3-E1 · tax_authorities: an official_primary claim WITHOUT a url or an accessed_at is "
-  + "refused -- absence is not evidence, and a grade nobody can re-walk is a claim, not a "
-  + "citation", async (t) => {
+  + "refused -- a grade nobody can re-walk is a claim, not a citation", async (t) => {
     if (gate(t)) return;
     await insertMutant("tax_authorities", authorityRow({ url: null }),
       "ck_tax_authorities_primary_is_grounded");
@@ -141,7 +137,6 @@ test("ft3-E5 · tax_rate_bands, capital_allowance_rates and tax_thresholds: the 
       "ck_tax_rate_bands_regime", "23514", BAND_COLS);
     await insertMutant("tax_rate_bands", band({ rate_bp: 10001 }),
       "tax_rate_bands_rate_bp_check", "23514", BAND_COLS);
-
     const CA_COLS = ["ca_class", "ya_from", "ya_to", "ia_bp", "aa_bp", "authority_id",
       "conflict", "valid_through", "superseded_by", "superseded_at", "seeded_in_migration"];
     const ca = (o) => ({ ca_class: `x_ft3_${process.pid}`, ya_from: 2099, ya_to: null,
@@ -165,8 +160,8 @@ test("ft3-E5 · tax_rate_bands, capital_allowance_rates and tax_thresholds: the 
       "ck_tax_thresholds_exactly_one_value", "23514", TH_COLS);
   });
 
-test("ft3-E6 · tax_add_back_class_map: a leaf may not name a code that does not exist -- "
-  + "without the FK the map could quietly point the propose step at nothing", async (t) => {
+test("ft3-E6 · tax_add_back_class_map: a leaf may not name a code that does not exist -- without "
+  + "the FK the map could quietly point the propose step at nothing", async (t) => {
     if (gate(t)) return;
     const a = await freshAuthority();
     const MAP_COLS = ["add_back_class", "code", "source_edition", "source_document",
@@ -225,9 +220,8 @@ test("ft3-F1 · a second LIVE row on the same key is refused on every relation t
   });
 
 // ---------------------------------------------------------------------------------------
-// G · IMMUTABILITY -- the shared guard, the estate's append-only pair, and the TWO lawful
-// updates. Every cell here proves a REFUSAL, and each refusal is paired with the write that
-// the same wall must let through, so a guard that simply refuses everything cannot pass.
+// G · IMMUTABILITY. Every cell proves a REFUSAL paired with the write the same wall must let
+// through, so a guard that simply refuses everything cannot pass.
 // ---------------------------------------------------------------------------------------
 
 test("ft3-G1 · any non-allowlisted column update is refused CLR10, on a table with a "
@@ -331,14 +325,12 @@ test("ft3-G4 · DELETE is refused CLR08 and TRUNCATE is refused CLR08 on every r
       () => roleQuery(ROLES.fnOwner, "delete from clara.tax_authorities where id = $1", [auth]),
       "deleting a live authority row");
 
-    // CASCADE, deliberately. A PLAIN truncate of a table another table's FK references is
-    // refused by Postgres itself with 0A000 (feature_not_supported) BEFORE any BEFORE TRUNCATE
-    // trigger runs -- tax_authorities is referenced by five of these six, and
-    // tax_treatment_codes by the map. A cell that accepted that 0A000 would be measuring
-    // Postgres's FK rule, not this file's wall. CASCADE removes the FK objection so the guard
-    // is what answers. truncateGuardError bounds the lock wait and retries, so the assertion
-    // observes the GUARD's CLR08 rather than a deadlock against a concurrent writer
-    // (db-tests.md).
+    // CASCADE, deliberately: a PLAIN truncate of an FK-referenced table is refused by Postgres
+    // itself with 0A000 BEFORE any BEFORE TRUNCATE trigger runs (tax_authorities is referenced
+    // by five of these six, tax_treatment_codes by the map), and a cell accepting that 0A000
+    // would be measuring Postgres's FK rule rather than this file's wall. truncateGuardError
+    // bounds the lock wait and retries, so the assertion observes the GUARD's CLR08 rather than
+    // a deadlock against a concurrent writer (db-tests.md).
     for (const rel of RELATIONS) {
       const err = await truncateGuardError(
         `set role ${ROLES.fnOwner}; truncate clara.${rel} cascade`);
@@ -398,6 +390,40 @@ test("ft3-H1 · the five deliberate absences are absent, and the instrument that
     }
   });
 
+test("ft3-G5 · ARM ZERO: the shared guard attached WITHOUT a mutable-column allowlist refuses "
+  + "outright rather than passing everything -- `to_jsonb(new) - NULL::text[]` is NULL and "
+  + "`NULL is distinct from NULL` is FALSE, so a forgotten argument would be an open door drawn "
+  + "as a wall (law 68). The DIFFERENTIAL is the point: the same update succeeds once the "
+  + "correctly-attached trigger is back", async (t) => {
+    if (gate(t)) return;
+    const id = (await insertLawRow("tax_authorities", authorityRow())).rows[0].id;
+    const succ = (await insertLawRow("tax_authorities", authorityRow())).rows[0].id;
+
+    await inRolledBackTx(async (c) => {
+      await c.query(`set role ${ROLES.fnOwner}`);
+      // Re-attach with NO argument -- the exact mistake a seventh table would make.
+      await c.query("drop trigger t_tax_authorities_immutable on clara.tax_authorities");
+      await c.query(`create trigger t_tax_authorities_immutable before update
+                       on clara.tax_authorities for each row
+                       execute function clara._tf_ft3_law_row_immutable()`);
+      await assert.rejects(
+        () => c.query(`update clara.tax_authorities set superseded_by = $1,
+                         superseded_at = now() where id = $2`, [succ, id]),
+        (err) => {
+          assert.equal(err.code, "CLR10");
+          assert.match(err.message, /no mutable-column allowlist/);
+          return true;
+        },
+        "an unconfigured guard must refuse, not wave a LAWFUL update through");
+    });
+
+    const ok = await roleQuery(ROLES.fnOwner,
+      `update clara.tax_authorities set superseded_by = $1, superseded_at = now()
+        where id = $2 returning superseded_by`, [succ, id]);
+    assert.equal(ok.rows[0].superseded_by, succ,
+      "the real trigger admits that same stamp -- so ARM ZERO refused the missing ARGUMENT, not the update");
+  });
+
 test("ft3-H2 · 裁-33: not one of the six relations carries a lifecycle-state column, so nothing "
   + "this PR builds presumes an issued state exists -- a column CENSUS, never the absence of a "
   + "state machine, and the same census DOES find one on clara.report_runs", async (t) => {
@@ -423,21 +449,17 @@ test("ft3-H2 · 裁-33: not one of the six relations carries a lifecycle-state c
   });
 
 // ---------------------------------------------------------------------------------------
-// I · THE SCOPE BINDING on the seeded refusal rows -- and an honest statement of what this
-// PR can and cannot prove about it.
+// I · THE SCOPE BINDING -- and an honest statement of what this PR cannot prove about it.
 //
-// WHAT WAS ATTEMPTED AND WHY IT IS NOT HERE. The intended cell was an end-to-end differential:
-// insert a clara.metric_cells row for firm B carrying a reason row scoped to firm A, assert
-// CLR11; repeat with the platform (firm_id NULL) row, assert no CLR11. MEASURED, on the rig:
-// t_scope_cell_na_reason is a CONSTRAINT trigger (AFTER INSERT, DEFERRABLE INITIALLY
-// IMMEDIATE), so it fires at end of statement -- strictly AFTER the NOT NULL checks and after
-// the internal RI_ConstraintTrigger_* FK checks, whose names sort before it. Any incomplete
-// probe row therefore dies on 23502 or 23503 and never reaches the wall, and a cell that
-// accepted those codes would be measuring the wrong instrument. Reaching the trigger needs a
-// COMPLETE cell -- which needs a metric_evaluation_contexts row, which needs a
-// metric_input_snapshots row and a producer version. That chain is PR-6's run wrapper, and
-// the end-to-end arm belongs to PR-6's C21 cell, where a real cell can actually be minted.
-// Recorded here by name rather than left as a silent absence.
+// The intended cell was an end-to-end differential: insert a clara.metric_cells row for firm B
+// carrying a reason row scoped to firm A, assert CLR11; repeat with the platform row, assert
+// no CLR11. MEASURED on the rig: t_scope_cell_na_reason is a CONSTRAINT trigger (AFTER INSERT,
+// DEFERRABLE INITIALLY IMMEDIATE), so it fires at end of statement -- after the NOT NULL checks
+// and after the internal RI_ConstraintTrigger_* FK checks, whose names sort before it. Any
+// incomplete probe row dies on 23502/23503 and never reaches the wall, and a cell accepting
+// those codes would be measuring the wrong instrument. Reaching it needs a COMPLETE cell, hence
+// a metric_evaluation_contexts row, hence a snapshot and a producer version -- PR-6's run
+// wrapper. The end-to-end arm is PR-6's C21 cell; recorded by name, not left a silent absence.
 // ---------------------------------------------------------------------------------------
 
 test("ft3-I1 · the trigger that decides a reason row's firm scope IS attached to "

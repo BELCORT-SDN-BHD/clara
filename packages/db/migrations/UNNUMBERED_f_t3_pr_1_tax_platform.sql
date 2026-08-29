@@ -369,6 +369,19 @@ declare
   v_old_at     text   := v_old ->> 'owner_signed_at';
   v_new_at     text   := v_new ->> 'owner_signed_at';
 begin
+  -- (a0) ARM ZERO -- the allowlist itself must exist. Without this the guard is an OPEN DOOR
+  --      DRAWN AS A WALL (law 68): a trigger attached with no argument gives
+  --      `v_mutable = NULL`, `to_jsonb(new) - NULL::text[]` is NULL, and
+  --      `NULL is distinct from NULL` is FALSE -- so arm (c) would pass EVERY update silently.
+  --      All six triggers below pass an argument, so this cannot fire today; it exists so a
+  --      SEVENTH attachment that forgets one fails closed and loudly instead of quietly
+  --      unlocking the table. Behavioural cell ft3-G5 attaches exactly that trigger and
+  --      asserts the refusal.
+  if v_mutable is null or cardinality(v_mutable) = 0 then
+    raise exception 'clara._tf_ft3_law_row_immutable was attached to % with no mutable-column allowlist; refusing to run as an open door', tg_table_name
+      using errcode = 'CLR10', detail = '{"reason":"ft3_guard_unconfigured"}';
+  end if;
+
   -- (a) superseded is terminal.
   if (v_old ->> 'superseded_at') is not null or (v_old ->> 'superseded_by') is not null then
     raise exception 'a superseded % row is immutable', tg_table_name
