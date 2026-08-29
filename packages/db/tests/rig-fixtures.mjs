@@ -324,10 +324,23 @@ export async function insertUser(prefix, tag) {
   return id;
 }
 
-/** Seed an unconsumed firm_admissions token as the operator (superuser). */
+/** Seed an unconsumed firm_admissions token as the operator (superuser). 裁-16b (pre-beta
+ *  hardening batch): firm_admissions stores token_hash only -- the plaintext is minted here,
+ *  returned to the caller, and never written to the row itself.
+ *
+ *  `$1::uuid::text`, NOT `$1::text` (independent review 2026-08-29). `clara.create_firm` hashes
+ *  `p_admission_token::text`, i.e. uuid's own canonical lowercase-hyphenated rendering. Hashing
+ *  the CALLER'S SPELLING here instead would write a row no reader can ever find whenever the
+ *  spelling is not already canonical -- and this is a WRITE, so the damage is permanent: the
+ *  token would be unusable forever with nothing to compare against once the plaintext is gone.
+ *  The pre-hardening `where token = $1` was tolerant because Postgres coerced the parameter to
+ *  uuid for the comparison; hashing removes that coercion, so the cast has to be explicit. */
 export async function seedAdmission(note = "rig admission") {
   const token = randomUUID();
-  await rootQuery("insert into clara.firm_admissions (token, note) values ($1, $2)", [token, note]);
+  await rootQuery(
+    "insert into clara.firm_admissions (token_hash, note) values (sha256(convert_to($1::uuid::text,'UTF8')), $2)",
+    [token, note],
+  );
   return token;
 }
 

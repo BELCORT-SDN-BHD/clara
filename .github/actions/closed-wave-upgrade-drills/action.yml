@@ -223,3 +223,22 @@ runs:
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_hrd_a_recut_ci'
         PGDATABASE=clara_hrd_a_recut_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
           node --test tests/hrd-a-recut-guard.test.mjs
+
+    # Hardening-batch Migration B (裁-16) POPULATED upgrade drill. B carries two DATA
+    # conversions — the firm_admissions plaintext->hash backfill and the legacy op_receipts
+    # invite-receipt scrub — and BOTH are vacuous everywhere else in CI: the
+    # deploy-onto-existing leg applies main-then-HEAD with no seed in between, and the estate
+    # suite seeds only AFTER the whole chain migrated (so every row it writes is already
+    # hash-only). This drill supplies the missing precondition — a populated PRE-B database,
+    # including a consumed row, an uppercase-spelled uuid and legacy plaintext receipts — and
+    # proves each conversion per row against a dual derivation (Node crypto vs Postgres
+    # sha256), then mutates each guard for real. Reset-gated (replays the numbered chain once
+    # per cell), so it runs ALONE in its OWN throwaway database — the concurrent all-packages
+    # sweep only ever SKIPS it (`.claude/rules/db-tests.md`: a skip-only drill is a false green).
+    - name: Hardening-B populated upgrade drill (isolated DB)
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_hrd_b_upgrade_ci'
+        PGDATABASE=clara_hrd_b_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+          node --test tests/hrd-b-upgrade-drill.test.mjs

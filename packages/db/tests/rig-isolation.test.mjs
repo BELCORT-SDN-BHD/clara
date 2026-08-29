@@ -11,7 +11,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import {
   CLR,
   PG,
@@ -595,10 +595,33 @@ test("T23 create_firm is fail-closed on an admission token; create_client is adm
   await assertRaises(CLR.authz, () => createFirm(frank, { name: `${world.prefix}_noTok`, token: randomUUID(), opKey: opk() }), "create_firm unknown token");
 
   const token = await seedAdmission();
-  const firmF = await createFirm(frank, { name: `${world.prefix}_firmF`, token, opKey: opk() });
+  const firmFOpKey = opk();
+  const firmF = await createFirm(frank, { name: `${world.prefix}_firmF`, token, opKey: firmFOpKey });
   assert.ok(firmF, "create_firm with a valid token succeeds");
-  const consumed = await rootQuery("select consumed_at from clara.firm_admissions where token = $1", [token]);
-  assert.ok(consumed.rows[0].consumed_at != null, "admission token is consumed");
+  // 裁-16b (pre-beta hardening batch): firm_admissions stores token_hash only. The row is fetched
+  // by an INDEPENDENT key -- the op_key create_firm stamped on it -- and the digest is then
+  // recomputed in NODE and compared. An earlier draft selected the row BY the hash and asserted
+  // the same hash matched, which is circular: the WHERE clause enforced exactly what the SELECT
+  // claimed to prove, so it could only ever report true (independent review, 2026-08-29).
+  const row = await rootQuery(
+    "select id, consumed_at, encode(token_hash,'hex') as hash from clara.firm_admissions where consumed_op_key = $1",
+    [firmFOpKey],
+  );
+  assert.equal(row.rows.length, 1, "exactly one admission row carries the op_key create_firm consumed it under");
+  assert.ok(row.rows[0].consumed_at != null, "admission token is consumed");
+  assert.ok(row.rows[0].id != null, "the row is keyed by the surrogate id");
+  // 裁-16b direct census, AS OWNER: no plaintext `token` column exists on the table at all
+  // (not merely "unreadable" -- ABSENT).
+  const cols = await rootQuery(
+    "select attname from pg_attribute where attrelid = 'clara.firm_admissions'::regclass and attnum > 0 and not attisdropped",
+  );
+  assert.ok(!cols.rows.some((r) => r.attname === "token"), "firm_admissions carries no plaintext token column");
+  assert.ok(cols.rows.some((r) => r.attname === "token_hash"), "firm_admissions carries token_hash");
+  assert.equal(
+    row.rows[0].hash,
+    createHash("sha256").update(token, "utf8").digest("hex"),
+    "the row's token_hash is exactly sha256 of the plaintext token that was actually used -- derived independently, in Node, not by asking Postgres to confirm its own WHERE clause",
+  );
   const owner = await rootQuery("select role from clara.firm_memberships where firm_id = $1 and user_id = $2 and status = 'active'", [firmF, frank]);
   assert.equal(owner.rows[0]?.role, "owner", "bootstrapping user becomes owner");
   const grace = await insertUser(world.prefix, "grace");
