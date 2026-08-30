@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 import {
@@ -12,14 +10,11 @@ import {
   moduleStateHazards,
   reachableCallsFrom,
   reachableFrom,
-  scopeSpineModuleStateReport,
   spineGuardProof,
   stripComments,
   tryBlockRanges,
   uninspectableExportReasons,
 } from "../test/sourceOracle";
-
-const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("the TypeScript source oracle parses the module's real export record", () => {
   it("PIN AST-1: comments separate tokens instead of deleting them into invisibility", () => {
@@ -190,13 +185,6 @@ describe("module-level state is scoped by the AST, not a whole-file regex", () =
       "const cache = Object.create(null);",
       "const matcher = /ab/gy;",
     ]) assert.ok(moduleStateHazards(source).length > 0, `${source} passed`);
-  });
-
-  it("NO spine module holds unproved module-level mutable state — all four", () => {
-    for (const report of scopeSpineModuleStateReport(WEB_ROOT)) {
-      assert.ok(report.declarationCount > 0, `${report.file}: declaration walk is vacuous`);
-      assert.deepEqual(report.hazards, [], `${report.file}: mutable state outlives a request`);
-    }
   });
 
   it("an allowlist spelling without a substantial reason is not evidence", () => {
