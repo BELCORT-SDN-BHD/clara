@@ -551,7 +551,12 @@ describe("what the two reads actually put on the wire", () => {
   it("LOW-4: a verified caller with zero rows is a SUCCESSFUL empty result", async () => {
     const result = await loadOwnRegistrationRequests({ resolveSession: async () => SESSION });
     assert.equal(result.ok, true);
-    assert.deepEqual((result as { rows: unknown[] }).rows, []);
+    assert.deepEqual((result as { rows: readonly unknown[] }).rows, []);
+    assert.equal(
+      (result as { subject: string }).subject,
+      SESSION.subject,
+      "the mapper cannot bind hydrated rows unless the verified subject survives the read seam",
+    );
     assert.equal(new URL(onlyCall()).searchParams.get("applicant"), `eq.${APPLICANT}`);
   });
 

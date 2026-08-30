@@ -216,19 +216,21 @@ apps' `typecheck`/`build` stay green after it. Worth a second look from whoever 
 ## Security posture — owner/deploy obligations
 
 A cross-model adversarial security review of the P2 auth surface (Codex `gpt-5.6-sol`,
-2026-08-27) produced thirteen findings. Ten were fixed in code on this branch and are
+2026-08-27) produced thirteen findings; the round-two review added one deployment
+obligation. Ten were fixed in code on this branch and are
 covered by `tests/` (the redirect wall, the proxy matcher, the OTP hardening, the scope
 epoch, the key-class gate, the cookie hardening, the anti-cache headers, the logout wall).
 
-**Three are not code.** They are hosted-Supabase or deployment configuration that this
+**Four are not code.** They are hosted-Supabase or deployment configuration that this
 repository cannot enforce or prove, and they are the owner's to set and to re-verify after
 any Supabase project change. Each is stated with what must be true and how to check it.
 
 ### 1. Password policy must be set in Supabase Auth (review finding 10, LOW)
 
-The only constraint this repo can see is the invite form's `minLength={8}`, which a direct
-SDK or Auth API call bypasses entirely. The authoritative policy lives in the hosted
-project.
+The only constraints this repo can see are the `minLength={8}` courtesies on BOTH password
+surfaces: `components/invite-accept-form.tsx` and
+`components/entry/signup-account-form.tsx`. A direct SDK or Auth API call bypasses either
+entirely. The authoritative policy lives in the hosted project.
 
 - **Configure:** Supabase Dashboard → Authentication → Providers → Email → *Password
   requirements*. Set a minimum length of **at least 12** and require lower + upper +
@@ -239,8 +241,10 @@ project.
   `password_min_length`, `password_required_characters`,
   `password_hibp_enabled`. Keep the JSON response with the deploy record — a screenshot is
   not a receipt. Re-run it after any project restore.
-- **Keep aligned:** if the server minimum moves, move `minLength` in
-  `components/invite-accept-form.tsx` with it. The UI value is a courtesy, never the wall.
+- **Keep aligned:** if the server minimum moves, move `minLength` in BOTH
+  `components/invite-accept-form.tsx` and
+  `components/entry/signup-account-form.tsx` with it. The UI values are courtesies, never
+  the wall.
 
 ### 2. Access-JWT revocation window (review finding 5, MEDIUM)
 
@@ -283,15 +287,38 @@ the history stack. What remains is template and log hygiene:
   accepts. Keep access-log retention short and restricted, and prefer re-inviting over
   re-sending a leaked link.
 
+### 4. Signup confirmation redirect and enumeration posture (round-2 review, MEDIUM)
+
+`components/entry/signup-account-form.tsx` pins `emailRedirectTo` to the current origin's
+`/signup` route. The hosted project must admit that exact target and must keep email
+confirmation enabled; neither property can be enforced from this repository.
+
+- **Configure:** Supabase Dashboard → Authentication → URL Configuration → *Redirect
+  URLs*. Add the exact `<origin>/signup` URL for every deployed origin, with no wildcard.
+  A wildcard would turn any future regression that accepts a caller-controlled redirect
+  into a token-delivery vector. Under Authentication → Providers → Email, keep *Confirm
+  Email* ON, as PRD §8 requires for the interim signup guardrail.
+- **Verify (receipt):** with the project's Management API token,
+  `GET /v1/projects/{ref}/config/auth`; keep the JSON response with the deploy record and
+  verify `uri_allow_list` contains each exact `<origin>/signup` entry and
+  `mailer_autoconfirm` is `false`. Re-run the read after any project restore or auth
+  configuration change.
+- **Residual:** `/signup`'s response for an existing email is controlled by that hosted
+  confirmation setting. With confirmation ON, Supabase returns the non-enumerating
+  `user`/no-session shape and this app renders “Confirm your email”. With confirmation OFF,
+  Supabase returns its verbatim “User already registered” error. Turning confirmation OFF
+  therefore both violates PRD §8 and changes the surface into an email-enumeration signal.
+
 ### Also configuration, not code
 
 - **CDN caching.** The proxy sets `Cache-Control: private, no-store` on every gated response
   and applies the stricter headers `@supabase/ssr` supplies when it writes a session cookie.
   Do not add a Cloudflare cache rule that overrides `Cache-Control` for this app's HTML —
   a cached response carrying `Set-Cookie` signs the next visitor in as the previous one.
-- **Public signup.** This app has no signup route, but that does not disable signup in the
-  hosted project. Confirm Authentication → Providers → Email → *Allow new users to sign up*
-  is **off**; invite-only is a product invariant, not a UI choice.
+- **Public signup.** This app now has the ruled tier-3 `/signup` route. When that tranche is
+  deployed, Authentication → Providers → Email → *Allow new users to sign up* must be ON
+  for the entrance to work, while *Confirm Email* stays ON per obligation 4. The admission
+  gate remains a product invariant; neither setting is a substitute for it.
 - **`__Host-` cookies need HTTPS.** `lib/supabase/cookie-options.ts` names the session
   cookie `__Host-clara-auth` with `Secure`. Chrome and Firefox accept that on
   `http://localhost`; Safari does not — develop against HTTPS if you use Safari.

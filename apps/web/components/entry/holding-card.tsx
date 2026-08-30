@@ -54,7 +54,8 @@ import { LogoutButton } from "@/components/logout-button";
  *
  * 裁-58 binds the words: every plan is FREE until the amounts are ruled, and the
  * UI renders a TRIAL state — **never "RM0"** (裁-42's design wall stands). The
- * copy in `messages/en.json` says "trial", and `tests/holding-copy.test.ts` pins
+ * copy in `messages/en.json` says "trial", and
+ * `components/entry/pending-a11y.test.tsx` pins
  * that no entry-face string contains an RM amount at all.
  *
  * WHAT THE DB STILL SAYS, MEANWHILE. `request_firm_registration` writes an

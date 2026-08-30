@@ -228,7 +228,7 @@ export interface InviteAuthClient {
  * the mail body and nowhere else").
  *
  * So this component takes the Clara token as its OWN prop and does not decide
- * the URL shape. `app/invite/[token]/page.tsx` sources it through one named
+ * the URL shape. `app/(entry)/invite/[token]/page.tsx` sources it through one named
  * constant, which is the single line the ruling repoints. **When it is absent
  * the surface refuses honestly and consumes nothing** — see the guard below:
  * the one outcome that is never acceptable is reporting success for a journey

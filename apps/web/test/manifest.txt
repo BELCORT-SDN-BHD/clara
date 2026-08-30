@@ -49,6 +49,7 @@ components/documents/documents-a11y.test.tsx
 components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
 components/documents/lint-finding-detail.test.tsx
+components/entry/entry-contracts.test.tsx
 components/entry/pending-a11y.test.tsx
 components/entry/signup-a11y.test.tsx
 components/entry/signup-firm-form.test.tsx

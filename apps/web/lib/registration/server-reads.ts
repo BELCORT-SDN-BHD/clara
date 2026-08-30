@@ -23,7 +23,6 @@ import {
 
 import {
   loadRegistrationRequestsForApplicant,
-  type RegistrationRequestRow,
 } from "./reads";
 
 /** The server seam `loadOwnRegistrationRequests` resolves the caller through,
@@ -49,7 +48,17 @@ export type OwnRegistrationDeps = {
  * that observed zero rows.
  */
 export type OwnRegistrationResult =
-  | { readonly ok: true; readonly rows: RegistrationRequestRow[] }
+  | {
+      readonly ok: true;
+      /** The subject positively verified before the read was issued. Kept with
+       *  the rows so the holding mapper can bind every hydrated row back to the
+       *  identity that authorised this request. */
+      readonly subject: string;
+      /** Transport output is untrusted until holding-state validates all ten
+       *  columns. `getRows<T>` is a compile-time projection, not a runtime
+       *  decoder. */
+      readonly rows: readonly unknown[];
+    }
   | { readonly ok: false; readonly reason: "no_session" };
 
 /**
@@ -80,5 +89,5 @@ export async function loadOwnRegistrationRequests(
     session.subject,
     deps.signal,
   );
-  return { ok: true, rows };
+  return { ok: true, subject: session.subject, rows };
 }

@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import { StateBanner } from "@/components/common/state";
+import { SignupFirmForm } from "./signup-firm-form";
 
 /**
  * SIGNUP, STEP 1 OF 2 — create the Supabase account (design §4 A step 1).
@@ -110,7 +111,7 @@ export interface SignupAuthClient {
   };
 }
 
-type Stage = "form" | "submitting" | "check-email";
+type Stage = "form" | "submitting" | "check-email" | "firm";
 
 // NOTE the absence of a `= {}` default on the parameter itself. React always
 // passes a props object, and defaulting the whole parameter widens the inferred
@@ -133,9 +134,10 @@ export function SignupAccountForm({
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     // The DPA gate, re-checked at the act and not only in the disabled
-    // attribute. `disabled` is a rendering; this is the wall. They agree today,
-    // and this branch is what keeps them agreeing if a later lane restyles the
-    // control into something that can be clicked while it looks disabled.
+    // attribute. `disabled` is a rendering; this is the client-side gate. They
+    // agree today, and this branch keeps them agreeing if a later lane restyles
+    // the control into something that can be clicked while it looks disabled.
+    // It is not an Auth wall: the public anon key can call signUp directly.
     if (!dpaAccepted) return;
 
     setStage("submitting");
@@ -168,20 +170,27 @@ export function SignupAccountForm({
       return;
     }
 
-    // FAIL-CLOSED ON THE SHAPE, not just on `error`. Supabase's documented
-    // "confirmation required" signal is `data.user && !data.session`. A
-    // response carrying NEITHER is not a success we can act on: nothing was
-    // created that this journey can continue from, so it must not render the
-    // check-your-email state, which would send the person to an inbox with
-    // nothing in it. Absence is not evidence (review law 2).
-    if (!data?.user) {
-      setError(t("noAccountReturned"));
-      setStage("form");
+    // Branch on Supabase's TWO documented success shapes, not merely `user`.
+    // With confirmation ON the detector is exactly `data.user &&
+    // !data.session`; only that shape may promise an email. With auto-confirm
+    // both values exist, so the caller already holds what step 2 needs and must
+    // see the firm form rather than a confirmation message that is false.
+    if (data?.user && !data.session) {
+      setStage("check-email");
+      return;
+    }
+    if (data?.user && data.session) {
+      setStage("firm");
       return;
     }
 
-    setStage("check-email");
+    // A response carrying neither documented shape is not a success we can act
+    // on. Absence is not evidence (review law 2).
+    setError(t("noAccountReturned"));
+    setStage("form");
   }
+
+  if (stage === "firm") return <SignupFirmForm />;
 
   if (stage === "check-email") {
     return (
@@ -229,11 +238,18 @@ export function SignupAccountForm({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="signup-password">{t("passwordLabel")}</Label>
+            {/*
+              `minLength` is a UI convenience ONLY — a direct SDK/Auth API call
+              bypasses it entirely. The authoritative password policy lives in
+              hosted Supabase Auth and is an owner/deploy obligation recorded
+              in README.md ("Security posture"), review finding 10.
+            */}
             <Input
               id="signup-password"
               type="password"
               autoComplete="new-password"
               required
+              minLength={8}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />

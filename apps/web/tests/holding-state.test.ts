@@ -38,7 +38,13 @@ const ROW = (over: Partial<RegistrationRequestRow> = {}): RegistrationRequestRow
   ...over,
 });
 
-const ok = (rows: RegistrationRequestRow[]): OwnRegistrationResult => ({ ok: true, rows });
+const SUBJECT = "22222222-2222-2222-2222-222222222222";
+
+const ok = (rows: RegistrationRequestRow[]): OwnRegistrationResult => ({
+  ok: true,
+  subject: SUBJECT,
+  rows,
+});
 
 describe("holdingStateFrom — the six renderings, one per observable fact", () => {
   it("an OPEN row is `pending`, carrying the DB's own firm name", () => {
@@ -158,6 +164,56 @@ describe("the NEWEST row decides — decided rows accumulate", () => {
   });
 });
 
+describe("MED-4: hydrated rows are validated and bound to the verified subject", () => {
+  it("a partial row such as {status: 'open'} fails closed as malformed", () => {
+    const result = { ok: true, rows: [{ status: "open" }] } as unknown as OwnRegistrationResult;
+    assert.deepEqual(holdingStateFrom(result, SUBJECT), {
+      kind: "read-failed",
+      reason: "malformed",
+    });
+  });
+
+  it("a non-string reason fails closed even when this status would not display it", () => {
+    const result = ok([ROW({ status: "open", reason: 42 as unknown as string })]);
+    assert.deepEqual(holdingStateFrom(result, SUBJECT), {
+      kind: "read-failed",
+      reason: "malformed",
+    });
+  });
+
+  it("a well-formed row for somebody else fails closed as wrong_subject", () => {
+    const result = ok([ROW({ applicant: "99999999-9999-9999-9999-999999999999" })]);
+    assert.deepEqual(holdingStateFrom(result, SUBJECT), {
+      kind: "read-failed",
+      reason: "wrong_subject",
+    });
+  });
+
+  it("every one of the ten declared columns is shape-checked", () => {
+    const invalid: Array<[keyof RegistrationRequestRow, unknown]> = [
+      ["id", 1],
+      ["applicant", null],
+      ["firm_name", false],
+      ["note", 1],
+      ["status", null],
+      ["decided_by", 1],
+      ["decided_at", false],
+      ["reason", 1],
+      ["firm_id", false],
+      ["created_at", 1],
+    ];
+    for (const [column, value] of invalid) {
+      const row = { ...ROW(), [column]: value };
+      const result = { ok: true, rows: [row] } as unknown as OwnRegistrationResult;
+      assert.deepEqual(
+        holdingStateFrom(result, SUBJECT),
+        { kind: "read-failed", reason: "malformed" },
+        `${column} was not validated`,
+      );
+    }
+  });
+});
+
 describe("RED-BEFORE — each mutant is measured to give a DIFFERENT answer", () => {
   /** MUTANT A: the fail-closed collapse — `!result.ok` treated as emptiness. */
   const collapseUnidentified = (r: OwnRegistrationResult): HoldingState =>
@@ -166,7 +222,7 @@ describe("RED-BEFORE — each mutant is measured to give a DIFFERENT answer", ()
   /** MUTANT B: an unknown status guessed as pending instead of refused. */
   const guessUnknownAsPending = (r: OwnRegistrationResult): HoldingState => {
     if (!r.ok) return { kind: "unidentified" };
-    const n = r.rows[0];
+    const n = r.rows[0] as RegistrationRequestRow | undefined;
     if (n === undefined) return { kind: "invite-expected" };
     if (n.status === "rejected") return { kind: "rejected", firmName: n.firm_name, reason: n.reason };
     if (n.status === "approved") return { kind: "approved", firmName: n.firm_name };
@@ -190,7 +246,9 @@ describe("RED-BEFORE — each mutant is measured to give a DIFFERENT answer", ()
   /** MUTANT E: scan for an open row anywhere instead of taking the newest. */
   const scanForOpen = (r: OwnRegistrationResult): HoldingState => {
     if (!r.ok) return { kind: "unidentified" };
-    const open = r.rows.find((x) => x.status === "open");
+    const open = (r.rows as readonly RegistrationRequestRow[]).find(
+      (x) => x.status === "open",
+    );
     return open === undefined ? holdingStateFrom(r) : { kind: "pending", firmName: open.firm_name };
   };
 

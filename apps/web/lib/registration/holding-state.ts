@@ -43,6 +43,14 @@
 // "pending". `lib/registration/reads.ts`'s header records the same split from
 // the read side. The translation happens HERE, once, in the copy layer — never
 // by re-writing what the row said.
+//
+// PREVIOUS ASYMMETRY (native security review of #461, round 2): this mapper
+// trusted `getRows<RegistrationRequestRow>` as if a TypeScript generic decoded
+// the HTTP response. `readCallerContextForSubject` in `lib/identity/doors.ts`
+// already validated every hydrated column AND rebound the row to the verified
+// subject. The holding read did neither, even though it decides what is true of
+// the same person. `isRegistrationRequestRow` and the subject comparison below
+// close that asymmetry; a 200 carrying a partial or foreign row is a denial.
 
 import type {
   RegistrationRequestRow,
@@ -63,7 +71,33 @@ export type HoldingState =
   /** The caller could not be verified. Fail-closed, and NOT emptiness. */
   | { readonly kind: "unidentified" }
   /** The read did not succeed. Fail-closed, and NOT emptiness. */
-  | { readonly kind: "read-failed" };
+  | {
+      readonly kind: "read-failed";
+      readonly reason?: "malformed" | "wrong_subject" | "read_error";
+    };
+
+/** Runtime decoder for ALL TEN columns declared by
+ * `REGISTRATION_REQUESTS_SELECT`. A typed `getRows<T>` call does not validate
+ * bytes supplied by an HTTP peer, so nothing below may inspect status or copy
+ * text until this predicate has positively seen every field's shape. */
+export function isRegistrationRequestRow(
+  value: unknown,
+): value is RegistrationRequestRow {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.id === "string" &&
+    typeof row.applicant === "string" &&
+    typeof row.firm_name === "string" &&
+    (row.note === null || typeof row.note === "string") &&
+    typeof row.status === "string" &&
+    (row.decided_by === null || typeof row.decided_by === "string") &&
+    (row.decided_at === null || typeof row.decided_at === "string") &&
+    (row.reason === null || typeof row.reason === "string") &&
+    (row.firm_id === null || typeof row.firm_id === "string") &&
+    typeof row.created_at === "string"
+  );
+}
 
 /**
  * NEWEST FIRST, AND ONLY THE NEWEST DECIDES.
@@ -78,10 +112,19 @@ export type HoldingState =
  * The ordering is the DB's, not re-derived here: re-sorting client-side would be
  * a second implementation of the same ordering, free to disagree with the first.
  */
-export function holdingStateFrom(result: OwnRegistrationResult): HoldingState {
+export function holdingStateFrom(
+  result: OwnRegistrationResult,
+  verifiedSubject: string | null = result.ok ? result.subject : null,
+): HoldingState {
   if (!result.ok) return { kind: "unidentified" };
-  const newest: RegistrationRequestRow | undefined = result.rows[0];
+  const newest = result.rows[0];
   if (newest === undefined) return { kind: "invite-expected" };
+  if (!isRegistrationRequestRow(newest)) {
+    return { kind: "read-failed", reason: "malformed" };
+  }
+  if (newest.applicant !== verifiedSubject) {
+    return { kind: "read-failed", reason: "wrong_subject" };
+  }
 
   switch (newest.status) {
     case "open":

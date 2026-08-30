@@ -68,8 +68,8 @@ import type { SessionTokenAccessor } from "@/lib/session";
  * the door refuses `CLR10 "invalid invite token"` every time.
  *
  * **Declared here, in ONE file, so both ends import it rather than re-typing
- * the string.** The two ends are `app/invite/[token]/page.tsx` (reads it) and
- * P4-4's courier, `app/api/invite/route.ts` (builds the link). A courier that
+ * the string.** The two ends are `app/(entry)/invite/[token]/page.tsx` (reads it) and
+ * P4-4's invite courier (builds the link). A courier that
  * spelled it `?token=` would ship an invite nobody can accept, and nothing
  * would fail until a real employee clicked a real link.
  *

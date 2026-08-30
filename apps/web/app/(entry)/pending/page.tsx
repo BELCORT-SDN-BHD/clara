@@ -59,9 +59,10 @@ export async function generateMetadata() {
 export default async function PendingPage() {
   let state: HoldingState;
   try {
-    state = holdingStateFrom(await loadOwnRegistrationRequests());
+    const result = await loadOwnRegistrationRequests();
+    state = holdingStateFrom(result, result.ok ? result.subject : null);
   } catch {
-    state = { kind: "read-failed" };
+    state = { kind: "read-failed", reason: "read_error" };
   }
   return <HoldingCard state={state} />;
 }

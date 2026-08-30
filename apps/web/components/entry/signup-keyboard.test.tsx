@@ -86,6 +86,24 @@ const theCheckbox = (n: Node) => n.tagName === "INPUT" && n.type === "checkbox";
 const byLabelledField = (label: RegExp) => (n: Node) =>
   (n.tagName === "INPUT" || n.tagName === "TEXTAREA") && label.test(textOf((n.parentNode ?? {}) as never));
 
+async function submitAcceptedAccount(
+  h: Awaited<ReturnType<typeof renderComponent>>,
+): Promise<void> {
+  const email = findIn(h.container as never, byLabelledField(/Email/));
+  const password = findIn(h.container as never, byLabelledField(/Password/));
+  const box = findIn(h.container as never, theCheckbox);
+  const form = findIn(h.container as never, (n) => n.tagName === "FORM");
+  assert.ok(email && password && box && form, "the complete signup form must render");
+  await h.act(() => {
+    setFieldValue(email as never, "aisyah@example.com");
+    setFieldValue(password as never, "correct horse battery");
+  });
+  await h.fireEvent(box as never, "click", (n) => setNativeValue(n as never, "checked", true));
+  for (let i = 0; i < 3; i++) await h.settle();
+  await h.fireEvent(form as never, "submit");
+  for (let i = 0; i < 6; i++) await h.settle();
+}
+
 test("THE ACCOUNT STEP IS KEYBOARD-OPERABLE, and the DPA gate is a REAL wall", async () => {
   let created = false;
   const router: Router = { replaced: [] };
@@ -161,6 +179,92 @@ test("THE ACCOUNT STEP IS KEYBOARD-OPERABLE, and the DPA gate is a REAL wall", a
       assert.equal(created, true, "the keyboard-driven journey did not create the account");
       assert.match(textOf(h.container as never), /Confirm your email/);
       assert.deepEqual(checkKeyboardWalk(h.container as never), [], "no violations on the confirmation state");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("MED-2: emailRedirectTo is the exact origin /signup URL and ignores the query string", async () => {
+  type SignupCredentials = Parameters<SignupAuthClient["auth"]["signUp"]>[0];
+  let captured: SignupCredentials | null = null;
+  const client: () => SignupAuthClient = () => ({
+    auth: {
+      signUp: async (credentials) => {
+        captured = credentials;
+        return { data: { user: { id: "u1" }, session: null }, error: null };
+      },
+    },
+  });
+  const location = window.location as unknown as { origin?: string; search?: string };
+  const previousOrigin = location.origin;
+  const previousSearch = location.search;
+  location.origin = "https://app.clarabook.example";
+  location.search = "?r=https%3A%2F%2Fevil.example%2Ftake-token";
+
+  try {
+    await withEnv(async () => jsonResponse({}), async () => {
+      const h = await renderComponent(
+        App(createElement(SignupAccountForm, { createSupabaseClient: client }), { replaced: [] }),
+      );
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        await submitAcceptedAccount(h);
+        assert.equal(
+          captured?.options?.emailRedirectTo,
+          "https://app.clarabook.example/signup",
+          "the confirmation target was sourced from caller-controlled query input",
+        );
+        assert.doesNotMatch(captured?.options?.emailRedirectTo ?? "", /evil\.example/);
+      } finally {
+        await h.unmount();
+      }
+    });
+  } finally {
+    if (previousOrigin === undefined) delete location.origin;
+    else location.origin = previousOrigin;
+    if (previousSearch === undefined) delete location.search;
+    else location.search = previousSearch;
+  }
+});
+
+test("LOW-1: Supabase's auto-confirm {user, session} shape opens the firm step", async () => {
+  const client: () => SignupAuthClient = () => ({
+    auth: {
+      signUp: async () => ({
+        data: { user: { id: "u1" }, session: { access_token: "jwt" } },
+        error: null,
+      }),
+    },
+  });
+  await withEnv(async () => jsonResponse({}), async () => {
+    const h = await renderComponent(
+      App(createElement(SignupAccountForm, { createSupabaseClient: client }), { replaced: [] }),
+    );
+    try {
+      for (let i = 0; i < 3; i++) await h.settle();
+      await submitAcceptedAccount(h);
+      const text = textOf(h.container as never);
+      assert.match(text, /Tell us about your firm/, "the auto-confirmed session did not reach step 2");
+      assert.doesNotMatch(text, /Confirm your email/, "the auto-confirm shape was mislabelled as confirmation-required");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("LOW-3: the signup password field carries the same 8-character courtesy floor as invite", async () => {
+  await withEnv(async () => jsonResponse({}), async () => {
+    const h = await renderComponent(
+      App(createElement(SignupAccountForm, { createSupabaseClient: () => ({ auth: { signUp: async () => ({ data: { user: null, session: null }, error: null }) } }) }), { replaced: [] }),
+    );
+    try {
+      for (let i = 0; i < 3; i++) await h.settle();
+      const password = findIn(h.container as never, byLabelledField(/Password/)) as unknown as Record<string, unknown> | null;
+      assert.ok(password, "the signup password field did not render");
+      const propsKey = Object.keys(password).find((key) => key.startsWith("__reactProps"));
+      assert.ok(propsKey, "the password field's live React props were not observable");
+      assert.equal((password[propsKey] as { minLength?: number }).minLength, 8);
     } finally {
       await h.unmount();
     }
