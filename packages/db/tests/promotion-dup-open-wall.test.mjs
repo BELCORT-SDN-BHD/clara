@@ -372,7 +372,15 @@ test("MBB-7(a) D2: a second wake_propose_client_onboarding on the same document 
   assert.equal(await openOnboardingQuestions(doc.documentId), 1);
 });
 
-test("MBB-7(a) D2 THE SECOND WRITER: wake_open_firm_question(kind='onboarding_proposed') on a document that already has one now refuses CLR10/already_open -- the path Door 2's body check can never see", async (t) => {
+// SUPERSEDED BY THE KIND WALL (packages/db/migrations/
+// UNNUMBERED_wake_open_firm_question_kind_wall.sql, PROGRESS.md Known-issues 3a), full battery
+// in wake-open-firm-question-kind-wall.test.mjs. This cell used to prove that
+// uq_firm_open_questions_onboarding_open -- not Door 2's body check -- is what refuses
+// wake_open_firm_question's SECOND attempt at kind='onboarding_proposed'. The kind wall now
+// refuses the FIRST attempt too, unconditionally, at the verb level, before the shared core (and
+// its index) are ever reached -- so this cell is trued to the new, stronger reason rather than
+// left asserting a reason (already_open/onboarding_proposed) the verb can no longer produce.
+test("MBB-7(a) D2 THE SECOND WRITER, TRUED: wake_open_firm_question(kind='onboarding_proposed') on a document that already has one now refuses CLR10/door_owned_kind -- the kind wall fires before the index this cell used to name is ever reached", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
   const doc = await freshDoc();
@@ -381,71 +389,63 @@ test("MBB-7(a) D2 THE SECOND WRITER: wake_open_firm_question(kind='onboarding_pr
     document: doc.documentId, basis: { sightings: 1, citations: [citation] },
     authorization: await freshAuthorization(doc.sha256),
   });
-  // BEFORE MBB-7(a) this call was ADMITTED: wake_open_firm_question takes a caller-supplied
-  // kind, holds no document lock, runs no duplicate-open check and demands no egress
-  // authorization. The ONLY thing that refuses it is the new index.
-  // MUTANT this discriminates: drop uq_firm_open_questions_onboarding_open -> this call
-  // succeeds and the cell goes RED.
   const err = await assertRaises(CLR.badRequest,
     () => openFirmQuestion(secret, { document: doc.documentId }),
     "wake_open_firm_question opening a SECOND onboarding_proposed question on the same document");
-  assert.equal(detailReason(err), "already_open");
-  assert.equal(detailClass(err), "onboarding_proposed",
-    "the shared core gives the index's 23505 the SAME typed name Door 2's own body check uses");
-  assert.equal(await openOnboardingQuestions(doc.documentId), 1);
+  assert.equal(detailReason(err), "door_owned_kind");
+  assert.equal(detailClass(err), "kind");
+  assert.equal(await openOnboardingQuestions(doc.documentId), 1, "still exactly the one Door 2 opened");
 });
 
+// TRUED by the kind wall (same migration as above): wake_open_firm_question can no longer mint
+// 'onboarding_proposed' at all, so the onboarding leg now goes through Door 2 -- the wall's own
+// honest recourse -- while the point of THIS cell (a different kind is untouched, and settling
+// frees the slot) is otherwise unchanged.
 test("MBB-7(a) D2: the wall is KIND-scoped -- a second open question of a different kind on the same document is still admitted, and settling the onboarding one frees its slot", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
   const doc = await freshDoc();
-  const first = await openFirmQuestion(secret, { document: doc.documentId });
+  const { citation } = await seedOneRegion(doc.documentId);
+  const basis = { sightings: 1, citations: [citation] };
+  const first = await proposeOnboarding(secret, { document: doc.documentId, basis, authorization: await freshAuthorization(doc.sha256) });
   const other = await openFirmQuestion(secret, { document: doc.documentId, kind: "unattributed", opKey: opk("mbb7d2-other") });
   assert.ok(other.rows[0].result.question_id, "a DIFFERENT kind on the same document is untouched by the wall");
 
   await humanQuery(world.users.bob,
     "select clara.dismiss_firm_question($1,'rig: settled',$2)",
     [first.rows[0].result.question_id, opk("dfq")]);
-  const again = await openFirmQuestion(secret, { document: doc.documentId, opKey: opk("mbb7d2-again") });
+  const again = await proposeOnboarding(secret, {
+    document: doc.documentId, basis, authorization: await freshAuthorization(doc.sha256), opKey: opk("mbb7d2-again"),
+  });
   assert.ok(again.rows[0].result.question_id, "dismissing leaves the predicate and frees the slot");
   assert.equal(await openOnboardingQuestions(doc.documentId), 1);
 });
 
-test("MBB-7(a) D2 RACE: two sessions opening the same onboarding_proposed question through the UNLOCKED writer -- the loser is observably BLOCKED on the index (never a sleep), then refuses CLR10/already_open; exactly one question survives", async (t) => {
+// SUPERSEDED BY THE KIND WALL. This cell used to race two wake_open_firm_question(kind=
+// 'onboarding_proposed') calls against uq_firm_open_questions_onboarding_open itself and prove
+// the loser observably BLOCKED on the winner's uncommitted insert before refusing already_open.
+// That scenario is now STRUCTURALLY IMPOSSIBLE: the kind wall refuses BOTH calls before either
+// ever reaches _reserve_op, let alone the shared core's INSERT -- there is no winner, no insert,
+// and nothing for either session to block on (a `waitBlockedByOrThrow` against this call now
+// times out, since neither session ever takes the lock it was watching for). Trued to prove the
+// new invariant instead: two CONCURRENT callers both refuse, independently and identically.
+test("MBB-7(a) D2 RACE, TRUED BY THE KIND WALL: two CONCURRENT wake_open_firm_question(kind='onboarding_proposed') calls both refuse CLR10/door_owned_kind -- there is no winner, no lock, and no index left to race against", async (t) => {
   if (unready(t)) return;
   const { secret: s1 } = await mintFiling();
   const { secret: s2 } = await mintFiling();
   const doc = await freshDoc();
   const call = namedCall("wake_open_firm_question", OFQ_SPECS);
 
-  // wake_open_firm_question is deliberately the racer here, NOT wake_propose_client_onboarding:
-  // Door 2 already serializes its own two callers on `clara.documents ... for update` (the
-  // separate cell below proves that lock is real), so racing Door 2 against itself would
-  // measure the LOCK, not the index. This path holds no such lock, so the index is the only
-  // thing standing between the two sessions.
-  let t1 = null; let t2 = null; let blocked = false; let loser;
-  try {
-    t1 = await openWakeSession(s1);
-    await t1.c.query(call, ofqVals({ document: doc.documentId, opKey: opk("mbb7d2race-a") }));
-
-    t2 = await openWakeSession(s2);
-    const t2p = t2.c
-      .query(call, ofqVals({ document: doc.documentId, opKey: opk("mbb7d2race-b") }))
-      .then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
-
-    blocked = await waitBlockedByOrThrow(t2.pid, t1.pid, `the ${D2_INDEX} insert conflict`);
-    await t1.c.query("commit");
-    loser = await t2p;
-  } finally {
-    await closeWakeSession(t1);
-    await closeWakeSession(t2);
+  const [r1, r2] = await Promise.allSettled([
+    runAs(wakeActor("clara_wake_filing", s1), call, ofqVals({ document: doc.documentId, opKey: opk("mbb7d2race-a") })),
+    runAs(wakeActor("clara_wake_filing", s2), call, ofqVals({ document: doc.documentId, opKey: opk("mbb7d2race-b") })),
+  ]);
+  for (const [label, r] of [["session 1", r1], ["session 2", r2]]) {
+    assert.equal(r.status, "rejected", `${label} must refuse -- neither call can ever succeed`);
+    assert.equal(r.reason.code, CLR.badRequest, `${label} refuses typed CLR10, not a raw ${PG.uniqueViolation}`);
+    assert.equal(detailReason(r.reason), "door_owned_kind", `${label} refuses via the kind wall, not the index`);
   }
-
-  assert.ok(blocked, "T2 must be observably blocked on T1's uncommitted insert");
-  assert.equal(loser.ok, false, "the loser must REFUSE, not open a second onboarding question");
-  assert.equal(loser.e.code, CLR.badRequest, `the loser refuses typed CLR10, not a raw ${PG.uniqueViolation}`);
-  assert.equal(detailReason(loser.e), "already_open");
-  assert.equal(await openOnboardingQuestions(doc.documentId), 1);
+  assert.equal(await openOnboardingQuestions(doc.documentId), 0, "neither concurrent call wrote a row");
 });
 
 test("MBB-7(a) D2: Door 2's own two callers serialize on the document row lock -- measured, not taken from 0142's comment; the loser blocks and then refuses through the BODY check", async (t) => {
