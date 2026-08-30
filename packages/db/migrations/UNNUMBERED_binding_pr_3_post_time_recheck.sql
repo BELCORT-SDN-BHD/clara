@@ -40,7 +40,7 @@
 -- =====================================================================================
 --   1. clara._approve_entry_core(jsonb,uuid,uuid,text,text)
 --      pre-image prosrc sha256 d5ab4afc85f79c2676e047ae1f2a5c622cac81f9877a502ae521531b11a3c637
---      (19431 bytes), measured on a PRISTINE replay of main at frontier
+--      (19 431 CHARACTERS -- length(), not octet_length(); 19 444 bytes), measured on a PRISTINE replay of main at frontier
 --      0155_client_identifiers_unique -- the same value 0154's own SS1 pins and its tail
 --      re-asserts BYTE-IDENTICAL, deliberately, so this file has an undisturbed pre-image.
 --      It is replaced by SPLICE, never by retype -- see "A PATCH, NEVER A REBUILD" below.
@@ -115,10 +115,16 @@
 -- binding row -- steps (2) then (3) of 0154 SS5b's one order, the same order every binding
 -- lifecycle writer takes. It sits AFTER the advisory keys this body already holds (203005003
 -- vendor, 203005004 client, 203005005 duplicate), and that cannot close a cycle: NO binding
--- lifecycle writer takes any of those three keys. That is MEASURED, not reasoned: on the rig,
--- of the EIGHT bodies whose comment-stripped prosrc calls clara._binding_lock_pair -- both
--- proposal doors, the agent core, sign, decline, reset_binding_decline, the stale-proposal sweep
--- and this one -- clara._approve_entry_core is the ONLY one that also names 203005003 / 203005004
+-- lifecycle writer takes any of those three keys. That is MEASURED, not reasoned -- and the
+-- arithmetic is stated exactly, because an earlier cut of this comment double-counted the agent
+-- core inside "both proposal doors" and reported eight where it had enumerated nine.
+--   BEFORE this file: SIX bodies call clara._binding_lock_pair --
+--     propose_vendor_identity_binding · _propose_vendor_binding_agent_core ·
+--     sign_vendor_identity_binding · decline_vendor_identity_binding ·
+--     reset_binding_decline · _expire_stale_proposals
+--   AFTER this file: EIGHT -- the two it adds are clara._approve_entry_core (this splice) and
+--     clara.reset_binding_revocation (SS3).
+-- Of all eight, clara._approve_entry_core is the ONLY one that also names 203005003 / 203005004
 -- / 203005005. So nothing this body waits on can be waiting on something this body holds.
 --
 -- RECORDED, not new: clara.revoke_vendor_identity_binding takes the ROW lock and no pair key at
@@ -399,7 +405,7 @@ begin
   v_pt_page_counterparty uuid; v_pt_page_same boolean; v_pt_page_ambiguous boolean;
   v_pt_detail text; v_pt_detail_j jsonb;
   v_pt_suppression text; v_pt_outcome text; v_pt_annotate boolean; v_pt_warning jsonb;
-  v_pt_expired boolean;$t1$);
+  v_pt_expired boolean; v_pt_lifted boolean;$t1$);
 
   -- ---------------------------------------------------------------------------------
   -- (2) THE CONTROL ITSELF, immediately before the approve UPDATE -- after every other wall,
@@ -420,9 +426,15 @@ begin
   -- TWO GATES, both ruled (O3, 2026-08-29):
   --   * `e.vendor_binding_id is not null` -- fourteen call sites reach this body and most carry
   --     no binding at all; an ungated check would fire in every one of them.
-  --   * `e.reversal_of is null` -- REVERSALS BYPASS ENTIRELY. An entry posted under a
-  --     since-revoked binding is exactly the entry a human needs to reverse, and a check that
-  --     refused it would block its own remedy. This is not optional under any arm.
+  --   * `e.reversal_of is null` -- REVERSALS BYPASS ENTIRELY (O3, and not optional under any
+  --     arm). STATED ACCURATELY, because the obvious reading overclaims: NO caller can put a
+  --     binding marker on a reversal today -- clara.reverse_entry builds the mirror WITHOUT
+  --     vendor_binding_id (measured on its live body), and only _draft_entry_core / revise_entry
+  --     write that column. So the bypass is not what keeps the remedy reachable right now; the
+  --     gate above it already is. It is DEFENCE IN DEPTH against the day a reversal path does
+  --     carry the marker, and the rig reaches it only by building such an entry by hand
+  --     (bpr3.C7). Without it, an entry posted under a since-revoked binding would be refused
+  --     the very reversal that remedies it -- a control blocking its own remedy.
   if e.vendor_binding_id is not null and e.reversal_of is null then
     -- 0154 SS5b's ONE ORDER: the pair key BEFORE the row lock. The pair columns are immutable
     -- and have no writer anywhere, so reading them unlocked cannot go stale; what the key
@@ -677,6 +689,19 @@ begin
     -- moved below f1/f2/f3. The refusal itself is unchanged in every such case -- the same set of
     -- states refuses, and only the discriminant a classifier reads can move.
     v_pt_expired := (v_pt_b.status='expired' or v_pt_b.expires_at<=now());
+    -- FIND-2 (#452 native review, RULED): A LIFTED REVOCATION IS NOT A CLOCK EXPIRY, and must
+    -- not be narrated as one. 裁-46 lands a reset revocation on `expired` deliberately (it is the
+    -- estate's terminal status that no wall keys on), which means the two states are
+    -- INDISTINGUISHABLE by status alone -- so a human reading "the binding had expired" on a
+    -- posted entry would be told a clock ran out when in fact an admin had taken the authority
+    -- away and another had given it back.
+    -- THE FINGERPRINT IS EXACT, not a heuristic: clara.reset_binding_revocation is the ONLY
+    -- writer that clears `revoked_at` while LEAVING `revoked_by` (it says so, and ck_vib_revoked
+    -- forces the clear), and a fresh proposal for the pair is a NEW row whose revoked_by is null.
+    -- So `expired AND revoked_at is null AND revoked_by is not null` is reachable by exactly one
+    -- history.
+    v_pt_lifted := (v_pt_b.status='expired'
+                    and v_pt_b.revoked_at is null and v_pt_b.revoked_by is not null);
 
     -- (1) ------------------------------------------------------------------------------------
     if v_pt_b.status='revoked' or v_pt_suppression='revoked' then
@@ -705,8 +730,10 @@ begin
     end if;
 
     -- (2) ------------------------------------------------------------------------------------
+    -- The clock, and the ONE state that wears the clock's clothes without being it (FIND-2).
+    -- Both annotate-and-post; they differ only in what the receipt SAYS happened.
     if v_pt_reason is null and v_pt_expired then
-      v_pt_reason:='binding_expired';
+      v_pt_reason := case when v_pt_lifted then 'binding_revocation_lifted' else 'binding_expired' end;
     end if;
 
     -- (3) ------------------------------------------------------------------------------------
@@ -725,7 +752,7 @@ begin
 
     -- O3: EXPIRY IS A CLOCK, REVOCATION IS AN ACT. An entry drafted three days before expiry
     -- and approved two days after it posts, with the divergence recorded and annotated.
-    v_pt_annotate:=(v_pt_reason='binding_expired');
+    v_pt_annotate:=(v_pt_reason in ('binding_expired','binding_revocation_lifted'));
     v_pt_outcome:=case when v_pt_reason is null then 'bound'
                        when v_pt_annotate then 'divergence' else 'refused' end;
 
@@ -746,10 +773,14 @@ begin
       -- and on the door's return, beside (never inside) the pre-existing no-counterparty
       -- warning -- two different facts must not share one slot.
       v_pt_warning:=jsonb_build_object(
-        'code','binding_expired_at_post',
-        'message','the vendor identity binding had expired when this entry was approved; the entry posted and the divergence is recorded',
+        'code',case when v_pt_lifted then 'binding_revocation_lifted_at_post'
+                    else 'binding_expired_at_post' end,
+        'message',case when v_pt_lifted
+          then 'this vendor identity binding had been REVOKED and the revocation was later lifted by an admin, which leaves the authority terminal rather than live; the entry posted and the divergence is recorded'
+          else 'the vendor identity binding had expired when this entry was approved; the entry posted and the divergence is recorded' end,
         'binding_id',e.vendor_binding_id,
         'expires_at',v_pt_b.expires_at,
+        'revoked_by',v_pt_b.revoked_by,
         'resolution_recorded',(v_pt_res_facts is not null and v_pt_res_ocr is not null));
     elsif v_pt_reason is not null then
       raise exception 'the vendor identity binding no longer holds at post time'
@@ -912,7 +943,7 @@ set role clara_fn_owner;
 create function clara.reset_binding_revocation(
     p_binding uuid, p_reason text, p_op_key text)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fn$
-declare c record; v_dedupe jsonb; b record; v_reason text; v_pair record; v_posted int;
+declare c record; v_dedupe jsonb; b record; v_reason text; v_pair record; v_posted int; v_drafts int;
 begin
   c := clara._human_ctx(clara.role_rank('admin'));
   if p_op_key is null or btrim(p_op_key) = '' then
@@ -921,7 +952,13 @@ begin
   if p_binding is null then
     raise exception 'binding is required' using errcode = 'CLR10';
   end if;
-  v_reason := nullif(btrim(coalesce(p_reason, '')), '');
+  -- FIND-1 (#452 native review, MEDIUM — MEASURED, not theorised): single-argument btrim strips
+  -- SPACES ONLY. `btrim(E'\t')` is E'\t', which is not '', so a reason consisting of one tab or
+  -- one newline satisfied "non-blank" and lifted a revocation with no reason on the receipt.
+  -- The character set is given explicitly. The estate's 0154 siblings
+  -- (decline_vendor_identity_binding, reset_binding_decline, and revoke's own spelling) carry the
+  -- same single-arg idiom; that is NOT this PR's to change and is on the fix queue.
+  v_reason := nullif(btrim(coalesce(p_reason, ''), E' \t\n\r\f\v'), '');
   if v_reason is null then
     raise exception 'a revocation-reset reason is required' using errcode = 'CLR36',
       detail = '{"reason":"reset_reason_required"}';
@@ -961,6 +998,12 @@ begin
   -- ended; an admin re-opening it is entitled to the same figure, and it is DB-derived.
   select count(*)::int into v_posted
     from clara.journal_entries where vendor_binding_id = p_binding and status = 'approved';
+  -- FIND-2(a): AND HOW MANY ARE STILL IN FLIGHT. The posted count is history; the DRAFT count is
+  -- the admin's actual exposure at the moment they lift the revocation -- every one of those
+  -- drafts still carries this binding's marker and will meet the post-time re-check at approve.
+  -- A receipt that reports only what already happened tells the wrong half of the story.
+  select count(*)::int into v_drafts
+    from clara.journal_entries where vendor_binding_id = p_binding and status = 'draft';
 
   update clara.vendor_identity_bindings
      set status = 'expired',
@@ -973,14 +1016,14 @@ begin
       'counterparty_id', b.counterparty_id, 'reason', v_reason,
       'revoked_by', b.revoked_by, 'revoked_at', b.revoked_at,
       'revoke_reason', b.revoke_reason, 'prior_status', b.status,
-      'approved_entries', v_posted, 'op_key', p_op_key));
+      'approved_entries', v_posted, 'draft_entries', v_drafts, 'op_key', p_op_key));
   perform clara._append_event(c.firm, 'kb_binding.revocation_reset', b.client_id, c.actor,
     null, null, null, null, null,
     jsonb_build_object('binding_id', p_binding, 'counterparty_id', b.counterparty_id,
-      'approved_entries', v_posted));
+      'approved_entries', v_posted, 'draft_entries', v_drafts));
   return clara._finish_op(c.firm, 'reset_binding_revocation', p_op_key,
     jsonb_build_object('binding_id', p_binding, 'status', 'expired',
-      'approved_entries', v_posted));
+      'approved_entries', v_posted, 'draft_entries', v_drafts));
 end $fn$;
 comment on function clara.reset_binding_revocation(uuid,text,text) is
   '裁-46 (2026-08-30), riding 裁-18b PR-3: the NAMED human door out of a REVOCATION. '

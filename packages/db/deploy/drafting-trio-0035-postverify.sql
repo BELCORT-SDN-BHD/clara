@@ -60,6 +60,15 @@
 -- pin refresh against the live catalog, not a relaxation. Probe 3's three
 -- position pins and probe 5's whole-schema sole-carrier scan are untouched in
 -- substance; probe 5 simply follows probe 2's phrase.
+--
+-- THE PAIR THAT COVERS BOTH READINGS, worth knowing before changing either half:
+-- probe 2 below reads a COMMENT-STRIPPED, whitespace-collapsed, lower-cased
+-- projection of the body, so it cannot be satisfied by prose in a comment. The
+-- PR-3 migration's own postcheck (UNNUMBERED_binding_pr_3_post_time_recheck.sql,
+-- the "stale budget gate name survives" guard) reads the RAW pg_get_functiondef
+-- instead, so it also refuses the retired word appearing in a comment. Neither
+-- read subsumes the other: the pair is what makes "the gate name is gone" true
+-- of the executable code AND of what a reader sees beside it.
 -- ---------------------------------------------------------------------------
 
 do $post$

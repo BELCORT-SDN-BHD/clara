@@ -369,8 +369,8 @@ test("bpr3.C3 — a REVOKED binding REFUSES at approve (O3), and its mutant post
   const d2 = await boundDraft(b2, "C3m");
   await revoke(w.users.bob, { binding: b2.binding.binding_id, reason: "mutant probe" });
   await withMutant(APPROVE_CORE_SIG,
-    [["v_pt_annotate:=(v_pt_reason='binding_expired');",
-      "v_pt_annotate:=(v_pt_reason in ('binding_expired','binding_revoked'));"]],
+    [["v_pt_annotate:=(v_pt_reason in ('binding_expired','binding_revocation_lifted'));",
+      "v_pt_annotate:=(v_pt_reason in ('binding_expired','binding_revocation_lifted','binding_revoked'));"]],
     async () => {
       const r = await approve(d2, "bpr3c3m");
       assert.equal(r.status, "approved",
@@ -410,7 +410,8 @@ test("bpr3.C4 — an EXPIRED binding POSTS and is ANNOTATED (O3), and its mutant
   const d2 = await boundDraft(b2, "C4m");
   await expireBinding(b2.binding.binding_id);
   await withMutant(APPROVE_CORE_SIG,
-    [["v_pt_annotate:=(v_pt_reason='binding_expired');", "v_pt_annotate:=false;"]],
+    [["v_pt_annotate:=(v_pt_reason in ('binding_expired','binding_revocation_lifted'));",
+      "v_pt_annotate:=false;"]],
     async () => {
       const err = await assertRaises("CLR36", () => approve(d2, "bpr3c4m"),
         "an expired binding with the annotate arm removed");
@@ -621,8 +622,8 @@ test("bpr3.C9 — an EXPIRED binding whose identity ALSO drifted REFUSES; the cl
   await mergeAway(b2.cp.id, (await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "C9mwin")).id);
   await expireBinding(b2.binding.binding_id);
   await withMutant(APPROVE_CORE_SIG,
-    [["    if v_pt_reason is null and v_pt_expired then\n      v_pt_reason:='binding_expired';\n    end if;",
-      "    if v_pt_expired then\n      v_pt_reason:='binding_expired';\n    end if;"]],
+    [["    if v_pt_reason is null and v_pt_expired then\n      v_pt_reason := case when v_pt_lifted then 'binding_revocation_lifted' else 'binding_expired' end;\n    end if;",
+      "    if v_pt_expired then\n      v_pt_reason := case when v_pt_lifted then 'binding_revocation_lifted' else 'binding_expired' end;\n    end if;"]],
     async () => {
       const r = await approve(d2, "bpr3c9m");
       assert.equal(r.status, "approved",
@@ -716,6 +717,17 @@ test("bpr3.K1 — the door lifts a REVOCATION, receipts every column it cleared,
   // that agrees with itself but not with the books is worse than no receipt.
   assert.equal(r.approved_entries, expected, "the door RETURNS the DB-derived count");
   assert.equal(audit.args.approved_entries, expected, "…the audit row carries the same figure");
+  // FIND-2(a): and the IN-FLIGHT exposure, which is the half an admin lifting a revocation
+  // actually needs — every draft still carrying this marker will meet the post-time re-check.
+  // The fixture left exactly one, and the count is read from the DB rather than written as 1.
+  const draftsExpected = (await rootQuery(
+    "select count(*)::int c from clara.journal_entries where vendor_binding_id=$1 and status='draft'",
+    [b.binding.binding_id])).rows[0].c;
+  assert.equal(draftsExpected, 1, "control: the fixture left exactly one draft under this binding");
+  assert.equal(r.draft_entries, draftsExpected, "the door RETURNS the draft count too");
+  assert.equal(audit.args.draft_entries, draftsExpected, "…and the audit row carries it");
+  assert.notEqual(draftsExpected, expected,
+    "the two counts DIFFER on this fixture (1 vs 2), so neither can be standing in for the other");
   const ev = (await rootQuery(
     `select count(*)::int c, min((payload->>'approved_entries')::int) n
        from clara.domain_events
@@ -723,6 +735,10 @@ test("bpr3.K1 — the door lifts a REVOCATION, receipts every column it cleared,
     [b.binding.binding_id])).rows[0];
   assert.equal(ev.c, 1, "…and one typed event under its OWN name (裁-46: a revocation's undo carries its own name)");
   assert.equal(ev.n, expected, "…whose payload carries that same figure too");
+  assert.equal((await rootQuery(
+    `select min((payload->>'draft_entries')::int) n from clara.domain_events
+      where event_type='kb_binding.revocation_reset' and payload->>'binding_id'=$1`,
+    [b.binding.binding_id])).rows[0].n, draftsExpected, "…and the draft count on the event too");
 
   // TWO MUTANTS, because the two ways this figure can go wrong are different bugs.
   //   (a) a CONSTANT — the shape a cell asserting only `typeof === "number"` cannot see;
@@ -789,7 +805,10 @@ test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason,
     "a bookkeeper reopening a revocation");
   // REASON MANDATORY, and non-blank after trim — a receipt whose reason is three spaces is not
   // a reason.
-  for (const blank of ["", "   "]) {
+  // FIND-1 (#452): single-arg btrim strips SPACES ONLY, so a tab- or newline-only reason used
+  // to satisfy "non-blank" and lift a revocation with NOTHING on the receipt. Every shape the
+  // reviewer drove is here; the non-space ones are the RED-before cells for that fix.
+  for (const blank of ["", "   ", "\t", "\n", "  \t ", "\r\n", "\f", "\v"]) {
     const err = await assertRaises("CLR36",
       () => resetRevocation(w.users.alice, { binding: b.binding.binding_id, reason: blank }),
       `a blank reason (${JSON.stringify(blank)})`);
@@ -820,6 +839,67 @@ test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason,
     () => resetDecline(w.users.alice, { binding: b.binding.binding_id, reason: "wrong door" }),
     "reset_binding_decline on a revoked row");
   assert.equal(reasonOf(e3), "binding_revoked_reset_requires_ruling");
+});
+
+test("bpr3.K4 — a LIFTED revocation is never narrated as a clock expiry at post time", async () => {
+  failPr3();
+  // FIND-2 (#452 native review, RULED). 裁-46 lands a reset revocation on `expired` deliberately,
+  // which makes it INDISTINGUISHABLE from a clock expiry by status alone — so the annotation on a
+  // still-bound entry approved afterwards would have told a human "the binding had expired" when
+  // what actually happened is that an admin took the authority away and another gave it back.
+  // Same posting behaviour (O3: annotate, do not strand); different, honest words.
+  const b = await liveBinding("K4");
+  const d = await boundDraft(b, "K4");                       // drafted while the binding was LIVE
+  await revoke(w.users.bob, { binding: b.binding.binding_id, reason: "K4 revoke" });
+  await resetRevocation(w.users.alice,
+    { binding: b.binding.binding_id, reason: "vendor re-confirmed", opKey: opk("k4reset") });
+  const lifted = await bindingRow(b.binding.binding_id);
+  assert.equal(lifted.status, "expired", "control: the lifted row lands on `expired`, as 裁-46 rules");
+  assert.equal(lifted.revoked_at, null);
+  assert.ok(lifted.revoked_by, "…and it is exactly the fingerprint: cleared stamp, KEPT actor");
+
+  const r = await approve(d, "bpr3k4");
+  assert.equal(r.status, "approved", "the entry still POSTS — this is an annotation, not a wall");
+  assert.equal(r.binding_post_check?.code, "binding_revocation_lifted_at_post",
+    "…and the receipt says a revocation was lifted, NEVER that a clock ran out");
+  assert.match(r.binding_post_check.message, /REVOKED/,
+    "…in words a human reads, not only a code");
+  assert.equal(r.binding_post_check.revoked_by, lifted.revoked_by,
+    "…naming who took the authority away");
+  const res = await postResolution(d.entry);
+  assert.equal(res.outcome, "divergence");
+  assert.equal(res.refusal_reason, "binding_revocation_lifted",
+    "the resolution ledger records the distinct reason too");
+
+  // THE POSITIVE CONTROL, without which this cell could pass on a door that says
+  // "revocation lifted" for every annotated post: a genuinely expired binding — never revoked —
+  // still says EXPIRED.
+  const plain = await liveBinding("K4plain");
+  const pd = await boundDraft(plain, "K4plain");
+  await expireBinding(plain.binding.binding_id);
+  assert.equal((await bindingRow(plain.binding.binding_id)).revoked_by, null,
+    "control: this one was never revoked");
+  const pr = await approve(pd, "bpr3k4plain");
+  assert.equal(pr.status, "approved");
+  assert.equal(pr.binding_post_check?.code, "binding_expired_at_post",
+    "a plain expiry keeps its own code — the two states stay distinguishable in both directions");
+  assert.equal((await postResolution(pd.entry)).refusal_reason, "binding_expired");
+
+  // THE MUTANT: blind the fingerprint and the lifted revocation is narrated as a clock expiry
+  // again — which is precisely the misreport this cell exists to prevent.
+  const m2 = await liveBinding("K4m");
+  const md = await boundDraft(m2, "K4m");
+  await revoke(w.users.bob, { binding: m2.binding.binding_id, reason: "K4m revoke" });
+  await resetRevocation(w.users.alice,
+    { binding: m2.binding.binding_id, reason: "re-confirmed", opKey: opk("k4mreset") });
+  await withMutant(APPROVE_CORE_SIG,
+    [["    v_pt_lifted := (v_pt_b.status='expired'\n                    and v_pt_b.revoked_at is null and v_pt_b.revoked_by is not null);",
+      "    v_pt_lifted := false;"]],
+    async () => {
+      const out = await approve(md, "bpr3k4m");
+      assert.equal(out.binding_post_check?.code, "binding_expired_at_post",
+        "with the fingerprint blinded the lifted revocation reads as a plain expiry — the wall is that predicate");
+    });
 });
 
 test("bpr3.K3 — the door is firm-scoped, idempotent, and EXECUTE-able by clara_authenticated alone", async () => {
