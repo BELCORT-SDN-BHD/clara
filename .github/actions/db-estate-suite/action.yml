@@ -57,3 +57,19 @@ runs:
         pnpm db:migrate
         pnpm db:seed
         pnpm -r --if-present test
+
+    # FALSE-GREEN PROTECTION for the 裁-41 battery (.claude/rules/db-tests.md: "a new wave
+    # battery's false-green protection is its own dedicated ci.yml drill step ... focused run,
+    # allow-missing variable unset"). The sweep above preloads
+    # tests/client-identifiers-unique-preintegration-gate.mjs, which sets
+    # CLARA_ALLOW_MISSING_CLIENT_IDENTIFIERS_UNIQUE=1 so a PRE-migration chain skips loudly
+    # instead of failing — and a skip that nothing ever contradicts is a green that proves
+    # nothing. This step runs the same file FOCUSED, with the variable unset, against the DB the
+    # step above just migrated: on a chain that carries the migration the battery must RUN, and
+    # on one that does not it must FAIL here rather than skip. No database of its own: the
+    # battery is not reset-gated and stages its own fixtures.
+    - name: 裁-41 client_identifiers UNIQUE — focused run, gate variable UNSET
+      shell: bash -e {0}
+      run: |
+        unset CLARA_ALLOW_MISSING_CLIENT_IDENTIFIERS_UNIQUE
+        node --test --test-concurrency=1 packages/db/tests/client-identifiers-unique.test.mjs
