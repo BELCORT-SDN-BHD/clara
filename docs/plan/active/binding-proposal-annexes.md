@@ -400,7 +400,7 @@ branch as W7's index, not left for the estate leg to find.
 | v | date | change |
 |---|---|---|
 | v1 | 2026-08-29 | First issue. Survey + design + annexes + gate record authored against a rig at frontier `0142` (137 migrations). Gate **OPEN** with 8 questions. |
-| v2 | 2026-08-30 | PR-0 gate fold (M7) discharged for this file: A.5, Annex B's table + shim mapping, battery cell R-2, and Annex J's headline (plus its own "not in this inventory" list) superseded in place against the migration as fold-round-shipped (`UNNUMBERED_binding_proposal_pr_1.sql`, tip `7829adf0`). Annex K added — the verb contracts for `decline_vendor_identity_binding`, `reset_binding_decline` and `_expire_stale_proposals`, none of which any prior version of this file specified — split into its own companion file, `binding-proposal-annexes-k-fold-verb-contracts.md`, to stay under this repo's per-file line cap. |
+| v2 | 2026-08-30 | PR-0 gate fold (M7) discharged for this file: A.5, Annex B's table + shim mapping, battery cell R-2, and Annex J's headline (plus its own "not in this inventory" list) superseded in place against the migration as fold-round-shipped (then UNNUMBERED_binding_proposal_pr_1.sql, now `packages/db/migrations/0154_binding_proposal_pr_1.sql`; tip `7829adf0`). Annex K added — the verb contracts for `decline_vendor_identity_binding`, `reset_binding_decline` and `_expire_stale_proposals`, none of which any prior version of this file specified — split into its own companion file, `binding-proposal-annexes-k-fold-verb-contracts.md`, to stay under this repo's per-file line cap. |
 
 ---
 
