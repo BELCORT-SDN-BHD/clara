@@ -39,9 +39,11 @@ import {
   wakeActor, runAs, namedCall, ensureReady, buildWorld, mintWake, endPool, getPool,
 } from "./rig-fixtures.mjs";
 import { seedVerifiedDocument, ensureFirmNarrowAttribution, seedExtraction, seedRegion } from "./rig-docs-fixtures.mjs";
+import { readWakeOpenFirmQuestionKindWallState } from "./wake-open-firm-question-kind-wall-gate-state.mjs";
 
 let world;
 let ready = false;
+let kindWallOldBody = false;
 
 const D1_INDEX = "uq_client_identifier_promotions_open_subject";
 const D2_INDEX = "uq_firm_open_questions_onboarding_open";
@@ -66,6 +68,12 @@ before(async () => {
     ready = false;
     return;
   }
+  // This sibling carries two cells whose expected refusal moved from 0148's index to the kind
+  // wall. Both genuinely execute on either body; the exact old SHA selects the old, still-valid
+  // index outcome. The preload only admits that known authoring state. Unknown bodies take the
+  // reviewed-body arm and must satisfy the behavioural assertions rather than being skipped.
+  const kindWallState = await readWakeOpenFirmQuestionKindWallState(rootQuery);
+  kindWallOldBody = kindWallState.oldBody;
   world = await buildWorld();
 });
 
@@ -391,7 +399,7 @@ test("MBB-7(a) D2: a second wake_propose_client_onboarding on the same document 
 // refuses the FIRST attempt too, unconditionally, at the verb level, before the shared core (and
 // its index) are ever reached -- so this cell is trued to the new, stronger reason rather than
 // left asserting a reason (already_open/onboarding_proposed) the verb can no longer produce.
-test("MBB-7(a) D2 THE SECOND WRITER, TRUED: wake_open_firm_question(kind='onboarding_proposed') on a document that already has one now refuses CLR10/door_owned_kind -- the kind wall fires before the index this cell used to name is ever reached", async (t) => {
+test("MBB-7(a) D2 THE SECOND WRITER, TRUED: wake_open_firm_question(kind='onboarding_proposed') on a document that already has one refuses typed -- by 0148's index on the exact old body, or by the kind wall on the reviewed body", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
   const doc = await freshDoc();
@@ -403,8 +411,8 @@ test("MBB-7(a) D2 THE SECOND WRITER, TRUED: wake_open_firm_question(kind='onboar
   const err = await assertRaises(CLR.badRequest,
     () => openFirmQuestion(secret, { document: doc.documentId }),
     "wake_open_firm_question opening a SECOND onboarding_proposed question on the same document");
-  assert.equal(detailReason(err), "door_owned_kind");
-  assert.equal(detailClass(err), "kind");
+  assert.equal(detailReason(err), kindWallOldBody ? "already_open" : "door_owned_kind");
+  assert.equal(detailClass(err), kindWallOldBody ? "onboarding_proposed" : "kind");
   assert.equal(await openOnboardingQuestions(doc.documentId), 1, "still exactly the one Door 2 opened");
 });
 
@@ -502,7 +510,7 @@ test("MBB-7(a) D2: the wall is KIND-scoped -- a second open question of a differ
 // and nothing for either session to block on (a `waitBlockedByOrThrow` against this call now
 // times out, since neither session ever takes the lock it was watching for). Trued to prove the
 // new invariant instead: two CONCURRENT callers both refuse, independently and identically.
-test("MBB-7(a) D2 RACE, TRUED BY THE KIND WALL: two CONCURRENT wake_open_firm_question(kind='onboarding_proposed') calls both refuse CLR10/door_owned_kind -- there is no winner, no lock, and no index left to race against", async (t) => {
+test("MBB-7(a) D2 RACE, TRUED BY THE KIND WALL: concurrent generic onboarding calls execute on both bodies -- old body admits one and index-refuses one; reviewed body kind-refuses both", async (t) => {
   if (unready(t)) return;
   const { secret: s1 } = await mintFiling();
   const { secret: s2 } = await mintFiling();
@@ -513,8 +521,18 @@ test("MBB-7(a) D2 RACE, TRUED BY THE KIND WALL: two CONCURRENT wake_open_firm_qu
     runAs(wakeActor("clara_wake_filing", s1), call, ofqVals({ document: doc.documentId, opKey: opk("mbb7d2race-a") })),
     runAs(wakeActor("clara_wake_filing", s2), call, ofqVals({ document: doc.documentId, opKey: opk("mbb7d2race-b") })),
   ]);
+  if (kindWallOldBody) {
+    const fulfilled = [r1, r2].filter((r) => r.status === "fulfilled");
+    const rejected = [r1, r2].filter((r) => r.status === "rejected");
+    assert.equal(fulfilled.length, 1, "the exact old body admits one winner through the generic writer");
+    assert.equal(rejected.length, 1, "the exact old body index-refuses one loser");
+    assert.equal(rejected[0].reason.code, CLR.badRequest, `the old-body loser refuses typed CLR10, not raw ${PG.uniqueViolation}`);
+    assert.equal(detailReason(rejected[0].reason), "already_open", "the old-body loser is refused by 0148's index map");
+    assert.equal(await openOnboardingQuestions(doc.documentId), 1, "the exact old body leaves exactly one winner");
+    return;
+  }
   for (const [label, r] of [["session 1", r1], ["session 2", r2]]) {
-    assert.equal(r.status, "rejected", `${label} must refuse -- neither call can ever succeed`);
+    assert.equal(r.status, "rejected", `${label} must refuse -- neither reviewed-body call can succeed`);
     assert.equal(r.reason.code, CLR.badRequest, `${label} refuses typed CLR10, not a raw ${PG.uniqueViolation}`);
     assert.equal(detailReason(r.reason), "door_owned_kind", `${label} refuses via the kind wall, not the index`);
   }

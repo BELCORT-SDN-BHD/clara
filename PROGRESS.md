@@ -104,6 +104,8 @@ tranche-2 #411 · `0146` 裁-17 #412 — ceremonied in ONE ~51-s D1 window 2026-
   (`scripts/hooks/pinned-ids-guard.mjs`, tracked `.claude/settings.json`).
 - **Evening sitting 2026-08-30: 裁-57…72 filed** — paid beta (RM0 trial until the pricing sitting), checkout tranche + tier-3 signup gate on the critical path, tax inert at beta (裁-62), cutover after ALL 110 dashboard-only/orphan verbs have an apps/web home (裁-72, trains P6-C1…C7), P4-7 magiclink arm (裁-65), `/ready` hard-fail (裁-61), DB-resolved proposal bases (裁-69). Ledger: `docs/plan/active/mohe-grill-rulings-2026-08-30.md`.
 
+- **#447 REFRESH-RED GATE FIX BUILT 2026-08-31:** the UNNUMBERED kind-wall battery now skips only on a positive read of the exact old `wake_open_firm_question` prosrc SHA; numbered-chain target files are 20 pass / 17 loud skips (both MBB cells execute on old+new), scratch-numbered applied files are 37/37 with zero skips, and the local full `@clara/db` command remains unverified after reproducible 30-minute host timeouts (CI re-run owed).
+
 ## Lanes
 
 | Lane | Scope | State | PR |

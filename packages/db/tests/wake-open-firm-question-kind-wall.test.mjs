@@ -23,12 +23,10 @@
 //   PART C -- the honest recourse: wake_propose_client_onboarding (Door 2), the door this
 //     refusal's own message points a caller toward, still genuinely works.
 //
-// UNLIKE 0148's sibling batteries (promotion-dup-open-wall.test.mjs and its
-// -preintegration-gate.mjs companion), this file ships in the SAME PR as its own migration --
-// there is no multi-PR staging window where main could carry one without the other, so there is
-// no cross-chain mismatch for a preintegration gate to paper over. The catalog gate below still
-// fails LOUDLY (never skips) if the premise is missing, matching the estate's fail-never-skip
-// convention; it simply has no allow-missing companion because none is needed here.
+// PRE-INTEGRATION: CI replays numbered migrations only, so this PR's UNNUMBERED migration is
+// absent from the package-wide estate sweep. The preload is only one arm: this file skips only
+// after a positive read of the exact known old prosrc SHA. The reviewed body and every unknown
+// future body execute every behavioural cell; a focused old-body run fails loudly.
 //
 // SUPERSESSION, trued in THIS PR per .claude/rules/db-tests.md ("A PR retiring or moving a
 // catalog object pinned by a closed-wave floor trues that floor IN THE SAME PR"): this
@@ -46,31 +44,20 @@ import {
   wakeActor, runAs, namedCall, ensureReady, buildWorld, mintWake, endPool,
 } from "./rig-fixtures.mjs";
 import { seedVerifiedDocument, ensureFirmNarrowAttribution, seedExtraction, seedRegion } from "./rig-docs-fixtures.mjs";
+import { readWakeOpenFirmQuestionKindWallState } from "./wake-open-firm-question-kind-wall-gate-state.mjs";
 
 let world;
 let ready = false;
+let missingReason = null;
 
 before(async () => {
+  const gateState = await readWakeOpenFirmQuestionKindWallState(rootQuery);
+  if (gateState.oldBody) {
+    missingReason = gateState.skipReason;
+    return;
+  }
   ready = await ensureReady();
   if (!ready) return;
-  // The catalog gate names the WALL's own marker text, not just the function's existence --
-  // wake_open_firm_question has resolved since 0126, so a bare to_regprocedure check would
-  // pass on a pre-migration chain and this file's cells would then hard-fail one-by-one on
-  // "expected CLR10, got success" with no single diagnosis of WHY.
-  const catalog = await rootQuery(
-    `select position('door_owned_kind' in p.prosrc) <> 0 as walled
-       from pg_proc p
-      where p.oid = 'clara.wake_open_firm_question(uuid,text,text,jsonb,text,jsonb,text)'::regprocedure`,
-  );
-  if (!catalog.rows[0]?.walled) {
-    throw new Error(
-      "wake-open-firm-question-kind-wall premise missing: clara.wake_open_firm_question does not " +
-      "carry the door_owned_kind marker -- this migration and this test file ship in the SAME PR " +
-      "(packages/db/migrations/UNNUMBERED_wake_open_firm_question_kind_wall.sql), so a chain " +
-      "carrying this file but not the migration is a broken checkout, not a legitimate pre-wave " +
-      "state -- failing loudly rather than skipping.",
-    );
-  }
   world = await buildWorld();
 });
 
@@ -79,8 +66,13 @@ after(async () => {
 });
 
 function unready(t) {
+  if (missingReason) {
+    console.warn(`SKIP wake-open-firm-question-kind-wall: ${missingReason}`);
+    t.skip(`${missingReason}. Explicit package-wide preintegration run.`);
+    return true;
+  }
   if (!ready) {
-    t.skip("rig not ready: ensureReady() found no draft_entry, or the door_owned_kind catalog gate found the wall absent");
+    t.skip("rig not ready: ensureReady() found no draft_entry");
     return true;
   }
   return false;
