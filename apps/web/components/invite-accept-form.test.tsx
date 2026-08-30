@@ -22,6 +22,7 @@ import { renderComponent, textOf, clickButton, setFieldValue } from "../test/hoo
 import { enableDomInspection } from "../test/domInspect";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../lib/session-accessor";
 import messages from "../messages/en.json";
+import { INVITE_CLARA_TOKEN_PARAM } from "../lib/identity/doors";
 import { InviteAcceptForm, type InviteAuthClient } from "./invite-accept-form";
 
 enableDomInspection();
@@ -43,7 +44,14 @@ function jsonResponse(body: unknown, status = 200): Response {
  *  REPORTS it. The read is never told about the acceptance except through this
  *  shared state — which is what makes the post-condition discriminating. */
 function fakeEstate(options: { acceptRefusal?: { code: string; message: string }; contextStatus?: number } = {}) {
-  const state = { membership: false, acceptCalls: [] as Record<string, unknown>[], contextReads: 0 };
+  const state = {
+    membership: false,
+    acceptCalls: [] as Record<string, unknown>[],
+    contextReads: 0,
+    /** Headers of the LAST caller_context read — so a cell can prove the read
+     *  went out credentialed and profile-scoped, not as an anonymous GET. */
+    contextHeaders: {} as Record<string, string>,
+  };
   const impl = (async (u: RequestInfo | URL, init?: RequestInit) => {
     const url = String(u);
     if (url.includes("/rpc/accept_invite")) {
@@ -54,6 +62,8 @@ function fakeEstate(options: { acceptRefusal?: { code: string; message: string }
     }
     if (url.includes("/rest/v1/caller_context")) {
       state.contextReads += 1;
+      state.contextHeaders = {};
+      new Headers(init?.headers).forEach((v, k) => { state.contextHeaders[k.toLowerCase()] = v; });
       if (options.contextStatus) return jsonResponse({ message: "upstream unavailable" }, options.contextStatus);
       return jsonResponse(state.membership ? [CONTEXT_ROW] : []);
     }
@@ -552,4 +562,155 @@ test("the unconfirmed state's recovery RE-READS and never re-calls the door; a p
       }
     },
   );
+});
+
+// ===========================================================================
+// THE CONSUMED TOKEN LEAVES THE ADDRESS BAR (ruling 2026-08-30, requirement 3)
+// ===========================================================================
+
+const INVITE_URL = `http://localhost/invite/supabase-token-hash?${INVITE_CLARA_TOKEN_PARAM}=${CLARA_TOKEN}&utm=mail`;
+
+/** Installs a location + history pair the component can actually drive, and
+ *  records every `replaceState`. Restores both afterwards. */
+function withAddressBar(
+  href: string,
+  run: (bar: { href: () => string; replaceStateCalls: string[] }) => Promise<void>,
+): Promise<void> {
+  const win = globalThis.window as unknown as Record<string, unknown>;
+  const originalLocation = win.location;
+  const originalHistory = win.history;
+  let current = href;
+  const replaceStateCalls: string[] = [];
+  win.location = { get href() { return current; } };
+  win.history = {
+    replaceState: (_state: unknown, _title: string, url: string) => {
+      replaceStateCalls.push(url);
+      current = new URL(url, current).href;
+    },
+  };
+  return run({ href: () => current, replaceStateCalls }).finally(() => {
+    win.location = originalLocation;
+    win.history = originalHistory;
+  });
+}
+
+test("CONSUMED: a successful acceptance strips the ct token from the address bar, keeping the rest of the URL", async () => {
+  // Driven on the UNCONFIRMED branch on purpose — it is the one success path
+  // that KEEPS the person on this page, so the scrubbed URL is observable
+  // rather than immediately replaced by the redirect to "/".
+  const { impl } = fakeEstate();
+  await withMockedEnv(
+    (async (u: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/caller_context")) return jsonResponse([]);
+      return impl(u as never, init as never);
+    }) as typeof fetch,
+    async () => {
+      await withAddressBar(INVITE_URL, async (bar) => {
+        const { h } = await mount(
+          createElement(InviteAcceptForm, {
+            token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+            createSupabaseClient: authClient(),
+          }),
+        );
+        try {
+          // CONTROL: the token is in the address bar before the act.
+          assert.ok(bar.href().includes(CLARA_TOKEN), "control: the URL carries the token to begin with");
+
+          await walkToSubmit(h);
+
+          assert.equal(bar.replaceStateCalls.length, 1, "history.replaceState fires exactly once");
+          const after = new URL(bar.href());
+          assert.equal(
+            after.searchParams.get(INVITE_CLARA_TOKEN_PARAM), null,
+            "the consumed token must be GONE from the address bar",
+          );
+          assert.ok(!bar.href().includes(CLARA_TOKEN), "and its value must not survive anywhere in the URL");
+          // Surgical, not destructive: the route and any unrelated params stay.
+          assert.equal(after.pathname, "/invite/supabase-token-hash", "the path (Supabase's own token) is untouched");
+          assert.equal(after.searchParams.get("utm"), "mail", "unrelated params are not collateral damage");
+        } finally {
+          await h.unmount();
+        }
+      });
+    },
+  );
+});
+
+test("NOT consumed: a REFUSAL leaves the token in the address bar — it is still a live credential", async () => {
+  // The invite is still `pending` after a refusal, so the token is still
+  // needed. Scrubbing it here would destroy the person's only way back in.
+  const { impl } = fakeEstate({ acceptRefusal: { code: "CLR10", message: "invalid invite token" } });
+  await withMockedEnv(impl, async () => {
+    await withAddressBar(INVITE_URL, async (bar) => {
+      const { h } = await mount(
+        createElement(InviteAcceptForm, {
+          token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+          createSupabaseClient: authClient(),
+        }),
+      );
+      try {
+        await walkToSubmit(h);
+        assert.match(textOf(h.container as never), /invalid invite token/, "the refusal rendered");
+        assert.deepEqual(bar.replaceStateCalls, [], "nothing was stripped");
+        assert.ok(bar.href().includes(CLARA_TOKEN), "the still-live token survives for a retry");
+      } finally {
+        await h.unmount();
+      }
+    });
+  });
+});
+
+test("the ct token NEVER reaches rendered copy — on any failure branch", async () => {
+  // An error message that echoes the bearer token would put it on screen, in a
+  // screenshot, and in any support thread the person pastes it into.
+  for (const refusal of [
+    { code: "CLR10", message: "invalid invite token" },
+    { code: "CLR09", message: "this invite has expired" },
+  ]) {
+    const { impl } = fakeEstate({ acceptRefusal: refusal });
+    await withMockedEnv(impl, async () => {
+      const { h } = await mount(
+        createElement(InviteAcceptForm, {
+          token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+          createSupabaseClient: authClient(),
+        }),
+      );
+      try {
+        await walkToSubmit(h);
+        const rendered = textOf(h.container as never);
+        assert.ok(rendered.includes(refusal.message), "control: the refusal really did render");
+        assert.ok(!rendered.includes(CLARA_TOKEN), `${refusal.code}: the token must not appear in rendered copy`);
+      } finally {
+        await h.unmount();
+      }
+    });
+  }
+});
+
+test("the membership read goes out CREDENTIALED and profile-scoped — never an anonymous GET", async () => {
+  // "Through the real door under the real credential": the post-condition read
+  // rides the real getRows/wire stack with the session's bearer token and the
+  // clara profile header. A read that dropped the credential would be answered
+  // by PostgREST as an anonymous caller, and `caller_context`'s own
+  // `jwt_sub()` predicate would then match nothing — an empty result that
+  // looks exactly like "no membership".
+  const { state, impl } = fakeEstate();
+  await withMockedEnv(impl, async () => {
+    const { h, router } = await mount(
+      createElement(InviteAcceptForm, {
+        token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+        createSupabaseClient: authClient(),
+      }),
+    );
+    try {
+      await walkToSubmit(h);
+      assert.ok(state.contextReads >= 1, "the read happened");
+      assert.equal(state.contextHeaders["authorization"], "Bearer tok", "the read carries the session bearer token");
+      assert.equal(state.contextHeaders["accept-profile"], "clara", "and is scoped to the clara schema");
+      assert.deepEqual(router.replaced, ["/"], "and the journey completed on it");
+    } finally {
+      await h.unmount();
+    }
+  });
 });

@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
 import { InviteAcceptForm } from "@/components/invite-accept-form";
+import { INVITE_CLARA_TOKEN_PARAM } from "@/lib/identity/doors";
 
 export async function generateMetadata() {
   const t = await getTranslations("Invite");
@@ -39,27 +40,20 @@ export async function generateMetadata() {
  * verification, never a query parameter on this one.
  */
 /**
- * THE ONE LINE THE PENDING RULING REPOINTS (P4-1 rung-0 scope note).
+ * THE INVITE LINK CARRIES TWO SECRETS — ruled 2026-08-30, option (a):
+ * `/invite/<supabase_token_hash>?ct=<clara_token>`.
  *
- * This journey needs TWO independent secrets. The PATH SEGMENT is Supabase's
- * `token_hash`, consumed by `verifyOtp` — unchanged from P2. `accept_invite`
- * needs a DIFFERENT one: CLARA's own invite token, minted by
- * `clara.invite_member` (`0147:404`) and matched by `sha256()` against
- * `firm_invites.token_hash` (`0145:702`). Feeding the path segment to the door
- * would refuse `CLR10 "invalid invite token"` every time — the two secrets
- * are not interchangeable.
+ * The PATH SEGMENT is Supabase's `token_hash`, consumed by `verifyOtp` — P2's
+ * shipped contract, byte-untouched by the ruling. The QUERY PARAM carries
+ * Clara's own invite token, which `clara.accept_invite` sha256's and looks the
+ * invite up by (`0145:702`). They are not interchangeable: the path segment
+ * fed to the door refuses `CLR10 "invalid invite token"` every time.
  *
- * Nothing in the P4 design corpus or the four mohe-grill ruling ledgers says
- * how both travel in one URL, and the courier that will hold Clara's plaintext
- * token is P4-4's. So this constant is the provisional seam, chosen because it
- * is the one shape that leaves the path segment and every P2 wall
- * byte-untouched. When the ruling lands, this name (and P4-4's link builder)
- * is what changes — not the form, which takes the token as a plain prop.
- *
- * The document already carries `referrer: "no-referrer"` below, so this half
- * of the link leaks no further than the path half it sits beside.
+ * The param NAME is `INVITE_CLARA_TOKEN_PARAM`, declared once in
+ * `lib/identity/doors.ts` and imported at both ends — here (reads it) and
+ * P4-4's courier (builds the link) — so neither end can drift by re-typing the
+ * string. See that declaration for the courier's plaintext-handling obligation.
  */
-const CLARA_INVITE_TOKEN_PARAM = "ct";
 
 export default async function InvitePage({
   params,
@@ -74,7 +68,7 @@ export default async function InvitePage({
   // A repeated parameter arrives as an array. Take NO token rather than
   // guessing which of two a caller meant — the form's own guard then refuses
   // honestly and consumes nothing, which is the fail-closed answer.
-  const raw = query[CLARA_INVITE_TOKEN_PARAM];
+  const raw = query[INVITE_CLARA_TOKEN_PARAM];
   const inviteToken = typeof raw === "string" && raw !== "" ? raw : null;
 
   return (

@@ -118,6 +118,7 @@ function source(relative: string): string {
 describe("the OTP purpose is not caller-controlled", () => {
   const form = source("../components/invite-accept-form.tsx");
   const page = source("../app/invite/[token]/page.tsx");
+  const doors = source("../lib/identity/doors.ts");
 
   it("verifyOtp is called with a hard-coded type: \"invite\"", () => {
     // NOTE (P4-1): this file-wide match is satisfied by the component's own
@@ -204,16 +205,26 @@ describe("the OTP purpose is not caller-controlled", () => {
     const reads = [...page.matchAll(/query\[([^\]]+)\]/g)].map((m) => m[1]!.trim());
     assert.deepEqual(
       reads,
-      ["CLARA_INVITE_TOKEN_PARAM"],
+      ["INVITE_CLARA_TOKEN_PARAM"],
       "exactly ONE search param may be read, and only through its named constant",
     );
 
-    const declared = page.match(/const CLARA_INVITE_TOKEN_PARAM = "([^"]+)"/);
-    assert.ok(declared, "the param name must be a single named constant, so this census can read its value");
+    // The constant lives in lib/identity/doors.ts (ruling 2026-08-30: ONE
+    // declaration, imported by both the reader here and P4-4's courier), so
+    // the census reads its value THERE — following the identifier to its
+    // definition rather than trusting the page's spelling of it.
+    const declared = doors.match(/export const INVITE_CLARA_TOKEN_PARAM = "([^"]+)"/);
+    assert.ok(declared, "the param name must be a single exported constant, so this census can read its value");
+    assert.equal(declared[1], "ct", "the ruled parameter name");
     assert.doesNotMatch(
       declared[1]!,
       /^(type|otp|otp_type|signup|recovery|email_change|magiclink|token_hash)$/,
       "the one readable param must not be an OTP purpose (or Supabase's own token_hash) under another name",
+    );
+    assert.match(
+      page,
+      /import \{ INVITE_CLARA_TOKEN_PARAM \} from "@\/lib\/identity\/doors"/,
+      "the page must IMPORT the constant, never re-type the string (spelling is not identity)",
     );
 
     // And what the route hands the form is exactly the two tokens — the
@@ -239,6 +250,35 @@ describe("the OTP purpose is not caller-controlled", () => {
       guardAt < updateAt,
       "the subject check must run before updateUser",
     );
+  });
+
+  it("accept_invite is reached ONLY after the subject binding and the password write — never before, never in parallel", () => {
+    // Ruling 2026-08-30, requirement 1, pinned in SOURCE ORDER as the belt to
+    // the two behavioural cells in components/invite-accept-form.test.tsx
+    // (a subject mismatch and an incomplete verification each assert the door
+    // was never called). Anchored on CALL SITES, not bare names — this file's
+    // own `updateUser` cell already documents why: the header prose names all
+    // three of these, and a bare-name indexOf finds the comment first.
+    const guardAt = form.indexOf("activeSubject !== verifiedSubject");
+    const updateAt = form.indexOf("auth.updateUser(");
+    const doorAt = form.indexOf("await acceptInvite({");
+    assert.ok(guardAt > -1 && updateAt > -1 && doorAt > -1, "all three sites must exist");
+    assert.ok(guardAt < doorAt, "the subject binding must run BEFORE the door");
+    assert.ok(updateAt < doorAt, "the password write must run BEFORE the door");
+
+    // NOT IN PARALLEL. The door call is awaited, and it is the only
+    // `acceptInvite(` call site — a `Promise.all` racing it against the auth
+    // calls would satisfy source order while destroying the ordering the
+    // ruling is actually about.
+    assert.equal(
+      [...form.matchAll(/acceptInvite\(\{/g)].length, 1,
+      "exactly one accept_invite call site",
+    );
+    assert.doesNotMatch(form, /Promise\.(all|allSettled|race|any)/, "no branch races the door against anything");
+
+    // And the consumed token is scrubbed only AFTER the door returns.
+    const stripAt = form.indexOf("stripInviteTokenFromUrl();");
+    assert.ok(stripAt > doorAt, "the URL is scrubbed only after the token has actually been consumed");
   });
 
   it("the invite is not consumed without an explicit human act", () => {

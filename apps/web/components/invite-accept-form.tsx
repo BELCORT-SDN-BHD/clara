@@ -9,7 +9,11 @@ import {
   type VerifyOtpLikeResponse,
 } from "@/lib/invite-verification";
 import { createClient } from "@/lib/supabase/client";
-import { acceptInvite, callerContext } from "@/lib/identity/doors";
+import {
+  acceptInvite,
+  callerContext,
+  INVITE_CLARA_TOKEN_PARAM,
+} from "@/lib/identity/doors";
 import { isDoorRefusal } from "@/lib/doors";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +39,40 @@ type Stage =
  *  its own message, both VERBATIM. `code` is null for an ordinary failure
  *  (transport, no session) — there is no DB verdict to show a chip for. */
 type Refusal = { code: string | null; message: string };
+
+/**
+ * Takes Clara's invite token OUT of the address bar, once the door has
+ * consumed it (ruling 2026-08-30, requirement 3).
+ *
+ * WHEN, AND WHY EXACTLY THEN. This runs only after `accept_invite` RETURNS
+ * SUCCESSFULLY — the point at which the token is spent and worthless. It does
+ * NOT run on a refusal, and that is deliberate: a refused invite is still
+ * `pending` and still needs its token, so stripping it there would destroy a
+ * live credential the person may need in order to reload and try again. The
+ * spent-token case is the one worth scrubbing, because the URL outlives the
+ * page — in a screenshot, a shared link, a synced history, a Back navigation.
+ *
+ * `replaceState`, never `pushState`: the goal is that the token-bearing entry
+ * stops existing, not that a second entry is stacked on top of it. This is a
+ * pure history mutation — it does not re-render, does not re-fetch, and does
+ * not disturb the `inviteToken` prop the component is still holding, so a
+ * retry after an unconfirmed read still works.
+ *
+ * SURGICAL: only this one parameter is removed. The path (Supabase's own
+ * token) and every unrelated query parameter survive untouched.
+ *
+ * Guarded on every hop: SSR (no `window`), and any environment without
+ * `history.replaceState`. A missing history API must never break an
+ * acceptance that already succeeded in the DB.
+ */
+function stripInviteTokenFromUrl(): void {
+  if (typeof window === "undefined") return;
+  if (typeof window.history?.replaceState !== "function") return;
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has(INVITE_CLARA_TOKEN_PARAM)) return;
+  url.searchParams.delete(INVITE_CLARA_TOKEN_PARAM);
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+}
 
 /**
  * THE THREE AUTH CALLS THIS SURFACE MAKES, and nothing else — a structural
@@ -317,6 +355,11 @@ export function InviteAcceptForm({
     } catch (e) {
       // VERBATIM: the DB's own code and its own sentence, never re-worded and
       // never retried here. A non-refusal failure has no CLR verdict to show.
+      //
+      // The token is NOT stripped on this path: a refused invite is still
+      // `pending` and still needs its token. Nothing here echoes the token
+      // either — the rendered text is the DB's message, and no branch of this
+      // component ever interpolates `inviteToken` into copy or a log line.
       setRefusal(
         isDoorRefusal(e)
           ? { code: e.code, message: e.message }
@@ -325,6 +368,11 @@ export function InviteAcceptForm({
       setStage("set-password");
       return;
     }
+
+    // CONSUMED. Scrub it from the address bar before anything else — before the
+    // membership read, so even the branch that keeps the person on this page
+    // (unconfirmed) is left holding a URL with no live secret in it.
+    stripInviteTokenFromUrl();
 
     await confirmMembershipThenLeave();
   }

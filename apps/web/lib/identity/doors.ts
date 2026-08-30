@@ -53,6 +53,32 @@ import { callDoor, type CallDoorOptions } from "../doors";
 import { getRows } from "../read";
 import type { SessionTokenAccessor } from "@/lib/session";
 
+/**
+ * THE INVITE LINK'S SECOND SECRET — the query-parameter name Clara's own
+ * invite token travels under. **Ruled 2026-08-30 (option (a)):** the invite
+ * URL is `/invite/<supabase_token_hash>?ct=<clara_token>`.
+ *
+ * TWO SECRETS, ONE LINK. The PATH SEGMENT is Supabase's `token_hash`, consumed
+ * by `verifyOtp` — P2's shipped contract, byte-untouched by the ruling. This
+ * parameter carries CLARA's token: the 64-hex-char secret `clara.invite_member`
+ * mints at `0147:404`, stores only as `sha256(token)` in
+ * `firm_invites.token_hash`, and hands its caller exactly once above
+ * persistence. `accept_invite` re-computes that sha256 over `p_token`
+ * (`0145:702`). The two are NOT interchangeable — passing the path segment to
+ * the door refuses `CLR10 "invalid invite token"` every time.
+ *
+ * **Declared here, in ONE file, so both ends import it rather than re-typing
+ * the string.** The two ends are `app/invite/[token]/page.tsx` (reads it) and
+ * P4-4's courier, `app/api/invite/route.ts` (builds the link). A courier that
+ * spelled it `?token=` would ship an invite nobody can accept, and nothing
+ * would fail until a real employee clicked a real link.
+ *
+ * THE COURIER'S OBLIGATION, restated at the shared seam: the plaintext token
+ * goes into the mail body and NOWHERE else — never a log line, never a
+ * response body, never a store. The DB keeps only the sha256.
+ */
+export const INVITE_CLARA_TOKEN_PARAM = "ct";
+
 /** What `accept_invite` resolves to — `_finish_op`'s persisted receipt
  *  (`0145:757-758`): `{user_id, firm_id, membership_id}`. Every field is
  *  optional here on purpose: this is a REPORT of what the DB did, and
