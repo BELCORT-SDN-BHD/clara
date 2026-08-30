@@ -28,8 +28,9 @@
 --   §F  TOCTOU   clara._bank_wake_task_gate: every one of the fourteen bank wake verbs verifies,
 --                inside its own write transaction and under FOR UPDATE, that its task is still
 --                running (writes) and that the subject's bank account IS the task's account.
---   §G  CAS      clara._settle_wake_task becomes a conditional CAS under FOR UPDATE, bound to
---                workflow_run_id and an expected status; a mismatched settle REFUSES.
+--   §G  CAS      clara._settle_wake_task_cas: the settle as a conditional CAS under FOR UPDATE,
+--                bound to workflow_run_id and an expected status; a mismatched settle REFUSES.
+--                The three-argument clara._settle_wake_task delegates to it, unchanged.
 --
 -- WHAT IT DOES NOT DO, deliberately, each recorded in the tail as a named follow-up:
 --   · It touches NO frozen runtime file (constraint 9). Three of its doors are additive and stay
@@ -49,9 +50,9 @@
 -- D1 INVENTORY (every writer body this file replaces; before/after prosrc sha256 in the tail):
 --   fourteen bank wake wrappers (one added line each, RE-SUBSTITUTION-proven byte-identical
 --   otherwise), clara.mint_wake_credential, clara.mint_wake_credential_for_task, and
---   clara._settle_wake_task (DROP+CREATE: two new trailing DEFAULTed parameters; the three-argument
---   call every live caller makes still resolves, and its ACL is re-made in the same statement
---   block). NO trigger body is recut. NO frozen workflow file is touched.
+--   and clara._settle_wake_task (recut IN PLACE at its exact signature, its whole body now the
+--   delegation to the new sibling). NO signature moves, NO ACL is re-made, NO trigger body is
+--   recut, NO frozen workflow file is touched.
 -- =================================================================================================
 
 set local statement_timeout = '20min';   -- precautionary: the two CHECK re-adds validate whole
@@ -162,7 +163,7 @@ begin
   insert into g1_pr2a_stash(sig, prosrc, sha)
     values ('clara._settle_wake_task(uuid,text,text)', v_txt,
             encode(sha256(convert_to(v_txt, 'UTF8')), 'hex'));
-  -- Its ACL, so the tail can prove the DROP+CREATE re-made exactly what was there.
+  -- Its ACL, so the tail can prove BOTH doors end on exactly the footing this one had.
   insert into g1_pr2a_pre(k, v) values ('settle_acl_runtime',
     has_function_privilege('clara_runtime', 'clara._settle_wake_task(uuid,text,text)'::regprocedure, 'EXECUTE')::text);
   select count(*)::text into v_txt from (select r.rolname from pg_roles r
@@ -174,7 +175,8 @@ begin
   -- alone would miss an overload).
   if exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
               where n.nspname = 'clara'
-                and p.proname in ('_bank_wake_task_gate', '_wake_task_bank_account', '_drafted_prose_within')) then
+                and p.proname in ('_bank_wake_task_gate', '_wake_task_bank_account',
+                                  '_drafted_prose_within', '_settle_wake_task_cas')) then
     raise exception 'g1_pr2a prestate: one of the three new helper names already exists at some arity'
       using errcode = 'CLR10';
   end if;
@@ -1265,46 +1267,46 @@ begin
 end $function$;
 
 -- =================================================================================================
--- §G · THE SETTLE BECOMES A CAS — FOR UPDATE, bound to workflow_run_id and an expected status.
+-- §G · THE SETTLE GAINS A CAS SIBLING — FOR UPDATE, bound to workflow_run_id and an expected status.
 --
 -- FOLD-21's residual, in #437's own words: "the latch is per-attempt by construction, and the
 -- monotonic DB-side version is G1 PR-2's". The shape: a WDK step retry, a crash-recovery
 -- re-enqueue, or a reconciler belt can each hold a view of a task that has since moved on, and
 -- today _settle_wake_task writes whatever it is told about whatever row carries that id. Two
--- conjuncts close it, and BOTH are opt-in by default because the frozen callers cannot yet pass
--- them:
+-- conjuncts close it:
 --
 --   p_expect_run    -- the settling run's own workflow_run_id. A run that no longer holds the task
 --                      (because a re-enqueue bound a second one) REFUSES instead of overwriting.
 --   p_expect_status -- the status the caller believes it is settling FROM. A settle that raced a
 --                      cancel REFUSES instead of stamping over it.
 --
--- WHY DEFAULTED, AND WHAT THAT COSTS, said plainly rather than implied. Every live caller passes
--- three arguments by name from a FROZEN file (reconciler-wake.mjs, reconciler.mjs, and both wake
--- bodies' own terminal steps). Making either conjunct mandatory would refuse every settle in the
--- estate the moment this lands. So the doors exist, are drilled, and the runtime follow-up that
--- passes them is NAMED in the tail -- the identical shape §A(a), §B and §D's roster take, and the
--- identical shape 0120 took when it shipped wake_credentials.agent_task_id writerless.
+-- TWO DOORS, ONE BODY, AND THE ESTATE'S OWN STANDING GATE IS WHY. The first cut of this section
+-- made _settle_wake_task itself five-argument with the two conjuncts DEFAULTed, so every live
+-- three-argument caller still resolved. It applied cleanly and the DB battery was green — and the
+-- RUNTIME suite refused it: G1B-I3, the arity-AND-ORDER gate #437 built and mutant-proved, asserts
+-- that every call passes EVERY declared argument ("highest placeholder $3 but the verb declares 5
+-- args"). Relaxing that gate to tolerate a short call would have been the easy fix and the wrong
+-- one: the short call is EXACTLY the residual this migration ships, and a gate relaxed to admit it
+-- would stop catching the follow-up's own mistake.
 --
--- WHAT BITES TODAY, with no caller change at all: the FOR UPDATE. The pre-fix body read nothing
--- and UPDATEd blind, so two settles of one task interleaved with only the transition trigger
--- between them. The row is now held from the read to the commit, which is what makes the two
--- conjuncts meaningful when they arrive and what serialises the reconciler belt against a live
--- run's own terminal step in the meantime.
+-- So the CAS lives in a SIBLING, on mint_wake_credential / mint_wake_credential_for_task's own
+-- precedent — the estate already answers "the same act, with a binding the frozen caller cannot
+-- supply" with a second door rather than a widened one. _settle_wake_task keeps its exact
+-- signature and its exact ACL (a CoR, not a DROP+CREATE), and delegates; nothing about the frozen
+-- callers changes. When the runtime follow-up repoints them at _settle_wake_task_cas, I3 will
+-- require all FIVE arguments of it, by name, in order — so the follow-up's correctness is
+-- machine-checked the moment it lands, which is strictly better than a defaulted parameter nobody
+-- would notice was never passed.
 --
--- SIGNATURE CHANGE, DELIBERATELY THE ONE DOOR AND NOT TWO. Postgres cannot add a DEFAULTed
--- parameter by CREATE OR REPLACE (it would mint a second function and every three-argument call
--- would then be ambiguous, 42725), so this is a DROP + CREATE. The three-argument call every live
--- caller makes still resolves through the defaults -- proven behaviourally in the tail, not
--- assumed -- and the ACL is re-made in the same block and re-measured against the prestate's own
--- reading of it. A sibling verb (the mint_wake_credential_for_task precedent) was the alternative
--- and was rejected here: a settle is the one place where two doors onto one row is exactly the
--- hazard being closed.
+-- WHAT BITES TODAY, with no caller change at all: the FOR UPDATE, which both doors now take. The
+-- pre-fix body read nothing and UPDATEd blind, so the row it settled could have moved between the
+-- decision and the write. Holding it from the read to the commit is what makes the two conjuncts
+-- meaningful when they arrive, and what makes a raced settle refuse with its OWN typed reason
+-- rather than falling through to the transition trigger's generic CLR13 (G1PR2A-G4 drills exactly
+-- that difference, and MUT-8 — the lock deleted from the shipping body — reds it and nothing else).
 -- =================================================================================================
-drop function clara._settle_wake_task(uuid, text, text);
-
-create function clara._settle_wake_task(p_task uuid, p_outcome text, p_error_code text,
-    p_expect_run text default null, p_expect_status text default null)
+create or replace function clara._settle_wake_task_cas(p_task uuid, p_outcome text, p_error_code text,
+    p_expect_run text, p_expect_status text)
   returns void
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare v_intent uuid; v_status text; v_run text;
@@ -1325,8 +1327,9 @@ begin
   if not found then
     raise exception 'no wake-engine task % to settle', p_task using errcode='CLR10';
   end if;
-  -- THE CAS. Both conjuncts are skipped when the caller names no expectation, which is every
-  -- caller today; a caller that DOES name one gets a refusal, never a silent no-op.
+  -- THE CAS. Both conjuncts are skipped when the caller names no expectation -- which is what the
+  -- three-argument door below passes, and every live caller with it. A caller that DOES name one
+  -- gets a refusal, never a silent no-op.
   if p_expect_run is not null and v_run is distinct from p_expect_run then
     raise exception 'wake task % is bound to run %, not the settling run', p_task, coalesce(v_run, '<unbound>')
       using errcode='CLR10', detail='{"reason":"wake_settle_run_mismatch"}';
@@ -1362,19 +1365,35 @@ begin
     update clara.wakes_outbox set status = 'settled' where intent_id = v_intent and status = 'held';
   end if;
 end $$;
-revoke all on function clara._settle_wake_task(uuid,text,text,text,text) from public;
--- clara_runtime ONLY, re-made byte-for-byte against what the prestate MEASURED on the dropped
--- body -- the reconciler belt and the engine's own claim path both call this AS clara_runtime,
--- the same footing settle_chat_turn already stands on. Every human/wake role stays refused;
--- PUBLIC stays refused. The tail proves the post-DROP roster is the same set, by role, not by
--- trusting this statement.
-grant execute on function clara._settle_wake_task(uuid,text,text,text,text) to clara_runtime;
-comment on function clara._settle_wake_task(uuid,text,text,text,text) is
-  'Gate G1 / G1 PR-2a: the wake-engine settlement verb, now a conditional CAS. Holds the task
-   FOR UPDATE for the rest of the calling transaction and, when the caller names them, requires
+revoke all on function clara._settle_wake_task_cas(uuid,text,text,text,text) from public;
+-- clara_runtime ONLY, matching _settle_wake_task's own footing exactly: the reconciler belt and the
+-- engine's own claim path are the only callers either door will ever have. Every human/wake role
+-- stays refused; PUBLIC stays refused. This new name is added to rig-meta.mjs's own
+-- G1_WAKE_ENGINE_RUNTIME_COHORT in the same PR -- the estate's grant matrix iterates the LIVE
+-- catalog and treats an unrostered grant as a failure, which is the behaviour that makes the
+-- roster worth having.
+grant execute on function clara._settle_wake_task_cas(uuid,text,text,text,text) to clara_runtime;
+comment on function clara._settle_wake_task_cas(uuid,text,text,text,text) is
+  'Gate G1 / G1 PR-2a: the wake-engine settlement verb as a conditional CAS. Holds the task FOR
+   UPDATE for the rest of the calling transaction and, when the caller names them, requires
    workflow_run_id and status to match before settling -- a mismatch REFUSES, never no-ops. The
-   two expectation arguments default to NULL because every live caller is a frozen body passing
-   three; passing them is a named runtime follow-up.';
+   three-argument clara._settle_wake_task delegates here with no expectations; passing them is a
+   named runtime follow-up, and G1B-I3 will require all five by name once it does.';
+
+-- The pre-existing door, CoR-ed in place: same signature, same ACL, same callers. Its whole body is
+-- now the delegation, so there is ONE implementation of the settle and no second place for the
+-- lock, the kind domain or the first-write-wins rule to drift.
+create or replace function clara._settle_wake_task(p_task uuid, p_outcome text, p_error_code text)
+  returns void
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  perform clara._settle_wake_task_cas(p_task => p_task, p_outcome => p_outcome,
+    p_error_code => p_error_code, p_expect_run => null, p_expect_status => null);
+end $$;
+-- ACL unmoved by this CoR (same signature): 0133 granted it to clara_runtime and nobody else.
+-- Re-stated rather than assumed, and the tail proves the roster is still exactly that.
+revoke all on function clara._settle_wake_task(uuid,text,text) from public;
+grant execute on function clara._settle_wake_task(uuid,text,text) to clara_runtime;
 
 -- The deploy principal is restored here, BEFORE the census, so every ACL and ownership assertion
 -- below reads the catalogue as an outside caller sees it rather than from inside the owner role.
@@ -1521,7 +1540,7 @@ begin
   for v_sig in select unnest(array['clara._bank_wake_task_gate(text,uuid,boolean,boolean)',
                                    'clara._wake_task_bank_account(uuid)',
                                    'clara._drafted_prose_within(jsonb,integer)',
-                                   'clara._settle_wake_task(uuid,text,text,text,text)']) loop
+                                   'clara._settle_wake_task_cas(uuid,text,text,text,text)']) loop
     select pg_get_userbyid(p.proowner) into v_txt from pg_proc p where p.oid = v_sig::regprocedure;
     if v_txt is distinct from 'clara_fn_owner' then
       raise exception 'g1_pr2a tail: % is owned by %, not clara_fn_owner', v_sig, v_txt using errcode='CLR10';
@@ -1549,17 +1568,19 @@ begin
     end if;
   end loop;
 
-  -- H5 · §G's CAS. The three-argument call is proven to still resolve BEHAVIOURALLY -- by making
-  -- one and reading the refusal it is supposed to give -- rather than by staring at the defaults.
-  -- A 42883 (undefined function) or 42725 (ambiguous) here is exactly the regression this proves
-  -- against, and both would surface as a DIFFERENT sqlstate than the CLR10 the body raises.
+  -- H5 · §G's CAS sibling. TWO doors, one body. The three-argument door is proven to still
+  -- resolve BEHAVIOURALLY -- by making the call and reading the refusal it is supposed to give --
+  -- rather than by staring at a signature: a 42883 (undefined) or 42725 (ambiguous) here would
+  -- surface as a DIFFERENT sqlstate than the CLR10 the body raises, which is exactly the
+  -- regression a signature-only read cannot see.
   select count(*) into v_n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname='clara' and p.proname = '_settle_wake_task';
-  if v_n <> 1 then
-    raise exception 'g1_pr2a tail: _settle_wake_task resolves at % pg_proc row(s), expected exactly 1', v_n using errcode='CLR10';
+    where n.nspname='clara' and p.proname in ('_settle_wake_task','_settle_wake_task_cas');
+  if v_n <> 2 then
+    raise exception 'g1_pr2a tail: the settle family resolves at % pg_proc row(s), expected exactly 2 (one arity each)', v_n using errcode='CLR10';
   end if;
-  if to_regprocedure('clara._settle_wake_task(uuid,text,text,text,text)') is null then
-    raise exception 'g1_pr2a tail: _settle_wake_task is not at its new five-argument signature' using errcode='CLR10';
+  if to_regprocedure('clara._settle_wake_task(uuid,text,text)') is null
+     or to_regprocedure('clara._settle_wake_task_cas(uuid,text,text,text,text)') is null then
+    raise exception 'g1_pr2a tail: the settle family is not at its expected two signatures' using errcode='CLR10';
   end if;
   begin
     perform clara._settle_wake_task(p_task => '00000000-0000-4000-8000-000000000000'::uuid,
@@ -1572,20 +1593,32 @@ begin
         using errcode='CLR10';
     end if;
   end;
-  select p.prosrc into v_new from pg_proc p where p.oid = 'clara._settle_wake_task(uuid,text,text,text,text)'::regprocedure;
+  -- The CAS body carries the lock, both conjuncts and 0133's registry-driven kind domain; the
+  -- three-argument door carries nothing but the delegation, so there is exactly one place any of
+  -- them could drift from.
+  select p.prosrc into v_new from pg_proc p where p.oid = 'clara._settle_wake_task_cas(uuid,text,text,text,text)'::regprocedure;
   if position('for update' in lower(v_new)) = 0
      or position('wake_settle_run_mismatch' in v_new) = 0
      or position('wake_settle_status_mismatch' in v_new) = 0
      or position('kind in (select task_kind from clara.wake_engine_sources)' in v_new) = 0 then
-    raise exception 'g1_pr2a tail: _settle_wake_task is missing the lock, a CAS conjunct, or 0133''s registry-driven kind domain' using errcode='CLR10';
+    raise exception 'g1_pr2a tail: _settle_wake_task_cas is missing the lock, a CAS conjunct, or 0133''s registry-driven kind domain' using errcode='CLR10';
   end if;
-  select count(*) into v_n from pg_roles r
-    where r.rolname like 'clara\_%' and has_function_privilege(r.rolname, 'clara._settle_wake_task(uuid,text,text,text,text)'::regprocedure, 'EXECUTE');
-  if v_n::text is distinct from (select v from g1_pr2a_pre where k = 'settle_acl_clara_role_count')
-     or not has_function_privilege('clara_runtime', 'clara._settle_wake_task(uuid,text,text,text,text)'::regprocedure, 'EXECUTE') then
-    raise exception 'g1_pr2a tail: the DROP+CREATE did not re-make _settle_wake_task''s ACL (now % clara role(s), was %)',
-      v_n, (select v from g1_pr2a_pre where k = 'settle_acl_clara_role_count') using errcode='CLR10';
+  select p.prosrc into v_txt from pg_proc p where p.oid = 'clara._settle_wake_task(uuid,text,text)'::regprocedure;
+  if position('_settle_wake_task_cas' in v_txt) = 0 or position('update clara.agent_tasks' in v_txt) > 0 then
+    raise exception 'g1_pr2a tail: the three-argument door must DELEGATE, not carry a second copy of the settle' using errcode='CLR10';
   end if;
+  -- Both doors on the SAME footing, and the three-argument one's ACL is unmoved from what the
+  -- prestate measured (this is a CoR at the same signature, so nothing should have touched it).
+  for v_sig in select unnest(array['clara._settle_wake_task(uuid,text,text)',
+                                   'clara._settle_wake_task_cas(uuid,text,text,text,text)']) loop
+    select count(*) into v_n from pg_roles r
+      where r.rolname like 'clara\_%' and has_function_privilege(r.rolname, v_sig::regprocedure, 'EXECUTE');
+    if v_n::text is distinct from (select v from g1_pr2a_pre where k = 'settle_acl_clara_role_count')
+       or not has_function_privilege('clara_runtime', v_sig::regprocedure, 'EXECUTE') then
+      raise exception 'g1_pr2a tail: %''s ACL is % clara role(s), expected the % the prestate measured on the pre-fix settle',
+        v_sig, v_n, (select v from g1_pr2a_pre where k = 'settle_acl_clara_role_count') using errcode='CLR10';
+    end if;
+  end loop;
 
   -- H6 · §A/§B, extend-only in BOTH directions: every pre-existing member survives AND exactly
   -- the named members were added (a count, so a third smuggled member fails too).
@@ -1730,7 +1763,7 @@ begin
     end if;
   end loop;
 
-  raise notice 'g1_pr2a tail: OK -- D1 INVENTORY = 17 REPLACED WRITER BODIES: the FOURTEEN bank wake wrappers (each recut in place, its delta proven by SURGICAL RE-SUBSTITUTION against the byte-exact prestate pin -- exactly one _bank_wake_task_gate call per body and nothing else moved), clara.mint_wake_credential (recut in place: the bank_agent arm now DERIVES and binds the unique LIVE wake task, refusing bank_agent_task_absent / bank_agent_task_ambiguous, with all 9 pre-existing walls read back verbatim and the six other kinds still binding agent_task_id NULL), clara.mint_wake_credential_for_task (recut in place: roster widened close_prep -> {close_prep, bank_agent} and the expected agent_tasks.kind resolved from wake_engine_sources.task_kind instead of a literal), and clara._settle_wake_task (DROP+CREATE at (uuid,text,text,text,text): FOR UPDATE + two DEFAULTed CAS conjuncts, its ACL re-made to the SAME clara-role set the prestate measured on the dropped body, and the three-argument call proven to still resolve BEHAVIOURALLY by driving it to its own CLR10). The 18 DO-NOT-TOUCH bodies re-pin BYTE-IDENTICAL, both abandon doors and _tf_agent_task_update among them. NEW: clara._bank_wake_task_gate (FOR UPDATE on the task inside the CALLER''s transaction; six rostered refusal reasons; ungranted to every non-owner clara role; stands aside for every credential that is not bank_agent, which is what keeps chatTurn.v14''s thirteen interactive_client bank doors working), clara._wake_task_bank_account (the run''s account read from its producing event''s payload, regex-guarded so a malformed value reads ABSENT and is refused rather than raising 22P02), clara._drafted_prose_within (IMMUTABLE, table-free, safe in a CHECK). ROSTERS: ck_llm_usage_events_call_kind 9 -> 11 members (裁-49) and agent_tasks_error_code_check 6 -> 7 (all_writes_refused), both proven extend-only member-by-member AND by count. PRODUCER: bank.agent_due registered in BOTH halves of the coupled pair -- client_scoped=true, decision internal_task (the estate''s FIRST row at that decision; % existed before), coverage proven WHOLE over the ENTIRE registry before and after, taxonomy version UNMOVED, and an UNREGISTERED type still refused by a real probe. PROSE: 7 new CHECKs, every pre-existing non-blank guard untouched. clara.close_abandon_reasons ships 10 rows with RLS enabled+forced, the owner/read policy pair, zero non-owner DML; clara.close_runs.end_reason_code ships EMPTY and writerless BY DESIGN (0120:254''s precedent). UNMOVED: wake_engine_sources = 2 rows BOTH DISABLED (裁-40''s flip is the owner''s ceremony), bank_agent.login_pool=bank, % held wake row(s), and every one of the six pinned row counts. NAMED RUNTIME FOLLOW-UPS, none of them silent: (1) repoint BANK_AGENT_CALL_KIND / CLOSE_PREP_CALL_KIND off unattended_posting; (2) settle with all_writes_refused where FOLD-3 settles internal today; (3) pass p_expect_run/p_expect_status from both terminal steps and both reconciler belts; (4) repoint mintBankAgentCredential at clara.mint_wake_credential_for_task so a multi-account client stops being ambiguous; (5) plumb p_reason_code through wake_abandon_close / abandon_close. Each needs a new frozen version and none is in this file. NOT SHIPPED, deliberately: bank_agent_run_due (F-A3''s), the close_prep task producer (F-A4''s), and any cadence column -- the design puts the cadence gate in leader.mjs as a pure predicate (§1.1), and leader.mjs''s six live predicates were measured to read an env-var interval and no DB row. No table in workflow/graphile_worker/spike touched.',
+  raise notice 'g1_pr2a tail: OK -- D1 INVENTORY = 17 REPLACED WRITER BODIES: the FOURTEEN bank wake wrappers (each recut in place, its delta proven by SURGICAL RE-SUBSTITUTION against the byte-exact prestate pin -- exactly one _bank_wake_task_gate call per body and nothing else moved), clara.mint_wake_credential (recut in place: the bank_agent arm now DERIVES and binds the unique LIVE wake task, refusing bank_agent_task_absent / bank_agent_task_ambiguous, with all 9 pre-existing walls read back verbatim and the six other kinds still binding agent_task_id NULL), clara.mint_wake_credential_for_task (recut in place: roster widened close_prep -> {close_prep, bank_agent} and the expected agent_tasks.kind resolved from wake_engine_sources.task_kind instead of a literal), and clara._settle_wake_task (recut IN PLACE at its exact three-argument signature, its whole body now a delegation to the NEW clara._settle_wake_task_cas, which carries the FOR UPDATE and both CAS conjuncts -- a sibling rather than a widened signature because the runtime''s own standing arity-AND-ORDER gate, G1B-I3, requires every call to pass EVERY declared argument, and relaxing it to admit a short call would have stopped it catching exactly the residual this file ships; the three-argument call is proven to still resolve BEHAVIOURALLY by driving it to its own CLR10, and both doors carry the SAME clara-role ACL the prestate measured). The 18 DO-NOT-TOUCH bodies re-pin BYTE-IDENTICAL, both abandon doors and _tf_agent_task_update among them. NEW: clara._bank_wake_task_gate (FOR UPDATE on the task inside the CALLER''s transaction; six rostered refusal reasons; ungranted to every non-owner clara role; stands aside for every credential that is not bank_agent, which is what keeps chatTurn.v14''s thirteen interactive_client bank doors working), clara._wake_task_bank_account (the run''s account read from its producing event''s payload, regex-guarded so a malformed value reads ABSENT and is refused rather than raising 22P02), clara._drafted_prose_within (IMMUTABLE, table-free, safe in a CHECK). ROSTERS: ck_llm_usage_events_call_kind 9 -> 11 members (裁-49) and agent_tasks_error_code_check 6 -> 7 (all_writes_refused), both proven extend-only member-by-member AND by count. PRODUCER: bank.agent_due registered in BOTH halves of the coupled pair -- client_scoped=true, decision internal_task (the estate''s FIRST row at that decision; % existed before), coverage proven WHOLE over the ENTIRE registry before and after, taxonomy version UNMOVED, and an UNREGISTERED type still refused by a real probe. PROSE: 7 new CHECKs, every pre-existing non-blank guard untouched. clara.close_abandon_reasons ships 10 rows with RLS enabled+forced, the owner/read policy pair, zero non-owner DML; clara.close_runs.end_reason_code ships EMPTY and writerless BY DESIGN (0120:254''s precedent). UNMOVED: wake_engine_sources = 2 rows BOTH DISABLED (裁-40''s flip is the owner''s ceremony), bank_agent.login_pool=bank, % held wake row(s), and every one of the six pinned row counts. NAMED RUNTIME FOLLOW-UPS, none of them silent: (1) repoint BANK_AGENT_CALL_KIND / CLOSE_PREP_CALL_KIND off unattended_posting; (2) settle with all_writes_refused where FOLD-3 settles internal today; (3) repoint both terminal steps and both reconciler belts at clara._settle_wake_task_cas, passing p_expect_run/p_expect_status -- G1B-I3 will then require all five by name, in order, so that follow-up is machine-checked the moment it lands; (4) repoint mintBankAgentCredential at clara.mint_wake_credential_for_task so a multi-account client stops being ambiguous; (5) plumb p_reason_code through wake_abandon_close / abandon_close. Each needs a new frozen version and none is in this file. NOT SHIPPED, deliberately: bank_agent_run_due (F-A3''s), the close_prep task producer (F-A4''s), and any cadence column -- the design puts the cadence gate in leader.mjs as a pure predicate (§1.1), and leader.mjs''s six live predicates were measured to read an env-var interval and no DB row. No table in workflow/graphile_worker/spike touched.',
     (select v from g1_pr2a_pre where k='internal_task_rows_before'),
     (select v from g1_pr2a_pre where k='held_wake_rows');
 end $tail$;

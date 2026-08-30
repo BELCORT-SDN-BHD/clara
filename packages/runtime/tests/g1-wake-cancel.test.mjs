@@ -32,7 +32,11 @@ test("G1B-CANCEL-1 裁-44 FOLD-2 (bank) — a cancel between an admitted read an
   await buildBankPrereqs(w);
   const acct = await buildBankAccount(w, [10000]);
   const [entry] = await buildApprovedEntries(w, [10000]);
-  const { taskId } = await plantHeldWakeTask({ owner: w.owner, client: w.client, payload: {} });
+  // THE PRODUCER CONTRACT, in the fixture (#437's own RED, now enforced by G1 PR-2a's §F): the
+  // event payload must carry bank_account_id. The other plants in this file already do -- this one
+  // predates them and its `{}` now yields wake_task_account_unbound on the first tool call.
+  const { taskId } = await plantHeldWakeTask({
+    owner: w.owner, client: w.client, payload: { bank_account_id: acct.bankAccountId } });
   await rig.rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
 
   const previous = injectBankPools();

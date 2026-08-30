@@ -94,7 +94,7 @@ test("p2a.G1 a settle naming the WRONG run refuses; naming the right one settles
   const { taskId } = await freshWakeTask();
   await rootQuery("update clara.agent_tasks set workflow_run_id='run-A' where id=$1", [taskId]);
   const err = await caught(() => rootQuery(
-    "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4)",
+    "select clara._settle_wake_task_cas(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4, p_expect_status => null)",
     [taskId, "completed", null, "run-B"]));
   assert.ok(err, "G1: a settle from a run that does not hold the task must refuse");
   assert.equal(err.code, "CLR10", `G1: expected CLR10, got ${err.code}: ${err.message}`);
@@ -102,7 +102,7 @@ test("p2a.G1 a settle naming the WRONG run refuses; naming the right one settles
   assert.equal((await rootQuery("select status from clara.agent_tasks where id=$1", [taskId])).rows[0].status,
     "running", "G1: a REFUSED settle must leave the row alone -- refusing, never no-opping, is only half of it");
   // Control: one argument differs.
-  await rootQuery("select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4)",
+  await rootQuery("select clara._settle_wake_task_cas(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4, p_expect_status => null)",
     [taskId, "completed", null, "run-A"]);
   assert.equal((await rootQuery("select status from clara.agent_tasks where id=$1", [taskId])).rows[0].status, "completed");
 });
@@ -111,7 +111,7 @@ test("p2a.G1b a settle of an UNBOUND task that names a run refuses -- a null run
   if (gate(t)) return;
   const { taskId } = await freshWakeTask();
   const err = await caught(() => rootQuery(
-    "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4)",
+    "select clara._settle_wake_task_cas(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4, p_expect_status => null)",
     [taskId, "failed", "internal", "run-Z"]));
   assert.equal(reasonOf(err), "wake_settle_run_mismatch",
     `G1b: an unbound task must not silently satisfy a run expectation, got ${err?.detail}`);
@@ -122,11 +122,11 @@ test("p2a.G2 a settle naming the WRONG status refuses; the right one settles", a
   if (gate(t)) return;
   const { taskId } = await freshWakeTask();
   const err = await caught(() => rootQuery(
-    "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4, p_expect_status => $5)",
+    "select clara._settle_wake_task_cas(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4, p_expect_status => $5)",
     [taskId, "completed", null, null, "cancel_requested"]));
   assert.equal(reasonOf(err), "wake_settle_status_mismatch", `G2: expected wake_settle_status_mismatch, got ${err?.detail}`);
   await rootQuery(
-    "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4, p_expect_status => $5)",
+    "select clara._settle_wake_task_cas(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4, p_expect_status => $5)",
     [taskId, "completed", null, null, "running"]);
   assert.equal((await rootQuery("select status from clara.agent_tasks where id=$1", [taskId])).rows[0].status, "completed");
 });
@@ -171,7 +171,7 @@ test("p2a.G4 FOR UPDATE makes the CAS read the COMMITTED row: a raced status exp
     await c1.query("begin");
     await c1.query("select clara._settle_wake_task($1,$2,$3)", [taskId, "completed", null]);
     const raced = c2.query(
-      "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4, p_expect_status => $5)",
+      "select clara._settle_wake_task_cas(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4, p_expect_status => $5)",
       [taskId, "failed", "internal", null, "running"]).catch((e) => e);
     // PROVE the interleave with pg_blocking_pids, never a sleep (db-tests.md): if T2 never
     // observably blocked, the window this cell describes did not happen and its verdict would be

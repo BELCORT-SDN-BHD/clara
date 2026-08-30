@@ -18,7 +18,12 @@ const tools = await import("../workflows/bankAgent.v1.tools.ts");
 
 /** A running wake task plus the tool set bound to it, ready to drive. */
 async function armed(w, bankAccountId, attemptKey = "attempt-1") {
-  const { taskId } = await plantHeldWakeTask({ owner: w.owner, client: w.client, payload: {} });
+  // THE PRODUCER CONTRACT, in the fixture (#437's own RED, now enforced by G1 PR-2a's §F): the
+  // event payload must carry bank_account_id, because the pack is per-account and the bank role
+  // cannot enumerate accounts. A `{}` payload now yields wake_task_account_unbound on the first
+  // tool call.
+  const { taskId } = await plantHeldWakeTask({
+    owner: w.owner, client: w.client, payload: { bank_account_id: bankAccountId } });
   await rig.rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
   const rec = tools.newBankRunRecord(attemptKey);
   const ctx = { taskId, firmId: w.firm, clientId: w.client, bankAccountId, dueReason: null };

@@ -1031,6 +1031,19 @@ export const G1_WAKE_ENGINE_COHORT = ["set_wake_source_enabled"];
 // lands in ALLOWED[ROLES.runtime], not the human-lane roster above.
 export const G1_WAKE_ENGINE_RUNTIME_COHORT = ["_settle_wake_task"];
 
+// [G1 PR-2a] The CAS SIBLING, on the same clara_runtime-only footing and for the same one caller:
+// _settle_wake_task_cas carries the FOR UPDATE and the two expectation conjuncts, and
+// _settle_wake_task delegates to it. A sibling rather than a widened signature because the
+// runtime's own arity-AND-ORDER gate (G1B-I3) requires every call to pass EVERY declared argument,
+// so a defaulted parameter would have forced that gate to be relaxed to admit exactly the short
+// call the follow-up exists to remove.
+// ITS OWN COHORT, not an entry appended to the one above, and the reason is mechanical: this file
+// runs against databases pinned at EARLIER frontiers where this name does not exist yet, and a
+// two-name cohort with one member missing is reported as PARTIAL. A one-name cohort is bimodal by
+// construction (cohortFailures returns nothing when all of it is missing), which is the correct
+// shape for a name a later migration introduces.
+export const G1_PR2A_SETTLE_CAS_COHORT = ["_settle_wake_task_cas"];
+
 // F-A3/PR-3 [retirement + parity + doors] the one NEW human door: confirm_bank_identifier_promotion
 // (OQ-8's deferred confirm half — bookkeeper floor, body-enforced; agent + both wake roles gain
 // ZERO, matching every other confirm/settle door on this roster). book_staff_advance_application
@@ -1427,6 +1440,8 @@ export const ALLOWED = {
     // claim path, the settle_chat_turn precedent above). Declared here so any wider grant FAILS
     // the matrix.
     ...G1_WAKE_ENGINE_RUNTIME_COHORT,
+    // [G1 PR-2a] and its CAS sibling, same footing, same single caller.
+    ...G1_PR2A_SETTLE_CAS_COHORT,
     // [Wave-F Track A, F-A4 PR-1c] the clock's two runtime verbs: close_prep_due (the due oracle
     // — clara_runtime and NOBODY else, Annex B.1: the wake roles never ask) and
     // mint_wake_credential_for_task (the F14 sibling minter, mirroring mint_wake_credential's own
@@ -1634,6 +1649,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("F-A3/PR-1b bank-agency agent limb", BANK_AGENCY_F_A3_PR1B_COHORT, liveNames));
   failures.push(...cohortFailures("Gate G1 wake-execution engine", G1_WAKE_ENGINE_COHORT, liveNames));
   failures.push(...cohortFailures("Gate G1 wake-execution engine (runtime lane)", G1_WAKE_ENGINE_RUNTIME_COHORT, liveNames));
+  failures.push(...cohortFailures("G1 PR-2a settle CAS sibling", G1_PR2A_SETTLE_CAS_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3/PR-3 retirement + parity + doors", BANK_AGENCY_F_A3_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5b PR-1 sandbox export lane", F_A5B_PR1_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5b card 1 substitution seam", CARD1_SEAM_COHORT, liveNames));

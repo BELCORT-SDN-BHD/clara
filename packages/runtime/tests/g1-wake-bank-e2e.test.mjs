@@ -60,7 +60,11 @@ test("G1B-BANK-E2 a REAL bank_agent wake credential calling the REAL wrapper sta
   // that SAME field back via split_part(op_key,':',2) to bind a write's inputs_digest to the
   // CURRENT TASK's own prior pack read — a second taskId here would make every write below
   // refuse CLR10 inputs_digest_unverified for a reason that has nothing to do with the fixture.
-  const { taskId } = await plantHeldWakeTask({ owner: w.owner, client: w.client, payload: {} });
+  // THE PRODUCER CONTRACT, in the fixture (#437's own RED, now enforced by G1 PR-2a's §F): the
+  // event payload must carry bank_account_id, because the pack is per-account and the bank role
+  // cannot enumerate accounts. A `{}` payload now yields wake_task_account_unbound on the pack read.
+  const { taskId } = await plantHeldWakeTask({
+    owner: w.owner, client: w.client, payload: { bank_account_id: acct.bankAccountId } });
   await rig.rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
 
   const previous = injectBankPools();

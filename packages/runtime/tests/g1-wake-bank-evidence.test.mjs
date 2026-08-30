@@ -22,7 +22,13 @@ const tools = await import("../workflows/bankAgent.v1.tools.ts");
  *  uses. Duplicated rather than shared: a two-line helper in a third module costs more to follow
  *  than it saves. */
 async function armed(w, bankAccountId, attemptKey = "attempt-1") {
-  const { taskId } = await plantHeldWakeTask({ owner: w.owner, client: w.client, payload: {} });
+  // THE PRODUCER CONTRACT, in the fixture. #437 recorded it as a RED: "the event payload must
+  // carry bank_account_id (the pack is per-account and the bank role cannot enumerate accounts)".
+  // G1 PR-2a makes the database read it — every bank act's own account is derived from its subject
+  // and required to equal the one this run's producing event named — so a `{}` payload now yields
+  // wake_task_account_unbound on the first tool call, which is the contract refusing, not a defect.
+  const { taskId } = await plantHeldWakeTask({
+    owner: w.owner, client: w.client, payload: { bank_account_id: bankAccountId } });
   await rig.rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
   const rec = tools.newBankRunRecord(attemptKey);
   const ctx = { taskId, firmId: w.firm, clientId: w.client, bankAccountId, dueReason: null };
