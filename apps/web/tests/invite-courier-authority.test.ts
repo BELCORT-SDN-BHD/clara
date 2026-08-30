@@ -50,9 +50,21 @@ const UNAUTHORISED: { name: string; rows: unknown }[] = [
   { name: "a row this app cannot validate", rows: [{ ...callerRow("admin"), firm_id: "not-a-uuid" }] },
   { name: "a role off the DB's own ladder", rows: [{ ...callerRow("admin"), role: "wizard" }] },
   { name: "a NULL rank — the DB's type permits it, so it is no evidence", rows: [callerRow("admin", { role_rank: null })] },
-  { name: "a rank that DISAGREES with its role name", rows: [callerRow("bookkeeper", { role_rank: 3 })] },
   { name: "a payload that is not an array", rows: { role: "admin" } },
 ];
+
+// NOT IN THAT LIST, AND DELIBERATELY SO: a row whose `role_rank` disagrees with
+// its own role NAME (say `{role: "bookkeeper", role_rank: 3}`). An earlier draft
+// refused it, on the review-law-3 reasoning that the wire's rank and this app's
+// re-derivation from the role name are two independent sources that must agree.
+// That was dropped when the native review's fix shape was adopted, and the reason
+// is worth recording rather than leaving as a silent relaxation: `ROLE_LADDER` and
+// `ADMIN_RANK` are ALREADY pinned byte-for-byte to `0002`'s `clara.role_rank` by
+// `lib/members/members-doors.test.ts`, so the drift that check guarded against
+// reds in CI before it can ship. Enforcing it again at RUNTIME converts the same
+// hypothetical drift into a total invite lockout for every admin in the estate —
+// an availability failure bought with no security gain, since `_human_ctx` would
+// still refuse correctly. The DB's own `role_rank` is the rank this gate reads.
 
 describe("N1: the account oracle is bounded to admin+ BEFORE it runs", () => {
   for (const principal of UNAUTHORISED) {
@@ -66,7 +78,7 @@ describe("N1: the account oracle is bounded to admin+ BEFORE it runs", () => {
       const res = await handleInviteRequest(post({ email: "known@example.test", role: "admin" }), d);
 
       assert.equal(res.status, 403);
-      assert.equal((await json(res)).code, "not_authorised");
+      assert.equal((await json(res)).code, "not_permitted");
       assert.equal(obs.mintChecks.length, 0, "THE ORACLE MUST NOT HAVE RUN — no listUsers, at all");
       assert.equal(calls.length, 0, "…and nothing was minted");
       assert.equal(obs.mints.length, 0);

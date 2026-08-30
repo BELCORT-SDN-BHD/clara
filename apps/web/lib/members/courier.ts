@@ -80,7 +80,7 @@ import {
   type ServerSession,
 } from "../supabase/server-session";
 import { isCallerContextRow, loadCallerContext } from "../firm/caller-context";
-import { ADMIN_RANK, roleRank } from "./reads";
+import { ADMIN_RANK } from "./reads";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { InviteCourierCode } from "./doors";
 import {
@@ -223,7 +223,8 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 /**
- * IS THIS CALLER POSITIVELY AN ADMIN OR OWNER OF EXACTLY ONE FIRM? (N1)
+ * IS THIS CALLER POSITIVELY AN ADMIN OR OWNER OF EXACTLY ONE FIRM? (N1 /
+ * native MEDIUM-1 — both reviews landed on the same finding.)
  *
  * Everything here is a POSITIVE read — review law 2. `null` (the read threw),
  * a non-array, zero rows, more than one row, a row `isCallerContextRow` rejects,
@@ -236,24 +237,26 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * which firm the invite would land in — and `lib/firm/caller-context.ts` is
  * explicit that zero and >1 are different facts that must not be folded.
  *
- * TWO INDEPENDENT RANK SOURCES MUST AGREE (review law 3 — spelling is not
- * identity). `role_rank` arrives on the wire from `clara.role_rank(m.role)`;
- * `roleRank(row.role)` re-derives it from the role NAME using this app's
- * transcription of the same SQL `case`, which `lib/members/members-doors.test.ts`
- * pins to `0002` byte for byte. Requiring both to clear the bar means a view that
- * started publishing a rank inconsistent with its own role column refuses rather
- * than grants. A NULL `role_rank` is permitted by the DB's type and is treated as
- * "no evidence", so it refuses.
+ * THE RANK COMPARISON IS THE DB'S OWN `role_rank`, and NOT a second locally
+ * derived one. An earlier draft of this function additionally required
+ * `roleRank(row.role)` — this app's transcription of the same SQL `case` — to
+ * EQUAL the wire's value, on review-law-3 grounds. That was dropped deliberately.
+ * `ROLE_LADDER` and `ADMIN_RANK` are already pinned byte-for-byte to `0002`'s
+ * `clara.role_rank` by `lib/members/members-doors.test.ts`, so a drift between
+ * the two is caught in CI, before merge. Requiring equality at RUNTIME converts
+ * that same hypothetical drift into a total invite lockout for every admin in the
+ * estate — an availability failure bought with no security gain, since the DB's
+ * own `_human_ctx` would still refuse correctly. `isCallerContextRow` has already
+ * checked that `role` is one of the DB's four and that `role_rank` is an integer
+ * or null; a NULL rank is permitted by the DB's type, carries no evidence, and
+ * refuses.
  */
 function isAdminOrAbove(rows: unknown): boolean {
   if (!Array.isArray(rows) || rows.length !== 1) return false;
   const row: unknown = rows[0];
   if (!isCallerContextRow(row)) return false;
-  const declared = row.role_rank;
-  if (typeof declared !== "number" || declared < ADMIN_RANK) return false;
-  const derived = roleRank(row.role);
-  if (derived === null || derived < ADMIN_RANK) return false;
-  return derived === declared;
+  const rank = row.role_rank;
+  return typeof rank === "number" && rank >= ADMIN_RANK;
 }
 
 /** `invite_member`'s own return, as far as this file reads it. `token_hash` is in
@@ -352,12 +355,22 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
   // could read, one address at a time. The door's `_human_ctx` came too late to
   // stop it, because the disclosure happened BEFORE the door.
   //
-  // The owner's acceptance of this enumeration was explicitly "bounded to
+  // The owner's acceptance of this enumeration (裁-65) was explicitly "bounded to
   // admin+". So the bound now exists, ahead of everything that touches the
   // directory or reflects the recipient — including the config check, so a
   // non-admin cannot even learn whether this deployment has mail set up.
   //
-  // IT IS NOT A SECOND COPY OF THE WALL. It can only REFUSE; it grants nothing,
+  // AND THE ORACLE IS NOT THE ONLY COST. The independent review measured ONE
+  // probe driving up to 40 service-role `listUsers` calls (the pagination ceiling
+  // below), so an unbounded caller could also wedge every admin's invite behind
+  // GoTrue's admin rate limit — a denial that costs nothing to mount and is
+  // invisible from the app. Least privilege on the courier's OWN service-role
+  // side effect is the second reason this gate exists, independent of the
+  // disclosure.
+  //
+  // THE TRADE, NAMED HONESTLY: this IS a second reading of authority, and this
+  // file spent its whole life arguing that the DB is the wall. What makes it
+  // legitimate is the direction — it can only REFUSE; it grants nothing,
   // and `invite_member`'s own `_human_ctx(role_rank('admin'))` (`0147:376`)
   // still judges the request independently at step 5. Two fail-closed checks in
   // series cannot admit anything one of them would refuse — which is the whole
@@ -375,7 +388,7 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
     // ONE FIXED BODY, WHATEVER THE ADDRESS WAS. No correlation id, no detail, no
     // hint of which of the six failure shapes applied — a refusal that varied
     // would be the same oracle wearing a different status code.
-    return courierError(403, "not_authorised", "inviting someone needs the admin or owner role in this firm");
+    return courierError(403, "not_permitted", "only an admin or owner can issue an invitation");
   }
 
   // ---- 4. Can this deployment deliver at all? (see the header) -------------

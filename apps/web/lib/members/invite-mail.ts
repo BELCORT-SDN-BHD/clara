@@ -256,6 +256,23 @@ export function isInviteMailFailure(e: unknown): e is InviteMailFailure {
   return e instanceof InviteMailFailure;
 }
 
+/**
+ * A PROVIDER STATUS, OR NOTHING — native review M6.
+ *
+ * `error.status` on a Supabase `AuthError` is typed `number | undefined`, but it
+ * arrives from the wire and this module's whole promise (MEDIUM-3) is that the
+ * only things reaching a log line are a code from a closed set and a NUMBER. A
+ * provider that answered `status: "429 Too Many Requests"`, or an object, would
+ * otherwise ride that string straight into `InviteCourierLogEntry.providerStatus`
+ * and into the message this class composes — the exact upstream-text leak the
+ * closed record exists to make structurally impossible. Anything that is not an
+ * integer is DISCARDED rather than coerced or stringified: a status this app
+ * cannot read is no status.
+ */
+export function integerStatus(value: unknown): number | null {
+  return Number.isInteger(value) ? (value as number) : null;
+}
+
 /** A provider HTTP status, classified into the closed set above. The BODY is
  *  never read: there is nothing in it this app is allowed to repeat. */
 export function classifyProviderStatus(status: number): MailFailureCode {
@@ -441,7 +458,7 @@ export function productionInviteMailer(
         // `{ data: { users: [] }, error }` on an AuthError (`@supabase/auth-js`
         // 2.112.4, `GoTrueAdminApi.js`'s own `listUsers` catch) — an unreadable
         // directory arrives looking EXACTLY like the end of the list.
-        if (error) throw new InviteMailFailure("directory_unreadable", error.status ?? null);
+        if (error) throw new InviteMailFailure("directory_unreadable", integerStatus(error.status));
         // A POSITIVELY PRESENT ARRAY, or nothing (Codex round 2, N2(1)). The
         // previous `data?.users ?? []` turned a null payload — or a payload of
         // some shape this app has never seen — into an EMPTY PAGE, which the
@@ -472,7 +489,7 @@ export function productionInviteMailer(
     },
     async mintSupabaseTokenHash(email: string): Promise<string> {
       const { data, error } = await admin().auth.admin.generateLink({ type: "invite", email });
-      if (error) throw new InviteMailFailure("provider_rejected", error.status ?? null);
+      if (error) throw new InviteMailFailure("provider_rejected", integerStatus(error.status));
       const hashed = data?.properties?.hashed_token;
       if (typeof hashed !== "string" || hashed === "") {
         // Absence is not evidence of anything except absence: refuse rather than

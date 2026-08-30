@@ -230,9 +230,12 @@ A cross-model adversarial security review of the P2 auth surface (Codex `gpt-5.6
 covered by `tests/` (the redirect wall, the proxy matcher, the OTP hardening, the scope
 epoch, the key-class gate, the cookie hardening, the anti-cache headers, the logout wall).
 
-**Three are not code.** They are hosted-Supabase or deployment configuration that this
+**Four are not code.** They are hosted-Supabase or deployment configuration that this
 repository cannot enforce or prove, and they are the owner's to set and to re-verify after
 any Supabase project change. Each is stated with what must be true and how to check it.
+*(Three came from the 2026-08-27 review; §4 was added by P4-4's round 3 — the invite
+courier put a second bearer factor and a service-role key behind this surface, which is what
+made the deployment's own public origin something the app must be told rather than infer.)*
 
 ### 1. Password policy must be set in Supabase Auth (review finding 10, LOW)
 

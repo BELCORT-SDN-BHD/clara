@@ -238,7 +238,7 @@ export const INVITE_COURIER_PATH = "/api/invite";
  *   no_session          the request carried no usable session
  *   cross_origin        the same-origin proof failed
  *   invalid_request     the body was not `{email, role}` with non-empty strings
- *   not_authorised      the caller is not positively an admin+ of exactly one
+ *   not_permitted      the caller is not positively an admin+ of exactly one
  *                       firm (Codex round 2, N1). This is the courier's own
  *                       fail-closed PREFLIGHT, not the wall: `_human_ctx` still
  *                       judges the request at the door. It exists because the
@@ -268,7 +268,7 @@ export type InviteCourierCode =
   | "cross_origin"
   | "invalid_request"
   | "unsupported_address"
-  | "not_authorised"
+  | "not_permitted"
   | "mail_not_configured"
   | "recipient_has_account"
   | "mail_unavailable"
@@ -283,7 +283,7 @@ export const INVITE_COURIER_CODES: readonly InviteCourierCode[] = [
   "cross_origin",
   "invalid_request",
   "unsupported_address",
-  "not_authorised",
+  "not_permitted",
   "mail_not_configured",
   "recipient_has_account",
   "mail_unavailable",

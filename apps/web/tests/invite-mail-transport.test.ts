@@ -25,10 +25,13 @@ import {
   CAN_MINT_MAX_PAGES,
   CAN_MINT_PAGE_SIZE,
   classifyProviderStatus,
+  escapeHtml,
+  integerStatus,
   InviteMailFailure,
   isConfirmedUser,
   isInviteMailFailure,
   productionInviteMailer,
+  renderInviteEmail,
   RESEND_ENDPOINT,
   sameAddress,
   type InviteMailConfig,
@@ -281,6 +284,28 @@ describe("canMintFor answers {ok:true} only when it has SEEN the whole directory
     assert.equal(client.listUsersCalls.length, 2, "page 1 had rows, page 2 was empty — two reads, then done");
   });
 
+  test("LOW-5: the two pagination constants are pinned to their LITERALS, not to themselves", async () => {
+    // Native review LOW-5. Every other cell here compares the constants against
+    // THEMSELVES (`users.length < CAN_MINT_PAGE_SIZE`, `listUsersCalls.length ===
+    // CAN_MINT_MAX_PAGES`), so halving either one — or dropping the ceiling to 1 —
+    // stayed green while silently changing what the check can see. A constant that
+    // only ever validates against itself is not pinned at all.
+    //
+    // THE ARITHMETIC THESE NUMBERS EXIST FOR, from the module's own header: 40
+    // pages × 1000 covers 40,000 accounts at the requested page size, and 2,000
+    // even if the server clamps `per_page` to GoTrue's own 50 default. Both are
+    // orders of magnitude beyond an accounting firm's staff roster. Past the
+    // ceiling the answer is an EXCEPTION, never an optimistic `{ok:true}` — so
+    // WIDENING these is a cost decision (more service-role calls per probe, which
+    // is the rate-limit surface the authority preflight also bounds) and
+    // NARROWING them makes a legitimate directory unreadable. Either way it should
+    // be a deliberate edit that reds this cell, not a silent one.
+    assert.equal(CAN_MINT_PAGE_SIZE, 1000);
+    assert.equal(CAN_MINT_MAX_PAGES, 40);
+    assert.equal(CAN_MINT_PAGE_SIZE * CAN_MINT_MAX_PAGES, 40_000, "the documented ceiling at the requested page size");
+    assert.equal(50 * CAN_MINT_MAX_PAGES, 2_000, "…and the floor if GoTrue clamps per_page to its own default");
+  });
+
   test("the page request carries the documented PageParams and nothing else", async () => {
     const client = recordingClient({ listUsers: () => pageOf([]) });
     const mailer = productionInviteMailer(CONFIG, { createClient: client.createClient });
@@ -353,6 +378,82 @@ describe("canMintFor answers {ok:true} only when it has SEEN the whole directory
 // ---------------------------------------------------------------------------
 // MEDIUM-3 — EVERY FAILURE IS A CODE, NEVER A PROVIDER'S SENTENCE
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// LOW-3 — THE MAIL BODY'S ESCAPING
+// ---------------------------------------------------------------------------
+
+describe("LOW-3: renderInviteEmail escapes every value that reaches the markup", () => {
+  // Native review LOW-3: `escapeHtml` and its three call sites had ZERO coverage —
+  // replacing the body with `(v) => v` left the whole suite green. Three of the
+  // four values in this template are attacker-influenced or free text: the FIRM
+  // NAME is typed by a person, the ROLE comes off the request body, and the URL is
+  // composed. The invitee has no Clara account yet, so the audience for an
+  // injected payload is whoever opens the mail.
+
+  const HOSTILE = '<img src=x onerror=1>';
+
+  test("a hostile firm name reaches the body ESCAPED, and never as live markup", () => {
+    const content = renderInviteEmail({
+      firmName: HOSTILE,
+      role: "bookkeeper",
+      inviteUrl: "https://app.clara.example/invite/abc?ct=xyz",
+      expiresAt: "2026-09-06T00:00:00Z",
+    });
+
+    assert.ok(!content.html.includes(HOSTILE), "the raw payload must not appear in the HTML at all");
+    assert.ok(
+      content.html.includes("&lt;img src=x onerror=1&gt;"),
+      "…and the escaped bytes must — a name is displayed, not executed",
+    );
+    assert.ok(!/<img/i.test(content.html), "no <img element may exist in the rendered body");
+    assert.ok(!/onerror/i.test(content.html.replace(/onerror=1&gt;/g, "")), "no live event handler survives");
+  });
+
+  test("the role and the URL are escaped on the same path", () => {
+    const content = renderInviteEmail({
+      firmName: null,
+      role: '"><script>alert(1)</script>',
+      inviteUrl: 'https://app.clara.example/invite/a"><script>x</script>?ct=y',
+      expiresAt: "2026-09-06T00:00:00Z",
+    });
+    assert.ok(!/<script/i.test(content.html), "no <script element may exist in the rendered body");
+    assert.ok(content.html.includes("&lt;script&gt;"), "the role's payload is escaped, not dropped");
+    // THE HREF IS STILL A USABLE LINK. Escaping must not break the one thing the
+    // mail exists to carry, so the attribute's quotes are the escaped form and
+    // the URL's own characters survive round-tripping.
+    const href = /href="([^"]+)"/.exec(content.html)?.[1];
+    assert.ok(href, "the mail must still carry an href");
+    assert.ok((href as string).startsWith("https://app.clara.example/invite/"), "…pointing where it was built to point");
+    assert.ok(!(href as string).includes('"'), "an unescaped quote would break out of the attribute");
+  });
+
+  test("the ORDINARY case still renders the firm name and the link intact", () => {
+    // The positive control: escaping that mangled a normal name or a normal URL
+    // would be a different bug, and the cells above would not see it.
+    const content = renderInviteEmail({
+      firmName: "ROME PROPERTIES",
+      role: "admin",
+      inviteUrl: "https://app.clara.example/invite/abc?ct=xyz",
+      expiresAt: "2026-09-06T00:00:00Z",
+    });
+    assert.match(content.subject, /ROME PROPERTIES/);
+    assert.match(content.html, /<strong>ROME PROPERTIES<\/strong>/);
+    assert.equal(/href="([^"]+)"/.exec(content.html)?.[1], "https://app.clara.example/invite/abc?ct=xyz");
+  });
+
+  test("RED-BEFORE: an IDENTITY escapeHtml passes the old suite and fails these cells", () => {
+    // The measurement that makes LOW-3 a finding rather than a preference: the
+    // mutant the reviewer describes, run here.
+    const identity = (v: string): string => v;
+    const mutated = `<p>You have been invited to join <strong>${identity(HOSTILE)}</strong> on Clara.</p>`;
+    assert.ok(mutated.includes(HOSTILE), "the identity mutant emits the payload verbatim…");
+    assert.ok(/<img/i.test(mutated), "…as LIVE markup, which the cells above would catch");
+    // …and the shipped function does not.
+    assert.equal(escapeHtml(HOSTILE), "&lt;img src=x onerror=1&gt;");
+    assert.equal(escapeHtml(`a&b<c>d"e'f`), "a&amp;b&lt;c&gt;d&quot;e&#39;f", "all five entities, ampersand first");
+  });
+});
 
 describe("the transport throws codes, never upstream text", () => {
   test("a non-2xx from Resend is classified by STATUS, and its body is never read", async () => {
@@ -433,6 +534,36 @@ describe("the transport throws codes, never upstream text", () => {
         `absence is not evidence: ${JSON.stringify(properties)} must not build a link with an empty path segment`,
       );
     }
+  });
+
+  test("M6: a NON-INTEGER provider status is discarded, never carried into the message or the log", () => {
+    // Native review M6. `error.status` is typed `number | undefined` but arrives
+    // from the wire, and the whole MEDIUM-3 promise is that only a code from a
+    // closed set and a NUMBER can reach a log line. `?? null` passed anything
+    // non-undefined straight through — so a provider answering
+    // `status: "429 Too Many Requests"` would have put that string in
+    // `providerStatus` and in the composed message.
+    for (const hostile of ["429 PROVIDER-SAID slow down", { code: 429 }, 4.5, NaN, true, null, undefined]) {
+      assert.equal(integerStatus(hostile), null, `${JSON.stringify(hostile)} is not a status this app can read`);
+    }
+    assert.equal(integerStatus(401), 401, "POSITIVE CONTROL: a real integer status survives");
+    assert.equal(integerStatus(0), 0);
+
+    const client = recordingClient({
+      listUsers: () => ({
+        data: null,
+        error: { message: "PROVIDER-SAID rate limited", status: "429 PROVIDER-SAID slow down" as unknown as number },
+      }),
+    });
+    return assert.rejects(
+      () => productionInviteMailer(CONFIG, { createClient: client.createClient }).canMintFor("a@b.test"),
+      (e: unknown) => {
+        assert.ok(isInviteMailFailure(e));
+        assert.equal(e.providerStatus, null, "the string status was discarded");
+        assert.ok(!e.message.includes("PROVIDER-SAID"), "…and never reached the composed message");
+        return true;
+      },
+    );
   });
 
   test("InviteMailFailure's message is COMPOSED from code and status — there is no text channel", () => {

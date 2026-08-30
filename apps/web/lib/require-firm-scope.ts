@@ -354,9 +354,15 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
     //     CALLER'S OWN session accessor — not a service-role client — so
     //     `_human_ctx(role_rank('admin'))` (`0147:376`) judges the real person, and
     //     the role-ceiling wall (`0147:386`) judges their real rank.
-    //   · It reads NO firm-scoped relation on its own authority. It touches
-    //     `caller_context` — self-scoped by the view itself, on the caller's own
-    //     token — and nothing else.
+    //   · WHAT IT ACTUALLY READS, stated in full because the previous version of
+    //     this entry got it wrong. TWO reads, not one: (a) `caller_context`,
+    //     self-scoped by the view itself, on the CALLER'S OWN token — used twice,
+    //     once as the admin+ preflight and once for the mail's courtesy subject
+    //     line; and (b) THE AUTH DIRECTORY, `listUsers` under the SERVICE-ROLE
+    //     key, which is ESTATE-WIDE and answers about accounts in no firm at all.
+    //     (b) is the reason (a) exists: it is an account-existence oracle, and it
+    //     now sits BEHIND the preflight. Neither is a firm-scoped product
+    //     relation, which is what this registry is about.
     //   · TRUED 2026-08-30 BY CODEX ROUND 2 (M5/N1). The two bullets here used to
     //     say the route made no pre-door authority-sensitive read and that "none
     //     [of its gates] reads a role". BOTH ARE NOW FALSE, and saying so is the
@@ -378,9 +384,13 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
     //     would add here is different in kind: `requireFirmScope()` REDIRECTS a
     //     caller to the holding page, which is a page-render decision with no
     //     meaning for a POST-only JSON courier.
-    //   · Its remaining gates decide nothing about authority: same-origin (CSRF,
-    //     the wall `app/logout/route.ts` carries for the same reason), "is there a
-    //     token at all", and a SERVER-CONFIG capability check that answers 503.
+    //   · THE GATE COUNT IS FIVE, not the three this entry used to claim:
+    //     (1) same-origin — CSRF, the wall `app/logout/route.ts` carries for the
+    //     same reason; (2) body shape; (3) "is there a token at all";
+    //     (4) THE ADMIN+ PREFLIGHT, which does read a role; (5) a SERVER-CONFIG
+    //     capability check answering 503. Only (4) reads authority, and only to
+    //     refuse. A wrong explanation the next lane trusts is precisely the hazard
+    //     this registry exists to prevent, which is why the count is spelled out.
     //   · The service-role key it holds never authorises the DB act — it mints the
     //     Supabase half of the invite link AFTER the door has already said yes.
     reason:
@@ -391,9 +401,11 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
       "a second, drifting copy of an authority decision in front of the real one. " +
       "Verified against the landed body, not the plan: it returns no firm-scoped " +
       "data on its own authority. It DOES run its own admin+ preflight before the " +
-      "door (Codex round 2, N1) — because the pre-door account-existence check is " +
-      "an oracle whose accepted audience is admin+ — but that preflight is " +
-      "fail-closed and can only REFUSE, so it is not a second copy of the wall, " +
-      "and _human_ctx still judges the act independently.",
+      "door (round 3, N1 / native MEDIUM-1) — it reads the CALLER'S OWN rank from " +
+      "caller_context, because the step behind it reads the ESTATE-WIDE auth " +
+      "directory under the service-role key and that is an account-existence " +
+      "oracle whose accepted audience is admin+. Five gates, one of which reads a " +
+      "role, and only ever to REFUSE: it is not a second copy of the wall, and " +
+      "_human_ctx still judges the act independently.",
   },
 ];

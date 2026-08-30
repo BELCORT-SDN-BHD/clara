@@ -21,16 +21,17 @@
  * INDEPENDENT REVIEW OF #455, MEDIUM-2 — WHY THIS SEAM RETURNS THE ORIGIN.
  * `lib/members/courier.ts` builds the invitation's own URL, and it used to build
  * it from `new URL(request.url).origin` — a DIFFERENT value from the one this
- * wall validated. Behind a proxy those two genuinely diverge: this wall
- * deliberately compares the Origin header against `x-forwarded-host` as well as
- * the request URL's authority (that is what makes it hold when the authority is
- * rewritten), so a request whose `request.url` reads
- * `http://internal.worker.local/api/invite` passes the wall on its forwarded
- * host and then hands the courier an INTERNAL, plain-HTTP authority to put in an
- * email nobody can un-send. So the proof now CARRIES the origin it proved —
- * scheme included, and therefore carrying this file's https/loopback ruling with
- * it — and the courier uses only that. One validated value, one consumer, no
- * second derivation.
+ * wall validated. Behind a proxy those two genuinely diverge: a request whose
+ * `request.url` reads `http://internal.worker.local/api/invite` can pass the wall
+ * and then hand the courier an INTERNAL, plain-HTTP authority to put in an email
+ * nobody can un-send. So the proof now CARRIES the origin it proved — scheme
+ * included, and therefore carrying this file's https/loopback ruling with it —
+ * and the courier uses only that. One validated value, one consumer, no second
+ * derivation.
+ *
+ * *(This paragraph originally went on to say the wall "deliberately compares the
+ * Origin header against `x-forwarded-host`". That was true when it was written
+ * and is NOT true now — round 3's N3 removed it. See the next block.)*
  */
 
 /**
