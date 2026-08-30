@@ -341,9 +341,19 @@ begin
   -- the moment a coordinated sibling PR lands ahead of this one and is a merge-order landmine; a
   -- before/after equality proves the thing the section actually claims -- THIS FILE did not move
   -- it -- and stays true at every frontier.
+  -- THE WHOLE IDENTITY, not only the bytes (#452 review, ruled in). A body can MOVE without its
+  -- prosrc moving at all: a GRANT rewrites proacl, an ALTER FUNCTION OWNER TO rewrites proowner,
+  -- a `set search_path` change rewrites proconfig, and SECURITY DEFINER / VOLATILE are one ALTER
+  -- away each. A sha-only stash passes an ACL wipe -- the reviewer proved exactly that -- so the
+  -- five other columns that make a function what it is are stashed beside it and compared too.
   insert into _bp3_pre(k,v)
   select 'sha:'||s,
          (select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')
+                 || '|acl='   || coalesce(p.proacl::text, '(default)')
+                 || '|owner=' || p.proowner::regrole::text
+                 || '|cfg='   || coalesce(array_to_string(p.proconfig, ','), '(none)')
+                 || '|secdef='|| p.prosecdef::text
+                 || '|vol='   || p.provolatile
             from pg_proc p where p.oid = to_regprocedure(s))
     from unnest(array['clara.propose_vendor_identity_binding(jsonb,text)',
                       'clara._derive_vendor_binding_proposal(uuid,uuid,uuid)',
@@ -849,7 +859,7 @@ begin
   end if;
   if position($p2$v_pt_reason:='binding_revoked'$p2$ in v_def) = 0
      or position($p3$v_pt_annotate:=(v_pt_reason in ('binding_expired','binding_revocation_lifted'))$p3$ in v_def) = 0
-     or position($p4$v_pt_reason:='binding_revocation_lifted'$p4$ in v_def) = 0 then
+     or position($p4$when v_pt_lifted then 'binding_revocation_lifted'$p4$ in v_def) = 0 then
     raise exception 'binding pr-3 postcheck: the revoked-refuses / expired-annotates / revocation-lifted arms are not all live'
       using errcode='CLR10';
   end if;
@@ -956,11 +966,18 @@ begin
   -- FIND-1 (#452 native review, MEDIUM — MEASURED, not theorised): single-argument btrim strips
   -- SPACES ONLY. `btrim(E'\t')` is E'\t', which is not '', so a reason consisting of one tab or
   -- one newline satisfied "non-blank" and lifted a revocation with no reason on the receipt.
-  -- The character set is given explicitly -- and NOT as E'...\v'. PostgreSQL's E'' strings have
-  -- NO \v escape, and an unknown escape yields the FOLLOWING CHARACTER LITERALLY, so E'\v' is the
-  -- letter `v`: the first cut of this fix would have trimmed a leading/trailing `v` off every
-  -- reason ("vendor re-confirmed with SSM" -> "endor re-confirmed with SSM"). Measured on the rig,
-  -- not reasoned about. chr(11) is the vertical tab, spelled the one way that cannot be misread.
+  -- ON THE SPELLING chr(11), and a correction worth leaving in the file. A review round called
+  -- E'...\v' a BUG on the theory that PostgreSQL's E'' has no \v escape and yields the letter `v`,
+  -- which would have trimmed a leading/trailing `v` off every reason. THAT IS NOT TRUE HERE, and
+  -- it was settled by MEASUREMENT rather than by either side's reading -- psql -f on a file, no
+  -- shell in the path to mangle a backslash, PostgreSQL 17.11, standard_conforming_strings on:
+  --     ascii(E'\v') = 11          (the vertical tab, NOT 118, the letter `v`)
+  --     E' \t\n\r\f\v'  and  E' \t\n\r\f' || chr(11)  are BYTE-IDENTICAL: {32,9,10,13,12,11}
+  --     btrim('vendor ... v', <either set>) leaves BOTH leading and trailing `v` untouched
+  -- So the two spellings are the same set and this line is a no-op rewrite, kept only because
+  -- chr(11) cannot be misread by the next person who has this argument. THE REAL FIX above it is
+  -- the one that mattered: single-argument btrim strips SPACES ONLY, so before the charset
+  -- argument existed a tab- or newline-only reason was "non-blank" and lifted a revocation.
   -- The estate's 0154 siblings
   -- (decline_vendor_identity_binding, reset_binding_decline, and revoke's own spelling) carry the
   -- same single-arg idiom; that is NOT this PR's to change and is on the fix queue.
@@ -1253,8 +1270,21 @@ begin
   -- very database, not against a literal. This is the claim the section actually makes: THIS FILE
   -- did not touch these bodies. It holds at every frontier, so a coordinated sibling PR landing
   -- ahead of this one cannot turn a true premise into a false abort.
+  -- NON-VACUOUS BY CONSTRUCTION: a loop over an empty stash would "pass" while comparing
+  -- nothing, so the row count is asserted against the number SS1 (k2) was asked to stash.
+  select count(*) into v_n from _bp3_pre where k like 'sha:%';
+  if v_n <> 3 then
+    raise exception 'binding pr-3 tail: the neighbour stash holds % row(s), expected 3 -- this loop would have compared nothing', v_n
+      using errcode='CLR10';
+  end if;
   for r in select k, v from _bp3_pre where k like 'sha:%' order by k loop
-    select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
+    select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')
+           || '|acl='   || coalesce(p.proacl::text, '(default)')
+           || '|owner=' || p.proowner::regrole::text
+           || '|cfg='   || coalesce(array_to_string(p.proconfig, ','), '(none)')
+           || '|secdef='|| p.prosecdef::text
+           || '|vol='   || p.provolatile
+      into v_sha
       from pg_proc p where p.oid = to_regprocedure(substr(r.k, 5));
     if v_sha is null then
       raise exception 'binding pr-3 tail: % no longer resolves', substr(r.k, 5) using errcode='CLR10';
