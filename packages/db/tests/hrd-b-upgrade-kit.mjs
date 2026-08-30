@@ -38,16 +38,23 @@ export function skipUnlessReset(t) {
   return false;
 }
 
-/** Every numbered migration on disk EXCEPT B's own -- the frontier B lands on. Once B claimed a
- *  number it became an ordinary numbered file, so it has to be excluded EXPLICITLY: leaving it in
- *  would apply the real B during the baseline replay, before this drill ever seeds its populated
- *  pre-B state, and every cell below would then be measuring an already-migrated database.
- *  migrate() re-verifies EVERY applied version's checksum against what is in `dir` on every
- *  subsequent call, so no OTHER file may be omitted. */
+/** Every numbered migration on disk BELOW B's number -- the frontier B lands on. B itself is
+ *  excluded EXPLICITLY (leaving it in would apply the real B during the baseline replay, before
+ *  this drill ever seeds its populated pre-B state, and every cell below would then be measuring
+ *  an already-migrated database), and so is EVERY SUCCESSOR: once the estate moved past B
+ *  (2026-08-30, `0148`..`0153`), "everything except B" silently replayed the successors FIRST,
+ *  the frontier became 0153, and placing B's copy at 0147 was refused by the runner as a
+ *  late-inserted lower number -- the whole drill went red on the sweep (run 33283730630, 8/8).
+ *  The successors are copied back in by placeMigration(), AFTER B or its mutant, so each cell
+ *  still applies the WHOLE on-disk chain onto the populated book (.claude/rules/db-tests.md) in
+ *  the order live saw it: pre-B -> B -> successors. migrate() re-verifies EVERY applied
+ *  version's checksum against what is in `dir` on every subsequent call, so nothing may be
+ *  omitted once applied. */
 export function exportBaseline() {
   const tmp = mkdtempSync(join(tmpdir(), "clara-hrdb-baseline-"));
   let max = 0;
   let excluded = false;
+  const successors = [];
   for (const f of readdirSync(MIG_DIR)) {
     const m = /^(\d{4})_.*\.sql$/.exec(f);
     if (!m) continue;
@@ -56,12 +63,25 @@ export function exportBaseline() {
       m[1], REAL_VERSION,
       `another migration already occupies ${REAL_VERSION} (${f}) -- B's claimed number collides and this drill would write over it`,
     );
+    if (Number(m[1]) > Number(REAL_VERSION)) { successors.push(f); continue; }
     copyFileSync(join(MIG_DIR, f), join(tmp, f));
     max = Math.max(max, Number(m[1]));
   }
   assert.ok(max > 0, "no numbered migrations found — the baseline export is looking in the wrong place");
+  assert.equal(max, Number(REAL_VERSION) - 1, `the pre-B baseline must end exactly one below B (${REAL_VERSION}); it ends at ${max}`);
   assert.ok(excluded, `${REAL_BASENAME} was not found in ${MIG_DIR} — this drill drives THAT file, so its absence is a broken drill, not a passing one`);
-  return { dir: tmp, version: REAL_VERSION };
+  LAST_SUCCESSORS = successors;
+  return { dir: tmp, version: REAL_VERSION, successors };
+}
+
+/** The successor list of the most recent exportBaseline() -- read by placeMigration(). */
+let LAST_SUCCESSORS = [];
+
+/** The files ABOVE B on disk, copied into `dir` so the chain B-or-mutant -> successors applies
+ *  in one migrate() call. Idempotent (a second call re-copies the same bytes). */
+export function placeSuccessors(dir, successors) {
+  for (const f of successors) copyFileSync(join(MIG_DIR, f), join(dir, f));
+  return successors.length;
 }
 
 export async function freshBaseline() {
@@ -144,9 +164,12 @@ export async function seedPreState() {
   );
 }
 
-/** Apply a (possibly mutated) copy of B's real text at B's OWN claimed number. */
+/** Apply a (possibly mutated) copy of B's real text at B's OWN claimed number -- and place the
+ *  successors beside it, so the next migrate() applies B-or-mutant and then everything the
+ *  estate shipped after B, exactly as live saw it (see exportBaseline). */
 export function placeMigration(dir, version, text, stem) {
   writeFileSync(join(dir, `${version}_${stem}.sql`), text ?? readFileSync(REAL_FILE, "utf8"));
+  placeSuccessors(dir, LAST_SUCCESSORS);
 }
 
 // ---------------------------------------------------------------------------------------------
