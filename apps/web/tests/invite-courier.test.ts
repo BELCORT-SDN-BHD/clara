@@ -248,7 +248,11 @@ describe("nothing is minted before the courier can finish the job", () => {
 
   test("the config check reports every missing name, and never a value", async () => {
     const obs = observer();
-    const { deps: d } = deps(obs, { resolve: OK_RECEIPT }, { env: {} });
+    const { deps: d } = deps(
+      obs,
+      { resolve: OK_RECEIPT },
+      { env: { CLARA_ALLOW_INSECURE_LOOPBACK: "1" } },
+    );
     const body = await json(await handleInviteRequest(post({ email: "a@b.test", role: "admin" }), d));
     const detail = String(body.detail);
     for (const name of ["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "RESEND_API_KEY", "INVITE_MAIL_FROM"]) {

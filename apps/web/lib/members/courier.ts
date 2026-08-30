@@ -14,12 +14,14 @@
 //
 // THE ORDERING IS THE POINT (design §4 C, plan §6 OQ-4):
 //
-//   1. PROVE SAME ORIGIN.        A cross-origin POST that both mints an invite and
-//                                sends mail is exactly what CSRF wants.
-//   2. PARSE THE BODY.           Structure only — never business judgement.
-//   3. REQUIRE A SESSION.        There is no door call to make without a token.
-//   4. REQUIRE A MAIL TRANSPORT. See the long note below. NOTHING is minted yet.
-//   5. CALL invite_member AS THE CALLER. THE DB PERFORMS THE AUTHORITY CHECK.
+//   1. PROVE SAME ORIGIN.          A cross-origin POST that both mints an invite
+//                                  and sends mail is exactly what CSRF wants.
+//   2. PARSE BODY + RAW ASCII.     Structure, then the provider-identity limit.
+//   3. REQUIRE A SESSION.          No door call exists without a token.
+//   3b. ADMIN+ PREFLIGHT.          Bounds the estate-wide directory oracle.
+//   4. REQUIRE MAIL CAPABILITY.    See the long note below. NOTHING is minted.
+//   4b. PROVE RECIPIENT MINTABLE.  A malformed/unreadable directory refuses.
+//   5. CALL invite_member AS THE CALLER. THE DB JUDGES AUTHORITY INDEPENDENTLY.
 //   6. ONLY ON A SUCCESSFUL RETURN, SEND.
 //
 // THE COURIER IS NOT A GUARD. `clara.invite_member`'s own
@@ -80,7 +82,7 @@ import {
   type ServerSession,
 } from "../supabase/server-session";
 import { isCallerContextRow, loadCallerContext } from "../firm/caller-context";
-import { ADMIN_RANK } from "./reads";
+import { ADMIN_RANK, roleRank } from "./reads";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { InviteCourierCode } from "./doors";
 import {
@@ -237,26 +239,27 @@ function isRecord(v: unknown): v is Record<string, unknown> {
  * which firm the invite would land in — and `lib/firm/caller-context.ts` is
  * explicit that zero and >1 are different facts that must not be folded.
  *
- * THE RANK COMPARISON IS THE DB'S OWN `role_rank`, and NOT a second locally
- * derived one. An earlier draft of this function additionally required
- * `roleRank(row.role)` — this app's transcription of the same SQL `case` — to
- * EQUAL the wire's value, on review-law-3 grounds. That was dropped deliberately.
- * `ROLE_LADDER` and `ADMIN_RANK` are already pinned byte-for-byte to `0002`'s
- * `clara.role_rank` by `lib/members/members-doors.test.ts`, so a drift between
- * the two is caught in CI, before merge. Requiring equality at RUNTIME converts
- * that same hypothetical drift into a total invite lockout for every admin in the
- * estate — an availability failure bought with no security gain, since the DB's
- * own `_human_ctx` would still refuse correctly. `isCallerContextRow` has already
- * checked that `role` is one of the DB's four and that `role_rank` is an integer
- * or null; a NULL rank is permitted by the DB's type, carries no evidence, and
- * refuses.
+ * THREE CONJUNCTS, because the row's fields are not independent evidence:
+ *   · the role is positively `admin` or `owner`;
+ *   · the wire rank is an integer at or above the pinned admin floor; and
+ *   · `roleRank(role)` equals that wire rank.
+ * A contradictory 200 such as `{role:'bookkeeper', role_rank:3}` is malformed,
+ * not an owner. Equality can only REFUSE more; if the DB's scale ever drifts, the
+ * all-migration live-body pin in `lib/members/members-doors.test.ts` reds in CI
+ * and this runtime check fails closed meanwhile. A NULL rank likewise carries no
+ * evidence and refuses.
  */
 function isAdminOrAbove(rows: unknown): boolean {
   if (!Array.isArray(rows) || rows.length !== 1) return false;
   const row: unknown = rows[0];
   if (!isCallerContextRow(row)) return false;
   const rank = row.role_rank;
-  return typeof rank === "number" && rank >= ADMIN_RANK;
+  return (
+    (row.role === "admin" || row.role === "owner") &&
+    typeof rank === "number" &&
+    rank >= ADMIN_RANK &&
+    roleRank(row.role) === rank
+  );
 }
 
 /** `invite_member`'s own return, as far as this file reads it. `token_hash` is in
@@ -305,6 +308,18 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
   if (!isRecord(body) || typeof body.email !== "string" || typeof body.role !== "string") {
     return courierError(400, "invalid_request", 'expected a JSON body of {"email": string, "role": string}');
   }
+  // THE ASCII CHECK IS ON THE RAW WIRE VALUE, BEFORE ANY CANONICALISATION.
+  // U+212A KELVIN SIGN lowercases to ASCII `k` in JavaScript; checking after
+  // `.toLowerCase()` therefore accepts a non-ASCII address whose bytes have
+  // already collapsed. The identity limit has to inspect what the caller sent.
+  if (!isAsciiAddress(body.email)) {
+    return courierError(
+      400,
+      "unsupported_address",
+      "this invitation service can only send to plain-ASCII email addresses — nothing was created",
+    );
+  }
+
   // CANONICALISED ONCE, HERE, AND NOWHERE ELSE (Codex round 2, N2(2)). `email`
   // below is the ONLY address this handler uses from this line on — the scan, the
   // door, the mint and the send all receive these exact bytes, so the four can no
@@ -314,21 +329,6 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
   // sees it, and CLR10 'a valid email is required' remains the DB's to raise.
   const email = canonicalAddress(body.email);
   const role = body.role;
-
-  // …AND AN ADDRESS THIS APP CANNOT CANONICALISE THE PROVIDER'S WAY IS REFUSED
-  // rather than guessed at. See `isAsciiAddress` for why non-ASCII case-folding
-  // diverges between JavaScript, PostgreSQL and GoTrue, and why a divergence here
-  // specifically produces a DEAD INVITE. This is the one refusal in this file
-  // that the DB would not itself have made; it is a recorded product limitation
-  // (INFORM on the PR), not a wall, and it costs nothing for every address the
-  // product supports today.
-  if (!isAsciiAddress(email)) {
-    return courierError(
-      400,
-      "unsupported_address",
-      "this invitation service can only send to plain-ASCII email addresses — nothing was created",
-    );
-  }
 
   // ---- 3. A session to call the door WITH. --------------------------------
   // RESOLVED ONCE, AND THE DOOR IS CALLED WITH THOSE EXACT BYTES. Before P4-2's

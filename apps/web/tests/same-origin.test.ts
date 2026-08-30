@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { isSameOriginRequest, readSameOriginConfig } from "../lib/same-origin";
+import { isSameOriginRequest, proveSameOrigin, readSameOriginConfig } from "../lib/same-origin";
 
 /**
  * Finding 11 (LOW) — same-site logout CSRF. `SameSite=Lax` blocks cross-SITE
@@ -92,7 +92,7 @@ describe("isSameOriginRequest — accepts only proved same-origin requests", () 
 
   it("N3: the allowlist is parsed exactly — unparseable entries widen nothing", () => {
     const { publicOrigins } = readSameOriginConfig({
-      CLARA_PUBLIC_ORIGINS: " https://App.Clara.example/ , not a url , , https://second.example:8443 ",
+      CLARA_PUBLIC_ORIGINS: " https://app.clara.example/ , not a url , , https://second.example:8443 ",
     });
     assert.deepEqual(
       publicOrigins,
@@ -100,6 +100,50 @@ describe("isSameOriginRequest — accepts only proved same-origin requests", () 
       "entries normalise through URL.origin; junk is DROPPED, never admitted",
     );
     assert.deepEqual(readSameOriginConfig({}).publicOrigins, [], "absent means not configured, not permissive");
+  });
+
+  it("N3: configured entries must be exact canonical origins, with only an optional trailing slash", () => {
+    for (const invalid of [
+      "https://app.clara.example/path",
+      "https://user:password@app.clara.example",
+      "https://app.clara.example?mode=invite",
+      "https://app.clara.example#invite",
+      "https:app.clara.example",
+      "https://App.Clara.example",
+      "https://app.clara.example:443",
+    ]) {
+      assert.deepEqual(
+        readSameOriginConfig({ CLARA_PUBLIC_ORIGINS: invalid }).publicOrigins,
+        [],
+        `${invalid} is a URL, but not an exact canonical origin`,
+      );
+    }
+    assert.deepEqual(
+      readSameOriginConfig({
+        CLARA_PUBLIC_ORIGINS: "https://app.clara.example, https://second.example:8443/",
+      }).publicOrigins,
+      ["https://app.clara.example", "https://second.example:8443"],
+    );
+  });
+
+  it("LOW-A: the configured allowlist widens the Host proof; it never replaces it", () => {
+    const requestHeaders = headers({
+      origin: "https://app.example",
+      host: "app.example",
+      "sec-fetch-site": "same-origin",
+    });
+    const config = { publicOrigins: ["https://unrelated.example"], allowInsecureLoopback: false };
+    assert.deepEqual(
+      proveSameOrigin(requestHeaders, "https://app.example/api/invite", config),
+      { ok: true, origin: "https://app.example" },
+    );
+
+    const replacementMutant = (origin: string): boolean => config.publicOrigins.includes(origin);
+    assert.equal(
+      replacementMutant("https://app.example"),
+      false,
+      "RED-BEFORE: replacing the Host proof with the allowlist alone rejects this valid request",
+    );
   });
 
   it("accepts a browser that sends no Sec-Fetch-Site but a matching Origin", () => {
@@ -233,6 +277,7 @@ describe("isSameOriginRequest — scheme check (reviewer note 2)", () => {
           "sec-fetch-site": "same-origin",
         }),
         "http://localhost:3000/logout",
+        readSameOriginConfig({ CLARA_ALLOW_INSECURE_LOOPBACK: "1" }),
       ),
       true,
     );
@@ -247,6 +292,7 @@ describe("isSameOriginRequest — scheme check (reviewer note 2)", () => {
           "sec-fetch-site": "same-origin",
         }),
         "http://127.0.0.1:3000/logout",
+        readSameOriginConfig({ CLARA_ALLOW_INSECURE_LOOPBACK: "1" }),
       ),
       true,
     );
@@ -277,11 +323,25 @@ describe("isSameOriginRequest — scheme check (reviewer note 2)", () => {
     }
   });
 
-  it("N5: the flag is derived from NODE_ENV, and only 'production' closes it", () => {
+  it("N5: loopback is enabled only by development mode or the explicit flag", () => {
     assert.equal(readSameOriginConfig({ NODE_ENV: "production" }).allowInsecureLoopback, false);
     assert.equal(readSameOriginConfig({ NODE_ENV: "development" }).allowInsecureLoopback, true);
-    assert.equal(readSameOriginConfig({ NODE_ENV: "test" }).allowInsecureLoopback, true);
-    assert.equal(readSameOriginConfig({}).allowInsecureLoopback, true);
+    for (const env of [
+      {},
+      { NODE_ENV: "test" },
+      { NODE_ENV: "staging" },
+      { NODE_ENV: "Development" },
+      { NODE_ENV: "garbage" },
+    ]) {
+      assert.equal(readSameOriginConfig(env).allowInsecureLoopback, false, JSON.stringify(env));
+    }
+    assert.equal(readSameOriginConfig({ CLARA_ALLOW_INSECURE_LOOPBACK: "1" }).allowInsecureLoopback, true);
+    assert.equal(
+      readSameOriginConfig({ NODE_ENV: "production", CLARA_ALLOW_INSECURE_LOOPBACK: "1" }).allowInsecureLoopback,
+      true,
+      "the explicit opt-in is independent of an inferred mode",
+    );
+    assert.equal(readSameOriginConfig({ CLARA_ALLOW_INSECURE_LOOPBACK: "true" }).allowInsecureLoopback, false);
   });
 
   it("N5: an allowlisted HTTP loopback origin is still refused in production", () => {

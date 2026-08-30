@@ -49,22 +49,13 @@ const UNAUTHORISED: { name: string; rows: unknown }[] = [
   { name: "two active memberships (the index says impossible)", rows: [callerRow("admin"), callerRow("owner")] },
   { name: "a row this app cannot validate", rows: [{ ...callerRow("admin"), firm_id: "not-a-uuid" }] },
   { name: "a role off the DB's own ladder", rows: [{ ...callerRow("admin"), role: "wizard" }] },
+  {
+    name: "a contradictory role/rank row (bookkeeper claiming owner rank)",
+    rows: [callerRow("bookkeeper", { role_rank: 3 })],
+  },
   { name: "a NULL rank — the DB's type permits it, so it is no evidence", rows: [callerRow("admin", { role_rank: null })] },
   { name: "a payload that is not an array", rows: { role: "admin" } },
 ];
-
-// NOT IN THAT LIST, AND DELIBERATELY SO: a row whose `role_rank` disagrees with
-// its own role NAME (say `{role: "bookkeeper", role_rank: 3}`). An earlier draft
-// refused it, on the review-law-3 reasoning that the wire's rank and this app's
-// re-derivation from the role name are two independent sources that must agree.
-// That was dropped when the native review's fix shape was adopted, and the reason
-// is worth recording rather than leaving as a silent relaxation: `ROLE_LADDER` and
-// `ADMIN_RANK` are ALREADY pinned byte-for-byte to `0002`'s `clara.role_rank` by
-// `lib/members/members-doors.test.ts`, so the drift that check guarded against
-// reds in CI before it can ship. Enforcing it again at RUNTIME converts the same
-// hypothetical drift into a total invite lockout for every admin in the estate —
-// an availability failure bought with no security gain, since `_human_ctx` would
-// still refuse correctly. The DB's own `role_rank` is the rank this gate reads.
 
 describe("N1: the account oracle is bounded to admin+ BEFORE it runs", () => {
   for (const principal of UNAUTHORISED) {
@@ -170,7 +161,7 @@ describe("N1: the account oracle is bounded to admin+ BEFORE it runs", () => {
     const { deps: d } = deps(
       obs,
       { resolve: OK_RECEIPT },
-      { readCallerRows: async () => [callerRow("viewer")], env: {} },
+      { readCallerRows: async () => [callerRow("viewer")], env: { CLARA_ALLOW_INSECURE_LOOPBACK: "1" } },
     );
     const res = await handleInviteRequest(post({ email: "a@b.test", role: "admin" }), d);
     const text = await res.text();
@@ -259,6 +250,27 @@ describe("N2: the address is canonicalised once and used identically everywhere"
     assert.equal(obs.mints.length, 0);
     assert.equal(obs.sends.length, 0);
   });
+
+  for (const [where, email] of [
+    ["local part", "Kelvin@example.test"],
+    ["domain", "person@Kelvin.example"],
+  ] as const) {
+    test(`a Kelvin sign in the ${where} is refused BEFORE Unicode can collapse it to ASCII`, async () => {
+      assert.equal(isAsciiAddress(email), false, "the raw request contains U+212A KELVIN SIGN");
+      assert.equal(isAsciiAddress(canonicalAddress(email)), true, "RED-BEFORE: lowercasing first collapses U+212A to ASCII k");
+      const obs = observer();
+      const { deps: d, calls, callerReads } = deps(obs, { resolve: OK_RECEIPT });
+      const res = await handleInviteRequest(post({ email, role: "admin" }), d);
+
+      assert.equal(res.status, 400);
+      assert.equal((await json(res)).code, "unsupported_address");
+      assert.equal(callerReads.length, 0, "no authority/directory path starts");
+      assert.equal(obs.mintChecks.length, 0, "no directory read");
+      assert.equal(calls.length, 0, "no door call");
+      assert.equal(obs.mints.length, 0, "no provider mint");
+      assert.equal(obs.sends.length, 0, "no send");
+    });
+  }
 
   test("VACUITY CONTROL: the ASCII gate admits every address the product supports", async () => {
     for (const ok of ["a@b.test", "first.last+tag@sub.example.co.uk", "A_B-c@example.test", ""]) {

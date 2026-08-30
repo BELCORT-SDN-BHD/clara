@@ -384,13 +384,14 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
     //     would add here is different in kind: `requireFirmScope()` REDIRECTS a
     //     caller to the holding page, which is a page-render decision with no
     //     meaning for a POST-only JSON courier.
-    //   · THE GATE COUNT IS FIVE, not the three this entry used to claim:
-    //     (1) same-origin — CSRF, the wall `app/logout/route.ts` carries for the
-    //     same reason; (2) body shape; (3) "is there a token at all";
-    //     (4) THE ADMIN+ PREFLIGHT, which does read a role; (5) a SERVER-CONFIG
-    //     capability check answering 503. Only (4) reads authority, and only to
-    //     refuse. A wrong explanation the next lane trusts is precisely the hazard
-    //     this registry exists to prevent, which is why the count is spelled out.
+    //   · THE GATE COUNT IS SEVEN, not the five this entry used to claim:
+    //     (1) same-origin — CSRF; (2) body shape; (3) raw-address ASCII support;
+    //     (4) "is there a token at all"; (5) THE ADMIN+ PREFLIGHT, which reads a
+    //     role; (6) a SERVER-CONFIG capability check; (7) the estate-wide
+    //     directory/mintability check. Only (5) reads authority, and only to
+    //     refuse. A wrong explanation the next lane trusts is precisely the
+    //     hazard this registry exists to prevent, so the source census in
+    //     `tests/firm-scope-surfaces.test.ts` pins the number and order.
     //   · The service-role key it holds never authorises the DB act — it mints the
     //     Supabase half of the invite link AFTER the door has already said yes.
     reason:
@@ -404,8 +405,8 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
       "door (round 3, N1 / native MEDIUM-1) — it reads the CALLER'S OWN rank from " +
       "caller_context, because the step behind it reads the ESTATE-WIDE auth " +
       "directory under the service-role key and that is an account-existence " +
-      "oracle whose accepted audience is admin+. Five gates, one of which reads a " +
-      "role, and only ever to REFUSE: it is not a second copy of the wall, and " +
+      "oracle whose accepted audience is admin+. Seven pre-door gates, one of " +
+      "which reads a role, and only ever to REFUSE: it is not a second copy of " +
       "_human_ctx still judges the act independently.",
   },
 ];

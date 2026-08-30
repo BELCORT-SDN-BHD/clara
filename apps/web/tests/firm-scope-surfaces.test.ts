@@ -613,6 +613,30 @@ describe("the deliberate exemptions stay exempt", () => {
     assert.match(src, /THE DB IS THE WALL/);
   });
 
+  it("the invite exemption's SEVEN pre-door gates match the courier source census", () => {
+    const courier = stripComments(readSource("lib/members/courier.ts"), { blankStrings: true });
+    const gates = [
+      ["origin", /const proof = proveSameOrigin\(/],
+      ["body", /const body: unknown = await request\.json\(\)/],
+      ["ASCII", /if \(!isAsciiAddress\(body\.email\)\)/],
+      ["session", /const serverSession = await/],
+      ["admin preflight", /const callerRows = await/],
+      ["configuration", /const capability = inviteMailCapability\(/],
+      ["directory\/mintability", /mintable = await mailer\.canMintFor\(email\)/],
+    ] as const;
+    const positions = gates.map(([name, pattern]) => {
+      const at = courier.search(pattern);
+      assert.ok(at >= 0, `the documentary census cannot see the ${name} gate`);
+      return at;
+    });
+    assert.equal(gates.length, 7, "the exemption's documentary number changed without changing its census");
+    assert.deepEqual(positions, [...positions].sort((a, b) => a - b), "the seven pre-door gates changed order");
+
+    const exemption = SCOPE_EXEMPT_SURFACES.find((entry) => entry.path === "app/api/invite/route.ts");
+    assert.ok(exemption);
+    assert.match(exemption.reason, /Seven pre-door gates/);
+  });
+
   it("logout keeps the two walls that DO matter there", () => {
     const code = codeWithStrings("app/logout/route.ts");
     assert.match(code, /isSameOriginRequest\(/, "the same-origin wall is gone");

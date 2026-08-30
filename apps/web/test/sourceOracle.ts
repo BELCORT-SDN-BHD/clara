@@ -234,8 +234,8 @@ export function moduleLevelDeclarations(code: string): Decl[] {
  * DELETE()` does (#451 round-3 review, MED-1).
  *
  * `export type { … }` is erased at runtime and exports nothing, so it is skipped.
- * A specifier this cannot parse (a string-literal export name, `export { x } from
- * "./y"` whose local binding lives in another module) is deliberately NOT resolved:
+ * A specifier this cannot parse (`export { x } from "./y"` whose local binding
+ * lives in another module) is deliberately NOT resolved:
  * `reachableFrom` then finds no body and returns `null`, and the caller's cell reds.
  * Fail-closed — an export whose code this instrument cannot see is never "guarded".
  */
@@ -244,10 +244,10 @@ export function exportClauseAliases(code: string): Map<string, string> {
   for (const m of code.matchAll(/\bexport\s*(type\s+)?\{([^}]*)\}/g)) {
     if (m[1]) continue;
     for (const spec of (m[2] as string).split(",")) {
-      const parsed = /^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/.exec(spec.trim());
+      const parsed = /^([A-Za-z_$][\w$]*)(?:\s+as\s+(?:([A-Za-z_$][\w$]*)|(["'])([^"']+)\3))?$/.exec(spec.trim());
       if (!parsed) continue;
       const local = parsed[1] as string;
-      out.set(parsed[2] ?? local, local);
+      out.set(parsed[2] ?? parsed[4] ?? local, local);
     }
   }
   return out;

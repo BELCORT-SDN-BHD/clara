@@ -348,16 +348,19 @@ bearer factors under their origin.
 The header is no longer consulted. What replaces it is configuration, because what a
 deployment's public origins are is a fact about the deployment:
 
-- **Configure:** `CLARA_PUBLIC_ORIGINS`, comma-separated exact origins (scheme + host +
-  non-default port) — every hostname this app is reachable on, aliases included.
+- **Configure:** `CLARA_PUBLIC_ORIGINS`, comma-separated canonical exact origins (scheme +
+  host + non-default port, optional trailing slash; no path, credentials, query or fragment)
+  — every hostname this app is reachable on, aliases included. Noncanonical URL spellings are
+  dropped rather than repaired.
 - **Verify:** POST from the real app (an invite, a logout) and confirm it succeeds; then
   replay it with an `Origin` you did not list and confirm a 403.
 - **Unset is fail-closed, not permissive.** The wall falls back to the `Host` header and the
   request URL. Local dev works unset; a proxied deployment will refuse its own same-origin
   POSTs until this is set — which is the visible failure, not a silent downgrade.
-- **`NODE_ENV=production` also closes the loopback exception** (N5): `http://localhost` and
-  `http://127.0.0.1` origins are accepted only outside production, so a production invite can
-  never be mailed with both secrets pointing at the recipient's own machine.
+- **Loopback HTTP is explicit** (N5): `http://localhost` and `http://127.0.0.1` are accepted
+  only when `NODE_ENV` is exactly `development` or `CLARA_ALLOW_INSECURE_LOOPBACK=1`. Absent,
+  test, staging and malformed modes refuse; the override is for a controlled local harness and
+  must not be set on a deployment.
 
 ### Also configuration, not code
 

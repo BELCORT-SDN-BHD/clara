@@ -24,7 +24,8 @@
 // order IS `clara.role_rank`'s own `case` mapping, read out of `0002`.
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
@@ -54,16 +55,20 @@ const MIGRATION_FILES = readdirSync(MIGRATIONS_DIR)
   .filter((f) => f.endsWith(".sql"))
   .sort();
 
-function migration(name: string): string {
-  return readFileSync(join(MIGRATIONS_DIR, name), "utf8");
+function migration(name: string, dir = MIGRATIONS_DIR): string {
+  return readFileSync(join(dir, name), "utf8");
 }
 
-/** Every migration carrying a plain `create [or replace] function clara.<name>(`.
- *  Sorted by filename, so the LAST entry is the live body — unless something
- *  splices it dynamically, which the census below checks separately. */
-function functionDefiners(fn: string): string[] {
+/** Every migration carrying a plain definition OR a dynamic body splice for
+ *  `clara.<name>`. Sorted by filename, so the LAST entry owns the live body. */
+function functionDefiners(fn: string, dir = MIGRATIONS_DIR): string[] {
+  const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
   const re = new RegExp(`create\\s+(or\\s+replace\\s+)?function\\s+clara\\.${fn}\\s*\\(`, "i");
-  return MIGRATION_FILES.filter((f) => re.test(migration(f)));
+  const dynamicName = new RegExp(`v_name\\s+text\\s*:=\\s*'${fn}'`, "i");
+  return files.filter((f) => {
+    const sql = migration(f, dir);
+    return re.test(sql) || (/execute\s+replace\(\s*v_head/i.test(sql) && dynamicName.test(sql));
+  });
 }
 
 function viewDefiners(view: string): string[] {
@@ -84,6 +89,20 @@ function declaredContract(sql: string, relation: string): { count: number; colum
 const M0141 = "0141_p4_tranche1_invite_rbac.sql";
 const M0145 = "0145_p4_tranche2_registration_operator_alias.sql";
 const M0147 = "0147_db_hardening_b_hash_only_bearer_tokens.sql";
+
+function pinnedRoleRankBody(dir = MIGRATIONS_DIR): string {
+  const definers = functionDefiners("role_rank", dir);
+  assert.deepEqual(
+    definers,
+    ["0002_foundation.sql"],
+    "clara.role_rank has a later live-body definer — re-census ROLE_LADDER before trusting it",
+  );
+  const body = /create function clara\.role_rank\(p_role text\)[\s\S]*?\$\$;/.exec(
+    migration(definers[0] as string, dir),
+  )?.[0];
+  assert.ok(body, "clara.role_rank's body was not found — re-census before trusting ROLE_LADDER");
+  return body;
+}
 
 describe("rung 0 — the live bodies this module cites are still the live bodies", () => {
   it("VACUITY CONTROL: the migration corpus was actually read", () => {
@@ -234,10 +253,8 @@ describe("every FILE these modules cite actually exists", () => {
 });
 
 describe("the role ladder is clara.role_rank's own mapping", () => {
-  it("ROLE_LADDER's order IS the SQL's case expression, parsed out of 0002", () => {
-    const sql = migration("0002_foundation.sql");
-    const body = /create function clara\.role_rank\(p_role text\)[\s\S]*?\$\$;/.exec(sql)?.[0];
-    assert.ok(body, "clara.role_rank's body was not found — re-census before trusting ROLE_LADDER");
+  it("ROLE_LADDER's order IS the LIVE SQL case expression, found by the all-migration census", () => {
+    const body = pinnedRoleRankBody();
     // Read the pairs the SQL actually declares, in its own order, rather than
     // asserting a list this file typed out.
     const pairs = [...body.matchAll(/when '([a-z]+)' then (\d+)/g)].map(([, role, rank]) => ({
@@ -253,6 +270,29 @@ describe("the role ladder is clara.role_rank's own mapping", () => {
     // `else null` — an out-of-ladder role ranks NULL, never a number.
     assert.match(body, /else null end/);
     assert.equal(roleRank("wizard"), null);
+  });
+
+  it("RED-BEFORE: a later dynamic-splice role_rank migration invalidates the live-body pin", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "clara-role-rank-"));
+    try {
+      writeFileSync(
+        join(fixture, "0002_foundation.sql"),
+        "create function clara.role_rank(p_role text) returns int language sql immutable as $$ select case p_role when 'viewer' then 0 when 'bookkeeper' then 1 when 'admin' then 2 when 'owner' then 3 else null end $$;\n",
+      );
+      writeFileSync(
+        join(fixture, "9999_role_rank_recut.sql"),
+        "do $$ declare v_name text := 'role_rank'; v_head text := 'create function clara.role_rank'; begin execute replace(v_head, 'then 2', 'then 7'); end $$;\n",
+      );
+
+      assert.deepEqual(functionDefiners("role_rank", fixture), ["0002_foundation.sql", "9999_role_rank_recut.sql"]);
+      assert.throws(
+        () => pinnedRoleRankBody(fixture),
+        /later live-body definer/,
+        "the old 0002-only pin false-greens after a later migration changes the scale",
+      );
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
   });
 
   it("the two closed status worlds match the DB's own CHECK constraints", () => {

@@ -47,7 +47,12 @@ const CONFIG: InviteMailConfig = {
   from: "Clara <invites@example.test>",
 };
 
-type AdminUser = { email?: string | null };
+type AdminUser = {
+  email?: string | null;
+  email_confirmed_at?: unknown;
+  phone_confirmed_at?: unknown;
+  confirmed_at?: unknown;
+};
 type ListResult = { data: { users: AdminUser[] } | null; error: { message: string; status?: number } | null };
 
 /** THE RECORDING CLIENT. Every argument the constructor received, and every
@@ -180,7 +185,10 @@ describe("the service-role key's only destination is the Supabase client constru
 // ---------------------------------------------------------------------------
 
 describe("canMintFor answers {ok:true} only when it has SEEN the whole directory", () => {
-  const pageOf = (emails: string[]): ListResult => ({ data: { users: emails.map((email) => ({ email })) }, error: null });
+  const pageOf = (emails: string[]): ListResult => ({
+    data: { users: emails.map((email) => ({ email, email_confirmed_at: "2026-08-01T00:00:00Z" })) },
+    error: null,
+  });
 
   test("a match on page 1 is already_registered", async () => {
     const client = recordingClient({ listUsers: () => pageOf(["taken@example.test"]) });
@@ -189,7 +197,7 @@ describe("canMintFor answers {ok:true} only when it has SEEN the whole directory
     assert.equal(client.listUsersCalls.length, 1, "it stops the moment it has a positive answer");
   });
 
-  test("N2(3): an UNCONFIRMED matching row proceeds — only a CONFIRMED one is already_registered", async () => {
+  test("N2(3): a serialised UNCONFIRMED row with email_confirmed_at OMITTED proceeds", async () => {
     // CODEX ROUND 2, N2(3). The scan treated the mere EXISTENCE of a matching row
     // as the refusal condition. Supabase rejects `generateLink({type:"invite"})`
     // only for a CONFIRMED user and permits an unconfirmed one — so refusing
@@ -197,7 +205,7 @@ describe("canMintFor answers {ok:true} only when it has SEEN the whole directory
     const unconfirmed = recordingClient({
       listUsers: (p) =>
         (p.page ?? 1) === 1
-          ? { data: { users: [{ email: "pending@example.test", email_confirmed_at: null, confirmed_at: null }] }, error: null }
+          ? { data: { users: [{ email: "pending@example.test" }] }, error: null }
           : { data: { users: [] }, error: null },
     });
     assert.deepEqual(
@@ -206,9 +214,35 @@ describe("canMintFor answers {ok:true} only when it has SEEN the whole directory
       "an unconfirmed account may still be invited",
     );
 
+  });
+
+  test("N2(3): phone-only confirmation does not make the email confirmed", async () => {
+    const phoneOnly = recordingClient({
+      listUsers: (p) =>
+        (p.page ?? 1) === 1
+          ? {
+              data: {
+                users: [{
+                  email: "phone-only@example.test",
+                  phone_confirmed_at: "2026-08-01T00:00:00Z",
+                  confirmed_at: "2026-08-01T00:00:00Z",
+                }],
+              },
+              error: null,
+            }
+          : { data: { users: [] }, error: null },
+    });
+    assert.deepEqual(
+      await productionInviteMailer(CONFIG, { createClient: phoneOnly.createClient }).canMintFor("phone-only@example.test"),
+      { ok: true },
+      "GoTrue's invite decision is email confirmation, not legacy confirmed_at",
+    );
+  });
+
+  test("N2(3): an EMAIL-confirmed matching row is already_registered", async () => {
     const confirmed = recordingClient({
       listUsers: () => ({
-        data: { users: [{ email: "live@example.test", email_confirmed_at: "2026-08-01T00:00:00Z", confirmed_at: null }] },
+        data: { users: [{ email: "live@example.test", email_confirmed_at: "2026-08-01T00:00:00Z" }] },
         error: null,
       }),
     });
@@ -218,33 +252,27 @@ describe("canMintFor answers {ok:true} only when it has SEEN the whole directory
     );
   });
 
-  test("N2(3): confirmation is read FAIL-CLOSED — an unreadable field counts as confirmed", async () => {
-    // The two directions are not symmetric. Wrongly "confirmed" annoys an admin
-    // and mints nothing; wrongly "unconfirmed" mints a DEAD invite and blocks the
-    // address for seven days. So only an explicit null on BOTH fields is a
-    // positive reading of "not confirmed"; absence or an odd type is not an
-    // answer, and an unanswered question never licenses the mint.
+  test("N2(3): empty-string and non-string email confirmation timestamps make the directory unreadable", async () => {
     for (const user of [
-      { email: "x@example.test" }, // both fields ABSENT — cannot tell
-      { email: "x@example.test", email_confirmed_at: undefined, confirmed_at: undefined },
-      { email: "x@example.test", email_confirmed_at: 17, confirmed_at: null },
-      { email: "x@example.test", email_confirmed_at: "2026-08-01T00:00:00Z" },
-      { email: "x@example.test", confirmed_at: "2026-08-01T00:00:00Z" }, // phone-confirmed account
+      { email: "x@example.test", email_confirmed_at: "" },
+      { email: "x@example.test", email_confirmed_at: 17 },
     ]) {
       const client = recordingClient({ listUsers: () => ({ data: { users: [user] }, error: null }) });
-      assert.deepEqual(
-        await productionInviteMailer(CONFIG, { createClient: client.createClient }).canMintFor("x@example.test"),
-        { ok: false, reason: "already_registered" },
-        `${JSON.stringify(user)} must fail CLOSED — a dead invite is the expensive direction`,
+      await assert.rejects(
+        () => productionInviteMailer(CONFIG, { createClient: client.createClient }).canMintFor("x@example.test"),
+        (e: unknown) => isInviteMailFailure(e) && e.code === "directory_unreadable",
+        `${JSON.stringify(user)} must refuse as MALFORMED, never become unconfirmed → mint`,
       );
+      assert.deepEqual(client.generateLinkCalls, [], "the malformed row never reaches the provider mint");
     }
 
-    // POSITIVE CONTROL: the one readable shape that really does mean "not
-    // confirmed" still lets the invite through, so the rule above is a
-    // discrimination and not a blanket refusal.
-    assert.equal(isConfirmedUser({ email_confirmed_at: null, confirmed_at: null }), false);
-    assert.equal(isConfirmedUser({ email_confirmed_at: "2026-08-01T00:00:00Z", confirmed_at: null }), true);
-    assert.equal(isConfirmedUser(null), true, "a non-object row is not an answer either");
+    assert.equal(isConfirmedUser({}), false, "omitempty makes a missing field the real unconfirmed wire shape");
+    assert.equal(isConfirmedUser({ email_confirmed_at: null }), false);
+    assert.equal(isConfirmedUser({ email_confirmed_at: "2026-08-01T00:00:00Z" }), true);
+    assert.throws(
+      () => isConfirmedUser({ email_confirmed_at: "" }),
+      (e: unknown) => isInviteMailFailure(e) && e.code === "directory_unreadable",
+    );
   });
 
   test("the match is case- and whitespace-insensitive, exactly as the door normalises", async () => {

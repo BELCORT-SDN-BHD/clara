@@ -17,8 +17,9 @@
 // somebody remembering to extend a list is a guard that will one day be extended
 // too late.
 //
-// SO: the roots are DISCOVERED from the tree (every file carrying a `"use client"`
-// directive), and the walk follows every bundler-relevant VALUE edge — static
+// SO: the roots are DISCOVERED from the tree (every TS/JS file carrying
+// `"use client"` anywhere in its directive prologue), and the walk follows every
+// bundler-relevant VALUE edge — static
 // imports, bare side-effect imports, `export … from` re-exports (including
 // `export *`), and dynamic `import()`. Type-only edges are still NOT followed:
 // `import type` is erased at compile time and drags nothing into a bundle, so
@@ -54,8 +55,9 @@ type Tree = {
 // ---------------------------------------------------------------------------
 
 /**
- * Every specifier a module pulls in AT RUNTIME. Four shapes, because a bundler
- * follows all four:
+ * Every specifier a module pulls in AT RUNTIME. A bundler follows all four edge
+ * families below; no-substitution template imports are ordinary known edges,
+ * while an interpolated template is unresolvable here and FAILS CLOSED:
  *   · `import x from "m"` / `import { x } from "m"`     — static value import
  *   · `import "m"`                                       — side-effect import
  *   · `export { x } from "m"` / `export * from "m"`      — RE-EXPORT (N6). A
@@ -78,7 +80,13 @@ export function runtimeSpecifiers(source: string): string[] {
     if (/^\s*type\s/.test(m[1] as string)) continue;
     out.push(m[2] as string);
   }
-  for (const m of code.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g)) out.push(m[1] as string);
+  for (const m of code.matchAll(/\bimport\s*\(\s*`([^`]*)`\s*\)/g)) {
+    const template = m[1] as string;
+    if (template.includes("${")) {
+      throw new Error("interpolated_dynamic_import_unresolved");
+    }
+  }
+  for (const m of code.matchAll(/\bimport\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/g)) out.push(m[1] as string);
   return out;
 }
 
@@ -91,7 +99,18 @@ function resolveLocal(tree: Tree, fromFile: string, spec: string): string | null
       ? join(dirname(fromFile), spec).split(sep).join("/")
       : null;
   if (base === null) return null;
-  for (const ext of [".ts", ".tsx", "/index.ts", "/index.tsx"]) {
+  for (const ext of [
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    "/index.ts",
+    "/index.tsx",
+    "/index.js",
+    "/index.jsx",
+    "/index.mjs",
+  ]) {
     const candidate = `${base}${ext}`;
     if (tree.exists(candidate)) return candidate;
   }
@@ -106,7 +125,16 @@ export function closureOf(tree: Tree, entry: string): Set<string> {
     const current = queue.pop() as string;
     if (files.has(current)) continue;
     files.add(current);
-    for (const spec of runtimeSpecifiers(tree.read(current))) {
+    let specifiers: string[];
+    try {
+      specifiers = runtimeSpecifiers(tree.read(current));
+    } catch (error) {
+      if (error instanceof Error && error.message === "interpolated_dynamic_import_unresolved") {
+        throw new Error(`interpolated_dynamic_import_unresolved:${current}`);
+      }
+      throw error;
+    }
+    for (const spec of specifiers) {
       const local = resolveLocal(tree, current, spec);
       if (local !== null) queue.push(local);
     }
@@ -114,12 +142,17 @@ export function closureOf(tree: Tree, entry: string): Set<string> {
   return files;
 }
 
-/** Does this file open with a `"use client"` directive? Read as a DIRECTIVE — the
- *  first statement — not as a substring, so a file merely discussing the string in
- *  prose is not mistaken for a Client Component. */
+/** Does this file carry `"use client"` in its DIRECTIVE PROLOGUE? Directives may
+ *  precede it; the prologue ends at the first non-string statement. */
 export function isClientComponent(source: string): boolean {
-  const code = stripComments(source).trimStart();
-  return /^["']use client["']\s*;?/.test(code);
+  let code = stripComments(source).trimStart();
+  while (code !== "") {
+    const directive = /^(["'])([^"'\\]*(?:\\.[^"'\\]*)*)\1(?:[ \t]*;)?(?:[ \t]*\r?\n|[ \t]*)/.exec(code);
+    if (!directive) return false;
+    if (directive[2] === "use client") return true;
+    code = code.slice(directive[0].length).trimStart();
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +166,7 @@ function walkDir(absolute: string, relative: string, out: string[]): void {
     if (SKIP.has(entry.name)) continue;
     const nextRelative = relative === "" ? entry.name : `${relative}/${entry.name}`;
     if (entry.isDirectory()) walkDir(join(absolute, entry.name), nextRelative, out);
-    else if (/\.(ts|tsx)$/.test(entry.name)) out.push(nextRelative);
+    else if (/\.(ts|tsx|js|jsx|mjs)$/.test(entry.name)) out.push(nextRelative);
   }
 }
 
@@ -251,6 +284,39 @@ describe("N6: the three edges the first version of this walk could not see", () 
     assert.ok(closureOf(tree, "components/new-panel.tsx").has(COURIER));
   });
 
+  test("a no-substitution BACKTICK dynamic import is detected", () => {
+    const tree = syntheticTree({
+      [COURIER]: "export function handleInviteRequest() {}\n",
+      "components/new-panel.tsx":
+        '`use client`;\nasync function go() { return import(`@/lib/members/courier`); }\n',
+    });
+    assert.ok(closureOf(tree, "components/new-panel.tsx").has(COURIER));
+  });
+
+  test("an INTERPOLATED dynamic import reachable from a client root fails closed by named reason", () => {
+    const tree = syntheticTree({
+      "components/new-panel.tsx":
+        '`use client`;\nconst target = "courier";\nasync function go() { return import(`@/lib/members/${target}`); }\n',
+    });
+    assert.throws(
+      () => closureOf(tree, "components/new-panel.tsx"),
+      /interpolated_dynamic_import_unresolved:components\/new-panel\.tsx/,
+    );
+  });
+
+  test("JavaScript, JSX and MJS files participate in both discovery and resolution", () => {
+    const tree = syntheticTree({
+      "components/new-panel.jsx": '"use client";\nimport bridge from "@/lib/bridge";\nvoid bridge;\n',
+      "lib/bridge.mjs": 'import courier from "./members/courier";\nexport default courier;\n',
+      "lib/members/courier.js": "export default function courier() {}\n",
+    });
+    const roots = tree.files().filter((f) => isClientComponent(tree.read(f)));
+    assert.deepEqual(roots, ["components/new-panel.jsx"]);
+    const reached = closureOf(tree, roots[0] as string);
+    assert.ok(reached.has("lib/bridge.mjs"));
+    assert.ok(reached.has("lib/members/courier.js"));
+  });
+
   test("RED-BEFORE: the OLD static-only walk missed all three", () => {
     // The measurement that makes N6 a real finding rather than a preference: the
     // previous specifier reader recognised only `import … from` and bare
@@ -288,5 +354,11 @@ describe("N6: the three edges the first version of this walk could not see", () 
     assert.equal(isClientComponent("'use client'\nexport const x = 1;"), true);
     assert.equal(isClientComponent('// this file explains "use client"\nexport const x = 1;'), false);
     assert.equal(isClientComponent('export const doc = "use client";'), false);
+    assert.equal(isClientComponent('"use strict";\n"use client";\nexport const x = 1;'), true);
+    assert.equal(
+      isClientComponent('"use strict";\nexport const x = 1;\n"use client";'),
+      false,
+      "the directive prologue ends at the first non-string statement",
+    );
   });
 });

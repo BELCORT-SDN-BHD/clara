@@ -39,6 +39,9 @@ export const FULL_ENV = {
   SUPABASE_SERVICE_ROLE_KEY: "PLACEHOLDER",
   RESEND_API_KEY: "PLACEHOLDER",
   INVITE_MAIL_FROM: "Clara <invites@example.test>",
+  // The fixture's ORIGIN is deliberately loopback HTTP. Unknown/test modes are
+  // fail-closed, so the harness opts into that exception explicitly.
+  CLARA_ALLOW_INSECURE_LOOPBACK: "1",
 };
 
 // P4-2's fold replaced the lazy accessor with a ONCE-resolved `ServerSession` —

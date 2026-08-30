@@ -384,31 +384,24 @@ export function sameAddress(a: string, b: string): boolean {
  * perfectly inviteable unconfirmed accounts — a self-inflicted 409 on a flow
  * that would have worked.
  *
- * THE TWO DIRECTIONS ARE NOT SYMMETRIC, so this is not a plain boolean read:
- *   · Wrongly "confirmed"   → the admin is told to ask them to sign in. Annoying,
- *                             reversible, mints nothing.
- *   · Wrongly "unconfirmed" → the courier proceeds, the door MINTS, and
- *                             `generateLink` then throws — the plaintext is gone,
- *                             the invite is dead, and the address is blocked for
- *                             seven days. Exactly the bug FIND-1 closes.
- * So the uncertain cases fail toward "confirmed". A timestamp positively present
- * is confirmed; an explicit `null` is a positive reading of "not confirmed"; a
- * field that is ABSENT, or of a type this app does not recognise, means the
- * question was not answered — and an unanswered question is never the licence to
- * mint (review law 2).
+ * GoTrue's invite decision is EMAIL confirmation. `confirmed_at` is the legacy
+ * aggregate of phone OR email confirmation, so reading it here wrongly refuses a
+ * phone-only account that GoTrue can still invite by email.
  *
- * `confirmed_at` is read as well as `email_confirmed_at` because Supabase's user
- * object exposes both and the invite path cares about the account, not only the
- * email factor.
+ * GoTrue serialises a nil `email_confirmed_at` with `omitempty`, making ABSENCE
+ * the ordinary unconfirmed wire shape. Explicit null means the same. A present,
+ * non-empty string is confirmed. A present empty string or a non-string is not
+ * "unconfirmed" evidence: it is a malformed directory row and throws
+ * `directory_unreadable`, so it can never license the door to mint.
  */
 export function isConfirmedUser(user: unknown): boolean {
-  if (typeof user !== "object" || user === null) return true;
+  if (typeof user !== "object" || user === null) {
+    throw new InviteMailFailure("directory_unreadable", null);
+  }
   const u = user as Record<string, unknown>;
-  const stamped = (v: unknown): boolean => typeof v === "string" && v !== "";
-  if (stamped(u.email_confirmed_at) || stamped(u.confirmed_at)) return true;
-  const readable = (v: unknown): boolean => v === null || typeof v === "string";
-  if (readable(u.email_confirmed_at) && readable(u.confirmed_at)) return false;
-  return true;
+  if (!Object.hasOwn(u, "email_confirmed_at") || u.email_confirmed_at === null) return false;
+  if (typeof u.email_confirmed_at === "string" && u.email_confirmed_at !== "") return true;
+  throw new InviteMailFailure("directory_unreadable", null);
 }
 
 /**
@@ -471,11 +464,10 @@ export function productionInviteMailer(
         for (const user of users) {
           const found = (user as { email?: string | null }).email;
           if (typeof found === "string" && sameAddress(found, email)) {
-            // A ROW IS NOT A CONFIRMATION (Codex round 2, N2(3)). Supabase
-            // rejects an invite only for a CONFIRMED user; an unconfirmed one
-            // may be re-invited, and refusing those turned a working flow into
-            // a 409 for no reason. So confirmation is READ, and read
-            // fail-closed in the direction that cannot mint a dead invite.
+            // A ROW IS NOT EMAIL CONFIRMATION (Codex round 4, N2-2). Missing
+            // `email_confirmed_at` is GoTrue's real serialised unconfirmed shape;
+            // malformed present values throw `directory_unreadable` rather than
+            // becoming a licence to mint.
             if (isConfirmedUser(user)) return { ok: false, reason: "already_registered" };
           }
         }

@@ -60,16 +60,15 @@ export type SameOriginConfig = {
   /** Exact serialized origins this deployment answers on, from
    *  `CLARA_PUBLIC_ORIGINS`. Empty means "not configured" — see above. */
   readonly publicOrigins: readonly string[];
-  /** N5: `http://localhost` / `http://127.0.0.1` are accepted ONLY here. In
-   *  production an insecure loopback origin is refused, because a production
-   *  invite mailed to `http://localhost/...` carries both bearer factors to
-   *  whatever is listening on the recipient's own machine. */
+  /** N5: `http://localhost` / `http://127.0.0.1` are accepted ONLY in explicit
+   *  development mode or under the explicit insecure-loopback opt-in. */
   readonly allowInsecureLoopback: boolean;
 };
 
-/** Parse the allowlist. Each entry is normalised through `URL.origin`, so
- *  `https://App.Clara.example/` and `https://app.clara.example` are the same
- *  entry, and anything unparseable is DROPPED rather than admitted. */
+/** Parse the allowlist. A value must ALREADY BE an exact canonical origin;
+ *  `URL.origin` is a validator, never a repair tool that silently discards a
+ *  path/query/credential or normalises a misspelling into authority. The sole
+ *  tolerated spelling difference is an optional trailing slash. */
 export function readSameOriginConfig(env: Record<string, string | undefined>): SameOriginConfig {
   const raw = env.CLARA_PUBLIC_ORIGINS ?? "";
   const publicOrigins: string[] = [];
@@ -77,12 +76,19 @@ export function readSameOriginConfig(env: Record<string, string | undefined>): S
     const trimmed = part.trim();
     if (trimmed === "") continue;
     try {
-      publicOrigins.push(new URL(trimmed).origin);
+      const parsed = new URL(trimmed);
+      const inputWithSlash = trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+      if (`${parsed.origin}/` !== inputWithSlash) continue;
+      publicOrigins.push(parsed.origin);
     } catch {
       // An unparseable entry contributes nothing. It never widens the wall.
     }
   }
-  return { publicOrigins, allowInsecureLoopback: env.NODE_ENV !== "production" };
+  return {
+    publicOrigins,
+    allowInsecureLoopback:
+      env.NODE_ENV === "development" || env.CLARA_ALLOW_INSECURE_LOOPBACK === "1",
+  };
 }
 
 /** What the wall PROVED, not merely whether it passed. `origin` is the
@@ -134,11 +140,9 @@ export function proveSameOrigin(
   // checks the ORIGIN's own scheme, never the request URL's authority (which
   // a proxy may rewrite independently).
   //
-  // N5: AND ONLY OUTSIDE PRODUCTION. Local dev serves HTTP on loopback, so the
-  // exception has to exist — but a PRODUCTION deployment never legitimately sees
-  // one, and accepting it there means a production invite can be mailed with both
-  // bearer factors pointing at `http://localhost/...`, i.e. at whatever happens to
-  // be listening on the recipient's own machine.
+  // N5: AND ONLY UNDER AN EXPLICIT MODE OR OPT-IN. Unknown/absent modes refuse;
+  // fail-open mode inference could mail both bearer factors to whatever is
+  // listening on the recipient's own loopback interface.
   const isLoopback = originUrl.hostname === "localhost" || originUrl.hostname === "127.0.0.1";
   const loopbackAllowed = isLoopback && config.allowInsecureLoopback;
   if (originUrl.protocol !== "https:" && !(originUrl.protocol === "http:" && loopbackAllowed)) {
