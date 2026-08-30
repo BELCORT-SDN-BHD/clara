@@ -53,7 +53,7 @@ async function ensureBankWakeTaskForClient({ firm, client }) {
   if (live.rowCount === 1) { _bankTaskCache.set(key, live.rows[0].id); return live.rows[0].id; }
   if (live.rowCount > 1) return null;   // ambiguous by construction: let §E's own refusal name it
   const acct = await rootQuery(
-    "select id from clara.bank_accounts where client_id=$1 and coalesce(status,'active')='active'", [client]);
+    "select id from clara.bank_accounts where client_id=$1 and active", [client]);
   // EXACTLY ONE -> that one. NONE -> a synthetic id, because the account a wake task names is
   // whatever its producing event named, and a client with no bank account can only be driving the
   // four verbs that HAVE no account subject (add_bank_account, upsert_account, the staff-advance

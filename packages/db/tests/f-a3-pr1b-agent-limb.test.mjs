@@ -196,6 +196,25 @@ test("f31b.f mint_wake_credential('bank_agent', ...): client required, on_behalf
     "select * from clara.mint_wake_credential($1,$2,$3,'00:15:00'::interval,$4)",
     ["bank_agent", firm, world.users.alice, world.clients.A1]));
   assert.ok(withObo, "bank_agent forbids on_behalf_of; a non-null value must refuse, not mint");
+  // G1 PR-2a: from that migration on, the bank_agent arm also BINDS the client's live wake task
+  // and refuses bank_agent_task_absent when there is none -- so the positive half of this cell
+  // needs the producer's own artefacts. Gated on the gate's EXACT SIGNATURE, so this cell is
+  // unchanged against a pre-PR-2a chain. The client's own bank account is bound where there is
+  // exactly one, which is what this world builds.
+  const { hasG1Pr2a, makeBankWakeTask } = await import("./g1-pr-2a-fixtures.mjs");
+  if (await hasG1Pr2a()) {
+    const live = await rootQuery(
+      `select id from clara.agent_tasks where firm_id=$1 and client_id=$2 and kind='wake'
+         and status in ('held','running','cancel_requested')`, [firm, world.clients.A1]);
+    if (live.rowCount === 0) {
+      const acct = await rootQuery(
+        "select id from clara.bank_accounts where client_id=$1 and active",
+        [world.clients.A1]);
+      await makeBankWakeTask({
+        firm, client: world.clients.A1,
+        bankAccount: acct.rowCount === 1 ? acct.rows[0].id : randomUUID(), status: "running" });
+    }
+  }
   const ok = await rootQuery(
     "select * from clara.mint_wake_credential($1,$2,null,'00:15:00'::interval,$3)",
     ["bank_agent", firm, world.clients.A1]);
