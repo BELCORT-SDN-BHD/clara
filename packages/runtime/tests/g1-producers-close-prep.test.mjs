@@ -19,6 +19,7 @@ import { test, after, describe } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, humanQuery, asRuntime, opk, buildFirm, endPool, getPool } from "./relay-fixtures.mjs";
 import { produceClosePrepTasks } from "../lib/reconciler-close-prep.mjs";
+import { waitBlockedByOrThrow, backendPid } from "./pg-lock-wait.mjs";
 
 async function hasClosePrepDue() {
   const r = await rootQuery("select to_regprocedure('clara.close_prep_due()') is not null as ok");
@@ -281,7 +282,7 @@ test("HIGH-2 symmetry: claim_close_prep_task is owned by clara_fn_owner, SECURIT
 // HIGH-3 — the DB-owned claim under REAL concurrency (two independent connections, barriered).
 // =====================================================================================
 
-test("HIGH-3: two independent runtime connections racing the SAME fiscal_year_id — exactly one appended, one skipped", { skip: skipClaim }, async () => {
+test("R2-4: a GENUINE barrier on the SAME fiscal_year_id — T1 holds the claim row uncommitted, T2 is PROVEN blocked (waitBlockedByOrThrow), then T1 releases — exactly one appended, one skipped", { skip: skipClaim }, async () => {
   const w = await buildFirm("g1cp-race");
   const fy = await buildOverdueFiscalYear(w, "FY-race");
 
@@ -291,15 +292,77 @@ test("HIGH-3: two independent runtime connections racing the SAME fiscal_year_id
   try {
     await c1.query("set role clara_runtime");
     await c2.query("set role clara_runtime");
-    const [r1, r2] = await Promise.all([
-      c1.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fy, "race-1"]),
-      c2.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fy, "race-2"]),
-    ]);
+    const c2Pid = await backendPid(c2); // before c2 is put in flight
+
+    await c1.query("begin");
+    const t1Pid = await backendPid(c1);
+    const r1 = await c1.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fy, "race-1"]);
+    assert.equal(r1.rows[0].r.appended, true, "T1's own claim must succeed first");
+    const r2p = c2.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fy, "race-2"]);
+    await waitBlockedByOrThrow(c2Pid, t1Pid, { what: "the close_prep_fy_claims row T1 holds uncommitted" });
+    await c1.query("commit");
+    const r2 = await r2p;
+
     const results = [r1.rows[0].r, r2.rows[0].r];
     assert.equal(results.filter((r) => r.appended === true).length, 1, `exactly one concurrent call must have appended, got ${JSON.stringify(results)}`);
     assert.equal(results.filter((r) => r.appended === false).length, 1, `exactly one must have been skipped, got ${JSON.stringify(results)}`);
     assert.equal(await taskCountFor(w.client), 1, "exactly one task survived the race");
   } finally {
+    await c1.query("rollback").catch(() => {});
+    await c1.query("reset role").catch(() => {});
+    await c2.query("reset role").catch(() => {});
+    c1.release();
+    c2.release();
+  }
+});
+
+test("R2-4: a TERMINAL-CLAIM RECLAIM racing a concurrent DIFFERENT-FY live-task claim for the SAME client — the client-level wall arbitrates them too, barrier-proven", { skip: skipClaim }, async () => {
+  const w = await buildFirm("g1cp-reclaimrace");
+  // Fiscal years must open in strictly FORWARD chronological order (the contiguity wall refuses
+  // backfilling an earlier period once a later one exists) — fyB opens FIRST (the earlier window),
+  // fyA SECOND (the later window, chaining right after it). Which one is "A"/"B" is otherwise
+  // arbitrary; fyA is the one T1's reclaim below targets.
+  const fyB = await buildEarlierOverdueFiscalYear(w, "FY-reclaimrace-b");
+  // FY-A already carries a TERMINAL claim (a resolved close_prep task) — the shape T1's reclaim
+  // path below depends on.
+  const fyA = await buildOverdueFiscalYear(w, "FY-reclaimrace-a");
+  const firstClaim = await asRuntime((c) => c.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fyA, "reclaimrace-seed"]));
+  const seedTaskId = firstClaim.rows[0].r.task_id;
+  await rootQuery("update clara.agent_tasks set status='running' where id=$1", [seedTaskId]);
+  await rootQuery("update clara.agent_tasks set status='completed' where id=$1", [seedTaskId]);
+
+  const pool = getPool();
+  const c1 = await pool.connect();
+  const c2 = await pool.connect();
+  try {
+    await c1.query("set role clara_runtime");
+    await c2.query("set role clara_runtime");
+    const c2Pid = await backendPid(c2);
+
+    // T1 RECLAIMS FY-A's terminal claim — its own agent_tasks INSERT (client-scoped
+    // uq_agent_task_one_live_close_prep) is held uncommitted.
+    await c1.query("begin");
+    const t1Pid = await backendPid(c1);
+    const r1 = await c1.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fyA, "reclaimrace-t1"]);
+    assert.equal(r1.rows[0].r.appended, true, "T1's reclaim of the terminal FY-A claim must succeed");
+    // T2 claims the DIFFERENT fiscal year FY-B for the SAME client — its own close_prep_fy_claims
+    // insert (keyed on FY-B, genuinely fresh) succeeds immediately; its SUBSEQUENT agent_tasks
+    // insert is what collides with T1's uncommitted row on the CLIENT-scoped wall.
+    const r2p = c2.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fyB, "reclaimrace-t2"]);
+    await waitBlockedByOrThrow(c2Pid, t1Pid, { what: "uq_agent_task_one_live_close_prep, held uncommitted by T1's reclaim" });
+    await c1.query("commit");
+    const r2 = await r2p;
+
+    assert.equal(r2.rows[0].r.appended, false, "T2's different-FY claim must be refused — the client's one live slot is now T1's reclaimed task");
+    assert.equal(r2.rows[0].r.reason, "client_has_live_close_prep");
+    // T2's OWN close_prep_fy_claims row for FY-B must have been cleaned up by claim_close_prep_task's
+    // own unique_violation handler — a later real claim on FY-B must not find itself permanently
+    // stuck behind a claim whose task was never created.
+    const leftoverFyBClaim = await rootQuery("select count(*)::int as n from clara.close_prep_fy_claims where fiscal_year_id=$1", [fyB]);
+    assert.equal(leftoverFyBClaim.rows[0].n, 0, "T2's own fiscal-year claim must have been rolled back, not left dangling");
+    assert.equal(await taskCountFor(w.client), 2, "two tasks total for this client: FY-A's original (now completed) + FY-A's reclaim — FY-B created none");
+  } finally {
+    await c1.query("rollback").catch(() => {});
     await c1.query("reset role").catch(() => {});
     await c2.query("reset role").catch(() => {});
     c1.release();

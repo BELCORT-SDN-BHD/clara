@@ -1030,6 +1030,12 @@ export const G1_WAKE_ENGINE_COHORT = ["set_wake_source_enabled"];
 // the engine's own claim path, the settle_chat_turn precedent) — a separate cohort since it
 // lands in ALLOWED[ROLES.runtime], not the human-lane roster above.
 export const G1_WAKE_ENGINE_RUNTIME_COHORT = ["_settle_wake_task"];
+// G1 PR-2b [the wake-engine producers] adds the two narrow clara_runtime doors used by the
+// leader-owned bank_agent and close_prep belts. Keep this as its own cohort: pre-PR-2b estates
+// must remain valid with both names absent, while a partial deployment must fail the closed
+// grant roster. The migration and its focused catalog test pin the stronger signature-level
+// ACL tuples; T17's estate-wide sweep proves that no other application role gained EXECUTE.
+export const G1_PR2B_PRODUCER_RUNTIME_COHORT = ["emit_bank_agent_due", "claim_close_prep_task"];
 
 // F-A3/PR-3 [retirement + parity + doors] the one NEW human door: confirm_bank_identifier_promotion
 // (OQ-8's deferred confirm half — bookkeeper floor, body-enforced; agent + both wake roles gain
@@ -1427,6 +1433,7 @@ export const ALLOWED = {
     // claim path, the settle_chat_turn precedent above). Declared here so any wider grant FAILS
     // the matrix.
     ...G1_WAKE_ENGINE_RUNTIME_COHORT,
+    ...G1_PR2B_PRODUCER_RUNTIME_COHORT,
     // [Wave-F Track A, F-A4 PR-1c] the clock's two runtime verbs: close_prep_due (the due oracle
     // — clara_runtime and NOBODY else, Annex B.1: the wake roles never ask) and
     // mint_wake_credential_for_task (the F14 sibling minter, mirroring mint_wake_credential's own
@@ -1634,6 +1641,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("F-A3/PR-1b bank-agency agent limb", BANK_AGENCY_F_A3_PR1B_COHORT, liveNames));
   failures.push(...cohortFailures("Gate G1 wake-execution engine", G1_WAKE_ENGINE_COHORT, liveNames));
   failures.push(...cohortFailures("Gate G1 wake-execution engine (runtime lane)", G1_WAKE_ENGINE_RUNTIME_COHORT, liveNames));
+  failures.push(...cohortFailures("Gate G1 PR-2b producer doors (runtime lane)", G1_PR2B_PRODUCER_RUNTIME_COHORT, liveNames));
   failures.push(...cohortFailures("F-A3/PR-3 retirement + parity + doors", BANK_AGENCY_F_A3_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5b PR-1 sandbox export lane", F_A5B_PR1_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5b card 1 substitution seam", CARD1_SEAM_COHORT, liveNames));

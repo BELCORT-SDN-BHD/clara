@@ -56,6 +56,19 @@ export function derivedOpKey(task, verb, subject) {
  *  will mint in PR-2. The task insert goes through clara.agent_tasks' own BEFORE trigger (the
  *  close_prep arm PR-1b installed), so a shape this rig accepts is a shape the trigger accepts. */
 export async function mintClosePrepSession(firm, client) {
+  // G1 PR-2b adds the production invariant that one client may have at most one LIVE
+  // close_prep task. This F-A4 battery models successive wake-engine attempts (many cells say
+  // "a new wake task" explicitly), but its pre-G1 fixture used to leave each synthetic prior
+  // task queued forever. Retire that prior synthetic attempt before minting the next one; do not
+  // weaken or bypass the DB wall. A non-queued live task is deliberately NOT rewritten here and
+  // will still make the INSERT fail loud, because the fixture has no authority to pretend a
+  // running attempt finished.
+  await rootQuery(
+    `update clara.agent_tasks
+        set status = 'cancelled'
+      where firm_id = $1 and client_id = $2 and kind = 'close_prep' and status = 'queued'`,
+    [firm, client],
+  );
   const t = await rootQuery(
     `insert into clara.agent_tasks(firm_id, client_id, kind, status, model_snapshot)
        values ($1, $2, 'close_prep', 'queued', $3) returning id`,

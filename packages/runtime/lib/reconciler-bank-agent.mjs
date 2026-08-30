@@ -86,6 +86,17 @@ const EMIT_REASONS = new Set(["unmatched_lines", "reconcilable", "retry_later"])
 const NOTIFY_REASONS = new Set(["chase_statement"]);
 const QUIET_REASONS = new Set(["purpose_unconsented", "held", "nothing_due"]);
 
+// R2-2 (Codex r2 review of #449): the SAME canonical due_key shape emit_bank_agent_due's own SQL
+// enforces (UNNUMBERED_g1_pr_2b_bank_agent_due_emit.sql) — ASCII letters/digits/._:- only,
+// non-empty, at most 256 UTF-8 bytes. This allowlist is deliberately byte-for-byte portable:
+// JavaScript Unicode classes and PostgreSQL locale-sensitive POSIX classes are not identical.
+// Checked here too so malformed predicate output is caught as ANOMALOUS (logged, not counted —
+// the same FIND-11 bucket a missing field falls into) rather than surfacing as a raw DB failure.
+const DUE_KEY_PATTERN = /^[A-Za-z0-9._:-]+$/;
+function dueKeyShapeOk(dueKey) {
+  return typeof dueKey === "string" && DUE_KEY_PATTERN.test(dueKey) && Buffer.byteLength(dueKey, "utf8") <= 256;
+}
+
 /** The closed reason->action switch (HIGH-1, bank-agency-annexes-1-mechanics.md §D.0's tail).
  *  PURE — no I/O — so it is unit-testable on its own and the belt below is thin glue over it.
  *
@@ -107,7 +118,11 @@ export function classifyBankDueReason(due) {
   if (EMIT_REASONS.has(reason)) {
     if (due?.due !== true) return { action: "malformed", detail: `reason '${reason}' requires due:true (got ${JSON.stringify(due)})` };
     if (!due?.bank_account_id) return { action: "anomalous", detail: `reason '${reason}' requires bank_account_id (got ${JSON.stringify(due)})` };
-    if (!due?.due_key) return { action: "anomalous", detail: `reason '${reason}' requires due_key (got ${JSON.stringify(due)})` };
+    // R2-2: a due_key that fails the canonical shape (missing, non-string, padded/whitespace,
+    // control characters, or over 256 bytes) is the SAME "anomalous" bucket as a missing
+    // due_key — the DB's own SQL wall is still the authoritative refusal if this check is ever
+    // bypassed, but catching it here avoids a wasted round-trip and a raw-exception failure count.
+    if (!dueKeyShapeOk(due?.due_key)) return { action: "anomalous", detail: `reason '${reason}' requires a canonically-shaped due_key (got ${JSON.stringify(due)})` };
     return { action: "emit", reason };
   }
   if (NOTIFY_REASONS.has(reason)) {

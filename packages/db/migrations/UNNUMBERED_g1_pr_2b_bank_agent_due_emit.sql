@@ -131,7 +131,13 @@ create table clara.bank_agent_due_claims (
   firm_id          uuid        not null,
   client_id        uuid        not null,
   bank_account_id  uuid        not null,
-  due_key          text        not null check (btrim(due_key) <> ''),
+  -- R2-2 (Codex r2 review of #449): the CANONICAL due_key contract, enforced at the table level
+  -- too (defense in depth alongside the function's own upfront guard below): ASCII letters,
+  -- digits, dot, underscore, colon and hyphen ONLY; non-empty; at most 256 bytes. An allowlist is
+  -- deliberate: JavaScript Unicode classes and PostgreSQL locale-sensitive POSIX classes do not
+  -- describe exactly the same language, so a "no whitespace" rule would drift across the two
+  -- layers it claimed were identical. This grammar is byte-for-byte reproducible in both.
+  due_key          text        not null check (due_key ~ '^[A-Za-z0-9._:-]+$' and octet_length(due_key) <= 256),
   event_seq        bigint, -- set once the append below determines it; null only inside emit_bank_agent_due's own transaction
   claimed_at       timestamptz not null default now(),
   constraint uq_bank_agent_due_claims_key unique (client_id, bank_account_id, due_key)
@@ -152,8 +158,22 @@ create function clara.emit_bank_agent_due(p_client uuid, p_bank_account uuid, p_
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare v_firm uuid; v_seq bigint;
 begin
-  if p_due_key is null or btrim(p_due_key) = '' then
-    raise exception 'emit_bank_agent_due: due_key is required (the occurrence identity the claim keys on)' using errcode = 'CLR10';
+  -- R2-2 (Codex r2 review of #449): the SAME canonical due_key shape the table's own CHECK
+  -- enforces, checked upfront so a malformed key refuses cleanly (CLR10) before any claim-table
+  -- write is even attempted, rather than surfacing as a raw 23514 CHECK-violation.
+  if p_due_key is null or p_due_key !~ '^[A-Za-z0-9._:-]+$' or octet_length(p_due_key) > 256 then
+    raise exception 'emit_bank_agent_due: due_key must use only ASCII letters/digits/._:- and be at most 256 bytes (got %)', coalesce(quote_literal(p_due_key), 'null') using errcode = 'CLR10';
+  end if;
+  -- R2-1 (Codex r2 review of #449, HIGH): the CLOSED emit-worthy reason set, enforced HERE —
+  -- the TypeScript classifier (reconciler-bank-agent.mjs's classifyBankDueReason) is a caller
+  -- CONVENIENCE, never the wall itself, because this function's ACL grants clara_runtime EXECUTE
+  -- directly: any caller holding that role could otherwise pass p_reason='chase_statement' (a
+  -- notification-only reason with no event) or a quiet/unknown/null/blank value and mint a
+  -- durable bank.agent_due event the closed switch forbids. The OLD default
+  -- `coalesce(nullif(btrim(p_reason),''),'due')` is gone entirely — there is no longer a
+  -- fallback value; every call must name one of the three genuinely emit-worthy reasons.
+  if p_reason is null or p_reason not in ('unmatched_lines', 'reconcilable', 'retry_later') then
+    raise exception 'emit_bank_agent_due: reason % is not in the closed emit-worthy reason set (unmatched_lines, reconcilable, retry_later)', coalesce(quote_literal(p_reason), 'null') using errcode = 'CLR10';
   end if;
   select c.firm_id into v_firm from clara.clients c where c.id = p_client and c.status = 'active';
   if v_firm is null then
@@ -178,8 +198,11 @@ begin
     return jsonb_build_object('appended', false, 'reason', 'already_claimed');
   end if;
 
+  -- R2-1: p_reason is now GUARANTEED one of the three closed values above -- no more
+  -- coalesce/fallback needed, and none SHOULD exist (a fallback is exactly the shape that let
+  -- an out-of-set value silently become 'due' before this fold).
   v_seq := clara._append_event(v_firm, 'bank.agent_due', p_client, null, null, null, null, null, null,
-    jsonb_build_object('bank_account_id', p_bank_account, 'reason', coalesce(nullif(btrim(p_reason), ''), 'due')));
+    jsonb_build_object('bank_account_id', p_bank_account, 'reason', p_reason));
   update clara.bank_agent_due_claims set event_seq = v_seq
    where client_id = p_client and bank_account_id = p_bank_account and due_key = p_due_key;
   return jsonb_build_object('appended', true, 'seq', v_seq);
@@ -409,35 +432,81 @@ begin
     raise exception 'g1_pr_2b tail: close_prep_fy_claims is not owned by clara_fn_owner' using errcode='CLR10';
   end if;
 
-  -- FIND-1 (opus r1 review of #449): the EXACT proacl matrix, not merely has_function_privilege
-  -- spot-checks -- the coa-template-pr-a.test.mjs:203 idiom (aclexplode, EXECUTE only, sorted
-  -- grantee list) so a wrongly-additional grantee (Codex r1's own M5 mutant: `grant ... to
-  -- clara_wake_bank`) fails this tail even though has_function_privilege('clara_runtime', ...)
-  -- would still read true. EXPECTED matrix is `clara_fn_owner,clara_runtime`, NOT `clara_runtime`
-  -- alone -- measured empirically (and matching coa-template-pr-a.test.mjs:203's own expected
-  -- string, which likewise names its object's owner): the FIRST statement that touches a
-  -- function's ACL (the `revoke all from public` above) materializes proacl from Postgres' own
-  -- implicit default (owner=ALL, PUBLIC=EXECUTE) into an explicit array, and that materialization
-  -- keeps the (now clara_fn_owner) owner's own implicit grant as a real ACL entry. This changes
-  -- nothing functionally (ownership itself, checked separately from the ACL, already gives
-  -- clara_fn_owner every privilege) but it is what the catalog actually shows, and asserting the
-  -- wrong string here would make this tail permanently red rather than a real security check.
+  -- FIND-1/R2-3 (opus r1 + Codex r2 reviews of #449): the EXACT proacl matrix INCLUDING grantor
+  -- and grantability, not merely grantee names -- aclexplode exposes all four fields
+  -- (grantor, grantee, privilege_type, is_grantable); the FIND-1-era check aggregated grantees
+  -- only, which a mutant that granted WITH GRANT OPTION or from the wrong grantor would still
+  -- have passed. EXPECTED matrix is `clara_fn_owner,clara_runtime` (not `clara_runtime` alone —
+  -- see FIND-1's own comment on why the owner's implicit grant materializes), grantor
+  -- clara_fn_owner on EVERY row, is_grantable false on every row.
   declare
     v_emit_acl text; v_claim_acl text;
   begin
-    select coalesce(string_agg(g.grantee::regrole::text, ',' order by g.grantee::regrole::text), '<none>')
+    select coalesce(string_agg(format('%s/%s/%s/%s', g.grantor::regrole::text, g.grantee::regrole::text, g.privilege_type, g.is_grantable), ',' order by g.grantee::regrole::text), '<none>')
       into v_emit_acl
       from pg_proc p, aclexplode(p.proacl) g
      where p.oid = 'clara.emit_bank_agent_due(uuid,uuid,text,text)'::regprocedure and g.privilege_type = 'EXECUTE';
-    if v_emit_acl is distinct from 'clara_fn_owner,clara_runtime' then
-      raise exception 'g1_pr_2b tail: emit_bank_agent_due EXECUTE matrix is [%] (want exactly clara_fn_owner,clara_runtime)', v_emit_acl using errcode='CLR10';
+    if v_emit_acl is distinct from 'clara_fn_owner/clara_fn_owner/EXECUTE/f,clara_fn_owner/clara_runtime/EXECUTE/f' then
+      raise exception 'g1_pr_2b tail: emit_bank_agent_due EXECUTE ACL tuples are [%] (want the exact grantor/grantee/priv/grantable set)', v_emit_acl using errcode='CLR10';
     end if;
-    select coalesce(string_agg(g.grantee::regrole::text, ',' order by g.grantee::regrole::text), '<none>')
+    select coalesce(string_agg(format('%s/%s/%s/%s', g.grantor::regrole::text, g.grantee::regrole::text, g.privilege_type, g.is_grantable), ',' order by g.grantee::regrole::text), '<none>')
       into v_claim_acl
       from pg_proc p, aclexplode(p.proacl) g
      where p.oid = 'clara.claim_close_prep_task(uuid,uuid,uuid,text)'::regprocedure and g.privilege_type = 'EXECUTE';
-    if v_claim_acl is distinct from 'clara_fn_owner,clara_runtime' then
-      raise exception 'g1_pr_2b tail: claim_close_prep_task EXECUTE matrix is [%] (want exactly clara_fn_owner,clara_runtime)', v_claim_acl using errcode='CLR10';
+    if v_claim_acl is distinct from 'clara_fn_owner/clara_fn_owner/EXECUTE/f,clara_fn_owner/clara_runtime/EXECUTE/f' then
+      raise exception 'g1_pr_2b tail: claim_close_prep_task EXECUTE ACL tuples are [%] (want the exact grantor/grantee/priv/grantable set)', v_claim_acl using errcode='CLR10';
+    end if;
+  end;
+
+  -- R2-3 + reviewer residual R1: the "policy pair" claim above checked only RLS FLAGS
+  -- (relrowsecurity/relforcerowsecurity) -- it never actually read pg_policy, so a table with
+  -- forced RLS but ZERO policies (or the wrong ones) would still have passed. Assert the EXACT
+  -- policy roster: exactly 2 policies per table, the permissive owner-ALL and the permissive
+  -- authenticated-SELECT, by NAME + command + exact polroles + USING/WITH CHECK expressions
+  -- (never by counting alone). Then census the TABLE ACL closed world independently: after
+  -- excluding the owner, clara_authenticated=SELECT is the sole tuple. A role that can DELETE a
+  -- bank claim can replay the event it guards, so policy correctness alone is not sufficient.
+  declare v_bank_pol text; v_close_pol text; v_bank_acl text; v_close_acl text;
+  begin
+    select coalesce(string_agg(format('%s/%s/%s/%s/%s/%s', p.polname, p.polcmd, p.polpermissive,
+             (select string_agg(r::regrole::text, '+' order by r) from unnest(p.polroles) r),
+             coalesce(pg_get_expr(p.polqual, p.polrelid), '<null>'),
+             coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '<null>')), ',' order by p.polname), '<none>')
+      into v_bank_pol
+      from pg_policy p join pg_class c on c.oid = p.polrelid
+      where c.relname = 'bank_agent_due_claims' and c.relnamespace = 'clara'::regnamespace;
+    if v_bank_pol is distinct from 'p_bank_agent_due_claims_owner/*/t/clara_fn_owner/true/true,p_bank_agent_due_claims_read/r/t/clara_authenticated/(firm_id = clara.jwt_firm())/<null>' then
+      raise exception 'g1_pr_2b tail: bank_agent_due_claims policy roster is [%] (want the exact owner-ALL + authenticated-SELECT pair)', v_bank_pol using errcode='CLR10';
+    end if;
+    select coalesce(string_agg(format('%s/%s/%s/%s/%s/%s', p.polname, p.polcmd, p.polpermissive,
+             (select string_agg(r::regrole::text, '+' order by r) from unnest(p.polroles) r),
+             coalesce(pg_get_expr(p.polqual, p.polrelid), '<null>'),
+             coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '<null>')), ',' order by p.polname), '<none>')
+      into v_close_pol
+      from pg_policy p join pg_class c on c.oid = p.polrelid
+      where c.relname = 'close_prep_fy_claims' and c.relnamespace = 'clara'::regnamespace;
+    if v_close_pol is distinct from 'p_close_prep_fy_claims_owner/*/t/clara_fn_owner/true/true,p_close_prep_fy_claims_read/r/t/clara_authenticated/(firm_id = clara.jwt_firm())/<null>' then
+      raise exception 'g1_pr_2b tail: close_prep_fy_claims policy roster is [%] (want the exact owner-ALL + authenticated-SELECT pair)', v_close_pol using errcode='CLR10';
+    end if;
+
+    select coalesce(string_agg(g.grantee::regrole::text || ':' || g.privilege_type, ','
+             order by g.grantee::regrole::text, g.privilege_type), '<none>')
+      into v_bank_acl
+      from pg_class c, aclexplode(c.relacl) g
+     where c.oid = 'clara.bank_agent_due_claims'::regclass
+       and g.grantee <> 'clara_fn_owner'::regrole;
+    if v_bank_acl is distinct from 'clara_authenticated:SELECT' then
+      raise exception 'g1_pr_2b tail: bank_agent_due_claims non-owner ACL is [%] (want exactly clara_authenticated:SELECT)', v_bank_acl using errcode='CLR10';
+    end if;
+
+    select coalesce(string_agg(g.grantee::regrole::text || ':' || g.privilege_type, ','
+             order by g.grantee::regrole::text, g.privilege_type), '<none>')
+      into v_close_acl
+      from pg_class c, aclexplode(c.relacl) g
+     where c.oid = 'clara.close_prep_fy_claims'::regclass
+       and g.grantee <> 'clara_fn_owner'::regrole;
+    if v_close_acl is distinct from 'clara_authenticated:SELECT' then
+      raise exception 'g1_pr_2b tail: close_prep_fy_claims non-owner ACL is [%] (want exactly clara_authenticated:SELECT)', v_close_acl using errcode='CLR10';
     end if;
   end;
 
@@ -478,5 +547,5 @@ begin
     end if;
   end;
 
-  raise notice 'g1_pr_2b tail: OK -- emit_bank_agent_due(uuid,uuid,text,text) and claim_close_prep_task(uuid,uuid,uuid,text) both owned by clara_fn_owner, SECURITY DEFINER, search_path pinned, EXACT clara_runtime-only EXECUTE matrix (aclexplode); clara_runtime still cannot execute _append_event directly; both new claim tables (bank_agent_due_claims, close_prep_fy_claims) RLS-enabled+forced with the owner/human policy pair; uq_agent_task_one_live_close_prep (the client-scoped live-task wall) present by property; the agent_tasks status-domain drift guard holds. No table in workflow/graphile_worker/spike touched.';
+  raise notice 'g1_pr_2b tail: OK -- emit_bank_agent_due(uuid,uuid,text,text) and claim_close_prep_task(uuid,uuid,uuid,text) both owned by clara_fn_owner, SECURITY DEFINER, search_path pinned, EXACT clara_runtime-only EXECUTE tuples (aclexplode); clara_runtime still cannot execute _append_event directly; both new claim tables (bank_agent_due_claims, close_prep_fy_claims) RLS-enabled+forced with the exact owner/human policy roster and exact authenticated-SELECT-only non-owner ACL; uq_agent_task_one_live_close_prep (the client-scoped live-task wall) present by property; the agent_tasks status-domain drift guard holds. No table in workflow/graphile_worker/spike touched.';
 end $$;

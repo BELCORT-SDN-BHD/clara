@@ -1222,6 +1222,13 @@ test("M4: a poisoned close_prep claim terminalizes to 'failed' (queued->failed, 
   const key = `g1_test_m4_${randomUUID().slice(0, 8)}`;
   const w = await rig.buildFirm("g1m4");
   await registerSource({ sourceKey: key, carrier: "direct_queue", taskKind: "close_prep", wakeKind: "close_prep", maxAttempts: 1, enabled: true, actor: w.owner });
+  // PR-2b's client-scoped live-task wall correctly forbids two queued close_prep tasks for
+  // ONE client. M4 is a source-loop isolation test, not a same-client concurrency test, so
+  // give the healthy row a sibling client while preserving the SAME firm, source, and cycle.
+  const healthyClient = await rig.createClient(w.owner, {
+    name: `g1m4_healthy_${randomUUID().slice(0, 8)}`,
+    opKey: rig.opk("g1m4_healthy"),
+  });
 
   const poisonTask = (await rig.rootQuery(
     `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot)
@@ -1231,7 +1238,7 @@ test("M4: a poisoned close_prep claim terminalizes to 'failed' (queued->failed, 
   const healthyTask = (await rig.rootQuery(
     `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot)
        values ($1,$2,'close_prep','queued','gpt-5.6-terra') returning id`,
-    [w.firm, w.client],
+    [w.firm, healthyClient],
   )).rows[0].id;
 
   // Inject a genuine, isolated claim failure on ONLY the poison task — the same real-trigger

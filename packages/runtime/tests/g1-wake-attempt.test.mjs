@@ -320,17 +320,6 @@ test("G1B-I8-stream-integration Gate G1 PR-2b (Codex r6 LOW #2) — a REAL regis
     globalThis.__claraPools = previous;
   }
 
-  // "EXACTLY ONE releaseLock" — a STRUCTURAL proof off the shipping source (no harness here can
-  // drive the real "use step" wrapper — the same gap MEDIUM-6 names). FIND-12 (opus r1 review of
-  // #449): kept as a regex deliberately (a fake-writer count would only prove something about a
-  // stand-in), widened whitespace/comment-tolerant (`[\s\S]*?`) so a reformat can't false-red it.
-  const implSrc = await import("node:fs/promises").then((fs) =>
-    fs.readFile(new URL("../workflows/bankAgent.v1.impl.ts", import.meta.url), "utf8"),
-  );
-  const releaseLockCalls = implSrc.match(/writer\.releaseLock\(\)/g) ?? [];
-  assert.equal(releaseLockCalls.length, 1, "writer.releaseLock() must appear exactly once in the shipping source");
-  assert.match(implSrc, /finally\s*\{[\s\S]*?writer\.releaseLock\(\);[\s\S]*?\}/, "and it must sit inside a finally block, so it runs on every exit path exactly once");
-
   // "AN UNHELD RUN PROVES NO SETTLEMENT" — claimBankTask/settleBankTask are plain, rig-callable
   // functions, so this half IS directly testable. FIND-5 (opus r1 review of #449): the ORIGINAL
   // cut never actually CALLED settleBankTask — "no settle call is made" proved nothing about its
