@@ -229,7 +229,11 @@ test("kind wall ROSTER (standing closed-set tripwire): the live seven-value voca
   const def = await rootQuery(
     `select pg_get_constraintdef(oid) as def from pg_constraint
       where conrelid='clara.firm_open_questions'::regclass and conname='firm_open_questions_kind_check'`);
-  const live = [...def.rows[0].def.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]);
+  // Round-2 fold NEW-1: [a-z_]+ misses any kind spelling with a digit or uppercase letter
+  // (e.g. a hypothetical engagement2_proposed would not match, and this tripwire would
+  // read 0/8 members instead of reporting the real gap) -- match anything between the
+  // literal quotes the ARRAY[...] rendering actually uses, not a guessed character class.
+  const live = [...def.rows[0].def.matchAll(/'([^']+)'::text/g)].map((m) => m[1]);
   assert.deepEqual([...live].sort(), [...ADMITTED_KINDS, ...DOOR_OWNED_KINDS].sort(),
     "the live CHECK vocabulary no longer matches this file's own closed-set roster -- " +
     "STOP: classify the new/removed kind in ADMITTED_KINDS or DOOR_OWNED_KINDS above " +
@@ -341,6 +345,20 @@ test("kind wall: NULL, an unknown spelling, a whitespace variant and a wrong-cas
   assert.equal(q.rows[0].n, 0, "none of the four variant shapes wrote a row");
 });
 
+test("kind wall BOUNDED ECHO (fold review round 2, NEW-2): an oversized p_kind is truncated to 64 chars in the refusal's own detail JSON, not echoed unbounded", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await freshDoc();
+  const huge = "x".repeat(500);
+  const err = await assertRaises(CLR.badRequest,
+    () => openFirmQuestion(secret, { document: doc.documentId, kind: huge, opKey: opk("kw-bounded-echo") }),
+    "a 500-char p_kind");
+  assert.equal(detailReason(err), "door_owned_kind");
+  const echoed = detailKind(err);
+  assert.equal(echoed.length, 64, "the echoed kind is capped at 64 characters, not the full 500");
+  assert.equal(echoed, huge.slice(0, 64), "the echo is a left-truncation of the real value, not garbled or replaced");
+});
+
 // ===========================================================================
 // PART D -- SOURCE-ORDER, permanently pinned (Codex FIX-REQUIRED MEDIUM finding 2 on
 // #447, ruled 2026-08-30; round 2 NOT-CLOSED finding on the SAME cell, ruled 2026-08-30).
@@ -370,7 +388,7 @@ test("kind wall SOURCE ORDER (permanent catalog pin): the roster guard's own sou
       where p.oid = 'clara.wake_open_firm_question(uuid,text,text,jsonb,text,jsonb,text)'::regprocedure`);
   const src = r.rows[0].src;
   const liveSha = createHash("sha256").update(src, "utf8").digest("hex");
-  assert.equal(liveSha, "a592b6128da3fda2ef5497eae82331ddb382b3650abfc842ef710a6f59871964",
+  assert.equal(liveSha, "779ac164ae985e39ad0c8457be2e8b1768fb306888ed0bdec336924765078635",
     "the live prosrc no longer matches the exact reviewed postimage -- a later LEGITIMATE " +
     "recut must deliberately update this pin, in the same PR that changes the body, so a " +
     "reviewer sees the sha move rather than trusting a marker-string position check alone");

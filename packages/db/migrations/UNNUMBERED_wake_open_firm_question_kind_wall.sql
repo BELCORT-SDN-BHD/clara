@@ -107,6 +107,16 @@
 -- exist", it asks "is this the right door", closing the side door itself rather than
 -- limiting how many times it can be used.
 --
+-- BOUNDED ECHO (fold review round 2, NEW-2): the refusal's own detail JSON echoes the
+-- caller-supplied p_kind back so a caller can see what it sent -- but p_kind is plain
+-- text with no length CHECK of its own on this verb (unlike the CANDIDATE columns this
+-- refusal never reaches), so an unbounded echo would let a caller inflate the error
+-- payload arbitrarily (a 10 KB echo was measured pre-fix). `left(p_kind,64)` caps it;
+-- 64 chars is generous for every real kind spelling (the longest live one is 20 chars)
+-- while bounding the pathological case. The other early refusals in this same function
+-- (op_key/rationale/model) never echo a caller-supplied string at all, so none needed
+-- the same treatment.
+--
 -- =====================================================================================
 -- D1 WRITE-QUIESCE INVENTORY -- ONE LIVE AUDITED WRITER BODY REPLACED
 -- =====================================================================================
@@ -263,7 +273,7 @@ begin
   if p_kind is null or p_kind not in ('unattributed','collision','contradiction','identity_document') then
     raise exception 'a firm question of this kind must be opened through its own purpose-built door, not the generic wake_open_firm_question verb'
       using errcode='CLR10',
-      detail=jsonb_build_object('reason','door_owned_kind','class','kind','kind',p_kind)::text;
+      detail=jsonb_build_object('reason','door_owned_kind','class','kind','kind',left(p_kind,64))::text;
   end if;
   v_dedupe := clara._reserve_op(w.firm_id,'wake_open_firm_question',p_op_key,
     clara._hash(jsonb_build_object('document',p_document,'kind',p_kind,'question',p_question)));
@@ -358,8 +368,8 @@ begin
     raise exception 'wake_open_firm_question_kind_wall tail: the recut wake_open_firm_question lost a pre-existing wall string' using errcode = 'CLR10';
   end if;
   if position('if p_kind is null or p_kind not in (''unattributed'',''collision'',''contradiction'',''identity_document'') then' in v_src) = 0
-     or position('jsonb_build_object(''reason'',''door_owned_kind'',''class'',''kind'',''kind'',p_kind)::text' in v_src) = 0 then
-    raise exception 'wake_open_firm_question_kind_wall tail: the recut wake_open_firm_question is missing its new positive-roster door-owned-kind refusal' using errcode = 'CLR10';
+     or position('jsonb_build_object(''reason'',''door_owned_kind'',''class'',''kind'',''kind'',left(p_kind,64))::text' in v_src) = 0 then
+    raise exception 'wake_open_firm_question_kind_wall tail: the recut wake_open_firm_question is missing its new positive-roster door-owned-kind refusal, or its p_kind echo is no longer bounded (fold review round 2, NEW-2)' using errcode = 'CLR10';
   end if;
   if position('if p_kind is null or p_kind not in (''unattributed'',''collision'',''contradiction'',''identity_document'') then' in v_src)
      >= position('v_dedupe := clara._reserve_op(w.firm_id,''wake_open_firm_question''' in v_src) then
@@ -392,7 +402,7 @@ begin
   if p_kind is null or p_kind not in ('unattributed','collision','contradiction','identity_document') then
     raise exception 'a firm question of this kind must be opened through its own purpose-built door, not the generic wake_open_firm_question verb'
       using errcode='CLR10',
-      detail=jsonb_build_object('reason','door_owned_kind','class','kind','kind',p_kind)::text;
+      detail=jsonb_build_object('reason','door_owned_kind','class','kind','kind',left(p_kind,64))::text;
   end if;
 $blk$;
     v_stripped := replace(v_src, v_inserted_block, '');
@@ -400,8 +410,8 @@ $blk$;
       raise exception 'wake_open_firm_question_kind_wall tail: stripping the exactly-one-inserted splice from the new body does not reproduce the 3d6c6d8a... preimage byte-for-byte -- the recut touched something beyond the ruled wall (e.g. a dropped provenance comment), or this check''s own splice text has drifted from the live body' using errcode = 'CLR10';
     end if;
     v_postimage_sha := encode(sha256(convert_to(v_src,'UTF8')),'hex');
-    if v_postimage_sha <> 'a592b6128da3fda2ef5497eae82331ddb382b3650abfc842ef710a6f59871964' then
-      raise exception 'wake_open_firm_question_kind_wall tail: the reviewed postimage prosrc sha256 mismatch (got %, expected a592b6128da3fda2ef5497eae82331ddb382b3650abfc842ef710a6f59871964) -- the live body no longer matches the exact text the fold review reviewed', v_postimage_sha using errcode = 'CLR10';
+    if v_postimage_sha <> '779ac164ae985e39ad0c8457be2e8b1768fb306888ed0bdec336924765078635' then
+      raise exception 'wake_open_firm_question_kind_wall tail: the reviewed postimage prosrc sha256 mismatch (got %, expected 779ac164ae985e39ad0c8457be2e8b1768fb306888ed0bdec336924765078635) -- the live body no longer matches the exact text the fold review reviewed', v_postimage_sha using errcode = 'CLR10';
     end if;
   end;
 
