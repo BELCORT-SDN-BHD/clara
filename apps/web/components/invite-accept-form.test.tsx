@@ -688,6 +688,40 @@ test("the ct token NEVER reaches rendered copy — on any failure branch", async
   }
 });
 
+test("the ct token never reaches rendered copy on the NON-REFUSAL branch either (transport failure)", async () => {
+  // Its own cell because it renders through a DIFFERENT branch: a transport
+  // failure is a `DoorError`, not a `DoorRefusal`, so it takes the `else` arm
+  // that echoes a raw `Error.message`. A mutant that interpolated the token
+  // into that arm survived a first version of this file which only ever drove
+  // governed refusals — the branch the assertion aimed at was never rendered.
+  // Coverage of one arm is not coverage of the judgement.
+  await withMockedEnv(
+    (async (u: RequestInfo | URL) => {
+      const url = String(u);
+      if (url.includes("/rpc/accept_invite")) throw new TypeError("fetch failed: network unreachable");
+      if (url.includes("/rest/v1/caller_context")) return jsonResponse([]);
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch,
+    async () => {
+      const { h, router } = await mount(
+        createElement(InviteAcceptForm, {
+          token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+          createSupabaseClient: authClient(),
+        }),
+      );
+      try {
+        await walkToSubmit(h);
+        const rendered = textOf(h.container as never);
+        assert.match(rendered, /network unreachable/, "control: the transport failure really did render");
+        assert.ok(!rendered.includes(CLARA_TOKEN), "the token must not appear in a transport error message");
+        assert.deepEqual(router.replaced, [], "and a transport failure never redirects");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("the membership read goes out CREDENTIALED and profile-scoped — never an anonymous GET", async () => {
   // "Through the real door under the real credential": the post-condition read
   // rides the real getRows/wire stack with the session's bearer token and the
