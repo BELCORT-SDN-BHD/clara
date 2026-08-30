@@ -491,10 +491,16 @@ test("f-a6.pr2.prompt: v15's system prompt is v14's plus the freeform guidance, 
 // 9 · The registry repoint.
 // =============================================================================================
 
-test("f-a6.pr2.registry: chatTurn: repoints to v15, and v14 stays exported and IS its own function", () => {
+// P6-1 (Q8's four-card wire bump) repointed chatTurn: v15 -> v16. This cell's subject is F-A6's
+// own closure, so the half that must survive is "v15 is exported and IS its own function" — the
+// policy (c) guarantee for the runs parked in THIS PR's body. The "is the pin" half moves to
+// v16. EXTENDED, never re-cut: the freeform TOOL this file tests is still v15's, reached by
+// import from v16's tool set, so this file's other cells remain the right cells.
+test("f-a6.pr2.registry: v15 stays exported and IS its own function; chatTurn: now pins v16", () => {
   assert.equal(typeof registry.chatTurn_v14, "function");
   assert.equal(registry.chatTurn_v14, v14Module.chatTurn_v14, "no parked run is stranded by the repoint");
   assert.equal(registry.chatTurn_v15, v15Module.chatTurn_v15, "the registry's v15 export IS chatTurn.v15.ts's own function");
-  assert.equal(registry.workflows.chatTurn, v15Module.chatTurn_v15);
+  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v16", "P6-1 repointed chatTurn: past this file's own v15 pin");
   assert.notEqual(registry.workflows.chatTurn, registry.chatTurn_v14);
+  assert.notEqual(registry.workflows.chatTurn, v15Module.chatTurn_v15, "...and no longer at v15 either");
 });
