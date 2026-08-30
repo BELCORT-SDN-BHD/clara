@@ -111,12 +111,18 @@ export async function withWitnessReplaced(rows, fn) {
        values ($1, $2, $3, $4)`,
       [row.control, row.proc, row.prosrc_sha, row.minted_in_migration]);
   }
+  // THE RESTORE IS VERIFIED BY CONTENT, NOT BY COUNT. A row count says something is there; it
+  // does not say the witness attests to the same bytes it did before this helper ran, and a
+  // wrong sha put back would leave every later signing cell silently testing a closed gate.
   const back = (await rootQuery(
-    "select count(*)::int c from clara.control_witnesses where control = $1", [POST_TIME_MARKER])).rows[0].c;
-  if (back !== saved.length) {
+    "select control, proc, prosrc_sha, minted_in_migration from clara.control_witnesses where control = $1 order by proc",
+    [POST_TIME_MARKER])).rows;
+  const shape = (rs) => JSON.stringify(rs.map((x) =>
+    [x.control, x.proc, x.prosrc_sha, x.minted_in_migration]).sort());
+  if (shape(back) !== shape(saved)) {
     throw new Error(
-      `withWitnessReplaced: RESTORE FAILED (${back} row(s) back, expected ${saved.length}) — every later `
-      + "signing cell in this suite is now untrustworthy."
+      `withWitnessReplaced: RESTORE FAILED — the registry is not what this helper found `
+      + `(${shape(back)} != ${shape(saved)}). Every later signing cell in this suite is now untrustworthy.`
       + (probeError ? ` The probe had also failed: ${probeError.message}` : ""));
   }
   if (probeError) throw probeError;
