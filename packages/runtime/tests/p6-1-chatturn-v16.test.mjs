@@ -31,7 +31,7 @@ import { readFile, stat } from "node:fs/promises";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const { register } = await import("tsx/esm/api");
@@ -425,16 +425,27 @@ test(
   },
 );
 
-test("p6-1.bundle.gate-is-fail-closed: a MISSING bundle fails the gate rather than skipping it", () => {
-  // The defect this whole section exists to close, pinned directly: point the gate at a tree
-  // with no `.output/` and it must EXIT NON-ZERO. A gate that stood down politely here is a gate
-  // that certified nothing in both of CI's lanes.
+test("p6-1.bundle.gate-is-fail-closed: a MISSING bundle fails the gate, and fails it FOR THAT REASON", () => {
+  // The defect this whole section exists to close, pinned directly: point the gate at a tree with
+  // no `.output/` and it must EXIT NON-ZERO. A gate that stood down politely here is a gate that
+  // certified nothing in either of CI's lanes.
+  //
+  // THE TEMP TREE IS A REAL GIT REPO, and that is the whole difference between this cell and the
+  // vacuous one it replaces. The first version ran the gate in a bare temp dir; the gate's own
+  // `git rev-parse --show-toplevel` died there, so it exited non-zero WITHOUT EVER REACHING the
+  // missing-bundle branch — the cell was green for the wrong reason and survived a mutant that
+  // turned that branch's `exit(1)` into `exit(0)`. Caught by this lane's own RED-before panel
+  // (M13), which is what a mutant panel is for. So: `git init` first, then assert BOTH the
+  // non-zero exit AND that the message names the artifact, which is what makes the reason part
+  // of the claim rather than an inference.
   const empty = mkdtempSync(join(tmpdir(), "p6-1-nobundle-"));
   try {
+    execFileSync("git", ["-c", "user.email=t@example.invalid", "-c", "user.name=t", "init", "-q"], { cwd: empty, stdio: ["ignore", "pipe", "pipe"] });
     const r = spawnSync(process.execPath, [GATE], { cwd: empty, encoding: "utf8" });
-    // `cwd` outside a git tree also makes the gate's own repo-root probe fail; either way the
-    // requirement is the same and it is the only thing asserted: it must NOT exit 0.
-    assert.notEqual(r.status, 0, `the gate must fail without a built bundle; it exited ${r.status}:\n${r.stdout}${r.stderr}`);
+    const out = `${r.stdout}${r.stderr}`;
+    assert.notEqual(r.status, 0, `the gate must FAIL without a built bundle; it exited ${r.status}:\n${out}`);
+    assert.match(out, /no built bundle/i, "and it must fail BECAUSE the bundle is missing — not because something else in the gate happened to throw first");
+    assert.match(out, /\.output[/\\]server[/\\]index\.mjs/, "...naming the artifact it looked for");
   } finally {
     rmSync(empty, { recursive: true, force: true });
   }
