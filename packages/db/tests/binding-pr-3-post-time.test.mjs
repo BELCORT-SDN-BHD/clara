@@ -650,7 +650,42 @@ async function revokedBinding(tag) {
 
 test("bpr3.K1 — the door lifts a REVOCATION, receipts every column it cleared, and un-suppresses the pair", async () => {
   failPr3();
-  const b = await revokedBinding("K1");
+  // THE COUNT MUST DISCRIMINATE (Codex #452 LOW). An earlier cut of this cell asserted only
+  // `typeof approved_entries === "number"` over a fixture that had posted NOTHING — so the impl
+  // could have returned a constant 0, or dropped the `status='approved'` filter, and this cell
+  // would still have been green. A receipt figure nobody checks is decoration.
+  //
+  // The fixture now makes the RIGHT ANSWER a specific, non-zero, non-trivial number:
+  //   · TWO entries posted under this binding and APPROVED  -> both must count
+  //   · ONE left as a DRAFT under the same binding          -> the status filter must exclude it
+  //   · ONE approved under a DIFFERENT live binding         -> the binding filter must exclude it
+  // so 2 is distinguishable from 0 (a constant), from 3 (no status filter) and from 4 (neither).
+  const b = await liveBinding("K1");
+  const counted = [];
+  for (const tag of ["K1a", "K1b"]) {
+    const d = await boundDraft(b, tag);
+    assert.equal((await approve(d, `bpr3k1${tag}`)).status, "approved",
+      `${tag}: the fixture entry must actually POST, or the count is trivially right`);
+    counted.push(d.entry);
+  }
+  const draftOnly = await boundDraft(b, "K1draft");          // never approved
+  const other = await liveBinding("K1other");                // a different authority entirely
+  const otherEntry = await boundDraft(other, "K1otherpost");
+  assert.equal((await approve(otherEntry, "bpr3k1other")).status, "approved");
+
+  // THE EXPECTED VALUE IS READ FROM THE DB, never asserted as a literal 2 — this cell states the
+  // predicate the door is supposed to compute and compares the door against it.
+  const expected = (await rootQuery(
+    "select count(*)::int c from clara.journal_entries where vendor_binding_id=$1 and status='approved'",
+    [b.binding.binding_id])).rows[0].c;
+  assert.equal(expected, 2,
+    "control: the fixture really did leave exactly two APPROVED entries under this binding");
+  assert.equal((await rootQuery(
+    "select count(*)::int c from clara.journal_entries where vendor_binding_id=$1", [b.binding.binding_id])).rows[0].c,
+  3, "control: …out of three carrying its marker, so the status filter has something to exclude");
+  assert.equal(await entryStatus(draftOnly.entry), "draft", "control: the third really is a draft");
+
+  await revoke(w.users.bob, { binding: b.binding.binding_id, reason: "K1 revoke" });
   const before = await bindingRow(b.binding.binding_id);
   assert.equal(before.status, "revoked");
   assert.ok(before.revoked_at && before.revoke_reason && before.revoked_by);
@@ -675,19 +710,74 @@ test("bpr3.K1 — the door lifts a REVOCATION, receipts every column it cleared,
   assert.equal(audit.args.revoke_reason, "K1 revoke", "…including the revocation's own reason");
   assert.equal(audit.args.revoked_by, before.revoked_by);
   assert.equal(audit.args.prior_status, "revoked");
-  assert.equal(typeof audit.args.approved_entries, "number",
-    "…and the DB-derived count of what the authority actually posted");
 
+  // THE COUNT, ON ALL THREE SURFACES, AGAINST THE DB'S OWN ANSWER. The door's return, the audit
+  // row and the event payload must each carry the same figure the predicate yields — a receipt
+  // that agrees with itself but not with the books is worse than no receipt.
+  assert.equal(r.approved_entries, expected, "the door RETURNS the DB-derived count");
+  assert.equal(audit.args.approved_entries, expected, "…the audit row carries the same figure");
   const ev = (await rootQuery(
-    "select count(*)::int c from clara.domain_events where event_type='kb_binding.revocation_reset' and payload->>'binding_id'=$1",
-    [b.binding.binding_id])).rows[0].c;
-  assert.equal(ev, 1, "…and one typed event under its OWN name (裁-46: a revocation's undo carries its own name)");
+    `select count(*)::int c, min((payload->>'approved_entries')::int) n
+       from clara.domain_events
+      where event_type='kb_binding.revocation_reset' and payload->>'binding_id'=$1`,
+    [b.binding.binding_id])).rows[0];
+  assert.equal(ev.c, 1, "…and one typed event under its OWN name (裁-46: a revocation's undo carries its own name)");
+  assert.equal(ev.n, expected, "…whose payload carries that same figure too");
+
+  // TWO MUTANTS, because the two ways this figure can go wrong are different bugs.
+  //   (a) a CONSTANT — the shape a cell asserting only `typeof === "number"` cannot see;
+  //   (b) the STATUS FILTER dropped — the draft under the same binding starts counting.
+  // Each is driven on a SECOND revoked binding built the same way, so the mutant is measured
+  // against a fixture whose right answer is known and non-trivial.
+  const m = await liveBinding("K1m");
+  for (const tag of ["K1ma", "K1mb"]) await approve(await boundDraft(m, tag), `bpr3k1m${tag}`);
+  await boundDraft(m, "K1mdraft");
+  await revoke(w.users.bob, { binding: m.binding.binding_id, reason: "K1m revoke" });
+  for (const [label, edits, want] of [
+    ["constant-zero", [["select count(*)::int into v_posted\n    from clara.journal_entries where vendor_binding_id = p_binding and status = 'approved';",
+      "v_posted := 0;"]], 0],
+    ["no-status-filter", [["where vendor_binding_id = p_binding and status = 'approved';",
+      "where vendor_binding_id = p_binding;"]], 3],
+  ]) {
+    await withMutant(RESET_REVOCATION_SIG, edits, async () => {
+      const out = await resetRevocation(w.users.alice,
+        { binding: m.binding.binding_id, reason: `mutant ${label}`, opKey: opk(`k1m${label.slice(0, 6)}`) });
+      assert.equal(out.approved_entries, want,
+        `${label}: the mutant reports ${want} where the truth is 2 — so the assertion above is discriminating`);
+    });
+    // Put the row back to 'revoked' so the second mutant starts from the same state.
+    await rootQuery(
+      "update clara.vendor_identity_bindings set status='revoked', revoked_at=now(), revoke_reason='K1m revoke' where id=$1",
+      [m.binding.binding_id]);
+  }
 
   // THE POINT OF THE DOOR: the pair stops being suppressed and can be proposed again.
   assert.equal((await rootQuery("select clara._binding_suppression($1,$2,$3) as s",
     [w.firms.A, w.clients.A1, b.cp.id])).rows[0].s, null, "the pair is no longer suppressed");
-  const re = await propose(w.users.bob, { client: w.clients.A1, counterparty: b.cp.id });
-  assert.equal(re.status, "proposed", "…and a fresh proposal is admitted");
+
+  // …and the proposal door now gets PAST the suppression rung. It is asserted that way, on the
+  // typed reason, rather than as a bare "proposed" — because THIS cell's own count fixture
+  // approved two fresh entries against this vendor TODAY, which collapses the frozen
+  // derivation's 14-day/3-distinct-posting-date window. That refusal is the window talking, not
+  // the revocation, and a cell that demanded `status==='proposed'` here would be asserting an
+  // unrelated fixture property and would break the moment the count fixture changed.
+  let reproposeReason = null;
+  let reproposed = null;
+  try {
+    reproposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: b.cp.id });
+  } catch (e) {
+    reproposeReason = reasonOf(e) ?? e.message;
+  }
+  assert.ok(reproposed?.status === "proposed"
+    || !["binding_revoked", "binding_suppressed", "binding_conflict"].includes(reproposeReason),
+  `the lifted pair is proposable again — any refusal must be about the WINDOW, never the revocation (got ${reproposeReason})`);
+  // THE POSITIVE CONTROL that keeps the line above from passing vacuously: BEFORE the reset the
+  // very same call refuses for the revocation, and that is measured on a pair reset has not
+  // touched — the second fixture binding this cell already revoked for its mutants.
+  const stillRevoked = await assertRaises("CLR36",
+    () => propose(w.users.bob, { client: w.clients.A1, counterparty: m.cp.id }),
+    "control: a pair whose revocation was NOT reset still refuses");
+  assert.equal(reasonOf(stillRevoked), "binding_revoked");
 });
 
 test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason, and refuses a non-revoked row", async () => {
