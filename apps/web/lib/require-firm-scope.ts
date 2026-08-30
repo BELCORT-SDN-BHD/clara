@@ -347,16 +347,31 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
   },
   {
     path: "app/api/invite/route.ts",
-    pending: true,
+    // `pending` CLEARED BY P4-4, 2026-08-30, in the same PR that wrote the body —
+    // which is the step MEDIUM-3 exists to force. What the capability-check of the
+    // real body found, so a later reader can re-run it rather than trust it:
+    //   · It calls `clara.invite_member` through `lib/members/courier.ts` with the
+    //     CALLER'S OWN session accessor — not a service-role client — so
+    //     `_human_ctx(role_rank('admin'))` (`0147:376`) judges the real person, and
+    //     the role-ceiling wall (`0147:386`) judges their real rank.
+    //   · It reads NO firm-scoped relation on its own authority. It touches
+    //     `caller_context` once, self-scoped, on the caller's own token, and only
+    //     for the mail's subject line — fail-open, discarded on error.
+    //   · Its own three gates decide nothing about AUTHORITY: same-origin (CSRF,
+    //     the wall `app/logout/route.ts` carries for the same reason), "is there a
+    //     token at all", and a SERVER-CONFIG capability check that answers 503.
+    //     None reads a role; none can grant.
+    //   · The service-role key it holds never authorises the DB act — it mints the
+    //     Supabase half of the invite link AFTER the door has already said yes.
     reason:
-      "EXEMPT ON PRINCIPLE, PENDING ITS BODY. P4-4's mail courier will call " +
-      "clara.invite_member AS THE CALLER, and clara._human_ctx(role_rank('admin')) " +
-      "already raises CLR04 for a caller with no active membership — so THE DB IS " +
-      "THE WALL. Adding a scope check in front would be the courier pretending to " +
-      "be a guard, and would put a second, drifting copy of an authority decision " +
-      "in front of the real one. This entry does NOT pre-approve the file: it does " +
-      "not exist yet, and the suite refuses to let it inherit the exemption — P4-4 " +
-      "must clear `pending` in the same PR that writes the body, which is the step " +
-      "where someone reads what it actually does.",
+      "EXEMPT ON PRINCIPLE. P4-4's mail courier calls clara.invite_member AS THE " +
+      "CALLER, and clara._human_ctx(role_rank('admin')) already raises CLR04 for a " +
+      "caller with no active membership — so THE DB IS THE WALL. Adding a scope " +
+      "check in front would be the courier pretending to be a guard, and would put " +
+      "a second, drifting copy of an authority decision in front of the real one. " +
+      "Verified against the landed body, not the plan: it returns no firm-scoped " +
+      "data on its own authority, and its own gates (same-origin, a session to call " +
+      "with, a mail-transport capability check answering 503) read no role and " +
+      "grant nothing.",
   },
 ];

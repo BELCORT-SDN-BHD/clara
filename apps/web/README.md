@@ -112,7 +112,17 @@ app/(full)/    — the Clara full-screen escalation routes (/clara/:threadId and
                  thin scope layout so the client variant never escapes client-scope
                  activation.
 app/login · app/invite/[token] · app/logout — the auth surfaces (proxy-gated).
+app/api/runtime/[...path] · app/api/invite — the two SERVER-ONLY Route Handlers.
+                 The runtime proxy is a scope-spine entrance (403, never a redirect);
+                 the invite courier is a REGISTERED EXEMPTION from that spine
+                 (`lib/require-firm-scope.ts`'s `SCOPE_EXEMPT_SURFACES`) because it
+                 calls `clara.invite_member` as the caller and the DB is the wall.
+                 It is also the ONLY place in this app that reads a service-role key
+                 — server-side, never NEXT_PUBLIC_ (see `.env.example`).
 ```
+
+*(Trued 2026-08-30 by P4-4: the block above listed no `app/api/*` handler at all, so
+neither the runtime proxy nor the new invite courier had a home a reader could find.)*
 
 Every workbench tab page mounts a real workbench: hydrate-never-trust reads through
 `lib/read.ts`'s `getRows`, governed writes through `lib/doors.ts`'s `callDoor`. They landed
