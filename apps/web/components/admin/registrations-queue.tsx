@@ -134,12 +134,11 @@ function OperatorQueue({ callerId }: { callerId: string }) {
   );
   const [receipt, setReceipt] = useState<{ firmId: string; planId: string } | null>(null);
 
-  // ONE synchronous guard for every Approve click in this queue (mirrors
-  // RejectDialog's own per-dialog guard) — closes the pre-render race
-  // `disabled={busy}` alone cannot: `busy` only takes effect on react's
-  // NEXT render, so two rapid clicks (same row, or two different rows)
-  // can both reach this function before either sees it.
-  const approveGuardRef = useRef(createSingleFireGuard());
+  // ONE synchronous guard for EVERY governed act on this page. `busy` only
+  // reaches the controls on React's next render; this ref closes both the
+  // same-button double click and the cross-row Approve/Reject race before
+  // either action performs its first await.
+  const actionGuardRef = useRef(createSingleFireGuard());
 
   async function handleApprove(row: RegistrationRequestRow) {
     // FOLD (Codex HIGH-1, RULED at the opus addendum — MEDIUM FIND-3): a
@@ -173,7 +172,7 @@ function OperatorQueue({ callerId }: { callerId: string }) {
     // OnboardingChecklistCard F5 precedent) — otherwise a later refusal
     // renders beside a stale, unrelated "firm created" banner.
     setReceipt(null);
-    await runOnce(approveGuardRef.current, async () => {
+    await runOnce(actionGuardRef.current, async () => {
       await act(async () => {
         const out = await approveFirmRegistration(sessionTokenAccessor, row.id, key);
         // The DB's own returned `plan_id` rendered verbatim, never dropped —
@@ -184,11 +183,16 @@ function OperatorQueue({ callerId }: { callerId: string }) {
     });
   }
 
-  async function handleReject(row: RegistrationRequestRow, reason: string, opKey: string, onOk: () => void) {
+  async function handleReject(row: RegistrationRequestRow, reason: string, onOk: () => void): Promise<boolean> {
     setReceipt(null);
-    await act(async () => {
-      await rejectFirmRegistration(sessionTokenAccessor, row.id, reason, opKey);
-    }, onOk);
+    return runOnce(actionGuardRef.current, async () => {
+      await act(async () => {
+        // ROUND 5: hashing belongs INSIDE both the page-wide synchronous
+        // guard and `act()` so `busy` begins before this first await.
+        const opKey = await rejectKeyFor(row.id, callerId, reason);
+        await rejectFirmRegistration(sessionTokenAccessor, row.id, reason, opKey);
+      }, onOk);
+    });
   }
 
   // FOLD (Codex LOW-4, amended round-2): before the first successful
@@ -247,10 +251,9 @@ function OperatorQueue({ callerId }: { callerId: string }) {
               <RegistrationRow
                 key={row.id}
                 row={row}
-                callerId={callerId}
                 busy={busy}
                 onApprove={() => handleApprove(row)}
-                onReject={(reason, opKey, onOk) => handleReject(row, reason, opKey, onOk)}
+                onReject={(reason, onOk) => handleReject(row, reason, onOk)}
               />
             ))}
           </TableBody>
@@ -263,16 +266,14 @@ function OperatorQueue({ callerId }: { callerId: string }) {
 
 function RegistrationRow({
   row,
-  callerId,
   busy,
   onApprove,
   onReject,
 }: {
   row: RegistrationRequestRow;
-  callerId: string;
   busy: boolean;
   onApprove: () => Promise<void>;
-  onReject: (reason: string, opKey: string, onOk: () => void) => Promise<void>;
+  onReject: (reason: string, onOk: () => void) => Promise<boolean>;
 }) {
   const t = useTranslations("Registrations");
   return (
@@ -296,7 +297,6 @@ function RegistrationRow({
           </Button>
           <RejectDialog
             requestId={row.id}
-            callerId={callerId}
             firmName={row.firm_name}
             busy={busy}
             onReject={onReject}
@@ -315,10 +315,9 @@ function RegistrationRow({
  *  header) — kept as its OWN small copy rather than importing
  *  components/firm-admin/FirmAdminDoorDialog.tsx, matching that file's own
  *  stated convention: each admin domain owns its dialog chrome and its own
- *  i18n namespace so the domains stay independently reviewable. The
- *  single-fire guard mirrors that same file's ref-backed reasoning (a
- *  synchronous click-to-click race `disabled={busy}` alone cannot close,
- *  because `busy` only takes effect on the NEXT render). */
+ *  i18n namespace so the domains stay independently reviewable. Its parent
+ *  owns the page-wide synchronous guard because `disabled={busy}` alone
+ *  cannot close a pre-render cross-row race. */
 /** The bound Codex MEDIUM-2 cites — the design's own 500-character
  *  reference, meaning Unicode CODE POINTS (matching PostgreSQL's own
  *  `char_length` direction — the DB-side twin, `char_length(v_reason) >
@@ -357,21 +356,18 @@ function codePointLength(s: string): number {
 
 function RejectDialog({
   requestId,
-  callerId,
   firmName,
   busy,
   onReject,
 }: {
   requestId: string;
-  callerId: string;
   firmName: string;
   busy: boolean;
-  onReject: (reason: string, opKey: string, onOk: () => void) => Promise<void>;
+  onReject: (reason: string, onOk: () => void) => Promise<boolean>;
 }) {
   const t = useTranslations("Registrations");
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
-  const guardRef = useRef(createSingleFireGuard());
 
   // FOLD (Codex round-2, LOW reason-length metric drift): derived ONCE per
   // render and used EVERYWHERE below — the counter text, the Confirm gate,
@@ -437,19 +433,10 @@ function RejectDialog({
             variant="destructive"
             disabled={busy || normalizedLength === 0 || normalizedLength > REASON_MAX_LENGTH}
             onClick={async () => {
-              // FOLD (Codex round-3, LOW Reject key — unbounded historical
-              // Map): the digest is computed INSIDE the guarded callback,
-              // not before it — `runOnce`'s own check-and-set stays
-              // synchronous at click time (single-fire-guard.ts's own
-              // header: "read/written synchronously, in the SAME
-              // microtask as the click handler"), so a rapid double-click
-              // is still dropped by the SECOND call's guard check before
-              // it ever starts a redundant digest, exactly as before this
-              // fold.
-              const ran = await runOnce(guardRef.current, async () => {
-                const key = await rejectKeyFor(requestId, callerId, normalized);
-                await onReject(normalized, key, () => setReason(""));
-              });
+              // ROUND 5: the parent acquires the ONE page-wide guard before
+              // starting `act()` and its digest. Its boolean preserves the
+              // rule that a dropped concurrent click never closes a dialog.
+              const ran = await onReject(normalized, () => setReason(""));
               if (ran) setOpen(false);
             }}
           >

@@ -112,6 +112,17 @@ test("Reject dialog: opens on click, Confirm gates on the required reason, Cance
         assert.match(textOf(body as never), /Cancel/, "opening the dialog must reveal its Cancel control");
         const textarea = findIn(body as never, (n) => n.tagName === "TEXTAREA");
         assert.ok(textarea, "the reason field must be open");
+        const textareaElement = textarea as unknown as { getAttribute: (name: string) => string | null };
+        assert.equal(
+          textareaElement.getAttribute("maxLength"),
+          null,
+          "the native UTF-16 maxLength wall must stay absent; the explicit code-point gate is the only length wall",
+        );
+        assert.equal(
+          textareaElement.getAttribute("aria-required"),
+          "true",
+          "positive control: this DOM stub reads React's camelCase/aria attribute store from the live textarea",
+        );
 
         const confirmButton = findIn(
           body as never,

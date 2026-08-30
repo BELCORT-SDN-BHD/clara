@@ -35,6 +35,7 @@
 
 components/admin/registrations-a11y.test.tsx
 components/admin/registrations-keyboard-round2.test.tsx
+components/admin/registrations-keyboard-round5.test.tsx
 components/admin/registrations-keyboard.test.tsx
 components/invite-accept-a11y.test.tsx
 components/invite-accept-form.test.tsx
