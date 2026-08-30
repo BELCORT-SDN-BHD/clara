@@ -5,6 +5,7 @@ import {
   CAPABILITY_LEGS,
   CAPABILITY_LEG_REFUSAL_STATUS,
   buildOutbound,
+  hasDotSegment,
   isJwtShaped,
   legFor,
 } from "../lib/runtime/outbound";
@@ -40,37 +41,106 @@ const BYTES = ["intake", "documents", "i-1", "bytes"];
 const FINALIZE = ["intake", "documents", "i-1", "finalize"];
 const VIEWER = ["documents", "d-1", "bytes"];
 
+/** The two capability legs AS THE RUNTIME DEFINES THEM — method and path together
+ *  (`packages/runtime/README.md:79-80`). The pairing is the point: the same URL
+ *  under a different verb is NOT a capability leg. */
+const CAPABILITY_CALLS: ReadonlyArray<[string, string[]]> = [
+  ["PUT", BYTES],
+  ["POST", FINALIZE],
+];
+
+/** Every method this proxy exports (`app/api/runtime/[...path]/route.ts`). */
+const PROXY_METHODS = ["GET", "POST", "PUT"] as const;
+
 function headersOf(r: ReturnType<typeof buildOutbound>): Headers {
   assert.equal(r.ok, true, "expected a forwardable header set, got a refusal");
   return (r as { headers: Headers }).headers;
 }
 
 describe("the leg switch is the runtime's own contract", () => {
-  it("begin takes a JWT; bytes AND finalize take the capability", () => {
-    assert.equal(legFor(BEGIN), "session");
-    assert.equal(legFor(BYTES), "capability");
+  it("begin takes a JWT; PUT-bytes and POST-finalize take the capability", () => {
+    assert.equal(legFor("POST", BEGIN), "session");
+    assert.equal(legFor("PUT", BYTES), "capability");
     assert.equal(
-      legFor(FINALIZE),
+      legFor("POST", FINALIZE),
       "capability",
       "finalize is the SECOND capability leg — the ruling named only bytes, the contract names both",
     );
-    assert.equal(legFor(VIEWER), "session", "the evidence viewer rides the JWT lane");
+    assert.equal(legFor("GET", VIEWER), "session", "the evidence viewer rides the JWT lane");
+  });
+
+  it("THE METHOD×PATH PRODUCT — only the two contracted pairs are capability legs", () => {
+    // Matching on path alone classified EVERY method on those two URLs as a
+    // capability leg, and this proxy exports GET, POST and PUT (#451 Codex round
+    // 2, item 2). Nothing reachable exploits it today — a wrong-method request
+    // finds no Express handler and 404s — but a future session-authenticated
+    // handler on either URL would have inherited caller-controlled forwarding.
+    const paths: ReadonlyArray<[string, string[]]> = [
+      ["BEGIN", BEGIN],
+      ["BYTES", BYTES],
+      ["FINALIZE", FINALIZE],
+      ["VIEWER", VIEWER],
+    ];
+    const contracted = new Set(CAPABILITY_CALLS.map(([m, p]) => `${m} ${p.join("/")}`));
+    for (const method of PROXY_METHODS) {
+      for (const [label, path] of paths) {
+        const expected = contracted.has(`${method} ${path.join("/")}`) ? "capability" : "session";
+        assert.equal(
+          legFor(method, path),
+          expected,
+          `${method} ${label} classified as ${legFor(method, path)}, expected ${expected}`,
+        );
+      }
+    }
+  });
+
+  it("the method match is case-insensitive but exact", () => {
+    assert.equal(legFor("put", BYTES), "capability");
+    assert.equal(legFor("PUTX", BYTES), "session");
   });
 
   it("an UNKNOWN leg defaults to our own verified identity", () => {
-    assert.equal(legFor(["something", "new"]), "session");
-    assert.equal(legFor([]), "session");
+    assert.equal(legFor("GET", ["something", "new"]), "session");
+    assert.equal(legFor("GET", []), "session");
     assert.equal(
-      legFor(["intake", "documents", "i-1", "bytes", "extra"]),
+      legFor("PUT", ["intake", "documents", "i-1", "bytes", "extra"]),
       "session",
       "a longer path must not match a capability leg by prefix",
     );
   });
 
-  it("every registered capability leg cites where the contract says so", () => {
+  it("every registered capability leg names a METHOD and cites the contract", () => {
     assert.equal(CAPABILITY_LEGS.length, 2);
     for (const leg of CAPABILITY_LEGS) {
       assert.match(leg.why, /packages\/runtime/, `${leg.path.join("/")} carries no citation`);
+      assert.equal(leg.method, leg.method.toUpperCase(), "the registry method must be uppercase");
+      assert.ok(["PUT", "POST"].includes(leg.method));
+    }
+  });
+});
+
+describe("a non-canonical path is refused before it is classified", () => {
+  // Classification runs before the target URL is assembled, so a dot segment could
+  // make the path judged differ from the path fetched (#451 Codex round 2, item 2).
+  const A2 = "token-A";
+
+  it("dot segments, encoded or not, are rejected", () => {
+    for (const seg of ["..", ".", "%2e%2e", "%2E", "a/b", "%2Fetc", ""]) {
+      assert.equal(hasDotSegment(["intake", seg, "bytes"]), true, `${JSON.stringify(seg)} was accepted as a name`);
+    }
+  });
+
+  it("ordinary segments are NOT rejected — the wall has to let real traffic through", () => {
+    assert.equal(hasDotSegment(BYTES), false);
+    assert.equal(hasDotSegment(["documents", "d-1", "bytes"]), false);
+    assert.equal(hasDotSegment(["a.b.c"]), false, "a dotted NAME is not a dot segment");
+  });
+
+  it("buildOutbound refuses a dot-segment path outright, on either leg", () => {
+    for (const [method, leg] of [["PUT", ["intake", "documents", "..", "bytes"]], ["POST", ["intake", ".."]]] as const) {
+      const r = buildOutbound(new Headers({ authorization: `Bearer ${CAPABILITY}` }), method, leg, A2);
+      assert.equal(r.ok, false, `${method} ${leg.join("/")} was not refused`);
+      assert.equal((r as { response: Response }).response.status, CAPABILITY_LEG_REFUSAL_STATUS);
     }
   });
 });
@@ -78,13 +148,13 @@ describe("the leg switch is the runtime's own contract", () => {
 describe("SESSION legs — the guard's own token, the caller's never read", () => {
   it("cookie A + header B → the runtime receives A, never B", () => {
     const inbound = new Headers({ authorization: `Bearer ${B}`, "content-type": "application/json" });
-    const out = headersOf(buildOutbound(inbound, BEGIN, A));
+    const out = headersOf(buildOutbound(inbound, "POST", BEGIN, A));
     assert.equal(out.get("authorization"), `Bearer ${A}`);
     assert.ok(!String(out.get("authorization")).includes(B), "the caller's bearer survived to the runtime");
   });
 
   it("a MISSING inbound Authorization still forwards A", () => {
-    const out = headersOf(buildOutbound(new Headers({ "content-type": "application/json" }), BEGIN, A));
+    const out = headersOf(buildOutbound(new Headers({ "content-type": "application/json" }), "POST", BEGIN, A));
     assert.equal(out.get("authorization"), `Bearer ${A}`);
   });
 
@@ -96,7 +166,7 @@ describe("SESSION legs — the guard's own token, the caller's never read", () =
       origin: "https://evil.example",
       referer: "https://evil.example/x",
     });
-    const out = headersOf(buildOutbound(inbound, BEGIN, A));
+    const out = headersOf(buildOutbound(inbound, "POST", BEGIN, A));
     assert.equal(out.get("content-type"), "application/octet-stream");
     assert.equal(out.get("content-length"), "42");
     for (const dropped of ["cookie", "origin", "referer"]) {
@@ -120,13 +190,17 @@ describe("SESSION legs — the guard's own token, the caller's never read", () =
 
 describe("CAPABILITY legs — the upload token travels, the JWT does not", () => {
   it("the capability is forwarded on BOTH capability legs", () => {
-    for (const leg of [BYTES, FINALIZE]) {
+    for (const [method, leg] of CAPABILITY_CALLS) {
       const inbound = new Headers({
         authorization: `Bearer ${CAPABILITY}`,
         "content-type": "application/octet-stream",
       });
-      const out = headersOf(buildOutbound(inbound, leg, A));
-      assert.equal(out.get("authorization"), `Bearer ${CAPABILITY}`, `${leg.join("/")} lost the upload capability`);
+      const out = headersOf(buildOutbound(inbound, method, leg, A));
+      assert.equal(
+        out.get("authorization"),
+        `Bearer ${CAPABILITY}`,
+        `${method} ${leg.join("/")} lost the upload capability`,
+      );
       assert.ok(!String(out.get("authorization")).includes(A), "the session JWT reached a capability leg");
     }
   });
@@ -134,7 +208,7 @@ describe("CAPABILITY legs — the upload token travels, the JWT does not", () =>
   it("a JWT-shaped bearer is REFUSED — never both credentials", () => {
     const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2ln";
     assert.equal(isJwtShaped(jwt), true);
-    const r = buildOutbound(new Headers({ authorization: `Bearer ${jwt}` }), BYTES, A);
+    const r = buildOutbound(new Headers({ authorization: `Bearer ${jwt}` }), "PUT", BYTES, A);
     assert.equal(r.ok, false);
     assert.equal((r as { response: Response }).response.status, CAPABILITY_LEG_REFUSAL_STATUS);
   });
@@ -146,7 +220,7 @@ describe("CAPABILITY legs — the upload token travels, the JWT does not", () =>
   });
 
   it("no inbound credential → none forwarded, never a substitute", () => {
-    const out = headersOf(buildOutbound(new Headers({ "content-length": "9" }), BYTES, A));
+    const out = headersOf(buildOutbound(new Headers({ "content-length": "9" }), "PUT", BYTES, A));
     assert.equal(out.get("authorization"), null, "the session JWT was substituted onto a capability leg");
     assert.equal(out.get("content-length"), "9");
   });

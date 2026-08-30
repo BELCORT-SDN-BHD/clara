@@ -14,7 +14,8 @@ import {
   loadRegistrationRequestsForApplicant,
 } from "../lib/registration/reads";
 import { loadOwnRegistrationRequests } from "../lib/registration/server-reads";
-import { lexSql, stripComments } from "../test/sourceOracle";
+import { stripComments } from "../test/sourceOracle";
+import { lexSql } from "../test/sqlOracle";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { ServerSession } from "../lib/supabase/server-session";
 
@@ -142,11 +143,41 @@ const MIGRATION_FILES = readdirSync(MIGRATIONS_DIR)
 
 const migration = (name: string): string => readFileSync(join(MIGRATIONS_DIR, name), "utf8");
 
-/** Which migrations carry a real, statement-level `create [or replace] view
- *  clara.<name>` — the live-body census, mechanised. */
-function viewDefiners(view: string): string[] {
-  const re = new RegExp(`create\\s+(or\\s+replace\\s+)?view\\s+clara\\.${view}\\b`, "gi");
-  return MIGRATION_FILES.filter((f) => re.test(lexSql(migration(f)).statements));
+/**
+ * Every real, statement-level `create [or replace] view clara.<name>` OCCURRENCE
+ * in the corpus, with its file and byte offset.
+ *
+ * OCCURRENCES, NOT FILENAMES, AND A FRESH REGEX PER FILE (#451 Codex round 2,
+ * item 3 — a bug in this gate, not in the code it guards). The previous version
+ * built ONE global regex and called `.test()` on each file in a `filter`. A global
+ * regex carries `lastIndex` across calls, so `.test()` resumed mid-way through the
+ * next file and could miss a definition near its start; and returning filenames
+ * collapsed two definitions in ONE file into a single entry. Either way the census
+ * could report "exactly one" while the corpus held two — the precise failure this
+ * cell exists to catch. Ironic and instructive: a stateful module-level regex is
+ * the same hazard the cache-safety cell now bans by name.
+ */
+function viewDefinitions(view: string): { file: string; offset: number }[] {
+  const out: { file: string; offset: number }[] = [];
+  for (const file of MIGRATION_FILES) {
+    const re = new RegExp(`create\\s+(or\\s+replace\\s+)?view\\s+clara\\.${view}\\b`, "gi");
+    for (const m of lexSql(migration(file)).statements.matchAll(re)) {
+      out.push({ file, offset: m.index ?? -1 });
+    }
+  }
+  return out;
+}
+
+/** The one live body, asserted to be exactly one OCCURRENCE estate-wide. */
+function theOnlyDefinition(view: string, expectedFile: string): void {
+  const defs = viewDefinitions(view);
+  assert.deepEqual(
+    defs.map((d) => `${d.file}@${d.offset}`),
+    defs.length === 1 && defs[0]?.file === expectedFile
+      ? [`${expectedFile}@${defs[0].offset}`]
+      : [`${expectedFile}@<exactly one>`],
+    `clara.${view} must have exactly ONE statement-level definition, in ${expectedFile} — re-run the rung-0 census`,
+  );
 }
 
 /** The `('<relation>', <n>, '<cols>')` column contract a migration registers in its
@@ -189,6 +220,61 @@ describe("LOW-5 — the SQL lexer, controlled before it is trusted", () => {
     assert.ok(withoutComments.includes("everything live"), "a string's contents were eaten as a comment");
   });
 
+  it("an ESCAPE string `E'…\\'…'` does not end early — a DDL inside one stays masked", () => {
+    // PostgreSQL's E'' form escapes with a BACKSLASH, and the corpus really
+    // contains this syntax (0111_f_a5_reporting_agency_pr1.sql:606). Treating
+    // `\'` as the closing quote desynchronises everything after it.
+    //
+    // THE FIXTURE IS CHOSEN TO DISCRIMINATE, which an earlier version was not: the
+    // whole `; create view … ;` sits INSIDE one escape string, so correct lexing
+    // masks it and a lexer that ends the string at `\'` exposes it at statement
+    // level. An earlier fixture put the DDL after the string and let a `--`
+    // comment eat the evidence in both cases — a cell that passed either way.
+    const sql = "select E'\\'; create view clara.probe as select 1; ';";
+    const { statements } = lexSql(sql);
+    assert.ok(
+      !/create\s+view\s+clara\.probe/i.test(statements),
+      "a CREATE VIEW inside an escape string surfaced as a real definition — the lexer lost sync on \\'",
+    );
+  });
+
+  it("an escape string does not swallow the statement that follows it", () => {
+    const sql = "select E'a\\'b';\ncreate view clara.probe as select 1;";
+    assert.ok(
+      /create\s+view\s+clara\.probe/i.test(lexSql(sql).statements),
+      "the DDL after an escape string was swallowed",
+    );
+  });
+
+  it("the REAL corpus parses: 0111's escape string does not desynchronise it", () => {
+    const { withoutComments, statements } = lexSql(migration("0111_f_a5_reporting_agency_pr1.sql"));
+    assert.equal(withoutComments.length, statements.length);
+    assert.ok(withoutComments.length > 1000, "the file did not lex at all");
+  });
+
+  it("a contract decoy NESTED in an inner dollar string does not count", () => {
+    // The outer `do $$ … $$` is a body and is lexed; an inner `$q$ … $q$` inside it
+    // is a LITERAL and is masked. Retaining it let a contract-shaped decoy satisfy
+    // declaredContract() (#451 Codex round 2, item 4).
+    const sql = "do $$ begin\n  perform $q$ ('caller_context', 6, 'DECOY') $q$;\nend $$;";
+    const { withoutComments } = lexSql(sql);
+    assert.ok(!withoutComments.includes("DECOY"), "a nested dollar-string payload survived as evidence");
+  });
+
+  it("a DDL decoy nested in an inner dollar string does not count either", () => {
+    const sql = "do $$ begin\n  perform $q$ create view clara.probe as select 1; $q$;\nend $$;";
+    assert.ok(!/create\s+view\s+clara\.probe/i.test(lexSql(sql).statements));
+  });
+
+  it("every view is LENGTH-PRESERVING — the property the CHECK cell relies on", () => {
+    for (const file of ["0002_foundation.sql", "0141_p4_tranche1_invite_rbac.sql"]) {
+      const raw = migration(file);
+      const { withoutComments, statements } = lexSql(raw);
+      assert.equal(withoutComments.length, raw.length, `${file}: withoutComments changed length`);
+      assert.equal(statements.length, raw.length, `${file}: statements changed length`);
+    }
+  });
+
   it("VACUITY CONTROL: the migration corpus was actually read", () => {
     assert.ok(MIGRATION_FILES.length > 100, `only ${MIGRATION_FILES.length} migrations found`);
   });
@@ -196,11 +282,7 @@ describe("LOW-5 — the SQL lexer, controlled before it is trusted", () => {
 
 describe("the projections are the DB's own declared column contracts", () => {
   it("clara.caller_context has ONE live body — 0141:544, nothing superseding it", () => {
-    assert.deepEqual(
-      viewDefiners("caller_context"),
-      ["0141_p4_tranche1_invite_rbac.sql"],
-      "a later migration now defines caller_context — re-run the rung-0 census before trusting lib/firm/caller-context.ts's header",
-    );
+    theOnlyDefinition("caller_context", "0141_p4_tranche1_invite_rbac.sql");
   });
 
   it("caller_context's 6-column contract matches CALLER_CONTEXT_SELECT byte for byte", () => {
@@ -211,9 +293,44 @@ describe("the projections are the DB's own declared column contracts", () => {
   });
 
   it("clara.firm_registration_requests_visible has ONE live body — 0145:911", () => {
-    assert.deepEqual(viewDefiners("firm_registration_requests_visible"), [
+    theOnlyDefinition(
+      "firm_registration_requests_visible",
       "0145_p4_tranche2_registration_operator_alias.sql",
-    ]);
+    );
+  });
+
+  it("VACUITY CONTROL: the census counts OCCURRENCES, not files", () => {
+    // Two definitions in ONE input must count as two. The previous version
+    // returned FILENAMES from a `filter`, so a file defining the view twice
+    // reported "exactly one" — the precise failure the census exists to catch.
+    const count = (sql: string) => {
+      const re = new RegExp("create\\s+(or\\s+replace\\s+)?view\\s+clara\\.probe\\b", "gi");
+      return [...lexSql(sql).statements.matchAll(re)].length;
+    };
+    assert.equal(
+      count("create view clara.probe as select 1;\ncreate or replace view clara.probe as select 2;"),
+      2,
+      "two definitions in one file collapsed into one",
+    );
+    assert.equal(count("create view clara.probe as select 1;"), 1);
+    assert.equal(count("select 1;"), 0);
+  });
+
+  it("VACUITY CONTROL: the OLD `.test()` technique really did skip — matchAll does not", () => {
+    // Honest record of why the technique changed, and a live demonstration that
+    // the hazard is real rather than a story. A global regex reused across
+    // `.test()` calls carries `lastIndex` and resumes mid-way through the NEXT
+    // input, so a definition near its start is missed. `matchAll` is immune
+    // because it iterates over an internal clone — which is also why simply
+    // sharing the regex object is no longer a bug, and why the mutant that only
+    // shares it stays green.
+    const inputs = ["-- pad --\ncreate view clara.probe as select 1;", "create view clara.probe as select 2;"];
+    const shared = /create\s+view\s+clara\.probe\b/gi;
+    const stateful = inputs.filter((s) => shared.test(s));
+    assert.equal(stateful.length, 1, "the stateful hazard has stopped reproducing — re-examine this control");
+
+    const sound = inputs.filter((s) => [...s.matchAll(/create\s+view\s+clara\.probe\b/gi)].length > 0);
+    assert.equal(sound.length, 2, "matchAll must see both");
   });
 
   it("the registration view's 10-column contract matches REGISTRATION_REQUESTS_SELECT", () => {
@@ -259,11 +376,27 @@ describe("the projections are the DB's own declared column contracts", () => {
 
   it("MEDIUM-2: FIRM_ROLES is the CHECK constraint's own vocabulary (0002:215)", () => {
     // The validator refuses a role off this ladder, so the list must be the DB's,
-    // not a hand-written lookalike. Parsed out of the constraint, comment-free.
-    const foundation = lexSql(migration("0002_foundation.sql")).withoutComments;
-    const m = /role\s+text\s+not null\s+check\s*\(\s*role\s+in\s*\(([^)]*)\)/i.exec(foundation);
-    assert.ok(m, "0002 no longer declares firm_memberships.role's CHECK where this gate can read it");
-    const declared = [...(m[1] as string).matchAll(/'([^']+)'/g)].map((x) => x[1]).sort();
+    // not a hand-written lookalike.
+    //
+    // TWO VIEWS, ONE OFFSET (#451 Codex round 2, item 4). The CHECK has to be
+    // found at STATEMENT level — a decoy inside a comment, a string or a
+    // dollar-quoted body must not count — but the role NAMES live in string
+    // literals, which the statement view masks. Because the lexer's masking is
+    // length-preserving, the match found in `statements` addresses the same bytes
+    // in `withoutComments`: locate it in the view that proves it is real, read it
+    // from the view that still carries its values.
+    const { withoutComments, statements } = lexSql(migration("0002_foundation.sql"));
+    assert.equal(withoutComments.length, statements.length, "the lexer's views fell out of alignment");
+
+    const re = /role\s+text\s+not null\s+check\s*\(\s*role\s+in\s*\(([^)]*)\)/i;
+    const atStatementLevel = re.exec(statements);
+    assert.ok(
+      atStatementLevel,
+      "0002 no longer declares firm_memberships.role's CHECK at statement level where this gate can read it",
+    );
+    const start = atStatementLevel.index;
+    const values = withoutComments.slice(start, start + atStatementLevel[0].length);
+    const declared = [...values.matchAll(/'([^']+)'/g)].map((x) => x[1]).sort();
     assert.deepEqual(
       declared,
       [...FIRM_ROLES].sort(),

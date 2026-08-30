@@ -55,7 +55,7 @@ async function proxy(req: NextRequest, path: string[], accessToken: string): Pro
   // overwriting it breaks every document upload). See lib/runtime/outbound.ts —
   // the rule lives there so it can be DRIVEN by a test rather than read off this
   // file and trusted.
-  const outbound = buildOutbound(req.headers, path, accessToken);
+  const outbound = buildOutbound(req.headers, req.method, path, accessToken);
   if (!outbound.ok) return outbound.response;
   const headers = outbound.headers;
 

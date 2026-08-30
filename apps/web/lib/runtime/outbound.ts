@@ -67,23 +67,63 @@ export type OutboundLeg = "session" | "capability";
  * header, so the fail-closed direction holds for a route nobody has classified.
  */
 export const CAPABILITY_LEGS: ReadonlyArray<{
+  readonly method: string;
   readonly path: readonly string[];
   readonly why: string;
 }> = [
   {
+    method: "PUT",
     path: ["intake", "documents", "*", "bytes"],
     why: "PUT …/bytes — packages/runtime/README.md:79 'Bearer upload capability'; intakeRoutes.ts:101 bearerCapability()",
   },
   {
+    method: "POST",
     path: ["intake", "documents", "*", "finalize"],
     why: "POST …/finalize — packages/runtime/README.md:80 'Bearer upload capability'; intakeRoutes.ts:120 bearerCapability()",
   },
 ];
 
-/** Which credential this leg takes. Session unless the path matches a registered
- *  capability leg exactly (same length, `*` matching one segment). */
-export function legFor(path: readonly string[]): OutboundLeg {
+/**
+ * A path segment that is not a literal name — `.` or `..`, in raw or percent-
+ * encoded form.
+ *
+ * Classification happens BEFORE the target URL is assembled, so a dot segment
+ * would let the path this function judged differ from the path actually fetched
+ * (#451 Codex round 2, item 2). Nothing reachable today exploits it, and the fix
+ * is to refuse rather than to normalise: a legitimate caller never sends one, and
+ * "normalise then re-classify" is a second chance to get the correspondence wrong.
+ */
+export function hasDotSegment(path: readonly string[]): boolean {
+  return path.some((seg) => {
+    let decoded = seg;
+    try {
+      decoded = decodeURIComponent(seg);
+    } catch {
+      return true; // undecodable is not a name either
+    }
+    return decoded === "." || decoded === ".." || decoded === "" || decoded.includes("/");
+  });
+}
+
+/**
+ * Which credential this leg takes.
+ *
+ * METHOD AND PATH TOGETHER (#451 Codex round 2, item 2). The runtime's contract is
+ * specifically PUT-bytes and POST-finalize; matching on path alone classified
+ * EVERY method on those two URLs as a capability leg, and this proxy exports GET,
+ * POST and PUT. Nothing reachable today is affected — a wrong-method request finds
+ * no Express handler and 404s — but a future session-authenticated handler sharing
+ * either URL would silently inherit caller-controlled bearer forwarding. The
+ * registry now says which verb it means.
+ *
+ * Session unless BOTH method and path match a registered entry (`*` matching one
+ * segment). The default direction is unchanged and deliberate: an unclassified leg
+ * gets our own verified identity.
+ */
+export function legFor(method: string, path: readonly string[]): OutboundLeg {
+  const upper = method.toUpperCase();
   for (const leg of CAPABILITY_LEGS) {
+    if (leg.method !== upper) continue;
     if (leg.path.length !== path.length) continue;
     if (leg.path.every((seg, i) => seg === "*" || seg === path[i])) return "capability";
   }
@@ -108,6 +148,7 @@ export function bearerValue(header: string | null): string | null {
 
 export const CAPABILITY_LEG_REFUSAL_STATUS = 400;
 export const CAPABILITY_LEG_REFUSAL_BODY = { error: "jwt_on_capability_leg" } as const;
+export const DOT_SEGMENT_REFUSAL_BODY = { error: "non_canonical_path" } as const;
 
 export type OutboundResult =
   | { readonly ok: true; readonly headers: Headers }
@@ -131,16 +172,28 @@ export type OutboundResult =
  */
 export function buildOutbound(
   inbound: Headers,
+  method: string,
   path: readonly string[],
   accessToken: string,
 ): OutboundResult {
+  // BEFORE classification, not after: a dot segment would let the path judged here
+  // differ from the path fetched downstream.
+  if (hasDotSegment(path)) {
+    return {
+      ok: false,
+      response: Response.json(DOT_SEGMENT_REFUSAL_BODY, {
+        status: CAPABILITY_LEG_REFUSAL_STATUS,
+      }),
+    };
+  }
+
   const headers = new Headers();
   for (const name of BODY_HEADERS) {
     const value = inbound.get(name);
     if (value) headers.set(name, value);
   }
 
-  if (legFor(path) === "session") {
+  if (legFor(method, path) === "session") {
     headers.set("authorization", `Bearer ${accessToken}`);
     return { ok: true, headers };
   }

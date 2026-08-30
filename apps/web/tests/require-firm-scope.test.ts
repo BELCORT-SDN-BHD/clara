@@ -33,6 +33,7 @@ import {
   tokenFromSession,
   type ServerSession,
 } from "../lib/supabase/server-session";
+import { stripComments } from "../test/sourceOracle";
 /**
  * THE SCOPE SPINE'S BEHAVIOUR (P4-2; design `p4-design-2026-08-27.md` §4 E).
  * Its structural half — the route-leaf census, the three registries, the
@@ -462,10 +463,8 @@ describe("the cost of a scoped request", () => {
     // The memo cannot be OBSERVED here — React's `cache` only memoises inside a
     // request's own render scope, and a bare `node --test` process has none, so a
     // behavioural assertion would measure the harness rather than the code. What
-    // is asserted is the wrapping itself, plus the two properties that make it
-    // safe: ONE module-level function object (never a per-render accessor, so the
-    // singleton law is respected), and no module-level mutable cache of its own
-    // (nothing that could outlive a request and leak across two).
+    // is asserted is the wrapping itself, plus ONE module-level function object
+    // (never a per-render accessor, so the singleton law is respected).
     const src = readFileSync(join(WEB_ROOT, "lib/supabase/server-session.ts"), "utf8");
     assert.match(
       src,
@@ -473,10 +472,51 @@ describe("the cost of a scoped request", () => {
       "the session resolution is no longer memoised per request",
     );
     assert.match(src, /from "react"/, "React's cache is not the memo being used");
+  });
+
+  it("the session module holds NO module-level mutable state at all", () => {
+    // The old check only rejected a bare top-level `let`/`var` (#451 Codex round 2,
+    // item 6), so `export let`, a `const` Map/Set, and a stateful global regex all
+    // passed. Any of those can outlive a request and carry one caller's data into
+    // the next — the single failure mode that would make a per-request memo unsafe.
+    //
+    // The `g`-flag clause is not theoretical: a module-level global regex reused
+    // across calls carries `lastIndex`, and that exact hazard produced a real
+    // under-counting bug in this branch's OWN migration census.
+    const code = stripComments(readFileSync(join(WEB_ROOT, "lib/supabase/server-session.ts"), "utf8"));
+
+    assert.doesNotMatch(code, /^\s*(export\s+)?(let|var)\s/m, "a mutable module-level binding");
+    // The TYPE ARGUMENT matters: `new Map<string, T>(` does not contain the
+    // literal `new Map(`, and a substring check for it waves the cache straight
+    // through — caught by this suite's own mutant panel.
     assert.doesNotMatch(
-      src,
-      /^(let|var)\s/m,
-      "a module-level mutable binding could outlive a request and leak across two",
+      code,
+      /new\s+(Map|Set|WeakMap|WeakSet|Array)\s*(<[^>]*>)?\s*\(/,
+      "a module-level collection is a cache that outlives a request",
     );
+    for (const m of code.matchAll(/=\s*\/(?:[^/\\\n]|\\.)+\/([a-z]*)/g)) {
+      const flags = m[1] as string;
+      assert.ok(
+        !flags.includes("g") && !flags.includes("y"),
+        `a module-level regex with /${flags} carries lastIndex across calls`,
+      );
+    }
+  });
+
+  it("VACUITY CONTROL: the mutable-store check catches each shape it claims to", () => {
+    const rejects = (src: string, pattern: RegExp) => {
+      const code = stripComments(src);
+      return pattern.test(code);
+    };
+    assert.equal(rejects("export let sessions = null;", /^\s*(export\s+)?(let|var)\s/m), true);
+    assert.equal(rejects("let sessions = null;", /^\s*(export\s+)?(let|var)\s/m), true);
+    assert.equal(rejects("var sessions = null;", /^\s*(export\s+)?(let|var)\s/m), true);
+    assert.equal(rejects("const SAFE = 1;", /^\s*(export\s+)?(let|var)\s/m), false);
+    assert.ok(stripComments("const c = new Map();").includes("new Map("));
+    assert.ok(!stripComments("// const c = new Map();").includes("new Map("));
+    const flagsOf = (src: string) =>
+      [...src.matchAll(/=\s*\/(?:[^/\\\n]|\\.)+\/([a-z]*)/g)].map((m) => m[1]);
+    assert.deepEqual(flagsOf("const R = /ab/gi;"), ["gi"], "a global regex is not detected");
+    assert.deepEqual(flagsOf("const R = /ab/i;"), ["i"]);
   });
 });

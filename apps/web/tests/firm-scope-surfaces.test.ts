@@ -13,7 +13,12 @@ import {
   SCOPE_EXEMPT_SURFACES,
   SCOPE_UNSCOPED_SURFACES,
 } from "../lib/require-firm-scope";
-import { reachableCode, stripComments } from "../test/sourceOracle";
+import {
+  defaultExportName,
+  exportedHttpMethods,
+  reachableFrom,
+  stripComments,
+} from "../test/sourceOracle";
 
 /**
  * THE SCOPE SPINE'S STRUCTURAL HALF (P4-2). Behaviour is
@@ -50,9 +55,37 @@ function readSource(webRelativePath: string): string {
 
 /** Comments stripped, strings KEPT — for import specifiers and header reads. */
 const codeWithStrings = (p: string): string => stripComments(readSource(p));
-/** Comments stripped, strings BLANKED, dead declarations dropped — for calls. */
+
+/**
+ * THE EXECUTION ROOTS of a surface — the entry points a REQUEST actually runs
+ * through, each with the code reachable from it.
+ *
+ * SURFACE-AWARE, not "every export" (#451 Codex round 2, item 1). Rooting every
+ * export and taking the union answers "is there a guard somewhere in this file?",
+ * which is not the question. Two real bypasses followed from it:
+ *   - a page whose DEFAULT render is unguarded passed when some other export —
+ *     `generateStaticParams()`, which Next runs at BUILD time, not per request —
+ *     called the guard;
+ *   - a Route Handler with a guarded `GET` and an unguarded `POST` passed, because
+ *     each HTTP method export is a SEPARATE handler and the union hid that.
+ * So: for a page or layout, the default export and nothing else. For a route
+ * handler, EVERY exported method, checked independently.
+ */
+function executionRoots(p: string): { root: string; code: string }[] {
+  const code = stripComments(readSource(p), { blankStrings: true });
+  if (isRouteLeaf(p)) {
+    return exportedHttpMethods(code).map((method) => ({
+      root: method,
+      code: reachableFrom(code, method) ?? "",
+    }));
+  }
+  const name = defaultExportName(code);
+  return name === null ? [] : [{ root: name, code: reachableFrom(code, name) ?? "" }];
+}
+
+/** The union, for the few cells that legitimately ask "anywhere in what runs". */
 const executedCode = (p: string): string =>
-  reachableCode(stripComments(readSource(p), { blankStrings: true }));
+  executionRoots(p).map((r) => r.code).join("\n");
 
 function walkSources(dir: string, out: string[] = []): string[] {
   if (!existsSync(dir)) return out;
@@ -239,9 +272,15 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
     const realCall = `${importLine}\nexport default async function S() { await requireFirmScope(); return null; }`;
     const viaHelper = `${importLine}\nasync function guard() { await requireFirmScope(); }\nexport default async function S() { await guard(); return null; }`;
 
-    const detect = (src: string) =>
-      SPINE_IMPORT.test(stripComments(src)) &&
-      SPINE_CALL.test(reachableCode(stripComments(src, { blankStrings: true })));
+    const detect = (src: string) => {
+      const code = stripComments(src, { blankStrings: true });
+      const name = defaultExportName(code);
+      return (
+        SPINE_IMPORT.test(stripComments(src)) &&
+        name !== null &&
+        SPINE_CALL.test(reachableFrom(code, name) ?? "")
+      );
+    };
 
     assert.equal(detect(commentOnly), false, "a comment-only mention counts as a call");
     assert.equal(detect(stringDecoy), false, "a string decoy counts as a call — MEDIUM-3 attack B");
@@ -271,17 +310,33 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
     assert.equal(SCOPE_ENTRANCES.length, 3);
   });
 
-  it("every entrance calls the spine in its EXECUTED path, with NO argument", () => {
+  it("EVERY execution root of every entrance calls the spine, bare", () => {
     for (const entrance of SCOPE_ENTRANCES) {
       assert.ok(existsSync(join(WEB_ROOT, entrance.path)), `${entrance.path} is missing`);
-      const code = executedCode(entrance.path);
-      assert.match(code, /\b(requireFirmScope|firmScopeGuard)\(\s*\)/, `${entrance.path} does not call the spine bare`);
-      assert.doesNotMatch(
-        code,
-        /\b(requireFirmScope|firmScopeGuard)\(\s*[^)\s]/,
-        `${entrance.path} passes an argument — an entrance must never be handed its own reader`,
-      );
+      const roots = executionRoots(entrance.path);
+      assert.ok(roots.length > 0, `${entrance.path} exposes no execution root at all`);
+      for (const { root, code } of roots) {
+        assert.match(
+          code,
+          /\b(requireFirmScope|firmScopeGuard)\(\s*\)/,
+          `${entrance.path}: the ${root} entry point does not call the spine`,
+        );
+        assert.doesNotMatch(
+          code,
+          /\b(requireFirmScope|firmScopeGuard)\(\s*[^)\s]/,
+          `${entrance.path}: ${root} passes an argument — an entrance is never handed its own reader`,
+        );
+      }
     }
+  });
+
+  it("the API entrance's roots ARE its exported HTTP methods", () => {
+    // Each method export is its own handler, so "the roots" is not a detail: it is
+    // the set this suite must prove one at a time.
+    const api = SCOPE_ENTRANCES.find((e) => e.onDenial === "403");
+    assert.ok(api);
+    const roots = executionRoots(api.path).map((r) => r.root).sort();
+    assert.deepEqual(roots, ["GET", "POST", "PUT"], "the proxy's exported methods changed");
   });
 
   it("FIND-1 — every entrance AWAITS the spine", () => {
@@ -294,12 +349,49 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
     // `@typescript-eslint/no-floating-promises` rule (eslint.config.mjs, the
     // apps/web/app block) see it.
     for (const entrance of SCOPE_ENTRANCES) {
-      assert.match(
-        executedCode(entrance.path),
-        /await\s+(requireFirmScope|firmScopeGuard)\(\s*\)/,
-        `${entrance.path} calls the spine without awaiting it — the redirect throw floats and the surface renders anyway`,
-      );
+      for (const { root, code } of executionRoots(entrance.path)) {
+        assert.match(
+          code,
+          /await\s+(requireFirmScope|firmScopeGuard)\(\s*\)/,
+          `${entrance.path}: ${root} calls the spine without awaiting it — the redirect throw floats and the surface renders anyway`,
+        );
+      }
     }
+  });
+
+  it("VACUITY CONTROL: a build-time export cannot stand in for the render", () => {
+    // Next runs generateStaticParams at BUILD time; a guard there protects no
+    // request. Rooting every export made this pass (#451 Codex round 2, item 1).
+    const src = [
+      'import { requireFirmScope } from "@/lib/require-firm-scope";',
+      "export async function generateStaticParams() { await requireFirmScope(); return []; }",
+      "export default async function Page() { return null; }",
+    ].join("\n");
+    const code = stripComments(src, { blankStrings: true });
+    const name = defaultExportName(code);
+    assert.equal(name, "Page");
+    assert.doesNotMatch(
+      reachableFrom(code, name as string) ?? "",
+      /requireFirmScope\(/,
+      "a guard in generateStaticParams is being counted as guarding the render",
+    );
+  });
+
+  it("VACUITY CONTROL: a guarded GET does not cover an unguarded POST", () => {
+    const src = [
+      'import { firmScopeGuard } from "@/lib/require-firm-scope";',
+      "async function guarded() { const g = await firmScopeGuard(); return g; }",
+      "export const GET = guarded;",
+      "export async function POST() { return Response.json({ ok: true }); }",
+    ].join("\n");
+    const code = stripComments(src, { blankStrings: true });
+    assert.deepEqual(exportedHttpMethods(code).sort(), ["GET", "POST"]);
+    assert.match(reachableFrom(code, "GET") ?? "", /firmScopeGuard\(/, "GET should be guarded here");
+    assert.doesNotMatch(
+      reachableFrom(code, "POST") ?? "",
+      /firmScopeGuard\(/,
+      "POST is unguarded but the walker reports it covered — the per-method claim is vacuous",
+    );
   });
 
   it("FIND-1 — the 403 entrance RETURNS the refusal, not merely computes it", () => {

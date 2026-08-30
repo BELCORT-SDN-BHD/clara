@@ -115,6 +115,7 @@ function matchBlock(src: string, open: number): number {
 type Decl = {
   readonly name: string;
   readonly exported: boolean;
+  readonly isDefault: boolean;
   readonly body: string;
   /** Range of the WHOLE declaration — header included. Cutting only the body
    *  leaves `function unused() ` in the module shell, and the shell is then read
@@ -147,6 +148,7 @@ function declarations(code: string): Decl[] {
     out.push({
       name: m[4] as string,
       exported: Boolean(m[1]) || Boolean(m[2]),
+      isDefault: Boolean(m[2]),
       body: code.slice(bodyOpen, bodyEnd),
       start: m.index,
       end: bodyEnd,
@@ -174,6 +176,7 @@ function declarations(code: string): Decl[] {
     out.push({
       name: m[2] as string,
       exported: Boolean(m[1]),
+      isDefault: false,
       body: code.slice(start, end),
       start: m.index,
       end,
@@ -188,143 +191,64 @@ function declarations(code: string): Decl[] {
     .sort((a, b) => a.start - b.start);
 }
 
+/** The HTTP methods a Next.js Route Handler may export. Each is a SEPARATE
+ *  handler with its own execution path — a guard in `GET` does nothing for a
+ *  request that arrives as `POST`. */
+export const HTTP_METHODS = [
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+] as const;
+
 /**
- * The code a module can actually RUN when something imports it: every top-level
- * declaration reachable from an exported one, plus the module's own top-level
- * statements.
+ * The code reachable FROM ONE ROOT — the transitive closure of top-level
+ * declarations that root references. `null` when the module has no such
+ * declaration.
  *
- * A call that appears only outside this text — in an unexported helper nobody
- * invokes, or an exported one nothing reaches — is dead, and a dead guard guards
- * nothing (Codex review of #451, MEDIUM-3, attack B).
+ * PER ROOT, NOT PER MODULE (#451 Codex round 2, item 1). The previous version
+ * rooted EVERY export and returned their union, which answers a weaker question
+ * than the one the guard cells ask. Under it:
+ *   - a page whose DEFAULT render is unguarded passed if some other export —
+ *     `generateStaticParams()`, which Next runs at BUILD time — called the guard;
+ *   - a Route Handler with a guarded `GET` and an unguarded `POST` passed, because
+ *     the union contained the guard from `GET`.
+ * Both are "somewhere in this file there is a guard", which is not the claim.
+ * The claim is that the path a REQUEST takes runs it.
  */
-export function reachableCode(code: string): string {
-  const decls = declarations(code);
-  const byName = new Map(decls.map((d) => [d.name, d]));
+export function reachableFrom(code: string, rootName: string): string | null {
+  const byName = new Map(declarations(code).map((d) => [d.name, d]));
+  if (!byName.has(rootName)) return null;
 
-  // Top-level statements: whatever is left once every declaration — HEADER AND
-  // BODY — is cut out. Cutting only bodies leaves `function unused() ` behind, and
-  // the shell then reads as a reference to `unused`, making every declaration
-  // reach itself. Imports and re-exports remain, which is what they are for.
-  const covered = new Uint8Array(code.length);
-  for (const d of decls) covered.fill(1, d.start, d.end);
-  let shell = "";
-  for (let i = 0; i < code.length; i += 1) if (covered[i] === 0) shell += code[i];
-
-  const reached = new Set<string>();
-  const queue: string[] = [];
-  const consider = (text: string) => {
-    for (const m of text.matchAll(/[A-Za-z_$][\w$]*/g)) {
+  const reached = new Set<string>([rootName]);
+  const queue: string[] = [rootName];
+  while (queue.length > 0) {
+    const decl = byName.get(queue.pop() as string);
+    if (!decl) continue;
+    for (const m of decl.body.matchAll(/[A-Za-z_$][\w$]*/g)) {
       const name = m[0];
       if (byName.has(name) && !reached.has(name)) {
         reached.add(name);
         queue.push(name);
       }
     }
-  };
-
-  for (const d of decls) if (d.exported && !reached.has(d.name)) {
-    reached.add(d.name);
-    queue.push(d.name);
   }
-  consider(shell);
-  while (queue.length > 0) {
-    const next = byName.get(queue.pop() as string);
-    if (next) consider(next.body);
-  }
-
-  return [shell, ...[...reached].map((n) => byName.get(n)?.body ?? "")].join("\n");
+  return [...reached].map((n) => byName.get(n)?.body ?? "").join("\n");
 }
 
-/* -------------------------------------------------------------------------- */
-/* SQL                                                                         */
-/* -------------------------------------------------------------------------- */
+/** The name of the module's default export, or `null`. For a page or a layout
+ *  this is the ONLY export a request renders through. */
+export function defaultExportName(code: string): string | null {
+  return declarations(code).find((d) => d.isDefault)?.name ?? null;
+}
 
-export type SqlViews = {
-  /** Comments removed; strings and dollar-quoted bodies intact. The migrations'
-   *  column contracts live INSIDE `do $$ … $$` blocks, so a view that blanked
-   *  those would blank the very evidence. */
-  readonly withoutComments: string;
-  /** Also blanks the CONTENTS of single-quoted strings and dollar-quoted bodies —
-   *  what remains is statement-level SQL, where a `create view` is a real
-   *  definition rather than text inside a function body or a notice message. */
-  readonly statements: string;
-};
-
-/**
- * Lex a migration into the two views the pins need (Codex review of #451, LOW-5:
- * the old regexes read SQL COMMENTS as evidence, so a commented decoy tuple or a
- * commented `CREATE OR REPLACE VIEW` counted).
- *
- * Handles `--` to end of line, `/* … *\/` (nesting, as Postgres does), single
- * quotes with the `''` escape, and dollar quoting with an arbitrary tag. A `--`
- * inside a string is not a comment: 0141's own tail notice contains several.
- */
-export function lexSql(sql: string): SqlViews {
-  let withoutComments = "";
-  let statements = "";
-  const emit = (text: string, masked: string) => {
-    withoutComments += text;
-    statements += masked;
-  };
-
-  for (let i = 0; i < sql.length; ) {
-    const two = sql.slice(i, i + 2);
-
-    if (two === "--") {
-      while (i < sql.length && sql[i] !== "\n") i += 1;
-      continue;
-    }
-    if (two === "/*") {
-      let depth = 0;
-      while (i < sql.length) {
-        if (sql.slice(i, i + 2) === "/*") {
-          depth += 1;
-          i += 2;
-        } else if (sql.slice(i, i + 2) === "*/") {
-          depth -= 1;
-          i += 2;
-          if (depth === 0) break;
-        } else i += 1;
-      }
-      continue;
-    }
-    if (sql[i] === "'") {
-      const start = i;
-      i += 1;
-      while (i < sql.length) {
-        if (sql[i] === "'" && sql[i + 1] === "'") i += 2;
-        else if (sql[i] === "'") {
-          i += 1;
-          break;
-        } else i += 1;
-      }
-      const raw = sql.slice(start, i);
-      emit(raw, `'${" ".repeat(Math.max(raw.length - 2, 0))}'`);
-      continue;
-    }
-    const dollar = /^\$[A-Za-z_]?[\w]*\$/.exec(sql.slice(i));
-    if (dollar) {
-      const tag = dollar[0];
-      const close = sql.indexOf(tag, i + tag.length);
-      const innerEnd = close < 0 ? sql.length : close;
-      const inner = sql.slice(i + tag.length, innerEnd);
-      // RECURSE for `withoutComments`: a `do $$ … $$` body is real PL/pgSQL with
-      // real comments in it, and the migrations' column contracts live INSIDE such
-      // a block (0141:605-668). Emitting the block raw would leave a commented
-      // decoy tuple inside it counting as evidence — LOW-5's attack, one level
-      // down. `statements` still blanks the body wholesale: a `create view` in
-      // there is text, not a definition.
-      emit(
-        `${tag}${lexSql(inner).withoutComments}${tag}`,
-        `${tag}${" ".repeat(inner.length)}${tag}`,
-      );
-      i = close < 0 ? sql.length : close + tag.length;
-      continue;
-    }
-
-    emit(sql[i] as string, sql[i] as string);
-    i += 1;
-  }
-
-  return { withoutComments, statements };
+/** The HTTP methods this module exports as handlers, in declaration order. */
+export function exportedHttpMethods(code: string): string[] {
+  const methods = new Set<string>(HTTP_METHODS);
+  return declarations(code)
+    .filter((d) => d.exported && methods.has(d.name))
+    .map((d) => d.name);
 }
