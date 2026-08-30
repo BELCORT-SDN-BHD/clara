@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { firmScopeRefusal } from "@/lib/require-firm-scope";
+
 // The same-origin runtime proxy — REPLACES next.config.ts's build-time `rewrites()`
 // (independent review 2026-08-27, F1/F2/F3/note16). Two findings drove this:
 //
@@ -96,7 +98,29 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
   return new Response(res.body, { status: res.status, headers: outHeaders });
 }
 
+// P4-2, ENTRANCE 3 OF THE SCOPE SPINE (design §4 E). `app/api/runtime` is a
+// SIBLING of the `(firm)` route group, not a child — a route group adds no URL
+// segment and wraps nothing outside itself — so the check in `(firm)/layout.tsx`
+// never runs for this handler. `proxy.ts` proves there is a SESSION here (its
+// matcher covers `/api/...`; only `_next/static`, `_next/image`, `favicon.ico`
+// and `brand/` are exempt), but not that the session holds an active firm
+// membership.
+//
+// A 403, NEVER A REDIRECT: a 307 to an HTML holding page is not an answer to a
+// `fetch`. `lib/documents/intake.ts`'s three legs and the bytes viewer read the
+// STATUS; a redirect would reach them as an unrecognisable failure — or, with
+// `redirect: "follow"` somewhere downstream, as an HTML body where JSON was
+// expected.
+//
+// BEFORE the `runtime_not_configured` 503 and before the outbound fetch, both
+// deliberately: a caller with no firm scope learns nothing about whether the
+// runtime is configured, and no unscoped request ever reaches the runtime at all.
+// The runtime still independently authenticates the forwarded bearer — this is a
+// SCOPE gate over the session, never a substitute for that.
 async function handle(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }): Promise<Response> {
+  const refusal = await firmScopeRefusal();
+  if (refusal) return refusal;
+
   const { path } = await ctx.params;
   return proxy(req, path);
 }
