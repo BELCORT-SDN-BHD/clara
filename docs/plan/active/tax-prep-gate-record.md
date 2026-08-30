@@ -23,6 +23,18 @@
 > is stored but ungranted and unreadable. The 裁-33 / 裁-44 reading the census also raised is
 > **resolved, not carried as a finding**: they constrain different verbs, and the resolution plus
 > the surface P6 builds is `tax-prep-wake-annexes.md` §12.)*
+>
+> **LEAD DISPOSITIONS, 2026-08-30 — recorded so no reviewer re-litigates a settled call.**
+> **OQ-A RULED (a), five PRs** (§4, card closed). **ACCEPTED as designed:** the `direct_queue`
+> carrier with `task_kind='tax_prep'` (wake design §2) · the reuse of `agent_act_receipts` with
+> no new `agent_receipt_surfaces` row (§3.4) · the tax-draft card on the needs-you page's second
+> feed rather than a tenth `list_review_queue` `row_kind` (§6) · **`tax_prep`'s `call_kind`
+> riding PR-9's own migration, not G1 PR-2a's** (§3.5), with the G1 PR-2a lane told not to
+> phrase its roster as final. **OQ-B / OQ-C / OQ-D / OQ-E go to the owner's batch with the
+> recommendations below verbatim**, plus the per-carrier framing of the Wave-G producer question
+> (annexes §11.1) and the standing INFORM that **SST-02 and the CP204 reminders have no lane and
+> no date**. **Still open here: nothing.** GB-1's routing question is answered; GB-2, GB-3 and
+> GB-4 are folds the named PRs owe, not questions.
 
 ---
 
@@ -235,6 +247,10 @@ and what the file is written for; **(b)** a genuine single PR, which §8 argues 
 a review instrument and which would need the ordering law re-opened with the owner (it came from
 the PR-0 gate). **Fail-closed default: (a).** Five PRs is strictly reversible into fewer; a
 merged single PR carrying a frozen evaluator is not reversible at all.
+
+**— RULED 2026-08-30 (lead): (a), FIVE PRs.** The PR-0 gate's ordering law stands and the
+filename is a label. **This card is closed; the build lanes take PR-2 … PR-6 as five PRs with
+the D1 window on PR-3 and the frozen member last.**
 
 ### OQ-B · How often does she re-ask? — the `tax_prep` cadence
 
