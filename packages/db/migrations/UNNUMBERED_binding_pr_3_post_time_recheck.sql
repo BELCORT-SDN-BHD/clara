@@ -115,10 +115,18 @@
 -- binding row -- steps (2) then (3) of 0154 SS5b's one order, the same order every binding
 -- lifecycle writer takes. It sits AFTER the advisory keys this body already holds (203005003
 -- vendor, 203005004 client, 203005005 duplicate), and that cannot close a cycle: NO binding
--- lifecycle writer takes any of those three keys (censused across propose / sign / decline /
--- revoke / reset / the stale-proposal sweep), so nothing this body waits on can be waiting on
--- something this body holds. The pair key is what makes the SUPPRESSION read non-stale -- an
--- unlocked read of other rows for the pair is exactly the launder C-1 drove two-session.
+-- lifecycle writer takes any of those three keys. That is MEASURED, not reasoned: on the rig,
+-- of the EIGHT bodies whose comment-stripped prosrc calls clara._binding_lock_pair -- both
+-- proposal doors, the agent core, sign, decline, reset_binding_decline, the stale-proposal sweep
+-- and this one -- clara._approve_entry_core is the ONLY one that also names 203005003 / 203005004
+-- / 203005005. So nothing this body waits on can be waiting on something this body holds.
+--
+-- RECORDED, not new: clara.revoke_vendor_identity_binding takes the ROW lock and no pair key at
+-- all -- 0154 SS5b's own enumeration excludes it. It is safe against THIS block for a reason
+-- rather than by luck: the block re-reads the binding row `for update`, so a revoke that commits
+-- between the unlocked pair read and that row lock is seen, under READ COMMITTED, by definition.
+-- The pair key is what makes the SUPPRESSION read non-stale -- an unlocked read of OTHER rows
+-- for the pair is exactly the launder C-1 drove two-session.
 --
 -- =====================================================================================
 -- WHAT THE CHECK DOES **NOT** DO, so nobody reads more into it than is there

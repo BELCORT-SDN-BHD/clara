@@ -464,6 +464,21 @@ apply rather than passing silently.
 > re-asserted byte-identical in its tail (`clara._approve_entry_core` among them, deliberately —
 > PR-3 replaces it and needs an undisturbed pre-image to pin).
 
+> **SUPERSEDED AGAIN 2026-08-30, by the RULED PR-3 (`binding_pr_3_post_time_recheck`).** The
+> table above is the PRE-裁-25 numbering, where "PR-3" meant the two read CoRs. Under the ruled
+> five-PR sequence, PR-3 is **the post-time re-check**, and it is the item's **second D1 window**
+> — exactly the contingency 裁-25 priced. Its inventory is ONE body:
+>
+> | PR | object | kind | D1? | why |
+> |---|---|---|---|---|
+> | PR-3 (ruled) | `clara._approve_entry_core(jsonb,uuid,uuid,text,text)` | **body SPLICE** (five counted anchors) | **YES — write-quiesce** | the estate's most-shared audited writer; the file carries its own `clara.runtime_heartbeats` quiesce guard. Pre-image prosrc `d5ab4afc…` (19 431 bytes), post-image `fcb81a85…` (37 968), both measured on a pristine `0001..0155` replay. **A SPLICE, never a retype** (PR-0 gate B8): the live body is no single file's text and a retype from `0037` would silently restore the breeding block `0106` §E excised — so the apply counts twelve anti-revert markers on the RECUT body before it commits. |
+> | PR-3 (ruled) | `clara.reset_binding_revocation(uuid,text,text)` | new function (裁-46) | **no** | brand-new name; the tail proves exactly one `pg_proc` row |
+> | PR-3 (ruled) | `clara.control_witnesses` — one INSERT | data | **no** | the sha is computed from the LIVE `prosrc`, never written as a literal (README deploy contract D2) |
+> | PR-3 (ruled) | `clara.event_types` + `clara.trigger_taxonomy` — `kb_binding.revocation_reset` | registry pair | **no** | additive at the ACTIVE taxonomy version; no version flip |
+>
+> The two read CoRs the old table calls "PR-3" are unbuilt and un-renumbered; the ruling did not
+> renumber the frontend trains either, and that re-home is still owed.
+
 ---
 
 ## Annex K — the fold-round verb contracts (2026-08-30, PR-1 as shipped)

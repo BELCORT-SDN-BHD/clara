@@ -161,6 +161,15 @@ behaviour is a PostgreSQL property, not a Clara mechanism.)
 > **closes the gate and its door starts refusing** — deliberately, because a control whose body
 > changed without review is a control nobody has reviewed. The instrument is
 > `encode(sha256(convert_to(prosrc,'UTF8')),'hex')` — prosrc, never `pg_get_functiondef`.
+> **The first witness is minted by 裁-18b PR-3** (`binding_pr_3_post_time_recheck`): it splices
+> the post-time binding re-check into `clara._approve_entry_core` and, in the same file, mints
+> `binding_post_time_recheck_v1` from the LIVE `prosrc` it just installed — never from a literal,
+> because a literal is a second, mutually-unaware copy of the one fact the row carries. That
+> migration is itself a **D1 window**: `_approve_entry_core` is the estate's most-shared audited
+> writer, and it carries its own quiesce guard (`clara.runtime_heartbeats` fresh ⇒ refuse).
+> **It is also the file that CLOSES PR-1's deliberate refusal**: `0154` ships the registry empty,
+> so `clara.sign_vendor_identity_binding` refuses `post_time_control_absent` until PR-3 lands.
+> Either PR-1's ceremony follows PR-3's, or the refusal ships and PR-3 lifts it.
 > `packages/db/tests/binding-proposal-pr-1.test.mjs`'s `bp1.C3-registry` cell asserts every
 > registered witness still matches its live body, so a forgotten re-witness reds the suite rather
 > than surfacing as a door that has quietly stopped working.
