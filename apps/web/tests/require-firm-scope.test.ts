@@ -5,7 +5,12 @@
 import "./next-runtime-globals";
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
+
+const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 import {
   FIRM_SCOPE_FORBIDDEN_BODY,
@@ -28,12 +33,12 @@ import {
   tokenFromSession,
   type ServerSession,
 } from "../lib/supabase/server-session";
-import { buildOutboundHeaders } from "../lib/runtime/outbound";
-
 /**
  * THE SCOPE SPINE'S BEHAVIOUR (P4-2; design `p4-design-2026-08-27.md` §4 E).
- * Its structural half — the route-leaf census, the two registries, the wire-shape
- * pins and the SQL-lexed rung-0 census — is `tests/firm-scope-surfaces.test.ts`.
+ * Its structural half — the route-leaf census, the three registries, the
+ * `await` pins and the SQL-lexed rung-0 census — is
+ * `tests/firm-scope-surfaces.test.ts` and `tests/firm-scope-db-pins.test.ts`.
+ * What the proxy forwards, and on which leg, is `tests/runtime-outbound.test.ts`.
  *
  * Proven here:
  *  1. THE DECISION, BOTH DIRECTIONS. One well-formed row grants and hands back
@@ -41,13 +46,14 @@ import { buildOutboundHeaders } from "../lib/runtime/outbound";
  *     a row failing validation, and a thrown read each deny with their own reason.
  *     Every denial cell is re-run against a WALL-LESS MUTANT and required to FAIL.
  *  2. ONE PRINCIPAL (HIGH-1). The grant carries the very session object the
- *     decision verified, and `buildOutboundHeaders` writes THAT token — a caller's
- *     own `Authorization` never survives to the runtime.
+ *     decision verified, so an entrance that must forward a token cannot reach for
+ *     a second, unverified one.
  *  3. EVERY PINNED FIELD (MEDIUM-2), table-driven: each of the six columns,
  *     missing / null / wrong-typed, must produce `malformed`.
  *  4. THE ADAPTERS. The layouts throw Next's REAL `NEXT_REDIRECT` with the digest
  *     asserted to NAME `/pending`; the API adapter answers a STATUS, not a
  *     redirect, and hands back the session to forward.
+ *  5. THE COST. One session resolution per scoped request.
  */
 
 const SUB = "11111111-1111-4111-8111-111111111111";
@@ -256,57 +262,6 @@ describe("MEDIUM-2 — every pinned field is validated, not four of six", () => 
 });
 
 // ---------------------------------------------------------------------------
-// HIGH-1 — the outbound identity, driven
-// ---------------------------------------------------------------------------
-
-describe("HIGH-1 — the request leaves as the principal the guard authorised", () => {
-  const A = "token-A-the-guard-verified";
-  const B = "token-B-the-caller-chose";
-
-  it("cookie A + header B → the runtime receives A, never B", () => {
-    const inbound = new Headers({ authorization: `Bearer ${B}`, "content-type": "application/json" });
-    const out = buildOutboundHeaders(inbound, A);
-    assert.equal(out.get("authorization"), `Bearer ${A}`);
-    assert.ok(!String(out.get("authorization")).includes(B), "the caller's bearer survived to the runtime");
-  });
-
-  it("a MISSING inbound Authorization still forwards A", () => {
-    const out = buildOutboundHeaders(new Headers({ "content-type": "application/json" }), A);
-    assert.equal(out.get("authorization"), `Bearer ${A}`);
-  });
-
-  it("the body headers still cross; cookies and origin never do", () => {
-    const inbound = new Headers({
-      "content-type": "application/octet-stream",
-      "content-length": "42",
-      cookie: "sb-access-token=leak; sb-refresh-token=leak",
-      origin: "https://evil.example",
-      referer: "https://evil.example/x",
-    });
-    const out = buildOutboundHeaders(inbound, A);
-    assert.equal(out.get("content-type"), "application/octet-stream");
-    assert.equal(out.get("content-length"), "42");
-    for (const dropped of ["cookie", "origin", "referer"]) {
-      assert.equal(out.get(dropped), null, `${dropped} reached the runtime`);
-    }
-    assert.deepEqual([...out.keys()].sort(), ["authorization", "content-length", "content-type"]);
-  });
-
-  it("RED-before: a forwarder that prefers the inbound header fails the same cell", () => {
-    const preferInbound = (inbound: Headers, token: string) => {
-      const h = new Headers();
-      h.set("authorization", inbound.get("authorization") ?? `Bearer ${token}`);
-      return h;
-    };
-    const inbound = new Headers({ authorization: `Bearer ${B}` });
-    assert.throws(() => {
-      const out = preferInbound(inbound, A);
-      assert.equal(out.get("authorization"), `Bearer ${A}`);
-    }, /token-B/);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // ENTRANCES 1 AND 2 — the layouts' adapter, through Next's REAL redirect
 // ---------------------------------------------------------------------------
 
@@ -465,5 +420,63 @@ describe("lib/supabase/server-session — the deciding halves", () => {
     assert.throws(() => {
       assert.equal(trusting({ sub: `${SUB}&select=*` }), null, "accepted a malformed sub");
     }, /accepted a malformed sub/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE COST — one session resolution per scoped request
+// ---------------------------------------------------------------------------
+
+describe("the cost of a scoped request", () => {
+  it("ONE session resolution and ONE read per decision", async () => {
+    let sessions = 0;
+    let reads = 0;
+    const outcome = await resolveFirmScope({
+      resolveSession: async () => {
+        sessions += 1;
+        return SESSION;
+      },
+      read: async () => {
+        reads += 1;
+        return [MEMBER];
+      },
+    });
+    assert.equal(outcome.granted, true);
+    assert.equal(sessions, 1, "the decision resolved the session more than once");
+    assert.equal(reads, 1, "the decision read caller_context more than once");
+  });
+
+  it("a DENIAL costs no read it does not need", async () => {
+    let reads = 0;
+    await resolveFirmScope({
+      resolveSession: async () => null,
+      read: async () => {
+        reads += 1;
+        return [MEMBER];
+      },
+    });
+    assert.equal(reads, 0, "the read went out for a caller with no session at all");
+  });
+
+  it("resolveServerSession is memoised per request with React's cache()", () => {
+    // The memo cannot be OBSERVED here — React's `cache` only memoises inside a
+    // request's own render scope, and a bare `node --test` process has none, so a
+    // behavioural assertion would measure the harness rather than the code. What
+    // is asserted is the wrapping itself, plus the two properties that make it
+    // safe: ONE module-level function object (never a per-render accessor, so the
+    // singleton law is respected), and no module-level mutable cache of its own
+    // (nothing that could outlive a request and leak across two).
+    const src = readFileSync(join(WEB_ROOT, "lib/supabase/server-session.ts"), "utf8");
+    assert.match(
+      src,
+      /export const resolveServerSession = cache\(/,
+      "the session resolution is no longer memoised per request",
+    );
+    assert.match(src, /from "react"/, "React's cache is not the memo being used");
+    assert.doesNotMatch(
+      src,
+      /^(let|var)\s/m,
+      "a module-level mutable binding could outlive a request and leak across two",
+    );
   });
 });

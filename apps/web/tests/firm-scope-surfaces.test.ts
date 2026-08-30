@@ -11,7 +11,7 @@ import { describe, it } from "node:test";
 import {
   SCOPE_ENTRANCES,
   SCOPE_EXEMPT_SURFACES,
-  SCOPE_PUBLIC_PREFIXES,
+  SCOPE_UNSCOPED_SURFACES,
 } from "../lib/require-firm-scope";
 import { reachableCode, stripComments } from "../test/sourceOracle";
 
@@ -84,21 +84,39 @@ function routeLeaves(dir: string = APP_DIR, segments: string[] = [], out: { file
   return out;
 }
 
-/** The registered entrance layouts, as the directories they cover. A leaf is
- *  ancestor-covered when one of them is a prefix of its own directory. */
+/** The registered entrance layouts, as the directories they cover. */
 const ENTRANCE_LAYOUT_DIRS = SCOPE_ENTRANCES.filter((e) => e.path.endsWith("/layout.tsx")).map((e) =>
   e.path.slice(0, -"/layout.tsx".length),
 );
+
+const isRouteLeaf = (file: string): boolean => /\/route\.(ts|tsx|js|jsx)$/.test(file);
+
+/**
+ * Does a registered entrance LAYOUT wrap this leaf?
+ *
+ * **Only ever true for a page.** A Route Handler is not rendered inside the React
+ * tree, so no `layout.tsx` runs for it — `app/(firm)/scratch/route.ts` sits under
+ * the firm group's directory and is nonetheless completely ungated by that group's
+ * layout. The first version of this classifier treated directory containment as
+ * coverage for every leaf kind, which is exactly the hole the independent review
+ * of #451 named (FIND-2): a route handler dropped anywhere under `(firm)/` passed.
+ */
+function ancestorCovered(file: string): boolean {
+  if (isRouteLeaf(file)) return false;
+  const dir = file.slice(0, file.lastIndexOf("/"));
+  return ENTRANCE_LAYOUT_DIRS.some((d) => dir === d || dir.startsWith(`${d}/`));
+}
 
 function classify(leaf: { file: string; url: string }): string {
   if (SCOPE_ENTRANCES.some((e) => e.path === leaf.file)) return "direct entrance";
   const exempt = SCOPE_EXEMPT_SURFACES.find((e) => e.path === leaf.file);
   if (exempt) return exempt.pending ? "PENDING exemption on a file that EXISTS" : "proven exemption";
-  if (SCOPE_PUBLIC_PREFIXES.some((p) => leaf.url === p || leaf.url.startsWith(`${p}/`))) return "public";
-  const dir = leaf.file.slice(0, leaf.file.lastIndexOf("/"));
-  if (ENTRANCE_LAYOUT_DIRS.some((d) => dir === d || dir.startsWith(`${d}/`))) return "ancestor-covered";
+  if (SCOPE_UNSCOPED_SURFACES.some((s) => s.path === leaf.file)) return "registered unscoped";
+  if (ancestorCovered(leaf.file)) return "ancestor-covered";
   return "UNCLASSIFIED";
 }
+
+const OK_CLASSES = ["registered unscoped", "ancestor-covered", "direct entrance", "proven exemption"];
 
 const SPINE_IMPORT = /from\s+["']@\/lib\/require-firm-scope["']/;
 const SPINE_CALL = /\b(requireFirmScope|firmScopeGuard|resolveFirmScope)\s*\(/;
@@ -134,32 +152,71 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
   it("EVERY leaf classifies — an unclassified authenticated surface is a hole", () => {
     const unclassified = leaves
       .map((l) => ({ ...l, klass: classify(l) }))
-      .filter((l) => l.klass !== "public" && l.klass !== "ancestor-covered" && l.klass !== "direct entrance" && l.klass !== "proven exemption");
+      .filter((l) => !OK_CLASSES.includes(l.klass));
     assert.deepEqual(
       unclassified.map((l) => `${l.file} (${l.url}) → ${l.klass}`),
       [],
-      "a route leaf is neither public, nor under a registered entrance, nor an entrance, nor a proven exemption",
+      "a route leaf is neither registered-unscoped, nor under a registered entrance layout, nor an entrance, nor a proven exemption",
     );
   });
 
-  it("VACUITY CONTROL: an invented unguarded leaf WOULD be caught", () => {
+  it("CELL 1 — every route.ts is an ENTRANCE or an EXEMPTION, never merely nested", () => {
+    // A Route Handler runs no layout. Directory containment is not coverage for
+    // one, so it has to be named — FIND-2's `app/(firm)/scratch/route.ts`.
+    const routes = leaves.filter((l) => isRouteLeaf(l.file)).map((l) => l.file).sort();
+    const named = [
+      ...SCOPE_ENTRANCES.map((e) => e.path),
+      ...SCOPE_EXEMPT_SURFACES.map((e) => e.path),
+    ];
+    const unnamed = routes.filter((f) => !named.includes(f));
+    assert.deepEqual(unnamed, [], "a route handler is gated by nothing and registered nowhere");
+    assert.ok(routes.length >= 2, `only ${routes.length} route handlers found — the walk is not seeing them`);
+  });
+
+  it("CELL 2 — every page.tsx has an entrance ANCESTOR or is registered unscoped", () => {
+    const pages = leaves.filter((l) => !isRouteLeaf(l.file));
+    const unproven = pages
+      .filter((l) => !ancestorCovered(l.file) && !SCOPE_UNSCOPED_SURFACES.some((s) => s.path === l.file))
+      .map((l) => l.file);
+    assert.deepEqual(unproven, [], "a page renders with no entrance above it and no registered reason");
+    assert.ok(pages.length >= 15, `only ${pages.length} pages found — the walk is not seeing them`);
+  });
+
+  it("VACUITY CONTROL: the two attacks FIND-2 named are both caught", () => {
     assert.equal(
       classify({ file: "app/export/page.tsx", url: "/export" }),
       "UNCLASSIFIED",
-      "the classifier waves through a new authenticated leaf — MEDIUM-3's attack A",
+      "a new authenticated page passes",
     );
-    assert.equal(classify({ file: "app/(firm)/clients/page.tsx", url: "/clients" }), "ancestor-covered");
-    assert.equal(classify({ file: "app/login/page.tsx", url: "/login" }), "public");
+    assert.equal(
+      classify({ file: "app/(firm)/scratch/route.ts", url: "/scratch" }),
+      "UNCLASSIFIED",
+      "a route handler under an entrance group passes — layouts do not wrap route handlers",
+    );
+    assert.equal(ancestorCovered("app/(firm)/scratch/route.ts"), false);
+    assert.equal(ancestorCovered("app/(firm)/clients/page.tsx"), true);
+    assert.equal(classify({ file: "app/login/page.tsx", url: "/login" }), "registered unscoped");
   });
 
-  it("the public registry matches lib/supabase/proxy.ts, BOTH ways", () => {
+  it("VACUITY CONTROL: the three registries are non-empty and their files exist", () => {
+    assert.equal(SCOPE_ENTRANCES.length, 3);
+    assert.ok(SCOPE_EXEMPT_SURFACES.length >= 2);
+    assert.ok(SCOPE_UNSCOPED_SURFACES.length >= 3);
+    for (const s of SCOPE_UNSCOPED_SURFACES) {
+      assert.ok(existsSync(join(WEB_ROOT, s.path)), `${s.path} is registered unscoped but does not exist`);
+      assert.ok(s.reason.length >= 80, `${s.path}'s reason is too thin`);
+    }
+  });
+
+  it("the public entries match lib/supabase/proxy.ts, BOTH ways", () => {
     const proxy = codeWithStrings("lib/supabase/proxy.ts");
     const m = /const\s+PUBLIC_PATH_PREFIXES\s*=\s*\[([^\]]*)\]/.exec(proxy);
     assert.ok(m, "proxy.ts no longer declares PUBLIC_PATH_PREFIXES where this gate can read it");
     const declared = [...(m[1] as string).matchAll(/["']([^"']+)["']/g)].map((x) => x[1]).sort();
+    const registered = SCOPE_UNSCOPED_SURFACES.filter((s) => s.public).map((s) => s.url).sort();
     assert.deepEqual(
       declared,
-      [...SCOPE_PUBLIC_PREFIXES].sort(),
+      registered,
       "the app's auth gate and the spine's idea of 'public' have drifted apart",
     );
   });
@@ -225,6 +282,40 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
         `${entrance.path} passes an argument — an entrance must never be handed its own reader`,
       );
     }
+  });
+
+  it("FIND-1 — every entrance AWAITS the spine", () => {
+    // A dropped `await` disarms the guard SILENTLY: `redirect()` throws
+    // NEXT_REDIRECT inside the floating promise, so the layout returns its markup
+    // and paints firm chrome for a caller with no firm, while the rejection
+    // surfaces later as an unhandled rejection nobody reads. tsc is happy; the
+    // behavioural suite is happy, because it calls the spine directly and never
+    // through the layout. Only this pin and the type-checked
+    // `@typescript-eslint/no-floating-promises` rule (eslint.config.mjs, the
+    // apps/web/app block) see it.
+    for (const entrance of SCOPE_ENTRANCES) {
+      assert.match(
+        executedCode(entrance.path),
+        /await\s+(requireFirmScope|firmScopeGuard)\(\s*\)/,
+        `${entrance.path} calls the spine without awaiting it — the redirect throw floats and the surface renders anyway`,
+      );
+    }
+  });
+
+  it("FIND-1 — the 403 entrance RETURNS the refusal, not merely computes it", () => {
+    // Awaiting is not enough for the API entrance: a guard whose refusal is
+    // computed and dropped is the same hole one line further on.
+    const entrance = SCOPE_ENTRANCES.find((e) => e.onDenial === "403");
+    assert.ok(entrance, "no 403 entrance is registered");
+    const code = executedCode(entrance.path);
+    const m = /const\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+firmScopeGuard\(\s*\)/.exec(code);
+    assert.ok(m, "the 403 entrance does not bind the guard result to a name");
+    const bound = m[1] as string;
+    assert.match(
+      code,
+      new RegExp(`return\\s+${bound}\\.response`),
+      `${entrance.path} never returns ${bound}.response — the refusal is computed and discarded`,
+    );
   });
 
   it("the two layouts REDIRECT and the API route REFUSES — not the other way round", () => {

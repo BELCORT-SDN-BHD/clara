@@ -44,6 +44,8 @@
 // this client in a global variable ... it must be built from THAT request's
 // cookies").
 
+import { cache } from "react";
+
 import type { SessionTokenAccessor } from "@/lib/session";
 import { createClient } from "@/lib/supabase/server";
 
@@ -133,8 +135,21 @@ export function fixedTokenAccessor(accessToken: string): SessionTokenAccessor {
  *
  * `getClaims` verifies the JWT signature locally against the project's asymmetric
  * signing keys, with no network round-trip.
+ *
+ * WRAPPED IN REACT'S `cache()` (ruled on the #451 fold round). The memo is scoped
+ * to ONE request: React's cache is keyed inside the request's own render scope, so
+ * a second caller in the same request reuses the first resolution and NOTHING is
+ * shared between requests — the property that makes this safe is the same one that
+ * makes it useful. It respects the house singleton law rather than bending it:
+ * `cache()` returns ONE module-level function object, not a per-render accessor,
+ * so the identity hazard the law guards is untouched.
+ *
+ * Today exactly one entrance resolves per request, so the measured load count is 1
+ * either way; the memo is what keeps it 1 when P4-6's nav shaping asks for the
+ * context a second time in the same render, instead of quietly doubling every
+ * scoped page's session work.
  */
-export async function resolveServerSession(): Promise<ServerSession | null> {
+export const resolveServerSession = cache(async (): Promise<ServerSession | null> => {
   const supabase = await createClient();
 
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
@@ -146,4 +161,4 @@ export async function resolveServerSession(): Promise<ServerSession | null> {
   if (claimsError) return null;
 
   return serverSessionFrom(sessionData.session, claimsData?.claims);
-}
+});

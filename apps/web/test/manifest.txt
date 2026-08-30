@@ -169,6 +169,7 @@ tests/proxy-matcher.test.ts
 tests/public-key.test.ts
 tests/require-firm-scope.test.ts
 tests/response-state.test.ts
+tests/runtime-outbound.test.ts
 tests/safe-redirect.test.ts
 tests/same-origin.test.ts
 tests/streamAuthority.test.mjs

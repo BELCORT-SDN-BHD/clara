@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { firmScopeGuard } from "@/lib/require-firm-scope";
-import { buildOutboundHeaders } from "@/lib/runtime/outbound";
+import { buildOutbound } from "@/lib/runtime/outbound";
 
 // The same-origin runtime proxy — REPLACES next.config.ts's build-time `rewrites()`
 // (independent review 2026-08-27, F1/F2/F3/note16). Two findings drove this:
@@ -47,14 +47,17 @@ async function proxy(req: NextRequest, path: string[], accessToken: string): Pro
 
   const target = `${base}/api/${path.map(encodeURIComponent).join("/")}${req.nextUrl.search}`;
 
-  // Allow-list ONLY the body headers, and write our OWN Authorization — never a
+  // Allow-list ONLY the body headers, and choose the credential BY LEG — never a
   // wholesale copy (F3/note16: that is how the old rewrite leaked the Supabase
-  // cookie jar), and never the caller's bearer (Codex review of #451, HIGH-1).
-  // `accessToken` is the token `firmScopeGuard()` verified and whose
-  // `caller_context` row authorised this request. See lib/runtime/outbound.ts —
+  // cookie jar), never the caller's bearer on a session leg (#451 HIGH-1), and
+  // never the session JWT on an upload-capability leg (#451 independent review:
+  // …/bytes and …/finalize take the runtime's short-lived capability, and
+  // overwriting it breaks every document upload). See lib/runtime/outbound.ts —
   // the rule lives there so it can be DRIVEN by a test rather than read off this
   // file and trusted.
-  const headers = buildOutboundHeaders(req.headers, accessToken);
+  const outbound = buildOutbound(req.headers, path, accessToken);
+  if (!outbound.ok) return outbound.response;
+  const headers = outbound.headers;
 
   const hasBody = METHODS_WITH_BODY.has(req.method) && req.body !== null;
 

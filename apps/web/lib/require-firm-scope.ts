@@ -256,16 +256,60 @@ export const SCOPE_ENTRANCES: ReadonlyArray<{
 ];
 
 /**
- * THE PUBLIC REGISTRY — route leaves that must NOT be scope-gated because they are
- * reachable without a session at all.
+ * THE UNSCOPED REGISTRY — surfaces that must NOT call the spine, each with the
+ * reason it would be wrong to add one.
  *
- * Kept here, beside the entrances, so the leaf census has one place to classify
- * from — and cross-checked BOTH WAYS against `lib/supabase/proxy.ts`'s own
- * `PUBLIC_PATH_PREFIXES` by the suite, so the app's auth gate and this spine's
- * idea of "public" cannot drift apart. P4-3 appends `/signup` to that array; the
- * cross-check is what will make it add a line here too.
+ * This is the third registry the independent review of #451 asked for (FIND-2),
+ * and it exists because "not an entrance and not an exemption" was previously
+ * decided by a URL-prefix rule rather than named file by file. A page that renders
+ * nothing firm-scoped is not automatically fine — it is fine for a REASON, and the
+ * reason belongs where the next lane will read it.
+ *
+ * `public: true` additionally means the proxy lets the request through with no
+ * session at all. Those entries are cross-checked BOTH WAYS against
+ * `lib/supabase/proxy.ts`'s own `PUBLIC_PATH_PREFIXES`, so the app's auth gate and
+ * this spine's idea of "public" cannot drift apart — that cross-check is what will
+ * make P4-3 register `/signup` here when it appends it there.
+ *
+ * Next's built-in `/_not-found` is deliberately ABSENT: this app ships no
+ * `app/not-found.tsx`, so there is no file to register and registering a
+ * non-existent path would be an exemption for something nobody can read.
  */
-export const SCOPE_PUBLIC_PREFIXES: ReadonlyArray<string> = ["/login", "/invite"];
+export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
+  readonly path: string;
+  readonly url?: string;
+  readonly public?: true;
+  readonly reason: string;
+}> = [
+  {
+    path: "app/login/page.tsx",
+    url: "/login",
+    public: true,
+    reason:
+      "The sign-in surface. It must render with NO session, so it can carry no " +
+      "session-scoped check at all; gating it would make signing in require being " +
+      "signed in.",
+  },
+  {
+    path: "app/invite/[token]/page.tsx",
+    url: "/invite",
+    public: true,
+    reason:
+      "The invite-acceptance journey, which by definition runs BEFORE the invitee " +
+      "has a membership — accept_invite is the door that mints one. A scope check " +
+      "here would refuse every invitee at the exact moment the estate wants them " +
+      "in, and it is why the spine lives in the two route-group layouts rather " +
+      "than in the root one.",
+  },
+  {
+    path: "app/layout.tsx",
+    reason:
+      "The ROOT layout wraps every group — the entry surfaces and the holding page " +
+      "included. A check here would redirect the invitee mid-acceptance and would " +
+      "send /pending to itself forever. Scope belongs to the two scoped groups and " +
+      "the one API route, never above them.",
+  },
+];
 
 /**
  * THE EXEMPTION REGISTRY — authenticated surfaces that deliberately do NOT call
