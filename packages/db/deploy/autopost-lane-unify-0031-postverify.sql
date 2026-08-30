@@ -163,8 +163,19 @@ begin
   -- splice text, confirmed directly against a live 0155-frontier rig before this file was
   -- touched. Gated on the migration STEM, never a number (numbers are claimed at merge,
   -- `.claude/rules/db-migrations.md`): a chain that genuinely lacks 0053 keeps the
-  -- original pre-0053 literal check, so this probe still means something there instead of
-  -- silently degrading to a no-op on an incomplete or ancient chain.
+  -- original pre-0053 literal check.
+  --
+  -- NARROWED (fold FIND-1): that fallback's own real reach is smaller than "any pre-0053
+  -- chain" -- `admit_autodraft_task`'s outcome has been a CASE since 0034
+  -- (`0034_autodraft_retry_door.sql:410` splices the bare literal into
+  -- `case when v_is_retry then 're_admitted' else 'admitted' end`), so the plain
+  -- `outcome','admitted` substring this else-branch pins only ever matched the ORIGINAL
+  -- 0031 ceremony window -- frontiers 31 through 33, before 0034 applied. On any chain at
+  -- 34 or later but short of 0053 (a window with no live deploy history to protect), this
+  -- probe would ALSO fail to find the bare literal and this else-branch would red for the
+  -- same reason the pre-fix if-branch did -- correctly, since neither this file's fix nor
+  -- its fallback claims to track every intermediate outcome shape, only the two that ever
+  -- mattered to a real ceremony (0031's own, and 0053-onward's).
   if exists (select 1 from clara.schema_migrations
               where version = '0053_autodraft_readmit_after_withdrawal') then
     if position('v_dedupe:=clara._reserve_op(f.firm_id,''admit_autodraft_task''' in v_norm)=0
