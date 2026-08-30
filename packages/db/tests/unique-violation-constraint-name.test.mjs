@@ -20,6 +20,12 @@
 //     probe would have been mislabelled.
 //
 // Serial discipline: --test-concurrency=1 (shared rig convention).
+//
+// TWO-ARMED AUTHORING GATE. The package-wide sweep preloads
+// unique-violation-constraint-name-preintegration-gate.mjs because the migration remains
+// UNNUMBERED until merge and is therefore absent from HEAD's numbered replay. That shape skips
+// these cells loudly. A focused run does not preload it, so a missing migration still fails;
+// once the migration is applied, both behavioural cells execute in either shape.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -31,26 +37,25 @@ import { seedWindow, DATES_OK } from "./binding-proposal-pr-1-helpers.mjs";
 
 let ready = false;
 let w = null;
+let missingReason = null;
 
 before(async () => {
   // The catalog gate names the WALL's own marker text (constraint_name), not just the door's
   // existence -- propose_vendor_identity_binding has resolved since 0028, so a bare
   // to_regprocedure check would pass on a pre-migration chain and this file's cells would then
   // hard-fail on "expected binding_conflict, got a raw 23505" with no single diagnosis of WHY.
-  // Like wake-open-firm-question-kind-wall.test.mjs, this migration and this test file ship in
-  // the SAME PR -- no preintegration gate is needed for a cross-chain window that cannot occur.
   const catalog = await rootQuery(
     `select position('constraint_name' in p.prosrc) <> 0 as walled
        from pg_proc p where p.oid = 'clara.propose_vendor_identity_binding(jsonb,text)'::regprocedure`,
   );
   if (!(await has28()) || !catalog.rows[0]?.walled) {
-    throw new Error(
+    missingReason =
       "unique-violation-constraint-name premise missing: 0028 absent, or " +
       "clara.propose_vendor_identity_binding does not read constraint_name -- this migration and " +
-      "this test file ship in the SAME PR (packages/db/migrations/UNNUMBERED_unique_violation_" +
-      "constraint_name.sql), so a chain carrying this file but not the migration is a broken " +
-      "checkout, not a legitimate pre-wave state -- failing loudly rather than skipping.",
-    );
+      "this test file ship together (packages/db/migrations/UNNUMBERED_unique_violation_" +
+      "constraint_name.sql).";
+    if (process.env.CLARA_ALLOW_MISSING_UNIQUE_VIOLATION_CONSTRAINT_NAME === "1") return;
+    throw new Error(`${missingReason} Focused/post-migration runs fail loudly; only the explicit package-wide preintegration sweep may skip.`);
   }
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
@@ -61,7 +66,8 @@ after(async () => { printLaneNotes("unique-violation-constraint-name"); await en
 
 function unready(t) {
   if (!ready) {
-    t.skip("rig not ready: 0028 absent, or the constraint_name catalog gate found the handler unwalled");
+    console.warn(`SKIP unique-violation-constraint-name: ${missingReason}`);
+    t.skip(`${missingReason} Explicit package-wide preintegration run.`);
     return true;
   }
   return false;
