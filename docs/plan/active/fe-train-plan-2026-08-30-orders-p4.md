@@ -34,24 +34,32 @@ the lead**, not a redesign, and not something you work around.
 ### 0.3 Mechanics
 
 Own worktree, own branch: `git -C C:\Users\zhant\Desktop\clara-rebuild worktree add
-.claude\worktrees\<lane> -b <branch> origin/main`. Junction the main checkout's `node_modules` at
-the worktree root (`cmd /c mklink /J <wt>\node_modules C:\Users\zhant\Desktop\clara-rebuild\node_modules`).
-Remove a junction with `rmdir` **only** — never a recursive delete through one. **No rig and no
-docker for P4-1…P4-5** (they touch no migration); **P4-D needs one**, assigned by the lead.
+.claude\worktrees\<lane> -b <branch> origin/main`. **No `pnpm install`** — junction the main
+checkout's `node_modules` at the worktree root
+(`cmd /c mklink /J <wt>\node_modules C:\Users\zhant\Desktop\clara-rebuild\node_modules`) **and
+under `apps\web`** (see the precondition below). Remove a junction with `rmdir` **only** — never a
+recursive delete through one. **No rig and no docker for P4-1…P4-6** (they touch no migration);
+**P4-D needs one**, assigned by the lead. **Tear your worktree down at report time**
+(`git worktree remove`) — the host runs tight on disk.
 
-> **MEASURED PRECONDITION — the main checkout cannot supply `apps/web`'s dependencies** (this lane,
-> 2026-08-30). `apps/web/node_modules` does **not exist** in `C:\Users\zhant\Desktop\clara-rebuild`,
-> and its store genuinely lacks the packages: `ls node_modules/.pnpm` there returns `next@15.5.20`
-> (that is **apps/dashboard's** pin) and **zero** entries for `@base-ui/react`, `cmdk`, `next-intl`,
-> `@opennextjs/cloudflare`, `wrangler` or `tw-animate-css`. The store being empty of them — rather
-> than a link farm being missing over a populated store — is what says this was never installed
-> here, not deleted. Several existing lane worktrees DO carry the full tree in their **own**
-> `node_modules/.pnpm` (with `next@16.3.3`), so the frontend lanes have been installing per-worktree
-> all along. **Consequence: the plain junction recipe will NOT let you run
-> `pnpm --filter @clara/web typecheck|lint|test|build`.** Resolve it with the lead before you start
-> — junction from a worktree that already has the tree, or get an explicit grant for a scoped
-> install. **Do not silently skip the four verify commands**, and do not run a broad `pnpm install`
-> against the main checkout on your own initiative (this host filled to 0 bytes twice this week).
+> **THE `apps/web` DEPENDENCY PRECONDITION — check it before your first command.**
+> **Junction `apps/web/node_modules` from the main checkout too**, exactly as the root one:
+> `cmd /c mklink /J <wt>\apps\web\node_modules C:\Users\zhant\Desktop\clara-rebuild\apps\web\node_modules`.
+>
+> **Then verify it, and if `apps/web/node_modules/next` is ABSENT in the main checkout, STOP and
+> report — do not install anything yourself.** Probe that exact path: this is a pnpm workspace, so
+> the ROOT `node_modules` never carries `next` for `apps/web` (it carries `apps/dashboard`'s
+> `next@15.5.20`), and a root-level probe therefore reports a false alarm either way. `apps/web`'s
+> own pin is `next@16.3.3`.
+>
+> *Provenance, so nobody re-diagnoses this:* on 2026-08-30 this lane measured the main checkout
+> carrying **none** of `apps/web`'s dependencies — no `apps/web/node_modules`, and zero store
+> entries for `@base-ui/react`, `cmdk`, `next-intl`, `@opennextjs/cloudflare`, `wrangler` or
+> `tw-animate-css`. The lead resolved it centrally by installing `@clara/web`'s deps into the main
+> checkout's store, so every FE lane junctions from main as the brief says. **Per-lane installs are
+> not the answer and never were** — this host filled to 0 bytes twice that week. If the probe fails,
+> the central install has regressed and that is the lead's to fix, not yours to work around.
+> **Never silently skip the four verify commands.**
 
 Hooks you will hit: no shell file writes (`>`, `>>`, `sed -i`, `cp`, heredoc-to-file) — use
 Write/Edit, and scripts via Write then `bash script.sh`; commit subject ≤ 72 chars; `git stash`
