@@ -881,9 +881,12 @@ reset role;
 -- propose. ck_vib_revoked is a bidirectional equality, so revoked_at MUST clear in the same
 -- statement or the row violates its own CHECK -- SS1 (g) reads that CHECK rather than trusting
 -- this comment. `revoked_by` is deliberately LEFT on the row: it is not CHECK-paired to the
--- status, and who took the authority away is history worth keeping. `revoke_reason` clears with
--- the stamp and is carried WHOLE onto the receipt, because the reason a human ended an authority
--- is exactly what a later reader will want back.
+-- status, and who took the authority away is history worth keeping. `revoke_reason` clears
+-- alongside the stamp -- a CHOICE, not a CHECK: there is no ck_vib_revoke_reason_honest the way
+-- there is a ck_vib_decline_reason_honest (measured, not assumed), so leaving it would have been
+-- legal and would have left a reason standing on a row whose revocation had been lifted. It is
+-- carried WHOLE onto the receipt instead, because the reason a human ended an authority is
+-- exactly what a later reader will want back.
 set role clara_fn_owner;
 
 create function clara.reset_binding_revocation(
