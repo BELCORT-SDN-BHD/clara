@@ -325,23 +325,23 @@
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.impl.ts": {
-      "sha256": "a5e79592d6f57ae7b3408c8885646356aae4875026b18df07f26560ba5bea580",
+      "sha256": "7f3394952abdc79af31d5832e492e3aeac61b7a3c4d3329d915db39fc6a7d4ce",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.infra.ts": {
-      "sha256": "b337b87e0423bca3e591eb47ac7c26f5e5ea3eebc12256765546a7b41b9c7515",
+      "sha256": "fc5d94e7bfa5ab0b4dff4cfbe49fa8ba2e3fd7c4f52fcdb5701490c5eb5ff060",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.pack.ts": {
-      "sha256": "cac0abe48c95b86e125cccfed491dc570cb4d5a12a1216ae71b49ca2147a8023",
+      "sha256": "bec343837bd6b47511344e2defc63f9ffdf11739a7c047dd57fdf15e2ea7b730",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.prompt.ts": {
-      "sha256": "3d583955ebec6484610dfaa0d5bf84ecc801f31009ff9f33cf73e65544cc2f22",
+      "sha256": "18292c2c0cf4d47748a36317a0a4e6872b64a056a6e2c6b6bdf90e6c789f6084",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.tools.ts": {
-      "sha256": "84f55a1dc338689ac74b87915c369d635e2095b44122567f65b53b9fa7c58a47",
+      "sha256": "c566c16b0bd64d867c6d04c5dfcfda78bcaaaff2525346931fa690c11e5fec19",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.ts": {
@@ -793,7 +793,7 @@
       "note": ""
     },
     "packages/runtime/workflows/closePrep.v1.infra.ts": {
-      "sha256": "662cee3d73b2389f87f312dce610ef731c6011dcfb8cc63fa8357226725cfaa0",
+      "sha256": "2993a6d6136742dcacba16e1b08287ee357806cf9a8bb01542abd96942bbb71a",
       "note": ""
     },
     "packages/runtime/workflows/closePrep.v1.prompt.ts": {

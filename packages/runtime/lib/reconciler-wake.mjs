@@ -23,7 +23,8 @@
 //      running->cancel_requested->cancelled (reconcileTasks §C's own two-step shape — a direct
 //      running->cancelled jump is not itself legal in the wake/close_prep matrix either).
 
-import { isRunNotFound, terminalFor } from "./reconciler.mjs";
+import { WorkflowRunNotFoundError } from "workflow/internal/errors";
+import { terminalFor } from "./reconciler.mjs";
 import { TaxonomyHaltError } from "./relay.mjs";
 import { recordTaskDeadLetter, readDeadLetterAttempts, WAKE_ENGINE_ENQUEUE_CONSUMER } from "./wake-engine.mjs";
 
@@ -31,6 +32,36 @@ const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 
 function isLeaderHalt(err) {
   return err instanceof TaxonomyHaltError || !!err?.halt;
+}
+
+/**
+ * IS THIS THE ENGINE SAYING THE RUN DOES NOT EXIST — 裁-44 R2 / FOLD-13, and review law 3 in its
+ * purest form: a guard that reads a NAME reads a projection of the thing, not the thing.
+ *
+ * WHAT WAS MEASURED, not assumed. The installed WDK exports a real class,
+ * `WorkflowRunNotFoundError` from `workflow/internal/errors` (re-exported from
+ * `@workflow/errors@4.2.1`), and that class carries a `runId` field. But its OWN `static is()` is
+ * itself a name check — `isError(value) && value.name === 'WorkflowRunNotFoundError'`
+ * (`@workflow/errors/dist/index.js:346-348`, read directly). Driven on this host: an ordinary
+ * Error with `name` set to that string and the same message satisfies the vendor's `is()` and is
+ * NOT an instance of the class. So delegating to the vendor's predicate alone would terminal-ize
+ * live work on any transient error that happened to be spelled that way — which is precisely what
+ * the old `isRunNotFound` did, and what `G1B-LOST-1` was replaying rather than proving.
+ *
+ * THE TEST THIS LANE USES is `instanceof` — the strongest identity available — OR, for the case
+ * where two copies of the module get loaded and `instanceof` goes false across the realm boundary,
+ * the vendor's own predicate PLUS the class's structural brand (`runId`), which an impostor does
+ * not carry. Never the bare name.
+ *
+ * WHY THIS IS WAKE-LOCAL rather than a fix to `isRunNotFound` in reconciler-documents.mjs: that
+ * predicate is the DOCUMENT lane's (`:290`) and changing its identity test in place would move a
+ * behaviour this PR neither designed nor tests. Folding the two onto one shared helper is a
+ * follow-up, recorded as such.
+ */
+export function isWakeRunNotFound(err) {
+  if (err == null) return false;
+  if (err instanceof WorkflowRunNotFoundError) return true;
+  return WorkflowRunNotFoundError.is(err) && typeof err.runId === "string" && err.runId.length > 0;
 }
 
 /** Resolve a stuck row's own wake-engine source (by event_type for kind='wake', by task_kind
@@ -207,10 +238,11 @@ async function settleFromEngineTruth(client, deps) {
       // was skipped on EVERY sweep, forever: §A cannot see it (workflow_run_id is not null) and §B
       // walked away from it. That is precisely the stranded row _settle_wake_task exists to cure.
       // reconciler.mjs's own §C has always made this distinction (:276-277) and terminalFor already
-      // maps 'lost' -> failed/engine_lost for a running task (:58); this belt simply asks the same
-      // question with the same instrument. A REAL transient error still skips — isRunNotFound is a
-      // POSITIVE test on not-found, never an absence.
-      if (isRunNotFound(err)) {
+      // maps 'lost' -> failed/engine_lost for a running task (:58); this belt asks the same
+      // question, but through the ENGINE'S OWN CLASS rather than the spelling of an error message
+      // (裁-44 R2 / FOLD-13 — see isWakeRunNotFound). A REAL transient error still skips, and so
+      // now does an impostor that merely calls itself RunNotFound.
+      if (isWakeRunNotFound(err)) {
         engineTerminal = "lost";
       } else {
         log(`[reconcile] wake-engine status probe failed task=${t.id}: ${err?.message ?? err}`);

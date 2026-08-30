@@ -141,7 +141,18 @@ test("G1B-I3 EVERY DB call matches its function's LIVE declared arity AND argume
   const { readFileSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
   const dir = fileURLToPath(new URL("../workflows/", import.meta.url));
-  const files = ["bankAgent.v1.tools.ts", "closePrep.v1.reads.ts", "closePrep.v1.tools.ts"];
+  // 裁-44 R2 / FOLD-14(b) — THE INFRA FILES JOIN THE CORPUS. The two _settle_wake_task calls were
+  // the only G1 DB calls still written positionally, and their p_outcome/p_error_code pair is
+  // adjacent same-typed text drawn from two small closed rosters: a transposition is admitted by
+  // the driver and lands as a CHECK violation naming the wrong column, or — on the pair that
+  // satisfies both — is written silently the other way round. Sixteen calls became EIGHTEEN.
+  const files = [
+    "bankAgent.v1.tools.ts",
+    "bankAgent.v1.infra.ts",
+    "closePrep.v1.reads.ts",
+    "closePrep.v1.tools.ts",
+    "closePrep.v1.infra.ts",
+  ];
 
   const calls = [];
   for (const f of files) {
@@ -163,9 +174,15 @@ test("G1B-I3 EVERY DB call matches its function's LIVE declared arity AND argume
       calls.push({ file: f, name: m[1], span, max: Math.max(...placeholders), distinct: placeholders.size, names });
     }
   }
-  // 4 bank + 12 close = 16. Pinned as a COUNT so a future call that silently stops matching the
-  // regex (a reformat, a renamed alias) is caught here rather than skipped in silence.
-  assert.equal(calls.length, 16, `expected 16 DB calls across the two tool sets, saw ${calls.length}`);
+  // 4 bank verbs + 12 close wrappers + the 2 settlement calls = 18. Pinned as a COUNT so a future
+  // call that silently stops matching the regex (a reformat, a renamed alias) is caught here
+  // rather than skipped in silence.
+  assert.equal(calls.length, 18, `expected 18 DB calls across the two closures, saw ${calls.length}`);
+  assert.equal(
+    calls.filter((c) => c.name === "_settle_wake_task").length,
+    2,
+    "and BOTH settlement call sites are in the corpus — one per lane (裁-44 R2 / FOLD-14b)",
+  );
 
   for (const c of calls) {
     const r = await rig.rootQuery(
@@ -317,6 +334,38 @@ test("G1B-I9 裁-44 FOLD-3 — a night that ATTEMPTED writes and admitted none F
   const b1 = bank.classifyBankOutcome(mkBank({ admitted: 4, digest: "abc", cancelledAs: "cancelled" }), "");
   assert.equal(b1.kind, "cancelled");
   assert.equal(b1.observed, "cancelled", "an ALREADY-terminal status is reported as-is — the workflow stands down on it rather than raising CLR13");
+});
+
+test("G1B-I11 裁-44 R2 / FOLD-14(a) — the pack attempt key FAILS CLOSED; there is no clock fallback left to collide", { skip }, async () => {
+  // THE DEFECT: stepAttemptKey fell back to `Date.now()` when the WDK's step metadata was
+  // unavailable. That is not GUARANTEED unique — two attempts inside one millisecond mint ONE
+  // key, which is exactly the collision FOLD-8 exists to prevent, now arriving silently instead
+  // of loudly. A key this function cannot vouch for is worse than no run at all.
+  const bank = await import("../workflows/bankAgent.v1.impl.ts");
+
+  // (1) NO STEP CONTEXT AND NOTHING INJECTED — which is where a direct-drive cell runs, and where
+  // the old code quietly minted a clock token. It must throw.
+  assert.throws(
+    () => bank.stepAttemptKey(),
+    /no step context .* and none was injected/,
+    "outside a step, with no injected key, the only honest answer is to refuse",
+  );
+
+  // (2) AN EXPLICITLY INJECTED KEY is the tests' own door and still works — this is what every
+  // direct-drive cell in this battery uses, so the fail-closed branch above cannot be satisfied
+  // by simply never calling the function.
+  assert.equal(bank.stepAttemptKey("step-xyz#3"), "step-xyz#3");
+  assert.throws(() => bank.stepAttemptKey(""), /no step context/, "a blank injected key is not a key");
+
+  // (3) THE ABSENCE OF ANY CLOCK PATH, read off the shipping source rather than inferred from the
+  // two behaviours above — a fallback reachable on some third branch would still be a fallback.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const src = readFileSync(fileURLToPath(new URL("../workflows/bankAgent.v1.impl.ts", import.meta.url)), "utf8");
+  const body = src.slice(src.indexOf("export function stepAttemptKey"));
+  const fn = body.slice(0, body.indexOf("\n}\n") + 3);
+  assert.doesNotMatch(fn, /Date\.now|Math\.random|performance\.now/, "no clock, no randomness — the key is an identity or it is nothing");
+  assert.equal((fn.match(/throw new Error/g) ?? []).length, 2, "both unusable-metadata branches throw");
 });
 
 test("G1B-I7 a fault that never reached the database is OURS, not the model's", { skip: skip0138 }, async () => {

@@ -206,23 +206,37 @@ export function classifyBankOutcome(
  * installed package's declaration, not from a doc page). Together they are unique per attempt,
  * which is exactly and only what the key needs.
  *
- * THE FALLBACK IS NOT A SILENT ONE. getStepMetadata throws outside a step context — which is where
- * every cell in this repo drives these tools from — so a failure here is not necessarily a
- * production fault, and the honest response is a clock token that is still unique per attempt plus
- * a warning naming what happened. The FIX holds on either branch; what the WDK branch buys is an
- * identity rather than a clock.
+ * 裁-44 R2 / FOLD-14(a) — THERE IS NO CLOCK FALLBACK ANY MORE, and its removal is the fix. The
+ * earlier version fell back to `Date.now()`, which is not GUARANTEED unique — two attempts inside
+ * one millisecond produce one key, which is exactly the collision FOLD-8 exists to prevent, now
+ * arriving silently instead of loudly. A key this function cannot vouch for is worse than no run.
+ *
+ * THE TWO FAILURE MODES ARE DIFFERENT AND ARE TREATED DIFFERENTLY, because getStepMetadata THROWS
+ * outside a step context — which is where every direct-drive cell in this repo runs:
+ *   - metadata PRESENT but unusable (no stepId, a non-integer attempt) → throw. That is a WDK
+ *     contract this build does not understand, and guessing past it is how a wrong durable amount
+ *     gets written under a key nobody can reconstruct.
+ *   - NO step context at all → the caller must have supplied a key explicitly. Tests do; a
+ *     production step never lands here. If neither is available, throw.
+ * A throw inside the model step fails the step loudly, the WDK retries, and the run settles
+ * `failed` through the entry's own catch — visible, never a silently-colliding key.
  */
-export function stepAttemptKey(): string {
+export function stepAttemptKey(injected?: string): string {
+  if (typeof injected === "string" && injected.length > 0) return injected;
+  let m: { stepId?: unknown; attempt?: unknown };
   try {
-    const m = getStepMetadata() as { stepId?: unknown; attempt?: unknown };
-    if (typeof m?.stepId === "string" && m.stepId.length > 0 && Number.isInteger(m?.attempt)) {
-      return `${m.stepId}#${String(m.attempt)}`;
-    }
-    console.warn("[bankAgent_v1] getStepMetadata returned no usable stepId/attempt — falling back to a clock token for the pack op key");
-  } catch {
-    // Not inside a step (a direct-drive cell). Not an error; just not the WDK's identity.
+    m = getStepMetadata() as { stepId?: unknown; attempt?: unknown };
+  } catch (e) {
+    throw new Error(
+      `bankAgent_v1 has no step context to take a pack attempt key from and none was injected — refusing to run rather than mint a key that could collide (${e instanceof Error ? e.message : String(e)})`,
+    );
   }
-  return `t${Date.now().toString(36)}`;
+  if (typeof m?.stepId === "string" && m.stepId.length > 0 && Number.isInteger(m?.attempt)) {
+    return `${m.stepId}#${String(m.attempt)}`;
+  }
+  throw new Error(
+    `bankAgent_v1 got step metadata it cannot use for a pack attempt key (stepId=${String(m?.stepId)}, attempt=${String(m?.attempt)}) — refusing to run rather than mint a key that could collide`,
+  );
 }
 
 /** STEP 3 — the settlement. One verb, both projections, idempotent on replay. */

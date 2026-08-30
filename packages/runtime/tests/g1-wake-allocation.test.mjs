@@ -28,11 +28,15 @@ const closeTools = await import("../workflows/closePrep.v1.tools.ts");
 const closePrompt = await import("../workflows/closePrep.v1.prompt.ts");
 
 /** Build a pack view the way the DB's own reply would produce one, through the SHIPPING reader —
- *  never by hand-constructing the Maps, which would let readPackView rot untested. */
-const viewOf = (lines, candidates) =>
-  pack.readPackView({ digest: "d".repeat(64), lines, candidates });
+ *  never by hand-constructing the Maps, which would let readPackView rot untested. Throws on a
+ *  parse failure so a fixture that stopped being valid cannot quietly become an empty pack. */
+const viewOf = (lines, candidates) => {
+  const parsed = pack.readPackView({ digest: "d".repeat(64), lines, candidates });
+  assert.equal(parsed.ok, true, `fixture pack must parse — ${parsed.reason ?? ""} ${parsed.detail ?? ""}`);
+  return parsed.view;
+};
 
-const line = (id, cents) => ({ line_id: id, amount_cents: cents });
+const line = (id, cents, description = "line text") => ({ line_id: id, amount_cents: cents, description });
 const cand = (id, dr, cr) => ({ entry_id: id, debit_remaining_cents: dr, credit_remaining_cents: cr });
 
 test("G1B-ALLOC-1 the match tool's schema has NO PLACE FOR AN AMOUNT — the 4,999+5,001 split is inexpressible", async () => {
@@ -173,8 +177,11 @@ test("G1B-PROSE-1 裁-44 FOLD-7 — every prose field the model writes is CAPPED
     [bank.match_bank_line, { lines: [uuid()], entries: [uuid()], rationale: "r" }, "rationale", PROSE],
     [bank.propose_line_exception, { line_id: uuid(), kind: "bank_error", reason: "r", rationale: "r" }, "reason", PROSE],
     [bank.propose_line_exception, { line_id: uuid(), kind: "bank_error", reason: "r", rationale: "r" }, "rationale", PROSE],
-    [bank.propose_identifier_promotion, { counterparty_id: uuid(), identifier_kind: "tin", identifier_value: "v", times_seen: 1, rationale: "r" }, "identifier_value", PROSE],
-    [bank.propose_identifier_promotion, { counterparty_id: uuid(), identifier_kind: "tin", identifier_value: "v", times_seen: 1, rationale: "r" }, "rationale", PROSE],
+    [bank.propose_identifier_promotion, { counterparty_id: uuid(), identifier_kind: "tin", identifier_value: "v", rationale: "r" }, "identifier_value", PROSE],
+    // 裁-44 R2 / FOLD-11 — this rationale's cap is the house cap MINUS the budget reserved for
+    // the derived-sightings note the tool appends, so the composed string can never exceed the
+    // database's own 4000. Asserted at its real value rather than the shared one.
+    [bank.propose_identifier_promotion, { counterparty_id: uuid(), identifier_kind: "tin", identifier_value: "v", rationale: "r" }, "rationale", PROSE - 64],
     [close.list_fiscal_years, { rationale: "r" }, "rationale", PROSE],
     [close.get_close_plan, { fiscal_year_id: uuid(), rationale: "r" }, "rationale", PROSE],
     [close.begin_close, { fiscal_year_id: uuid(), rationale: "r" }, "rationale", PROSE],
@@ -211,26 +218,129 @@ test("G1B-PROSE-1 裁-44 FOLD-7 — every prose field the model writes is CAPPED
   assert.equal(close.propose_close.inputSchema.safeParse({ ...proposeBase, drafted }).success, true, "the positive control: a real attestation still parses");
 });
 
-test("G1B-ALLOC-4 readPackView reads only what the DATABASE returned, and fails closed on a pack with no digest", async () => {
-  // The reader is the seam between "what the DB said" and "what a write may derive", so its
-  // failure mode matters as much as its success one: a reply with no digest is not a pack, and
-  // returning an empty view rather than null would leave the write gate open with nothing behind
-  // it (the same absence-as-evidence shape M4 was).
-  assert.equal(pack.readPackView({ lines: [], candidates: [] }), null, "no digest, no pack");
-  assert.equal(pack.readPackView(null), null);
-  assert.equal(pack.readPackView({ digest: "" }), null, "a blank digest is not a digest");
+test("G1B-ALLOC-4 裁-44 R2 / FOLD-12 — a pack this parser cannot fully account for FAILS; it never becomes an authoritative empty one", async () => {
+  // THE DEFECT THIS CELL USED TO BLESS. The earlier reader accepted `{digest}` as a pack with
+  // empty arrays and turned a missing or malformed cents value into ZERO. Both are absence as
+  // evidence (review law 2), and the consequence was worse than a wrong refusal: the run ARMED
+  // itself on a corrupt reply, every write was refused for "not in the pack", and the task settled
+  // `nothing_due` — a corrupt read reported as a quiet night. The cell asserted that behaviour.
+  const D = "a".repeat(64);
+  const id = randomUUID();
+  const bad = (reply, reason) => {
+    const r = pack.readPackView(reply);
+    assert.equal(r.ok, false, `must FAIL: ${reason} — got ${JSON.stringify(r).slice(0, 200)}`);
+    assert.equal(r.reason, reason, `and by NAME, so the failure is diagnosable`);
+    return r;
+  };
 
-  // A pack whose arrays are missing entirely is still a pack — it just offers nothing, which is
-  // exactly what an account with no unmatched lines looks like.
-  const empty = pack.readPackView({ digest: "a".repeat(64) });
-  assert.equal(empty.lineCents.size, 0);
-  assert.equal(empty.entryCaps.size, 0);
+  bad(null, "pack_not_object");
+  bad("a string", "pack_not_object");
+  bad({ lines: [], candidates: [] }, "no_digest");
+  bad({ digest: "", lines: [], candidates: [] }, "no_digest");
+  // DIGEST-ONLY is the shape the old reader called an empty pack. It is a reply missing both of
+  // the arrays the verb ALWAYS builds (coalesce(jsonb_agg(...), '[]'), 0121:5715/:5736), so it is
+  // not this verb's reply at all.
+  bad({ digest: D }, "lines_not_array");
+  bad({ digest: D, lines: [] }, "candidates_not_array");
+  bad({ digest: D, lines: {}, candidates: [] }, "lines_not_array");
+
+  // A MALFORMED *LINE* AMOUNT, specifically — the sharper half. A zeroed capacity only refuses a
+  // write; a zeroed LINE amount silently CHANGES a multi-line allocation's total, so the
+  // derivation would tie against a number the books never carried.
+  bad({ digest: D, lines: [{ line_id: id }], candidates: [] }, "line_cents_unrepresentable");
+  bad({ digest: D, lines: [{ line_id: id, amount_cents: null }], candidates: [] }, "line_cents_unrepresentable");
+  bad({ digest: D, lines: [{ line_id: id, amount_cents: "1 000" }], candidates: [] }, "line_cents_unrepresentable");
+  bad({ digest: D, lines: [{ line_id: id, amount_cents: 10.5 }], candidates: [] }, "line_cents_unrepresentable");
+  bad({ digest: D, lines: [{ line_id: "not-a-uuid", amount_cents: 1 }], candidates: [] }, "line_id_malformed");
+  bad({ digest: D, lines: [{ line_id: id, amount_cents: 1, description: 42 }], candidates: [] }, "line_description_malformed");
+  bad({ digest: D, lines: [], candidates: [{ entry_id: id }] }, "capacity_unrepresentable");
+  bad({ digest: D, lines: [], candidates: [{ entry_id: id, debit_remaining_cents: 1 }] }, "capacity_unrepresentable");
+  bad({ digest: D, lines: [], candidates: [{ entry_id: "x", debit_remaining_cents: 1, credit_remaining_cents: 0 }] }, "entry_id_malformed");
+
+  // THE POSITIVE CONTROL, and it is the distinction the whole ruling turns on: an EXPLICITLY
+  // EMPTY pack is a perfectly good pack — an account with nothing unmatched — and must parse.
+  const empty = pack.readPackView({ digest: D, lines: [], candidates: [] });
+  assert.equal(empty.ok, true, "explicit empty arrays are a REAL pack, not a malformed one");
+  assert.equal(empty.view.lineCents.size, 0);
+  assert.equal(empty.view.entryCaps.size, 0);
+
+  // A NULL description is a real state of the books (bank_statement_lines.description is NULLABLE,
+  // 0038:546) and becomes empty text rather than a failure.
+  const nulled = pack.readPackView({ digest: D, lines: [{ line_id: id, amount_cents: 5, description: null }], candidates: [] });
+  assert.equal(nulled.ok, true, "a line with no printed narrative is lawful");
+  assert.equal(nulled.view.lineText.get(id), "", "and carries no text to match an identifier against");
 
   // UPPERCASE IDS FROM A MODEL MUST STILL RESOLVE (S3's own lesson, one level down): the DB renders
   // every uuid lowercase, and two spellings of one id must not be two subjects.
-  const id = randomUUID().toUpperCase();
-  const v = viewOf([line(id.toLowerCase(), 500)], [cand(id.toLowerCase(), 500, 0)]);
-  const out = pack.deriveMatchAllocation(v, [id], [id]);
+  const upper = randomUUID().toUpperCase();
+  const v = viewOf([line(upper.toLowerCase(), 500)], [cand(upper.toLowerCase(), 500, 0)]);
+  const out = pack.deriveMatchAllocation(v, [upper], [upper]);
   assert.equal(out.ok, true, "an uppercase spelling of a pack id still resolves");
   assert.equal(out.entries[0].matched_cents, 500);
+});
+
+test("G1B-ALLOC-5 裁-44 R2 / FOLD-10 — a cents value this process cannot carry exactly is refused, not rounded", async () => {
+  // CODEX'S OWN NUMBERS. A cap of 9007199254740993 becomes 9007199254740992 in JS; paired with a
+  // cap of 5 against a line of 9007199254740997 the rounded arithmetic ties EXACTLY and so does
+  // PostgreSQL's — but they are different sums. The evaluator would claim a multi-entry FULL
+  // settlement while leaving the first entry one cent open, and every DB rung would pass.
+  //
+  // The loss happens inside JSON.parse, before any of this code runs, so the test is on the
+  // RESULT: every integer JSON.parse rounds lands at or above 2^53, where Number.isSafeInteger is
+  // false. Sound, even though it can never name the digit it lost.
+  //
+  // THE VALUES ARE BUILT WITH Number(), NOT WRITTEN AS LITERALS, and that is corroboration rather
+  // than a workaround: eslint's own `no-loss-of-precision` REFUSES to let this file contain the
+  // literal 9007199254740993 at all, for exactly the reason this cell exists. Number() on the
+  // decimal string is the same rounding JSON.parse performs, which is the input under test.
+  const CAP_BIG = Number("9007199254740993");
+  const LINE_BIG = Number("9007199254740997");
+  assert.equal(CAP_BIG, Number("9007199254740992"), "the value is ALREADY rounded before any assertion runs — this is the premise, asserted");
+  assert.equal(pack.exactCents(CAP_BIG), null, "and the rounded value is not a safe integer, so it is refused");
+  assert.equal(pack.exactCents("9007199254740993"), null, "the string form is refused too: Number() is just as lossy");
+  assert.equal(pack.exactCents(LINE_BIG), null);
+  assert.equal(pack.exactCents(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER, "the boundary itself is exact and admitted");
+  assert.equal(pack.exactCents(Number.MAX_SAFE_INTEGER + 1), null, "one past it is not");
+  assert.equal(pack.exactCents(-4000), -4000, "negatives are ordinary (a money-out line)");
+  assert.equal(pack.exactCents("5"), 5);
+  assert.equal(pack.exactCents("007"), null, "a spelling this closure cannot reproduce is refused");
+  assert.equal(pack.exactCents(1.5), null);
+  assert.equal(pack.exactCents(""), null);
+  assert.equal(pack.exactCents(undefined), null);
+
+  // AND THE PARSER REFUSES THE WHOLE PACK on one, rather than dropping the line — a pack with a
+  // hole in it is not a smaller pack.
+  const D = "b".repeat(64);
+  const id = randomUUID();
+  const r = pack.readPackView({ digest: D, lines: [{ line_id: id, amount_cents: CAP_BIG, description: "x" }], candidates: [] });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "line_cents_unrepresentable");
+  const r2 = pack.readPackView({ digest: D, lines: [], candidates: [{ entry_id: id, debit_remaining_cents: CAP_BIG, credit_remaining_cents: 0 }] });
+  assert.equal(r2.ok, false);
+  assert.equal(r2.reason, "capacity_unrepresentable");
+});
+
+test("G1B-ALLOC-6 裁-44 R2 / FOLD-11 — the promotion count is COUNTED from the pack, and zero sightings is zero", async () => {
+  // The pure half of FOLD-11; G1B-BANK-E8 drives the same rule through the real verb.
+  const a = randomUUID();
+  const b = randomUUID();
+  const c = randomUUID();
+  const v = viewOf(
+    [
+      line(a, 100, "TRANSFER FROM MBB-514202-9 ACME SDN BHD"),
+      line(b, 200, "PAYMENT mbb-514202-9 recurring"),
+      line(c, 300, "CHEQUE 88214"),
+    ],
+    [],
+  );
+  assert.equal(pack.countIdentifierSightings(v, "MBB-514202-9"), 2, "case-insensitive exact substring, counted over the pack's own lines");
+  assert.equal(pack.countIdentifierSightings(v, "mbb-514202-9"), 2, "the model's spelling of the case does not change the count");
+  assert.equal(pack.countIdentifierSightings(v, "88214"), 1);
+  assert.equal(pack.countIdentifierSightings(v, "NOT-ON-THIS-STATEMENT"), 0, "and an identifier that appears nowhere counts ZERO — there is no floor of one");
+  assert.equal(pack.countIdentifierSightings(v, "   "), 0, "a blank needle matches nothing rather than everything");
+
+  // A line the DB reported with no description carries no text, so it can never contribute a
+  // sighting — the conservative direction.
+  const nulled = viewOf([{ line_id: a, amount_cents: 100, description: null }], []);
+  assert.equal(pack.countIdentifierSightings(nulled, "anything"), 0);
 });

@@ -9,7 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as rig from "./rig.mjs";
 import { skip, plantHeldWakeTask } from "./g1-wake-bodies.fixtures.mjs";
-import { buildApprovedEntries, buildBankAccount, buildBankPrereqs, injectBankPools } from "./g1-wake-bank-fixtures.mjs";
+import { BANK_COA, buildApprovedEntries, buildBankAccount, buildBankPrereqs, injectBankPools } from "./g1-wake-bank-fixtures.mjs";
 
 const { register } = await import("tsx/esm/api");
 register();
@@ -244,6 +244,119 @@ test("G1B-BANK-E5 裁-44 FOLD-9 — a refused pick does not poison the line, and
     assert.equal(corrected?.status, "live", `the corrected pick must be ADMITTED — got ${JSON.stringify(corrected)?.slice(0, 300)}`);
     assert.ok(corrected.match_id);
     assert.equal(rec.admitted, 2, "the exception proposal and the corrected match");
+  } finally {
+    globalThis.__claraPools = previous;
+  }
+});
+
+test("G1B-BANK-E7 裁-44 R2 / FOLD-10 — an unrepresentable cents value takes the whole pack read down, and no match row is written", { skip }, async () => {
+  // CODEX'S OWN VALUES, planted in the REAL books: a candidate carrying 9007199254740993 cents of
+  // debit capacity, a second carrying 5, and a line of 9007199254740997. PostgreSQL holds all
+  // three exactly. JavaScript does not — the first becomes 9007199254740992 the instant
+  // JSON.parse touches the pack — and in the ROUNDED arithmetic 9007199254740992 + 5 ties
+  // 9007199254740997 exactly, as it does in PostgreSQL's. But they are different sums: the
+  // evaluator would claim a multi-entry FULL settlement while leaving the first entry one cent
+  // open, and every DB rung would pass.
+  //
+  // The fix is a hard gate rather than better arithmetic, so what this cell proves is that the
+  // PACK READ fails — the run never arms, so there is nothing to derive an allocation from.
+  const w = await rig.buildFirm("g1be7");
+  await buildBankPrereqs(w);
+  // DECIMAL STRINGS, not JS numbers: `9007199254740993` written as a literal is already
+  // 9007199254740992 before the fixture can send it, so the values are planted as text and
+  // PostgreSQL parses them exactly. That is itself the finding in miniature.
+  const acct = await buildBankAccount(w, ["9007199254740997"]);
+  const [big, small] = await buildApprovedEntries(w, ["9007199254740993", "5"], "a",
+    "g1 bank e7: a deliberately unrepresentable capacity, attested through the estate's own high-stakes door");
+
+  const previous = injectBankPools();
+  try {
+    const { rec, built } = await armed(w, acct.bankAccountId);
+    const pack = await built.get_bank_pack.execute({ rationale: "reading a pack whose numbers this process cannot carry" });
+    assert.ok(pack.error, `the pack read must FAIL — got ${JSON.stringify(pack)?.slice(0, 300)}`);
+    assert.match(String(pack.error), /could not be read/, "and say so as OUR fault, not as an empty pack");
+    assert.equal(rec.pack, null, "the record is NOT armed — there is no view to derive an amount from");
+    assert.equal(rec.digest, null);
+    assert.equal(rec.infraFaults, 1, "and it is counted as OURS, which is what carries the run to failed/internal rather than nothing_due");
+
+    // THE CONSEQUENCE, which is the assertion the ruling actually asks for: the match the model
+    // would have made is refused and ZERO match rows exist.
+    const attempt = await built.match_bank_line.execute({
+      lines: acct.lineIds,
+      entries: [big, small],
+      rationale: "the rounded tie that must never be written",
+    });
+    assert.match(String(attempt.error), /get_bank_pack first/, `the write must refuse — got ${JSON.stringify(attempt)?.slice(0, 300)}`);
+    assert.equal(await memberCount(w.client), 0, "AND NOTHING WAS WRITTEN");
+
+    // THE POSITIVE CONTROL ON THE FIXTURE: the database really did store those exact values, so
+    // the refusal above is this process's limit rather than a fixture that never planted them.
+    const stored = await rig.rootQuery(
+      "select sum(l.debit_cents)::text as cents from clara.journal_lines l where l.entry_id = $1 and l.account_code = $2",
+      [big, BANK_COA],
+    );
+    assert.equal(stored.rows[0].cents, "9007199254740993", "PostgreSQL holds the value exactly — it is JS that cannot");
+  } finally {
+    globalThis.__claraPools = previous;
+  }
+});
+
+test("G1B-BANK-E8 裁-44 R2 / FOLD-11 — the model cannot supply times_seen, and what is persisted is the count from THIS pack", { skip }, async () => {
+  // The model used to supply the positive integer and 0121:5634 stored it verbatim in the payload
+  // a human reads to decide. Nothing could reproduce it: the pack's `learned_payers` is explicitly
+  // {"not_implemented": true} (0121:5781). Hard constraint 2, the same shape as FOLD-1.
+  const w = await rig.buildFirm("g1be8");
+  await buildBankPrereqs(w);
+  // THREE lines, TWO of which print the identifier — so a correct count is 2, and neither the
+  // line count (3) nor a floor of 1 would produce it by accident.
+  const acct = await buildBankAccount(w, [1000, 2000, 3000], "a", BANK_COA, [
+    "TRANSFER FROM MBB-514202-9 ACME",
+    "STANDING ORDER mbb-514202-9",
+    "CHEQUE 88214 UNRELATED",
+  ]);
+  await buildApprovedEntries(w, [1000]);
+  const counterparty = (await rig.humanQuery(w.owner,
+    "select clara.create_counterparty(p_client=>$1,p_kind=>$2,p_name=>$3,p_registration_no=>$4,p_tin=>$5,p_op_key=>$6) as r",
+    [w.client, "vendor", "G1 E8 counterparty", null, null, rig.opk("g1be8-cp")],
+  )).rows[0].r;
+  const cpId = counterparty.counterparty_id ?? counterparty.id;
+
+  const previous = injectBankPools();
+  try {
+    const { rec, built } = await armed(w, acct.bankAccountId);
+
+    // (1) THE SCHEMA HAS NO FIELD FOR IT. Driven through the SHIPPING schema, not a copy.
+    const withCount = built.propose_identifier_promotion.inputSchema.safeParse({
+      counterparty_id: cpId, identifier_kind: "bank_account", identifier_value: "MBB-514202-9", times_seen: 99, rationale: "r",
+    });
+    assert.equal(withCount.success, false, "a model-supplied count must no longer parse at all");
+
+    const pack = await built.get_bank_pack.execute({ rationale: "reading the pack the count will come from" });
+    assert.equal(pack.error, undefined, `the pack read must succeed — got ${JSON.stringify(pack)?.slice(0, 300)}`);
+
+    // (2) ZERO SIGHTINGS IS A REFUSAL, NOT A ONE. A floor would have let the model promote an
+    // identifier appearing nowhere on the statement, with the tool vouching for one sighting.
+    const unseen = await built.propose_identifier_promotion.execute({
+      counterparty_id: cpId, identifier_kind: "bank_account", identifier_value: "NOT-ON-THIS-STATEMENT",
+      rationale: "an identifier this run never saw",
+    });
+    assert.match(String(unseen.error), /identifier_not_in_pack/, `an unseen identifier must be REFUSED — got ${JSON.stringify(unseen)?.slice(0, 300)}`);
+    const none = await rig.rootQuery("select count(*)::int as n from clara.bank_agent_proposals where client_id=$1", [w.client]);
+    assert.equal(none.rows[0].n, 0, "and nothing was written");
+
+    // (3) THE PERSISTED COUNT IS THE PACK'S. Read back off the durable payload a human settles.
+    const ok = await built.propose_identifier_promotion.execute({
+      counterparty_id: cpId, identifier_kind: "bank_account", identifier_value: "MBB-514202-9",
+      rationale: "this printed account number recurs against this supplier",
+    });
+    assert.equal(ok?.status, "open", `the promotion must be ADMITTED — got ${JSON.stringify(ok)?.slice(0, 300)}`);
+    const row = await rig.rootQuery(
+      "select payload->>'times_seen' as seen, rationale from clara.bank_agent_proposals where id = $1",
+      [ok.proposal_id],
+    );
+    assert.equal(row.rows[0].seen, "2", "TWO of the three lines print it — the count is the database's own text, not the model's claim");
+    assert.match(row.rows[0].rationale, /sightings in this pack: 2/, "and the human settling it reads WHERE the number came from");
+    assert.equal(rec.admitted, 1);
   } finally {
     globalThis.__claraPools = previous;
   }

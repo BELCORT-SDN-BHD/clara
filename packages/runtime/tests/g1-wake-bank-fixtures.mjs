@@ -70,8 +70,14 @@ export async function buildBankPrereqs(w) {
 }
 
 /** One bank account plus a live statement carrying `lineCents.length` lines. `suffix` keeps two
- *  accounts on one client from colliding on their op keys. */
-export async function buildBankAccount(w, lineCents, suffix = "a", coaCode = BANK_COA) {
+ *  accounts on one client from colliding on their op keys.
+ *
+ *  `descriptions` (optional, one per line) is 裁-44 R2 / FOLD-11's own surface: the promotion
+ *  verb's `times_seen` is now COUNTED from the printed text of the pack's lines, so a cell that
+ *  needs a known sighting count plants that text here. The default keeps every line's text
+ *  distinct-but-shared-prefixed ("g1 bank line 1", "g1 bank line 2", ...), which is why the E2
+ *  cell can promote the substring "g1 bank line" and expect a count equal to the line count. */
+export async function buildBankAccount(w, lineCents, suffix = "a", coaCode = BANK_COA, descriptions = null) {
   // §2 — the bank_accounts row + is_bank_account flip, through the ONE audited writer
   // (clara.add_bank_account -> _add_bank_account_core), which also sets
   // coa_accounts.is_bank_account=true in the same transaction.
@@ -102,7 +108,13 @@ export async function buildBankAccount(w, lineCents, suffix = "a", coaCode = BAN
   // an explicit begin is its own transaction"). t_bank_statements_belt is `deferrable initially
   // deferred` and re-derives line_count from the ACTUAL rows at transaction end, so three separate
   // calls would fire the belt right after the statement insert alone and refuse.
-  const closing = lineCents.reduce((a, b) => a + b, 0);
+  // 裁-44 R2 / FOLD-10 — CENTS TRAVEL AS DECIMAL STRINGS FROM HERE ON, and that is a finding
+  // rather than a style: a JS number literal of 9007199254740993 is ALREADY 9007199254740992
+  // before node-postgres ever sees it, so a fixture written with numbers cannot plant the value
+  // the cell is about. `::bigint[]` parses the text exactly, and the closing balance is summed
+  // with BigInt for the same reason. Ordinary cells may still pass plain numbers.
+  const centsText = lineCents.map((c) => String(c));
+  const closing = centsText.reduce((a, b) => a + BigInt(b), 0n).toString();
   const built = await rig.rootQuery(
     `with stmt as (
        insert into clara.bank_statements(firm_id, client_id, bank_account_id, document_id,
@@ -112,14 +124,15 @@ export async function buildBankAccount(w, lineCents, suffix = "a", coaCode = BAN
          returning id
      ), lns as (
        insert into clara.bank_statement_lines(firm_id, client_id, statement_id, bank_account_id, line_no, entry_date, amount_cents, description)
-         select $1,$2,stmt.id,$3, x.ord, $9::date, x.cents, 'g1 bank line ' || x.ord
-           from stmt, unnest($12::bigint[]) with ordinality as x(cents, ord)
+         select $1,$2,stmt.id,$3, x.ord, $9::date, x.cents, x.descr
+           from stmt, unnest($12::bigint[], $13::text[]) with ordinality as x(cents, descr, ord)
          returning id, line_no
      )
      select (select id from stmt) as statement_id,
             (select array_agg(id order by line_no) from lns) as line_ids`,
     [w.firm, w.client, bankAccountId, stmtDoc.document_id, stmtSha, stmtDoc.filing_id,
-      PERIOD_START, PERIOD_END, LINE_DATE, closing, lineCents.length, lineCents],
+      PERIOD_START, PERIOD_END, LINE_DATE, closing, lineCents.length, centsText,
+      descriptions ?? lineCents.map((_, i) => `g1 bank line ${i + 1}`)],
   );
   return { bankAccountId, statementId: built.rows[0].statement_id, lineIds: built.rows[0].line_ids };
 }
@@ -130,7 +143,7 @@ export async function buildBankAccount(w, lineCents, suffix = "a", coaCode = BAN
  *  SIGN CONVENTION, stated once and load-bearing: matched_cents is the signed effect on the BANK
  *  account. A POSITIVE line (money in) pairs with a DEBIT on the bank COA. Getting this backwards
  *  fails tie_nonzero, NOT capacity_exhausted — a confusing rung to debug blind. */
-export async function buildApprovedEntries(w, entryCents, suffix = "a") {
+export async function buildApprovedEntries(w, entryCents, suffix = "a", attestation = null) {
   // draft_entry needs a client_resolutions row; a bare 'manual' one (subject_id null) is the exact
   // shape reconcile-fa.test.mjs's own seedResolution plants for the same purpose.
   const resolution = await rig.rootQuery(
@@ -140,19 +153,34 @@ export async function buildApprovedEntries(w, entryCents, suffix = "a") {
   );
   const ids = [];
   for (const [i, cents] of entryCents.entries()) {
+    // Cents as DECIMAL STRINGS: the core reads them with (elem->>'debit_cents')::bigint
+    // (0004:161/:197), so a string round-trips exactly while a JS number literal beyond 2^53 is
+    // already rounded before JSON.stringify runs. See buildBankAccount's own note.
+    const c = String(cents);
     const lines = [
-      { account_code: BANK_COA, debit_cents: cents, credit_cents: 0, description: `g1 bank inflow ${suffix}${i}` },
-      { account_code: INCOME_COA, debit_cents: 0, credit_cents: cents, description: `g1 bank revenue ${suffix}${i}` },
+      { account_code: BANK_COA, debit_cents: c, credit_cents: "0", description: `g1 bank inflow ${suffix}${i}` },
+      { account_code: INCOME_COA, debit_cents: "0", credit_cents: c, description: `g1 bank revenue ${suffix}${i}` },
     ];
     const draft = (await rig.humanQuery(w.owner,
       `select clara.draft_entry(p_client=>$1,p_resolution=>$2,p_posting_date=>$3::date,p_memo=>$4,
          p_lines=>$5::jsonb,p_op_key=>$6) as r`,
       [w.client, resolution.rows[0].id, LINE_DATE, `g1 bank receipt ${suffix}${i}`, JSON.stringify(lines), rig.opk(`g1be-draft-${suffix}${i}`)],
     )).rows[0].r;
-    // Deliberately BELOW any firm's high-stakes threshold, so the single-owner rig firm can
-    // lawfully self-check its own draft — the posture reconcile-fa.test.mjs documents.
-    await rig.humanQuery(w.owner, "select clara.approve_entry(p_entry=>$1,p_expected_revision=>$2,p_op_key=>$3) as r",
-      [draft.entry_id, draft.revision_token, rig.opk(`g1be-appr-${suffix}${i}`)]);
+    // Deliberately BELOW any firm's high-stakes threshold in the ordinary case, so the
+    // single-owner rig firm can lawfully self-check its own draft — the posture
+    // reconcile-fa.test.mjs documents.
+    //
+    // A CELL THAT NEEDS A DELIBERATELY HUGE ENTRY (FOLD-10's unrepresentable capacity) is ABOVE
+    // that threshold and the database says so: "solo high-stakes approval requires an
+    // attestation". It is supplied here rather than routed around — the estate's own door, with
+    // the attestation the door asks for, is the only lawful way past it.
+    if (attestation === null) {
+      await rig.humanQuery(w.owner, "select clara.approve_entry(p_entry=>$1,p_expected_revision=>$2,p_op_key=>$3) as r",
+        [draft.entry_id, draft.revision_token, rig.opk(`g1be-appr-${suffix}${i}`)]);
+    } else {
+      await rig.humanQuery(w.owner, "select clara.approve_entry(p_entry=>$1,p_expected_revision=>$2,p_attestation=>$3,p_op_key=>$4) as r",
+        [draft.entry_id, draft.revision_token, attestation, rig.opk(`g1be-appr-${suffix}${i}`)]);
+    }
     ids.push(draft.entry_id);
   }
   return ids;

@@ -224,12 +224,19 @@ export async function settleBankTask(c: PgExec, taskId: string, outcome: BankSet
   // The residual is a snapshot race inside that one statement, and the real cure is DB-side (a
   // settle predicated on status AND workflow_run_id) — booked as G1 PR-2 / the 裁-44 DB pass.
   // 'cancel_requested' -> 'cancelled' is the transition matrix's own legal edge (0133:415).
+  // 裁-44 R2 / FOLD-14(b) — NAMED NOTATION HERE TOO. p_outcome and p_error_code are adjacent
+  // texts, both drawn from small closed rosters, so a transposition would be admitted by the
+  // driver and refused by the CHECK for a reason naming the wrong column — or, worse, silently
+  // written the other way round on the pair that happens to satisfy both. Named notation makes
+  // that inexpressible; G1B-I3 now checks these two call sites against the catalog like the
+  // other sixteen.
   await c.query(
-    `select clara._settle_wake_task($1,
-        case when (select status from clara.agent_tasks where id = $1) = 'cancel_requested'
-             then 'cancelled' else $2 end,
-        case when (select status from clara.agent_tasks where id = $1) = 'cancel_requested'
-             then null else $3 end)`,
+    `select clara._settle_wake_task(
+        p_task => $1,
+        p_outcome => case when (select status from clara.agent_tasks where id = $1) = 'cancel_requested'
+                          then 'cancelled' else $2 end,
+        p_error_code => case when (select status from clara.agent_tasks where id = $1) = 'cancel_requested'
+                             then null else $3 end)`,
     [taskId, outcome, errorCode],
   );
 }

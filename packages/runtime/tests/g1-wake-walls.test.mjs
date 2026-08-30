@@ -174,7 +174,7 @@ test("G1B-H1 a bank WRITE before any pack read is refused locally, by name, and 
         ? { lines: [lineId], entries: [entryId], rationale: "r" }
         : name === "propose_line_exception"
           ? { line_id: lineId, kind: "bank_error", reason: "r", rationale: "r" }
-          : { counterparty_id: randomUUID(), identifier_kind: "tin", identifier_value: "X", times_seen: 2, rationale: "r" };
+          : { counterparty_id: randomUUID(), identifier_kind: "tin", identifier_value: "X", rationale: "r" };
     const res = await built[name].execute(args);
     assert.match(String(res.error), /get_bank_pack first/, `${name} must refuse before any pack read`);
   }
@@ -196,8 +196,17 @@ test("G1B-H1 a bank WRITE before any pack read is refused locally, by name, and 
   // minted (FOLD-2), so an uninjected-pools run fails there — with a REDACTED message (FIND-9),
   // because a driver message is no use to a model and this refusal is oracle-safe by contract.
   // The raw cause goes to the runtime log instead.
-  rec.pack = { digest: "d".repeat(64), lineCents: new Map([[lineId, 10000]]), entryCaps: new Map([[entryId, { dr: 10000, cr: 0 }]]) };
-  rec.digest = rec.pack.digest;
+  // Armed through the SHIPPING parser rather than by hand-building the Maps — 裁-44 R2 / FOLD-12
+  // widened the view (line text) and made the parse fallible, and a hand-built record would let
+  // this cell keep passing against a view shape the real reader no longer produces.
+  const parsed = tools.readPackView({
+    digest: "d".repeat(64),
+    lines: [{ line_id: lineId, amount_cents: 10000, description: "g1b-h1" }],
+    candidates: [{ entry_id: entryId, debit_remaining_cents: 10000, credit_remaining_cents: 0 }],
+  });
+  assert.equal(parsed.ok, true, "the fixture pack must parse, or the negative control below proves nothing");
+  rec.pack = parsed.view;
+  rec.digest = parsed.view.digest;
   const proceeded = await built.propose_line_exception.execute({ line_id: lineId, kind: "disputed", reason: "r", rationale: "r" });
   const msg = String(proceeded.error ?? "");
   assert.doesNotMatch(msg, /get_bank_pack first/, "with a pack on the record the local pack guard stands aside");

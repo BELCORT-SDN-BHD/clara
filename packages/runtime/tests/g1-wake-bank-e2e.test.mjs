@@ -164,12 +164,14 @@ test("G1B-BANK-E2 a REAL bank_agent wake credential calling the REAL wrapper sta
     )).rows[0].r;
     const counterpartyId = counterparty.counterparty_id ?? counterparty.id;
     assert.ok(counterpartyId, `the audited writer must name the counterparty it created — got ${JSON.stringify(counterparty)?.slice(0, 200)}`);
+    // 裁-44 R2 / FOLD-11 — NO COUNT IS PASSED. The identifier is one the fixture actually prints
+    // on its lines (see buildBankAccount's own descriptions), so the tool's derived count is
+    // non-zero and the proposal is admitted; G1B-BANK-E8 owns the count's own assertions.
     const promotion = await built.propose_identifier_promotion.execute({
       counterparty_id: counterpartyId,
       identifier_kind: "bank_account",
-      identifier_value: "MBB-514202-9",
-      times_seen: 3,
-      rationale: "this printed account number appears against this supplier on three lines of the statement",
+      identifier_value: "g1 bank line",
+      rationale: "this printed token appears against this supplier on the statement's own lines",
     });
     assert.equal(promotion?.status, "open", `the promotion proposal must be ADMITTED — got ${JSON.stringify(promotion)?.slice(0, 400)}`);
     assert.ok(promotion.proposal_id);

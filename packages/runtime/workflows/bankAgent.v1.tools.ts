@@ -33,6 +33,7 @@ import { PACK_TOOL, MATCH_TOOL, EXCEPTION_TOOL, PROMOTION_TOOL, bankModelIdentit
 import { bankScoped, bankOpKey, pools, readWakeTaskStatus, type BankTaskContext, type PgExec } from "./bankAgent.v1.infra.js";
 import {
   BANK_PROSE_MAX,
+  countIdentifierSightings,
   countIfAdmitted,
   dbRefusalReason,
   deriveMatchAllocation,
@@ -44,17 +45,25 @@ import {
 
 export {
   BANK_PROSE_MAX,
+  countIdentifierSightings,
   countIfAdmitted,
   dbRefusalReason,
   deriveMatchAllocation,
+  exactCents,
   isAdmittedBankReply,
   newBankRunRecord,
   readPackView,
   type BankAllocation,
+  type BankPackParse,
   type BankPackView,
   type BankRunRecord,
   type BankVerb,
 } from "./bankAgent.v1.pack.js";
+
+/** How much of the promotion rationale's cap is reserved for the derived-sightings note the tool
+ *  appends (裁-44 R2 / FOLD-11). Budgeted rather than truncated: a slice could cut the note in
+ *  half and leave the human reading a number with no sentence around it. */
+const SIGHTINGS_NOTE_BUDGET = 64;
 
 export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: BankRunRecord) {
   const model = bankModelIdentity(modelId);
@@ -157,13 +166,20 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
               .then((r) => r.rows[0]?.pack ?? null),
           );
           // Record WHAT THE DATABASE ACTUALLY RETURNED, never a digest or an amount we computed
-          // ourselves. A reply with no digest leaves the record untouched, so the write gate keeps
-          // refusing — absence is not evidence.
-          const view = readPackView(pack);
-          if (view !== null) {
-            rec.pack = view;
-            rec.digest = view.digest;
+          // ourselves.
+          //
+          // 裁-44 R2 / FOLD-12 — A REPLY THIS PARSER CANNOT ACCOUNT FOR IS OUR FAULT, NOT THE
+          // MODEL'S, and it is not an empty pack either. The record stays unarmed (so every write
+          // refuses) AND the infra-fault count moves, which is what carries the run to a `failed`
+          // settle with `internal` instead of the `nothing_due` a corrupt read used to earn.
+          const parsed = readPackView(pack);
+          if (!parsed.ok) {
+            rec.infraFaults += 1;
+            console.warn(`[bankAgent_v1] pack reply unusable (${parsed.reason}): ${parsed.detail}`);
+            return { error: "the bank pack could not be read: something on our side returned it in a shape this run cannot trust. Stop." };
           }
+          rec.pack = parsed.view;
+          rec.digest = parsed.view.digest;
           return pack;
         } catch (e) {
           return refusal(rec, e);
@@ -284,20 +300,34 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
     [PROMOTION_TOOL]: tool({
       description:
         "PROPOSE that a recurring printed identifier on the statement belongs to a counterparty. A proposal for a human, never a change to the books.",
-      inputSchema: z.object({
+      // STRICT, AND THIS IS THE ONE TOOL THAT NEEDS TO BE (裁-44 R2 / FOLD-11). Zod strips an
+      // unrecognised key by default, so simply deleting `times_seen` from the shape would make a
+      // model that still sends one look like it succeeded while the count it supplied vanished
+      // silently. On the tool whose whole defect was an unevaluated number arriving from the
+      // model, "silently ignored" is the wrong answer: the model is told, by name, that the field
+      // is not its to give. The other three tools stay permissive — nothing they could carry
+      // extra reaches a durable column.
+      inputSchema: z.strictObject({
         counterparty_id: z.string().uuid(),
         // The client_identifiers catalog's own closed roster (0121:5618 refuses anything else
         // with CLR10 identifier_kind_malformed).
         identifier_kind: z.enum(["tin", "ssm", "bank_account"]),
         identifier_value: z.string().min(1).max(BANK_PROSE_MAX),
-        times_seen: z.number().int().positive().describe("How many times you saw it in the pack. Count, never estimate."),
-        rationale: prose("Why this identifier belongs to this counterparty — name what you saw."),
+        // 裁-44 R2 / FOLD-11 — `times_seen` IS NOT A FIELD. It used to be the model's own positive
+        // integer, stored verbatim in the proposal payload a human reads to decide (0121:5634),
+        // with nothing to reproduce it from: the pack's `learned_payers` is explicitly
+        // {"not_implemented": true} (0121:5781). The tool now COUNTS the sightings in the pack this
+        // run read. Same shape as FOLD-1: the number is not the model's to give.
+        rationale: z
+          .string()
+          .min(1)
+          .max(BANK_PROSE_MAX - SIGHTINGS_NOTE_BUDGET)
+          .describe("Why this identifier belongs to this counterparty — name what you saw."),
       }),
       execute: async (a: {
         counterparty_id: string;
         identifier_kind: string;
         identifier_value: string;
-        times_seen: number;
         rationale: string;
       }) => {
         // NO LINE TO BIND (裁-44 / FOLD-4): a promotion names a counterparty, not a statement line,
@@ -305,8 +335,24 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         // enforces the pack-read precondition and the cancellation re-read — with an empty list.
         const blocked = await guardWrite([]);
         if (blocked) return blocked;
+        const pack = rec.pack;
+        if (pack === null) return localRefusal(`call ${PACK_TOOL} first — every act must be grounded in a pack read from this run.`);
+        // 裁-44 R2 / FOLD-11 — THE COUNT IS DERIVED, AND ZERO IS A REFUSAL RATHER THAN A ONE.
+        // A floor of 1 would have let the model promote an identifier that appears NOWHERE in the
+        // statement this run read, with the tool itself vouching for one sighting. FOLD-4's rule,
+        // one table over: propose only what you actually saw.
+        const timesSeen = countIdentifierSightings(pack, a.identifier_value);
+        if (timesSeen === 0) {
+          return localRefusal(
+            `refused (identifier_not_in_pack): "${a.identifier_value}" appears on no line of the pack this run read — propose only an identifier you actually saw on this statement.`,
+          );
+        }
         try {
           const opKey = bankOpKey("promote", ctx.taskId, `${a.counterparty_id}_${a.identifier_kind}_${a.identifier_value}`);
+          // The count travels into the rationale too, so the human settling the proposal reads
+          // WHERE the number came from rather than having to trust it. Budgeted out of the
+          // schema's own cap above, so the composed string can never exceed the DB's 4000.
+          const rationale = `${a.rationale} [sightings in this pack: ${timesSeen}]`;
           return await bankScoped(ctx, (c: PgExec) =>
             c
               // $5::int — p_times_seen is declared int and the driver sends a JS number as text;
@@ -316,8 +362,8 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
                 a.counterparty_id,
                 a.identifier_kind,
                 a.identifier_value,
-                a.times_seen,
-                a.rationale,
+                timesSeen,
+                rationale,
                 JSON.stringify(model),
                 rec.digest,
                 opKey,

@@ -171,15 +171,18 @@ test("G1B-LOST-1 裁-44 FOLD-6 — a bound running wake task whose engine run is
   await rig.rootQuery("insert into clara.wakes_outbox (intent_id, status) values ($1,'held') on conflict do nothing", [intentId]);
   await rig.rootQuery("update clara.agent_tasks set status='running', workflow_run_id=$2 where id=$1", [taskId, randomUUID()]);
 
-  // The engine's own "run id unknown" signal, in the shape reconciler-documents.mjs's
-  // isRunNotFound actually tests for (a RunNotFound name, or a "run … not found" message). Written
-  // as the NAME, so this cell is not pinned to a message string.
-  const lost = () => {
-    const e = new Error("nope");
-    e.name = "RunNotFoundError";
-    throw e;
-  };
-  const out = await rig.asRuntime((c) => reconcileWakeEngineTasks(c, { onlyFirm: w.firm, getRun: () => ({ get status() { return lost(); } }) }));
+  // 裁-44 R2 / FOLD-13 CORRECTED THIS FIXTURE, and the correction is the finding. It used to
+  // throw a plain Error with `name` set to a RunNotFound-ish string — i.e. it manufactured
+  // precisely the spelling the old predicate recognised, so it replayed the implementation
+  // instead of proving engine identity. It now throws the ENGINE'S OWN CLASS, which is the only
+  // thing a real lost run produces. G1B-LOST-2 owns the impostor's side of the same question.
+  const { WorkflowRunNotFoundError } = await import("workflow/internal/errors");
+  const out = await rig.asRuntime((c) =>
+    reconcileWakeEngineTasks(c, {
+      onlyFirm: w.firm,
+      getRun: (runId) => ({ get status() { throw new WorkflowRunNotFoundError(runId); } }),
+    }),
+  );
   assert.ok(out.wakeSettled >= 1, `the belt must have settled it — got ${JSON.stringify(out)}`);
   const t = await readTask(taskId);
   assert.equal(t.status, "failed", "a run the engine no longer has is LOST, and a lost run on a running task is a failure");
@@ -198,4 +201,59 @@ test("G1B-LOST-1 裁-44 FOLD-6 — a bound running wake task whose engine run is
   );
   assert.equal(out2.wakeSettled, 0, "a transient probe failure settles nothing");
   assert.equal((await readTask(second.taskId)).status, "running", "and the row is left exactly where the next sweep will find it");
+});
+
+test("G1B-LOST-2 裁-44 R2 / FOLD-13 — 'not found' is the ENGINE'S OWN CLASS, not the spelling of an error", { skip }, async () => {
+  // REVIEW LAW 3, and G1B-LOST-1 was the thing it warns about: that cell manufactures precisely
+  // the spelling the predicate recognises, so it replays the implementation instead of proving
+  // engine identity. Any transient error that happened to be NAMED RunNotFoundError would
+  // terminal-ize live work.
+  //
+  // WHAT WAS MEASURED HERE, and it is the reason this cell exists rather than a comment: the WDK
+  // DOES export a real class, but its own `static is()` is ITSELF a name check —
+  // `isError(value) && value.name === 'WorkflowRunNotFoundError'`
+  // (@workflow/errors@4.2.1/dist/index.js:346-348). So delegating to the vendor's predicate alone
+  // would not have closed this. The wake-local test adds the class's own structural brand.
+  const { WorkflowRunNotFoundError } = await import("workflow/internal/errors");
+  const { isWakeRunNotFound } = await import("../lib/reconciler-wake.mjs");
+
+  // (1) THE REAL THING — the error the engine actually throws for a run it does not have.
+  const real = new WorkflowRunNotFoundError(randomUUID());
+  assert.equal(isWakeRunNotFound(real), true, "the engine's own error is recognised");
+  assert.equal(typeof real.runId, "string", "and it carries the brand an impostor cannot fake");
+
+  // (2) THE IMPOSTOR — identical name, identical message, not the engine's class. This is the
+  // assertion that reds against the old name-matching predicate.
+  const impostor = Object.assign(new Error(`Workflow run "${randomUUID()}" not found`), { name: "WorkflowRunNotFoundError" });
+  assert.equal(WorkflowRunNotFoundError.is(impostor), true, "the VENDOR's own predicate is fooled — this is the measured fact the fix is built on");
+  assert.equal(isWakeRunNotFound(impostor), false, "and this lane's test is not");
+
+  // (3) The ordinary transients, none of which may terminal-ize anything.
+  assert.equal(isWakeRunNotFound(Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" })), false);
+  assert.equal(isWakeRunNotFound(new Error("run 123 not found")), false, "a bare message match is no longer enough");
+  assert.equal(isWakeRunNotFound(null), false);
+  assert.equal(isWakeRunNotFound("a string"), false);
+
+  // (4) AND BEHAVIOURALLY, through the shipping belt: the impostor leaves a bound running task
+  // exactly where it was, while G1B-LOST-1's real-class probe settles it.
+  const w = await rig.buildFirm("g1blost3");
+  const t = await plantHeldWakeTask({ owner: w.owner, client: w.client, payload: { bank_account_id: randomUUID() } });
+  await rig.rootQuery("update clara.agent_tasks set status='running', workflow_run_id=$2 where id=$1", [t.taskId, randomUUID()]);
+  const out = await rig.asRuntime((c) =>
+    reconcileWakeEngineTasks(c, {
+      onlyFirm: w.firm,
+      getRun: () => ({ get status() { throw Object.assign(new Error("Workflow run \"x\" not found"), { name: "WorkflowRunNotFoundError" }); } }),
+    }),
+  );
+  assert.equal(out.wakeSettled, 0, "an impostor settles NOTHING");
+  assert.equal((await readTask(t.taskId)).status, "running", "the row stays live for the next sweep");
+
+  const settled = await rig.asRuntime((c) =>
+    reconcileWakeEngineTasks(c, {
+      onlyFirm: w.firm,
+      getRun: (runId) => ({ get status() { throw new WorkflowRunNotFoundError(runId); } }),
+    }),
+  );
+  assert.ok(settled.wakeSettled >= 1, "and the REAL class still settles it — the positive control on the same row");
+  assert.equal((await readTask(t.taskId)).error_code, "engine_lost");
 });

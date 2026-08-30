@@ -118,12 +118,14 @@ export async function settleCloseTask(c: PgExec, taskId: string, outcome: CloseS
   // 裁-44 / FOLD-2(b) — see bankAgent.v1.infra.ts's own copy for the full statement. ONE statement
   // so the read and the write share a transaction; 'cancel_requested' -> 'cancelled' is the close
   // arm's own legal edge (0133:436). A cancel already recorded outranks this run's verdict.
+  // 裁-44 R2 / FOLD-14(b) — named notation, the same reasoning as the bank lane's own copy.
   await c.query(
-    `select clara._settle_wake_task($1,
-        case when (select status from clara.agent_tasks where id = $1) = 'cancel_requested'
-             then 'cancelled' else $2 end,
-        case when (select status from clara.agent_tasks where id = $1) = 'cancel_requested'
-             then null else $3 end)`,
+    `select clara._settle_wake_task(
+        p_task => $1,
+        p_outcome => case when (select status from clara.agent_tasks where id = $1) = 'cancel_requested'
+                          then 'cancelled' else $2 end,
+        p_error_code => case when (select status from clara.agent_tasks where id = $1) = 'cancel_requested'
+                             then null else $3 end)`,
     [taskId, outcome, errorCode],
   );
 }

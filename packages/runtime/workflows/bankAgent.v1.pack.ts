@@ -76,15 +76,33 @@ export function refusal(rec: BankRunRecord, e: unknown): { error: string } {
   return { error: `refused (${code}): the database declined this act.` };
 }
 
-/** The pack THIS run read, reduced to the three facts a write needs from it. Built ONLY from what
- *  the database returned — never from anything the model said. */
+/** The pack THIS run read, reduced to the facts a write needs from it. Built ONLY from what the
+ *  database returned — never from anything the model said. */
 export type BankPackView = {
   digest: string;
   /** line_id (lowercase) -> the line's own amount_cents, as the DB reported it. */
   lineCents: Map<string, number>;
+  /** line_id (lowercase) -> the line's printed descriptive text, lowercased for matching.
+   *
+   *  裁-44 R2 / FOLD-11 — this is the EVIDENCE a promotion's `times_seen` is counted from, so it
+   *  is part of the pack view rather than something a tool re-reads later. Empty string when the
+   *  database reported no description: `clara.bank_statement_lines.description` is NULLABLE
+   *  (`0038:546`, measured — not assumed), and a line with no printed narrative is a legitimate
+   *  state of the books, not a corrupt reply. It matches no identifier, which is the conservative
+   *  direction: a promotion grounded in nothing is refused rather than admitted. */
+  lineText: Map<string, string>;
   /** entry_id (lowercase) -> the remaining capacity on each side, as the DB reported it. */
   entryCaps: Map<string, { dr: number; cr: number }>;
 };
+
+/** Reading a pack either produces a view or FAILS — there is no third answer, and that is the
+ *  whole of 裁-44 R2 / FOLD-12. A malformed reply used to become an authoritative EMPTY pack: the
+ *  run armed itself on it, every write was refused for "not in the pack", and the task settled
+ *  `nothing_due` — a corrupt read reported as a quiet night. Absence is not evidence (review law
+ *  2), so a reply this parser cannot fully account for is an INFRASTRUCTURE failure. */
+export type BankPackParse =
+  | { ok: true; view: BankPackView }
+  | { ok: false; reason: string; detail: string };
 
 /** The mutable per-run record. One per tool set, i.e. per model-step execution attempt. */
 export type BankRunRecord = {
@@ -124,41 +142,140 @@ export function newBankRunRecord(attemptKey: string): BankRunRecord {
   };
 }
 
-const uuidKey = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v.toLowerCase() : null);
-const intOr = (v: unknown, fallback: number): number => {
-  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
-  return Number.isFinite(n) ? Math.trunc(n) : fallback;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** An id the DATABASE could have written, lowercased. Anything else is null and fails the parse —
+ *  a key this closure cannot round-trip against the DB's own lowercase spelling is not an id. */
+const uuidKey = (v: unknown): string | null => {
+  if (typeof v !== "string") return null;
+  const k = v.toLowerCase();
+  return UUID_RE.test(k) ? k : null;
 };
 
 /**
- * Reduce the database's own pack reply to the view a write is allowed to derive numbers from.
+ * A CENTS VALUE THIS PROCESS CAN CARRY WITHOUT ROUNDING IT — 裁-44 R2 / FOLD-10, and the reason
+ * this is a hard gate rather than a coercion.
  *
- * EVERY FIELD READ HERE IS THE DB'S (0121:5715-5771, read directly): `lines[].line_id` and
- * `lines[].amount_cents` come from clara.bank_statement_lines; `candidates[].entry_id`,
- * `debit_remaining_cents` and `credit_remaining_cents` are the pack's own arithmetic over
- * clara.journal_lines minus every live/pending bank_match_entry_members row. Returns null when the
- * reply carries no digest — an unreadable pack is not a pack, and the caller fails closed on it.
+ * THE LOSS HAPPENS BEFORE THIS CODE RUNS. The pack arrives as jsonb, node-postgres parses it with
+ * JSON.parse, and `amount_cents` is an unrestricted PostgreSQL bigint. 9007199254740993 is already
+ * 9007199254740992 by the time any function here sees it. So there is nothing to "detect" about
+ * the original value — what there is, is a SOUND test on the result: every integer JSON.parse
+ * rounds lands at or above 2^53, and Number.isSafeInteger is false for all of those. An integer
+ * that IS a safe integer round-tripped exactly. The test therefore admits exactly the values this
+ * process can carry losslessly, and refuses every value it cannot — which is the whole
+ * requirement, even though it can never name the digit it lost.
+ *
+ * WHAT THE ROUNDING WOULD HAVE COST, since "a big number" sounds academic: a cap of
+ * 9007199254740993 paired with a cap of 5 against a line of 9007199254740997 ties EXACTLY in
+ * rounded JS arithmetic and EXACTLY in PostgreSQL's — but they are different sums. The evaluator
+ * would claim a multi-entry FULL settlement while leaving the first entry one cent open, and every
+ * DB rung would pass. A wrong durable amount, from arithmetic this process was never able to do.
+ *
+ * A STRING IS ACCEPTED ONLY IF IT ROUND-TRIPS, which is the same test one layer out: node-postgres
+ * hands back int8 columns as decimal strings in some shapes, and `Number("9007199254740993")` is
+ * just as lossy as JSON.parse. `String(Number(s)) === s` is exact for every decimal integer that
+ * survives, and rejects leading zeros and any other spelling this closure cannot reproduce.
+ *
+ * The lossless answer is bigint end to end (decimal strings out of the pack, BigInt sums, decimal
+ * strings back in). That is a v2 change to a frozen body and is recorded as a known limit.
  */
-export function readPackView(pack: unknown): BankPackView | null {
+export function exactCents(v: unknown): number | null {
+  if (typeof v === "number") return Number.isSafeInteger(v) ? v : null;
+  if (typeof v === "string") {
+    if (!/^-?\d+$/.test(v)) return null;
+    const n = Number(v);
+    return Number.isSafeInteger(n) && String(n) === v ? n : null;
+  }
+  return null;
+}
+
+const packFail = (reason: string, detail: string): BankPackParse => ({ ok: false, reason, detail });
+
+/**
+ * Reduce the database's own pack reply to the view a write is allowed to derive numbers from —
+ * or FAIL, loudly, without producing a view at all.
+ *
+ * EVERY FIELD READ HERE IS THE DB'S (0121:5715-5771, read directly): `lines[].line_id`,
+ * `lines[].amount_cents` and `lines[].description` come from clara.bank_statement_lines;
+ * `candidates[].entry_id`, `debit_remaining_cents` and `credit_remaining_cents` are the pack's own
+ * arithmetic over clara.journal_lines minus every live/pending bank_match_entry_members row.
+ *
+ * 裁-44 R2 / FOLD-12 — WHY EVERY BRANCH BELOW FAILS RATHER THAN COERCES. The earlier version read
+ * `{digest}` as an authoritative EMPTY pack and turned a missing or malformed cents value into
+ * ZERO. Both are absence-as-evidence, and the second is the sharper one: a silently-zeroed LINE
+ * amount does not merely refuse a write, it CHANGES a multi-line allocation's total without
+ * complaining — the derivation then ties against a number the books never carried. So the parser
+ * admits only what it can fully account for, and everything else is an INFRASTRUCTURE failure the
+ * caller settles `internal` on. It is never a refusal: a refusal blames the model for our fault.
+ */
+export function readPackView(pack: unknown): BankPackParse {
   const p = pack as { digest?: unknown; lines?: unknown; candidates?: unknown } | null;
-  const digest = typeof p?.digest === "string" && p.digest.length > 0 ? p.digest : null;
-  if (digest === null) return null;
+  if (p === null || typeof p !== "object") return packFail("pack_not_object", "the pack reply is not an object");
+  if (typeof p.digest !== "string" || p.digest.length === 0) return packFail("no_digest", "the pack reply carries no digest");
+  // EXPLICIT ARRAYS, NOT "whatever is iterable". The verb always builds both with
+  // coalesce(jsonb_agg(...), '[]'::jsonb), so an ABSENT one means the reply is not the verb's.
+  if (!Array.isArray(p.lines)) return packFail("lines_not_array", "the pack reply carries no `lines` array");
+  if (!Array.isArray(p.candidates)) return packFail("candidates_not_array", "the pack reply carries no `candidates` array");
+
   const lineCents = new Map<string, number>();
-  for (const l of Array.isArray(p?.lines) ? p.lines : []) {
-    const id = uuidKey((l as { line_id?: unknown })?.line_id);
-    if (id !== null) lineCents.set(id, intOr((l as { amount_cents?: unknown }).amount_cents, 0));
-  }
-  const entryCaps = new Map<string, { dr: number; cr: number }>();
-  for (const c of Array.isArray(p?.candidates) ? p.candidates : []) {
-    const id = uuidKey((c as { entry_id?: unknown })?.entry_id);
-    if (id !== null) {
-      entryCaps.set(id, {
-        dr: intOr((c as { debit_remaining_cents?: unknown }).debit_remaining_cents, 0),
-        cr: intOr((c as { credit_remaining_cents?: unknown }).credit_remaining_cents, 0),
-      });
+  const lineText = new Map<string, string>();
+  for (const raw of p.lines) {
+    const l = raw as { line_id?: unknown; amount_cents?: unknown; description?: unknown } | null;
+    const id = uuidKey(l?.line_id);
+    if (id === null) return packFail("line_id_malformed", `a pack line carries no usable line_id (${String(l?.line_id)})`);
+    const cents = exactCents(l?.amount_cents);
+    if (cents === null) {
+      return packFail("line_cents_unrepresentable", `line ${id}'s amount_cents is missing, non-integer, or beyond this process's exact range`);
     }
+    // description is NULLABLE in the schema (0038:546) — null/absent is a real state of the books
+    // and becomes empty text, which matches no identifier. Any OTHER type is a malformed reply.
+    const text = l?.description;
+    if (text !== null && text !== undefined && typeof text !== "string") {
+      return packFail("line_description_malformed", `line ${id}'s description is neither text nor null`);
+    }
+    lineCents.set(id, cents);
+    lineText.set(id, typeof text === "string" ? text.toLowerCase() : "");
   }
-  return { digest, lineCents, entryCaps };
+
+  const entryCaps = new Map<string, { dr: number; cr: number }>();
+  for (const raw of p.candidates) {
+    const c = raw as { entry_id?: unknown; debit_remaining_cents?: unknown; credit_remaining_cents?: unknown } | null;
+    const id = uuidKey(c?.entry_id);
+    if (id === null) return packFail("entry_id_malformed", `a pack candidate carries no usable entry_id (${String(c?.entry_id)})`);
+    const dr = exactCents(c?.debit_remaining_cents);
+    const cr = exactCents(c?.credit_remaining_cents);
+    if (dr === null || cr === null) {
+      return packFail("capacity_unrepresentable", `entry ${id}'s remaining capacity is missing, non-integer, or beyond this process's exact range`);
+    }
+    entryCaps.set(id, { dr, cr });
+  }
+  return { ok: true, view: { digest: p.digest, lineCents, lineText, entryCaps } };
+}
+
+/**
+ * COUNT THE SIGHTINGS OF AN IDENTIFIER IN THE PACK THIS RUN READ — 裁-44 R2 / FOLD-11.
+ *
+ * `times_seen` used to be the MODEL's number, and 0121:5634 stores it verbatim in the proposal
+ * payload a human reads to decide. That is a model-generated numeral in a durable artifact with no
+ * deterministic evaluator behind it — the pack's own `learned_payers` is explicitly
+ * `{"not_implemented": true}` (0121:5781), so there was nothing to reproduce it from. Hard
+ * constraint 2, in the same shape FOLD-1 closed one table over.
+ *
+ * THE DERIVATION IS DELIBERATELY THE DUMBEST ONE THAT IS TRUE: the number of lines in THIS pack
+ * whose printed descriptive text contains the proposed identifier, matched case-insensitively as
+ * an exact substring. It is not fuzzy matching and does not try to be — a human settles the
+ * proposal, and what they need is a count they can check against the same statement.
+ *
+ * THERE IS NO FLOOR. Zero sightings is not "at least one", it is a proposal grounded in nothing
+ * this run saw, and the caller REFUSES it — FOLD-4's rule one table over: propose only what you
+ * actually read.
+ */
+export function countIdentifierSightings(pack: BankPackView, identifierValue: string): number {
+  const needle = identifierValue.trim().toLowerCase();
+  if (needle.length === 0) return 0;
+  let seen = 0;
+  for (const text of pack.lineText.values()) if (text.includes(needle)) seen += 1;
+  return seen;
 }
 
 /** What a match allocation derivation produced: either the exact entry rows to send, or a typed
