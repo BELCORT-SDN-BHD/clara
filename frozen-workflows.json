@@ -545,7 +545,7 @@
       "note": "P6-1 — THE DECLARER of Q8's four part kinds; apps/web/lib/parts/types.ts transcribes it. A hash change here is a wire-contract change and must move the reader in the same wave. UNDEPLOYED: the deploy-lock is the ceremony's act."
     },
     "packages/runtime/workflows/chatTurn.v16.prompt.ts": {
-      "sha256": "4066baaa6b34e100b7d97da89647a75613df975f15f975f98f7878057e1e984b",
+      "sha256": "227d74b31876a88d6590b6291ea8447df30752dfdce1d43e0bdc879470258cf0",
       "note": "P6-1 — ClaraPartV16 (22 + 4 = 26) and the one emitter this lane may lawfully carry (freeform_result). UNDEPLOYED: the deploy-lock is the ceremony's act."
     },
     "packages/runtime/workflows/chatTurn.v16.ts": {

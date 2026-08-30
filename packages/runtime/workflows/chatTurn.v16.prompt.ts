@@ -53,12 +53,22 @@
 //     row, `('close_prep', 'wake_propose_close')` (0138:2531). The same helper then requires the
 //     credential's own client pin to resolve to the subject. Its producer is `closePrep_v1`.
 //
-//   `agent_receipt` CANNOT BE emitted here. Its read surface is `clara.agent_receipts_visible`,
-//     granted to `clara_authenticated` — the HUMAN session (0103_f_a7_pi_additive.sql:1030) —
-//     and 0103's own tail asserts (:1146-1153) that `clara_agent_ro`,
-//     `clara_wake_interactive`, `clara_wake_proactive` and `clara_runtime` hold NO select on
-//     it, raising CLR10 at install time if any of them ever does. The card reads it on the
-//     human's own session, which is the design; no agent lane may.
+//   `agent_receipt` HAS NO EMITTER HERE, and this one needs stating carefully rather than
+//     flatly, because the flat version would be an overclaim. Q8 defines it as the GENERIC
+//     card that "reads `agent_receipts_visible`" — i.e. it surfaces receipts from ACROSS the
+//     lanes. THAT this closure genuinely cannot do: the view is granted to
+//     `clara_authenticated`, the HUMAN session (0103_f_a7_pi_additive.sql:1030), and 0103's own
+//     tail asserts at :1146-1153 that `clara_agent_ro`, `clara_wake_interactive`,
+//     `clara_wake_proactive` and `clara_runtime` hold NO select on it — raising CLR10 at
+//     install time if one ever does. So a chat turn cannot see another lane's receipt to
+//     address a card at it.
+//     WHAT IT COULD do, and deliberately does not: a chat turn DOES learn the receipt ids of
+//     its OWN acts (the post tool returns `post_receipt_id`, an f_a2 `entry_post` receipt), so
+//     nothing mechanical stops it minting a generic card for an act it just took. It does not,
+//     because those acts already have purpose-built cards — `entry_posted` and `bank_act`,
+//     v13's and v14's — and a second, generic card for the same act would put two receipts on
+//     one thing and leave the reader to work out that they are one. The generic card's job is
+//     the receipts nothing else renders, and reaching those is what the grant refuses.
 //
 // Widening any of those three to give this body an emitter would weaken a mechanism that is
 // itself the thing under test (hard constraint 14, whose operative clause is exactly this). So
