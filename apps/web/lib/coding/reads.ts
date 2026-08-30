@@ -12,7 +12,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { AGENT_TASK_LIVE_STATUSES } from "./types";
 import type {
   AgentTaskRow, CodingLaneResult, CodingLaneRow, CodingTaskRow,
-  LintFindingDetail, LintFindingRow, OpenQuestionDetail, UncodedFilingRow,
+  LintFindingDetail, LintFindingRow, OpenQuestionDetail, SweepRunDetail, UncodedFilingRow,
 } from "./types";
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
@@ -81,6 +81,21 @@ export function getLintFindingDetail(findingId: string, opts: Opts = {}): Promis
  *  already reads — types.ts's own "spelling is not identity" note). */
 export function getOpenQuestionDetail(questionId: string, opts: Opts = {}): Promise<OpenQuestionDetail> {
   return callDoor<OpenQuestionDetail>("get_open_question", { p_question: questionId }, opts);
+}
+
+/** `clara.get_sweep_run(p_run)` -> jsonb — a read RPC, and the ONLY
+ *  human-reachable read of a sweep run at all: neither `sweep_runs` nor
+ *  `sweep_run_items` carries a human SELECT policy (types.ts's own
+ *  `clara.sweep_runs` block). Rides `callDoor` as TRANSPORT ONLY — a read, never
+ *  a governed act (apps/web/AGENTS.md), so no confirmation UI and no
+ *  sticky-refusal semantics attach to it; the ACT half on this run is
+ *  `acknowledgeSweepRun` in ./doors.ts.
+ *
+ *  Resolves `null` for a run this session cannot see — the live body's own
+ *  behaviour (0011:3585-3594 returns SQL NULL when the id does not match a row
+ *  of the caller's firm), never an exception to catch. */
+export function getSweepRun(runId: string, opts: Opts = {}): Promise<SweepRunDetail> {
+  return callDoor<SweepRunDetail>("get_sweep_run", { p_run: runId }, opts);
 }
 
 /** Candidate entries `complete_coding_task` will accept as `p_result_entry`

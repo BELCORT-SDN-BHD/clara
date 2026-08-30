@@ -1,20 +1,32 @@
 import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
 
-// The shared labeled-identifier-card shape for every receipt-like ClaraPart
-// (je_review, doc_review, diff, sweep_receipt, open_question, bank_recon_receipt,
-// fixed_asset, depreciation_run_receipt, adjustment_run_receipt, staff_advance,
-// and — since MBB-4 — the four chatTurn_v14 kinds entry_posted, question_opened,
-// bank_act, bank_pack).
-// Renders ids only; it never sums or fabricates a figure — that is the hydrated
-// card's job (../../lib/parts/hooks.ts), landing with the specific per-type read fn
-// in P3. Extracted from PartRenderer.tsx so each stays independently reviewable.
+// The shared labeled-identifier-card shape for every receipt-like ClaraPart.
+// Extracted from PartRenderer.tsx so each stays independently reviewable.
 //
-// `children` and `link` are OPTIONAL and additive (MBB-4, 2026-08-29): the ten
-// callers above pass neither and render byte-identically to before. `link` takes a
+// THREE KINDS OF CALLER NOW, and the difference is what each knows:
+//   - the NINE id-only summary types PartRenderer still renders inline
+//     (je_review, doc_review, diff, open_question, bank_recon_receipt,
+//     fixed_asset, depreciation_run_receipt, adjustment_run_receipt,
+//     staff_advance) — no per-type read is wired for any of them yet;
+//   - the four chatTurn_v14 kinds (MBB-4, 2026-08-29: entry_posted,
+//     question_opened, bank_act, bank_pack), which render what the wire
+//     carries because no read function is keyed on what they address;
+//   - the five HYDRATED cards (P6-2, 2026-08-30: the four chatTurn_v16 kinds
+//     plus 裁-20's sweep_receipt upgrade), which pass their live DB body as
+//     `children`. `sweep_receipt` moved OUT of the first group to join this
+//     one — the only member that has ever left it.
+//
+// THIS COMPONENT ITSELF STILL RENDERS IDS ONLY and never sums or fabricates a
+// figure; a hydrated caller does its own reading (../../lib/parts/hooks.ts) and
+// hands the result down.
+//
+// `children` and `link` are OPTIONAL and additive (MBB-4): the nine inline
+// callers pass neither and render byte-identically to before. `link` takes a
 // REAL in-app path only — a card never invents a destination, and a caller that
-// cannot build one (an `entry_posted` whose client_id is still "") passes nothing
-// rather than a broken href.
+// cannot build one (an `entry_posted` whose client_id is still "", an
+// `agent_receipt` whose row has not loaded) passes nothing rather than a
+// broken href.
 
 export type SummaryRow = [label: string, value: string | null | undefined];
 

@@ -146,13 +146,54 @@ begin
   -- idempotency is preserved for the outcome that actually creates a task. Exactly
   -- one _finish_op call exists anywhere in the function (probe 3 already proved the
   -- refusal slice contains none), so this occurrence can only be the genuine one.
-  if position('v_dedupe:=clara._reserve_op(f.firm_id,''admit_autodraft_task''' in v_norm)=0
-     or position('outcome'',''admitted' in v_norm)=0
-     or position('return clara._finish_op(f.firm_id,''admit_autodraft_task''' in v_norm)=0
-     or (select count(*) from regexp_matches(v_norm,'_finish_op\(f\.firm_id,''admit_autodraft_task''','g'))<>1 then
-    raise exception '0031 postverify: the admitted (success) path no longer reserves/settles an idempotent op-key receipt, or a second _finish_op site appeared';
+  --
+  -- SUCCESSION-AWARE (2026-08-30, backend-small lane item 4 / PROGRESS.md Known-issues
+  -- 3d: "ALREADY RED at step 4/6 at the 0147 frontier on both sides -- pre-existing and
+  -- unrelated to F-A9"). RUN AND CONFIRMED on a fresh 0001-0155 replay: this probe reds
+  -- with exactly that message, on a chain that never touched F-A9 PR-1B at all -- so the
+  -- true cause predates 0147 by a lot. MEASURED, not guessed: pg_get_functiondef on the
+  -- live body shows the bare literal this probe pinned, `outcome','admitted`, is GONE --
+  -- not because the admitted path stopped settling a receipt (probe 3's own count already
+  -- proves there is exactly one _finish_op site and it is this one), but because
+  -- 0053_autodraft_readmit_after_withdrawal spliced the plain literal into a three-way
+  -- CASE (its own anchor/replacement pair, 0053:951/958-959) so a human one_click
+  -- re-admission after a withdrawal reports its own outcome token
+  -- (`re_admitted_after_withdrawal`) instead of colliding with `admitted`/`re_admitted`.
+  -- `'admitted'` never left; it is that CASE's `else` branch, byte-identical to 0053's own
+  -- splice text, confirmed directly against a live 0155-frontier rig before this file was
+  -- touched. Gated on the migration STEM, never a number (numbers are claimed at merge,
+  -- `.claude/rules/db-migrations.md`): a chain that genuinely lacks 0053 keeps the
+  -- original pre-0053 literal check.
+  --
+  -- NARROWED (fold FIND-1): that fallback's own real reach is smaller than "any pre-0053
+  -- chain" -- `admit_autodraft_task`'s outcome has been a CASE since 0034
+  -- (`0034_autodraft_retry_door.sql:410` splices the bare literal into
+  -- `case when v_is_retry then 're_admitted' else 'admitted' end`), so the plain
+  -- `outcome','admitted` substring this else-branch pins only ever matched the ORIGINAL
+  -- 0031 ceremony window -- frontiers 31 through 33, before 0034 applied. On any chain at
+  -- 34 or later but short of 0053 (a window with no live deploy history to protect), this
+  -- probe would ALSO fail to find the bare literal and this else-branch would red for the
+  -- same reason the pre-fix if-branch did -- correctly, since neither this file's fix nor
+  -- its fallback claims to track every intermediate outcome shape, only the two that ever
+  -- mattered to a real ceremony (0031's own, and 0053-onward's).
+  if exists (select 1 from clara.schema_migrations
+              where version = '0053_autodraft_readmit_after_withdrawal') then
+    if position('v_dedupe:=clara._reserve_op(f.firm_id,''admit_autodraft_task''' in v_norm)=0
+       or position('''outcome'',case when v_withdrawn_readmit then ''re_admitted_after_withdrawal'' when v_is_retry then ''re_admitted'' else ''admitted'' end' in v_norm)=0
+       or position('return clara._finish_op(f.firm_id,''admit_autodraft_task''' in v_norm)=0
+       or (select count(*) from regexp_matches(v_norm,'_finish_op\(f\.firm_id,''admit_autodraft_task''','g'))<>1 then
+      raise exception '0031 postverify: the admitted (success) path no longer reserves/settles an idempotent op-key receipt, the post-0053 three-way outcome CASE (admitted/re_admitted/re_admitted_after_withdrawal) drifted, or a second _finish_op site appeared';
+    end if;
+    raise notice '0031 postverify OK (4/6, post-0053): the admitted path still reserves and settles an idempotent op-key receipt (the ONLY such site), and its outcome token survives as the three-way CASE''s else branch (admitted / re_admitted / re_admitted_after_withdrawal)';
+  else
+    if position('v_dedupe:=clara._reserve_op(f.firm_id,''admit_autodraft_task''' in v_norm)=0
+       or position('outcome'',''admitted' in v_norm)=0
+       or position('return clara._finish_op(f.firm_id,''admit_autodraft_task''' in v_norm)=0
+       or (select count(*) from regexp_matches(v_norm,'_finish_op\(f\.firm_id,''admit_autodraft_task''','g'))<>1 then
+      raise exception '0031 postverify: the admitted (success) path no longer reserves/settles an idempotent op-key receipt, or a second _finish_op site appeared';
+    end if;
+    raise notice '0031 postverify OK (4/6): the admitted path still reserves and settles an idempotent op-key receipt, and it is the ONLY such site';
   end if;
-  raise notice '0031 postverify OK (4/6): the admitted path still reserves and settles an idempotent op-key receipt, and it is the ONLY such site';
 
   -- (5) clara.coding_lane (the read verb) still calls the identical
   -- _coding_lane_core -- admission and the read verb consume one law.

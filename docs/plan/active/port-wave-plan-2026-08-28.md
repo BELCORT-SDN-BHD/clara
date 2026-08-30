@@ -469,10 +469,11 @@ about what the merge will do.
      └── WAVE C (3 concurrent)   T1 close+FY      · T2 opening
                                  T11 onboarding five
                                         │
-                          WAVE D  ──────┴──►  P6 four-part wire bump (chatTurn_v15)
+                          WAVE D  ──────┴──►  P6 four-part wire bump (chatTurn_v16)
                                         │
                           WAVE E  ──────┴──►  exit gates → the cutover PR
 ```
+*(TRUED 2026-08-30: Wave D's diagram label was `chatTurn_v15` when drawn — see §8.1.)*
 
 ### Why this order
 
@@ -492,10 +493,12 @@ F-A7b's ruled playbook states as a design input; T11 waits on the F-A7b build tr
 all three last means no other train is blocked by a dependency it does not own.
 
 **Wave D is P6's four-part wire bump** — `agent_receipt`, `firm_question`, `close_proposal`,
-`freeform_result`, in **one** `chatTurn_v15` runtime version bump, catalog 18 → 22. It runs
-after Wave C because three of the four parts have their workbench half in T1 and T7, and Q8's
-whole point is that the workbench ships first on zero wire change. `freeform_result`'s
-workbench half is already live from P3.
+`freeform_result`, in **one** `chatTurn_v16` runtime version bump, catalog 22 → 26 (**TRUED
+2026-08-30**: was `v15`/18→22 when written; `v15` shipped 2026-08-29 for the unrelated F-A6 PR-2
+and is consumed+frozen, and MBB-4 found the catalog baseline already at 22). It runs after Wave
+C because three of the four parts have their workbench half in T1 and T7, and Q8's whole point
+is that the workbench ships first on zero wire change. `freeform_result`'s workbench half is
+already live from P3.
 
 **Wave E is the exit gate plus the cutover.** Detailed in part 2, §8 and §9.
 
