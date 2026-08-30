@@ -538,6 +538,14 @@ const BINDING_PROPOSAL_PR1_HUMAN_FNS = [
 ];
 /** …and the two wake verbs, on `filing` AND `interactive` (G1 arm A) — the same chat-parity
  *  shape wake_file_document already set: one allowlist row per kind, the grant on both roles. */
+/** 裁-18b PR-3 — the 裁-46 revocation-reset door. ONE more clara_authenticated verb, and it has
+ *  to be written down HERE or T17 reds: this matrix is a CLOSED SET whose default is "no role may
+ *  execute anything unlisted", which is exactly what makes an accidental grant a test failure
+ *  rather than a silent widening. Same unconditional shape as PR-1's list above --
+ *  grantMatrixFailures sweeps the LIVE catalog and only judges functions that exist, so a
+ *  pinned-frontier chain without this door simply never reaches the name. */
+const BINDING_PR3_HUMAN_FNS = ["reset_binding_revocation"];
+
 const BINDING_PROPOSAL_PR1_WAKE_FNS = [
   "wake_propose_vendor_identity_binding", "wake_list_binding_candidates",
 ];
@@ -1346,6 +1354,8 @@ export const ALLOWED = {
     ...P4T2_HUMAN_FNS,
     // 裁-18b PR-1 the four human binding doors — see the block above.
     ...BINDING_PROPOSAL_PR1_HUMAN_FNS,
+    // 裁-18b PR-3 the 裁-46 revocation-reset door — see the block above.
+    ...BINDING_PR3_HUMAN_FNS,
     // 裁-21 PR-a [the firm-level standard chart of accounts, TEMPLATE half] the seven admin
     // writers + the two invoker-rights reads — clara_authenticated ONLY; agent + both wake
     // roles gain ZERO, by the design's own non-goal rather than by omission. See the block above.

@@ -745,21 +745,39 @@ test("bpr3.K1 — the door lifts a REVOCATION, receipts every column it cleared,
   //   (b) the STATUS FILTER dropped — the draft under the same binding starts counting.
   // Each is driven on a SECOND revoked binding built the same way, so the mutant is measured
   // against a fixture whose right answer is known and non-trivial.
+  // THE MUTANT FIXTURE CARRIES DIFFERENT CARDINALITIES FROM THE CELL'S OWN (Codex r2 LOW):
+  // 3 approved / 2 drafts here versus 2 / 1 above. With matching counts, a `v_posted := 2` or
+  // `v_drafts := 1` constant would have passed both — the numbers have to disagree for the
+  // constant mutants below to be able to fail.
   const m = await liveBinding("K1m");
-  for (const tag of ["K1ma", "K1mb"]) await approve(await boundDraft(m, tag), `bpr3k1m${tag}`);
-  await boundDraft(m, "K1mdraft");
+  for (const tag of ["K1ma", "K1mb", "K1mc"]) await approve(await boundDraft(m, tag), `bpr3k1m${tag}`);
+  for (const tag of ["K1mdraft", "K1mdraft2"]) await boundDraft(m, tag);
   await revoke(w.users.bob, { binding: m.binding.binding_id, reason: "K1m revoke" });
-  for (const [label, edits, want] of [
-    ["constant-zero", [["select count(*)::int into v_posted\n    from clara.journal_entries where vendor_binding_id = p_binding and status = 'approved';",
-      "v_posted := 0;"]], 0],
+  const APPROVED_COUNT = "select count(*)::int into v_posted\n    from clara.journal_entries where vendor_binding_id = p_binding and status = 'approved';";
+  const DRAFT_COUNT = "select count(*)::int into v_drafts\n    from clara.journal_entries where vendor_binding_id = p_binding and status = 'draft';";
+  for (const [label, edits, want, wantDrafts] of [
+    ["constant-zero", [[APPROVED_COUNT, "v_posted := 0;"]], 0, 2],
+    ["constant-two", [[APPROVED_COUNT, "v_posted := 2;"]], 2, 2],
+    ["constant-one-draft", [[DRAFT_COUNT, "v_drafts := 1;"]], 3, 1],
     ["no-status-filter", [["where vendor_binding_id = p_binding and status = 'approved';",
-      "where vendor_binding_id = p_binding;"]], 3],
+      "where vendor_binding_id = p_binding;"]], 5, 2],
+    ["no-binding-filter", [[APPROVED_COUNT,
+      "select count(*)::int into v_posted\n    from clara.journal_entries where status = 'approved';"]], null, 2],
   ]) {
     await withMutant(RESET_REVOCATION_SIG, edits, async () => {
       const out = await resetRevocation(w.users.alice,
-        { binding: m.binding.binding_id, reason: `mutant ${label}`, opKey: opk(`k1m${label.slice(0, 6)}`) });
-      assert.equal(out.approved_entries, want,
-        `${label}: the mutant reports ${want} where the truth is 2 — so the assertion above is discriminating`);
+        { binding: m.binding.binding_id, reason: `mutant ${label}`, opKey: opk(`k1m${label.slice(0, 8)}`) });
+      if (want === null) {
+        // no-binding-filter counts every approved entry in the estate — a number this fixture
+        // cannot predict, but it MUST exceed this binding's own 3, which is the discrimination.
+        assert.ok(out.approved_entries > 3,
+          `${label}: dropping the binding filter must inflate the count past 3 (got ${out.approved_entries})`);
+      } else {
+        assert.equal(out.approved_entries, want,
+          `${label}: the mutant reports ${want} where the truth is 3 — so the assertion above is discriminating`);
+      }
+      assert.equal(out.draft_entries, wantDrafts,
+        `${label}: …and the draft count reads ${wantDrafts} (truth 2)`);
     });
     // Put the row back to 'revoked' so the second mutant starts from the same state.
     await rootQuery(
@@ -814,10 +832,36 @@ test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason,
       `a blank reason (${JSON.stringify(blank)})`);
     assert.equal(reasonOf(err), "reset_reason_required");
   }
+  // AND ACCEPTED REASONS SURVIVE BYTE-FOR-BYTE. This is the RED-before cell for Codex r2's HIGH:
+  // PostgreSQL's E'' strings have NO `\v` escape and an unknown escape yields the FOLLOWING
+  // CHARACTER, so a trim set spelled E' \t\n\r\f\v' contains the LETTER `v` and silently ate a
+  // leading or trailing `v` off every reason. A reason that both starts and ends with `v` is the
+  // shape that makes that visible, and it is asserted on the AUDIT ROW, not on the return.
+  const vReason = "vendor verified by SSM v";
+  const vRow = await revokedBinding("K2v");
+  await resetRevocation(w.users.alice, { binding: vRow.binding.binding_id, reason: `  ${vReason}  `, opKey: opk("k2v") });
+  assert.equal((await rootQuery(
+    "select args from clara.audit_log where fn='reset_binding_revocation' order by at desc limit 1")).rows[0].args.reason,
+  vReason, "an accepted reason is stored byte-for-byte — the trim set takes whitespace and NOTHING else");
+
   // AND CAPPED. The reason lands verbatim on an audit row; PR-0's M2 ruled the uncapped shape out.
   await assertRaises(CLR.badRequest,
     () => resetRevocation(w.users.alice, { binding: b.binding.binding_id, reason: "x".repeat(4001) }),
     "a 4001-character reason");
+  // …and the cap counts CHARACTERS, not bytes. A 4 000-character MULTIBYTE reason is ACCEPTED;
+  // a `>= 4000` off-by-one or an octet_length() regression would red here. Its byte length is
+  // asserted to be larger, so the cell cannot pass by the two measures coinciding.
+  const wide = "漢".repeat(4000);
+  const wideRow = await revokedBinding("K2wide");
+  const wideOut = await resetRevocation(w.users.alice,
+    { binding: wideRow.binding.binding_id, reason: wide, opKey: opk("k2wide") });
+  assert.equal(wideOut.status, "expired", "4 000 CHARACTERS is accepted at the boundary");
+  const wideMeasured = (await rootQuery(
+    `select length(args->>'reason') c, octet_length(args->>'reason') b
+       from clara.audit_log where fn='reset_binding_revocation' order by at desc limit 1`)).rows[0];
+  assert.equal(wideMeasured.c, 4000, "…stored at its full 4 000 characters");
+  assert.ok(wideMeasured.b > 4000,
+    `…and it really is multibyte (${wideMeasured.b} bytes), so length() and octet_length() disagree here`);
   assert.equal((await bindingRow(b.binding.binding_id)).status, "revoked",
     "…and none of those refusals moved the row");
 

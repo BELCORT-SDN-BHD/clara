@@ -848,8 +848,9 @@ begin
       using errcode='CLR10';
   end if;
   if position($p2$v_pt_reason:='binding_revoked'$p2$ in v_def) = 0
-     or position($p3$v_pt_annotate:=(v_pt_reason='binding_expired')$p3$ in v_def) = 0 then
-    raise exception 'binding pr-3 postcheck: the revoked-refuses / expired-annotates arms are not both live'
+     or position($p3$v_pt_annotate:=(v_pt_reason in ('binding_expired','binding_revocation_lifted'))$p3$ in v_def) = 0
+     or position($p4$v_pt_reason:='binding_revocation_lifted'$p4$ in v_def) = 0 then
+    raise exception 'binding pr-3 postcheck: the revoked-refuses / expired-annotates / revocation-lifted arms are not all live'
       using errcode='CLR10';
   end if;
 
@@ -955,10 +956,15 @@ begin
   -- FIND-1 (#452 native review, MEDIUM — MEASURED, not theorised): single-argument btrim strips
   -- SPACES ONLY. `btrim(E'\t')` is E'\t', which is not '', so a reason consisting of one tab or
   -- one newline satisfied "non-blank" and lifted a revocation with no reason on the receipt.
-  -- The character set is given explicitly. The estate's 0154 siblings
+  -- The character set is given explicitly -- and NOT as E'...\v'. PostgreSQL's E'' strings have
+  -- NO \v escape, and an unknown escape yields the FOLLOWING CHARACTER LITERALLY, so E'\v' is the
+  -- letter `v`: the first cut of this fix would have trimmed a leading/trailing `v` off every
+  -- reason ("vendor re-confirmed with SSM" -> "endor re-confirmed with SSM"). Measured on the rig,
+  -- not reasoned about. chr(11) is the vertical tab, spelled the one way that cannot be misread.
+  -- The estate's 0154 siblings
   -- (decline_vendor_identity_binding, reset_binding_decline, and revoke's own spelling) carry the
   -- same single-arg idiom; that is NOT this PR's to change and is on the fix queue.
-  v_reason := nullif(btrim(coalesce(p_reason, ''), E' \t\n\r\f\v'), '');
+  v_reason := nullif(btrim(coalesce(p_reason, ''), E' \t\n\r\f' || chr(11)), '');
   if v_reason is null then
     raise exception 'a revocation-reset reason is required' using errcode = 'CLR36',
       detail = '{"reason":"reset_reason_required"}';
