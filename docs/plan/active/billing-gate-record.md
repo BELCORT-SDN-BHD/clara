@@ -234,3 +234,5 @@ Named up front so the gate is not a re-read of the design's own claims.
 | OQ-6 | **裁-55** read-only after the grace period (default 14 d), never delete | the write-wall flag + the reminder flow; the design's shape stands |
 | OQ-7 | **裁-56 ARCHIVE = EXPORT PACKAGE, THEN DELETE** — no retention fee, no read-only tail | **supersedes §3's "archived = read-only retention"**: a sealed hash-receipted package, owner confirms the hash, 30-day cooling window, an audited delete door that walks the append-only triggers (never disables one), refusals for operator clients and open obligations; **beta-era build**, the dissent on file |
 | OQ-8 | **deferred by 裁-50** — amounts unset | `amounts_ruled=false`; nothing charges |
+
+> **裁-58 (2026-08-30 evening):** RM0 / free until the pricing sitting; UI renders a trial state, never RM0; Wave G proves the charge path in Stripe TEST mode.
