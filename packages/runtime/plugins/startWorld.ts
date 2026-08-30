@@ -7,7 +7,12 @@ import {
   withWriteWakeScoped,
   withRuntime,
   withRead,
+  withBankWakeScoped,
 } from "../lib/pools.mjs";
+// Gate G1's two wake bodies: the CLOCKED lanes' own credential mints. Their own module (rather
+// than two more exports on pools.mjs, which is already past the repo's 500-line module budget)
+// — see wake-mints.mjs for why the two doors are NOT interchangeable.
+import { mintBankAgentCredential, mintWakeCredentialForTask } from "../lib/wake-mints.mjs";
 // F-A6 PR-2: the audited freeform read's ONE wrapper. Injected beside the rest of the pool API
 // so chatTurn_v15's frozen steps reach it the same way they reach every other pool helper (they
 // never import a lib module). Its own header carries H-4/H-5/S-1.
@@ -77,6 +82,20 @@ export default definePlugin(() => {
     // which is S-1's structural half (lib/freeform-read.mjs's header). Earlier chatTurn
     // versions ignore the extra member, as they already ignore the write-floor ones.
     withFreeformRead,
+    // GATE G1's TWO WAKE BODIES. Three new members, each reached only by the closure that needs
+    // it — every earlier workflow version ignores them, as they already ignore the write-floor
+    // and freeform ones.
+    //   withBankWakeScoped        — the clara_wake_bank write-scoped txn helper. It has existed
+    //     in pools.mjs since G1 Annex E step 7 but was never INJECTED, because no body used it;
+    //     bankAgent_v1 is the first. Its pool is LAZY (MUST G): getBankPool() only builds on
+    //     first actual bank use, so a world with no CLARA_BANK_DATABASE_URL still BOOTS, and
+    //     fails closed at the first bank task instead of refusing to start.
+    //   mintBankAgentCredential   — the plain 5-arg mint, bank_agent arm.
+    //   mintWakeCredentialForTask — the TASK-BOUND sibling. close_prep's twelve wrappers refuse
+    //     CLR03 wake_task_unbound without it; it is not interchangeable with the plain door.
+    withBankWakeScoped,
+    mintBankAgentCredential,
+    mintWakeCredentialForTask,
   };
   (globalThis as unknown as { __claraDocumentServices?: unknown }).__claraDocumentServices = makeDocumentServices();
   (globalThis as unknown as { __claraInvoiceFactsServices?: unknown }).__claraInvoiceFactsServices = makeInvoiceFactsServices();
@@ -228,10 +247,20 @@ export default definePlugin(() => {
     // the engine heartbeat are untouched. +1 persistent session. `enqueue` resolves the
     // per-source workflow_export DYNAMICALLY through the registry `workflows` object (freeze-lint
     // enqueue-site-provenance: the root `workflows` binding is imported from workflows/registry.ts
-    // right here, so a bracket lookup on it is traceable) — no bankAgent/closePrep export exists
-    // yet (each source's own follow-up PR ships its frozen workflow + flips enabled=true); an
-    // enabled row naming an export the registry does not carry would throw at start(), caught by
-    // wake-engine.mjs's own per-row try/catch and dead-lettered, never silently dropped.
+    // right here, so a bracket lookup on it is traceable).
+    //
+    // TRUED (Gate G1's wake-bodies follow-up): this note used to read "no bankAgent/closePrep
+    // export exists yet". BOTH NOW EXIST — registry.ts carries `bankAgent: bankAgent_v1` and
+    // `closePrep: closePrep_v1`, which are exactly the two `workflow_export` values migration
+    // 0133 §G seeded into clara.wake_engine_sources. So an enabled row for either source now
+    // resolves to a real frozen body instead of throwing.
+    //
+    // WHAT IS STILL TRUE, AND STILL MATTERS: both seed rows remain enabled=false, so the engine
+    // claims nothing for either source until the owner flips them through
+    // clara.set_wake_source_enabled at the G1 rollout ceremony. And the general guard is
+    // unchanged — an enabled row naming an export the registry does NOT carry (a future source
+    // registered ahead of its body, exactly as these two were) still throws at start(), caught
+    // by wake-engine.mjs's own per-row try/catch and dead-lettered, never silently dropped.
     const wakeEngine = startWakeEngineLoop({
       // `workflowsByName` (registry.ts) is the SAME object as `workflows`, typed loosely for
       // exactly this dynamic (runtime-string-keyed) dispatch — `workflowExport` is a registry row

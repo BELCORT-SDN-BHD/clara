@@ -23,6 +23,7 @@
 //      running->cancel_requested->cancelled (reconcileTasks §C's own two-step shape — a direct
 //      running->cancelled jump is not itself legal in the wake/close_prep matrix either).
 
+import { WorkflowRunNotFoundError } from "workflow/internal/errors";
 import { terminalFor } from "./reconciler.mjs";
 import { TaxonomyHaltError } from "./relay.mjs";
 import { recordTaskDeadLetter, readDeadLetterAttempts, WAKE_ENGINE_ENQUEUE_CONSUMER } from "./wake-engine.mjs";
@@ -31,6 +32,48 @@ const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 
 function isLeaderHalt(err) {
   return err instanceof TaxonomyHaltError || !!err?.halt;
+}
+
+/**
+ * IS THIS THE ENGINE SAYING THE RUN DOES NOT EXIST — 裁-44 R2 / FOLD-13, and review law 3 in its
+ * purest form: a guard that reads a NAME reads a projection of the thing, not the thing.
+ *
+ * WHAT WAS MEASURED, not assumed. The installed WDK exports a real class,
+ * `WorkflowRunNotFoundError` from `workflow/internal/errors` (re-exported from
+ * `@workflow/errors@4.2.1`), and that class carries a `runId` field. But its OWN `static is()` is
+ * itself a name check — `isError(value) && value.name === 'WorkflowRunNotFoundError'`
+ * (`@workflow/errors/dist/index.js:346-348`, read directly). Driven on this host: an ordinary
+ * Error with `name` set to that string and the same message satisfies the vendor's `is()` and is
+ * NOT an instance of the class. So delegating to the vendor's predicate alone would terminal-ize
+ * live work on any transient error that happened to be spelled that way — which is precisely what
+ * the old `isRunNotFound` did, and what `G1B-LOST-1` was replaying rather than proving.
+ *
+ * 裁-44 R3 / FOLD-17 — THE VENDOR PREDICATE IS NOT ACCEPTED AT ALL ANY MORE, not even with a
+ * brand. An earlier round admitted `WorkflowRunNotFoundError.is(err) && typeof err.runId ===
+ * "string"` as a cross-realm fallback; but `runId` is a PUBLIC field, so `{name:
+ * "WorkflowRunNotFoundError", runId: "x"}` satisfied both halves and terminal-ized live work. A
+ * forgeable projection plus a forgeable field is still a forgeable projection.
+ *
+ * TWO CONJUNCTS, BOTH REQUIRED:
+ *   1. `instanceof` the INSTALLED class — the only identity a caller cannot fabricate.
+ *   2. `err.runId` EQUALS the run this task is actually bound to. An error about some other run
+ *      says nothing about this one, and a probe that answered for the wrong run is a bug we would
+ *      rather see as a stuck row than as a settled task.
+ *
+ * A SECOND PACKAGE COPY FAILS CLOSED, and that is chosen rather than tolerated: if two module
+ * instances ever get loaded, `instanceof` goes false and this returns false, so the row stays
+ * `running` and the next sweep tries again. The cost is a task that waits; the alternative cost is
+ * a live run terminal-ized by anything that spells its name right. Given this belt settles tasks
+ * FAILED, waiting is the correct direction.
+ *
+ * WHY THIS IS WAKE-LOCAL rather than a fix to `isRunNotFound` in reconciler-documents.mjs: that
+ * predicate is the DOCUMENT lane's (`:290`) and changing its identity test in place would move a
+ * behaviour this PR neither designed nor tests. Folding the two onto one shared helper is a
+ * follow-up, recorded as such.
+ */
+export function isWakeRunNotFound(err, expectedRunId) {
+  if (!(err instanceof WorkflowRunNotFoundError)) return false;
+  return typeof expectedRunId === "string" && expectedRunId.length > 0 && err.runId === expectedRunId;
 }
 
 /** Resolve a stuck row's own wake-engine source (by event_type for kind='wake', by task_kind
@@ -134,7 +177,7 @@ async function reenqueueStuckRows(client, deps) {
       const priorAttempts = await readDeadLetterAttempts(client, { consumer: WAKE_ENGINE_ENQUEUE_CONSUMER, taskId: t.id });
       if (priorAttempts >= source.max_attempts) {
         try {
-          await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, "failed", "internal"]);
+          await client.query("select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3)", [t.id, "failed", "internal"]);
           deadLettered += 1;
           log(`[reconcile] wake-engine task=${t.id} already exhausted (${priorAttempts}/${source.max_attempts}) — re-settling failed (idempotent by _settle_wake_task's own construction), enqueue NOT re-attempted`);
         } catch (settleErr) {
@@ -158,7 +201,7 @@ async function reenqueueStuckRows(client, deps) {
         const attempts = await recordTaskDeadLetter(client, { consumer: WAKE_ENGINE_ENQUEUE_CONSUMER, taskId: t.id, reason: enqErr?.message ?? String(enqErr) });
         if (attempts >= source.max_attempts) {
           try {
-            await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, "failed", "internal"]);
+            await client.query("select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3)", [t.id, "failed", "internal"]);
             deadLettered += 1;
             log(`[reconcile] wake-engine re-enqueue for task=${t.id} exhausted ${source.max_attempts} attempts -> settled failed`);
           } catch (settleErr) {
@@ -201,8 +244,22 @@ async function settleFromEngineTruth(client, deps) {
       const es = await getRun(t.workflow_run_id).status;
       engineTerminal = es === "completed" || es === "failed" || es === "cancelled" ? es : null;
     } catch (err) {
-      log(`[reconcile] wake-engine status probe failed task=${t.id}: ${err?.message ?? err}`);
-      continue;
+      // 裁-44 / FOLD-6 — A RUN THE ENGINE NO LONGER HAS IS *LOST*, NOT TRANSIENT. This branch used
+      // to treat every getRun error alike and `continue`, so a bound running task whose engine run
+      // had genuinely vanished (an engine reset, a purged run, a body whose settle never landed)
+      // was skipped on EVERY sweep, forever: §A cannot see it (workflow_run_id is not null) and §B
+      // walked away from it. That is precisely the stranded row _settle_wake_task exists to cure.
+      // reconciler.mjs's own §C has always made this distinction (:276-277) and terminalFor already
+      // maps 'lost' -> failed/engine_lost for a running task (:58); this belt asks the same
+      // question, but through the ENGINE'S OWN CLASS rather than the spelling of an error message
+      // (裁-44 R2 / FOLD-13 — see isWakeRunNotFound). A REAL transient error still skips, and so
+      // now does an impostor that merely calls itself RunNotFound.
+      if (isWakeRunNotFound(err, t.workflow_run_id)) {
+        engineTerminal = "lost";
+      } else {
+        log(`[reconcile] wake-engine status probe failed task=${t.id}: ${err?.message ?? err}`);
+        continue;
+      }
     }
     if (!engineTerminal) continue; // in flight
 
@@ -221,7 +278,7 @@ async function settleFromEngineTruth(client, deps) {
       try {
         await client.query("begin");
         await client.query("update clara.agent_tasks set status = 'cancel_requested', updated_at = now() where id = $1 and status = 'running'", [t.id]);
-        await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, "cancelled", null]);
+        await client.query("select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3)", [t.id, "cancelled", null]);
         await client.query("commit");
         out.wakeSettled += 1;
       } catch (err) {
@@ -243,7 +300,7 @@ async function settleFromEngineTruth(client, deps) {
       continue;
     }
     try {
-      await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, settle.outcome, settle.errorCode]);
+      await client.query("select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3)", [t.id, settle.outcome, settle.errorCode]);
       out.wakeSettled += 1;
     } catch (err) {
       if (isLeaderHalt(err)) throw err;
