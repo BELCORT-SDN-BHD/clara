@@ -31,8 +31,8 @@ import { rootQuery, endPool } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import {
-  has28, has29, seedPayableAccount, seedLiveBinding, seedBareDocument, seedF123Evidence,
-  seedVendorCounterparty, seedApprovedEntry, propose, sign,
+  has28, has29, seedPayableAccount, seedLiveBinding, seedBareDocument, seedF123Evidence, signLive,
+  seedVendorCounterparty, seedApprovedEntry, propose, seedClientHardIdentifier,
 } from "./x36-vendor-binding-helpers.mjs";
 
 let has0028 = false;
@@ -45,6 +45,10 @@ before(async () => {
   if (!has0028) { noteLane("0028 absent -- x36-vendor-binding-resolver battery FAILS loudly rather than skipping"); return; }
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
+  // FOLD-7: the own-client identifier wall cannot be EVALUATED for a client with no recorded
+  // hard identifier, and reading that no-match as "not the client's" would be absence-as-evidence
+  // — so the door refuses instead. buildWorld records none; every binding window needs one.
+  await seedClientHardIdentifier(w.firms.A, w.clients.A1);
 });
 after(async () => { printLaneNotes("x36-vendor-binding-resolver"); await endPool(); });
 
@@ -85,13 +89,32 @@ async function resolveOrError(client, document, pageCandidate = null) {
  *  even though F1 (derived purely from evidence text) matches. Defaults to `cp` itself. */
 async function bindLiveWithInvoiceId(cp, invoiceId, evidenceIdentity = cp) {
   const dates = ["2025-08-25", "2025-08-29", "2025-10-13"];
+  let i = 0;
   for (const d of dates) {
     const doc = await seedBareDocument(w.firms.A, `${cp.id}-${d}`);
-    await seedF123Evidence(w.firms.A, doc.id, evidenceIdentity, invoiceId);
-    await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc, { postingDate: d });
+    // 裁-18b PR-1 (the wall-introducing-PR law): the three documents now carry DISTINCT printed
+    // invoice ids, because a corpus wall above the frozen window refuses three scans of one
+    // invoice. The ids are `${invoiceId}1/2/3`, so their longest common prefix is EXACTLY
+    // `invoiceId` — this helper's whole contract ("f2_invoice_prefix ends up being that whole
+    // string") is preserved byte-for-byte, and every cell below still reads the prefix it
+    // expects. The approved_at/extracted_at backdating is the trusted-clock wall's requirement.
+    // corpus: true (裁-18b PR-1 fold) — this IS a binding window, so each document prints a hard
+    // identifier and its own economic facts. The identifier printed is the TARGET counterparty's,
+    // not evidenceIdentity's: W18 asks whether the page proves the identity of the party being
+    // bound, and the whole point of this helper is that the page's NAME is a trading name while
+    // the registration on it is the real vendor's. Economics derive from the (distinct) printed
+    // invoice ids, so the three documents fingerprint differently as three real invoices should.
+    await seedF123Evidence(w.firms.A, doc.id, evidenceIdentity, `${invoiceId}${i + 1}`,
+      evidenceIdentity.name, `${d}T00:00:00Z`, { corpus: true, printedRegistration: cp.reg });
+    await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc,
+      { postingDate: d, approvedAt: `${d}T09:00:00Z` });
+    i += 1;
   }
   const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
-  return sign(w.users.alice, { binding: proposed.binding_id });
+  // signLive: the post-time re-check is proven by a witnessed prosrc sha now (裁-18b PR-1 finding
+  // C3), so signing refuses until PR-3 mints the witness; the helper performs PR-3's two acts and
+  // undoes both.
+  return signLive(w.users.alice, { binding: proposed.binding_id });
 }
 
 /** Add one more top-band OCR region to a document's (already-seeded) ocr extraction,

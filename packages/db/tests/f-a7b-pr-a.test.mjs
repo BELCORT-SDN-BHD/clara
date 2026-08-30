@@ -631,8 +631,18 @@ test("census: agent_receipt_surfaces carries the f_a7b row, shim_exists+wired+co
   assert.equal(row.conforms, true);
   assert.equal(row.column_count, 19);
   assert.equal(Number(row.dark_rows), 0);
+  // 裁-18b PR-1 registers a NINTH member (pb_binding) and is gated in, exactly as PR-a's own
+  // eighth is gated into pi's rosters: this cell runs on chains that hold that migration out,
+  // where an unconditional 9 would be red for a reason unrelated to F-A7b. The witness is an
+  // exact-signature catalog probe, not a migration number — 裁-18b PR-1 ships UNNUMBERED and is
+  // numbered at merge.
+  const bp1 = (await rootQuery(
+    "select to_regprocedure("
+    + "'clara.wake_propose_vendor_identity_binding(uuid,uuid,jsonb,text,jsonb,text)') is not null as ok"
+  )).rows[0].ok;
   const total = await rootQuery("select count(*)::int n from clara.agent_receipt_source_census()");
-  assert.equal(total.rows[0].n, 8, "eight registered receipt-surface members after this PR");
+  assert.equal(total.rows[0].n, bp1 ? 9 : 8,
+    bp1 ? "eight members after this PR, plus 裁-18b PR-1's pb_binding" : "eight registered receipt-surface members after this PR");
 });
 
 test("census: onboarding_agent_receipts carries forced RLS, owner-only policy, zero app-role DML/table grants", async (t) => {

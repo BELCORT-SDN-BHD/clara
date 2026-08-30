@@ -24,7 +24,7 @@ import {
 import {
   FULL_ABSENT_RECEIPT, has28, has29, propose, seedApprovedEntry,
   seedBareDocument, seedF123Evidence, seedPassingWindow,
-  seedPayableAccount, seedVendorCounterparty, sign,
+  seedPayableAccount, seedVendorCounterparty, signLive, seedClientHardIdentifier
 } from "./x36-vendor-binding-helpers.mjs";
 
 const EZSEC_FRAGMENTS = [
@@ -66,15 +66,25 @@ async function seedWindow(tag, vendorNameTexts) {
   const invoiceId = `EZSEC30-${randomUUID().slice(0, 8)}`;
   for (const [i, postingDate] of PASSING_DATES.entries()) {
     const doc = await seedBareDocument(w.firms.A, `${tag}-${i}-${postingDate}`);
+    // 裁-18b PR-1 (the wall-introducing-PR law): DISTINCT printed invoice ids, and approval
+    // tracking the posting dates. Two walls now sit above the frozen window — three scans of one
+    // invoice is one invoice, and a corpus approved in a single minute has not been observed
+    // over fourteen days. The ids are `${invoiceId}1/2/3`, so their longest common prefix is
+    // EXACTLY `invoiceId` and every cell below that reads f2_invoice_prefix is unchanged.
     await seedF123Evidence(
       w.firms.A,
       doc.id,
       cp,
-      invoiceId,
+      `${invoiceId}${i + 1}`,
       vendorNameTexts[i],
+      `${postingDate}T00:00:00Z`,
+      // corpus: true — this IS the binding window x30.1 proposes from, so each document prints
+      // the vendor own hard identifier and its own economic facts (裁-18b PR-1 fold, C1 and C2).
+      { corpus: true },
     );
     await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc, {
       postingDate,
+      approvedAt: `${postingDate}T09:00:00Z`,
     });
   }
   return { cp, invoiceId };
@@ -345,6 +355,10 @@ before(async () => {
   if (!ready) return;
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
+  // FOLD-7: the own-client identifier wall cannot be EVALUATED for a client with no recorded
+  // hard identifier, and reading that no-match as "not the client's" would be absence-as-evidence
+  // — so the door refuses instead. buildWorld records none; every binding window needs one.
+  await seedClientHardIdentifier(w.firms.A, w.clients.A1);
   await upsertPayableAccount(w.users.alice, {
     client: w.clients.A1,
     code: AP,
@@ -376,7 +390,11 @@ test("x30.1 real EZSEC window derives the exact LCP, proposes, and signs live", 
     counterparty: seeded.cp.id,
   });
   assert.equal(proposed.f1_vendor_name_norm, EZSEC_LCP);
-  const signed = await sign(w.users.alice, {
+  // signLive, not sign (裁-18b PR-1 finding C3): the post-time binding re-check is proven by a
+  // CATALOG WITNESS on the approve path now, not by the append-only 0029 ledger row, so signing
+  // REFUSES until PR-3 mints the marker. The helper plants it, signs through the REAL audited
+  // door with every other wall live, and restores the body byte-for-byte.
+  const signed = await signLive(w.users.alice, {
     binding: proposed.binding_id,
   });
   assert.equal(signed.status, "live");

@@ -6,7 +6,7 @@
 >
 > **A** verbs and columns · **B** the receipt contract · **C** the battery · **D** the frontend
 > delta · **E** risks and non-goals · **F** change log · **G** the cross-lane ledger ·
-> **J** the D1 inventory.
+> **J** the D1 inventory · **K** the fold-round verb contracts (decline / reset / expire-sweep).
 
 ---
 
@@ -43,6 +43,25 @@ f2_evidence[], resolved_citations[]}` — every value read from the same relatio
 derivation reads, **none of it entering `content_hash`** (design §3.2; survey S4).
 
 ### A.2 Columns added to `clara.vendor_identity_bindings` (ADD COLUMN only)
+
+> **SUPERSEDED 2026-08-30 (fold round; N-7).** This table names 3 of the 12 columns the
+> migration actually adds — `vendor_identity_bindings` is the pre-existing 17-column shape
+> **plus 12**, not plus 3 (the migration's own tail census asserts `17 + 12 = 29`). Kept
+> verbatim, per this estate's convention.
+>
+> **The nine not listed here**, all `ADD COLUMN` only, no body CoR: `declined_by uuid`,
+> `declined_at timestamptz`, `decline_reason text` (the decline triple, mirroring the live
+> `ck_vib_revoked` idiom — `ck_vib_declined` pairs `status = 'declined'` with
+> `declined_at is not null`); `directed_by uuid` (裁-32: the directing human of an `interactive`
+> proposal, from the credential's `on_behalf_of`; null for `filing` and for a human proposal);
+> `effective_proposer uuid generated always as (coalesce(directed_by, created_by)) stored` (a
+> derived, not copied, principal — no writer can set it directly); `self_approved boolean not
+> null default false` and `self_approval_reason text` (裁-32's solo arm: the sole eligible human
+> may sign their own directed proposal only with an explicit attestation, paired by
+> `ck_vib_self_approval_pair` and gated to a signed row by `ck_vib_self_approval_signed`); and
+> `signer_count_at_signing integer` / `signer_roster_epoch timestamptz` (H5: the durable-roster
+> count and the window it was measured over, stamped by the signer and paired/signed-gated by
+> `ck_vib_signer_count_pair` / `ck_vib_signer_count_signed`).
 
 | column | type | null | note |
 |---|---|---|---|
@@ -94,6 +113,41 @@ does not fire). **Zero `wake_credentials` CHECK change** — both kinds already 
 
 ### A.5 The unchanged surfaces, named so a reviewer can check they stayed unchanged
 
+> **SUPERSEDED 2026-08-30 (fold round, PR-1 as shipped).** Two of the ten names below are **NOT**
+> unchanged, and a third live writer body outside this list is recut too. Kept verbatim above
+> rather than edited in place, per this estate's convention that a record which erases what it
+> used to say cannot show why a ruling went the other way.
+>
+> `clara.propose_vendor_identity_binding(jsonb,text)` is **RECUT** — `CREATE OR REPLACE`, same
+> signature, three splices (the shared `(client, counterparty)` advisory lock, the
+> declined/revoked-history suppression wall, and the post-derivation identity walls). The
+> migration's tail proves it by re-substitution: strip exactly those three blocks and what
+> remains equals the prestate byte-for-byte.
+>
+> `clara.sign_vendor_identity_binding(uuid,text)` is **RECUT AT A NEW SIGNATURE** —
+> `clara.sign_vendor_identity_binding(uuid,text,text)`. Not a `CREATE OR REPLACE`: the new third
+> argument (`p_attestation text default null`) is a parameter-list change, which cannot happen
+> under CoR without leaving the old overload shadow-reachable, so the migration `DROP`s the
+> 2-arg overload and `CREATE`s the 3-arg one. The default keeps every existing 2-arg caller
+> resolving unedited.
+>
+> A **third** live writer body, not in this list at all, is recut alongside them:
+> `clara._tf_vendor_identity_binding_update()` (the `t_vib_frozen` freeze trigger,
+> `0028:198-213`) — `CREATE OR REPLACE`, same signature. Its freeze list was a negative list
+> covering five derived content fields; this file adds four maker/checker-bearing columns it
+> could not see, so the trigger body moves to cover them.
+>
+> **The D1 write-quiesce inventory for PR-1 is therefore THREE writer bodies, not zero** — see
+> the superseded note on Annex J below.
+>
+> The remaining seven names in the original list stay correctly unchanged:
+> `clara.revoke_vendor_identity_binding(uuid,text,text)` ·
+> `clara._derive_vendor_binding_proposal(uuid,uuid,uuid)` ·
+> `clara._resolve_vendor_binding(uuid,uuid,uuid)` · `clara._binding_common_prefix(text,text,text)` ·
+> `clara._binding_f3_holds(uuid,text,text)` · `clara._coding_lane_core(uuid,uuid)` ·
+> `clara.agent_receipts_visible` · `clara.agent_receipt_contract` — each still pinned by prosrc
+> sha256 in the migration's §0 and re-asserted in its tail.
+
 `clara.propose_vendor_identity_binding(jsonb,text)` · `clara.sign_vendor_identity_binding(uuid,text)` ·
 `clara.revoke_vendor_identity_binding(uuid,text,text)` · `clara._derive_vendor_binding_proposal(uuid,uuid,uuid)` ·
 `clara._resolve_vendor_binding(uuid,uuid,uuid)` · `clara._binding_common_prefix(text,text,text)` ·
@@ -104,6 +158,16 @@ in every migration's §0 and re-asserted in its tail** (the shas are in `binding
 ---
 
 ## Annex B — the receipt table and its 19-column contract mapping
+
+> **SUPERSEDED 2026-08-30 (fold round, gate ruling O2/B2).** The `failing_rungs text[]` column,
+> the nullable `binding_id`, and `ck_bar_proposed_iff_clean` below are **DELETED** in the
+> migration as shipped, and `binding_id` is `NOT NULL`. The gate ruled the fail-closed default:
+> **no refusal-receipt rows.** Every wall in the door `RAISE`s, and a raise rolls the whole call
+> back, so a refused proposal can never leave a receipt row behind — the refusal vocabulary
+> described a shape no code could ever write. Kept verbatim below rather than edited in place,
+> per this estate's convention that a record which erases what it used to say cannot show why a
+> ruling went the other way. See also the superseded note on battery cell R-2 in Annex C.4 and
+> on Annex J.
 
 ```sql
 create table clara.binding_agent_receipts (
@@ -137,11 +201,24 @@ create table clara.binding_agent_receipts (
 );
 ```
 
+**As shipped instead (2026-08-30 fold round):** `binding_id` is `uuid not null` (no comment about
+a refused proposal — there is no representable refused-proposal row); no `failing_rungs` column
+at all; no `ck_bar_proposed_iff_clean` constraint. `trigger_kind` also differs from the table
+above — it is `check (trigger_kind in ('wake_task','wake_credential'))`, not
+`('wake_task','chat_turn')` (an independent correction folded the same round; `chat_turn` was
+never writable by any of this door's callers). `fk_bar_binding` additionally carries
+`deferrable initially deferred` (gate M1: both uuids are pre-minted, receipt inserted before
+binding, no update-after-insert against the frozen-content trigger).
+
 Forced RLS + owner-only policy + the `_tf_append_only` / `_tf_no_truncate` trigger pair; **no**
 `revoke … from public` (the measured DR-drift no-op, `0126`/`0142`'s finding); **no**
 `clara_authenticated` grant — the read is `clara.agent_receipts_visible` only.
 
 **Shim mapping to the 19-column contract** (`clara.agent_receipt_contract`, ordinals 1-19):
+
+> **SUPERSEDED 2026-08-30 (fold round).** Ordinal 5 and ordinal 13 below do not match the
+> migration as shipped, both as a direct consequence of the `failing_rungs`/nullable-`binding_id`
+> deletion above. Kept verbatim, per this estate's convention.
 
 | # | contract column | source |
 |---|---|---|
@@ -158,6 +235,12 @@ Forced RLS + owner-only policy + the `_tf_append_only` / `_tf_no_truncate` trigg
 | 14-16 | `via_wake_kind` / `trigger_kind` / `trigger_id` | direct |
 | 17-18 | `authorization_id` / `adopted_verbatim` | direct (both null here) |
 | 19 | `scope` | `'firm'::text` |
+
+**As shipped instead:** ordinal 5 (`subject_id`) reads `r.binding_id::text` directly — no
+`coalesce`, because `binding_id` is `NOT NULL` and there is no refused-proposal row whose
+`binding_id` would be null to fall back from. Ordinal 13 (`failing_rungs`) is not a table column
+at all; the shim supplies the honest empty constant `'{}'::text[]` so the 19-column contract's
+shape is still satisfied by every row, which is always a clean proposal.
 
 Registry delta: one `clara.agent_receipt_surfaces` row, the two closed-world regex widenings
 (item + shim_relname), and a **ninth** `union all` arm in `clara._agent_receipts_all`.
@@ -242,7 +325,7 @@ Fixtures THROW on construction failure. Differential over self-referential.
 | cell | expect |
 |---|---|
 | **R-1** | a successful proposal writes exactly one `binding_agent_receipts` row with `binding_id` set, `failing_rungs = '{}'`, `rationale` verbatim, `model`/`model_version` from `p_model` |
-| **R-2** | a REFUSED proposal that got past `_reserve_op` writes a receipt with `binding_id IS NULL` and a non-empty `failing_rungs`; `ck_bar_proposed_iff_clean` refuses both lying shapes |
+| **R-2** | ~~a REFUSED proposal that got past `_reserve_op` writes a receipt with `binding_id IS NULL` and a non-empty `failing_rungs`; `ck_bar_proposed_iff_clean` refuses both lying shapes~~ — **SUPERSEDED 2026-08-30 (gate ruling O2/B2): this cell is DELETED, not built.** A refusal receipt is not a representable state in the shipped schema: every wall in the door `RAISE`s, and a `RAISE` rolls back the whole call, so there is no code path that could ever produce the row this cell describes. A refused proposal now leaves an audit line and no receipt — the same posture `0126` records for its own Tier A. |
 | **R-3** | the row is visible through `clara.agent_receipts_visible` to a bookkeeper of the owning firm and **invisible** to a bookkeeper of another firm |
 | **R-4** | `clara.agent_receipt_source_census()` returns 9 rows; the new one is `shim_exists ∧ wired ∧ conforms ∧ 19 cols ∧ 0 dark`; `clara.agent_receipt_dark_rows()` is empty |
 | **R-5** | append-only: `update` and `delete` on the receipt table are refused; `truncate` is refused |
@@ -317,6 +400,7 @@ branch as W7's index, not left for the estate leg to find.
 | v | date | change |
 |---|---|---|
 | v1 | 2026-08-29 | First issue. Survey + design + annexes + gate record authored against a rig at frontier `0142` (137 migrations). Gate **OPEN** with 8 questions. |
+| v2 | 2026-08-30 | PR-0 gate fold (M7) discharged for this file: A.5, Annex B's table + shim mapping, battery cell R-2, and Annex J's headline (plus its own "not in this inventory" list) superseded in place against the migration as fold-round-shipped (then UNNUMBERED_binding_proposal_pr_1.sql, now `packages/db/migrations/0154_binding_proposal_pr_1.sql`; tip `7829adf0`). Annex K added — the verb contracts for `decline_vendor_identity_binding`, `reset_binding_decline` and `_expire_stale_proposals`, none of which any prior version of this file specified — split into its own companion file, `binding-proposal-annexes-k-fold-verb-contracts.md`, to stay under this repo's per-file line cap. |
 
 ---
 
@@ -334,6 +418,22 @@ branch as W7's index, not left for the estate leg to find.
 ---
 
 ## Annex J — the D1 write-quiesce inventory
+
+> **SUPERSEDED 2026-08-30 (fold round).** "Replaces ZERO live PL/pgSQL WRITER bodies" is false
+> as shipped. **PR-1's D1 inventory is THREE live writer bodies**, not zero:
+>
+> 1. `clara.propose_vendor_identity_binding(jsonb,text)` — `CREATE OR REPLACE`, same signature.
+>    Three splices (advisory lock, declined/revoked-history suppression, post-derivation identity
+>    walls); the tail proves it by re-substitution against the prestate.
+> 2. `clara.sign_vendor_identity_binding(uuid,text)` — `DROP` + `CREATE` at a new signature
+>    `(uuid,text,text)`. Not a CoR: the new `p_attestation` parameter cannot be added under
+>    `CREATE OR REPLACE` without leaving the old overload shadow-reachable. The new argument
+>    defaults to null, so every existing 2-arg caller resolves unedited.
+> 3. `clara._tf_vendor_identity_binding_update()` (the `t_vib_frozen` freeze trigger) —
+>    `CREATE OR REPLACE`, same signature. Its freeze list needed to cover the four new
+>    maker/checker-bearing columns this file adds that an unmodified 0028 body could not see.
+>
+> Kept verbatim below, per this estate's convention. See also the superseded note on Annex A.5.
 
 **The whole item replaces ZERO live PL/pgSQL WRITER bodies.** Enumerated in full:
 
@@ -356,3 +456,26 @@ branch as W7's index, not left for the estate leg to find.
 `_draft_entry_core`, `revise_entry`, `_approve_entry_core`, `_firm_question_core`. Each is pinned
 by prosrc in every migration's §0 prestate and re-asserted in its tail, so a drift aborts the
 apply rather than passing silently.
+
+> **SUPERSEDED 2026-08-30.** The first two names in that "not in this inventory" list are wrong,
+> for the same reason given at the top of this annex: `propose_vendor_identity_binding` and
+> `sign_vendor_identity_binding` are BOTH in the D1 inventory as shipped. The other eight names
+> are correctly still outside it, each still pinned by prosrc in the migration's §0 prestate and
+> re-asserted byte-identical in its tail (`clara._approve_entry_core` among them, deliberately —
+> PR-3 replaces it and needs an undisturbed pre-image to pin).
+
+---
+
+## Annex K — the fold-round verb contracts (2026-08-30, PR-1 as shipped)
+
+*(Added by the fold round; no prior version of this annex specified any of the three verbs
+below — the gate's M7 finding named this gap explicitly: "Annex A specifies no `decline` verb
+at all — no name, signature, floor, audit/event or transition guard." Split into its own
+companion file to keep this file under the repo's per-file line cap.)*
+
+**See `binding-proposal-annexes-k-fold-verb-contracts.md`** for the full contracts — signature,
+role floor, required arguments and refusal tokens, status transition, lock order, audit payload
+keys and domain event type — for `clara.decline_vendor_identity_binding(uuid,text,text)`,
+`clara.reset_binding_decline(uuid,text,text)` and `clara._expire_stale_proposals(uuid,uuid,uuid)`,
+plus K.0, the single lock-order protocol (H6/C-1) every lifecycle writer on
+`clara.vendor_identity_bindings` now follows.

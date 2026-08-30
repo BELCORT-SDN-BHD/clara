@@ -53,7 +53,7 @@ import {
   seedF123Evidence,
   seedPayableAccount,
   seedVendorCounterparty,
-  sign,
+  signLive, seedClientHardIdentifier
 } from "./x36-vendor-binding-helpers.mjs";
 
 const AMOUNT = 100_000;
@@ -426,6 +426,10 @@ before(async () => {
   await requireReady();
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
+  // FOLD-7: the own-client identifier wall cannot be EVALUATED for a client with no recorded
+  // hard identifier, and reading that no-match as "not the client's" would be absence-as-evidence
+  // — so the door refuses instead. buildWorld records none; every binding window needs one.
+  await seedClientHardIdentifier(w.firms.A, w.clients.A1);
   await upsertPayableAccount(w.users.alice, {
     client: w.clients.A1,
     code: "400-000",
@@ -452,22 +456,31 @@ test("x31.a a real EZSEC-shaped live evidence window admits end-to-end", async (
   const windowInvoice = `EZSEC31-${randomUUID().slice(0, 8)}`;
   for (const [i, postingDate] of PASSING_DATES.entries()) {
     const doc = await seedBareDocument(w.firms.A, `x31-ezsec-${i}`);
+    // 裁-18b PR-1 (the wall-introducing-PR law): distinct printed invoice ids sharing the
+    // window's prefix (so the LCP is still exactly `windowInvoice`), and approval tracking the
+    // posting dates so the trusted-clock span is real. Both are walls above the frozen window.
     await seedF123Evidence(
       w.firms.A,
       doc.id,
       cp,
-      windowInvoice,
+      `${windowInvoice}${i + 1}`,
       EZSEC_FRAGMENTS[i],
+      `${postingDate}T00:00:00Z`,
+      // corpus: true — the binding window this cell proposes from (裁-18b PR-1 fold, C1 and C2).
+      { corpus: true },
     );
     await seedApprovedEntry(w.firms.A, w.clients.A1, cp.id, doc, {
       postingDate,
+      approvedAt: `${postingDate}T09:00:00Z`,
     });
   }
   const proposed = await propose(w.users.bob, {
     client: w.clients.A1,
     counterparty: cp.id,
   });
-  const binding = await sign(w.users.alice, {
+  // signLive (裁-18b PR-1 finding C3): signing refuses until PR-3 mints the approve-path
+  // marker; the helper plants it, drives the REAL door, and restores the body byte-for-byte.
+  const binding = await signLive(w.users.alice, {
     binding: proposed.binding_id,
   });
   assert.equal(binding.status, "live");

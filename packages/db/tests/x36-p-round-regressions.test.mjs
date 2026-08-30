@@ -34,8 +34,8 @@ import {
   upsertAccountClassed, upsertPayableAccount,
 } from "./wave-a-fixtures.mjs";
 import {
-  has29, propose, seedApprovedEntry, seedBareDocument, seedF123Evidence,
-  seedPayableAccount, seedVendorCounterparty, sign,
+  has29, propose, seedApprovedEntry, seedBareDocument, seedF123Evidence, signLive,
+  seedPayableAccount, seedVendorCounterparty, seedClientHardIdentifier
 } from "./x36-vendor-binding-helpers.mjs";
 
 let ready = false;
@@ -185,25 +185,38 @@ async function bindLive(cp, pageVendor, invoiceIds) {
       w.firms.A,
       `p-window-${cp.id}-${index}`,
     );
+    // 裁-18b PR-1 (the wall-introducing-PR law): the invoice ids here were ALREADY distinct, so
+    // only the trusted clock needed truing — approval now tracks the posting dates and the
+    // extraction is backdated ahead of it, or the frozen derivation refuses `evidence_restated`
+    // before the new span wall is ever reached.
     await seedF123Evidence(
       w.firms.A,
       doc.id,
       { name: pageVendor, reg: cp.reg },
       invoiceIds[index],
+      pageVendor,
+      `${postingDate}T00:00:00Z`,
+      // corpus: true — the binding window bindLive() proposes from (裁-18b PR-1 fold, C1 and C2).
+      // The printed identifier is cp.reg, which is what the page really carries here: this
+      // fixture deliberately gives the PAGE a different vendor NAME from the counterparty row.
+      { corpus: true },
     );
     await seedApprovedEntry(
       w.firms.A,
       w.clients.A1,
       cp.id,
       doc,
-      { postingDate },
+      { postingDate, approvedAt: `${postingDate}T09:00:00Z` },
     );
   }
   const proposed = await propose(w.users.bob, {
     client: w.clients.A1,
     counterparty: cp.id,
   });
-  return sign(w.users.alice, { binding: proposed.binding_id });
+  // signLive (裁-18b PR-1 finding C3): the post-time re-check is proven by a catalog witness on
+  // the approve path now, so signing refuses until PR-3 mints the marker; the helper plants it,
+  // drives the REAL door, and restores the body byte-for-byte.
+  return signLive(w.users.alice, { binding: proposed.binding_id });
 }
 
 before(async () => {
@@ -211,6 +224,10 @@ before(async () => {
   if (!ready) return;
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
+  // FOLD-7: the own-client identifier wall cannot be EVALUATED for a client with no recorded
+  // hard identifier, and reading that no-match as "not the client's" would be absence-as-evidence
+  // — so the door refuses instead. buildWorld records none; every binding window needs one.
+  await seedClientHardIdentifier(w.firms.A, w.clients.A1);
   await upsertPayableAccount(w.users.alice, {
     client: w.clients.A1,
     code: AP,
