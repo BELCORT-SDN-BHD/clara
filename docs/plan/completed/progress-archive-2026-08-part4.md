@@ -9,8 +9,27 @@ archive that paraphrases is a second, weaker copy of the record. `PROGRESS.md` k
 
 ## Session log entries, 2026-08-22 … 2026-08-25 (moved 2026-08-30, verbatim)
 
-*Moved because the 磨合 sprint's own entries had pushed the file to its cap. The 2026-08-27 and
-2026-08-27/28 entries stay in `PROGRESS.md`; everything earlier that was still inline is here.*
+*Moved because the 磨合 sprint's own entries had pushed the file to its cap. Everything that was
+still inline up to 2026-08-25 is here; the 2026-08-27 and 2026-08-27/28 entries followed at noon
+2026-08-30 (next section) when the noon posture update pushed the file over again.*
+
+## Session log entries, 2026-08-27 … 2026-08-28 (moved 2026-08-30 noon, verbatim)
+
+- **2026-08-27/28 (THE 磨合 SPRINT NIGHT)** — **twelve PRs #368-#379 merged** under the
+  owner's standing autonomous mandate; three grill batches ruled (R1-R7 · 裁-1…裁-7 · the
+  law-71 close-lane ruling); the port wave ruled A and planned (11 trains); `0139`/`0140`
+  landed (ceremony owed); the CI meta-gate caught `0140`'s seam-census red (the ledger owed
+  three projection keys — trued extend-only, the instrument ceiling recorded in the test
+  header); the THIRD disk-zero event recovered + permanently fixed (87 GB volume prune + the
+  owner-run diskpart compact, C: 82 GB free); T0 seam lane dispatched at close; **the
+  0139+0140 D1 window RAN same night — live 135/`0140`** (as-run in completed/).
+- **2026-08-27 (THE 磨合 WINDOW OPENS)** — the opening grill RULED IN FULL
+  (`mohe-grill-rulings-2026-08-27.md`); **F-A7b's gate SAT and CLOSED** (BUILD-AUTHORIZED);
+  `chatTurn_v14` deployed + bundle-proven; #356-#360 merged. P2's four shell lanes built in
+  parallel worktrees through build→review→fix→re-verify; the Codex security pass on auth
+  returned two HIGH (anti-cache headers; OTP purpose) — both fixed pre-fold.
+
+## Session log entries, 2026-08-22 … 2026-08-25 (moved 2026-08-30, verbatim)
 
 - **2026-08-25 (THE W2+W3 COMBINED CLOSE)** — the six-car train merged and **CEREMONIED live
   112→122/`0127`**, Track A's backend fully live; four cars took a first-chain-meeting fix

@@ -252,3 +252,11 @@ proposal per (client, vendor); the human door's second manual proposal refuses
 - **The T10 copy must flip when 裁-18a lands.** `apps/web/messages/en.json:1898` and `:1915-1917`
   currently tell the admin that the same person may propose and sign. True today, false the day the
   wall merges. Carried as a cross-lane obligation (annexes G-c), not a question.
+
+## PR-1 review's three owner questions — RULED 2026-08-30 noon (ledger `mohe-grill-rulings-2026-08-30.md`)
+
+- **(a) revoked pair re-open → 裁-46:** a SEPARATE admin door `reset_binding_revocation(uuid, reason)`,
+  admin/owner, reason mandatory, receipted — rides PR-3; `reset_binding_decline` keeps refusing on revoked.
+- **(b) solo attestation scope → 裁-47 CONFIRMED narrow:** only Clara's DIRECTED path (`directed_by = signer`);
+  a human's own manual propose-then-self-sign is refused at any firm size; the 90-day roster window stands.
+- **(c) the dead `0028` postverify → 裁-48:** retired (deleted) in its own PR.
