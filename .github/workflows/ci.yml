@@ -235,6 +235,8 @@ jobs:
       # rather than hardcoding one, so it needs no edit at the next _vN.
       - name: Workflow-bundle gate (registry pins + WDK directives reached the served artifact)
         run: node scripts/check-workflow-bundle.mjs
+      - name: Parts parity (web reader covers runtime-emittable kinds)
+        run: node packages/runtime/scripts/check-parts-parity.mjs
 
   # =========================================================================
   # DB ESTATE LEG (ADR-0073 lever 2): the two per-PR backstops the owner's ruling

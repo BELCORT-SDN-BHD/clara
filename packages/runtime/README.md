@@ -306,13 +306,13 @@ world runs ONLY in the deployed app.
 From the **repo root** (so the Docker build context is the pnpm workspace root):
 
 ```sh
-node packages/runtime/scripts/check-parts-parity.mjs
 fly deploy --config packages/runtime/fly.toml
 ```
 
-The parity preflight is a deploy prerequisite and the Docker builder runs the same command. It
-fails closed while `apps/web`'s `ClaraPart` reader lacks any kind the pinned chatTurn declarer can
-emit; merge the reader bump before deploying the runtime image.
+CI proves reader ⊇ emittable at this commit — the deploy-ordering hold (deployed web ≥ runtime) is
+OPS.x. The CI gate runs after the workflow-bundle gate and fails closed when `apps/web`'s
+`ClaraPart` reader lacks a kind the runtime closure can construct. It is not a claim about the
+version of the web app already deployed.
 
 (Recommended: add a repo-root `.dockerignore` excluding `.git`, `node_modules`,
 `**/.output`, `**/.env` to speed the context upload — it does not affect

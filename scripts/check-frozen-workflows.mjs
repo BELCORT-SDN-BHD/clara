@@ -70,6 +70,7 @@ import { execFileSync } from "node:child_process";
 // Pure sibling checkers let selftests inject simulated base/head source pairs.
 import { checkRegistryMonotonicity, checkRegistryViewIntegrity, checkEnqueueSites, isTestPath, REGISTRY_REL } from "./freeze-lint-checks.mjs";
 import { runFrozenManifestCompareCli } from "./frozen-manifest-compare.mjs";
+import { FROZEN_WORKFLOW_FAILURE_GUIDANCE } from "./frozen-workflow-guidance.mjs";
 const COMPARE_BASE_INDEX = process.argv.indexOf("--compare-base");
 if (COMPARE_BASE_INDEX !== -1) process.exit(runFrozenManifestCompareCli(process.argv.slice(2)));
 // All git calls go through execFileSync with an argv array — never a shell string —
@@ -486,7 +487,7 @@ function main() {
     console.error("freeze-lint: FAIL — frozen workflow policy violated (ARCHITECTURE.md Appendix A):\n");
     for (const v of violations) console.error("  - " + v);
     console.error(
-      `\n${violations.length} violation(s). Ship a behavioural change as a NEW _vN workflow; re-baseline with --update (local) when ADDING any new frozen file (a new class or a new _vN), then prove the manifest diff is additions-only — you can never mutate or remove an existing frozen entry.`,
+      `\n${violations.length} violation(s). ${FROZEN_WORKFLOW_FAILURE_GUIDANCE}`,
     );
     return 1;
   }

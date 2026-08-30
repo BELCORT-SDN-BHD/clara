@@ -1,30 +1,37 @@
 #!/usr/bin/env node
-// Deploy preflight: the pinned chatTurn declarer must not outrun the apps/web reader.
-//
-// This is deliberately a source/AST check. The declarer's exported constant is read from its
-// declaration, and the reader kinds are reached from the ClaraPart union through its referenced
-// aliases. A comment or an unrelated type alias therefore cannot stand in for either identity.
+// Commit-parity gate: apps/web's reader must cover every part kind this runtime can emit.
+// Declared-only kinds are exempt only through the explicit produced-elsewhere allowlist, and
+// each exemption is invalidated by any object-literal construction site in packages/runtime.
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { declaredPartShapes } from "./part-shapes.mjs";
 
+const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const DEFAULT_DECLARER = "packages/runtime/workflows/chatTurn.v16.parts.ts";
 const DEFAULT_READER = "apps/web/lib/parts/types.ts";
+const DEFAULT_RUNTIME_ROOT = "packages/runtime";
+
+export const PRODUCED_ELSEWHERE_PART_KINDS = [
+  "agent_receipt",
+  "firm_question",
+  "close_proposal",
+];
 
 function sourceFile(path, source) {
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const errors = file.parseDiagnostics ?? [];
   if (errors.length > 0) {
-    const detail = errors.map((d) => ts.flattenDiagnosticMessageText(d.messageText, " ")).join("; ");
+    const detail = errors.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")).join("; ");
     throw new Error(`${path}: TypeScript parse failed: ${detail}`);
   }
   return file;
 }
 
 function exported(node) {
-  return node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) === true;
+  return node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) === true;
 }
 
 function unwrapExpression(node) {
@@ -33,34 +40,6 @@ function unwrapExpression(node) {
     current = current.expression;
   }
   return current;
-}
-
-export function declarerPartKinds(source, path = DEFAULT_DECLARER) {
-  const file = sourceFile(path, source);
-  const matches = [];
-  for (const statement of file.statements) {
-    if (!ts.isVariableStatement(statement) || !exported(statement)) continue;
-    for (const declaration of statement.declarationList.declarations) {
-      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== "CHATTURN_V16_PART_KINDS") continue;
-      matches.push(declaration);
-    }
-  }
-  if (matches.length !== 1) {
-    throw new Error(`${path}: expected exactly one exported CHATTURN_V16_PART_KINDS declaration, found ${matches.length}`);
-  }
-  const initializer = matches[0].initializer && unwrapExpression(matches[0].initializer);
-  if (!initializer || !ts.isArrayLiteralExpression(initializer)) {
-    throw new Error(`${path}: CHATTURN_V16_PART_KINDS must be an array literal (optionally as const)`);
-  }
-  const kinds = initializer.elements.map((element) => {
-    const item = unwrapExpression(element);
-    if (!ts.isStringLiteral(item)) throw new Error(`${path}: every CHATTURN_V16_PART_KINDS member must be a string literal`);
-    return item.text;
-  });
-  if (kinds.length === 0 || new Set(kinds).size !== kinds.length) {
-    throw new Error(`${path}: CHATTURN_V16_PART_KINDS must be non-empty and duplicate-free`);
-  }
-  return kinds;
 }
 
 function propertyNameText(name) {
@@ -120,34 +99,137 @@ export function readerPartKinds(source, path = DEFAULT_READER) {
   return [...kinds];
 }
 
-export function checkPartsParity({ declarerSource, readerSource, declarerPath = DEFAULT_DECLARER, readerPath = DEFAULT_READER }) {
-  const declared = declarerPartKinds(declarerSource, declarerPath);
+export function readRuntimeSources(runtimeRoot = resolve(REPO_ROOT, DEFAULT_RUNTIME_ROOT)) {
+  const sources = [];
+  const walk = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name === "node_modules" || entry.name === ".output" || entry.name === ".nitro") continue;
+      const path = resolve(directory, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.isFile() && entry.name.endsWith(".ts")) {
+        sources.push({
+          path: relative(REPO_ROOT, path).replaceAll("\\", "/"),
+          source: readFileSync(path, "utf8"),
+        });
+      }
+    }
+  };
+  walk(runtimeRoot);
+  return sources.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function constructionSiteCensus(runtimeSources, declared) {
+  if (!Array.isArray(runtimeSources) || runtimeSources.length === 0) {
+    throw new Error("runtime construction-site census requires at least one TypeScript source");
+  }
+  const sites = new Map(declared.map((kind) => [kind, []]));
+  const paths = new Set();
+  for (const entry of runtimeSources) {
+    if (!entry || typeof entry.path !== "string" || typeof entry.source !== "string") {
+      throw new Error("every runtime census entry must carry string path and source fields");
+    }
+    if (paths.has(entry.path)) throw new Error(`runtime construction-site census contains duplicate path ${entry.path}`);
+    paths.add(entry.path);
+    const file = sourceFile(entry.path, entry.source);
+    const visit = (node) => {
+      if (ts.isObjectLiteralExpression(node)) {
+        for (const property of node.properties) {
+          if (!ts.isPropertyAssignment(property) || propertyNameText(property.name) !== "type") continue;
+          const initializer = unwrapExpression(property.initializer);
+          if (!ts.isStringLiteral(initializer) || !sites.has(initializer.text)) continue;
+          const line = file.getLineAndCharacterOfPosition(property.getStart(file)).line + 1;
+          sites.get(initializer.text).push(`${entry.path}:${line}`);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(file);
+  }
+  return sites;
+}
+
+export function checkPartsParity({
+  declarerSource,
+  readerSource,
+  runtimeSources = readRuntimeSources(),
+  declarerPath = DEFAULT_DECLARER,
+  readerPath = DEFAULT_READER,
+  allowlistedKinds = PRODUCED_ELSEWHERE_PART_KINDS,
+}) {
+  const declared = [...declaredPartShapes(declarerSource).keys()];
+  if (declared.length === 0) throw new Error(`${declarerPath}: no exported object-type part declarations found`);
   const reader = readerPartKinds(readerSource, readerPath);
+  const allowlisted = [...allowlistedKinds];
+  if (new Set(allowlisted).size !== allowlisted.length) throw new Error("produced-elsewhere allowlist must be duplicate-free");
+
+  const declaredSet = new Set(declared);
+  const allowlistedSet = new Set(allowlisted);
+  const constructionSites = constructionSiteCensus(runtimeSources, declared);
+  const staleAllowlist = allowlisted.filter((kind) => !declaredSet.has(kind));
+  const allowlistedWithConstructionSites = allowlisted.filter(
+    (kind) => declaredSet.has(kind) && constructionSites.get(kind).length > 0,
+  );
+  const unexplainedDeclarations = declared.filter(
+    (kind) => !allowlistedSet.has(kind) && constructionSites.get(kind).length === 0,
+  );
+  const emittable = declared.filter((kind) => !allowlistedSet.has(kind));
   const readerSet = new Set(reader);
-  const missing = declared.filter((kind) => !readerSet.has(kind));
-  return { ok: missing.length === 0, declared, reader, missing };
+  const missing = emittable.filter((kind) => !readerSet.has(kind));
+  const census = declared.map((kind) => ({
+    kind,
+    classification: allowlistedSet.has(kind) ? "allowlisted-produced-elsewhere" : "emittable",
+    constructionSites: constructionSites.get(kind),
+  }));
+  const ok = missing.length === 0
+    && staleAllowlist.length === 0
+    && allowlistedWithConstructionSites.length === 0
+    && unexplainedDeclarations.length === 0;
+  return {
+    ok,
+    declared,
+    reader,
+    allowlisted,
+    emittable,
+    missing,
+    staleAllowlist,
+    allowlistedWithConstructionSites,
+    unexplainedDeclarations,
+    census,
+  };
+}
+
+export function formatCensus(census) {
+  return census.map((entry) => {
+    const sites = entry.constructionSites.length > 0 ? entry.constructionSites.join(",") : "no-construction-site";
+    return `${entry.kind}=${entry.classification}:${sites}`;
+  }).join(" | ");
 }
 
 function main() {
-  const declarerPath = resolve(DEFAULT_DECLARER);
-  const readerPath = resolve(DEFAULT_READER);
+  const declarerPath = resolve(REPO_ROOT, DEFAULT_DECLARER);
+  const readerPath = resolve(REPO_ROOT, DEFAULT_READER);
   try {
     const result = checkPartsParity({
       declarerSource: readFileSync(declarerPath, "utf8"),
       readerSource: readFileSync(readerPath, "utf8"),
-      declarerPath: DEFAULT_DECLARER,
-      readerPath: DEFAULT_READER,
     });
+    const census = formatCensus(result.census);
     if (!result.ok) {
-      console.error(
-        `parts-parity: REFUSED — the pinned v16 declarer can emit ${result.missing.join(", ")}, ` +
-          `but apps/web's ${result.reader.length}-kind ClaraPart reader cannot read them. Merge the reader bump before deploy.`,
-      );
+      const reasons = [];
+      if (result.missing.length > 0) reasons.push(`reader lacks emittable kind(s): ${result.missing.join(", ")}`);
+      if (result.allowlistedWithConstructionSites.length > 0) {
+        reasons.push(`allowlisted kind(s) gained construction sites: ${result.allowlistedWithConstructionSites.join(", ")}`);
+      }
+      if (result.unexplainedDeclarations.length > 0) {
+        reasons.push(`declared kind(s) have no construction site or allowlist explanation: ${result.unexplainedDeclarations.join(", ")}`);
+      }
+      if (result.staleAllowlist.length > 0) reasons.push(`allowlist names undeclared kind(s): ${result.staleAllowlist.join(", ")}`);
+      console.error(`parts-parity: REFUSED — ${reasons.join("; ")}. Census: ${census}`);
       return 1;
     }
     console.log(
-      `parts-parity: OK — apps/web's ${result.reader.length}-kind ClaraPart reader covers all ` +
-        `${result.declared.length} CHATTURN_V16_PART_KINDS.`,
+      `parts-parity: OK — CI proves reader ⊇ emittable at this commit; `
+        + `emittable={${result.emittable.join(", ")}}; allowlist={${result.allowlisted.join(", ")}}. Census: ${census}`,
     );
     return 0;
   } catch (error) {

@@ -33,6 +33,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { declaredPartShapes, stripComments } from "../scripts/part-shapes.mjs";
 
 const { register } = await import("tsx/esm/api");
 register();
@@ -68,12 +69,6 @@ const FAKE_CTX = {
   createdBy: "00000000-0000-0000-0000-000000000003",
   taskId: "00000000-0000-0000-0000-000000000004",
 };
-
-/** Strip `//` and block comments so a source census reads CODE, not prose — see this file's
- *  header for why that is the difference between a real cell and a vacuous one. */
-function stripComments(src) {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
-}
 
 /** One ADMITTED freeform tool result, in the exact two-envelope shape `runFreeformRead`
  *  returns: the tool's own `{ok, read}` wrapper around the DB verb's jsonb, which carries its
@@ -131,25 +126,6 @@ test("p6-1.registry.rollback-preflight: EVERY chatTurn body v1..v16 is still rea
 // ==============================================================================================
 // 2 · The DECLARER — the four kinds, and the field lists P6-2 transcribes.
 // ==============================================================================================
-
-/** Census the four exported object-type declarations out of chatTurn.v16.parts.ts. Returns
- *  kind -> ordered field names, read from CODE. */
-function declaredPartShapes(src) {
-  const code = stripComments(src);
-  const shapes = new Map();
-  const decl = /export\s+type\s+[A-Za-z0-9_]+\s*=\s*\{([^{}]*)\}/g;
-  let m;
-  while ((m = decl.exec(code)) !== null) {
-    const body = m[1];
-    const kind = /\btype\s*:\s*"([a-z_]+)"/.exec(body);
-    if (!kind) continue;
-    shapes.set(
-      kind[1],
-      [...body.matchAll(/(?:^|[;{\s])([a-z_][a-z0-9_]*)\s*:/g)].map((x) => x[1]),
-    );
-  }
-  return shapes;
-}
 
 test("p6-1.declarer.instrument: stripComments really removes the header — the source cells below are not reading prose", () => {
   assert.ok(/裁-9|Q8/.test(PARTS_SRC), "the RAW declarer names the ruling in its header (control: the text is there to strip)");

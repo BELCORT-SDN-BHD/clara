@@ -174,6 +174,12 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 
 Registered but not scheduled. Sources of record in brackets.
 
+- **OPS.x — deployed parts-version hold (minted by PR #454 round 4):** CI now proves
+  `reader ⊇ emittable` inside one commit, but that cannot prove the web version already deployed is
+  at least the runtime version about to ship. A separate ops/CI PR must have the deployed web
+  publish a catalog/version stamp and make the runtime deploy read and compare it before rollout.
+  Until then, same-commit parity is a build gate, not the deploy-ordering hold.
+
 **THE DEBT-CLEARING SPRINT IS NEXT (owner mandate, 2026-08-24): everything except full Track B clears in the 磨合 window.** W2/W3 ladder items (2026-08-25), the forward-obligations block and the F-A5b/W4 items below ride it:
 - **裁-22 (2026-08-29) — agent proposal bases become DB-RESOLVED citations**, both proposal doors in one migration pair, before beta (`mohe-grill-rulings-2026-08-28.md`); with the receipt-contract `trigger_id` looseness and the name-bound wake allowlist recorded there as backlog.
 - **The two owner-excepted-door verdicts owed since `port-wave-plan-2026-08-28.md:82` — MEASURED 2026-08-30, not deferred further (mohe-alignment-audit-2026-08-29.md R-3):**
