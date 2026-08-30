@@ -161,6 +161,7 @@ test/a11yRules.test.ts
 test/keyboardWalk.test.ts
 tests/apiLimitBanner.test.mjs
 tests/client-scope.test.ts
+tests/firm-scope-db-pins.test.ts
 tests/firm-scope-surfaces.test.ts
 tests/focusRailSubscription.test.mjs
 tests/invite-verification.test.ts

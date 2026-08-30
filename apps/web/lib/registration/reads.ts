@@ -47,8 +47,9 @@
 
 import { getRows } from "../read";
 import {
-  serverCallerSubject,
-  serverSessionTokenAccessor,
+  fixedTokenAccessor,
+  resolveServerSession,
+  type ServerSession,
 } from "@/lib/supabase/server-session";
 import type { SessionTokenAccessor } from "@/lib/session";
 
@@ -134,40 +135,60 @@ export function loadRegistrationRequestsForApplicant(
   });
 }
 
-/** The two server seams `loadOwnRegistrationRequests` resolves the caller through,
+/** The server seam `loadOwnRegistrationRequests` resolves the caller through,
  *  injectable so the fail-closed branch can be DRIVEN in a test rather than read
- *  off the source. Production passes nothing and takes both defaults. */
+ *  off the source. Production passes nothing and takes the default. */
 export type OwnRegistrationDeps = {
-  readonly subject?: () => Promise<string | null>;
-  readonly session?: SessionTokenAccessor;
+  readonly resolveSession?: () => Promise<ServerSession | null>;
   readonly signal?: AbortSignal;
 };
 
 /**
+ * What the holding page's read returns.
+ *
+ * A DISCRIMINATED RESULT, not a bare array (Codex review of #451, LOW-4). The
+ * previous shape collapsed "your identity could not be verified" into `[]` — the
+ * same value a verified applicant with no requests gets. Those are different
+ * facts and the screen owes the person different words: one is "you have not
+ * applied yet", the other is "we could not confirm who you are". Returning `[]`
+ * for both would have the holding page confidently tell a signed-in applicant
+ * their pending application does not exist, on nothing more than a claims
+ * verification blip.
+ *
+ * `[]` is now reserved for exactly one case: a successful, applicant-filtered read
+ * that observed zero rows.
+ */
+export type OwnRegistrationResult =
+  | { readonly ok: true; readonly rows: RegistrationRequestRow[] }
+  | { readonly ok: false; readonly reason: "no_session" };
+
+/**
  * The server-side convenience the holding page uses: resolve the caller's own
- * verified subject, then read their requests.
+ * verified session, then read their requests.
  *
- * FAIL-CLOSED ON AN ABSENT SUBJECT: with no session — or a `sub` claim that is
- * absent or not a uuid — this returns an EMPTY LIST **without issuing any read at
- * all**. Review law 2: an absent identity is not a licence to widen the query, and
- * an unfiltered read here is precisely the operator-queue leak the header
- * describes. The suite asserts the stronger property — that `fetch` is never
- * reached on this branch — because "returned []" alone would also be true of a
- * request that went out and happened to come back empty.
+ * FAIL-CLOSED ON AN UNVERIFIED CALLER: with no session — or a `sub` claim that is
+ * absent, unverifiable or not a uuid — this returns the `no_session` branch
+ * **without issuing any read at all**. Review law 2: an absent identity is not a
+ * licence to widen the query, and an unfiltered read here is precisely the
+ * operator-queue leak the header describes. The suite asserts the stronger
+ * property — that `fetch` is never reached on this branch — because a returned
+ * emptiness alone would also be true of a request that went out and came back
+ * empty.
  *
- * An empty list is NOT the same fact as "no requests" at the render layer — the
- * caller must distinguish loading, empty and error itself (§0.5's three
- * distinguishable states); this function reports only what a read returned.
+ * A FAILED read THROWS rather than degrading into either branch: the caller must
+ * distinguish loading, empty and error (§0.5's three distinguishable states), and
+ * a read failure is none of the three answers this function is able to give.
  */
 export async function loadOwnRegistrationRequests(
   deps: OwnRegistrationDeps = {},
-): Promise<RegistrationRequestRow[]> {
-  const resolveSubject = deps.subject ?? serverCallerSubject;
-  const applicant = await resolveSubject();
-  if (!applicant) return [];
-  return loadRegistrationRequestsForApplicant(
-    deps.session ?? serverSessionTokenAccessor,
-    applicant,
+): Promise<OwnRegistrationResult> {
+  const resolve = deps.resolveSession ?? resolveServerSession;
+  const session = await resolve();
+  if (session === null) return { ok: false, reason: "no_session" };
+  const rows = await loadRegistrationRequestsForApplicant(
+    fixedTokenAccessor(session.accessToken),
+    session.subject,
     deps.signal,
   );
+  return { ok: true, rows };
 }

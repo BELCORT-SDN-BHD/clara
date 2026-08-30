@@ -16,8 +16,20 @@
 //   2. app/(full)/layout.tsx              → redirect to the holding route
 //   3. app/api/runtime/[...path]/route.ts → 403, NEVER a redirect
 // A redirect is not an answer to a data request, which is why the third entrance
-// gets its own adapter rather than sharing the layouts'. A FOURTH authenticated
-// surface later means calling this helper — the seam is visible, not implicit.
+// gets its own adapter. A FOURTH authenticated surface later means calling this
+// helper — the seam is visible, not implicit, and
+// `tests/firm-scope-surfaces.test.ts` enumerates EVERY route leaf in the tree and
+// reds on any it cannot classify.
+//
+// ONE PRINCIPAL, START TO FINISH (Codex review of #451, HIGH-1). The decision
+// resolves the caller's session ONCE — `{accessToken, subject}`, the subject
+// verified from that very token — and RETURNS it on a grant. Entrance 3 then
+// forwards THAT token to the runtime, overwriting whatever `Authorization` the
+// browser sent. Before this, the guard read the cookie session while the proxy
+// forwarded a caller-controlled bearer: a caller holding a scoped cookie A could
+// send `Authorization: Bearer B` and have A's scope authorise B's request. The
+// guard and the governed request are now the same principal by construction, not
+// by coincidence.
 //
 // THIS IS NOT THE SECURITY BOUNDARY. `clara._human_ctx` is (design §4 D). RLS
 // already returns zero rows and the governed doors already refuse `CLR04` for a
@@ -27,18 +39,22 @@
 //
 // FAIL-CLOSED IN EVERY DIRECTION (review law 2 — absence is not evidence, and a
 // derived state is not evidence). Only a read that POSITIVELY returned exactly one
-// well-formed context row grants. Zero rows, more than one row, a row missing the
-// pinned shape, and a read that threw are four DIFFERENT facts and four SEPARATE
-// denial reasons — but all four deny. `resolveFirmScope` has no branch that grants
-// on anything else.
+// row carrying every pinned column grants. No session, zero rows, more than one
+// row, a row that fails validation, and a read that threw are five DIFFERENT facts
+// and five SEPARATE denial reasons — but all five deny.
 
 import { redirect } from "next/navigation";
 
 import {
+  isCallerContextRow,
   loadCallerContext,
   type CallerContextRow,
 } from "@/lib/firm/caller-context";
-import { serverSessionTokenAccessor } from "@/lib/supabase/server-session";
+import {
+  fixedTokenAccessor,
+  resolveServerSession,
+  type ServerSession,
+} from "@/lib/supabase/server-session";
 
 /**
  * Where a session with no firm scope is sent. ONE constant, so the two layout
@@ -67,8 +83,7 @@ export const FIRM_SCOPE_FORBIDDEN_STATUS = 403;
 /** The machine-readable body of that refusal. Not user-facing prose, so it does
  *  not route through next-intl: nothing renders it — `lib/documents/intake.ts`
  *  and the bytes viewer read the STATUS. It deliberately says only that firm scope
- *  is missing, never which of the four denial reasons applied: an unauthenticated
- *  probe learns nothing about the estate from it. */
+ *  is missing, never which denial reason applied: a probe learns nothing. */
 export const FIRM_SCOPE_FORBIDDEN_BODY = { error: "no_firm_scope" } as const;
 
 /** The granted context — the caller's own row of `clara.caller_context`. */
@@ -79,76 +94,82 @@ export type FirmScope = CallerContextRow;
  * denial is legible in a log or a test, never so a caller can treat one of them as
  * a soft failure.
  *
+ *  - `no_session`    — no usable session, or its subject could not be verified
+ *    from its own token. Unreachable through a layout (`lib/supabase/proxy.ts`
+ *    redirects an unauthenticated request to /login before any layout renders),
+ *    which is exactly why it is checked rather than assumed.
  *  - `no_membership` — the read returned zero rows. The ordinary, expected case:
- *    a signed-in person who has not yet been added to a firm. This is the holding
- *    state's own trigger (design §4 E), not an error.
- *  - `ambiguous` — the read returned more than one row. `uq_membership_active_user`
- *    says this cannot happen; if it does, the DB's own invariant has broken and
- *    picking one row would be this module inventing an answer.
- *  - `malformed` — exactly one row, but it does not carry the pinned shape. A
- *    projection drift or a truncated body; a derived "probably fine" is not
- *    evidence.
- *  - `read_failed` — the read threw: no session, 401, 403, a transport failure, a
- *    malformed body. lib/read.ts's `ReadError` already classified it; the spine
- *    needs only that it did not succeed.
+ *    a signed-in person not yet added to a firm. This is the holding state's own
+ *    trigger (design §4 E), not an error.
+ *  - `ambiguous`     — more than one row. `uq_membership_active_user` says this
+ *    cannot happen; if it does, the DB's own invariant has broken and picking one
+ *    row would be this module inventing an answer.
+ *  - `malformed`     — exactly one row, but it does not carry every pinned column
+ *    at its declared type.
+ *  - `read_failed`   — the read threw: 401, 403, a transport failure, a malformed
+ *    body. `lib/read.ts`'s `ReadError` already classified it; the spine needs only
+ *    that it did not succeed.
  */
 export type ScopeDenialReason =
+  | "no_session"
   | "no_membership"
   | "ambiguous"
   | "malformed"
   | "read_failed";
 
+/**
+ * The outcome. A grant carries BOTH the context and the session it was decided
+ * from — that pairing is HIGH-1's fix in the type system: an entrance that needs a
+ * token to forward can only get one that this very decision verified, and cannot
+ * reach for a second, unverified source.
+ */
 export type ScopeOutcome =
-  | { granted: true; context: FirmScope }
+  | { granted: true; context: FirmScope; session: ServerSession }
   | { granted: false; reason: ScopeDenialReason };
 
-/** The injectable read. Exists so every fail-closed branch above can be driven in
- *  a test WITHOUT a live PostgREST — a wall whose refusal branch cannot be
+/** The injectable seams. They exist so every fail-closed branch can be DRIVEN in a
+ *  test WITHOUT a live request scope — a wall whose refusal branch cannot be
  *  exercised is a wall nobody has ever seen close. The three real entrances pass
- *  NOTHING and take the default; `tests/require-firm-scope.test.ts` asserts that
+ *  NOTHING and take the defaults; `tests/firm-scope-surfaces.test.ts` asserts that
  *  by reading the app tree, so this seam cannot become a way to hand an entrance a
  *  permissive reader. */
-export type CallerContextReader = () => Promise<CallerContextRow[]>;
+export type ScopeDeps = {
+  readonly resolveSession?: () => Promise<ServerSession | null>;
+  readonly read?: (session: ServerSession) => Promise<CallerContextRow[]>;
+};
 
-/** The production reader: the caller's own context, on the server request's own
- *  session (lib/supabase/server-session.ts explains why not the browser
- *  singleton). */
-export const defaultCallerContextReader: CallerContextReader = () =>
-  loadCallerContext(serverSessionTokenAccessor);
-
-/** A row carries the pinned shape only if the three columns this spine and its
- *  consumers actually depend on are present and of the declared type. `role_rank`
- *  is checked as `number | null` because the DB genuinely permits null there (see
- *  lib/firm/caller-context.ts's census) — a null rank is a real, grantable
- *  context, and consumers compare it fail-closed. */
-function hasPinnedShape(row: unknown): row is CallerContextRow {
-  if (typeof row !== "object" || row === null) return false;
-  const r = row as Record<string, unknown>;
-  if (typeof r.user_id !== "string" || r.user_id.length === 0) return false;
-  if (typeof r.firm_id !== "string" || r.firm_id.length === 0) return false;
-  if (typeof r.role !== "string" || r.role.length === 0) return false;
-  if (r.role_rank !== null && typeof r.role_rank !== "number") return false;
-  return true;
-}
+/** The production read: the caller's own context, on the SAME token the grant will
+ *  carry. */
+const defaultRead = (session: ServerSession): Promise<CallerContextRow[]> =>
+  loadCallerContext(fixedTokenAccessor(session.accessToken));
 
 /**
  * THE decision — the one implementation. Framework-free on purpose: it neither
- * redirects nor builds a Response, so the same logic can be proven once and then
- * adapted three ways below. Never throws.
+ * redirects nor builds a Response, so the same logic is proven once and adapted
+ * twice below. Never throws.
  */
-export async function resolveFirmScope(
-  read: CallerContextReader = defaultCallerContextReader,
-): Promise<ScopeOutcome> {
+export async function resolveFirmScope(deps: ScopeDeps = {}): Promise<ScopeOutcome> {
+  const resolveSession = deps.resolveSession ?? resolveServerSession;
+  const read = deps.read ?? defaultRead;
+
+  let session: ServerSession | null;
+  try {
+    session = await resolveSession();
+  } catch {
+    return { granted: false, reason: "no_session" };
+  }
+  if (session === null) return { granted: false, reason: "no_session" };
+
   let rows: CallerContextRow[];
   try {
-    rows = await read();
+    rows = await read(session);
   } catch {
-    // Deliberately swallows the classified `ReadError` rather than re-throwing:
-    // a failed read must land the caller in the SAME place an empty one does
+    // Deliberately swallows the classified `ReadError` rather than re-throwing: a
+    // failed read must land the caller in the SAME place an empty one does
     // (design §4 E — "a failed read and an empty result both route to the holding
     // state or the 403, and both grant nothing"). Letting it propagate would give
-    // a transport blip a different, louder outcome than a genuine absence, and
-    // one of the two would eventually be handled as "retry and continue".
+    // a transport blip a different, louder outcome than a genuine absence, and one
+    // of the two would eventually be handled as "retry and continue".
     return { granted: false, reason: "read_failed" };
   }
 
@@ -159,10 +180,10 @@ export async function resolveFirmScope(
     return { granted: false, reason: "ambiguous" };
   }
   const row = rows[0];
-  if (!hasPinnedShape(row)) {
+  if (!isCallerContextRow(row)) {
     return { granted: false, reason: "malformed" };
   }
-  return { granted: true, context: row };
+  return { granted: true, context: row, session };
 }
 
 /**
@@ -173,49 +194,57 @@ export async function resolveFirmScope(
  * segment. Nothing downstream of a denial renders, so there is no window in which
  * a firm-scoped layout paints for a caller who has no firm.
  */
-export async function requireFirmScope(
-  read: CallerContextReader = defaultCallerContextReader,
-): Promise<FirmScope> {
-  const outcome = await resolveFirmScope(read);
+export async function requireFirmScope(deps: ScopeDeps = {}): Promise<FirmScope> {
+  const outcome = await resolveFirmScope(deps);
   if (!outcome.granted) {
     redirect(HOLDING_ROUTE);
   }
   return outcome.context;
 }
 
+/** What entrance 3 gets back. A discriminated union rather than a nullable
+ *  Response: on a grant the caller receives the VERIFIED SESSION it must forward,
+ *  so "check the scope" and "know whose request this is" cannot come apart. */
+export type FirmScopeGuard =
+  | { readonly ok: false; readonly response: Response }
+  | { readonly ok: true; readonly session: ServerSession };
+
 /**
  * ENTRANCE 3 — the runtime API route.
  *
  * Answers with a `Response` on denial instead of redirecting: a 307 to an HTML
  * page is not an answer to `fetch`, and `lib/documents/intake.ts` would read it as
- * an unrecognisable failure rather than a refusal. Returns `null` on a grant so
- * the caller reads `if (refusal) return refusal;` — the guard cannot be
- * accidentally ignored the way a boolean can.
+ * an unrecognisable failure rather than a refusal.
+ *
+ * On a grant it hands back the session whose `accessToken` the caller MUST send
+ * onward. The caller does not choose that token and must not read one off the
+ * inbound request (HIGH-1).
  *
  * Plain `Response.json`, not `NextResponse.json`: this module is imported by two
- * layouts as well, and there is nothing here that needs the Next wrapper. Route
- * Handlers are dynamic by default, so the refusal is not cached.
+ * layouts as well, and nothing here needs the Next wrapper. Route Handlers are
+ * dynamic by default, so the refusal is not cached.
  */
-export async function firmScopeRefusal(
-  read: CallerContextReader = defaultCallerContextReader,
-): Promise<Response | null> {
-  const outcome = await resolveFirmScope(read);
-  if (outcome.granted) return null;
-  return Response.json(FIRM_SCOPE_FORBIDDEN_BODY, {
-    status: FIRM_SCOPE_FORBIDDEN_STATUS,
-  });
+export async function firmScopeGuard(deps: ScopeDeps = {}): Promise<FirmScopeGuard> {
+  const outcome = await resolveFirmScope(deps);
+  if (!outcome.granted) {
+    return {
+      ok: false,
+      response: Response.json(FIRM_SCOPE_FORBIDDEN_BODY, {
+        status: FIRM_SCOPE_FORBIDDEN_STATUS,
+      }),
+    };
+  }
+  return { ok: true, session: outcome.session };
 }
 
 /**
  * THE ENTRANCE REGISTRY — every surface that calls this spine, as data.
  *
- * `tests/require-firm-scope.test.ts` matches this list against the real `app/`
- * tree BOTH WAYS: every path here must call the spine, and no other file under
- * `app/` may. That is what makes design §4 E's "a fourth authenticated surface
- * later means calling the helper — the seam is visible, not implicit" a gate
- * rather than a hope: a fifth entrance cannot appear without a line landing here,
- * in front of a reviewer, and an entrance cannot silently STOP calling the spine
- * either.
+ * `tests/firm-scope-surfaces.test.ts` matches this list against the real `app/`
+ * tree BOTH WAYS, and separately classifies every route leaf in the tree against
+ * it. That is what makes design §4 E's "a fourth authenticated surface later means
+ * calling the helper — the seam is visible, not implicit" a gate rather than a
+ * hope.
  */
 export const SCOPE_ENTRANCES: ReadonlyArray<{
   readonly path: string;
@@ -227,13 +256,30 @@ export const SCOPE_ENTRANCES: ReadonlyArray<{
 ];
 
 /**
- * THE EXEMPTION REGISTRY — the two authenticated surfaces that deliberately do NOT
- * call this spine, and why.
+ * THE PUBLIC REGISTRY — route leaves that must NOT be scope-gated because they are
+ * reachable without a session at all.
  *
- * Written as DATA, not prose, because `tests/require-firm-scope.test.ts` asserts
+ * Kept here, beside the entrances, so the leaf census has one place to classify
+ * from — and cross-checked BOTH WAYS against `lib/supabase/proxy.ts`'s own
+ * `PUBLIC_PATH_PREFIXES` by the suite, so the app's auth gate and this spine's
+ * idea of "public" cannot drift apart. P4-3 appends `/signup` to that array; the
+ * cross-check is what will make it add a line here too.
+ */
+export const SCOPE_PUBLIC_PREFIXES: ReadonlyArray<string> = ["/login", "/invite"];
+
+/**
+ * THE EXEMPTION REGISTRY — authenticated surfaces that deliberately do NOT call
+ * this spine, and why.
+ *
+ * Written as DATA, not prose, because `tests/firm-scope-surfaces.test.ts` asserts
  * each entry against the real app tree: an exempt file that starts calling
  * `requireFirmScope` goes red, and so does an exemption whose reason has been
  * deleted. An unexplained exemption is exactly the thing a later lane "fixes".
+ *
+ * `pending: true` means the file does not exist yet. A pending exemption grants
+ * nothing and excuses nothing — when the file lands, the suite requires it to be
+ * re-classified deliberately rather than inheriting an exemption written before
+ * anyone could read its body (Codex review of #451, MEDIUM-3).
  *
  * The rule both entries imply, and the one a fourth surface should be measured
  * against: A SURFACE CALLS `requireFirmScope()` WHEN IT RENDERS OR RETURNS
@@ -243,6 +289,7 @@ export const SCOPE_ENTRANCES: ReadonlyArray<{
 export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
   readonly path: string;
   readonly reason: string;
+  readonly pending?: true;
 }> = [
   {
     path: "app/logout/route.ts",
@@ -256,12 +303,16 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
   },
   {
     path: "app/api/invite/route.ts",
+    pending: true,
     reason:
-      "EXEMPT ON PRINCIPLE. P4-4's mail courier calls clara.invite_member AS THE " +
-      "CALLER, and clara._human_ctx(role_rank('admin')) already raises CLR04 for a " +
-      "caller with no active membership — so THE DB IS THE WALL. Adding a scope " +
-      "check in front would be the courier pretending to be a guard, and would put " +
-      "a second, drifting copy of an authority decision in front of the real one. " +
-      "Built by P4-4; until then this entry binds the file that does not exist yet.",
+      "EXEMPT ON PRINCIPLE, PENDING ITS BODY. P4-4's mail courier will call " +
+      "clara.invite_member AS THE CALLER, and clara._human_ctx(role_rank('admin')) " +
+      "already raises CLR04 for a caller with no active membership — so THE DB IS " +
+      "THE WALL. Adding a scope check in front would be the courier pretending to " +
+      "be a guard, and would put a second, drifting copy of an authority decision " +
+      "in front of the real one. This entry does NOT pre-approve the file: it does " +
+      "not exist yet, and the suite refuses to let it inherit the exemption — P4-4 " +
+      "must clear `pending` in the same PR that writes the body, which is the step " +
+      "where someone reads what it actually does.",
   },
 ];

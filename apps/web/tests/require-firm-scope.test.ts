@@ -11,85 +11,102 @@ import {
   FIRM_SCOPE_FORBIDDEN_BODY,
   FIRM_SCOPE_FORBIDDEN_STATUS,
   HOLDING_ROUTE,
-  firmScopeRefusal,
+  firmScopeGuard,
   requireFirmScope,
   resolveFirmScope,
-  type CallerContextReader,
   type ScopeDenialReason,
+  type ScopeDeps,
   type ScopeOutcome,
 } from "../lib/require-firm-scope";
-import type { CallerContextRow } from "../lib/firm/caller-context";
 import {
+  isCallerContextRow,
+  type CallerContextRow,
+} from "../lib/firm/caller-context";
+import {
+  serverSessionFrom,
   subjectFromClaims,
   tokenFromSession,
+  type ServerSession,
 } from "../lib/supabase/server-session";
+import { buildOutboundHeaders } from "../lib/runtime/outbound";
 
 /**
  * THE SCOPE SPINE'S BEHAVIOUR (P4-2; design `p4-design-2026-08-27.md` §4 E).
- * Its structural half — one implementation / three entrances / two exemptions,
- * the wire-shape pins and the mechanised rung-0 census — is
- * `tests/firm-scope-surfaces.test.ts`.
+ * Its structural half — the route-leaf census, the two registries, the wire-shape
+ * pins and the SQL-lexed rung-0 census — is `tests/firm-scope-surfaces.test.ts`.
  *
- * Two things get proven here:
- *
+ * Proven here:
  *  1. THE DECISION, BOTH DIRECTIONS. One well-formed row grants and hands back
- *     THAT row; zero rows, more than one row, a malformed row and a THROWN read
- *     each deny, with their own reason. Every denial cell is re-run against a
- *     WALL-LESS MUTANT and required to FAIL — the RED-before proof (§0.5 / review
- *     law 2: an assertion that still passes with the wall deleted proves nothing).
- *  2. THE THREE ENTRANCES' ADAPTERS. The layouts' adapter throws Next's REAL
- *     `NEXT_REDIRECT` and the digest is asserted to NAME `/pending` — the shipping
- *     mechanism, not a stand-in, so a redirect to the wrong place fails here. The
- *     API adapter's refusal is asserted as a STATUS (403) and positively asserted
- *     NOT to be a redirect.
+ *     that row AND the session it was decided from; no session, zero rows, >1 row,
+ *     a row failing validation, and a thrown read each deny with their own reason.
+ *     Every denial cell is re-run against a WALL-LESS MUTANT and required to FAIL.
+ *  2. ONE PRINCIPAL (HIGH-1). The grant carries the very session object the
+ *     decision verified, and `buildOutboundHeaders` writes THAT token — a caller's
+ *     own `Authorization` never survives to the runtime.
+ *  3. EVERY PINNED FIELD (MEDIUM-2), table-driven: each of the six columns,
+ *     missing / null / wrong-typed, must produce `malformed`.
+ *  4. THE ADAPTERS. The layouts throw Next's REAL `NEXT_REDIRECT` with the digest
+ *     asserted to NAME `/pending`; the API adapter answers a STATUS, not a
+ *     redirect, and hands back the session to forward.
  */
 
-/** A well-formed context row. Every field is DISTINCT and non-default so a grant
- *  cell asserting `deepEqual` on it cannot pass against a fabricated blank. */
+const SUB = "11111111-1111-4111-8111-111111111111";
+const FIRM = "22222222-2222-4222-8222-222222222222";
+
+/** A well-formed context row. Every field distinct and non-default, so a grant
+ *  cell asserting `deepEqual` cannot pass against a fabricated blank. */
 const MEMBER: CallerContextRow = {
-  user_id: "11111111-1111-4111-8111-111111111111",
-  firm_id: "22222222-2222-4222-8222-222222222222",
+  user_id: SUB,
+  firm_id: FIRM,
   firm_name: "BELCORT SDN BHD",
   role: "owner",
   role_rank: 3,
   is_operator: true,
 };
 
-const readOne: CallerContextReader = async () => [MEMBER];
-const readZero: CallerContextReader = async () => [];
-const readTwo: CallerContextReader = async () => [
-  MEMBER,
-  { ...MEMBER, firm_id: "33333333-3333-4333-8333-333333333333" },
-];
-/** One row that is NOT a context: the pinned columns are absent. What a projection
- *  drift or a truncated body looks like on the wire. */
-const readMalformed: CallerContextReader = async () =>
-  [{ hello: "world" } as unknown as CallerContextRow];
-const readThrows: CallerContextReader = async () => {
-  throw new Error("read failed: 503 from PostgREST");
+const SESSION: ServerSession = { accessToken: "token-A", subject: SUB };
+
+const withRows = (rows: unknown[]): ScopeDeps => ({
+  resolveSession: async () => SESSION,
+  read: async () => rows as CallerContextRow[],
+});
+
+const noSession: ScopeDeps = { resolveSession: async () => null, read: async () => [MEMBER] };
+const sessionThrows: ScopeDeps = {
+  resolveSession: async () => {
+    throw new Error("cookies() outside a request scope");
+  },
+  read: async () => [MEMBER],
+};
+const readThrows: ScopeDeps = {
+  resolveSession: async () => SESSION,
+  read: async () => {
+    throw new Error("read failed: 503 from PostgREST");
+  },
 };
 
 /**
  * THE MUTANT — the spine with every fail-closed branch removed. It grants on
- * whatever the read said, which is precisely the NULL-`jwt_firm()` defect this
- * train exists to prevent. Each denial cell below is run against it and REQUIRED
- * to fail; that failure IS the recorded RED.
+ * whatever it was given, which is precisely the NULL-`jwt_firm()` defect this
+ * train exists to prevent. Each denial cell is run against it and REQUIRED to
+ * fail; that failure IS the recorded RED.
  */
 const grantAlways = async (): Promise<ScopeOutcome> => ({
   granted: true,
   context: MEMBER,
+  session: SESSION,
 });
 
-type Resolver = (read: CallerContextReader) => Promise<ScopeOutcome>;
+type Resolver = (deps: ScopeDeps) => Promise<ScopeOutcome>;
 
 /** The one assertion shape both the real spine and the mutant are put through, so
  *  the RED-before control is byte-identical to the cell it controls. */
 async function assertDenied(
   resolve: Resolver,
-  read: CallerContextReader,
+  deps: ScopeDeps,
   reason: ScopeDenialReason,
 ): Promise<void> {
-  const outcome = await resolve(read);
+  const outcome = await resolve(deps);
   assert.equal(outcome.granted, false, "GRANTED where a denial was required");
   assert.equal(
     (outcome as { reason: ScopeDenialReason }).reason,
@@ -98,22 +115,16 @@ async function assertDenied(
   );
 }
 
-/** Run the identical assertion against the wall-less mutant and require it to
- *  throw — the RED half of RED-before. Matched on the assertion's own message so
- *  it cannot "pass" by failing for some unrelated reason. */
-async function assertMutantIsRed(
-  read: CallerContextReader,
-  reason: ScopeDenialReason,
-): Promise<void> {
+async function assertMutantIsRed(deps: ScopeDeps, reason: ScopeDenialReason): Promise<void> {
   await assert.rejects(
-    () => assertDenied(grantAlways, read, reason),
+    () => assertDenied(grantAlways, deps, reason),
     /GRANTED where a denial was required/,
   );
 }
 
 describe("resolveFirmScope — the one decision", () => {
-  it("POSITIVE CONTROL: exactly one well-formed row grants, and returns THAT row", async () => {
-    const outcome = await resolveFirmScope(readOne);
+  it("POSITIVE CONTROL: one well-formed row grants, returning THAT row", async () => {
+    const outcome = await resolveFirmScope(withRows([MEMBER]));
     assert.equal(outcome.granted, true);
     assert.deepEqual(
       (outcome as { context: CallerContextRow }).context,
@@ -122,9 +133,42 @@ describe("resolveFirmScope — the one decision", () => {
     );
   });
 
-  it("an EMPTY read denies — no_membership (mutant seen RED)", async () => {
-    await assertDenied(resolveFirmScope, readZero, "no_membership");
-    await assertMutantIsRed(readZero, "no_membership");
+  it("HIGH-1: a grant carries the SAME session the decision verified", async () => {
+    const outcome = await resolveFirmScope(withRows([MEMBER]));
+    assert.equal(outcome.granted, true);
+    assert.strictEqual(
+      (outcome as { session: ServerSession }).session,
+      SESSION,
+      "the grant must hand back the very session it decided from — an entrance that " +
+        "forwards a token must not be able to reach for a second, unverified one",
+    );
+  });
+
+  it("HIGH-1: the read is issued on the GRANTING session's own token", async () => {
+    let sawToken: string | null = null;
+    await resolveFirmScope({
+      resolveSession: async () => SESSION,
+      read: async (session) => {
+        sawToken = session.accessToken;
+        return [MEMBER];
+      },
+    });
+    assert.equal(sawToken, SESSION.accessToken);
+  });
+
+  it("NO SESSION denies — no_membership would be a different, wrong story", async () => {
+    await assertDenied(resolveFirmScope, noSession, "no_session");
+    await assertMutantIsRed(noSession, "no_session");
+  });
+
+  it("a THROWING session resolution denies, never propagates", async () => {
+    await assertDenied(resolveFirmScope, sessionThrows, "no_session");
+    await assertMutantIsRed(sessionThrows, "no_session");
+  });
+
+  it("an EMPTY read denies — no_membership", async () => {
+    await assertDenied(resolveFirmScope, withRows([]), "no_membership");
+    await assertMutantIsRed(withRows([]), "no_membership");
   });
 
   it("a FAILED read denies — read_failed, and never propagates the throw", async () => {
@@ -133,19 +177,13 @@ describe("resolveFirmScope — the one decision", () => {
   });
 
   it("MORE THAN ONE row denies — ambiguous, never 'pick the first'", async () => {
-    await assertDenied(resolveFirmScope, readTwo, "ambiguous");
-    await assertMutantIsRed(readTwo, "ambiguous");
-  });
-
-  it("a row without the pinned shape denies — malformed", async () => {
-    await assertDenied(resolveFirmScope, readMalformed, "malformed");
-    await assertMutantIsRed(readMalformed, "malformed");
+    const two = withRows([MEMBER, { ...MEMBER, firm_id: "33333333-3333-4333-8333-333333333333" }]);
+    await assertDenied(resolveFirmScope, two, "ambiguous");
+    await assertMutantIsRed(two, "ambiguous");
   });
 
   it("a null role_rank is a REAL context and still grants (the DB permits it)", async () => {
-    const outcome = await resolveFirmScope(async () => [
-      { ...MEMBER, role_rank: null },
-    ]);
+    const outcome = await resolveFirmScope(withRows([{ ...MEMBER, role_rank: null }]));
     assert.equal(
       outcome.granted,
       true,
@@ -155,22 +193,135 @@ describe("resolveFirmScope — the one decision", () => {
 });
 
 // ---------------------------------------------------------------------------
+// MEDIUM-2 — every pinned field, table-driven
+// ---------------------------------------------------------------------------
+
+/**
+ * One row per REJECTION the validator owes. The previous validator checked four of
+ * six columns, so a row missing `firm_name` and `is_operator` — or carrying the
+ * string `"true"` where a boolean belongs — granted and was then handed onward as
+ * a trusted `CallerContextRow`. A partial validator launders an unvalidated field
+ * behind a checked one, which is worse than none.
+ */
+const MALFORMED_ROWS: ReadonlyArray<{ readonly what: string; readonly row: unknown }> = [
+  { what: "not an object", row: "a string" },
+  { what: "null", row: null },
+  { what: "user_id missing", row: { ...MEMBER, user_id: undefined } },
+  { what: "user_id not a uuid", row: { ...MEMBER, user_id: "u1" } },
+  { what: "user_id null", row: { ...MEMBER, user_id: null } },
+  { what: "firm_id missing", row: { ...MEMBER, firm_id: undefined } },
+  { what: "firm_id not a uuid", row: { ...MEMBER, firm_id: "f1" } },
+  { what: "firm_name missing", row: { ...MEMBER, firm_name: undefined } },
+  { what: "firm_name empty", row: { ...MEMBER, firm_name: "" } },
+  { what: "firm_name null", row: { ...MEMBER, firm_name: null } },
+  { what: "firm_name not a string", row: { ...MEMBER, firm_name: 7 } },
+  { what: "role missing", row: { ...MEMBER, role: undefined } },
+  { what: "role off the ladder", row: { ...MEMBER, role: "superuser" } },
+  { what: "role empty", row: { ...MEMBER, role: "" } },
+  { what: "role_rank a float", row: { ...MEMBER, role_rank: 2.5 } },
+  { what: "role_rank NaN", row: { ...MEMBER, role_rank: Number.NaN } },
+  { what: "role_rank a numeric string", row: { ...MEMBER, role_rank: "3" } },
+  { what: "is_operator missing", row: { ...MEMBER, is_operator: undefined } },
+  { what: "is_operator the STRING true", row: { ...MEMBER, is_operator: "true" } },
+  { what: "is_operator null", row: { ...MEMBER, is_operator: null } },
+  { what: "only the four once-checked fields", row: { user_id: SUB, firm_id: FIRM, role: "owner", role_rank: 3 } },
+];
+
+describe("MEDIUM-2 — every pinned field is validated, not four of six", () => {
+  for (const { what, row } of MALFORMED_ROWS) {
+    it(`denies malformed: ${what}`, async () => {
+      assert.equal(isCallerContextRow(row), false, `isCallerContextRow accepted: ${what}`);
+      await assertDenied(resolveFirmScope, withRows([row]), "malformed");
+    });
+  }
+
+  it("POSITIVE CONTROL: the fully-formed row passes the same validator", () => {
+    assert.equal(isCallerContextRow(MEMBER), true);
+    assert.equal(isCallerContextRow({ ...MEMBER, role_rank: null }), true);
+    for (const role of ["viewer", "bookkeeper", "admin", "owner"]) {
+      assert.equal(isCallerContextRow({ ...MEMBER, role }), true, `rejected the real role ${role}`);
+    }
+  });
+
+  it("RED-before: the old four-field validator passes rows this one rejects", () => {
+    const fourFieldsOnly = (r: Record<string, unknown>) =>
+      typeof r.user_id === "string" &&
+      typeof r.firm_id === "string" &&
+      typeof r.role === "string" &&
+      (r.role_rank === null || typeof r.role_rank === "number");
+    const spoof = { user_id: SUB, firm_id: FIRM, role: "owner", role_rank: 3, is_operator: "true" };
+    assert.equal(fourFieldsOnly(spoof), true, "control: the old shape admitted this");
+    assert.equal(isCallerContextRow(spoof), false, "the new validator must reject it");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HIGH-1 — the outbound identity, driven
+// ---------------------------------------------------------------------------
+
+describe("HIGH-1 — the request leaves as the principal the guard authorised", () => {
+  const A = "token-A-the-guard-verified";
+  const B = "token-B-the-caller-chose";
+
+  it("cookie A + header B → the runtime receives A, never B", () => {
+    const inbound = new Headers({ authorization: `Bearer ${B}`, "content-type": "application/json" });
+    const out = buildOutboundHeaders(inbound, A);
+    assert.equal(out.get("authorization"), `Bearer ${A}`);
+    assert.ok(!String(out.get("authorization")).includes(B), "the caller's bearer survived to the runtime");
+  });
+
+  it("a MISSING inbound Authorization still forwards A", () => {
+    const out = buildOutboundHeaders(new Headers({ "content-type": "application/json" }), A);
+    assert.equal(out.get("authorization"), `Bearer ${A}`);
+  });
+
+  it("the body headers still cross; cookies and origin never do", () => {
+    const inbound = new Headers({
+      "content-type": "application/octet-stream",
+      "content-length": "42",
+      cookie: "sb-access-token=leak; sb-refresh-token=leak",
+      origin: "https://evil.example",
+      referer: "https://evil.example/x",
+    });
+    const out = buildOutboundHeaders(inbound, A);
+    assert.equal(out.get("content-type"), "application/octet-stream");
+    assert.equal(out.get("content-length"), "42");
+    for (const dropped of ["cookie", "origin", "referer"]) {
+      assert.equal(out.get(dropped), null, `${dropped} reached the runtime`);
+    }
+    assert.deepEqual([...out.keys()].sort(), ["authorization", "content-length", "content-type"]);
+  });
+
+  it("RED-before: a forwarder that prefers the inbound header fails the same cell", () => {
+    const preferInbound = (inbound: Headers, token: string) => {
+      const h = new Headers();
+      h.set("authorization", inbound.get("authorization") ?? `Bearer ${token}`);
+      return h;
+    };
+    const inbound = new Headers({ authorization: `Bearer ${B}` });
+    assert.throws(() => {
+      const out = preferInbound(inbound, A);
+      assert.equal(out.get("authorization"), `Bearer ${A}`);
+    }, /token-B/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ENTRANCES 1 AND 2 — the layouts' adapter, through Next's REAL redirect
 // ---------------------------------------------------------------------------
 
 /** Next's `redirect()` throws an `Error` carrying
  *  `digest === "NEXT_REDIRECT;replace;/pending;307;"`. Asserting the DIGEST, not
- *  merely "something threw", is what makes this cell name the destination: a
- *  redirect to /login would fail it. */
+ *  merely "something threw", is what makes this cell name the destination. */
 function redirectDigest(e: unknown): string {
   const digest: unknown = (e as { digest?: unknown }).digest;
   assert.equal(typeof digest, "string", "not a Next redirect — no string digest");
   return digest as string;
 }
 
-async function assertRedirectsToHolding(read: CallerContextReader): Promise<void> {
+async function assertRedirectsToHolding(deps: ScopeDeps): Promise<void> {
   await assert.rejects(
-    () => requireFirmScope(read),
+    () => requireFirmScope(deps),
     (e: unknown) => {
       const digest = redirectDigest(e);
       assert.match(digest, /^NEXT_REDIRECT;/, "threw, but not a NEXT_REDIRECT");
@@ -188,35 +339,27 @@ describe("requireFirmScope — entrances 1 and 2 (the two layouts)", () => {
     assert.equal(HOLDING_ROUTE, "/pending");
   });
 
-  it("an EMPTY read redirects to the holding route", async () => {
-    await assertRedirectsToHolding(readZero);
-  });
-
-  it("a FAILED read redirects to the SAME place — the design's explicit requirement", async () => {
+  it("every denial reason redirects to the holding route", async () => {
+    await assertRedirectsToHolding(noSession);
+    await assertRedirectsToHolding(withRows([]));
     await assertRedirectsToHolding(readThrows);
-  });
-
-  it("more than one row, and a malformed row, redirect too", async () => {
-    await assertRedirectsToHolding(readTwo);
-    await assertRedirectsToHolding(readMalformed);
+    await assertRedirectsToHolding(withRows([MEMBER, MEMBER]));
+    await assertRedirectsToHolding(withRows([{ hello: "world" }]));
   });
 
   it("POSITIVE CONTROL: a real membership passes through and returns its context", async () => {
-    const scope = await requireFirmScope(readOne);
-    assert.deepEqual(scope, MEMBER);
+    assert.deepEqual(await requireFirmScope(withRows([MEMBER])), MEMBER);
   });
 
   it("RED-before: an adapter that does not redirect fails the very same cell", async () => {
-    // The mutant: `requireFirmScope` with the redirect removed. If the assertion
-    // above could pass against this, it would be asserting nothing.
-    const noRedirect = async (read: CallerContextReader) => {
-      await resolveFirmScope(read);
+    const noRedirect = async (deps: ScopeDeps) => {
+      await resolveFirmScope(deps);
       return MEMBER;
     };
     await assert.rejects(
       () =>
         assert.rejects(
-          () => noRedirect(readZero),
+          () => noRedirect(withRows([])),
           (e: unknown) => {
             assert.match(redirectDigest(e), /^NEXT_REDIRECT;/);
             return true;
@@ -228,53 +371,47 @@ describe("requireFirmScope — entrances 1 and 2 (the two layouts)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// ENTRANCE 3 — the API route's adapter: a STATUS, never a redirect
+// ENTRANCE 3 — a STATUS, never a redirect; and the session to forward
 // ---------------------------------------------------------------------------
 
-describe("firmScopeRefusal — entrance 3 (the runtime API route)", () => {
-  it("the refusal status is 403, asserted as a status and not a redirect", async () => {
-    const res = await firmScopeRefusal(readZero);
+describe("firmScopeGuard — entrance 3 (the runtime API route)", () => {
+  it("refuses with 403, asserted as a status and not a redirect", async () => {
+    const guard = await firmScopeGuard(withRows([]));
+    assert.equal(guard.ok, false);
+    const res = (guard as { response: Response }).response;
     assert.ok(res instanceof Response, "must answer with a Response, not a throw");
     assert.equal(res.status, FIRM_SCOPE_FORBIDDEN_STATUS);
     assert.equal(res.status, 403, "the design fixes this at 403");
-    assert.ok(
-      res.status < 300 || res.status >= 400,
-      "a 3xx here would be the redirect the design forbids on a data request",
-    );
-    assert.equal(
-      res.headers.get("location"),
-      null,
-      "a Location header would make this a redirect in all but status",
-    );
+    assert.ok(res.status < 300 || res.status >= 400, "a 3xx would be the forbidden redirect");
+    assert.equal(res.headers.get("location"), null, "a Location header is a redirect in all but status");
     assert.deepEqual(await res.json(), FIRM_SCOPE_FORBIDDEN_BODY);
   });
 
-  it("a FAILED read refuses the same way — fail-closed, not fail-open", async () => {
-    const res = await firmScopeRefusal(readThrows);
-    assert.ok(res instanceof Response);
-    assert.equal(res.status, 403);
+  it("every denial reason refuses the same way — fail-closed, not fail-open", async () => {
+    for (const deps of [noSession, readThrows, withRows([MEMBER, MEMBER]), withRows([{}])]) {
+      const guard = await firmScopeGuard(deps);
+      assert.equal(guard.ok, false);
+      assert.equal((guard as { response: Response }).response.status, 403);
+    }
   });
 
-  it("more than one row, and a malformed row, refuse too", async () => {
-    assert.equal((await firmScopeRefusal(readTwo))?.status, 403);
-    assert.equal((await firmScopeRefusal(readMalformed))?.status, 403);
+  it("POSITIVE CONTROL: a grant yields the session whose token must be forwarded", async () => {
+    const guard = await firmScopeGuard(withRows([MEMBER]));
+    assert.equal(guard.ok, true);
+    assert.strictEqual((guard as { session: ServerSession }).session, SESSION);
   });
 
-  it("POSITIVE CONTROL: a real membership yields null, so the proxy runs", async () => {
-    assert.equal(await firmScopeRefusal(readOne), null);
-  });
-
-  it("RED-before: a permissive adapter (always null) fails the 403 cell", async () => {
-    const alwaysAllows = async (): Promise<Response | null> => null;
+  it("RED-before: a permissive adapter (always ok) fails the 403 cell", async () => {
+    const alwaysAllows = async () => ({ ok: true as const, session: SESSION });
     await assert.rejects(async () => {
-      const res = await alwaysAllows();
-      assert.ok(res instanceof Response, "must answer with a Response, not a throw");
-    }, /must answer with a Response/);
+      const guard = await alwaysAllows();
+      assert.equal(guard.ok, false, "GRANTED where a refusal was required");
+    }, /GRANTED where a refusal was required/);
   });
 
-  it("the refusal body names no denial reason — a probe learns nothing", async () => {
+  it("the refusal body names no denial reason — a probe learns nothing", () => {
     const body = JSON.stringify(FIRM_SCOPE_FORBIDDEN_BODY);
-    for (const reason of ["no_membership", "ambiguous", "malformed", "read_failed"]) {
+    for (const reason of ["no_session", "no_membership", "ambiguous", "malformed", "read_failed"]) {
       assert.ok(!body.includes(reason), `the refusal body leaks the reason "${reason}"`);
     }
   });
@@ -284,15 +421,7 @@ describe("firmScopeRefusal — entrance 3 (the runtime API route)", () => {
 // THE SERVER SESSION SEAM — the deciding halves, driven
 // ---------------------------------------------------------------------------
 
-/**
- * `serverSessionTokenAccessor.getAccessToken()` and `serverCallerSubject()` need a
- * live Next request scope (`cookies()`) and cannot be called here. What they
- * DECIDE was extracted into two pure helpers precisely so the fail-closed
- * branches are drivable — the plumbing around them decides nothing.
- */
 describe("lib/supabase/server-session — the deciding halves", () => {
-  const SUB = "55555555-5555-4555-8555-555555555555";
-
   it("tokenFromSession: only a non-empty string token is a token", () => {
     assert.equal(tokenFromSession({ access_token: "abc" }), "abc");
     assert.equal(tokenFromSession(null), null);
@@ -312,21 +441,23 @@ describe("lib/supabase/server-session — the deciding halves", () => {
   });
 
   it("subjectFromClaims refuses a claim that would reshape the PostgREST filter", () => {
-    // The value is spliced into `applicant=eq.<sub>`. Signature-verified is not
-    // the same as well-formed, and this is the cheapest of the three walls.
-    for (const hostile of [
-      "not-a-uuid",
-      `${SUB}&select=*`,
-      `${SUB} or true`,
-      "*",
-      `${SUB}\n`,
-    ]) {
+    for (const hostile of ["not-a-uuid", `${SUB}&select=*`, `${SUB} or true`, "*", `${SUB}\n`]) {
       assert.equal(
         subjectFromClaims({ sub: hostile }),
         null,
         `accepted a malformed sub: ${JSON.stringify(hostile)}`,
       );
     }
+  });
+
+  it("serverSessionFrom: BOTH halves or nothing — never a bundle with one guessed", () => {
+    assert.deepEqual(serverSessionFrom({ access_token: "t" }, { sub: SUB }), {
+      accessToken: "t",
+      subject: SUB,
+    });
+    assert.equal(serverSessionFrom({ access_token: "t" }, {}), null, "a token with no verified subject");
+    assert.equal(serverSessionFrom(null, { sub: SUB }), null, "a subject with no token");
+    assert.equal(serverSessionFrom(null, null), null);
   });
 
   it("RED-before: a helper that trusts the claim verbatim fails the cell above", () => {

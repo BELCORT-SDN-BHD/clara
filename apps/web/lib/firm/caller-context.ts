@@ -90,6 +90,55 @@ export type CallerContextRow = {
 };
 
 /**
+ * The four roles `clara.firm_memberships.role` admits — its CHECK constraint,
+ * verbatim and in ladder order (`0002:215`, `check (role in ('viewer',
+ * 'bookkeeper','admin','owner'))`). `tests/firm-scope-surfaces.test.ts` parses
+ * that constraint out of the migration and requires this list to match it as a
+ * SET, so the wall below cannot drift from the DB's own vocabulary in silence.
+ *
+ * A role outside this list is refused rather than granted. That is deliberate and
+ * it has a cost worth naming: if the estate ever adds a fifth role, every member
+ * holding it is denied until this list moves. The cross-check is what makes that a
+ * RED test in the same PR as the migration rather than a support ticket — and the
+ * alternative (granting on an unknown role) would hand firm scope to a principal
+ * whose rank `clara.role_rank` cannot even order (`0002:326-331` returns NULL for
+ * anything off the ladder).
+ */
+export const FIRM_ROLES = ["viewer", "bookkeeper", "admin", "owner"] as const;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Does this value carry EVERY column of the pinned projection, each of the type
+ * the view declares?
+ *
+ * All six are checked, not the four the scope spine happens to read (Codex review
+ * of #451, MEDIUM-2). A row missing `firm_name` and `is_operator`, or carrying the
+ * STRING `"true"` where a boolean belongs, used to pass validation and then be
+ * handed onward as a trusted `CallerContextRow` — a lie the type system could not
+ * see through, because the value was cast on the way in from the wire. A partial
+ * validator is worse than none: it launders an unvalidated field behind a checked
+ * one.
+ *
+ * `role_rank` admits `null` because the DB genuinely permits it (see the header
+ * census); everything else is required. Integers only — `role_rank` is `int` in
+ * Postgres, so a float or a NaN arriving here means the body is not what the view
+ * returns.
+ */
+export function isCallerContextRow(row: unknown): row is CallerContextRow {
+  if (typeof row !== "object" || row === null) return false;
+  const r = row as Record<string, unknown>;
+  if (typeof r.user_id !== "string" || !UUID_RE.test(r.user_id)) return false;
+  if (typeof r.firm_id !== "string" || !UUID_RE.test(r.firm_id)) return false;
+  if (typeof r.firm_name !== "string" || r.firm_name.length === 0) return false;
+  if (typeof r.role !== "string") return false;
+  if (!(FIRM_ROLES as readonly string[]).includes(r.role)) return false;
+  if (r.role_rank !== null && !Number.isInteger(r.role_rank)) return false;
+  if (typeof r.is_operator !== "boolean") return false;
+  return true;
+}
+
+/**
  * Read the caller's own context. Returns the rows VERBATIM — zero, one, or (a
  * structural surprise the DB's unique index says cannot happen) more. This module
  * deliberately does NOT collapse that to `Row | null`: "zero rows" and "more than
