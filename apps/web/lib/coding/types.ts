@@ -184,22 +184,88 @@ export type OpenQuestionDetail = { question: OpenQuestionRow; rule: CodingRuleRo
 // last_finalized_at/last_ack_at (booleans and timestamps, never an id), and
 // no `list_sweep_runs` door exists — but a run id DOES reach a human
 // honestly through a DIFFERENT channel: `lib/parts/types.ts`'s
-// `SweepReceiptPart` (`type: "sweep_receipt"; run_id: string`), already live
-// in the 18-member parts catalog, is what Clara posts into a thread when a
-// sweep finalizes. That part renders today as a generic id-only summary
-// card (components/parts/PartRenderer.tsx) rather than a rich card hydrating
-// get_sweep_run/acknowledge_sweep_run. OWNER-RULED (裁-20,
-// docs/plan/active/mohe-grill-rulings-2026-08-28.md:268-272): that upgrade
-// ships inside the P6 four-part wire bump (chatTurn_v16 — TRUED 2026-08-30, was
-// v15; v15 shipped 2026-08-29 for the unrelated F-A6 PR-2), no separate train.
-// RECORDED SCOPE NOTE (rung 0, port-wave plan §7.0): the queue-altitude
-// sweep panel this train owes (components/firm/sweep-status-panel.tsx)
-// renders the STATE the review-queue envelope already carries, honestly,
-// and names that ruled, tracked home rather than a vague gap. -------------
+// `SweepReceiptPart` (`type: "sweep_receipt"; run_id: string`) is what Clara
+// posts into a thread when a sweep finalizes.
+//
+// TRUED 2026-08-30 (P6-2 — 裁-20 DISCHARGED, not merely tracked). That part no
+// longer renders as a generic id-only summary card: it is now a rich card
+// (components/parts/SweepReceiptCard.tsx) that hydrates `get_sweep_run` on
+// mount and offers `acknowledge_sweep_run` on a FINALIZED run, exactly as
+// 裁-20 (docs/plan/active/mohe-grill-rulings-2026-08-28.md:268-272) ruled it
+// should inside the P6 wire bump. The paragraph above is still the reason the
+// card is the ONLY home for that control — nothing about the grant picture
+// changed, so the queue-altitude panel
+// (components/firm/sweep-status-panel.tsx) still cannot host one. ----------
 
 /** Re-exported from lib/firm/needs-you.ts's own type under this module's
  *  vocabulary — the SAME envelope shape, never a second definition. */
 export type { ReviewQueueSweep as SweepStatus } from "@/lib/firm/needs-you";
+
+/** One `clara.sweep_runs` row, transcribed column for column from the table's own
+ *  DDL (0011_daily_loop.sql:674-696) plus the ONE column a later migration added
+ *  — `posted_count` (0108_f_a2_posted_chain.sql:180). `get_sweep_run` returns
+ *  `to_jsonb(r)` over the whole row, so every column below arrives whether or not
+ *  a card renders it; the shape is declared in full rather than narrowed, so the
+ *  next reader sees what the DB actually hands over.
+ *
+ *  EVERY COUNTER HERE IS DB-OWNED AND IS RENDERED, NEVER RECOMPUTED. `expected`,
+ *  `drafted`, `skipped`, `refused` and `posted` are five separate columns the
+ *  sweep itself wrote; 0108's own comment on `posted_count` says why it is a
+ *  fourth counter and not a fold into `drafted_count` ("folding would make a
+ *  posted row indistinguishable from a drafted one in the run summary"). A UI
+ *  that summed or reconciled them would be doing exactly the arithmetic the
+ *  schema split apart — hard constraint 2. */
+export type SweepRunRow = {
+  id: string;
+  firm_id: string;
+  state: "open" | "finalized" | string;
+  window_started_at: string;
+  window_ended_at: string | null;
+  expected_count: number;
+  drafted_count: number;
+  skipped_count: number;
+  refused_count: number;
+  posted_count: number;
+  token_reserved: number;
+  token_spent: number;
+  checkpoint_seq: number | null;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+  created_at: string;
+  finalized_at: string | null;
+};
+
+/** One `clara.sweep_run_items` row (0011:728-748). `outcome`'s CHECK has been
+ *  WIDENED twice and never narrowed — 0108:169-170 added `posted`, 0151:701-703
+ *  added `refused_concurrency` — so it is typed as an OPEN union: a literal-only
+ *  union transcribed from 0011 would have been two values short by 0151, and the
+ *  seventh value the day a third widening lands. Same posture as `RefusalCode`
+ *  and `agent_receipt`'s `receipt_kind`. `refusal_token` is caller-shaped jsonb
+ *  with no per-outcome schema, so it is `unknown` and is never walked. */
+export type SweepRunItemRow = {
+  run_id: string;
+  filing_id: string;
+  firm_id: string;
+  client_id: string;
+  document_id: string;
+  outcome:
+    | "drafted" | "posted" | "skipped_lane" | "noop_existing"
+    | "refused_budget" | "refused_concurrency" | "refused_attempts"
+    | (string & {});
+  entry_id: string | null;
+  refusal_token: unknown;
+  tokens_reserved: number;
+  tokens_spent: number;
+  created_at: string;
+};
+
+/** `clara.get_sweep_run(p_run)` -> jsonb — a read-flavoured RPC (viewer+; the
+ *  ACKNOWLEDGE half is bookkeeper+ and human-only). The body builds
+ *  `jsonb_build_object('run', to_jsonb(r), 'items', coalesce(jsonb_agg(...),
+ *  '[]'))` and returns SQL NULL — not an empty object — when the run does not
+ *  exist or belongs to another firm (0011:3585-3594), so `null` here is the
+ *  honest "no such run for you" and never an error the DB did not raise. */
+export type SweepRunDetail = { run: SweepRunRow; items: SweepRunItemRow[] } | null;
 
 // --- clara.agent_tasks_visible (masked view) --------------------------------
 export type AgentTaskKind = "chat_turn" | "wake" | "autodraft" | "close_prep";

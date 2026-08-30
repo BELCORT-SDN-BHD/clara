@@ -41,11 +41,22 @@ export function NeedsYouGaps() {
 
   const handleResolve = (id: string, resolution: string, clientId: string | null): Promise<boolean> => {
     setActingQuestion(id);
-    return questions.act(() => resolveFirmQuestion(sessionTokenAccessor, id, resolution, clientId).then(() => undefined));
+    return questions.act(() => resolveFirmQuestion(
+      sessionTokenAccessor,
+      id,
+      resolution,
+      clientId,
+      crypto.randomUUID(),
+    ).then(() => undefined));
   };
   const handleDismiss = (id: string, reason: string): Promise<boolean> => {
     setActingQuestion(id);
-    return questions.act(() => dismissFirmQuestion(sessionTokenAccessor, id, reason).then(() => undefined));
+    return questions.act(() => dismissFirmQuestion(
+      sessionTokenAccessor,
+      id,
+      reason,
+      crypto.randomUUID(),
+    ).then(() => undefined));
   };
   const handleConfirm = (id: string): Promise<boolean> => {
     setActingPromotion(id);
