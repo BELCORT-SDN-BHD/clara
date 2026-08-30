@@ -398,3 +398,167 @@ an escalation: constraint 9's spirit and the "never recut without cause" princip
 reversing it later (retrofitting close_prep onto `kind='wake'`) remains possible without any
 data loss if the owner ever judges the convergence worth the D1 cost — nothing this design does
 forecloses that option, it only declines to pay for it now.
+
+---
+
+## 8 · AS-BUILT: the walls PR-2a added (2026-08-30, ruled into this doc by the lead)
+
+**Why this section exists.** Everything above is the design as it was ruled. The walls below are
+NOT design changes — they are the DB half of residuals **#437 recorded rather than built** while
+shipping `bankAgent_v1`/`closePrep_v1`, and they landed in G1 PR-2a's migration
+(`UNNUMBERED_g1_pr_2a_db_pass.sql`, number claimed at merge). They are written here because a
+design of record that stops at the ruling leaves the next reader believing the engine's DB surface
+is what §1–§7 describes, and it no longer is.
+
+**Nothing in §1–§7 is retracted.** Both sources are still `enabled=false`; the flip is still the
+operator owner's own act at the G1 rollout ceremony (裁-40, amended to four acts by 裁-44).
+
+### 8.1 The bank credential is bound to its task, and the binding is DERIVED
+
+`mint_wake_credential`'s `bank_agent` arm now finds the client's one LIVE **bank-source** wake task
+(`{held, running, cancel_requested}`) and records it on `wake_credentials.agent_task_id`. Zero
+matches and several matches are SEPARATE refusals (`bank_agent_task_absent` /
+`bank_agent_task_ambiguous`), because they mean different things to a triage.
+
+`kind='wake'` is only the shared carrier projection; it is not bank identity. Both minters prove
+the source chain `agent_tasks.origin_intent_id → wake_intents.event_id → domain_events.event_type`
+against the `wake_engine_sources(source_key='bank_agent', event_type='bank.agent_due')` row, with
+the event's firm/client congruent to the task. An unrelated same-kind wake is ignored by the plain
+minter and refused as `wake_task_source_mismatch` by the exact door.
+
+It is derived rather than passed, for `_close_wake_ctx`'s own stated reason: *a caller-supplied
+task id is the caller asserting its own provenance*. **LIVE, not running** — FOLD-2 settled that a
+cancelled pass may still READ, so a mint that refused off `running` would break the read path the
+moment a cancel landed; the running requirement belongs one layer down, inside the write's own
+transaction.
+
+`mint_wake_credential_for_task` (0138's F14 sibling) gains `bank_agent` as the EXACT door and
+resolves the expected `agent_tasks.kind` from `wake_engine_sources.task_kind` rather than a
+literal — so `close_prep` rides its own kind and `bank_agent` rides `'wake'` with no further recut
+when a third source registers. For `bank_agent`, it also reads the task's status: the three live
+states may mint; `completed`, `failed`, and `cancelled` refuse without inserting a credential.
+The direct-queue `close_prep` path keeps its prior semantics separately.
+
+> **RESIDUAL, named rather than hidden.** The pack is per-ACCOUNT, so a client with two accounts
+> can have two live wake tasks, and the plain mint then refuses BOTH — fail-closed and loud, never
+> wrong, but it caps such a client at one concurrent run. The runtime follow-up that repoints
+> `mintBankAgentCredential` at the task-bound minter removes it entirely.
+
+### 8.2 The write TOCTOU, closed inside the writing transaction
+
+FOLD-2 made every bank WRITE re-read `agent_tasks.status` on the runtime pool before minting. That
+read is a different transaction on a different connection, taken before the mint — so a cancel
+landing between it and the wrapper's own commit is invisible, and the write lands under books that
+already say the run stopped. Only a check INSIDE the writing transaction, holding the row, closes
+it.
+
+`clara._bank_wake_task_gate(p_verb, p_account, p_requires_running, p_account_required)` is called
+by **all fourteen** bank wake verbs. It takes `FOR UPDATE` on the task in the CALLER's transaction
+and refuses with a rostered reason: `wake_task_unbound`, `wake_task_kind_mismatch`,
+`wake_task_not_running` (writes only — the pack read passes `false`, per FOLD-2),
+`wake_task_source_mismatch`, `wake_task_incongruent`, `wake_task_account_unbound`,
+`wake_task_account_incongruent`, `wake_act_account_unresolved`, or
+`wake_task_account_mismatch`.
+
+Two structural facts about it that a later editor must not undo:
+
+- **It stands aside for every credential that is not `bank_agent`.** THIRTEEN of the fourteen verbs
+  are also `interactive_client` doors — the chat lane, where a human is in the room and there is no
+  task, no pack and no account. A gate that fired there would break chatTurn.v14's whole bank tool
+  set.
+- **The call sits LAST, immediately before the core call.** An earlier draft put it right after
+  `assert_wake_allowed` and it MASKED every refusal each wrapper already made: a credential pinned
+  to client A calling with client B refused `CLR03 wake_act_account_unresolved` instead of
+  `CLR11 credential_client_pin` — the right outcome for the wrong stated reason. The position is
+  pinned structurally by cell G1PR2A-F7.
+
+### 8.3 The account binding, and the producer contract it rests on
+
+The pack is account-scoped, the producer's event carries `bank_account_id` (#437's first producer
+contract, found by a RED), and nothing previously required the account a run ACTS on to be the
+account it READ. `clara._wake_task_bank_account(task)` walks task → `wake_intents` →
+`domain_events.payload->>'bank_account_id'` (regex-guarded, so an unparseable value refuses rather
+than raising 22P02), proves the registered bank source and event/task firm/client congruence, then
+joins the referenced **active `bank_accounts` row** on the same firm/client. A UUID spelling alone
+is never identity: missing/malformed values are `wake_task_account_unbound`; syntactically valid
+but nonexistent, inactive, or cross-client values are `wake_task_account_incongruent`.
+
+The four formerly exempt verbs now derive or refuse too:
+
+- `wake_add_bank_account` is unavailable to an account-specific bank run because the account does
+  not exist yet;
+- `wake_upsert_account` resolves `p_code` through the client's active
+  `bank_accounts.coa_account_code`;
+- `wake_book_staff_advance_application` resolves every bank-account COA referenced by `p_lines`
+  and requires exactly one distinct account;
+- `wake_propose_bank_identifier_promotion` resolves the admitted pack-read receipt for the
+  `inputs_digest`, then compares that durable receipt's account subject to the task account.
+
+Every wrapper therefore passes `p_account_required => true`: unavailable, absent, non-unique, or
+cross-account derivations refuse before the core.
+
+**`bank.agent_due` is registered in BOTH halves of the coupled pair** — `clara.event_types`
+(`client_scoped = true`, without which the wake insert arm yields a clientless task the bank mint
+refuses outright) and `clara.trigger_taxonomy` at the ACTIVE version with decision `internal_task`,
+the estate's first row at that decision. `notification` would work mechanically and is wrong in
+meaning: this is Clara's own clocked work, not a card a person answers.
+
+### 8.4 The settlement CAS is a SIBLING, and that shape was forced by a gate
+
+FOLD-21's residual — *"the monotonic DB-side version is G1 PR-2's"* — is
+`clara._settle_wake_task_cas(p_task, p_outcome, p_error_code, p_expect_run, p_expect_status)`:
+`FOR UPDATE` plus two conjuncts, so a settle from a run that no longer holds the task, or one that
+raced a cancel, REFUSES with its own typed reason instead of overwriting.
+
+NULL is a real expected run value: `v_run IS DISTINCT FROM p_expect_run` is evaluated on every
+strict call, so a caller that observed an unbound task loses to a concurrent run bind. Status has
+no wildcard at all; a NULL expectation refuses `wake_settle_status_required`.
+
+It is a sibling and not a widened `_settle_wake_task` because the runtime's own standing
+arity-AND-ORDER gate (`G1B-I3`) requires every call to pass EVERY declared argument. A DEFAULTed
+parameter would have forced that gate to be relaxed to admit a short call — which is exactly the
+residual this PR ships, so the gate would have stopped catching the follow-up's own mistake.
+`_settle_wake_task(uuid,text,text)` keeps its signature and ACL while frozen v1 runs drain, but it
+delegates only to the private, ungranted `_settle_wake_task_compat` body. That body intentionally
+locks and derives the current expectations before calling the strict CAS — the legacy skip is
+quarantined rather than smuggled into the five-argument door. Its catalog comment names the D1
+cutover after which the three-argument door is revoked and the compatibility body removed. When
+the runtime repoints, I3 requires all five strict arguments by name, in order.
+
+**What bites with no caller change at all is the `FOR UPDATE`**, and it is subtler than
+serialisation: the row was already locked by the UPDATE at the end of the body. What the clause
+buys is that the CAS conjuncts are evaluated against the COMMITTED row rather than a snapshot taken
+before the racing transaction committed — so a raced expectation refuses BY NAME
+(`wake_settle_status_mismatch`) instead of falling through to the transition trigger's generic
+CLR13, in the field a dead-letter triage reads first.
+
+### 8.5 What the DB now says, that the runtime cannot yet say
+
+Four destinations exist that no production caller reaches, each a NAMED follow-up rather than an
+oversight, and each blocked on the same thing: the caller is a FROZEN body (constraint 9).
+
+| destination | who must repoint |
+|---|---|
+| task-exact bank credential mint | `mintBankAgentCredential` first, from the plain minter to `mint_wake_credential_for_task` |
+| `agent_tasks.error_code = 'all_writes_refused'` | both lanes' classifiers, where FOLD-3 settles `internal` |
+| `llm_usage_events.call_kind` ∈ {`bank_agent`, `close_prep`} (裁-49) | `BANK_AGENT_CALL_KIND` / `CLOSE_PREP_CALL_KIND` |
+| `_settle_wake_task_cas`'s two expectations | new versions of both terminal steps + both reconciler belts; then the D1 cutover revokes the three-argument door |
+| `close_runs.end_reason_code` → `clara.close_abandon_reasons` | `wake_abandon_close` / `abandon_close` + a closePrep `_v2` |
+
+The last one ships as a CARRIER with no writer on **0120:254's own precedent** —
+`wake_credentials.agent_task_id` shipped writerless and 0138 filled it eighteen migrations later.
+Adding a parameter to a verb `closePrep.v1.tools.ts` calls by name would make closePrep_v1 refuse
+every abandonment it attempted, which is strictly worse than the prose it writes now.
+
+### 8.6 What §1.1's clock half turned out to need (measured, not assumed)
+
+- **No cadence column.** §1.1's third bullet already says the cadence gate is a runtime pure
+  predicate and "not something the engine can absorb into a registry row". Confirmed against the
+  code: leader.mjs's six live `*Due(lastRunMs, nowMs)` predicates each read an env-var interval and
+  no DB row. `wake_engine_sources` gained nothing.
+- **No event type for `close_prep`.** It is `carrier='direct_queue'`, and
+  `ck_wes_event_type_carrier` REQUIRES `event_type IS NULL` there. Its producer writes
+  `agent_tasks(kind='close_prep', status='queued')` directly, and `close.preparation_started` is
+  already registered if it wants to emit one.
+- `wake_engine_sources.login_pool` for `close_prep` was trued `runtime` → `write` (裁-49): the row
+  described a pool closePrep_v1 does not use.

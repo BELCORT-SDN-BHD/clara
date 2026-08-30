@@ -165,7 +165,8 @@ test("f-a3pr3.mfA.pos a real bank_agent credential now reaches wake_book_staff_a
     { name: "p_inputs_digest" }, { name: "p_op_key" }];
   const opKey = opk("mfa-pos");
   const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_book_staff_advance_application", specs), [
-    client, "2026-07-05", "mfA.pos agent application", JSON.stringify(applicationLines(ADV1, 40_000)),
+    client, "2026-07-05", "mfA.pos agent application",
+    JSON.stringify(applicationLines(ADV1, 40_000, { counter: BANKV })),
     JSON.stringify([{ line_no: 2, advance_id: advance.id, amount_cents: 40_000 }]),
     "payroll_deduction", "mfA.pos rig application", RATIONALE, JSON.stringify(MODEL), digest, opKey,
   ]);
@@ -760,7 +761,8 @@ test("f-a3pr3.f2.agent-prepared an unattended staff-advance's journal_entries ro
     { name: "p_inputs_digest" }, { name: "p_op_key" }];
   const opKey = opk("f2agentprep");
   const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_book_staff_advance_application", specs), [
-    client, "2026-07-06", "f2 agent application", JSON.stringify(applicationLines(ADV1, 20_000)),
+    client, "2026-07-06", "f2 agent application",
+    JSON.stringify(applicationLines(ADV1, 20_000, { counter: BANKV })),
     JSON.stringify([{ line_no: 2, advance_id: advance.id, amount_cents: 20_000 }]),
     "payroll_deduction", "f2 rig application", RATIONALE, JSON.stringify(MODEL),
     digest, opKey,

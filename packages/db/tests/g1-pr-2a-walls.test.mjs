@@ -24,7 +24,7 @@ import {
 import { wakeQuery, ROLES } from "./rig-helpers.mjs";
 import { WAKE_ROLE, RATIONALE, MODEL, callWrapper } from "./f-a3-pr1b-wake-fixtures.mjs";
 import {
-  hasG1Pr2a, makeBankWakeTask, retireLiveBankWakeTasks, forgetBankWakeTasks,
+  hasG1Pr2a, makeBankWakeTask, makeUnrelatedWakeTask, retireLiveBankWakeTasks, forgetBankWakeTasks,
 } from "./g1-pr-2a-fixtures.mjs";
 
 let ready = false;
@@ -64,6 +64,22 @@ const MATCH = [{ name: "p_client", cast: "uuid" }, { name: "p_lines", cast: "jso
   { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }];
 const matchArgs = (lines, key) => [CLIENT, JSON.stringify(lines), "[]", "[]", false,
   RATIONALE, JSON.stringify(MODEL), "d", opk(key)];
+const ADD_ACCOUNT = [{ name: "p_client", cast: "uuid" }, { name: "p_coa_account_code" },
+  { name: "p_proposal_id", cast: "uuid" }, { name: "p_bank_code" }, { name: "p_account_number" },
+  { name: "p_bank_name_display" }, { name: "p_rationale" }, { name: "p_model", cast: "jsonb" },
+  { name: "p_inputs_digest" }, { name: "p_op_key" }];
+const UPSERT_ACCOUNT = [{ name: "p_client", cast: "uuid" }, { name: "p_code" }, { name: "p_name" },
+  { name: "p_type" }, { name: "p_special_acc_type" }, { name: "p_account_class" },
+  { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" },
+  { name: "p_op_key" }];
+const STAFF_ADVANCE = [{ name: "p_client", cast: "uuid" }, { name: "p_posting_date", cast: "date" },
+  { name: "p_memo" }, { name: "p_lines", cast: "jsonb" }, { name: "p_allocations", cast: "jsonb" },
+  { name: "p_kind" }, { name: "p_reason" }, { name: "p_rationale" },
+  { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }];
+const PROMOTION = [{ name: "p_client", cast: "uuid" }, { name: "p_counterparty", cast: "uuid" },
+  { name: "p_identifier_kind" }, { name: "p_identifier_value" }, { name: "p_times_seen", cast: "int" },
+  { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" },
+  { name: "p_op_key" }];
 
 const mintPlain = (kind, firm, client, obo = null) => rootQuery(
   "select * from clara.mint_wake_credential($1,$2,$3,'00:15:00'::interval,$4)", [kind, firm, obo, client]);
@@ -131,20 +147,27 @@ after(async () => {
 // =====================================================================================
 // §E -- the credential can no longer be minted out of thin air.
 // =====================================================================================
-test("p2a.E1 mint_wake_credential('bank_agent') REFUSES with no live wake task, and BINDS the one there is", async (t) => {
+test("p2a.E1 plain bank mint counts only bank.agent_due source tasks, never every kind='wake' task", async (t) => {
   if (gate(t)) return;
   await retireLiveBankWakeTasks({ firm: FIRM, client: CLIENT });
   forgetBankWakeTasks();
+  const unrelated = await makeUnrelatedWakeTask({ firm: FIRM, client: CLIENT, bankAccount: ACCT_B });
   const err = await caught(() => mintPlain("bank_agent", FIRM, CLIENT));
-  assert.ok(err, "E1: a bank_agent mint with no live wake task must refuse");
+  assert.ok(err, "E1: a bank_agent mint with only a non-bank wake task must refuse");
   assert.equal(err.code, "CLR10", `E1: expected CLR10, got ${err.code}: ${err.message}`);
   assert.equal(reasonOf(err), "bank_agent_task_absent", `E1: expected bank_agent_task_absent, got ${err.detail}`);
-  // POSITIVE CONTROL, and it is what makes the refusal above mean what it says: the ONLY thing
-  // that changed is that a task now exists.
-  const { taskId } = await freshTask();
+  const exactErr = await caught(() => mintForTask("bank_agent", FIRM, CLIENT, unrelated.taskId));
+  assert.equal(reasonOf(exactErr), "wake_task_source_mismatch",
+    `E1: the exact minter must refuse the shared-kind/wrong-source task BY SOURCE, got ${exactErr?.detail}`);
+  // POSITIVE CONTROL with both tasks live: the unrelated wake is ignored, not counted as a false
+  // ambiguity, and the one real bank task is the credential binding.
+  const { taskId } = await makeBankWakeTask({ firm: FIRM, client: CLIENT, bankAccount: ACCT_A, status: "running" });
   const ok = await mintPlain("bank_agent", FIRM, CLIENT);
   const bound = (await rootQuery("select agent_task_id from clara.wake_credentials where id=$1", [ok.rows[0].credential_id])).rows[0];
-  assert.equal(bound.agent_task_id, taskId, "E1: the minted credential names THIS task -- derived by the database, never supplied");
+  assert.equal(bound.agent_task_id, taskId,
+    "E1: one bank wake plus one unrelated wake binds the bank task, never ambiguous");
+  const exact = await mintForTask("bank_agent", FIRM, CLIENT, taskId);
+  assert.ok(exact.rows[0].secret, "E1: the exact minter admits the real bank-source task");
 });
 
 test("p2a.E2 two live wake tasks for one client REFUSE the plain mint rather than picking one", async (t) => {
@@ -188,6 +211,29 @@ test("p2a.E4 mint_wake_credential_for_task admits bank_agent, and refuses a task
   // POSITIVE CONTROL on the same row: close_prep still works through the same door, unchanged.
   const okClose = await mintForTask("close_prep", FIRM, CLIENT, closeTask);
   assert.ok(okClose.rows[0].secret, "E4: close_prep's own path through the widened door is unmoved");
+});
+
+test("p2a.E5 exact bank mint admits cancel_requested but refuses every terminal task without inserting", async (t) => {
+  if (gate(t)) return;
+  const cancel = await freshTask({ status: "cancel_requested" });
+  const cancelCred = await mintForTask("bank_agent", FIRM, CLIENT, cancel.taskId);
+  const werr = await caught(() => wakeQuery(WAKE_ROLE, cancelCred.rows[0].secret,
+    callWrapper("wake_match_bank_line", MATCH), matchArgs([], "p2a-e5-write")));
+  assert.equal(reasonOf(werr), "wake_task_not_running",
+    `E5: cancel_requested can mint/read but its write refuses, got ${werr?.detail}`);
+  const rerr = await caught(() => wakeQuery(WAKE_ROLE, cancelCred.rows[0].secret,
+    callWrapper("wake_get_bank_pack", PACK),
+    [CLIENT, ACCT_A, RATIONALE, JSON.stringify(MODEL), opk("p2a-e5-read")]));
+  assert.notEqual(reasonOf(rerr), "wake_task_not_running", "E5: cancel_requested still clears the pack-read status arm");
+
+  for (const status of ["completed", "failed", "cancelled"]) {
+    const task = await freshTask({ status });
+    const before = (await rootQuery("select count(*)::int as n from clara.wake_credentials where agent_task_id=$1", [task.taskId])).rows[0].n;
+    const err = await caught(() => mintForTask("bank_agent", FIRM, CLIENT, task.taskId));
+    assert.equal(reasonOf(err), "wake_task_not_live", `E5: ${status} must refuse wake_task_not_live, got ${err?.detail}`);
+    const afterN = (await rootQuery("select count(*)::int as n from clara.wake_credentials where agent_task_id=$1", [task.taskId])).rows[0].n;
+    assert.equal(afterN, before, `E5: ${status} refusal inserts no credential`);
+  }
 });
 
 // =====================================================================================
@@ -283,6 +329,45 @@ test("p2a.F4 a task whose producing event carried NO bank_account_id refuses eve
   }
 });
 
+test("p2a.F4b payload UUID spelling is not account identity: nonexistent and cross-client accounts refuse", async (t) => {
+  if (gate(t)) return;
+  for (const [label, account] of [["nonexistent", randomUUID()], ["cross-client", ACCT_B]]) {
+    // The cross-client arm is replaced below with an actually foreign account. Keeping both
+    // cases in one loop makes their only difference the payload identity.
+    let payloadAccount = account;
+    if (label === "cross-client") {
+      const otherCode = `173-${randomUUID().replace(/-/g, "").slice(0, 4).toUpperCase()}`;
+      await upsertAccountClassed(W.users.alice, { client: W.clients.A2, code: otherCode,
+        name: "Foreign-client bank (p2a)", type: "asset", opKey: opk("p2a-foreign-coa") });
+      payloadAccount = idOf(await addBankAccount(W.users.alice, {
+        client: W.clients.A2, coaAccountCode: otherCode, accountNumber: `2999${randomUUID().slice(0, 8)}`,
+      }), "bank_account_id", "id");
+    }
+    const { taskId } = await freshTask({ account: payloadAccount });
+    const cred = await mintForTask("bank_agent", FIRM, CLIENT, taskId);
+    const err = await caught(() => wakeQuery(WAKE_ROLE, cred.rows[0].secret,
+      callWrapper("wake_get_bank_pack", PACK),
+      [CLIENT, ACCT_A, RATIONALE, JSON.stringify(MODEL), opk(`p2a-f4b-${label}`)]));
+    assert.equal(reasonOf(err), "wake_task_account_incongruent",
+      `F4b: ${label} payload UUID must refuse as unproven identity, got ${err?.detail}`);
+  }
+});
+
+test("p2a.F4c a credential bound to a shared-kind WRONG-SOURCE task is refused again at the gate", async (t) => {
+  if (gate(t)) return;
+  await retireLiveBankWakeTasks({ firm: FIRM, client: CLIENT });
+  const unrelated = await makeUnrelatedWakeTask({ firm: FIRM, client: CLIENT, bankAccount: ACCT_A });
+  const secret = `${randomUUID()}${randomUUID()}`;
+  await rootQuery(
+    `insert into clara.wake_credentials(wake_kind,firm_id,client_id,secret_hash,expires_at,agent_task_id)
+       values ('bank_agent',$1,$2,sha256(convert_to($3,'UTF8')),now()+interval '15 minutes',$4)`,
+    [FIRM, CLIENT, secret, unrelated.taskId]);
+  const err = await caught(() => wakeQuery(WAKE_ROLE, secret, callWrapper("wake_get_bank_pack", PACK),
+    [CLIENT, ACCT_A, RATIONALE, JSON.stringify(MODEL), opk("p2a-f4c")]));
+  assert.equal(reasonOf(err), "wake_task_source_mismatch",
+    `F4c: the transaction-local gate must independently prove source identity, got ${err?.detail}`);
+});
+
 test("p2a.F5 a subject that resolves to NO bank account is a refusal, never 'any account'", async (t) => {
   if (gate(t)) return;
   const { taskId } = await freshTask();
@@ -313,6 +398,59 @@ test("p2a.F6 the CHAT lane is untouched: an interactive_client credential still 
   }
 });
 
+test("p2a.F6b all four formerly-exempt wrappers refuse task-A inputs/evidence targeting account B before core", async (t) => {
+  if (gatePurpose(t)) return;
+  // First produce durable pack evidence for B. Promotion has no account-shaped argument; its
+  // inputs_digest must resolve through this receipt, whose subject_id is the account read.
+  const taskB = await freshTask({ account: ACCT_B });
+  const credB = await mintForTask("bank_agent", FIRM, CLIENT, taskB.taskId);
+  const packB = await wakeQuery(WAKE_ROLE, credB.rows[0].secret, callWrapper("wake_get_bank_pack", PACK),
+    [CLIENT, ACCT_B, RATIONALE, JSON.stringify(MODEL), opk("p2a-f6b-pack-b")]);
+  const digestB = packB.rows[0].r.digest;
+
+  const taskA = await freshTask({ account: ACCT_A });
+  const credA = await mintForTask("bank_agent", FIRM, CLIENT, taskA.taskId);
+  const packA = await wakeQuery(WAKE_ROLE, credA.rows[0].secret, callWrapper("wake_get_bank_pack", PACK),
+    [CLIENT, ACCT_A, RATIONALE, JSON.stringify(MODEL), opk("p2a-f6b-pack-a")]);
+  const digestA = packA.rows[0].r.digest;
+  const cases = [
+    ["wake_add_bank_account", ADD_ACCOUNT,
+      [CLIENT, BANKCOA2, null, "MBB", `3888${randomUUID().slice(0, 8)}`, "Target B", RATIONALE,
+        JSON.stringify(MODEL), digestB, opk("p2a-f6b-add")], "wake_act_account_unresolved"],
+    ["wake_upsert_account", UPSERT_ACCOUNT,
+      [CLIENT, BANKCOA2, "Target B", "asset", null, null, RATIONALE,
+        JSON.stringify(MODEL), digestB, opk("p2a-f6b-upsert")], "wake_task_account_mismatch"],
+    ["wake_book_staff_advance_application", STAFF_ADVANCE,
+      [CLIENT, "2026-08-30", "Target B staff advance",
+        JSON.stringify([{ account_code: BANKCOA2, debit_cents: 100, credit_cents: 0 },
+          { account_code: EXPN, debit_cents: 0, credit_cents: 100 }]), "[]", "advance", "test",
+        RATIONALE, JSON.stringify(MODEL), digestB, opk("p2a-f6b-staff")], "wake_task_account_mismatch"],
+    ["wake_propose_bank_identifier_promotion", PROMOTION,
+      [CLIENT, randomUUID(), "bank_account", "8899041722", 1, RATIONALE,
+        JSON.stringify(MODEL), digestB, opk("p2a-f6b-promotion")], "wake_task_account_mismatch"],
+  ];
+  for (const [verb, specs, params, want] of cases) {
+    const beforeProposals = (await rootQuery("select count(*)::int as n from clara.bank_agent_proposals where client_id=$1", [CLIENT])).rows[0].n;
+    const err = await caught(() => wakeQuery(WAKE_ROLE, credA.rows[0].secret, callWrapper(verb, specs), params));
+    assert.equal(reasonOf(err), want, `F6b: ${verb} must refuse before its core, got ${err?.detail}`);
+    const afterProposals = (await rootQuery("select count(*)::int as n from clara.bank_agent_proposals where client_id=$1", [CLIENT])).rows[0].n;
+    assert.equal(afterProposals, beforeProposals, `F6b: ${verb} refusal reached no proposal-writing core`);
+  }
+
+  // RIGHT-ANSWER control for the evidence-derived verb: a pack receipt from this SAME task and
+  // account clears the account gate. The deliberately absent counterparty may make the core
+  // refuse later; either outcome proves the account derivation is not an always-refuse wall.
+  const promotionControl = await caught(() => wakeQuery(WAKE_ROLE, credA.rows[0].secret,
+    callWrapper("wake_propose_bank_identifier_promotion", PROMOTION),
+    [CLIENT, randomUUID(), "bank_account", "8899041723", 1, RATIONALE,
+      JSON.stringify(MODEL), digestA, opk("p2a-f6b-promotion-control")]));
+  for (const gateReason of ["wake_act_account_unresolved", "wake_task_account_mismatch",
+    "wake_task_account_unbound", "wake_task_account_incongruent"]) {
+    assert.notEqual(reasonOf(promotionControl), gateReason,
+      `F6b: same-task/same-account promotion evidence must clear ${gateReason}`);
+  }
+});
+
 test("p2a.F7 CENSUS: all fourteen bank wrappers carry exactly one gate call, and the gate is ungranted", async (t) => {
   if (gate(t)) return;
   const rows = (await rootQuery(
@@ -324,16 +462,13 @@ test("p2a.F7 CENSUS: all fourteen bank wrappers carry exactly one gate call, and
          'wake_settle_from_bank_line','wake_unmatch_bank_match','wake_upsert_account',
          'wake_void_bank_reconciliation','wake_void_bank_statement')`)).rows;
   assert.equal(rows.length, 14, "F7: the closed world is fourteen wrappers -- an overload or a rename fails here");
-  const noAccount = new Set(["wake_add_bank_account", "wake_upsert_account",
-    "wake_book_staff_advance_application", "wake_propose_bank_identifier_promotion"]);
   for (const r of rows) {
     const hits = r.prosrc.match(/_bank_wake_task_gate\(/g) ?? [];
     assert.equal(hits.length, 1, `F7: ${r.proname} must call the gate exactly once (found ${hits.length})`);
     const call = r.prosrc.slice(r.prosrc.indexOf("_bank_wake_task_gate("));
     const args = call.slice(0, call.indexOf(");") + 1);
-    const required = /,\s*true\s*\)\s*;?$/.test(args.trim());
-    assert.equal(!noAccount.has(r.proname), required,
-      `F7: ${r.proname}'s account-required flag disagrees with the four verbs that HAVE no account subject`);
+    assert.match(args, /,\s*true\s*\)\s*;?$/,
+      `F7: ${r.proname} must fail closed when its account derivation is unavailable or non-unique`);
     if (r.proname === "wake_get_bank_pack") {
       assert.match(args, /,\s*false\s*,/, "F7: the pack READ must not demand a running task (FOLD-2)");
     } else {

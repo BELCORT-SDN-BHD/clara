@@ -54,10 +54,9 @@ async function ensureBankWakeTaskForClient({ firm, client }) {
   if (live.rowCount > 1) return null;   // ambiguous by construction: let §E's own refusal name it
   const acct = await rootQuery(
     "select id from clara.bank_accounts where client_id=$1 and active", [client]);
-  // EXACTLY ONE -> that one. NONE -> a synthetic id, because the account a wake task names is
-  // whatever its producing event named, and a client with no bank account can only be driving the
-  // four verbs that HAVE no account subject (add_bank_account, upsert_account, the staff-advance
-  // booking, the identifier promotion) -- for which the value is never compared to anything.
+  // EXACTLY ONE -> that one. NONE -> a synthetic id so accountless tests that exercise only the
+  // credential/receipt seam can still mint; every account-requiring wrapper then refuses at
+  // G1's active-account identity join.
   // SEVERAL -> null, which makes §F refuse wake_task_account_unbound out loud: a helper that
   // silently picked one would let a battery pass against an account it never meant to act on.
   const bankAccount = acct.rowCount === 1 ? acct.rows[0].id : (acct.rowCount === 0 ? randomUUID() : null);

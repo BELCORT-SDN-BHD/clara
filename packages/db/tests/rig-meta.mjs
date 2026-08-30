@@ -1039,9 +1039,8 @@ export const G1_WAKE_ENGINE_RUNTIME_COHORT = ["_settle_wake_task"];
 // call the follow-up exists to remove.
 // ITS OWN COHORT, not an entry appended to the one above, and the reason is mechanical: this file
 // runs against databases pinned at EARLIER frontiers where this name does not exist yet, and a
-// two-name cohort with one member missing is reported as PARTIAL. A one-name cohort is bimodal by
-// construction (cohortFailures returns nothing when all of it is missing), which is the correct
-// shape for a name a later migration introduces.
+// The name remains in the role allowlist, but grantMatrixFailures also proves its exact signature.
+// A proname-only cohort cannot distinguish the real door from a wrong-arity overload (review law 3).
 export const G1_PR2A_SETTLE_CAS_COHORT = ["_settle_wake_task_cas"];
 
 // F-A3/PR-3 [retirement + parity + doors] the one NEW human door: confirm_bank_identifier_promotion
@@ -1649,7 +1648,26 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("F-A3/PR-1b bank-agency agent limb", BANK_AGENCY_F_A3_PR1B_COHORT, liveNames));
   failures.push(...cohortFailures("Gate G1 wake-execution engine", G1_WAKE_ENGINE_COHORT, liveNames));
   failures.push(...cohortFailures("Gate G1 wake-execution engine (runtime lane)", G1_WAKE_ENGINE_RUNTIME_COHORT, liveNames));
-  failures.push(...cohortFailures("G1 PR-2a settle CAS sibling", G1_PR2A_SETTLE_CAS_COHORT, liveNames));
+  // G1 PR-2a LOW-6: spelling is not identity. Wholly absent is a valid pre-frontier estate;
+  // once the name exists there must be exactly ONE overload and it must be the five-argument CAS.
+  // This catches both replacement by, and addition of, a same-named wrong-arity body.
+  const g1SettleCasSig = "clara._settle_wake_task_cas(uuid,text,text,text,text)";
+  const g1SettleCasIdentity = await rootQuery(
+    `select count(*)::int as named,
+            count(*) filter (where p.oid = to_regprocedure($1))::int as exact
+       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'clara' and p.proname = '_settle_wake_task_cas'`,
+    [g1SettleCasSig],
+  );
+  const g1SettleCasNamed = Number(g1SettleCasIdentity.rows[0].named);
+  const g1SettleCasExact = Number(g1SettleCasIdentity.rows[0].exact);
+  if (g1SettleCasNamed !== 0 && (g1SettleCasNamed !== 1 || g1SettleCasExact !== 1)) {
+    failures.push(
+      "G1 PR-2a settle CAS sibling: signature-exact check requires exactly "
+      + `${g1SettleCasSig}; found ${g1SettleCasNamed} same-named overload(s) and `
+      + `${g1SettleCasExact} exact match(es).`,
+    );
+  }
   failures.push(...cohortFailures("F-A3/PR-3 retirement + parity + doors", BANK_AGENCY_F_A3_PR3_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5b PR-1 sandbox export lane", F_A5B_PR1_COHORT, liveNames));
   failures.push(...cohortFailures("wave F F-A5b card 1 substitution seam", CARD1_SEAM_COHORT, liveNames));

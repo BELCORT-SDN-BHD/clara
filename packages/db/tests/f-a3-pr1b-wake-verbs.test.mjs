@@ -661,13 +661,15 @@ test("f31w.w B2: account_upsert, identifier_promotion_propose, exception_propose
   const M = JSON.stringify(MODEL);
   const digestW = await realDigest(cred.secret, world.clients.A1, bankAcct.A1.primary, opk("f31w-w-pack0"));
 
-  // account_upsert: subject_id is a deterministic md5(client, code) -- SAME code, two edits.
+  // account_upsert: G1 binds this bank-agent run to BANKCOA1's active bank account, so the
+  // account wrapper may revisit that SAME bank-backed COA row but may not create an unrelated
+  // expense account. Same subject, fresh op keys, two edits remains the repeatability claim.
   for (const [n, name] of [[1, "B2 acct v1"], [2, "B2 acct v2"]]) {
     const r = await wakeQuery(WAKE_ROLE, cred.secret, callWrapper("wake_upsert_account", [
       { name: "p_client", cast: "uuid" }, { name: "p_code" }, { name: "p_name" }, { name: "p_type" },
       { name: "p_special_acc_type" }, { name: "p_account_class" }, { name: "p_rationale" },
       { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }]),
-      [world.clients.A1, "777-WWW", name, "expense", null, null, RATIONALE, M, digestW, opk(`f31w-w-acct-${n}`)]);
+      [world.clients.A1, BANKCOA1, name, "asset", null, null, RATIONALE, M, digestW, opk(`f31w-w-acct-${n}`)]);
     assert.ok(r.rows[0].r, `f31w.w account_upsert #${n} must not raise`);
   }
 

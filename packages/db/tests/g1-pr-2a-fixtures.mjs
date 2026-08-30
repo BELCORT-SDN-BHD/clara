@@ -66,10 +66,57 @@ export async function makeBankWakeTask({ firm, client, bankAccount, status = "ru
     // production -- never a direct jump the matrix would refuse.
     await rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
     if (status !== "running") {
+      // running -> cancelled is deliberately NOT a legal single hop: cancellation is requested
+      // first, then confirmed. Keep the fixture on the real matrix path so terminal-mint cells do
+      // not manufacture a state production cannot reach.
+      if (status === "cancelled") {
+        await rootQuery("update clara.agent_tasks set status='cancel_requested' where id=$1", [taskId]);
+      }
       await rootQuery("update clara.agent_tasks set status=$2 where id=$1", [taskId, status]);
     }
   }
   return { eventId, intentId, taskId };
+}
+
+/** A live kind='wake' task produced by a NON-bank source. The wake carrier is shared by every
+ * wake_outbox source, so kind alone is never bank identity. The event type is discovered from the
+ * active taxonomy instead of hard-coded; the only fixed negative is that it is not bank.agent_due. */
+export async function makeUnrelatedWakeTask({ firm, client, bankAccount, status = "running" }) {
+  const source = (await rootQuery(
+    `select e.name as event_type, t.decision
+       from clara.event_types e
+       join clara.trigger_taxonomy t on t.event_type=e.name
+        and t.version=(select version from clara.taxonomy_active)
+      where e.client_scoped and e.name <> 'bank.agent_due'
+        and t.decision in ('notification','background_review','internal_task')
+      order by e.name limit 1`,
+  )).rows[0];
+  if (!source) throw new Error("makeUnrelatedWakeTask: no non-bank client-scoped wake source exists");
+  const seq = (await rootQuery(
+    "select clara._append_event($1,$2,$3,null,null,null,null,null,null,$4::jsonb) as seq",
+    [firm, source.event_type, client, JSON.stringify({ bank_account_id: bankAccount })],
+  )).rows[0].seq;
+  const eventId = (await rootQuery(
+    "select id from clara.domain_events where firm_id=$1 and seq=$2", [firm, seq])).rows[0].id;
+  const intentId = (await roleQuery(
+    ROLES.runtime,
+    "insert into clara.wake_intents(event_id,decision,taxonomy_version) values ($1,$2,(select version from clara.taxonomy_active)) returning id",
+    [eventId, source.decision],
+  )).rows[0].id;
+  const taskId = (await rootQuery(
+    "insert into clara.agent_tasks(firm_id,kind,status,origin_intent_id) values ($1,'wake','held',$2) returning id",
+    [firm, intentId],
+  )).rows[0].id;
+  if (status !== "held") {
+    await rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
+    if (status !== "running") {
+      if (status === "cancelled") {
+        await rootQuery("update clara.agent_tasks set status='cancel_requested' where id=$1", [taskId]);
+      }
+      await rootQuery("update clara.agent_tasks set status=$2 where id=$1", [taskId, status]);
+    }
+  }
+  return { eventId, intentId, taskId, eventType: source.event_type };
 }
 
 /** Retire every live wake task for a (firm, client) so a later makeBankWakeTask is UNAMBIGUOUS.

@@ -539,6 +539,24 @@ test("T17 grant matrix: exact per-role EXECUTE, no PUBLIC leak, helpers/cores no
   assert.deepEqual(failures, [], `grant-matrix drift:\n  ${failures.join("\n  ")}`);
 });
 
+test("T17a G1 PR-2a CAS cohort rejects a same-named wrong-arity overload", async (t) => {
+  if (unready(t)) return;
+  const landed = (await rootQuery(
+    "select to_regprocedure('clara._settle_wake_task_cas(uuid,text,text,text,text)') is not null as ok")).rows[0].ok;
+  if (!landed) { t.skip("G1 PR-2a CAS sibling absent on this frontier"); return; }
+  await asRole(ROLES.fnOwner, (c) => c.query(
+    "create function clara._settle_wake_task_cas(uuid) returns void language plpgsql as $$ begin null; end $$"));
+  try {
+    await rootQuery("revoke all on function clara._settle_wake_task_cas(uuid) from public");
+    await rootQuery("grant execute on function clara._settle_wake_task_cas(uuid) to clara_runtime");
+    const failures = await grantMatrixFailures();
+    assert.ok(failures.some((f) => /G1 PR-2a settle CAS sibling.*signature-exact/i.test(f)),
+      `T17a: wrong-arity overload must fail the signature-exact cohort; got:\n${failures.join("\n")}`);
+  } finally {
+    await rootQuery("drop function if exists clara._settle_wake_task_cas(uuid)");
+  }
+});
+
 // T17b — the PUBLIC-lockdown MECHANISM. PostgreSQL grants EXECUTE to PUBLIC on every
 // new function by default, and `ALTER DEFAULT PRIVILEGES ... REVOKE EXECUTE FROM
 // PUBLIC` is a confirmed NO-OP for that hardwired default (verified on PG16/17: it
