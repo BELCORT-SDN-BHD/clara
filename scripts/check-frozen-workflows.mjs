@@ -486,7 +486,7 @@ function main() {
     console.error("freeze-lint: FAIL — frozen workflow policy violated (ARCHITECTURE.md Appendix A):\n");
     for (const v of violations) console.error("  - " + v);
     console.error(
-      `\n${violations.length} violation(s). Ship a behavioural change as a NEW _vN workflow; only re-baseline with --update (local) when ADDING a brand-new frozen workflow — you can never mutate or remove an existing frozen entry.`,
+      `\n${violations.length} violation(s). Ship a behavioural change as a NEW _vN workflow; re-baseline with --update (local) when ADDING any new frozen file (a new class or a new _vN), then prove the manifest diff is additions-only — you can never mutate or remove an existing frozen entry.`,
     );
     return 1;
   }

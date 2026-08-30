@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // Self-test: A NEW `_vN` OF AN EXISTING CLASS REQUIRES `pnpm freeze:update`.
 //
-// WHY THIS FILE EXISTS. `.claude/rules/runtime-workflows.md` step 3 says the opposite — that a
-// new `_vN` "should pass freeze-lint on its own" and that `--update` is only for a brand-new
+// WHY THIS FILE EXISTS. Before PR #454, `.claude/rules/runtime-workflows.md` step 3 said that a
+// new `_vN` "should pass freeze-lint on its own" and that `--update` was only for a brand-new
 // frozen CLASS. Measured against the shipping checker (P6-1, and independently by the Codex
-// review of #454), that is false: H2 requires every `"use workflow"` module to be @frozen AND
+// review of #454), that was false: H2 requires every `"use workflow"` module to be @frozen AND
 // registered, and every file inside a frozen import closure to be registered, so five new v16
-// paths came up UNREGISTERED until the manifest gained them. The rule is being trued in its own
-// docs PR; this is the cell that keeps the corrected statement honest, so the next reader does
-// not have to re-measure it.
+// paths came up UNREGISTERED until the manifest gained them. PR #454 trues the rule alongside
+// this cell, which keeps the corrected statement honest so the next reader does not have to
+// re-measure it.
 //
 // It is a SEPARATE FILE from check-frozen-workflows.selftest.mjs on purpose: that one advertises
 // "runs WITHOUT a git base — Node built-ins only" and drives the pure checkers with string
@@ -106,10 +106,10 @@ try {
     "utf8",
   );
 
-  check("1 · FAIL BEFORE — a new _vN of an EXISTING class is UNREGISTERED (the rule says otherwise)", () => {
+  check("1 · FAIL BEFORE — a new _vN of an EXISTING class is UNREGISTERED (the old rule said otherwise)", () => {
     const r = run();
     if (r.status === 0) {
-      throw new Error("the gate PASSED — if this is now true, `.claude/rules/runtime-workflows.md` step 3 is right after all and this cell should be retired deliberately, not deleted quietly.");
+      throw new Error("the gate PASSED — the checker semantics changed; re-measure `.claude/rules/runtime-workflows.md` step 3 and retire this cell deliberately, never by quiet deletion.");
     }
     const out = r.stdout + r.stderr;
     if (!out.includes("UNREGISTERED")) throw new Error(`expected an UNREGISTERED violation, got:\n${out}`);

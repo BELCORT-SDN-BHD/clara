@@ -253,6 +253,15 @@ test("p6-1.emit.positive-admission: every non-admitting envelope yields NO card 
   assert.equal(ok.filter((p) => p.type === "freeform_result").length, 1, "control: the minimal ADMITTED envelope does mint a card");
 });
 
+test("p6-1.emit.provenance: read_id is read from the DB verb's own jsonb ALONE — never from the outer envelope", () => {
+  const outerOnly = { type: "tool-result", toolCallId: "tc-x", toolName: FF,
+    output: { ok: true, read_id: "999", read: { ok: true, outcome: "ok", authority: "narrative" } } };
+  assert.deepEqual(prompt16.toTypedParts_v16([outerOnly]).filter((p) => p.type === "freeform_result"), [],
+    "a read_id beside the DB's answer, rather than inside it, must mint NO card");
+  assert.equal(prompt16.admittedFreeformReadId(outerOnly.output), null);
+  assert.equal(prompt16.admittedFreeformReadId({ ok: true, read: { ok: true, outcome: "ok", read_id: 7 } }), "7");
+});
+
 test("p6-1.emit.read_id: a bigint that has already lost digits mints NO card, rather than the wrong receipt", () => {
   assert.equal(prompt16.admittedFreeformReadId({ ok: true, read: { ok: true, outcome: "ok", read_id: Number.MAX_SAFE_INTEGER } }), String(Number.MAX_SAFE_INTEGER), "the largest exact integer is still exact — it is admitted");
   assert.equal(prompt16.admittedFreeformReadId({ ok: true, read: { ok: true, outcome: "ok", read_id: Number.MAX_SAFE_INTEGER + 2 } }), null, "one past it is not, and fails closed");
