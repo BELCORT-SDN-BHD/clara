@@ -155,8 +155,14 @@ test("G1B-I12 裁-44 R3 / FOLD-19 — reconciler-wake.mjs's OWN settlement calls
   // be weakened to accommodate one known survivor is not a gate, so it is named and checked here
   // rather than excused. The whole-tree sweep below is what makes that claim total.
   const generic = readFileSync(fileURLToPath(new URL("../lib/reconciler.mjs", import.meta.url)), "utf8");
-  assert.match(generic, /_settle_wake_task\(\s*\n?\s*"?p_task => \$1/, "reconciler.mjs's G1 cancel arm settles by NAME too");
-  assert.doesNotMatch(generic, /_settle_wake_task\(\$1\s*,/, "and carries no positional survivor");
+  // 裁-44 R4 (LOW) — the seventh site goes through the SAME catalog loop as the other four, not a
+  // bare name match: a call naming only p_task would have passed the old assertion.
+  const genericCalls = [...generic.matchAll(/select\s+clara\.(\w+)\(([^)]*)\)/g)]
+    .filter((m) => m[1] === "_settle_wake_task")
+    .map((m) => [...m[2].matchAll(/(\w+)\s*=>/g)].map((x) => x[1]));
+  assert.equal(genericCalls.length, 1, `expected exactly one G1 settle in reconciler.mjs, saw ${genericCalls.length}`);
+  assert.deepEqual(genericCalls[0], catalogNames, "and its FULL argument vector matches the catalog, in order");
+  assert.doesNotMatch(generic, /_settle_wake_task\(\$1\s*,/, "with no positional survivor");
 });
 
 test("G1B-I11 裁-44 R2 / FOLD-14(a) — the pack attempt key FAILS CLOSED; there is no clock fallback left to collide", { skip }, async () => {

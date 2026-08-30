@@ -24,7 +24,7 @@ import {
   type PgExec,
 } from "./bankAgent.v1.infra.js";
 import { SYSTEM_PROMPT_BANK_AGENT_V1, BANK_AGENT_STEP_BUDGET, type BankAgentOutcome } from "./bankAgent.v1.prompt.js";
-import { buildBankAgentTools, newBankRunRecord } from "./bankAgent.v1.tools.js";
+import { beginModelStep, buildBankAgentTools, hadToolActivity, newBankRunRecord } from "./bankAgent.v1.tools.js";
 import { bankAgentEngineId, recordBankAgentUsage, onUsageProblem } from "./bankAgent.v1.usage.js";
 
 /** STEP 1 — the CAS-and-bind. Returns a plain, non-secret verdict; a false claim is a clean
@@ -90,6 +90,16 @@ export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: strin
     messages: [{ role: "user", content: dueLine }],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tools: tools as any,
+    // 裁-44 R4 / FOLD-20(a) — ASK THE PROVIDER FOR ONE TOOL CALL AT A TIME. The OpenAI provider
+    // defaults parallelToolCalls to TRUE, so siblings in one step run concurrently against this
+    // run's single mutable record. This is the REQUEST; the wall is the local serialisation in
+    // bankAgent.v1.tools.ts and the evidence epoch, because a provider setting can be defaulted
+    // differently, ignored by a future model, or lost in a provider swap.
+    providerOptions: { openai: { parallelToolCalls: false } },
+    // 裁-44 R4 / FOLD-20(c) — THE STEP CLOCK the evidence epoch is measured against. Advanced when
+    // a step ENDS, so every tool inside step N sees `rec.step === N` and a pack read there stamps
+    // epoch N; a write in step N+1 then satisfies `epoch < step` while one in step N does not.
+    onStepEnd: () => beginModelStep(rec),
     // 裁-44 / FOLD-2(a) — A CANCEL ENDS THE PASS, it does not merely refuse the next act. Once a
     // write gate has seen this run's own task off 'running', every later tool refuses anyway; this
     // condition stops the loop rather than letting the model burn its remaining budget arguing
@@ -114,7 +124,29 @@ export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: strin
     usage = ((await result.usage) ?? {}) as { inputTokens?: number; outputTokens?: number };
   } catch (err) {
     await recordBankAgentUsage(ctx, bankAgentEngineId(modelId), { durationMs: Date.now() - startedAt }, "error");
-    throw err;
+    // 裁-44 R4 / FOLD-21 — A STREAM FAILURE AFTER TOOL ACTIVITY IS SETTLED BY THIS ATTEMPT, NEVER
+    // RETHROWN INTO A CLEAN ONE.
+    //
+    // THE SCHEDULE THAT MADE THIS A DEFECT: attempt one admits a durable write, then a re-read
+    // comes back malformed and counts a grounding fault, then the stream throws a network error.
+    // Rethrowing hands the WDK a retry whose record starts at zero — the write replays through its
+    // stable op key (or the clean pass finds nothing due) and the task settles COMPLETED, with the
+    // earlier attempt's fault erased. The whole run record is per-attempt, so the fault has no
+    // memory to survive in.
+    //
+    // The run HOLDS the task (`holds` was set before this step), so this attempt can and must
+    // settle it. Only a failure before ANY tool call may rethrow: nothing durable happened, no
+    // fault was observed, and a retry is exactly the right answer.
+    //
+    // THE RESIDUAL, STATED: this latch is per-attempt BY CONSTRUCTION. It cannot bind a fault
+    // observed in attempt one to a settlement written by attempt three — nothing in this process
+    // outlives the attempt. The monotonic version is DB-side (a per-task grounding-fault row that
+    // writes and settlement both consult) and is booked as G1 PR-2 / the 裁-44 DB pass.
+    if (!hadToolActivity(rec)) throw err;
+    rec.streamFault = true;
+    rec.infraFaults += 1;
+    console.warn(`[bankAgent_v1] model stream failed after ${rec.toolCalls} tool call(s); settling this attempt rather than retrying clean: ${err instanceof Error ? err.message : String(err)}`);
+    return { outcome: classifyBankOutcome(rec, ""), usageTokens: 0 };
   } finally {
     writer.releaseLock();
   }
@@ -142,7 +174,11 @@ export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: strin
  *  there is nothing to say — a clean run stays silent, or the signal becomes noise. */
 export function infraFaultNote(rec: { admitted: number; infraFaults: number }): string | null {
   if (rec.admitted <= 0 || rec.infraFaults <= 0) return null;
-  return `bank_agent run succeeded with ${rec.admitted} act(s) but ${rec.infraFaults} tool call(s) never reached the database`;
+  // 裁-44 R4 (LOW) — "SUCCEEDED" WAS FALSE HERE from the moment FOLD-16 landed: on this lane an
+  // infra fault now FAILS the run, so a note claiming success contradicts the settle it
+  // accompanies. It says what actually happened instead. G1B-I8 pins the wording against the
+  // classifier's own verdict so the two cannot drift apart again.
+  return `bank_agent run recorded ${rec.admitted} admitted act(s) and FAILED: ${rec.infraFaults} tool call(s) never reached the database`;
 }
 
 /** THE SETTLE DECISION, extracted so it can be driven directly — see closePrep.v1.impl.ts's own

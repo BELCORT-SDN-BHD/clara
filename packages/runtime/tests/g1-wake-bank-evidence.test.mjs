@@ -62,6 +62,7 @@ test("G1B-BANK-E7 裁-44 R2 / FOLD-10 — an unrepresentable cents value takes t
   try {
     const { rec, built } = await armed(w, acct.bankAccountId);
     const pack = await built.get_bank_pack.execute({ rationale: "reading a pack whose numbers this process cannot carry" });
+    tools.beginModelStep(rec); // FOLD-20(c): the model has now SEEN this pack
     assert.ok(pack.error, `the pack read must FAIL — got ${JSON.stringify(pack)?.slice(0, 300)}`);
     assert.match(String(pack.error), /could not be read/, "and say so as OUR fault, not as an empty pack");
     assert.equal(rec.pack, null, "the record is NOT armed — there is no view to derive an amount from");
@@ -126,6 +127,8 @@ test("G1B-BANK-E8 裁-44 R2 / FOLD-11 — the model cannot supply times_seen, an
     assert.equal(withCount.success, false, "a model-supplied count must no longer parse at all");
 
     const pack = await built.get_bank_pack.execute({ rationale: "reading the pack the count will come from" });
+
+    tools.beginModelStep(rec); // FOLD-20(c): the model has now SEEN this pack
     assert.equal(pack.error, undefined, `the pack read must succeed — got ${JSON.stringify(pack)?.slice(0, 300)}`);
 
     // (2) ZERO SIGHTINGS IS A REFUSAL, NOT A ONE. A floor would have let the model promote an
@@ -223,11 +226,15 @@ test("G1B-BANK-E9 裁-44 R3 / FOLD-16 — a malformed RE-READ disarms the run; t
     const { rec, built } = await armed(w, acct.bankAccountId);
 
     const first = await built.get_bank_pack.execute({ rationale: "the good read" });
+
+    tools.beginModelStep(rec); // FOLD-20(c): the model has now SEEN this pack
     assert.equal(first.error, undefined, `the first read must succeed — got ${JSON.stringify(first)?.slice(0, 300)}`);
     assert.ok(rec.pack, "and it arms the run");
     const armedDigest = rec.digest;
 
     const second = await built.get_bank_pack.execute({ rationale: "the re-read that comes back corrupt" });
+
+    tools.beginModelStep(rec); // FOLD-20(c): the model has now SEEN this pack
     assert.ok(second.error, `the malformed re-read must FAIL — got ${JSON.stringify(second)?.slice(0, 300)}`);
     assert.equal(rec.pack, null, "AND IT DISARMS THE RUN — the previous pack must not survive a failed refresh");
     assert.equal(rec.digest, null, "including its digest, which every write re-presents as p_inputs_digest");
@@ -251,3 +258,83 @@ test("G1B-BANK-E9 裁-44 R3 / FOLD-16 — a malformed RE-READ disarms the run; t
   }
 });
 
+
+test("G1B-E9-parallel 裁-44 R4 / FOLD-20 — sibling tool calls cannot authorise a write from a pack the model never saw", { skip }, async () => {
+  // THE SCHEDULE THE REVIEW FOUND, driven rather than argued. The OpenAI provider defaults
+  // parallelToolCalls to TRUE, so siblings in ONE step run concurrently against this run's single
+  // mutable record:
+  //   1. a WRITE reads the armed pack, then awaits its task-status round trip;
+  //   2. sibling read A clears and re-arms with a NEW pack;
+  //   3. sibling read B parses malformed and counts a fault WITHOUT clearing A's pack;
+  //   4. the write resumes and derives from A's pack — which the model never received, because it
+  //      was returned to the provider AFTER the model had already chosen this write's arguments.
+  // The settle is failed/internal either way, but that does not undo a committed bank write.
+  const w = await rig.buildFirm("g1bpar");
+  await buildBankPrereqs(w);
+  const acct = await buildBankAccount(w, [10000]);
+  const [entry] = await buildApprovedEntries(w, [10000]);
+
+  const previous = injectBankPools();
+  const real = globalThis.__claraPools.withBankWakeScoped;
+  let packReads = 0;
+  globalThis.__claraPools = {
+    ...globalThis.__claraPools,
+    withBankWakeScoped: async (secret, fn) => {
+      const out = await real(secret, fn);
+      if (out && typeof out === "object" && typeof out.digest === "string") {
+        packReads += 1;
+        if (packReads === 2) return { ...out, digest: "x" }; // the FIRST sibling comes back malformed
+      }
+      return out;
+    },
+  };
+  try {
+    const { rec, built } = await armed(w, acct.bankAccountId);
+
+    // Step 0 — a good read the model DOES see, so the run is armed and the hostile write below is
+    // not blocked by the pack guard. The cell must fail for the epoch reason, not that one.
+    const first = await built.get_bank_pack.execute({ rationale: "the read the model actually sees" });
+    assert.equal(first.error, undefined);
+    tools.beginModelStep(rec);
+    assert.ok(rec.pack, "armed, from a strictly earlier step");
+
+    // THE HOSTILE STEP: two reads and a write issued together, exactly as siblings would be. The
+    // WRITE IS LAST so it is the one that resumes after the siblings have moved the record — which
+    // is the schedule the review described. (Issued first it would legitimately use the step-0
+    // pack the model DID see, and prove nothing; that ordering was the cell's own first draft.)
+    const [readA, readB, write] = await Promise.all([
+      built.get_bank_pack.execute({ rationale: "sibling read A, malformed" }),
+      built.get_bank_pack.execute({ rationale: "sibling read B, good" }),
+      built.match_bank_line.execute({ lines: acct.lineIds, entries: [entry], rationale: "the delayed write" }),
+    ]);
+
+    // THE WRITE IS REFUSED, and by the EPOCH specifically. The record is ARMED when the write runs
+    // — sibling B's pack is sitting right there — so the pack-before-write guard would have let it
+    // straight through. What stops it is that B's pack belongs to THIS step: the model chose this
+    // write's arguments before that pack existed, so it is not evidence the model ever saw.
+    assert.ok(rec.pack, "the record IS armed when the write runs — otherwise the epoch is not what refused it");
+    assert.equal(rec.pack.epoch, rec.step, "and the armed pack belongs to the CURRENT step");
+    assert.ok(write.error, `the sibling write must be refused — got ${JSON.stringify(write)?.slice(0, 300)}`);
+    assert.match(String(write.error), /pack_same_step/, "by name, and not by the pack-before-write guard");
+    assert.equal(await memberCount(w.client), 0, "AND NO BANK WRITE WAS COMMITTED — the assertion the whole ruling is about");
+
+    assert.ok(readA.error, "sibling A came back malformed, as staged");
+    assert.equal(readB.error, undefined, "and sibling B succeeded");
+    assert.ok(rec.infraFaults >= 1, "the malformed sibling counted a grounding fault");
+
+    const bank = await import("../workflows/bankAgent.v1.impl.ts");
+    const outcome = bank.classifyBankOutcome(rec, "");
+    assert.equal(outcome.kind, "refused", "and the settle is a failure, not a quiet night");
+    assert.equal(outcome.code, "internal");
+
+    // THE POSITIVE CONTROL — the same write in the FOLLOWING step, on a pack the model has now
+    // seen, proceeds. Without it this cell would pass against a tool that refused every write.
+    const good = await built.get_bank_pack.execute({ rationale: "a clean read the model sees" });
+    assert.equal(good.error, undefined, `the recovery read must succeed — got ${JSON.stringify(good)?.slice(0, 200)}`);
+    tools.beginModelStep(rec);
+    const admitted = await built.match_bank_line.execute({ lines: acct.lineIds, entries: [entry], rationale: "the write, one step later" });
+    assert.equal(admitted?.status, "live", `the following step's write must be ADMITTED — got ${JSON.stringify(admitted)?.slice(0, 300)}`);
+  } finally {
+    globalThis.__claraPools = previous;
+  }
+});

@@ -57,6 +57,7 @@ test("G1B-BANK-E3 裁-44 FOLD-1 — a split the model would have invented is REF
   try {
     const { rec, built } = await armed(w, acct.bankAccountId);
     const pack = await built.get_bank_pack.execute({ rationale: "reading the pack before acting" });
+    tools.beginModelStep(rec); // FOLD-20(c): the model has now SEEN this pack
     assert.equal(pack.error, undefined, `the pack read must succeed — got ${JSON.stringify(pack)?.slice(0, 300)}`);
     assert.equal(await memberCount(w.client), 0, "the books start with no matched members — the baseline this cell measures against");
 
@@ -132,6 +133,7 @@ test("G1B-BANK-E4 裁-44 FOLD-8 — a STEP RETRY after an admitted act can still
   try {
     const { taskId, ctx, built, rec } = await armed(w, acct.bankAccountId, "step-abc#1");
     const pack1 = await built.get_bank_pack.execute({ rationale: "attempt 1 reads the pack" });
+    tools.beginModelStep(rec); // FOLD-20(c): the model has now SEEN this pack
     assert.equal(pack1.error, undefined);
     const match = await built.match_bank_line.execute({ lines: acct.lineIds, entries: [entry], rationale: "attempt 1 acts" });
     assert.equal(match?.status, "live", `attempt 1's act must land, or the retry has no moved digest to collide with — got ${JSON.stringify(match)?.slice(0, 300)}`);
@@ -189,6 +191,7 @@ test("G1B-BANK-E5 裁-44 FOLD-9 — a refused pick does not poison the line, and
   try {
     const { rec, built } = await armed(w, acct.bankAccountId);
     const pack1 = await built.get_bank_pack.execute({ rationale: "reading the pack" });
+    tools.beginModelStep(rec); // FOLD-20(c): the model has now SEEN this pack
     assert.equal(pack1.error, undefined);
 
     // (1) THE WRONG ENTRY PICK. Its derived amount (7,000, the entry's own capacity) cannot tie a
@@ -227,6 +230,7 @@ test("G1B-BANK-E5 裁-44 FOLD-9 — a refused pick does not poison the line, and
     });
     assert.equal(proposal?.status, "open", `the digest-moving act must be admitted — got ${JSON.stringify(proposal)?.slice(0, 300)}`);
     const pack2 = await built.get_bank_pack.execute({ rationale: "re-reading after acting" });
+    tools.beginModelStep(rec); // FOLD-20(c): the model has now SEEN this pack
     assert.equal(pack2.error, undefined);
     assert.notEqual(pack2.digest, pack1.digest, "the digest genuinely moved, or the belt below has nothing to catch");
 
@@ -265,6 +269,7 @@ test("G1B-BANK-E6 裁-44 FOLD-4 — a line from ANOTHER account of the same clie
   try {
     const { rec, built } = await armed(w, a.bankAccountId);
     const packA = await built.get_bank_pack.execute({ rationale: "reading account A's pack" });
+    tools.beginModelStep(rec); // FOLD-20(c): the model has now SEEN this pack
     assert.equal(packA.error, undefined);
     // THE POSITIVE CONTROL FIRST: the pack this run read really is account A's and really does
     // exclude B's line. Without it, "B's line was refused" could just mean the pack was empty.

@@ -77,6 +77,9 @@ export async function runClosePrepModelStep(ctx: CloseTaskContext, modelId: stri
     ],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tools: tools as any,
+    // 裁-44 R4 / FOLD-20(a) — ask the provider for one tool call at a time; the WALL is the local
+    // serialisation in closePrep.v1.tools.ts. See bankAgent.v1.impl.ts's own copy.
+    providerOptions: { openai: { parallelToolCalls: false } },
     // 裁-44 / FOLD-2(a) — a cancel ENDS the pass rather than merely refusing the next act. See
     // bankAgent.v1.impl.ts's own copy.
     stopWhen: [isStepCount(CLOSE_PREP_STEP_BUDGET), () => rec.cancelledAs !== null],
@@ -100,6 +103,16 @@ export async function runClosePrepModelStep(ctx: CloseTaskContext, modelId: stri
     usage = ((await result.usage) ?? {}) as { inputTokens?: number; outputTokens?: number };
   } catch (err) {
     await recordClosePrepUsage(ctx, closePrepEngineId(modelId), { durationMs: Date.now() - startedAt }, "error");
+    // 裁-44 R4 / FOLD-21 — a stream failure AFTER tool activity is settled by THIS attempt, never
+    // rethrown into a clean retry whose record starts at zero. See bankAgent.v1.impl.ts's own copy
+    // for the schedule and for the residual (the latch is per-attempt by construction; the
+    // monotonic version is DB-side and booked as G1 PR-2).
+    if (rec.toolCalls > 0) {
+      rec.streamFault = true;
+      rec.infraFaults += 1;
+      console.warn(`[closePrep_v1] model stream failed after ${rec.toolCalls} tool call(s); settling this attempt rather than retrying clean: ${err instanceof Error ? err.message : String(err)}`);
+      return { outcome: classifyCloseOutcome(rec, ""), usageTokens: 0 };
+    }
     throw err;
   } finally {
     writer.releaseLock();
@@ -136,6 +149,9 @@ export async function runClosePrepModelStep(ctx: CloseTaskContext, modelId: stri
  *  stay silent, or the signal becomes noise a reader learns to ignore. */
 export function infraFaultNote(rec: { acts: number; infraFaults: number }): string | null {
   if (rec.acts <= 0 || rec.infraFaults <= 0) return null;
+  // 裁-44 R4 (LOW) — "succeeded" is still TRUE on this lane (N12's partial-success rule stands,
+  // and the classifier does settle it green), unlike the bank lane's copy where FOLD-16 made the
+  // word false. Said explicitly so the asymmetry reads as a decision rather than a missed edit.
   return `close_prep run succeeded with ${rec.acts} act(s) but ${rec.infraFaults} tool call(s) never reached the database`;
 }
 
@@ -145,9 +161,17 @@ export function infraFaultNote(rec: { acts: number; infraFaults: number }): stri
  * through a model call, i.e. not reachable by any test at all).
  */
 export function classifyCloseOutcome(
-  rec: { acts: number; reads: number; infraFaults: number; writeAttempts: number; refusals: number; cancelledAs: string | null },
+  rec: { acts: number; reads: number; infraFaults: number; writeAttempts: number; refusals: number; cancelledAs: string | null; streamFault?: boolean },
   text: string,
 ): ClosePrepOutcome {
+  // 裁-44 R4 / FOLD-21 — A STREAM FAILURE AFTER TOOL ACTIVITY FAILS THE RUN, even here where N12's
+  // partial-success rule otherwise stands. The distinction FOLD-16 drew is about a fault in the
+  // EVIDENCE, which this lane has none of; a stream that died mid-pass is different — the run was
+  // CUT OFF, so whatever it had left to do is undone and unknown. Settling green on a truncated
+  // pass is the same silent-green class one layer out.
+  if (rec.streamFault === true && rec.cancelledAs === null) {
+    return { kind: "refused", code: "internal", message: "the model stream failed after this run had already acted — the pass is incomplete, not quiet" };
+  }
   // 裁-44 / FOLD-2 — A CANCELLED TASK OUTRANKS EVERY OTHER VERDICT, admitted acts included. The
   // acts that landed keep their own durable receipts; what this decides is only what the TASK's
   // terminal state says, and a task somebody cancelled did not complete.

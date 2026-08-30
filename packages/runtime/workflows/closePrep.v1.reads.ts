@@ -80,10 +80,14 @@ export type CloseRunRecord = {
   refusals: number;
   /** 裁-44 / FOLD-2 — the non-'running' status a write gate actually SAW, or null. */
   cancelledAs: string | null;
+  /** 裁-44 R4 / FOLD-21 — every tool call this attempt made. ONE named counter, not a sum. */
+  toolCalls: number;
+  /** 裁-44 R4 / FOLD-21 — a stream failure that landed after tool activity. */
+  streamFault: boolean;
 };
 
 export function newCloseRunRecord(): CloseRunRecord {
-  return { reads: 0, acts: 0, infraFaults: 0, closeRunId: null, writeAttempts: 0, refusals: 0, cancelledAs: null };
+  return { reads: 0, acts: 0, infraFaults: 0, closeRunId: null, writeAttempts: 0, refusals: 0, cancelledAs: null, toolCalls: 0, streamFault: false };
 }
 
 /**
@@ -168,10 +172,43 @@ export function assertTailBinding(verb: string, sql: string, valueCount: number)
  *  Review law 2 holds: this counts what the reply SAYS, never the absence of an error. A call
  *  that threw never reaches here at all (the caller turns it into a refusal object), and a
  *  refusal reply says 'refused' in the same field. */
-export function countIfAdmitted(rec: CloseRunRecord, reply: unknown): unknown {
-  if ((reply as { status?: unknown } | null)?.status === "acted") rec.acts += 1;
-  else rec.refusals += 1;
-  return reply;
+const CLOSE_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const isCloseUuid = (v: unknown): boolean => typeof v === "string" && CLOSE_UUID_RE.test(v.toLowerCase());
+
+/**
+ * 裁-44 R4 / FOLD-22(a) — THREE ANSWERS ON THIS LANE TOO, and this one was the looser of the pair.
+ *
+ * `status === 'acted'` ALONE counted an act. 0138's agent cores return `{status, receipt_id,
+ * result}` on the acted path (`_agent_close_read_core` at :1852, `_agent_begin_close_core` at
+ * :2107), so a bare `{status:'acted'}` is not that shape — and it was being counted as a read or
+ * an act, which could carry a run to `nothing_due` and a GREEN settle with no receipt behind it.
+ * Incomplete positive evidence is not positive evidence (review law 2).
+ *
+ * A purported success that cannot be verified is OURS, not the model's: `malformed` is an
+ * infrastructure fault. `wake_begin_close` additionally carries `result.close_run_id` — the run id
+ * the whole rest of the pass names — so that one is checked where it is claimed.
+ */
+export type CloseReplyVerdict = "acted" | "refused" | "malformed";
+
+export function classifyCloseReply(reply: unknown, opts: { needsCloseRunId?: boolean } = {}): CloseReplyVerdict {
+  const r = reply as { status?: unknown; receipt_id?: unknown; result?: unknown } | null;
+  if (r === null || typeof r !== "object") return "refused";
+  if (r.status !== "acted") return "refused";
+  if (!isCloseUuid(r.receipt_id)) return "malformed";
+  if (r.result === null || typeof r.result !== "object") return "malformed";
+  if (opts.needsCloseRunId && !isCloseUuid((r.result as { close_run_id?: unknown }).close_run_id)) return "malformed";
+  return "acted";
+}
+
+export function countIfAdmitted(rec: CloseRunRecord, reply: unknown, opts: { needsCloseRunId?: boolean } = {}): CloseReplyVerdict {
+  const verdict = classifyCloseReply(reply, opts);
+  if (verdict === "acted") rec.acts += 1;
+  else if (verdict === "refused") rec.refusals += 1;
+  else {
+    rec.infraFaults += 1;
+    console.warn("[closePrep_v1] a wrapper reply claimed 'acted' but carries no verifiable receipt");
+  }
+  return verdict;
 }
 
 const RATIONALE = z
@@ -180,7 +217,13 @@ const RATIONALE = z
   .max(CLOSE_PROSE_MAX)
   .describe("Why you are making this call, in one plain sentence.");
 
-export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec: CloseRunRecord) {
+/** The shared one-at-a-time queue (裁-44 R4 / FOLD-20b). It is PASSED IN rather than created here
+ *  because the reads and the writes must share ONE chain: a read and a write interleaving is the
+ *  same hazard as two reads, and two independent queues would serialise each half against itself
+ *  while leaving the halves free to race each other. */
+export type CloseSerialiser = <T>(body: () => Promise<T>) => Promise<T>;
+
+export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec: CloseRunRecord, serial: CloseSerialiser) {
   /** A read counts ONLY when the database says it acted.
    *
    *  THIS IS THE COUNTER THAT DECIDES WHETHER THE RUN SETTLED HONESTLY, which is why it gets the
@@ -196,9 +239,19 @@ export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec:
    *  The acted shape is `_agent_close_read_core`'s own: {status:'acted', receipt_id, result}
    *  (0138:1852). Same key, same value, same test as the write half — one vocabulary. */
   const read = async (verb: string, subject: string, sql: string, args: unknown[], rationale: string) => {
+    rec.toolCalls += 1;
     try {
       const out = await callCloseVerb(ctx, verb, subject, sql, args, rationale, modelId);
-      if ((out as { status?: unknown } | null)?.status === "acted") rec.reads += 1;
+      // 裁-44 R4 / FOLD-22(a) — a READ counts only on the DOCUMENTED acted shape. `status:'acted'`
+      // alone used to be enough, so a reply with no receipt could carry a run to `nothing_due` and
+      // a green settle. A purported success we cannot verify is an infrastructure fault.
+      const verdict = classifyCloseReply(out);
+      if (verdict === "acted") rec.reads += 1;
+      else if (verdict === "malformed") {
+        rec.infraFaults += 1;
+        console.warn(`[closePrep_v1] ${verb} reply claimed 'acted' but carries no verifiable receipt`);
+        return { error: "the read did not go through: the database's reply could not be verified as this call's own receipt. Stop." };
+      }
       return out;
     } catch (e) {
       return closeRefusal(rec, e);
@@ -209,34 +262,31 @@ export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec:
     [READ_TOOLS.LIST_FY]: tool({
       description: "List this client's fiscal years: which are open, reopened or closed, and when each ends. Start here.",
       inputSchema: z.object({ rationale: RATIONALE }),
-      execute: ({ rationale }: { rationale: string }) =>
-        read(
+      execute: ({ rationale }: { rationale: string }) => serial(() => read(
           "wake_list_fiscal_years",
           ctx.clientId,
           "select clara.wake_list_fiscal_years(p_client => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
           [ctx.clientId],
           rationale,
-        ),
+        )),
     }),
 
     [READ_TOOLS.CLOSE_PLAN]: tool({
       description: "Read the close plan for one fiscal year — the ordered steps a close of this year involves.",
       inputSchema: z.object({ fiscal_year_id: z.string().uuid(), rationale: RATIONALE }),
-      execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) =>
-        read(
+      execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) => serial(() => read(
           "wake_get_close_plan",
           fiscal_year_id,
           "select clara.wake_get_close_plan(p_fiscal_year_id => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
           [fiscal_year_id],
           rationale,
-        ),
+        )),
     }),
 
     [READ_TOOLS.READINESS]: tool({
       description: "Read whether this fiscal year is ready to close, and what is blocking it if not. Blockers are facts; read them before acting.",
       inputSchema: z.object({ fiscal_year_id: z.string().uuid(), rationale: RATIONALE }),
-      execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) =>
-        read(
+      execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) => serial(() => read(
           "wake_get_close_readiness",
           fiscal_year_id,
           // TWO ADJACENT UUIDs — transposition case B. Named notation closes ONE HALF of that
@@ -248,46 +298,43 @@ export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec:
           "select clara.wake_get_close_readiness(p_client => $1, p_fy => $2, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [ctx.clientId, fiscal_year_id],
           rationale,
-        ),
+        )),
     }),
 
     [READ_TOOLS.DRY_RUN]: tool({
       description: "Test close readiness WITHOUT committing to anything — use this to check a shape before you act on it.",
       inputSchema: z.object({ fiscal_year_id: z.string().uuid(), rationale: RATIONALE }),
-      execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) =>
-        read(
+      execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) => serial(() => read(
           "wake_dry_run_close_readiness",
           fiscal_year_id,
           "select clara.wake_dry_run_close_readiness(p_client => $1, p_fy => $2, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [ctx.clientId, fiscal_year_id],
           rationale,
-        ),
+        )),
     }),
 
     [READ_TOOLS.VERIFY]: tool({
       description: "Verify an existing close receipt — what it covers and whether it still holds.",
       inputSchema: z.object({ close_receipt_id: z.string().uuid(), rationale: RATIONALE }),
-      execute: ({ close_receipt_id, rationale }: { close_receipt_id: string; rationale: string }) =>
-        read(
+      execute: ({ close_receipt_id, rationale }: { close_receipt_id: string; rationale: string }) => serial(() => read(
           "wake_verify_close",
           close_receipt_id,
           "select clara.wake_verify_close(p_receipt => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
           [close_receipt_id],
           rationale,
-        ),
+        )),
     }),
 
     [READ_TOOLS.SNAPSHOT_STATE]: tool({
       description: "Read the state of one period snapshot.",
       inputSchema: z.object({ snapshot_id: z.string().uuid(), rationale: RATIONALE }),
-      execute: ({ snapshot_id, rationale }: { snapshot_id: string; rationale: string }) =>
-        read(
+      execute: ({ snapshot_id, rationale }: { snapshot_id: string; rationale: string }) => serial(() => read(
           "wake_snapshot_state",
           snapshot_id,
           "select clara.wake_snapshot_state(p_snapshot => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
           [snapshot_id],
           rationale,
-        ),
+        )),
     }),
   };
 }

@@ -79,6 +79,21 @@ export function refusal(rec: BankRunRecord, e: unknown): { error: string } {
 /** The pack THIS run read, reduced to the facts a write needs from it. Built ONLY from what the
  *  database returned — never from anything the model said. */
 export type BankPackView = {
+  /** 裁-44 R4 / FOLD-20 — THE MODEL STEP THIS PACK WAS RETURNED IN, stamped when it is armed.
+   *
+   *  IT LIVES HERE RATHER THAN ON THE RECORD, and that placement is the fix rather than a
+   *  preference. FOLD-16 clears `rec.pack` and `rec.digest` before every re-read; a separate
+   *  `rec.packEpoch` field would have to be cleared in lockstep, and the first edit that forgot
+   *  would leave a stale epoch vouching for a pack that is no longer there. On the view, "cleared"
+   *  and "stale" are one fact: no pack, no epoch.
+   *
+   *  WHAT IT BUYS. The provider runs sibling tool calls in ONE step concurrently (OpenAI defaults
+   *  parallelToolCalls to true). Even with local serialisation, a write that ran after a same-step
+   *  read would derive its amounts from a pack THE MODEL HAS NEVER SEEN — returned to the provider
+   *  after the model had already chosen the write's arguments. That is grounding in evidence
+   *  nobody read: FOLD-4's defect across TIME rather than across accounts. So a write may only use
+   *  a pack from a STRICTLY EARLIER step. */
+  epoch: number;
   digest: string;
   /** line_id (lowercase) -> the line's own amount_cents, as the DB reported it. */
   lineCents: Map<string, number>;
@@ -126,19 +141,35 @@ export type BankRunRecord = {
   /** 裁-44 / FOLD-2 — the non-'running' status a write gate actually SAW, or null. Once set, every
    *  later act refuses and the run settles the cancellation instead of a night's work. */
   cancelledAs: string | null;
+  /** 裁-44 R4 / FOLD-20 — THE MODEL STEP THIS RUN IS CURRENTLY IN. Advanced by the step loop, never
+   *  by a tool. It is the clock the evidence epoch below is measured against. */
+  step: number;
+  /** 裁-44 R4 / FOLD-21 — EVERY tool call this attempt made, admitted or not, read or write. ONE
+   *  named counter rather than a sum recomputed at the call site: the question "has anything
+   *  happened yet?" must have one answer, and a sum drifts the moment a counter is added. */
+  toolCalls: number;
+  /** 裁-44 R4 / FOLD-21 — a stream/network failure that landed AFTER tool activity. The attempt
+   *  settles this itself rather than rethrowing into a clean retry whose record starts at zero. */
+  streamFault: boolean;
 };
+
+/** Advance the model-step clock (裁-44 R4 / FOLD-20). Called by the step loop's own
+ *  `onStepEnd`, and by a direct-drive cell between the read and the write it grounds — which is
+ *  exactly what the loop does, made explicit. */
+export function beginModelStep(rec: { step: number }): void {
+  rec.step += 1;
+}
+
+/** Has this attempt done ANYTHING yet? 裁-44 R4 / FOLD-21 asks this to decide whether a stream
+ *  failure may be rethrown into a retry (nothing happened) or must be settled by this attempt. */
+export function hadToolActivity(rec: { toolCalls: number }): boolean {
+  return rec.toolCalls > 0;
+}
 
 export function newBankRunRecord(attemptKey: string): BankRunRecord {
   return {
-    pack: null,
-    digest: null,
-    admitted: 0,
-    writeAttempts: 0,
-    refusals: 0,
-    packReads: 0,
-    infraFaults: 0,
-    attemptKey,
-    cancelledAs: null,
+    pack: null, digest: null, admitted: 0, writeAttempts: 0, refusals: 0, packReads: 0,
+    infraFaults: 0, attemptKey, cancelledAs: null, step: 0, toolCalls: 0, streamFault: false,
   };
 }
 
@@ -213,7 +244,7 @@ const packFail = (reason: string, detail: string): BankPackParse => ({ ok: false
  * admits only what it can fully account for, and everything else is an INFRASTRUCTURE failure the
  * caller settles `internal` on. It is never a refusal: a refusal blames the model for our fault.
  */
-export function readPackView(pack: unknown): BankPackParse {
+export function readPackView(pack: unknown, epoch: number): BankPackParse {
   const p = pack as { digest?: unknown; lines?: unknown; candidates?: unknown } | null;
   if (p === null || typeof p !== "object") return packFail("pack_not_object", "the pack reply is not an object");
   // 裁-44 R3 / FOLD-16 — THE DIGEST IS A SHA-256, NOT "any non-empty string". The verb computes it
@@ -271,178 +302,7 @@ export function readPackView(pack: unknown): BankPackParse {
     }
     entryCaps.set(id, { dr, cr });
   }
-  return { ok: true, view: { digest: p.digest, lineCents, lineText, entryCaps } };
-}
-
-/** Separators are noise on BOTH sides of an identifier comparison — "9988-776655" printed on a
- *  statement and "9988776655" typed by a model are the same account. Canonicalising to [a-z0-9]
- *  is what lets the token match below be exact without being brittle (裁-44 R3 / FOLD-15). */
-export function canonicalIdentifier(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-/** The floor each identifier kind must clear AFTER canonicalisation (裁-44 R3 / FOLD-15).
- *  A bank account is a number and the longest of the three, so it carries the higher bar. */
-const MIN_CANON_CHARS: Record<string, number> = { tin: 6, ssm: 6, bank_account: 8 };
-
-/** Is this identifier long and specific enough to be COUNTABLE at all? Returns null when it is,
- *  otherwise the typed reason the caller refuses with. */
-export function identifierTooShort(kind: string, value: string): string | null {
-  const canon = canonicalIdentifier(value);
-  const min = MIN_CANON_CHARS[kind] ?? 6;
-  if (canon.length < min) {
-    return `an identifier of kind ${kind} needs at least ${min} letters/digits once separators are removed; "${value}" has ${canon.length}`;
-  }
-  // A BANK ACCOUNT IS A NUMBER. A bank prefix may precede it, but eight digits must be there —
-  // otherwise a phrase like "g1 bank line" clears a bare character count and is then matched
-  // against every line that happens to print it.
-  if (kind === "bank_account" && (canon.match(/\d/g) ?? []).length < 8) {
-    return `a bank_account identifier needs at least 8 digits; "${value}" has ${(canon.match(/\d/g) ?? []).length}`;
-  }
-  return null;
-}
-
-/**
- * COUNT THE SIGHTINGS OF AN IDENTIFIER IN THE PACK THIS RUN READ — 裁-44 R2 / FOLD-11, hardened
- * against the model by 裁-44 R3 / FOLD-15.
- *
- * `times_seen` used to be the MODEL's number, and 0121:5634 stores it verbatim in the proposal
- * payload a human reads to decide. That is a model-generated numeral in a durable artifact with no
- * deterministic evaluator behind it — the pack's own `learned_payers` is explicitly
- * `{"not_implemented": true}` (0121:5781). Hard constraint 2, in the same shape FOLD-1 closed one
- * table over.
- *
- * THE FIRST DERIVATION WAS STILL THE MODEL'S TO GAME. A raw case-insensitive SUBSTRING search over
- * a one-character identifier counts every line with a "1" anywhere in it — so the model could not
- * choose the number directly, but it could choose an identifier that made the number whatever it
- * liked. Deriving from DB-owned inputs is not enough on its own: the QUESTION has to be one the
- * model cannot bend.
- *
- * SO THE MATCH IS TOKEN-BOUNDED, ON BOTH SIDES. The description is split on whitespace — the
- * boundaries the statement actually prints — and each token is canonicalised to [a-z0-9] alone.
- * The identifier is canonicalised the same way, and a sighting is a token that EQUALS it. Two
- * consequences worth naming:
- *   - "9988-776655" printed on the statement is found by an identifier written "9988776655", and
- *     vice versa: separators are noise on both sides, which is what canonicalisation is for.
- *   - "1" can never match "514202" — it is not a whole token — and the length floor refuses it
- *     before matching anyway.
- * A longer digit run therefore never contains a shorter identifier by accident.
- *
- * THERE IS NO FLOOR ON THE COUNT. Zero sightings is not "at least one", it is a proposal grounded
- * in nothing this run saw, and the caller REFUSES it — FOLD-4's rule one table over: propose only
- * what you actually read.
- */
-export function countIdentifierSightings(pack: BankPackView, identifierValue: string): number {
-  const needle = canonicalIdentifier(identifierValue);
-  if (needle.length === 0) return 0;
-  let seen = 0;
-  for (const text of pack.lineText.values()) {
-    const hit = text.split(/\s+/).some((token) => canonicalIdentifier(token) === needle);
-    if (hit) seen += 1;
-  }
-  return seen;
-}
-
-/** What a match allocation derivation produced: either the exact entry rows to send, or a typed
- *  reason the model can act on. `reason` is a stable token, not prose — the cells pin it. */
-export type BankAllocation =
-  | { ok: true; entries: Array<{ entry_id: string; matched_cents: number }>; lineCents: number }
-  | { ok: false; reason: string; detail: string };
-
-/**
- * DERIVE THE ALLOCATION FROM THE PACK — the whole of 裁-44 / FOLD-1 in one pure function.
- *
- * WHAT THE DATABASE'S OWN LADDER DOES NOT CATCH, and why this function has to exist. 0121's
- * `tie_nonzero` checks only the AGGREGATE (`v_line_cents <> v_entry_cents + v_adj_cents`,
- * :5897); `capacity_exhausted` bounds each amount by that entry's OWN remaining capacity
- * (:5955-5967); `same_amount_ambiguous` searches for an UNSELECTED entry whose capacity equals
- * the aggregate (:5911-5918). A 10,000-cent line split 4,999 + 5,001 across two entries that
- * each have spare capacity passes all three — and the model's invented split becomes a durable
- * clara.bank_match_entry_members row. That is a model-generated numeral in a client's books,
- * which hard constraint 2 forbids outright.
- *
- * THE TWO ADMISSIBLE SHAPES, and there is no third:
- *   ONE entry   — matched_cents is the signed min of the line total and that entry's remaining
- *                 capacity on the matching side. When the capacity is the larger of the two the
- *                 line settles in full and the entry is partly consumed; when it is the smaller,
- *                 the derived amount cannot tie and the DATABASE refuses on tie_nonzero, which is
- *                 the right court for that verdict.
- *   MANY entries — every selected entry contributes its FULL remaining capacity, and their sum
- *                 must equal the line total exactly. A model that wants a different division does
- *                 not get one: there is no arithmetic left for it to invent.
- * Anything else is refused HERE, with a typed reason, and the prompt sends the model to
- * propose_line_exception — a human dividing an amount is the whole point of that door.
- *
- * THE SIGN CONVENTION is the estate's: matched_cents is the signed effect on the BANK account, so
- * a positive line (money in) is settled by DEBIT capacity and a negative line by CREDIT capacity.
- */
-export function deriveMatchAllocation(pack: BankPackView, lineIds: string[], entryIds: string[]): BankAllocation {
-  const lines = [...new Set(lineIds.map((v) => v.toLowerCase()))];
-  const entries = [...new Set(entryIds.map((v) => v.toLowerCase()))];
-  if (lines.length === 0) return { ok: false, reason: "no_lines", detail: "name at least one statement line" };
-  if (entries.length === 0) return { ok: false, reason: "no_entries", detail: "name at least one journal entry" };
-
-  const missingLine = lines.find((id) => !pack.lineCents.has(id));
-  if (missingLine !== undefined) {
-    return { ok: false, reason: "line_not_in_pack", detail: `line ${missingLine} is not among the unmatched lines of the pack this run read` };
-  }
-  const missingEntry = entries.find((id) => !pack.entryCaps.has(id));
-  if (missingEntry !== undefined) {
-    return { ok: false, reason: "entry_not_in_pack", detail: `entry ${missingEntry} is not among the candidates of the pack this run read` };
-  }
-
-  // 裁-44 R3 / FOLD-18 — THE AGGREGATE IS SUMMED IN BigInt AND CHECKED. Every LEAF is a safe
-  // integer by now (exactCents refused anything else), but a sum of safe integers is not itself
-  // guaranteed safe: enough large lines add past 2^53 and the total starts rounding, which is the
-  // very defect FOLD-10 closed one level down. BigInt makes the addition exact; the check refuses
-  // a total this process cannot carry rather than shipping a rounded one.
-  const lineTotal = lines.reduce((sum, id) => sum + BigInt(pack.lineCents.get(id) ?? 0), 0n);
-  if (!isSafeBig(lineTotal)) {
-    return { ok: false, reason: "aggregate_unrepresentable", detail: "the lines you named total more than this run can carry exactly — match them in smaller groups" };
-  }
-  const lineCents = Number(lineTotal);
-  if (lineCents === 0) {
-    return { ok: false, reason: "lines_net_to_zero", detail: "the lines you named net to zero, and a match must settle a non-zero amount" };
-  }
-  const sign = lineCents > 0 ? 1 : -1;
-  const want = Math.abs(lineCents);
-  const capacityOf = (id: string): number => {
-    const cap = pack.entryCaps.get(id);
-    return cap === undefined ? 0 : sign > 0 ? cap.dr : cap.cr;
-  };
-
-  const empty = entries.find((id) => capacityOf(id) <= 0);
-  if (empty !== undefined) {
-    return {
-      ok: false,
-      reason: "entry_has_no_capacity",
-      detail: `entry ${empty} has no remaining ${sign > 0 ? "debit" : "credit"} capacity against this bank account in the pack this run read`,
-    };
-  }
-
-  const only = entries[0];
-  if (entries.length === 1 && only !== undefined) {
-    const magnitude = Math.min(want, capacityOf(only));
-    return { ok: true, entries: [{ entry_id: only, matched_cents: sign * magnitude }], lineCents };
-  }
-
-  // Same BigInt discipline on the capacity side (裁-44 R3 / FOLD-18): several full capacities can
-  // sum past 2^53 even though each one is exact.
-  const totalBig = entries.reduce((sum, id) => sum + BigInt(capacityOf(id)), 0n);
-  if (!isSafeBig(totalBig)) {
-    return { ok: false, reason: "aggregate_unrepresentable", detail: "the entries you named carry more capacity between them than this run can carry exactly — match them in smaller groups" };
-  }
-  const total = Number(totalBig);
-  if (total !== want) {
-    return {
-      ok: false,
-      reason: "entries_do_not_tie",
-      detail:
-        `the entries you named carry ${total} cent(s) of remaining capacity between them and the line(s) total ${want} — ` +
-        "a multi-entry match settles every entry in FULL, so pick a set that adds up, or propose an exception for a human to divide",
-    };
-  }
-  return { ok: true, entries: entries.map((id) => ({ entry_id: id, matched_cents: sign * capacityOf(id) })), lineCents };
+  return { ok: true, view: { epoch, digest: p.digest, lineCents, lineText, entryCaps } };
 }
 
 /** The three verbs' own POSITIVE admitted shapes (裁-44 / FOLD-5).
@@ -459,15 +319,54 @@ export function deriveMatchAllocation(pack: BankPackView, lineIds: string[], ent
  *  counts as admitted — correctly: it names the same durable act, which did happen. */
 export type BankVerb = "match" | "exception" | "promotion";
 
-export function isAdmittedBankReply(verb: BankVerb, reply: unknown): boolean {
-  const r = reply as { status?: unknown; match_id?: unknown; proposal_id?: unknown } | null;
-  if (r === null || typeof r !== "object") return false;
-  if (verb === "match") return r.status === "live" && typeof r.match_id === "string";
-  return r.status === "open" && typeof r.proposal_id === "string";
+const isUuid = (v: unknown): boolean => typeof v === "string" && UUID_RE.test(v.toLowerCase());
+
+/**
+ * 裁-44 R4 / FOLD-22(a) — THREE ANSWERS, NOT TWO, and the third is the finding.
+ *
+ * `admitted` and `refused` were the whole world; a reply that CLAIMED the success status but
+ * carried no usable identity fell into `refused`, which blames the MODEL for a shape the DATABASE
+ * is supposed to guarantee. Worse on the counting side: an id was accepted as "any string", so
+ * `{status:'live', match_id:'ok'}` counted a durable act that names nothing an audit can follow.
+ *
+ * A PURPORTED SUCCESS THAT CANNOT BE VERIFIED IS OURS, NOT THE MODEL'S — `malformed` is an
+ * INFRASTRUCTURE fault, which on this lane settles `internal` (FOLD-16). The identity checks are
+ * the DB's own documented shapes: a match returns a uuid `match_id` (0121:1622), and a proposal
+ * returns a uuid `proposal_id` PLUS the subject it was asked about (0121:5566, :5643) — so a reply
+ * about a DIFFERENT line or counterparty than the one this call named is not this call's receipt.
+ */
+export type BankReplyVerdict = "admitted" | "refused" | "malformed";
+
+export function classifyBankReply(verb: BankVerb, reply: unknown, subjectId?: string): BankReplyVerdict {
+  const r = reply as { status?: unknown; match_id?: unknown; proposal_id?: unknown; line_id?: unknown; counterparty_id?: unknown } | null;
+  if (r === null || typeof r !== "object") return "refused";
+  if (verb === "match") {
+    if (r.status !== "live") return "refused";
+    return isUuid(r.match_id) ? "admitted" : "malformed";
+  }
+  if (r.status !== "open") return "refused";
+  if (!isUuid(r.proposal_id)) return "malformed";
+  // THE SUBJECT MUST BE THE ONE WE ASKED ABOUT. Absent from the reply, or naming something else,
+  // and this receipt is not evidence for THIS act (review law 2).
+  const subject = verb === "exception" ? r.line_id : r.counterparty_id;
+  if (subjectId === undefined) return isUuid(subject) ? "admitted" : "malformed";
+  return typeof subject === "string" && subject.toLowerCase() === subjectId.toLowerCase() ? "admitted" : "malformed";
 }
 
-export function countIfAdmitted(rec: BankRunRecord, verb: BankVerb, reply: unknown): unknown {
-  if (isAdmittedBankReply(verb, reply)) rec.admitted += 1;
-  else rec.refusals += 1;
-  return reply;
+/** Kept as the boolean the reply PROJECTION asks (裁-44 R3 / FOLD-18): only an admitted reply is
+ *  narrowed to status + ids. A malformed one is replaced wholesale by the caller. */
+export function isAdmittedBankReply(verb: BankVerb, reply: unknown, subjectId?: string): boolean {
+  return classifyBankReply(verb, reply, subjectId) === "admitted";
+}
+
+export function countIfAdmitted(rec: BankRunRecord, verb: BankVerb, reply: unknown, subjectId?: string): BankReplyVerdict {
+  const verdict = classifyBankReply(verb, reply, subjectId);
+  if (verdict === "admitted") rec.admitted += 1;
+  else if (verdict === "refused") rec.refusals += 1;
+  else {
+    // Not counted as a refusal: a refusal is the model's act being judged, and nothing here was.
+    rec.infraFaults += 1;
+    console.warn(`[bankAgent_v1] ${verb} reply claimed success but carries no verifiable identity`);
+  }
+  return verdict;
 }

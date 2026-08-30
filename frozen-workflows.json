@@ -324,8 +324,16 @@
       "sha256": "9dc60ac878516f144b60984c28975f07c945a5f171c54e6baa05e5c856f5a1dd",
       "note": ""
     },
+    "packages/runtime/workflows/bankAgent.v1.alloc.ts": {
+      "sha256": "c9d39172179016d71c459a808c503e56143d504833465dcec49341e2c7fbaa2f",
+      "note": ""
+    },
+    "packages/runtime/workflows/bankAgent.v1.identity.ts": {
+      "sha256": "47e14d7ed1b97d57031126099b0fab44f6d986f1f214eb42d633a202c1176ace",
+      "note": ""
+    },
     "packages/runtime/workflows/bankAgent.v1.impl.ts": {
-      "sha256": "d43c70e110a3fb6836e95f88ddb7f6bf3e544e821123c6ec6951895157bea81d",
+      "sha256": "74e306c55f5d6f1f49e20cb7ee2dedb0707bfeb44767c01b38489015a713e0fd",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.infra.ts": {
@@ -333,7 +341,7 @@
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.pack.ts": {
-      "sha256": "6240513b3feba5f1c97a20bd0b6196163d0edc7649830fe54e54acdd6e7aee34",
+      "sha256": "c0f09cf2268e17baccd528edde9f80a09ef8b5f75fda660b84718b227bc92c28",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.prompt.ts": {
@@ -341,7 +349,7 @@
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.tools.ts": {
-      "sha256": "076b9df83d371a9b3e1316504e76ee9c7087222242885f142ed96fe14688758f",
+      "sha256": "29e24f155c2f20fd493855d54aeca139f0912ba9ceb9eec8326f1a2aaa35e127",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.ts": {
@@ -789,7 +797,7 @@
       "deployed": true
     },
     "packages/runtime/workflows/closePrep.v1.impl.ts": {
-      "sha256": "8825ae8272992d14d7071b133ea1f91194a6c6a8781e4ec258fb6dfb9dbc1b4a",
+      "sha256": "ef11823f373956cc2fc26c92f2f3fa3a29b8f9c2ba8b54b95d4e7c0aa5ec8b98",
       "note": ""
     },
     "packages/runtime/workflows/closePrep.v1.infra.ts": {
@@ -801,11 +809,11 @@
       "note": ""
     },
     "packages/runtime/workflows/closePrep.v1.reads.ts": {
-      "sha256": "96ad9b04d919d35fb003c2a2f1bebb4e9d0f1ce0a85fde35723e2e194581d183",
+      "sha256": "4b76bba8aaae9b00525f6eef5124e69af5cf840c1664ba16f28578371772e231",
       "note": ""
     },
     "packages/runtime/workflows/closePrep.v1.tools.ts": {
-      "sha256": "d84a7b4e8682c7e3c675e14507995a8733b8745cda1c7ca5426e9fe09bfb2c70",
+      "sha256": "d17aed59d79d2b037bd484434b464b2dffade18fb4e8d0e33e7f09eeb04e0873",
       "note": ""
     },
     "packages/runtime/workflows/closePrep.v1.ts": {

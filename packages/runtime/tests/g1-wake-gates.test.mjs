@@ -172,6 +172,16 @@ test("G1B-I8 N11 — a run whose reads worked but whose ACTS were all blocked by
   assert.equal(close.infraFaultNote({ acts: 2, infraFaults: 0 }), null, "a clean run stays silent — the signal has to mean something");
   assert.equal(close.infraFaultNote({ acts: 0, infraFaults: 3 }), null, "and a zero-act run is the OTHER branch's business, not this signal's");
   assert.match(String(bank.infraFaultNote({ admitted: 1, infraFaults: 4 })), /4 tool call\(s\) never reached the database/, "same on the bank lane");
+  // 裁-44 R4 (LOW) — THE NOTE MUST NOT CONTRADICT THE SETTLE IT ACCOMPANIES. FOLD-16 made an infra
+  // fault FAIL a bank run, so the bank note's old word "succeeded" became false the same day.
+  // Pinned against the classifier's own verdict so the two cannot drift apart again.
+  const noted = String(bank.infraFaultNote({ admitted: 1, infraFaults: 4 }));
+  assert.doesNotMatch(noted, /succeeded/, "the bank note may not claim success");
+  assert.match(noted, /FAILED/, "it says what the classifier actually decided");
+  assert.equal(bank.classifyBankOutcome(mkBank({ admitted: 1, digest: "abc", infraFaults: 4 }), "").kind, "refused", "which is this");
+  // The CLOSE note keeps "succeeded" because on that lane it is still true (N12 stands).
+  assert.match(String(close.infraFaultNote({ acts: 2, infraFaults: 3 })), /succeeded/);
+  assert.equal(close.classifyCloseOutcome(mkClose({ acts: 2, reads: 6, infraFaults: 3 }), "").kind, "proposed");
   assert.equal(bank.infraFaultNote({ admitted: 1, infraFaults: 0 }), null);
 
   // S9's own branch, re-driven here through the extracted function so both attributions are

@@ -22,16 +22,22 @@ import { randomUUID } from "node:crypto";
 const { register } = await import("tsx/esm/api");
 register();
 
-const pack = await import("../workflows/bankAgent.v1.pack.ts");
+// 裁-44 R4 split the pure half three ways for the 500-line budget — the record and the parser
+// (pack), the identifier matcher (identity), and the allocation (alloc). The cells address ONE
+// surface, so the three namespaces are merged rather than every call site being rewritten to
+// guess which module a function lives in today.
+const pack = {
+  ...(await import("../workflows/bankAgent.v1.pack.ts")),
+  ...(await import("../workflows/bankAgent.v1.identity.ts")),
+  ...(await import("../workflows/bankAgent.v1.alloc.ts")),
+};
 const tools = await import("../workflows/bankAgent.v1.tools.ts");
-const closeTools = await import("../workflows/closePrep.v1.tools.ts");
-const closePrompt = await import("../workflows/closePrep.v1.prompt.ts");
 
 /** Build a pack view the way the DB's own reply would produce one, through the SHIPPING reader —
  *  never by hand-constructing the Maps, which would let readPackView rot untested. Throws on a
  *  parse failure so a fixture that stopped being valid cannot quietly become an empty pack. */
-const viewOf = (lines, candidates) => {
-  const parsed = pack.readPackView({ digest: "d".repeat(64), lines, candidates });
+const viewOf = (lines, candidates, epoch = 0) => {
+  const parsed = pack.readPackView({ digest: "d".repeat(64), lines, candidates }, epoch);
   assert.equal(parsed.ok, true, `fixture pack must parse — ${parsed.reason ?? ""} ${parsed.detail ?? ""}`);
   return parsed.view;
 };
@@ -146,78 +152,6 @@ test("G1B-ALLOC-3 裁-44 FOLD-4 — nothing outside the pack THIS run read can b
   assert.equal(pack.deriveMatchAllocation(zeroNet, [l], [e1]).reason, "lines_net_to_zero");
 });
 
-test("G1B-PROSE-1 裁-44 FOLD-7 — every prose field the model writes is CAPPED, and a fiscal-year label is a name rather than an essay", async () => {
-  // THE FINDING: model prose reaches durable columns with only a non-blank guard. The receipt
-  // rationale on both lanes IS capped by the database (0121:4375, 0138:362, both `length(...)
-  // <= 4000`), but clara.bank_agent_proposals.rationale (0121:4425), the proposal payload's reason
-  // and identifier value, clara.close_proposals.narrative and .drafted[].text, and
-  // clara.close_runs.end_reason all take whatever they are given. clara.fiscal_years.label is the
-  // sharpest of them (0056:236, display-only, non-blank) because every human surface renders it
-  // inline. These are not new numeric-book paths, but they permit persistent injected content —
-  // and for an abandonment, the prose ACCOMPANIES a state-changing act.
-  //
-  // The cap is the client-side half this PR can ship without a migration; the DB-side CHECKs and a
-  // structured abandonment-code roster are booked as G1 PR-2 / the 裁-44 DB pass.
-  const uuid = () => randomUUID();
-  const bank = tools.buildBankAgentTools(
-    { taskId: uuid(), firmId: uuid(), clientId: uuid(), bankAccountId: uuid(), dueReason: null },
-    "gpt-5.6-terra",
-    pack.newBankRunRecord("cell"),
-  );
-  const close = closeTools.buildClosePrepTools({ taskId: uuid(), firmId: uuid(), clientId: uuid() }, "gpt-5.6-terra", closeTools.newCloseRunRecord());
-
-  const PROSE = tools.BANK_PROSE_MAX;
-  assert.equal(PROSE, closePrompt.CLOSE_PROSE_MAX, "both lanes carry the SAME house limit — one number, stated once per closure");
-  assert.equal(PROSE, 4000, "and it is the database's own number where one exists (0121:4375 / 0138:362)");
-  const LABEL = closePrompt.CLOSE_FY_LABEL_MAX;
-
-  const drafted = [{ check_key: "unposted_entries", item_key: "je-1", text: "attested" }];
-  const cases = [
-    [bank.get_bank_pack, { rationale: "r" }, "rationale", PROSE],
-    [bank.match_bank_line, { lines: [uuid()], entries: [uuid()], rationale: "r" }, "rationale", PROSE],
-    [bank.propose_line_exception, { line_id: uuid(), kind: "bank_error", reason: "r", rationale: "r" }, "reason", PROSE],
-    [bank.propose_line_exception, { line_id: uuid(), kind: "bank_error", reason: "r", rationale: "r" }, "rationale", PROSE],
-    [bank.propose_identifier_promotion, { counterparty_id: uuid(), identifier_kind: "tin", identifier_value: "v", rationale: "r" }, "identifier_value", PROSE],
-    // 裁-44 R2 / FOLD-11 — this rationale's cap is the house cap MINUS the budget reserved for
-    // the derived-sightings note the tool appends, so the composed string can never exceed the
-    // database's own 4000. Asserted at its real value rather than the shared one.
-    [bank.propose_identifier_promotion, { counterparty_id: uuid(), identifier_kind: "tin", identifier_value: "v", rationale: "r" }, "rationale", PROSE - 64],
-    [close.list_fiscal_years, { rationale: "r" }, "rationale", PROSE],
-    [close.get_close_plan, { fiscal_year_id: uuid(), rationale: "r" }, "rationale", PROSE],
-    [close.begin_close, { fiscal_year_id: uuid(), rationale: "r" }, "rationale", PROSE],
-    [close.abandon_close, { close_run_id: uuid(), reason: "r", rationale: "r" }, "reason", PROSE],
-    [close.propose_close, { close_run_id: uuid(), drafted, narrative: "n", rationale: "r" }, "narrative", PROSE],
-    [close.open_fiscal_year, { label: "FY2026", starts_on: "2026-01-01", rationale: "r" }, "label", LABEL],
-    [close.open_fiscal_year, { label: "FY2026", starts_on: "2026-01-01", rationale: "r" }, "rationale", PROSE],
-    [close.run_depreciation_catchup, { through: "2026-01-31", rationale: "r" }, "rationale", PROSE],
-    [close.mint_month_snapshot, { month_start: "2026-01-01", rationale: "r" }, "rationale", PROSE],
-  ];
-
-  for (const [tool, base, field, max] of cases) {
-    // AT the cap parses; ONE over does not. Both directions, because a cell that only proved the
-    // refusal would pass just as happily against a schema that refused everything.
-    const at = tool.inputSchema.safeParse({ ...base, [field]: "x".repeat(max) });
-    assert.equal(at.success, true, `${field} at ${max} must parse — ${JSON.stringify(at.error?.issues)?.slice(0, 200)}`);
-    const over = tool.inputSchema.safeParse({ ...base, [field]: "x".repeat(max + 1) });
-    assert.equal(over.success, false, `${field} at ${max + 1} must be REFUSED — it reaches a durable column with no length guard of its own`);
-  }
-
-  // THE FY LABEL IS THE ONE WORTH ASSERTING SEPARATELY: it is capped an order of magnitude tighter
-  // than prose, because it is a NAME. A 4,000-character label would parse under the house limit.
-  assert.equal(LABEL, 120);
-  assert.equal(close.open_fiscal_year.inputSchema.safeParse({ label: "x".repeat(PROSE), starts_on: "2026-01-01", rationale: "r" }).success, false,
-    "a prose-length label is refused — the label cap is not merely the house cap by another name");
-
-  // The drafted[] elements carry their own caps: the two KEYS are identifiers echoed back from
-  // get_close_readiness, the attestation TEXT is prose.
-  const longKey = [{ check_key: "x".repeat(LABEL + 1), item_key: "je-1", text: "t" }];
-  const longText = [{ check_key: "k", item_key: "je-1", text: "x".repeat(PROSE + 1) }];
-  const proposeBase = { close_run_id: uuid(), narrative: "n", rationale: "r" };
-  assert.equal(close.propose_close.inputSchema.safeParse({ ...proposeBase, drafted: longKey }).success, false, "an over-long check_key is refused");
-  assert.equal(close.propose_close.inputSchema.safeParse({ ...proposeBase, drafted: longText }).success, false, "and so is an over-long attestation");
-  assert.equal(close.propose_close.inputSchema.safeParse({ ...proposeBase, drafted }).success, true, "the positive control: a real attestation still parses");
-});
-
 test("G1B-ALLOC-4 裁-44 R2 / FOLD-12 — a pack this parser cannot fully account for FAILS; it never becomes an authoritative empty one", async () => {
   // THE DEFECT THIS CELL USED TO BLESS. The earlier reader accepted `{digest}` as a pack with
   // empty arrays and turned a missing or malformed cents value into ZERO. Both are absence as
@@ -227,7 +161,7 @@ test("G1B-ALLOC-4 裁-44 R2 / FOLD-12 — a pack this parser cannot fully accoun
   const D = "a".repeat(64);
   const id = randomUUID();
   const bad = (reply, reason, why = "") => {
-    const r = pack.readPackView(reply);
+    const r = pack.readPackView(reply, 0);
     assert.equal(r.ok, false, `must FAIL: ${reason} ${why} — got ${JSON.stringify(r).slice(0, 200)}`);
     assert.equal(r.reason, reason, `and by NAME, so the failure is diagnosable`);
     return r;
@@ -272,14 +206,14 @@ test("G1B-ALLOC-4 裁-44 R2 / FOLD-12 — a pack this parser cannot fully accoun
 
   // THE POSITIVE CONTROL, and it is the distinction the whole ruling turns on: an EXPLICITLY
   // EMPTY pack is a perfectly good pack — an account with nothing unmatched — and must parse.
-  const empty = pack.readPackView({ digest: D, lines: [], candidates: [] });
+  const empty = pack.readPackView({ digest: D, lines: [], candidates: [] }, 0);
   assert.equal(empty.ok, true, "explicit empty arrays are a REAL pack, not a malformed one");
   assert.equal(empty.view.lineCents.size, 0);
   assert.equal(empty.view.entryCaps.size, 0);
 
   // A NULL description is a real state of the books (bank_statement_lines.description is NULLABLE,
   // 0038:546) and becomes empty text rather than a failure.
-  const nulled = pack.readPackView({ digest: D, lines: [{ line_id: id, amount_cents: 5, description: null }], candidates: [] });
+  const nulled = pack.readPackView({ digest: D, lines: [{ line_id: id, amount_cents: 5, description: null }], candidates: [] }, 0);
   assert.equal(nulled.ok, true, "a line with no printed narrative is lawful");
   assert.equal(nulled.view.lineText.get(id), "", "and carries no text to match an identifier against");
 
@@ -325,10 +259,10 @@ test("G1B-ALLOC-5 裁-44 R2 / FOLD-10 — a cents value this process cannot carr
   // hole in it is not a smaller pack.
   const D = "b".repeat(64);
   const id = randomUUID();
-  const r = pack.readPackView({ digest: D, lines: [{ line_id: id, amount_cents: CAP_BIG, description: "x" }], candidates: [] });
+  const r = pack.readPackView({ digest: D, lines: [{ line_id: id, amount_cents: CAP_BIG, description: "x" }], candidates: [] }, 0);
   assert.equal(r.ok, false);
   assert.equal(r.reason, "line_cents_unrepresentable");
-  const r2 = pack.readPackView({ digest: D, lines: [], candidates: [{ entry_id: id, debit_remaining_cents: CAP_BIG, credit_remaining_cents: 0 }] });
+  const r2 = pack.readPackView({ digest: D, lines: [], candidates: [{ entry_id: id, debit_remaining_cents: CAP_BIG, credit_remaining_cents: 0 }] }, 0);
   assert.equal(r2.ok, false);
   assert.equal(r2.reason, "capacity_unrepresentable");
 });
@@ -367,32 +301,6 @@ test("G1B-ALLOC-6 裁-44 R2 / FOLD-11 — the promotion count is COUNTED from th
   const nulled = viewOf([{ line_id: a, amount_cents: 100, description: null }], []);
   assert.equal(pack.countIdentifierSightings(nulled, "anything"), 0);
   assert.ok(c, "the third fixture line is used by the token cases above");
-});
-
-test("G1B-ALLOC-7 裁-44 R3 / FOLD-15 — an identifier too short to be specific is refused BEFORE it is counted", async () => {
-  // The floor is not a formatting nicety: it is what stops the model choosing a needle that
-  // matches everything, which would put the derived count back in its hands.
-  for (const [kind, value] of [["tin", "12345"], ["ssm", "abc"], ["bank_account", "8899041"], ["bank_account", "1"]]) {
-    assert.ok(pack.identifierTooShort(kind, value), `${kind} "${value}" must be refused`);
-  }
-  // Separators do not count toward the floor — the length is measured AFTER canonicalisation, so
-  // "1-2-3-4-5-6" is six characters, not eleven.
-  assert.ok(pack.identifierTooShort("tin", "1-2-3-4-5"), "five digits dressed up with separators is still five");
-  assert.equal(pack.identifierTooShort("tin", "1-2-3-4-5-6"), null, "six is six however it is printed");
-
-  // bank_account carries the higher, DIGIT-AWARE bar: prose can clear a bare character count, and
-  // "g1 bank line" is exactly the value G1B-BANK-E2 used to admit as an account number.
-  assert.ok(pack.identifierTooShort("bank_account", "g1 bank line"), "prose is not an account number");
-  assert.ok(pack.identifierTooShort("bank_account", "abcdefghij"), "ten letters are not eight digits");
-  assert.equal(pack.identifierTooShort("bank_account", "8899041722"), null, "a real ten-digit account passes");
-  assert.equal(pack.identifierTooShort("bank_account", "mbb-88990417"), null, "and a bank prefix in front of eight digits is fine");
-
-  // The positive controls, so the four refusals above are the floor speaking and not a predicate
-  // that refuses everything.
-  assert.equal(pack.identifierTooShort("tin", "C12345678"), null);
-  assert.equal(pack.identifierTooShort("ssm", "202301012345"), null);
-  assert.equal(pack.canonicalIdentifier("8899-041722"), "8899041722", "canonicalisation is [a-z0-9] after lowercasing");
-  assert.equal(pack.canonicalIdentifier("MBB/514 202"), "mbb514202");
 });
 
 test("G1B-ALLOC-8 裁-44 R3 / FOLD-18 — an aggregate this process cannot carry is refused, and a write reply hands the model no cents", async () => {
@@ -438,4 +346,58 @@ test("G1B-ALLOC-8 裁-44 R3 / FOLD-18 — an aggregate this process cannot carry
   const refusal = { status: "refused", rung_vector: { tie_nonzero: "fail" } };
   assert.deepEqual(tools.projectReply("match", refusal), refusal);
   assert.deepEqual(tools.projectReply("match", null), null);
+
+  // 裁-44 R4 / FOLD-22(b) — AND NO *LOCAL* REFUSAL CARRIES A CENTS VALUE EITHER. The PR claimed
+  // "rung names, not amounts" while `entries_do_not_tie` interpolated BOTH totals into the text
+  // handed back to the model. Every reason this function can produce is swept, so the claim is
+  // machine-checked rather than asserted in prose.
+  const l1b = randomUUID();
+  const l2b = randomUUID();
+  const e1b = randomUUID();
+  const e2b = randomUUID();
+  const cases = [
+    [viewOf([line(l1b, 10000)], [cand(e1b, 25000, 0), cand(e2b, 25000, 0)]), [l1b], [e1b, e2b]],
+    [viewOf([line(l1b, 10000)], [cand(e1b, 0, 5000)]), [l1b], [e1b]],
+    [viewOf([line(l1b, 0)], [cand(e1b, 5000, 0)]), [l1b], [e1b]],
+    [viewOf([line(l1b, 100)], [cand(e1b, 100, 0)]), [randomUUID()], [e1b]],
+    [viewOf([line(l1b, 100)], [cand(e1b, 100, 0)]), [l1b], [randomUUID()]],
+    [viewOf([line(l1b, HALF), line(l2b, HALF)], [cand(e1b, HALF, 0)]), [l1b, l2b], [e1b]],
+  ];
+  // IDs ARE STRIPPED BEFORE THE CHECK, and that distinction is the point rather than a dodge: an
+  // entry id is WHICH ROW, an amount is HOW MUCH. The first is what makes a refusal actionable and
+  // carries no arithmetic; the second is the books' own figure being read back to the model. A
+  // uuid contains digit runs, so a naive digit sweep would forbid the ids too.
+  const stripIds = (s) => s.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<id>");
+  const seen = new Set();
+  for (const [view, ls, es] of cases) {
+    const out = pack.deriveMatchAllocation(view, ls, es);
+    assert.equal(out.ok, false, "each of these must refuse, or the sweep below is vacuous");
+    seen.add(out.reason);
+    assert.doesNotMatch(
+      stripIds(out.detail),
+      /\d/,
+      `refusal "${out.reason}" must carry no amount — got: ${out.detail}`,
+    );
+  }
+  // The sweep is only worth anything if it actually reached the reasons it claims to cover.
+  assert.ok(seen.has("entries_do_not_tie"), "the reason FOLD-22(b) fixed is in the sweep");
+  assert.ok(seen.has("aggregate_unrepresentable") && seen.has("entry_has_no_capacity"), "and so are the two the ruling left alone");
+  assert.ok(seen.size >= 5, `the sweep covered ${seen.size} distinct refusal reasons`);
+});
+
+test("G1B-ALLOC-8b 裁-44 R4 (LOW) — the CAPACITY aggregation is guarded too, not just the line total", async () => {
+  // ALLOC-8 drove the LINE sum. There are two BigInt aggregations in this function and only one
+  // was under test; a guard nothing exercises is a guard nobody will notice losing.
+  const l = randomUUID();
+  const e1 = randomUUID();
+  const e2 = randomUUID();
+  const HUGE = Number("9007199254740000"); // safe alone; two of them are not
+  // The LINE total is small, so the line-side guard cannot be what fires — it has to be the
+  // capacity sum, which is only reached on the MULTI-entry path.
+  const v = viewOf([line(l, 10)], [cand(e1, HUGE, 0), cand(e2, HUGE, 0)]);
+  const out = pack.deriveMatchAllocation(v, [l], [e1, e2]);
+  assert.equal(out.ok, false);
+  assert.equal(out.reason, "aggregate_unrepresentable", "the CAPACITY sum's own guard, reached with a tiny line total");
+  assert.match(out.detail, /capacity/, "and it names which aggregate it was");
+  assert.doesNotMatch(out.detail, /\b\d{3,}\b/, "without quoting the number back at the model");
 });

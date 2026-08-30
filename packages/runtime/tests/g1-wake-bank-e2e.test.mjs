@@ -72,6 +72,7 @@ test("G1B-BANK-E2 a REAL bank_agent wake credential calling the REAL wrapper sta
 
     // --- the first pack read ------------------------------------------------------------------
     const pack1 = await built.get_bank_pack.execute({ rationale: "the nightly bank pass is reading this account's live pack" });
+    tools.beginModelStep(rec); // FOLD-20(c): the model has now SEEN this pack
     assert.equal(pack1.error, undefined, `the pack read must not refuse — got ${JSON.stringify(pack1)?.slice(0, 400)}`);
     assert.match(pack1.digest, /^[0-9a-f]{64}$/, "the digest the DB actually computed and returned, never one this test computes itself");
     // THE POSITIVE CONTROL (review law 2): without this, a fixture the verb literally cannot SEE
@@ -144,6 +145,7 @@ test("G1B-BANK-E2 a REAL bank_agent wake credential calling the REAL wrapper sta
     // because the digest has genuinely moved (line 1 dropped out of the unmatched set, entry 1
     // dropped out of the candidates once its capacity hit zero).
     const pack2 = await built.get_bank_pack.execute({ rationale: "confirming the pack after acting — the digest must have moved" });
+    tools.beginModelStep(rec); // FOLD-20(c): the model has now SEEN this pack
     assert.equal(pack2.error, undefined, `the SECOND pack read must not refuse — got ${JSON.stringify(pack2)?.slice(0, 400)}. A refusal here specifically is the op-key-constancy regression.`);
     assert.match(pack2.digest, /^[0-9a-f]{64}$/);
     assert.notEqual(pack2.digest, pack1.digest, "the pack genuinely changed (line 1 matched, entry 1's capacity exhausted) — a stale digest here would mean this read never actually re-ran the query");

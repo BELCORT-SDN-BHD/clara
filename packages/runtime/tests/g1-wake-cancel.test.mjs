@@ -44,6 +44,7 @@ test("G1B-CANCEL-1 裁-44 FOLD-2 (bank) — a cancel between an admitted read an
     // THE READ IS ADMITTED FIRST, which is the whole shape of the defect: the claim CAS proved the
     // task was running, the pass got going, and only THEN did the cancel land.
     const pack = await built.get_bank_pack.execute({ rationale: "the nightly pass begins" });
+    bankTools.beginModelStep(rec); // FOLD-20(c): the model has now SEEN this pack
     assert.equal(pack.error, undefined, `the read must be admitted, or this cell proves nothing — got ${JSON.stringify(pack)?.slice(0, 300)}`);
     const credsBefore = await rig.rootQuery("select count(*)::int as n from clara.wake_credentials where firm_id=$1", [w.firm]);
     const receiptsBefore = await rig.rootQuery("select count(*)::int as n from clara.bank_agent_receipts where client_id=$1", [w.client]);

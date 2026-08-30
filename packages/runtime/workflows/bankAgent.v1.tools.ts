@@ -33,11 +33,8 @@ import { PACK_TOOL, MATCH_TOOL, EXCEPTION_TOOL, PROMOTION_TOOL, bankModelIdentit
 import { bankScoped, bankOpKey, pools, readWakeTaskStatus, type BankTaskContext, type PgExec } from "./bankAgent.v1.infra.js";
 import {
   BANK_PROSE_MAX,
-  countIdentifierSightings,
   countIfAdmitted,
   dbRefusalReason,
-  deriveMatchAllocation,
-  identifierTooShort,
   isAdmittedBankReply,
   isDbVerdict,
   readPackView,
@@ -45,26 +42,29 @@ import {
   type BankRunRecord,
   type BankVerb,
 } from "./bankAgent.v1.pack.js";
+import { countIdentifierSightings, identifierTooShort } from "./bankAgent.v1.identity.js";
+import { deriveMatchAllocation } from "./bankAgent.v1.alloc.js";
 
 export {
   BANK_PROSE_MAX,
-  canonicalIdentifier,
-  countIdentifierSightings,
+  beginModelStep,
+  classifyBankReply,
   countIfAdmitted,
   dbRefusalReason,
-  deriveMatchAllocation,
   exactCents,
-  identifierTooShort,
+  hadToolActivity,
   isAdmittedBankReply,
   isSafeBig,
   newBankRunRecord,
   readPackView,
-  type BankAllocation,
   type BankPackParse,
   type BankPackView,
+  type BankReplyVerdict,
   type BankRunRecord,
   type BankVerb,
 } from "./bankAgent.v1.pack.js";
+export { canonicalIdentifier, countIdentifierSightings, identifierTooShort } from "./bankAgent.v1.identity.js";
+export { deriveMatchAllocation, type BankAllocation } from "./bankAgent.v1.alloc.js";
 
 /** How much of the promotion rationale's cap is reserved for the derived-sightings note the tool
  *  appends (裁-44 R2 / FOLD-11). Budgeted rather than truncated: a slice could cut the note in
@@ -100,6 +100,31 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
   const model = bankModelIdentity(modelId);
   const prose = (describe: string) => z.string().min(1).max(BANK_PROSE_MAX).describe(describe);
 
+  /**
+   * 裁-44 R4 / FOLD-20(b) — ONE TOOL AT A TIME, ENFORCED HERE, whatever the provider does.
+   *
+   * The provider is asked not to issue parallel tool calls (FOLD-20(a), in the impl), but a
+   * provider setting is a REQUEST, not a wall: it can be defaulted differently, ignored by a
+   * future model, or lost in a provider swap. Everything these tools touch is one mutable record
+   * — the armed pack, the digest, every counter — so two concurrent executions interleave on
+   * shared state. The concrete schedule the review found: a write reads the armed pack, awaits the
+   * task-status round trip; sibling read A clears and re-arms; sibling read B parses malformed and
+   * counts a fault WITHOUT clearing A's pack; the write resumes and derives from A's pack.
+   *
+   * A PROMISE CHAIN IS THE WHOLE MECHANISM. Each execute links onto the previous one's settlement
+   * (both branches — a rejection must not break the chain), so the bodies run strictly in call
+   * order and the record is only ever touched by one of them.
+   */
+  let chain: Promise<unknown> = Promise.resolve();
+  const serial = <T>(body: () => Promise<T>): Promise<T> => {
+    const next = chain.then(body, body);
+    chain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
+
   /** Count a LOCAL refusal — an act the model attempted that never reached the database because
    *  this closure refused it first. It is a refusal, never an infra fault: the fault is the
    *  model's proposal, and 裁-44 / FOLD-3 makes a night of these settle failed rather than green. */
@@ -121,6 +146,15 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
     if (rec.cancelledAs !== null) return stopped();
     if (rec.pack === null) {
       return localRefusal(`call ${PACK_TOOL} first — every act must be grounded in a pack read from this run.`);
+    }
+    // 裁-44 R4 / FOLD-20(c) — THE EVIDENCE EPOCH. A pack read in THIS model step was returned to
+    // the provider after the model had already chosen this write's arguments, so grounding a write
+    // in it means grounding it in evidence the model never saw. Serialisation fixes the ORDER of
+    // two siblings; only the epoch fixes which of them may be EVIDENCE for the other.
+    if (rec.pack.epoch >= rec.step) {
+      return localRefusal(
+        `refused (pack_same_step): the pack you would act on was read in this same turn, so you have not seen it yet. Read the pack, look at what comes back, then act on it.`,
+      );
     }
     // 裁-44 / FOLD-2(a) — RE-ASK THE BOOKS BEFORE MINTING ANYTHING. The claim CAS proved the task
     // was running when the run started; a cancel landing mid-pass leaves it 'cancel_requested'
@@ -156,6 +190,17 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
   /** A thrown write, counted and mapped. 裁-44 / FOLD-9(b): CLR10 op_key_identity_mismatch is the
    *  one CLR the model can actually act on, so it gets its own sentence instead of the oracle-safe
    *  one — see the MATCH_TOOL body for what produces it. */
+  /** Count a reply, then hand the model only what it may see (裁-44 R4 / FOLD-22a + R3 / FOLD-18).
+   *  A MALFORMED purported success never reaches the model as a success: it was our fault, so the
+   *  model gets the same redacted sentence any infrastructure failure earns. */
+  const settleReply = (verb: BankVerb, reply: unknown, subjectId?: string): unknown => {
+    const verdict = countIfAdmitted(rec, verb, reply, subjectId);
+    if (verdict === "malformed") {
+      return { error: "the act did not go through: the database's reply could not be verified as this act's own receipt. Do not retry it." };
+    }
+    return projectReply(verb, reply);
+  };
+
   const writeRefusal = (e: unknown): { error: string } => {
     rec.refusals += 1;
     if (isDbVerdict(e) && dbRefusalReason(e) === "op_key_identity_mismatch") {
@@ -177,7 +222,8 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
       inputSchema: z.object({
         rationale: prose("Why you are reading — one plain sentence."),
       }),
-      execute: async ({ rationale }: { rationale: string }) => {
+      execute: ({ rationale }: { rationale: string }) => serial(async () => {
+        rec.toolCalls += 1;
         try {
           // A READ CARRIES A COUNTER (S8), AND THE COUNTER CARRIES THE STEP ATTEMPT (FOLD-8).
           // Re-reading the pack after acting is the normal shape the DB explicitly designs for; a
@@ -210,7 +256,8 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
           // MODEL'S, and it is not an empty pack either. The record stays unarmed (so every write
           // refuses) AND the infra-fault count moves, which is what carries the run to a `failed`
           // settle with `internal` instead of the `nothing_due` a corrupt read used to earn.
-          const parsed = readPackView(pack);
+          // The epoch is stamped HERE, from the step this read is returning in (FOLD-20(c)).
+          const parsed = readPackView(pack, rec.step);
           if (!parsed.ok) {
             rec.infraFaults += 1;
             console.warn(`[bankAgent_v1] pack reply unusable (${parsed.reason}): ${parsed.detail}`);
@@ -222,7 +269,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         } catch (e) {
           return refusal(rec, e);
         }
-      },
+      }),
     }),
 
     [MATCH_TOOL]: tool({
@@ -243,7 +290,8 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
           .describe("Approved journal entry ids from the pack's `candidates`. Amounts are the database's, not yours."),
         rationale: prose("What ties these together, in plain words a bookkeeper can check."),
       }),
-      execute: async ({ lines, entries, rationale }: { lines: string[]; entries: string[]; rationale: string }) => {
+      execute: ({ lines, entries, rationale }: { lines: string[]; entries: string[]; rationale: string }) => serial(async () => {
+        rec.toolCalls += 1;
         const blocked = await guardWrite(lines);
         if (blocked) return blocked;
         const pack = rec.pack;
@@ -284,12 +332,12 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
                 rec.digest,
                 opKey,
               ])
-              .then((r) => projectReply("match", countIfAdmitted(rec, "match", r.rows[0]?.r ?? null))),
+              .then((r) => settleReply("match", r.rows[0]?.r ?? null)),
           );
         } catch (e) {
           return writeRefusal(e);
         }
-      },
+      }),
     }),
 
     [EXCEPTION_TOOL]: tool({
@@ -307,7 +355,8 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         reason: prose("What is wrong with this line, concretely."),
         rationale: prose("Why an exception rather than a match — name what you ruled out."),
       }),
-      execute: async ({ line_id, kind, reason, rationale }: { line_id: string; kind: string; reason: string; rationale: string }) => {
+      execute: ({ line_id, kind, reason, rationale }: { line_id: string; kind: string; reason: string; rationale: string }) => serial(async () => {
+        rec.toolCalls += 1;
         const blocked = await guardWrite([line_id]);
         if (blocked) return blocked;
         try {
@@ -327,12 +376,12 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
                 rec.digest,
                 opKey,
               ])
-              .then((r) => projectReply("exception", countIfAdmitted(rec, "exception", r.rows[0]?.r ?? null))),
+              .then((r) => settleReply("exception", r.rows[0]?.r ?? null, line_id)),
           );
         } catch (e) {
           return writeRefusal(e);
         }
-      },
+      }),
     }),
 
     [PROMOTION_TOOL]: tool({
@@ -362,12 +411,13 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
           .max(BANK_PROSE_MAX - SIGHTINGS_NOTE_BUDGET)
           .describe("Why this identifier belongs to this counterparty — name what you saw."),
       }),
-      execute: async (a: {
+      execute: (a: {
         counterparty_id: string;
         identifier_kind: string;
         identifier_value: string;
         rationale: string;
-      }) => {
+      }) => serial(async () => {
+        rec.toolCalls += 1;
         // NO LINE TO BIND (裁-44 / FOLD-4): a promotion names a counterparty, not a statement line,
         // so the pack's line set has nothing to say about it. The gate still runs — it is what
         // enforces the pack-read precondition and the cancellation re-read — with an empty list.
@@ -412,12 +462,12 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
                 rec.digest,
                 opKey,
               ])
-              .then((r) => projectReply("promotion", countIfAdmitted(rec, "promotion", r.rows[0]?.r ?? null))),
+              .then((r) => settleReply("promotion", r.rows[0]?.r ?? null, a.counterparty_id)),
           );
         } catch (e) {
           return writeRefusal(e);
         }
-      },
+      }),
     }),
   };
 }
