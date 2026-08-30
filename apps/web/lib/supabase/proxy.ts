@@ -13,13 +13,30 @@ import {
  * convention, verified via context7 2026-08-27) so the auth logic is
  * testable independent of the file Next.js requires at the app root.
  *
- * Gate: EVERY route is protected EXCEPT /login and /invite/:token (the
- * invite-accept flow, which must work before a session exists) and the
- * framework/static paths the exported `config.matcher` below already
- * excludes. There is no public marketing root in this app — "/" is the
- * firm-altitude home and is gated like everything else
- * (docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3; §0.4 of the
- * handoff — Supabase Auth cookie sessions, invite-only).
+ * Gate: EVERY route is protected EXCEPT /login, /invite/:token (the
+ * invite-accept flow, which must work before a session exists) and /signup
+ * (the tier-3 self-serve registration face, which by definition runs before
+ * an account exists at all), plus the framework/static paths the exported
+ * `config.matcher` below already excludes. There is no public marketing root
+ * in this app — "/" is the firm-altitude home and is gated like everything
+ * else (docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3; §0.4 of the
+ * handoff — Supabase Auth cookie sessions).
+ *
+ * /signup joined the allowlist in P4-3 under **裁-57** (2026-08-30 evening):
+ * beta is a PAID launch and signup is tier-3 self-serve. The handoff's §0.4
+ * "invite-only" reading is superseded by that ruling — "invite" now means an
+ * RBAC membership invite INTO an existing firm, not the only way in.
+ *
+ * **/pending is deliberately NOT here.** The holding route requires a session;
+ * it just does not require a FIRM (design §4 E). Adding it would let an
+ * unauthenticated stranger load a page whose entire job is to report the
+ * caller's own registration status.
+ *
+ * THIS LIST IS CROSS-CHECKED BOTH WAYS against `lib/require-firm-scope.ts`'s
+ * `SCOPE_UNSCOPED_SURFACES` (the entries marked `public: true`) by
+ * `tests/firm-scope-surfaces.test.ts`, so the app's auth gate and the scope
+ * spine's idea of "public" cannot drift apart. Adding a prefix here without
+ * registering its page there reds that suite, and vice versa.
  *
  * RESPONSE CONSTRUCTION (cross-model security review 2026-08-27, findings 1
  * and 12). Cookie writes and the headers that protect them are QUEUED here
@@ -39,9 +56,20 @@ import {
  *    away and the browser kept a stale, half-dead session.
  */
 
-const PUBLIC_PATH_PREFIXES = ["/login", "/invite"];
+const PUBLIC_PATH_PREFIXES = ["/login", "/invite", "/signup"];
 
-function isPublicPath(pathname: string): boolean {
+/**
+ * EXPORTED so `tests/proxy-matcher.test.ts` drives THIS function rather than a
+ * re-typed copy of the list (review law 3 — a test that re-declares the
+ * prefixes is asserting its own spelling, not this gate's behaviour). It is a
+ * pure predicate over a pathname: exporting it widens no surface.
+ *
+ * Prefix semantics, asserted both ways by that suite: a prefix matches the path
+ * EXACTLY or as a `/`-delimited ancestor. `/signup` is public; `/signup/x` is
+ * public; **`/signupsomething` is NOT** — the `${prefix}/` guard is what stops a
+ * mere string-prefix collision from opening a route nobody allowlisted.
+ */
+export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
