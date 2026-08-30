@@ -272,16 +272,23 @@ test("putCanonical reads Supabase's WRAPPED status: a 400/409 duplicate is 'exis
     { created: false, existed: true },
     "a wrapped 409 is a benign re-upload, not a fatal storage_error");
 
-  // 2. A REAL failure still throws — AND carries the body, because '(400)' alone cannot
-  //    distinguish a duplicate from a permission denial, and discarding it cost a day.
+  // 2. A REAL failure still throws. Its wrapped status stays diagnostic, but vendor body text
+  //    is discarded because it can echo a credential or signed URL into the intake log.
   t.mock.restoreAll();
+  const rawCredentialMaterial = "synthetic-storage-credential";
+  const rawUrlQuery = "https://storage.invalid/object?signature=synthetic-query-material";
   t.mock.method(globalThis, "fetch", async () => new Response(
-    JSON.stringify({ statusCode: "403", error: "Unauthorized", message: "permission denied for table objects" }),
+    JSON.stringify({
+      statusCode: "403",
+      error: "Unauthorized",
+      message: `permission denied for ${rawCredentialMaterial} at ${rawUrlQuery}`,
+    }),
     { status: 400 }));
   await assert.rejects(() => putCanonical(file, key, "application/pdf"), (err) => {
     assert.equal(err.code, "storage_error");
-    assert.match(err.message, /permission denied for table objects/,
-      "the failure must carry the BODY, not just the HTTP status");
+    assert.equal(err.message, "Storage upload failed (403)", "the wrapped status remains diagnostic");
+    assert.equal(err.message.includes(rawCredentialMaterial), false, "the body must not leak credentials");
+    assert.equal(err.message.includes(rawUrlQuery), false, "the body must not leak signed URLs");
     return true;
   });
 

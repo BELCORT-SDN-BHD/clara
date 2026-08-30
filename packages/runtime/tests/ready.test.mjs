@@ -72,6 +72,7 @@ test("ready: skeleton mode (world off) is READY on DB reachability alone", { ski
     assert.equal(r.ready, true, "ready in skeleton mode");
     assert.equal(r.checks.db.ok, true);
     assert.equal(r.checks.world.enabled, false, "world reported informational");
+    assert.deepEqual(r.failures, []);
   } finally {
     if (prev !== undefined) process.env.CLARA_START_WORLD = prev;
   }
@@ -123,15 +124,25 @@ test("ready: storage write hard-fails on the second consecutive failure and one 
       pending: false,
       consecutive_failures: 2,
     });
-    assert.ok(
-      second.warnings.some((warning) => warning.includes("storage write probe failed (2 consecutive)")),
-      `expected the count-bearing storage warning, got ${JSON.stringify(second.warnings)}`,
+    assert.deepEqual(second.failures, [
+      {
+        check: "storage_write",
+        reason: "storage_error",
+        pending: false,
+        consecutive_failures: 2,
+      },
+    ]);
+    assert.equal(
+      second.warnings.some((warning) => warning.includes("storage write probe failed")),
+      false,
+      "hard failures belong in failures[], never warnings[]",
     );
 
     delete globalThis.__claraStorageForTest;
     await _refreshStorageProbeForTest();
     const recovered = await checkReadiness();
     assert.equal(recovered.ready, true, "one successful write probe clears the hard failure immediately");
+    assert.deepEqual(recovered.failures, []);
     assert.deepEqual(recovered.checks.storage_write, {
       ok: true,
       reason: null,
@@ -142,6 +153,51 @@ test("ready: storage write hard-fails on the second consecutive failure and one 
     delete globalThis.__claraStorageForTest;
     _resetStorageProbeCacheForTest();
     if (prev !== undefined) process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready HTTP: a cold boot returns 503 until the eager storage probe succeeds", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  delete process.env.CLARA_START_WORLD;
+  _resetStorageProbeCacheForTest();
+  let server;
+  try {
+    const indexSource = await readFile(fileURLToPath(new URL("../src/index.ts", import.meta.url)), "utf8");
+    assert.match(indexSource, /app\.get\("\/ready", readinessHandler\);/, "src/index.ts must mount the exact tested handler");
+    assert.match(indexSource, /startStorageProbe\(\);/, "src/index.ts must start the eager probe at boot");
+    const app = express();
+    app.get("/ready", readinessHandler);
+    server = await new Promise((resolve) => {
+      const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+    });
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const response = await fetch(`http://127.0.0.1:${address.port}/ready`);
+    const body = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(body.ready, false);
+    assert.deepEqual(body.checks.storage_write, {
+      ok: true,
+      reason: null,
+      pending: true,
+      consecutive_failures: 0,
+    });
+    assert.deepEqual(body.failures, [
+      {
+        check: "storage_write",
+        reason: "storage_probe_pending",
+        pending: true,
+        consecutive_failures: 0,
+      },
+    ]);
+  } finally {
+    if (server) {
+      server.closeAllConnections?.();
+      await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    }
+    _resetStorageProbeCacheForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
   }
 });
 
@@ -184,6 +240,15 @@ test("ready HTTP: a storage hard failure returns 503 with only the classified pu
       pending: true,
       consecutive_failures: 2,
     });
+    assert.deepEqual(body.failures, [
+      {
+        check: "storage_write",
+        reason: "storage_error",
+        pending: true,
+        consecutive_failures: 2,
+      },
+    ]);
+    assert.equal(body.warnings.some((warning) => warning.includes("storage write probe failed")), false);
     const publicBody = JSON.stringify(body.checks.storage_write);
     assert.equal(publicBody.includes(rawCredentialMaterial), false);
     assert.equal(publicBody.includes(rawUrlQuery), false);
@@ -208,6 +273,7 @@ test("ready: world ON with a STALE world beat FAILS (world dead)", { skip }, asy
     const r = await checkReadiness();
     assert.equal(r.ready, false, "not ready when the world beat is stale");
     assert.equal(r.checks.world.ok, false, "world check failed");
+    assert.deepEqual(r.failures, [{ check: "world", reason: "world_heartbeat_stale" }]);
   } finally {
     if (prev === undefined) delete process.env.CLARA_START_WORLD;
     else process.env.CLARA_START_WORLD = prev;
@@ -272,6 +338,7 @@ test("ready: world ON with a STALE control beat FAILS (control listener dead)", 
     const r = await checkReadiness();
     assert.equal(r.ready, false, "not ready when the control beat is stale");
     assert.equal(r.checks.control.ok, false, "control check failed");
+    assert.deepEqual(r.failures, [{ check: "control", reason: "control_heartbeat_stale" }]);
   } finally {
     if (prev === undefined) delete process.env.CLARA_START_WORLD;
     else process.env.CLARA_START_WORLD = prev;
@@ -298,6 +365,7 @@ test("ready: a DB-only failure still hard-fails while storage is healthy", { ski
     const r = await checkReadiness();
     assert.equal(r.ready, false, "DB unreachability remains a hard readiness failure");
     assert.deepEqual(r.checks.db, { ok: false, error: "db_timeout" });
+    assert.deepEqual(r.failures, [{ check: "db", reason: "db_timeout" }]);
     assert.equal(r.checks.storage_write.ok, true, "the failure is DB-only, not storage-derived");
   } finally {
     await endPools();

@@ -71,8 +71,10 @@
 // TRANSITIONS ARE LOGGED, STEADY STATE IS NOT. The incident's own observability defect #1 was
 // "the runtime logs nothing" — fly logs is the real alarm surface for a single-maintainer
 // operation, so a red<->green flip gets a console.error line carrying ONLY the classified
-// reason. Raw vendor detail can echo a credential or URL query, so it is never retained or
-// logged; an already-known-red cycle stays silent to avoid spamming that log once a
+// reason. Collapsing `err.code` is not the redaction boundary: storage.mjs keeps a diagnostic
+// HTTP status but drops the response body, and this probe retains no detail field. Raw vendor
+// text can echo a credential or URL query, so it is never retained or logged; an
+// already-known-red cycle stays silent to avoid spamming that log once a
 // minute forever. The public verdict (storageProbeHealth()'s return value, which becomes
 // checks.storage_write on the UNAUTHENTICATED /ready response) carries only a classified
 // `reason` and consecutive count. See docs/ops/DR.md §7 for the still-open other half of
@@ -185,7 +187,7 @@ export async function _probeStorageOnceForTest() {
 
 // Fail closed until the first successful write/readback establishes positive evidence. The
 // two-consecutive-failure tolerance begins only in that warm, previously-proven state.
-let cachedResult = { ok: false, reason: null, pending: true, consecutive_failures: 0 };
+let cachedResult = { ok: true, reason: null, pending: true, consecutive_failures: 0 };
 let intervalHandle = null;
 let inFlight = null; // the current/most-recent refresh cycle's promise (test determinism seam)
 let activeRefresh = null;
@@ -266,7 +268,7 @@ export function _resetStorageProbeCacheForTest() {
   inFlight = null;
   activeRefresh = null;
   activeController = null;
-  cachedResult = { ok: false, reason: null, pending: true, consecutive_failures: 0 };
+  cachedResult = { ok: true, reason: null, pending: true, consecutive_failures: 0 };
 }
 
 /** Test-only: await the most recently started (or currently in-flight) background refresh

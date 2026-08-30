@@ -40,7 +40,8 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   retired with F-A2 PR-3.) **Supervisor** (`scripts/serve.mjs`):
   one crash-only process group.
 - **HTTP** (`src/index.ts`): chat sessions/messages/turns, an SSE stream that
-  survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7). The cached
+  survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7 — AMENDED
+  2026-08-30 by 裁-61: the storage write joins the hard gates). The cached
   `checks.storage_write` probe starts eagerly at boot and stays **503 until its first
   success**. In the resulting warm state it tolerates one transient failure, returns 503
   on the second consecutive failure, and recovers on the next success; its public shape is
@@ -103,12 +104,13 @@ There is deliberately no runtime status route. Human status reads use migration
 | `CLARA_STORAGE_URL` | Full private-bucket object base, for example the Storage REST `/storage/v1/object/<bucket>` base. |
 | `CLARA_STORAGE_ROLE` | Exact dedicated custom role expected in the Storage JWT (`clara_storage_docs` at the ceremony); required outside tests. |
 | `CLARA_STORAGE_ROLE_JWT` | Rotated, unexpired dedicated custom-role JWT with object `INSERT` + `SELECT` only. `anon`, `authenticated`, and `service_role` are rejected; no `UPDATE`/`DELETE`. |
-| `CLARA_STORAGE_PROBE_CACHE_MS` | Background interval after the immediate boot probe; default `60000`. A finite value at least `1000` is accepted; smaller/non-finite values fall back to `60000` so configuration cannot create a storage hot loop. `/ready` never waits for this interval or performs probe I/O itself. |
+| `CLARA_STORAGE_PROBE_CACHE_MS` | Background interval after the immediate boot probe; default `60000`. A finite value at least `1000` is accepted; smaller/non-finite values fall back to `60000` so configuration cannot create a storage hot loop. `/ready` never waits for this interval or performs probe I/O itself. **BREAK-GLASS:** set this very high and redeploy so only the eager boot probe runs in the operational window and the storage gate cannot re-fire; this deliberately suspends ongoing storage assurance and must be reverted after recovery. A redeploy also yields a fresh READY Machine for its readiness grace window. |
 | `CLARA_STORAGE_PROBE_TIMEOUT_MS` | Per-cycle write+readback deadline; default `3000`. A finite positive value is accepted; zero/negative/non-finite values fall back to `3000`. The deadline aborts both storage calls and their fetches, and refresh ownership remains held through settlement and scratch cleanup. Values above `3000` require the Fly readiness grace arithmetic below to be raised before deploy. |
 
-Fly's readiness grace is `35s`: the prior `30s` boot allowance + the default `3s`
-first-probe deadline + `2s` scheduling margin. If the timeout is raised, increase the
-grace by the same delta before deploy; the cache interval is irrelevant to the first probe.
+Fly's readiness grace is `60s`. It exceeds the default `3s` eager-probe deadline and
+leaves runway for a slow `shared-cpu-1x` cold start, including clamd signature loading
+(which previously OOM-killed the 1 GB Machine). If the timeout is raised above `3000`,
+raise the grace before deploy; the cache interval is irrelevant to the first probe.
 
 `RELAY_TEST_MODE=1` is the only adapter gate: tests inject/localize scanner,
 Storage, and Azure behavior. The real production adapters have no dev bypass.
@@ -344,9 +346,13 @@ would strand them — quiesce/drain those runs first, or do not roll back to it.
 
 ### First-deploy verification checklist
 
-1. `GET /health` → 200; `GET /ready` → 200 with `checks.world.ok` +
-   `checks.control.ok` + `checks.taxonomy.ok` all true, and `checks.storage_write`
-   settled at `{ ok: true, reason: null, pending: false, consecutive_failures: 0 }`.
+1. `GET /health` → 200. A 503 from `GET /ready` in the first seconds after boot is
+   expected, with `checks.storage_write.pending: true`: the eager storage probe runs at
+   startup and `/ready` stays not-ready until it succeeds (bounded by
+   `CLARA_STORAGE_PROBE_TIMEOUT_MS`, default 3 s). Then expect 200 with world/control/
+   taxonomy ok and `checks.storage_write` at
+   `{ ok: true, reason: null, pending: false, consecutive_failures: 0 }`. If the 503 does
+   not clear, storage is genuinely unreachable — see `docs/ops/DR.md` §6 for break-glass.
 2. One seeded-firm chat turn: `POST /api/chat/:sessionId/turns` (valid JWT) →
    202 `{task_id}`; the task reaches `completed` with an assistant message
    (typed parts) and non-zero recorded usage.

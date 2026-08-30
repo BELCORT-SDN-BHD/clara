@@ -127,7 +127,7 @@ test("storage probe: read-back-mismatch arm — tampered bytes on readback repor
 
 test("READY-STORAGE-COLD: unknown and initial failure stay unroutable; warm state tolerates one failure", async () => {
   const cold = storageProbeHealth();
-  assert.deepEqual(cold, { ok: false, reason: null, pending: true, consecutive_failures: 0 });
+  assert.deepEqual(cold, { ok: true, reason: null, pending: true, consecutive_failures: 0 });
   assert.equal(
     readinessHasHardFailure({ db: { ok: true }, storage_write: cold }, false),
     true,
@@ -190,6 +190,63 @@ test("READY-STORAGE-COLD: unknown and initial failure stay unroutable; warm stat
     true,
     "a DB-only failure remains a hard readiness failure",
   );
+});
+
+test("readiness policy: absent or malformed storage_write verdicts fail closed", () => {
+  const hardFailure = (storage_write) => readinessHasHardFailure({ db: { ok: true }, storage_write }, false);
+
+  assert.equal(hardFailure(undefined), true, "an absent verdict is not positive storage evidence");
+  assert.equal(hardFailure({}), true, "an empty verdict is not positive storage evidence");
+  assert.equal(hardFailure({ ok: false, pending: false }), true, "a missing failure counter fails closed");
+  assert.equal(
+    hardFailure({ ok: false, pending: false, consecutive_failures: "nope" }),
+    true,
+    "a malformed failure counter fails closed",
+  );
+  assert.equal(
+    hardFailure({ ok: false, pending: false, consecutive_failures: 1 }),
+    false,
+    "one finite warm-state failure remains tolerated",
+  );
+});
+
+test("storage probe facade: two consecutive TIMEOUTS reach the hard-failure threshold", async () => {
+  process.env.CLARA_STORAGE_PROBE_TIMEOUT_MS = "40";
+  globalThis.__claraStorageForTest = {
+    put: (_file, _key, _mime, options) =>
+      new Promise((resolve) => {
+        options?.signal?.addEventListener("abort", () => resolve({ created: true, existed: false }), { once: true });
+      }),
+  };
+  const originalError = console.error;
+  const keepEventLoopAlive = setTimeout(() => {}, 500);
+  console.error = () => {};
+  try {
+    const first = await _waitForStorageProbeSettleForTest();
+    assert.deepEqual(first, {
+      ok: false,
+      reason: "storage_probe_timeout",
+      pending: true,
+      consecutive_failures: 1,
+    });
+    const second = await _refreshStorageProbeForTest();
+    assert.deepEqual(second, {
+      ok: false,
+      reason: "storage_probe_timeout",
+      pending: true,
+      consecutive_failures: 2,
+    });
+    assert.equal(
+      readinessHasHardFailure({ db: { ok: true }, storage_write: second }, false),
+      true,
+      "the refresh loop's second timeout must trip readiness",
+    );
+  } finally {
+    clearTimeout(keepEventLoopAlive);
+    console.error = originalError;
+    if (previousTimeoutMs === undefined) delete process.env.CLARA_STORAGE_PROBE_TIMEOUT_MS;
+    else process.env.CLARA_STORAGE_PROBE_TIMEOUT_MS = previousTimeoutMs;
+  }
 });
 
 test("STORAGE-PROBE-ABORT: deadline aborts the adapter, intervals never overlap, and late success cannot recover", async () => {
@@ -270,6 +327,19 @@ test("storage probe facade: settles once, then repeat calls stay synchronous (no
     // above) somewhere inside a later test's window.
     _resetStorageProbeCacheForTest();
     delete process.env.CLARA_STORAGE_PROBE_CACHE_MS;
+  }
+});
+
+test("storage probe facade: a healthy cold boot logs nothing", async () => {
+  const logs = [];
+  const originalError = console.error;
+  console.error = (...args) => logs.push(args.join(" "));
+  try {
+    const settled = await _waitForStorageProbeSettleForTest();
+    assert.deepEqual(settled, { ok: true, reason: null, pending: false, consecutive_failures: 0 });
+    assert.deepEqual(logs, [], "a successful eager boot probe is not a RED -> GREEN recovery");
+  } finally {
+    console.error = originalError;
   }
 });
 

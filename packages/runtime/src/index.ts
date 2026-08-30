@@ -66,8 +66,8 @@ app.get("/health", (_req, res) => {
 
 // Readiness — should we receive traffic? FAILS (503) on DB unreachable, world dead,
 // control listener dead, taxonomy HALT, cold/unknown storage, or the second consecutive
-// warm-state storage-write failure; relay lag / dead-letters / backlog are warnings[].
-// Bounded + sanitized.
+// warm-state storage-write failure. Hard failures are failures[]; relay lag / dead-letters /
+// backlog stay warnings[]. Bounded + sanitized.
 app.get("/ready", readinessHandler);
 
 // The registered workflows (the versioning hook point; freeze-lint guards bodies).

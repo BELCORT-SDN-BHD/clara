@@ -65,6 +65,11 @@ function objectUrl(base, key) {
   return `${base}/${safeKey(key).split("/").map(encodeURIComponent).join("/")}`;
 }
 
+function diagnosticHttpStatus(response, parsedBody) {
+  const wrapped = String(parsedBody?.statusCode ?? "");
+  return /^\d{3}$/.test(wrapped) ? wrapped : String(response.status);
+}
+
 async function localPut(filePath, key, { signal } = {}) {
   signal?.throwIfAborted();
   const dest = localPath(key);
@@ -110,11 +115,12 @@ export async function putCanonical(filePath, key, mime, { signal } = {}) {
   if (response.status === 409 || String(inner?.statusCode) === "409" || inner?.error === "Duplicate") {
     return { created: false, existed: true };
   }
-  // Carry the BODY, not just the HTTP status: `(400)` alone cannot distinguish a duplicate from
-  // a permission denial from a bad key, and discarding it cost a full day of diagnosis.
+  // Parse the body to classify a wrapped duplicate and recover its wrapped HTTP status, then
+  // discard it. Vendor text can echo a signed URL or credential into the intake failure log;
+  // the status retains the useful 403-vs-400 diagnostic without that leak vector.
   throw new StorageError(
     "storage_error",
-    `Storage upload failed (${response.status})${body ? ` ${body.slice(0, 200)}` : ""}`,
+    `Storage upload failed (${diagnosticHttpStatus(response, inner)})`,
   );
 }
 
@@ -334,7 +340,7 @@ export async function putReportCanonical(filePath, key, mime = "application/pdf"
   }
   throw new StorageError(
     "storage_error",
-    `report storage upload failed (${response.status})${body ? ` ${body.slice(0, 200)}` : ""}`,
+    `report storage upload failed (${diagnosticHttpStatus(response, inner)})`,
   );
 }
 

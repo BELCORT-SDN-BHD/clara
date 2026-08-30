@@ -1,4 +1,5 @@
-// Readiness aggregation (Slice 4, contract §4.7). /ready is a LOAD-BALANCER gate:
+// Readiness aggregation (Slice 4, contract §4.7 — AMENDED 2026-08-30 by 裁-61:
+// the storage write joins the hard gates). /ready is a LOAD-BALANCER gate:
 // it FAILS (503) only on conditions where routing traffic here would be wrong —
 //
 //   * DB unreachable            (nothing works)
@@ -26,7 +27,7 @@ import { factsGateHealth } from "./facts-gate.mjs";
 import { classifyHealth } from "./classify.mjs";
 import { wikiProjectionHealth } from "./wiki-projection-ops.mjs";
 import { storageProbeHealth } from "./storage-probe.mjs";
-import { readinessHasHardFailure } from "./readiness-policy.mjs";
+import { readinessHasHardFailure, storageWriteHasHardFailure } from "./readiness-policy.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
@@ -85,11 +86,12 @@ async function bounded(fn, onTimeout) {
 }
 
 /**
- * Full readiness snapshot. Returns { ready, checks, warnings }.
- * @returns {Promise<{ready:boolean, checks:Record<string,unknown>, warnings:string[]}>}
+ * Full readiness snapshot. Returns { ready, checks, failures, warnings }.
+ * @returns {Promise<{ready:boolean, checks:Record<string,unknown>, failures:Array<Record<string,unknown>>, warnings:string[]}>}
  */
 export async function checkReadiness() {
   const checks = {};
+  const failures = [];
   const warnings = [];
 
   // Single bounded round-trip: DB reachability + (when enabled) heartbeats,
@@ -316,20 +318,35 @@ export async function checkReadiness() {
   // an unauthenticated endpoint's response.
   const storage = storageProbeHealth();
   checks.storage_write = storage;
-  if (!storage.ok) {
+  const storageHardFailure = storageWriteHasHardFailure(storage);
+  if (storageHardFailure) {
+    failures.push({
+      check: "storage_write",
+      reason: storage.reason ?? "storage_probe_pending",
+      pending: storage.pending,
+      consecutive_failures: storage.consecutive_failures,
+    });
+  } else if (!storage.ok) {
     warnings.push(
       `storage write probe failed (${storage.consecutive_failures} consecutive): ` +
-        `${storage.reason || (storage.pending ? "first probe still pending" : "unknown")}`,
+        `${storage.reason}`,
     );
   }
 
   if (!result || result.ok !== true) {
     // DB unreachable or the whole check timed out.
     checks.db = { ok: false, error: result?.timeout ? "db_timeout" : "db_unreachable" };
-    return { ready: false, checks, warnings };
+    failures.unshift({ check: "db", reason: checks.db.error });
+    return { ready: false, checks, failures, warnings };
+  }
+
+  if (worldEnabled()) {
+    if (checks.world?.ok === false) failures.push({ check: "world", reason: "world_heartbeat_stale" });
+    if (checks.control?.ok === false) failures.push({ check: "control", reason: "control_heartbeat_stale" });
+    if (checks.taxonomy?.ok === false) failures.push({ check: "taxonomy", reason: "taxonomy_halt" });
   }
 
   const failed = readinessHasHardFailure(checks, worldEnabled());
 
-  return { ready: !failed, checks, warnings };
+  return { ready: !failed, checks, failures, warnings };
 }

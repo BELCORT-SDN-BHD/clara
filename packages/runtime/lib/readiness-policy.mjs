@@ -3,13 +3,17 @@
 
 export const STORAGE_WRITE_FAILURE_THRESHOLD = 2;
 
-export function readinessHasHardFailure(checks, isWorldEnabled) {
-  const storage = checks.storage_write ?? {};
+export function storageWriteHasHardFailure(storageVerdict) {
+  const storage = storageVerdict ?? {};
   const storageFailureCount = Number(storage.consecutive_failures);
-  const storageWriteFailed =
+  return (
     storage.pending === true ||
-    (storage.ok !== true &&
-      (!Number.isFinite(storageFailureCount) || storageFailureCount >= STORAGE_WRITE_FAILURE_THRESHOLD));
+    (storage.ok !== true && (!Number.isFinite(storageFailureCount) || storageFailureCount >= STORAGE_WRITE_FAILURE_THRESHOLD))
+  );
+}
+
+export function readinessHasHardFailure(checks, isWorldEnabled) {
+  const storageWriteFailed = storageWriteHasHardFailure(checks.storage_write);
 
   return (
     checks.db?.ok === false ||

@@ -279,17 +279,32 @@ Storage timing knobs: `CLARA_STORAGE_PROBE_CACHE_MS` defaults to `60000` (finite
 at least `1000` are accepted; invalid/lower values fall back to the default), and controls
 only the interval after the immediate boot cycle. `CLARA_STORAGE_PROBE_TIMEOUT_MS`
 defaults to `3000` (finite positive values accepted; otherwise default) and aborts both
-storage requests at the deadline. The Fly readiness grace is 35s: the prior 30s boot
-allowance + 3s default first-probe deadline + 2s scheduling margin. Raising the timeout
-requires raising that grace by the same delta before deploy.
+storage requests at the deadline. The Fly readiness grace is 60s: it exceeds the 3s default
+first-probe deadline and leaves runway for a slow `shared-cpu-1x` cold start, including clamd
+signature loading (which previously OOM-killed the 1 GB Machine). Raising the probe timeout
+above 3000 requires raising that grace before deploy.
 
 The DB branch was verified locally on 2026-07-17; the storage-aware response contract was
 re-verified on the throwaway runtime rig on 2026-08-30:
 
+```json
+{
+  "ready": true,
+  "checks": {
+    "db": { "ok": true },
+    "world": { "ok": true, "age_ms": 0 },
+    "control": { "ok": true, "age_ms": 0 },
+    "taxonomy": { "ok": true },
+    "storage_write": { "ok": true, "reason": null, "pending": false, "consecutive_failures": 0 }
+  },
+  "failures": [],
+  "warnings": [],
+  "ts": "2026-08-30T00:00:00.000Z"
+}
 ```
-GET /health -> {"ok":true,"service":"clara-runtime",...}
-GET /ready  -> {"ready":true,"checks":{"db":{"ok":true},"storage_write":{"ok":true,...},...}}  HTTP 200
-```
+
+The real response also carries the current warn-only consumer and intake checks; the sample
+above spells out every hard-gate field and every top-level key. There is no `latency_ms` field.
 
 When the DB is down, storage has not yet succeeded since boot, or a warm
 `checks.storage_write.consecutive_failures` reaches 2, `/ready` returns
@@ -297,8 +312,20 @@ When the DB is down, storage has not yet succeeded since boot, or a warm
 
 **Intended 裁-61 consequence:** this is a required single-machine deployment. A sustained
 storage outage therefore becomes a **total public outage** while the process remains alive
-and keeps probing; Fly removes the only unhealthy Machine from routing rather than restarting
-it. That is the chosen fail-closed posture because uploads cannot enter canonical custody.
+and keeps probing: Fly removes the only unhealthy Machine from routing, taking chat, turns,
+SSE, interviews, uploads and reports out together. This burns the 99.5% runtime-availability
+SLO below; it is the chosen fail-closed posture because uploads cannot enter canonical custody.
+The consecutive counter is process-local and resets on restart, but cold pending is itself
+not-ready: an `always` restart loop faster than two probe intervals cannot reopen a false-ready
+window during the outage.
+
+**BREAK-GLASS (operator, degraded assurance):** set
+`CLARA_STORAGE_PROBE_CACHE_MS` very high and redeploy. The eager boot probe still runs, but
+after it succeeds the gate cannot re-fire during the chosen operational window; the operator
+has deliberately suspended continuing storage assurance and must revert the override after
+recovery. A redeploy also yields a fresh READY Machine for its 60s readiness grace window. Record
+the override and keep investigating storage: this lever restores the rest of the single-machine
+service only by accepting that later storage regressions will not be detected during the window.
 
 > **A 503 right after a HARD runtime restart is usually not a DB fault, and none of this
 > document is the fix.** A machine that died without a clean shutdown leaves its pooler
@@ -321,9 +348,9 @@ the external `/ready` uptime checks remain the open wiring piece.
 
 | SLO | Target | Signal | Alert when |
 |---|---|---|---|
-| Runtime availability | 99.5% monthly | `/ready` == 200 (external check, 30s) | 2 consecutive failures |
+| Runtime availability | 99.5% monthly | `/ready` == 200 (external check, 30s); storage hard-red burns this whole-runtime SLO | 2 consecutive failures |
 | DB reachability | 99.9% | `/ready` `checks.db.ok` | any false for >1 min |
-| Storage write path | uploads can enter canonical custody | `/ready` `checks.storage_write` | cold/unknown, or second consecutive warm failure; recover on success |
+| Storage write path | uploads can enter canonical custody; full-service gate on the single Machine | `/ready` `checks.storage_write` | cold/unknown, or second consecutive warm failure; recover on success |
 | Backup freshness (Free/Pro) | dump age < 24h | last `backups/` timestamp / managed backup age | age > 26h |
 | Restore drill | passes quarterly | `dr:selftest` exit code | any failure |
 | Durable-run backlog (Slice 4+) | drained < 5 min | outbox / graphile queue depth | depth rising 10 min |
