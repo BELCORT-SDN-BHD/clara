@@ -329,6 +329,26 @@ begin
     end if;
   end loop;
 
+  -- (k2) THE NEIGHBOURING BODIES, HASHED **NOW**, so the tail's "nothing else moved" claim is a
+  -- genuine BEFORE/AFTER equality rather than a hard-coded frontier snapshot. The difference is
+  -- not cosmetic: a literal sha proves "this body is one particular known body", which goes false
+  -- the moment a coordinated sibling PR lands ahead of this one and is a merge-order landmine; a
+  -- before/after equality proves the thing the section actually claims -- THIS FILE did not move
+  -- it -- and stays true at every frontier.
+  insert into _bp3_pre(k,v)
+  select 'sha:'||s,
+         (select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex')
+            from pg_proc p where p.oid = to_regprocedure(s))
+    from unnest(array['clara.propose_vendor_identity_binding(jsonb,text)',
+                      'clara._derive_vendor_binding_proposal(uuid,uuid,uuid)',
+                      'clara._coding_lane_core(uuid,uuid)']) s;
+  select string_agg(substr(k,5), ', ' order by k) into v_missing from _bp3_pre
+   where k like 'sha:%' and v is null;
+  if v_missing is not null then
+    raise exception 'binding pr-3 prestate: neighbouring body/bodies do not resolve: %', v_missing
+      using errcode = 'CLR10';
+  end if;
+
   -- (k) THE BASELINE the tail compares "unmoved" against.
   insert into _bp3_pre(k,v) values
     ('taxonomy_versions', (select count(*)::text from clara.taxonomy_versions)),
@@ -1180,14 +1200,27 @@ begin
       (select v from _bp3_pre where k='clara_functions'), v_n using errcode='CLR10';
   end if;
 
-  -- (6) NOTHING ELSE MOVED. The two neighbouring writer bodies this file must NOT have touched.
+  -- (6a) NOTHING ELSE MOVED -- as a BEFORE/AFTER EQUALITY against what SS1 (k2) measured on this
+  -- very database, not against a literal. This is the claim the section actually makes: THIS FILE
+  -- did not touch these bodies. It holds at every frontier, so a coordinated sibling PR landing
+  -- ahead of this one cannot turn a true premise into a false abort.
+  for r in select k, v from _bp3_pre where k like 'sha:%' order by k loop
+    select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
+      from pg_proc p where p.oid = to_regprocedure(substr(r.k, 5));
+    if v_sha is null then
+      raise exception 'binding pr-3 tail: % no longer resolves', substr(r.k, 5) using errcode='CLR10';
+    end if;
+    if v_sha is distinct from r.v then
+      raise exception 'binding pr-3 tail: % MOVED across this file (% -> %)', substr(r.k, 5), r.v, v_sha
+        using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- (6b) ...and the two BYTE-FROZEN bodies are additionally pinned to their literal identities,
+  -- because "unmoved by this file" is a weaker claim than "still the reviewed body". G3 rules
+  -- clara._coding_lane_core untouched, and clara._derive_vendor_binding_proposal's content_hash
+  -- covers the evidence array, so recutting it un-signs every open proposal (survey S4).
   for r in select * from (values
-      -- MEASURED ON THE RIG AT FRONTIER 0155, never copied from a comment. Note the first one:
-      -- 0154's header pins propose_vendor_identity_binding at 610ef1df -- that is its PRE-image,
-      -- the body 0154 then recut. The live value after 0154 is fe14f239, and a pin copied out of
-      -- a prose header would have failed this file for the wrong reason.
-      ('clara.propose_vendor_identity_binding(jsonb,text)',
-       'fe14f23984e00178e1dc084caf3224cfe4cb5b62fe080301b95e2fc4b671dc82'),
       ('clara._derive_vendor_binding_proposal(uuid,uuid,uuid)',
        'de0f58078f23ef2c6ce3f4a82cb29691a3633e3b8b9c48ae90babc53e7ee043c'),
       ('clara._coding_lane_core(uuid,uuid)',
@@ -1196,14 +1229,31 @@ begin
   loop
     select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
       from pg_proc p where p.oid = to_regprocedure(r.sig);
-    if v_sha is null then
-      raise exception 'binding pr-3 tail: % does not resolve', r.sig using errcode='CLR10';
-    end if;
-    if left(v_sha, length(r.pin)) is distinct from r.pin then
-      raise exception 'binding pr-3 tail: % moved (sha % , expected prefix %)', r.sig, v_sha, r.pin
+    if v_sha is distinct from r.pin then
+      raise exception 'binding pr-3 tail: % is not the reviewed frozen body (sha % , expected %)', r.sig, v_sha, r.pin
         using errcode='CLR10';
     end if;
   end loop;
+
+  -- (6c) MERGE-ORDER COORDINATION -- clara.propose_vendor_identity_binding, which is NOT frozen
+  -- and has a sibling landing ahead of this file.
+  --   fe14f239...  its body after 0154 (裁-18b PR-1) -- measured on a pristine 0001..0155 replay.
+  --                (0154's own header pins 610ef1df, which is its PRE-image: the body 0154 recut.
+  --                 A pin copied out of that prose header would fail this file for the wrong
+  --                 reason, which is why every value here was measured rather than read.)
+  --   8c4000de...  its body after PR #448 (db/unique-violation-constraint-name), which recuts the
+  --                unique_violation handler and lands BEFORE this PR.
+  -- BOTH are lawful during the merge window and a THIRD value is not -- an uncoordinated recut of
+  -- a body on the binding lifecycle is exactly what this rung exists to catch. AT MERGE PREP THIS
+  -- NARROWS TO THE SINGLE VALUE MEASURED ON MERGED MAIN with #448 applied; the sha below was
+  -- supplied by the conductor and is NOT trusted as evidence until that replay reads it back.
+  select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
+    from pg_proc p where p.oid = to_regprocedure('clara.propose_vendor_identity_binding(jsonb,text)');
+  if v_sha not in ('fe14f23984e00178e1dc084caf3224cfe4cb5b62fe080301b95e2fc4b671dc82',
+                   '8c4000de1e85553ca833204eb9f552b098ef57839a461240c3af3e08e649713f') then
+    raise exception 'binding pr-3 tail: clara.propose_vendor_identity_binding is at an UNRECOGNISED body (%) -- neither the 0154 post-image nor PR #448''s; a body on the binding lifecycle was recut without coordinating with this file', v_sha
+      using errcode='CLR10';
+  end if;
 
   -- (7) NO TABLE IN THE FROZEN SCHEMAS TOUCHED (hard constraint 15) -- a read-only census.
   select count(*) into v_n from pg_class c join pg_namespace ns on ns.oid = c.relnamespace
