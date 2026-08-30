@@ -841,6 +841,30 @@ const G1_WAKE_ENGINE_CLOCK_NAMES = ["set_wake_source_enabled"];
 // red every such leg on a two-name diff that says nothing about clock discipline.
 const COA_TEMPLATE_PR_A_CLOCK_NAMES = ["publish_coa_template", "retire_coa_template"];
 
+// [裁-21 PR-b, `coa_pr_b_apply_template` -- number claimed at merge prep]: exactly ONE of the
+// twelve new bodies carries a bare clock token, MEASURED by re-running arm (D)'s own detector
+// over the whole lane surface on the rig, never inferred from the shapes:
+//   apply_coa_template -- `adopted_at = now()` on the adoption stamp, in both the move-a-proposal
+//                         arm and the human-direct-adoption arm.
+// PR-a's own block above PREDICTED this one in as many words ("coa_template_adoptions'
+// proposed_at / adopted_at are written by PR-b's doors, not by anything in this PR"), so it is a
+// declared cost, not a drift. It is the same "the audit stamp is the clock" idiom every other
+// human writer on this roster carries, and it derives no DATE from the session clock: every
+// timestamp column on clara.coa_template_adoptions is timestamptz and the relation carries no
+// date-typed column at all. The other eleven bodies are clean on the same detector -- the
+// additive door, the five reads, the four INVOKER helpers and the plant loop.
+//
+// THE GATE IS A PAIR, AND THE SECOND HALF IS WHY (.claude/rules/db-tests.md's succession
+// pattern: a migration STEM witness OR a catalog witness, post-armed if EITHER says applied).
+// The stem alone is not enough for this PR: the file ships UNNUMBERED until merge, and a lane
+// that applies it by hand writes NO clara.schema_migrations row at all -- so the stem gate reads
+// false on exactly the database where the body exists, and the roster reds for a name that is
+// lawfully there. The catalog witness is a SIBLING object of the same migration
+// (clara.coa_template_entity_overrides), never apply_coa_template itself: gating a name on its
+// own existence would make this roster tautological for it, and the cell must still be able to
+// say NO if apply_coa_template ever appeared without the migration that declares it.
+const COA_TEMPLATE_PR_B_CLOCK_NAMES = ["apply_coa_template"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -849,6 +873,12 @@ export async function s5BareTokenRoster(query) {
   const appliedStem = async (re) => (await query(
     `select count(*)::int as n from clara.schema_migrations where version ~ '${re}'`
   )).rows[0].n === 1;
+  // The CATALOG half of the succession pattern (.claude/rules/db-tests.md): an EXACT
+  // schema-qualified relation name, for a migration whose stem cannot be witnessed because it is
+  // still UNNUMBERED on the database under test. Not a bare name and not a LIKE.
+  const relationExists = async (qualified) => (await query(
+    "select to_regclass($1) is not null as ok", [qualified]
+  )).rows[0].ok === true;
   const names = [...S5_25_BARE_TOKEN_ROSTER];
   // REVERSE gate, no lower bound -- these eleven are early-born (see the array's own header),
   // so they are expected everywhere the roster reaches UNTIL the cutover retires them.
@@ -911,6 +941,10 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("fa7b_pr_a_client_onboarding_open$")) names.push(...ONBOARDING_OPEN_F_A7B_PR_A_CLOCK_NAMES);
   if (await appliedStem("p4_tranche2_registration_operator_alias$")) names.push(...P4T2_CLOCK_NAMES);
   if (await appliedStem("coa_template_pr_a$")) names.push(...COA_TEMPLATE_PR_A_CLOCK_NAMES);
+  if (await appliedStem("coa_pr_b_apply_template$")
+      || await relationExists("clara.coa_template_entity_overrides")) {
+    names.push(...COA_TEMPLATE_PR_B_CLOCK_NAMES);
+  }
   return names.sort();
 }
 
