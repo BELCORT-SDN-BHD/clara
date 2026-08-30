@@ -166,11 +166,31 @@ export async function seedPreState() {
 
 /** Apply a (possibly mutated) copy of B's real text at B's OWN claimed number -- and place the
  *  successors beside it, so the next migrate() applies B-or-mutant and then everything the
- *  estate shipped after B, exactly as live saw it (see exportBaseline). */
+ *  estate shipped after B, exactly as live saw it (see exportBaseline).
+ *
+ *  THE FILE IS WRITTEN UNDER B'S REAL BASENAME, whatever `stem` says. The successors carry
+ *  STEM WITNESSES on B (`0154_binding_proposal_pr_1` refuses "frontier mismatch" unless
+ *  `0147_db_hardening_b_hash_only_bearer_tokens` is in `clara.schema_migrations` -- the
+ *  succession pattern of .claude/rules/db-tests.md, which is correct and immutable once applied),
+ *  so a copy applied under `0147_hrd_b_mutant_x` is invisible to them and every cell that reaches
+ *  the successors reds at 0154 (sweep run 33288656180: 3 pass / 5 fail -- exactly the cells where B
+ *  or its mutant APPLIED). The mutant identity lives in `stem`, recorded here for the cells' own
+ *  `schema_migrations` reads (`placedVersion()`), never in the version string the estate reads. */
 export function placeMigration(dir, version, text, stem) {
-  writeFileSync(join(dir, `${version}_${stem}.sql`), text ?? readFileSync(REAL_FILE, "utf8"));
+  LAST_STEM = stem;
+  writeFileSync(join(dir, REAL_BASENAME), text ?? readFileSync(REAL_FILE, "utf8"));
   placeSuccessors(dir, LAST_SUCCESSORS);
 }
+
+/** The version string the placed B-or-mutant records in clara.schema_migrations -- always B's own
+ *  real version (see placeMigration); `placedStem()` says WHICH copy the cell placed. */
+export function placedVersion() {
+  return REAL_BASENAME.replace(/\.sql$/, "");
+}
+export function placedStem() {
+  return LAST_STEM;
+}
+let LAST_STEM = null;
 
 // ---------------------------------------------------------------------------------------------
 // THE EXACT BLOCKS THIS DRILL MUTATES. Copy-pasted from the real file and asserted present on
