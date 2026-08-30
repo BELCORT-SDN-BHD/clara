@@ -51,7 +51,7 @@
 -- direction, rather than silently being swallowed as binding_conflict).
 --
 -- =====================================================================================
--- THE CENSUS (SS2 below) -- A MEASUREMENT, NOT A FIX, FOR THE OTHER 44 HANDLERS
+-- THE CENSUS (SS2 below) -- A MEASUREMENT, NOT A FIX, FOR THE OTHER 31 HANDLERS
 -- =====================================================================================
 -- PROGRESS's own dawn-review figure ("99 handlers... only ~15 read constraint_name") is
 -- RE-MEASURED here against the live catalog at this file's own frontier (0155) rather than
@@ -71,8 +71,9 @@
 -- WHEN clause is spelled with unusual whitespace this regex does not tolerate, or a
 -- function that has since been retired entirely (fewer live handlers than a historical
 -- migration-file grep would find is the EXPECTED direction for that specific instrument
--- mismatch, not a red flag). The 44 REMAINING handlers (45 minus this file's own) are
--- listed by exact signature in the tail's raise notice, unmodified -- each is a candidate
+-- mismatch, not a red flag). The 31 REMAINING handlers (45 total minus the 14 that read
+-- constraint_name, this file's own recut counted among them) are listed by exact
+-- signature in the tail's raise notice, unmodified -- each is a candidate
 -- for the SAME narrowing this file gives clara.propose_vendor_identity_binding, and each
 -- is deliberately left alone: which typed code each OTHER constraint deserves is a
 -- per-handler judgement this file does not make wholesale.
