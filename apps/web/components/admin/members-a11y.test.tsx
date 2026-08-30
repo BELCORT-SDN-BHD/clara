@@ -25,11 +25,14 @@ import { MembersPanel } from "./members-panel";
 import {
   App,
   attrOf,
+  BOOKKEEPER_CONTEXT,
   findAll,
   findIn,
   jsonResponse,
+  MEMBERS,
   mockMembersFetch,
   mountMembers,
+  OWNER_CONTEXT,
   withMockedEnv,
 } from "./members-fixtures";
 
@@ -212,6 +215,41 @@ test("members: the revoke confirm dialog, OPEN, scans clean and names the addres
   );
 });
 
+/**
+ * ABSENCE IS NOT EVIDENCE, RENDERED — independent review of #455, LOW-9.
+ *
+ * Both empty states used to make a claim about the WORLD: "This firm has no
+ * members on its roster" and "No invitations are outstanding". Neither view can
+ * support it. `firm_members_visible` floors at bookkeeper+ and
+ * `firm_invites_visible` at admin+, and BELOW THE FLOOR THE PREDICATE EXCLUDES
+ * EVERY ROW — the read succeeds and returns zero rows, indistinguishable on the
+ * wire from a firm that genuinely has none (`lib/members/reads.ts`'s own header
+ * says so for both). So a below-rank caller was being told, in Clara's voice,
+ * something Clara had not read and could not know.
+ *
+ * The copy now describes THE SCREEN ("No roster rows are visible here"), which is
+ * true under every cause, and each section's description states its floor
+ * unconditionally beside it. This is the same discipline the withheld-email cell
+ * already enforces one table over: state the absence, name the causes, guess
+ * between them never.
+ */
+const FACTUAL_ABSENCE = [
+  /has no members/i,
+  /no members on its roster/i,
+  /no invitations are outstanding/i,
+  /this firm has no/i,
+  /there are none/i,
+];
+
+function assertNoFactualAbsence(text: string, fixture: string): void {
+  for (const claim of FACTUAL_ABSENCE) {
+    assert.ok(
+      !claim.test(text),
+      `${fixture}: the screen asserted a FACT about the world (${claim}) that a floored read cannot support`,
+    );
+  }
+}
+
 test("members: loading, empty and failed are three DIFFERENT screens", async () => {
   // LOADING → a sentence naming what is loading.
   await withMockedEnv(
@@ -222,22 +260,23 @@ test("members: loading, empty and failed are three DIFFERENT screens", async () 
         await h.settle();
         const text = h.text();
         assert.match(text, /Loading the member roster/);
-        assert.ok(!/This firm has no members/.test(text), "a pending read must never render the empty state");
+        assert.ok(!/No roster rows are visible/.test(text), "a pending read must never render the empty state");
       } finally {
         await h.unmount();
       }
     },
   );
 
-  // EMPTY → an honest sentence about the roster, and no table.
+  // EMPTY → a sentence about THE SCREEN, and no table.
   await withMockedEnv(
     async () => jsonResponse([]),
     async () => {
       const { h, body } = await mountMembers();
       try {
         const text = textOf(body as never);
-        assert.match(text, /This firm has no members on its roster/);
-        assert.match(text, /No invitations are outstanding/);
+        assert.match(text, /No roster rows are visible here/);
+        assert.match(text, /No invitation rows are visible here/);
+        assertNoFactualAbsence(text, "zero rows");
         assert.equal(findIn(body, (n) => n.tagName === "TABLE"), null, "an empty read renders no table");
         assert.deepEqual(checkAccessibility(body as never), []);
       } finally {
@@ -254,7 +293,8 @@ test("members: loading, empty and failed are three DIFFERENT screens", async () 
       try {
         const text = textOf(body as never);
         assert.match(text, /permission denied for view firm_members_visible/, "the read's own message renders");
-        assert.ok(!/This firm has no members/.test(text), "a FAILED read must never render as an empty roster");
+        assert.ok(!/No roster rows are visible/.test(text), "a FAILED read must never render as an empty roster");
+        assertNoFactualAbsence(text, "failed read");
         assert.equal(findIn(body, (n) => n.tagName === "TABLE"), null);
         assert.deepEqual(checkAccessibility(body as never), []);
       } finally {
@@ -262,4 +302,74 @@ test("members: loading, empty and failed are three DIFFERENT screens", async () 
       }
     },
   );
+});
+
+test("LOW-9: no absence fixture — below-rank, failed context, or zero rows — claims a FACT", async () => {
+  // THE THREE CAUSES OF AN EMPTY SCREEN, driven separately, because they are
+  // indistinguishable on the wire and the copy must therefore be true of all
+  // three at once.
+  const fixtures: { name: string; fetch: typeof fetch }[] = [
+    {
+      // BELOW THE INVITE FLOOR. A bookkeeper reads the roster fine and gets zero
+      // invite rows from a view that excluded them — not from a firm with none.
+      name: "below-rank caller",
+      fetch: (async (u: RequestInfo | URL) => {
+        const url = String(u);
+        if (url.includes("/rest/v1/caller_context")) return jsonResponse(BOOKKEEPER_CONTEXT);
+        if (url.includes("/rest/v1/firm_invites_visible")) return jsonResponse([]);
+        if (url.includes("/rest/v1/firm_members_visible")) return jsonResponse(MEMBERS);
+        throw new Error(`unexpected fetch: ${url}`);
+      }) as unknown as typeof fetch,
+    },
+    {
+      // THE CONTEXT READ ITSELF FAILED, so the screen does not even know the
+      // caller's rank — and still must not claim anything about the firm.
+      name: "failed caller_context",
+      fetch: (async (u: RequestInfo | URL) => {
+        const url = String(u);
+        if (url.includes("/rest/v1/caller_context")) return jsonResponse({ message: "boom" }, 500);
+        if (url.includes("/rest/v1/firm_invites_visible")) return jsonResponse([]);
+        if (url.includes("/rest/v1/firm_members_visible")) return jsonResponse([]);
+        throw new Error(`unexpected fetch: ${url}`);
+      }) as unknown as typeof fetch,
+    },
+    {
+      name: "genuinely zero rows",
+      fetch: (async (u: RequestInfo | URL) => {
+        const url = String(u);
+        if (url.includes("/rest/v1/caller_context")) return jsonResponse(OWNER_CONTEXT);
+        return jsonResponse([]);
+      }) as unknown as typeof fetch,
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    await withMockedEnv(fixture.fetch, async () => {
+      const { h, body } = await mountMembers();
+      try {
+        const text = textOf(body as never);
+        assertNoFactualAbsence(text, fixture.name);
+        // …and the floor is stated UNCONDITIONALLY beside the empty list, so the
+        // absence is legible rather than merely un-claimed.
+        assert.match(
+          text,
+          /Invitations are published to admin and owner only/,
+          `${fixture.name}: the invite section must state its floor whatever it rendered`,
+        );
+      } finally {
+        await h.unmount();
+      }
+    });
+  }
+});
+
+test("VACUITY CONTROL: the neutrality walk really does catch a factual claim", () => {
+  // Without this the walk above is equally green on a screen rendering nothing
+  // at all, or on a regex list that matches no string a human would write.
+  assert.throws(
+    () => assertNoFactualAbsence("This firm has no members on its roster.", "control"),
+    /asserted a FACT/,
+  );
+  assert.throws(() => assertNoFactualAbsence("No invitations are outstanding.", "control"), /asserted a FACT/);
+  assertNoFactualAbsence("No roster rows are visible here.", "control");
 });

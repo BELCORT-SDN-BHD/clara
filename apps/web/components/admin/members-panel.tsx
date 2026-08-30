@@ -138,7 +138,10 @@ function RosterTable({
   loading: boolean;
   failed: boolean;
   busy: boolean;
-  onPickRole: (row: FirmMemberRow, role: MemberRole) => void;
+  /** RETURNS THE ACT'S OWN PROMISE. `MemberRowMenu` disables its items and holds
+   *  its single-fire guard until this settles; a `void`-ing caller would leave
+   *  the double-fire window open (independent review of #455, MEDIUM-4). */
+  onPickRole: (row: FirmMemberRow, role: MemberRole) => Promise<void>;
   onRemove: (row: FirmMemberRow) => void;
 }) {
   const t = useTranslations("Members.roster");
@@ -372,11 +375,15 @@ export function MembersPanel() {
           loading={roster.loading}
           failed={roster.err !== null}
           busy={roster.busy}
-          onPickRole={(row, role) => {
-            void roster.act(async () => {
+          onPickRole={(row, role) =>
+            // RETURNED, not `void`-ed. `useHydratedPart`'s `act()` resolves only
+            // after the call AND its unconditional re-read have finished, so this
+            // promise is exactly "the act has settled" — which is what
+            // `MemberRowMenu`'s guard and its disabled items hang on.
+            roster.act(async () => {
               await setMemberRole(sessionTokenAccessor, row.membership_id, role);
-            });
-          }}
+            })
+          }
           onRemove={(row) => setRemoving(row)}
         />
       </section>
@@ -396,7 +403,18 @@ export function MembersPanel() {
         {courier ? (
           <StateBanner tone="error" title={tCourier("title")} code={courier.code}>
             {tCourier(courier.code)}
+            {/* CLARA'S OWN detail, when there is one — today only the list of
+                unset environment variable NAMES on `mail_not_configured`. The
+                courier stopped relaying upstream strings entirely (independent
+                review of #455, MEDIUM-3), so this can no longer be a provider's
+                words. */}
             {courier.detail ? <> ({courier.detail})</> : null}
+            {/* THE CORRELATION ID, rendered because an id nobody can see is not
+                a support channel. It is the ONE handle joining this banner to
+                the server log line that holds the real, classified failure —
+                which is the whole trade MEDIUM-3 makes: the browser is told
+                less, so it must be told where the rest of it went. */}
+            {courier.correlationId ? <> {tCourier("reference", { id: courier.correlationId })}</> : null}
           </StateBanner>
         ) : null}
         {invites.err ? (

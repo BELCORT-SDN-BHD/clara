@@ -19,9 +19,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { textOf, clickButton } from "../../test/hookHarness";
+import { textOf, clickButton, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import {
+  ADMIN_CONTEXT,
   INVITES,
   MEMBERS,
   attrOf,
@@ -150,84 +151,161 @@ test("WALL: removing the last owner renders the same CLR09 through the confirm d
 // WALL 2 — the role ceiling
 // ---------------------------------------------------------------------------
 
-test("WALL: the role ceiling renders CLR04 verbatim, and all four roles stayed on offer", async () => {
-  const calls: Call[] = [];
-  await withMockedEnv(
-    scripted({ set_member_role: () => refusal("CLR04", "cannot assign a role above your own rank") }, calls) as unknown as typeof fetch,
-    async () => {
-      const { h, body } = await mountMembers();
-      try {
-        await openRoleMenu(h, body, "Siti Rahman");
-        // The proof that nothing was filtered: `owner` is offered to a caller
-        // this fixture's door will refuse for asking.
-        const offered = findAll(body, (n) => attrOf(n, "role") === "menuitemradio").map((n) => textOf(n as never).trim());
-        assert.deepEqual(offered, ["Viewer", "Bookkeeper", "Admin", "Owner"]);
-        await pickRole(h, body, "Owner");
-
-        const after = textOf(body as never);
-        assert.match(after, /cannot assign a role above your own rank/);
-        assert.match(after, /CLR04/);
-      } finally {
-        await h.unmount();
+test("WALL: an ADMIN promoting to owner gets CLR04 verbatim, and all four roles stayed on offer", async () => {
+  // NOT VACUOUS ANY MORE (independent review of #455, MEDIUM-6). This cell used
+  // to mount the OWNER fixture and pick `owner` — a selection no ceiling refuses
+  // — against a mock that answered CLR04 on the strength of the URL alone. It
+  // stayed green whatever arguments the panel sent, including none.
+  //
+  // Now: a positively-read ADMIN caller (rank 2) picks `owner` (rank 3), which is
+  // the exact situation `0145:603` exists for; and THE MOCK READS THE REQUEST. It
+  // refuses only for this membership and this role, and answers a plain receipt
+  // for anything else — so a panel that sent the wrong row, or the wrong role,
+  // gets no refusal at all and this cell goes red.
+  const seen: Record<string, unknown>[] = [];
+  const impl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = String(input);
+    if (url.includes("/rest/v1/caller_context")) return jsonResponse(ADMIN_CONTEXT);
+    if (url.includes("/rpc/set_member_role")) {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      seen.push(body);
+      if (body.p_membership === "m-book" && body.p_role === "owner") {
+        return refusal("CLR04", "cannot assign a role above your own rank");
       }
-    },
-  );
+      // ANY OTHER ARGUMENTS SUCCEED — which is what makes the assertion below a
+      // measurement of what was sent rather than of what was mocked.
+      return jsonResponse({ membership_id: String(body.p_membership), role: String(body.p_role) });
+    }
+    return mockMembersFetch(url);
+  }) as unknown as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const { h, body } = await mountMembers();
+    try {
+      assert.ok(
+        !/cannot assign a role above your own rank/.test(textOf(body as never)),
+        "VACUITY GUARD: the message must NOT already be on the page",
+      );
+
+      await openRoleMenu(h, body, "Siti Rahman");
+      // The proof that nothing was filtered: `owner` is offered to an admin whose
+      // own door will refuse them for asking.
+      const offered = findAll(body, (n) => attrOf(n, "role") === "menuitemradio").map((n) => textOf(n as never).trim());
+      assert.deepEqual(offered, ["Viewer", "Bookkeeper", "Admin", "Owner"]);
+      await pickRole(h, body, "Owner");
+
+      // WHAT WAS ACTUALLY SENT, field by field. Mutating either one in the
+      // component sends arguments this mock answers with a receipt, and the
+      // refusal assertions below then find nothing.
+      assert.equal(seen.length, 1, "exactly one governed call");
+      assert.equal(seen[0]!.p_membership, "m-book", "the act named the row it was activated on");
+      assert.equal(seen[0]!.p_role, "owner", "…and the role that was actually clicked");
+      assert.equal(typeof seen[0]!.p_op_key, "string", "…under an op key the door requires");
+
+      const after = textOf(body as never);
+      assert.match(after, /cannot assign a role above your own rank/);
+      assert.match(after, /CLR04/);
+    } finally {
+      await h.unmount();
+    }
+  });
 });
 
-test("WALL: the courier relays invite_member's CLR04 ceiling verbatim, and keeps the dialog open", async () => {
-  const calls: Call[] = [];
-  await withMockedEnv(
-    scripted(
-      {
-        "/api/invite": () =>
-          jsonResponse(
-            {
-              ok: false,
-              kind: "refusal",
-              refusal: {
-                code: "CLR04",
-                message: "cannot invite to a role above your own rank",
-                reason: null,
-                status: 400,
-                pgCode: "CLR04",
-                codeSource: "sqlstate",
-              },
+test("WALL: an ADMIN inviting an owner gets invite_member's CLR04 verbatim, and the dialog stays open", async () => {
+  // NOT VACUOUS ANY MORE (independent review of #455, MEDIUM-6). This cell used
+  // to submit the dialog UNTOUCHED — an empty email at the default role — against
+  // a mock that refused on the URL alone. It proved that a refusal envelope
+  // renders, and nothing whatever about what the surface sent.
+  //
+  // Now: a real address is typed through the portal-capable helper, `owner` is
+  // chosen on the role select, the caller is a positively-read ADMIN, and THE
+  // COURIER MOCK READS THE POSTED BODY — refusing only for that address at that
+  // role, and answering a successful issue for anything else.
+  const posted: Record<string, unknown>[] = [];
+  const TYPED = "newhire2@example.test";
+  const impl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = String(input);
+    if (url.includes("/rest/v1/caller_context")) return jsonResponse(ADMIN_CONTEXT);
+    if (url === "/api/invite") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      posted.push(body);
+      if (body.email === TYPED && body.role === "owner") {
+        return jsonResponse(
+          {
+            ok: false,
+            kind: "refusal",
+            refusal: {
+              code: "CLR04",
+              message: "cannot invite to a role above your own rank",
+              reason: null,
+              status: 400,
+              pgCode: "CLR04",
+              codeSource: "sqlstate",
             },
-            400,
-          ),
-      },
-      calls,
-    ) as unknown as typeof fetch,
-    async () => {
-      const { h, body } = await mountMembers();
-      try {
-        const trigger = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Invite someone");
-        assert.ok(trigger);
-        await h.act(async () => {
-          await clickButton(trigger as never);
-        });
-        for (let i = 0; i < 4; i++) await h.settle();
-
-        const send = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Send invitation");
-        assert.ok(send);
-        await h.act(async () => {
-          await clickButton(send as never);
-        });
-        for (let i = 0; i < 6; i++) await h.settle();
-
-        const after = textOf(body as never);
-        assert.match(after, /cannot invite to a role above your own rank/, "a refusal that crossed the courier is still the DB's own sentence");
-        assert.match(after, /CLR04/);
-        // The dialog stays OPEN on a governed refusal, so the role can be
-        // corrected without retyping the address.
-        assert.match(after, /Invite someone to this firm/, "a refusal must not throw away what was typed");
-        // …and the surface must not ALSO claim the invitation was sent.
-        assert.ok(!/was sent\./.test(after), "a refused invite must never report a send");
-      } finally {
-        await h.unmount();
+          },
+          400,
+        );
       }
-    },
-  );
+      return jsonResponse({ ok: true, invite_id: "i-other", expires_at: "2026-09-06T00:00:00Z" });
+    }
+    return mockMembersFetch(url);
+  }) as unknown as typeof fetch;
+
+  await withMockedEnv(impl, async () => {
+    const { h, body } = await mountMembers();
+    try {
+      assert.ok(
+        !/cannot invite to a role above your own rank/.test(textOf(body as never)),
+        "VACUITY GUARD: the message must NOT already be on the page",
+      );
+
+      const trigger = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Invite someone");
+      assert.ok(trigger);
+      await h.act(async () => {
+        await clickButton(trigger as never);
+      });
+      for (let i = 0; i < 4; i++) await h.settle();
+
+      // THE PORTAL-CAPABLE HELPER, not `h.fireEvent`: an open Base UI dialog's
+      // content is portalled to `document.body`, a delegation root `fireEvent`
+      // never reaches (apps/web/AGENTS.md's first dialog law). `setFieldValue`
+      // invokes the live React `onChange` on the real node.
+      const email = findIn(body, (n) => n.tagName === "INPUT" && attrOf(n, "type") === "email");
+      const select = findIn(body, (n) => n.tagName === "SELECT");
+      assert.ok(email && select, "the dialog's own controls must render");
+      await h.act(() => {
+        setFieldValue(email as never, TYPED);
+      });
+      await h.act(() => {
+        setFieldValue(select as never, "owner");
+      });
+      await h.settle();
+
+      const send = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Send invitation");
+      assert.ok(send);
+      await h.act(async () => {
+        await clickButton(send as never);
+      });
+      for (let i = 0; i < 6; i++) await h.settle();
+
+      // WHAT THE SURFACE ACTUALLY POSTED. Break either field in the dialog and
+      // the mock answers `ok:true`, so the refusal assertions below find nothing.
+      assert.equal(posted.length, 1, "exactly one courier round trip");
+      assert.equal(posted[0]!.email, TYPED, "the typed address reached the wire");
+      assert.equal(posted[0]!.role, "owner", "…and the chosen role did too");
+
+      const after = textOf(body as never);
+      assert.match(after, /cannot invite to a role above your own rank/, "a refusal that crossed the courier is still the DB's own sentence");
+      assert.match(after, /CLR04/);
+      // The dialog stays OPEN on a governed refusal, so the role can be
+      // corrected without retyping the address.
+      assert.match(after, /Invite someone to this firm/, "a refusal must not throw away what was typed");
+      // …and the surface must not ALSO claim the invitation was sent.
+      assert.ok(!/was sent\./.test(after), "a refused invite must never report a send");
+    } finally {
+      await h.unmount();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -247,7 +325,13 @@ test("the courier's mail_failed renders under its OWN title, names the invite, a
               code: "mail_failed",
               message: "the invite was created but the email could not be sent",
               invite: { invite_id: "i-new", expires_at: "2026-09-06T00:00:00Z" },
-              detail: "450: the mail provider rejected the recipient",
+              // THE SHAPE THE COURIER REALLY SENDS NOW (independent review of
+              // #455, MEDIUM-3): no `detail`, because the only string it used to
+              // carry was the mail provider's own error text — and Resend had
+              // been handed the full secret URL. What comes back instead is the
+              // id the server logged the classified failure under.
+              detail: null,
+              correlation_id: "corr-9f2a",
             },
             502,
           ),
@@ -274,7 +358,11 @@ test("the courier's mail_failed renders under its OWN title, names the invite, a
         const after = textOf(body as never);
         assert.match(after, /The invitation was not sent/, "the courier's failures carry their OWN title, never the DB's voice");
         assert.match(after, /its link cannot be recovered/);
-        assert.match(after, /450: the mail provider rejected the recipient/, "the provider's own detail is relayed");
+        assert.match(after, /Reference corr-9f2a/, "THE CORRELATION ID IS RENDERED — an id nobody can see is not a support channel");
+        assert.ok(
+          !/450|mail provider rejected/.test(after),
+          "NO PROVIDER TEXT ON SCREEN: the string that used to sit here had been in the same process as both invite secrets",
+        );
         assert.ok(!/was sent\./.test(after), "a failed send must never also claim success");
 
         // A courier failure still RE-READS: `mail_failed` means the invite EXISTS,

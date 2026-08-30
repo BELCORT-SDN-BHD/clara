@@ -235,6 +235,7 @@
     },
     "courier": {
       "title": "The invitation was not sent",
+      "reference": "Reference {id} — quote it if you ask for help.",
       "no_session": "You are not signed in any more. Sign in and try again.",
       "cross_origin": "That request did not come from this app, so it was refused.",
       "invalid_request": "The invitation form sent something this server could not read.",

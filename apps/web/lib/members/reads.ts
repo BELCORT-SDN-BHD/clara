@@ -40,8 +40,14 @@
 //     EITHER "masked below admin+" OR "this member genuinely has none on file",
 //     and nothing on the wire distinguishes them. Review law 2: a derived state is
 //     not evidence. The surface therefore renders the ABSENCE and names both
-//     causes (components/admin/members-roster.tsx) — never a blank cell, and
-//     never a claim about which cause applied.
+//     causes (`components/admin/members-panel.tsx`'s `RosterTable`, and the
+//     `Members.roster.emailNote` sentence under it) — never a blank cell, and
+//     never a claim about which cause applied. This citation used to name a
+//     members-roster.tsx under components/admin, a file that has never existed
+//     in this tree (independent review of #455, LOW-12): the roster table is a
+//     module-level component INSIDE the panel, not a file of its own.
+//     `lib/members/members-doors.test.ts` now walks every path these modules
+//     cite and reds on one that does not resolve, so the class cannot recur.
 //   - NO `firm_id` COLUMN, deliberately: the view is already scoped by
 //     `clara.jwt_firm()`, so there is nothing for a caller to filter on and no
 //     tenant probe to attempt.

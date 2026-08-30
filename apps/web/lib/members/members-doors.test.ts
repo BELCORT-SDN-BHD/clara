@@ -24,7 +24,7 @@
 // order IS `clara.role_rank`'s own `case` mapping, read out of `0002`.
 
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
@@ -172,6 +172,64 @@ describe("the projections are the DB's own declared column contracts", () => {
 
   it("VACUITY CONTROL: the contract parser fails loudly on a relation it cannot find", () => {
     assert.throws(() => declaredContract(migration(M0141), "no_such_relation"), /no column contract/);
+  });
+});
+
+describe("every FILE these modules cite actually exists", () => {
+  // LOW-12 (independent review of #455). `lib/members/reads.ts` pointed a reader
+  // at `components/admin/members-roster.tsx` for the withheld-email behaviour —
+  // a file that has never existed in this tree; the roster table is a
+  // module-level component inside `members-panel.tsx`. Nothing caught it because
+  // a comment is not executable.
+  //
+  // Prose is not usually checkable. A BACKTICKED PATH is: it either resolves or
+  // it does not, and `tests/firm-scope-db-pins.test.ts` already established the
+  // idiom one layer up (its "a module that NAMES its pinning test must name one
+  // that really pins it" cell). This is the same instrument over this train's
+  // own modules.
+  const CITING = [
+    "lib/members/reads.ts",
+    "lib/members/doors.ts",
+    "lib/members/courier.ts",
+    "lib/members/invite-mail.ts",
+    "components/admin/members-panel.tsx",
+    "components/admin/member-row-menu.tsx",
+    "components/admin/invite-dialog.tsx",
+    "components/admin/members-confirm-dialog.tsx",
+  ];
+  /** A backticked repo-relative path with a source extension. Deliberately NOT
+   *  every backticked token: `0147:372` and `p_op_key` are citations of other
+   *  kinds, checked by other cells in this file. */
+  const CITATION = /`((?:app|lib|components|tests|test|scripts|messages)\/[A-Za-z0-9_./-]+\.(?:ts|tsx|mjs|json|txt))`/g;
+
+  for (const module of CITING) {
+    it(`${module} cites no path that fails to resolve`, () => {
+      const src = readFileSync(join(WEB_ROOT, module), "utf8");
+      const cited = [...src.matchAll(CITATION)].map((m) => m[1] as string);
+      for (const path of new Set(cited)) {
+        assert.ok(
+          existsSync(join(WEB_ROOT, path)),
+          `${module} points a reader at ${path}, which does not exist — a citation nobody can follow`,
+        );
+      }
+    });
+  }
+
+  it("VACUITY CONTROL: the walk finds real citations, and would catch a fake one", () => {
+    // Without this the cells above are equally green on a regex that matches
+    // nothing — the absence-from-the-wrong-instrument class, and the reason this
+    // defect survived review in the first place.
+    const found = CITING.flatMap((module) => [
+      ...readFileSync(join(WEB_ROOT, module), "utf8").matchAll(CITATION),
+    ]).map((m) => m[1] as string);
+    assert.ok(found.length >= 10, `only ${found.length} citations were seen across ${CITING.length} modules`);
+    assert.ok(
+      found.some((p) => existsSync(join(WEB_ROOT, p))),
+      "not one cited path resolved — the walk is reading the wrong root",
+    );
+    const fake = [...'`components/admin/members-roster.tsx`'.matchAll(CITATION)].map((m) => m[1] as string);
+    assert.deepEqual(fake, ["components/admin/members-roster.tsx"], "the regex no longer recognises the shape it exists for");
+    assert.equal(existsSync(join(WEB_ROOT, fake[0] as string)), false, "…and that path really is the one that does not resolve");
   });
 });
 

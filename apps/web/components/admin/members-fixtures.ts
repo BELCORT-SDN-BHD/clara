@@ -127,6 +127,20 @@ export const BOOKKEEPER_CONTEXT = [
   { user_id: "u-book", firm_id: "f-1", firm_name: "ROME PROPERTIES", role: "bookkeeper", role_rank: 1, is_operator: false },
 ];
 
+/**
+ * AN ADMIN CALLER — the only rank at which the role ceiling is a REAL wall.
+ *
+ * The ceiling refuses "a role ABOVE YOUR OWN rank" (`0145:603`, `0147:386`). An
+ * OWNER (rank 3) picking `owner` is not above anything, so a fixture that returns
+ * CLR04 for it is a mock refusing on the strength of the URL alone — the cell
+ * would stay green with the panel sending any arguments at all. An admin (rank 2)
+ * picking `owner` (rank 3) is the situation the wall exists for, and it is what
+ * the ceiling cells drive.
+ */
+export const ADMIN_CONTEXT = [
+  { user_id: "u-admin", firm_id: "f-1", firm_name: "ROME PROPERTIES", role: "admin", role_rank: 2, is_operator: false },
+];
+
 export function mockMembersFetch(u: string): Response {
   if (u.includes("/rest/v1/firm_members_visible")) return jsonResponse(MEMBERS);
   if (u.includes("/rest/v1/firm_invites_visible")) return jsonResponse(INVITES);

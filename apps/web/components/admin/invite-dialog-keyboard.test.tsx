@@ -14,13 +14,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { textOf, clickButton } from "../../test/hookHarness";
+import { textOf, clickButton, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { checkKeyboardWalk, focusableElements, isKeyboardOperable } from "../../test/keyboardWalk";
 import {
   attrOf,
   findAll,
   findIn,
+  jsonResponse,
   mockMembersFetch,
   mountMembers,
   withMockedEnv,
@@ -159,49 +160,115 @@ test("invite dialog: the ESCAPE PATH — Cancel closes it and leaves the trigger
 });
 
 test("invite dialog: a closed dialog FORGETS the address, so re-opening cannot re-send it by accident", async () => {
-  await withMockedEnv(
-    async (u) => mockMembersFetch(String(u)),
-    async () => {
-      const { h, body } = await mountMembers();
-      try {
-        const open = async () => {
-          const trigger = inviteTrigger(body);
-          assert.ok(trigger);
-          await h.act(async () => {
-            await clickButton(trigger as never);
-          });
-          for (let i = 0; i < 4; i++) await h.settle();
-        };
-        await open();
+  // REWRITTEN (independent review of #455, LOW-11). The previous version drove
+  // the field with `h.fireEvent` and a direct `n.value = …` mutation, which is
+  // vacuous twice over:
+  //   · `h.fireEvent` dispatches through the MOUNT CONTAINER's delegated
+  //     listener, and an open Base UI dialog's content is portalled to
+  //     `document.body` — a separate delegation root it never reaches
+  //     (apps/web/AGENTS.md's first dialog law). The React `onChange` was never
+  //     invoked at all.
+  //   · the assertion that followed read back the value THE TEST HAD JUST
+  //     WRITTEN, so it held whether or not the component was controlled.
+  // Deleting `onChange` from the Input left it green.
+  //
+  // Now the value goes in through `setFieldValue` (the shared portal-capable
+  // helper, which invokes the live React handler on the real node), and the
+  // proof is taken ON THE WIRE: what the courier was POSTED. That makes the two
+  // mutations red INDEPENDENTLY — removing `onChange` changes the first
+  // submission's body, removing the reset effect changes the second's.
+  //
+  // WHAT THIS STILL CANNOT PROVE is a real browser's own typing, focus and
+  // hit-testing; there is no layout engine in this harness (test/hookHarness.ts's
+  // own note). That is a Wave-G Playwright item, recorded in the PR body.
+  const posted: Record<string, unknown>[] = [];
+  const impl = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = String(input);
+    if (url === "/api/invite") {
+      posted.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return jsonResponse({ ok: true, invite_id: "i-new", expires_at: "2026-09-06T00:00:00Z" });
+    }
+    return mockMembersFetch(url);
+  }) as unknown as typeof fetch;
 
-        const input = findIn(body, (n) => n.tagName === "INPUT" && attrOf(n, "type") === "email");
-        assert.ok(input);
-        await h.fireEvent(input as never, "change", (n) => {
-          (n as unknown as { value: string }).value = "typed@example.test";
-        });
-        await h.settle();
-        assert.equal((input as unknown as { value: string }).value, "typed@example.test");
-
-        const cancel = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Cancel");
+  await withMockedEnv(impl, async () => {
+    const { h, body } = await mountMembers();
+    try {
+      const open = async () => {
+        const trigger = inviteTrigger(body);
+        assert.ok(trigger, "the invite trigger must render");
         await h.act(async () => {
-          await clickButton(cancel as never);
+          await clickButton(trigger as never);
         });
         for (let i = 0; i < 4; i++) await h.settle();
-        await open();
+      };
+      const field = () => {
+        const input = findIn(body, (n) => n.tagName === "INPUT" && attrOf(n, "type") === "email");
+        const select = findIn(body, (n) => n.tagName === "SELECT");
+        assert.ok(input && select, "the dialog's own controls must render");
+        return { input, select };
+      };
+      const send = async () => {
+        const button = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Send invitation");
+        assert.ok(button, "Send invitation must render");
+        await h.act(async () => {
+          await clickButton(button as never);
+        });
+        for (let i = 0; i < 6; i++) await h.settle();
+      };
 
-        const reopened = findIn(body, (n) => n.tagName === "INPUT" && attrOf(n, "type") === "email");
-        assert.ok(reopened);
-        assert.equal(
-          (reopened as unknown as { value: string }).value,
-          "",
-          "a re-opened dialog must not present the address that was just invited — one click from CLR10 'an invite is already pending for this email'",
-        );
-        // …and the role chooser is back at its default too.
-        const options = findAll(body, (n) => n.tagName === "OPTION");
-        assert.equal(options.length, 4);
-      } finally {
-        await h.unmount();
-      }
-    },
-  );
+      await open();
+      const first = field();
+      await h.act(() => {
+        setFieldValue(first.input as never, "typed@example.test");
+      });
+      await h.act(() => {
+        setFieldValue(first.select as never, "admin");
+      });
+      await h.settle();
+
+      // THE TYPED VALUES REACHED REACT STATE — measured where it matters, on the
+      // request the courier received. A field whose `onChange` was never wired
+      // posts the initial state instead.
+      await send();
+      assert.deepEqual(
+        posted,
+        [{ email: "typed@example.test", role: "admin" }],
+        "the address and role the human entered are what went to the courier",
+      );
+
+      // A successful invite closes the dialog, and closing is what clears it.
+      assert.ok(
+        !/Invite someone to this firm/.test(textOf(body as never)),
+        "a successful invite must close the dialog before the reset can be observed",
+      );
+
+      await open();
+      const second = field();
+      assert.equal(
+        (second.input as unknown as { value: string }).value,
+        "",
+        "a re-opened dialog must not present the address that was just invited — one click from CLR10 'an invite is already pending for this email'",
+      );
+      // The ROLE's reset is asserted on the wire below rather than here: a
+      // freshly-mounted `<select>` in this harness reports `value === ""` until
+      // react-dom writes it, because the stub has no real option-selection
+      // machinery (test/hookHarness.ts's `mkNode` provides `options` and
+      // `multiple` and nothing more). Reading it here would be measuring the
+      // stub. The submitted body cannot be faked the same way.
+      assert.equal(findAll(body, (n) => n.tagName === "OPTION").length, 4, "all four roles are still offered");
+
+      // AND THE SAME PROOF ON THE WIRE: submitting the re-opened dialog untouched
+      // posts the DEFAULTS, not what was typed before. This is the half that goes
+      // red when the reset effect is deleted, independently of the half above.
+      await send();
+      assert.deepEqual(
+        posted[1],
+        { email: "", role: "bookkeeper" },
+        "A RE-OPENED DIALOG THAT STILL HELD THE OLD VALUES WOULD RE-SEND THEM",
+      );
+    } finally {
+      await h.unmount();
+    }
+  });
 });

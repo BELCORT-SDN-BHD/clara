@@ -31,6 +31,7 @@ components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
 components/admin/members-a11y.test.tsx
 components/admin/members-keyboard.test.tsx
+components/admin/members-single-fire.test.tsx
 components/admin/members-walls.test.tsx
 components/bank/bank-a11y.test.tsx
 components/bank/matching-section.test.tsx
