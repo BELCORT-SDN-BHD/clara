@@ -400,6 +400,13 @@ RED-before mutant per refusal branch.
 
 ## P6-X · The cutover PR — retiring `apps/dashboard`
 
+> **Scope note (RULED, 裁-60/裁-72):** the cutover fires only after ALL SEVEN P6-C trains
+> (P6-C1…C7 — the domain-train reorganisation of the 81 cutover-owed + 29 orphan verbs, criticality
+> order fiscal-year/close → firm admin/onboarding/egress → journals/governance/coding →
+> opening/carry-down → counterparty/documents/questions → fixed assets/depreciation + staff
+> advances → adjustments + reports/sweeps/seeding) have landed — "cutover when C7 lands," not as
+> soon as P6-2 renders. The dashboard stays untouched and no beta user is pointed at it before then.
+
 **Branch:** web/p6-x-cutover. **Size 0.5. CEREMONY-GRADE. Depends on: every train above, plus
 both exit gates green (plan §5.2).**
 
