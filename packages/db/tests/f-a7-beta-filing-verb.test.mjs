@@ -372,6 +372,16 @@ async function fa7bPraLanded() {
   return r.rows[0].n > 0;
 }
 
+/** 裁-18b PR-1 adds TWO more filing rows (wake_propose_vendor_identity_binding,
+ *  wake_list_binding_candidates). Gated on the migration STEM exactly like PR-a above, and for
+ *  the same reason: an unconditional expectation reds every chain that holds this migration out.
+ *  The stem, not a number — the file ships UNNUMBERED and the conductor numbers it at merge. */
+async function bindingProposalPr1Landed() {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version ~ 'binding_proposal_pr_1$'");
+  return r.rows[0].n > 0;
+}
+
 test("filing allowlist: closed world holds exactly the six train-beta rows, plus F-A7b PR-a's own once that train has landed (cell 40, corrected scope, gated)", async (t) => {
   if (unready(t)) return;
   const r = await rootQuery("select function_name from clara.wake_fn_allowlist where wake_kind='filing' order by 1");
@@ -384,14 +394,19 @@ test("filing allowlist: closed world holds exactly the six train-beta rows, plus
   // unconditional (independent review finding F2): an unconditional row-8 expectation reds any
   // chain that holds PR-a's migration out (46/1 on the beta-only frontier).
   const praLanded = await fa7bPraLanded();
+  const bp1Landed = await bindingProposalPr1Landed();
   const expected = [
     "get_document_extract", "wake_file_document", "wake_open_firm_question",
     "wake_propose_filing_correction", "wake_propose_identifier_promotion", "wake_reattribute_document",
     ...(praLanded ? ["wake_propose_client_onboarding"] : []),
+    // 裁-18b PR-1's two: the proposal door and its eligibility read, both on the `filing` kind
+    // per G1 arm A. Gated on the same succession principle as PR-a's row above.
+    ...(bp1Landed ? ["wake_propose_vendor_identity_binding", "wake_list_binding_candidates"] : []),
   ].sort();
-  assert.deepEqual(got, expected, praLanded
+  assert.deepEqual(got, expected, `${praLanded
     ? "filing allowlist rows 1-6 (train beta) + row 8 (F-A7b PR-a, landed); row 7 (wake_begin_client_onboarding) is F-A7b PR-b's, still unclaimed"
-    : "filing allowlist rows 1-6 (train beta) only -- F-A7b PR-a has not landed on this chain");
+    : "filing allowlist rows 1-6 (train beta) only -- F-A7b PR-a has not landed on this chain"}${
+    bp1Landed ? " + 裁-18b PR-1's two binding rows (landed)" : " -- 裁-18b PR-1 has not landed on this chain"}`);
 });
 
 test("filing allowlist twin: a filing credential cannot call wake_draft_entry", async (t) => {
