@@ -449,8 +449,27 @@ insert into clara.trigger_taxonomy(version, event_type, decision, note)
     from clara.taxonomy_active ta;
 
 -- =====================================================================================
--- S4 -- THE INTERNALS. All ungranted; the doors and the reads share ONE spelling of each rule so
--- a wall and the read that reports on it can never disagree.
+-- S4 -- THE INTERNALS. The doors and the reads share ONE spelling of each rule so a wall and the
+-- read that reports on it can never disagree.
+--
+-- FOUR OF THE FIVE ARE **SECURITY INVOKER**, AND THAT IS THE SECURITY DECISION IN THIS FILE.
+-- MEASURED, not reasoned about: the first rig run of clara.coa_template_family_plan raised
+-- `42501 permission denied for function _coa_family_plan` -- an INVOKER-rights read cannot reach
+-- an ungranted DEFINER helper. The two ways out are not equal:
+--   * GRANT the helpers while they stay DEFINER. REFUSED. A granted DEFINER
+--     _coa_client_axis(p_client, ...) would answer for ANY client uuid a caller cared to type,
+--     with the owner's RLS bypass behind it -- a cross-tenant read oracle reachable by every
+--     authenticated user, minted to save a keyword. That is the security mechanism being
+--     weakened for convenience, which the lane brief forbids in as many words.
+--   * Make them INVOKER and grant them. TAKEN. As INVOKER they carry NO authority of their own:
+--     every relation they touch (client_facts, onboarding_plans/_items, coa_template_families,
+--     coa_template_entity_overrides) is RLS-filtered to the caller's firm, so a caller learns
+--     exactly what a direct SELECT would already have told them and nothing more. Called from
+--     inside the DEFINER doors, current_user is clara_fn_owner and the owner policy applies --
+--     which is the behaviour the plant loop needs, and it is reached without any second body.
+-- THEIR FRONTEND HOME IS THEIR CALLER'S (.claude/rules/db-migrations.md): they are helpers of
+-- the five named reads, never surfaces a screen calls directly.
+-- clara._coa_plant_family stays SECURITY DEFINER and reaches NOBODY -- it writes.
 -- =====================================================================================
 set role clara_fn_owner;
 
@@ -458,7 +477,7 @@ set role clara_fn_owner;
 -- register (5): the estate's own idiom, spliced into get_context_pack by 0055 S6 for exactly
 -- entity_type and msic.
 create function clara._coa_client_axis(p_client uuid, p_key text) returns text
-  language sql stable security definer set search_path = clara, pg_temp as $$
+  language sql stable security invoker set search_path = clara, pg_temp as $$
   select coalesce(
     (select cf.fact_value #>> '{}' from clara.client_facts cf
       where cf.client_id = p_client and cf.fact_key = p_key and cf.superseded_at is null
@@ -473,7 +492,7 @@ $$;
 revoke all on function clara._coa_client_axis(uuid,text) from public;
 
 create function clara._coa_client_axes(p_client uuid) returns jsonb
-  language sql stable security definer set search_path = clara, pg_temp as $$
+  language sql stable security invoker set search_path = clara, pg_temp as $$
   select jsonb_build_object(
     'entity_type',  clara._coa_client_axis(p_client, 'entity_type'),
     'trade_nature', clara._coa_client_axis(p_client, 'trade_nature'),
@@ -486,7 +505,7 @@ revoke all on function clara._coa_client_axes(uuid) from public;
 -- never report itself `renamed`. A null return means SUPPRESSED -- not planted, and not missing.
 create function clara._coa_effective_account_name(p_template uuid, p_code text,
     p_template_name text, p_entity_type text) returns text
-  language sql stable security definer set search_path = clara, pg_temp as $$
+  language sql stable security invoker set search_path = clara, pg_temp as $$
   select case
            when o.template_id is null then p_template_name
            when o.suppress then null
@@ -512,7 +531,7 @@ revoke all on function clara._coa_effective_account_name(uuid,text,text,text) fr
 -- a client with no facts at all is proposed exactly the core set and every declared axis is
 -- reported ABSENT by name. Absence is not evidence (review law 2).
 create function clara._coa_family_plan(p_client uuid, p_template uuid) returns jsonb
-  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+  language plpgsql stable security invoker set search_path = clara, pg_temp as $$
 declare
   v_axes jsonb; v_entity text; v_nature text; v_msic text; v_div text;
   v_keep text[]; v_drop text[]; v_absent text[]; v_axis text;
@@ -1080,8 +1099,9 @@ $$;
 reset role;
 
 -- =====================================================================================
--- S7 -- THE EXECUTE MATRIX. The two writers and the five reads reach clara_authenticated ONLY;
--- every internal reaches NOBODY but its owner. NO WAKE GRANT, ON PURPOSE: Annex E's first
+-- S7 -- THE EXECUTE MATRIX. The two writers, the five reads and the four INVOKER helpers reach
+-- clara_authenticated ONLY; the one WRITING internal (_coa_plant_family) reaches NOBODY but its
+-- owner. NO WAKE GRANT, ON PURPOSE: Annex E's first
 -- non-goal is "any agent path to the BULK apply" -- one rationale covering forty accounts is not
 -- forty rationales -- so no wake role, no allowlist row, and the battery proves the raise rather
 -- than the absence of a grant.
@@ -1101,6 +1121,18 @@ grant execute on function clara.get_coa_template_adoption(uuid) to clara_authent
 grant execute on function clara.coa_chart_state(uuid) to clara_authenticated;
 grant execute on function clara.coa_template_drift(uuid) to clara_authenticated;
 grant execute on function clara.firm_coa_drift() to clara_authenticated;
+
+-- The four INVOKER helpers the five reads call (S4's header states the security decision and why
+-- the DEFINER alternative was refused). They carry no authority: RLS filters every relation they
+-- touch to the caller's own firm, so each answers exactly what a direct SELECT already would.
+revoke all on function clara._coa_client_axis(uuid,text) from public;
+revoke all on function clara._coa_client_axes(uuid) from public;
+revoke all on function clara._coa_effective_account_name(uuid,text,text,text) from public;
+revoke all on function clara._coa_family_plan(uuid,uuid) from public;
+grant execute on function clara._coa_client_axis(uuid,text) to clara_authenticated;
+grant execute on function clara._coa_client_axes(uuid) to clara_authenticated;
+grant execute on function clara._coa_effective_account_name(uuid,text,text,text) to clara_authenticated;
+grant execute on function clara._coa_family_plan(uuid,uuid) to clara_authenticated;
 
 -- =====================================================================================
 -- S8 -- TAIL CENSUS. What a reviewer reads. Everything below is measured out of the live catalog
@@ -1232,8 +1264,10 @@ begin
   select count(*) into v_n from clara.taxonomy_versions;
   raise notice 'coa-template PR-b: taxonomy versions unmoved at % (additive registration, never a flip)', v_n;
 
-  -- (5) THE ACL MATRIX, by property. Seven doors reach clara_authenticated and clara_fn_owner
-  --     ONLY; five internals reach NOBODY but the owner; PUBLIC reaches none of the twelve.
+  -- (5) THE ACL MATRIX, by property. Seven doors AND the four INVOKER helpers reach
+  --     clara_authenticated and clara_fn_owner ONLY; the one WRITING internal reaches NOBODY but
+  --     the owner; PUBLIC reaches none of the twelve. The helpers are in the same loop as the
+  --     doors on purpose: they carry the same reach, so they take the same census.
   for r in select x from unnest(array[
       'clara.apply_coa_template(uuid,uuid,text[],text)',
       'clara.add_coa_template_family(uuid,uuid,text,text)',
@@ -1241,7 +1275,11 @@ begin
       'clara.get_coa_template_adoption(uuid)',
       'clara.coa_chart_state(uuid)',
       'clara.coa_template_drift(uuid)',
-      'clara.firm_coa_drift()']) x loop
+      'clara.firm_coa_drift()',
+      'clara._coa_client_axis(uuid,text)',
+      'clara._coa_client_axes(uuid)',
+      'clara._coa_effective_account_name(uuid,text,text,text)',
+      'clara._coa_family_plan(uuid,uuid)']) x loop
     if not has_function_privilege('clara_authenticated', r.x::regprocedure, 'EXECUTE') then
       raise exception 'S8: clara_authenticated cannot EXECUTE %', r.x using errcode = 'CLR10';
     end if;
@@ -1253,18 +1291,13 @@ begin
       end if;
     end loop;
   end loop;
-  for r in select x from unnest(array[
-      'clara._coa_client_axis(uuid,text)',
-      'clara._coa_client_axes(uuid)',
-      'clara._coa_effective_account_name(uuid,text,text,text)',
-      'clara._coa_family_plan(uuid,uuid)',
-      'clara._coa_plant_family(jsonb,uuid,uuid,text,text)']) x loop
-    for v_txt in select rolname from pg_roles where rolname like 'clara\_%' and rolname <> 'clara_fn_owner' loop
-      if has_function_privilege(v_txt, r.x::regprocedure, 'EXECUTE') then
-        raise exception 'S8: role % can EXECUTE the internal % -- it is owner-only', v_txt, r.x
-          using errcode = 'CLR10';
-      end if;
-    end loop;
+  -- The one WRITING internal is owner-only. It is the whole reason the DEFINER/INVOKER split
+  -- exists: a granted writer would be a door with no ladder.
+  for v_txt in select rolname from pg_roles where rolname like 'clara\_%' and rolname <> 'clara_fn_owner' loop
+    if has_function_privilege(v_txt, 'clara._coa_plant_family(jsonb,uuid,uuid,text,text)'::regprocedure, 'EXECUTE') then
+      raise exception 'S8: role % can EXECUTE clara._coa_plant_family -- the writing internal is owner-only', v_txt
+        using errcode = 'CLR10';
+    end if;
   end loop;
   for r in select x from unnest(array[
       'clara.apply_coa_template(uuid,uuid,text[],text)',
@@ -1284,19 +1317,18 @@ begin
     end if;
   end loop;
 
-  -- (6) THE SECURITY POSTURE, by property rather than by reading the file back. The two writers
-  --     and the five internals are DEFINER with a pinned search_path; the five READS are INVOKER
-  --     so RLS decides, and a definer read here would be a new read surface nobody asked for.
+  -- (6) THE SECURITY POSTURE, by property rather than by reading the file back. THE THREE
+  --     WRITERS are DEFINER with a pinned search_path (they reach the ungranted account core);
+  --     the five READS **and the four granted helpers** are INVOKER so RLS decides. A DEFINER
+  --     helper reachable by clara_authenticated would be a cross-tenant read oracle, which is
+  --     the defect S4's header records this file measured and refused -- so this census is the
+  --     drift guard on that decision, and it fails if a later hand flips one back.
   for r in select p.oid::regprocedure::text as sig, p.prosecdef, p.proconfig
              from pg_proc p join pg_namespace n on n.oid = p.pronamespace
             where n.nspname = 'clara'
               and p.oid::regprocedure::text = any (array[
                 'clara.apply_coa_template(uuid,uuid,text[],text)',
                 'clara.add_coa_template_family(uuid,uuid,text,text)',
-                'clara._coa_client_axis(uuid,text)',
-                'clara._coa_client_axes(uuid)',
-                'clara._coa_effective_account_name(uuid,text,text,text)',
-                'clara._coa_family_plan(uuid,uuid)',
                 'clara._coa_plant_family(jsonb,uuid,uuid,text,text)']) loop
     if not r.prosecdef then
       raise exception 'S8: % is not SECURITY DEFINER', r.sig using errcode = 'CLR10';
@@ -1314,9 +1346,13 @@ begin
                 'clara.get_coa_template_adoption(uuid)',
                 'clara.coa_chart_state(uuid)',
                 'clara.coa_template_drift(uuid)',
-                'clara.firm_coa_drift()']) loop
+                'clara.firm_coa_drift()',
+                'clara._coa_client_axis(uuid,text)',
+                'clara._coa_client_axes(uuid)',
+                'clara._coa_effective_account_name(uuid,text,text,text)',
+                'clara._coa_family_plan(uuid,uuid)']) loop
     if r.prosecdef then
-      raise exception 'S8: the read % is SECURITY DEFINER -- the reads are INVOKER so RLS decides', r.sig
+      raise exception 'S8: the read % is SECURITY DEFINER -- every clara_authenticated-reachable read in this file is INVOKER so RLS decides', r.sig
         using errcode = 'CLR10';
     end if;
     if r.proconfig is null or not (r.proconfig @> array['search_path=clara, pg_temp']) then
@@ -1366,5 +1402,5 @@ begin
   end if;
 
   select count(*) into v_n from clara.coa_template_adoptions;
-  raise notice 'coa-template PR-b tail: OK -- D1 INVENTORY EMPTY, PROVEN BY WHOLE-CATALOG DIFFERENTIAL: every pre-existing clara function byte-identical on prosrc + ACL + owner, none dropped, and the ADDED set an exact signature MAP of this file''s twelve (7 doors + 5 internals); the FOUR upsert_account chain bodies re-pinned by prosrc sha256 AFTER the work as well as before. ONE new relation, clara.coa_template_entity_overrides: clara_fn_owner-owned, ENABLE+FORCE RLS, EXACTLY 2 policies (owner ALL + the parent-derived human SELECT), ZERO INSERT/UPDATE/DELETE/TRUNCATE reach for any non-owner clara role (migration-seeded DATA, no door writes it), carrying exactly 2 reviewed rows -- society/3900 RELABELLED "Accumulated Fund" and society/3040 SUPPRESSED, discharging in full the written obligation 0150''s header handed to this PR. ONE new event type, account.chart_applied, registered as the COUPLED PAIR (clara.event_types client_scoped + clara.trigger_taxonomy `notification` at the ACTIVE version) with the whole-catalog coverage anti-join re-proved EMPTY and the taxonomy version count unmoved. ACL: the 7 doors reach clara_authenticated + clara_fn_owner and NO other clara role -- NO WAKE GRANT and NO allowlist row, Annex E''s first non-goal (no agent path to the BULK apply) held structurally; the 5 internals reach NOBODY but their owner; PUBLIC reaches none of the twelve. POSTURE by property: the 2 writers + 5 internals SECURITY DEFINER with search_path pinned to clara,pg_temp; the 5 READS INVOKER (0004:730-739''s trial_balance idiom, 0150''s own posture) so RLS decides who sees what. Neither writer nor the plant loop contains any DML against clara.coa_accounts -- every planted account goes through clara._upsert_account_core and inherits its live ladder, its _audit row and its account.upserted event unchanged. % coa_template_adoptions row(s) live: this file plants no client chart. Constraint 15: workflow/graphile_worker/spike relation counts unmoved and none of this file''s names inside them.', v_n;
+  raise notice 'coa-template PR-b tail: OK -- D1 INVENTORY EMPTY, PROVEN BY WHOLE-CATALOG DIFFERENTIAL: every pre-existing clara function byte-identical on prosrc + ACL + owner, none dropped, and the ADDED set an exact signature MAP of this file''s twelve (7 doors + 5 internals); the FOUR upsert_account chain bodies re-pinned by prosrc sha256 AFTER the work as well as before. ONE new relation, clara.coa_template_entity_overrides: clara_fn_owner-owned, ENABLE+FORCE RLS, EXACTLY 2 policies (owner ALL + the parent-derived human SELECT), ZERO INSERT/UPDATE/DELETE/TRUNCATE reach for any non-owner clara role (migration-seeded DATA, no door writes it), carrying exactly 2 reviewed rows -- society/3900 RELABELLED "Accumulated Fund" and society/3040 SUPPRESSED, discharging in full the written obligation 0150''s header handed to this PR. ONE new event type, account.chart_applied, registered as the COUPLED PAIR (clara.event_types client_scoped + clara.trigger_taxonomy `notification` at the ACTIVE version) with the whole-catalog coverage anti-join re-proved EMPTY and the taxonomy version count unmoved. ACL: the 7 doors AND the 4 INVOKER helpers reach clara_authenticated + clara_fn_owner and NO other clara role -- NO WAKE GRANT and NO allowlist row, Annex E''s first non-goal (no agent path to the BULK apply) held structurally; the one WRITING internal _coa_plant_family reaches NOBODY but its owner; PUBLIC reaches none of the twelve. POSTURE by property, and it is this file''s security decision: the 3 WRITERS (2 doors + the plant loop) are SECURITY DEFINER with search_path pinned to clara,pg_temp, while the 5 READS and the 4 granted helpers are INVOKER (0004:730-739''s trial_balance idiom, 0150''s own posture) so RLS decides who sees what -- a granted DEFINER helper answering for any client uuid would be a cross-tenant read oracle, which the first rig run surfaced as a 42501 and this census now drift-guards in both directions. Neither writer nor the plant loop contains any DML against clara.coa_accounts -- every planted account goes through clara._upsert_account_core and inherits its live ladder, its _audit row and its account.upserted event unchanged. % coa_template_adoptions row(s) live: this file plants no client chart. Constraint 15: workflow/graphile_worker/spike relation counts unmoved and none of this file''s names inside them.', v_n;
 end $tail$;
