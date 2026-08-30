@@ -22,6 +22,38 @@
 > `tax-computation-design-part2.md` (§8-§13), `tax-computation-annexes.md` (D-18..D-26, the re-cut
 > predictions, the re-worked ladder) and the new `tax-computation-annexes-2-mechanics.md`. **This file
 > is the fold's specification.**
+>
+> **v1.3 note, 2026-08-29 (the PR-0 replay).** Two claims in this record were re-measured on a
+> throwaway rig and are corrected in `tax-computation-annexes-2-mechanics.md` §M0 rather than
+> restated here: **GB-1's snapshot-builder citations point at a `finalize_close` body superseded
+> TWICE** (`0056` create → `0120` CoR → `0128` CoR), so re-cite to `0128:307` and
+> `0128:463`/`:473` — the substance holds at the live body (M0 **D-1**); and **GB-1's "two
+> independent catalog confirmations" is really one plus a file comment** —
+> `obj_description('clara.close_receipts')` is NULL and the table carries zero column comments, so
+> `0056:1503` is a SQL `--` comment, not a catalog `COMMENT ON` (M0 **D-1b**). The finding itself is
+> unaffected; the framing was over-claimed. *`0056:1544` (`uq_cr_one_active_close`) and `0056:1554`
+> (`_tf_close_receipts_belt`'s live refusal text) DO still resolve and are kept.*
+
+---
+
+## 0 · The ten findings that changed a mechanism
+
+*Moved here from `tax-computation-design.md`'s header at the v1.3 fold. This file is the fold's
+specification; that one has a 500-line budget its own header states; and a table restated in two
+places drifts in one of them.*
+
+| What was wrong in v1.2 | Where it is fixed |
+|---|---|
+| The ladder read `closing_position`, which is **balance-sheet-only**; the per-account P&L movement is `snapshot->'pl_rows'`, and the sign rule was never stated | design §3, A.2 (**D-18**) |
+| The **two loss deductions were in each other's rung** and the s.44(6) cap sat on the wrong base | design §3 R7/R8 (**D-19**) |
+| The **carry-forward inputs did not exist** anywhere in the estate; the ladder deducted zero silently | design §4.2 (**D-19**) |
+| `record_client_fact` **cannot carry F-T3's facts** — no valid time, a fail-closed dispatch, CLR04 in a migration — and `tin`/`ssm` already have a governed home | design §4.1 (**D-21, D-22**) |
+| A basis period diverging from the sealed fiscal year computed anyway | design §3 R1 (**D-23**) |
+| The **human-keyed guarantee was a NOT-NULL check the agent satisfies** | design §2 (**D-24**) |
+| **No wake door** for any of the three agent writes | design §3.1 (**D-25**) |
+| The disposal value is **not** the accounting proceeds; the FA immutability allowlist excludes the new column; the disposal verb does not write the register row | design §5, mechanics §M3 (**D-7 re-cut, D-26**) |
+| The frozen evaluator read tables created in a **later** PR | part 2 §11 |
+| Ten new relations with **no tenancy or RLS shape**, and every refusal string missing its `metric_na_reason_versions` row | mechanics §M4, part 2 §9 |
 
 ---
 
@@ -255,10 +287,18 @@ list and are minted by this fold, so four was right for what it read and seven i
 `tax_authorities` · `tax_treatment_codes` · `tax_rate_bands` · `capital_allowance_rates` ·
 `tax_thresholds` · the field-pack map. Two of the seven need a **second** composite binding:
 `tax_account_treatments`/`tax_entry_treatments` to `clara.coa_accounts (account_id, firm_id, client_id)`
-— the target `uq_coa_account_id_tenant` exists at `0058:56` and is used by nothing — and
-`ca_asset_years` to `clara.fixed_assets`, which has **no** such unique (its PK is `id` alone,
-`0003:155`), so **PR-3 adds `uq_fa_id_tenant unique (id, firm_id, client_id)`** first. **Fold:
-mechanics §M4; prediction P-14.**
+— the target `uq_coa_account_id_tenant` exists at `0058:56` ~~and is used by nothing~~ **[v1.3 —
+WRONG, and corrected on-rig: read from `pg_constraint.conindid`, THREE live FKs already bind to that
+exact index — `account_set_version_members`, `metric_input_snapshot_contributions`,
+`metric_input_snapshot_samples`. The unique is therefore NOT droppable and nothing in PR-1..PR-3 may
+assume it is; PR-4 adds a FOURTH dependant rather than the first]** — and
+`ca_asset_years` to `clara.fixed_assets`, ~~which has **no** such unique (its PK is `id` alone,
+`0003:155`), so **PR-3 adds `uq_fa_id_tenant unique (id, firm_id, client_id)`** first~~ **[v1.3 —
+also WRONG, HALF-REFUTED at the replay (M0 D-7): `uq_fixed_assets_id_firm_client UNIQUE (id,
+firm_id, client_id)` ALREADY exists, the `0003:155` cite is stale by the whole Wave-D/E arc, and
+**PR-3 must NOT add `uq_fa_id_tenant`** — it binds to the existing constraint]**. **Fold:
+mechanics §M4; prediction P-14. Both halves of this paragraph were source-reads that the rig
+refuted; this is the class PR-0's replay exists to catch.**
 
 ---
 
