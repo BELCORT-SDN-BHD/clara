@@ -1,5 +1,8 @@
--- UNNUMBERED_binding_proposal_pr_1.sql -- 裁-18b PR-1: the Clara vendor-binding PROPOSAL door.
--- Number claimed at MERGE PREPARATION (standing law, AGENTS.md + .claude/rules/db-migrations.md).
+-- 0154_binding_proposal_pr_1.sql -- 裁-18b PR-1: the Clara vendor-binding PROPOSAL door.
+-- Number 0154 claimed at MERGE PREPARATION 2026-08-30 (standing law, AGENTS.md +
+-- .claude/rules/db-migrations.md); authored as UNNUMBERED_binding_proposal_pr_1.sql, reviewed
+-- CLEAR at c9789c3e by three independent legs (native review x3 rounds, native adversarial,
+-- Codex x3 rounds), replayed at scratch number 0152 -- every self-reference below uses the stem.
 -- Authored as 0150 against a main frontier of 0147_db_hardening_b_hash_only_bearer_tokens, then
 -- REPLAYED 2026-08-30 as 0152 onto a frontier of 0151_f_a9_pr_1b_brake_census (146 files), in
 -- two moves as main ran ahead of this branch:

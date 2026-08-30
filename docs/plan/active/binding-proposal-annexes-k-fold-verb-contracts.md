@@ -8,7 +8,7 @@
 below — the gate's M7 finding named this gap explicitly: "Annex A specifies no `decline` verb
 at all — no name, signature, floor, audit/event or transition guard.")*
 
-Every fact below is read directly from `packages/db/migrations/UNNUMBERED_binding_proposal_pr_1.sql`
+Every fact below is read directly from `packages/db/migrations/0154_binding_proposal_pr_1.sql` (authored as `UNNUMBERED_binding_proposal_pr_1.sql`; number claimed at merge prep)
 (tip `7829adf0`), not inferred and not copied from any older draft.
 
 ## K.0 — the one lock, the one order (H6 / C-1)
