@@ -1,9 +1,9 @@
 "use client";
 
 // The operator approval queue — design §4 B, §5 ask 8; Mobbin grounding §2
-// (docs/plan/active/p4-mobbin-grounding-2026-08-28.md). One export,
-// `RegistrationsQueuePanel`, split in three: the operator-eligibility gate
-// (an AFFORDANCE, not the wall — see `isOperatorConsoleEligible`'s own
+// (docs/plan/active/p4-mobbin-grounding-2026-08-28.md). ONE COMPONENT
+// export, `RegistrationsQueuePanel`, split in three: the operator-eligibility
+// gate (an AFFORDANCE, not the wall — see `isOperatorConsoleEligible`'s own
 // header in lib/registration/doors.ts), the queue table, and the
 // dialog-gated Reject act. Approve carries NO dialog on purpose — Mobbin §2
 // takeaway 2: "approval is a direct, receipted act", the same reasoning
@@ -11,6 +11,13 @@
 // (components/journals/drafts-queue-panel.tsx, F5-ratified) — a no-field
 // confirmation dialog around a single click that IS already the confirming
 // act adds friction without adding a real second confirmation step.
+//
+// FOLD (round-3) exports `rejectKeyFor`, a plain, React-free async
+// function — the round-2 Map-based `keyFor` it replaces is gone entirely
+// (Codex round-3, LOW: the Map "retains one key per normalised reason...
+// entries persist until the row unmounts" — unbounded historical state for
+// no reason, since the key is a pure function of its inputs). See that
+// function's own header.
 
 import { useRef, useState } from "react";
 import { useTranslations } from "next-intl";
@@ -34,7 +41,7 @@ import { DataTableCard } from "@/components/common/data-table-card";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { createSingleFireGuard, runOnce } from "@/lib/parts/single-fire-guard";
-import { loadCallerContext } from "@/lib/firm/caller-context";
+import { isCallerContextRow, loadCallerContext } from "@/lib/firm/caller-context";
 import {
   approveFirmRegistration,
   isOperatorConsoleEligible,
@@ -76,12 +83,39 @@ export function RegistrationsQueuePanel() {
     );
   }
 
+  // FOLD (Codex round-3, MEDIUM caller-context shape fails open):
+  // `lib/read.ts`'s `getRows` (via `wire.ts`'s `pgrestSelect`) parses a
+  // successful HTTP-200 body as `T[]` through a bare generic cast — nothing
+  // on that path runs `isCallerContextRow`. `ctxState.data[0]` alone
+  // therefore trusted an eligible-SHAPED row even if its `user_id` were
+  // missing/null/not-a-UUID (minting `reg-approve-<id>-undefined` below,
+  // colliding every malformed caller onto ONE key) and silently took the
+  // FIRST of two-or-more rows rather than denying the ambiguity. This
+  // mirrors the established fail-closed pattern this exact view already
+  // has at `lib/require-firm-scope.ts`'s `resolveFirmScope` (`:176-186`
+  // there — "exactly one row AND isCallerContextRow(row)"), rather than
+  // re-deriving a second, driftable copy of the same judgement (review law
+  // 3: a row that merely LOOKS like a CallerContextRow is a projection of
+  // one, not proof). Zero rows, more than one row, and a single malformed
+  // row all deny identically here — this screen shows one honest refusal
+  // line either way (this gate is an AFFORDANCE, not the wall, per
+  // `isOperatorConsoleEligible`'s own header — the DB is).
+  // FOLD (round-3 native re-verify addendum): same four-way fail-closed
+  // guard as above, restated as one combined condition per that review's
+  // own requested shape — `row` is read positionally (`data[0]`) and
+  // `ctxState.data.length > 1` catches the ambiguous case explicitly,
+  // rather than folding "exactly one" into the lookup itself. Equivalent
+  // truth table, different phrasing.
   const row = ctxState.data[0];
-  if (!row || !isOperatorConsoleEligible(row)) {
+  if (!row || ctxState.data.length > 1 || !isCallerContextRow(row) || !isOperatorConsoleEligible(row)) {
     return <StateBanner tone="warning">{t("notOperator")}</StateBanner>;
   }
 
-  return <OperatorQueue />;
+  // FOLD (Codex round-2, MEDIUM cross-operator Approve key collision): the
+  // caller's own `user_id`, now PROVEN to actually be a UUID by the
+  // validation above, threaded down so `handleApprove` below can bind it
+  // into the deterministic op_key. See that function's own comment for why.
+  return <OperatorQueue callerId={row.user_id} />;
 }
 
 /** THE REAL QUEUE — mounted only once the eligibility gate above has
@@ -93,7 +127,7 @@ export function RegistrationsQueuePanel() {
  *  single-banner convention rather than drafts-queue-panel.tsx's per-row
  *  `actingId` attribution, which that file needs only because it also
  *  carries an expandable per-row detail panel this one does not. */
-function OperatorQueue() {
+function OperatorQueue({ callerId }: { callerId: string }) {
   const t = useTranslations("Registrations");
   const { data: rows, err, clr, busy, act } = useHydratedPart(sessionTokenAccessor, (session) =>
     loadOperatorRegistrationQueue(session),
@@ -118,7 +152,23 @@ function OperatorQueue() {
     // row is decided. Simpler than the round-1 fix and needs no cleanup:
     // once the row leaves the open queue it is never re-approved, so this
     // key is never recomputed for it again either way.
-    const key = `reg-approve-${row.id}`;
+    //
+    // FOLD (Codex round-2, MEDIUM cross-operator Approve key collision):
+    // `_reserve_op` (0004_governed_fns.sql:46-55) is scoped ONLY by
+    // `(firm, fn, op_key)` -- the actor lives solely inside the re-hashed
+    // request/actor pair (0145:788-790), never in the reservation's own
+    // identity. A key derived from `row.id` ALONE therefore collides
+    // across two DIFFERENT operator-firm owners racing the same row: the
+    // second caller's key is "reused with different args" (CLR10) before
+    // the door ever reads the row's own status, masking the honest CLR09
+    // ("no longer open") a second decider should see. `callerId` (this
+    // component's own prop, sourced from `caller_context.user_id` -- see
+    // RegistrationsQueuePanel's header, never a client-supplied value)
+    // makes the key actor-scoped too: a SAME-actor retry still replays
+    // (identical row + identical callerId -> identical key -> identical
+    // request hash), while a DIFFERENT actor mints its own key and reaches
+    // the row-status check on its own merits.
+    const key = `reg-approve-${row.id}-${callerId}`;
     // A NEW attempt clears the LAST attempt's receipt too (the
     // OnboardingChecklistCard F5 precedent) — otherwise a later refusal
     // renders beside a stale, unrelated "firm created" banner.
@@ -141,14 +191,20 @@ function OperatorQueue() {
     }, onOk);
   }
 
-  // FOLD (Codex LOW-4): the FOUR states below are mutually exclusive at
-  // the top level — before the first successful load, exactly ONE of
-  // error / loading / empty / table renders, never error-plus-loading. A
-  // LATER reload failing (rows already holds data from an earlier load)
-  // is a DIFFERENT case: the error banner renders ALONGSIDE the still-
-  // displayed table, matching compliance-register-panel.tsx's own
-  // precedent ("the list is still real... the failure renders ALONGSIDE
-  // it, never replacing it").
+  // FOLD (Codex LOW-4, amended round-2): before the first successful
+  // load (`rows` still null), error and loading are mutually exclusive —
+  // exactly ONE of them renders, never error-plus-loading, and the empty
+  // state cannot exist yet (there is no data to be empty). ONCE `rows`
+  // holds a real result (empty array included), a LATER reload failing
+  // renders `errorBanner` ALONGSIDE whatever that result was — table OR
+  // EmptyState — matching compliance-register-panel.tsx's own precedent
+  // ("the list is still real... the failure renders ALONGSIDE it, never
+  // replacing it"). Round-2 fix: the empty branch used to drop
+  // `errorBanner` entirely, so a governed refusal whose mandatory
+  // re-read happened to empty the queue (the row it just decided was the
+  // last open one) silently vanished — the ACT succeeded or failed for
+  // real reasons a screen reader and a sighted operator both need to see,
+  // regardless of how many rows are left afterward.
   const errorBanner = err ? (
     <StateBanner tone="error" code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}>
       {err}
@@ -166,8 +222,12 @@ function OperatorQueue() {
       ) : rows.length === 0 ? (
         // Mobbin grounding §2 takeaway 5: none of the three table references
         // showed an empty state — the house pattern, not a reference,
-        // supplies this one. Plain muted prose, no icon.
-        <EmptyState>{t("empty")}</EmptyState>
+        // supplies this one. Plain muted prose, no icon. FOLD (round-2):
+        // `errorBanner` renders here too now — see the block comment above.
+        <>
+          {errorBanner}
+          <EmptyState>{t("empty")}</EmptyState>
+        </>
       ) : (
         <>
           {errorBanner}
@@ -187,6 +247,7 @@ function OperatorQueue() {
               <RegistrationRow
                 key={row.id}
                 row={row}
+                callerId={callerId}
                 busy={busy}
                 onApprove={() => handleApprove(row)}
                 onReject={(reason, opKey, onOk) => handleReject(row, reason, opKey, onOk)}
@@ -202,11 +263,13 @@ function OperatorQueue() {
 
 function RegistrationRow({
   row,
+  callerId,
   busy,
   onApprove,
   onReject,
 }: {
   row: RegistrationRequestRow;
+  callerId: string;
   busy: boolean;
   onApprove: () => Promise<void>;
   onReject: (reason: string, opKey: string, onOk: () => void) => Promise<void>;
@@ -231,7 +294,13 @@ function RegistrationRow({
           <Button type="button" size="sm" disabled={busy} onClick={onApprove}>
             {t("approveTrigger")}
           </Button>
-          <RejectDialog firmName={row.firm_name} busy={busy} onReject={onReject} />
+          <RejectDialog
+            requestId={row.id}
+            callerId={callerId}
+            firmName={row.firm_name}
+            busy={busy}
+            onReject={onReject}
+          />
         </div>
       </TableCell>
     </TableRow>
@@ -250,22 +319,51 @@ function RegistrationRow({
  *  single-fire guard mirrors that same file's ref-backed reasoning (a
  *  synchronous click-to-click race `disabled={busy}` alone cannot close,
  *  because `busy` only takes effect on the NEXT render). */
-/** The bound Codex MEDIUM-2 cites — the design's own 500-character reference.
- *  The DB-side twin (`char_length(v_reason) > 500` → CLR10) is a MIGRATION
- *  and belongs to P4-D's tranche, not this order — recorded in the PR body,
- *  not built here. A UI-only bound is bypassable, so it is enforced TWICE
- *  here: the native `maxLength` attribute (stops typing/most pastes) AND an
- *  explicit length check in `confirmDisabled` (never trusts the attribute
- *  alone — a test can set `.value` directly, bypassing native input
- *  handling entirely, the same class of gap `setFieldValue`'s own header
- *  in test/hookHarness.ts documents). */
+/** The bound Codex MEDIUM-2 cites — the design's own 500-character
+ *  reference, meaning Unicode CODE POINTS (matching PostgreSQL's own
+ *  `char_length` direction — the DB-side twin, `char_length(v_reason) >
+ *  500` → CLR10, is a MIGRATION and belongs to P4-D's tranche, not this
+ *  order, recorded in the PR body, not built here), never grapheme
+ *  clusters: a combining-mark sequence or a ZWJ emoji sequence counts as
+ *  MULTIPLE units here even though it reads as one visual character —
+ *  Postgres's `char_length` does not count grapheme clusters either, so
+ *  this stays consistent with the eventual DB wall rather than a friendlier
+ *  but DIFFERENT bound the two would then disagree on.
+ *
+ *  FOLD (Codex round-3, LOW native maxlength contradicts the code-point
+ *  contract): the native `maxLength` HTML attribute counts UTF-16 CODE
+ *  UNITS on the RAW, untrimmed value, before any of this file's own
+ *  code-point logic ever runs (the HTML spec's own `string length`,
+ *  https://infra.spec.whatwg.org/#strings) — for 500 supplementary
+ *  characters (each a surrogate PAIR) that attribute silently stopped
+ *  typing at ~250, and a legitimately-valid padded reason (500 core
+ *  characters plus surrounding whitespace) could not be typed past 500
+ *  raw units even though the TRIMMED value was fine. Removed entirely —
+ *  the explicit `normalizedLength` gate below (trimmed, code-point-
+ *  counted, matching what actually travels to the wire) is now the ONLY
+ *  wall, never contradicted by a second, differently-counted one. */
 const REASON_MAX_LENGTH = 500;
 
+/** FOLD (Codex round-2, LOW reason-length metric drift): count Unicode CODE
+ *  POINTS, not UTF-16 code units — `string.length` counts each surrogate
+ *  pair (a supplementary character, e.g. many emoji) as TWO, silently
+ *  halving the effective bound for such text and disagreeing with both the
+ *  "characters" copy and PostgreSQL's own `char_length` (which the DB-side
+ *  wall this file's header defers to P4-D will use). Iterating a string
+ *  (`[...s]`/`Array.from`) walks by code point, matching that semantics. */
+function codePointLength(s: string): number {
+  return [...s].length;
+}
+
 function RejectDialog({
+  requestId,
+  callerId,
   firmName,
   busy,
   onReject,
 }: {
+  requestId: string;
+  callerId: string;
   firmName: string;
   busy: boolean;
   onReject: (reason: string, opKey: string, onOk: () => void) => Promise<void>;
@@ -274,16 +372,31 @@ function RejectDialog({
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const guardRef = useRef(createSingleFireGuard());
-  // FOLD (Codex HIGH-1): ONE stable op_key per (request, NORMALISED
-  // reason) — reject's own hash binds `reason` (0145:850-851), so a retry
-  // of the SAME reason must reuse the SAME key, but an EDITED reason must
-  // mint a fresh one (reusing the old key against different args would hit
-  // `_reserve_op`'s own "op_key reused with different args" CLR10). This
-  // dialog's own component instance is stable for the lifetime of its row
-  // (keyed by `row.id` one level up) and unmounts once the row leaves the
-  // open queue, so the cache needs no separate pruning — it disappears with
-  // the row it belongs to.
-  const keyCacheRef = useRef<{ reason: string; key: string } | null>(null);
+
+  // FOLD (Codex round-2, LOW reason-length metric drift): derived ONCE per
+  // render and used EVERYWHERE below — the counter text, the Confirm gate,
+  // and the wire payload all agree on the SAME normalised (trimmed) text
+  // and the SAME code-point count. Before this fold, the counter compared
+  // raw `reason.length` (untrimmed, UTF-16 units) while the gate compared
+  // `reason.trim().length` (trimmed, still UTF-16 units) — a padded-500
+  // reason (500 core characters plus surrounding whitespace) showed
+  // "too long" while Confirm was actually enabled, and 500 supplementary
+  // code points (1000 UTF-16 units) showed double their real count.
+  const normalized = reason.trim();
+  const normalizedLength = codePointLength(normalized);
+
+  // FOLD (round-3 native re-verify addendum, LOW): the reason field's id/
+  // htmlFor/aria-describedby used to be a bare hardcoded literal —
+  // `reg-reject-reason` — shared by EVERY row's own `RejectDialog`
+  // instance. With two-or-more open registrations on screen, that is a
+  // duplicate id twice over (the textarea's own id, and the counter
+  // paragraph's), and a screen reader's label lookup for `htmlFor`
+  // resolves to whichever DOM node owns the id FIRST — always row 1's
+  // field, never the row the caller actually opened. Scoped by
+  // `requestId` (this dialog's own row, already a prop) so every row's
+  // ids are unique in the same document.
+  const reasonId = `reg-reject-reason-${requestId}`;
+  const reasonCounterId = `${reasonId}-counter`;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -300,35 +413,43 @@ function RejectDialog({
           <DialogDescription>{t("rejectDescription")}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-1.5">
-          <Label htmlFor="reg-reject-reason">{t("reasonLabel")}</Label>
+          <Label htmlFor={reasonId}>{t("reasonLabel")}</Label>
           <Textarea
-            id="reg-reject-reason"
+            id={reasonId}
             required
             aria-required="true"
-            maxLength={REASON_MAX_LENGTH}
-            aria-describedby="reg-reject-reason-counter"
+            aria-describedby={reasonCounterId}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder={t("reasonPlaceholder")}
           />
           {/* FOLD (Codex MEDIUM-2): a localized, live counter — not a bare
               number — so the bound is legible to a screen reader too. */}
-          <p id="reg-reject-reason-counter" className="text-xs text-muted-foreground">
-            {reason.length > REASON_MAX_LENGTH
+          <p id={reasonCounterId} className="text-xs text-muted-foreground">
+            {normalizedLength > REASON_MAX_LENGTH
               ? t("reasonTooLong", { max: REASON_MAX_LENGTH })
-              : t("reasonCounter", { count: reason.length, max: REASON_MAX_LENGTH })}
+              : t("reasonCounter", { count: normalizedLength, max: REASON_MAX_LENGTH })}
           </p>
         </div>
         <DialogFooter>
           <DialogClose render={<Button variant="ghost" disabled={busy} />}>{t("cancel")}</DialogClose>
           <Button
             variant="destructive"
-            disabled={busy || reason.trim().length === 0 || reason.trim().length > REASON_MAX_LENGTH}
+            disabled={busy || normalizedLength === 0 || normalizedLength > REASON_MAX_LENGTH}
             onClick={async () => {
-              const normalized = reason.trim();
-              const ran = await runOnce(guardRef.current, () =>
-                onReject(normalized, keyFor(keyCacheRef, normalized), () => setReason("")),
-              );
+              // FOLD (Codex round-3, LOW Reject key — unbounded historical
+              // Map): the digest is computed INSIDE the guarded callback,
+              // not before it — `runOnce`'s own check-and-set stays
+              // synchronous at click time (single-fire-guard.ts's own
+              // header: "read/written synchronously, in the SAME
+              // microtask as the click handler"), so a rapid double-click
+              // is still dropped by the SECOND call's guard check before
+              // it ever starts a redundant digest, exactly as before this
+              // fold.
+              const ran = await runOnce(guardRef.current, async () => {
+                const key = await rejectKeyFor(requestId, callerId, normalized);
+                await onReject(normalized, key, () => setReason(""));
+              });
               if (ran) setOpen(false);
             }}
           >
@@ -340,13 +461,38 @@ function RejectDialog({
   );
 }
 
-/** See `RejectDialog`'s own `keyCacheRef` comment. A free function (not a
- *  method) so it stays trivially unit-testable in isolation from React. */
-function keyFor(cacheRef: { current: { reason: string; key: string } | null }, normalizedReason: string): string {
-  if (cacheRef.current && cacheRef.current.reason === normalizedReason) {
-    return cacheRef.current.key;
-  }
-  const key = crypto.randomUUID();
-  cacheRef.current = { reason: normalizedReason, key };
-  return key;
+/** FOLD (Codex round-3, LOW Reject key — unbounded historical Map):
+ *  SHA-256 via Web Crypto (native in every target browser and in Node's
+ *  `node --test` harness — no polyfill, no new dependency) over the
+ *  normalised reason. The digest itself needs no cryptographic property
+ *  here — this is a client-side DEDUPE key, not a security boundary;
+ *  `_reserve_op`'s own stored `request_hash` comparison is the real wall
+ *  (0004_governed_fns.sql:46-60) — but reusing the platform's own
+ *  primitive is simpler and more legible than justifying a bespoke one. */
+async function sha256Hex(input: string): Promise<string> {
+  const bytes = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** The Reject op_key — PURE and STATELESS, replacing the round-2 `Map`
+ *  entirely (Codex round-3, LOW: "the Map retains one key per normalised
+ *  reason... entries persist until the row unmounts" — every distinct
+ *  FAILED confirm added one more, unbounded for the dialog's lifetime).
+ *  `(requestId, callerId, normalizedReason)` deterministically reproduces
+ *  the SAME key every time — A/A replays and A/B/A's first and third calls
+ *  agree BY CONSTRUCTION, needing no cache to remember them — while a
+ *  genuinely different reason always reproduces a DIFFERENT key (reject's
+ *  own request hash binds `reason` too, 0145:850-851, so a key collision
+ *  across two different reasons would hit `_reserve_op`'s "op_key reused
+ *  with different args" CLR10). `callerId` is folded in for the SAME
+ *  reason `handleApprove`'s key above binds it — two different operators
+ *  independently rejecting the same request must not collide onto one
+ *  key. Exported for a direct unit test, same reasoning as the round-2
+ *  `keyFor` this replaces. */
+export async function rejectKeyFor(requestId: string, callerId: string, normalizedReason: string): Promise<string> {
+  const digest = await sha256Hex(normalizedReason);
+  return `reg-reject-${requestId}-${callerId}-${digest.slice(0, 16)}`;
 }

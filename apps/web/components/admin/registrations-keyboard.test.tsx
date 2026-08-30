@@ -63,7 +63,13 @@ function App(children: unknown, heading: string) {
   });
 }
 
-const CALLER_CONTEXT = [{ user_id: "u1", firm_id: "f1", firm_name: "BELCORT", role: "owner", role_rank: 3, is_operator: true }];
+// FOLD (Codex round-3, MEDIUM caller-context shape fails open): a REAL
+// UUID-shaped id — `isCallerContextRow` (require-firm-scope.test.ts's own
+// established table) rejects "u1"/"f1" outright, so this fixture would
+// never reach eligibility at all once the panel validates the row.
+const CALLER_USER_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const CALLER_FIRM_ID = "11111111-1111-4111-8111-111111111111";
+const CALLER_CONTEXT = [{ user_id: CALLER_USER_ID, firm_id: CALLER_FIRM_ID, firm_name: "BELCORT", role: "owner", role_rank: 3, is_operator: true }];
 const OPEN_REQUEST = {
   id: "r1", applicant: "a1234567-89ab-cdef-0123-456789abcdef", firm_name: "Rome Public Advisory",
   note: null, status: "open", decided_by: null, decided_at: null, reason: null, firm_id: null,
@@ -237,7 +243,7 @@ test("Approve: the discriminating post-condition — the approved row LEAVES the
   );
 });
 
-test("FOLD (Codex HIGH-1 / opus MEDIUM FIND-3): a synchronous double-click on Approve results in EXACTLY ONE approve_firm_registration call, keyed reg-approve-r1", async () => {
+test("FOLD (Codex HIGH-1 / opus MEDIUM FIND-3, round-2 actor-scoped): a synchronous double-click on Approve results in EXACTLY ONE approve_firm_registration call, keyed reg-approve-r1-<callerId>", async () => {
   let approveCalls = 0;
   const seenOpKeys: unknown[] = [];
   let queueCall = 0;
@@ -285,8 +291,11 @@ test("FOLD (Codex HIGH-1 / opus MEDIUM FIND-3): a synchronous double-click on Ap
         assert.equal(seenOpKeys.length, 1);
         // RULED at the opus addendum (MEDIUM FIND-3): Approve's op_key is
         // now a STABLE, DETERMINISTIC template keyed on the row id, not a
-        // cached crypto.randomUUID() — assert the literal shape.
-        assert.equal(seenOpKeys[0], "reg-approve-r1");
+        // cached crypto.randomUUID() — assert the literal shape. FOLD
+        // (round-2, cross-operator collision): the template now ALSO binds
+        // the caller's own user_id (CALLER_CONTEXT's `CALLER_USER_ID`
+        // above) — the literal below is the round-2 shape.
+        assert.equal(seenOpKeys[0], `reg-approve-r1-${CALLER_USER_ID}`);
       } finally {
         await h.unmount();
         // FOLD hygiene: remove the mounted container from document.body —
@@ -438,7 +447,7 @@ test("Reject: the F7 self-decision refusal (CLR04) renders VERBATIM — the exac
   );
 });
 
-test("FOLD (Codex MEDIUM-2): Confirm refuses a reason over 500 characters even with maxLength BYPASSED, accepts exactly 500", async () => {
+test("FOLD (Codex MEDIUM-2): Confirm refuses a reason over 500 plain characters, accepts exactly 500", async () => {
   await withMockedEnv(
     async (u) => {
       const url = String(u);
@@ -457,11 +466,12 @@ test("FOLD (Codex MEDIUM-2): Confirm refuses a reason over 500 characters even w
         assert.ok(textarea, "the reason field must be open");
 
         // `setFieldValue` writes `.value` directly and fires onChange —
-        // this harness's stub does NOT itself enforce the native
-        // `maxLength` attribute (that is real-browser input behaviour, not
-        // something a bare property setter reproduces), so this is exactly
-        // the "maxLength bypassed" scenario Codex's finding names: the
-        // COMPONENT's own logic must be the second, independent wall.
+        // the SAME live handler a real keystroke reaches. FOLD (Codex
+        // round-3, LOW native maxlength contradicts the code-point
+        // contract): the textarea no longer carries a native `maxLength`
+        // attribute at all (registrations-queue.tsx's REASON_MAX_LENGTH
+        // header) — this is no longer a "bypass" of anything; the
+        // COMPONENT's own explicit code-point gate is the ONLY wall now.
         await h.act(() => {
           setFieldValue(textarea as never, "x".repeat(501));
         });
@@ -470,7 +480,7 @@ test("FOLD (Codex MEDIUM-2): Confirm refuses a reason over 500 characters even w
         assert.equal(
           (confirmButton as unknown as { disabled: boolean }).disabled,
           true,
-          "Confirm must refuse 501 characters even though the native maxLength attribute was bypassed by a direct .value write",
+          "Confirm must refuse 501 characters via the explicit code-point gate",
         );
         assert.match(textOf(body as never), /must be 500 characters or fewer/, "the localized over-length copy must render");
 
