@@ -116,8 +116,10 @@ doors → the addendum spec; Wave-7A backfill, closed).
 
 ## Dispositions owed (the owner's sheet)
 
-1. **The P6 cutover scope ruling** — the 81, three options (port-all · port-critical +
-   dashboard-behind-admin-flag · port-critical + named Known-issues deferrals).
-2. **The 29 orphan dispositions**, headlined by the fiscal-year cluster ("no UI can open
-   a fiscal year") — likely P6-close scope, needs the owner's word.
+1. ~~**The P6 cutover scope ruling**~~ — **RULED 裁-72: port-all.** All 110 verbs (the 81 +
+   the 29 orphans below) get an `apps/web` home before the domain switch, organised as
+   domain trains P6-C1…C7.
+2. ~~**The 29 orphan dispositions**~~ — **RULED 裁-72**, same disposition as item 1: the
+   fiscal-year cluster ("no UI can open a fiscal year") and the rest all port, inside the
+   P6-C trains.
 3. `requeue_render_job`'s possible unrecorded P3 scope-down — reconcile at P6.

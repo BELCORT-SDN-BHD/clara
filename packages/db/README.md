@@ -12,13 +12,17 @@ truth (`docs/ARCHITECTURE.md` §3).
 > structural invariants, the balance/immutability/append-only triggers, and
 > money-as-cents. See `docs/plan/completed/rebuild-plan-history.md`.
 >
-> **Migration ledger — TRUED 2026-08-26 (counted, not remembered).** The repo carries **131
-> migration files, `0001`–`0136`** (the sequence skips `0032`, which never existed, and the
-> `0055`-era gaps), and **live is applied through the frontier `0136_fix_freeform_basis_types`**
-> — matching `PROGRESS.md`'s posture line. *(Was: "97 migrations, `0001`–`0102`, frontier
-> `0102_f_a2_statement_activation`, as of 2026-08-23" — stale by 34 files and 34 numbers.)* The
-> paragraph below is the **2026-08-09 arrivals note**, kept as the record of that batch rather
-> than rewritten:
+> **Migration ledger — TRUED 2026-08-30 (counted, not remembered).** The repo carries **150
+> migration files, `0001`–`0155`** (the sequence skips `0032` and `0073`–`0076`, none of which
+> ever existed as files — `0073`-`0076` were claimed by the Wave-E ζ render/DR train and then
+> re-claimed at `0079`-`0083` when the frontier moved before it merged; only its OWN squash
+> subject still says "0073-0076", stale pre-renumber testimony, immutable, while the migrations
+> DIRECTORY stays the numbering authority), and **live is applied through the frontier
+> `0153_f_t1_sst_reference_tables`, 148 migrations** — matching `PROGRESS.md`'s noon posture
+> line (`0154`/`0155` are on `main`, merged but NOT yet applied). *(Was: "131 migration files,
+> `0001`–`0136`, frontier `0136_fix_freeform_basis_types`, as of 2026-08-26" — stale by 19 files
+> and 19 numbers.)* The paragraph below is the **2026-08-09 arrivals note**, kept as the record
+> of that batch rather than rewritten:
 >
 > The most recent arrivals
 > are the **F6–F9 batch** (ADR-066, applied 2026-08-08 23:24Z in ONE D1-quiesced ceremony):

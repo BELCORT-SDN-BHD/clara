@@ -224,6 +224,11 @@ carries a **closed census of every relation its body names**, each with the PR t
 | **PR-8** | the `law_review_due` belt — `wake_raise_law_review_due` on `proactive` + its allowlist row, a consumer of F-A4's clock, idempotent per row per horizon, resolving only by a seeded successor | partial | no |
 | **PR-9** | **NEW, minted by 裁-44 (2026-08-30) — the `tax_prep` WAKE: the agentic half.** The wake body (shaped on `close_prep`), its `wake_engine_sources` row shipped `enabled=false`, the allowlist rows, and the **tax-draft card** in the needs-you inbox. After a close seals, Clara drafts R1–R10 + the CP204 estimate **unasked**, every rung carrying its statutory citation and her explanation, and **proposes** each account's treatment through PR-4's existing `wake_propose_tax_treatment` — **a human still signs** (裁-38). The SST-02 drafts when the taxable period closes; CP204 due-date reminders go proactive. **The computation layer is untouched**, and 裁-33's draft-only wall is unmoved. The source is the **fourth switch opened at the G1 rollout ceremony** with `bank_agent`, `close_prep` and the binding-expiry sweep (裁-40 as amended), **after this body is built and reviewed** | **yes** | no |
 
+**Note (RULED, 裁-59/裁-62):** PR-9 is NOT G1's fourth switch — the G1 rollout ceremony opens
+exactly three sources (`bank_agent` · `close_prep` · binding-expiry); `tax_prep` gets its own later
+sitting. PR-9 also stays inert at beta: with all 13 treatment codes unsigned, `wake_run_tax_computation`
+cannot even draft (裁-62), so PR-9 is off the beta critical path regardless of build order.
+
 **Why PR-9 is last and not first.** It adds no relation the frozen member reads, so it cannot move
 the ordering law above; and it cannot draft a computation before PR-6 registers the member that
 computes one. It is the lane's **posture**, added once the lane's arithmetic exists.

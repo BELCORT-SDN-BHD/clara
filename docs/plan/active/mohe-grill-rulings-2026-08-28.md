@@ -272,6 +272,8 @@ D1 window; full ladder. T8's UI says exactly what the door does at each frontier
 **Ruled (confirming the conductor's call):** `SweepReceiptPart` upgrades from an id-only
 summary card to a rich card with `get_sweep_run` detail + `acknowledge_sweep_run` inside the
 P6 wire bump (`chatTurn_v15`), alongside the other unhydrated part types. No separate train.
+**[TRUED 2026-08-30: the bump this ruling names is `chatTurn_v16` — `v15` shipped 2026-08-29
+for the unrelated F-A6 PR-2 and is consumed+frozen.]**
 
 ### 裁-21 · A firm-level standard Malaysian SME chart of accounts — YES, before beta
 
