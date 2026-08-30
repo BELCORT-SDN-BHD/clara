@@ -10,7 +10,8 @@
 //
 // What is STILL NOT BUILT here: the CARD — a proactive `close_proposal` typed
 // part Clara raises unprompted in the chat rail. That is the P6 four-part
-// wire bump's own scope (chatTurn_v15, apps/web/lib/parts/{types,catalog}.ts
+// wire bump's own scope (chatTurn_v16 — TRUED 2026-08-30, was v15; v15 shipped
+// 2026-08-29 for the unrelated F-A6 PR-2 — apps/web/lib/parts/{types,catalog}.ts
 // + PartRenderer.tsx) — recorded here as P6-owed, not fabricated as a
 // NotBuiltNote, because the object this panel opens is real and live.
 
