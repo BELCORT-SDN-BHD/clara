@@ -54,6 +54,42 @@ import { createClient } from "@/lib/supabase/server";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * The DECIDING half of `serverCallerSubject`, extracted so it can be driven by a
+ * test. Everything around it — `cookies()`, `createClient()`, `getClaims()` — is
+ * plumbing that needs a live Next request scope and decides nothing; this is the
+ * part that says yes or no, and a fail-closed branch nobody can exercise is a
+ * branch nobody has seen work (review law 1: judgement logic gets proven, not
+ * asserted).
+ *
+ * Returns `null` for anything that is not a uuid-shaped string. That matters
+ * beyond tidiness: the value is spliced into a PostgREST filter as
+ * `applicant=eq.<sub>`, so a verified-but-malformed claim would otherwise reach
+ * the query string. `URLSearchParams` encodes it, and the view's own predicate
+ * re-scopes it — this is the third, cheapest wall, not the only one.
+ */
+export function subjectFromClaims(claims: unknown): string | null {
+  if (typeof claims !== "object" || claims === null) return null;
+  const sub: unknown = (claims as Record<string, unknown>).sub;
+  if (typeof sub !== "string" || !UUID_RE.test(sub)) return null;
+  return sub;
+}
+
+/**
+ * The deciding half of `getAccessToken`, on the same reasoning.
+ *
+ * An empty-string token is "no usable token": `lib/read.ts`'s `getRows`
+ * classifies `!token` as `no_session` anyway, so folding it to `null` here keeps
+ * both ends of this seam agreeing on the same falsy set instead of one end
+ * calling `""` a session and the other not.
+ */
+export function tokenFromSession(session: unknown): string | null {
+  if (typeof session !== "object" || session === null) return null;
+  const token: unknown = (session as Record<string, unknown>).access_token;
+  if (typeof token !== "string" || token.length === 0) return null;
+  return token;
+}
+
+/**
  * The stable server-lane accessor. Resolves the current request's raw Supabase
  * access token, or `null` when there is no session — `null` is a legitimate
  * answer, never an error (the same contract `lib/session.ts`'s `getSessionToken`
@@ -73,11 +109,8 @@ export const serverSessionTokenAccessor: SessionTokenAccessor = {
   async getAccessToken(): Promise<string | null> {
     const supabase = await createClient();
     const { data, error } = await supabase.auth.getSession();
-    if (error || !data.session) return null;
-    // `|| null`, not `?? null`: an empty-string token is "no usable token", and
-    // lib/read.ts's `getRows` classifies `!token` as `no_session` anyway — folding
-    // it here keeps the two ends of this seam agreeing on the same falsy set.
-    return data.session.access_token || null;
+    if (error) return null;
+    return tokenFromSession(data.session);
   },
 };
 
@@ -102,7 +135,5 @@ export async function serverCallerSubject(): Promise<string | null> {
   const supabase = await createClient();
   const { data, error } = await supabase.auth.getClaims();
   if (error) return null;
-  const sub: unknown = data?.claims?.sub;
-  if (typeof sub !== "string" || !UUID_RE.test(sub)) return null;
-  return sub;
+  return subjectFromClaims(data?.claims);
 }

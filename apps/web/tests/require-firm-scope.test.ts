@@ -19,6 +19,10 @@ import {
   type ScopeOutcome,
 } from "../lib/require-firm-scope";
 import type { CallerContextRow } from "../lib/firm/caller-context";
+import {
+  subjectFromClaims,
+  tokenFromSession,
+} from "../lib/supabase/server-session";
 
 /**
  * THE SCOPE SPINE'S BEHAVIOUR (P4-2; design `p4-design-2026-08-27.md` §4 E).
@@ -273,5 +277,62 @@ describe("firmScopeRefusal — entrance 3 (the runtime API route)", () => {
     for (const reason of ["no_membership", "ambiguous", "malformed", "read_failed"]) {
       assert.ok(!body.includes(reason), `the refusal body leaks the reason "${reason}"`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE SERVER SESSION SEAM — the deciding halves, driven
+// ---------------------------------------------------------------------------
+
+/**
+ * `serverSessionTokenAccessor.getAccessToken()` and `serverCallerSubject()` need a
+ * live Next request scope (`cookies()`) and cannot be called here. What they
+ * DECIDE was extracted into two pure helpers precisely so the fail-closed
+ * branches are drivable — the plumbing around them decides nothing.
+ */
+describe("lib/supabase/server-session — the deciding halves", () => {
+  const SUB = "55555555-5555-4555-8555-555555555555";
+
+  it("tokenFromSession: only a non-empty string token is a token", () => {
+    assert.equal(tokenFromSession({ access_token: "abc" }), "abc");
+    assert.equal(tokenFromSession(null), null);
+    assert.equal(tokenFromSession(undefined), null);
+    assert.equal(tokenFromSession({}), null);
+    assert.equal(tokenFromSession({ access_token: "" }), null, "an empty token is not a session");
+    assert.equal(tokenFromSession({ access_token: 42 }), null);
+  });
+
+  it("subjectFromClaims: only a uuid-shaped sub is an identity", () => {
+    assert.equal(subjectFromClaims({ sub: SUB }), SUB);
+    assert.equal(subjectFromClaims(null), null);
+    assert.equal(subjectFromClaims(undefined), null);
+    assert.equal(subjectFromClaims({}), null, "an absent sub is not an identity");
+    assert.equal(subjectFromClaims({ sub: 42 }), null);
+    assert.equal(subjectFromClaims({ sub: "" }), null);
+  });
+
+  it("subjectFromClaims refuses a claim that would reshape the PostgREST filter", () => {
+    // The value is spliced into `applicant=eq.<sub>`. Signature-verified is not
+    // the same as well-formed, and this is the cheapest of the three walls.
+    for (const hostile of [
+      "not-a-uuid",
+      `${SUB}&select=*`,
+      `${SUB} or true`,
+      "*",
+      `${SUB}\n`,
+    ]) {
+      assert.equal(
+        subjectFromClaims({ sub: hostile }),
+        null,
+        `accepted a malformed sub: ${JSON.stringify(hostile)}`,
+      );
+    }
+  });
+
+  it("RED-before: a helper that trusts the claim verbatim fails the cell above", () => {
+    const trusting = (claims: unknown) => (claims as { sub?: string } | null)?.sub ?? null;
+    assert.throws(() => {
+      assert.equal(trusting({ sub: `${SUB}&select=*` }), null, "accepted a malformed sub");
+    }, /accepted a malformed sub/);
   });
 });
