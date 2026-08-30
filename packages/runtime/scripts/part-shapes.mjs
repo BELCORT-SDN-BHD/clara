@@ -30,6 +30,30 @@ function propertyNameText(name) {
   return null;
 }
 
+function computedPropertyNameText(name) {
+  if (!ts.isComputedPropertyName(name)) return null;
+  const expression = name.expression;
+  if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) return expression.text;
+  return null;
+}
+
+function literalTypeDiscriminant(member) {
+  if (!ts.isPropertySignature(member) || !member.name) return null;
+  const name = propertyNameText(member.name) ?? computedPropertyNameText(member.name);
+  const type = member.type;
+  if (name !== "type" || !type || !ts.isLiteralTypeNode(type) || !ts.isStringLiteral(type.literal)) return null;
+  return { computed: ts.isComputedPropertyName(member.name), kind: type.literal.text };
+}
+
+function typeContainsLiteralDiscriminant(node) {
+  if (ts.isTypeLiteralNode(node)) return node.members.some((member) => literalTypeDiscriminant(member) !== null);
+  if (ts.isParenthesizedTypeNode(node)) return typeContainsLiteralDiscriminant(node.type);
+  if (ts.isIntersectionTypeNode(node) || ts.isUnionTypeNode(node)) {
+    return node.types.some(typeContainsLiteralDiscriminant);
+  }
+  return false;
+}
+
 /** Return kind -> ordered field names for exported object-type declarations. */
 export function declaredPartShapes(src, path = DEFAULT_PATH) {
   const file = parseSource(src, path);
@@ -37,11 +61,15 @@ export function declaredPartShapes(src, path = DEFAULT_PATH) {
 
   const recordTypeLiteral = (node) => {
     const namedTypeMembers = node.members.filter(
-      (member) => member.name && propertyNameText(member.name) === "type",
+      (member) => member.name
+        && (propertyNameText(member.name) === "type" || computedPropertyNameText(member.name) === "type"),
     );
     if (namedTypeMembers.length === 0) return;
     if (namedTypeMembers.length !== 1 || !ts.isPropertySignature(namedTypeMembers[0])) {
       throw new Error(`${path}: unsupported type discriminant shape`);
+    }
+    if (ts.isComputedPropertyName(namedTypeMembers[0].name)) {
+      throw new Error(`${path}: unsupported computed part declaration`);
     }
 
     const discriminant = namedTypeMembers[0].type;
@@ -76,12 +104,19 @@ export function declaredPartShapes(src, path = DEFAULT_PATH) {
       return;
     }
     if (ts.isParenthesizedTypeNode(node)) visitAliasType(node.type);
+    if (ts.isIntersectionTypeNode(node) && typeContainsLiteralDiscriminant(node)) {
+      throw new Error(`${path}: unsupported intersection part declaration`);
+    }
     // Type references are intentionally not followed: each referenced exported alias is parsed
     // at its own declaration, so a union roster does not double-count its discriminants.
   };
 
   for (const statement of file.statements) {
     if (ts.isTypeAliasDeclaration(statement) && exported(statement)) visitAliasType(statement.type);
+    if (ts.isInterfaceDeclaration(statement) && exported(statement)
+      && statement.members.some((member) => literalTypeDiscriminant(member) !== null)) {
+      throw new Error(`${path}: unsupported interface part declaration`);
+    }
   }
   return shapes;
 }

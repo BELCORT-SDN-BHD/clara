@@ -2,16 +2,23 @@
 // Commit-parity gate: apps/web's reader must cover every part kind this runtime can emit.
 // Declared-only kinds are exempt only through the explicit produced-elsewhere allowlist, and
 // each exemption is invalidated by any object-literal construction site in packages/runtime.
-// Scope is every non-test runtime package source file, across TS/JS module variants;
-// tests and build/install outputs are not runtime sources. The census detects object-literal
-// constructions: a literal discriminant is classified, while a non-literal discriminant throws
-// unless its non-part file is explicitly reviewed below. Unknown never means safe.
+// Scope is every regular TS/JS module file under packages/runtime. Files outside that root,
+// behind a symlink, or below node_modules/tests/.output/.nitro are not scanned. The census
+// detects object-literal constructions: literal discriminants are classified, while dynamic
+// properties and every object spread throw unless their exact AST site is explicitly reviewed.
+// Unknown never means safe.
 
 import { readFileSync, readdirSync } from "node:fs";
 import { extname, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { declaredPartShapes } from "./part-shapes.mjs";
+import {
+  REVIEWED_COMPUTED_KEY_EXEMPTIONS,
+  REVIEWED_NON_PART_LITERAL_EXEMPTIONS,
+  REVIEWED_OBJECT_SPREAD_EXEMPTIONS,
+} from "./parts-parity-exemptions.mjs";
+import { describeParitySite, siteExemptionLedger } from "./parts-parity-sites.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const DEFAULT_DECLARER = "packages/runtime/workflows/chatTurn.v16.parts.ts";
@@ -33,15 +40,51 @@ export const PRODUCED_ELSEWHERE_PART_KINDS = [
   "close_proposal",
 ];
 
+export const LEGACY_PART_KINDS = [
+  "text",
+  "tool_call",
+  "tool_result",
+  "tool_error",
+  "clarify",
+  "clarify_closed",
+  "attachment",
+  "je_review",
+  "refusal",
+  "doc_review",
+  "diff",
+  "sweep_receipt",
+  "open_question",
+  "bank_recon_receipt",
+  "fixed_asset",
+  "depreciation_run_receipt",
+  "adjustment_run_receipt",
+  "staff_advance",
+  "entry_posted",
+  "question_opened",
+  "bank_act",
+  "bank_pack",
+];
+
 export const UNCLASSIFIABLE_DISCRIMINANT_EXEMPTIONS = [
   {
     path: "packages/runtime/workflows/chatTurn.v14.bankSchemas.ts",
+    enclosing: "upsertBankCoaAccountInputSchema",
+    signature: "type: z.string().min(1)",
     reason: "Zod input schema field for a bank account class; it does not construct a chat part",
   },
   {
     path: "packages/runtime/lib/myinvois-ubl.mjs",
+    enclosing: "extractUblModel",
+    signature: 'type: txtAt(category, "cbc:ID")',
     reason: "MyInvois UBL tax-category projection field; it does not construct a chat part",
   },
+];
+
+const DEFAULT_SITE_EXEMPTIONS = [
+  ...UNCLASSIFIABLE_DISCRIMINANT_EXEMPTIONS.map((exemption) => ({ ...exemption, siteKind: "property" })),
+  ...REVIEWED_OBJECT_SPREAD_EXEMPTIONS,
+  ...REVIEWED_NON_PART_LITERAL_EXEMPTIONS,
+  ...REVIEWED_COMPUTED_KEY_EXEMPTIONS,
 ];
 
 function scriptKindForPath(path) {
@@ -145,21 +188,15 @@ function dereferenceExpression(node, context, contexts, seen = new Set()) {
 
 function staticStringValue(node, context, contexts, seen = new Set()) {
   const resolved = dereferenceExpression(node, context, contexts, seen);
-  if (!resolved) return null;
+  if (!resolved) return { kind: "unknown" };
   const current = resolved.node;
-  if (ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current)) return current.text;
-  if (ts.isPropertyAccessExpression(current)) {
-    const owner = dereferenceExpression(current.expression, resolved.context, contexts, resolved.seen);
-    if (!owner) return null;
-    const object = owner.node;
-    if (!ts.isObjectLiteralExpression(object)) return null;
-    const matches = object.properties.filter(
-      (property) => property.name && propertyNameText(property.name) === current.name.text,
-    );
-    if (matches.length !== 1 || !ts.isPropertyAssignment(matches[0])) return null;
-    return staticStringValue(matches[0].initializer, owner.context, contexts, owner.seen);
+  if (ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current)) {
+    return { kind: "string", value: current.text };
   }
-  return null;
+  if (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)) {
+    return { kind: "mutable-object-property" };
+  }
+  return { kind: "unknown" };
 }
 
 export function readerPartKinds(source, path = DEFAULT_READER) {
@@ -232,18 +269,12 @@ export function readRuntimeSources(runtimeRoot = resolve(REPO_ROOT, DEFAULT_RUNT
   return sources.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-function constructionSiteCensus(runtimeSources, declared) {
+function constructionSiteCensus(runtimeSources, declared, siteExemptions) {
   if (!Array.isArray(runtimeSources) || runtimeSources.length === 0) {
     throw new Error("runtime construction-site census requires at least one runtime source");
   }
-  const exemptions = new Map();
-  for (const exemption of UNCLASSIFIABLE_DISCRIMINANT_EXEMPTIONS) {
-    if (!exemption || typeof exemption.path !== "string" || typeof exemption.reason !== "string" || exemption.reason.trim() === "") {
-      throw new Error("unclassifiable-discriminant exemptions require path and reason strings");
-    }
-    if (exemptions.has(exemption.path)) throw new Error(`duplicate unclassifiable-discriminant exemption ${exemption.path}`);
-    exemptions.set(exemption.path, exemption.reason);
-  }
+  const exemptions = siteExemptionLedger(siteExemptions);
+  const knownPartKinds = new Set([...LEGACY_PART_KINDS, ...declared]);
   const sites = new Map(declared.map((kind) => [kind, []]));
   const paths = new Set();
   const contexts = new Map();
@@ -264,45 +295,62 @@ function constructionSiteCensus(runtimeSources, declared) {
   }
   for (const context of contexts.values()) {
     const { entry, file } = context;
-    const refuseUnclassifiable = (node) => {
-      if (exemptions.has(entry.path)) return;
+    const refuseUnclassifiable = (node, siteKind, message) => {
       const line = file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1;
-      throw new Error(`parts-parity: unclassifiable discriminant at ${entry.path}:${line}`);
+      const site = describeParitySite(node, file, entry.path, siteKind);
+      if (exemptions.consume(site)) return;
+      throw new Error(`parts-parity: ${message} at ${entry.path}:${line}`);
     };
+    const visitComputedKeys = (node) => {
+      if (ts.isComputedPropertyName(node)) {
+        const computedName = staticStringValue(node.expression, context, contexts);
+        if (computedName.kind !== "string") {
+          refuseUnclassifiable(node, "computed", "unclassifiable computed key");
+        }
+        if (computedName.value === "type") {
+          refuseUnclassifiable(node, "computed", "unclassifiable discriminant");
+        }
+      }
+      ts.forEachChild(node, visitComputedKeys);
+    };
+    visitComputedKeys(file);
+
     const visit = (node) => {
       if (ts.isObjectLiteralExpression(node)) {
-        let hasDeclaredTypeProperty = false;
         for (const property of node.properties) {
-          if (property.name && ts.isComputedPropertyName(property.name)) {
-            const computedName = staticStringValue(property.name.expression, context, contexts);
-            if (computedName === null || computedName === "type") refuseUnclassifiable(property);
-            continue;
+          if (ts.isSpreadAssignment(property)) {
+            refuseUnclassifiable(property, "spread", "unclassifiable object spread");
           }
+        }
+        for (const property of node.properties) {
+          if (property.name && ts.isComputedPropertyName(property.name)) continue;
           if (!property.name || propertyNameText(property.name) !== "type") continue;
           if (!ts.isPropertyAssignment(property)) {
-            refuseUnclassifiable(property);
+            refuseUnclassifiable(property, "property", "unclassifiable discriminant");
             continue;
           }
           const initializer = unwrapExpression(property.initializer);
           if (!ts.isStringLiteral(initializer)) {
-            refuseUnclassifiable(property);
+            refuseUnclassifiable(property, "property", "unclassifiable discriminant");
             continue;
           }
+          if (!knownPartKinds.has(initializer.text)) {
+            const site = describeParitySite(property, file, entry.path, "literal");
+            if (exemptions.consume(site)) continue;
+            throw new Error(
+              `unknown part kind '${initializer.text}' constructed at ${entry.path}:${site.line} — declare it or site-exempt it`,
+            );
+          }
           if (!sites.has(initializer.text)) continue;
-          hasDeclaredTypeProperty = true;
           const line = file.getLineAndCharacterOfPosition(property.getStart(file)).line + 1;
           sites.get(initializer.text).push(`${entry.path}:${line}`);
-        }
-        if (hasDeclaredTypeProperty) {
-          for (const property of node.properties) {
-            if (ts.isSpreadAssignment(property)) refuseUnclassifiable(property);
-          }
         }
       }
       ts.forEachChild(node, visit);
     };
     visit(file);
   }
+  exemptions.assertComplete();
   return sites;
 }
 
@@ -313,6 +361,7 @@ export function checkPartsParity({
   declarerPath = DEFAULT_DECLARER,
   readerPath = DEFAULT_READER,
   allowlistedKinds = PRODUCED_ELSEWHERE_PART_KINDS,
+  siteExemptions = DEFAULT_SITE_EXEMPTIONS,
 }) {
   const declared = [...declaredPartShapes(declarerSource).keys()];
   if (declared.length === 0) throw new Error(`${declarerPath}: no exported object-type part declarations found`);
@@ -322,7 +371,7 @@ export function checkPartsParity({
 
   const declaredSet = new Set(declared);
   const allowlistedSet = new Set(allowlisted);
-  const constructionSites = constructionSiteCensus(runtimeSources, declared);
+  const constructionSites = constructionSiteCensus(runtimeSources, declared, siteExemptions);
   const staleAllowlist = allowlisted.filter((kind) => !declaredSet.has(kind));
   const allowlistedWithConstructionSites = allowlisted.filter(
     (kind) => declaredSet.has(kind) && constructionSites.get(kind).length > 0,

@@ -18,6 +18,7 @@ const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const DECLARER = await readFile(join(RUNTIME_ROOT, "workflows/chatTurn.v16.parts.ts"), "utf8");
 const READER = await readFile(join(REPO_ROOT, "apps/web/lib/parts/types.ts"), "utf8");
 const CI = await readFile(join(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
+const REGISTRY = await readFile(join(RUNTIME_ROOT, "workflows/registry.ts"), "utf8");
 
 const RUNTIME_SOURCES = readRuntimeSources();
 
@@ -56,6 +57,27 @@ const POST_P6_READER_KINDS = [
 
 function readerFixture(kinds) {
   return `export type ClaraPart =\n${kinds.map((kind) => `  | { type: "${kind}" }`).join("\n")};\n`;
+}
+
+function replaceRuntimeSource(path, update) {
+  let found = false;
+  const sources = RUNTIME_SOURCES.map((entry) => {
+    if (entry.path !== path) return entry;
+    found = true;
+    return { ...entry, source: update(entry.source) };
+  });
+  assert.equal(found, true, `control: runtime census contains ${path}`);
+  return sources;
+}
+
+function checkSynthetic(runtimeSources, options = {}) {
+  return checkPartsParity({
+    declarerSource: DECLARER,
+    readerSource: readerFixture(POST_P6_READER_KINDS),
+    runtimeSources,
+    siteExemptions: [],
+    ...options,
+  });
 }
 
 test("p6-1.parts-parity: v16 plus the live 22-kind reader REFUSES the unrendered freeform_result emitter", () => {
@@ -123,6 +145,7 @@ test("p6-1.parts-parity: an identifier discriminant THROWS instead of disappeari
         path: "packages/runtime/workflows/identifier-discriminant.mutant.ts",
         source: 'const kind = "agent_receipt"; export const emitted = { type: kind };\n',
       }],
+      siteExemptions: [],
     }),
     /parts-parity: unclassifiable discriminant at packages\/runtime\/workflows\/identifier-discriminant\.mutant\.ts:1/,
   );
@@ -137,6 +160,7 @@ test("p6-1.parts-parity: a computed type key THROWS instead of disappearing from
         path: "packages/runtime/workflows/computed-discriminant.mutant.ts",
         source: 'const key = "type"; export const emitted = { [key]: "agent_receipt" };\n',
       }],
+      siteExemptions: [],
     }),
     /parts-parity: unclassifiable discriminant at packages\/runtime\/workflows\/computed-discriminant\.mutant\.ts:1/,
   );
@@ -151,8 +175,9 @@ test("p6-1.parts-parity: an unresolved computed key THROWS instead of being assu
         path: "packages/runtime/workflows/unknown-computed-key.mutant.ts",
         source: 'export const emitted = { [runtimeKey]: "agent_receipt" };\n',
       }],
+      siteExemptions: [],
     }),
-    /parts-parity: unclassifiable discriminant at packages\/runtime\/workflows\/unknown-computed-key\.mutant\.ts:1/,
+    /parts-parity: unclassifiable computed key at packages\/runtime\/workflows\/unknown-computed-key\.mutant\.ts:1/,
   );
 });
 
@@ -165,6 +190,7 @@ test("p6-1.parts-parity: template and spread discriminants also THROW", () => {
         path: "packages/runtime/workflows/template-discriminant.mutant.ts",
         source: 'const suffix = "receipt"; export const emitted = { type: `agent_${suffix}` };\n',
       }],
+      siteExemptions: [],
     }),
     /parts-parity: unclassifiable discriminant at packages\/runtime\/workflows\/template-discriminant\.mutant\.ts:1/,
   );
@@ -176,8 +202,9 @@ test("p6-1.parts-parity: template and spread discriminants also THROW", () => {
         path: "packages/runtime/workflows/spread-discriminant.mutant.ts",
         source: 'const overrides = {}; export const emitted = { type: "agent_receipt", ...overrides };\n',
       }],
+      siteExemptions: [],
     }),
-    /parts-parity: unclassifiable discriminant at packages\/runtime\/workflows\/spread-discriminant\.mutant\.ts:1/,
+    /parts-parity: unclassifiable object spread at packages\/runtime\/workflows\/spread-discriminant\.mutant\.ts:1/,
   );
 });
 
@@ -185,13 +212,96 @@ test("p6-1.parts-parity: the reviewed unclassifiable-discriminant exemptions are
   assert.deepEqual(UNCLASSIFIABLE_DISCRIMINANT_EXEMPTIONS, [
     {
       path: "packages/runtime/workflows/chatTurn.v14.bankSchemas.ts",
+      enclosing: "upsertBankCoaAccountInputSchema",
+      signature: "type: z.string().min(1)",
       reason: "Zod input schema field for a bank account class; it does not construct a chat part",
     },
     {
       path: "packages/runtime/lib/myinvois-ubl.mjs",
+      enclosing: "extractUblModel",
+      signature: 'type: txtAt(category, "cbc:ID")',
       reason: "MyInvois UBL tax-category projection field; it does not construct a chat part",
     },
   ]);
+});
+
+test("p6-1.parts-parity: site exemptions cover exactly one reviewed property, never a whole file", () => {
+  const secondDynamicSite = replaceRuntimeSource(
+    "packages/runtime/lib/myinvois-ubl.mjs",
+    (source) => `${source}\nexport function secondProjection() { return { type: runtimeType() }; }\n`,
+  );
+  assert.throws(
+    () => checkPartsParity({
+      declarerSource: DECLARER,
+      readerSource: readerFixture(POST_P6_READER_KINDS),
+      runtimeSources: secondDynamicSite,
+    }),
+    /unclassifiable discriminant at packages\/runtime\/lib\/myinvois-ubl\.mjs:\d+/,
+    "a second dynamic type property in the same file is not covered by the reviewed site",
+  );
+
+  const staleSite = replaceRuntimeSource(
+    "packages/runtime/workflows/chatTurn.v14.bankSchemas.ts",
+    (source) => source.replace("  type: z.string().min(1),\n", ""),
+  );
+  assert.throws(
+    () => checkPartsParity({
+      declarerSource: DECLARER,
+      readerSource: readerFixture(POST_P6_READER_KINDS),
+      runtimeSources: staleSite,
+    }),
+    /stale unclassifiable-site exemption.*upsertBankCoaAccountInputSchema/,
+    "deleting the reviewed property makes its exemption stale",
+  );
+});
+
+test("p6-1.parts-parity: computed keys resolve only through primitive immutable const chains", () => {
+  assert.doesNotThrow(() => checkSynthetic([{
+    path: "packages/runtime/workflows/primitive-computed-key.control.ts",
+    source: 'const first = "other"; const second = first; export const emitted = { [second]: "agent_receipt" };\n',
+  }]));
+
+  for (const [name, source] of [
+    [
+      "spread-overwrite",
+      'const payload = {}; const keys = { value: "other", ...payload }; export const emitted = { [keys.value]: "agent_receipt" };\n',
+    ],
+    [
+      "later-assignment",
+      'const keys = { value: "other" }; keys.value = "type"; export const emitted = { [keys.value]: "agent_receipt" };\n',
+    ],
+  ]) {
+    assert.throws(
+      () => checkSynthetic([{
+        path: `packages/runtime/workflows/${name}.mutant.ts`,
+        source,
+      }]),
+      new RegExp(`parts-parity: unclassifiable computed key at packages/runtime/workflows/${name}\\.mutant\\.ts:1`),
+      `${name} cannot make mutable object-property resolution look static`,
+    );
+  }
+});
+
+test("p6-1.parts-parity: every object spread is unclassifiable regardless of a direct type literal", () => {
+  for (const [name, source] of [
+    [
+      "unknown-literal-before-spread",
+      'const payload = {}; export const emitted = { type: "not_a_part", ...payload };\n',
+    ],
+    [
+      "spread-only",
+      'const payload = { type: "agent_receipt" }; export const emitted = { ...payload };\n',
+    ],
+  ]) {
+    assert.throws(
+      () => checkSynthetic([{
+        path: `packages/runtime/workflows/${name}.mutant.ts`,
+        source,
+      }]),
+      new RegExp(`parts-parity: unclassifiable object spread at packages/runtime/workflows/${name}\\.mutant\\.ts:1`),
+      `${name} cannot hide a runtime part discriminant`,
+    );
+  }
 });
 
 test("p6-1.parts-parity: declaration parsing is AST-backed, quote-agnostic, and string-aware", () => {
@@ -220,6 +330,71 @@ test("p6-1.parts-parity: unsupported declaration discriminants THROW", () => {
   assert.throws(
     () => declaredPartShapes("export type DynamicPart = { type: string; id: string };"),
     /unsupported type discriminant shape/,
+  );
+});
+
+test("p6-1.parts-parity: unsupported interface, intersection, and computed declarations THROW", () => {
+  const declarations = [
+    'export interface InterfacePart { type: "interface_part"; id: string }',
+    'export type IntersectionPart = { type: "intersection_part" } & { id: string };',
+    'export type ComputedPart = { ["type"]: "computed_part"; id: string };',
+  ];
+  for (const declaration of declarations) {
+    assert.throws(
+      () => checkPartsParity({
+        declarerSource: `${DECLARER}\n${declaration}\n`,
+        readerSource: readerFixture([...POST_P6_READER_KINDS, "interface_part", "intersection_part", "computed_part"]),
+        runtimeSources: RUNTIME_SOURCES,
+      }),
+      /unsupported (?:interface|intersection|computed) part declaration/,
+      declaration,
+    );
+  }
+});
+
+test("p6-1.parts-parity: an unknown literal construction is refused instead of skipped", () => {
+  assert.throws(
+    () => checkPartsParity({
+      declarerSource: DECLARER,
+      readerSource: readerFixture(POST_P6_READER_KINDS),
+      runtimeSources: [
+        ...RUNTIME_SOURCES,
+        {
+          path: "packages/runtime/workflows/unknown-literal.mutant.mjs",
+          source: 'export const emitted = { type: "undeclared_part" };\n',
+        },
+      ],
+    }),
+    /unknown part kind 'undeclared_part' constructed at packages\/runtime\/workflows\/unknown-literal\.mutant\.mjs:1 — declare it or site-exempt it/,
+  );
+});
+
+test("p6-1.parts-parity: declaration-only and construction variants share one scanned-file control", () => {
+  const path = "packages/runtime/workflows/paired-site.mutant.ts";
+  const declaredOnly = checkPartsParity({
+    declarerSource: DECLARER,
+    readerSource: readerFixture(POST_P6_READER_KINDS),
+    runtimeSources: [
+      ...RUNTIME_SOURCES,
+      { path, source: 'export type PairedSite = { type: "paired_unknown"; id: string };\n' },
+    ],
+  });
+  const control = checkPartsParity({
+    declarerSource: DECLARER,
+    readerSource: readerFixture(POST_P6_READER_KINDS),
+    runtimeSources: RUNTIME_SOURCES,
+  });
+  assert.deepEqual(declaredOnly, control, "a declaration in a scanned runtime file is not a construction site");
+  assert.throws(
+    () => checkPartsParity({
+      declarerSource: DECLARER,
+      readerSource: readerFixture(POST_P6_READER_KINDS),
+      runtimeSources: [
+        ...RUNTIME_SOURCES,
+        { path, source: 'export const emitted = { type: "paired_unknown" };\n' },
+      ],
+    }),
+    /unknown part kind 'paired_unknown' constructed at packages\/runtime\/workflows\/paired-site\.mutant\.ts:1/,
   );
 });
 
@@ -268,4 +443,9 @@ test("p6-1.parts-parity: CI invokes the gate unconditionally after the workflow-
   assert.ok(parityAt > bundleAt, "removing or moving the parts-parity invocation before the bundle gate must red this cell");
   const parityStep = build.slice(build.lastIndexOf("- name:", parityAt), build.indexOf("\n      - name:", parityAt));
   assert.doesNotMatch(parityStep, /\b(?:if|continue-on-error):/, "the parity step is unconditional and fail-closed");
+
+  const deployParagraph = /\/\/ DEPLOY IS HELD[\s\S]*?\/\/ A rollback to v15/.exec(REGISTRY)?.[0];
+  assert.ok(deployParagraph, "the v16 deploy paragraph is present");
+  assert.match(deployParagraph, /CI `build` job/, "the comment names the CI job that actually runs parity");
+  assert.doesNotMatch(deployParagraph, /Docker build/, "the comment never claims the Docker build runs parity");
 });

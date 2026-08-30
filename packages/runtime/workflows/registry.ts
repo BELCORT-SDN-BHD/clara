@@ -67,7 +67,7 @@ export const workflows = {
   // THE DATABASE NEEDS NO COUPLED MIGRATION, ceremony or new secret: all four hydrate surfaces
   // are already live, and v15's `CLARA_FREEFORM_DATABASE_URL` precondition is unchanged. But the
   // DEPLOY IS HELD on reader parity: apps/web must first declare every kind v16 can emit. The
-  // Docker build runs `check-parts-parity.mjs` and refuses while that reader trails the declarer.
+  // The CI `build` job runs `check-parts-parity.mjs` and refuses while that reader trails the declarer.
   // A rollback to v15 still requires the standing parked-run preflight; it then stops minting the
   // new card without changing the database.
   chatTurn: chatTurn_v16,

@@ -178,10 +178,10 @@ Registered but not scheduled. Sources of record in brackets.
   `reader ⊇ emittable` inside one commit, but that cannot prove the web version already deployed is
   at least the runtime version about to ship. A separate ops/CI PR must have the deployed web
   publish a catalog/version stamp and make the runtime deploy read and compare it before rollout.
-  Until then, same-commit parity is a build gate, not the deploy-ordering hold. **Round 5 hardened
-  that build instrument fail-closed:** all TS/JS module extensions are scanned, dynamic or computed
-  discriminants throw unless their non-part file is literal-exempted with a reason, and declarations
-  are read from the TypeScript AST rather than regex. The standalone gate remains honestly red only
+  Until then, same-commit parity is a build gate, not the deploy-ordering hold. **Round 6 hardened that build
+  instrument fail-closed:** exact AST-site exemptions match once; mutable computed keys, every unreviewed
+  spread, unknown literal kind and unsupported declaration form throws; declarations come from the TypeScript
+  AST rather than regex. The standalone gate remains honestly red only
   on `freeform_result` until #459's 26-kind reader lands first.
 
 **THE DEBT-CLEARING SPRINT IS NEXT (owner mandate, 2026-08-24): everything except full Track B clears in the 磨合 window.** W2/W3 ladder items (2026-08-25), the forward-obligations block and the F-A5b/W4 items below ride it:
