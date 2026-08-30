@@ -350,7 +350,6 @@ export function canonicalAddress(raw: string): string {
  * implementing provider-equivalent normalisation, not relaxing this.
  */
 export function isAsciiAddress(value: string): boolean {
-  // eslint-disable-next-line no-control-regex
   return /^[\x00-\x7F]*$/.test(value);
 }
 

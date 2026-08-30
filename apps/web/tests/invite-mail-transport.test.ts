@@ -16,24 +16,11 @@
 // So `productionInviteMailer` takes its two outside worlds as injectable deps
 // (both defaulting to the real thing) and this file drives the SHIPPING body.
 //
-// THE `server-only` QUESTION, ANSWERED HONESTLY. The order asked for
-// `import "server-only"` in the transport and the courier. That package is NOT
-// installed in this workspace (`node_modules/server-only` does not exist) and a
-// lane may not run `pnpm install`, so adding the import would red every gate
-// rather than protect anything. The ESTATE'S EXISTING MECHANISM for the identical
-// question is the import-closure walk in `tests/firm-scope-db-pins.test.ts`
-// ("client-importable modules never drag next/headers into the bundle"), minted
-// when P4-5 hit this exact class. The walk below is that instrument pointed at
-// these two modules, and it is strictly stronger than the import in one respect:
-// `server-only` fails at BUILD time in a bundler, while this fails in `pnpm test`
-// with the offending edge named. Recorded as an owner item in the PR body.
+// THE `server-only` QUESTION is answered in `tests/server-boundary.test.ts`, not
+// here — see the note at the foot of this file for what moved and why.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, sep } from "node:path";
-import { fileURLToPath } from "node:url";
-
 import {
   CAN_MINT_MAX_PAGES,
   CAN_MINT_PAGE_SIZE,
@@ -46,9 +33,6 @@ import {
   sameAddress,
   type InviteMailConfig,
 } from "../lib/members/invite-mail";
-import { stripComments } from "../test/sourceOracle";
-
-const WEB_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 
 // `PLACEHOLDER` is what `scripts/check-leaks.mjs` accepts as an EXPLICIT
 // placeholder (`SECRET_PLACEHOLDER`, `check-leaks.mjs:40`). The two key fields
@@ -458,95 +442,9 @@ describe("the transport throws codes, never upstream text", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// LOW-7 (the `server-only` half) — THE ESTATE'S OWN MECHANISM
-// ---------------------------------------------------------------------------
-
-describe("no client-importable module reaches the courier or the mail transport", () => {
-  // The same instrument as `tests/firm-scope-db-pins.test.ts`'s isomorphic wall,
-  // pointed at the two server-only modules of this train. Value edges only:
-  // `import type` is erased and drags nothing into a bundle.
-  function resolveLocal(fromFile: string, spec: string): string | null {
-    const base = spec.startsWith("@/")
-      ? join(WEB_ROOT, spec.slice(2))
-      : spec.startsWith(".")
-        ? join(dirname(join(WEB_ROOT, fromFile)), spec)
-        : null;
-    if (base === null) return null;
-    for (const ext of [".ts", ".tsx", "/index.ts", "/index.tsx"]) {
-      const candidate = `${base}${ext}`;
-      if (existsSync(candidate)) return candidate.slice(WEB_ROOT.length + 1).split(sep).join("/");
-    }
-    return null;
-  }
-
-  function valueImports(webRelative: string): string[] {
-    const code = stripComments(readFileSync(join(WEB_ROOT, webRelative), "utf8"));
-    const out: string[] = [];
-    for (const m of code.matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
-      if (/^\s*type\s/.test(m[1] as string)) continue;
-      out.push(m[2] as string);
-    }
-    for (const m of code.matchAll(/import\s*["']([^"']+)["']/g)) out.push(m[1] as string);
-    return out;
-  }
-
-  function closure(entry: string): Set<string> {
-    const files = new Set<string>();
-    const queue = [entry];
-    while (queue.length > 0) {
-      const current = queue.pop() as string;
-      if (files.has(current)) continue;
-      files.add(current);
-      for (const spec of valueImports(current)) {
-        const local = resolveLocal(current, spec);
-        if (local !== null) queue.push(local);
-      }
-    }
-    return files;
-  }
-
-  const SERVER_ONLY = ["lib/members/invite-mail.ts", "lib/members/courier.ts"];
-  const CLIENT_ENTRIES = [
-    "components/admin/members-panel.tsx",
-    "components/admin/invite-dialog.tsx",
-    "components/admin/member-row-menu.tsx",
-    "lib/members/doors.ts",
-    "lib/members/reads.ts",
-  ];
-
-  for (const entry of CLIENT_ENTRIES) {
-    test(`${entry} reaches neither server-only module`, () => {
-      const files = closure(entry);
-      for (const forbidden of SERVER_ONLY) {
-        assert.ok(
-          !files.has(forbidden),
-          `${entry} transitively value-imports ${forbidden} — the service-role key and the plaintext token would be bundled for a browser`,
-        );
-      }
-    });
-  }
-
-  test("VACUITY CONTROL: the walk DOES find the transport from the courier", () => {
-    // Without this every assertion above is equally true of a walk that resolves
-    // nothing at all — the absence-from-the-wrong-instrument class.
-    const files = closure("lib/members/courier.ts");
-    assert.ok(files.has("lib/members/invite-mail.ts"), "the walk cannot see a one-hop edge");
-    assert.ok(files.has("lib/same-origin.ts"), "…nor a second one");
-  });
-
-  test("VACUITY CONTROL: the client entries were really walked", () => {
-    const files = closure("components/admin/members-panel.tsx");
-    assert.ok(files.size > 5, `the panel's closure resolved only ${files.size} files`);
-    assert.ok(files.has("lib/members/doors.ts"), "the panel's own door module is missing from its closure");
-  });
-
-  test("the two server-only modules are marked as such in their own headers", () => {
-    // Prose, but checkable prose: if `server-only` is ever installed, this is the
-    // list of files that must gain the import. Named so the follow-up is findable.
-    for (const file of SERVER_ONLY) {
-      const src = readFileSync(join(WEB_ROOT, file), "utf8");
-      assert.match(src, /SERVER[ -]ONLY|server-only/i, `${file} does not declare itself server-only anywhere`);
-    }
-  });
-});
+// THE `server-only` HALF OF LOW-7 MOVED OUT, and was rebuilt (Codex round 2, N6).
+// It used to live here as an import-closure walk over FIVE HAND-LISTED client
+// roots that followed only static imports — true of the tree it was pointed at,
+// blind to a new "use client" file, a re-export barrel or a dynamic import. It is
+// now `tests/server-boundary.test.ts`, which DISCOVERS every Client Component from
+// the tree and follows every bundler-relevant value edge.

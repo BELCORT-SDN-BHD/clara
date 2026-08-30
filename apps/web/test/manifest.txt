@@ -187,6 +187,7 @@ tests/response-state.test.ts
 tests/runtime-outbound.test.ts
 tests/safe-redirect.test.ts
 tests/same-origin.test.ts
+tests/server-boundary.test.ts
 tests/streamAuthority.test.mjs
 tests/streamParser.test.mjs
 tests/streamReattach.test.mjs

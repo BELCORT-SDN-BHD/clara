@@ -25,7 +25,13 @@ import { fileURLToPath } from "node:url";
 
 import { handleInviteRequest, type InviteCourierLogEntry } from "../lib/members/courier";
 import { InviteMailFailure } from "../lib/members/invite-mail";
-import { exportedHttpMethods, readCode, reachableFrom, stripComments } from "../test/sourceOracle";
+import {
+  exportedHttpMethods,
+  moduleLevelDeclarations,
+  readCode,
+  reachableFrom,
+  stripComments,
+} from "../test/sourceOracle";
 import {
   CALLER_BYTES,
   deadSession,
@@ -368,6 +374,39 @@ describe("the door and the firm read run on the CALLER'S OWN session", () => {
     assert.equal(firmReads[0], CALLER_BYTES, "…and the courtesy read is the same principal, not a service identity");
   });
 
+  test("THE SESSION IS RESOLVED EXACTLY ONCE, and every seam gets THAT resolution", async () => {
+    // A-THEN-B (Codex round 2's requested cell). The resolver hands back session
+    // A on its first call and session B on any later one. If the courier resolved
+    // more than once — a second `resolveServerSession()`, or an accessor that
+    // re-reads the cookie inside `pgrestRpc` — some seam would receive B, and the
+    // token the session check inspected would not be the token the door ran on.
+    // That is the very drift P4-2's `fixedTokenAccessor` fold closed, and it
+    // matters most here because what follows is a governed write and an
+    // irreversible email.
+    let resolutions = 0;
+    const A = "session-A-bytes";
+    const B = "session-B-bytes";
+    const obs = observer();
+    const { deps: d, calls, firmReads, callerReads } = deps(
+      obs,
+      { resolve: OK_RECEIPT },
+      {
+        resolveSession: async (): Promise<ServerSession | null> => {
+          resolutions += 1;
+          return { accessToken: resolutions === 1 ? A : B, subject: "s-1" };
+        },
+      },
+    );
+    const res = await handleInviteRequest(post({ email: "new@example.test", role: "bookkeeper" }), d);
+
+    assert.equal(res.status, 200, "the request must SUCCEED, or the seams below were never reached");
+    assert.equal(resolutions, 1, "the session was resolved more than once — the seams can now disagree");
+    assert.equal(callerReads[0], A, "the AUTHORITY PREFLIGHT ran on A");
+    assert.equal(await calls[0]!.opts.session.getAccessToken(), A, "…the DOOR ran on A");
+    assert.equal(firmReads[0], A, "…and the courtesy read ran on A too");
+    assert.notEqual(A, B, "VACUITY GUARD: the two sessions must actually differ");
+  });
+
   test("ALTERNATE PRINCIPAL: a different resolved session reaches the door as THAT one", async () => {
     // The control that makes the pin above non-vacuous: it tracks the session
     // rather than asserting a constant that happens to match. A courier that
@@ -422,29 +461,147 @@ describe("the door and the firm read run on the CALLER'S OWN session", () => {
 // rather than a library the route might have stopped using.
 // ---------------------------------------------------------------------------
 
+/**
+ * THE IMPORTED BINDING'S LOCAL NAME, or null. Codex round 2, N4.
+ *
+ * `import { handleInviteRequest } from "…"` and
+ * `import { handleInviteRequest as courier } from "…"` both bring the real
+ * function in, but under DIFFERENT local names — and it is the LOCAL name that a
+ * call site must use to be calling the import. Matching the EXPORTED name against
+ * the callee is the review-law-3 mistake: it reads a spelling that the two ends
+ * are not obliged to share, so `import { handleInviteRequest as x }` plus a local
+ * `function handleInviteRequest()` decoy satisfies both halves while the shipped
+ * POST calls the decoy.
+ */
+function importedLocalName(code: string, exported: string): string | null {
+  for (const m of code.matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
+    const clause = m[1] as string;
+    if (/^\s*type\s/.test(clause)) continue; // erased at compile time; not the real function
+    const braces = /\{([^}]*)\}/.exec(clause);
+    if (!braces) continue;
+    for (const spec of (braces[1] as string).split(",")) {
+      const parsed = /^\s*([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*$/.exec(spec);
+      if (!parsed) continue;
+      if (parsed[1] === exported) return (parsed[2] ?? parsed[1]) as string;
+    }
+  }
+  return null;
+}
+
 describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and nothing else", () => {
   const ROUTE = "app/api/invite/route.ts";
   const code = readCode(join(WEB_ROOT, ROUTE));
+  // STRINGS BLANKED AS WELL AS COMMENTS (N4). `readCode`'s default keeps string
+  // literals, so a reachable `const decoy = "handleInviteRequest(request)"` in the
+  // POST body satisfied the delegation regex without calling anything. Blanking
+  // is length-preserving, so offsets and reachability are unaffected.
+  const executable = readCode(join(WEB_ROOT, ROUTE), { blankStrings: true });
 
   test("it VALUE-imports handleInviteRequest — a type-only edge would not be the real function", () => {
-    const valueImported = [...code.matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)].some(
-      (m) => !/^\s*type\s/.test(m[1] as string) && /handleInviteRequest/.test(m[1] as string),
-    );
-    assert.ok(valueImported, `${ROUTE} does not value-import handleInviteRequest`);
+    assert.ok(importedLocalName(code, "handleInviteRequest") !== null, `${ROUTE} does not value-import handleInviteRequest`);
   });
 
-  test("the EXECUTABLE POST delegates to it — reachability, not a mention in a header", () => {
-    const reachable = reachableFrom(code, "POST");
+  test("the EXECUTABLE POST calls THE IMPORTED BINDING ITSELF — not a name that merely matches", () => {
+    // THREE THINGS, and the third is the one review law 3 demands: the callee is
+    // the local name the import introduced, AND nothing in this module declares
+    // that name itself, so the identifier the call resolves to can only be the
+    // import.
+    const local = importedLocalName(code, "handleInviteRequest");
+    assert.ok(local !== null, "no value import to bind to");
+    const reachable = reachableFrom(executable, "POST");
     assert.ok(reachable !== null, `${ROUTE} exports no POST at all`);
     assert.match(
       reachable,
-      /handleInviteRequest\s*\(\s*request\s*\)/,
-      "POST must hand the REQUEST to the courier — not a rebuilt one, and not nothing",
+      new RegExp(`\\b${local}\\s*\\(\\s*request\\s*\\)`),
+      "POST must hand the REQUEST to the imported courier — not a rebuilt one, and not nothing",
+    );
+    assert.equal(
+      moduleLevelDeclarations(code).some((d) => d.name === local),
+      false,
+      `${ROUTE} declares its own ${local}, which would SHADOW the import the assertion above just matched`,
     );
   });
 
   test("POST is the ONLY verb exported — a second handler is a second, unguarded path", () => {
     assert.deepEqual(exportedHttpMethods(code), ["POST"]);
+  });
+
+  test("RED-BEFORE: a reachable STRING decoy no longer satisfies the delegation pin", () => {
+    // The decoy is a real, reachable statement in the POST body whose TEXT is the
+    // call the pin looks for. Against comment-stripped-but-string-keeping source
+    // it passes; against string-blanked source it does not.
+    const raw = readFileSync(join(WEB_ROOT, ROUTE), "utf8");
+    const mutant = raw.replace(
+      /export async function POST\([\s\S]*$/,
+      'export async function POST(request: Request): Promise<Response> {\n' +
+        '  const note = "handleInviteRequest(request)";\n' +
+        '  return new Response(note, { status: 204 });\n}\n',
+    );
+    assert.notEqual(mutant, raw, "the mutation did not apply");
+
+    const naive = reachableFrom(stripComments(mutant), "POST");
+    assert.ok(naive !== null);
+    assert.match(
+      naive,
+      /handleInviteRequest\s*\(\s*request\s*\)/,
+      "THE OLD INSTRUMENT PASSES THE DECOY — which is why the pin reads string-blanked source",
+    );
+
+    const sound = reachableFrom(stripComments(mutant, { blankStrings: true }), "POST");
+    assert.ok(sound !== null);
+    assert.ok(
+      !/handleInviteRequest\s*\(\s*request\s*\)/.test(sound),
+      "THE PIN IS VACUOUS: a POST whose only mention of the courier is inside a string still satisfies it",
+    );
+  });
+
+  test("RED-BEFORE: an ALIASED import plus a local decoy of the same name is caught", () => {
+    // The substitution N4 names: the module still imports the real function (so
+    // the value-import assertion passes) and still contains a call spelled
+    // `handleInviteRequest(request)` (so a name-matching delegation assertion
+    // passes) — but that call resolves to a LOCAL decoy, and the import is bound
+    // to `courier`, which nothing invokes.
+    const mutant =
+      'import { handleInviteRequest as courier } from "@/lib/members/courier";\n' +
+      "async function handleInviteRequest(request: Request): Promise<Response> {\n" +
+      "  return new Response(null, { status: 204 });\n}\n" +
+      "export async function POST(request: Request): Promise<Response> {\n" +
+      "  return handleInviteRequest(request);\n}\n";
+
+    const local = importedLocalName(mutant, "handleInviteRequest");
+    assert.equal(local, "courier", "the import's LOCAL name is what a call must use");
+
+    const reachable = reachableFrom(mutant, "POST");
+    assert.ok(reachable !== null);
+    assert.ok(
+      !new RegExp(`\\b${local}\\s*\\(\\s*request\\s*\\)`).test(reachable),
+      "THE PIN IS VACUOUS: the aliased import is never called and the pin did not notice",
+    );
+    assert.equal(
+      moduleLevelDeclarations(mutant).some((d) => d.name === "handleInviteRequest"),
+      true,
+      "…and the shadowing local decoy is visible to the declaration walk that backs the assertion",
+    );
+  });
+
+  test("RED-BEFORE: all three EXPORT SHAPES of a second verb are seen (P4-2 round 3's repair, in use here)", () => {
+    // `export { x as GET }`, `export let GET` and `export var GET` were invisible
+    // to the census before P4-2's round-3 fix; this branch now sits on it, so the
+    // repair is exercised from this route's own pin rather than trusted.
+    const raw = readFileSync(join(WEB_ROOT, ROUTE), "utf8");
+    const shapes: Record<string, string> = {
+      "aliased export clause": "\nasync function rawGet(): Promise<Response> { return new Response(null); }\nexport { rawGet as GET };\n",
+      "export let": "\nexport let GET = async (): Promise<Response> => new Response(null);\n",
+      "export var": "\nexport var GET = async (): Promise<Response> => new Response(null);\n",
+      "plain function": "\nexport async function GET(): Promise<Response> { return new Response(null); }\n",
+    };
+    for (const [shape, addition] of Object.entries(shapes)) {
+      assert.deepEqual(
+        exportedHttpMethods(stripComments(raw + addition)).sort(),
+        ["GET", "POST"],
+        `a second verb added as a ${shape} was invisible to the census`,
+      );
+    }
   });
 
   test("RED-BEFORE: a body-replaced, comments-KEPT mutant fails the delegation pin", () => {

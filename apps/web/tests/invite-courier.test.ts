@@ -475,13 +475,23 @@ describe("errorFromCourierBody reconstructs the SAME classes", () => {
       Members: { courier: Record<string, string> };
     };
     for (const code of INVITE_COURIER_CODES) {
+      const sentence = messages.Members.courier[code];
       assert.equal(
-        typeof messages.Members.courier[code],
+        typeof sentence,
         "string",
         `messages/en.json has no Members.courier.${code} — the banner would render the key itself`,
       );
+      // NONBLANK, not merely present (Codex round 2). `typeof "" === "string"`,
+      // so an empty or whitespace-only value satisfied the check above while
+      // rendering an error banner with a title, a code chip and NO SENTENCE — a
+      // refusal the reader cannot act on, which is worse than a raw key because
+      // it looks finished.
+      assert.ok(
+        (sentence as string).trim().length > 0,
+        `Members.courier.${code} is blank — the banner would render a code chip and nothing to read`,
+      );
     }
-    assert.ok(INVITE_COURIER_CODES.length >= 8, "VACUITY GUARD: the code list was actually read");
+    assert.ok(INVITE_COURIER_CODES.length >= 10, "VACUITY GUARD: the code list was actually read");
   });
 
   test("FAIL-CLOSED: an unrecognised body, and an unknown code, both become transport", () => {
