@@ -165,6 +165,10 @@ owns nav, ⌘K and the i18n truing. `apps/web/messages/en.json` is the one genui
 *Sizes are P3-lane equivalents on `port-wave-plan-…-part2.md` §10.1's calibration (1.0 ≈ 20-40
 files, ~3,000-4,500 lines, full ladder).*
 
+**P4 adds NO `parts[]` wire types** (design §9, a named non-goal). Its surfaces are pages and
+forms; the catalog and its `tsc` guard are untouched, and the four-part bump stays P6's. A P4 order
+that finds itself wanting a card has found a P6 scope question, not a build task.
+
 **Two rules bind every P4 order.** (a) **Affordance shaping** (design §4 D): a whole surface below
 the caller's rank is **hidden** from nav; an in-context verb above it is **shown disabled with the
 required rank named**. Neither is a security boundary — `_human_ctx` is. (b) **No wall is
