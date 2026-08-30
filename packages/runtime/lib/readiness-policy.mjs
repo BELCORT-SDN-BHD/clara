@@ -37,7 +37,8 @@ export function storageWriteVerdictIsValid(storageVerdict) {
     typeof storageVerdict.consecutive_failures === "number" &&
     Number.isFinite(storageVerdict.consecutive_failures) &&
     storageVerdict.consecutive_failures >= 0 &&
-    Number.isInteger(storageVerdict.consecutive_failures)
+    Number.isInteger(storageVerdict.consecutive_failures) &&
+    (storageVerdict.reason === null || READINESS_FAILURE_REASON_SET.has(storageVerdict.reason))
   );
 }
 

@@ -75,8 +75,8 @@ async function intakeReadinessSnapshot() {
   return { ok: true, spool, scanner, held, queued, oldestQueuedMs, source };
 }
 
-/** Run fn with an overall wall-clock deadline; on timeout resolve to `onTimeout`. */
-async function bounded(fn, onTimeout) {
+/** Run fn with an overall wall-clock deadline; classify deadline and thrown failure separately. */
+async function bounded(fn, onTimeout, onThrown = onTimeout) {
   let timer;
   const deadline = new Promise((resolve) => {
     timer = setTimeout(() => resolve(onTimeout), READY_DEADLINE_MS);
@@ -84,7 +84,7 @@ async function bounded(fn, onTimeout) {
   try {
     return await Promise.race([fn(), deadline]);
   } catch {
-    return onTimeout;
+    return onThrown;
   } finally {
     clearTimeout(timer);
   }
@@ -286,6 +286,7 @@ export async function checkReadiness() {
         return { ok: true };
       }),
     { ok: false, timeout: true },
+    { ok: false, thrown: true },
   );
 
   const intake = await bounded(intakeReadinessSnapshot, { ok: false, timeout: true });

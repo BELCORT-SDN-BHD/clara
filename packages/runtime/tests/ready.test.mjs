@@ -364,8 +364,8 @@ test("ready: a DB-only failure still hard-fails while storage is healthy", { ski
     await endPools();
     const r = await checkReadiness();
     assert.equal(r.ready, false, "DB unreachability remains a hard readiness failure");
-    assert.deepEqual(r.checks.db, { ok: false, error: "db_timeout" });
-    assert.deepEqual(r.failures, [{ check: "db", reason: "db_timeout" }]);
+    assert.deepEqual(r.checks.db, { ok: false, error: "db_unreachable" });
+    assert.deepEqual(r.failures, [{ check: "db", reason: "db_unreachable" }]);
     assert.equal(r.checks.storage_write.ok, true, "the failure is DB-only, not storage-derived");
   } finally {
     await endPools();

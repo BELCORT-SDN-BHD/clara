@@ -69,6 +69,25 @@ try {
   );
   check("/ready shutdown envelope carries an ISO timestamp", !Number.isNaN(Date.parse(readyBody.ts)));
 
+  for (const path of ["/ready/", "/READY"]) {
+    const variant = await fetch(`${BASE}${path}`);
+    const variantBody = await variant.json().catch(() => ({}));
+    check(`${path} 503 while draining`, variant.status === 503);
+    check(
+      `${path} uses the structured readiness envelope while draining`,
+      variantBody.ready === false &&
+        variantBody.checks?.shutdown === true &&
+        variantBody.failures?.[0]?.reason === "runtime_shutting_down",
+    );
+  }
+
+  const postReady = await fetch(`${BASE}/ready`, { method: "POST" });
+  const postReadyBody = await postReady.json().catch(() => ({}));
+  check("POST /ready uses the global drain response", postReady.status === 503 && postReadyBody.error === "shutting_down");
+
+  const drainHealthSlash = await fetch(`${BASE}/health/`);
+  check("/health/ STILL 200 while draining", drainHealthSlash.status === 200);
+
   // (3) Active-request tracking returns to zero after each request settles (finish/close
   // both decrement, once-guarded). After all the awaited fetches above, it must be 0.
   sup.shuttingDown = false; // let one more clean request through and confirm the counter balances

@@ -38,7 +38,11 @@ app.use((req, res, next) => {
     const s = (req.socket as unknown as { server?: Server }).server;
     if (s) sup.httpServer = s;
   }
-  if (sup.shuttingDown && req.path !== "/health" && req.path !== "/ready") {
+  const normalizedPath = req.path.replace(/\/+$/, "").toLowerCase();
+  const drainExempt =
+    (req.method === "GET" || req.method === "HEAD") &&
+    (normalizedPath === "/health" || normalizedPath === "/ready");
+  if (sup.shuttingDown && !drainExempt) {
     res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
     return;
   }

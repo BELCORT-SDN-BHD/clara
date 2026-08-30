@@ -97,7 +97,7 @@ test("storage probe: timeout arm — a hung storage call resolves not-ok within 
       }),
   };
   process.env.CLARA_STORAGE_PROBE_TIMEOUT_MS = "50";
-  const keepEventLoopAlive = setTimeout(() => {}, 500);
+  const keepEventLoopAlive = setTimeout(() => {}, 2_000);
   try {
     const startedAt = Date.now();
     const r = await _probeStorageOnceForTest();
@@ -233,10 +233,13 @@ test("readiness policy: absent or malformed storage_write verdicts fail closed",
     "a fractional failure counter fails closed",
   );
   assert.equal(
-    hardFailure({ ok: false, pending: false, consecutive_failures: 1 }),
+    hardFailure({ ok: false, reason: "storage_error", pending: false, consecutive_failures: 1 }),
     false,
     "one finite warm-state failure remains tolerated",
   );
+  const unknownReason = { ok: true, reason: "bogus", pending: false, consecutive_failures: 0 };
+  assert.equal(hardFailure(unknownReason), true, "an unknown producer reason must fail closed");
+  assert.equal(storageWriteHardFailureReason(unknownReason), "storage_verdict_malformed");
 });
 
 test("storage probe facade: two consecutive TIMEOUTS reach the hard-failure threshold", async () => {
@@ -248,7 +251,7 @@ test("storage probe facade: two consecutive TIMEOUTS reach the hard-failure thre
       }),
   };
   const originalError = console.error;
-  const keepEventLoopAlive = setTimeout(() => {}, 500);
+  const keepEventLoopAlive = setTimeout(() => {}, 4_000);
   console.error = () => {};
   try {
     const first = await _waitForStorageProbeSettleForTest();
@@ -279,8 +282,8 @@ test("storage probe facade: two consecutive TIMEOUTS reach the hard-failure thre
 });
 
 test("STORAGE-PROBE-ABORT: deadline aborts the adapter, intervals never overlap, and late success cannot recover", async () => {
-  process.env.CLARA_STORAGE_PROBE_TIMEOUT_MS = "20";
-  process.env.CLARA_STORAGE_PROBE_CACHE_MS = "1000";
+  process.env.CLARA_STORAGE_PROBE_TIMEOUT_MS = "1000";
+  process.env.CLARA_STORAGE_PROBE_CACHE_MS = "3000";
   let active = 0;
   let maxActive = 0;
   let abortCount = 0;
@@ -307,10 +310,10 @@ test("STORAGE-PROBE-ABORT: deadline aborts the adapter, intervals never overlap,
       });
     },
   };
-  const keepEventLoopAlive = setTimeout(() => {}, 4_000);
+  const keepEventLoopAlive = setTimeout(() => {}, 10_000);
   try {
     await _waitForStorageProbeSettleForTest();
-    await new Promise((resolve) => setTimeout(resolve, 2_150));
+    await new Promise((resolve) => setTimeout(resolve, 6_200));
     const verdict = storageProbeHealth();
     assert.ok(abortCount >= 3, `expected the initial cycle plus interval ticks to receive abort, got ${abortCount}`);
     assert.equal(active, 0, "every aborted adapter call must actually settle");

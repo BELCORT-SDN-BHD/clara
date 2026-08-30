@@ -20,6 +20,10 @@ runs:
       shell: bash -e {0}
       run: pnpm --filter @clara/runtime build
 
+    - name: FX2 shutdown middleware (in-process, no DB)
+      shell: bash -e {0}
+      run: cd packages/runtime && node --import tsx tests/shutdown-middleware.mjs
+
     # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
     # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
     # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap

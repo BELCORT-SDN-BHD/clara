@@ -36,13 +36,12 @@ test("STORAGE-PROBE-UNABORTABLE: a wedged cycle releases the slot and late settl
   const lateResolvers = [];
   process.env.RELAY_TEST_MODE = "1";
   process.env.CLARA_TEST_STORAGE_DIR = storageDir;
-  process.env.CLARA_STORAGE_PROBE_CACHE_MS = "1000";
+  process.env.CLARA_STORAGE_PROBE_CACHE_MS = "60000";
+  process.env.CLARA_STORAGE_PROBE_TIMEOUT_MS = "1000";
 
   try {
     const warm = await _waitForStorageProbeSettleForTest();
     assert.deepEqual(warm, { ok: true, reason: null, pending: false, consecutive_failures: 0 });
-    process.env.CLARA_STORAGE_PROBE_TIMEOUT_MS = "100";
-
     globalThis.__claraStorageForTest = {
       // Deliberately ignores options.signal: this models an unabortable filesystem/storage hang.
       put: () => new Promise((resolve) => lateResolvers.push(resolve)),
@@ -50,7 +49,7 @@ test("STORAGE-PROBE-UNABORTABLE: a wedged cycle releases the slot and late settl
 
     const first = await within(
       _refreshStorageProbeForTest(),
-      1000,
+      4_000,
       "the first unabortable timeout kept refresh ownership forever",
     );
     assert.deepEqual(first, {
@@ -62,7 +61,7 @@ test("STORAGE-PROBE-UNABORTABLE: a wedged cycle releases the slot and late settl
 
     const second = await within(
       _refreshStorageProbeForTest(),
-      1000,
+      4_000,
       "the second deterministic refresh never acquired the released slot",
     );
     assert.deepEqual(second, {
@@ -94,7 +93,7 @@ test("STORAGE-PROBE-UNABORTABLE: a wedged cycle releases the slot and late settl
     };
     const cold = await within(
       _waitForStorageProbeSettleForTest(),
-      1000,
+      4_000,
       "a cold unabortable timeout kept refresh ownership forever",
     );
     assert.equal(cold.pending, true, "a failed cold proof must remain pending");

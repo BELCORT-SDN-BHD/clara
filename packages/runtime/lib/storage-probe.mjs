@@ -90,18 +90,48 @@ import { join } from "node:path";
 import { putCanonical, verifyCanonical, StorageError } from "./storage.mjs";
 
 const PROBE_FIRM_ID = "00000000-0000-4000-8000-000000000000";
+const MIN_TIMER_MS = 1_000;
+const MAX_TIMER_MS = 2_147_483_647;
+const DEFAULT_CACHE_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 3_000;
 
-function cacheMs() {
-  // Floor 1000ms: this value now FEEDS setInterval (not a staleness compare), so 0 would be
-  // a sustained storage hot loop from a health check — the old async design's "0 = no cache"
-  // meaning no longer exists. Out-of-range values fall back to the 60s default.
-  const n = Number(process.env.CLARA_STORAGE_PROBE_CACHE_MS);
-  return Number.isFinite(n) && n >= 1000 ? n : 60_000;
+function configuredDelay(name, defaultMs) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return defaultMs;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    console.warn(`[storage-probe] ${name} is not finite; using ${defaultMs}ms`);
+    return defaultMs;
+  }
+  const clamped = Math.min(MAX_TIMER_MS, Math.max(MIN_TIMER_MS, Math.trunc(parsed)));
+  if (clamped !== parsed) {
+    console.warn(
+      `[storage-probe] ${name} clamped to [${MIN_TIMER_MS}, ${MAX_TIMER_MS}]: ${clamped}ms`,
+    );
+  }
+  return clamped;
 }
 
-function timeoutMs() {
-  const n = Number(process.env.CLARA_STORAGE_PROBE_TIMEOUT_MS);
-  return Number.isFinite(n) && n > 0 ? n : 3_000;
+function probeTiming() {
+  let cacheMs = configuredDelay("CLARA_STORAGE_PROBE_CACHE_MS", DEFAULT_CACHE_MS);
+  let timeoutMs = configuredDelay("CLARA_STORAGE_PROBE_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);
+  if (3 * timeoutMs > cacheMs) {
+    timeoutMs = DEFAULT_TIMEOUT_MS;
+    if (3 * timeoutMs > cacheMs) {
+      cacheMs = DEFAULT_CACHE_MS;
+      console.warn(
+        "[storage-probe] CLARA_STORAGE_PROBE_TIMEOUT_MS violates " +
+          "3 * timeout <= CLARA_STORAGE_PROBE_CACHE_MS; using 3000ms and " +
+          "CLARA_STORAGE_PROBE_CACHE_MS=60000ms",
+      );
+    } else {
+      console.warn(
+        "[storage-probe] CLARA_STORAGE_PROBE_TIMEOUT_MS violates " +
+          "3 * timeout <= CLARA_STORAGE_PROBE_CACHE_MS; using 3000ms",
+      );
+    }
+  }
+  return { cacheMs, timeoutMs };
 }
 
 /** Today's (UTC) probe payload/key — see the header comment for why the date is folded in. */
@@ -182,7 +212,8 @@ function startHardTimeout(fn, ms, onTimeout) {
  * the correctness arms (success/failure/timeout/mismatch) can assert deterministically instead
  * of racing a background interval. */
 export async function _probeStorageOnceForTest() {
-  const cycle = startHardTimeout(runProbeOnce, timeoutMs(), { ok: false, reason: "storage_probe_timeout" });
+  const { timeoutMs } = probeTiming();
+  const cycle = startHardTimeout(runProbeOnce, timeoutMs, { ok: false, reason: "storage_probe_timeout" });
   const verdict = await cycle.verdict;
   await cycle.settled;
   return verdict;
@@ -197,8 +228,8 @@ let activeRefresh = null;
 let activeController = null;
 let cacheGeneration = 0;
 
-async function refreshOnce(generation) {
-  const cycle = startHardTimeout(runProbeOnce, timeoutMs(), { ok: false, reason: "storage_probe_timeout" });
+async function refreshOnce(generation, timing) {
+  const cycle = startHardTimeout(runProbeOnce, timing.timeoutMs, { ok: false, reason: "storage_probe_timeout" });
   activeController = cycle.controller;
   try {
     const result = await cycle.verdict;
@@ -229,7 +260,7 @@ async function refreshOnce(generation) {
     // the refresh slot forever. Overlap is still prevented wherever the cycle can settle.
     let settlementTimer;
     const bound = new Promise((resolve) => {
-      settlementTimer = setTimeout(resolve, timeoutMs() * 2);
+      settlementTimer = setTimeout(resolve, timing.timeoutMs * 2);
       settlementTimer.unref?.();
     });
     await Promise.race([cycle.settled, bound]);
@@ -238,10 +269,10 @@ async function refreshOnce(generation) {
   }
 }
 
-function startRefresh() {
+function startRefresh(timing = probeTiming()) {
   if (activeRefresh) return activeRefresh;
   const generation = cacheGeneration;
-  const refresh = refreshOnce(generation);
+  const refresh = refreshOnce(generation, timing);
   const tracked = refresh.finally(() => {
     if (activeRefresh === tracked) activeRefresh = null;
   });
@@ -252,10 +283,11 @@ function startRefresh() {
 /** Start the background probe eagerly at runtime boot. Safe to call more than once. */
 export function startStorageProbe() {
   if (intervalHandle) return;
-  inFlight = startRefresh();
+  const timing = probeTiming();
+  inFlight = startRefresh(timing);
   intervalHandle = setInterval(() => {
-    inFlight = startRefresh();
-  }, cacheMs());
+    inFlight = startRefresh(timing);
+  }, timing.cacheMs);
   intervalHandle.unref?.();
 }
 
@@ -293,7 +325,7 @@ export async function _waitForStorageProbeSettleForTest() {
 
 /** Test-only: force one additional sequential refresh without waiting for the interval. */
 export async function _refreshStorageProbeForTest() {
-  inFlight = startRefresh();
+  inFlight = startRefresh(probeTiming());
   await inFlight;
   return { ...cachedResult };
 }
