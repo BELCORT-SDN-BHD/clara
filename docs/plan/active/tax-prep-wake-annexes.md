@@ -70,7 +70,7 @@ run the **branch's** test files and differ only in whether the migration is appl
 | T-13 | a draft whose `bound_digests` have moved **refuses** adoption | the staleness target actually bites; a signed code or a set `ca_class` invalidates the draft |
 | T-14 | the run refuses **`CLR10 evaluator_undeployed`** when the closure is dark, and the task settles `failed` rather than `completed` | §11's ordering hazard, made visible rather than mysterious |
 | T-15 | the source ships `enabled=false`; `wake_engine_sources` holds **3** rows, all disabled | 裁-40's posture, **censused not asserted** |
-| T-16 | the **bundle grep**: `taxPrep` appears in the built `.output/` | the WDK directive-swallow class, which typecheck cannot see |
+| T-16 | the **bundle grep**: `taxPrep` appears in the built runtime bundle under .output | the WDK directive-swallow class, which typecheck cannot see |
 
 ---
 
@@ -90,8 +90,8 @@ run the **branch's** test files and differ only in whether the migration is appl
 
 ## 10 · The build work order — PR-9
 
-**One migration**, `UNNUMBERED_f_t3_pr9_tax_prep_wake.sql` (number claimed at MERGE, hard
-constraint 10).
+**One migration**, `UNNUMBERED_f_t3_pr9_tax_prep_wake` under `packages/db/migrations/` (number
+claimed at MERGE, hard constraint 10).
 
 **§0 prestate** — assert the exact live text of all **seven** CHECKs being widened (design
 §3.1's five plus §3.4's two) and abort CLR10 on drift; pin `clara.mint_wake_credential`'s live

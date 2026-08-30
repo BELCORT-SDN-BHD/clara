@@ -284,8 +284,8 @@ and uses it nowhere else** — `grep loginPool` over that file returns exactly t
 pool a run actually uses is chosen inside the workflow's own infra module
 (`closePrep.v1.infra.ts:177-183`: `pools().withWriteWakeScoped(secret, fn)`). So the column
 documents intent and enforces nothing, and 裁-49's "true `close_prep`'s `login_pool` to the
-write pool" is a **documentation correction**, not a behaviour change. `taxPrep.v1.infra.ts`
-must independently use the **write** pool.
+write pool" is a **documentation correction**, not a behaviour change. The taxPrep.v1 infra
+module must independently use the **write** pool.
 
 ### 3.9 · The allowlist rows, and the role
 
@@ -329,8 +329,9 @@ A **new frozen class**, so `pnpm freeze:update` runs once (constraint 9: a new `
 existing class must pass freeze-lint on its own; only a brand-new class re-baselines). Files
 mirror `closePrep.v1`'s split so the two read the same:
 
-`taxPrep.v1.ts` (the entry) · `.impl.ts` (the three steps) · `.infra.ts` (pools, claim, settle)
-· `.prompt.ts` · `.reads.ts` · `.tools.ts` · `.usage.ts`.
+taxPrep.v1.ts (the entry) · .impl.ts (the three steps) · .infra.ts (pools, claim, settle) ·
+.prompt.ts · .reads.ts · .tools.ts · .usage.ts — seven files under
+`packages/runtime/workflows/`.
 
 **No backticks in any comment above the `"use workflow"` directive.** The WDK blanks template
 literals with a naive regex before looking for the directive, so a stray backtick can pair with
@@ -376,13 +377,13 @@ at all — that is why it is extracted here at birth. The precedence, and each a
 
 | Order | Condition | Outcome | Why |
 |---|---|---|---|
-| 1 | `streamFault && !cancelled` | `refused/internal` | the pass was **cut off**; whatever it had left is undone and unknown. Settling green on a truncated pass is the silent-green class |
+| 1 | `streamFault && !cancelled` | `refused` · code `internal` | the pass was **cut off**; whatever it had left is undone and unknown. Settling green on a truncated pass is the silent-green class |
 | 2 | `cancelledAs !== null` | `cancelled` | a cancelled task outranks every verdict, admitted acts included — the acts keep their own receipts; this decides only what the TASK says |
 | 3 | `acts > 0` | `drafted{acts, refusals}` | a partial success is still a success: the acts landed with durable receipts |
-| 4 | `reads > 0 && acts === 0 && infraFaults > 0` | `refused/internal` | reads fine, every write blocked by **our** fault. **The asymmetry decides it**: a false failure costs one wasted retry; a false success costs a tax draft that silently never gets prepared, invisibly, with nobody looking |
-| 5 | `writeAttempts > 0` | `refused/` `internal` if `infraFaults` else `model_error` | writes attempted, **none admitted**, is a failed night. On this lane a typed DB refusal does **not** throw — the wrapper cores RETURN `{status:'refused'}` — so without this arm a wholly-refused run takes the `nothing_due` branch and settles **completed** |
+| 4 | `reads > 0 && acts === 0 && infraFaults > 0` | `refused` · code `internal` | reads fine, every write blocked by **our** fault. **The asymmetry decides it**: a false failure costs one wasted retry; a false success costs a tax draft that silently never gets prepared, invisibly, with nobody looking |
+| 5 | `writeAttempts > 0` | `refused` · code `internal` if `infraFaults` else `model_error` | writes attempted, **none admitted**, is a failed night. On this lane a typed DB refusal does **not** throw — the wrapper cores RETURN `{status:'refused'}` — so without this arm a wholly-refused run takes the `nothing_due` branch and settles **completed** |
 | 6 | `reads > 0` | `nothing_due` | read and lawfully found nothing due — a correct outcome |
-| 7 | otherwise | `refused/` `internal` if `infraFaults` else `model_error` | never read anything: the run cannot say it looked (review law 2). **It must not blame the model for our bugs** — a pool fault, a mint failure or a driver error is `internal` |
+| 7 | otherwise | `refused` · code `internal` if `infraFaults` else `model_error` | never read anything: the run cannot say it looked (review law 2). **It must not blame the model for our bugs** — a pool fault, a mint failure or a driver error is `internal` |
 
 **Arm 5 is the one this lane most needs and the one most likely to be dropped**, because
 `tax_prep`'s expected first-run outcome *is* a wholly-refused night: 13 unsigned codes, no
