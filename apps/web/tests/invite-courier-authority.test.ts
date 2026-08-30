@@ -25,11 +25,12 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 import { handleInviteRequest } from "../lib/members/courier";
-import { canonicalAddress, isAsciiAddress, InviteMailFailure } from "../lib/members/invite-mail";
+import { canonicalAddress, isAsciiAddress, isConfirmedUser, InviteMailFailure } from "../lib/members/invite-mail";
 import {
   callerRow,
   CALLER_BYTES,
   deps,
+  FULL_ENV,
   json,
   observer,
   OK_RECEIPT,
@@ -273,19 +274,46 @@ describe("N2: the address is canonicalised once and used identically everywhere"
   }
 
   test("VACUITY CONTROL: the ASCII gate admits every address the product supports", async () => {
-    for (const ok of ["a@b.test", "first.last+tag@sub.example.co.uk", "A_B-c@example.test", ""]) {
+    for (const ok of ["a@b.test", "first.last+tag@sub.example.co.uk", "A_B-c@example.test", "   "]) {
       assert.equal(isAsciiAddress(ok), true, `${ok} must not be refused`);
     }
+    assert.equal(isAsciiAddress(""), false, "the printable-address predicate is non-empty");
     assert.equal(isAsciiAddress("naïve@example.test"), false);
   });
 
-  test("an EMPTY address still reaches the door — the courier does not pre-empt CLR10", async () => {
+  test("a SPACES-ONLY address still reaches the door — the courier does not pre-empt CLR10", async () => {
     const obs = observer();
     const { deps: d, calls } = deps(obs, { resolve: OK_RECEIPT });
     await handleInviteRequest(post({ email: "   ", role: "wizard" }), d);
     assert.equal(calls.length, 1, "canonicalising is not validating");
     assert.equal(calls[0]?.args.p_email, "", "…and `lower(btrim('   '))` really is the empty string");
   });
+
+  for (const [name, control] of [
+    ["NUL", "\x00"],
+    ["TAB", "\t"],
+    ["LF", "\n"],
+    ["CR", "\r"],
+    ["US", "\x1f"],
+    ["DEL", "\x7f"],
+    ["C1", "\x80"],
+  ] as const) {
+    test(`${name} in the RAW address is unsupported before every authority and write seam`, async () => {
+      const email = `a${control}@example.test`;
+      assert.equal(isAsciiAddress(email), false);
+      const obs = observer();
+      const { deps: d, calls, callerReads } = deps(obs, { resolve: OK_RECEIPT });
+      const res = await handleInviteRequest(post({ email, role: "admin" }), d);
+
+      assert.equal(res.status, 400);
+      assert.equal((await json(res)).code, "unsupported_address");
+      assert.equal(callerReads.length, 0, "no caller-context read");
+      assert.equal(obs.mintChecks.length, 0, "no directory read");
+      assert.equal(calls.length, 0, "no door call");
+      assert.equal(obs.mints.length, 0, "no provider mint");
+      assert.equal(obs.sends.length, 0, "no send");
+    });
+  }
 
   test("THE CHECK/USE RACE is handled as a mail_failed, not as a claimed send (P4-7 boundary)", async () => {
     // `canMintFor` says free, the account is confirmed between the scan and the
@@ -306,5 +334,51 @@ describe("N2: the address is canonicalised once and used identically everywhere"
     assert.deepEqual(body.invite, { invite_id: OK_RECEIPT.invite_id, expires_at: OK_RECEIPT.expires_at });
     assert.equal(calls.length, 1, "the door DID mint — that is what makes this the race and not the pre-door refusal");
     assert.equal(obs.sends.length, 0, "and no mail may claim to have gone");
+  });
+});
+
+describe("confirmation timestamps and production loopback fail closed before writes", () => {
+  for (const [name, timestamp, expectedStatus, expectedCode] of [
+    ["unparseable", "not-a-date", 503, "mail_unavailable"],
+    ["valid future", "2099-01-01T00:00:00Z", 409, "recipient_has_account"],
+  ] as const) {
+    test(`${name} email_confirmed_at produces ${expectedStatus} with no writes`, async () => {
+      const obs = observer();
+      const { deps: d, calls } = deps(obs, { resolve: OK_RECEIPT }, {
+        mailerFor: () => ({
+          ...obs.mailer,
+          async canMintFor(email: string) {
+            obs.mintChecks.push(email);
+            return isConfirmedUser({ email_confirmed_at: timestamp })
+              ? { ok: false as const, reason: "already_registered" as const }
+              : { ok: true as const };
+          },
+        }),
+        logFailure: () => undefined,
+      });
+      const res = await handleInviteRequest(post({ email: "target@example.test", role: "admin" }), d);
+
+      assert.equal(res.status, expectedStatus);
+      assert.equal((await json(res)).code, expectedCode);
+      assert.equal(calls.length, 0, "no door call");
+      assert.equal(obs.mints.length, 0, "no provider mint");
+      assert.equal(obs.sends.length, 0, "no send");
+    });
+  }
+
+  test("production ignores the insecure-loopback flag and touches no downstream seam", async () => {
+    const obs = observer();
+    const { deps: d, calls, callerReads } = deps(obs, { resolve: OK_RECEIPT }, {
+      env: { ...FULL_ENV, NODE_ENV: "production", CLARA_ALLOW_INSECURE_LOOPBACK: "1" },
+    });
+    const res = await handleInviteRequest(post({ email: "target@example.test", role: "admin" }), d);
+
+    assert.equal(res.status, 403);
+    assert.equal((await json(res)).code, "cross_origin");
+    assert.equal(callerReads.length, 0, "no caller-context read");
+    assert.equal(obs.mintChecks.length, 0, "no directory read");
+    assert.equal(calls.length, 0, "no door call");
+    assert.equal(obs.mints.length, 0, "no provider mint");
+    assert.equal(obs.sends.length, 0, "no send");
   });
 });

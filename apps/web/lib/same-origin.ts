@@ -87,7 +87,8 @@ export function readSameOriginConfig(env: Record<string, string | undefined>): S
   return {
     publicOrigins,
     allowInsecureLoopback:
-      env.NODE_ENV === "development" || env.CLARA_ALLOW_INSECURE_LOOPBACK === "1",
+      env.NODE_ENV !== "production" &&
+      (env.NODE_ENV === "development" || env.CLARA_ALLOW_INSECURE_LOOPBACK === "1"),
   };
 }
 

@@ -47,6 +47,7 @@ import {
 } from "./reads";
 import { addMember, removeMember, revokeInvite, setMemberRole } from "./doors";
 import type { SessionTokenAccessor } from "@/lib/session";
+import { semanticFunctionOperations } from "../../test/sqlFunctionCensus";
 
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const MIGRATIONS_DIR = join(WEB_ROOT, "..", "..", "packages", "db", "migrations");
@@ -91,14 +92,14 @@ const M0145 = "0145_p4_tranche2_registration_operator_alias.sql";
 const M0147 = "0147_db_hardening_b_hash_only_bearer_tokens.sql";
 
 function pinnedRoleRankBody(dir = MIGRATIONS_DIR): string {
-  const definers = functionDefiners("role_rank", dir);
+  const operations = semanticFunctionOperations(dir, "role_rank");
   assert.deepEqual(
-    definers,
-    ["0002_foundation.sql"],
-    "clara.role_rank has a later live-body definer — re-census ROLE_LADDER before trusting it",
+    operations.map(({ file, kind }) => ({ file, kind })),
+    [{ file: "0002_foundation.sql", kind: "define" }],
+    "clara.role_rank has more than its one semantic operation — re-census ROLE_LADDER before trusting it",
   );
   const body = /create function clara\.role_rank\(p_role text\)[\s\S]*?\$\$;/.exec(
-    migration(definers[0] as string, dir),
+    migration(operations[0]!.file, dir),
   )?.[0];
   assert.ok(body, "clara.role_rank's body was not found — re-census before trusting ROLE_LADDER");
   return body;
@@ -272,7 +273,7 @@ describe("the role ladder is clara.role_rank's own mapping", () => {
     assert.equal(roleRank("wizard"), null);
   });
 
-  it("RED-BEFORE: a later dynamic-splice role_rank migration invalidates the live-body pin", () => {
+  it("RED-BEFORE: EXECUTE format with concatenated head and variable target invalidates the role_rank pin", () => {
     const fixture = mkdtempSync(join(tmpdir(), "clara-role-rank-"));
     try {
       writeFileSync(
@@ -281,15 +282,41 @@ describe("the role ladder is clara.role_rank's own mapping", () => {
       );
       writeFileSync(
         join(fixture, "9999_role_rank_recut.sql"),
-        "do $$ declare v_name text := 'role_rank'; v_head text := 'create function clara.role_rank'; begin execute replace(v_head, 'then 2', 'then 7'); end $$;\n",
+        "do $$ declare v_schema text := 'clara'; v_name text := 'role_rank'; v_head text := 'create or replace func' || 'tion '; begin execute format('%s%I.%I(text) returns integer language sql as ''select 7''', v_head, v_schema, v_name); end $$;\n",
       );
-
-      assert.deepEqual(functionDefiners("role_rank", fixture), ["0002_foundation.sql", "9999_role_rank_recut.sql"]);
       assert.throws(
         () => pinnedRoleRankBody(fixture),
-        /later live-body definer/,
-        "the old 0002-only pin false-greens after a later migration changes the scale",
+        /semantic operation/,
+        "a formatted dynamic redefinition changed the scale without entering the census",
       );
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("RED-BEFORE: a second definition in the same migration invalidates the role_rank pin", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "clara-role-rank-"));
+    try {
+      writeFileSync(
+        join(fixture, "0002_foundation.sql"),
+        "create function clara.role_rank(p_role text) returns int language sql immutable as $$ select 0 $$;\n" +
+          "create or replace function clara.role_rank(p_role text) returns int language sql immutable as $$ select 7 $$;\n",
+      );
+      assert.throws(() => pinnedRoleRankBody(fixture), /semantic operation/);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("RED-BEFORE: a later DROP invalidates the role_rank pin", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "clara-role-rank-"));
+    try {
+      writeFileSync(
+        join(fixture, "0002_foundation.sql"),
+        "create function clara.role_rank(p_role text) returns int language sql immutable as $$ select 0 $$;\n",
+      );
+      writeFileSync(join(fixture, "9999_drop.sql"), "drop function clara.role_rank(text);\n");
+      assert.throws(() => pinnedRoleRankBody(fixture), /semantic operation/);
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }

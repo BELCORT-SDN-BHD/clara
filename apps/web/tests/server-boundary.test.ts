@@ -34,6 +34,7 @@ import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 import { stripComments } from "../test/sourceOracle";
 
@@ -69,24 +70,50 @@ type Tree = {
  * `import type` / `export type` are erased and deliberately NOT followed.
  */
 export function runtimeSpecifiers(source: string): string[] {
-  const code = stripComments(source);
   const out: string[] = [];
-  for (const m of code.matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
-    if (/^\s*type\s/.test(m[1] as string)) continue;
-    out.push(m[2] as string);
-  }
-  for (const m of code.matchAll(/import\s*["']([^"']+)["']/g)) out.push(m[1] as string);
-  for (const m of code.matchAll(/export\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
-    if (/^\s*type\s/.test(m[1] as string)) continue;
-    out.push(m[2] as string);
-  }
-  for (const m of code.matchAll(/\bimport\s*\(\s*`([^`]*)`\s*\)/g)) {
-    const template = m[1] as string;
-    if (template.includes("${")) {
-      throw new Error("interpolated_dynamic_import_unresolved");
+  const file = ts.createSourceFile("boundary.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const addLiteral = (node: ts.Expression): boolean => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      out.push(node.text);
+      return true;
     }
-  }
-  for (const m of code.matchAll(/\bimport\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/g)) out.push(m[1] as string);
+    return false;
+  };
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node)) {
+      const clause = node.importClause;
+      const named = clause?.namedBindings;
+      const onlyTypeSpecifiers =
+        named !== undefined && ts.isNamedImports(named) && named.elements.length > 0 && named.elements.every((e) => e.isTypeOnly);
+      if (!clause?.isTypeOnly && !(clause?.name === undefined && onlyTypeSpecifiers)) addLiteral(node.moduleSpecifier);
+      return;
+    }
+    if (ts.isExportDeclaration(node)) {
+      const clause = node.exportClause;
+      const onlyTypeSpecifiers =
+        clause !== undefined && ts.isNamedExports(clause) && clause.elements.length > 0 && clause.elements.every((e) => e.isTypeOnly);
+      if (!node.isTypeOnly && !onlyTypeSpecifiers && node.moduleSpecifier !== undefined) addLiteral(node.moduleSpecifier);
+      return;
+    }
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      const argument = node.arguments[0];
+      if (argument === undefined || !addLiteral(argument)) {
+        throw new Error(
+          argument !== undefined && ts.isTemplateExpression(argument)
+            ? "interpolated_dynamic_import_unresolved"
+            : "non_literal_dynamic_import_unresolved",
+        );
+      }
+      return;
+    }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "require") {
+      const argument = node.arguments[0];
+      if (argument === undefined || !addLiteral(argument)) throw new Error("non_literal_require_unresolved");
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(file, visit);
   return out;
 }
 
@@ -99,17 +126,38 @@ function resolveLocal(tree: Tree, fromFile: string, spec: string): string | null
       ? join(dirname(fromFile), spec).split(sep).join("/")
       : null;
   if (base === null) return null;
+  if (tree.exists(base)) return base;
+  const extensionSubstitutions: Record<string, readonly string[]> = {
+    ".js": [".ts", ".tsx"],
+    ".jsx": [".tsx"],
+    ".mjs": [".mts"],
+    ".cjs": [".cts"],
+  };
+  for (const [runtimeExtension, sourceExtensions] of Object.entries(extensionSubstitutions)) {
+    if (!base.endsWith(runtimeExtension)) continue;
+    const stem = base.slice(0, -runtimeExtension.length);
+    for (const sourceExtension of sourceExtensions) {
+      const candidate = `${stem}${sourceExtension}`;
+      if (tree.exists(candidate)) return candidate;
+    }
+  }
   for (const ext of [
     ".ts",
     ".tsx",
     ".js",
     ".jsx",
     ".mjs",
+    ".mts",
+    ".cjs",
+    ".cts",
     "/index.ts",
     "/index.tsx",
     "/index.js",
     "/index.jsx",
     "/index.mjs",
+    "/index.mts",
+    "/index.cjs",
+    "/index.cts",
   ]) {
     const candidate = `${base}${ext}`;
     if (tree.exists(candidate)) return candidate;
@@ -129,8 +177,8 @@ export function closureOf(tree: Tree, entry: string): Set<string> {
     try {
       specifiers = runtimeSpecifiers(tree.read(current));
     } catch (error) {
-      if (error instanceof Error && error.message === "interpolated_dynamic_import_unresolved") {
-        throw new Error(`interpolated_dynamic_import_unresolved:${current}`);
+      if (error instanceof Error && error.message.endsWith("_unresolved")) {
+        throw new Error(`${error.message}:${current}`);
       }
       throw error;
     }
@@ -166,7 +214,7 @@ function walkDir(absolute: string, relative: string, out: string[]): void {
     if (SKIP.has(entry.name)) continue;
     const nextRelative = relative === "" ? entry.name : `${relative}/${entry.name}`;
     if (entry.isDirectory()) walkDir(join(absolute, entry.name), nextRelative, out);
-    else if (/\.(ts|tsx|js|jsx|mjs)$/.test(entry.name)) out.push(nextRelative);
+    else if (/\.(ts|tsx|js|jsx|mjs|mts|cjs|cts)$/.test(entry.name)) out.push(nextRelative);
   }
 }
 
@@ -315,6 +363,40 @@ describe("N6: the three edges the first version of this walk could not see", () 
     const reached = closureOf(tree, roots[0] as string);
     assert.ok(reached.has("lib/bridge.mjs"));
     assert.ok(reached.has("lib/members/courier.js"));
+  });
+
+  test("an explicit existing extension is resolved before any suffix is appended", () => {
+    const tree = syntheticTree({
+      "components/root.ts": 'import "../lib/bridge.mjs";\n',
+      "lib/bridge.mjs": 'export const bridge = true;\n',
+    });
+    assert.ok(closureOf(tree, "components/root.ts").has("lib/bridge.mjs"));
+  });
+
+  test("a JavaScript import specifier resolves to its TypeScript source", () => {
+    const tree = syntheticTree({
+      "components/root.ts": 'import "@/lib/members/courier.js";\n',
+      [COURIER]: "export const courier = true;\n",
+    });
+    assert.ok(closureOf(tree, "components/root.ts").has(COURIER));
+  });
+
+  test("a literal CommonJS require is a runtime edge", () => {
+    const tree = syntheticTree({
+      "components/root.ts": 'const courier = require("@/lib/members/courier");\n',
+      [COURIER]: "export const courier = true;\n",
+    });
+    assert.ok(closureOf(tree, "components/root.ts").has(COURIER));
+  });
+
+  test("a non-literal dynamic import fails closed by a named reason", () => {
+    const tree = syntheticTree({
+      "components/root.ts": 'const target = "@/lib/members/courier";\nvoid import(target);\n',
+    });
+    assert.throws(
+      () => closureOf(tree, "components/root.ts"),
+      /non_literal_dynamic_import_unresolved:components\/root\.ts/,
+    );
   });
 
   test("RED-BEFORE: the OLD static-only walk missed all three", () => {

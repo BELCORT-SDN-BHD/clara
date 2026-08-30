@@ -25,6 +25,7 @@
 //     instrument that sees it.
 
 import { readFileSync } from "node:fs";
+import ts from "typescript";
 
 /* -------------------------------------------------------------------------- */
 /* TypeScript/JavaScript                                                       */
@@ -241,13 +242,23 @@ export function moduleLevelDeclarations(code: string): Decl[] {
  */
 export function exportClauseAliases(code: string): Map<string, string> {
   const out = new Map<string, string>();
-  for (const m of code.matchAll(/\bexport\s*(type\s+)?\{([^}]*)\}/g)) {
-    if (m[1]) continue;
-    for (const spec of (m[2] as string).split(",")) {
-      const parsed = /^([A-Za-z_$][\w$]*)(?:\s+as\s+(?:([A-Za-z_$][\w$]*)|(["'])([^"']+)\3))?$/.exec(spec.trim());
-      if (!parsed) continue;
-      const local = parsed[1] as string;
-      out.set(parsed[2] ?? parsed[4] ?? local, local);
+  const file = ts.createSourceFile("source-oracle.ts", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  for (const statement of file.statements) {
+    if (
+      !ts.isExportDeclaration(statement) ||
+      statement.isTypeOnly ||
+      statement.moduleSpecifier !== undefined ||
+      statement.exportClause === undefined ||
+      !ts.isNamedExports(statement.exportClause)
+    ) continue;
+    for (const specifier of statement.exportClause.elements) {
+      if (specifier.isTypeOnly) continue;
+      const localNode = specifier.propertyName ?? specifier.name;
+      if (!ts.isIdentifier(localNode)) continue;
+      // StringLiteral.text is the COOKED runtime export name: the source spelling
+      // `"G\u0045T"` names GET in the module record, and Next dispatches on that
+      // record rather than on the raw token text.
+      out.set(specifier.name.text, localNode.text);
     }
   }
   return out;

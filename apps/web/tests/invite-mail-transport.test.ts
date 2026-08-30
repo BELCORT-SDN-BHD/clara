@@ -252,9 +252,10 @@ describe("canMintFor answers {ok:true} only when it has SEEN the whole directory
     );
   });
 
-  test("N2(3): empty-string and non-string email confirmation timestamps make the directory unreadable", async () => {
+  test("N2(3): malformed email confirmation timestamps make the directory unreadable", async () => {
     for (const user of [
       { email: "x@example.test", email_confirmed_at: "" },
+      { email: "x@example.test", email_confirmed_at: "not-a-date" },
       { email: "x@example.test", email_confirmed_at: 17 },
     ]) {
       const client = recordingClient({ listUsers: () => ({ data: { users: [user] }, error: null }) });
@@ -269,6 +270,7 @@ describe("canMintFor answers {ok:true} only when it has SEEN the whole directory
     assert.equal(isConfirmedUser({}), false, "omitempty makes a missing field the real unconfirmed wire shape");
     assert.equal(isConfirmedUser({ email_confirmed_at: null }), false);
     assert.equal(isConfirmedUser({ email_confirmed_at: "2026-08-01T00:00:00Z" }), true);
+    assert.equal(isConfirmedUser({ email_confirmed_at: "2099-01-01T00:00:00Z" }), true, "future is still confirmed");
     assert.throws(
       () => isConfirmedUser({ email_confirmed_at: "" }),
       (e: unknown) => isInviteMailFailure(e) && e.code === "directory_unreadable",

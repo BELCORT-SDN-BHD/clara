@@ -210,13 +210,13 @@ describe("nothing is minted before the courier can finish the job", () => {
     assert.equal(obs.sends.length, 0);
   });
 
-  test("an EMPTY email and an unknown role are passed STRAIGHT THROUGH to the door", async () => {
+  test("a SPACES-ONLY email and an unknown role are passed STRAIGHT THROUGH to the door", async () => {
     // The courier must not pre-empt CLR10 'a valid email is required' or CLR10
     // 'bad role'. If this ever goes red because the courier "validated" them, the
     // UI has started guessing the DB's answer (plan §2 rule (b)).
     const obs = observer();
     const { deps: d, calls } = deps(obs, { resolve: OK_RECEIPT });
-    await handleInviteRequest(post({ email: "", role: "wizard" }), d);
+    await handleInviteRequest(post({ email: "   ", role: "wizard" }), d);
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0]?.args, { p_email: "", p_role: "wizard", p_op_key: "op-key-pinned" });
   });

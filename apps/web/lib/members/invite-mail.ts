@@ -367,7 +367,7 @@ export function canonicalAddress(raw: string): string {
  * implementing provider-equivalent normalisation, not relaxing this.
  */
 export function isAsciiAddress(value: string): boolean {
-  return /^[\x00-\x7F]*$/.test(value);
+  return /^[\x20-\x7E]+$/.test(value);
 }
 
 /** Address equality, on the canonical form both ends now share. */
@@ -390,8 +390,8 @@ export function sameAddress(a: string, b: string): boolean {
  *
  * GoTrue serialises a nil `email_confirmed_at` with `omitempty`, making ABSENCE
  * the ordinary unconfirmed wire shape. Explicit null means the same. A present,
- * non-empty string is confirmed. A present empty string or a non-string is not
- * "unconfirmed" evidence: it is a malformed directory row and throws
+ * parseable ISO-8601 string is confirmed. A malformed string or a non-string is
+ * not "unconfirmed" evidence: it is an unreadable directory row and throws
  * `directory_unreadable`, so it can never license the door to mint.
  */
 export function isConfirmedUser(user: unknown): boolean {
@@ -400,7 +400,11 @@ export function isConfirmedUser(user: unknown): boolean {
   }
   const u = user as Record<string, unknown>;
   if (!Object.hasOwn(u, "email_confirmed_at") || u.email_confirmed_at === null) return false;
-  if (typeof u.email_confirmed_at === "string" && u.email_confirmed_at !== "") return true;
+  if (
+    typeof u.email_confirmed_at === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(u.email_confirmed_at) &&
+    Number.isFinite(Date.parse(u.email_confirmed_at))
+  ) return true;
   throw new InviteMailFailure("directory_unreadable", null);
 }
 

@@ -336,10 +336,11 @@ describe("isSameOriginRequest — scheme check (reviewer note 2)", () => {
       assert.equal(readSameOriginConfig(env).allowInsecureLoopback, false, JSON.stringify(env));
     }
     assert.equal(readSameOriginConfig({ CLARA_ALLOW_INSECURE_LOOPBACK: "1" }).allowInsecureLoopback, true);
+    assert.equal(readSameOriginConfig({ NODE_ENV: "test", CLARA_ALLOW_INSECURE_LOOPBACK: "1" }).allowInsecureLoopback, true);
     assert.equal(
       readSameOriginConfig({ NODE_ENV: "production", CLARA_ALLOW_INSECURE_LOOPBACK: "1" }).allowInsecureLoopback,
-      true,
-      "the explicit opt-in is independent of an inferred mode",
+      false,
+      "production kills the development-only escape hatch even when the flag is present",
     );
     assert.equal(readSameOriginConfig({ CLARA_ALLOW_INSECURE_LOOPBACK: "true" }).allowInsecureLoopback, false);
   });

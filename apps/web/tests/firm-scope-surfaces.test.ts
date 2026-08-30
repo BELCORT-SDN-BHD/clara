@@ -7,6 +7,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
+import ts from "typescript";
 
 import {
   SCOPE_ENTRANCES,
@@ -45,6 +46,49 @@ const APP_DIR = join(WEB_ROOT, "app");
 
 const LEAF = /^(page|route)\.(ts|tsx|js|jsx)$/;
 const SOURCE_EXT = /\.(ts|tsx)$/;
+
+type CourierRefusal = { readonly code: string; readonly start: number; readonly end: number };
+
+/** Every courierError return the handler can take before its first governed door
+ * call. This is the executable refusal surface, not a list of expected spellings. */
+function preDoorCourierRefusals(source: string): CourierRefusal[] {
+  const file = ts.createSourceFile("courier.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const handler = file.statements.find(
+    (statement): statement is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(statement) && statement.name?.text === "handleInviteRequest",
+  );
+  assert.ok(handler?.body, "handleInviteRequest body was not found");
+  let doorAt = Number.POSITIVE_INFINITY;
+  const locateDoor = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "call"
+    ) doorAt = Math.min(doorAt, node.getStart(file));
+    ts.forEachChild(node, locateDoor);
+  };
+  ts.forEachChild(handler.body, locateDoor);
+  assert.ok(Number.isFinite(doorAt), "the governed door call was not found");
+
+  const refusals: CourierRefusal[] = [];
+  const visit = (node: ts.Node): void => {
+    if (node.getStart(file) >= doorAt) return;
+    if (
+      ts.isReturnStatement(node) &&
+      node.expression !== undefined &&
+      ts.isCallExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.expression.text === "courierError"
+    ) {
+      const code = node.expression.arguments[1];
+      assert.ok(code !== undefined && ts.isStringLiteralLike(code), "pre-door courierError has no literal code");
+      refusals.push({ code: code.text, start: node.getStart(file), end: node.end });
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(handler.body, visit);
+  return refusals.sort((a, b) => a.start - b.start);
+}
 
 function webRelative(abs: string): string {
   return relative(WEB_ROOT, abs).split(sep).join("/");
@@ -613,28 +657,44 @@ describe("the deliberate exemptions stay exempt", () => {
     assert.match(src, /THE DB IS THE WALL/);
   });
 
-  it("the invite exemption's SEVEN pre-door gates match the courier source census", () => {
-    const courier = stripComments(readSource("lib/members/courier.ts"), { blankStrings: true });
-    const gates = [
-      ["origin", /const proof = proveSameOrigin\(/],
-      ["body", /const body: unknown = await request\.json\(\)/],
-      ["ASCII", /if \(!isAsciiAddress\(body\.email\)\)/],
-      ["session", /const serverSession = await/],
-      ["admin preflight", /const callerRows = await/],
-      ["configuration", /const capability = inviteMailCapability\(/],
-      ["directory\/mintability", /mintable = await mailer\.canMintFor\(email\)/],
-    ] as const;
-    const positions = gates.map(([name, pattern]) => {
-      const at = courier.search(pattern);
-      assert.ok(at >= 0, `the documentary census cannot see the ${name} gate`);
-      return at;
-    });
-    assert.equal(gates.length, 7, "the exemption's documentary number changed without changing its census");
-    assert.deepEqual(positions, [...positions].sort((a, b) => a - b), "the seven pre-door gates changed order");
+  it("the invite exemption's pre-door refusal count comes from handleInviteRequest's control flow", () => {
+    const source = readSource("lib/members/courier.ts");
+    const refusals = preDoorCourierRefusals(source);
+    assert.equal(refusals.length, 8, "seven conceptual gates currently expose eight refusal sites");
+    assert.deepEqual(refusals.map((r) => r.code), [
+      "cross_origin",
+      "invalid_request",
+      "unsupported_address",
+      "no_session",
+      "not_permitted",
+      "mail_not_configured",
+      "mail_unavailable",
+      "recipient_has_account",
+    ]);
+
+    for (const refusal of refusals) {
+      const mutant = source.slice(0, refusal.start) + source.slice(refusal.end);
+      assert.equal(
+        preDoorCourierRefusals(mutant).length,
+        refusals.length - 1,
+        `removing ${refusal.code} did not change the AST-derived census`,
+      );
+    }
+    const insertion = source.indexOf("  const call = deps.callDoor ?? realCallDoor;");
+    assert.ok(insertion >= 0, "the mutant insertion point before the door was not found");
+    const added = source.slice(0, insertion) +
+      '  if (request.headers.has("x-added-refusal")) return courierError(418, "added_refusal", "added");\n' +
+      source.slice(insertion);
+    const addedRefusals = preDoorCourierRefusals(added);
+    assert.equal(addedRefusals.length, refusals.length + 1, "a ninth pre-door refusal escaped the control-flow census");
+    assert.equal(addedRefusals.at(-1)?.code, "added_refusal");
 
     const exemption = SCOPE_EXEMPT_SURFACES.find((entry) => entry.path === "app/api/invite/route.ts");
     assert.ok(exemption);
-    assert.match(exemption.reason, /Seven pre-door gates/);
+    const countWord = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"][refusals.length];
+    assert.ok(countWord);
+    assert.match(exemption.reason, new RegExp(`${countWord} pre-door refusal sites`));
+    assert.match(exemption.reason, /seven conceptual gates/);
   });
 
   it("logout keeps the two walls that DO matter there", () => {
