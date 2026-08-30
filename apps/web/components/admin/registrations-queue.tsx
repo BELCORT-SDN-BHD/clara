@@ -12,7 +12,7 @@
 // confirmation dialog around a single click that IS already the confirming
 // act adds friction without adding a real second confirmation step.
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
@@ -100,12 +100,6 @@ function OperatorQueue() {
   );
   const [receipt, setReceipt] = useState<{ firmId: string; planId: string } | null>(null);
 
-  // FOLD (Codex HIGH-1): ONE stable op_key per OPEN request, held until the
-  // mandatory re-read proves the row left the queue — see
-  // lib/registration/doors.ts's own header on why a fresh key per click
-  // defeats `_reserve_op`'s replay contract. A `useRef` Map so retries
-  // across renders reuse the SAME key; pruned below once a row is decided.
-  const approveKeysRef = useRef<Map<string, string>>(new Map());
   // ONE synchronous guard for every Approve click in this queue (mirrors
   // RejectDialog's own per-dialog guard) — closes the pre-render race
   // `disabled={busy}` alone cannot: `busy` only takes effect on react's
@@ -113,29 +107,25 @@ function OperatorQueue() {
   // can both reach this function before either sees it.
   const approveGuardRef = useRef(createSingleFireGuard());
 
-  // A decided row (approved or rejected) never comes back — its cached key
-  // is dead weight once it has left the open queue on a real re-read.
-  useEffect(() => {
-    if (!rows) return;
-    const openIds = new Set(rows.map((r) => r.id));
-    for (const id of approveKeysRef.current.keys()) {
-      if (!openIds.has(id)) approveKeysRef.current.delete(id);
-    }
-  }, [rows]);
-
   async function handleApprove(row: RegistrationRequestRow) {
-    let key = approveKeysRef.current.get(row.id);
-    if (!key) {
-      key = crypto.randomUUID();
-      approveKeysRef.current.set(row.id, key);
-    }
+    // FOLD (Codex HIGH-1, RULED at the opus addendum — MEDIUM FIND-3): a
+    // STABLE, DETERMINISTIC key derived from `row.id` alone, not a cached
+    // `crypto.randomUUID()`. `_reserve_op`'s replay contract (0004:46-60,
+    // doors.ts's own header) is keyed on `(firm, fn, op_key)` and re-hashes
+    // `{request, actor}` — approve's request/actor pair for a given row
+    // never changes across retries, so the key can be computed FRESH on
+    // every call instead of cached in a Map that then needs pruning once a
+    // row is decided. Simpler than the round-1 fix and needs no cleanup:
+    // once the row leaves the open queue it is never re-approved, so this
+    // key is never recomputed for it again either way.
+    const key = `reg-approve-${row.id}`;
     // A NEW attempt clears the LAST attempt's receipt too (the
     // OnboardingChecklistCard F5 precedent) — otherwise a later refusal
     // renders beside a stale, unrelated "firm created" banner.
     setReceipt(null);
     await runOnce(approveGuardRef.current, async () => {
       await act(async () => {
-        const out = await approveFirmRegistration(sessionTokenAccessor, row.id, key!);
+        const out = await approveFirmRegistration(sessionTokenAccessor, row.id, key);
         // The DB's own returned `plan_id` rendered verbatim, never dropped —
         // see lib/registration/doors.ts's header on `_create_firm_core`
         // opening the onboarding plan alongside the firm.
@@ -297,7 +287,13 @@ function RejectDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button variant="destructive" size="sm" />}>{t("rejectTrigger")}</DialogTrigger>
+      {/* FOLD (opus addendum, LOW FIND-4): the trigger itself must be
+          disabled={busy} too — Approve's own button already is, and this
+          file's own header claims every control disables under the SAME
+          `busy` while an act is in flight; the trigger was the one
+          exception. Opening a NEW dialog while another row's act is still
+          running is exactly the kind of overlap `busy` exists to prevent. */}
+      <DialogTrigger render={<Button variant="destructive" size="sm" disabled={busy} />}>{t("rejectTrigger")}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t("rejectTitle", { firm: firmName })}</DialogTitle>

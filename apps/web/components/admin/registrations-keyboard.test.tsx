@@ -237,7 +237,7 @@ test("Approve: the discriminating post-condition — the approved row LEAVES the
   );
 });
 
-test("FOLD (Codex HIGH-1): a synchronous double-click on Approve results in EXACTLY ONE approve_firm_registration call", async () => {
+test("FOLD (Codex HIGH-1 / opus MEDIUM FIND-3): a synchronous double-click on Approve results in EXACTLY ONE approve_firm_registration call, keyed reg-approve-r1", async () => {
   let approveCalls = 0;
   const seenOpKeys: unknown[] = [];
   let queueCall = 0;
@@ -262,38 +262,31 @@ test("FOLD (Codex HIGH-1): a synchronous double-click on Approve results in EXAC
         const approveButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Approve");
         assert.ok(approveButton, "the Approve trigger must render");
 
-        // TWO onClick invocations, back to back, with NEITHER awaited before
-        // the other starts — the synchronous race single-fire-guard.ts's own
-        // header describes: `disabled={busy}` alone cannot close this
-        // window, because `busy` (React state) only takes effect on the
+        // TWO `clickButton` invocations, back to back, with NEITHER awaited
+        // before the other starts — RULED at the opus addendum: drive this
+        // with the SAME shared instrument MEDIUM FIND-3 names, rather than
+        // a hand-rolled onClick extraction. single-fire-guard.ts's own
+        // header names the race this closes: `disabled={busy}` alone
+        // cannot, because `busy` (React state) only takes effect on the
         // NEXT render, while the ref-backed guard is read/written
-        // synchronously in the SAME microtask as the click handler. Reads
-        // `onClick` directly (the same `__reactProps$…` technique
-        // `clickButton` uses internally) and calls it TWICE inside ONE
-        // `h.act(...)`, rather than two separate `h.fireEvent` calls —
-        // React's own `act()` does not support overlapping/concurrent
-        // invocations (a real, measured warning + downstream pollution
-        // across later tests in this same process when tried), so both
-        // calls must live inside the SAME `act()` boundary to stay
-        // supported while still genuinely racing.
-        const propsKey = Object.keys(approveButton as object).find((k) => k.startsWith("__reactProps"));
-        const onClick = propsKey
-          ? (approveButton as unknown as Record<string, { onClick?: (e: unknown) => unknown }>)[propsKey]?.onClick
-          : undefined;
-        assert.ok(onClick, "Approve must have a real onClick handler");
-        const fakeEvent = {
-          type: "click", target: approveButton, currentTarget: approveButton,
-          preventDefault() {}, stopPropagation() {}, persist() {},
-        };
+        // synchronously in the SAME microtask as the click handler. Both
+        // calls live inside ONE `h.act(...)` — React's own `act()` does not
+        // support overlapping/concurrent invocations (a real, measured
+        // warning + downstream pollution across later tests in this same
+        // process when tried as two separate `h.fireEvent`/`act` calls).
         await h.act(async () => {
-          const p1 = onClick(fakeEvent);
-          const p2 = onClick(fakeEvent);
+          const p1 = clickButton(approveButton as never);
+          const p2 = clickButton(approveButton as never);
           await Promise.all([p1, p2]);
         });
         for (let i = 0; i < 6; i++) await h.settle();
 
         assert.equal(approveCalls, 1, "the second, synchronous click must be a no-op — exactly one RPC must have fired");
         assert.equal(seenOpKeys.length, 1);
+        // RULED at the opus addendum (MEDIUM FIND-3): Approve's op_key is
+        // now a STABLE, DETERMINISTIC template keyed on the row id, not a
+        // cached crypto.randomUUID() — assert the literal shape.
+        assert.equal(seenOpKeys[0], "reg-approve-r1");
       } finally {
         await h.unmount();
         // FOLD hygiene: remove the mounted container from document.body —
@@ -318,14 +311,16 @@ test("FOLD (Codex HIGH-1): a synchronous double-click on Approve results in EXAC
 // shared `clickButton` on the portaled control, per the same law as Cancel
 // above.
 
-test("Reject: a successful confirm submits the TRIMMED reason, and the DISCRIMINATING post-condition — the row LEAVES the open queue on the real re-read", async () => {
+test("Reject: a successful confirm submits the TRIMMED reason, calls reject_firm_registration EXACTLY ONCE, and the DISCRIMINATING post-condition — the row LEAVES the open queue on the real re-read", async () => {
   let queueCall = 0;
+  let rejectCalls = 0;
   let sawReasonBody: { p_reason?: string } | null = null;
   await withMockedEnv(
     async (u, init) => {
       const url = String(u);
       if (url.includes("/rest/v1/caller_context")) return jsonResponse(CALLER_CONTEXT);
       if (url.includes("/rpc/reject_firm_registration")) {
+        rejectCalls += 1;
         sawReasonBody = JSON.parse(String(init?.body ?? "{}"));
         return jsonResponse({ request_id: "r1", status: "rejected" });
       }
@@ -364,6 +359,7 @@ test("Reject: a successful confirm submits the TRIMMED reason, and the DISCRIMIN
         for (let i = 0; i < 6; i++) await h.settle();
 
         assert.ok(sawReasonBody, "reject_firm_registration must actually have been called");
+        assert.equal(rejectCalls, 1, "reject_firm_registration must have been called EXACTLY ONCE (opus addendum, HIGH FIND-1)");
         assert.equal(
           sawReasonBody!.p_reason,
           "Duplicate applicant, already a client.",
@@ -486,6 +482,53 @@ test("FOLD (Codex MEDIUM-2): Confirm refuses a reason over 500 characters even w
           (confirmButton as unknown as { disabled: boolean }).disabled,
           false,
           "exactly 500 characters must be ACCEPTED — the bound is <=500, not <500",
+        );
+      } finally {
+        await h.unmount();
+        const bodyEl = body as unknown as { removeChild: (c: unknown) => void; childNodes?: unknown[] };
+        if (bodyEl.childNodes?.includes(h.container)) bodyEl.removeChild(h.container);
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
+test("FOLD (opus LOW FIND-4): the Reject TRIGGER disables while ANY act is in flight, matching Approve's own disabled={busy}", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/caller_context")) return jsonResponse(CALLER_CONTEXT);
+      if (url.includes("/rpc/approve_firm_registration")) {
+        // Deliberately never resolves — holds the queue in its `busy` state
+        // so this test can observe the Reject trigger's disabled prop
+        // while Approve's own act is still in flight.
+        return new Promise<Response>(() => {});
+      }
+      if (url.includes("/rest/v1/firm_registration_requests_visible")) return jsonResponse([OPEN_REQUEST]);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const { h, body } = await mountEligibleQueue(() => jsonResponse([OPEN_REQUEST]));
+      try {
+        const approveButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Approve");
+        assert.ok(approveButton, "the Approve trigger must render");
+        const rejectTriggerBefore = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Reject");
+        assert.ok(rejectTriggerBefore, "the Reject trigger must render");
+        assert.equal(
+          (rejectTriggerBefore as unknown as { disabled: boolean }).disabled,
+          false,
+          "not busy yet — nothing has been clicked",
+        );
+
+        await h.act(() => clickButton(approveButton as never));
+        for (let i = 0; i < 4; i++) await h.settle();
+
+        const rejectTriggerDuring = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Reject");
+        assert.ok(rejectTriggerDuring, "the Reject trigger must still render while Approve's act is in flight");
+        assert.equal(
+          (rejectTriggerDuring as unknown as { disabled: boolean }).disabled,
+          true,
+          "the Reject trigger must disable while ANY act on this queue is in flight, not just Confirm inside its own dialog",
         );
       } finally {
         await h.unmount();

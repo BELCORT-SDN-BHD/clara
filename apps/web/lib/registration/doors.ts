@@ -93,28 +93,26 @@
 
 import { getRows } from "../read";
 import { callDoor } from "../doors";
-import type { RegistrationRequestRow } from "./reads";
+import {
+  REGISTRATION_REQUESTS_RELATION,
+  REGISTRATION_REQUESTS_SELECT,
+  type RegistrationRequestRow,
+} from "./reads";
 import type { CallerContextRow } from "@/lib/firm/caller-context";
 import type { SessionTokenAccessor } from "@/lib/session";
 
-// THE RELATION NAME AND SELECT STRING ARE DUPLICATED HERE, DELIBERATELY, NOT
-// VALUE-IMPORTED FROM "./reads" — a build-time finding (`next build
-// --webpack` failed on this exact chain before the fix). `./reads` ALSO
-// exports `loadOwnRegistrationRequests`, which imports
-// `@/lib/supabase/server-session` → `@/lib/supabase/server.ts` →
-// `next/headers`, a SERVER-ONLY module. This file is imported by a
-// `"use client"` component (components/admin/registrations-queue.tsx); a
-// VALUE import of ANYTHING from "./reads" — even a name this file never
-// uses — still executes that module's top-level imports, which drags
-// `next/headers` into the CLIENT bundle and fails the build. The `type`
-// import above is fully erased (zero runtime effect, any transpiler), so it
-// alone is safe; these two string constants cannot be imported the same way
-// because they are runtime VALUES, not types. `doors.test.ts` cross-checks
-// both against `./reads`'s own exports byte-for-byte, so a drift between
-// the two copies goes RED here rather than silently.
-export const REGISTRATION_REQUESTS_RELATION = "firm_registration_requests_visible";
-export const REGISTRATION_REQUESTS_SELECT =
-  "id,applicant,firm_name,note,status,decided_by,decided_at,reason,firm_id,created_at";
+// FOLD (P4-2's nit round, cc82d182): the relation name/select string used to
+// be DUPLICATED here because value-importing anything from "./reads" used
+// to drag `next/headers` into this "use client"-reachable module's bundle
+// (that file's OWN `loadOwnRegistrationRequests` pulled it in transitively).
+// P4-2 has since split the server-only half into `./server-reads.ts` and
+// marked this module "ISOMORPHIC BY CONSTRUCTION" (its own header,
+// `tests/firm-scope-db-pins.test.ts` walks the import graph and reds if
+// `next/headers` ever reappears) — so the plain value-import above is safe
+// again, and the duplicate-plus-cross-check this file used to carry is
+// gone: one declaration, one owner (`./reads.ts`), exactly the DRY this
+// workaround only ever gave up under duress. `doors.test.ts` no longer
+// needs the byte-equality cross-check for the same reason.
 
 /** The open queue, oldest first (FIFO — the operator works through it in the
  *  order applicants arrived), unfiltered by applicant so the view's own

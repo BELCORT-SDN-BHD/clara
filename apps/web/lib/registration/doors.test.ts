@@ -12,27 +12,18 @@ import {
   approveFirmRegistration,
   isOperatorConsoleEligible,
   loadOperatorRegistrationQueue,
-  REGISTRATION_REQUESTS_RELATION,
-  REGISTRATION_REQUESTS_SELECT,
   rejectFirmRegistration,
 } from "./doors";
-import {
-  REGISTRATION_REQUESTS_RELATION as READS_RELATION,
-  REGISTRATION_REQUESTS_SELECT as READS_SELECT,
-} from "./reads";
 import { isDoorRefusal } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 
-// doors.ts DUPLICATES these two constants rather than value-importing them
-// from ./reads (that file's OTHER export pulls in next/headers, which
-// breaks the webpack build for the "use client" component that imports
-// doors.ts — see doors.ts's own header for the full account). This is the
-// promised cross-check: Node can safely import ./reads directly (no
-// bundler boundary here), so a drift between the two copies goes RED.
-test("doors.ts's local REGISTRATION_REQUESTS_RELATION/SELECT stay byte-identical to reads.ts's own pin", () => {
-  assert.equal(REGISTRATION_REQUESTS_RELATION, READS_RELATION);
-  assert.equal(REGISTRATION_REQUESTS_SELECT, READS_SELECT);
-});
+// FOLD (P4-2's nit round, cc82d182): the byte-equality cross-check that
+// used to live here is GONE, not merely reworded — doors.ts now
+// value-imports REGISTRATION_REQUESTS_RELATION/SELECT straight from
+// ./reads (safe now that P4-2 made that module isomorphic-by-construction
+// and moved the server-only half to ./server-reads.ts), so there is no
+// second copy left to drift. `loadOperatorRegistrationQueue`'s own test
+// below still proves the RIGHT relation/select/filter/order are sent.
 
 function fakeSession(token: string | null = "tok"): SessionTokenAccessor {
   return { getAccessToken: async () => token };
