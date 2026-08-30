@@ -147,10 +147,21 @@ test("p2a.G3 the THREE-argument call every frozen caller makes still resolves an
     "internal", "G3: first-write-wins on error_code is unchanged by the CAS recut");
 });
 
-test("p2a.G4 the settle HOLDS the task row: a second settle blocks on the first until it commits", async (t) => {
+test("p2a.G4 FOR UPDATE makes the CAS read the COMMITTED row: a raced status expectation refuses by NAME, not by the trigger", async (t) => {
   if (gate(t)) return;
-  // The conjuncts are opt-in; the LOCK is not, and it is the half that bites with no caller
-  // change at all. Proven by pg_blocking_pids, never by a sleep (db-tests.md).
+  // WHAT THIS CELL HAD TO BECOME, and the mutant panel is what forced it. The first draft asserted
+  // "the second settle blocks on the first's row lock" -- true, and NOT DISCRIMINATING: the
+  // UPDATE at the end of the body takes that row lock by itself, so deleting the explicit
+  // FOR UPDATE reded nothing. A cell that cannot fail against the defect it names is decoration.
+  //
+  // The property the clause actually buys is that the CAS conjuncts are evaluated against the
+  // COMMITTED row rather than a snapshot taken before the racing transaction committed. So: T1
+  // settles the task inside an open window; T2, from another session, settles it expecting
+  // 'running'. WITH the lock, T2 waits at the SELECT, then reads 'completed' and refuses
+  // wake_settle_status_mismatch -- its own typed refusal, naming the real cause. WITHOUT it, T2
+  // reads the stale 'running', PASSES its own CAS, and is refused downstream by the transition
+  // trigger's CLR13 instead: the right outcome for the wrong stated reason, which is exactly the
+  // class this file exists to keep out of a dead-letter triage.
   const { taskId } = await freshWakeTask();
   const c1 = await getPool().connect();
   const c2 = await getPool().connect();
@@ -159,23 +170,26 @@ test("p2a.G4 the settle HOLDS the task row: a second settle blocks on the first 
     const pid1 = (await c1.query("select pg_backend_pid() as pid")).rows[0].pid;
     await c1.query("begin");
     await c1.query("select clara._settle_wake_task($1,$2,$3)", [taskId, "completed", null]);
-    // T2 fires from inside T1's open window and must observably WAIT on T1's row lock.
-    const blocked = c2.query("select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", "internal"]);
+    const raced = c2.query(
+      "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4, p_expect_status => $5)",
+      [taskId, "failed", "internal", null, "running"]).catch((e) => e);
+    // PROVE the interleave with pg_blocking_pids, never a sleep (db-tests.md): if T2 never
+    // observably blocked, the window this cell describes did not happen and its verdict would be
+    // about something else.
     let sawBlock = false;
-    const deadline = Date.now() + 8000;
+    const deadline = Date.now() + 15000;
     while (Date.now() < deadline) {
-      const r = await rootQuery(
-        "select wait_event_type as wet, pg_blocking_pids(pid) as blockers from pg_stat_activity where pid=$1", [pid2]);
-      const row = r.rows[0];
+      const row = (await rootQuery(
+        "select wait_event_type as wet, pg_blocking_pids(pid) as blockers from pg_stat_activity where pid=$1", [pid2])).rows[0];
       if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(pid1))) { sawBlock = true; break; }
       await sleep(25);
     }
-    assert.ok(sawBlock, "G4: the second settle must observably block on the first's row lock");
+    assert.ok(sawBlock, "G4: T2 must observably block on T1 -- otherwise the race this cell describes never happened");
     await c1.query("commit");
-    // Once T1 commits, T2 re-evaluates against the SETTLED row -- the transition trigger is what
-    // refuses it, which is the correct division of labour (the lock serialises, the matrix rules).
-    const err = await caught(() => blocked);
-    assert.ok(err, "G4: completed -> failed is not a legal transition, so T2 must refuse once unblocked");
+    const err = await raced;
+    assert.ok(err instanceof Error, "G4: the raced settle must refuse");
+    assert.equal(reasonOf(err), "wake_settle_status_mismatch",
+      `G4: the CAS must read the COMMITTED status and refuse BY NAME; got ${err.code} ${err.detail ?? ""} -- a CLR13 here means the conjunct was evaluated against a stale snapshot`);
   } finally {
     for (const c of [c1, c2]) {
       try { await c.query("rollback"); } catch { /* not in a txn */ }
@@ -345,7 +359,11 @@ test("p2a.D2 the abandonment roster is a closed, forced-RLS vocabulary and end_r
   // The carrier is written by NO PRODUCTION VERB yet -- that is the named follow-up, and it is
   // recorded as a measurement rather than a comment: the only row carrying a code is the one this
   // cell wrote by hand. A verb that started setting it would show up here.
+  // SCOPED TO THIS RUN'S OWN CLIENT. An estate-wide count would go false the SECOND time this
+  // file runs against one database (this cell's own previous row survives) -- found by the mutant
+  // panel, where every §G and §D mutant reded D2 for that reason and not for the wall it removed.
   const written = (await rootQuery(
-    "select count(*)::int as n from clara.close_runs where end_reason_code is not null and id <> $1", [good.id])).rows[0].n;
+    "select count(*)::int as n from clara.close_runs where client_id=$1 and end_reason_code is not null and id <> $2",
+    [CLIENT, good.id])).rows[0].n;
   assert.equal(written, 0, "D2: nothing but this cell's own hand-written row carries a code -- the writer is still owed");
 });
