@@ -61,12 +61,12 @@
 // network round trip here, even bounded to a "few seconds", could eat most of the remaining
 // budget on a cache miss. So storageProbeHealth() is SYNCHRONOUS: it returns the last
 // verdict health.mjs uses for its two-failure hard gate, without doing I/O in the request.
-// It returns from memory, ~0ms, every time. A background setInterval (started lazily on
-// first use, unref'd so it never keeps the process alive on its own) refreshes that verdict at
+// It returns from memory, ~0ms, every time. A background setInterval (started eagerly by
+// src/index.ts at boot, unref'd so it never keeps the process alive on its own) refreshes that verdict at
 // most once every CACHE_MS (default 60s — a real outage still surfaces within one interval,
 // comfortably inside any on-call's noticing window). Each refresh cycle is still individually
-// bounded by TIMEOUT_MS (default 3s) so a hung storage call can never wedge the interval loop
-// itself, even though it can no longer hang /ready either way.
+// bounded by TIMEOUT_MS (default 3s). The deadline aborts the actual storage requests; interval
+// ownership remains held until the aborted call settles and scratch cleanup completes.
 //
 // TRANSITIONS ARE LOGGED, STEADY STATE IS NOT. The incident's own observability defect #1 was
 // "the runtime logs nothing" — fly logs is the real alarm surface for a single-maintainer
@@ -75,7 +75,7 @@
 // logged; an already-known-red cycle stays silent to avoid spamming that log once a
 // minute forever. The public verdict (storageProbeHealth()'s return value, which becomes
 // checks.storage_write on the UNAUTHENTICATED /ready response) carries only a classified
-// `reason` and consecutive count. See docs/ops/DR.md:304 for the still-open other half of
+// `reason` and consecutive count. See docs/ops/DR.md §7 for the still-open other half of
 // this follow-up: an EXTERNAL uptime check that pages someone on that transition. This file
 // only makes the runtime know and log; it does not page anyone.
 
@@ -119,15 +119,15 @@ export function _currentProbeForTest() {
 /** One write -> read-back-verify round trip through the SAME storage.mjs functions
  * production intake uses. Never throws: resolves { ok:true } or { ok:false, reason }.
  * Raw vendor detail is not retained because transition logs must never echo secrets. */
-async function runProbeOnce() {
+async function runProbeOnce(signal) {
   const { payload, sha256, key } = currentProbe();
   let scratchDir;
   try {
     scratchDir = await mkdtemp(join(tmpdir(), "clara-storage-probe-"));
     const scratchFile = join(scratchDir, "probe.bin");
-    await writeFile(scratchFile, payload);
-    await putCanonical(scratchFile, key, "application/octet-stream");
-    await verifyCanonical(key, sha256);
+    await writeFile(scratchFile, payload, { signal });
+    await putCanonical(scratchFile, key, "application/octet-stream", { signal });
+    await verifyCanonical(key, sha256, { signal });
     return { ok: true };
   } catch (err) {
     const reason = err instanceof StorageError
@@ -139,61 +139,80 @@ async function runProbeOnce() {
   }
 }
 
-/** Race `fn()` against a hard deadline; resolves to `onTimeout` if it doesn't settle in time. */
-function withHardTimeout(fn, ms, onTimeout) {
-  return new Promise((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
+/** Start one abortable probe cycle. `verdict` resolves at the deadline, while `settled`
+ * remains pending until the aborted operation and its finally cleanup have actually ended. */
+function startHardTimeout(fn, ms, onTimeout) {
+  const controller = new AbortController();
+  let timeoutWon = false;
+  let timer;
+  const operation = Promise.resolve().then(() => fn(controller.signal));
+  const verdict = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      timeoutWon = true;
+      controller.abort();
       resolve(onTimeout);
     }, ms);
     timer.unref?.();
-    fn().then(
+    operation.then(
       (value) => {
-        if (settled) return;
-        settled = true;
+        if (timeoutWon) return;
         clearTimeout(timer);
         resolve(value);
       },
       () => {
-        if (settled) return;
-        settled = true;
+        if (timeoutWon) return;
         clearTimeout(timer);
-        resolve(onTimeout);
+        resolve({ ok: false, reason: "storage_probe_error" });
       },
     );
   });
+  const settled = operation.then(
+    () => undefined,
+    () => undefined,
+  ).finally(() => clearTimeout(timer));
+  return { controller, verdict, settled };
 }
 
 /** Test-only: run exactly one bounded round trip, bypassing the cache/interval machinery so
  * the correctness arms (success/failure/timeout/mismatch) can assert deterministically instead
  * of racing a background interval. */
 export async function _probeStorageOnceForTest() {
-  return withHardTimeout(runProbeOnce, timeoutMs(), { ok: false, reason: "storage_probe_timeout" });
+  const cycle = startHardTimeout(runProbeOnce, timeoutMs(), { ok: false, reason: "storage_probe_timeout" });
+  const verdict = await cycle.verdict;
+  await cycle.settled;
+  return verdict;
 }
 
-// Optimistic until the first cycle completes: a fresh boot has no evidence of a problem yet.
-// After settlement, health.mjs gates on two consecutive failures; one failure remains tolerated.
-let cachedResult = { ok: true, reason: null, pending: true, consecutive_failures: 0 };
+// Fail closed until the first successful write/readback establishes positive evidence. The
+// two-consecutive-failure tolerance begins only in that warm, previously-proven state.
+let cachedResult = { ok: false, reason: null, pending: true, consecutive_failures: 0 };
 let intervalHandle = null;
 let inFlight = null; // the current/most-recent refresh cycle's promise (test determinism seam)
-let busy = false; // never let two probe cycles overlap (a slow cycle + a short CACHE_MS otherwise races)
+let activeRefresh = null;
+let activeController = null;
+let cacheGeneration = 0;
 
-async function refreshOnce() {
-  if (busy) return;
-  busy = true;
+async function refreshOnce(generation) {
+  const cycle = startHardTimeout(runProbeOnce, timeoutMs(), { ok: false, reason: "storage_probe_timeout" });
+  activeController = cycle.controller;
   try {
+    const result = await cycle.verdict;
+    if (generation !== cacheGeneration) return;
     const wasOk = cachedResult.ok;
-    const result = await withHardTimeout(runProbeOnce, timeoutMs(), { ok: false, reason: "storage_probe_timeout" });
+    const wasPending = cachedResult.pending;
+    const previousFailures = cachedResult.consecutive_failures;
     const consecutiveFailures = result.ok ? 0 : cachedResult.consecutive_failures + 1;
     cachedResult = {
       ok: result.ok,
       reason: result.ok ? null : (result.reason ?? "storage_probe_error"),
-      pending: false,
+      pending: result.ok ? false : wasPending,
       consecutive_failures: consecutiveFailures,
     };
-    if (wasOk !== result.ok) {
+    if (wasPending && !result.ok && consecutiveFailures === 1) {
+      console.error(`[storage-probe] COLD -> RED (${cachedResult.reason})`);
+    } else if (wasPending && result.ok && previousFailures > 0) {
+      console.error("[storage-probe] RED -> GREEN");
+    } else if (!wasPending && wasOk !== result.ok) {
       // Deliberate alarm line — see the header comment ("TRANSITIONS ARE LOGGED...").
       console.error(
         `[storage-probe] ${wasOk ? "GREEN -> RED" : "RED -> GREEN"}` +
@@ -201,27 +220,39 @@ async function refreshOnce() {
       );
     }
   } finally {
-    busy = false;
+    await cycle.settled;
+    if (activeController === cycle.controller) activeController = null;
   }
 }
 
-function ensureStarted() {
+function startRefresh() {
+  if (activeRefresh) return activeRefresh;
+  const generation = cacheGeneration;
+  const refresh = refreshOnce(generation);
+  const tracked = refresh.finally(() => {
+    if (activeRefresh === tracked) activeRefresh = null;
+  });
+  activeRefresh = tracked;
+  return tracked;
+}
+
+/** Start the background probe eagerly at runtime boot. Safe to call more than once. */
+export function startStorageProbe() {
   if (intervalHandle) return;
-  inFlight = refreshOnce();
+  inFlight = startRefresh();
   intervalHandle = setInterval(() => {
-    inFlight = refreshOnce();
+    inFlight = startRefresh();
   }, cacheMs());
   intervalHandle.unref?.();
 }
 
 /**
  * Synchronous — returns the last known verdict instantly, no I/O on the calling path (see the
- * header comment: this is off /ready's latency budget entirely). A background interval,
- * started lazily on first use, keeps the verdict refreshed at most once per CACHE_MS.
+ * header comment: this is off /ready's latency budget entirely). The boot-started background
+ * interval keeps the verdict refreshed at most once per CACHE_MS.
  * @returns {{ok:boolean, reason:string|null, pending:boolean, consecutive_failures:number}}
  */
 export function storageProbeHealth() {
-  ensureStarted();
   return { ...cachedResult };
 }
 
@@ -229,23 +260,27 @@ export function storageProbeHealth() {
  * call starts a fresh cycle instead of serving stale state left by an earlier test. */
 export function _resetStorageProbeCacheForTest() {
   if (intervalHandle) clearInterval(intervalHandle);
+  activeController?.abort();
+  cacheGeneration += 1;
   intervalHandle = null;
   inFlight = null;
-  busy = false;
-  cachedResult = { ok: true, reason: null, pending: true, consecutive_failures: 0 };
+  activeRefresh = null;
+  activeController = null;
+  cachedResult = { ok: false, reason: null, pending: true, consecutive_failures: 0 };
 }
 
 /** Test-only: await the most recently started (or currently in-flight) background refresh
  * cycle — starts the loop if it hasn't been started yet — so a test can assert on a SETTLED
  * verdict instead of racing the interval. */
 export async function _waitForStorageProbeSettleForTest() {
-  storageProbeHealth();
+  startStorageProbe();
   await inFlight;
   return { ...cachedResult };
 }
 
 /** Test-only: force one additional sequential refresh without waiting for the interval. */
 export async function _refreshStorageProbeForTest() {
-  await refreshOnce();
+  inFlight = startRefresh();
+  await inFlight;
   return { ...cachedResult };
 }

@@ -44,10 +44,13 @@ primary_region = "sin"
   # Readiness gate (§4.7): /ready FAILS on DB unreachable / world dead / control
   # listener dead / taxonomy HALT, or the second consecutive storage-write failure —
   # the LB then holds traffic (and a crash-only exit takes the machine down for Fly to restart).
+  # Cold storage is fail-closed until its eager first probe succeeds. Grace = the prior 30s
+  # boot allowance + the default 3s probe deadline + 2s scheduling margin = 35s. If
+  # CLARA_STORAGE_PROBE_TIMEOUT_MS is raised, increase this by the same delta before deploy.
   [[http_service.checks]]
     interval = "15s"
     timeout = "5s"
-    grace_period = "30s"
+    grace_period = "35s"
     method = "get"
     path = "/ready"
 

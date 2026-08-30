@@ -185,28 +185,19 @@ The verbs, which the whole mistake turned on:
 | `POST /object/<bucket>/<path>` | **create** — fails if the object exists | INSERT |
 | `PUT /object/<bucket>/<path>` | **update / replace** — overwrites | INSERT **and UPDATE** |
 
-`putCanonical` uses **PUT**, which is exactly why the missing UPDATE grant broke intake.
+`putCanonical` uses **POST**, the create verb, and needs the deliberately narrow INSERT grant;
+the incident's missing-UPDATE diagnosis was false and the temporary grant was reverted.
 
-To probe the write path without touching any real document, **POST to a canonical-shaped key
-under a random firm UUID** — it satisfies the RLS predicate, collides with nothing, and is
-deleted afterwards with the service key (the custom role has no DELETE, by design):
+The shipped probe calls `putCanonical` and `verifyCanonical` themselves, using a reserved
+non-firm UUID and one content-addressed key per UTC day. The first daily cycle proves INSERT;
+later cycles prove the duplicate-detection branch that actually failed in this incident, and
+every cycle reads the object back and verifies its hash. It never DELETEs: routine custody is
+write-once/delete-never, and widening the storage role for a health check would weaken the
+mechanism under test. At roughly one tiny object per day, the sentinel itself is the fixture.
 
-```sh
-# 1. create under a throwaway firm uuid
-FIRM=$(python -c "import uuid;print(uuid.uuid4())")
-SHA=$(python -c "print('c'*64)")
-fly ssh console -a clara-runtime -C "/usr/local/bin/node -e \"
-  const j=process.env.CLARA_STORAGE_ROLE_JWT, b=process.env.CLARA_STORAGE_URL;
-  (async()=>{ const r=await fetch(b+'/firms/$FIRM/docs/$SHA.pdf',{method:'POST',
-      headers:{authorization:'Bearer '+j, apikey:j, 'content-type':'application/pdf'},
-      body:Buffer.from('probe')});
-    console.log('POST -> '+r.status); console.log((await r.text()).slice(0,200)); })()\""
-# 2. then DELETE it with the service key (never leave probe objects behind)
-```
-
-Read it as: **200** → the write path is healthy. **403 permission denied for table objects** → a
-missing GRANT (this incident: UPDATE). **new row violates row-level security policy** → the
-grant is fine and the RLS predicate rejected the key. **413** → a size limit.
+Read a successful POST-or-recognized-duplicate plus verified readback as healthy. A classified
+`storage_error` means the same production INSERT/SELECT/RLS path failed and must be diagnosed;
+it does **not** establish that UPDATE is missing. **413** still means a size limit.
 
 **Never PUT a key you did not just create.**
 
@@ -258,11 +249,11 @@ upload needs it, and unproven grants on a security boundary are how boundaries r
    reachability check would have stayed green either way. **Shipped 2026-08-27** (PR #358;
    promoted to a hard readiness gate by 裁-61 on 2026-08-30): `checks.storage_write` in
    `packages/runtime/lib/health.mjs`, with the probe itself in
-   `packages/runtime/lib/storage-probe.mjs`. The runtime logs classified red↔green transitions,
-   tolerates one transient failure, and `/ready` returns 503 on the second consecutive failure;
-   Fly then marks the machine unhealthy for routing. The remaining ALARM half — an external
-   check that pages someone when it flips — is `docs/ops/DR.md`:304's still-open "external
-   `/ready` uptime checks" wiring piece.
+   `packages/runtime/lib/storage-probe.mjs`. Cold/unknown now remains 503 until the first
+   successful proof; the warm state tolerates one transient failure and returns 503 on the
+   second consecutive failure. The runtime logs classified red↔green transitions, and Fly
+   marks the machine unhealthy for routing. The remaining ALARM half — an external check that
+   pages someone when it flips — is `docs/ops/DR.md` §7's still-open wiring piece.
 3. **Rig-cover the storage grant surface.** The fixture written for this amendment
    (`scratchpad/storage-fixture.sql`) should become a permanent battery so a vendor change
    that needs another privilege fails in CI instead of in production.

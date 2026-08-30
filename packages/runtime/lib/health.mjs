@@ -5,13 +5,14 @@
 //   * world dead                (when CLARA_START_WORLD=1 — no engine to run turns)
 //   * control listener dead     (parked clarifies would never resume)
 //   * taxonomy HALT             (the relay cannot route — an un-routable state)
-//   * storage write red twice   (client uploads cannot enter canonical custody)
+//   * storage cold/unknown or red twice after proof (uploads cannot enter canonical custody)
 //
 // A dead relay LEADER is handled by the supervisor's fail-fast (S4-ND5), not here.
 // Relay lag / dead-letters / backlog are WARNINGS only (degraded, still serving) —
 // surfaced from clara.relay_health(). The storage write probe (R9, below) tolerates one
-// transient failure, hard-fails on the second consecutive failure, and recovers on the
-// first success. Everything is bounded + sanitized: /ready must never hang or leak secrets.
+// warm-state transient failure, hard-fails cold/unknown or on the second consecutive warm
+// failure, and recovers on success. Everything is bounded + sanitized: /ready must never hang
+// or leak secrets.
 
 import { withRuntime } from "./pools.mjs";
 import { scannerReachable } from "./scan.mjs";
@@ -303,9 +304,10 @@ export async function checkReadiness() {
 
   // Storage write probe (R9, docs/plan/active/harness-audit-rulings-2026-08-26.md — the
   // MEASUREMENT half of follow-up (a) of docs/ops/incident-2026-07-26-intake-storage.md; the
-  // ALARM/ROUTING half is DR.md:304's still-open "external /ready uptime checks" item, not
-  // this change). A storage outage makes client uploads unusable, so the second consecutive
-  // failure becomes a hard gate. storageProbeHealth() is SYNCHRONOUS (storage-probe.mjs runs
+  // ALARM half is DR.md §7's still-open "external /ready uptime checks" item, not this
+  // change). Cold/unknown is a hard gate until the eager boot probe succeeds; after that proof
+  // the second consecutive failure becomes a hard gate. storageProbeHealth() is SYNCHRONOUS
+  // (storage-probe.mjs runs
   // the actual round trip on its own background interval, off this call entirely) — no await,
   // no bounded() wrap, ~0ms: three SEQUENTIAL bounded() network round trips already share fly's
   // 5s /ready timeout above, so the storage verdict must never spend any of that budget.

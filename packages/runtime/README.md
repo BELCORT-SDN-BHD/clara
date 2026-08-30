@@ -41,8 +41,9 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   one crash-only process group.
 - **HTTP** (`src/index.ts`): chat sessions/messages/turns, an SSE stream that
   survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7). The cached
-  `checks.storage_write` probe tolerates one transient failure, returns **503 on the
-  second consecutive failure**, and recovers on the first success; its public shape is
+  `checks.storage_write` probe starts eagerly at boot and stays **503 until its first
+  success**. In the resulting warm state it tolerates one transient failure, returns 503
+  on the second consecutive failure, and recovers on the next success; its public shape is
   `ok` + classified `reason` + `pending` + `consecutive_failures`, never raw vendor text.
 - **Workflow-versioning**: `registry.ts` names the newest version enqueue sites
   target; the CI freeze-lint golden-hashes every frozen body + its import
@@ -102,6 +103,12 @@ There is deliberately no runtime status route. Human status reads use migration
 | `CLARA_STORAGE_URL` | Full private-bucket object base, for example the Storage REST `/storage/v1/object/<bucket>` base. |
 | `CLARA_STORAGE_ROLE` | Exact dedicated custom role expected in the Storage JWT (`clara_storage_docs` at the ceremony); required outside tests. |
 | `CLARA_STORAGE_ROLE_JWT` | Rotated, unexpired dedicated custom-role JWT with object `INSERT` + `SELECT` only. `anon`, `authenticated`, and `service_role` are rejected; no `UPDATE`/`DELETE`. |
+| `CLARA_STORAGE_PROBE_CACHE_MS` | Background interval after the immediate boot probe; default `60000`. A finite value at least `1000` is accepted; smaller/non-finite values fall back to `60000` so configuration cannot create a storage hot loop. `/ready` never waits for this interval or performs probe I/O itself. |
+| `CLARA_STORAGE_PROBE_TIMEOUT_MS` | Per-cycle write+readback deadline; default `3000`. A finite positive value is accepted; zero/negative/non-finite values fall back to `3000`. The deadline aborts both storage calls and their fetches, and refresh ownership remains held through settlement and scratch cleanup. Values above `3000` require the Fly readiness grace arithmetic below to be raised before deploy. |
+
+Fly's readiness grace is `35s`: the prior `30s` boot allowance + the default `3s`
+first-probe deadline + `2s` scheduling margin. If the timeout is raised, increase the
+grace by the same delta before deploy; the cache interval is irrelevant to the first probe.
 
 `RELAY_TEST_MODE=1` is the only adapter gate: tests inject/localize scanner,
 Storage, and Azure behavior. The real production adapters have no dev bypass.
@@ -195,7 +202,7 @@ For a health/ready check, boot with DB env set and `CLARA_START_WORLD` unset:
 export PGHOST=... PGUSER=... PGPASSWORD=... PGDATABASE=postgres PGPORT=5432
 pnpm --filter @clara/runtime build && pnpm --filter @clara/runtime start
 # GET http://localhost:3200/health  -> { ok: true }
-# GET http://localhost:3200/ready   -> { ready: true, checks: { db: { ok: true }}}
+# GET http://localhost:3200/ready   -> 503 until checks.storage_write records its first success
 ```
 
 ## Versioning discipline (do not skip)

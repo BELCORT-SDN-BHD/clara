@@ -1,7 +1,8 @@
 import type { Server } from "node:http";
 import express from "express";
 import { workflowNames } from "../workflows/registry.js";
-import { checkReadiness } from "../lib/health.mjs";
+import { startStorageProbe } from "../lib/storage-probe.mjs";
+import { readinessHandler } from "../lib/readiness-http.mjs";
 import { chatRoutes } from "./chatRoutes.js";
 import { intakeRoutes } from "./intakeRoutes.js";
 import { streamRoutes } from "./streamRoute.js";
@@ -22,6 +23,10 @@ const sup = ((globalThis as unknown as { __claraSupervisor?: Sup }).__claraSuper
 });
 
 const app = express();
+
+// Spend the Fly grace period proving storage, before the first /ready request. The cached
+// verdict remains fail-closed until this boot-started cycle produces its first success.
+startStorageProbe();
 
 // Graceful-shutdown gate + active-request tracking (S4-FX2). Runs BEFORE every route:
 // captures the HTTP listener (so serve.mjs can server.close() on SIGTERM), refuses
@@ -60,19 +65,10 @@ app.get("/health", (_req, res) => {
 });
 
 // Readiness — should we receive traffic? FAILS (503) on DB unreachable, world dead,
-// control listener dead, taxonomy HALT, or the second consecutive storage-write probe
-// failure; relay lag / dead-letters / backlog are warnings[] (degraded, still serving).
+// control listener dead, taxonomy HALT, cold/unknown storage, or the second consecutive
+// warm-state storage-write failure; relay lag / dead-letters / backlog are warnings[].
 // Bounded + sanitized.
-app.get("/ready", async (_req, res) => {
-  // During graceful shutdown, report NOT ready so the LB stops routing new traffic.
-  const sup = (globalThis as unknown as { __claraSupervisor?: { shuttingDown?: boolean } }).__claraSupervisor;
-  if (sup?.shuttingDown) {
-    res.status(503).json({ ready: false, checks: { shutdown: true }, warnings: [], ts: new Date().toISOString() });
-    return;
-  }
-  const r = await checkReadiness();
-  res.status(r.ready ? 200 : 503).json({ ready: r.ready, checks: r.checks, warnings: r.warnings, ts: new Date().toISOString() });
-});
+app.get("/ready", readinessHandler);
 
 // The registered workflows (the versioning hook point; freeze-lint guards bodies).
 app.get("/workflows", (_req, res) => {

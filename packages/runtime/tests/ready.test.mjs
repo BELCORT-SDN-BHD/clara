@@ -1,23 +1,27 @@
 // /ready fail-vs-warn matrix (contract §4.7). checkReadiness FAILS on DB unreachable,
-// world dead, control dead, taxonomy HALT, or the second consecutive storage-write
-// failure; relay lag/dead-letters/backlog remain warnings. Exercised against clara_rt_test by
+// world dead, control dead, taxonomy HALT, cold/unknown storage, or the second consecutive
+// warm storage-write failure; relay lag/dead-letters/backlog remain warnings. Exercised against clara_rt_test by
 // toggling the world switch and heartbeat freshness. (Taxonomy-HALT is NOT exercised here —
 // removing the shared active pointer would corrupt the relay suite.)
 
-import { test, before, after } from "node:test";
+import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import express from "express";
 import * as rig from "./rig.mjs";
 import { checkReadiness } from "../lib/health.mjs";
 import { StorageError } from "../lib/storage.mjs";
+import { readinessHandler } from "../lib/readiness-http.mjs";
 import { endPools } from "../lib/pools.mjs";
 import {
   _refreshStorageProbeForTest,
   _resetStorageProbeCacheForTest,
   _waitForStorageProbeSettleForTest,
+  startStorageProbe,
 } from "../lib/storage-probe.mjs";
 
 const READY = await rig.runtimeReady();
@@ -46,6 +50,12 @@ after(async () => {
   if (previousStorageDir === undefined) delete process.env.CLARA_TEST_STORAGE_DIR;
   else process.env.CLARA_TEST_STORAGE_DIR = previousStorageDir;
   if (storageDir) await rm(storageDir, { recursive: true, force: true }).catch(() => {});
+});
+
+beforeEach(async () => {
+  delete globalThis.__claraStorageForTest;
+  _resetStorageProbeCacheForTest();
+  await _waitForStorageProbeSettleForTest();
 });
 
 async function setBeat(component, expr) {
@@ -88,14 +98,13 @@ test("ready: world ON with fresh world+control beats is READY", { skip }, async 
 test("ready: storage write hard-fails on the second consecutive failure and one success recovers", { skip }, async () => {
   const prev = process.env.CLARA_START_WORLD;
   delete process.env.CLARA_START_WORLD;
-  _resetStorageProbeCacheForTest();
   globalThis.__claraStorageForTest = {
     put: async () => {
       throw new StorageError("storage_error", "simulated write rejection");
     },
   };
   try {
-    await _waitForStorageProbeSettleForTest();
+    await _refreshStorageProbeForTest();
     const first = await checkReadiness();
     assert.equal(first.ready, true, "one transient storage failure stays inside the tolerance");
     assert.deepEqual(first.checks.storage_write, {
@@ -133,6 +142,60 @@ test("ready: storage write hard-fails on the second consecutive failure and one 
     delete globalThis.__claraStorageForTest;
     _resetStorageProbeCacheForTest();
     if (prev !== undefined) process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready HTTP: a storage hard failure returns 503 with only the classified public verdict", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  delete process.env.CLARA_START_WORLD;
+  const rawCredentialMaterial = "synthetic-http-secret";
+  const rawUrlQuery = "https://storage.invalid/object?signature=synthetic-http-query";
+  _resetStorageProbeCacheForTest();
+  globalThis.__claraStorageForTest = {
+    put: async () => {
+      throw new StorageError(
+        `vendor_${rawCredentialMaterial}_${rawUrlQuery}`,
+        `vendor echoed ${rawCredentialMaterial} at ${rawUrlQuery}`,
+      );
+    },
+  };
+  let server;
+  try {
+    const indexSource = await readFile(fileURLToPath(new URL("../src/index.ts", import.meta.url)), "utf8");
+    assert.match(indexSource, /app\.get\("\/ready", readinessHandler\);/, "src/index.ts must mount the exact tested handler");
+    assert.match(indexSource, /startStorageProbe\(\);/, "src/index.ts must spend boot grace probing before the first request");
+    const app = express();
+    app.get("/ready", readinessHandler);
+    startStorageProbe();
+    await _waitForStorageProbeSettleForTest();
+    await _refreshStorageProbeForTest();
+    server = await new Promise((resolve) => {
+      const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+    });
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const response = await fetch(`http://127.0.0.1:${address.port}/ready`);
+    const body = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(body.ready, false);
+    assert.deepEqual(body.checks.storage_write, {
+      ok: false,
+      reason: "storage_error",
+      pending: true,
+      consecutive_failures: 2,
+    });
+    const publicBody = JSON.stringify(body.checks.storage_write);
+    assert.equal(publicBody.includes(rawCredentialMaterial), false);
+    assert.equal(publicBody.includes(rawUrlQuery), false);
+  } finally {
+    if (server) {
+      server.closeAllConnections?.();
+      await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
+    }
+    delete globalThis.__claraStorageForTest;
+    _resetStorageProbeCacheForTest();
+    if (prev === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = prev;
   }
 });
 

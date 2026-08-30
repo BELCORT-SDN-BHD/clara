@@ -65,11 +65,15 @@ function objectUrl(base, key) {
   return `${base}/${safeKey(key).split("/").map(encodeURIComponent).join("/")}`;
 }
 
-async function localPut(filePath, key) {
+async function localPut(filePath, key, { signal } = {}) {
+  signal?.throwIfAborted();
   const dest = localPath(key);
   await mkdir(dirname(dest), { recursive: true });
   try {
-    await pipeline(createReadStream(filePath), createWriteStream(dest, { flags: "wx", mode: 0o600 }));
+    const source = createReadStream(filePath);
+    const target = createWriteStream(dest, { flags: "wx", mode: 0o600 });
+    if (signal) await pipeline(source, target, { signal });
+    else await pipeline(source, target);
     return { created: true, existed: false };
   } catch (err) {
     if (err?.code === "EEXIST") return { created: false, existed: true };
@@ -78,11 +82,12 @@ async function localPut(filePath, key) {
   }
 }
 
-export async function putCanonical(filePath, key, mime) {
+export async function putCanonical(filePath, key, mime, { signal } = {}) {
   safeKey(key);
+  signal?.throwIfAborted();
   if (process.env.RELAY_TEST_MODE === "1") {
     const injected = globalThis.__claraStorageForTest;
-    return injected?.put ? injected.put(filePath, key, mime) : localPut(filePath, key);
+    return injected?.put ? injected.put(filePath, key, mime, { signal }) : localPut(filePath, key, { signal });
   }
   const { base, jwt } = realConfig();
   const response = await fetch(objectUrl(base, key), {
@@ -90,6 +95,7 @@ export async function putCanonical(filePath, key, mime) {
     headers: { authorization: `Bearer ${jwt}`, apikey: jwt, "content-type": mime, "x-upsert": "false" },
     body: createReadStream(filePath),
     duplex: "half",
+    signal,
   });
   // SUPABASE WRAPS ITS REAL STATUS INSIDE THE BODY. A duplicate object comes back as
   // **HTTP 400** with `{"statusCode":"409","error":"Duplicate",...}`, and a permission failure
@@ -112,29 +118,34 @@ export async function putCanonical(filePath, key, mime) {
   );
 }
 
-async function responseFor(key) {
+async function responseFor(key, { signal } = {}) {
+  signal?.throwIfAborted();
   if (process.env.RELAY_TEST_MODE === "1") {
     const injected = globalThis.__claraStorageForTest;
-    if (injected?.get) return injected.get(key);
+    if (injected?.get) return injected.get(key, { signal });
     return createReadStream(localPath(key));
   }
   const { base, jwt } = realConfig();
   const response = await fetch(objectUrl(base, key), {
     headers: { authorization: `Bearer ${jwt}`, apikey: jwt },
+    signal,
   });
   if (!response.ok || !response.body) throw new StorageError("storage_error", `Storage read failed (${response.status})`);
   return response.body;
 }
 
-export async function hashCanonical(key) {
-  const body = await responseFor(safeKey(key));
+export async function hashCanonical(key, { signal } = {}) {
+  const body = await responseFor(safeKey(key), { signal });
   const hash = createHash("sha256");
-  for await (const chunk of body) hash.update(chunk);
+  for await (const chunk of body) {
+    signal?.throwIfAborted();
+    hash.update(chunk);
+  }
   return hash.digest("hex");
 }
 
-export async function verifyCanonical(key, expectedSha256) {
-  const actual = await hashCanonical(key);
+export async function verifyCanonical(key, expectedSha256, { signal } = {}) {
+  const actual = await hashCanonical(key, { signal });
   if (actual !== expectedSha256) throw new StorageError("checksum_mismatch", "canonical readback hash mismatch");
   return { sha256: actual };
 }
