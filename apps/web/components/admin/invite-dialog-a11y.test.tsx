@@ -99,7 +99,7 @@ test("invite dialog: all four roles are offered, each with what it can do", asyn
   );
 });
 
-test("invite dialog: NO submit gate — an empty address reaches the door, which owns that judgement", async () => {
+test("invite dialog: NO client-side submit gate — the courier remains the first runtime judge", async () => {
   await withMockedEnv(
     async (u) => mockMembersFetch(String(u)),
     async () => {
@@ -107,9 +107,9 @@ test("invite dialog: NO submit gate — an empty address reaches the door, which
       try {
         const send = findIn(body, (n) => n.tagName === "BUTTON" && textOf(n as never).trim() === "Send invitation");
         assert.ok(send, "the submit control must render");
-        // `invite_member` answers CLR10 'a valid email is required' (`0147:380`)
-        // in its own words. A client-side `required`/disabled-until-valid gate
-        // would be a second, drifting copy of that judgement.
+        // A raw empty address is the courier's `unsupported_address`; spaces-only
+        // canonicalises to empty and reaches the door's CLR10. A client-side
+        // `required`/disabled-until-valid gate would drift from both branches.
         assert.equal(
           (send as unknown as { disabled: boolean }).disabled,
           false,

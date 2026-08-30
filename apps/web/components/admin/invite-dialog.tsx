@@ -10,12 +10,14 @@
 // never specified — and `accept_invite`'s wall is per-token, per-email anyway.
 // One invite per submit.
 //
-// NOTHING HERE VALIDATES THE EMAIL OR THE ROLE. The field is `type="email"` for
-// the keyboard and autofill a browser gives it, and it carries no `required`, no
-// pattern and no submit gate: `invite_member` answers CLR10 'a valid email is
-// required' (`0147:380`) and CLR10 'bad role' (`0147:382`) in its own words, and
-// a client-side copy of either would be a second, drifting judgement in front of
-// the real one. The Send button is disabled only while a call is IN FLIGHT.
+// NO CLIENT-SIDE EMAIL OR ROLE JUDGEMENT. The field is `type="email"` for the
+// keyboard and autofill a browser gives it, and it carries no `required`, no
+// pattern and no submit gate. The courier refuses a raw empty address as
+// `unsupported_address`; a spaces-only address canonicalises to empty and the
+// door answers CLR10 'a valid email is required' (`0147:380`). An unknown role
+// reaches the door's CLR10 'bad role' (`0147:382`). Copying any of those gates
+// here would create a second, drifting judgement. The Send button is disabled
+// only while a call is IN FLIGHT.
 //
 // THE ROLE CHOOSER IS A NATIVE `<select>` (components/common/native-select.tsx),
 // not the vendored Select popup — that file's own header states the house

@@ -25,6 +25,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 import { handleInviteRequest } from "../lib/members/courier";
+import { DoorRefusal } from "../lib/members/doors";
 import { canonicalAddress, isAsciiAddress, isConfirmedUser, InviteMailFailure } from "../lib/members/invite-mail";
 import {
   callerRow,
@@ -304,11 +305,21 @@ describe("N2: the address is canonicalised once and used identically everywhere"
   });
 
   test("a SPACES-ONLY address still reaches the door — the other half of the residual two-layer/two-code split", async () => {
+    const refusal = new DoorRefusal("CLR10", "a valid email is required", {
+      reason: null,
+      status: 400,
+      pgCode: "CLR10",
+      codeSource: "sqlstate",
+    });
     const obs = observer();
-    const { deps: d, calls } = deps(obs, { resolve: OK_RECEIPT });
-    await handleInviteRequest(post({ email: "   ", role: "wizard" }), d);
+    const { deps: d, calls } = deps(obs, { reject: refusal });
+    const res = await handleInviteRequest(post({ email: "   ", role: "wizard" }), d);
     assert.equal(calls.length, 1, "canonicalising is not validating");
     assert.equal(calls[0]?.args.p_email, "", "…and `lower(btrim('   '))` really is the empty string");
+    const body = await json(res);
+    const surfaced = body.refusal as Record<string, unknown>;
+    assert.equal(surfaced.code, refusal.code, "the courier must surface the door's real CLR10 code");
+    assert.equal(surfaced.reason, refusal.reason, "the courier must preserve the door's real reason value");
   });
 
   for (const [name, control] of [

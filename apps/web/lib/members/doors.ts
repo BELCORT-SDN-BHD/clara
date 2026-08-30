@@ -237,7 +237,9 @@ export const INVITE_COURIER_PATH = "/api/invite";
  *
  *   no_session          the request carried no usable session
  *   cross_origin        the same-origin proof failed
- *   invalid_request     the body was not `{email, role}` with non-empty strings
+ *   invalid_request     the body was not `{email, role}` with string values
+ *   unsupported_address the raw empty/non-ASCII/control-bearing address was
+ *                       refused before the door (spaces-only reaches CLR10)
  *   not_permitted      the caller is not positively an admin+ of exactly one
  *                       firm (Codex round 2, N1). This is the courier's own
  *                       fail-closed PREFLIGHT, not the wall: `_human_ctx` still

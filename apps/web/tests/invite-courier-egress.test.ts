@@ -554,10 +554,14 @@ function routeDelegationIssues(code: string): string[] {
     if (clause.isTypeOnly) return [];
     if (clause.name !== undefined) return null;
     const bindings = clause.namedBindings;
-    if (bindings === undefined) return [];
+    if (bindings === undefined) return null;
     if (!ts.isNamedImports(bindings)) return null;
+    // `import {} from "./x"` still evaluates ./x. Only a non-empty named list
+    // whose every specifier is type-only may join a whole-clause `import type`.
+    if (bindings.elements.length === 0) return null;
     return bindings.elements.filter((element) => !element.isTypeOnly);
   };
+  let sawExactCourierValueImport = false;
   for (const statement of file.statements) {
     if (statement === post) continue;
     if (ts.isImportDeclaration(statement)) {
@@ -568,7 +572,11 @@ function routeDelegationIssues(code: string): string[] {
         ts.isStringLiteral(statement.moduleSpecifier) &&
         statement.moduleSpecifier.text === COURIER_MODULE &&
         (values[0]?.propertyName?.text ?? values[0]?.name.text) === "handleInviteRequest";
-      if ((values !== null && values.length === 0) || exactCourierValueImport) continue;
+      if (values !== null && values.length === 0) continue;
+      if (exactCourierValueImport && !sawExactCourierValueImport) {
+        sawExactCourierValueImport = true;
+        continue;
+      }
       issues.push("unexpected_top_level_statement");
       continue;
     }
@@ -582,6 +590,9 @@ function routeDelegationIssues(code: string): string[] {
       if (declaration !== undefined && ts.isIdentifier(declaration.name)) {
         const domain = routeConfigDomains.get(declaration.name.text);
         const initializer = declaration.initializer;
+        // Intentionally stricter than a recursive initializer walk: only a ROOT
+        // StringLiteral can be configuration, so every call/new/await/template
+        // expression fails closed without needing an effect classifier.
         if (
           domain !== undefined &&
           initializer !== undefined &&
@@ -713,6 +724,11 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
       [],
       "runtime and dynamic are two independent approved config exports, not a one-config total",
     );
+    assert.deepEqual(
+      routeDelegationIssues('import type { X } from "./x";\n' + wrapper),
+      [],
+      "a genuinely type-only import does not evaluate its module at runtime",
+    );
 
     const mutants: Record<string, string> = {
       "call initializer": "export const runtime = sideEffect();\n" + wrapper,
@@ -721,6 +737,9 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
       "template-expression initializer": "export const runtime = `${runtimeChoice}`;\n" + wrapper,
       "JSON value import": 'import data from "./x.json" with { type: "json" };\n' + wrapper,
       "bare side-effect import": 'import "./x";\n' + wrapper,
+      "empty named side-effect import": 'import {} from "./x";\n' + wrapper,
+      "duplicate exact courier import":
+        'import { handleInviteRequest } from "@/lib/members/courier";\n' + wrapper,
     };
     for (const [shape, mutant] of Object.entries(mutants)) {
       assert.ok(

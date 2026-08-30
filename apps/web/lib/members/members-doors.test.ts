@@ -246,6 +246,19 @@ describe("every FILE these modules cite actually exists", () => {
     assert.deepEqual(fake, ["components/admin/members-roster.tsx"], "the regex no longer recognises the shape it exists for");
     assert.equal(existsSync(join(WEB_ROOT, fake[0] as string)), false, "…and that path really is the one that does not resolve");
   });
+
+  it("LOW-3: source narratives distinguish raw-empty courier refusal from spaces-only CLR10", () => {
+    const dialog = readFileSync(join(WEB_ROOT, "components/admin/invite-dialog.tsx"), "utf8");
+    const a11y = readFileSync(join(WEB_ROOT, "components/admin/invite-dialog-a11y.test.tsx"), "utf8");
+    const doors = readFileSync(join(WEB_ROOT, "lib/members/doors.ts"), "utf8");
+
+    assert.doesNotMatch(dialog, /NOTHING HERE VALIDATES THE EMAIL OR THE ROLE/);
+    assert.doesNotMatch(a11y, /an empty address reaches the door/);
+    assert.doesNotMatch(doors, /with non-empty strings/);
+    assert.match(dialog, /raw empty/i);
+    assert.match(a11y, /courier/i);
+    assert.match(doors, /unsupported_address[\s\S]*raw empty/i);
+  });
 });
 
 describe("the role ladder is clara.role_rank's own mapping", () => {
@@ -354,6 +367,75 @@ describe("the role ladder is clara.role_rank's own mapping", () => {
         () => semanticFunctionOperations(fixture, "role_rank"),
         /sql_function_census_unresolved_execute/,
       );
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("RED-BEFORE N1: replacing a known-other definition cannot change its target invisibly", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "clara-role-rank-"));
+    try {
+      writeFileSync(
+        join(fixture, "0001_transform.sql"),
+        "do $$ declare v_other_def text; begin " +
+          "select pg_get_functiondef('clara.other(text)'::regprocedure) into v_other_def; " +
+          "execute replace(v_other_def, 'other', 'role_rank'); end $$;\n",
+      );
+      assert.throws(
+        () => semanticFunctionOperations(fixture, "role_rank"),
+        /sql_function_census_unresolved_execute/,
+      );
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("RED-BEFORE N1: a known-other definition plus opaque runtime SQL fails closed", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "clara-role-rank-"));
+    try {
+      writeFileSync(
+        join(fixture, "0001_opaque_tail.sql"),
+        "do $$ declare v_other_def text; begin " +
+          "select pg_get_functiondef('clara.other(text)'::regprocedure) into v_other_def; " +
+          "execute v_other_def || v_opaque_sql; end $$;\n",
+      );
+      assert.throws(
+        () => semanticFunctionOperations(fixture, "role_rank"),
+        /sql_function_census_unresolved_execute/,
+      );
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("RED-BEFORE N1: EXECUTEs in one DO block follow source order, not rendered whitespace", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "clara-role-rank-"));
+    try {
+      writeFileSync(
+        join(fixture, "0001_order.sql"),
+        "do $$ begin " +
+          "execute '        create function clara.role_rank(p_role text) returns int language sql as ''select 1'''; " +
+          "execute 'drop function clara.role_rank(text)'; end $$;\n",
+      );
+      assert.throws(
+        () => pinnedRoleRankBody(fixture),
+        /no final LIVE/,
+        "CREATE then DROP must derive a dropped final state regardless of rendered indentation",
+      );
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it("RED-BEFORE N1: fully commented DO blocks contribute zero operations", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "clara-role-rank-"));
+    try {
+      writeFileSync(
+        join(fixture, "0001_commented.sql"),
+        "-- do $$ begin execute 'create function clara.role_rank(p_role text) returns int language sql as ''select 1'''; end $$;\n" +
+          "/* do $body$ begin execute 'drop function clara.role_rank(text)'; end $body$; */\n",
+      );
+      assert.deepEqual(semanticFunctionOperations(fixture, "role_rank"), []);
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
