@@ -334,7 +334,18 @@ at P6's exit gate against whether its lane merged (the STALE-NOT-BUILT class).
 5. **`app.clarabook.com` still serves `apps/dashboard`, and no repo evidence settles it** (audit
    §5). *Recommend: a deploy-record check as the cutover PR's first act, not an assumption in its
    body — absence of a Workers deployment record is not evidence of a Pages one.*
-6. **Sequencing the cream ground against the 50% ring.** P4-2 grounds four entry faces on
+6. **The main checkout cannot supply `apps/web`'s dependencies, so no P4/P6 lane can verify by the
+   standard junction recipe.** Measured this lane: `apps/web/node_modules` does not exist in the
+   main checkout, and its store carries `next@15.5.20` (apps/dashboard's pin) with **zero** entries
+   for `@base-ui/react`, `cmdk`, `next-intl`, `@opennextjs/cloudflare`, `wrangler` or
+   `tw-animate-css`. An empty store — rather than a missing link farm over a full one — means this
+   was never installed here. Several lane worktrees carry the whole tree (`next@16.3.3`) in their
+   own store, so the frontend lanes have been installing per-worktree throughout. *Recommend: the
+   lead names ONE source worktree that P4/P6 lanes junction `apps/web/node_modules` from, or grants
+   a scoped `pnpm install --filter @clara/web` per lane. Either is cheap; deciding it per-lane is
+   how eleven lanes each spend the same twenty minutes, and how one of them quietly ships without
+   running the four verify commands at all.*
+7. **Sequencing the cream ground against the 50% ring.** P4-2 grounds four entry faces on
    `--identity-canvas` while the halo is still at `/50`, which fails SC 1.4.11 on that ground
    (2.317 measured, annex 1 §C). *Recommend: **P4-2 adds the ten cream TEXT pairs at 4.5 and NO
    composited focus rows**; P6-3 lands the 70% components and the six composited rows in the same

@@ -34,12 +34,24 @@ the lead**, not a redesign, and not something you work around.
 ### 0.3 Mechanics
 
 Own worktree, own branch: `git -C C:\Users\zhant\Desktop\clara-rebuild worktree add
-.claude\worktrees\<lane> -b <branch> origin/main`. **No `pnpm install`** — junction the main
-checkout's `node_modules` at the worktree root **and** under `apps\web`
-(`cmd /c mklink /J <wt>\node_modules C:\Users\zhant\Desktop\clara-rebuild\node_modules`, same for
-`<wt>\apps\web\node_modules`). Remove a junction with `rmdir` **only** — never a recursive delete
-through one. **No rig and no docker for P4-1…P4-5** (they touch no migration); **P4-D needs one**,
-assigned by the lead.
+.claude\worktrees\<lane> -b <branch> origin/main`. Junction the main checkout's `node_modules` at
+the worktree root (`cmd /c mklink /J <wt>\node_modules C:\Users\zhant\Desktop\clara-rebuild\node_modules`).
+Remove a junction with `rmdir` **only** — never a recursive delete through one. **No rig and no
+docker for P4-1…P4-5** (they touch no migration); **P4-D needs one**, assigned by the lead.
+
+> **MEASURED PRECONDITION — the main checkout cannot supply `apps/web`'s dependencies** (this lane,
+> 2026-08-30). `apps/web/node_modules` does **not exist** in `C:\Users\zhant\Desktop\clara-rebuild`,
+> and its store genuinely lacks the packages: `ls node_modules/.pnpm` there returns `next@15.5.20`
+> (that is **apps/dashboard's** pin) and **zero** entries for `@base-ui/react`, `cmdk`, `next-intl`,
+> `@opennextjs/cloudflare`, `wrangler` or `tw-animate-css`. The store being empty of them — rather
+> than a link farm being missing over a populated store — is what says this was never installed
+> here, not deleted. Several existing lane worktrees DO carry the full tree in their **own**
+> `node_modules/.pnpm` (with `next@16.3.3`), so the frontend lanes have been installing per-worktree
+> all along. **Consequence: the plain junction recipe will NOT let you run
+> `pnpm --filter @clara/web typecheck|lint|test|build`.** Resolve it with the lead before you start
+> — junction from a worktree that already has the tree, or get an explicit grant for a scoped
+> install. **Do not silently skip the four verify commands**, and do not run a broad `pnpm install`
+> against the main checkout on your own initiative (this host filled to 0 bytes twice this week).
 
 Hooks you will hit: no shell file writes (`>`, `>>`, `sed -i`, `cp`, heredoc-to-file) — use
 Write/Edit, and scripts via Write then `bash script.sh`; commit subject ≤ 72 chars; `git stash`
@@ -219,7 +231,7 @@ erase why the question was open**, which is what makes the next reader re-litiga
 **Contrast rows.** Add the **ten cream text pairs at threshold 4.5** (annex 1 §C.2 measured all ten
 passing, tightest `muted-foreground` at 4.636). **Add NO composited focus rows** — the halo is
 still at `/50` on this tip and P6-3 owns the 70% recut; a row at an alpha nothing renders asserts a
-composition that does not ship (plan §6 OQ-6).
+composition that does not ship (plan §6 OQ-7).
 
 **Tests.** `signup-a11y` · `signup-keyboard` · `pending-a11y` · **`login-a11y` · `login-keyboard` ·
 `invite-accept-a11y` · `invite-accept-keyboard`** — the last four register the two P2 surfaces that
