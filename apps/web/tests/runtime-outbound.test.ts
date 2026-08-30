@@ -12,7 +12,7 @@ import {
   isJwtShaped,
   legFor,
 } from "../lib/runtime/outbound";
-import { matchBlock, stripComments } from "../test/sourceOracle";
+import { runtimeRouteRegistrations } from "../test/sourceOracle";
 
 /**
  * THE RUNTIME PROXY'S OUTBOUND CREDENTIAL (P4-2).
@@ -151,25 +151,11 @@ const INTAKE_ROUTES = join(
 );
 
 function runtimeRoutes(): { call: string; capability: boolean }[] {
-  const src = stripComments(readFileSync(INTAKE_ROUTES, "utf8"));
-  const out: { call: string; capability: boolean }[] = [];
-  for (const m of src.matchAll(/router\.(get|post|put|patch|delete)\s*\(\s*"([^"]+)"\s*,/g)) {
-    const open = src.indexOf("(", m.index);
-    const end = matchBlock(src, open);
-    assert.ok(end > 0, `router.${m[1]}("${m[2]}"): unbalanced call — this parser is blind`);
-    // The proxy sees everything after `/api/runtime/`, and an Express `:param` is
-    // one dynamic segment — the registry's `*`.
-    const path = (m[2] as string)
-      .replace(/^\/api\//, "")
-      .split("/")
-      .map((s) => (s.startsWith(":") ? "*" : s))
-      .join("/");
-    out.push({
-      call: `${(m[1] as string).toUpperCase()} ${path}`,
-      capability: src.slice(open, end).includes("bearerCapability("),
-    });
-  }
-  return out;
+  return runtimeRoutesFrom(readFileSync(INTAKE_ROUTES, "utf8"));
+}
+
+function runtimeRoutesFrom(src: string): { call: string; capability: boolean }[] {
+  return runtimeRouteRegistrations(src).map(({ call, capability }) => ({ call, capability }));
 }
 
 describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () => {
@@ -201,6 +187,53 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
     assert.ok(begin, "the begin leg vanished from the runtime's route table");
     assert.equal(begin.capability, false, "begin reads a capability — the leg split itself would be wrong");
     assert.equal(routes.filter((r) => r.capability).length, 2, "the bearerCapability() read is not discriminating");
+  });
+
+  it("PIN NEW-1a: a helper-added route is censused, never invisible", () => {
+    const helper = `register(
+      router,
+      "put",
+      "/api/intake/documents/:id/retry",
+      async (req, res) => { bearerCapability(req.header("authorization")); res.end(); },
+    );`;
+    assert.deepEqual(runtimeRoutesFrom(helper), [
+      { call: "PUT intake/documents/*/retry", capability: true },
+    ]);
+  });
+
+  it("PIN NEW-1b: the word bearerCapability in a string is not a capability call", () => {
+    const decoy = `router.put("/api/intake/documents/:id/bytes", (_req, res) => {
+      const log = "bearerCapability(req.header('authorization'))";
+      res.json({ log });
+    });`;
+    assert.deepEqual(runtimeRoutesFrom(decoy), [
+      { call: "PUT intake/documents/*/bytes", capability: false },
+    ]);
+  });
+
+  it("PIN NEW-1c: multiline direct calls remain visible", () => {
+    const multiline = `router
+      .post(
+        "/api/intake/documents/:id/finalize",
+        async (req, res) => { bearerCapability(req.header("authorization")); res.end(); },
+      );`;
+    assert.deepEqual(runtimeRoutesFrom(multiline), [
+      { call: "POST intake/documents/*/finalize", capability: true },
+    ]);
+  });
+
+  it("PIN NEW-1d: a trailing slash remains a discriminating extra segment", () => {
+    const trailing = `router.put("/api/intake/documents/:id/bytes/", () => bearerCapability("x"));`;
+    assert.deepEqual(runtimeRoutesFrom(trailing), [
+      { call: "PUT intake/documents/*/bytes/", capability: true },
+    ]);
+  });
+
+  it("PIN NEW-1e: an unknown helper registration fails closed by helper name", () => {
+    assert.throws(
+      () => runtimeRoutesFrom(`addRoute(router, "put", "/api/intake/hidden", () => bearerCapability("x"));`),
+      /addRoute\(router, .*unrecognised route registration shape/,
+    );
   });
 });
 

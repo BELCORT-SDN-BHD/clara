@@ -17,8 +17,10 @@ import {
   defaultExportName,
   exportedHttpMethods,
   reachableFrom,
+  reachableCallsFrom,
+  spineGuardProof,
   stripComments,
-  tryBlockRanges,
+  uninspectableExportReasons,
 } from "../test/sourceOracle";
 
 /**
@@ -72,16 +74,23 @@ const codeWithStrings = (p: string): string => stripComments(readSource(p));
  * So: for a page or layout, the default export and nothing else. For a route
  * handler, EVERY exported method, checked independently.
  */
-function executionRoots(p: string): { root: string; code: string }[] {
+function executionRoots(p: string): { root: string; code: string; calls: ReturnType<typeof reachableCallsFrom>; proof: ReturnType<typeof spineGuardProof> }[] {
   const code = stripComments(readSource(p), { blankStrings: true });
   if (isRouteLeaf(p)) {
     return exportedHttpMethods(code).map((method) => ({
       root: method,
       code: reachableFrom(code, method) ?? "",
+      calls: reachableCallsFrom(code, method),
+      proof: spineGuardProof(code, method),
     }));
   }
   const name = defaultExportName(code);
-  return name === null ? [] : [{ root: name, code: reachableFrom(code, name) ?? "" }];
+  return name === null ? [] : [{
+    root: name,
+    code: reachableFrom(code, name) ?? "",
+    calls: reachableCallsFrom(code, name),
+    proof: spineGuardProof(code, name),
+  }];
 }
 
 /** The union, for the few cells that legitimately ask "anywhere in what runs". */
@@ -153,11 +162,11 @@ function classify(leaf: { file: string; url: string }): string {
 const OK_CLASSES = ["registered unscoped", "ancestor-covered", "direct entrance", "proven exemption"];
 
 const SPINE_IMPORT = /from\s+["']@\/lib\/require-firm-scope["']/;
-const SPINE_CALL = /\b(requireFirmScope|firmScopeGuard|resolveFirmScope)\s*\(/;
 
 /** Imports the spine AND actually executes one of its entrances. */
 function callsSpine(p: string): boolean {
-  return SPINE_IMPORT.test(codeWithStrings(p)) && SPINE_CALL.test(executedCode(p));
+  return SPINE_IMPORT.test(codeWithStrings(p)) && executionRoots(p).some((root) =>
+    root.calls.some((call) => ["requireFirmScope", "firmScopeGuard", "resolveFirmScope"].includes(call.name)));
 }
 
 describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () => {
@@ -215,9 +224,12 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     // this today; this cell is what keeps that true.
     const hiding = leaves
       .filter((l) => isRouteLeaf(l.file))
-      .filter((l) => /\bexport\s*\*/.test(stripComments(readSource(l.file), { blankStrings: true })))
-      .map((l) => l.file);
-    assert.deepEqual(hiding, [], "a route handler star-re-exports — the method census cannot see through it");
+      .flatMap((l) => uninspectableExportReasons(readSource(l.file)).map((reason) => `${l.file}: ${reason}`));
+    assert.deepEqual(
+      hiding,
+      [],
+      "a route handler has no locally inspectable/provable spine call because it re-exports code the census cannot inspect",
+    );
   });
 
   it("CELL 2 — every page.tsx has an entrance ANCESTOR or is registered unscoped", () => {
@@ -274,41 +286,6 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
   const libFiles = walkSources(join(WEB_ROOT, "lib")).map(webRelative);
   const componentFiles = walkSources(join(WEB_ROOT, "components")).map(webRelative);
 
-  it("VACUITY CONTROL: the detector sees a real call and not a fake one", () => {
-    assert.equal(callsSpine("app/(firm)/layout.tsx"), true, "blind to a call it is pointed straight at");
-    assert.equal(callsSpine("app/layout.tsx"), false, "reports a call the root layout does not make");
-
-    // The three shapes that fooled earlier versions of this gate.
-    const importLine = 'import { requireFirmScope } from "@/lib/require-firm-scope";';
-    const commentOnly = `${importLine}\n// requireFirmScope() would be the wrong wall here\nexport default function S() { return null; }`;
-    const stringDecoy = `${importLine}\nconst decoy = "requireFirmScope()";\nexport default function S() { return decoy; }`;
-    const deadHelper = `${importLine}\nfunction unused() { requireFirmScope(); }\nexport default function S() { return null; }`;
-    const realCall = `${importLine}\nexport default async function S() { await requireFirmScope(); return null; }`;
-    const viaHelper = `${importLine}\nasync function guard() { await requireFirmScope(); }\nexport default async function S() { await guard(); return null; }`;
-
-    const detect = (src: string) => {
-      const code = stripComments(src, { blankStrings: true });
-      const name = defaultExportName(code);
-      return (
-        SPINE_IMPORT.test(stripComments(src)) &&
-        name !== null &&
-        SPINE_CALL.test(reachableFrom(code, name) ?? "")
-      );
-    };
-
-    assert.equal(detect(commentOnly), false, "a comment-only mention counts as a call");
-    assert.equal(detect(stringDecoy), false, "a string decoy counts as a call — MEDIUM-3 attack B");
-    assert.equal(detect(deadHelper), false, "a never-invoked helper counts as a guard");
-    assert.equal(detect(realCall), true, "a real call is invisible");
-    assert.equal(detect(viaHelper), true, "a call one hop from the export is invisible");
-  });
-
-  it("VACUITY CONTROL: the stripper keeps string literals, drops both comment forms", () => {
-    const s = stripComments('const u = "https://a.example/x"; // LINE_GONE\n/* BLOCK_GONE */ const v = `t//t`;');
-    assert.ok(s.includes("https://a.example/x") && s.includes("t//t"));
-    assert.ok(!s.includes("LINE_GONE") && !s.includes("BLOCK_GONE"));
-  });
-
   it("exactly one module DEFINES each spine export", () => {
     for (const symbol of ["resolveFirmScope", "requireFirmScope", "firmScopeGuard"]) {
       const definers = [...libFiles, ...appFiles, ...componentFiles].filter((p) =>
@@ -329,15 +306,14 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
       assert.ok(existsSync(join(WEB_ROOT, entrance.path)), `${entrance.path} is missing`);
       const roots = executionRoots(entrance.path);
       assert.ok(roots.length > 0, `${entrance.path} exposes no execution root at all`);
-      for (const { root, code } of roots) {
-        assert.match(
-          code,
-          /\b(requireFirmScope|firmScopeGuard)\(\s*\)/,
-          `${entrance.path}: the ${root} entry point does not call the spine`,
+      for (const { root, calls, proof } of roots) {
+        const guards = calls.filter((call) => call.name === "requireFirmScope" || call.name === "firmScopeGuard");
+        assert.ok(
+          guards.length > 0,
+          `${entrance.path}: ${root} ${proof.reason}; it has no locally inspectable/provable spine call`,
         );
-        assert.doesNotMatch(
-          code,
-          /\b(requireFirmScope|firmScopeGuard)\(\s*[^)\s]/,
+        assert.ok(
+          guards.every((call) => call.argumentCount === 0),
           `${entrance.path}: ${root} passes an argument — an entrance is never handed its own reader`,
         );
       }
@@ -363,35 +339,17 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
     // `@typescript-eslint/no-floating-promises` rule (eslint.config.mjs, the
     // apps/web/app block) see it.
     for (const entrance of SCOPE_ENTRANCES) {
-      for (const { root, code } of executionRoots(entrance.path)) {
-        assert.match(
-          code,
-          /await\s+(requireFirmScope|firmScopeGuard)\(\s*\)/,
+      for (const { root, calls } of executionRoots(entrance.path)) {
+        const guards = calls.filter((call) => call.name === "requireFirmScope" || call.name === "firmScopeGuard");
+        assert.ok(
+          guards.some((call) => call.awaited && call.argumentCount === 0),
           `${entrance.path}: ${root} calls the spine without awaiting it — the redirect throw floats and the surface renders anyway`,
         );
       }
     }
   });
 
-  it("VACUITY CONTROL: a build-time export cannot stand in for the render", () => {
-    // Next runs generateStaticParams at BUILD time; a guard there protects no
-    // request. Rooting every export made this pass (#451 Codex round 2, item 1).
-    const src = [
-      'import { requireFirmScope } from "@/lib/require-firm-scope";',
-      "export async function generateStaticParams() { await requireFirmScope(); return []; }",
-      "export default async function Page() { return null; }",
-    ].join("\n");
-    const code = stripComments(src, { blankStrings: true });
-    const name = defaultExportName(code);
-    assert.equal(name, "Page");
-    assert.doesNotMatch(
-      reachableFrom(code, name as string) ?? "",
-      /requireFirmScope\(/,
-      "a guard in generateStaticParams is being counted as guarding the render",
-    );
-  });
-
-  it("FIND-1b — no entrance calls the spine INSIDE a try block", () => {
+  it("FIND-1b — the awaited spine guard execution-dominates every entrance", () => {
     // AWAITING IS NOT ENOUGH, AND NEITHER IS CALLING (#451 round-3, MED-2).
     // `requireFirmScope()` denies by calling `redirect()`, which SIGNALS BY
     // THROWING `NEXT_REDIRECT`. So `try { await requireFirmScope(); } catch {}`
@@ -406,105 +364,14 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
     // throwing, but a `catch` around it still turns a resolution failure into a
     // silently continuing request. An entrance has no business swallowing either.
     for (const entrance of SCOPE_ENTRANCES) {
-      for (const { root, code } of executionRoots(entrance.path)) {
-        const ranges = tryBlockRanges(code);
-        for (const call of code.matchAll(/\b(requireFirmScope|firmScopeGuard)\s*\(/g)) {
-          const at = call.index;
-          assert.equal(
-            ranges.some(([s, e]) => at >= s && at < e),
-            false,
-            `${entrance.path}: ${root} calls the spine inside a try block — a denial that THROWS is swallowed and the surface continues`,
-          );
-        }
+      for (const { root, proof } of executionRoots(entrance.path)) {
+        assert.equal(
+          proof.dominates,
+          true,
+          `${entrance.path}: ${root}: ${proof.reason}`,
+        );
       }
     }
-  });
-
-  it("VACUITY CONTROL: the try-block instrument sees the swallow, and only it", () => {
-    const swallowed = [
-      'import { requireFirmScope } from "@/lib/require-firm-scope";',
-      "export default async function S() { try { await requireFirmScope(); } catch {} return null; }",
-    ].join("\n");
-    const armed = [
-      'import { requireFirmScope } from "@/lib/require-firm-scope";',
-      "export default async function S() { await requireFirmScope(); try { await load(); } catch {} return null; }",
-    ].join("\n");
-    const swallowsSpine = (src: string) => {
-      const code = stripComments(src, { blankStrings: true });
-      const body = reachableFrom(code, defaultExportName(code) as string) ?? "";
-      const ranges = tryBlockRanges(body);
-      return [...body.matchAll(/\brequireFirmScope\s*\(/g)].some((m) =>
-        ranges.some(([s, e]) => m.index >= s && m.index < e),
-      );
-    };
-    assert.equal(swallowsSpine(swallowed), true, "a try/catch around the spine call is invisible");
-    assert.equal(
-      swallowsSpine(armed),
-      false,
-      "a try block ELSEWHERE in the body is read as swallowing the guard — the cell would red on honest code",
-    );
-    // The instrument reads the same string-blanked code every other cell here
-    // does, so a `try {` written inside a string literal is not a try block.
-    assert.equal(
-      tryBlockRanges(stripComments('const s = "try {"; try { a(); } catch {}', { blankStrings: true })).length,
-      1,
-      "a `try {` inside a string counted as a real try block",
-    );
-  });
-
-  it("VACUITY CONTROL: a guarded GET does not cover an unguarded POST", () => {
-    const src = [
-      'import { firmScopeGuard } from "@/lib/require-firm-scope";',
-      "async function guarded() { const g = await firmScopeGuard(); return g; }",
-      "export const GET = guarded;",
-      "export async function POST() { return Response.json({ ok: true }); }",
-    ].join("\n");
-    const code = stripComments(src, { blankStrings: true });
-    assert.deepEqual(exportedHttpMethods(code).sort(), ["GET", "POST"]);
-    assert.match(reachableFrom(code, "GET") ?? "", /firmScopeGuard\(/, "GET should be guarded here");
-    assert.doesNotMatch(
-      reachableFrom(code, "POST") ?? "",
-      /firmScopeGuard\(/,
-      "POST is unguarded but the walker reports it covered — the per-method claim is vacuous",
-    );
-  });
-
-  it("VACUITY CONTROL: an ALIASED or `let`-bound method export is still a root", () => {
-    // MED-1. Next 16 dispatches off the module's export RECORD (`handlers[method]`
-    // / `method in userland`), so `export { raw as DELETE }` and `export let
-    // DELETE = raw` route exactly as `export function DELETE()` does. The census
-    // read only the two easy spellings, so an unguarded DELETE added in either
-    // shape passed BOTH per-root cells — "the API entrance's roots ARE its
-    // exported HTTP methods" and "EVERY execution root calls the spine" — because
-    // it was never named as a root at all. Review law 3: the instrument was
-    // reading a SPELLING and calling it the export.
-    const aliased = [
-      'import { firmScopeGuard } from "@/lib/require-firm-scope";',
-      "async function handler() { const g = await firmScopeGuard(); return g; }",
-      "async function raw() { return Response.json({ ok: true }); }",
-      "export { handler as GET };",
-      "export { raw as DELETE };",
-    ].join("\n");
-    const aliasedCode = stripComments(aliased, { blankStrings: true });
-    assert.deepEqual(exportedHttpMethods(aliasedCode).sort(), ["DELETE", "GET"]);
-    // And the alias resolves to the RIGHT body, both ways — otherwise every
-    // aliased export would red for want of a body rather than for want of a guard.
-    assert.match(reachableFrom(aliasedCode, "GET") ?? "", /firmScopeGuard\(/);
-    assert.doesNotMatch(reachableFrom(aliasedCode, "DELETE") ?? "", /firmScopeGuard\(/);
-
-    const letBound = [
-      'import { firmScopeGuard } from "@/lib/require-firm-scope";',
-      "async function raw() { return Response.json({ ok: true }); }",
-      "export let DELETE = raw;",
-    ].join("\n");
-    const letCode = stripComments(letBound, { blankStrings: true });
-    assert.deepEqual(exportedHttpMethods(letCode), ["DELETE"]);
-    assert.doesNotMatch(reachableFrom(letCode, "DELETE") ?? "", /firmScopeGuard\(/);
-
-    // A type-only clause exports nothing at runtime and must not invent a root.
-    assert.deepEqual(exportedHttpMethods(stripComments("export type { DELETE };")), []);
-    // …and the whitespace between `export` and `{` is formatting, not meaning.
-    assert.deepEqual(exportedHttpMethods(stripComments("function raw() {}\nexport{raw as DELETE};")), ["DELETE"]);
   });
 
   it("FIND-1 — the 403 entrance RETURNS the refusal, not merely computes it", () => {

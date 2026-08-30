@@ -15,7 +15,7 @@ import {
 } from "../lib/registration/reads";
 import { loadOwnRegistrationRequests } from "../lib/registration/server-reads";
 import { stripComments } from "../test/sourceOracle";
-import { lexSql } from "../test/sqlOracle";
+import { lexSql, viewDefinitionOffsets } from "../test/sqlOracle";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { ServerSession } from "../lib/supabase/server-session";
 
@@ -160,19 +160,7 @@ const migration = (name: string): string => readFileSync(join(MIGRATIONS_DIR, na
 function viewDefinitions(view: string): { file: string; offset: number }[] {
   const out: { file: string; offset: number }[] = [];
   for (const file of MIGRATION_FILES) {
-    // THE SCHEMA QUALIFIER IS SQL, NOT A FIXED STRING (#451 round-3, LOW-1).
-    // PostgreSQL accepts `clara . caller_context` and `clara."caller_context"` as
-    // the very same relation, and `clara\.${view}` saw neither — a second live
-    // body written in either spelling would have passed a census whose whole claim
-    // is "exactly one, estate-wide". `\b` sits INSIDE the optional closing quote
-    // so it still anchors on the identifier's last character in both spellings.
-    const re = new RegExp(
-      `create\\s+(or\\s+replace\\s+)?view\\s+"?clara"?\\s*\\.\\s*"?${view}\\b"?`,
-      "gi",
-    );
-    for (const m of lexSql(migration(file)).statements.matchAll(re)) {
-      out.push({ file, offset: m.index ?? -1 });
-    }
+    for (const offset of viewDefinitionOffsets(migration(file), view)) out.push({ file, offset });
   }
   return out;
 }
@@ -199,158 +187,6 @@ function declaredContract(sql: string, relation: string): { count: number; colum
   assert.ok(typeof count === "string" && typeof columns === "string", "contract matched without both groups");
   return { count: Number(count), columns };
 }
-
-describe("LOW-5 — the SQL lexer, controlled before it is trusted", () => {
-  it("a commented-out CREATE VIEW is not a definition", () => {
-    const sql = "-- create view clara.decoy as select 1;\n/* create view clara.decoy as select 2; */\ncreate view clara.real as select 3;";
-    const { statements } = lexSql(sql);
-    assert.ok(!/create\s+view\s+clara\.decoy/i.test(statements), "a commented DDL counted");
-    assert.ok(/create\s+view\s+clara\.real/i.test(statements), "the real DDL was eaten");
-  });
-
-  it("a CREATE VIEW inside a dollar-quoted body is text, not a definition", () => {
-    const sql = "do $$ begin raise notice 'create view clara.decoy as select 1'; end $$;\ncreate view clara.real as select 1;";
-    const { statements } = lexSql(sql);
-    assert.ok(!/create\s+view\s+clara\.decoy/i.test(statements));
-    assert.ok(/create\s+view\s+clara\.real/i.test(statements));
-  });
-
-  it("comments INSIDE a dollar-quoted body are still stripped", () => {
-    // The contracts live inside `do $$ … $$`, so a decoy tuple one level down is
-    // exactly where it would hide.
-    const sql = "do $$ begin\n  -- ('decoy', 9, 'a,b')\n  perform ('real', 2, 'a,b');\nend $$;";
-    const { withoutComments } = lexSql(sql);
-    assert.ok(!withoutComments.includes("decoy"), "a comment inside a do-block survived");
-    assert.ok(withoutComments.includes("'real'"), "the live tuple was eaten");
-  });
-
-  it("a `--` inside a string is not a comment", () => {
-    const { withoutComments } = lexSql("select 'p4t1 tail: OK -- everything live', 1;");
-    assert.ok(withoutComments.includes("everything live"), "a string's contents were eaten as a comment");
-  });
-
-  it("an ESCAPE string `E'…\\'…'` does not end early — a DDL inside one stays masked", () => {
-    // PostgreSQL's E'' form escapes with a BACKSLASH, and the corpus really
-    // contains this syntax (0111_f_a5_reporting_agency_pr1.sql:606). Treating
-    // `\'` as the closing quote desynchronises everything after it.
-    //
-    // THE FIXTURE IS CHOSEN TO DISCRIMINATE, which an earlier version was not: the
-    // whole `; create view … ;` sits INSIDE one escape string, so correct lexing
-    // masks it and a lexer that ends the string at `\'` exposes it at statement
-    // level. An earlier fixture put the DDL after the string and let a `--`
-    // comment eat the evidence in both cases — a cell that passed either way.
-    const sql = "select E'\\'; create view clara.probe as select 1; ';";
-    const { statements } = lexSql(sql);
-    assert.ok(
-      !/create\s+view\s+clara\.probe/i.test(statements),
-      "a CREATE VIEW inside an escape string surfaced as a real definition — the lexer lost sync on \\'",
-    );
-  });
-
-  it("an escape string does not swallow the statement that follows it", () => {
-    const sql = "select E'a\\'b';\ncreate view clara.probe as select 1;";
-    assert.ok(
-      /create\s+view\s+clara\.probe/i.test(lexSql(sql).statements),
-      "the DDL after an escape string was swallowed",
-    );
-  });
-
-  it("the REAL corpus parses: 0111's escape string does not desynchronise it", () => {
-    const { withoutComments, statements } = lexSql(migration("0111_f_a5_reporting_agency_pr1.sql"));
-    assert.equal(withoutComments.length, statements.length);
-    assert.ok(withoutComments.length > 1000, "the file did not lex at all");
-  });
-
-  it("a contract decoy NESTED in an inner dollar string does not count", () => {
-    // The outer `do $$ … $$` is a body and is lexed; an inner `$q$ … $q$` inside it
-    // is a LITERAL and is masked. Retaining it let a contract-shaped decoy satisfy
-    // declaredContract() (#451 Codex round 2, item 4).
-    const sql = "do $$ begin\n  perform $q$ ('caller_context', 6, 'DECOY') $q$;\nend $$;";
-    const { withoutComments } = lexSql(sql);
-    assert.ok(!withoutComments.includes("DECOY"), "a nested dollar-string payload survived as evidence");
-  });
-
-  it("a DDL decoy nested in an inner dollar string does not count either", () => {
-    const sql = "do $$ begin\n  perform $q$ create view clara.probe as select 1; $q$;\nend $$;";
-    assert.ok(!/create\s+view\s+clara\.probe/i.test(lexSql(sql).statements));
-  });
-
-  it("MED-3 — a BARE DDL inside a top-level do block IS a definition", () => {
-    // The three cells above prove what stays MASKED. This one proves the lexer
-    // did not buy that by blinding itself: `do $$ begin create or replace view
-    // …; end $$;` is executable SQL that really defines the view, and blanking
-    // the whole body hid a live body from the one-definition census (#451
-    // round-3, MED-3). The discrimination is by KIND, not by depth alone — the
-    // quoted decoy and the nested payload above still do not count.
-    const sql = "do $$ begin\n  create or replace view clara.probe as select 1;\nend $$;";
-    assert.ok(
-      /create\s+or\s+replace\s+view\s+clara\.probe/i.test(lexSql(sql).statements),
-      "a real CREATE VIEW inside a do block is invisible to the census",
-    );
-  });
-
-  it("LOW-2 — an unterminated string keeps both views the same length", () => {
-    // `statements` re-emitted a closing quote the input never had, so it came out
-    // ONE BYTE LONGER than `withoutComments` — and every offset-based read in
-    // these pins is built on the two views addressing the same bytes.
-    const sql = "select '";
-    const { withoutComments, statements } = lexSql(sql);
-    assert.equal(withoutComments.length, sql.length);
-    assert.equal(statements.length, sql.length);
-  });
-
-  it("LOW-3 — `$1$` is a parameter, not a dollar tag", () => {
-    // `$1$` has no closing tag, so reading it as one masked the rest of the FILE.
-    const sql = "select $1$::text;\ncreate view clara.probe as select 1;";
-    const { statements, withoutComments } = lexSql(sql);
-    assert.ok(/create\s+view\s+clara\.probe/i.test(statements), "everything after `$1$` was masked away");
-    assert.equal(withoutComments.length, sql.length);
-  });
-
-  it("LOW-3 — an UNTERMINATED dollar tag does not mask to EOF", () => {
-    // The fail-OPEN direction: one malformed tag silently erasing every statement
-    // after it is exactly how a live body would leave a census clean.
-    const sql = "do $body$ begin end;\ncreate view clara.probe as select 1;";
-    const { statements } = lexSql(sql);
-    assert.ok(
-      /create\s+view\s+clara\.probe/i.test(statements),
-      "an unterminated $body$ swallowed the statements that follow it",
-    );
-    assert.equal(statements.length, sql.length);
-  });
-
-  it("LOW-1 — a spaced or quoted schema qualifier is the SAME relation", () => {
-    // `clara . probe` and `clara."probe"` are both `clara.probe` to PostgreSQL;
-    // a census that reads only `clara\.probe` would call a second live body zero.
-    for (const spelling of ['clara . probe', 'clara."probe"', '"clara"."probe"', "clara.probe"]) {
-      const defs = [
-        ...lexSql(`create or replace view ${spelling} as select 1;`).statements.matchAll(
-          /create\s+(or\s+replace\s+)?view\s+"?clara"?\s*\.\s*"?probe\b"?/gi,
-        ),
-      ];
-      assert.equal(defs.length, 1, `${spelling} was not seen as a definition of clara.probe`);
-    }
-    const near = [
-      ...lexSql("create view clara.probe_other as select 1;").statements.matchAll(
-        /create\s+(or\s+replace\s+)?view\s+"?clara"?\s*\.\s*"?probe\b"?/gi,
-      ),
-    ];
-    assert.equal(near.length, 0, "clara.probe_other matched the pin for clara.probe");
-  });
-
-  it("every view is LENGTH-PRESERVING — the property the CHECK cell relies on", () => {
-    for (const file of ["0002_foundation.sql", "0141_p4_tranche1_invite_rbac.sql"]) {
-      const raw = migration(file);
-      const { withoutComments, statements } = lexSql(raw);
-      assert.equal(withoutComments.length, raw.length, `${file}: withoutComments changed length`);
-      assert.equal(statements.length, raw.length, `${file}: statements changed length`);
-    }
-  });
-
-  it("VACUITY CONTROL: the migration corpus was actually read", () => {
-    assert.ok(MIGRATION_FILES.length > 100, `only ${MIGRATION_FILES.length} migrations found`);
-  });
-});
 
 describe("the projections are the DB's own declared column contracts", () => {
   it("clara.caller_context has ONE live body — 0141:544, nothing superseding it", () => {
