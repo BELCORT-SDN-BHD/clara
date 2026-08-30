@@ -14,9 +14,23 @@ runs:
         # append-only freeze-lint + migration-history gates MUST have it — a
         # fetch failure can no longer masquerade as success. Only a genuine
         # first-introduction (origin/main absent) may pass without a base.
+        #
+        # THE HARNESS RACE (sweep 33283730630, db-estate red, 2026-08-30): both call
+        # sites checkout with fetch-depth:0, so refs/remotes/origin/main already
+        # exists locally, fully-historied, from job start. This step's own fetch is a
+        # SEPARATE, SHALLOW (--depth=1) fetch of just the tip. A non-forced refspec
+        # (`main:refs/remotes/origin/main`) update is fast-forward-only; when another
+        # PR merges into main WHILE this job is still running, git rejects that
+        # shallow tip as "non-fast-forward" and the whole step (and everything after
+        # it, `-e` in the shebang) dies -- the read-only comparison ref we only ever
+        # read for freeze-lint/migration-history reds the job for a reason that has
+        # nothing to do with the PR's own content. We want the FRESHEST remote main
+        # for that comparison regardless of local ancestry shape, so the refspec is
+        # forced (`+`) -- safe here because this ref is read-only base material, never
+        # merged into or pushed from.
         if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
           echo "origin/main exists — fetching it for the append-only base checks"
-          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          git fetch --no-tags --depth=1 origin +main:refs/remotes/origin/main
         else
           echo "origin/main does not exist yet (first introduction) — base checks treat all as new"
         fi

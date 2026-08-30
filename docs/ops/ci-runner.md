@@ -159,3 +159,24 @@ build/db-estate/db-live-gates/render-drill legs of one PR landing at once); if t
 gets memory-pressured or a job is OOM-killed, the lever is raising `.wslconfig`'s
 `memory=` (the host has ~32 GiB physical, so there's room to raise the ~15.5 GiB default
 cap) rather than removing a runner instance.
+
+## `fetch-base-main` harness race, forced ref (2026-08-30)
+
+Sweep 33283730630 reded `db-estate` on `fetch-base-main` (`.github/actions/fetch-base-main`):
+`git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main` was rejected
+non-fast-forward. Both call sites (`lint`, `db-estate`) checkout with `fetch-depth: 0`, so
+`refs/remotes/origin/main` already exists locally, fully-historied, from job start; this
+step's own fetch is a *separate*, shallow (`--depth=1`) re-fetch of just the tip, done later
+in the job to pick up any main-tip movement since checkout. When another PR merges into
+`main` while a long self-hosted job (the `db-estate` suite in particular) is still running,
+that later shallow fetch's ref update is fast-forward-only by default and git refuses it —
+the step's `shell: bash -e {0}` then dies on the non-zero exit, failing the whole job for a
+reason that has nothing to do with the PR's own content. **Fix:** force the refspec
+(`+main:refs/remotes/origin/main`) — safe because this ref is read-only base material for
+the append-only freeze-lint/migration-history comparisons, never merged into or pushed from,
+so there is no correctness reason to require a "clean" fast-forward here; we want the
+freshest remote `main` for the comparison regardless of local ancestry shape. No selftest
+exists for this composite action (both usages are inline in `ci.yml`); the fix is proven by
+reasoned diff, not a rig test — there is no database or migration surface here. **Standing
+practice, unchanged:** avoid merging into `main` mid-sweep where practical; the forced ref
+is the structural fix for when it happens anyway.
