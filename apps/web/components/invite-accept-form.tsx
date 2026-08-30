@@ -4,7 +4,10 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
-import { readInviteVerification } from "@/lib/invite-verification";
+import {
+  readInviteVerification,
+  type VerifyOtpLikeResponse,
+} from "@/lib/invite-verification";
 import { createClient } from "@/lib/supabase/client";
 import { acceptInvite, callerContext } from "@/lib/identity/doors";
 import { isDoorRefusal } from "@/lib/doors";
@@ -32,6 +35,49 @@ type Stage =
  *  its own message, both VERBATIM. `code` is null for an ordinary failure
  *  (transport, no session) — there is no DB verdict to show a chip for. */
 type Refusal = { code: string | null; message: string };
+
+/**
+ * THE THREE AUTH CALLS THIS SURFACE MAKES, and nothing else — a structural
+ * type, so the client can be substituted at the seam without this component
+ * ever seeing a different shape.
+ *
+ * WHY A SEAM EXISTS AT ALL. It mirrors the one `callDoor`/`getRows` already
+ * expose ("pass an explicit accessor only for a test" — lib/doors.ts's
+ * `CallDoorOptions.session`), and it is a TRANSPORT seam only: every wall on
+ * this journey — the hard-coded `type: "invite"`, `readInviteVerification`'s
+ * fail-closed reading, the `getClaims()` subject binding, and the door's own
+ * refusals — runs identically whichever client is supplied. Nothing here can
+ * be injected to make a refused acceptance look accepted.
+ *
+ * It is needed because the real browser client cannot be constructed under the
+ * Node 20 test runner at all: `@supabase/realtime-js` throws at construction
+ * without a native `WebSocket` (Node 22+), and its auth timers keep the
+ * process alive afterwards. Measured on this branch, not assumed.
+ *
+ * REVIEW LAW 3 — spelling is not identity. The proof that this interface still
+ * describes the REAL client is the default parameter below
+ * (`createSupabaseClient = createClient`): `tsc` must accept `typeof
+ * createClient` as `() => InviteAuthClient`, so an SDK shape change fails the
+ * typecheck instead of silently diverging behind a structurally-typed prop.
+ * The proof is the production wiring itself, not a separate assertion that
+ * could rot beside it (lib/invite-verification.ts's `SDK_SHAPE_IS_READ` is the
+ * same idea, one layer down).
+ */
+export interface InviteAuthClient {
+  auth: {
+    verifyOtp(params: {
+      token_hash: string;
+      type: "invite";
+    }): Promise<VerifyOtpLikeResponse>;
+    getClaims(): Promise<{
+      data?: { claims?: { sub?: string } } | null;
+      error?: { message?: string } | null;
+    }>;
+    updateUser(attributes: {
+      password: string;
+    }): Promise<{ error?: { message: string } | null }>;
+  };
+}
 
 /**
  * The invite-accept flow (app/invite/[token]/page.tsx). THREE governed calls
@@ -137,11 +183,15 @@ type Refusal = { code: string | null; message: string };
 export function InviteAcceptForm({
   token,
   inviteToken,
+  createSupabaseClient = createClient,
 }: {
   /** Supabase's `token_hash` from the URL path segment. */
   token: string;
   /** Clara's own invite token. Nullable — see the header's "TWO TOKENS". */
   inviteToken: string | null;
+  /** The transport seam. Defaults to the real browser client; see
+   *  `InviteAuthClient` for why it is substitutable and what it cannot do. */
+  createSupabaseClient?: () => InviteAuthClient;
 }) {
   const t = useTranslations("Invite");
   const router = useRouter();
@@ -173,7 +223,7 @@ export function InviteAcceptForm({
     setStage("verifying");
     setErrorMessage(null);
 
-    const supabase = createClient();
+    const supabase = createSupabaseClient();
     const response = await supabase.auth.verifyOtp({
       token_hash: token,
       // HARD-CODED. Never a caller-supplied OTP purpose — see finding 2 above.
@@ -225,7 +275,7 @@ export function InviteAcceptForm({
     setErrorMessage(null);
     setRefusal(null);
 
-    const supabase = createClient();
+    const supabase = createSupabaseClient();
 
     // Bind the continuation to the verified subject. `updateUser` acts on the
     // session the browser currently holds; unless that session's
