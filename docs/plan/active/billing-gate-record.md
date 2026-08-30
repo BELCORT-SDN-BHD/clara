@@ -221,3 +221,16 @@ Named up front so the gate is not a re-read of the design's own claims.
    `llm_price_table` plus a margin ratio. The design says no on two grounds (billing at cost;
    law 18's FX foreclosure) — that argument is the one most worth attacking, because it is the
    decision that adds a whole relation.
+
+## 4 · The owner's cards — RULED 2026-08-30 noon (ledger `mohe-grill-rulings-2026-08-30.md`)
+
+| Card | Ruling | Consequence for the build |
+|---|---|---|
+| OQ-1 | **裁-50** RM via Clara's OWN rate table ("用 RM，不过先不定价") | `billing_usage_rates` stands; `llm_price_table` stays vendor cost |
+| OQ-2 | **裁-51** no `payments_only` role | role CHECK unchanged; billing surface = admin/owner; Stripe hosted links for the payer |
+| OQ-3 | **裁-52** `onboarding` stays; "Draft / 草稿" is an i18n label | no rename migration |
+| OQ-4 | **裁-53** BELCORT exempt by a plan flag | an operator-exempt plan row; metered, never invoiced |
+| OQ-5 | **裁-54** Stripe Tax | no DB tax computation on Clara's invoices; switch on at registration |
+| OQ-6 | **裁-55** read-only after the grace period (default 14 d), never delete | the write-wall flag + the reminder flow; the design's shape stands |
+| OQ-7 | **裁-56 ARCHIVE = EXPORT PACKAGE, THEN DELETE** — no retention fee, no read-only tail | **supersedes §3's "archived = read-only retention"**: a sealed hash-receipted package, owner confirms the hash, 30-day cooling window, an audited delete door that walks the append-only triggers (never disables one), refusals for operator clients and open obligations; **beta-era build**, the dissent on file |
+| OQ-8 | **deferred by 裁-50** — amounts unset | `amounts_ruled=false`; nothing charges |
