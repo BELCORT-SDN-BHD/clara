@@ -19,7 +19,7 @@ import {
   grantConsent, idOf,
 } from "./a21-helpers.mjs";
 import {
-  BANKCOA1, AR1, AP1, EXPN, REVN, hasBankMatching, caught, addBankAccount,
+  BANKCOA1, BANKCOA2, AR1, AP1, EXPN, REVN, hasBankMatching, caught, addBankAccount,
 } from "./x38-match-fixtures.mjs";
 import { wakeQuery, ROLES } from "./rig-helpers.mjs";
 import { WAKE_ROLE, RATIONALE, MODEL, callWrapper } from "./f-a3-pr1b-wake-fixtures.mjs";
@@ -52,9 +52,18 @@ function gatePurpose(t) {
 /** The verb specs, once. */
 const PACK = [{ name: "p_client", cast: "uuid" }, { name: "p_bank_account", cast: "uuid" },
   { name: "p_rationale" }, { name: "p_model", cast: "jsonb" }, { name: "p_op_key" }];
-const EXC = [{ name: "p_line", cast: "uuid" }, { name: "p_kind" }, { name: "p_reason" },
-  { name: "p_evidence_document", cast: "uuid" }, { name: "p_rationale" },
+// THE WRITE THIS FILE DRIVES, and the choice is deliberate. wake_propose_bank_line_exception
+// derives its client FROM THE LINE, so a fabricated line id makes its own credential_client_pin
+// check refuse CLR11 before the gate is ever reached -- the gate now sits LAST, after every
+// refusal the wrapper already made. wake_match_bank_line takes p_client directly, so its pin
+// passes and the gate is genuinely what answers. (That the pin fires first at all is the
+// evidence the gate is not masking it -- G1PR2A-F7 pins the position structurally.)
+const MATCH = [{ name: "p_client", cast: "uuid" }, { name: "p_lines", cast: "jsonb" },
+  { name: "p_entries", cast: "jsonb" }, { name: "p_adjustments", cast: "jsonb" },
+  { name: "p_ack_period_exceptions", cast: "boolean" }, { name: "p_rationale" },
   { name: "p_model", cast: "jsonb" }, { name: "p_inputs_digest" }, { name: "p_op_key" }];
+const matchArgs = (lines, key) => [CLIENT, JSON.stringify(lines), "[]", "[]", false,
+  RATIONALE, JSON.stringify(MODEL), "d", opk(key)];
 
 const mintPlain = (kind, firm, client, obo = null) => rootQuery(
   "select * from clara.mint_wake_credential($1,$2,$3,'00:15:00'::interval,$4)", [kind, firm, obo, client]);
@@ -80,14 +89,18 @@ before(async () => {
   CLIENT = W.clients.A1;
   FIRM = await firmOf(CLIENT);
   const sub = W.users.alice;
+  // TWO bank COA codes, and a third minted per-cell where one is needed: add_bank_account
+  // refuses a chart account that is already bound to a live bank account ("one COA, one bank
+  // account"), so a second bank account for the same client needs its own code.
   await upsertAccountClassed(sub, { client: CLIENT, code: BANKCOA1, name: "Maybank current (p2a)", type: "asset", opKey: opk("p2a-bcoa") });
+  await upsertAccountClassed(sub, { client: CLIENT, code: BANKCOA2, name: "CIMB current (p2a)", type: "asset", opKey: opk("p2a-bcoa2") });
   await upsertAccountClassed(sub, { client: CLIENT, code: AR1, name: "Trade Debtors (p2a)", type: "asset", accountClass: "receivable", opKey: opk("p2a-ar") });
   await upsertPayableAccount(sub, { client: CLIENT, code: AP1, name: "Trade Creditors (p2a)", opKey: opk("p2a-ap") });
   await upsertAccountClassed(sub, { client: CLIENT, code: EXPN, name: "Prof Fees (p2a)", type: "expense", opKey: opk("p2a-exp") });
   await upsertAccountClassed(sub, { client: CLIENT, code: REVN, name: "Revenue (p2a)", type: "income", opKey: opk("p2a-rev") });
   await grantConsent(sub, { firm: FIRM, client: CLIENT }).catch(() => {});
   ACCT_A = idOf(await addBankAccount(sub, { client: CLIENT, coaAccountCode: BANKCOA1, accountNumber: `2001${randomUUID().slice(0, 8)}` }), "bank_account_id", "id");
-  ACCT_B = idOf(await addBankAccount(sub, { client: CLIENT, coaAccountCode: BANKCOA1, accountNumber: `2002${randomUUID().slice(0, 8)}` }), "bank_account_id", "id");
+  ACCT_B = idOf(await addBankAccount(sub, { client: CLIENT, coaAccountCode: BANKCOA2, accountNumber: `2002${randomUUID().slice(0, 8)}` }), "bank_account_id", "id");
   // The egress purpose, exactly as f-a3-pr1b-wake-verbs sets it up (raw inserts: the grant verbs
   // carry their own enum raise and are PR-1c's, not this file's to pre-empt).
   const def = (await rootQuery(
@@ -184,16 +197,16 @@ test("p2a.F1 a bank WRITE refuses while its task is HELD, and stops refusing whe
   if (gate(t)) return;
   const { taskId } = await freshTask({ status: "held" });
   const cred = await mintForTask("bank_agent", FIRM, CLIENT, taskId);
-  const err = await caught(() => wakeQuery(WAKE_ROLE, cred.rows[0].secret, callWrapper("wake_propose_bank_line_exception", EXC),
-    [randomUUID(), "bank_error", "r", null, RATIONALE, JSON.stringify(MODEL), "d", opk("p2a-f1")]));
+  const err = await caught(() => wakeQuery(WAKE_ROLE, cred.rows[0].secret, callWrapper("wake_match_bank_line", MATCH),
+    matchArgs([], "p2a-f1")));
   assert.equal(err?.code, "CLR03", `F1: expected CLR03, got ${err?.code}: ${err?.message}`);
   assert.equal(reasonOf(err), "wake_task_not_running", `F1: expected wake_task_not_running, got ${err?.detail}`);
   // The control: the SAME call, the SAME credential, one status change. It must now get PAST the
   // gate -- proven by the refusal CHANGING, not by the call succeeding (the line id is fake, so
   // a later rung is exactly what is owed).
   await rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
-  const err2 = await caught(() => wakeQuery(WAKE_ROLE, cred.rows[0].secret, callWrapper("wake_propose_bank_line_exception", EXC),
-    [randomUUID(), "bank_error", "r", null, RATIONALE, JSON.stringify(MODEL), "d", opk("p2a-f1b")]));
+  const err2 = await caught(() => wakeQuery(WAKE_ROLE, cred.rows[0].secret, callWrapper("wake_match_bank_line", MATCH),
+    matchArgs([], "p2a-f1b")));
   assert.notEqual(reasonOf(err2), "wake_task_not_running", "F1: a running task must clear the status arm of the gate");
 });
 
@@ -202,8 +215,8 @@ test("p2a.F2 after a cancel the WRITES stop but the pack READ still clears the g
   const { taskId } = await freshTask();
   const cred = await mintForTask("bank_agent", FIRM, CLIENT, taskId);
   await rootQuery("update clara.agent_tasks set status='cancel_requested' where id=$1", [taskId]);
-  const werr = await caught(() => wakeQuery(WAKE_ROLE, cred.rows[0].secret, callWrapper("wake_propose_bank_line_exception", EXC),
-    [randomUUID(), "bank_error", "r", null, RATIONALE, JSON.stringify(MODEL), "d", opk("p2a-f2")]));
+  const werr = await caught(() => wakeQuery(WAKE_ROLE, cred.rows[0].secret, callWrapper("wake_match_bank_line", MATCH),
+    matchArgs([], "p2a-f2")));
   assert.equal(reasonOf(werr), "wake_task_not_running", `F2: a write after cancel_requested must refuse, got ${werr?.detail}`);
   const rerr = await caught(() => wakeQuery(WAKE_ROLE, cred.rows[0].secret, callWrapper("wake_get_bank_pack", PACK),
     [CLIENT, ACCT_A, RATIONALE, JSON.stringify(MODEL), opk("p2a-f2r")]));
@@ -233,8 +246,11 @@ test("p2a.F3b the ADMITTED pack read's receipt names the task's account as its s
   // ever -- so a cell that needs a genuine admission cannot reuse an account an earlier cell has
   // already read. Without this the cell would fail on a uniqueness collision and look like a gate
   // defect.
+  // ck_coa_account_code_0009: NNNN..NNNNNNNN or NNN-[0-9A-Z]{2,4}. Four uppercase hex characters.
+  const code = `172-${randomUUID().replace(/-/g, "").slice(0, 4).toUpperCase()}`;
+  await upsertAccountClassed(W.users.alice, { client: CLIENT, code, name: "HSBC current (p2a f3b)", type: "asset", opKey: opk("p2a-bcoa3") });
   const acct = idOf(await addBankAccount(W.users.alice, {
-    client: CLIENT, coaAccountCode: BANKCOA1, accountNumber: `2003${randomUUID().slice(0, 8)}` }), "bank_account_id", "id");
+    client: CLIENT, coaAccountCode: code, accountNumber: `2003${randomUUID().slice(0, 8)}` }), "bank_account_id", "id");
   const { taskId } = await freshTask({ account: acct });
   const cred = await mintForTask("bank_agent", FIRM, CLIENT, taskId);
   const key = opk("p2a-f3b-admit");
@@ -260,7 +276,7 @@ test("p2a.F4 a task whose producing event carried NO bank_account_id refuses eve
   const cred = await mintForTask("bank_agent", FIRM, CLIENT, taskId);
   for (const [verb, specs, params] of [
     ["wake_get_bank_pack", PACK, [CLIENT, ACCT_A, RATIONALE, JSON.stringify(MODEL), opk("p2a-f4a")]],
-    ["wake_propose_bank_line_exception", EXC, [randomUUID(), "bank_error", "r", null, RATIONALE, JSON.stringify(MODEL), "d", opk("p2a-f4b")]],
+    ["wake_match_bank_line", MATCH, matchArgs([], "p2a-f4b")],
   ]) {
     const err = await caught(() => wakeQuery(WAKE_ROLE, cred.rows[0].secret, callWrapper(verb, specs), params));
     assert.equal(reasonOf(err), "wake_task_account_unbound", `F4: ${verb} must refuse wake_task_account_unbound, got ${err?.detail}`);
@@ -271,10 +287,16 @@ test("p2a.F5 a subject that resolves to NO bank account is a refusal, never 'any
   if (gate(t)) return;
   const { taskId } = await freshTask();
   const cred = await mintForTask("bank_agent", FIRM, CLIENT, taskId);
-  const err = await caught(() => wakeQuery(WAKE_ROLE, cred.rows[0].secret, callWrapper("wake_propose_bank_line_exception", EXC),
-    [randomUUID(), "bank_error", "r", null, RATIONALE, JSON.stringify(MODEL), "d", opk("p2a-f5")]));
+  const err = await caught(() => wakeQuery(WAKE_ROLE, cred.rows[0].secret, callWrapper("wake_match_bank_line", MATCH),
+    matchArgs([randomUUID()], "p2a-f5")));
   assert.equal(reasonOf(err), "wake_act_account_unresolved",
-    `F5: an unknown line must refuse as unresolvable, got ${err?.detail}`);
+    `F5: a line id that resolves to no bank account must refuse as unresolvable, got ${err?.detail}`);
+  // THE CONTROL, and it is the discriminating half: the SAME credential on a subject that DOES
+  // resolve is not refused for this reason. Without it the cell would pass just as well against
+  // a gate that refused every act.
+  const ok = await caught(() => wakeQuery(WAKE_ROLE, cred.rows[0].secret, callWrapper("wake_get_bank_pack", PACK),
+    [CLIENT, ACCT_A, RATIONALE, JSON.stringify(MODEL), opk("p2a-f5b")]));
+  assert.notEqual(reasonOf(ok), "wake_act_account_unresolved", "F5: a resolvable subject clears the arm");
 });
 
 test("p2a.F6 the CHAT lane is untouched: an interactive_client credential still clears the gate", async (t) => {
@@ -321,8 +343,9 @@ test("p2a.F7 CENSUS: all fourteen bank wrappers carry exactly one gate call, and
     // wrapper's own client-pin / op_key / rationale checks it MASKS them -- a cross-client call
     // would refuse for the gate's reason instead of credential_client_pin, which is the
     // right-conclusion-wrong-reason class. Nothing else in this battery would see that.
+    // `args` ends at the gate call's closing paren, so what follows starts with its semicolon.
     const after = r.prosrc.slice(r.prosrc.indexOf(args) + args.length);
-    assert.match(after, /^\s*\n?\s*return clara\._agent_/,
+    assert.match(after, /^;\s*return clara\._agent_/,
       `F7: ${r.proname}'s gate must sit immediately before its core call, not ahead of the wrapper's own refusals`);
   }
   const grants = (await rootQuery(

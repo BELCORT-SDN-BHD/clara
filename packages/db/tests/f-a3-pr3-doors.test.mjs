@@ -574,7 +574,13 @@ async function provFixture(label) {
   const { client } = await freshAdvClient(label);
   const w = await advWorld();
   const firm = await firmOf(client);
-  const acct = await addBankAccount(w.users.alice, { client, coaAccountCode: BANKV, accountNumber: `PROV${randomUUID().slice(0, 6)}` });
+  // A COIN-FLIP FLAKE, found by the G1 PR-2a lane rather than by design: the first six characters
+  // of a uuid are hex, so roughly one run in fifty draws six LETTERS and add_bank_account refuses
+  // "account number PROVxxxxxx has no digits" (FOLD-15's own floor -- an account is a number).
+  // Digits are now guaranteed by construction rather than by luck.
+  const acct = await addBankAccount(w.users.alice, {
+    client, coaAccountCode: BANKV,
+    accountNumber: `PROV${Date.now().toString().slice(-6)}${randomUUID().slice(0, 4)}` });
   const bankAccountId = acct.bank_account_id ?? acct.id;
   await grantBankMatching({ client, firm, actor: w.users.alice });
   const stmt = await enterStatement(w.users.alice, {

@@ -23,12 +23,37 @@ let W = null; let FIRM = null; let CLIENT = null; let FY = null;
  *  (fiscal_years.id, firm_id), so a random uuid would fail on THAT foreign key and the
  *  end_reason_code cells below would then be measuring the wrong constraint entirely -- the
  *  "right conclusion, wrong reason" class this repo has paid for three times. */
-async function mintFiscalYear(ordinal) {
-  return (await rootQuery(
-    `insert into clara.fiscal_years(firm_id, client_id, label, starts_on, ends_on, ordinal, status, fy_end_source, opened_by, opened_at)
-       values ($1,$2,$3, make_date(2000 + $4, 1, 1), make_date(2000 + $4, 12, 31), $4, 'open', 'asserted', $5, now())
+let LAST_FY = null;
+let LAST_ORDINAL = 0;
+async function mintFiscalYear() {
+  // CONTIGUOUS: clara.fiscal_years carries a contiguity trigger, so ordinal N > 1 must name its
+  // predecessor. The chain is threaded here rather than each caller passing an ordinal, because a
+  // caller that got the ordinal wrong would fail with the trigger's message and look like an
+  // end_reason_code defect.
+  LAST_ORDINAL += 1;
+  const id = (await rootQuery(
+    `insert into clara.fiscal_years(firm_id, client_id, label, starts_on, ends_on, ordinal, prior_fy_id, status, fy_end_source, opened_by, opened_at)
+       values ($1,$2,$3, make_date(2000 + $4, 1, 1), make_date(2000 + $4, 12, 31), $4, $6, 'open', 'asserted', $5, now())
      returning id`,
-    [FIRM, CLIENT, `p2a FY${2000 + ordinal}`, ordinal, W.users.alice])).rows[0].id;
+    [FIRM, CLIENT, `p2a FY${2000 + LAST_ORDINAL}`, LAST_ORDINAL, W.users.alice, LAST_FY])).rows[0].id;
+  LAST_FY = id;
+  return id;
+}
+
+/** A close run, born in_progress and then settled. clara._tf_assert_close_agent_receipt's INSERT
+ *  arm refuses a run BORN with terminal fields ("a close run is born in_progress with no terminal
+ *  fields"), so the abandonment cells below cannot insert an abandoned row directly -- the shape
+ *  has to be reached the way a real abandon reaches it. The actor is a HUMAN, so no agent receipt
+ *  is owed and the deferred wall stands aside. Returns the error when the settling UPDATE is
+ *  refused, and null when it lands. */
+async function abandonRun({ fy, endReason = "r", endReasonCode = null }) {
+  const id = (await rootQuery(
+    `insert into clara.close_runs(firm_id, client_id, fiscal_year_id, state, started_by)
+       values ($1,$2,$3,'in_progress',$4) returning id`, [FIRM, CLIENT, fy, W.users.alice])).rows[0].id;
+  const err = await caught(() => rootQuery(
+    `update clara.close_runs set state='abandoned', ended_by=$2, ended_at=now(), end_reason=$3, end_reason_code=$4
+      where id=$1`, [id, W.users.alice, endReason, endReasonCode]));
+  return { id, err };
 }
 
 function gate(t) {
@@ -53,7 +78,7 @@ before(async () => {
   W = await buildWorld();
   CLIENT = W.clients.A1;
   FIRM = await firmOf(CLIENT);
-  FY = await mintFiscalYear(1);
+  FY = await mintFiscalYear();
 });
 after(async () => {
   printLaneNotes("g1-pr-2a-shape");
@@ -178,8 +203,13 @@ test("p2a.A1 llm_usage_events admits bank_agent + close_prep, still admits the n
 
 test("p2a.A2 close_prep's login pool is trued to the write pool, and BOTH sources stay disabled", async (t) => {
   if (gate(t)) return;
-  const rows = (await rootQuery("select source_key, login_pool, enabled from clara.wake_engine_sources order by source_key")).rows;
-  assert.deepEqual(rows.map((r) => r.source_key), ["bank_agent", "close_prep"]);
+  // SCOPED to the two rows G1 seeded, deliberately: g1-wake-engine.test.mjs's own S3 cell
+  // registers a synthetic source on this rig, so a whole-table closed-world assertion here would
+  // be an ORDERING dependency between two files rather than a claim about this migration.
+  const rows = (await rootQuery(
+    "select source_key, login_pool, enabled from clara.wake_engine_sources where source_key in ('bank_agent','close_prep') order by source_key")).rows;
+  assert.deepEqual(rows.map((r) => r.source_key), ["bank_agent", "close_prep"],
+    "A2: both G1 rows are still there -- this migration registers no third source and removes neither");
   assert.equal(rows.find((r) => r.source_key === "close_prep").login_pool, "write", "A2: 裁-49's truing");
   assert.equal(rows.find((r) => r.source_key === "bank_agent").login_pool, "bank", "A2: bank_agent's pool is untouched");
   for (const r of rows) assert.equal(r.enabled, false, `A2: ${r.source_key} stays disabled -- 裁-40's flip is the owner's ceremony`);
@@ -261,12 +291,13 @@ test("p2a.D1 every model-authored prose column is capped at 4000, and 4000 itsel
     assert.ok(def && def.includes("4000"), `D1: ${rel}.${col} carries a 4000-character cap (${def})`);
   }
   // Behavioural, on the one table this battery can populate cheaply: the CHECK really refuses.
-  const err = await caught(() => rootQuery(
-    `insert into clara.close_runs(firm_id, client_id, fiscal_year_id, state, started_by, ended_by, ended_at, end_reason)
-       values ($1,$2,$3,'abandoned',$4,$4,now(),$5)`, [FIRM, CLIENT, FY, W.users.alice, long]));
+  const { err } = await abandonRun({ fy: FY, endReason: long });
   assert.ok(err, "D1: a 4001-character end_reason is refused by the database, not merely by a TypeScript schema");
   assert.equal(err.constraint, "ck_close_runs_end_reason_len",
     `D1: and refused by the length CHECK BY NAME, never by an FK or another guard (${err.constraint}: ${err.message})`);
+  // The control at the boundary: exactly 4000 lands.
+  const okRun = await abandonRun({ fy: await mintFiscalYear(), endReason: "x".repeat(4000) });
+  assert.equal(okRun.err, null, `D1: 4000 characters is admitted (${okRun.err?.message})`);
 });
 
 test("p2a.D1b drafted[].text is capped per ELEMENT, and a lawful drafted array still passes", async (t) => {
@@ -293,32 +324,28 @@ test("p2a.D2 the abandonment roster is a closed, forced-RLS vocabulary and end_r
   assert.ok(codes.length >= 5, `D2: the roster is populated (${codes.length})`);
   // The wall that bites TODAY: an unrostered code is refused. A REAL fiscal year, because the
   // composite FK to (fiscal_years.id, firm_id) would otherwise be what refused this row.
-  const err = await caught(() => rootQuery(
-    `insert into clara.close_runs(firm_id, client_id, fiscal_year_id, state, started_by, ended_by, ended_at, end_reason, end_reason_code)
-       values ($1,$2,$3,'abandoned',$4,$4,now(),'r','not_a_real_code')`, [FIRM, CLIENT, FY, W.users.alice]));
-  assert.ok(err, "D2: an unrostered end_reason_code is refused");
-  assert.equal(err.code, "23503", `D2: refused by the FOREIGN KEY specifically, got ${err.code}: ${err.message}`);
-  // POSITIVE CONTROL on the identical row: a ROSTERED code lands. Without it the cell above would
-  // pass just as well against a column nothing could ever be written to.
-  const fy2 = await mintFiscalYear(2);
-  const ok = await rootQuery(
-    `insert into clara.close_runs(firm_id, client_id, fiscal_year_id, state, started_by, ended_by, ended_at, end_reason, end_reason_code)
-       values ($1,$2,$3,'abandoned',$4,$4,now(),'r','other') returning id, end_reason_code`,
-    [FIRM, CLIENT, fy2, W.users.alice]);
-  assert.equal(ok.rows[0].end_reason_code, "other", "D2: a rostered code lands on a real row");
+  const bad = await abandonRun({ fy: await mintFiscalYear(), endReasonCode: "not_a_real_code" });
+  assert.ok(bad.err, "D2: an unrostered end_reason_code is refused");
+  assert.equal(bad.err.code, "23503", `D2: refused by the FOREIGN KEY specifically, got ${bad.err.code}: ${bad.err.message}`);
+  // POSITIVE CONTROL on the identical shape: a ROSTERED code lands. Without it the cell above
+  // would pass just as well against a column nothing could ever be written to.
+  const good = await abandonRun({ fy: await mintFiscalYear(), endReasonCode: "other" });
+  assert.equal(good.err, null, `D2: a rostered code lands (${good.err?.message})`);
+  assert.equal((await rootQuery("select end_reason_code from clara.close_runs where id=$1", [good.id])).rows[0].end_reason_code,
+    "other", "D2: and it is stored, not silently dropped");
   // And a rostered code on a run that is NOT abandoned is refused -- a code is a cause, and a run
   // that did not end has none.
-  const fy3 = await mintFiscalYear(3);
+  const fyOpen = await mintFiscalYear();
   const err2 = await caught(() => rootQuery(
     `insert into clara.close_runs(firm_id, client_id, fiscal_year_id, state, started_by, end_reason_code)
-       values ($1,$2,$3,'in_progress',$4,'other')`, [FIRM, CLIENT, fy3, W.users.alice]));
+       values ($1,$2,$3,'in_progress',$4,'other')`, [FIRM, CLIENT, fyOpen, W.users.alice]));
   assert.ok(err2, "D2: a code on a non-abandoned run is refused");
   assert.equal(err2.constraint, "ck_close_runs_end_reason_code_abandoned",
     `D2: and by the pairing CHECK by name, not by something else (${err2.constraint}: ${err2.message})`);
   // The carrier is written by NO PRODUCTION VERB yet -- that is the named follow-up, and it is
-  // recorded as a measurement rather than a comment: the only rows carrying a code are the ones
-  // this cell wrote by hand. A verb that started setting it would show up here.
+  // recorded as a measurement rather than a comment: the only row carrying a code is the one this
+  // cell wrote by hand. A verb that started setting it would show up here.
   const written = (await rootQuery(
-    "select count(*)::int as n from clara.close_runs where end_reason_code is not null and id <> $1", [ok.rows[0].id])).rows[0].n;
+    "select count(*)::int as n from clara.close_runs where end_reason_code is not null and id <> $1", [good.id])).rows[0].n;
   assert.equal(written, 0, "D2: nothing but this cell's own hand-written row carries a code -- the writer is still owed");
 });
