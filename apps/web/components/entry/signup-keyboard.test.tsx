@@ -28,6 +28,7 @@ import { renderComponent, textOf, setFieldValue, setNativeValue } from "../../te
 import { enableDomInspection } from "../../test/domInspect";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
+import { AUTH_COOKIE_NAME } from "../../lib/supabase/cookie-options";
 import messages from "../../messages/en.json";
 import { SignupAccountForm, type SignupAuthClient } from "./signup-account-form";
 import { SignupFirmForm } from "./signup-firm-form";
@@ -102,6 +103,25 @@ async function submitAcceptedAccount(
   for (let i = 0; i < 3; i++) await h.settle();
   await h.fireEvent(form as never, "submit");
   for (let i = 0; i < 6; i++) await h.settle();
+}
+
+class BrowserCookieJar {
+  readonly values = new Map<string, string>();
+
+  getAll(): Array<{ name: string; value: string }> {
+    return [...this.values].map(([name, value]) => ({ name, value }));
+  }
+
+  setAll(cookies: Array<{
+    name: string;
+    value: string;
+    options: { maxAge?: number };
+  }>): void {
+    for (const { name, value, options } of cookies) {
+      if (value === "" || options.maxAge === 0) this.values.delete(name);
+      else this.values.set(name, value);
+    }
+  }
 }
 
 test("THE ACCOUNT STEP IS KEYBOARD-OPERABLE, and the DPA gate is a REAL wall", async () => {
@@ -274,6 +294,55 @@ test("NEW-2: auto-confirm containment signs out locally before painting the refu
       );
       assert.doesNotMatch(text, /Tell us about your firm/, "the misconfigured project reached step 2");
       assert.doesNotMatch(text, /Confirm your email/, "the auto-confirm shape was mislabelled as confirmation-required");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("NEW-2: auto-confirm containment deletes the persisted auth cookie", async () => {
+  const subject = "11111111-1111-1111-1111-111111111111";
+  const jar = new BrowserCookieJar();
+  jar.values.set(AUTH_COOKIE_NAME, "persisted-session");
+  const client: () => SignupAuthClient = () => ({
+    auth: {
+      signUp: async () => ({
+        data: { user: { id: subject }, session: { access_token: "autoconfirmed" } },
+        error: null,
+      }),
+      signOut: async (options) => {
+        assert.deepEqual(options, { scope: "local" });
+        jar.setAll([{
+          name: AUTH_COOKIE_NAME,
+          value: "",
+          options: { maxAge: 0 },
+        }]);
+        return { error: null };
+      },
+    },
+  });
+
+  assert.ok(
+    jar.values.has(AUTH_COOKIE_NAME),
+    "the deletion cell started without a persisted auth cookie",
+  );
+
+  await withEnv(async () => jsonResponse({}), async () => {
+    const h = await renderComponent(
+      App(createElement(SignupAccountForm, { createSupabaseClient: client }), { replaced: [] }),
+    );
+    try {
+      for (let i = 0; i < 3; i++) await h.settle();
+      await submitAcceptedAccount(h);
+      assert.match(
+        textOf(h.container as never),
+        /sign-up confirmation is not enforced on this project/i,
+      );
+      assert.equal(
+        jar.values.has(AUTH_COOKIE_NAME),
+        false,
+        "the local sign-out returned but left the auth cookie persisted",
+      );
     } finally {
       await h.unmount();
     }

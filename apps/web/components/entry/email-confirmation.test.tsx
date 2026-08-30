@@ -15,6 +15,16 @@ import EntryLayout from "../../app/(entry)/layout";
 import messages from "../../messages/en.json";
 import { enableDomInspection } from "../../test/domInspect";
 import { renderComponent, textOf } from "../../test/hookHarness";
+import {
+  isConfirmedUser,
+  UnreadableAuthUserError,
+} from "../../lib/auth/confirmed-user";
+import {
+  createClient as createServerClient,
+  createRouteClient,
+  type ServerCookieStore,
+} from "../../lib/supabase/server";
+import { resolveServerSession } from "../../lib/supabase/server-session";
 import { SignupAccountForm } from "./signup-account-form";
 import { renderSignupRoute } from "./signup-route";
 import { SignupStep } from "./signup-step";
@@ -55,7 +65,6 @@ function fakeClient(
   response: VerifyResponse,
   calls: Array<{ type: "email"; token_hash: string }>,
   sealed: Response[],
-  sessionCookie?: string,
 ): EmailConfirmationRouteClient {
   return {
     supabase: {
@@ -69,10 +78,44 @@ function fakeClient(
     sealResponse(result) {
       sealed.push(result);
       result.headers.set("Cache-Control", "private, no-store");
-      if (sessionCookie) result.headers.append("Set-Cookie", sessionCookie);
       return result;
     },
   };
+}
+
+class MemoryCookieStore {
+  readonly values = new Map<string, string>();
+
+  static fromRequest(request: Request): MemoryCookieStore {
+    const store = new MemoryCookieStore();
+    for (const part of (request.headers.get("cookie") ?? "").split(";")) {
+      const separator = part.indexOf("=");
+      if (separator < 1) continue;
+      store.values.set(part.slice(0, separator).trim(), part.slice(separator + 1).trim());
+    }
+    return store;
+  }
+
+  getAll(): Array<{ name: string; value: string }> {
+    return [...this.values].map(([name, value]) => ({ name, value }));
+  }
+
+  set(name: string, value: string): void {
+    if (value === "") this.values.delete(name);
+    else this.values.set(name, value);
+  }
+}
+
+function testJwt(subject: string): string {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({
+    sub: subject,
+    aud: "authenticated",
+    role: "authenticated",
+    exp: 4_102_444_800,
+    iat: 1_788_112_800,
+  })).toString("base64url");
+  return `${header}.${payload}.test-signature`;
 }
 
 test("N1: two scanner GETs paint the explicit button and make zero verifyOtp calls", async () => {
@@ -134,6 +177,8 @@ test("N1: one click makes exactly one hard-coded email verification and ignores 
 const refusalCases: Array<{
   name: string;
   headers: Record<string, string>;
+  requestUrl?: string;
+  nodeEnv?: string;
 }> = [
   {
     name: "cross-origin",
@@ -164,16 +209,39 @@ const refusalCases: Array<{
       "sec-fetch-site": "cross-site",
     },
   },
+  {
+    name: "production localhost loopback",
+    headers: {
+      origin: "http://localhost:3000",
+      host: "localhost:3000",
+      "sec-fetch-site": "same-origin",
+    },
+    requestUrl: "http://localhost:3000/auth/confirm/verify",
+    nodeEnv: "production",
+  },
+  {
+    name: "production 127.0.0.1 loopback",
+    headers: {
+      origin: "http://127.0.0.1:3000",
+      host: "127.0.0.1:3000",
+      "sec-fetch-site": "same-origin",
+    },
+    requestUrl: "http://127.0.0.1:3000/auth/confirm/verify",
+    nodeEnv: "production",
+  },
 ];
 
 for (const refusal of refusalCases) {
   test(`NEW-1: ${refusal.name} refuses before body parsing or auth`, async () => {
+    const mutableEnv = process.env as Record<string, string | undefined>;
+    const originalNodeEnv = process.env.NODE_ENV;
+    if (refusal.nodeEnv) mutableEnv.NODE_ENV = refusal.nodeEnv;
     let bodyReads = 0;
     let clientCreations = 0;
     const calls: Array<{ type: "email"; token_hash: string }> = [];
     const request = {
       headers: new Headers(refusal.headers),
-      url: "https://app.clarabook.example/auth/confirm/verify",
+      url: refusal.requestUrl ?? "https://app.clarabook.example/auth/confirm/verify",
       async formData() {
         bodyReads += 1;
         const form = new FormData();
@@ -182,66 +250,124 @@ for (const refusal of refusalCases) {
       },
     } as unknown as Request;
 
-    const response = await handleEmailConfirmationPost(request, async () => {
-      clientCreations += 1;
-      return fakeClient(validResponse(), calls, []);
-    });
+    try {
+      const response = await handleEmailConfirmationPost(request, async () => {
+        clientCreations += 1;
+        return fakeClient(validResponse(), calls, []);
+      });
 
-    assert.equal(response.status, 403, `${refusal.name} was not refused`);
-    assert.deepEqual(await response.json(), { ok: false, error: "cross-origin" });
-    assert.equal(bodyReads, 0, `${refusal.name} was parsed before the wall`);
-    assert.equal(clientCreations, 0, `${refusal.name} created an auth client`);
-    assert.deepEqual(calls, [], `${refusal.name} reached verifyOtp`);
-    assert.equal(response.headers.get("set-cookie"), null, `${refusal.name} wrote a cookie`);
-    assert.equal(response.headers.get("location"), null, `${refusal.name} redirected`);
+      assert.equal(response.status, 403, `${refusal.name} was not refused`);
+      assert.deepEqual(await response.json(), { ok: false, error: "cross-origin" });
+      assert.equal(bodyReads, 0, `${refusal.name} was parsed before the wall`);
+      assert.equal(clientCreations, 0, `${refusal.name} created an auth client`);
+      assert.deepEqual(calls, [], `${refusal.name} reached verifyOtp`);
+      assert.equal(response.headers.get("set-cookie"), null, `${refusal.name} wrote a cookie`);
+      assert.equal(response.headers.get("location"), null, `${refusal.name} redirected`);
+    } finally {
+      if (originalNodeEnv === undefined) delete mutableEnv.NODE_ENV;
+      else mutableEnv.NODE_ENV = originalNodeEnv;
+    }
   });
 }
 
 test("NEW-5: the confirmation response cookie drives the next /signup request", async () => {
-  const sessionCookie = "__Host-clara-auth=confirmed-session; Path=/; HttpOnly; Secure; SameSite=Lax";
-  const calls: Array<{ type: "email"; token_hash: string }> = [];
-  const sealed: Response[] = [];
-  const response = await handleEmailConfirmationPost(
-    postRequest([["token_hash", "token-hash-2"]]),
-    async () => fakeClient(validResponse(), calls, sealed, sessionCookie),
-  );
-  assert.equal(response.headers.get("location"), "https://app.clarabook.example/signup");
-  const setCookie = response.headers.get("set-cookie");
-  assert.match(setCookie ?? "", /^__Host-clara-auth=confirmed-session;/);
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const originalKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const testGlobal = globalThis as unknown as { window: unknown };
+  const originalWindow = testGlobal.window;
+  const originalWebSocket = globalThis.WebSocket;
+  const accessToken = testJwt(SUBJECT);
+  const routeCookies = new MemoryCookieStore();
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "publishable-test-key";
+  // This cell drives the SERVER client. The shared React harness installs a
+  // minimal `window`, which would otherwise make auth-js choose its browser
+  // navigator-lock path even though this request is server-side.
+  testGlobal.window = undefined;
+  // Node 20 has no native WebSocket. Supabase constructs its dormant realtime
+  // client eagerly even though this Auth-only cell never connects it; provide
+  // the constructor check only, and let any accidental use fail immediately.
+  globalThis.WebSocket = class AuthOnlyWebSocket {
+    constructor() {
+      throw new Error("the Auth-only SSR adapter must not open a WebSocket");
+    }
+  } as unknown as typeof WebSocket;
+  globalThis.fetch = async (input) => {
+    const url = input instanceof Request ? input.url : String(input);
+    assert.match(url, /\/auth\/v1\/verify$/);
+    return new Response(JSON.stringify({
+      access_token: accessToken,
+      refresh_token: "refresh-token",
+      token_type: "bearer",
+      expires_in: 3_600,
+      expires_at: 4_102_444_800,
+      user: { id: SUBJECT, email_confirmed_at: "2026-08-31T01:02:03Z" },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
 
-  const sessionFor = (request: Request) =>
-    request.headers.get("cookie")?.includes("__Host-clara-auth=confirmed-session")
-      ? { subject: SUBJECT, accessToken: "cookie-session-token" }
-      : null;
-  const signupRequest = new Request("https://app.clarabook.example/signup", {
-    headers: { cookie: (setCookie as string).split(";", 1)[0] as string },
-  });
-  const createSignupClient = async () => ({
-    auth: {
-      getUser: async (jwt: string) => ({
-        data: {
-          user: jwt === "cookie-session-token"
-            ? { id: SUBJECT, email_confirmed_at: "2026-08-31T01:02:03Z" }
-            : null,
-        },
-        error: null,
+  try {
+    const response = await handleEmailConfirmationPost(
+      postRequest([["token_hash", "token-hash-2"]]),
+      async () => createRouteClient({
+        cookieStore: routeCookies as unknown as ServerCookieStore,
       }),
-    },
-  });
-  const step = await renderSignupRoute(
-    async () => sessionFor(signupRequest),
-    createSignupClient,
-  );
-  assert.equal(step.type, SignupFirmForm, "the cookie-backed /signup visit did not render the firm step");
+    );
+    assert.equal(response.headers.get("location"), "https://app.clarabook.example/signup");
+    const getSetCookie = (response.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie;
+    const setCookies = getSetCookie?.call(response.headers) ?? [response.headers.get("set-cookie") ?? ""];
+    assert.ok(setCookies.some((value) => value.startsWith("__Host-clara-auth=")));
 
-  const noCookieStep = await renderSignupRoute(
-    async () => sessionFor(new Request("https://app.clarabook.example/signup")),
-    createSignupClient,
-  );
-  assert.equal(noCookieStep.type, SignupAccountForm, "a cookieless /signup request reached the firm step");
+    const rawCookie = setCookies
+      .filter(Boolean)
+      .map((value) => value.split(";", 1)[0] as string)
+      .join("; ");
+    const signupRequest = new Request("https://app.clarabook.example/signup", {
+      headers: { cookie: rawCookie },
+    });
+    const requestCookies = MemoryCookieStore.fromRequest(signupRequest);
+    const serverClient = await createServerClient({
+      cookieStore: requestCookies as unknown as ServerCookieStore,
+    });
+    serverClient.auth.getClaims = (async (jwt?: string) => ({
+      data: { claims: jwt === accessToken ? { sub: SUBJECT } : null },
+      error: jwt === accessToken ? null : { message: "wrong token" },
+    })) as typeof serverClient.auth.getClaims;
+    serverClient.auth.getUser = (async (jwt?: string) => ({
+      data: {
+        user: jwt === accessToken
+          ? { id: SUBJECT, email_confirmed_at: "2026-08-31T01:02:03Z" }
+          : null,
+      },
+      error: jwt === accessToken ? null : { message: "wrong token" },
+    })) as typeof serverClient.auth.getUser;
+
+    const step = await renderSignupRoute(
+      async () => resolveServerSession(async () => serverClient),
+      async () => serverClient,
+    );
+    assert.equal(step.type, SignupFirmForm, "the cookie-backed /signup visit did not render the firm step");
+
+    const noCookieClient = await createServerClient({
+      cookieStore: new MemoryCookieStore() as unknown as ServerCookieStore,
+    });
+    const noCookieStep = await renderSignupRoute(
+      async () => resolveServerSession(async () => noCookieClient),
+      async () => noCookieClient,
+    );
+    assert.equal(noCookieStep.type, SignupAccountForm, "a cookieless /signup request reached the firm step");
+  } finally {
+    testGlobal.window = originalWindow;
+    globalThis.WebSocket = originalWebSocket;
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    if (originalKey === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = originalKey;
+  }
 
   // Production must use the request-cookie SSR client. The injected route
-  // double above proves the HTTP round trip; this source pin makes replacing
+  // boundary above drives that exact adapter; this source pin makes replacing
   // that production wiring with the browser client red instead of invisible.
   const handlerSource = readFileSync(
     join(WEB_ROOT, "app/(entry)/auth/confirm/verify/handler.ts"),
@@ -262,6 +388,51 @@ test("NEW-2: a fresh /signup render refuses persisted unconfirmed or unreadable 
   for (const user of refusedUsers) {
     const step = SignupStep({ session, user } as Parameters<typeof SignupStep>[0]);
     assert.equal(step.type, SignupAccountForm, "an unconfirmed persisted session reached the firm step");
+  }
+});
+
+test("NEW-2 RESIDUAL: a direct hosted-Auth caller under autoconfirm drift reaches the firm step — held by the deploy gate, not by code", () => {
+  const session = { subject: SUBJECT, accessToken: "autoconfirmed-token" };
+  const step = SignupStep({
+    session,
+    user: {
+      id: SUBJECT,
+      email_confirmed_at: "2026-08-31T01:02:03Z",
+    },
+  });
+  assert.equal(
+    step.type,
+    SignupFirmForm,
+    "the residual changed: update the deploy-gate claim and the booked server-receipt follow-up",
+  );
+});
+
+test("NEW: confirmed-user accepts strict timestamps and refuses malformed clock/calendar values", () => {
+  for (const timestamp of [
+    "2024-02-29T23:59:59Z",
+    "2026-08-31T01:02:03.123456789+08:00",
+  ]) {
+    assert.equal(
+      isConfirmedUser({ email_confirmed_at: timestamp }),
+      true,
+      `${timestamp} should be accepted`,
+    );
+  }
+
+  for (const timestamp of [
+    "2026-02-30T01:02:03Z",
+    "2025-02-29T01:02:03Z",
+    "2026-08-31",
+    "2026",
+    "2026-08-31T24:00:00Z",
+    "2026-08-31T23:60:00Z",
+    "2026-08-31T23:59:60Z",
+  ]) {
+    assert.throws(
+      () => isConfirmedUser({ email_confirmed_at: timestamp }),
+      UnreadableAuthUserError,
+      `${timestamp} should be refused`,
+    );
   }
 });
 

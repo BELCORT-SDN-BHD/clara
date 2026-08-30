@@ -106,7 +106,7 @@ export interface SignupAuthClient {
       options?: { emailRedirectTo?: string };
     }): Promise<{
       data: { user: unknown | null; session: unknown | null };
-      error: { message: string } | null;
+      error: { message: string; code?: string; status?: number } | null;
     }>;
     signOut(options: { scope: "local" }): Promise<{
       error: { message: string } | null;
@@ -115,6 +115,21 @@ export interface SignupAuthClient {
 }
 
 type Stage = "form" | "submitting" | "check-email" | "configuration-error";
+
+const DUPLICATE_ACCOUNT_CODES = new Set(["user_already_exists", "email_exists"]);
+
+function isDuplicateAccountError(error: NonNullable<Awaited<
+  ReturnType<SignupAuthClient["auth"]["signUp"]>
+>["error"]>): boolean {
+  if (typeof error.code === "string" && DUPLICATE_ACCOUNT_CODES.has(error.code)) {
+    return true;
+  }
+
+  // Older/self-hosted Auth deployments may omit the stable code. Keep the
+  // fallback deliberately narrow: the provider's exact duplicate shape, not
+  // arbitrary 422s, maps to the same public result as a fresh signup.
+  return error.status === 422 && /^user already registered\.?$/i.test(error.message.trim());
+}
 
 // NOTE the absence of a `= {}` default on the parameter itself. React always
 // passes a props object, and defaulting the whole parameter widens the inferred
@@ -167,9 +182,15 @@ export function SignupAccountForm({
     });
 
     if (signUpError) {
-      // Supabase's own message, VERBATIM — never re-worded. This is not a
-      // governed Clara refusal (no CLR code exists for it); it is the auth
-      // provider's answer, and the person is owed it as given.
+      // Duplicate-account errors are an enumeration oracle when surfaced.
+      // Normalize the stable Auth codes (with a narrow legacy shape fallback)
+      // to the SAME public state as a fresh signup. Other provider failures
+      // remain verbatim: they describe availability/validation, not whether a
+      // particular email already has an account.
+      if (isDuplicateAccountError(signUpError)) {
+        setStage("check-email");
+        return;
+      }
       setError(signUpError.message);
       setStage("form");
       return;
@@ -188,8 +209,10 @@ export function SignupAccountForm({
       // `signUp` has already persisted this auto-confirmed session through the
       // browser client. Clear it before the refusal is painted so a reload
       // cannot silently carry the person onward. This is containment, not the
-      // wall: `/signup` independently requires a positively confirmed server
-      // user because hosted Auth can be called without this component.
+      // wall: `/signup` re-reads a positively confirmed server user, but an
+      // AUTOCONFIRMED hosted user satisfies that predicate. The blocking Auth
+      // Management-API deploy receipt is the wall against configuration drift;
+      // this sign-out contains the browser path only.
       try {
         await supabase.auth.signOut({ scope: "local" });
       } catch {

@@ -278,7 +278,7 @@ test("NEW-4: signup confirmation records its access-log residual and deploy rece
   const readme = readFileSync(join(WEB_ROOT, "README.md"), "utf8");
   assert.match(
     readme,
-    /### 4\.[\s\S]*signup confirmation[\s\S]*access logs[\s\S]*(?:redact|short[ -]retention)[\s\S]*deploy (?:record|receipt)/i,
+    /### 4\.[\s\S]*signup confirmation[\s\S]*blocking log-control receipt[\s\S]*access logs[\s\S]*positive read/i,
   );
 });
 

@@ -1,11 +1,16 @@
 import { createServerClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import type { NextResponse } from "next/server";
 
 import {
   AUTH_COOKIE_OPTIONS,
-  AUTH_RESPONSE_CACHE_CONTROL,
 } from "@/lib/supabase/cookie-options";
+import {
+  applyAuthState,
+  emptyAuthState,
+  type QueuedAuthState,
+} from "@/lib/supabase/response-state";
 
 /**
  * The Supabase client for CODE THAT RUNS ON THE SERVER (Server Components,
@@ -35,12 +40,19 @@ import {
 
 interface BuiltClient {
   supabase: SupabaseClient;
-  queuedHeaders: Record<string, string>;
+  queued: QueuedAuthState;
 }
 
-async function build(): Promise<BuiltClient> {
-  const cookieStore = await cookies();
-  const queuedHeaders: Record<string, string> = {};
+export type ServerCookieStore = Pick<Awaited<ReturnType<typeof cookies>>, "getAll" | "set">;
+
+interface BuildOptions {
+  cookieStore?: ServerCookieStore;
+  queueCookieWrites?: boolean;
+}
+
+async function build(options: BuildOptions = {}): Promise<BuiltClient> {
+  const cookieStore = options.cookieStore ?? await cookies();
+  const queued = emptyAuthState();
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -56,7 +68,16 @@ async function build(): Promise<BuiltClient> {
           // is the call that can throw (Server Component), and losing the
           // anti-cache headers with it is exactly finding 1.
           for (const [key, value] of Object.entries(headers ?? {})) {
-            queuedHeaders[key] = value;
+            queued.headers[key] = value;
+          }
+          if (options.queueCookieWrites) {
+            // Route Handlers own the final response. Queue the SDK's cookie
+            // instructions and apply them to THAT response in sealResponse;
+            // writing them only to Next's ambient cookie store makes a direct
+            // handler response impossible to verify and risks losing them on
+            // a response object created after the auth call.
+            queued.cookies.push(...cookiesToSet);
+            return;
           }
           try {
             for (const { name, value, options } of cookiesToSet) {
@@ -72,12 +93,12 @@ async function build(): Promise<BuiltClient> {
     },
   );
 
-  return { supabase, queuedHeaders };
+  return { supabase, queued };
 }
 
 /** Server Components / Server Actions. */
-export async function createClient(): Promise<SupabaseClient> {
-  return (await build()).supabase;
+export async function createClient(options: Pick<BuildOptions, "cookieStore"> = {}): Promise<SupabaseClient> {
+  return (await build(options)).supabase;
 }
 
 export interface RouteClient {
@@ -87,24 +108,25 @@ export interface RouteClient {
    * the `private, no-store` floor — to the response the handler is about to
    * return. Call it on the FINAL response object, after every auth call.
    */
-  sealResponse<T extends Response>(response: T): T;
+  sealResponse<T extends NextResponse>(response: T): T;
 }
 
 /**
  * Route Handlers — the only server context in Next.js that owns its own
  * `Response` object and can therefore carry the SDK's anti-cache headers.
  */
-export async function createRouteClient(): Promise<RouteClient> {
-  const { supabase, queuedHeaders } = await build();
+export async function createRouteClient(
+  options: Pick<BuildOptions, "cookieStore"> = {},
+): Promise<RouteClient> {
+  const { supabase, queued } = await build({
+    ...options,
+    queueCookieWrites: true,
+  });
 
   return {
     supabase,
-    sealResponse<T extends Response>(response: T): T {
-      response.headers.set("Cache-Control", AUTH_RESPONSE_CACHE_CONTROL);
-      for (const [key, value] of Object.entries(queuedHeaders)) {
-        response.headers.set(key, value);
-      }
-      return response;
+    sealResponse<T extends NextResponse>(response: T): T {
+      return applyAuthState(response, queued);
     },
   };
 }

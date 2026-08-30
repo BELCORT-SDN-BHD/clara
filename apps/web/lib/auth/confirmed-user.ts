@@ -29,16 +29,33 @@ export function isConfirmedUser(user: unknown): boolean {
 
   if (typeof record.email_confirmed_at === "string") {
     const timestamp = record.email_confirmed_at;
-    const shaped = /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.exec(
+    const shaped = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/.exec(
       timestamp,
     );
     const parsed = Date.parse(timestamp);
     if (shaped !== null && Number.isFinite(parsed)) {
-      // Date.parse normalises impossible calendar dates. Round-trip the date
-      // component separately so values such as 2026-02-30 cannot pass.
-      const datePart = shaped[1] as string;
+      const [, yearText, monthText, dayText, hourText, minuteText, secondText,
+        offsetHourText, offsetMinuteText] = shaped;
+      const hour = Number(hourText);
+      const minute = Number(minuteText);
+      const second = Number(secondText);
+      const offsetHour = offsetHourText === undefined ? 0 : Number(offsetHourText);
+      const offsetMinute = offsetMinuteText === undefined ? 0 : Number(offsetMinuteText);
+      if (
+        hour > 23 || minute > 59 || second > 59 ||
+        offsetHour > 23 || offsetMinute > 59
+      ) {
+        throw new UnreadableAuthUserError();
+      }
+
+      // Date.parse normalises impossible calendar dates and `24:00` into a
+      // different instant. The explicit clock bounds above reject the latter;
+      // round-trip the date separately so values such as 2026-02-30 cannot pass.
+      const datePart = `${yearText}-${monthText}-${dayText}`;
       const calendar = Date.parse(`${datePart}T00:00:00Z`);
-      const [year, month, day] = datePart.split("-").map(Number);
+      const year = Number(yearText);
+      const month = Number(monthText);
+      const day = Number(dayText);
       const roundTrip = new Date(calendar);
       if (
         Number.isFinite(calendar) &&

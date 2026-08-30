@@ -23,7 +23,7 @@ export interface EmailConfirmationRouteClient {
       }): Promise<VerifyEmailResponse>;
     };
   };
-  sealResponse<T extends Response>(response: T): T;
+  sealResponse<T extends NextResponse>(response: T): T;
 }
 
 export type CreateEmailConfirmationRouteClient = () => Promise<EmailConfirmationRouteClient>;

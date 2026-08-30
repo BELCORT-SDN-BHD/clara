@@ -319,16 +319,22 @@ PRD §8's server-verified-session requirement at the transition into the firm st
   substitutes for the retained response.
 - **Residual:** the existing-account response remains controlled by hosted Auth. With the
   required posture, Supabase returns the non-enumerating `user`/no-session shape and this app
-  renders “Confirm your email”. Any `{user, session}` success is contained in the browser by
-  a local sign-out before the refusal paints. That containment is not the wall: a fresh
-  `/signup` server render positively re-reads the same session's user and refuses the firm
-  step unless `email_confirmed_at` is a valid confirmation timestamp for that subject.
-  Direct hosted-Auth callers therefore cannot bypass confirmation by skipping this UI.
-  The initial signup confirmation GET still carries `token_hash` in its query string, so
-  edge/server **access logs** can capture the bearer despite `Referrer-Policy: no-referrer`.
-  Redact query strings there or keep access-log retention short and restricted, and name the
-  chosen control plus its retention in the deploy receipt. A delivered-message sample and
-  that log-control receipt are both required at deployment.
+  renders the same “Confirm your email” copy for a new user, an `identities: []` user, and
+  stable duplicate-account error codes. Any `{user, session}` success is contained in the
+  browser by a local sign-out before the refusal paints. That containment is not the wall.
+  A fresh `/signup` render does re-read the same subject and require a valid
+  `email_confirmed_at`, but AUTOCONFIRMED users satisfy that predicate: a direct hosted-Auth
+  caller under autoconfirm drift reaches the firm step. The blocking Management-API deploy
+  receipt above, not this code, is the control against that drift. P4 follow-up: require the
+  signup fork to consume a same-subject server receipt minted by the explicit
+  `/auth/confirm/verify` POST (signed httpOnly cookie or DB row).
+- **Blocking log-control receipt:** the initial signup confirmation GET carries `token_hash`
+  in its query string, so edge/server **access logs** can capture the bearer despite
+  `Referrer-Policy: no-referrer`. Deployment is blocked until an instrument makes a
+  **positive read** of the effective edge/server logging configuration and retains the
+  response proving either query-string redaction or short retention plus restricted ACLs.
+  A policy statement or intended setting is not evidence. The delivered-message sample and
+  this retained log-control response are both required at deployment.
 
 ### Also configuration, not code
 

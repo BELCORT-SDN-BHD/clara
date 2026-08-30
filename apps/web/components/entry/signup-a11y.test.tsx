@@ -119,12 +119,15 @@ test("THE HEADING IS REAL — this scan is not resting on a synthetic h1", async
   });
 });
 
-test("the AUTH-ERROR state — Supabase's own message, verbatim — has zero violations", async () => {
+test("a non-enumerating AUTH-ERROR state keeps the provider message and has zero violations", async () => {
   await withEnv(async () => jsonResponse({}), async () => {
     const h = await renderComponent(
       App(createElement(SignupAccountForm, {
         createSupabaseClient: authClient({
-          signUp: async () => ({ data: { user: null, session: null }, error: { message: "User already registered" } }),
+          signUp: async () => ({
+            data: { user: null, session: null },
+            error: { message: "Auth service unavailable", code: "unexpected_failure", status: 500 },
+          }),
         }),
       })),
     );
@@ -136,12 +139,60 @@ test("the AUTH-ERROR state — Supabase's own message, verbatim — has zero vio
       const form = findIn(h.container as never, (n) => n.tagName === "FORM");
       await h.fireEvent(form as never, "submit");
       for (let i = 0; i < 6; i++) await h.settle();
-      assert.match(textOf(h.container as never), /User already registered/, "the auth error must have rendered");
+      assert.match(textOf(h.container as never), /Auth service unavailable/, "the auth error must have rendered");
       assert.deepEqual(checkAccessibility(h.container as never), []);
     } finally {
       await h.unmount();
     }
   });
+});
+
+test("NEW: fresh, identities-empty, and duplicate responses have indistinguishable public copy and timing shape", async () => {
+  const responses: Array<Awaited<ReturnType<SignupAuthClient["auth"]["signUp"]>>> = [
+    {
+      data: { user: { id: "new-user", identities: [{ id: "email-identity" }] }, session: null },
+      error: null,
+    },
+    {
+      data: { user: { id: "obfuscated-user", identities: [] }, session: null },
+      error: null,
+    },
+    {
+      data: { user: null, session: null },
+      error: { message: "User already registered", code: "user_already_exists", status: 422 },
+    },
+  ];
+  const publicCopies: string[] = [];
+
+  await withEnv(async () => jsonResponse({}), async () => {
+    for (const response of responses) {
+      const h = await renderComponent(
+        App(createElement(SignupAccountForm, {
+          createSupabaseClient: authClient({ signUp: async () => response }),
+        })),
+      );
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        const box = findIn(h.container as never, theCheckbox);
+        await h.fireEvent(box as never, "click", (node) =>
+          setNativeValue(node as never, "checked", true));
+        for (let i = 0; i < 3; i++) await h.settle();
+        const form = findIn(h.container as never, (node) => node.tagName === "FORM");
+        await h.fireEvent(form as never, "submit");
+        // Every shape crosses one awaited signUp and the same six settlement
+        // turns before observation; no duplicate-only intermediate state.
+        for (let i = 0; i < 6; i++) await h.settle();
+        const copy = textOf(h.container as never);
+        assert.match(copy, /Confirm your email/);
+        assert.doesNotMatch(copy, /User already registered/i);
+        publicCopies.push(copy);
+      } finally {
+        await h.unmount();
+      }
+    }
+  });
+
+  assert.equal(new Set(publicCopies).size, 1, "the public response disclosed which account shape occurred");
 });
 
 test("the CHECK-YOUR-EMAIL state has zero a11y violations", async () => {
