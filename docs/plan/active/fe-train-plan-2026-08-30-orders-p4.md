@@ -114,9 +114,73 @@ fresh-context review and the cross-model leg; you answer fold rounds on the same
 
 ---
 
-## P4-1 · The scope spine — `requireFirmScope()`, one implementation, three entrances
+## P4-1 · THE INVITE REPAIR — wire the shipped accept journey to `accept_invite`
 
-**Branch:** web/p4-1-scope-spine. **Size 0.6. Depends on: nothing. Everything else depends on it.**
+**Branch:** web/p4-1-invite-repair. **Size 0.4. Depends on: nothing. BETA BLOCKER — this is the
+first train to fork and the first to merge.** **Judgement logic → review law 1's independent pass.**
+
+**The defect, byte-read (plan §0 ④).** `apps/web/components/invite-accept-form.tsx` contains **no
+`callDoor` call and never names `accept_invite`**. `handleAcceptInvite` calls
+`supabase.auth.verifyOtp({ token_hash, type: "invite" })` (`:81`); `handleSetPassword` verifies the
+subject binding, calls `supabase.auth.updateUser({ password })` (`:126`), then `router.replace("/")`
+(`:136`). `clara.accept_invite` (**live body `0145:694`**) is the **only** caller of
+`_claim_identity_core` and `_add_member_core` — the only path in the estate that mints a
+`clara.users` row and a `firm_memberships` row for a real person. **So the invitee gets a valid
+Supabase session, no `clara.users` row, no membership, an invite still `pending`, `jwt_firm()` NULL
+— and a success redirect.** Every RLS read then returns zero rows and every governed write raises
+`CLR04`. The UI reports success for a journey that completed nothing.
+
+**Scope — deliberately narrow.** Add the missing step; change nothing else. **No route moves** (the
+`(entry)` group is P4-3's, and putting a refactor in front of a beta blocker is how the blocker
+waits a wave). Files:
+
+```
+apps/web/components/invite-accept-form.tsx   EDIT  add the accept_invite step
+apps/web/lib/identity/doors.ts               NEW   the accept_invite wrapper (P4-3 extends it)
+apps/web/messages/en.json                    EDIT  refusal + display-name copy, Invite namespace
+```
+
+**Everything P2 built stays exactly as built** — the click-gate, the hard-coded `type: "invite"`
+(never a caller-supplied OTP purpose), the `getClaims()` subject-binding check, the `no-referrer`
+header, and `router.replace("/")` so the token-bearing URL leaves the history stack. This train
+inserts **one call** after the password is set and before the redirect.
+
+**The door.** `clara.accept_invite(p_token text, p_display_name text, p_op_key text)` → one
+transaction through both cores, consuming the invite. Refusals to render **verbatim**, each a real
+branch: **`CLR04`** *"the signed-in email does not match this invite"* — the second, independent
+wall on top of Supabase's own `verifyOtp` binding, and the reason a leaked token cannot be bound to
+another account · **`CLR04`** no authenticated actor · **`CLR09`** *"this invite is no longer open
+(status: …)"* and *"this invite has expired"* · **`CLR10`** invalid token / missing op_key.
+`p_display_name` needs a field the form does not have today — collect it on the password step; the
+**email is never form input**, it comes from the JWT claim inside the door (`_jwt_email()`).
+
+**Ordering, and the one thing that must not regress.** The redirect happens **only after
+`accept_invite` returns**. On a refusal the person stays on the page with the DB's own message and
+their password already set (that part succeeded) — do not roll back the password, do not retry the
+door, and do not redirect. A success path that runs before the membership exists is the defect this
+train removes; re-introducing it in the error branch would be the same bug wearing a different hat.
+
+**Tests.** `invite-accept-a11y` and `invite-accept-keyboard` — **this surface has never been in
+either scan** — plus a door-wrapper suite beside the new identity doors module, and:
+
+- **THE acceptance cell, and the order's whole point: after a successful acceptance, a MEMBERSHIP
+  EXISTS.** Assert the post-condition on the membership/context read, not on the redirect and not on
+  the door returning 200 — those are both true today while nothing is minted. **RED-before is
+  mandatory here: delete the `accept_invite` call and this cell must go red.** If it stays green,
+  it is asserting the old broken flow and proves nothing.
+- Each refusal branch rendered verbatim, with its own RED-before mutant.
+- A control proving the redirect does **not** fire on a refusal.
+
+**Acceptance.** All four commands green · the membership post-condition cell with its RED-before
+proof recorded (say you saw it red) · every refusal verbatim · no route moved, no P2 wall weakened ·
+the display-name field added without the email ever leaving the JWT.
+
+---
+
+## P4-2 · The scope spine — `requireFirmScope()`, one implementation, three entrances
+
+**Branch:** web/p4-2-scope-spine. **Size 0.6. Depends on: nothing — forks beside P4-1.
+P4-3/4/5 depend on it.**
 **This is judgement logic on its face and takes review law 1's independent pass.**
 
 **Why one file, three callers.** The (full) route group and the runtime API route are **SIBLINGS**
@@ -168,9 +232,11 @@ case rendered honestly · the two exemptions carry their reasons in the source.
 
 ---
 
-## P4-2 · The entry group — signup, the holding page, invite-accept extended
+## P4-3 · The entry group — signup, the holding page, and the four entry faces
 
-**Branch:** web/p4-2-entry-group. **Size 1.0. Depends on P4-1 merged.**
+**Branch:** web/p4-3-entry-group. **Size 0.9. Depends on P4-1 AND P4-2 merged** — P4-1 owns the
+invite form's repair, and this train MOVES that file. Fork after both, or you are refactoring a
+file another lane is fixing.
 **Mobbin grounding: [`p4-mobbin-grounding-2026-08-28.md`](p4-mobbin-grounding-2026-08-28.md) §1.**
 
 **Files:**
@@ -182,7 +248,8 @@ apps/web/app/(entry)/invite/[token]/page.tsx MOVED from apps/web/app/invite/[tok
 apps/web/app/(entry)/signup/page.tsx        NEW
 apps/web/app/(entry)/pending/page.tsx       NEW    the FOURTH entry face (裁-2 4b)
 apps/web/components/entry/*                 NEW    signup form, pending states, brand lockup
-apps/web/lib/identity/doors.ts              NEW    claim_identity + request_firm_registration
+apps/web/lib/identity/doors.ts              EXTEND P4-1 created it; add claim_identity +
+                                                   request_firm_registration beside accept_invite
 apps/web/app/globals.css                    EDIT   the --color-identity-canvas bridge
 apps/web/lib/supabase/proxy.ts              EDIT   /signup joins PUBLIC_PATH_PREFIXES (line 42)
 ```
@@ -215,12 +282,10 @@ queue has no SLA a system enforces; a fabricated duration is constraint 2 extend
 cross-sell block** (Airwallex's is the named anti-pattern) · **one action: "Log out"**, secondary
 variant — there is no dashboard to return to when `jwt_firm()` is NULL.
 
-**Invite-accept gains one step** and keeps everything P2 built: the click-gate, the hard-coded
-`type: "invite"`, the subject-binding check and the `router.replace("/")`. After the password is
-set, call `clara.accept_invite(p_token text, p_display_name text, p_op_key text)` (**live body
-`0145:694`**) — one transaction through `_claim_identity_core` + `_add_member_core`. **The wall is
-that the JWT's verified email equals the invite's email** (`CLR04` *"the signed-in email does not
-match this invite"*); `CLR09` covers a non-open or expired invite. Render each verbatim.
+**Invite-accept is P4-1's, already repaired — this train only MOVES it.** Do not re-wire
+`accept_invite`, do not re-shape its refusals, do not touch its walls. The move is a path change
+that keeps the URL byte-identical; if the file has drifted from P4-1's merged state, stop and
+report rather than reconciling it here.
 
 **Tokens** (`globals.css`). Add the `--color-identity-canvas` bridge inside `@theme inline`. The
 existing comment block above `:166` cites the token contract twice (§3.1, §3.3) and concludes the
@@ -233,23 +298,24 @@ passing, tightest `muted-foreground` at 4.636). **Add NO composited focus rows**
 still at `/50` on this tip and P6-3 owns the 70% recut; a row at an alpha nothing renders asserts a
 composition that does not ship (plan §6 OQ-7).
 
-**Tests.** `signup-a11y` · `signup-keyboard` · `pending-a11y` · **`login-a11y` · `login-keyboard` ·
-`invite-accept-a11y` · `invite-accept-keyboard`** — the last four register the two P2 surfaces that
-**have never been in either scan** and sit squarely in this train's blast radius. Plus a
-door-wrapper suite beside the new identity doors module (wire-shape pinning: exact verb name,
-exact argument names, refusal passthrough) and the extended
-`apps/web/tests/proxy-matcher.test.ts`.
+**Tests.** `signup-a11y` · `signup-keyboard` · `pending-a11y` · **`login-a11y` · `login-keyboard`**
+— the last two register the P2 login form, which **has never been in either scan** and sits
+squarely in this train's blast radius. (P4-1 registers the invite-accept pair.) Plus the
+`claim_identity` / `request_firm_registration` wrappers on the identity doors module P4-1 created,
+and the extended `apps/web/tests/proxy-matcher.test.ts`.
 
 **Acceptance.** All four commands green · every URL byte-identical after the moves (assert by
-route, not by claim) · the three holding states distinguishable, each with a RED-before mutant ·
-the email never sourced from form input · the four newly-registered scans green · the `globals.css`
-comment rewritten, not deleted.
+route, not by claim) · **P4-1's invite tests still green and still discriminating after the move**
+— a path change that quietly vacates the membership post-condition is the regression this train can
+cause · the three holding states distinguishable, each with a RED-before mutant · the email never
+sourced from form input · the newly-registered login scans green · the `globals.css` comment
+rewritten, not deleted.
 
 ---
 
-## P4-3 · Members, roles, invites — the roster, the role menu, the dialog, the courier
+## P4-4 · Members, roles, invites — the roster, the role menu, the dialog, the courier
 
-**Branch:** web/p4-3-members. **Size 1.0. Depends on P4-1 merged.**
+**Branch:** web/p4-4-members. **Size 1.0. Depends on P4-2 merged.**
 **Mobbin grounding: §3.** **The courier is judgement logic and takes review law 1's pass.**
 
 **Files:**
@@ -312,16 +378,16 @@ every log, response body and store (grep the diff and say so) · DropdownMenu ca
 
 ---
 
-## P4-4 · The operator approval queue
+## P4-5 · The operator approval queue
 
-**Branch:** web/p4-4-registrations. **Size 0.6. Depends on P4-1 merged.** **Mobbin grounding: §2.**
+**Branch:** web/p4-5-registrations. **Size 0.6. Depends on P4-2 merged.** **Mobbin grounding: §2.**
 
 **Files:**
 
 ```
 apps/web/app/(firm)/admin/registrations/page.tsx    NEW  the operator route
 apps/web/components/admin/registrations-queue.tsx   NEW  the queue + approve/reject dialogs
-apps/web/lib/registration/doors.ts                  NEW  extends P4-1's registration/reads.ts
+apps/web/lib/registration/doors.ts                  NEW  extends P4-2's registration/reads.ts
 ```
 
 **Authority.** `approve_firm_registration(uuid,text)` (`0145:766`) and
@@ -362,9 +428,9 @@ or explicitly recorded as unused · the deferred rung-5 stated in the report, no
 
 ---
 
-## P4-5 · Nav, ⌘K and the admin hub
+## P4-6 · Nav, ⌘K and the admin hub
 
-**Branch:** web/p4-5-nav. **Size 0.3. Depends on P4-2, P4-3 and P4-4 merged.**
+**Branch:** web/p4-6-nav. **Size 0.3. Depends on P4-3, P4-4 and P4-5 merged.**
 
 Rank-shape `apps/web/components/firm-nav.tsx` (hide below-rank surfaces; the operator console only
 on the operator predicate) · turn `apps/web/app/(firm)/admin/page.tsx` from an honest empty state

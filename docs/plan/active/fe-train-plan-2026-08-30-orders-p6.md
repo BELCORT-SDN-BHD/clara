@@ -1,4 +1,4 @@
-# P6 work orders — P6-1 … P6-6, P6-T, and the P6-X cutover
+# P6 work orders — P6-1 … P6-6, P6-T, P6-R, and the P6-X cutover
 
 *Companion to [`fe-train-plan-2026-08-30.md`](fe-train-plan-2026-08-30.md) and
 [`fe-train-plan-2026-08-30-orders-p4.md`](fe-train-plan-2026-08-30-orders-p4.md). **Every order
@@ -87,10 +87,22 @@ exists in the live 22-member union and renders today as a generic id-only summar
 `acknowledge_sweep_run`. `components/firm/sweep-status-panel.tsx:8-28` carries the rung-0 note that
 named this home; **true that comment in this PR** rather than leaving a claim that went stale.
 
-**裁-44 · the tax-draft card is a NAMED PLACEHOLDER, not a card.** The `tax_prep` wake body, its
-needs-you card and its allowlist rows belong to F-T3's new PR. Record the reserved shape in a
-comment beside the four, naming F-T3 and 裁-44, and **ship nothing** — a card for a part nothing
-emits is the same defect as a control for a door that does not exist.
+**裁-44 · the tax-draft card is a NAMED PLACEHOLDER, not a card — and its shape is NOT yours.**
+The part type is designed by the **`ft3-taxprep-design`** lane, alongside the `tax_prep` wake body,
+its needs-you card and its allowlist rows. Record the reserved shape in a comment beside the four,
+naming that lane and 裁-44, and **ship nothing** — a card for a part nothing emits is the same
+defect as a control for a door that does not exist. Do not invent its fields to "get ahead": the
+reader-is-never-the-declarer law above binds this one twice over, since here the declarer is another
+lane's design as well as another package's code.
+
+**A conformance debt this train pays because it is already inside the file (裁-3 tier (a): fixed as
+found, never deferred).** `apps/web/components/parts/PartRenderer.tsx:160-163` states in its own
+comment that **the ten summary titles above it are still hardcoded English** — *"an older debt this
+change does not silently widen and does not pretend to have paid."* That violates the next-intl
+house law, and it is also what would red the Q5 hardcoded-string lint the day it lands. **Route all
+ten through next-intl in this PR**, with the strings in the same namespace the four new cards use.
+It is a mechanical change in a file you are already editing; leaving it makes the next lane pay a
+merge conflict for it.
 
 **Hydrate-never-trust.** Every card carries identifiers only and re-derives authoritative state from
 a pinned DB read on mount and after every act, through the shared `useHydratedPart` hook (its
@@ -113,7 +125,7 @@ a comment, not a component.
 
 ## P6-3 · The a11y + token finish — 裁-13, 裁-1, 裁-2 4c
 
-**Branch:** web/p6-3-a11y-tokens. **Size 0.8. Depends on P4-2 merged** (the cream ground must
+**Branch:** web/p6-3-a11y-tokens. **Size 0.8. Depends on P4-3 merged** (the cream ground must
 exist before its composited rows can be honest). **Skills: `impeccable`, `emil-design-eng`, `shadcn`.**
 
 **Three ruled items, executed in one PR because they share three files.**
@@ -126,9 +138,14 @@ becomes a **visible, reasoned exception**, never a silent downgrade. Q7's formal
 unchanged; 2.5.8 is adopted **on top of** it. There is **no known-violation pinning mechanism** by
 design — a real violation is a component fix, never an allowlist entry.
 
-**② 裁-1 · the focus ring at 70%, and the Button treatment.** Ten components carry the idiom today,
-**all still at `/50`** — and the robust census is the **colour token, not the width or the
-variant**: `grep -rl "ring-ring/50" apps/web/components/` returns exactly ten —
+**② 裁-1 · the focus ring at 70%, R3's arm (b), and the Button treatment.** **Nothing has been
+recut, and `globals.css` says so about itself** — `:185-200` is a comment headed *"FOCUS TREATMENT
+— RULED 2026-08-27 evening (R3), RECUT STILL OWED"*, concluding *"nothing has been recut yet. The
+flat `:focus-visible` outline is still what this file declares, so the two idioms still coexist"*,
+while `:447-450` declares that flat outline. **Read that comment before you touch anything: it is
+the previous lane telling you exactly what state you are inheriting, and your PR replaces it rather
+than deleting it.** Ten components carry the ring idiom today, **all still at `/50`** — and the
+robust census is the **colour token, not the width or the variant**: `grep -rl "ring-ring/50" apps/web/components/` returns exactly ten —
 
 ```
 components/ui/button.tsx          components/ui/input.tsx
@@ -270,7 +287,7 @@ resolution still visible · the seventh kind asserted against the live CHECK's o
 
 ## P6-6 · The identity finish
 
-**Branch:** web/p6-6-identity. **Size 0.6. Depends on P4-2 and P6-3 merged.**
+**Branch:** web/p6-6-identity. **Size 0.6. Depends on P4-3 and P6-3 merged.**
 **Skills: `impeccable`, `frontend-design`, `emil-design-eng`, `animate`, `apple-design`.**
 
 **① 裁-14 · the Clara mascot.** `apps/web/public/` holds **five font files and nothing else** —
@@ -278,7 +295,7 @@ there is no mascot asset. Port it and implement **under the token contract's §7
 **empty states and rare welcome moments only, NEVER a loader**, and `prefers-reduced-motion`
 honoured with its own arm (the codebase already carries four such blocks — match that idiom).
 
-**② R1 · the Ledger Fold mark**, ported and placed on the `(entry)` layout P4-2 built.
+**② R1 · the Ledger Fold mark**, ported and placed on the (entry) layout P4-3 built.
 
 **③ The ClaraBook product-name copy pass**, across every surface. Note the as-conducted ruling that
 bounds it: the `ClaraBook*` **component-naming** convention is **NOT BINDING** (the house adopted
@@ -286,7 +303,7 @@ domain folders through P2/P3's reviewed builds) — conformance binds at the **t
 / motion** level, not the export-naming level. This pass is product copy, not a rename.
 
 **④ The entry-face finish** — 裁-2 4a's white-card-on-canvas treatment, taken from structural
-(P4-2) to finished, with the third conformance pass's prototype screens as the parity reference.
+(P4-3) to finished, with the third conformance pass's prototype screens as the parity reference.
 
 **Craft rules that bind and are already held** (the handoff repo's EMIL-CRAFT-AUDIT, verified consumed): **no
 `transition-all`**; ⌘K deliberately skips decorative dialog motion. Do not regress either.
@@ -308,6 +325,19 @@ F-T1; the R1–R10 draft card + the CP204 schedule from F-T3, **draft only**) ·
 deadlines as a **FIRM-level needs-you feed** (Clara reminds; the deadline is not a page the firm has
 to remember to open) · and **one line on the compliance register page**.
 
+> **裁-44 FIXES THE TAB'S SHAPE, AND IT IS NOT A FORM.** Read this before you sketch a layout. Tax
+> is **agentic on the same shape as the close**: after a close seals, **Clara drafts** the R1–R10
+> computation and the CP204 estimate **unasked**, **every rung carrying its statutory citation and
+> her own explanation of why the rung reads the way it does** — so a professional reviews reasoning,
+> not just a number. The draft is pushed to the **needs-you inbox as a card**. She **proposes** each
+> account's treatment (entertainment at 50%, the add-back families) and **a human signs** (裁-38).
+> The SST-02 drafts when the taxable period closes, not when someone remembers; CP204 reminders are
+> proactive. **So the tab is a PROPOSAL/RECEIPT surface with a human signing lane — never an input
+> grid a professional types a computation into.** A lane that builds a form here has built the wrong
+> surface, not merely an early one. 裁-33's draft-only wall (nothing reaches `issued`, enforced by a
+> named refusal) is what "draft" means on this screen, and 裁-38's `treatment_code_unsigned` is why
+> an unsigned treatment renders as unusable rather than as an empty field.
+
 **Measured state of the three backends at `94afbbef`:** F-T1's PR-1 is **built but unmerged** and
 ~125 commits behind · F-T3 is **unbuilt**, and 裁-33 walls `issued` behind a named refusal so it
 ships **draft-only** · F-T2's `statutory_deadlines` DDL is **live-EMPTY since `0139`** with **no
@@ -323,17 +353,67 @@ Then **three ride-alongs, one per backend merge** (~0.2 each), each wiring its p
 doors that lane actually shipped. **Do not invent a panel for a door that does not exist**, and do
 not let a NotBuiltNote outlive its lane — every one is swept at the exit gate.
 
-**Acceptance.** All four commands green · `routes.test.ts` green with the new rows (its oracle
-derives from the live tree, so a wrong href reds on its own) · `tax-a11y.test.tsx` and the nav
+**Acceptance.** All four commands green · the routes suite green with the new rows (its oracle
+derives from the live tree, so a wrong href reds on its own) · a tax a11y file and the nav
 extension · every NotBuiltNote naming **both** a verb and a lane · the three ride-alongs named in
-the report with their preconditions.
+the report with their preconditions · **the tab's shape reviewed against 裁-44 explicitly** — the
+report states, in one sentence, why what shipped is a proposal/receipt surface and not a form.
+
+---
+
+## P6-R · The hygiene-panel ride-along — ONE PR, two debts, one component
+
+**Branch:** web/p6-r-hygiene-panel. **Size 0.3. Depends on: nothing. Runnable whenever a lane is
+free.** It is ONE PR because both debts land on
+`apps/web/components/registers/counterparty-hygiene-panel.tsx`, and two lanes in one component buys
+nothing but a conflict.
+
+**① `clara.counterparty_aliases_visible`** (`0145:960-964`) — live, granted to
+`clara_authenticated`, **zero readers**. Columns: `id, counterparty_id, alias_display,
+alias_normalized, created_at, retired_at`. `apps/web/components/registers/RetireCounterpartyAliasDialog.tsx`
+**exists and is imported by nothing** — mount it, and give `retire_counterparty_alias` the honest
+alias id it has never had. **A merge checklist, not a surprise:** this wiring **will trip three
+tests that positively PIN the absence** and **six stale comments** that assert the read does not
+exist — `counterparty.test.ts:203` asserts *"exactly two reads … no counterparty_aliases read"*,
+plus two a11y/keyboard tests stubbing a 403, and the comment sites at
+`counterparty-hygiene-panel.tsx:10-20`, `messages/en.json:1876`,
+`lib/registers/counterparty.ts:26-28,96-104,358` and `RetireCounterpartyAliasDialog.tsx:3-5`. **Fix
+every one in this PR.** The 403 stubs target the BASE TABLE, which is still correctly denied — they
+are aimed at the wrong relation now, not wrong in principle, so re-point them rather than deleting
+them.
+
+**② `clara.counterparty_merges`** (`0149:54-61`, whose own frontend-home block names this exact
+panel) — also **zero readers**. And the door's receipt gained a key the frontend never read:
+`merge_counterparties` now returns **`merge_id`**, while `MergeCounterpartiesResult`
+(`apps/web/lib/registers/counterparty-doors.ts:132-137`) declares only `survivor_id`, `merged_id`,
+`reissued_rule_id`, `reissued_autopost_rule_id`. **0149 says PR-3's dialog and PR-2's un-merge both
+key on `merge_id`** — so this is not a cosmetic omission, it is the seam two scheduled PRs depend
+on. Add the key to the type, read it at the call site, and hang the merge record off the row that
+already renders the `statusMerged` chip.
+
+**Acceptance.** All four commands green · both reads wired with a discriminating post-condition
+each · the three absence pins re-pointed (not deleted) and the six comments trued, each named in the
+report · `merge_id` present in the type AND consumed, with a cell that reds if it is dropped · a
+RED-before mutant per refusal branch.
 
 ---
 
 ## P6-X · The cutover PR — retiring `apps/dashboard`
 
 **Branch:** web/p6-x-cutover. **Size 0.5. CEREMONY-GRADE. Depends on: every train above, plus
-both exit gates green (plan §5.2).** **Run from merged `main`, never from a branch, with an as-run
+both exit gates green (plan §5.2).**
+
+> **The two exit gates are real work, not a sign-off, and one of them needs a rig.** The
+> verb-coverage census must be **re-run against a LIVE CATALOG on a throwaway rig** — the standing
+> census is **pinned to `0138`**, and **seven verb families minted at `0149`–`0155` have never been
+> measured by it**, so this is their first measurement, not a re-confirmation. Migration-text greps
+> do not substitute: the census's own header says revokes make them unreliable. And the
+> **NotBuiltNote sweep is DERIVED FROM THE LIVE app TREE** on the routes-suite pattern
+> (`apps/web/lib/command/routes.test.ts` reads the tree and carries a vacuity control) — enumerate
+> the notes on disk, resolve each against the lane it names, fail on any whose lane merged. A
+> hand-kept list is the STALE-NOT-BUILT class arriving through the back door.
+
+**Run from merged `main`, never from a branch, with an as-run
 record.**
 
 **Measured scope:** `apps/dashboard` is **217 TypeScript files, of which 61 are test files**. The

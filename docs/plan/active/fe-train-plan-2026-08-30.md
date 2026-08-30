@@ -20,24 +20,30 @@ Q-A…Q-F) · [`mohe-grill-rulings-2026-08-27-evening.md`](mohe-grill-rulings-20
 **Companions — the self-contained work orders** (files, commands, acceptance) per
 `.claude/rules/handoffs.md`. This document is the shape and the reasoning; those are what a builder
 lane executes: **[`fe-train-plan-2026-08-30-orders-p4.md`](fe-train-plan-2026-08-30-orders-p4.md)**
-(the shared preamble every order inherits, plus P4-1…P4-5 and P4-D) ·
+(the shared preamble every order inherits, plus P4-1…P4-6 and P4-D) ·
 **[`fe-train-plan-2026-08-30-orders-p6.md`](fe-train-plan-2026-08-30-orders-p6.md)**
-(P6-1…P6-6, P6-T and the P6-X cutover).
+(P6-1…P6-6, P6-T, P6-R and the P6-X cutover).
 
 ---
 
-## 0 · Four truings this plan carries, each measured before any train was scoped
+## 0 · Five truings this plan carries, each measured before any train was scoped
 
-**① `chatTurn_v15` is TAKEN, and it added NO part kind — so P6's four-card bump is `chatTurn_v16`.**
-Every prior document (裁-9, 裁-20, `port-wave-plan-…-part2.md` §8.1, `PROGRESS.md`'s frontend row,
+*① ② ③ ⑤ were measured by this lane. **④ was surfaced by the 2026-08-30 44-agent census** and is
+re-verified here at the bytes rather than accepted — see its own paragraph for what this lane read.*
+
+**① `chatTurn_v15` is TAKEN AND FROZEN, and it added NO part kind — so P6's bump is `chatTurn_v16`.**
+Every prior document (裁-9, 裁-20, `port-wave-plan-…-part2.md` §8.1, `PROGRESS.md:123`,
 `apps/web/README.md`) names the bump *"`chatTurn_v15`"*. That version number was consumed on
 2026-08-29 by **F-A6 PR-2** (the audited freeform read, #423, deployed Fly v69) and its own frozen
 header says so in words: `packages/runtime/workflows/chatTurn.v15.prompt.ts:10` —
 *"`ClaraPartV15` IS `ClaraPartV14`, DELIBERATELY — NO NEW PART KIND … the `freeform_result` card
 belongs to P6's own later batched wire bump"*; `:33` `export type ClaraPartV15 = ClaraPartV14;`.
-`registry.ts:61` reads `chatTurn: chatTurn_v15`. **The four Q8 parts therefore need a new
-`chatTurn_v16` export + a registry repoint** (hard constraint 9 — a frozen body is never edited).
-This is a naming truing, not a scope change; the work is identical.
+`packages/runtime/workflows/registry.ts:61` reads `chatTurn: chatTurn_v15`, and
+the repo-root `frozen-workflows.json` carries the closure — so it is frozen, not merely occupied.
+**The four Q8 parts therefore need a new `chatTurn_v16` export + a registry repoint** (hard
+constraint 9 — a frozen body is never edited). This is a naming truing, not a scope change; the
+work is identical. *(Independently confirmed by the 2026-08-30 44-agent census. **Truing the stale
+documents is a separate docs lane's, in flight — not this plan's.** Plan against v16.)*
 
 **② The catalog is 22, not 18 — MBB-4 is CLOSED, and the bump lands 26.**
 `apps/web/lib/parts/types.ts:178-200` declares 22 union members; `:12-16` records the four
@@ -47,14 +53,50 @@ on 2026-08-29, and `apps/web/components/parts/V14ReceiptCards.tsx` renders all f
 is superseded: **22 + 4 = 26** — a figure the file's own header at `:15` already states, so this
 truing is corroborated by the declarer, not only by this lane's count.
 
-**③ 裁-1, 裁-2 (4a/4b/4c) and 裁-13 are ALL UNEXECUTED at the tip.** Measured, not assumed:
-`grep -rl "ring-ring/50" apps/web/components/` returns the same **ten** carriers annex 2 §F
-censused, every one still at **`/50`**, not 裁-1's ruled `/70`. `app/globals.css:247` still reads
-`--input: #c7c5bd`. There is **no** `--color-identity-canvas` bridge in `@theme inline` and **no**
-`app/(entry)/` route group. `grep -rn "target-size\|--target-min" apps/web/test/` returns zero.
-These are the four polish rulings that have been ruled longest and executed least.
+**③ 裁-1, 裁-2 (4a/4b/4c), 裁-13 and R3's arm (b) are ALL UNEXECUTED at the tip.** Measured, not
+assumed: `grep -rl "ring-ring/50" apps/web/components/` returns the same **ten** carriers annex 2
+§F censused, every one still at **`/50`**, not 裁-1's ruled `/70`. **R3's arm (b) — the global
+recut — is not built either, and `globals.css` says so about itself**: `:185-200` is a comment
+headed *"FOCUS TREATMENT — RULED 2026-08-27 evening (R3), RECUT STILL OWED"* concluding
+*"nothing has been recut yet"*, while `:447-450` still declares the flat
+`:focus-visible { outline: var(--focus-ring-width) solid var(--focus) }`. So the two idioms coexist
+exactly as the file describes. `:247` still reads `--input: #c7c5bd`. There is **no**
+`--color-identity-canvas` bridge in `@theme inline` and **no** `(entry)` route group.
+`grep -rn "target-size\|--target-min" apps/web/test/` returns zero.
 
-**④ The 08-29 alignment audit's agent-buildable findings LANDED; two remain.** Verified at this
+**Two more conformance debts the same sweep found, both self-declared in code.** ⌘K's "Do" is a
+`<CommandItem value="do-dispatch" disabled>` with **no `onSelect`**
+(`apps/web/components/command/command-palette.tsx:183-190`) — inert exactly as P2 shipped it. And
+**ten hardcoded English summary titles violate the next-intl law**:
+`apps/web/components/parts/PartRenderer.tsx:160-163` states it in its own comment — *"These are the
+ONLY branches in this file whose copy routes through next-intl — the ten summary titles above are
+still hardcoded English, an older debt this change does not silently widen and does not pretend to
+have paid."* Under 裁-3 tier (a) a conformance item is **fixed as found, never deferred**, so the
+i18n debt rides P6-2 (which is already inside that file) rather than waiting for a polish lane.
+
+**④ THE P4 TRANCHE IS MEASURABLY ZERO — AND THE SHIPPED INVITE FLOW IS BROKEN. This blocks beta.**
+Re-measured at this tip: **all sixteen** P4 door and relation names (the fifteen from `0141`/`0145`
+plus `counterparty_aliases_visible`) return **zero** occurrences across every `.ts`/`.tsx` file in
+`apps/web`. That much was the planned state of a sequenced lane. **The defect underneath it was
+not.** `apps/web/components/invite-accept-form.tsx` contains **no `callDoor` call and never names
+`accept_invite`** (byte-read this lane; `grep -n "callDoor\|accept_invite"` on that file → nothing).
+Its `handleAcceptInvite` calls `supabase.auth.verifyOtp({type: "invite"})` (`:81`); its
+`handleSetPassword` checks the subject binding and calls `supabase.auth.updateUser({password})`
+(`:126`), then `router.replace("/")` (`:136`).
+
+`clara.accept_invite` (**live body `0145:694`**) is the **only** caller of `_claim_identity_core`
+and `_add_member_core` — the only path in the estate that mints a `clara.users` row and a
+`firm_memberships` row for a real person. Nothing calls it. **So an invitee today: verifies the
+OTP, sets a password, sees a success redirect — and lands on `/` with a valid Supabase session, no
+`clara.users` row, no membership, and their `firm_invites` row still `pending`.** `clara.jwt_firm()`
+returns NULL, so every RLS-scoped read returns zero rows and every governed write raises `CLR04` at
+`clara._human_ctx`. **The UI reports success for a journey that completed nothing.**
+
+This is the identity gap P4's design §3 predicted in the abstract, now confirmed as a **shipped
+defect on `main`**. It reorders this plan: **P4-1 is the invite repair** (§2), narrow and shippable
+on its own, ahead of the scope spine and everything else.
+
+**⑤ The 08-29 alignment audit's agent-buildable findings LANDED; two remain.** Verified at this
 tip: MBB-5 closed — `apps/web/lib/command/routes.ts` reads `status: "built"` on all fifteen rows,
 `needsYou` → /needs-you, and `apps/web/lib/command/routes.test.ts` (lines 27, 46, 107) derives its
 oracle from the live app tree with a vacuity control, closing the class. MBB-8 closed —
@@ -113,8 +155,10 @@ Live at `0141`/`0145`, with the **live bodies chased past both** (the superseded
 | `clara.firm_registration_requests_visible` | `0145:911` | SELF or OPERATOR | none |
 | `clara.counterparty_aliases_visible` | `0145:960` | firm-scoped | **none — R-2, still zero readers** |
 
-Estate-wide the app calls ~167 door verbs and 39 relations (audit §1.1). The nine rows above are
-the whole unbuilt P4 tranche plus one T8 ride-along.
+Estate-wide the app calls ~167 door verbs and 39 relations (audit §1.1). **Every name in the table
+above returns ZERO occurrences across `apps/web`** — re-measured this lane, name by name. The
+tranche is not partially wired; it is not wired at all, and `accept_invite`'s absence is a shipped
+defect rather than an unstarted feature (§0 ④).
 
 ### 1.4 Tests and gates
 
@@ -125,13 +169,19 @@ the whole unbuilt P4 tranche plus one T8 ride-along.
   pairs**, all PASS, unconditionally strict) · `apps/web/test/a11yRules.ts` (hand-written rule
   engine, no axe) · `apps/web/test/keyboardWalk.ts`. **A fourth is owed:** WCAG 2.2 SC 2.5.8
   target-size (裁-13) — absent.
-- **Token contract:** the ClaraBook brand package verifies **42/42** (Q4/#357); the 27 gate pairs
-  are the *contrast* subset of it, not the same number — those two figures are not comparable and
-  no document should treat them as one.
+- **Token contract — and a figure this plan corrects.** The **"42/42" is a BRAND-PACKAGE
+  verification in the `clarabook-frontend` repo, not a token count**, and no lane should re-derive
+  a "42 tokens" target from it. The token contract of record is that repo's own
+  01-TOKEN-CONTRACT document at commit `a86e48a`, which `apps/web/app/globals.css` cites by
+  section. The real counts here: **57 `--color-*` bridges** in `@theme inline` (measured this lane)
+  over roughly 71 `:root` definitions and 74 `@theme inline` entries. The 27 contrast pairs are a
+  fourth, separate number — the pairs the gate declares, not the tokens that exist.
 - **Colour discipline:** zero raw hex, zero default-palette classes, zero `dark:` in
   `app/**`/`components/**`, now mechanically held by `eslint.config.mjs:66-78`.
 - **The Q5 sibling ban — hardcoded UI strings — is still unbuilt** (`i18n/request.ts:8` and
-  `README.md:76` both describe it in the future tense).
+  `README.md:76` both describe it in the future tense), **and there is live copy that would fail
+  it**: the ten hardcoded summary titles at `apps/web/components/parts/PartRenderer.tsx:160-163`
+  (§0 ③). Landing the ban before that debt is paid would red the build on its own tree.
 
 ### 1.5 What the ClaraBook conformance audit still owes
 
@@ -146,21 +196,29 @@ that same repo (裁-2 4c) · and the **third conformance pass** over the DESCRIP
 
 ## 2 · The P4 trains
 
-**Five build orders, one DB order, two deferred surfaces.** The partition is by *file ownership*,
-so five lanes can run concurrently without touching each other's tree: **P4-1** owns the new lib
-modules + the two layouts + the runtime route handler; **P4-2** owns the new (entry) route group;
-**P4-3** owns admin/members + the invite Route Handler; **P4-4** owns admin/registrations; **P4-5**
-owns nav, ⌘K and the i18n truing. `apps/web/messages/en.json` is the one genuinely shared file —
-§2.7 states the seam rule.
+**Six build orders, one DB order, two deferred surfaces.** It is six rather than five because §0 ④
+promoted the **invite repair** out of the entry-group train and to the front: it is a shipped,
+beta-blocking defect, it is small, and holding it behind a route-group refactor would keep a broken
+journey on `main` for the length of a wave. The partition is by *file ownership*, so the lanes run
+concurrently without touching each other's tree: **P4-1** owns the invite form + the identity door
+wrapper; **P4-2** owns the new lib modules, the two layouts and the runtime route handler; **P4-3**
+owns the new (entry) route group; **P4-4** owns admin/members + the invite Route Handler; **P4-5**
+owns admin/registrations; **P4-6** owns nav, ⌘K and the hub. `apps/web/messages/en.json` is the one
+genuinely shared file — §2.7 states the seam rule.
 
 | # | Train | Doors / reads | Depends on | Size |
 |---|---|---|---|---|
-| **P4-1** | **The scope spine** — `requireFirmScope()`, one implementation, three entrances; the holding state's data | `caller_context`, `firm_registration_requests_visible` | — | 0.6 |
-| **P4-2** | **The entry group** — `(entry)` route group on the identity canvas; signup; the holding page; invite-accept extended | `claim_identity`, `request_firm_registration`, `accept_invite` | P4-1 | 1.0 |
-| **P4-3** | **Members, roles, invites** — the roster, the role menu, the invite dialog, the mail courier | `firm_members_visible`, `firm_invites_visible`, `invite_member`, `revoke_invite`, `set_member_role`, `remove_member` | P4-1 | 1.0 |
-| **P4-4** | **The operator approval queue** — /admin/registrations, operator-only | `firm_registration_requests_visible`, `approve_firm_registration`, `reject_firm_registration` | P4-1 | 0.6 |
-| **P4-5** | **Nav, ⌘K and the admin hub** — rank-shaped nav, five new route rows, the hub's sections | reads only | P4-2..4 merged | 0.3 |
+| **P4-1** | **THE INVITE REPAIR — beta blocker.** Wire the shipped accept journey to the door that mints the membership | `accept_invite` | — | **0.4** |
+| **P4-2** | **The scope spine** — `requireFirmScope()`, one implementation, three entrances; the holding state's data | `caller_context`, `firm_registration_requests_visible` | — | 0.6 |
+| **P4-3** | **The entry group** — the (entry) route group on the identity canvas; signup; the holding page | `claim_identity`, `request_firm_registration` | P4-1 + P4-2 | 0.9 |
+| **P4-4** | **Members, roles, invites** — the roster, the role menu, the invite dialog, the mail courier | `firm_members_visible`, `firm_invites_visible`, `invite_member`, `revoke_invite`, `set_member_role`, `remove_member` | P4-2 | 1.0 |
+| **P4-5** | **The operator approval queue** — /admin/registrations, operator-only | `firm_registration_requests_visible`, `approve_firm_registration`, `reject_firm_registration` | P4-2 | 0.6 |
+| **P4-6** | **Nav, ⌘K and the admin hub** — rank-shaped nav, the new route rows, the hub's sections | reads only | P4-3..5 merged | 0.3 |
 | **P4-D** | **DB: 裁-26 + 裁-36** — the admission token's email binding; the DPA e-sign wall; the rate wall | new | its own mini-gate (§6 OQ-3) | 0.7 |
+
+**P4-1 and P4-2 both fork immediately and neither blocks the other** — P4-1 repairs the journey
+that *creates* memberships; P4-2 builds the wall that catches sessions which have none. They are
+the two halves of the same gap and the estate is exposed until both land.
 
 *Sizes are P3-lane equivalents on `port-wave-plan-…-part2.md` §10.1's calibration (1.0 ≈ 20-40
 files, ~3,000-4,500 lines, full ladder).*
@@ -198,8 +256,14 @@ home and a precondition, which is the mechanism the house already uses.
   **"Draft"** with no schema rename (裁-52) · a past-grace firm renders **read-only** with pay and
   export live and every book-write control disabled-with-reason (裁-55) · BELCORT's operator-exempt
   plan shows full metering and **no invoice** (裁-53) · the invoice renders **every** line 裁-42⑨
-  names, from `invoice_lines`, and sums nothing client-side. **Disposition: deferred**, sequenced
-  behind billing PR-2 (`get_firm_invoice`) — not a P4 build lane today.
+  names, from `invoice_lines`, and sums nothing client-side. **Disposition: deferred AND
+  CONDITIONAL** — sequenced behind billing PR-2 (`get_firm_invoice`), and gated on an owner question
+  that is not the amounts: **does beta charge at all, or is it invited-and-unpaid?** If beta is
+  invited-unpaid, the checkout shell is not merely un-priced, it is **unbuilt for beta** and the
+  train drops out of the wave entirely; if beta charges, it re-enters behind billing PR-2. Written
+  as a train that can be pulled in or out on one word, so the wave does not carry a half-built
+  checkout either way. *(裁-28 and 裁-42 settle the MODEL and leave the AMOUNTS open; neither
+  answers this question, which is about whether money moves during beta at all.)*
 
 ### 2.7 · The shared-file seam
 
@@ -225,7 +289,8 @@ conformance items (fix-as-found) outside P6 and flow polish + identity flourishe
 | **P6-4** | **ONE shared signed money input** | 裁-9 flow polish; the Wave-A/C money defects | — | 0.6 |
 | **P6-5** | **The agentic surface finish** — ⌘K "Do", amend-resolution, the 7th question kind, the sweep panel, inbox deep-links | 裁-37, 裁-27, 裁-17 | P6-2 (sweep card) | 0.7 |
 | **P6-6** | **The identity finish** — mascot, Ledger Fold, the ClaraBook copy pass, the entry-face finish | 裁-14, R1, 裁-3(c) | P4-2, P6-3 | 0.6 |
-| **P6-T** | **Track B's frontend home** — the Tax tab, the firm-level deadline feed, the compliance-register line | 裁-34 | F-T1 / F-T2 / F-T3 (§4) | 0.7 |
+| **P6-T** | **Track B's frontend home** — the Tax tab as a PROPOSAL/RECEIPT surface, the deadline feed, the compliance line | 裁-34, 裁-44, 裁-33/38 | F-T1 / F-T2 / F-T3 (§4) | 0.7 |
+| **P6-R** | **The hygiene-panel ride-along** — both counterparty debts, ONE PR, one component | 裁-11, `0149` | — | 0.3 |
 | **P6-X** | **The cutover PR** — retires `apps/dashboard` | port-wave §8.2 | everything + both exit gates | 0.5 |
 
 **P6-1 and P6-2 are two orders on purpose.** The wire shapes must be **transcribed field for
@@ -234,16 +299,27 @@ declarer, this module is the reader"*), so the web half reads a merged runtime b
 design. Shipping them as one PR would have the reader and the declarer written by the same pass —
 exactly the mismatch that law exists to prevent.
 
-**P6-2 also carries the tax-draft card (裁-44) as a NAMED PLACEHOLDER, not a card.** The
-`tax_prep` wake body and its needs-you card belong to F-T3's new PR (裁-44's own consequence list);
-until that merges, P6-2 records the fifth kind's reserved shape in a comment and ships **nothing**
-— a card for a part nothing emits is the same defect as a control for a door that does not exist.
+**P6-2 also carries the tax-draft card (裁-44) as a NAMED PLACEHOLDER, not a card.** Its part type
+is **not this plan's to design** — it comes from the `ft3-taxprep-design` lane, alongside the
+`tax_prep` wake body and its needs-you card (裁-44's own consequence list). Until that lane's PR
+merges, P6-2 records the reserved shape in a comment and ships **nothing** — a card for a part
+nothing emits is the same defect as a control for a door that does not exist.
 
-**P6-T is backend-gated and its order says so per surface.** F-T1 PR-1 is built-but-unmerged and
-~125 commits behind; F-T3 is unbuilt with PR-7 walled off by 裁-33; F-T2's `statutory_deadlines`
-DDL is live-EMPTY at `0139` with **no grant and no verb**. So P6-T's *only* unconditional
-deliverable is the **IA**: the `tax` route + tab, the nav entry, the ⌘K rows, and one
-`NotBuiltNote` per panel naming its lane — with three ride-alongs, one per backend merge.
+**P6-T is backend-gated, and 裁-44 fixes its SHAPE before its schedule.** The Tax tab is a
+**proposal/receipt surface, not a form**: 裁-44 ruled that after a close seals, **Clara drafts** the
+R1–R10 computation and the CP204 estimate unasked, **every rung carrying its statutory citation and
+her own explanation**, pushes it to the needs-you inbox as a card, and **proposes** each account's
+treatment for a human to **sign** (裁-38). The SST-02 drafts when the taxable period closes; CP204
+reminders are proactive. So the tab renders **her drafts and their receipts with a human signing
+lane** — it never renders an input grid a professional types a computation into. A lane that builds
+a form here has built the wrong surface, not merely an early one, and 裁-33's draft-only wall
+(nothing reaches `issued`) is what "draft" means on this screen.
+
+Schedule-wise: F-T1 PR-1 is built-but-unmerged and ~125 commits behind; F-T3 is unbuilt with PR-7
+walled off by 裁-33; F-T2's `statutory_deadlines` DDL is live-EMPTY at `0139` with **no grant and
+no verb**. So P6-T's *only* unconditional deliverable is the **IA**: the tax route + tab, the nav
+entry, the ⌘K rows, and one `NotBuiltNote` per panel naming its lane — with three ride-alongs, one
+per backend merge.
 
 ---
 
@@ -262,7 +338,24 @@ at P6's exit gate against whether its lane merged (the STALE-NOT-BUILT class).
 | **G1 producers** (`bank_agent`, `close_prep`, binding-expiry, `tax_prep`) | wake bodies for the first two merged (#437) **with both switches OFF**; the other two unbuilt | anything that renders an agent-initiated receipt on the clock | the cards render when a run exists; the surfaces do not assert one does |
 | **Billing PR-1/2/3** | unbuilt; gate closed 裁-50…裁-56 | the whole checkout tranche (§2.6) | deferred — no surface ships |
 | **F-T1 / F-T2 / F-T3** | unmerged / DDL-empty / unbuilt | P6-T's three panels | the tab ships with three named NotBuiltNotes |
-| **`counterparty_aliases_visible`** | live, granted, **zero readers** (R-2) | T8's alias list + retire dialog, still unmounted | a ~0.2 ride-along; **it will trip three test pins and six stale comments** the audit enumerated |
+| **The hygiene-panel pair — ONE PR, not two** | see below | T8's alias list + the merge record | a single ~0.3 ride-along, sequenced whenever a lane is free |
+
+**The hygiene-panel debts are one PR because they land on one component.** Both name
+`apps/web/components/registers/counterparty-hygiene-panel.tsx` as their home, and splitting them
+would put two lanes in the same file for no gain:
+
+- **`clara.counterparty_aliases_visible`** (`0145:960-964`) — live, granted to
+  `clara_authenticated`, **zero readers** in `apps/web` (re-measured this lane).
+  `apps/web/components/registers/RetireCounterpartyAliasDialog.tsx` **exists and is imported by
+  nothing**. The wiring PR **will trip three test pins and six stale comments** the audit
+  enumerated by name — that is a merge checklist, not a surprise.
+- **`clara.counterparty_merges`** (`0149:54-61`, which names this exact panel as its home) — also
+  **zero readers**. And the door's receipt gained a key the frontend never read: `merge_counterparties`
+  now returns `merge_id`, while `MergeCounterpartiesResult`
+  (`apps/web/lib/registers/counterparty-doors.ts:132-137`) declares only `survivor_id`, `merged_id`,
+  `reissued_rule_id`, `reissued_autopost_rule_id`. **0149's own frontend-home block says PR-3's
+  dialog and PR-2's un-merge both key on `merge_id`** — so the type is not merely incomplete, it is
+  the seam two later PRs are about to depend on.
 
 ---
 
@@ -285,15 +378,23 @@ at P6's exit gate against whether its lane merged (the STALE-NOT-BUILT class).
 
 ### 5.2 · P6's EXIT gate — four proofs, run by a lane that built none of the trains
 
-1. **The verb-coverage census re-run** at the then-current frontier, by the 2026-08-28 method (a
-   throwaway rig, the **live catalog read directly**, never migration-text greps). **Pass = zero
-   CUTOVER-OWED and zero un-dispositioned ORPHAN in direction 1; direction 2 still 100%.** It also
-   closes §2's 81-vs-87 arithmetic by measurement.
+1. **The verb-coverage census re-run — against a LIVE CATALOG on a throwaway rig, not against
+   migration text.** This is not a formality: **the standing census is pinned to `0138`**, and
+   **seven verb families minted at `0149`–`0155` have never been measured by it at all**. So the
+   re-run is the first measurement those families get, and its denominator (the true count of
+   `clara_authenticated` EXECUTE-granted functions) has to come from a live `pg_proc`/grant read —
+   the 08-29 audit could not reproduce it precisely because it had no rig, and the census's own
+   header warns that revokes make migration-text greps unreliable here. **Pass = zero CUTOVER-OWED
+   and zero un-dispositioned ORPHAN in direction 1; direction 2 still 100%.** It also closes §2's
+   81-vs-87 arithmetic by measurement.
 2. **The conformance re-audit** — `routes.ts` re-derived from the live tree (the gate now exists:
-   the routes suite), **every `NotBuiltNote`/`NotBuiltBadge` swept** against whether its named lane
-   merged (**ten** surfaces carry one today, excluding the three note components themselves and the
-   two test files), the manifest count control run as a gate, and R1's Ledger
-   Fold + the ClaraBook copy pass confirmed landed.
+   the routes suite), the manifest count control run as a gate, and R1's Ledger Fold + the ClaraBook
+   copy pass confirmed landed. **The NotBuiltNote sweep is DERIVED FROM THE LIVE app TREE, on the
+   routes-suite pattern** — the same instrument, not a second habit: enumerate every note on disk,
+   resolve each against the lane it names, and fail on any whose lane merged. A hand-kept list of
+   notes is the STALE-NOT-BUILT class arriving through the back door. **Ten** surfaces carry one
+   today (excluding the three note components themselves and the two test files), so the sweep has
+   a known starting population to check the derivation against.
 3. **The a11y set, at four gates not three** — contrast (strict), rule engine, keyboard walk, and
    **target size** (裁-13), with every `--target-min` exception visible and reasoned.
 4. **The cutover proof.** Each of `apps/dashboard`'s **61 test suites** classified into exactly one
@@ -308,6 +409,14 @@ at P6's exit gate against whether its lane merged (the STALE-NOT-BUILT class).
 
 ## 6 · Open questions — each with this lane's recommendation, none resolved here
 
+0. **DOES BETA CHARGE AT ALL — paid, or invited-and-unpaid?** This is the one question that adds or
+   removes a whole train. 裁-28 and 裁-42 settle the billing MODEL and leave the AMOUNTS open;
+   neither says whether money moves during beta. If beta is **invited-unpaid**, the checkout shell
+   is unbuilt for beta and §2.6's billing train drops out of the wave; if beta **charges**, it
+   re-enters behind billing PR-2 (`get_firm_invoice`) and pulls 裁-36's DPA e-sign + rate wall and
+   裁-26's email-bound token in with it. *Recommend: ask it in the next batch, before the wave is
+   sequenced — this is cheap to answer and expensive to guess, and a half-built checkout is the one
+   outcome neither answer wants.*
 1. **The `--input` recut's origin (裁-2 4c).** The ruling puts the recut in the **clarabook**
    repo, with `apps/web` re-porting after it merges. No such PR exists, and P6-3 cannot add the
    four `input-on-*` contrast rows without the value. *Recommend: let **P6-3 set the value in
