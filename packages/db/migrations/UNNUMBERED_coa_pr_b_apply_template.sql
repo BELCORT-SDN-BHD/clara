@@ -650,6 +650,7 @@ revoke all on function clara._coa_plant_family(jsonb,uuid,uuid,text,text) from p
 --   4 the template is published and visible     CLR11 template_not_found / CLR10 template_not_published
 --   5 THE CLIENT'S CHART IS EMPTY               CLR10 chart_not_empty          <- 裁-23 Q4's wall
 --   6 no 'adopted' adoption row for the client  CLR10 already_adopted
+--  6b the resolved family set is non-empty      CLR10 families_required
 --   7 every named family exists on the template CLR10 unknown_family (names the offender)
 --   8 every `core` family is present            CLR10 core_family_dropped (names it)
 --   9 apply
@@ -730,6 +731,16 @@ begin
     -- Duplicates in the caller's array are collapsed: the same family twice is one family, and
     -- the adoption row's families[] must not carry it twice.
     select coalesce(array_agg(distinct x), '{}'::text[]) into v_families from unnest(p_families) x;
+  end if;
+
+  -- Rung 6b -- THE RESOLVED SET IS NON-EMPTY. Rung 8 catches an empty list on any template that
+  -- HAS core families, which the platform starter does; but a firm's own fork may lawfully carry
+  -- none (remove_coa_template_family does not defend `core`), and then an empty apply would sail
+  -- past rung 8, plant nothing, and die on ck_coa_adoption_families as a bare 23514 naming
+  -- nothing. Every refusal in this door is a NAMED one.
+  if v_families = '{}'::text[] then
+    raise exception 'an apply must name at least one family' using errcode = 'CLR10',
+      detail = '{"reason":"families_required"}';
   end if;
 
   -- Rung 7 -- names the offender.

@@ -239,6 +239,13 @@ test("§2.4 rung 7 + rung 8 name the offender", async (t) => {
   await assert.rejects(
     () => applyTemplate(world.users.bob, { client, template: starter.id, families: oneCoreDropped, opKey: opk("ap4") }),
     (e) => new RegExp(core[0]).test(e.message), "rung 8 NAMES the dropped core family");
+  // Rung 6b -- an EMPTY set is refused by NAME rather than by ck_coa_adoption_families' bare
+  // 23514. On the platform starter rung 8 would also catch it (it carries core families), so the
+  // cell pins the REASON: `families_required` is the one that must answer, and it must answer
+  // first.
+  assert.equal(
+    await refusalReason(() => applyTemplate(world.users.bob, { client, template: starter.id, families: [], opKey: opk("ap5") })),
+    "families_required", "rung 6b: an empty family set is a named refusal, never a CHECK violation");
   assert.equal(await accountCount(client), 0, "no refusal planted anything");
 });
 
