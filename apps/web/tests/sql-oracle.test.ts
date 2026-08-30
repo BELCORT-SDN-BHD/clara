@@ -121,6 +121,55 @@ describe("the SQL lexer is controlled before the migration census trusts it", ()
     assert.equal(viewDefinitionOffsets(sql, "probe").length, 2);
   });
 
+  it("PIN SQL-7: invoked local function exposes DDL; uninvoked control remains masked", () => {
+    const invoked = `create or replace function clara.install_probe() returns void language plpgsql as $fn$
+      begin create view clara.probe as select 1; end $fn$;
+      select clara.install_probe();`;
+    const performed = `create or replace function clara.install_probe() returns void language plpgsql as $fn$
+      begin create view clara.probe as select 1; end $fn$;
+      do $$ begin perform clara.install_probe(); end $$;`;
+    const uninvoked = `create function clara.install_probe() returns void language plpgsql as $fn$
+      begin create view clara.probe as select 1; end $fn$;`;
+    assert.equal(viewDefinitionOffsets(invoked, "probe").length, 1);
+    assert.equal(viewDefinitionOffsets(performed, "probe").length, 1);
+    assert.equal(viewDefinitionOffsets(uninvoked, "probe").length, 0);
+  });
+
+  it("PIN SQL-8: quoted DO body is executable; ordinary quoted value is data", () => {
+    const plain = "do 'begin create view clara.probe as select 1; end';";
+    const escaped = "do E'begin create view clara.probe as select 1; end';";
+    const data = "select 'create view clara.probe as select 1;';";
+    assert.equal(viewDefinitionOffsets(plain, "probe").length, 1);
+    assert.equal(viewDefinitionOffsets(escaped, "probe").length, 1);
+    assert.equal(viewDefinitionOffsets(data, "probe").length, 0);
+  });
+
+  it("PIN SQL-9: EXECUTE literal exposes DDL; PERFORM literal remains data", () => {
+    const dollar = "do $$ begin execute $ddl$create view clara.probe as select 1;$ddl$; end $$;";
+    const quoted = "do $$ begin execute 'create view clara.probe as select 1;'; end $$;";
+    const data = "do $$ begin perform $ddl$create view clara.probe as select 1;$ddl$; end $$;";
+    assert.equal(viewDefinitionOffsets(dollar, "probe").length, 1);
+    assert.equal(viewDefinitionOffsets(quoted, "probe").length, 1);
+    assert.equal(viewDefinitionOffsets(data, "probe").length, 0);
+    const unresolved = lexSql("do $$ begin execute format('create view clara.%I as select 1', name); end $$;");
+    assert.match(unresolved.unresolvedDynamicSql[0] ?? "", /unmodelled: unresolved dynamic SQL at sql-oracle\.sql:1/);
+    assert.throws(
+      () => viewDefinitionOffsets("do $$ begin execute format('create view clara.%I as select 1', name); end $$;", "probe"),
+      /unmodelled: unresolved dynamic SQL/,
+    );
+    assert.throws(
+      () => viewDefinitionOffsets("do $$ begin execute v_sql; end $$; create view clara.probe as select 1;", "probe"),
+      /unmodelled: unresolved dynamic SQL/,
+      "a census answered exactly one while unresolved dynamic SQL was present",
+    );
+  });
+
+  it("quoted identifier text and identifier continuations are exact, not regex boundaries", () => {
+    assert.equal(viewDefinitionOffsets('select "create view clara.probe";', "probe").length, 0);
+    assert.equal(viewDefinitionOffsets('create view clara."probe-extra" as select 1;', "probe").length, 0);
+    assert.equal(viewDefinitionOffsets("create view clara.probeé as select 1;", "probe").length, 0);
+  });
+
   it("every real migration view is length-preserving", () => {
     for (const file of ["0002_foundation.sql", "0141_p4_tranche1_invite_rbac.sql"]) {
       const raw = migration(file);

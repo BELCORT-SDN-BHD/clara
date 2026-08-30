@@ -10,7 +10,12 @@ export type SqlViews = {
   readonly withoutComments: string;
   /** Comments and every literal payload blanked; executable DO bodies unwrapped. */
   readonly statements: string;
+  /** Named fail-closed diagnostics. A target census must reject every diagnostic
+   * that could synthesize that target instead of answering from incomplete text. */
+  readonly unresolvedDynamicSql: readonly string[];
 };
+
+type SqlPair = Pick<SqlViews, "withoutComments" | "statements">;
 
 const blank = (n: number): string => " ".repeat(Math.max(0, n));
 
@@ -43,6 +48,89 @@ function isIdentChar(ch: string | undefined): boolean {
   return ch !== undefined && /[A-Za-z0-9_$\u0080-\u{10ffff}]/u.test(ch);
 }
 
+type SqlToken = {
+  readonly kind: "word" | "quoted" | "symbol";
+  readonly value: string;
+  readonly start: number;
+  readonly end: number;
+};
+
+type LocalFunction = {
+  readonly identity: readonly string[];
+  readonly body: string;
+  readonly bodyStart: number;
+  exposed: boolean;
+};
+
+function sqlTokens(sql: string): SqlToken[] {
+  const tokens: SqlToken[] = [];
+  for (let i = 0; i < sql.length;) {
+    const point = String.fromCodePoint(sql.codePointAt(i) as number);
+    if (/\s/u.test(point)) {
+      i += point.length;
+      continue;
+    }
+    if (sql[i] === '"') {
+      const start = i;
+      i += 1;
+      let value = "";
+      while (i < sql.length) {
+        if (sql[i] === '"' && sql[i + 1] === '"') {
+          value += '"';
+          i += 2;
+        } else if (sql[i] === '"') {
+          i += 1;
+          break;
+        } else {
+          const next = String.fromCodePoint(sql.codePointAt(i) as number);
+          value += next;
+          i += next.length;
+        }
+      }
+      tokens.push({ kind: "quoted", value, start, end: i });
+      continue;
+    }
+    if (/[A-Za-z_\u0080-\u{10ffff}]/u.test(point)) {
+      const start = i;
+      let value = point;
+      i += point.length;
+      while (i < sql.length) {
+        const next = String.fromCodePoint(sql.codePointAt(i) as number);
+        if (!/[A-Za-z0-9_$\u0080-\u{10ffff}]/u.test(next)) break;
+        value += next;
+        i += next.length;
+      }
+      tokens.push({ kind: "word", value: value.toLocaleLowerCase("en-US"), start, end: i });
+      continue;
+    }
+    tokens.push({ kind: "symbol", value: point, start: i, end: i + point.length });
+    i += point.length;
+  }
+  return tokens;
+}
+
+const isKeyword = (token: SqlToken | undefined, keyword: string): boolean =>
+  token?.kind === "word" && token.value === keyword;
+
+function qualifiedIdentifier(tokens: readonly SqlToken[], start: number): { identity: string[]; next: number } | null {
+  const first = tokens[start];
+  if (first === undefined || (first.kind !== "word" && first.kind !== "quoted")) return null;
+  const identity = [first.value];
+  let next = start + 1;
+  if (tokens[next]?.kind === "symbol" && tokens[next]?.value === ".") {
+    const second = tokens[next + 1];
+    if (second === undefined || (second.kind !== "word" && second.kind !== "quoted")) return null;
+    identity.push(second.value);
+    next += 2;
+  }
+  return { identity, next };
+}
+
+function currentStatement(text: string): { text: string; start: number } {
+  const start = text.lastIndexOf(";") + 1;
+  return { text: text.slice(start), start };
+}
+
 /** The masked executable prefix must end in the DO grammar immediately before
  * the delimiter. Semicolons delimit statements; BEGIN before a nested DO is fine. */
 function attachedToDo(statements: string): boolean {
@@ -50,7 +138,42 @@ function attachedToDo(statements: string): boolean {
   return /(?:^|\s)do(?:\s+language\s+(?:"(?:[^"]|"")+"|[A-Za-z_\u0080-\u{10ffff}][A-Za-z0-9_$\u0080-\u{10ffff}]*))?\s*$/iu.test(current);
 }
 
-function lexExecutable(sql: string): SqlViews {
+function attachedExecuteStart(statements: string): number | null {
+  const current = currentStatement(statements);
+  const match = /\bexecute\s*$/iu.exec(current.text);
+  return match === null ? null : current.start + match.index;
+}
+
+function attachedFunctionIdentity(statements: string): readonly string[] | null {
+  const current = currentStatement(statements).text;
+  if (!/\bas\s*$/iu.test(current)) return null;
+  const tokens = sqlTokens(current);
+  let i = 0;
+  if (!isKeyword(tokens[i], "create")) return null;
+  i += 1;
+  if (isKeyword(tokens[i], "or") && isKeyword(tokens[i + 1], "replace")) i += 2;
+  if (!isKeyword(tokens[i], "function") && !isKeyword(tokens[i], "procedure")) return null;
+  const parsed = qualifiedIdentifier(tokens, i + 1);
+  return parsed?.identity ?? null;
+}
+
+function lineLocation(sql: string, offset: number, sourceName: string): string {
+  const before = sql.slice(0, Math.max(0, offset));
+  const line = before.split(/\r?\n/).length;
+  const lastNewline = Math.max(before.lastIndexOf("\n"), before.lastIndexOf("\r"));
+  return `${sourceName}:${line}:${offset - lastNewline}`;
+}
+
+type LexContext = {
+  readonly rootSql: string;
+  readonly sourceName: string;
+  readonly functions: LocalFunction[];
+  readonly resolvedExecutes: Set<number>;
+  readonly reportedExecutes: Set<number>;
+  readonly dynamicHazards: string[];
+};
+
+function lexExecutable(sql: string, baseOffset: number, context: LexContext): SqlPair {
   let withoutComments = "";
   let statements = "";
   const emit = (kept: string, masked: string): void => {
@@ -85,6 +208,21 @@ function lexExecutable(sql: string): SqlViews {
       continue;
     }
 
+    if (sql[i] === '"') {
+      const start = i;
+      i += 1;
+      while (i < sql.length) {
+        if (sql[i] === '"' && sql[i + 1] === '"') i += 2;
+        else if (sql[i] === '"') {
+          i += 1;
+          break;
+        } else i += 1;
+      }
+      const raw = sql.slice(start, i);
+      emit(raw, raw);
+      continue;
+    }
+
     const isEscapeString = (sql[i] === "E" || sql[i] === "e") && sql[i + 1] === "'"
       && !isIdentChar(previousCodePoint(sql, i));
     if (sql[i] === "'" || isEscapeString) {
@@ -111,7 +249,18 @@ function lexExecutable(sql: string): SqlViews {
       const raw = sql.slice(start, i);
       const lead = isEscapeString ? 2 : 1;
       const tail = closed ? "'" : "";
-      emit(raw, `${raw.slice(0, lead)}${blank(raw.length - lead - tail.length)}${tail}`);
+      const inner = raw.slice(lead, raw.length - tail.length);
+      const executeAt = attachedExecuteStart(statements);
+      const functionIdentity = attachedFunctionIdentity(statements);
+      if (attachedToDo(statements) || executeAt !== null) {
+        if (executeAt !== null) context.resolvedExecutes.add(baseOffset + executeAt);
+        const lexed = lexExecutable(inner, baseOffset + start + lead, context);
+        emit(`${raw.slice(0, lead)}${lexed.withoutComments}${tail}`, `${raw.slice(0, lead)}${lexed.statements}${tail}`);
+      } else if (functionIdentity !== null) {
+        context.functions.push({ identity: functionIdentity, body: inner, bodyStart: baseOffset + start + lead, exposed: false });
+        const masked = blankPreservingLines(inner);
+        emit(`${raw.slice(0, lead)}${masked}${tail}`, `${raw.slice(0, lead)}${masked}${tail}`);
+      } else emit(raw, `${raw.slice(0, lead)}${blankPreservingLines(inner)}${tail}`);
       continue;
     }
 
@@ -126,9 +275,22 @@ function lexExecutable(sql: string): SqlViews {
           continue;
         }
         const inner = sql.slice(i + tag.length, close);
-        if (attachedToDo(statements)) {
-          const lexed = lexExecutable(inner);
-          emit(`${tag}${lexed.withoutComments}${tag}`, `${tag}${lexed.statements}${tag}`);
+        const executeAt = attachedExecuteStart(statements);
+        const functionIdentity = attachedFunctionIdentity(statements);
+        if (attachedToDo(statements) || executeAt !== null) {
+          if (executeAt !== null) context.resolvedExecutes.add(baseOffset + executeAt);
+          const lexed = lexExecutable(inner, baseOffset + i + tag.length, context);
+          const delimiterMask = blank(tag.length);
+          emit(`${delimiterMask}${lexed.withoutComments}${delimiterMask}`, `${delimiterMask}${lexed.statements}${delimiterMask}`);
+        } else if (functionIdentity !== null) {
+          context.functions.push({
+            identity: functionIdentity,
+            body: inner,
+            bodyStart: baseOffset + i + tag.length,
+            exposed: false,
+          });
+          const masked = blankPreservingLines(inner);
+          emit(`${tag}${masked}${tag}`, `${tag}${masked}${tag}`);
         } else {
           const masked = blankPreservingLines(inner);
           emit(`${tag}${masked}${tag}`, `${tag}${masked}${tag}`);
@@ -141,23 +303,101 @@ function lexExecutable(sql: string): SqlViews {
     emit(sql[i] as string, sql[i] as string);
     i += 1;
   }
+  const tokens = sqlTokens(statements);
+  for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex += 1) {
+    const token = tokens[tokenIndex] as SqlToken;
+    const absolute = baseOffset + token.start;
+    if (isKeyword(token, "execute") && !context.resolvedExecutes.has(absolute)
+        && !context.reportedExecutes.has(absolute)) {
+      if (isKeyword(tokens[tokenIndex + 1], "function") || isKeyword(tokens[tokenIndex + 1], "procedure")
+          || isKeyword(tokens[tokenIndex + 1], "on")) continue;
+      context.reportedExecutes.add(absolute);
+      const statementEnd = sql.indexOf(";", token.end);
+      const statement = sql.slice(token.start, statementEnd < 0 ? sql.length : statementEnd).trim();
+      context.dynamicHazards.push(
+        `unmodelled: unresolved dynamic SQL at ${lineLocation(context.rootSql, absolute, context.sourceName)} — ${statement.slice(0, 200)}`,
+      );
+    }
+  }
   return { withoutComments, statements };
 }
 
+function invokedIdentities(statements: string): readonly string[][] {
+  const tokens = sqlTokens(statements);
+  const invoked: string[][] = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (!isKeyword(tokens[i], "select") && !isKeyword(tokens[i], "perform")) continue;
+    const parsed = qualifiedIdentifier(tokens, i + 1);
+    if (parsed !== null && tokens[parsed.next]?.kind === "symbol" && tokens[parsed.next]?.value === "(") {
+      invoked.push(parsed.identity);
+    }
+  }
+  return invoked;
+}
+
+function sameFunction(definition: readonly string[], invocation: readonly string[]): boolean {
+  if (definition.join(".") === invocation.join(".")) return true;
+  return invocation.length === 1 && definition.at(-1) === invocation[0];
+}
+
+function replaceRange(text: string, start: number, replacement: string): string {
+  return `${text.slice(0, start)}${replacement}${text.slice(start + replacement.length)}`;
+}
+
 /** `depth` is retained only for source compatibility with the old helper. Every
- * public call starts in executable SQL; recursive DO bodies use the same rule. */
-export function lexSql(sql: string, depth = 0): SqlViews {
+ * public call starts in executable SQL; recursive DO/function/EXECUTE bodies use
+ * the same fail-closed scanner. */
+export function lexSql(sql: string, depth = 0, sourceName = "sql-oracle.sql"): SqlViews {
   void depth;
-  return lexExecutable(sql);
+  const context: LexContext = {
+    rootSql: sql,
+    sourceName,
+    functions: [],
+    resolvedExecutes: new Set(),
+    reportedExecutes: new Set(),
+    dynamicHazards: [],
+  };
+  let views = lexExecutable(sql, 0, context);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const invocations = invokedIdentities(views.statements);
+    for (const definition of context.functions) {
+      if (definition.exposed || !invocations.some((identity) => sameFunction(definition.identity, identity))) continue;
+      const body = lexExecutable(definition.body, definition.bodyStart, context);
+      views = {
+        withoutComments: replaceRange(views.withoutComments, definition.bodyStart, body.withoutComments),
+        statements: replaceRange(views.statements, definition.bodyStart, body.statements),
+      };
+      definition.exposed = true;
+      changed = true;
+    }
+  }
+  return { ...views, unresolvedDynamicSql: context.dynamicHazards };
 }
 
 /** Every statement-level definition offset for one Clara view. Optional
  * RECURSIVE belongs before VIEW in PostgreSQL's CREATE VIEW grammar. */
-export function viewDefinitionOffsets(sql: string, view: string): number[] {
-  const escaped = view.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(
-    `create\\s+(?:or\\s+replace\\s+)?(?:recursive\\s+)?view\\s+"?clara"?\\s*\\.\\s*"?${escaped}\\b"?`,
-    "gi",
-  );
-  return [...lexSql(sql).statements.matchAll(re)].map((match) => match.index ?? -1);
+export function viewDefinitionOffsets(sql: string, view: string, sourceName = "sql-oracle.sql"): number[] {
+  const views = lexSql(sql, 0, sourceName);
+  const tokens = sqlTokens(views.statements);
+  const offsets: number[] = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (!isKeyword(tokens[i], "create")) continue;
+    let next = i + 1;
+    if (isKeyword(tokens[next], "or") && isKeyword(tokens[next + 1], "replace")) next += 2;
+    if (isKeyword(tokens[next], "recursive")) next += 1;
+    if (!isKeyword(tokens[next], "view")) continue;
+    const relation = qualifiedIdentifier(tokens, next + 1);
+    if (relation === null || relation.identity.length !== 2) continue;
+    if (relation.identity[0] === "clara" && relation.identity[1] === view.toLocaleLowerCase("en-US")) {
+      offsets.push(tokens[i]?.start ?? -1);
+    }
+  }
+  const unresolved = views.unresolvedDynamicSql.find((hazard) => {
+    const formatLiteral = /\bexecute\s+format\s*\(\s*E?'([^']*)'/iu.exec(hazard)?.[1];
+    return formatLiteral === undefined ? offsets.length > 0 : /\bcreate\b[\s\S]*\bview\b/iu.test(formatLiteral);
+  });
+  if (unresolved !== undefined) throw new Error(unresolved);
+  return offsets;
 }

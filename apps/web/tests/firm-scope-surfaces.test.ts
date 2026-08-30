@@ -75,7 +75,9 @@ const codeWithStrings = (p: string): string => stripComments(readSource(p));
  * handler, EVERY exported method, checked independently.
  */
 function executionRoots(p: string): { root: string; code: string; calls: ReturnType<typeof reachableCallsFrom>; proof: ReturnType<typeof spineGuardProof> }[] {
-  const code = stripComments(readSource(p), { blankStrings: true });
+  // Import module specifiers are binding identity. Keep strings for the AST;
+  // `reachableFrom()` blanks literal payloads in the regex-facing text it returns.
+  const code = stripComments(readSource(p));
   if (isRouteLeaf(p)) {
     return exportedHttpMethods(code).map((method) => ({
       root: method,
@@ -162,11 +164,14 @@ function classify(leaf: { file: string; url: string }): string {
 const OK_CLASSES = ["registered unscoped", "ancestor-covered", "direct entrance", "proven exemption"];
 
 const SPINE_IMPORT = /from\s+["']@\/lib\/require-firm-scope["']/;
+const isSpineCall = (call: ReturnType<typeof reachableCallsFrom>[number]): boolean =>
+  call.importedFrom === "@/lib/require-firm-scope"
+  && ["requireFirmScope", "firmScopeGuard", "resolveFirmScope"].includes(call.importedName ?? "");
 
 /** Imports the spine AND actually executes one of its entrances. */
 function callsSpine(p: string): boolean {
   return SPINE_IMPORT.test(codeWithStrings(p)) && executionRoots(p).some((root) =>
-    root.calls.some((call) => ["requireFirmScope", "firmScopeGuard", "resolveFirmScope"].includes(call.name)));
+    root.calls.some(isSpineCall));
 }
 
 describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () => {
@@ -307,7 +312,8 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
       const roots = executionRoots(entrance.path);
       assert.ok(roots.length > 0, `${entrance.path} exposes no execution root at all`);
       for (const { root, calls, proof } of roots) {
-        const guards = calls.filter((call) => call.name === "requireFirmScope" || call.name === "firmScopeGuard");
+        const guards = calls.filter((call) => isSpineCall(call)
+          && (call.importedName === "requireFirmScope" || call.importedName === "firmScopeGuard"));
         assert.ok(
           guards.length > 0,
           `${entrance.path}: ${root} ${proof.reason}; it has no locally inspectable/provable spine call`,
@@ -340,7 +346,8 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
     // apps/web/app block) see it.
     for (const entrance of SCOPE_ENTRANCES) {
       for (const { root, calls } of executionRoots(entrance.path)) {
-        const guards = calls.filter((call) => call.name === "requireFirmScope" || call.name === "firmScopeGuard");
+        const guards = calls.filter((call) => isSpineCall(call)
+          && (call.importedName === "requireFirmScope" || call.importedName === "firmScopeGuard"));
         assert.ok(
           guards.some((call) => call.awaited && call.argumentCount === 0),
           `${entrance.path}: ${root} calls the spine without awaiting it — the redirect throw floats and the surface renders anyway`,

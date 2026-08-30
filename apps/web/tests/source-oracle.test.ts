@@ -63,8 +63,35 @@ describe("the TypeScript source oracle parses the module's real export record", 
 });
 
 describe("the AST call graph and execution-dominance proof", () => {
-  const guardCalls = (src: string, root = defaultExportName(src) ?? "S") =>
-    reachableCallsFrom(src, root).filter((call) => call.name === "requireFirmScope" || call.name === "firmScopeGuard");
+  const withSpineImports = (src: string): string => src.includes('from "@/lib/require-firm-scope"')
+    ? src
+    : `import { requireFirmScope, firmScopeGuard } from "@/lib/require-firm-scope";\n${src}`;
+  const guardCalls = (src: string, root?: string) => {
+    const code = withSpineImports(src);
+    return reachableCallsFrom(code, root ?? defaultExportName(code) ?? "S").filter((call) => call.importedFrom === "@/lib/require-firm-scope"
+      && (call.importedName === "requireFirmScope" || call.importedName === "firmScopeGuard"));
+  };
+
+  it("PIN AST-8: syntactically broken input throws before an oracle answer", () => {
+    const broken = "export default async function S() { await requireFirmScope();";
+    assert.throws(() => spineGuardProof(broken, "S"), /unmodelled: syntactically invalid source at source-oracle\.tsx:1/);
+  });
+
+  it("PIN AST-9: canonical spelling does not prove guard identity", () => {
+    const localOnly = `async function requireFirmScope() { return null; }
+      export default async function S() { await requireFirmScope(); return null; }`;
+    const shadowed = `import { requireFirmScope as importedGuard } from "@/lib/require-firm-scope";
+      export default async function S() {
+        async function requireFirmScope() { return null; }
+        await requireFirmScope();
+        return importedGuard;
+      }`;
+    const aliased = `import { requireFirmScope as guard } from "@/lib/require-firm-scope";
+      export default async function S() { await guard(); return null; }`;
+    assert.equal(spineGuardProof(localOnly, "S").dominates, false);
+    assert.equal(spineGuardProof(shadowed, "S").dominates, false);
+    assert.equal(spineGuardProof(aliased, "S").dominates, true, "an aliased canonical import stopped being the guard");
+  });
 
   it("only INVOKED local functions enter the reachable graph", () => {
     const uninvokedArrow = `export default async function S() {
@@ -86,13 +113,33 @@ describe("the AST call graph and execution-dominance proof", () => {
     assert.equal(spineGuardProof(invoked, "S").dominates, false, "a closure invocation stood in for a direct dominating guard");
   });
 
+  it("PIN AST-10: dead nested bodies do not enter reachable text", () => {
+    const dead = `export default async function S() {
+      const guard = await firmScopeGuard();
+      function unused() { return guard.response; }
+      return proxy();
+    }`;
+    assert.doesNotMatch(reachableFrom(dead, "S") ?? "", /return\s+guard\.response/);
+
+    const callback = `export default async function S() { items.map(() => guard.response); return proxy(); }`;
+    const objectMethod = `export default async function S() { const x = { unused() { return guard.response; } }; return x; }`;
+    const nestedDirect = `function guarded() { return guard.response; }
+      export default async function S() { await Promise.all([guarded()]); return proxy(); }`;
+    const conditional = `function guarded() { return guard.response; }
+      export default async function S() { if (ready) guarded(); return proxy(); }`;
+    assert.doesNotMatch(reachableFrom(callback, "S") ?? "", /guard\.response/);
+    assert.doesNotMatch(reachableFrom(objectMethod, "S") ?? "", /guard\.response/);
+    assert.match(reachableFrom(nestedDirect, "S") ?? "", /guard\.response/);
+    assert.match(reachableFrom(conditional, "S") ?? "", /guard\.response/);
+  });
+
   it("PIN AST-4: regex literals are tokens, never braces or guard calls", () => {
     const swallowed = `export default async function S() {
       try { const r = /}/; await requireFirmScope(); } catch {}
       return null;
     }`;
     const decoy = `export default function S() { const r = /requireFirmScope[(]/; return r; }`;
-    assert.equal(spineGuardProof(swallowed, "S").dominates, false, "a /}/ ended the try before the swallowed guard");
+    assert.equal(spineGuardProof(withSpineImports(swallowed), "S").dominates, false, "a /}/ ended the try before the swallowed guard");
     assert.equal(tryBlockRanges(swallowed).length, 1);
     assert.deepEqual(guardCalls(decoy), [], "a regex guard decoy counted as a CallExpression");
     const open = swallowed.indexOf("{");
@@ -112,19 +159,42 @@ describe("the AST call graph and execution-dominance proof", () => {
       try { await requireFirmScope(); } finally { cleanup(); }
       return null;
     }`;
-    assert.equal(spineGuardProof(catchOnly, "S").dominates, false, "try success bypasses a catch-only guard");
-    assert.equal(spineGuardProof(swallowed, "S").dominates, false, "a catch swallowed redirect's throw");
-    assert.equal(spineGuardProof(finallyOnly, "S").dominates, true, "finally-only falsely rejected a safe guard");
+    assert.equal(spineGuardProof(withSpineImports(catchOnly), "S").dominates, false, "try success bypasses a catch-only guard");
+    assert.equal(spineGuardProof(withSpineImports(swallowed), "S").dominates, false, "a catch swallowed redirect's throw");
+    assert.equal(spineGuardProof(withSpineImports(finallyOnly), "S").dominates, true, "finally-only falsely rejected a safe guard");
     assert.deepEqual(tryBlockRanges(finallyOnly), [], "a finally-only try was labelled swallowing");
+  });
+
+  it("PIN AST-11: abrupt finally cannot swallow the guard throw", () => {
+    const returning = `import { requireFirmScope } from "@/lib/require-firm-scope";
+      export default async function S() {
+        try { await requireFirmScope(); } finally { return null; }
+      }`;
+    const throwing = `import { requireFirmScope } from "@/lib/require-firm-scope";
+      export default async function S() {
+        try { await requireFirmScope(); } finally { throw new Error("override"); }
+      }`;
+    assert.equal(spineGuardProof(returning, "S").dominates, false);
+    assert.equal(spineGuardProof(throwing, "S").dominates, false);
+  });
+
+  it("PIN AST-12: interpolated template payloads are blanked", () => {
+    const src = `export default function S() {
+      const decoy = \`return guard.response \${value}\`;
+      return proxy(decoy);
+    }`;
+    const reachable = reachableFrom(src, "S") ?? "";
+    assert.doesNotMatch(reachable, /return\s+guard\.response/);
+    assert.match(reachable, /\bvalue\b/, "the interpolation expression itself should remain executable text");
   });
 
   it("the guard must be the first top-level executable statement", () => {
     const direct = "export default async function S() { await requireFirmScope(); return null; }";
     const afterBranch = "export default async function S() { if (ready) render(); await requireFirmScope(); return null; }";
     const afterProxy = "export async function GET() { await proxy(); await firmScopeGuard(); }";
-    assert.equal(spineGuardProof(direct, "S").dominates, true);
-    assert.equal(spineGuardProof(afterBranch, "S").dominates, false);
-    assert.equal(spineGuardProof(afterProxy, "GET").dominates, false);
+    assert.equal(spineGuardProof(withSpineImports(direct), "S").dominates, true);
+    assert.equal(spineGuardProof(withSpineImports(afterBranch), "S").dominates, false);
+    assert.equal(spineGuardProof(withSpineImports(afterProxy), "GET").dominates, false);
   });
 
   it("a build-time export and a sibling HTTP method cannot cover the request root", () => {
@@ -161,9 +231,27 @@ describe("module-level state is scoped by the AST, not a whole-file regex", () =
   it("PIN AST-7: populated or mutated containers red unless explicitly immutable", () => {
     assert.match(moduleStateHazards("const cache = { firm: null };")[0] ?? "", /populated mutable object/);
     assert.match(moduleStateHazards("const cache = [null];")[0] ?? "", /populated mutable array/);
-    assert.match(moduleStateHazards("const cache = {}; function put(v: unknown) { cache.firm = v; }")[0] ?? "", /mutated/);
+    assert.match(moduleStateHazards("const cache = {}; function put(v: unknown) { cache.firm = v; }")[0] ?? "", /empty mutable object|mutated/);
     assert.deepEqual(moduleStateHazards("const table = { code: 403 } as const;"), []);
     assert.deepEqual(moduleStateHazards("const table = Object.freeze({ code: 403 });"), []);
+  });
+
+  it("PIN AST-14: every durable-store shape reds", () => {
+    const hazards = [
+      "const cache: Record<string, unknown> = {};",
+      "export const cache: unknown[] = [];",
+      "globalThis.cache = {};",
+      "globalThis[Symbol.for('cache')] ??= new Map();",
+      "const cache = new Proxy({}, {});",
+      "const Holder = class { static cache = {}; };",
+      "class Holder { static { warmCache(); } }",
+      "const cache = Object.freeze({ cache: new Map() });",
+    ];
+    for (const source of hazards) {
+      assert.ok(moduleStateHazards(source).length > 0, `${source} passed as request-local or immutable`);
+    }
+    assert.deepEqual(moduleStateHazards("const table = { code: 403, headers: ['content-type'] } as const;"), []);
+    assert.deepEqual(moduleStateHazards("const table = Object.freeze({ code: 403, ok: true });"), []);
   });
 
   it("function, arrow, and class-method locals remain request-local", () => {
@@ -190,5 +278,44 @@ describe("module-level state is scoped by the AST, not a whole-file regex", () =
   it("an allowlist spelling without a substantial reason is not evidence", () => {
     const hazards = moduleStateHazards("const TABLE = [{ code: 1 }];", new Map([["TABLE", "safe"]]));
     assert.match(hazards[0] ?? "", /reason is too thin/);
+  });
+
+  it("VACUITY CONTROL: the mutable-store check catches each shape it claims to", () => {
+    assert.match(moduleStateHazards("export let sessions = null;")[0] ?? "", /mutable module binding/);
+    assert.match(moduleStateHazards("const c: Record<string, unknown> = {};")[0] ?? "", /mutable object literal/);
+    assert.match(moduleStateHazards("const a: unknown[] = [];")[0] ?? "", /mutable array literal/);
+    assert.match(moduleStateHazards("export const c = {};")[0] ?? "", /mutable object literal/);
+    assert.match(moduleStateHazards("const c = Object.create(null);")[0] ?? "", /Object\.create/);
+    assert.deepEqual(moduleStateHazards('const T = { error: "no_firm_scope" } as const;'), []);
+    assert.deepEqual(moduleStateHazards('const L = ["content-type"] as const;'), []);
+  });
+});
+
+describe("unsupported export mechanisms fail closed", () => {
+  it("PIN AST-13: default GET is not a named method; unsupported export mechanisms are uninspectable", () => {
+    assert.deepEqual(exportedHttpMethods("export default async function GET() {}"), []);
+    for (const source of [
+      "async function GET() {} export = GET;",
+      "async function GET() {} module.exports = { GET };",
+      'async function GET() {} Object.defineProperty(exports, "GET", { value: GET });',
+    ]) {
+      assert.match(uninspectableExportReasons(source)[0] ?? "", /unmodelled: uninspectable export mechanism at source-oracle\.tsx:1/);
+    }
+  });
+
+  it("VACUITY CONTROL: the stripper keeps string literals, drops both comment forms", () => {
+    const source = 'const u = "https://a.example/x"; // LINE_GONE\n/* BLOCK_GONE */ const v = `t//t`;';
+    const stripped = stripComments(source);
+    assert.ok(stripped.includes("https://a.example/x") && stripped.includes("t//t"));
+    assert.ok(!stripped.includes("LINE_GONE") && !stripped.includes("BLOCK_GONE"));
+  });
+
+  it("VACUITY CONTROL: an ALIASED or `let`-bound method export is still a root", () => {
+    const aliased = "async function raw() {}\nexport { raw as DELETE };";
+    const letBound = "async function raw() {}\nexport let DELETE = raw;";
+    assert.deepEqual(exportedHttpMethods(aliased), ["DELETE"]);
+    assert.deepEqual(exportedHttpMethods(letBound), ["DELETE"]);
+    assert.equal(exportClauseAliases(aliased).get("DELETE"), "raw");
+    assert.equal(reachableFrom(letBound, "DELETE")?.includes("{}"), true);
   });
 });

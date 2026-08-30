@@ -21,8 +21,58 @@ const blankPreservingLines = (text: string): string => {
   return out;
 };
 
+const checkerCache = new WeakMap<ts.SourceFile, ts.TypeChecker>();
+
+function diagnosticLocation(file: ts.SourceFile, start = 0): string {
+  const position = file.getLineAndCharacterOfPosition(Math.max(0, start));
+  return `${file.fileName}:${position.line + 1}:${position.character + 1}`;
+}
+
 function sourceFile(code: string): ts.SourceFile {
-  return ts.createSourceFile("source-oracle.tsx", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const file = ts.createSourceFile("source-oracle.tsx", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const options: ts.CompilerOptions = {
+    target: ts.ScriptTarget.Latest,
+    jsx: ts.JsxEmit.Preserve,
+    noLib: true,
+    noResolve: true,
+  };
+  const host = ts.createCompilerHost(options, true);
+  host.getSourceFile = (fileName) => fileName === file.fileName ? file : undefined;
+  host.fileExists = (fileName) => fileName === file.fileName;
+  host.readFile = (fileName) => fileName === file.fileName ? code : undefined;
+  const program = ts.createProgram([file.fileName], options, host);
+  const parseDiagnostics = (file as ts.SourceFile & { readonly parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics ?? [];
+  const diagnostics = [...parseDiagnostics, ...program.getSyntacticDiagnostics(file)];
+  if (diagnostics.length > 0) {
+    const first = diagnostics[0] as ts.Diagnostic;
+    const start = first.start ?? 0;
+    const message = ts.flattenDiagnosticMessageText(first.messageText, " ");
+    throw new Error(`unmodelled: syntactically invalid source at ${diagnosticLocation(file, start)} — ${message}`);
+  }
+  checkerCache.set(file, program.getTypeChecker());
+  return file;
+}
+
+function checkerFor(file: ts.SourceFile): ts.TypeChecker {
+  const checker = checkerCache.get(file);
+  if (checker === undefined) throw new Error(`unmodelled: source binding unavailable at ${diagnosticLocation(file)}`);
+  return checker;
+}
+
+type ImportBinding = { readonly importedFrom: string; readonly importedName: string };
+
+function importBinding(identifier: ts.Identifier, file: ts.SourceFile): ImportBinding | null {
+  const symbol = checkerFor(file).getSymbolAtLocation(identifier);
+  for (const declaration of symbol?.declarations ?? []) {
+    if (!ts.isImportSpecifier(declaration)) continue;
+    const importDeclaration = declaration.parent.parent.parent;
+    if (!ts.isImportDeclaration(importDeclaration) || !ts.isStringLiteral(importDeclaration.moduleSpecifier)) continue;
+    return {
+      importedFrom: importDeclaration.moduleSpecifier.text,
+      importedName: declaration.propertyName?.text ?? declaration.name.text,
+    };
+  }
+  return null;
 }
 
 function literalMask(text: string): string {
@@ -65,6 +115,18 @@ export function stripComments(src: string, opts: StripOptions = {}): string {
       ) {
         const start = node.getStart(file);
         replacements.push({ start, end: node.end, text: literalMask(src.slice(start, node.end)) });
+        return;
+      }
+      if (ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) {
+        const start = node.getStart(file);
+        const raw = src.slice(start, node.end);
+        const lead = ts.isTemplateHead(node) ? "`" : "}";
+        const tail = ts.isTemplateTail(node) ? "`" : "${";
+        replacements.push({
+          start,
+          end: node.end,
+          text: `${lead}${blankPreservingLines(raw.slice(lead.length, raw.length - tail.length))}${tail}`,
+        });
         return;
       }
       ts.forEachChild(node, visit);
@@ -164,6 +226,42 @@ function collectDeclarations(code: string): { file: ts.SourceFile; declarations:
     declarations.push({ ...decl, ...localScope(decl.node, file) });
   };
 
+  const addClassStatics = (node: ts.ClassLikeDeclarationBase, className: string): void => {
+    let staticIndex = 0;
+    for (const member of node.members) {
+      if (ts.isPropertyDeclaration(member) && hasModifier(member, ts.SyntaxKind.StaticKeyword)) {
+        const memberName = member.name !== undefined && ts.isIdentifier(member.name) ? member.name.text : `<field-${staticIndex}>`;
+        add({
+          name: `${className}.${memberName}`,
+          kind: "static-field",
+          exported: false,
+          isDefault: false,
+          body: member.initializer?.getText(file) ?? "",
+          start: member.getStart(file),
+          end: member.end,
+          node: member,
+          callable: null,
+          alias: null,
+        });
+        staticIndex += 1;
+      } else if (ts.isClassStaticBlockDeclaration(member)) {
+        add({
+          name: `${className}.<static-${staticIndex}>`,
+          kind: "static-block",
+          exported: false,
+          isDefault: false,
+          body: member.body.getText(file),
+          start: member.getStart(file),
+          end: member.end,
+          node: member,
+          callable: null,
+          alias: null,
+        });
+        staticIndex += 1;
+      }
+    }
+  };
+
   const visit = (node: ts.Node): void => {
     if (ts.isFunctionDeclaration(node)) {
       const name = node.name?.text ?? `__default_function_${node.pos}`;
@@ -212,39 +310,11 @@ function collectDeclarations(code: string): { file: ts.SourceFile; declarations:
         callable: null,
         alias: null,
       });
-      let staticIndex = 0;
-      for (const member of node.members) {
-        if (ts.isPropertyDeclaration(member) && hasModifier(member, ts.SyntaxKind.StaticKeyword)) {
-          const memberName = member.name !== undefined && ts.isIdentifier(member.name) ? member.name.text : `<field-${staticIndex}>`;
-          add({
-            name: `${className}.${memberName}`,
-            kind: "static-field",
-            exported: false,
-            isDefault: false,
-            body: member.initializer?.getText(file) ?? "",
-            start: member.getStart(file),
-            end: member.end,
-            node: member,
-            callable: null,
-            alias: null,
-          });
-          staticIndex += 1;
-        } else if (ts.isClassStaticBlockDeclaration(member)) {
-          add({
-            name: `${className}.<static-${staticIndex}>`,
-            kind: "static-block",
-            exported: false,
-            isDefault: false,
-            body: member.body.getText(file),
-            start: member.getStart(file),
-            end: member.end,
-            node: member,
-            callable: null,
-            alias: null,
-          });
-          staticIndex += 1;
-        }
-      }
+      addClassStatics(node, className);
+    } else if (ts.isClassExpression(node)) {
+      const className = node.name?.text
+        ?? (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name) ? node.parent.name.text : `__class_expression_${node.pos}`);
+      addClassStatics(node, className);
     } else if (ts.isExportAssignment(node) && !node.isExportEquals && (ts.isArrowFunction(node.expression) || ts.isFunctionExpression(node.expression))) {
       const name = `__default_expression_${node.pos}`;
       add({
@@ -288,11 +358,20 @@ type ExportTarget = { readonly local: string | null; readonly reason: string | n
 function exportTargets(code: string): Map<string, ExportTarget> {
   const file = sourceFile(code);
   const targets = new Map<string, ExportTarget>();
+  const uninspectable = (node: ts.Node, shape: string): void => {
+    targets.set(`__unmodelled_${node.getStart(file)}`, {
+      local: null,
+      reason: `unmodelled: uninspectable export mechanism at ${diagnosticLocation(file, node.getStart(file))} — ${shape}`,
+    });
+  };
   for (const statement of file.statements) {
     if (ts.isExportDeclaration(statement)) {
       if (statement.isTypeOnly) continue;
       if (statement.exportClause === undefined) {
-        targets.set("*", { local: null, reason: "has no locally inspectable/provable spine call: export * re-export" });
+        targets.set("*", {
+          local: null,
+          reason: `unmodelled: export-star re-export at ${diagnosticLocation(file, statement.getStart(file))} — has no locally inspectable/provable spine call`,
+        });
         continue;
       }
       if (!ts.isNamedExports(statement.exportClause)) continue;
@@ -302,14 +381,38 @@ function exportTargets(code: string): Map<string, ExportTarget> {
         const local = element.propertyName?.text ?? element.name.text;
         targets.set(exported, statement.moduleSpecifier === undefined
           ? { local, reason: null }
-          : { local: null, reason: `has no locally inspectable/provable spine call: ${exported} is re-exported from another module` });
+          : {
+              local: null,
+              reason: `unmodelled: re-exported ${exported} at ${diagnosticLocation(file, statement.getStart(file))} — has no locally inspectable/provable spine call`,
+            });
       }
-    } else if (ts.isExportAssignment(statement) && !statement.isExportEquals) {
-      targets.set("default", ts.isIdentifier(statement.expression)
-        ? { local: statement.expression.text, reason: null }
-        : { local: `__default_expression_${statement.pos}`, reason: null });
+    } else if (ts.isExportAssignment(statement)) {
+      if (statement.isExportEquals) uninspectable(statement, "export =");
+      else {
+        targets.set("default", ts.isIdentifier(statement.expression)
+          ? { local: statement.expression.text, reason: null }
+          : { local: `__default_expression_${statement.pos}`, reason: null });
+      }
     }
   }
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+        && ts.isPropertyAccessExpression(node.left) && ts.isIdentifier(node.left.expression)
+        && node.left.expression.text === "module" && node.left.name.text === "exports") {
+      uninspectable(node, "module.exports assignment");
+      return;
+    }
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+        && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "Object"
+        && node.expression.name.text === "defineProperty" && node.arguments[0] !== undefined
+        && ts.isIdentifier(node.arguments[0]) && node.arguments[0].text === "exports") {
+      uninspectable(node, "Object.defineProperty(exports, …)");
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
   return targets;
 }
 
@@ -331,7 +434,7 @@ export function exportedHttpMethods(code: string): string[] {
   const methods = new Set<string>(HTTP_METHODS);
   const found: Array<{ name: string; start: number }> = [];
   for (const decl of collectDeclarations(code).declarations) {
-    if (decl.exported && methods.has(decl.name)) found.push({ name: decl.name, start: decl.start });
+    if (decl.exported && !decl.isDefault && methods.has(decl.name)) found.push({ name: decl.name, start: decl.start });
   }
   const targets = exportTargets(code);
   for (const [name] of targets) if (methods.has(name)) found.push({ name, start: Number.MAX_SAFE_INTEGER });
@@ -365,12 +468,26 @@ function resolveRoot(code: string, rootName: string): { file: ts.SourceFile; dec
     seen.add(root.name);
     root = resolveName(collected.declarations, root.alias, root.start);
   }
-  if (root?.callable === null) return { ...collected, root: null, reason: "has no locally inspectable/provable spine call" };
-  return { ...collected, root, reason: root === null ? "has no locally inspectable/provable spine call" : null };
+  if (root?.callable === null) {
+    return {
+      ...collected,
+      root: null,
+      reason: `unmodelled: non-callable execution root at ${diagnosticLocation(collected.file, root.start)} — has no locally inspectable/provable spine call`,
+    };
+  }
+  return {
+    ...collected,
+    root,
+    reason: root === null
+      ? `unmodelled: missing execution root at ${diagnosticLocation(collected.file)} — has no locally inspectable/provable spine call`
+      : null,
+  };
 }
 
 export type ReachableCall = {
   readonly name: string;
+  readonly importedFrom: string | null;
+  readonly importedName: string | null;
   readonly start: number;
   readonly end: number;
   readonly awaited: boolean;
@@ -389,6 +506,24 @@ function callName(call: ts.CallExpression): string {
   return call.expression.getText();
 }
 
+function callableTextWithoutNestedBodies(body: ts.ConciseBody, file: ts.SourceFile): string {
+  const start = body.getStart(file);
+  const raw = body.getText(file);
+  const chars = raw.split("");
+  const mask = (node: ts.Node): void => {
+    if (node !== body && (ts.isFunctionLike(node) || ts.isClassLike(node))) {
+      const from = Math.max(0, node.getStart(file) - start);
+      const to = Math.min(chars.length, node.end - start);
+      const blanked = blankPreservingLines(raw.slice(from, to));
+      for (let i = from; i < to; i += 1) chars[i] = blanked[i - from] ?? " ";
+      return;
+    }
+    ts.forEachChild(node, mask);
+  };
+  mask(body);
+  return chars.join("");
+}
+
 function reachableGraph(code: string, rootName: string): { texts: string[]; calls: ReachableCall[]; reason: string | null } {
   const resolved = resolveRoot(code, rootName);
   if (resolved.root === null) return { texts: [], calls: [], reason: resolved.reason };
@@ -405,19 +540,22 @@ function reachableGraph(code: string, rootName: string): { texts: string[]; call
     if (callable === null || callable.body === undefined) continue;
     const callableBody = callable.body;
     reached.add(key);
-    texts.push(callableBody.getText(resolved.file));
+    texts.push(callableTextWithoutNestedBodies(callableBody, resolved.file));
 
     const visit = (node: ts.Node): void => {
       if (node !== callableBody && (ts.isFunctionLike(node) || ts.isClassLike(node))) return;
       if (ts.isCallExpression(node)) {
+        const identifier = calleeIdentifier(node.expression);
+        const binding = identifier === null ? null : importBinding(identifier, resolved.file);
         calls.push({
           name: callName(node),
+          importedFrom: binding?.importedFrom ?? null,
+          importedName: binding?.importedName ?? null,
           start: node.getStart(resolved.file),
           end: node.end,
           awaited: ts.isAwaitExpression(node.parent),
           argumentCount: node.arguments.length,
         });
-        const identifier = calleeIdentifier(node.expression);
         if (identifier !== null) {
           let target = resolveName(resolved.declarations, identifier.text, node.getStart(resolved.file));
           const aliases = new Set<string>();
@@ -453,7 +591,10 @@ export type SpineGuardProof = {
   readonly reason: string;
 };
 
-function awaitedBareSpineCall(statement: ts.Statement): "requireFirmScope" | "firmScopeGuard" | null {
+function awaitedBareSpineCall(
+  statement: ts.Statement,
+  file: ts.SourceFile,
+): "requireFirmScope" | "firmScopeGuard" | null {
   let expression: ts.Expression | undefined;
   if (ts.isExpressionStatement(statement)) expression = statement.expression;
   else if (ts.isVariableStatement(statement) && statement.declarationList.declarations.length === 1) {
@@ -462,9 +603,26 @@ function awaitedBareSpineCall(statement: ts.Statement): "requireFirmScope" | "fi
   if (expression === undefined || !ts.isAwaitExpression(expression)) return null;
   const call = expression.expression;
   if (!ts.isCallExpression(call) || call.arguments.length !== 0 || !ts.isIdentifier(call.expression)) return null;
-  return call.expression.text === "requireFirmScope" || call.expression.text === "firmScopeGuard"
-    ? call.expression.text
+  const binding = importBinding(call.expression, file);
+  return binding?.importedFrom === "@/lib/require-firm-scope"
+      && (binding.importedName === "requireFirmScope" || binding.importedName === "firmScopeGuard")
+    ? binding.importedName
     : null;
+}
+
+function hasAbruptCompletion(block: ts.Block): boolean {
+  let abrupt = false;
+  const visit = (node: ts.Node): void => {
+    if (node !== block && (ts.isFunctionLike(node) || ts.isClassLike(node))) return;
+    if (ts.isReturnStatement(node) || ts.isThrowStatement(node)
+        || ts.isBreakStatement(node) || ts.isContinueStatement(node)) {
+      abrupt = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(block);
+  return abrupt;
 }
 
 /** Prove the guard executes before every branch, closure call, proxy, or render.
@@ -481,11 +639,21 @@ export function spineGuardProof(code: string, rootName: string): SpineGuardProof
     return { inspectable: true, call: null, dominates: false, reason: "the root has no top-level guard statement" };
   }
   const first = body.statements[0] as ts.Statement;
-  const direct = awaitedBareSpineCall(first);
+  const direct = awaitedBareSpineCall(first, resolved.file);
   if (direct !== null) return { inspectable: true, call: direct, dominates: true, reason: "proved" };
   if (ts.isTryStatement(first) && first.catchClause === undefined && first.tryBlock.statements.length > 0) {
-    const inTry = awaitedBareSpineCall(first.tryBlock.statements[0] as ts.Statement);
-    if (inTry !== null) return { inspectable: true, call: inTry, dominates: true, reason: "proved through a non-swallowing try/finally" };
+    const inTry = awaitedBareSpineCall(first.tryBlock.statements[0] as ts.Statement, resolved.file);
+    if (inTry !== null && (first.finallyBlock === undefined || !hasAbruptCompletion(first.finallyBlock))) {
+      return { inspectable: true, call: inTry, dominates: true, reason: "proved through a non-swallowing try/finally" };
+    }
+    if (inTry !== null) {
+      return {
+        inspectable: true,
+        call: inTry,
+        dominates: false,
+        reason: `unmodelled: abrupt finally can override the guard denial at ${diagnosticLocation(resolved.file, first.finallyBlock?.getStart(resolved.file) ?? first.getStart(resolved.file))}`,
+      };
+    }
   }
   return {
     inspectable: true,
@@ -512,13 +680,38 @@ export function tryBlockRanges(code: string): [number, number][] {
 
 const MUTATING_METHODS = new Set(["add", "clear", "copyWithin", "delete", "fill", "pop", "push", "reverse", "set", "shift", "sort", "splice", "unshift"]);
 
+function literalIsDeeplyImmutable(expression: ts.Expression): boolean {
+  let value = expression;
+  while (ts.isParenthesizedExpression(value) || ts.isSatisfiesExpression(value)) value = value.expression;
+  if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)
+      || ts.isNumericLiteral(value) || ts.isBigIntLiteral(value)
+      || value.kind === ts.SyntaxKind.TrueKeyword || value.kind === ts.SyntaxKind.FalseKeyword
+      || value.kind === ts.SyntaxKind.NullKeyword) return true;
+  if (ts.isPrefixUnaryExpression(value)
+      && (value.operator === ts.SyntaxKind.PlusToken || value.operator === ts.SyntaxKind.MinusToken)
+      && ts.isNumericLiteral(value.operand)) return true;
+  if (ts.isArrayLiteralExpression(value)) {
+    return value.elements.every((element) => !ts.isSpreadElement(element) && literalIsDeeplyImmutable(element as ts.Expression));
+  }
+  if (ts.isObjectLiteralExpression(value)) {
+    return value.properties.every((property) => ts.isPropertyAssignment(property)
+      && !ts.isComputedPropertyName(property.name)
+      && literalIsDeeplyImmutable(property.initializer));
+  }
+  return false;
+}
+
 function immutableInitializer(initializer: ts.Expression, file: ts.SourceFile): boolean {
-  if (/\bas\s+const\s*$/.test(initializer.getText(file))) return true;
+  if (ts.isAsExpression(initializer) && /\bas\s+const\s*$/.test(initializer.getText(file))) {
+    return literalIsDeeplyImmutable(initializer.expression);
+  }
   return ts.isCallExpression(initializer)
     && ts.isPropertyAccessExpression(initializer.expression)
     && ts.isIdentifier(initializer.expression.expression)
     && initializer.expression.expression.text === "Object"
-    && initializer.expression.name.text === "freeze";
+    && initializer.expression.name.text === "freeze"
+    && initializer.arguments.length === 1
+    && literalIsDeeplyImmutable(initializer.arguments[0] as ts.Expression);
 }
 
 function mutableInitializer(initializer: ts.Expression, file: ts.SourceFile): string | null {
@@ -528,11 +721,21 @@ function mutableInitializer(initializer: ts.Expression, file: ts.SourceFile): st
   if (ts.isNewExpression(value) && ts.isIdentifier(value.expression) && ["Map", "Set", "WeakMap", "WeakSet", "Array"].includes(value.expression.text)) {
     return `constructs mutable ${value.expression.text}`;
   }
+  if (ts.isNewExpression(value) && ts.isIdentifier(value.expression) && value.expression.text === "Proxy") {
+    return "constructs mutable Proxy";
+  }
   if (ts.isCallExpression(value) && ts.isPropertyAccessExpression(value.expression)
       && ts.isIdentifier(value.expression.expression) && value.expression.expression.text === "Object"
       && value.expression.name.text === "create") return "constructs a mutable Object.create container";
-  if (ts.isObjectLiteralExpression(value) && value.properties.length > 0) return "holds a populated mutable object literal";
-  if (ts.isArrayLiteralExpression(value) && value.elements.length > 0) return "holds a populated mutable array literal";
+  if (ts.isCallExpression(value) && ts.isPropertyAccessExpression(value.expression)
+      && ts.isIdentifier(value.expression.expression) && value.expression.expression.text === "Object"
+      && value.expression.name.text === "freeze") return "uses shallow Object.freeze over an unproved nested value";
+  if (ts.isObjectLiteralExpression(value)) {
+    return value.properties.length > 0 ? "holds a populated mutable object literal" : "holds an empty mutable object literal";
+  }
+  if (ts.isArrayLiteralExpression(value)) {
+    return value.elements.length > 0 ? "holds a populated mutable array literal" : "holds an empty mutable array literal";
+  }
   if (value.kind === ts.SyntaxKind.RegularExpressionLiteral) {
     const flags = value.getText(file).slice(value.getText(file).lastIndexOf("/") + 1);
     if (flags.includes("g") || flags.includes("y")) return `holds a stateful /${flags} regex`;
@@ -577,6 +780,23 @@ export function moduleStateHazards(code: string, allowlist: ReadonlyMap<string, 
   const collected = collectDeclarations(code);
   const mutated = mutatedNames(collected.file);
   const hazards: string[] = [];
+  const at = (node: ts.Node): string => diagnosticLocation(collected.file, node.getStart(collected.file));
+  const globalRoot = (expression: ts.Expression): boolean => {
+    let value = expression;
+    while (ts.isParenthesizedExpression(value) || ts.isAsExpression(value) || ts.isSatisfiesExpression(value)) value = value.expression;
+    if (ts.isIdentifier(value)) return value.text === "globalThis";
+    if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) return globalRoot(value.expression);
+    return false;
+  };
+  const visitGlobals = (node: ts.Node): void => {
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+        && globalRoot(node.left as ts.Expression)) {
+      hazards.push(`globalThis: durable global store at ${at(node)}`);
+    }
+    ts.forEachChild(node, visitGlobals);
+  };
+  visitGlobals(collected.file);
   const moduleDecls = collected.declarations.filter((decl) => decl.scopeStart === 0 && decl.scopeEnd === collected.file.end);
   for (const decl of moduleDecls) {
     const reason = allowlist.get(decl.name);
@@ -584,14 +804,23 @@ export function moduleStateHazards(code: string, allowlist: ReadonlyMap<string, 
       if (reason.trim().length < 40) hazards.push(`${decl.name}: allowlist reason is too thin to prove safety`);
       continue;
     }
-    if (decl.kind === "let" || decl.kind === "var") hazards.push(`${decl.kind} ${decl.name}: mutable module binding`);
-    else if (decl.kind === "static-field") hazards.push(`${decl.name}: class static field outlives requests`);
+    if (decl.kind === "let" || decl.kind === "var") hazards.push(`${decl.kind} ${decl.name}: mutable module binding at ${at(decl.node)}`);
+    else if (decl.kind === "static-field") hazards.push(`${decl.name}: class static field outlives requests at ${at(decl.node)}`);
     else if (decl.kind === "static-block") {
-      if (/\b(?:this|[A-Za-z_$][\w$]*)\s*(?:\.|\[)/.test(decl.body) || /=/.test(decl.body)) hazards.push(`${decl.name}: class static block writes module state`);
+      let hasCall = false;
+      const findCall = (node: ts.Node): void => {
+        if (ts.isCallExpression(node)) hasCall = true;
+        ts.forEachChild(node, findCall);
+      };
+      findCall(decl.node);
+      if (hasCall) hazards.push(`${decl.name}: unmodelled call in class static block at ${at(decl.node)}`);
+      else if (/\b(?:this|[A-Za-z_$][\w$]*)\s*(?:\.|\[)/.test(decl.body) || /=/.test(decl.body)) {
+        hazards.push(`${decl.name}: class static block writes module state at ${at(decl.node)}`);
+      }
     } else if (decl.kind === "const" && ts.isVariableDeclaration(decl.node) && decl.node.initializer !== undefined) {
       const hazard = mutableInitializer(decl.node.initializer, collected.file);
-      if (hazard !== null) hazards.push(`${decl.name}: ${hazard}`);
-      else if (mutated.has(decl.name)) hazards.push(`${decl.name}: module container is mutated after declaration`);
+      if (hazard !== null) hazards.push(`${decl.name}: ${hazard} at ${at(decl.node)}`);
+      else if (mutated.has(decl.name)) hazards.push(`${decl.name}: module container is mutated after declaration at ${at(decl.node)}`);
     }
   }
   return hazards;
@@ -640,19 +869,69 @@ export type RuntimeRouteRegistration = {
 
 const ROUTE_METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options"]);
 
-function stringArgument(expression: ts.Expression | undefined, context: string): string {
+function stringArgument(expression: ts.Expression | undefined, context: string, file: ts.SourceFile): string {
   if (expression !== undefined && (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression))) return expression.text;
-  throw new Error(`${context}: unrecognised route registration shape — method/path must be a static string`);
+  throw new Error(
+    `unmodelled: dynamic method/path in ${context} at ${diagnosticLocation(file, expression?.getStart(file) ?? 0)}`,
+  );
 }
 
-function containsCall(nodes: readonly ts.Node[], wanted: string): boolean {
+const CAPABILITY_IMPORT = "../lib/intake.mjs";
+
+function flattenHandlers(nodes: readonly ts.Expression[], file: ts.SourceFile): ts.Expression[] {
+  const handlers: ts.Expression[] = [];
+  for (const node of nodes) {
+    if (ts.isArrayLiteralExpression(node)) {
+      for (const element of node.elements) {
+        if (ts.isSpreadElement(element)) {
+          throw new Error(`unmodelled: spread handler array at ${diagnosticLocation(file, element.getStart(file))}`);
+        }
+        handlers.push(...flattenHandlers([element as ts.Expression], file));
+      }
+    } else if (ts.isSpreadElement(node)) {
+      throw new Error(`unmodelled: spread handler array at ${diagnosticLocation(file, node.getStart(file))}`);
+    } else handlers.push(node);
+  }
+  return handlers;
+}
+
+function containsImportedBearer(handler: ts.Expression, file: ts.SourceFile): boolean {
+  if (!ts.isArrowFunction(handler) && !ts.isFunctionExpression(handler)) return false;
   let found = false;
   const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === wanted) found = true;
+    if (node !== handler && (ts.isFunctionLike(node) || ts.isClassLike(node))) return;
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
+      const binding = importBinding(node.expression, file);
+      if (binding?.importedFrom === CAPABILITY_IMPORT && binding.importedName === "bearerCapability") found = true;
+    }
     ts.forEachChild(node, visit);
   };
-  for (const node of nodes) visit(node);
+  visit(handler);
   return found;
+}
+
+function recognisedNoOp(handler: ts.Expression): boolean {
+  if (!ts.isArrowFunction(handler) && !ts.isFunctionExpression(handler)) return false;
+  const next = handler.parameters.at(-1)?.name;
+  if (next === undefined || !ts.isIdentifier(next)) return false;
+  const isNext = (expression: ts.Expression): boolean => ts.isCallExpression(expression)
+    && expression.arguments.length === 0 && ts.isIdentifier(expression.expression)
+    && expression.expression.text === next.text;
+  if (!ts.isBlock(handler.body)) return isNext(handler.body);
+  if (handler.body.statements.length !== 1) return false;
+  const statement = handler.body.statements[0] as ts.Statement;
+  return (ts.isExpressionStatement(statement) && isNext(statement.expression))
+    || (ts.isReturnStatement(statement) && statement.expression !== undefined && isNext(statement.expression));
+}
+
+function capabilityProof(handlersRaw: readonly ts.Expression[], file: ts.SourceFile, site: ts.CallExpression): boolean {
+  const handlers = flattenHandlers(handlersRaw, file);
+  const capabilityAt = handlers.findIndex((handler) => containsImportedBearer(handler, file));
+  if (capabilityAt < 0) return false;
+  if (handlers.slice(0, capabilityAt).some((handler) => !recognisedNoOp(handler))) {
+    throw new Error(`unmodelled: handler before capability at ${diagnosticLocation(file, site.getStart(file))}`);
+  }
+  return true;
 }
 
 function routeCall(method: string, path: string): string {
@@ -666,8 +945,33 @@ function routeCall(method: string, path: string): string {
 export function runtimeRouteRegistrations(code: string): RuntimeRouteRegistration[] {
   const file = sourceFile(code);
   const routes: RuntimeRouteRegistration[] = [];
+  const unmodelledRegistration = (node: ts.CallExpression, shape: string): never => {
+    throw new Error(`unmodelled: unmodelled registration ${shape} at ${diagnosticLocation(file, node.getStart(file))}`);
+  };
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
+      if (ts.isPropertyAccessExpression(node.expression)) {
+        const receiver = node.expression.expression;
+        const method = node.expression.name.text.toLowerCase();
+        const literalPath = node.arguments[0] !== undefined
+          && (ts.isStringLiteral(node.arguments[0]) || ts.isNoSubstitutionTemplateLiteral(node.arguments[0]));
+        if (method === "route" && ts.isIdentifier(receiver) && receiver.text === "router") {
+          unmodelledRegistration(node, "router.route(…)");
+        }
+        if (ROUTE_METHODS.has(method) && !(ts.isIdentifier(receiver) && receiver.text === "router")
+            && (ts.isCallExpression(receiver) || literalPath)) {
+          unmodelledRegistration(node, `${receiver.getText(file)}.${method}(…)`);
+        }
+        if (method === "use" && literalPath && node.arguments.slice(1).some((argument) => ts.isIdentifier(argument))) {
+          unmodelledRegistration(node, `${receiver.getText(file)}.use(…, child)`);
+        }
+      } else if (ts.isIdentifier(node.expression) && node.arguments[0] !== undefined
+          && ts.isIdentifier(node.arguments[0]) && node.arguments[0].text !== "router"
+          && node.arguments[1] !== undefined && ts.isStringLiteralLike(node.arguments[1])
+          && ROUTE_METHODS.has(node.arguments[1].text.toLowerCase())
+          && node.arguments[2] !== undefined && ts.isStringLiteralLike(node.arguments[2])) {
+        unmodelledRegistration(node, `${node.expression.text}(${node.arguments[0].text}, …)`);
+      }
       if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression)
           && node.expression.expression.text === "router") {
         const method = node.expression.name.text.toLowerCase();
@@ -675,27 +979,27 @@ export function runtimeRouteRegistrations(code: string): RuntimeRouteRegistratio
           ts.forEachChild(node, visit);
           return;
         }
-        if (!ROUTE_METHODS.has(method)) throw new Error(`router.${method}: unrecognised route registration shape`);
-        const path = stringArgument(node.arguments[0], `router.${method}`);
-        if (node.arguments.length < 2) throw new Error(`router.${method}("${path}"): unrecognised route registration shape — no handler`);
+        if (!ROUTE_METHODS.has(method)) unmodelledRegistration(node, `router.${method}(…)`);
+        const path = stringArgument(node.arguments[0], `router.${method}`, file);
+        if (node.arguments.length < 2) unmodelledRegistration(node, `router.${method}("${path}") without a handler`);
         routes.push({
           call: routeCall(method, path),
-          capability: containsCall(node.arguments.slice(1), "bearerCapability"),
+          capability: capabilityProof(node.arguments.slice(1), file, node),
           shape: "router-method",
         });
       } else {
         const routerArg = node.arguments.find((argument) => ts.isIdentifier(argument) && argument.text === "router");
         if (routerArg !== undefined) {
           if (!ts.isIdentifier(node.expression) || node.expression.text !== "register" || node.arguments[0] !== routerArg) {
-            throw new Error(`${node.expression.getText(file)}(router, ...): unrecognised route registration shape`);
+            unmodelledRegistration(node, `${node.expression.getText(file)}(router, …)`);
           }
-          const method = stringArgument(node.arguments[1], "register(router, method)").toLowerCase();
-          if (!ROUTE_METHODS.has(method)) throw new Error(`register(router, "${method}"): unrecognised route registration method`);
-          const path = stringArgument(node.arguments[2], `register(router, "${method}", path)`);
-          if (node.arguments.length < 4) throw new Error(`register(router, "${method}", "${path}"): unrecognised route registration shape — no handler`);
+          const method = stringArgument(node.arguments[1], "register(router, method)", file).toLowerCase();
+          if (!ROUTE_METHODS.has(method)) unmodelledRegistration(node, `register(router, "${method}", …)`);
+          const path = stringArgument(node.arguments[2], `register(router, "${method}", path)`, file);
+          if (node.arguments.length < 4) unmodelledRegistration(node, `register(router, "${method}", "${path}") without a handler`);
           routes.push({
             call: routeCall(method, path),
-            capability: containsCall(node.arguments.slice(3), "bearerCapability"),
+            capability: capabilityProof(node.arguments.slice(3), file, node),
             shape: "register-helper",
           });
         }

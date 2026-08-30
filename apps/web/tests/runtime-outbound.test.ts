@@ -190,7 +190,8 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
   });
 
   it("PIN NEW-1a: a helper-added route is censused, never invisible", () => {
-    const helper = `register(
+    const helper = `import { bearerCapability } from "../lib/intake.mjs";
+    register(
       router,
       "put",
       "/api/intake/documents/:id/retry",
@@ -202,7 +203,8 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
   });
 
   it("PIN NEW-1b: the word bearerCapability in a string is not a capability call", () => {
-    const decoy = `router.put("/api/intake/documents/:id/bytes", (_req, res) => {
+    const decoy = `import { bearerCapability } from "../lib/intake.mjs";
+    router.put("/api/intake/documents/:id/bytes", (_req, res) => {
       const log = "bearerCapability(req.header('authorization'))";
       res.json({ log });
     });`;
@@ -212,7 +214,8 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
   });
 
   it("PIN NEW-1c: multiline direct calls remain visible", () => {
-    const multiline = `router
+    const multiline = `import { bearerCapability } from "../lib/intake.mjs";
+    router
       .post(
         "/api/intake/documents/:id/finalize",
         async (req, res) => { bearerCapability(req.header("authorization")); res.end(); },
@@ -223,7 +226,8 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
   });
 
   it("PIN NEW-1d: a trailing slash remains a discriminating extra segment", () => {
-    const trailing = `router.put("/api/intake/documents/:id/bytes/", () => bearerCapability("x"));`;
+    const trailing = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/documents/:id/bytes/", () => bearerCapability("x"));`;
     assert.deepEqual(runtimeRoutesFrom(trailing), [
       { call: "PUT intake/documents/*/bytes/", capability: true },
     ]);
@@ -232,8 +236,51 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
   it("PIN NEW-1e: an unknown helper registration fails closed by helper name", () => {
     assert.throws(
       () => runtimeRoutesFrom(`addRoute(router, "put", "/api/intake/hidden", () => bearerCapability("x"));`),
-      /addRoute\(router, .*unrecognised route registration shape/,
+      /unmodelled: unmodelled registration addRoute\(router, .* at source-oracle\.tsx:1/,
     );
+  });
+
+  it("PIN NEW-1f: shadowed or dead bearer call is not capability evidence", () => {
+    const shadowed = `import { bearerCapability as importedBearer } from "../lib/intake.mjs";
+      router.put("/api/intake/documents/:id/bytes", (_req, res) => {
+        function bearerCapability() { return "fake"; }
+        bearerCapability();
+        res.end(importedBearer);
+      });`;
+    const dead = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/documents/:id/bytes", (_req, res) => {
+        function unused() { bearerCapability("x"); }
+        res.end();
+      });`;
+    assert.deepEqual(runtimeRoutesFrom(shadowed), [{ call: "PUT intake/documents/*/bytes", capability: false }]);
+    assert.deepEqual(runtimeRoutesFrom(dead), [{ call: "PUT intake/documents/*/bytes", capability: false }]);
+  });
+
+  it("PIN NEW-1g: earlier handler cannot act before capability", () => {
+    const actingFirst = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/documents/:id/bytes",
+        (_req, res, next) => { res.setHeader("x-before", "1"); next(); },
+        (req, res) => { bearerCapability(req.header("authorization")); res.end(); },
+      );`;
+    assert.throws(() => runtimeRoutesFrom(actingFirst), /unmodelled: handler before capability at source-oracle\.tsx:2/);
+
+    const noOpFirst = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/documents/:id/bytes",
+        (_req, _res, next) => next(),
+        (req, res) => { bearerCapability(req.header("authorization")); res.end(); },
+      );`;
+    assert.deepEqual(runtimeRoutesFrom(noOpFirst), [{ call: "PUT intake/documents/*/bytes", capability: true }]);
+  });
+
+  it("PIN NEW-1h: mounted child router and hidden helper fail closed", () => {
+    for (const source of [
+      'child.put("/x", handler);',
+      'app.use("/api", child);',
+      'router.route("/x").put(handler);',
+      'register(child, "put", "/api/x", handler);',
+    ]) {
+      assert.throws(() => runtimeRoutesFrom(source), /unmodelled: unmodelled registration .* at source-oracle\.tsx:1/);
+    }
   });
 });
 
