@@ -1985,7 +1985,7 @@
       "lastFinalizedLabel": "Last finalized",
       "lastAckLabel": "Last acknowledged",
       "never": "Never",
-      "acknowledgeGap": "Acknowledging a finalized sweep run needs its run id, which only arrives via Clara's own sweep-receipt message in a thread — not built yet here. Ruled: it ships as a rich card on that message in the P6 wire bump, not a separate control on this panel."
+      "acknowledgeHome": "Acknowledging a finalized sweep run needs its run id, which only arrives with Clara's own sweep-receipt message in a thread. Open that message to see what the sweep did and acknowledge the run there."
     },
     "agentTasks": {
       "heading": "Running agent tasks",

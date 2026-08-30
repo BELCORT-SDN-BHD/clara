@@ -55,16 +55,20 @@ export function resolveLintFinding(
 
 /** `clara.acknowledge_sweep_run(p_run, p_op_key)` — bookkeeper+, human
  *  identity only (an agent/wake credential refuses CLR03). CLR29
- *  "not_finalized" if the run hasn't finalized yet, CLR11 if not found. Built
- *  and wire-tested against the live verb (Q9 rung 1's "no affordance without
- *  a named verb" is about the UI, not this module) — NOT wired to a control
- *  on the queue-altitude sweep panel: no BROWSABLE list of sweep run ids
- *  exists there (types.ts's own SweepStatus header). A run id does reach a
- *  human through the Clara thread's own `sweep_receipt` part; owner-ruled
- *  (裁-20, docs/plan/active/mohe-grill-rulings-2026-08-28.md:268-272) that
- *  its rich-card upgrade calling THIS door lands inside the P6 wire bump,
- *  not this train — components/firm/sweep-status-panel.tsx names that ruled
- *  home rather than fabricating a control here. */
+ *  "not_finalized" if the run hasn't finalized yet, CLR11 if not found.
+ *
+ *  WIRED, SINCE P6-2 (裁-20 discharged). Its ONE caller is
+ *  components/parts/SweepReceiptCard.tsx — the rich `sweep_receipt` card, which
+ *  hydrates `get_sweep_run` on mount and offers this door on a FINALIZED run.
+ *  This comment previously recorded the door as deliberately unwired, and that
+ *  is no longer true.
+ *
+ *  IT IS STILL NOT ON THE QUEUE-ALTITUDE PANEL, for the unchanged reason: no
+ *  BROWSABLE list of sweep run ids exists there (types.ts's own
+ *  `clara.sweep_runs` header). A run id reaches a human only through the Clara
+ *  thread's own `sweep_receipt` part, which is why 裁-20
+ *  (docs/plan/active/mohe-grill-rulings-2026-08-28.md:268-272) put the control
+ *  on that card and nowhere else. */
 export function acknowledgeSweepRun(runId: string, opts: Opts = {}): Promise<unknown> {
   return callDoor("acknowledge_sweep_run", { p_run: runId, p_op_key: opKey() }, opts);
 }
