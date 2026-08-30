@@ -465,14 +465,30 @@ test("C5 · the annotation HINTS: twelve add-back leaves verbatim, eleven statut
   );
   assert.equal(mismatch.rows[0].bad, "<none>");
 
-  // The boundary, proved by ABSENCE measured directly: no tax_* relation exists in clara, and
-  // coa_template_accounts carries exactly one foreign key -- its own family.
+  // The boundary: PR-a mints no tax_* relation. Proved by ABSENCE only until F-T3 PR-1 lands --
+  // that file mints the tax-law relations BY DESIGN (0152_f_t3_pr_1_tax_platform), so this floor
+  // is trued IN THE SAME PR per .claude/rules/db-tests.md's succession pattern: branch on the
+  // migration STEM witness, and on the post-arm assert the tax_* set is EXACTLY F-T3's own five
+  // (any other tax_* relation is still a PR-a boundary breach). The FK assertion below is the half
+  // of the boundary that survives either way: coa_template_accounts never grows a foreign key
+  // into a tax table.
   const taxRel = await rootQuery(
-    `select coalesce(string_agg(c.relname, ', '), '<none>') bad from pg_class c
+    `select coalesce(string_agg(c.relname, ', ' order by c.relname), '<none>') bad from pg_class c
        join pg_namespace n on n.oid=c.relnamespace
       where n.nspname='clara' and c.relkind in ('r','v','m') and c.relname like 'tax\\_%'`,
   );
-  assert.equal(taxRel.rows[0].bad, "<none>", "PR-a must mint no tax_* relation");
+  const ft3 = await rootQuery(
+    "select 1 from clara.schema_migrations where version ~ '_f_t3_pr_1_tax_platform$'",
+  );
+  if (ft3.rows.length === 0) {
+    assert.equal(taxRel.rows[0].bad, "<none>", "PR-a must mint no tax_* relation");
+  } else {
+    assert.equal(
+      taxRel.rows[0].bad,
+      "tax_add_back_class_map, tax_authorities, tax_rate_bands, tax_thresholds, tax_treatment_codes",
+      "with F-T3 PR-1 applied the tax_* relations must be EXACTLY its five -- PR-a still mints none",
+    );
+  }
   const fks = await rootQuery(
     `select coalesce(string_agg(con.conname || '->' || con.confrelid::regclass::text, ', ' order by con.conname), '<none>') fks
        from pg_constraint con where con.conrelid='clara.coa_template_accounts'::regclass and con.contype='f'`,
