@@ -113,6 +113,7 @@ test("THE ACCOUNT STEP IS KEYBOARD-OPERABLE, and the DPA gate is a REAL wall", a
         created = true;
         return { data: { user: { id: "u1" }, session: null }, error: null };
       },
+      signOut: async () => ({ error: null }),
     },
   });
 
@@ -194,6 +195,7 @@ test("N1: emailRedirectTo is the exact origin /auth/confirm URL and ignores the 
         captured = credentials;
         return { data: { user: { id: "u1" }, session: null }, error: null };
       },
+      signOut: async () => ({ error: null }),
     },
   });
   const location = window.location as unknown as { origin?: string; search?: string };
@@ -228,13 +230,25 @@ test("N1: emailRedirectTo is the exact origin /auth/confirm URL and ignores the 
   }
 });
 
-test("N2: Supabase's auto-confirm {user, session} shape refuses the misconfigured project", async () => {
+test("NEW-2: auto-confirm containment signs out locally before painting the refusal", async () => {
+  let releaseSignOut!: () => void;
+  const signOutGate = new Promise<void>((resolve) => { releaseSignOut = resolve; });
+  const order: string[] = [];
   const client: () => SignupAuthClient = () => ({
     auth: {
-      signUp: async () => ({
-        data: { user: { id: "u1" }, session: { access_token: "jwt" } },
-        error: null,
-      }),
+      signUp: async () => {
+        order.push("signUp");
+        return {
+          data: { user: { id: "u1" }, session: { access_token: "jwt" } },
+          error: null,
+        };
+      },
+      signOut: async (options) => {
+        assert.deepEqual(options, { scope: "local" });
+        order.push("signOut");
+        await signOutGate;
+        return { error: null };
+      },
     },
   });
   await withEnv(async () => jsonResponse({}), async () => {
@@ -244,6 +258,14 @@ test("N2: Supabase's auto-confirm {user, session} shape refuses the misconfigure
     try {
       for (let i = 0; i < 3; i++) await h.settle();
       await submitAcceptedAccount(h);
+      assert.deepEqual(order, ["signUp", "signOut"]);
+      assert.doesNotMatch(
+        textOf(h.container as never),
+        /sign-up confirmation is not enforced on this project/i,
+        "the refusal painted before local session containment finished",
+      );
+      releaseSignOut();
+      for (let i = 0; i < 6; i++) await h.settle();
       const text = textOf(h.container as never);
       assert.match(
         text,
@@ -261,7 +283,7 @@ test("N2: Supabase's auto-confirm {user, session} shape refuses the misconfigure
 test("LOW-3: the signup password field carries the same 8-character courtesy floor as invite", async () => {
   await withEnv(async () => jsonResponse({}), async () => {
     const h = await renderComponent(
-      App(createElement(SignupAccountForm, { createSupabaseClient: () => ({ auth: { signUp: async () => ({ data: { user: null, session: null }, error: null }) } }) }), { replaced: [] }),
+      App(createElement(SignupAccountForm, { createSupabaseClient: () => ({ auth: { signUp: async () => ({ data: { user: null, session: null }, error: null }), signOut: async () => ({ error: null }) } }) }), { replaced: [] }),
     );
     try {
       for (let i = 0; i < 3; i++) await h.settle();

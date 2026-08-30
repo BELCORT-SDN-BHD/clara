@@ -14,14 +14,17 @@ MERGED** · **PORT WAVE COMPLETE — 11/11 trains on main** (Wave C: T11 #405 ·
 tranche-2 #411 · `0146` 裁-17 #412 — ceremonied in ONE ~51-s D1 window 2026-08-29 03:17Z, LIVE
 141/`0146`**, as-run `docs/plan/completed/mohe-0142-0146-apply-asrun.md` · **HARDENING B (裁-16) IS FULLY LANDED: merged #414 AND APPLIED — `0147` ceremonied 2026-08-29 08:46:55Z–08:47:42Z (a 47-s D1 window, `/ready` 200), LIVE 142/`0147`**, as-run `docs/plan/completed/mohe-0147-apply-asrun.md` · **F-A6 PR-2 IS MERGED AND DEPLOYED — #423, runtime `v69`, `chatTurn_v15` bundle-proven SERVING, so Clara's audited FREEFORM READ IS LIVE IN CHAT (H-4/H-5/S-1 discharged); deploy ceremony 2026-08-29 18:04Z-18:08Z** · also merged 2026-08-29: **#421** the alignment audit's no-ruling-needed fixes · **#422** the 裁-18b PR-0 design gate record · **#424** the COA research addendum (MPERS 4.2 items + the Q8 reclassification); **#425** (`0148`, the duplicate-open wall on both agent proposal doors) is MERGING · **THE SITTINGS ARE RULED THROUGH 裁-44** — 裁-23…裁-28 on 08-29 morning (`docs/plan/active/mohe-grill-rulings-2026-08-28.md`) and **裁-29…裁-44** in `docs/plan/active/mohe-grill-rulings-2026-08-29.md`; `docs/plan/active/mohe-owner-batch-2026-08-29.md` is answered in both batches **except the pricing AMOUNTS**, the model itself having been ruled at 裁-42)*
 
-- **P4-3 PR #461 ROUND-3 FOLD IS REVIEW-READY ON web/p4-3-entry-group (not merged, 2026-08-31):**
-  the explicit, scanner-safe signup confirmation click now exchanges a hard-coded email
-  `token_hash` at /auth/confirm, /pending positively reads caller membership before
-  interpreting registration history, the login/invite faces own real `<h1>` elements, and
-  second-door lost-response replay is pinned. Web typecheck/lint/webpack build are green;
-  **1,383/1,383 tests** pass. Hosted Supabase still owes the README's positive deployment
-  receipt (`disable_signup=false`, `mailer_autoconfirm=false`, exact TokenHash template and
-  /auth/confirm allowlist); the PR remains subject to the independent review ladder.
+- **P4-3 PR #461 ROUND-4 FOLD IS REVIEW-READY ON web/p4-3-entry-group (not merged, 2026-08-31):**
+  the confirmation POST now refuses every unproved origin before parsing or auth; an
+  auto-confirmed browser session is locally contained while the /signup server fork
+  independently requires a valid, same-subject `email_confirmed_at`; the email template
+  contract consumes `.RedirectTo`; and the signup-token access-log residual is a named deploy
+  receipt. The route-level cookie round trip and heading prose are pinned. Web
+  typecheck/lint/webpack build are green; **1,389/1,389 tests** pass. Hosted Supabase still
+  owes the README's positive deployment gate (`disable_signup=false`,
+  `mailer_autoconfirm=false`, exact `.RedirectTo` TokenHash template, /auth/confirm
+  allowlist and access-log control receipt); the PR remains subject to the independent review
+  ladder.
 
 - **ELEVEN LANES RAN THIS NIGHT — ALL ELEVEN LANDED BY NOON 2026-08-30** (裁-21 PR-a `0150` · 裁-19 PR-1
   `0149` · F-T3 PR-1 `0152` · F-A9 PR-1B `0151` · 裁-18b PR-1 `0154` · F-T1 `0153` · 裁-41 `0155` · G1

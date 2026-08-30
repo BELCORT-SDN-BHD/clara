@@ -1,7 +1,6 @@
 import { getTranslations } from "next-intl/server";
 
-import { SignupStep } from "@/components/entry/signup-step";
-import { resolveServerSession } from "@/lib/supabase/server-session";
+import { renderSignupRoute } from "@/components/entry/signup-route";
 
 export async function generateMetadata() {
   const t = await getTranslations("Signup");
@@ -53,5 +52,5 @@ export async function generateMetadata() {
  * is the authority on, and it would have to guess where to send them.
  */
 export default async function SignupPage() {
-  return <SignupStep session={await resolveServerSession()} />;
+  return renderSignupRoute();
 }

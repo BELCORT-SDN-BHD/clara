@@ -303,21 +303,32 @@ PRD §8's server-verified-session requirement at the transition into the firm st
 - **Configure:** Supabase Dashboard → Authentication → Providers → Email: *Allow new users
   to sign up* ON and *Confirm Email* ON (autoconfirm disabled). Under Authentication → Email
   Templates → *Confirm signup*, replace the default `ConfirmationURL` link with exactly
-  `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`. Under URL
+  `{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email`. Here `.RedirectTo` is the exact
+  `emailRedirectTo` value passed by this app — `<origin>/auth/confirm` — whereas `.SiteURL`
+  is the project's single configured Site URL. Under URL
   Configuration → *Redirect URLs*, add the exact `<origin>/auth/confirm` URL for every
   deployed origin, with no wildcard.
 - **Verify (receipt):** with the project's Management API token, positively read
   `GET /v1/projects/{ref}/config/auth` and retain the JSON showing `disable_signup` is
   `false`, `mailer_autoconfirm` is `false`, and `uri_allow_list` contains every exact
   `<origin>/auth/confirm` entry. Retain a delivered *Confirm signup* message showing the
-  exact TokenHash template URL above; open it twice before clicking and record that both
+  exact `.RedirectTo` + `TokenHash` template URL above; open it twice before clicking and record that both
   visits paint the button without consuming the token. Re-run these reads after any project
-  restore or auth-configuration change.
+  restore or auth-configuration change. This positive Management API read is a blocking
+  **deploy gate**: repository code cannot read hosted project settings and no UI assertion
+  substitutes for the retained response.
 - **Residual:** the existing-account response remains controlled by hosted Auth. With the
   required posture, Supabase returns the non-enumerating `user`/no-session shape and this app
-  renders “Confirm your email”. Any `{user, session}` success is treated as a configuration
-  refusal — “Sign-up confirmation is not enforced on this project” — and never opens the
-  firm step.
+  renders “Confirm your email”. Any `{user, session}` success is contained in the browser by
+  a local sign-out before the refusal paints. That containment is not the wall: a fresh
+  `/signup` server render positively re-reads the same session's user and refuses the firm
+  step unless `email_confirmed_at` is a valid confirmation timestamp for that subject.
+  Direct hosted-Auth callers therefore cannot bypass confirmation by skipping this UI.
+  The initial signup confirmation GET still carries `token_hash` in its query string, so
+  edge/server **access logs** can capture the bearer despite `Referrer-Policy: no-referrer`.
+  Redact query strings there or keep access-log retention short and restricted, and name the
+  chosen control plus its retention in the deploy receipt. A delivered-message sample and
+  that log-control receipt are both required at deployment.
 
 ### Also configuration, not code
 

@@ -15,6 +15,8 @@ import EntryLayout from "../../app/(entry)/layout";
 import messages from "../../messages/en.json";
 import { enableDomInspection } from "../../test/domInspect";
 import { renderComponent, textOf } from "../../test/hookHarness";
+import { SignupAccountForm } from "./signup-account-form";
+import { renderSignupRoute } from "./signup-route";
 import { SignupStep } from "./signup-step";
 import { SignupFirmForm } from "./signup-firm-form";
 
@@ -40,6 +42,11 @@ function postRequest(fields: Array<[string, string]>): Request {
   for (const [key, value] of fields) form.append(key, value);
   return new Request("https://app.clarabook.example/auth/confirm/verify", {
     method: "POST",
+    headers: {
+      origin: "https://app.clarabook.example",
+      host: "app.clarabook.example",
+      "sec-fetch-site": "same-origin",
+    },
     body: form,
   });
 }
@@ -48,6 +55,7 @@ function fakeClient(
   response: VerifyResponse,
   calls: Array<{ type: "email"; token_hash: string }>,
   sealed: Response[],
+  sessionCookie?: string,
 ): EmailConfirmationRouteClient {
   return {
     supabase: {
@@ -61,6 +69,7 @@ function fakeClient(
     sealResponse(result) {
       sealed.push(result);
       result.headers.set("Cache-Control", "private, no-store");
+      if (sessionCookie) result.headers.append("Set-Cookie", sessionCookie);
       return result;
     },
   };
@@ -122,26 +131,138 @@ test("N1: one click makes exactly one hard-coded email verification and ignores 
   assert.equal(response.headers.get("cache-control"), "private, no-store");
 });
 
-test("N1: a verified cookie session reaches /signup's firm step", async () => {
-  let cookieSession: { subject: string; accessToken: string } | null = null;
+const refusalCases: Array<{
+  name: string;
+  headers: Record<string, string>;
+}> = [
+  {
+    name: "cross-origin",
+    headers: {
+      origin: "https://evil.example",
+      host: "app.clarabook.example",
+    },
+  },
+  {
+    name: "same-site sibling",
+    headers: {
+      origin: "https://evil.clarabook.example",
+      host: "app.clarabook.example",
+      "sec-fetch-site": "same-site",
+    },
+  },
+  {
+    name: "missing Origin",
+    headers: {
+      host: "app.clarabook.example",
+    },
+  },
+  {
+    name: "cross-site Fetch Metadata",
+    headers: {
+      origin: "https://app.clarabook.example",
+      host: "app.clarabook.example",
+      "sec-fetch-site": "cross-site",
+    },
+  },
+];
+
+for (const refusal of refusalCases) {
+  test(`NEW-1: ${refusal.name} refuses before body parsing or auth`, async () => {
+    let bodyReads = 0;
+    let clientCreations = 0;
+    const calls: Array<{ type: "email"; token_hash: string }> = [];
+    const request = {
+      headers: new Headers(refusal.headers),
+      url: "https://app.clarabook.example/auth/confirm/verify",
+      async formData() {
+        bodyReads += 1;
+        const form = new FormData();
+        form.set("token_hash", "attacker-token");
+        return form;
+      },
+    } as unknown as Request;
+
+    const response = await handleEmailConfirmationPost(request, async () => {
+      clientCreations += 1;
+      return fakeClient(validResponse(), calls, []);
+    });
+
+    assert.equal(response.status, 403, `${refusal.name} was not refused`);
+    assert.deepEqual(await response.json(), { ok: false, error: "cross-origin" });
+    assert.equal(bodyReads, 0, `${refusal.name} was parsed before the wall`);
+    assert.equal(clientCreations, 0, `${refusal.name} created an auth client`);
+    assert.deepEqual(calls, [], `${refusal.name} reached verifyOtp`);
+    assert.equal(response.headers.get("set-cookie"), null, `${refusal.name} wrote a cookie`);
+    assert.equal(response.headers.get("location"), null, `${refusal.name} redirected`);
+  });
+}
+
+test("NEW-5: the confirmation response cookie drives the next /signup request", async () => {
+  const sessionCookie = "__Host-clara-auth=confirmed-session; Path=/; HttpOnly; Secure; SameSite=Lax";
   const calls: Array<{ type: "email"; token_hash: string }> = [];
   const sealed: Response[] = [];
-  const client = fakeClient(validResponse(), calls, sealed);
-  const originalVerify = client.supabase.auth.verifyOtp;
-  client.supabase.auth.verifyOtp = async (params) => {
-    const response = await originalVerify(params);
-    cookieSession = { subject: SUBJECT, accessToken: response.data.session!.access_token };
-    return response;
-  };
-
   const response = await handleEmailConfirmationPost(
     postRequest([["token_hash", "token-hash-2"]]),
-    async () => client,
+    async () => fakeClient(validResponse(), calls, sealed, sessionCookie),
   );
   assert.equal(response.headers.get("location"), "https://app.clarabook.example/signup");
-  assert.ok(cookieSession, "verifyOtp did not establish the server session represented by the cookie");
-  const step = SignupStep({ session: cookieSession });
+  const setCookie = response.headers.get("set-cookie");
+  assert.match(setCookie ?? "", /^__Host-clara-auth=confirmed-session;/);
+
+  const sessionFor = (request: Request) =>
+    request.headers.get("cookie")?.includes("__Host-clara-auth=confirmed-session")
+      ? { subject: SUBJECT, accessToken: "cookie-session-token" }
+      : null;
+  const signupRequest = new Request("https://app.clarabook.example/signup", {
+    headers: { cookie: (setCookie as string).split(";", 1)[0] as string },
+  });
+  const createSignupClient = async () => ({
+    auth: {
+      getUser: async (jwt: string) => ({
+        data: {
+          user: jwt === "cookie-session-token"
+            ? { id: SUBJECT, email_confirmed_at: "2026-08-31T01:02:03Z" }
+            : null,
+        },
+        error: null,
+      }),
+    },
+  });
+  const step = await renderSignupRoute(
+    async () => sessionFor(signupRequest),
+    createSignupClient,
+  );
   assert.equal(step.type, SignupFirmForm, "the cookie-backed /signup visit did not render the firm step");
+
+  const noCookieStep = await renderSignupRoute(
+    async () => sessionFor(new Request("https://app.clarabook.example/signup")),
+    createSignupClient,
+  );
+  assert.equal(noCookieStep.type, SignupAccountForm, "a cookieless /signup request reached the firm step");
+
+  // Production must use the request-cookie SSR client. The injected route
+  // double above proves the HTTP round trip; this source pin makes replacing
+  // that production wiring with the browser client red instead of invisible.
+  const handlerSource = readFileSync(
+    join(WEB_ROOT, "app/(entry)/auth/confirm/verify/handler.ts"),
+    "utf8",
+  );
+  assert.match(handlerSource, /createRouteClient[\s\S]*from "@\/lib\/supabase\/server"/);
+  assert.doesNotMatch(handlerSource, /@\/lib\/supabase\/client/);
+});
+
+test("NEW-2: a fresh /signup render refuses persisted unconfirmed or unreadable users", () => {
+  const session = { subject: SUBJECT, accessToken: "placeholder" };
+  const refusedUsers: unknown[] = [
+    { id: SUBJECT, email_confirmed_at: null },
+    { id: SUBJECT, email_confirmed_at: "not-a-timestamp" },
+    { id: SUBJECT, email_confirmed_at: "2026-02-30T01:02:03Z" },
+  ];
+
+  for (const user of refusedUsers) {
+    const step = SignupStep({ session, user } as Parameters<typeof SignupStep>[0]);
+    assert.equal(step.type, SignupAccountForm, "an unconfirmed persisted session reached the firm step");
+  }
 });
 
 test("N1: invalid, replayed, and sessionless tokens refuse on a clean URL", async () => {

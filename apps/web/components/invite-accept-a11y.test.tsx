@@ -73,9 +73,8 @@ function authClient(over: Partial<InviteAuthClient["auth"]> = {}): () => InviteA
   });
 }
 
-/** Wrapped in a synthetic <h1>, the same idiom every registers a11y file uses
- *  — the surface itself is a card inside a page whose heading belongs to the
- *  route, and `heading-order` is scanned against the whole document. */
+/** Render the real entry-layout composition. `InviteAcceptForm` owns the one
+ *  `<h1>` in every state; the harness adds no heading that could mask it. */
 function App(form: ReactElement) {
   return createElement(NextIntlClientProvider, {
     locale: "en", messages,

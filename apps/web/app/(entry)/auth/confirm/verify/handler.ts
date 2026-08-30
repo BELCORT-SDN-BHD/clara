@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { isSameOriginRequest } from "@/lib/same-origin";
 import { createRouteClient } from "@/lib/supabase/server";
 
 type VerifyEmailResponse = {
@@ -60,6 +61,17 @@ export async function handleEmailConfirmationPost(
   request: Request,
   createClient: CreateEmailConfirmationRouteClient = createRouteClient,
 ): Promise<Response> {
+  // This is a login/session-creating mutation. A cross-origin page must not be
+  // able to submit its own token into somebody else's browser and install the
+  // attacker's session there. Refuse before reading the bearer or constructing
+  // any auth client: a refused request has no cookie-writing capability at all.
+  if (!isSameOriginRequest(request.headers, request.url)) {
+    return NextResponse.json(
+      { ok: false, error: "cross-origin" },
+      { status: 403 },
+    );
+  }
+
   const form = await request.formData();
   const tokenValues = form.getAll("token_hash");
   const { supabase, sealResponse } = await createClient();

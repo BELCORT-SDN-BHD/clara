@@ -108,6 +108,9 @@ export interface SignupAuthClient {
       data: { user: unknown | null; session: unknown | null };
       error: { message: string } | null;
     }>;
+    signOut(options: { scope: "local" }): Promise<{
+      error: { message: string } | null;
+    }>;
   };
 }
 
@@ -182,6 +185,17 @@ export function SignupAccountForm({
       return;
     }
     if (data?.user && data.session) {
+      // `signUp` has already persisted this auto-confirmed session through the
+      // browser client. Clear it before the refusal is painted so a reload
+      // cannot silently carry the person onward. This is containment, not the
+      // wall: `/signup` independently requires a positively confirmed server
+      // user because hosted Auth can be called without this component.
+      try {
+        await supabase.auth.signOut({ scope: "local" });
+      } catch {
+        // The server fork still refuses the unconfirmed session. A transport
+        // failure here must not turn a misconfigured success into a UI success.
+      }
       setStage("configuration-error");
       return;
     }

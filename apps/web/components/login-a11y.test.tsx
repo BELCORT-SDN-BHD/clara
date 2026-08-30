@@ -99,8 +99,8 @@ test("the sign-in form has zero a11y violations", async () => {
 test("N4: the actual entry-layout/login composition owns exactly one h1", async () => {
   // The masking hazard of the wrapper idiom, closed by measurement rather than
   // by argument. If the `<h1>` were papering over a real violation, this cell
-  // reds. (It also documents what is true: LoginForm renders no heading of its
-  // own, which is P2's shape and not something this train silently changes.)
+  // reds. The real composition now proves `LoginForm` owns that heading and the
+  // harness supplies no synthetic one.
   const h = await renderComponent(
     App(createElement(LoginForm, { createSupabaseClient: authClient(null) })),
   );

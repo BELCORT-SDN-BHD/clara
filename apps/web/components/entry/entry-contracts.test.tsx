@@ -69,6 +69,7 @@ function renderedTextLeaves(node: DomNode): string[] {
 const signupClient = (): SignupAuthClient => ({
   auth: {
     signUp: async () => ({ data: { user: { id: "u1" }, session: null }, error: null }),
+    signOut: async () => ({ error: null }),
   },
 });
 
@@ -256,12 +257,29 @@ test("LOW-2: every backticked source path cited by an entry module resolves", ()
 
 test("MED-3/LOW-3: the deploy obligations cover signup redirect and both password surfaces", () => {
   const readme = readFileSync(join(WEB_ROOT, "README.md"), "utf8");
+  const signupSource = readFileSync(
+    join(WEB_ROOT, "components/entry/signup-account-form.tsx"),
+    "utf8",
+  );
   assert.match(readme, /### 4\.[\s\S]*<origin>\/auth\/confirm[\s\S]*no wildcard/i);
   assert.match(readme, /### 4\.[\s\S]*\*\*Configure:\*\*[\s\S]*\*\*Verify \(receipt\):\*\*[\s\S]*\*\*Residual/i);
   assert.match(readme, /### 4\.[\s\S]*Confirm\s+Email[\s\S]*PRD (?:§\s*|Section\s+)8/i);
-  assert.match(readme, /\{\{ \.SiteURL \}\}\/auth\/confirm\?token_hash=\{\{ \.TokenHash \}\}&type=email/);
+  assert.match(signupSource, /emailRedirectTo:[\s\S]*\/auth\/confirm/);
+  assert.match(readme, /\{\{ \.RedirectTo \}\}\?token_hash=\{\{ \.TokenHash \}\}&type=email/);
+  assert.doesNotMatch(
+    readme,
+    /\{\{ \.SiteURL \}\}\/auth\/confirm\?token_hash=\{\{ \.TokenHash \}\}&type=email/,
+  );
   assert.match(readme, /disable_signup[\s\S]*false[\s\S]*mailer_autoconfirm[\s\S]*false/i);
   assert.match(readme, /components\/invite-accept-form\.tsx[\s\S]*components\/entry\/signup-account-form\.tsx/);
+});
+
+test("NEW-4: signup confirmation records its access-log residual and deploy receipt", () => {
+  const readme = readFileSync(join(WEB_ROOT, "README.md"), "utf8");
+  assert.match(
+    readme,
+    /### 4\.[\s\S]*signup confirmation[\s\S]*access logs[\s\S]*(?:redact|short[ -]retention)[\s\S]*deploy (?:record|receipt)/i,
+  );
 });
 
 test("N6: live entry prose names only the moved route-group paths", () => {
@@ -274,6 +292,16 @@ test("N6: live entry prose names only the moved route-group paths", () => {
     const source = readFileSync(join(WEB_ROOT, file), "utf8");
     assert.doesNotMatch(source, /`?app\/login\b/);
     assert.doesNotMatch(source, /`?app\/invite\/\[token\]/);
+  }
+
+  const a11ySources = [
+    "components/invite-accept-a11y.test.tsx",
+    "components/login-a11y.test.tsx",
+  ].map((file) => readFileSync(join(WEB_ROOT, file), "utf8"));
+  for (const source of a11ySources) {
+    assert.doesNotMatch(source, /wraps? a synthetic <h1>/i);
+    assert.doesNotMatch(source, /LoginForm (?:has|renders) no heading/i);
+    assert.doesNotMatch(source, /LoginForm renders no heading of its own/i);
   }
 });
 

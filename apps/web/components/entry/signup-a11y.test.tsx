@@ -52,6 +52,7 @@ function withEnv(impl: typeof fetch, run: () => Promise<void>): Promise<void> {
 const authClient = (over: Partial<SignupAuthClient["auth"]> = {}): (() => SignupAuthClient) => () => ({
   auth: {
     signUp: async () => ({ data: { user: { id: "u1" }, session: null }, error: null }),
+    signOut: async () => ({ error: null }),
     ...over,
   },
 });
