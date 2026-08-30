@@ -111,6 +111,13 @@ test("§1.1 apply onto an EMPTY chart plants exactly the kept families' accounts
   const res = await applyTemplate(world.users.bob, { client, template: starter.id, opKey: opk("ap") });
 
   assert.equal(res.families_source, "plan", "a NULL p_families asks the database for its own plan");
+  // AN INDEPENDENT INSTRUMENT, not the door's own answer: the family set is compared against the
+  // plan READ, computed separately from the client's facts. Deriving the expectation from
+  // `res.families` alone would be self-referential -- a door that applied the wrong families and
+  // then reported them would pass.
+  const planned = await familyPlan(world.users.bob, client, starter.id);
+  assert.deepEqual([...res.families].sort(), [...planned.keep].sort(),
+    "the door applied exactly the families the plan read proposes");
   const want = await expectedChartMap(starter.id, res.families, "sdn_bhd");
   const got = await clientChartMap(client);
   assert.deepEqual(got, want, "the planted chart is the template's own rows for the kept families");

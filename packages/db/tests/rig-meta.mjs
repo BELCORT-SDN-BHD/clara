@@ -1752,6 +1752,7 @@ export async function grantMatrixFailures() {
   // absent (every pre-PR-a chain) returns no failure, while a PARTIAL cohort — one of the
   // thirteen retired or renamed without truing this roster — is caught by name.
   failures.push(...cohortFailures("裁-21 PR-a COA template", COA_TEMPLATE_PR_A_COHORT, liveNames));
+  failures.push(...cohortFailures("裁-21 PR-b COA apply", COA_TEMPLATE_PR_B_COHORT, liveNames));
   // The same signature-exact companion as P4T1's above, scoped to P4T2's own four names --
   // review law 3 applied from the start this round, not discovered by a later mutant panel.
   const p4t2Sigs = [
