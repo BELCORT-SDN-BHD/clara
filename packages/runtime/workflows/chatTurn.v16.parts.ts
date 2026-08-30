@@ -34,20 +34,23 @@
  * same view rather than opening a second door. There is no act: a receipt records what
  * happened and nothing settles it.
  *
- * THE ADDRESS IS THE PAIR, NOT `receipt_id` ALONE. The view is a UNION of seven per-item shim
- * views, and `receipt_id` is by its own contract "the member row's own primary key rendered
- * as text (member PKs are uuid on some tables, bigint on others)" — `clara.
- * agent_receipt_contract` ordinal 2 (0103:259). A primary key is unique inside its member
- * table and nowhere else, so `receipt_id` alone does not name a row of this view.
- * `receipt_kind` (ordinal 1) is the discriminator that closes it: the two together are the
- * address.
+ * THE ADDRESS IS THE PAIR, NOT `receipt_id` ALONE. The view is a UNION of per-item shim views,
+ * and `receipt_id` is by its own contract "the member row's own primary key rendered as text
+ * (member PKs are uuid on some tables, bigint on others)" — `clara.agent_receipt_contract`
+ * ordinal 2 (0103:260). A primary key is unique inside its member table and nowhere else, so
+ * `receipt_id` alone does not name a row of this view. `receipt_kind` (ordinal 1, 0103:259) is
+ * the discriminator that closes it: the two together are the address.
  *
- * `receipt_kind` IS `string`, NOT A UNION OF THE SEVEN LIVE VALUES. The live world is
- * `clara.agent_receipt_surfaces` (0103:292-300: `entry_post`, `bank_agent`, `agent_act`,
- * `report_agent`, `freeform_read`, `agent_filing`, plus f_a8's) — and that is a TABLE a
- * later item inserts into, not a fixed enumeration. A closed union here would make the next
- * lane's receipt unrenderable on a wire that already carried it, which is the failure mode
- * `RefusalCode`'s own open union (`(string & {})`) exists to avoid.
+ * `receipt_kind` IS `string`, AND THE REASON IS MEASURED RATHER THAN STYLISTIC. The world of
+ * kinds is `clara.agent_receipt_surfaces`, a TABLE later items insert into — and it has
+ * ALREADY moved twice past the seven 0103 seeded at :294-301 (`entry_post`, `bank_agent`,
+ * `agent_act`, `report_agent`, `freeform_read`, `agent_filing`, `web_fetch`). Read live on a
+ * rig at frontier 0155 it holds NINE rows: F-A7b's `onboarding_agent` and the binding
+ * proposal's `binding_agent` joined after. So a union of literals transcribed from 0103 would
+ * have shipped two kinds short on the day it was written, and a card for a real receipt would
+ * have been unrenderable on a wire that already carried it — the failure mode `RefusalCode`'s
+ * own open union (`(string & {})`) exists to avoid. p6-1-chatturn-v16-db.test.mjs re-reads that
+ * count rather than restating this sentence.
  *
  * `client_id` IS NULLABLE, AND STRUCTURALLY SO — ordinal 4's own semantics: "NULL where the
  * act is structurally client-less (pre-attribution filing, a firm-narrow read)". A card
@@ -76,7 +79,7 @@ export type AgentReceiptPart = {
  * no client is known cannot carry one, and a nullable column would let a caller put one
  * there and quietly re-create the ambiguity." A `client_id` on this part would re-create at
  * the wire exactly what the schema refused. The client a human names when they answer lands
- * in `named_client` on the settled row (0103:575-577) — a read, never a part field.
+ * in `named_client` on the settled row (0103:574) — a read, never a part field.
  *
  * `document_id` IS DELIBERATELY NOT CARRIED EITHER. It is NOT NULL on the row (0103:562), so
  * every hydrate returns it; copying it here would give the card a second, older source for a

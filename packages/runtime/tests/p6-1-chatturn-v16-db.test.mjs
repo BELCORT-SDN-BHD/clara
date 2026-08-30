@@ -135,6 +135,23 @@ test("p6-1.db.agent-receipt: the read surface is the HUMAN session's alone, and 
   );
 });
 
+test("p6-1.db.agent-receipt: receipt_kind's world is EXTEND-ONLY and has already outgrown 0103's seed", { skip }, async () => {
+  // This is why AgentReceiptPart types `receipt_kind` as `string` rather than a union of
+  // literals. 0103 seeded SEVEN kinds at :294-301; a union transcribed from that migration would
+  // already be short, because later lanes insert their own rows. Measured, not argued — and the
+  // cell reads the live table so it stays true as the estate grows, instead of pinning a number
+  // that a future lane would have to come back and edit.
+  const r = await rig.rootQuery(`select array_agg(receipt_kind order by receipt_kind) as kinds from clara.agent_receipt_surfaces`);
+  const kinds = r.rows[0].kinds ?? [];
+  for (const seeded of ["entry_post", "bank_agent", "agent_act", "report_agent", "freeform_read", "agent_filing", "web_fetch"]) {
+    assert.ok(kinds.includes(seeded), `0103's own seeded kind '${seeded}' is still registered`);
+  }
+  assert.ok(
+    kinds.length > 7,
+    `the registry has grown past 0103's seven (live: ${kinds.length} — ${kinds.join(", ")}). If this ever goes red because a lane REMOVED a kind, that is the finding, not this cell.`,
+  );
+});
+
 test("p6-1.db.close-proposal: the part's three fields are the settle door's subject plus the only fetch key", { skip }, async () => {
   const d = await rig.rootQuery(
     `select pg_get_function_identity_arguments(p.oid) as args from pg_proc p
