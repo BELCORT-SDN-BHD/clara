@@ -536,6 +536,26 @@
       "sha256": "2cb97562d37a2b144f17dff6e089f500a8d8cb7fd206f82ef2b25a37e0ccf282",
       "note": ""
     },
+    "packages/runtime/workflows/chatTurn.v16.impl.ts": {
+      "sha256": "bff0e0ca13e4a3918f06b60503d6988e833e961f65c882517f99719f2872bd4e",
+      "note": "P6-1 (Q8's four-card wire bump) — the v16 segment step. UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/runtime/workflows/chatTurn.v16.parts.ts": {
+      "sha256": "acf6b61de8180bf9dea269b3c44285ef747e2dea9c6d995a4741cf0e7cc28af2",
+      "note": "P6-1 — THE DECLARER of Q8's four part kinds; apps/web/lib/parts/types.ts transcribes it. A hash change here is a wire-contract change and must move the reader in the same wave. UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/runtime/workflows/chatTurn.v16.prompt.ts": {
+      "sha256": "4066baaa6b34e100b7d97da89647a75613df975f15f975f98f7878057e1e984b",
+      "note": "P6-1 — ClaraPartV16 (22 + 4 = 26) and the one emitter this lane may lawfully carry (freeform_result). UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/runtime/workflows/chatTurn.v16.ts": {
+      "sha256": "908e51723f422d5984c0fb3a7cc58bec4e10212726b5ea2d498601dbe75c141f",
+      "note": "P6-1 — the chatTurn_v16 workflow entry; registry.ts points chatTurn: here. The v15 body stays frozen and exported (policy (c)). UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
+    "packages/runtime/workflows/chatTurn.v16.usage.ts": {
+      "sha256": "f2238cc437424138738888eb756b1c3a4f39cd17f8a13e8aed5a044003609088",
+      "note": "P6-1 — the chatturn-v16 engine stamp; the metering recorder itself is v15's, by import. UNDEPLOYED: the deploy-lock is the ceremony's act."
+    },
     "packages/runtime/workflows/chatTurn.v2.errors.ts": {
       "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",
       "note": "",

@@ -582,6 +582,12 @@ export { chatTurn_v14 };
 // chat parks are the human-answer kind, so a live run still resuming into v15's body at cutover
 // is the expected case, not a corner one.
 export { chatTurn_v15 };
+// The PINNED version is reachable through `workflows.chatTurn`, so this export is not what makes
+// v16 dispatchable. It exists because the ROLLBACK PREFLIGHT (packages/runtime/README.md) asks a
+// target image whether it still exports every version holding non-terminal runs, and an answer
+// that has to special-case "except the current pin" is an answer somebody gets wrong at 2am.
+// v15 carried its own export while it was the pin for the same reason.
+export { chatTurn_v16 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
