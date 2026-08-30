@@ -77,6 +77,22 @@ const ADJ_RECONCILE_MS = Number.isFinite(ADJ_RECONCILE_MS_ENV) && ADJ_RECONCILE_
 // the migration itself.
 const RENDER_ENQUEUE_MS_ENV = Number(process.env.CLARA_RENDER_ENQUEUE_MS);
 const RENDER_ENQUEUE_MS = Number.isFinite(RENDER_ENQUEUE_MS_ENV) && RENDER_ENQUEUE_MS_ENV > 0 ? RENDER_ENQUEUE_MS_ENV : 24 * 3600000;
+// Gate G1 PR-2b — the bank_agent producer's own cadence, finite-guarded like every belt above
+// (a NaN here would silently DISABLE the belt that is #437's whole point). Deliberately NOT
+// daily like FA/ADJ/SST/lint: those recompute a period/watch that only moves once a day; this
+// belt's own job is noticing NEW bank data (an unmatched line, a missing statement) reasonably
+// promptly, which is a materially different latency need. One hour is this PR's own
+// recommendation, not a design ruling — g1-wake-engine-design.md names no cadence number for
+// bank_agent's clock half, only that it exists (§1.1); flagged in this PR's own report for the
+// owner to confirm or override via this env var, exactly like every sibling constant here.
+const BANK_AGENT_RECONCILE_MS_ENV = Number(process.env.CLARA_BANK_AGENT_RECONCILE_MS);
+const BANK_AGENT_RECONCILE_MS = Number.isFinite(BANK_AGENT_RECONCILE_MS_ENV) && BANK_AGENT_RECONCILE_MS_ENV > 0 ? BANK_AGENT_RECONCILE_MS_ENV : 3600000;
+// Gate G1 PR-2b — the close_prep producer's own cadence. DAILY, matching close_prep_due()'s own
+// stated cadence (0138: "the day after ends_on, re-asked DAILY until a run exists or a hold is
+// set") — asking more often buys nothing, since the oracle's own admission law and this belt's
+// own live-task check are both idempotent regardless of how often either is asked.
+const CLOSE_PREP_RECONCILE_MS_ENV = Number(process.env.CLARA_CLOSE_PREP_RECONCILE_MS);
+const CLOSE_PREP_RECONCILE_MS = Number.isFinite(CLOSE_PREP_RECONCILE_MS_ENV) && CLOSE_PREP_RECONCILE_MS_ENV > 0 ? CLOSE_PREP_RECONCILE_MS_ENV : 24 * 3600000;
 
 /** True iff the daily autopost-rule expiry sweep is due (pure — the since-last-run
  *  guard; lastRunMs=0 makes the first cycle after (re)boot run it immediately, which
@@ -137,6 +153,22 @@ export function renderEnqueueDue(lastRunMs, nowMs, intervalMs = RENDER_ENQUEUE_M
   return nowMs - lastRunMs >= intervalMs;
 }
 
+/** True iff the bank_agent producer belt is due (pure — the same since-last-run guard as its
+ *  siblings; lastRunMs=0 runs it on the first cycle after boot). Gates only CADENCE — the belt
+ *  itself feature-detects both DB surfaces it needs and boots dormant until they exist, and
+ *  reads wake_engine_sources.enabled fresh every time it runs regardless of this predicate's
+ *  own interval. Gate G1 PR-2b, g1-wake-engine-design.md §1.1/§3.6. */
+export function bankAgentProduceDue(lastRunMs, nowMs, intervalMs = BANK_AGENT_RECONCILE_MS) {
+  return nowMs - lastRunMs >= intervalMs;
+}
+
+/** True iff the close_prep producer belt is due (pure — the same since-last-run guard). Gates
+ *  only CADENCE — the belt feature-detects clara.close_prep_due() and reads
+ *  wake_engine_sources.enabled fresh every time it runs. Gate G1 PR-2b, design §1.1/§5. */
+export function closePrepProduceDue(lastRunMs, nowMs, intervalMs = CLOSE_PREP_RECONCILE_MS) {
+  return nowMs - lastRunMs >= intervalMs;
+}
+
 /**
  * Start the leader loop. Returns { stop, done }. `onHalt` (default process.exit(2))
  * fires on a taxonomy HALT. Deps: { enqueueChatTurn, getRun, log }.
@@ -161,6 +193,8 @@ export function startLeaderLoop(deps) {
     let lastFaRun = 0; // 0 ⇒ first cycle after boot runs the depreciation sweep (reconciler-fa.mjs feature-detects 0041 itself, so a pre-0041 boot is a cheap no-op)
     let lastAdjRun = 0; // 0 ⇒ first cycle after boot runs the adjustment-occurrence sweep (reconciler-adjustments.mjs feature-detects 0045 itself, so a pre-0045 boot is a cheap no-op)
     let lastRenderEnqueueRun = 0; // 0 ⇒ first cycle after boot runs the ζ render-enqueue fallback (reconciler-render.mjs feature-detects the ζ migration itself, so a pre-ζ boot is a cheap no-op)
+    let lastBankAgentRun = 0; // 0 ⇒ first cycle after boot runs the bank_agent producer (feature-detects its own two DB surfaces, so a pre-surface boot is a cheap no-op; Gate G1 PR-2b)
+    let lastClosePrepRun = 0; // 0 ⇒ first cycle after boot runs the close_prep producer (feature-detects close_prep_due(), so a pre-0138 boot is a cheap no-op; Gate G1 PR-2b)
     while (!stopRef.stop) {
       const client = makeRuntimeClient();
       let connErr = null;
@@ -185,6 +219,8 @@ export function startLeaderLoop(deps) {
             const lintDue = lintReconcileDue(lastLintRun, Date.now());
             const faDue = depreciationRunDue(lastFaRun, Date.now());
             const adjDue = adjustmentRunDue(lastAdjRun, Date.now());
+            const bankAgentDue = bankAgentProduceDue(lastBankAgentRun, Date.now());
+            const closePrepDue = closePrepProduceDue(lastClosePrepRun, Date.now());
             const swept = await runReconcilerSweep(client, {
               ...deps,
               prune: iteration % PRUNE_EVERY === 0,
@@ -193,12 +229,16 @@ export function startLeaderLoop(deps) {
               lintBelt: lintDue,
               faRuns: faDue,
               adjRuns: adjDue,
+              bankAgentRuns: bankAgentDue,
+              closePrepRuns: closePrepDue,
             });
             if (autopostDue && swept.autopostOk) lastAutopostRun = Date.now(); // a failed autopost sweep retries next cycle
             if (sstDue && swept.sstOk) lastSstRun = Date.now(); // a failed SST belt retries next cycle
             if (lintDue && swept.lintOk) lastLintRun = Date.now(); // a failed lint belt retries next cycle
             if (faDue && swept.faOk) lastFaRun = Date.now(); // a failed FA sweep retries next cycle
             if (adjDue && swept.adjOk) lastAdjRun = Date.now(); // a failed adjustment sweep retries next cycle
+            if (bankAgentDue && swept.bankAgentOk) lastBankAgentRun = Date.now(); // a failed bank_agent belt retries next cycle
+            if (closePrepDue && swept.closePrepOk) lastClosePrepRun = Date.now(); // a failed close_prep belt retries next cycle
             // Wave E lane ζ. Both belts isolate their own errors and return flags rather than
             // throwing, so neither can abort this cycle the way the section-I zombie did — but
             // they are ALSO wrapped, because "a sweeper that cannot fail" is a claim, and the

@@ -30,6 +30,13 @@ import { reconcileLintBelt } from "./reconciler-lint.mjs";
 import { reconcileFaRuns } from "./reconciler-fa.mjs";
 import { reconcileAdjustmentRuns } from "./reconciler-adjustments.mjs";
 import { reconcileWakeEngineTasks } from "./reconciler-wake.mjs";
+// Gate G1 PR-2b — the two wake-engine PRODUCERS #437 measured missing (PROGRESS.md 2026-08-30
+// noon: "neither source has a producer"). Split out like every belt above, for the same
+// module-size-budget reason and the same reconciler-fa.mjs precedent: each feature-detects its
+// own DB surface and each is gated on its own leader cadence flag (bankAgentRuns/closePrepRuns),
+// exactly like faRuns/adjRuns below.
+import { produceBankAgentWakes } from "./reconciler-bank-agent.mjs";
+import { produceClosePrepTasks } from "./reconciler-close-prep.mjs";
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 const ORPHAN_WINDOW = process.env.CLARA_RECONCILE_ORPHAN_WINDOW || "30 minutes";
@@ -557,6 +564,14 @@ export { reconcileAdjustmentRuns };
 // adjustment belts are.
 export { reconcileWakeEngineTasks };
 
+// Gate G1 PR-2b's own two producer belts (design §1.1/§3.6/§5) live in
+// reconciler-bank-agent.mjs / reconciler-close-prep.mjs under the same module-size budget.
+// Registered on their OWN daily-style cadence flags (bankAgentRuns/closePrepRuns, leader.mjs) —
+// UNLIKE reconcileWakeEngineTasks above, a producer tick is cheap but not free (a per-active-
+// client due-probe for bank_agent; a per-firm fiscal-year scan for close_prep), so it follows
+// the faRuns/adjRuns cadence-flag shape rather than running unconditionally every ~2s cycle.
+export { produceBankAgentWakes, produceClosePrepTasks };
+
 // ---------------------------------------------------------------------------
 // One full sweep (called under the leader lock by the supervisor).
 // ---------------------------------------------------------------------------
@@ -585,7 +600,7 @@ function isLeaderHalt(err) {
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {{enqueueChatTurn:Function, getRun:Function, log?:Function, prune?:boolean,
  *          autopostRules?:boolean, sstWatches?:boolean, lintBelt?:boolean, faRuns?:boolean,
- *          adjRuns?:boolean}} deps
+ *          adjRuns?:boolean, bankAgentRuns?:boolean, closePrepRuns?:boolean}} deps
  */
 export async function runReconcilerSweep(client, deps) {
   const log = deps.log ?? (() => {});
@@ -676,11 +691,16 @@ export async function runReconcilerSweep(client, deps) {
   const fa = deps.faRuns ? await belt("fa runs", () => reconcileFaRuns(client, { log }), { faOk: false }) : {};
   const adj = deps.adjRuns ? await belt("adjustment runs", () => reconcileAdjustmentRuns(client, { log }), { adjOk: false }) : {}; // Wave D-b belt (0045)
   const wake = await belt("wake engine reconcile", () => reconcileWakeEngineTasks(client, deps)); // Gate G1 belt — unconditional, like autodraft reconcile
+  // Gate G1 PR-2b — the two producers, on their OWN cadence flags (leader.mjs), same shape as
+  // faRuns/adjRuns above: each feature-detects its own DB surface and boots dormant until it
+  // lands, so gating them is safe even before either surface exists.
+  const bankAgent = deps.bankAgentRuns ? await belt("bank_agent produce", () => produceBankAgentWakes(client, { log }), { bankAgentOk: false }) : {};
+  const closePrep = deps.closePrepRuns ? await belt("close_prep produce", () => produceClosePrepTasks(client, { log }), { closePrepOk: false }) : {};
   const prune = deps.prune ? await belt("trace prune", () => pruneTraces(client, {}), { pruned: 0 }) : { pruned: 0 };
   // A FAILED BELT CONTRIBUTES NO COUNTERS, deliberately: a zeroed fallback would claim "nothing
   // to settle" where the truth is "we do not know", and it would let a caller's `"key" in swept`
   // assertion pass for a belt that never ran. `beltErrors` names them positively instead — the
   // autodraft edge's own law (a failure that is COUNTED stays visible; a failure that is only
   // logged is one grep away from invisible).
-  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...sst, ...lint, ...fa, ...adj, ...wake, ...prune };
+  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...sst, ...lint, ...fa, ...adj, ...wake, ...bankAgent, ...closePrep, ...prune };
 }

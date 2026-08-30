@@ -33,6 +33,25 @@ const pack = {
 };
 const tools = await import("../workflows/bankAgent.v1.tools.ts");
 
+// Codex r6 LOW (G1 PR-2b, #437's own review ladder): "a production MATCH_ALLOCATION_REASONS
+// roster compared by G1B-ALLOC-8". No such exported constant exists in the shipping source —
+// `reason: "<token>"` is a plain string literal at each refusal's own `return`
+// (bankAgent.v1.alloc.ts) — so the roster this cell compares against is DERIVED from that
+// shipping source text, the FOLD-19 idiom verbatim ("G1B-I3's corpus is now DERIVED from the
+// directory rather than typed out, so a new closure member joins the gate by existing"). A
+// hand-typed array here is exactly the allowlist class FOLD-19 closed for I3: a ninth refusal
+// reason added to deriveMatchAllocation tomorrow would silently NOT be swept unless this array
+// grew with it, and the sweep's own "not covered" assertion (below) is what makes that
+// omission loud instead of silent.
+async function productionAllocationReasons() {
+  const src = await import("node:fs/promises").then((fs) =>
+    fs.readFile(new URL("../workflows/bankAgent.v1.alloc.ts", import.meta.url), "utf8"),
+  );
+  const found = new Set();
+  for (const m of src.matchAll(/reason:\s*"([a-z_]+)"/g)) found.add(m[1]);
+  return found;
+}
+
 /** Build a pack view the way the DB's own reply would produce one, through the SHIPPING reader —
  *  never by hand-constructing the Maps, which would let readPackView rot untested. Throws on a
  *  parse failure so a fixture that stopped being valid cannot quietly become an empty pack. */
@@ -391,11 +410,24 @@ test("G1B-ALLOC-8 裁-44 R3 / FOLD-18 — an aggregate this process cannot carry
   // THE EXACT SET, not a floor: every reason this function can produce is here, and nothing else is.
   // The ninth branch — the CAPACITY-side `aggregate_unrepresentable` — shares this token and has its
   // own cell (G1B-ALLOC-8b), which is why the set has eight members and not nine.
+  const EXPECTED = ["aggregate_unrepresentable", "entries_do_not_tie", "entry_has_no_capacity", "entry_not_in_pack",
+    "line_not_in_pack", "lines_net_to_zero", "no_entries", "no_lines"];
   assert.deepEqual(
     [...seen].sort(),
-    ["aggregate_unrepresentable", "entries_do_not_tie", "entry_has_no_capacity", "entry_not_in_pack",
-      "line_not_in_pack", "lines_net_to_zero", "no_entries", "no_lines"],
+    EXPECTED,
     "the sweep must cover every refusal reason deriveMatchAllocation can produce, exactly",
+  );
+  // Codex r6 LOW — the SAME set, compared against the PRODUCTION roster derived from the
+  // shipping source rather than against this test's own hand-typed EXPECTED array, so a reason
+  // added to bankAgent.v1.alloc.ts without a matching staged case here fails LOUD (the sweep is
+  // no longer complete) instead of silently under-covering.
+  const production = await productionAllocationReasons();
+  assert.deepEqual(
+    [...production].sort(),
+    EXPECTED,
+    "the PRODUCTION roster (every distinct reason: token in the shipping source) must equal " +
+      "this sweep's own EXPECTED set — a reason added to bankAgent.v1.alloc.ts without a " +
+      "matching staged case here must fail this assertion, not silently go unswept",
   );
 
   // AND THE TWO THAT NO MODEL CAN REACH ARE PINNED AS SUCH, through the SHIPPING schema rather than

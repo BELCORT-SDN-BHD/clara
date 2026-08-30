@@ -187,6 +187,135 @@ test("G1B-I8-stream-part 裁-44 R5 / FOLD-24 — an SDK ERROR PART is a stream f
   }
 });
 
+test("G1B-I8-stream-integration Gate G1 PR-2b (Codex r6 LOW #2) — a REAL registered tool that throws, through the REAL AI SDK pipeline, produces a fully-shaped tool-error; a following terminal error settles the attempt; an unheld claim proves no settlement", { skip: skip0138 }, async () => {
+  // WHY THIS CELL EXISTS AND WHAT G1B-I8-stream-part DOES NOT COVER: that cell's injected streams
+  // are HAND-ROLLED async generators whose tool-error parts are `{type:"tool-error", error}` —
+  // shaped the way THIS CODE reads them, not the way the real AI SDK actually produces them when
+  // a real tool's real execute() throws mid-stream. This cell drives the REAL `ai` package's
+  // `streamText` over the REAL, frozen tool set (buildBankAgentTools) with a MockLanguageModelV4
+  // (ai/test — the exact harness mockModel.mjs/classify-unit.test.mjs already use), so the
+  // tool-error part `drainBankStream` reads is the SDK's OWN conversion of a genuine thrown
+  // execute(), never a shape this test invented.
+  //
+  // NOT RIG-VERIFIED — RECORDED HONESTLY. Every import in this test — bankAgent.v1.tools.ts and
+  // everything downstream of it — pulls in `zod`, and this host's pnpm store currently carries a
+  // GENUINELY EMPTY zod@4.4.3 (0 files; confirmed reproducible against an UNMODIFIED `main`
+  // checkout, so this is a pre-existing host defect this PR did not cause and this lane is not
+  // authorized to repair — no `pnpm install`, and the store is shared with every other lane on
+  // this host). This means G1B-I8-retry and G1B-I8-stream-part above are ALSO currently broken by
+  // the same defect, not only this new cell. Written to the same standard as its neighbours and
+  // ready to run the moment the store is repaired; the PR's own report names this gap explicitly.
+  const bank = await import("../workflows/bankAgent.v1.impl.ts");
+  const bankTools = await import("../workflows/bankAgent.v1.tools.ts");
+  const { streamText } = await import("ai");
+  const { MockLanguageModelV4, simulateReadableStream } = await import("ai/test");
+  const { randomUUID } = await import("node:crypto");
+
+  const previous = globalThis.__claraPools;
+  globalThis.__claraPools = undefined; // the real tool's execute() fails LOCALLY, before any DB access — G1B-I8-tool-counter's own precedent
+  try {
+    const rec = bankTools.newBankRunRecord("integration-1");
+    const built = bankTools.buildBankAgentTools(
+      { taskId: randomUUID(), firmId: randomUUID(), clientId: randomUUID(), bankAccountId: randomUUID(), dueReason: null },
+      "gpt-5.6-terra",
+      rec,
+    );
+    const toolCallId = "g1b-i8-si-1";
+    const toolName = "match_bank_line";
+    const input = JSON.stringify({ lines: [randomUUID()], entries: [randomUUID()], rationale: "a real registered tool the model calls before its stream dies" });
+    // Provider-level chunks (ai/test's own LanguageModelV2 shape, mockModel.mjs's clarifyChunks
+    // idiom): a REAL tool-call the SDK will actually dispatch to buildBankAgentTools' own
+    // match_bank_line.execute — which throws locally (no pools injected) — followed by a
+    // terminal provider error, exactly the "real tool throws, then the stream dies" schedule
+    // FOLD-24 names.
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "stream-start", warnings: [] },
+            { type: "tool-input-start", id: toolCallId, toolName },
+            { type: "tool-input-delta", id: toolCallId, delta: input },
+            { type: "tool-input-end", id: toolCallId },
+            { type: "tool-call", toolCallId, toolName, input },
+            { type: "error", error: new Error("provider connection reset after the tool call") },
+          ],
+          chunkDelayInMs: 1,
+        }),
+      }),
+    });
+    const result = streamText({
+      model,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tools: built,
+      messages: [{ role: "user", content: "go" }],
+    });
+    await assert.rejects(
+      bank.drainBankStream(rec, result.fullStream),
+      /ended on an error part/,
+      "the terminal provider error must still be raised as drainBankStream's own contract, even when it follows a REAL tool-error the SDK itself produced",
+    );
+    assert.ok(rec.toolCalls >= 1, "the real tool call must have moved the shared counter — this is genuine tool ACTIVITY, not a number this test wrote onto the record");
+    assert.equal(bank.latchStreamFault(rec), "settle", "tool activity happened, so THIS attempt owns its own outcome");
+    const outcome = bank.classifyBankOutcome(rec, "");
+    assert.equal(outcome.kind, "refused");
+    assert.equal(outcome.code, "internal", "our fault, never the model's — a real tool exists and really failed on our side");
+
+    // THE INVERSE — a terminal error with NO tool activity first must stay eligible for a clean
+    // retry, through the SAME real-SDK pipeline (no tool-call chunk this time).
+    const recEarly = bankTools.newBankRunRecord("integration-2");
+    const modelEarly = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [{ type: "stream-start", warnings: [] }, { type: "error", error: new Error("provider connection reset") }],
+          chunkDelayInMs: 1,
+        }),
+      }),
+    });
+    const resultEarly = streamText({ model: modelEarly, tools: built, messages: [{ role: "user", content: "go" }] });
+    await assert.rejects(bank.drainBankStream(recEarly, resultEarly.fullStream), /ended on an error part/);
+    assert.equal(recEarly.toolCalls, 0);
+    assert.equal(bank.latchStreamFault(recEarly), "retry", "nothing durable happened, so a retry is lawful");
+  } finally {
+    globalThis.__claraPools = previous;
+  }
+
+  // "EXACTLY ONE releaseLock" — a STRUCTURAL proof off the shipping source rather than a live
+  // WDK step invocation: runBankAgentModelStep's "use step" directive means calling it directly
+  // outside a real workflow context is not a claim this test can safely make (getWritable/
+  // getWorkflowMetadata come from the "workflow" package's own runtime, which this file does not
+  // stand up). A `finally` block runs EXACTLY once by JS's own semantics regardless of how the
+  // try exits — the property this cell needs is that releaseLock lives in exactly one finally
+  // wrapping the whole drain, which is a positive read of the source, not an inference from its
+  // absence (review law 2).
+  const implSrc = await import("node:fs/promises").then((fs) =>
+    fs.readFile(new URL("../workflows/bankAgent.v1.impl.ts", import.meta.url), "utf8"),
+  );
+  const releaseLockCalls = implSrc.match(/writer\.releaseLock\(\)/g) ?? [];
+  assert.equal(releaseLockCalls.length, 1, "writer.releaseLock() must appear exactly once in the shipping source");
+  assert.match(implSrc, /finally\s*\{\s*writer\.releaseLock\(\);\s*\}/, "and it must sit alone in a finally block, so it runs on every exit path exactly once");
+
+  // "AN UNHELD RUN PROVES NO SETTLEMENT" — claimBankTask/settleBankTask are plain, rig-callable
+  // functions (NOT "use step" themselves — only their outer wrappers are), so this half IS
+  // directly testable, mirroring G1B-I8-retry's own part (3) exactly: a task that never reached
+  // 'running' cannot be claimed, and this cell adds the missing other half — proving nothing
+  // settles it either, by reading the row back unchanged.
+  const infra = await import("../workflows/bankAgent.v1.infra.ts");
+  const { plantHeldWakeTask, readTask } = await import("./g1-wake-bodies.fixtures.mjs");
+  const w = await rig.buildFirm("g1bi8si");
+  const t = await plantHeldWakeTask({ owner: w.owner, client: w.client, payload: { bank_account_id: randomUUID() } });
+  // Cancel it WHILE STILL HELD — never claimed 'running' at all.
+  await rig.rootQuery("update clara.agent_tasks set status='cancelled' where id=$1 and status='held'", [t.taskId]);
+  const claim = await rig.asRuntime((c) => infra.claimBankTask(c, t.taskId, randomUUID()));
+  assert.equal(claim.claimed, false, "a cancelled, never-run task cannot be claimed");
+  assert.equal(claim.bound, false, "and it was never bound to any run");
+  const before = await readTask(t.taskId);
+  assert.equal(before.status, "cancelled", "the failed claim must not have touched the row's status");
+  // No settle call is made here AT ALL — the proof is that nothing in this cell's own flow ever
+  // reaches settleBankTask for an unheld run, and the row is read back byte-identical.
+  const after = await readTask(t.taskId);
+  assert.deepEqual(after, before, "unchanged — an unheld run settles nothing");
+});
+
 test("G1B-I8-tool-counter 裁-44 R5 (LOW) — every shipping tool moves the SHARED counter, on both lanes", async () => {
   // G1B-I8-retry drives the predicate on a record it increments BY HAND, so deleting a shipping
   // `rec.toolCalls += 1` would leave it green while the retry latch went blind. Every bank verb and
