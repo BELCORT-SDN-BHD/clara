@@ -27,7 +27,7 @@
 // forever. The same discipline OnboardingChecklistCard.tsx states for its own
 // two doors.
 
-import { useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "./PartBadge";
@@ -38,6 +38,11 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/common/native-select";
 import { businessDateTime } from "@/lib/business-date";
 import { useHydratedPart } from "@/lib/parts/hooks";
+import {
+  normalizeThreadActionText,
+  threadActionOpKey,
+  useThreadActionCoordinator,
+} from "@/lib/parts/thread-action-coordinator";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { loadClientRegister, type ClientRow } from "@/lib/firm/reads";
 import {
@@ -114,28 +119,67 @@ export function FirmQuestionCard({ part }: { part: FirmQuestionPart }) {
   const [mode, setMode] = useState<"resolve" | "dismiss" | null>(null);
   const [text, setText] = useState("");
   const [clientId, setClientId] = useState("");
+  const actions = useThreadActionCoordinator();
+  const resolveTriggerRef = useRef<HTMLButtonElement>(null);
+  const dismissTriggerRef = useRef<HTMLButtonElement>(null);
+  const originatingTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const formInputRef = useRef<HTMLInputElement>(null);
+  const restoreFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (mode !== null) {
+      formInputRef.current?.focus();
+    } else if (restoreFocusRef.current) {
+      restoreFocusRef.current = false;
+      originatingTriggerRef.current?.focus();
+    }
+  }, [mode]);
 
   if (!addressable) return <MalformedPart kind="firm_question" fields={["question_id"]} />;
 
   const row = state.data?.row ?? null;
   const clients = state.data?.clients ?? null;
   const isOpen = row?.status === "open";
+  const actionBusy = state.busy || actions.busy;
+  const actionUnavailable = actions.callerId === null;
 
   const reset = () => {
+    restoreFocusRef.current = true;
     setMode(null);
     setText("");
     setClientId("");
   };
 
+  const openMode = (next: "resolve" | "dismiss", trigger: RefObject<HTMLButtonElement | null>) => {
+    originatingTriggerRef.current = trigger.current;
+    setMode(next);
+  };
+
   const submit = () => {
-    const body = text.trim();
-    if (!body || !mode) return;
+    const body = normalizeThreadActionText(text);
+    const selectedMode = mode;
+    const selectedClient = clientId || null;
+    if (!body || !selectedMode || !row) return;
+    const questionId = row.id;
     // The typed text is cleared by `act`'s onOk arm ONLY — a refusal must never
     // discard what the human wrote (firm-question-row.tsx's own rule).
-    void state.act(async () => {
-      if (mode === "resolve") await resolveFirmQuestion(sessionTokenAccessor, part.question_id, body, clientId || null);
-      else await dismissFirmQuestion(sessionTokenAccessor, part.question_id, body);
-    }, reset);
+    void actions.runOnce(async (callerId) => {
+      await state.act(async () => {
+        const action = selectedMode === "resolve" ? "resolve-firm-question" : "dismiss-firm-question";
+        const operationKey = await threadActionOpKey({
+          callerId,
+          objectType: "firm-question",
+          objectId: questionId,
+          action,
+          intent: selectedMode === "resolve" ? [body, selectedClient] : [body],
+        });
+        if (selectedMode === "resolve") {
+          await resolveFirmQuestion(sessionTokenAccessor, questionId, body, selectedClient, operationKey);
+        } else {
+          await dismissFirmQuestion(sessionTokenAccessor, questionId, body, operationKey);
+        }
+      }, reset);
+    });
   };
 
   return (
@@ -164,11 +208,12 @@ export function FirmQuestionCard({ part }: { part: FirmQuestionPart }) {
             mode ? (
               <div className="flex flex-col gap-2">
                 <Input
+                  ref={formInputRef}
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   placeholder={mode === "resolve" ? t("resolutionPlaceholder") : t("reasonPlaceholder")}
                   aria-label={mode === "resolve" ? t("resolutionPlaceholder") : t("reasonPlaceholder")}
-                  disabled={state.busy}
+                  disabled={actionBusy || actionUnavailable}
                 />
                 {mode === "resolve" ? (
                   clients === null ? (
@@ -177,7 +222,7 @@ export function FirmQuestionCard({ part }: { part: FirmQuestionPart }) {
                     <NativeSelect
                       value={clientId}
                       onChange={(e) => setClientId(e.target.value)}
-                      disabled={state.busy}
+                      disabled={actionBusy || actionUnavailable}
                       aria-label={t("namedClientLabel")}
                       className="w-full"
                     >
@@ -191,20 +236,34 @@ export function FirmQuestionCard({ part }: { part: FirmQuestionPart }) {
                   )
                 ) : null}
                 <div className="flex gap-2">
-                  <Button type="button" size="sm" onClick={submit} disabled={state.busy || text.trim().length === 0}>
-                    {state.busy ? tc("submitting") : tc("submit")}
+                  <Button type="button" size="sm" onClick={submit} disabled={actionBusy || actionUnavailable || text.trim().length === 0}>
+                    {actionBusy ? tc("submitting") : tc("submit")}
                   </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={reset} disabled={state.busy}>
+                  <Button type="button" size="sm" variant="outline" onClick={reset} disabled={actionBusy || actionUnavailable}>
                     {tc("cancel")}
                   </Button>
                 </div>
               </div>
             ) : (
               <div className="flex gap-2">
-                <Button type="button" size="sm" variant="outline" onClick={() => setMode("resolve")} disabled={state.busy}>
+                <Button
+                  ref={resolveTriggerRef}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openMode("resolve", resolveTriggerRef)}
+                  disabled={actionBusy || actionUnavailable}
+                >
                   {t("resolve")}
                 </Button>
-                <Button type="button" size="sm" variant="outline" onClick={() => setMode("dismiss")} disabled={state.busy}>
+                <Button
+                  ref={dismissTriggerRef}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openMode("dismiss", dismissTriggerRef)}
+                  disabled={actionBusy || actionUnavailable}
+                >
                   {t("dismiss")}
                 </Button>
               </div>
@@ -271,22 +330,64 @@ export function CloseProposalCard({ part }: { part: CloseProposalPart }) {
 
   const [mode, setMode] = useState<"adopt" | "withdraw" | null>(null);
   const [reason, setReason] = useState("");
+  const actions = useThreadActionCoordinator();
+  const adoptTriggerRef = useRef<HTMLButtonElement>(null);
+  const withdrawTriggerRef = useRef<HTMLButtonElement>(null);
+  const originatingTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const adoptConfirmRef = useRef<HTMLButtonElement>(null);
+  const reasonInputRef = useRef<HTMLInputElement>(null);
+  const restoreFocusRef = useRef(false);
+
+  useEffect(() => {
+    if (mode === "adopt") {
+      adoptConfirmRef.current?.focus();
+    } else if (mode === "withdraw") {
+      reasonInputRef.current?.focus();
+    } else if (restoreFocusRef.current) {
+      restoreFocusRef.current = false;
+      originatingTriggerRef.current?.focus();
+    }
+  }, [mode]);
 
   if (!addressable) return <MalformedPart kind="close_proposal" fields={["proposal_id", "close_run_id", "client_id"]} />;
 
   const row = state.data?.row ?? null;
+  if (row !== null && (row.client_id !== part.client_id || row.close_run_id !== part.close_run_id)) {
+    return <MalformedPart kind="close_proposal" fields={["proposal_id", "close_run_id", "client_id"]} />;
+  }
   const isOpen = row?.state === "open";
+  const actionBusy = state.busy || actions.busy;
+  const actionUnavailable = actions.callerId === null;
   const reset = () => {
+    restoreFocusRef.current = true;
     setMode(null);
     setReason("");
   };
 
-  const settle = (next: "adopted" | "withdrawn") =>
-    void state.act(async () => {
-      await settleCloseProposal(part.proposal_id, next, next === "withdrawn" ? reason.trim() : null, {
-        session: sessionTokenAccessor,
-      });
-    }, reset);
+  const openMode = (next: "adopt" | "withdraw", trigger: RefObject<HTMLButtonElement | null>) => {
+    originatingTriggerRef.current = trigger.current;
+    setMode(next);
+  };
+
+  const settle = (next: "adopted" | "withdrawn") => {
+    if (!row) return;
+    const proposalId = row.id;
+    const normalizedReason = next === "withdrawn" ? normalizeThreadActionText(reason) : null;
+    void actions.runOnce(async (callerId) => {
+      await state.act(async () => {
+        const operationKey = await threadActionOpKey({
+          callerId,
+          objectType: "close-proposal",
+          objectId: proposalId,
+          action: next === "adopted" ? "adopt-close-proposal" : "withdraw-close-proposal",
+          intent: [normalizedReason],
+        });
+        await settleCloseProposal(proposalId, next, normalizedReason, operationKey, {
+          session: sessionTokenAccessor,
+        });
+      }, reset);
+    });
+  };
 
   return (
     <PartSummaryCard
@@ -295,7 +396,7 @@ export function CloseProposalCard({ part }: { part: CloseProposalPart }) {
         [t("proposalLabel"), part.proposal_id],
         [t("runLabel"), part.close_run_id],
       ]}
-      link={{ href: `/clients/${encodeURIComponent(part.client_id)}/close`, label: t("link") }}
+      link={row ? { href: `/clients/${encodeURIComponent(row.client_id)}/close`, label: t("link") } : undefined}
     >
       <HydrateState state={state} hasRow={row !== null} />
       {row ? (
@@ -320,10 +421,24 @@ export function CloseProposalCard({ part }: { part: CloseProposalPart }) {
           {isOpen ? (
             mode === null ? (
               <div className="flex flex-wrap gap-2">
-                <Button type="button" size="sm" variant="outline" onClick={() => setMode("adopt")} disabled={state.busy}>
+                <Button
+                  ref={adoptTriggerRef}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openMode("adopt", adoptTriggerRef)}
+                  disabled={actionBusy || actionUnavailable}
+                >
                   {t("adopt")}
                 </Button>
-                <Button type="button" size="sm" variant="destructive" onClick={() => setMode("withdraw")} disabled={state.busy}>
+                <Button
+                  ref={withdrawTriggerRef}
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => openMode("withdraw", withdrawTriggerRef)}
+                  disabled={actionBusy || actionUnavailable}
+                >
                   {t("withdraw")}
                 </Button>
               </div>
@@ -332,24 +447,26 @@ export function CloseProposalCard({ part }: { part: CloseProposalPart }) {
                 <p className="text-xs text-muted-foreground">{mode === "adopt" ? t("adoptConsent") : t("withdrawConsent")}</p>
                 {mode === "withdraw" ? (
                   <Input
+                    ref={reasonInputRef}
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
                     placeholder={t("reasonPlaceholder")}
                     aria-label={t("reasonPlaceholder")}
-                    disabled={state.busy}
+                    disabled={actionBusy || actionUnavailable}
                   />
                 ) : null}
                 <div className="flex gap-2">
                   <Button
+                    ref={mode === "adopt" ? adoptConfirmRef : undefined}
                     type="button"
                     size="sm"
                     variant={mode === "withdraw" ? "destructive" : "default"}
                     onClick={() => settle(mode === "adopt" ? "adopted" : "withdrawn")}
-                    disabled={state.busy || (mode === "withdraw" && reason.trim().length === 0)}
+                    disabled={actionBusy || actionUnavailable || (mode === "withdraw" && reason.trim().length === 0)}
                   >
-                    {state.busy ? tc("submitting") : mode === "adopt" ? t("adoptConfirm") : t("withdrawConfirm")}
+                    {actionBusy ? tc("submitting") : mode === "adopt" ? t("adoptConfirm") : t("withdrawConfirm")}
                   </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={reset} disabled={state.busy}>
+                  <Button type="button" size="sm" variant="outline" onClick={reset} disabled={actionBusy || actionUnavailable}>
                     {tc("cancel")}
                   </Button>
                 </div>

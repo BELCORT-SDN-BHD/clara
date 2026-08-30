@@ -56,7 +56,7 @@ test("loadFirmOpenQuestions: GETs firm_open_questions_visible filtered to status
   assert.match(seenUrl, /order=opened_at\.desc/);
 });
 
-test("resolveFirmQuestion: POSTs resolve_firm_question with p_client and a fresh op_key", async () => {
+test("resolveFirmQuestion: POSTs resolve_firm_question with p_client and the caller op_key verbatim", async () => {
   let seenUrl = "";
   let seenBody: Record<string, unknown> = {};
   await withMockedFetch(
@@ -66,14 +66,14 @@ test("resolveFirmQuestion: POSTs resolve_firm_question with p_client and a fresh
       return jsonResponse({ question_id: "q1", status: "resolved", named_client: "c1" }, 200);
     },
     async () => {
-      await resolveFirmQuestion(fakeSession("tok"), "q1", "It's Acme.", "c1");
+      await resolveFirmQuestion(fakeSession("tok"), "q1", "It's Acme.", "c1", "caller-owned-resolve-key");
     },
   );
   assert.match(seenUrl, /\/rpc\/resolve_firm_question$/);
   assert.equal(seenBody.p_question, "q1");
   assert.equal(seenBody.p_resolution, "It's Acme.");
   assert.equal(seenBody.p_client, "c1");
-  assert.ok(typeof seenBody.p_op_key === "string" && seenBody.p_op_key.length > 0);
+  assert.equal(seenBody.p_op_key, "caller-owned-resolve-key");
 });
 
 test("resolveFirmQuestion: a null clientId is passed through as p_client: null (the door's own optional arg)", async () => {
@@ -84,7 +84,7 @@ test("resolveFirmQuestion: a null clientId is passed through as p_client: null (
       return jsonResponse({ question_id: "q1", status: "resolved", named_client: null }, 200);
     },
     async () => {
-      await resolveFirmQuestion(fakeSession("tok"), "q1", "Not attributable.", null);
+      await resolveFirmQuestion(fakeSession("tok"), "q1", "Not attributable.", null, "caller-owned-null-client-key");
     },
   );
   assert.equal(seenBody.p_client, null);
@@ -100,12 +100,13 @@ test("dismissFirmQuestion: POSTs dismiss_firm_question, no client argument at al
       return jsonResponse({ question_id: "q1", status: "dismissed" }, 200);
     },
     async () => {
-      await dismissFirmQuestion(fakeSession("tok"), "q1", "Not a real question.");
+      await dismissFirmQuestion(fakeSession("tok"), "q1", "Not a real question.", "caller-owned-dismiss-key");
     },
   );
   assert.match(seenUrl, /\/rpc\/dismiss_firm_question$/);
   assert.deepEqual(Object.keys(seenBody).sort(), ["p_op_key", "p_question", "p_reason"]);
   assert.equal(seenBody.p_reason, "Not a real question.");
+  assert.equal(seenBody.p_op_key, "caller-owned-dismiss-key");
 });
 
 test("dismissFirmQuestion: a governed CLR refusal surfaces as DoorRefusal verbatim, never retried", async () => {
@@ -116,7 +117,7 @@ test("dismissFirmQuestion: a governed CLR refusal surfaces as DoorRefusal verbat
       return jsonResponse({ code: "CLR10", message: "firm question is not open" }, 400);
     },
     async () => {
-      await assert.rejects(dismissFirmQuestion(fakeSession("tok"), "q1", "irrelevant"), (e: unknown) => {
+      await assert.rejects(dismissFirmQuestion(fakeSession("tok"), "q1", "irrelevant", "caller-refusal-key"), (e: unknown) => {
         assert.ok(isDoorRefusal(e));
         assert.equal((e as { code: string }).code, "CLR10");
         assert.equal((e as { message: string }).message, "firm question is not open");

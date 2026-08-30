@@ -170,6 +170,43 @@ test("agent_receipt renders the DB row's own facts and links to the client works
   );
 });
 
+test("agent_receipt fails closed when the hydrated row belongs to a different client than the wire part", async () => {
+  await withMockedEnv(
+    () => jsonResponse([{ ...RECEIPT_ROW, client_id: "client-other" }]),
+    async () => {
+      const h = await renderComponent(App(RECEIPT));
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        const text = h.text();
+        assert.match(text, /could not be opened/, "a client mismatch must use the malformed-part fallback");
+        assert.doesNotMatch(text, /clara-agent/, "no fact from the mismatched hydrated row may render");
+        assert.doesNotMatch(text, /Vendor matched an existing coding rule/, "no receipt prose may cross the identity wall");
+        assert.deepEqual(hrefs(h), [], "a mismatched row proves no destination");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("agent_receipt fails closed when the wire declares firm altitude but hydration returns a client row", async () => {
+  await withMockedEnv(
+    () => jsonResponse([RECEIPT_ROW]),
+    async () => {
+      const h = await renderComponent(App({ ...RECEIPT, client_id: null }));
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        const text = h.text();
+        assert.match(text, /could not be opened/, "wire null versus hydrated non-null is an identity mismatch");
+        assert.doesNotMatch(text, /client-9b71/, "the client-scoped row must not be laundered into a firm-altitude receipt");
+        assert.deepEqual(hrefs(h), [], "the mismatched client route must not render");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("agent_receipt NEVER formats a numeral out of the model-authored `verdict` payload", async () => {
   await withMockedEnv(
     () => jsonResponse([RECEIPT_ROW]),

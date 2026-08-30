@@ -29,7 +29,8 @@ import { clickButton, renderComponent, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import { checkKeyboardWalk } from "../../test/keyboardWalk";
-import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
+import { configureSessionTokenSource, resetSessionTokenSource, sessionTokenAccessor } from "../../lib/session-accessor";
+import { ThreadActionCoordinatorProvider } from "../../lib/parts/thread-action-coordinator";
 import { PartRenderer } from "./PartRenderer";
 import type { ClaraPart } from "../../lib/parts/types";
 import messages from "../../messages/en.json";
@@ -42,11 +43,24 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+const CALLER_CONTEXT = [{
+  user_id: "11111111-1111-4111-8111-111111111111",
+  firm_id: "22222222-2222-4222-8222-222222222222",
+  firm_name: "BELCORT",
+  role: "owner",
+  role_rank: 40,
+  is_operator: true,
+}];
+
 function withMockedEnv(impl: (url: string) => Response, run: () => Promise<void>): Promise<void> {
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  globalThis.fetch = (async (u: unknown) => impl(String(u))) as typeof fetch;
+  globalThis.fetch = (async (u: unknown) => {
+    const url = String(u);
+    if (url.includes("/rest/v1/caller_context")) return jsonResponse(CALLER_CONTEXT);
+    return impl(url);
+  }) as typeof fetch;
   configureSessionTokenSource(async () => "tok");
   return run().finally(() => {
     globalThis.fetch = originalFetch;
@@ -61,7 +75,10 @@ function App(part: ClaraPart): ReactElement {
     locale: "en",
     messages,
     timeZone: "Asia/Kuala_Lumpur",
-    children: createElement(PartRenderer, { part }),
+    children: createElement(ThreadActionCoordinatorProvider, {
+      session: sessionTokenAccessor,
+      children: createElement(PartRenderer, { part }),
+    }),
   });
 }
 
@@ -89,7 +106,7 @@ async function scanCard(part: ClaraPart, openAct?: string): Promise<void> {
     if (openAct) {
       const trigger = h.find((n: Stub) => n.tagName === "BUTTON" && textOf(n).trim() === openAct);
       assert.ok(trigger, `the "${openAct}" trigger must render before this scan means anything`);
-      await clickButton(trigger);
+      await h.act(() => clickButton(trigger));
       for (let i = 0; i < 3; i++) await h.settle();
       // Discriminating proof the second state was actually REACHED — otherwise
       // this "open form" scan is just the resting scan run twice.

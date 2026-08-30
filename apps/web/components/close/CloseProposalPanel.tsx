@@ -77,8 +77,8 @@ export function CloseProposalPanel({
           <span className="text-xs text-muted-foreground">{t("drafted", { count: p.drafted.length })}</span>
           {p.state === "open" ? (
             <div className="flex flex-wrap gap-2">
-              <AdoptDialog proposal={p} busy={proposals.busy} onConfirm={() => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "adopted", null, { session }); })} />
-              <WithdrawDialog busy={proposals.busy} onConfirm={(reason) => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "withdrawn", reason, { session }); })} />
+              <AdoptDialog proposal={p} busy={proposals.busy} onConfirm={() => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "adopted", null, crypto.randomUUID(), { session }); })} />
+              <WithdrawDialog busy={proposals.busy} onConfirm={(reason) => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "withdrawn", reason, crypto.randomUUID(), { session }); })} />
             </div>
           ) : (
             <span className="text-xs text-muted-foreground">

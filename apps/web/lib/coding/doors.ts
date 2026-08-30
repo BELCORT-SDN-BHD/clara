@@ -1,7 +1,8 @@
 // T7 governed writes — every doors.ts caller re-reads afterward via
 // lib/parts/hooks.ts's `useHydratedPart().act()` (hydrate-never-trust; no
-// optimistic UI). A fresh `crypto.randomUUID()` op_key per call, never reused
-// across a retry (doors.ts's own "never retry a refusal" law). Signatures
+// optimistic UI). Most callers mint a fresh `crypto.randomUUID()` op_key per
+// call; retryable transcript acts accept a caller-owned deterministic key.
+// Signatures
 // transcribed from the LIVE catalog (2026-08-28 census) — see
 // lib/coding/types.ts's header for citations.
 
@@ -69,8 +70,8 @@ export function resolveLintFinding(
  *  thread's own `sweep_receipt` part, which is why 裁-20
  *  (docs/plan/active/mohe-grill-rulings-2026-08-28.md:268-272) put the control
  *  on that card and nowhere else. */
-export function acknowledgeSweepRun(runId: string, opts: Opts = {}): Promise<unknown> {
-  return callDoor("acknowledge_sweep_run", { p_run: runId, p_op_key: opKey() }, opts);
+export function acknowledgeSweepRun(runId: string, operationKey: string, opts: Opts = {}): Promise<unknown> {
+  return callDoor("acknowledge_sweep_run", { p_run: runId, p_op_key: operationKey }, opts);
 }
 
 /** `clara.cancel_agent_task(p_task, p_op_key)` — bookkeeper+. Idempotent on

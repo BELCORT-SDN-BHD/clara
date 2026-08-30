@@ -66,6 +66,7 @@ components/parts/v14-receipt-cards.test.tsx
 components/parts/v16-read-cards.test.tsx
 components/parts/v16-act-cards.test.tsx
 components/parts/sweep-receipt-card.test.tsx
+components/parts/v16-action-round2.test.tsx
 components/parts/v16-cards-a11y.test.tsx
 components/registers/accounts-a11y.test.tsx
 components/registers/accounts-keyboard.test.tsx
@@ -142,6 +143,7 @@ lib/onboarding/api.test.ts
 lib/parts/catalog.test.tsx
 lib/parts/hooks.test.ts
 lib/parts/single-fire-guard.test.ts
+lib/parts/thread-action-coordinator.test.ts
 lib/read.test.ts
 lib/registers/accounts.test.ts
 lib/registers/adjustments-workbench.test.ts

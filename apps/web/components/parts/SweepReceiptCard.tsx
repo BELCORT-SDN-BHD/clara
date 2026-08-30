@@ -39,6 +39,7 @@ import { FactRows, HydrateState, MalformedPart, usableId } from "./PartCardShell
 import { Button } from "@/components/ui/button";
 import { businessDateTime } from "@/lib/business-date";
 import { useHydratedPart } from "@/lib/parts/hooks";
+import { threadActionOpKey, useThreadActionCoordinator } from "@/lib/parts/thread-action-coordinator";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { getSweepRun } from "@/lib/coding/reads";
 import { acknowledgeSweepRun } from "@/lib/coding/doors";
@@ -95,6 +96,7 @@ export function SweepReceiptCard({ part }: { part: SweepReceiptPart }) {
   const state = useHydratedPart<{ row: SweepRunDetail }>(addressable ? sessionTokenAccessor : null, async (s) => ({
     row: await getSweepRun(part.run_id, { session: s }),
   }));
+  const actions = useThreadActionCoordinator();
 
   if (!addressable) return <MalformedPart kind="sweep_receipt" fields={["run_id"]} />;
 
@@ -103,6 +105,8 @@ export function SweepReceiptCard({ part }: { part: SweepReceiptPart }) {
   const items: SweepRunItemRow[] = detail?.items ?? [];
   const finalized = run?.state === "finalized";
   const acknowledged = run?.acknowledged_at != null;
+  const actionBusy = state.busy || actions.busy;
+  const actionUnavailable = actions.callerId === null;
 
   return (
     <PartSummaryCard
@@ -160,14 +164,24 @@ export function SweepReceiptCard({ part }: { part: SweepReceiptPart }) {
               type="button"
               size="sm"
               className="w-fit"
-              onClick={() =>
-                void state.act(async () => {
-                  await acknowledgeSweepRun(part.run_id, { session: sessionTokenAccessor });
-                })
-              }
-              disabled={state.busy || !finalized || acknowledged}
+              onClick={() => {
+                if (!run) return;
+                const runId = run.id;
+                void actions.runOnce(async (callerId) => {
+                  await state.act(async () => {
+                    const operationKey = await threadActionOpKey({
+                      callerId,
+                      objectType: "sweep-run",
+                      objectId: runId,
+                      action: "acknowledge-sweep-run",
+                    });
+                    await acknowledgeSweepRun(runId, operationKey, { session: sessionTokenAccessor });
+                  });
+                });
+              }}
+              disabled={actionBusy || actionUnavailable || !finalized || acknowledged}
             >
-              {state.busy ? tc("submitting") : t("acknowledge")}
+              {actionBusy ? tc("submitting") : t("acknowledge")}
             </Button>
             {!finalized ? <p className="text-xs text-muted-foreground">{t("acknowledgeBlockedNotFinalized")}</p> : null}
             {finalized && acknowledged ? <p className="text-xs text-muted-foreground">{t("acknowledgeAlreadyDone")}</p> : null}

@@ -96,6 +96,9 @@ export function AgentReceiptCard({ part }: { part: AgentReceiptPart }) {
 
   if (!addressable) return <MalformedPart kind="agent_receipt" fields={["receipt_kind", "receipt_id"]} />;
   const row = state.data?.row ?? null;
+  if (row !== null && row.client_id !== part.client_id) {
+    return <MalformedPart kind="agent_receipt" fields={["receipt_kind", "receipt_id", "client_id"]} />;
+  }
 
   return (
     <PartSummaryCard

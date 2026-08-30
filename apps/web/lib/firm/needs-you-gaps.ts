@@ -16,7 +16,7 @@
 // spec these wrappers follow.
 //
 // Same mechanism as lib/firm/needs-you.ts's own review-queue doors: callDoor
-// for the write, a fresh op_key per call (never reused across a retry), a
+// for the write, a caller-owned op_key passed through byte-for-byte, a
 // governed DoorRefusal surfaces verbatim and is never retried, and every
 // caller re-reads afterward (hydrate-never-trust) — lib/firm/use-async-read.ts's
 // `act()` is the intended caller.
@@ -133,10 +133,11 @@ export function resolveFirmQuestion(
   questionId: string,
   resolution: string,
   clientId: string | null,
+  opKey: string,
 ): Promise<unknown> {
   return callDoor(
     "resolve_firm_question",
-    { p_question: questionId, p_resolution: resolution, p_client: clientId, p_op_key: crypto.randomUUID() },
+    { p_question: questionId, p_resolution: resolution, p_client: clientId, p_op_key: opKey },
     { session },
   );
 }
@@ -146,10 +147,15 @@ export function resolveFirmQuestion(
  *  carry a named_client (`ck_firm_open_questions_dismissed_names_nobody`,
  *  0103:591-592) — dismissing means "this was never a real question," never
  *  an attribution, so this wrapper takes no clientId parameter at all. */
-export function dismissFirmQuestion(session: SessionTokenAccessor, questionId: string, reason: string): Promise<unknown> {
+export function dismissFirmQuestion(
+  session: SessionTokenAccessor,
+  questionId: string,
+  reason: string,
+  opKey: string,
+): Promise<unknown> {
   return callDoor(
     "dismiss_firm_question",
-    { p_question: questionId, p_reason: reason, p_op_key: crypto.randomUUID() },
+    { p_question: questionId, p_reason: reason, p_op_key: opKey },
     { session },
   );
 }

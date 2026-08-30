@@ -31,7 +31,8 @@ import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { clickButton, renderComponent, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
-import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
+import { configureSessionTokenSource, resetSessionTokenSource, sessionTokenAccessor } from "../../lib/session-accessor";
+import { ThreadActionCoordinatorProvider } from "../../lib/parts/thread-action-coordinator";
 import { PartRenderer, FALLBACK_UNSUPPORTED_PREFIX } from "./PartRenderer";
 import type { ClaraPart, SweepReceiptPart } from "../../lib/parts/types";
 import messages from "../../messages/en.json";
@@ -46,6 +47,14 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 type Call = { url: string; body: unknown };
 type Seen = { calls: Call[] };
+const CALLER_CONTEXT = [{
+  user_id: "11111111-1111-4111-8111-111111111111",
+  firm_id: "22222222-2222-4222-8222-222222222222",
+  firm_name: "BELCORT",
+  role: "owner",
+  role_rank: 40,
+  is_operator: true,
+}];
 
 function withMockedEnv(impl: (url: string) => Response, run: (seen: Seen) => Promise<void>): Promise<void> {
   const originalFetch = globalThis.fetch;
@@ -63,6 +72,7 @@ function withMockedEnv(impl: (url: string) => Response, run: (seen: Seen) => Pro
       }
     }
     seen.calls.push({ url, body });
+    if (url.includes("/rest/v1/caller_context")) return jsonResponse(CALLER_CONTEXT);
     return impl(url);
   }) as typeof fetch;
   configureSessionTokenSource(async () => "tok");
@@ -79,7 +89,10 @@ function App(part: ClaraPart): ReactElement {
     locale: "en",
     messages,
     timeZone: "Asia/Kuala_Lumpur",
-    children: createElement(PartRenderer, { part }),
+    children: createElement(
+      ThreadActionCoordinatorProvider,
+      { session: sessionTokenAccessor, children: createElement(PartRenderer, { part }) },
+    ),
   });
 }
 
@@ -248,7 +261,7 @@ test("sweep_receipt: acknowledging a FINALIZED run posts run + op_key, then re-r
         assert.ok(call, "the door must have been called");
         const body = call.body as Record<string, unknown>;
         assert.equal(body.p_run, "run-3c88", "the subject is the part's own run_id");
-        assert.ok(typeof body.p_op_key === "string" && body.p_op_key.length > 0, "a fresh op_key per call");
+        assert.ok(typeof body.p_op_key === "string" && body.p_op_key.length > 0, "the actor-scoped deterministic op_key reaches the door");
 
         // THE DISCRIMINATING POST-CONDITION — facts that exist only on the
         // re-read row, plus the control now closed against a second act.
@@ -321,7 +334,7 @@ test("sweep_receipt with a BLANK run_id fails closed: a visible notice, and NO r
       const h = await renderComponent(App({ ...SWEEP, run_id: "" }));
       try {
         for (let i = 0; i < 4; i++) await h.settle();
-        assert.deepEqual(seen.calls, [], "an unaddressable part must never reach the network");
+        assert.deepEqual(seen.calls.filter((call) => !call.url.includes("/caller_context")), [], "an unaddressable part must never issue an object request");
         assert.match(h.text(), /could not be opened/);
         assert.match(h.text(), /run_id/);
       } finally {
