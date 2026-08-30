@@ -251,7 +251,7 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
   it("PIN NEW-1e: an unknown helper registration fails closed by helper name", () => {
     assert.throws(
       () => runtimeRoutesFrom(`addRoute(router, "put", "/api/intake/hidden", () => bearerCapability("x"));`),
-      /unmodelled: unmodelled registration addRoute\(router, .* at runtime-fixture\.ts:/,
+      /unmodelled: registration addRoute\(router, .* at runtime-fixture\.ts:/,
     );
   });
 
@@ -297,7 +297,7 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
     ]) {
       assert.throws(
         () => runtimeRoutesFrom(source),
-        /unmodelled: (?:unmodelled registration .*|mounted child router) at runtime-fixture\.ts:/,
+        /unmodelled: (?:registration .*|mounted child router) at runtime-fixture\.ts:/,
       );
     }
   });
@@ -342,6 +342,71 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
     const source = `import { bearerCapability } from "../lib/intake.mjs";
       router.put("/api/intake/swallowed", (_req, res) => { try { bearerCapability("x"); } catch {} res.end(); });`;
     assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false]);
+  });
+
+  it("PIN NEW-1g-d: fallthrough work or next() before the bearer is not protection", () => {
+    for (const first of ["await mutateBooks();", "next();", "if (mutateBooks()) return;"]) {
+      const source = `import { bearerCapability } from "../lib/intake.mjs";
+        router.put("/api/intake/pre-bearer", async (req, res, next) => {
+          ${first}
+          bearerCapability(req.header("authorization"));
+          res.end();
+        });`;
+      assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false], first);
+    }
+  });
+
+  it("PIN NEW-1g-e: logical, ternary, and switch bearer calls are conditional", () => {
+    for (const statement of [
+      'flag && bearerCapability("x");',
+      'false && bearerCapability("x");',
+      'flag ? bearerCapability("x") : undefined;',
+      'switch (flag) { case true: bearerCapability("x"); break; }',
+    ]) {
+      const source = `import { bearerCapability } from "../lib/intake.mjs";
+        router.put("/api/intake/conditional", (_req, res) => { ${statement} res.end(); });`;
+      assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false], statement);
+    }
+  });
+
+  it("PIN NEW-1g-f: work after a caught bearer denial is not protected", () => {
+    const source = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/caught", async (_req, res) => {
+        try { bearerCapability("x"); } catch {}
+        await mutateBooks();
+      });`;
+    assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false]);
+  });
+
+  it("PIN NEW-1f-c: definite termination propagates through blocks and constant branches", () => {
+    const blocked = `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      export function intakeRoutes() {
+        const router = express.Router();
+        { return router; }
+        router.put("/api/intake/dead-block", () => bearerCapability("x"));
+      }`;
+    const constant = `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      export function intakeRoutes() {
+        const router = express.Router();
+        if (true) return router;
+        router.put("/api/intake/dead-if", () => bearerCapability("x"));
+      }`;
+    assert.deepEqual(runtimeRoutesFrom(blocked), []);
+    assert.deepEqual(runtimeRoutesFrom(constant), []);
+  });
+
+  it("PIN NEW-1f-d: an if(false) registration is dead but later live work remains", () => {
+    const source = `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      export function intakeRoutes() {
+        const router = express.Router();
+        if (false) router.put("/api/intake/dead", () => bearerCapability("x"));
+        router.put("/api/intake/live", () => bearerCapability("x"));
+        return router;
+      }`;
+    assert.deepEqual(runtimeRoutesFrom(source), [{ call: "PUT intake/live", capability: true }]);
   });
 });
 

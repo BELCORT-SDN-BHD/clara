@@ -19,6 +19,7 @@ import {
   reachableFrom,
   reachableCallsFrom,
   spineGuardProof,
+  spineGuardResponseIsReturned,
   stripComments,
   type SourceUnit,
 } from "../test/sourceOracle";
@@ -176,6 +177,28 @@ const isSpineCall = (call: ReturnType<typeof reachableCallsFrom>[number]): boole
 function callsSpine(p: string): boolean {
   return SPINE_IMPORT.test(codeWithStrings(p)) && executionRoots(p).some((root) =>
     root.calls.some(isSpineCall));
+}
+
+function assertDenialContract(unit: SourceUnit, root: string, onDenial: "redirect" | "403"): void {
+  const expected = onDenial === "redirect" ? "requireFirmScope" : "firmScopeGuard";
+  const proof = spineGuardProof(unit, root);
+  assert.equal(proof.call, expected, `${unit.path}: ${root} must use ${expected}`);
+  if (onDenial === "403") {
+    assert.equal(
+      spineGuardResponseIsReturned(unit, root),
+      true,
+      `${unit.path}: ${root} never returns the exact guard result's response`,
+    );
+  }
+}
+
+function assertGuardBeforeCall(unit: SourceUnit, root: string, targetName: string): void {
+  const calls = reachableCallsFrom(unit, root);
+  const guard = calls.find((call) => call.importedFrom === "@/lib/require-firm-scope"
+    && call.importedName === "firmScopeGuard");
+  const target = calls.find((call) => call.name === targetName);
+  assert.ok(target !== undefined, `${unit.path}: ${root}: the ${targetName} call is gone`);
+  assert.ok(guard !== undefined && guard.start < target.start, `${unit.path}: ${root}: ${targetName} runs before the guard`);
 }
 
 describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () => {
@@ -395,28 +418,49 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
     // computed and dropped is the same hole one line further on.
     const entrance = SCOPE_ENTRANCES.find((e) => e.onDenial === "403");
     assert.ok(entrance, "no 403 entrance is registered");
-    const code = executedCode(entrance.path);
-    const m = /const\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+firmScopeGuard\(\s*\)/.exec(code);
-    assert.ok(m, "the 403 entrance does not bind the guard result to a name");
-    const bound = m[1] as string;
-    assert.match(
-      code,
-      new RegExp(`return\\s+${bound}\\.response`),
-      `${entrance.path} never returns ${bound}.response — the refusal is computed and discarded`,
-    );
+    const unit = stripComments(readSourceUnit(entrance.path));
+    for (const { root } of executionRoots(entrance.path)) assertDenialContract(unit, root, "403");
   });
 
   it("the two layouts REDIRECT and the API route REFUSES — not the other way round", () => {
     for (const entrance of SCOPE_ENTRANCES) {
-      const code = executedCode(entrance.path);
-      if (entrance.onDenial === "redirect") {
-        assert.match(code, /requireFirmScope\(\s*\)/, `${entrance.path} must redirect`);
-        assert.doesNotMatch(code, /firmScopeGuard/, `${entrance.path} must not answer a status`);
-      } else {
-        assert.match(code, /firmScopeGuard\(\s*\)/, `${entrance.path} must answer a status`);
-        assert.doesNotMatch(code, /requireFirmScope\(/, `${entrance.path} must not redirect a data request`);
-      }
+      const unit = stripComments(readSourceUnit(entrance.path));
+      for (const { root } of executionRoots(entrance.path)) assertDenialContract(unit, root, entrance.onDenial);
     }
+  });
+
+  it("PIN F6: aliased spine imports preserve denial kind, return binding, and order", () => {
+    const redirect: SourceUnit = {
+      path: "aliased-layout.tsx",
+      code: `import { requireFirmScope as gate } from "@/lib/require-firm-scope";
+        export default async function Layout() { await gate(); return <main />; }`,
+    };
+    assertDenialContract(redirect, "Layout", "redirect");
+
+    const refusal: SourceUnit = {
+      path: "aliased-route.ts",
+      code: `import { firmScopeGuard as gate } from "@/lib/require-firm-scope";
+        async function proxy() { return new Response(); }
+        export async function GET() {
+          const result = await gate();
+          if (!result.ok) return result.response;
+          return proxy();
+        }`,
+    };
+    assertDenialContract(refusal, "GET", "403");
+    assertGuardBeforeCall(refusal, "GET", "proxy");
+
+    const wrongResult: SourceUnit = {
+      path: "wrong-result-route.ts",
+      code: `import { firmScopeGuard as gate } from "@/lib/require-firm-scope";
+        export async function GET() {
+          const result = await gate();
+          const decoy = { response: new Response() };
+          if (!result.ok) return decoy.response;
+          return new Response();
+        }`,
+    };
+    assert.equal(spineGuardResponseIsReturned(wrongResult, "GET"), false);
   });
 });
 
@@ -424,12 +468,8 @@ describe("HIGH-1 — the guard dominates the proxy, and owns the outbound identi
   const ROUTE = "app/api/runtime/[...path]/route.ts";
 
   it("the guard call PRECEDES the proxy call", () => {
-    const code = executedCode(ROUTE);
-    const guardAt = code.search(/firmScopeGuard\(\s*\)/);
-    const proxyAt = code.search(/\breturn\s+proxy\(/);
-    assert.ok(guardAt >= 0, "the guard call is gone");
-    assert.ok(proxyAt >= 0, "the proxy call is gone");
-    assert.ok(guardAt < proxyAt, "the proxy runs before the guard — the request leaves unguarded");
+    const unit = stripComments(readSourceUnit(ROUTE));
+    for (const { root } of executionRoots(ROUTE)) assertGuardBeforeCall(unit, root, "proxy");
   });
 
   it("the route NEVER reads an inbound Authorization header", () => {

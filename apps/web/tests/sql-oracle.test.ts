@@ -171,6 +171,19 @@ describe("the SQL lexer is controlled before the migration census trusts it", ()
       /unmodelled: unresolved dynamic SQL/,
       "a zero-result census silently accepted unresolved dynamic SQL",
     );
+    assert.throws(
+      () => viewDefinitionOffsets(
+        "do $$ begin execute v_sql; end $$; create view clara.probe as select 1;",
+        "probe",
+      ),
+      /unmodelled: unresolved dynamic SQL/,
+      "a nonzero-result census silently accepted unresolved dynamic SQL",
+    );
+  });
+
+  it("PIN SQL-9c: PostgreSQL E-string escapes never erase executable DDL", () => {
+    const escapedSpace = String.raw`do $$ begin execute E'create\x20view clara.probe as select 1;'; end $$;`;
+    assert.equal(viewDefinitionOffsets(escapedSpace, "probe").length, 1);
   });
 
   it("PIN SQL-9b: a pure literal concatenation folds; a mixed expression throws", () => {

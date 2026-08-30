@@ -122,6 +122,12 @@ describe("the AST call graph and execution-dominance proof", () => {
     assert.throws(() => spineGuardProof(source, "S"), /type-only import of the spine/);
   });
 
+  it("PIN AST-9a-inline: an inline type-only spine import throws", () => {
+    const source = `import { type requireFirmScope } from "@/lib/require-firm-scope";
+      export default async function S() { await requireFirmScope(); }`;
+    assert.throws(() => spineGuardProof(source, "S"), /type-only import of the spine/);
+  });
+
   it("PIN AST-9b: a barrel spine import throws", () => {
     const source = `import { requireFirmScope } from "./scope-barrel";
       export default async function S() { await requireFirmScope(); }`;
@@ -136,6 +142,12 @@ describe("the AST call graph and execution-dominance proof", () => {
 
   it("PIN AST-9d: an unresolved spine binding throws", () => {
     const source = "export default async function S() { await requireFirmScope(); }";
+    assert.throws(() => spineGuardProof(source, "S"), /unresolvable spine import identity/);
+  });
+
+  it("PIN AST-9e: dynamic namespace property access throws", () => {
+    const source = `const scope = await import("@/lib/require-firm-scope");
+      export default async function S() { await scope.requireFirmScope(); }`;
     assert.throws(() => spineGuardProof(source, "S"), /unresolvable spine import identity/);
   });
 
@@ -224,6 +236,16 @@ describe("the AST call graph and execution-dominance proof", () => {
     assert.equal(spineGuardProof(throwing, "S").dominates, false);
   });
 
+  it("PIN AST-11b: finally-local break and continue do not override the guard", () => {
+    const localTransfers = `import { requireFirmScope } from "@/lib/require-firm-scope";
+      export default async function S() {
+        try { await requireFirmScope(); } finally {
+          for (const value of [0, 1]) { if (value === 0) continue; break; }
+        }
+      }`;
+    assert.equal(spineGuardProof(localTransfers, "S").dominates, true);
+  });
+
   it("PIN AST-12: interpolated template payloads are blanked", () => {
     const src = `export default function S() {
       const decoy = \`return guard.response \${value}\`;
@@ -284,6 +306,19 @@ describe("module-level state is scoped by the AST, not a whole-file regex", () =
     assert.match(moduleStateHazards("const cache = makeStore(); function put(v: unknown) { cache.firm = v; }")[0] ?? "", /mutated/);
     assert.deepEqual(moduleStateHazards("const table = { code: 403 } as const;"), []);
     assert.deepEqual(moduleStateHazards("const table = Object.freeze({ code: 403 });"), []);
+  });
+
+  it("PIN F7: cast-wrapped writes invalidate immutable module containers", () => {
+    for (const source of [
+      "const c = makeStore(); (c as unknown as { seen: number }).seen += 1;",
+      "const c = Object.freeze({ seen: 0 }); (c as { seen: number }).seen = 1;",
+      "const c = [] as const; (c as unknown as string[]).push('value');",
+      "const c = makeStore(); ((c satisfies { seen: number })!).seen = 1;",
+      "const c = makeStore(); (<{ seen: number }>c).seen = 1;",
+    ]) {
+      assert.match(moduleStateHazards(source)[0] ?? "", /mutated/, source);
+    }
+    assert.deepEqual(moduleStateHazards("const c = Object.freeze({ seen: 0 });"), []);
   });
 
   it("PIN AST-14: every durable-store shape reds", () => {
@@ -360,6 +395,16 @@ describe("unsupported export mechanisms fail closed", () => {
       /unmodelled: export-star re-export/,
       "a direct default must not hide an unsupported sibling export",
     );
+  });
+
+  it("PIN AST-13b: computed CommonJS roots fail closed", () => {
+    for (const source of [
+      'async function GET() {} module["exports"]["GET"] = GET;',
+      'async function GET() {} module["exports"] = { GET };',
+      'async function GET() {} Object.defineProperty(module.exports, "GET", { value: GET });',
+    ]) {
+      assert.throws(() => exportedHttpMethods(source), /unmodelled: uninspectable export mechanism/);
+    }
   });
 
   it("VACUITY CONTROL: the stripper keeps string literals, drops both comment forms", () => {

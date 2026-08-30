@@ -153,8 +153,48 @@ function sqlStringLiteral(sql: string, start: number): SqlStringLiteral | null {
     let value = "";
     while (i < sql.length) {
       if (escaped && sql[i] === "\\" && i + 1 < sql.length) {
-        value += sql[i + 1] as string;
-        i += 2;
+        const kind = sql[i + 1] as string;
+        const simple = new Map<string, string>([
+          ["b", "\b"], ["f", "\f"], ["n", "\n"], ["r", "\r"], ["t", "\t"],
+          ["\\", "\\"], ["'", "'"],
+        ]);
+        const decoded = simple.get(kind);
+        if (decoded !== undefined) {
+          value += decoded;
+          i += 2;
+          continue;
+        }
+        if (/[0-7]/u.test(kind)) {
+          const digits = /^[0-7]{1,3}/u.exec(sql.slice(i + 1))?.[0];
+          if (digits === undefined) return null;
+          const byte = Number.parseInt(digits, 8);
+          if (byte === 0 || byte > 0x7f) return null;
+          value += String.fromCharCode(byte);
+          i += 1 + digits.length;
+          continue;
+        }
+        if (kind === "x") {
+          const digits = /^[0-9a-f]{1,2}/iu.exec(sql.slice(i + 2))?.[0];
+          if (digits === undefined) return null;
+          const byte = Number.parseInt(digits, 16);
+          if (byte === 0 || byte > 0x7f) return null;
+          value += String.fromCharCode(byte);
+          i += 2 + digits.length;
+          continue;
+        }
+        if (kind === "u" || kind === "U") {
+          const width = kind === "u" ? 4 : 8;
+          const digits = sql.slice(i + 2, i + 2 + width);
+          if (digits.length !== width || !/^[0-9a-f]+$/iu.test(digits)) return null;
+          const point = Number.parseInt(digits, 16);
+          if (point === 0 || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) return null;
+          value += String.fromCodePoint(point);
+          i += 2 + width;
+          continue;
+        }
+        // PostgreSQL gives other backslash pairs a literal interpretation. The
+        // census deliberately refuses that open-ended grammar instead of guessing.
+        return null;
       } else if (sql[i] === "'" && sql[i + 1] === "'") {
         value += "'";
         i += 2;

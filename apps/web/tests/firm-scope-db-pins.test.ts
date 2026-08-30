@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
@@ -147,6 +148,35 @@ const MIGRATION_FILES = readdirSync(MIGRATIONS_DIR)
 
 const migration = (name: string): string => readFileSync(join(MIGRATIONS_DIR, name), "utf8");
 
+type MigrationCorpus = {
+  readonly files: readonly string[];
+  readonly read: (name: string) => string;
+};
+
+const DEFAULT_MIGRATION_CORPUS: MigrationCorpus = { files: MIGRATION_FILES, read: migration };
+
+/** Exact, reviewed dynamic-SQL barriers. A new migration is never admitted here
+ * merely because the lexer could not inspect it: adding an entry is a review act
+ * and the reason records why this specific barrier is understood. */
+const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, string>([
+  [
+    "0146_ninth_rowkind_seeding_proposal.sql",
+    "Reviewed splice of clara.list_review_queue() from pg_get_functiondef; it cannot replace either P4 scope view.",
+  ],
+  [
+    "0147_db_hardening_b_hash_only_bearer_tokens.sql",
+    "Reviewed ALTER TABLE formatter drops the discovered firm_admissions primary-key constraint; it emits no view definition.",
+  ],
+  [
+    "0149_counterparty_merge_pr_1.sql",
+    "Reviewed pg_get_functiondef splices recut four named counterparty functions only; neither P4 scope view is a target.",
+  ],
+  [
+    "0151_f_a9_pr_1b_brake_census.sql",
+    "Reviewed pg_get_functiondef loop recuts the explicit F-A9 function roster only; neither P4 scope view is a target.",
+  ],
+]);
+
 /**
  * Every real, statement-level `create [or replace] view clara.<name>` OCCURRENCE
  * from the pinned live definition onward. A migration whose dynamic SQL the
@@ -167,20 +197,26 @@ const migration = (name: string): string => readFileSync(join(MIGRATIONS_DIR, na
 function viewDefinitions(
   view: string,
   expectedFile: string,
+  corpus: MigrationCorpus = DEFAULT_MIGRATION_CORPUS,
 ): { definitions: { file: string; offset: number }[]; blockedAt: string[] } {
   const out: { file: string; offset: number }[] = [];
   const blockedAt: string[] = [];
-  const first = MIGRATION_FILES.indexOf(expectedFile);
+  const first = corpus.files.indexOf(expectedFile);
   assert.notEqual(first, -1, `the pinned live migration ${expectedFile} is absent`);
-  for (const file of MIGRATION_FILES.slice(first)) {
+  for (const file of corpus.files.slice(first)) {
     let offsets: number[];
     try {
-      offsets = viewDefinitionOffsets(migration(file), view, file);
+      offsets = viewDefinitionOffsets(corpus.read(file), view, file);
     } catch (error) {
       assert.match(
         error instanceof Error ? error.message : String(error),
         new RegExp(`^unmodelled: unresolved dynamic SQL at ${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:`),
       );
+      const reason = REVIEWED_DYNAMIC_SQL_BARRIERS.get(file);
+      if (reason === undefined) {
+        throw new Error(`unmodelled: unreviewed dynamic-SQL barrier at ${file} - the successor census cannot prove this migration unrelated`);
+      }
+      assert.ok(reason.length >= 40, `${file}'s reviewed barrier reason is too thin`);
       blockedAt.push(file);
       continue;
     }
@@ -200,10 +236,10 @@ function theOnlyDefinition(view: string, expectedFile: string): void {
       : [`${expectedFile}@<exactly one>`],
     `clara.${view} must have exactly ONE statement-level definition, in ${expectedFile} — re-run the rung-0 census`,
   );
-  assert.equal(
-    census.blockedAt[0],
-    "0146_ninth_rowkind_seeding_proposal.sql",
-    `clara.${view}'s successor census did not record the named unresolved-dynamic-SQL barrier`,
+  assert.deepEqual(
+    census.blockedAt,
+    [...REVIEWED_DYNAMIC_SQL_BARRIERS.keys()],
+    `clara.${view}'s successor census did not record exactly the reviewed unresolved-dynamic-SQL barriers`,
   );
 }
 
@@ -219,7 +255,7 @@ function declaredContract(sql: string, relation: string): { count: number; colum
 }
 
 describe("the projections are the DB's own declared column contracts", () => {
-  it("clara.caller_context has ONE pinned body — successors throw at the 0146 dynamic barrier", () => {
+  it("clara.caller_context has ONE pinned body — successors stop at the exact reviewed dynamic barriers", () => {
     theOnlyDefinition("caller_context", "0141_p4_tranche1_invite_rbac.sql");
   });
 
@@ -230,7 +266,7 @@ describe("the projections are the DB's own declared column contracts", () => {
     assert.equal(CALLER_CONTEXT_SELECT.split(",").length, declared.count);
   });
 
-  it("clara.firm_registration_requests_visible has ONE pinned body — successors throw at the 0146 dynamic barrier", () => {
+  it("clara.firm_registration_requests_visible has ONE pinned body — successors stop at the exact reviewed dynamic barriers", () => {
     theOnlyDefinition(
       "firm_registration_requests_visible",
       "0145_p4_tranche2_registration_operator_alias.sql",
@@ -269,6 +305,28 @@ describe("the projections are the DB's own declared column contracts", () => {
 
     const sound = inputs.filter((s) => [...s.matchAll(/create\s+view\s+clara\.probe\b/gi)].length > 0);
     assert.equal(sound.length, 2, "matchAll must see both");
+  });
+
+  it("PIN SQL-10: a second, unreviewed dynamic-SQL barrier fails the successor census", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "clara-scope-census-"));
+    try {
+      const files = [
+        ["0141_base.sql", "create view clara.probe as select 1;"],
+        ["0146_ninth_rowkind_seeding_proposal.sql", "do $$ begin execute v_sql; end $$;"],
+        ["0147_unreviewed_successor.sql", "do $$ begin execute later_sql; end $$;"],
+      ] as const;
+      for (const [file, sql] of files) writeFileSync(join(scratch, file), sql, "utf8");
+      const corpus: MigrationCorpus = {
+        files: readdirSync(scratch).sort(),
+        read: (file) => readFileSync(join(scratch, file), "utf8"),
+      };
+      assert.throws(
+        () => viewDefinitions("probe", "0141_base.sql", corpus),
+        /unmodelled: unreviewed dynamic-SQL barrier at 0147_unreviewed_successor\.sql/,
+      );
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 
   it("the registration view's 10-column contract matches REGISTRATION_REQUESTS_SELECT", () => {

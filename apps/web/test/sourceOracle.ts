@@ -137,6 +137,55 @@ function spineBinding(identifier: ts.Identifier, file: ts.SourceFile): ImportBin
   return null;
 }
 
+function unwrappedExpression(expression: ts.Expression): ts.Expression {
+  let value = expression;
+  while (ts.isParenthesizedExpression(value) || ts.isAsExpression(value)
+      || ts.isSatisfiesExpression(value) || ts.isNonNullExpression(value)
+      || ts.isTypeAssertionExpression(value)) value = value.expression;
+  return value;
+}
+
+function dynamicImportSource(expression: ts.Expression): string | null {
+  let value = unwrappedExpression(expression);
+  if (ts.isAwaitExpression(value)) value = unwrappedExpression(value.expression);
+  return ts.isCallExpression(value) && value.expression.kind === ts.SyntaxKind.ImportKeyword
+      && value.arguments.length === 1 && ts.isStringLiteralLike(value.arguments[0] as ts.Expression)
+    ? (value.arguments[0] as ts.StringLiteralLike).text
+    : null;
+}
+
+function namespaceSource(identifier: ts.Identifier, file: ts.SourceFile): string | null {
+  const binding = importBinding(identifier, file);
+  if (binding?.importedName === "*") return binding.importedFrom;
+  const symbol = checkerFor(file).getSymbolAtLocation(identifier);
+  for (const declaration of symbol?.declarations ?? []) {
+    if (!ts.isVariableDeclaration(declaration) || declaration.initializer === undefined) continue;
+    const source = dynamicImportSource(declaration.initializer);
+    if (source !== null) return source;
+  }
+  return null;
+}
+
+function assertResolvableSpineCallee(expression: ts.Expression, file: ts.SourceFile): void {
+  const value = unwrappedExpression(expression);
+  let receiver: ts.Expression | undefined;
+  let member: string | null = null;
+  if (ts.isPropertyAccessExpression(value)) {
+    receiver = value.expression;
+    member = value.name.text;
+  } else if (ts.isElementAccessExpression(value) && value.argumentExpression !== undefined
+      && ts.isStringLiteralLike(value.argumentExpression)) {
+    receiver = value.expression;
+    member = value.argumentExpression.text;
+  }
+  if (receiver === undefined || member === null || !SPINE_NAMES.has(member)) return;
+  const root = unwrappedExpression(receiver);
+  const source = ts.isIdentifier(root) ? namespaceSource(root, file) : dynamicImportSource(root);
+  if (source !== null) {
+    throw new Error(`unmodelled: unresolvable spine import identity at ${diagnosticLocation(file, value.getStart(file))}`);
+  }
+}
+
 function literalMask(text: string): string {
   if (text.length < 2) return blankPreservingLines(text);
   const first = text[0] as string;
@@ -463,11 +512,17 @@ function exportTargets(unit: SourceUnit): Map<string, ExportTarget> {
     }
   }
 
-  const exportsObject = (expression: ts.Expression): boolean => ts.isIdentifier(expression)
-    ? expression.text === "exports"
-    : ts.isPropertyAccessExpression(expression)
-      && ts.isIdentifier(expression.expression) && expression.expression.text === "module"
-      && expression.name.text === "exports";
+  const exportsObject = (expression: ts.Expression): boolean => {
+    const value = unwrappedExpression(expression);
+    if (ts.isIdentifier(value)) return value.text === "exports";
+    if (ts.isPropertyAccessExpression(value)) {
+      return ts.isIdentifier(value.expression) && value.expression.text === "module"
+        && value.name.text === "exports";
+    }
+    return ts.isElementAccessExpression(value) && ts.isIdentifier(value.expression)
+      && value.expression.text === "module" && value.argumentExpression !== undefined
+      && ts.isStringLiteralLike(value.argumentExpression) && value.argumentExpression.text === "exports";
+  };
   const visit = (node: ts.Node): void => {
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       if (exportsObject(node.left as ts.Expression)
@@ -482,7 +537,7 @@ function exportTargets(unit: SourceUnit): Map<string, ExportTarget> {
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
         && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "Object"
         && node.expression.name.text === "defineProperty" && node.arguments[0] !== undefined
-        && ts.isIdentifier(node.arguments[0]) && node.arguments[0].text === "exports") {
+        && exportsObject(node.arguments[0] as ts.Expression)) {
       uninspectable(node, "Object.defineProperty(exports, …)");
       return;
     }
@@ -578,9 +633,10 @@ export type ReachableCall = {
   readonly argumentCount: number;
 };
 
-function calleeIdentifier(expression: ts.Expression): ts.Identifier | null {
-  if (ts.isIdentifier(expression)) return expression;
-  if (ts.isParenthesizedExpression(expression)) return calleeIdentifier(expression.expression);
+function calleeIdentifier(expression: ts.Expression, file: ts.SourceFile): ts.Identifier | null {
+  assertResolvableSpineCallee(expression, file);
+  const value = unwrappedExpression(expression);
+  if (ts.isIdentifier(value)) return value;
   return null;
 }
 
@@ -629,7 +685,7 @@ function reachableGraph(unit: SourceUnit, rootName: string): { texts: string[]; 
     const visit = (node: ts.Node): void => {
       if (node !== callableBody && (ts.isFunctionLike(node) || ts.isClassLike(node))) return;
       if (ts.isCallExpression(node)) {
-        const identifier = calleeIdentifier(node.expression);
+        const identifier = calleeIdentifier(node.expression, resolved.file);
         const binding = identifier === null ? null : importBinding(identifier, resolved.file);
         calls.push({
           name: callName(node),
@@ -688,8 +744,10 @@ function awaitedBareSpineCall(
   }
   if (expression === undefined || !ts.isAwaitExpression(expression)) return null;
   const call = expression.expression;
-  if (!ts.isCallExpression(call) || call.arguments.length !== 0 || !ts.isIdentifier(call.expression)) return null;
-  const binding = spineBinding(call.expression, file);
+  if (!ts.isCallExpression(call) || call.arguments.length !== 0) return null;
+  const identifier = calleeIdentifier(call.expression, file);
+  if (identifier === null) return null;
+  const binding = spineBinding(identifier, file);
   return binding?.importedFrom === "@/lib/require-firm-scope"
       && (binding.importedName === "requireFirmScope" || binding.importedName === "firmScopeGuard")
     ? binding.importedName
@@ -698,10 +756,26 @@ function awaitedBareSpineCall(
 
 function hasAbruptCompletion(block: ts.Block): boolean {
   let abrupt = false;
+  const transferEscapes = (node: ts.BreakStatement | ts.ContinueStatement): boolean => {
+    const label = node.label?.text;
+    for (let current = node.parent; current !== undefined; current = current.parent) {
+      if (current === block) return true;
+      if (label !== undefined && ts.isLabeledStatement(current) && current.label.text === label) return false;
+      if (label === undefined) {
+        const loop = ts.isForStatement(current) || ts.isForInStatement(current)
+          || ts.isForOfStatement(current) || ts.isWhileStatement(current) || ts.isDoStatement(current);
+        if (loop || (ts.isBreakStatement(node) && ts.isSwitchStatement(current))) return false;
+      }
+    }
+    return true;
+  };
   const visit = (node: ts.Node): void => {
     if (node !== block && (ts.isFunctionLike(node) || ts.isClassLike(node))) return;
-    if (ts.isReturnStatement(node) || ts.isThrowStatement(node)
-        || ts.isBreakStatement(node) || ts.isContinueStatement(node)) {
+    if (ts.isReturnStatement(node) || ts.isThrowStatement(node)) {
+      abrupt = true;
+      return;
+    }
+    if ((ts.isBreakStatement(node) || ts.isContinueStatement(node)) && transferEscapes(node)) {
       abrupt = true;
       return;
     }
@@ -747,6 +821,48 @@ export function spineGuardProof(unit: SourceUnit, rootName: string): SpineGuardP
     dominates: false,
     reason: "the awaited spine call is not the first dominating statement of the locally inspectable root",
   };
+}
+
+/** Prove a returned API refusal is the `.response` of the exact value produced by
+ * the canonical `firmScopeGuard` import. Variable spelling is deliberately not
+ * evidence: both the import and bound result are resolved by symbol identity. */
+export function spineGuardResponseIsReturned(unit: SourceUnit, rootName: string): boolean {
+  const resolved = resolveRoot(unit, rootName);
+  const body = resolved.root?.callable?.body;
+  if (body === undefined || !ts.isBlock(body)) return false;
+  const checker = checkerFor(resolved.file);
+  let resultSymbol: ts.Symbol | undefined;
+  for (const statement of body.statements) {
+    if (!ts.isVariableStatement(statement) || statement.declarationList.declarations.length !== 1) continue;
+    const declaration = statement.declarationList.declarations[0];
+    if (declaration === undefined || !ts.isIdentifier(declaration.name) || declaration.initializer === undefined) continue;
+    const initializer = unwrappedExpression(declaration.initializer);
+    if (!ts.isAwaitExpression(initializer)) continue;
+    const call = unwrappedExpression(initializer.expression);
+    if (!ts.isCallExpression(call) || call.arguments.length !== 0) continue;
+    const identifier = calleeIdentifier(call.expression, resolved.file);
+    if (identifier === null || spineBinding(identifier, resolved.file)?.importedName !== "firmScopeGuard") continue;
+    resultSymbol = checker.getSymbolAtLocation(declaration.name);
+    break;
+  }
+  if (resultSymbol === undefined) return false;
+  const boundProperty = (expression: ts.Expression, property: string): boolean => {
+    const value = unwrappedExpression(expression);
+    if (!ts.isPropertyAccessExpression(value) || value.name.text !== property) return false;
+    const receiver = unwrappedExpression(value.expression);
+    return ts.isIdentifier(receiver) && checker.getSymbolAtLocation(receiver) === resultSymbol;
+  };
+  const returnsResponse = (statement: ts.Statement): boolean => {
+    if (ts.isReturnStatement(statement)) {
+      return statement.expression !== undefined && boundProperty(statement.expression, "response");
+    }
+    return ts.isBlock(statement) && statement.statements.some(returnsResponse);
+  };
+  return body.statements.some((statement) => ts.isIfStatement(statement)
+    && ts.isPrefixUnaryExpression(statement.expression)
+    && statement.expression.operator === ts.SyntaxKind.ExclamationToken
+    && boundProperty(statement.expression.operand, "ok")
+    && returnsResponse(statement.thenStatement));
 }
 
 /** Ranges of try blocks whose catch can swallow a throw. Finally-only tries are
@@ -832,8 +948,9 @@ function mutableInitializer(initializer: ts.Expression, file: ts.SourceFile): st
 function mutatedNames(file: ts.SourceFile): Set<string> {
   const names = new Set<string>();
   const rootIdentifier = (expression: ts.Expression): string | null => {
-    if (ts.isIdentifier(expression)) return expression.text;
-    if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) return rootIdentifier(expression.expression);
+    const value = unwrappedExpression(expression);
+    if (ts.isIdentifier(value)) return value.text;
+    if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) return rootIdentifier(value.expression);
     return null;
   };
   const visit = (node: ts.Node): void => {
@@ -981,10 +1098,6 @@ function flattenHandlers(nodes: readonly ts.Expression[], file: ts.SourceFile): 
   return handlers;
 }
 
-const RESPONSE_METHODS = new Set([
-  "download", "end", "json", "redirect", "send", "setHeader", "status", "write", "writeHead",
-]);
-
 function isFalseLiteral(expression: ts.Expression): boolean {
   return expression.kind === ts.SyntaxKind.FalseKeyword
     || (ts.isParenthesizedExpression(expression) && isFalseLiteral(expression.expression));
@@ -995,90 +1108,144 @@ function isTrueLiteral(expression: ts.Expression): boolean {
     || (ts.isParenthesizedExpression(expression) && isTrueLiteral(expression.expression));
 }
 
-function underDeadBranch(node: ts.Node, boundary: ts.Node): boolean {
-  for (let current: ts.Node | undefined = node; current !== undefined && current !== boundary; current = current.parent) {
-    const parent: ts.Node | undefined = current.parent;
-    if (parent !== undefined && ts.isIfStatement(parent) && parent.thenStatement === current && isFalseLiteral(parent.expression)) return true;
-    if (parent !== undefined && ts.isIfStatement(parent) && parent.elseStatement === current && isTrueLiteral(parent.expression)) return true;
+function passiveExpression(expression: ts.Expression, file: ts.SourceFile): boolean {
+  const value = unwrappedExpression(expression);
+  if (ts.isIdentifier(value) || ts.isLiteralExpression(value)
+      || value.kind === ts.SyntaxKind.TrueKeyword || value.kind === ts.SyntaxKind.FalseKeyword
+      || value.kind === ts.SyntaxKind.NullKeyword || value.kind === ts.SyntaxKind.RegularExpressionLiteral) return true;
+  if (ts.isPropertyAccessExpression(value)) return passiveExpression(value.expression, file);
+  if (ts.isElementAccessExpression(value)) {
+    return passiveExpression(value.expression, file)
+      && (value.argumentExpression === undefined || passiveExpression(value.argumentExpression, file));
   }
-  return false;
-}
-
-function callIsResponse(node: ts.CallExpression): boolean {
-  return ts.isPropertyAccessExpression(node.expression) && RESPONSE_METHODS.has(node.expression.name.text);
-}
-
-function branchTerminatesAfter(node: ts.Node, handler: ts.ArrowFunction | ts.FunctionExpression): boolean {
-  let current: ts.Node = node;
-  while (current.parent !== undefined && current.parent !== handler) {
-    const parent: ts.Node | undefined = current.parent;
-    if (ts.isBlock(parent)) {
-      const statementIndex = parent.statements.findIndex((statement) =>
-        statement === current || (current.pos >= statement.pos && current.end <= statement.end));
-      if (statementIndex >= 0 && parent.statements.slice(statementIndex + 1).some((statement) =>
-        ts.isReturnStatement(statement) || ts.isThrowStatement(statement))) {
-        return parent.parent !== handler;
+  if (ts.isPrefixUnaryExpression(value)) {
+    return value.operator !== ts.SyntaxKind.PlusPlusToken && value.operator !== ts.SyntaxKind.MinusMinusToken
+      && passiveExpression(value.operand, file);
+  }
+  if (ts.isTypeOfExpression(value)) return passiveExpression(value.expression, file);
+  if (ts.isBinaryExpression(value)) {
+    if (value.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && value.operatorToken.kind <= ts.SyntaxKind.LastAssignment) return false;
+    return passiveExpression(value.left, file) && passiveExpression(value.right, file);
+  }
+  if (!ts.isCallExpression(value)) return false;
+  if (!value.arguments.every((argument) => passiveExpression(argument, file))) return false;
+  if (ts.isIdentifier(value.expression)) {
+    const symbol = checkerFor(file).getSymbolAtLocation(value.expression);
+    if (symbol === undefined && ["Boolean", "Number", "String"].includes(value.expression.text)) return true;
+    const declaration = symbol?.declarations?.find(ts.isFunctionDeclaration);
+    if (declaration?.body === undefined) return false;
+    let active = false;
+    const inspect = (node: ts.Node): void => {
+      if (node !== declaration.body && (ts.isFunctionLike(node) || ts.isClassLike(node))) return;
+      if (ts.isAwaitExpression(node) || ts.isNewExpression(node)
+          || ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)
+          || (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+            && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment)) active = true;
+      if (ts.isCallExpression(node)) {
+        if (!ts.isIdentifier(node.expression)) active = true;
+        else {
+          const called = checkerFor(file).getSymbolAtLocation(node.expression);
+          if (called !== undefined || !["Boolean", "Number", "String"].includes(node.expression.text)) active = true;
+        }
       }
-    }
-    current = parent;
+      ts.forEachChild(node, inspect);
+    };
+    inspect(declaration.body);
+    return !active;
   }
-  return false;
-}
-
-function conditionalBearer(node: ts.Node, handler: ts.ArrowFunction | ts.FunctionExpression): boolean {
-  for (let current: ts.Node | undefined = node; current !== undefined && current !== handler; current = current.parent) {
-    const parent: ts.Node | undefined = current.parent;
-    if (parent !== undefined && ts.isIfStatement(parent)
-        && (parent.thenStatement === current || parent.elseStatement === current)
-        && !isTrueLiteral(parent.expression)) return true;
-    if (parent !== undefined && (ts.isForStatement(parent) || ts.isForInStatement(parent)
-        || ts.isForOfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent))) return true;
+  if (!ts.isPropertyAccessExpression(value.expression)) return false;
+  const receiver = value.expression.expression;
+  const method = value.expression.name.text;
+  if (["toLowerCase", "replace", "trim"].includes(method)) return passiveExpression(receiver, file);
+  if (method === "header" && ts.isIdentifier(receiver)) {
+    return (checkerFor(file).getSymbolAtLocation(receiver)?.declarations ?? []).some(ts.isParameter);
   }
-  return false;
-}
-
-function swallowedBearer(node: ts.Node, handler: ts.ArrowFunction | ts.FunctionExpression): boolean {
-  for (let current: ts.Node | undefined = node; current !== undefined && current !== handler; current = current.parent) {
-    const parent: ts.Node | undefined = current.parent;
-    if (parent === undefined || !ts.isTryStatement(parent) || parent.tryBlock !== current || parent.catchClause === undefined) continue;
-    const block = parent.parent;
-    if (!ts.isBlock(block)) return true;
-    const index = block.statements.indexOf(parent);
-    return block.statements.slice(index + 1).some((statement) => {
-      let response = false;
-      const visit = (candidate: ts.Node): void => {
-        if (candidate !== statement && (ts.isFunctionLike(candidate) || ts.isClassLike(candidate))) return;
-        if (ts.isCallExpression(candidate) && callIsResponse(candidate)) response = true;
-        ts.forEachChild(candidate, visit);
-      };
-      visit(statement);
-      return response;
+  if (method === "test" && ts.isIdentifier(receiver)) {
+    const symbol = checkerFor(file).getSymbolAtLocation(receiver);
+    return (symbol?.declarations ?? []).some((declaration) => {
+      if (!ts.isVariableDeclaration(declaration) || declaration.initializer === undefined
+          || declaration.initializer.kind !== ts.SyntaxKind.RegularExpressionLiteral) return false;
+      const raw = declaration.initializer.getText(file);
+      const flags = raw.slice(raw.lastIndexOf("/") + 1);
+      return !flags.includes("g") && !flags.includes("y");
     });
   }
   return false;
 }
 
+function statementDefinitelyTerminates(statement: ts.Statement): boolean {
+  if (ts.isReturnStatement(statement) || ts.isThrowStatement(statement)) return true;
+  if (ts.isBlock(statement)) return statement.statements.some(statementDefinitelyTerminates);
+  if (ts.isIfStatement(statement)) {
+    if (isTrueLiteral(statement.expression)) return statementDefinitelyTerminates(statement.thenStatement);
+    if (isFalseLiteral(statement.expression)) {
+      return statement.elseStatement !== undefined && statementDefinitelyTerminates(statement.elseStatement);
+    }
+    return statement.elseStatement !== undefined
+      && statementDefinitelyTerminates(statement.thenStatement)
+      && statementDefinitelyTerminates(statement.elseStatement);
+  }
+  if (ts.isTryStatement(statement)) {
+    if (statement.finallyBlock !== undefined && statementDefinitelyTerminates(statement.finallyBlock)) return true;
+    const tryTerminates = statementDefinitelyTerminates(statement.tryBlock);
+    return statement.catchClause === undefined
+      ? tryTerminates
+      : tryTerminates && statementDefinitelyTerminates(statement.catchClause.block);
+  }
+  return false;
+}
+
+/** A refusal-only conditional can precede the capability on the surviving path:
+ * its taken path leaves the handler, and its fallthrough path has done no work. */
+function terminatingPrelude(statement: ts.Statement, file: ts.SourceFile): boolean {
+  return ts.isIfStatement(statement) && statement.elseStatement === undefined
+    && passiveExpression(statement.expression, file)
+    && statementDefinitelyTerminates(statement.thenStatement);
+}
+
+function passiveBindingPrelude(statement: ts.Statement, file: ts.SourceFile): boolean {
+  if (!ts.isVariableStatement(statement)
+      || (statement.declarationList.flags & ts.NodeFlags.Const) === 0) return false;
+  return statement.declarationList.declarations.every((declaration) =>
+    declaration.initializer === undefined || passiveExpression(declaration.initializer, file));
+}
+
+function directBearerExpression(expression: ts.Expression, file: ts.SourceFile): boolean {
+  let value = unwrappedExpression(expression);
+  if (ts.isAwaitExpression(value)) value = unwrappedExpression(value.expression);
+  if (!ts.isCallExpression(value)) return false;
+  const identifier = calleeIdentifier(value.expression, file);
+  if (identifier === null) return false;
+  const binding = importBinding(identifier, file);
+  return binding?.importedFrom === CAPABILITY_IMPORT && binding.importedName === "bearerCapability";
+}
+
+function directBearerStatement(statement: ts.Statement, file: ts.SourceFile): boolean {
+  if (ts.isExpressionStatement(statement)) return directBearerExpression(statement.expression, file);
+  if (!ts.isVariableStatement(statement) || statement.declarationList.declarations.length !== 1) return false;
+  const declaration = statement.declarationList.declarations[0];
+  return declaration?.initializer !== undefined && directBearerExpression(declaration.initializer, file);
+}
+
 function containsDominatingBearer(handler: ts.Expression, file: ts.SourceFile): boolean {
   if (!ts.isArrowFunction(handler) && !ts.isFunctionExpression(handler)) return false;
-  const bearerCalls: ts.CallExpression[] = [];
-  const responseCalls: ts.CallExpression[] = [];
-  const visit = (node: ts.Node): void => {
-    if (node !== handler && (ts.isFunctionLike(node) || ts.isClassLike(node))) return;
-    if (ts.isCallExpression(node)) {
-      if (ts.isIdentifier(node.expression)) {
-        const binding = importBinding(node.expression, file);
-        if (binding?.importedFrom === CAPABILITY_IMPORT && binding.importedName === "bearerCapability") bearerCalls.push(node);
-      }
-      if (callIsResponse(node)) responseCalls.push(node);
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(handler);
-  return bearerCalls.some((bearer) => {
-    if (underDeadBranch(bearer, handler) || conditionalBearer(bearer, handler) || swallowedBearer(bearer, handler)) return false;
-    return !responseCalls.some((response) => response.getStart(file) < bearer.getStart(file)
-      && !underDeadBranch(response, handler) && !branchTerminatesAfter(response, handler));
-  });
+  if (!ts.isBlock(handler.body)) return directBearerExpression(handler.body, file);
+  const statements = handler.body.statements;
+  let candidate = 0;
+  while (candidate < statements.length
+      && (terminatingPrelude(statements[candidate] as ts.Statement, file)
+        || passiveBindingPrelude(statements[candidate] as ts.Statement, file))) candidate += 1;
+  const first = statements[candidate];
+  if (first === undefined) return false;
+  if (ts.isTryStatement(first)) {
+    const inTry = first.tryBlock.statements[0];
+    if (inTry === undefined || !directBearerStatement(inTry, file)) return false;
+    // A caught denial may answer the request, but no fallthrough statement may do
+    // work after the catch. The real intake handlers end at this try/catch.
+    return statements.slice(candidate + 1).length === 0;
+  }
+  return directBearerStatement(first, file);
 }
 
 function recognisedNoOp(handler: ts.Expression): boolean {
@@ -1117,7 +1284,7 @@ export function runtimeRouteRegistrations(unit: SourceUnit): RuntimeRouteRegistr
   const file = sourceFile(unit);
   const routes: RuntimeRouteRegistration[] = [];
   const fail = (node: ts.CallExpression, shape: string): never => {
-    throw new Error(`unmodelled: unmodelled registration ${shape} at ${diagnosticLocation(file, node.getStart(file))}`);
+    throw new Error(`unmodelled: registration ${shape} at ${diagnosticLocation(file, node.getStart(file))}`);
   };
   const checker = checkerFor(file);
   const declarations = collectDeclarations(unit).declarations;
@@ -1234,19 +1401,27 @@ export function runtimeRouteRegistrations(unit: SourceUnit): RuntimeRouteRegistr
       return false;
     }
     if (ts.isBlock(statement)) {
-      for (const child of statement.statements) if (!inspectStatement(child)) break;
+      for (const child of statement.statements) if (!inspectStatement(child)) return false;
       return true;
     }
     if (ts.isIfStatement(statement)) {
-      if (!isFalseLiteral(statement.expression)) inspectStatement(statement.thenStatement);
-      if (statement.elseStatement !== undefined && !isTrueLiteral(statement.expression)) inspectStatement(statement.elseStatement);
-      return true;
+      inspectNode(statement.expression);
+      if (isTrueLiteral(statement.expression)) return inspectStatement(statement.thenStatement);
+      if (isFalseLiteral(statement.expression)) {
+        return statement.elseStatement === undefined || inspectStatement(statement.elseStatement);
+      }
+      const thenContinues = inspectStatement(statement.thenStatement);
+      const elseContinues = statement.elseStatement === undefined || inspectStatement(statement.elseStatement);
+      return thenContinues || elseContinues;
     }
     if (ts.isTryStatement(statement)) {
-      inspectStatement(statement.tryBlock);
-      if (statement.catchClause !== undefined) inspectStatement(statement.catchClause.block);
-      if (statement.finallyBlock !== undefined) inspectStatement(statement.finallyBlock);
-      return true;
+      const tryContinues = inspectStatement(statement.tryBlock);
+      const catchContinues = statement.catchClause === undefined
+        ? false
+        : inspectStatement(statement.catchClause.block);
+      const finallyContinues = statement.finallyBlock === undefined || inspectStatement(statement.finallyBlock);
+      if (!finallyContinues) return false;
+      return statement.catchClause === undefined ? tryContinues : tryContinues || catchContinues;
     }
     inspectNode(statement);
     return true;
