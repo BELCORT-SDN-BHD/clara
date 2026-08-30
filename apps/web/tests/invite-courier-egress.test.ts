@@ -719,7 +719,7 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
       "new initializer": "export const runtime = new RuntimeChoice();\n" + wrapper,
       "await initializer": "export const runtime = await runtimeChoice;\n" + wrapper,
       "template-expression initializer": "export const runtime = `${runtimeChoice}`;\n" + wrapper,
-      "JSON value import": 'import data from "./x.json" with { type: "json" };\nvoid data;\n' + wrapper,
+      "JSON value import": 'import data from "./x.json" with { type: "json" };\n' + wrapper,
       "bare side-effect import": 'import "./x";\n' + wrapper,
     };
     for (const [shape, mutant] of Object.entries(mutants)) {
