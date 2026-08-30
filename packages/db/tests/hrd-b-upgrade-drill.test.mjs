@@ -30,7 +30,7 @@ import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, endPool } from "./rig-helpers.mjs";
 import {
-  skipUnlessReset, freshBaseline, seedPreState, placeMigration, realText, sub,
+  skipUnlessReset, freshBaseline, seedPreState, placeMigration, placedVersion, placedStem, realText, sub,
   BACKFILL_LINE, SCRUB_UPDATE, TAIL_ZERO_BLOCK, TAIL_FLOOR_BLOCK, RECEIPTS,
   assertConvertedCorrectly, assertDuplicateHashRefused,
   assertPreExistingTokenStillWorks, assertScrubbedShapeMatchesFreshMint,
@@ -61,8 +61,11 @@ test("hrd-b upgrade drill MUTANT E (backfill hashes upper(token::text)): the mig
   // NOT rejected: NOT NULL holds, the unique index holds, the row count is preserved, the
   // plaintext column is gone. Every structural claim the migration makes about itself is TRUE.
   await migrate({ dir, log: () => {} });
+  // The mutant is applied under B's REAL version string (the successors' stem witnesses read it --
+  // see placeMigration); the cell placed the mutant, and placedStem() says so.
+  assert.equal(placedStem(), "hrd_b_mutant_upper_backfill");
   const applied = await rootQuery(
-    "select 1 from clara.schema_migrations where version = $1", [`${version}_hrd_b_mutant_upper_backfill`],
+    "select 1 from clara.schema_migrations where version = $1", [placedVersion()],
   );
   assert.equal(applied.rowCount, 1, "the wrong-rendering backfill commits silently — no error, no operator-visible warning");
 
@@ -127,9 +130,10 @@ test("hrd-b upgrade drill MUTANT B CONTROL (the vacuity MED-3 named): the SAME s
     "update clara.firm_admissions set token_hash = sha256(convert_to(token::text, 'UTF8')) where token_hash is null and consumed_at is null;");
   placeMigration(dir, version, mutant, "hrd_b_mutant_skip_consumed_empty");
   await migrate({ dir, log: () => {} });   // a throw here would fail the test — that is the point
+  assert.equal(placedStem(), "hrd_b_mutant_skip_consumed_empty");
   const applied = await rootQuery(
     "select 1 from clara.schema_migrations where version = $1",
-    [`${version}_hrd_b_mutant_skip_consumed_empty`],
+    [placedVersion()],
   );
   assert.equal(applied.rowCount, 1, "the broken backfill applies silently over an empty table — this is why the populated drill above has to exist");
 });
