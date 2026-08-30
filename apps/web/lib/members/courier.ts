@@ -3,6 +3,15 @@
 // `handleInviteRequest` because a Next.js route file may only export the route
 // contract itself; `lib/same-origin.ts`'s own header records the same reason.
 //
+// SERVER ONLY. This module holds Clara's PLAINTEXT invite token and reaches the
+// service-role transport, so nothing importable from a Client Component may
+// value-import it. The `server-only` package is not installed in this workspace,
+// so the wall is the estate's own import-closure walk — the instrument P4-5
+// minted in `tests/firm-scope-db-pins.test.ts` — re-pointed at this module and
+// at `lib/members/invite-mail.ts` in `tests/invite-mail-transport.test.ts`. It
+// names the offending edge in `pnpm test` rather than at bundle time; that
+// file's header records the trade and the follow-up.
+//
 // THE ORDERING IS THE POINT (design §4 C, plan §6 OQ-4):
 //
 //   1. PROVE SAME ORIGIN.        A cross-origin POST that both mints an invite and
@@ -47,11 +56,24 @@
 // THE PLAINTEXT TOKEN GOES INTO THE MAIL BODY AND NOWHERE ELSE. It is read out of
 // the door's return, passed to `buildInviteUrl`, and dropped. It is never
 // returned to the browser, never logged, never persisted, and never included in
-// any error this file constructs — including the ones that carry a provider's own
-// message. Nothing in this file calls `console.*` at all.
+// any error this file constructs.
+//
+// NO UPSTREAM TEXT EVER LEAVES THIS FILE — independent review of #455, MEDIUM-3.
+// The previous version relayed `e.message` from the mint/send step to the browser
+// as `detail`. That message came from Supabase or from Resend, and RESEND WAS
+// HANDED THE FULL SECRET URL — both bearer factors — so an upstream string is a
+// string that has been in the same process as the secrets, with wording this app
+// does not control and cannot audit. What the browser gets now is a CODE from a
+// closed set, a sentence Clara wrote, and a CORRELATION ID. What the server log
+// gets is that same id, the transport's own classified failure code, and the
+// provider's HTTP STATUS as a number — never a message, a body, a URL, a header,
+// an address or a token. The log is a seam (`deps.logFailure`) so a test can
+// capture the exact line and assert what is NOT in it; its default writes exactly
+// one `console.error`, whose payload is the four allowlisted fields and nothing
+// that a caller's data can reach.
 
 import { callDoor as realCallDoor, DoorRefusal } from "../doors";
-import { isSameOriginRequest } from "../same-origin";
+import { proveSameOrigin } from "../same-origin";
 import {
   fixedTokenAccessor,
   resolveServerSession,
@@ -63,9 +85,11 @@ import type { InviteCourierCode } from "./doors";
 import {
   buildInviteUrl,
   inviteMailCapability,
+  isInviteMailFailure,
   productionInviteMailer,
   renderInviteEmail,
   type InviteMailer,
+  type MailFailureCode,
 } from "./invite-mail";
 
 /** Every seam this handler talks to, injectable so `tests/invite-courier.test.ts`
@@ -79,22 +103,86 @@ export type CourierDeps = {
   callDoor?: <T>(fn: string, args: Record<string, unknown>, opts: { session: SessionTokenAccessor }) => Promise<T>;
   /** Built from the resolved config, once, per request. */
   mailerFor?: (config: Parameters<typeof productionInviteMailer>[0]) => InviteMailer;
-  /** The invitee's destination firm name, for the mail's subject line. Returns
-   *  null when it cannot be read — the sentence then omits it rather than
-   *  guessing one. */
-  readFirmName?: (session: SessionTokenAccessor) => Promise<string | null>;
+  /** The caller's firm AND its id, for the mail's subject line. The id is the
+   *  point: the name is a courtesy that must belong to the firm the door acted
+   *  IN, and this read cannot be trusted to be that firm on its own (LOW-8).
+   *  Returns null when it cannot be read — the sentence then omits the name
+   *  rather than guessing one. */
+  readFirmContext?: (session: SessionTokenAccessor) => Promise<{ firm_id: string; firm_name: string } | null>;
   /** The op_key `invite_member` requires. Injectable only so a test can pin it. */
   newOpKey?: () => string;
+  /** One id per request, printed to the admin and to the log so a support
+   *  conversation can join the two WITHOUT the response carrying any detail. */
+  newCorrelationId?: () => string;
+  /** THE SERVER LOG SEAM (MEDIUM-3). Receives the closed record below and
+   *  nothing else. Default: exactly one `console.error` of that record. */
+  logFailure?: (entry: InviteCourierLogEntry) => void;
 };
 
+/**
+ * THE ONLY THING THIS COURIER EVER LOGS, and it is a closed record of four
+ * allowlisted fields. There is no `message`, no `detail`, no `url`, no `email`
+ * and no free-text field on this type AT ALL — which is what makes "the log
+ * cannot leak the provider's words" a property of the shape rather than of the
+ * care taken at each call site.
+ */
+export type InviteCourierLogEntry = {
+  event: "invite_courier_failure";
+  /** What the browser was told. */
+  code: InviteCourierCode;
+  /** The transport's OWN classified code, when it threw one this file
+   *  recognises; `"unclassified"` when it threw something else. */
+  failure: MailFailureCode | "unclassified";
+  /** The provider's HTTP status as a NUMBER, when there was one. */
+  providerStatus: number | null;
+  correlationId: string;
+};
+
+/** The default log sink: one line, the closed record, nothing else. This is the
+ *  only `console.*` in this file, and its argument is a value whose type cannot
+ *  hold a caller-supplied string. */
+function defaultLogFailure(entry: InviteCourierLogEntry): void {
+  console.error(JSON.stringify(entry));
+}
+
+/** Split an unknown thrown value into the two loggable facts, and DISCARD the
+ *  rest. Nothing that reaches here is ever put in a response or a log line. */
+function classifyThrown(e: unknown): { failure: MailFailureCode | "unclassified"; providerStatus: number | null } {
+  return isInviteMailFailure(e)
+    ? { failure: e.code, providerStatus: e.providerStatus }
+    : { failure: "unclassified", providerStatus: null };
+}
+
+/**
+ * The courier's own failure envelope.
+ *
+ * `detail` IS CLARA'S OWN TEXT OR NOTHING (MEDIUM-3). The one thing that ever
+ * travels in it is the list of UNSET ENVIRONMENT VARIABLE NAMES on the
+ * mail-not-configured branch — a fact about this deployment's configuration that
+ * an admin cannot act on without being told, and a variable NAME is not a secret.
+ * No upstream string reaches this parameter; the call sites that used to relay one
+ * now pass a correlation id instead.
+ */
 function courierError(
   status: number,
   code: InviteCourierCode,
   message: string,
-  extra: { invite?: { invite_id: string; expires_at: string } | null; detail?: string | null } = {},
+  extra: {
+    invite?: { invite_id: string; expires_at: string } | null;
+    detail?: string | null;
+    correlationId?: string | null;
+  } = {},
 ): Response {
   return Response.json(
-    { ok: false, kind: "courier", code, message, invite: extra.invite ?? null, detail: extra.detail ?? null },
+    {
+      ok: false,
+      kind: "courier",
+      code,
+      message,
+      invite: extra.invite ?? null,
+      detail: extra.detail ?? null,
+      correlation_id: extra.correlationId ?? null,
+    },
     { status },
   );
 }
@@ -133,11 +221,28 @@ type InviteMemberReceipt = {
   invite_id?: unknown;
   expires_at?: unknown;
   token?: unknown;
+  /** NOT in today's receipt — `_finish_op` (`0004:62`) returns its `p_result`
+   *  verbatim and `invite_member` (`0147:421`) builds that from
+   *  `{invite_id, token_hash, expires_at}` only. Typed anyway, because the
+   *  courtesy-name branch below is written to USE it the moment the door starts
+   *  carrying it, rather than to be rewritten then. */
+  firm_id?: unknown;
 };
 
 export async function handleInviteRequest(request: Request, deps: CourierDeps = {}): Promise<Response> {
+  const correlationId = (deps.newCorrelationId ?? (() => crypto.randomUUID()))();
+  const logFailure = deps.logFailure ?? defaultLogFailure;
+
   // ---- 1. Same origin, or nothing. Both signals fail-closed. ----------------
-  if (!isSameOriginRequest(request.headers, request.url)) {
+  // THE PROOF CARRIES THE ORIGIN (MEDIUM-2). What comes back is the validated
+  // `Origin` header's own origin — scheme included, so this file inherits
+  // `lib/same-origin.ts`'s https/loopback ruling — and it is the ONLY authority
+  // the invitation link is ever built from. `request.url`'s authority is NOT
+  // interchangeable with it: this wall deliberately accepts a match against
+  // `x-forwarded-host`, so behind a proxy `request.url` can legitimately read
+  // `http://internal.worker.local/...` on a request that passes.
+  const proof = proveSameOrigin(request.headers, request.url);
+  if (!proof.ok) {
     return courierError(403, "cross_origin", "this endpoint accepts same-origin requests only");
   }
 
@@ -193,16 +298,21 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
   // whose plaintext no longer exists. So it is asked here, and BOTH non-ok
   // outcomes refuse before the door: a positive "already registered", and a check
   // that could not answer at all.
+  // ONE mailer per request, built here and reused at step 6 — the same instance
+  // answers "can this be minted" and then does the minting, so the two can never
+  // be talking to two differently-configured providers.
   const mailer = (deps.mailerFor ?? productionInviteMailer)(capability.config);
   let mintable: { ok: true } | { ok: false; reason: "already_registered" };
   try {
     mintable = await mailer.canMintFor(email);
   } catch (e) {
+    const { failure, providerStatus } = classifyThrown(e);
+    logFailure({ event: "invite_courier_failure", code: "mail_unavailable", failure, providerStatus, correlationId });
     return courierError(
       503,
       "mail_unavailable",
       "the invitation service could not be reached — nothing was created",
-      { detail: e instanceof Error ? e.message : String(e) },
+      { correlationId },
     );
   }
   if (!mintable.ok) {
@@ -237,7 +347,15 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
     // asserts it with a send-observer that a positive control proves would have
     // fired.
     if (e instanceof DoorRefusal) return refusalResponse(e);
-    return courierError(502, "transport", e instanceof Error ? e.message : "the invite door could not be reached");
+    // NOT the thrown message (MEDIUM-3, applied to this branch too): a wire
+    // failure's text carries the PostgREST URL it was talking to, project ref and
+    // all. A governed REFUSAL is a different thing entirely and is relayed
+    // verbatim above — that is the DB's own sentence, written to be read.
+    const { failure, providerStatus } = classifyThrown(e);
+    logFailure({ event: "invite_courier_failure", code: "transport", failure, providerStatus, correlationId });
+    return courierError(502, "transport", "the invite door could not be reached — nothing was created", {
+      correlationId,
+    });
   }
 
   // ---- 6. Only now, send. -------------------------------------------------
@@ -252,6 +370,7 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
     // this branch does not know one.
     return courierError(502, "mail_failed", "the invite door returned a shape this courier does not recognise", {
       detail: "no invite_id/expires_at in the receipt",
+      correlationId,
     });
   }
 
@@ -265,31 +384,47 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
     return courierError(502, "mail_failed", "this invite carries no usable token — revoke it and invite again", {
       invite: { invite_id: inviteId, expires_at: expiresAt },
       detail: "the door returned a receipt with no plaintext token (an op_key replay)",
+      correlationId,
     });
   }
 
-  const readFirmName = deps.readFirmName ?? (async (s: SessionTokenAccessor) => {
+  const readFirmContext = deps.readFirmContext ?? (async (s: SessionTokenAccessor) => {
     const rows = await loadCallerContext(s);
     const only = rows.length === 1 ? rows[0] : undefined;
-    return typeof only?.firm_name === "string" ? only.firm_name : null;
+    return typeof only?.firm_name === "string" && typeof only?.firm_id === "string"
+      ? { firm_id: only.firm_id, firm_name: only.firm_name }
+      : null;
   });
   // BEST EFFORT, AND FAIL-OPEN BY DESIGN: the firm name is a courtesy in a
   // subject line, not a fact the invite depends on. A failed read must not turn a
   // successful invite into an error — `renderInviteEmail` omits the name instead.
-  const firmName = await readFirmName(session).catch(() => null);
+  const firmContext = await readFirmContext(session).catch(() => null);
+  // BOUND TO THE FIRM THE DOOR ACTED IN, OR OMITTED (LOW-8). `caller_context` is
+  // a SECOND read, taken after the write, on a session that may hold more than
+  // one membership; the name it returns is not by construction the name of the
+  // firm `invite_member` minted the invite in. So it is used only when the
+  // RECEIPT names a firm and that firm is this one. Today the receipt names none
+  // (`_finish_op` returns `{invite_id, token_hash, expires_at}` verbatim), so the
+  // honest answer is no name at all — an invitation that says "a firm" is worse
+  // for nobody, while one that names the WRONG firm is a disclosure about a firm
+  // the invitee has nothing to do with.
+  const receiptFirmId = typeof receipt?.firm_id === "string" ? receipt.firm_id : null;
+  const firmName =
+    receiptFirmId !== null && firmContext !== null && firmContext.firm_id === receiptFirmId
+      ? firmContext.firm_name
+      : null;
 
-  const mailer = (deps.mailerFor ?? productionInviteMailer)(capability.config);
   try {
     const hashedToken = await mailer.mintSupabaseTokenHash(email);
-    // `request.url`'s origin, which step 1 has already PROVEN equals this app's
-    // own origin (`isSameOriginRequest` matches the Origin header against the
-    // host the browser addressed). So the link lands on the deployment the admin
-    // is actually looking at, with no extra variable to misconfigure.
-    const origin = new URL(request.url).origin;
+    // THE ORIGIN STEP 1 PROVED — never `new URL(request.url).origin`, which
+    // behind a proxy is a different, possibly internal and plain-HTTP authority
+    // (MEDIUM-2). So the link lands on the deployment the admin is actually
+    // looking at, with no extra variable to misconfigure and no second
+    // derivation to diverge.
     const content = renderInviteEmail({
       firmName,
       role,
-      inviteUrl: buildInviteUrl(origin, hashedToken, plaintext),
+      inviteUrl: buildInviteUrl(proof.origin, hashedToken, plaintext),
       expiresAt,
     });
     await mailer.send({ to: email, subject: content.subject, html: content.html });
@@ -297,11 +432,15 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
     // THE DOOR SUCCEEDED AND THE MAIL DID NOT GO. The invite exists, its
     // plaintext is now unrecoverable, and the only remedy is revoke-and-retry —
     // so the invite is named in the response and the surface says exactly that.
-    // The message relayed is the provider's own; nothing in this branch can
-    // carry the plaintext, which was never given to the error.
+    // WHAT IS *NOT* IN THE RESPONSE: the thrown value, in any form. It came from
+    // Supabase or from Resend, and Resend was handed the full secret URL. The
+    // browser gets the correlation id; the log gets the classified code and the
+    // provider's status number under that same id.
+    const { failure, providerStatus } = classifyThrown(e);
+    logFailure({ event: "invite_courier_failure", code: "mail_failed", failure, providerStatus, correlationId });
     return courierError(502, "mail_failed", "the invite was created but the email could not be sent", {
       invite: { invite_id: inviteId, expires_at: expiresAt },
-      detail: e instanceof Error ? e.message : String(e),
+      correlationId,
     });
   }
 

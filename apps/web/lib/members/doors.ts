@@ -282,16 +282,32 @@ export class InviteCourierError extends Error {
   readonly code: InviteCourierCode;
   /** Present ONLY on `mail_failed`: the invite the door really did create. */
   readonly invite: { invite_id: string; expires_at: string } | null;
-  /** The courier's own English detail, when it had one worth showing (a mail
-   *  provider's error text). Rendered ALONGSIDE the localised sentence, never
-   *  instead of it. */
+  /** CLARA'S OWN English detail, when it had one worth showing — today only the
+   *  list of unset environment variable NAMES on `mail_not_configured`. It is no
+   *  longer a mail provider's error text: the courier stopped relaying upstream
+   *  strings entirely (independent review of #455, MEDIUM-3). Rendered ALONGSIDE
+   *  the localised sentence, never instead of it. */
   readonly detail: string | null;
-  constructor(code: InviteCourierCode, message: string, opts: { invite?: { invite_id: string; expires_at: string } | null; detail?: string | null } = {}) {
+  /** The id the server logged the real failure under. It is what turns "the
+   *  invitation server could not be reached" into something supportable without
+   *  putting a provider's words — or a URL that carried both invite secrets — in
+   *  front of a browser. */
+  readonly correlationId: string | null;
+  constructor(
+    code: InviteCourierCode,
+    message: string,
+    opts: {
+      invite?: { invite_id: string; expires_at: string } | null;
+      detail?: string | null;
+      correlationId?: string | null;
+    } = {},
+  ) {
     super(message);
     this.name = "InviteCourierError";
     this.code = code;
     this.invite = opts.invite ?? null;
     this.detail = opts.detail ?? null;
+    this.correlationId = opts.correlationId ?? null;
   }
 }
 
@@ -329,6 +345,7 @@ type CourierErrorBody = {
   message: string;
   invite?: { invite_id: string; expires_at: string } | null;
   detail?: string | null;
+  correlation_id?: string | null;
 };
 
 type CourierOkBody = { ok: true } & InviteIssued;
@@ -372,6 +389,7 @@ export function errorFromCourierBody(status: number, body: unknown): Error {
           ? { invite_id: b.invite.invite_id, expires_at: b.invite.expires_at }
           : null,
         detail: typeof b.detail === "string" ? b.detail : null,
+        correlationId: typeof b.correlation_id === "string" ? b.correlation_id : null,
       });
     }
   }

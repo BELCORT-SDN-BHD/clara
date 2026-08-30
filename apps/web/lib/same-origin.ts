@@ -17,17 +17,41 @@
  * real app never serves that origin over HTTP. A scheme check closes it,
  * checked against the ORIGIN'S OWN URL (never the request URL's authority —
  * this wall must hold behind a proxy that rewrites that authority too).
+ *
+ * INDEPENDENT REVIEW OF #455, MEDIUM-2 — WHY THIS SEAM RETURNS THE ORIGIN.
+ * `lib/members/courier.ts` builds the invitation's own URL, and it used to build
+ * it from `new URL(request.url).origin` — a DIFFERENT value from the one this
+ * wall validated. Behind a proxy those two genuinely diverge: this wall
+ * deliberately compares the Origin header against `x-forwarded-host` as well as
+ * the request URL's authority (that is what makes it hold when the authority is
+ * rewritten), so a request whose `request.url` reads
+ * `http://internal.worker.local/api/invite` passes the wall on its forwarded
+ * host and then hands the courier an INTERNAL, plain-HTTP authority to put in an
+ * email nobody can un-send. So the proof now CARRIES the origin it proved —
+ * scheme included, and therefore carrying this file's https/loopback ruling with
+ * it — and the courier uses only that. One validated value, one consumer, no
+ * second derivation.
  */
 
+/** What the wall PROVED, not merely whether it passed. `origin` is the
+ *  serialized origin of the `Origin` header this function positively matched
+ *  against a host the browser addressed — never the request URL's own authority,
+ *  which a proxy may have rewritten. */
+export type SameOriginProof = { ok: true; origin: string } | { ok: false };
+
 /**
- * True only when the request POSITIVELY proves it came from this app's own
- * origin. Every uncertain case — missing `Origin`, an unparseable one, a
- * `Sec-Fetch-Site` that is anything other than `same-origin` — is false.
+ * The wall, returning its own evidence. Every uncertain case — missing `Origin`,
+ * an unparseable one, a `Sec-Fetch-Site` that is anything other than
+ * `same-origin` — is `{ok: false}`.
+ *
+ * `isSameOriginRequest` below is EXACTLY this function's `ok`, so the boolean
+ * callers (`app/logout/route.ts`) and the origin caller (the invite courier)
+ * can never drift onto two different judgements.
  */
-export function isSameOriginRequest(
+export function proveSameOrigin(
   headers: Headers,
   requestUrl: string,
-): boolean {
+): SameOriginProof {
   // Sec-Fetch-Site is sent by every browser that implements Fetch Metadata.
   // "same-origin" is the only acceptable value; "same-site", "cross-site" and
   // "none" are all refused — "same-site" is precisely the sibling-origin case
@@ -35,19 +59,19 @@ export function isSameOriginRequest(
   // browsers, non-browser callers); the Origin check below is the wall that
   // has to hold on its own.
   const fetchSite = headers.get("sec-fetch-site");
-  if (fetchSite !== null && fetchSite !== "same-origin") return false;
+  if (fetchSite !== null && fetchSite !== "same-origin") return { ok: false };
 
   // `fetch()` always sends Origin on a non-GET/HEAD request, same-origin
   // included (Fetch standard). Absence therefore means "not a browser request
   // this app's own page made" and is refused: absence is never evidence.
   const origin = headers.get("origin");
-  if (!origin) return false;
+  if (!origin) return { ok: false };
 
   let originUrl: URL;
   try {
     originUrl = new URL(origin);
   } catch {
-    return false;
+    return { ok: false };
   }
 
   // Scheme check (reviewer note 2): a plain-HTTP Origin is refused unless it
@@ -58,7 +82,7 @@ export function isSameOriginRequest(
   // a proxy may rewrite independently).
   const isLoopback = originUrl.hostname === "localhost" || originUrl.hostname === "127.0.0.1";
   if (originUrl.protocol !== "https:" && !(originUrl.protocol === "http:" && isLoopback)) {
-    return false;
+    return { ok: false };
   }
 
   const originHost = originUrl.host;
@@ -80,5 +104,22 @@ export function isSameOriginRequest(
     // make the check pass.
   }
 
-  return candidates.has(originHost);
+  if (!candidates.has(originHost)) return { ok: false };
+
+  // THE PROVEN ORIGIN, and it is the ORIGIN HEADER'S — not the request URL's.
+  // `URL.origin` serializes scheme + host (+ non-default port), so what a
+  // consumer receives has already passed the scheme ruling above and the host
+  // match here. Nothing downstream needs to re-derive it, and nothing downstream
+  // may substitute `request.url`'s authority for it.
+  return { ok: true, origin: originUrl.origin };
+}
+
+/**
+ * True only when the request POSITIVELY proves it came from this app's own
+ * origin — `proveSameOrigin`'s `ok`, and nothing else. Kept as the name the
+ * boolean callers already read (`app/logout/route.ts`), because a wall with two
+ * implementations is a wall with two behaviours.
+ */
+export function isSameOriginRequest(headers: Headers, requestUrl: string): boolean {
+  return proveSameOrigin(headers, requestUrl).ok;
 }

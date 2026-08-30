@@ -201,21 +201,70 @@ export type InviteMailer = {
   send(message: { to: string; subject: string; html: string }): Promise<void>;
 };
 
-/** Everything Resend returned that is safe to relay to an admin: its own error
- *  text, never a key, never a body. */
-function resendFailureDetail(status: number, body: unknown): string {
-  if (typeof body === "object" && body !== null) {
-    const m = (body as Record<string, unknown>).message;
-    if (typeof m === "string" && m !== "") return `${status}: ${m}`;
-  }
-  return `the mail provider answered ${status}`;
-}
+/**
+ * THE CLOSED SET OF FAILURE CODES THIS TRANSPORT MAY REPORT — independent review
+ * of #455, MEDIUM-3.
+ *
+ * Every one of these is chosen BY THIS MODULE from an HTTP status or a structural
+ * fact. None is ever derived from, or carries, a provider's own words. That is
+ * the whole point: this transport hands Resend the FULL SECRET INVITE URL, so a
+ * provider error string is a string that has been in the same process as both
+ * bearer factors — and the previous version relayed `e.message` to the browser
+ * and would have put it in any log line. A code from a fixed list cannot carry a
+ * token, a key, a URL or an address, however the upstream error was worded.
+ */
+export type MailFailureCode =
+  | "provider_unauthorized"
+  | "provider_rejected"
+  | "provider_rate_limited"
+  | "provider_unavailable"
+  | "provider_unreachable"
+  | "no_token_returned"
+  | "directory_unreadable"
+  | "directory_too_large";
+
+export const MAIL_FAILURE_CODES: readonly MailFailureCode[] = [
+  "provider_unauthorized",
+  "provider_rejected",
+  "provider_rate_limited",
+  "provider_unavailable",
+  "provider_unreachable",
+  "no_token_returned",
+  "directory_unreadable",
+  "directory_too_large",
+];
 
 /**
- * The production transport. Built per request from the config — never hoisted to
- * module scope, so a key rotated in the environment takes effect without a
- * redeploy and no client outlives the request that made it.
+ * What this transport throws. `message` is COMPOSED from `code` and
+ * `providerStatus` and from nothing else — deliberately, so that even a caller
+ * that carelessly relays `e.message` cannot leak provider text, a key or a URL.
+ * There is no field on this class that an upstream string reaches.
  */
+export class InviteMailFailure extends Error {
+  readonly code: MailFailureCode;
+  /** The provider's HTTP status when there was one — a NUMBER, loggable as is. */
+  readonly providerStatus: number | null;
+  constructor(code: MailFailureCode, providerStatus: number | null = null) {
+    super(providerStatus === null ? `invite mail: ${code}` : `invite mail: ${code} (${providerStatus})`);
+    this.name = "InviteMailFailure";
+    this.code = code;
+    this.providerStatus = providerStatus;
+  }
+}
+
+export function isInviteMailFailure(e: unknown): e is InviteMailFailure {
+  return e instanceof InviteMailFailure;
+}
+
+/** A provider HTTP status, classified into the closed set above. The BODY is
+ *  never read: there is nothing in it this app is allowed to repeat. */
+export function classifyProviderStatus(status: number): MailFailureCode {
+  if (status === 401 || status === 403) return "provider_unauthorized";
+  if (status === 429) return "provider_rate_limited";
+  if (status >= 500) return "provider_unavailable";
+  return "provider_rejected";
+}
+
 /**
  * How far `canMintFor` will page before it gives up and REFUSES TO ANSWER.
  *
@@ -230,14 +279,33 @@ function resendFailureDetail(status: number, body: unknown): string {
  * match, and answer "not registered" — re-opening the exact bug this check
  * closes, invisibly. So this pages the documented, typed API instead.
  *
- * 20 × 1000 covers 20,000 accounts, which is orders of magnitude beyond an
- * accounting firm's staff roster. Past that the answer is an EXCEPTION, never an
- * optimistic `{ok:true}`: "I did not find it in the pages I read" is not "it does
- * not exist" (review law 2), and the courier turns that into a refusal before the
- * door rather than a dead invite.
+ * 40 pages covers 40,000 accounts at the requested page size — and 2,000 even if
+ * the server clamps `per_page` to GoTrue's own 50 default — both orders of
+ * magnitude beyond an accounting firm's staff roster. Past that the answer is an
+ * EXCEPTION, never an optimistic `{ok:true}`: "I did not find it in the pages I
+ * read" is not "it does not exist" (review law 2), and the courier turns that
+ * into a refusal before the door rather than a dead invite.
+ *
+ * WHICH END-OF-LIST SIGNAL, AND WHY NOT THE OBVIOUS TWO. Read in the SHIPPED
+ * client (`@supabase/auth-js@2.112.4`, `dist/module/GoTrueAdminApi.js`'s own
+ * `listUsers`), because the choice of instrument is the whole soundness of this
+ * check:
+ *   · `data.nextPage === null` — REJECTED. It is parsed out of the `Link` header
+ *     with `.substring(0, 1)`, so page 10 reads as page 1, and when the response
+ *     carries no `Link` header at all the field simply stays `null` and `total`
+ *     stays `0`. A "null" that means both "no more pages" and "I could not tell"
+ *     is not a signal.
+ *   · `users.length < perPage` — REJECTED. `perPage` is passed straight through
+ *     to GoTrue's `per_page` query parameter, and a server that CLAMPS it would
+ *     return a short page for every page — making page 1 look like the end of the
+ *     list and answering "not registered" for an address on page 2. That is the
+ *     exact bug this check exists to close, re-opened by the check itself.
+ * So the signal is an EMPTY PAGE: a page that returns zero users is the end of
+ * the list under any clamp, and it is the only thing that licenses `{ok:true}`.
+ * The ceiling below is a refusal, never an optimistic answer.
  */
 export const CAN_MINT_PAGE_SIZE = 1000;
-export const CAN_MINT_MAX_PAGES = 20;
+export const CAN_MINT_MAX_PAGES = 40;
 
 /** Case-insensitive, whitespace-trimmed address equality — the same normalisation
  *  `clara.invite_member` applies (`0147:379`: `lower(btrim(p_email))`), so this
@@ -246,15 +314,49 @@ export function sameAddress(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
-export function productionInviteMailer(config: InviteMailConfig): InviteMailer {
+/**
+ * The two outside worlds this transport touches, injectable — independent review
+ * of #455, LOW-7. Not for convenience: it is what lets ONE test prove the two
+ * claims this module's header makes and nothing else could check, namely that the
+ * SERVICE-ROLE KEY is passed to the client constructor and to nothing else, and
+ * that the only admin operations this app ever performs are `listUsers` (behind
+ * `canMintFor`) and `generateLink`. Both defaults are the real thing.
+ */
+export type InviteMailTransportDeps = {
+  createClient?: typeof createClient;
+  fetch?: typeof fetch;
+};
+
+/** The single Resend endpoint this app posts to. Exported so a test pins the URL
+ *  rather than re-typing it — and so a second endpoint cannot appear unnoticed. */
+export const RESEND_ENDPOINT = "https://api.resend.com/emails";
+
+/**
+ * The production transport. Built per request from the config — never hoisted to
+ * module scope, so a key rotated in the environment takes effect without a
+ * redeploy and no client outlives the request that made it.
+ *
+ * EVERY FAILURE PATH THROWS `InviteMailFailure` and nothing else, so the courier
+ * has a CODE to log instead of an upstream sentence to relay (MEDIUM-3).
+ */
+export function productionInviteMailer(
+  config: InviteMailConfig,
+  deps: InviteMailTransportDeps = {},
+): InviteMailer {
+  const makeClient = deps.createClient ?? createClient;
+  const doFetch = deps.fetch ?? fetch;
+  const admin = () =>
+    makeClient(config.supabaseUrl, config.serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
   return {
     async canMintFor(email: string): Promise<{ ok: true } | { ok: false; reason: "already_registered" }> {
-      const admin = createClient(config.supabaseUrl, config.serviceRoleKey, {
-        auth: { autoRefreshToken: false, persistSession: false },
-      });
+      const client = admin();
       for (let page = 1; page <= CAN_MINT_MAX_PAGES; page += 1) {
-        const { data, error } = await admin.auth.admin.listUsers({ page, perPage: CAN_MINT_PAGE_SIZE });
-        if (error) throw new Error(error.message);
+        const { data, error } = await client.auth.admin.listUsers({ page, perPage: CAN_MINT_PAGE_SIZE });
+        // A directory that could not be read is a question that was not
+        // answered. It never becomes `{ok:true}`.
+        if (error) throw new InviteMailFailure("directory_unreadable", error.status ?? null);
         const users = data?.users ?? [];
         for (const user of users) {
           const found = (user as { email?: string | null }).email;
@@ -262,47 +364,50 @@ export function productionInviteMailer(config: InviteMailConfig): InviteMailer {
             return { ok: false, reason: "already_registered" };
           }
         }
-        // A SHORT PAGE IS THE END OF THE LIST — and it is the only thing that
-        // licenses `{ok:true}`, because only then has this function actually SEEN
-        // every account rather than merely not-seen one.
-        if (users.length < CAN_MINT_PAGE_SIZE) return { ok: true };
+        // AN EMPTY PAGE IS THE END OF THE LIST, and it is the only thing that
+        // licenses `{ok:true}` — see the ceiling's own note on why neither
+        // `nextPage` nor a short page is a sound signal here. Only now has this
+        // function actually SEEN every account rather than merely not-seen one.
+        if (users.length === 0) return { ok: true };
       }
-      throw new Error(
-        `the account directory exceeds ${CAN_MINT_MAX_PAGES * CAN_MINT_PAGE_SIZE} entries — this check cannot confirm the address is free`,
-      );
+      throw new InviteMailFailure("directory_too_large");
     },
     async mintSupabaseTokenHash(email: string): Promise<string> {
-      const admin = createClient(config.supabaseUrl, config.serviceRoleKey, {
-        auth: { autoRefreshToken: false, persistSession: false },
-      });
-      const { data, error } = await admin.auth.admin.generateLink({ type: "invite", email });
-      if (error) throw new Error(error.message);
+      const { data, error } = await admin().auth.admin.generateLink({ type: "invite", email });
+      if (error) throw new InviteMailFailure("provider_rejected", error.status ?? null);
       const hashed = data?.properties?.hashed_token;
       if (typeof hashed !== "string" || hashed === "") {
         // Absence is not evidence of anything except absence: refuse rather than
         // build a link with an empty path segment.
-        throw new Error("the auth provider returned no invite token hash");
+        throw new InviteMailFailure("no_token_returned");
       }
       return hashed;
     },
     async send(message): Promise<void> {
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${config.resendApiKey}`,
-        },
-        body: JSON.stringify({
-          from: config.from,
-          to: [message.to],
-          subject: message.subject,
-          html: message.html,
-        }),
-      });
-      if (!res.ok) {
-        const body: unknown = await res.json().catch(() => null);
-        throw new Error(resendFailureDetail(res.status, body));
+      let res: Response;
+      try {
+        res = await doFetch(RESEND_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${config.resendApiKey}`,
+          },
+          body: JSON.stringify({
+            from: config.from,
+            to: [message.to],
+            subject: message.subject,
+            html: message.html,
+          }),
+        });
+      } catch {
+        // The thrown value is DROPPED, not wrapped: a network error's message can
+        // carry the request URL, and this request's body carried both invite
+        // secrets.
+        throw new InviteMailFailure("provider_unreachable");
       }
+      // The response BODY is never read. There is nothing in it this app is
+      // allowed to repeat, and reading it only creates something to leak.
+      if (!res.ok) throw new InviteMailFailure(classifyProviderStatus(res.status), res.status);
     },
   };
 }

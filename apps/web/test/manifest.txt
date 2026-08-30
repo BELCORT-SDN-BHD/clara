@@ -175,6 +175,8 @@ tests/firm-scope-db-pins.test.ts
 tests/firm-scope-surfaces.test.ts
 tests/focusRailSubscription.test.mjs
 tests/invite-courier.test.ts
+tests/invite-courier-egress.test.ts
+tests/invite-mail-transport.test.ts
 tests/invite-verification.test.ts
 tests/proxy-matcher.test.ts
 tests/public-key.test.ts

@@ -1,4 +1,4 @@
-// THE INVITE COURIER'S BATTERY — P4-4.
+// THE INVITE COURIER'S BATTERY — P4-4. THE ORDERING.
 //
 // The order names the one test worth writing before any other: **the courier
 // sends NO mail when the door refused**, "with a positive control proving the
@@ -6,121 +6,41 @@
 // and the SAME observer, differing only in what the door does — so a green
 // negative cannot be the observer quietly never working.
 //
-// Everything is driven through `handleInviteRequest`'s injectable seams, so every
-// branch runs for real: no network, no Supabase, no PostgREST, and no mocking of
-// the function under test.
+// Everything is driven through `handleInviteRequest`'s injectable seams
+// (`tests/invite-courier-fixtures.ts`), so every branch runs for real: no
+// network, no Supabase, no PostgREST, and no mocking of the function under test.
+//
+// ITS SIBLING FILE. The two egress walls the independent review of #455 added —
+// the PROVEN ORIGIN the link is built from (MEDIUM-2) and NO UPSTREAM TEXT in a
+// response or a log line (MEDIUM-3), plus the route's own pin and the principal
+// cells — live in `tests/invite-courier-egress.test.ts`. Split by SUBJECT: this
+// file is about the courier's ORDERING, that one about what may leave the process.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { handleInviteRequest, type CourierDeps } from "../lib/members/courier";
+import { handleInviteRequest } from "../lib/members/courier";
 import { DoorRefusal, errorFromCourierBody, InviteCourierError } from "../lib/members/doors";
 import { RefusalError, WireError } from "../lib/wire";
 import { INVITE_CLARA_TOKEN_PARAM } from "../lib/identity/doors";
-import type { InviteMailer } from "../lib/members/invite-mail";
-import type { ServerSession } from "../lib/supabase/server-session";
-
-const ORIGIN = "http://localhost";
-const PLAINTEXT = "a".repeat(32) + "b".repeat(32);
-const HASHED = "supabase-hashed-token";
-const INVITE_ID = "11111111-1111-4111-8111-111111111111";
-const EXPIRES = "2026-09-06T00:00:00Z";
-
-// The two secret-shaped values are the literal token `PLACEHOLDER`, which is
-// what `scripts/check-leaks.mjs` accepts as an EXPLICIT placeholder
-// (`SECRET_PLACEHOLDER`, `check-leaks.mjs:40`). A plausible-looking fake like
-// "resend-key-for-this-test-only" trips `generic-key-assignment` — correctly, and
-// this lane tripped it: a scanner that has to judge whether a key is real is a
-// scanner that will one day let a real one through.
-const FULL_ENV = {
-  NEXT_PUBLIC_SUPABASE_URL: "https://rig.supabase.test",
-  SUPABASE_SERVICE_ROLE_KEY: "PLACEHOLDER",
-  RESEND_API_KEY: "PLACEHOLDER",
-  INVITE_MAIL_FROM: "Clara <invites@example.test>",
-};
-
-// P4-2's fold replaced the lazy accessor with a ONCE-resolved `ServerSession` —
-// the raw token plus the subject verified from that same token — so the courier
-// now calls the door with exactly the bytes step 3 checked. These two drive both
-// branches of that resolution.
-const liveSession = async (): Promise<ServerSession | null> => ({
-  accessToken: "caller-token",
-  subject: "11111111-1111-4111-8111-111111111111",
-});
-const deadSession = async (): Promise<ServerSession | null> => null;
-
-function post(body: unknown, headers: Record<string, string> = {}): Request {
-  return new Request(`${ORIGIN}/api/invite`, {
-    method: "POST",
-    headers: {
-      origin: ORIGIN,
-      "sec-fetch-site": "same-origin",
-      "content-type": "application/json",
-      ...headers,
-    },
-    body: typeof body === "string" ? body : JSON.stringify(body),
-  });
-}
-
-/** THE OBSERVER. One object records every mint and every send, so "no mail" is a
- *  measured zero rather than an absence nobody looked for. */
-type Observer = {
-  mints: string[];
-  sends: { to: string; subject: string; html: string }[];
-  mailer: InviteMailer;
-};
-
-function observer(opts: { sendThrows?: Error; mintThrows?: Error } = {}): Observer {
-  const mints: string[] = [];
-  const sends: { to: string; subject: string; html: string }[] = [];
-  return {
-    mints,
-    sends,
-    mailer: {
-      async mintSupabaseTokenHash(email: string): Promise<string> {
-        mints.push(email);
-        if (opts.mintThrows) throw opts.mintThrows;
-        return HASHED;
-      },
-      async send(message): Promise<void> {
-        sends.push(message);
-        if (opts.sendThrows) throw opts.sendThrows;
-      },
-    },
-  };
-}
-
-type DoorCall = { fn: string; args: Record<string, unknown> };
-
-function deps(
-  obs: Observer,
-  door: { resolve?: unknown; reject?: unknown },
-  overrides: Partial<CourierDeps> = {},
-): { deps: CourierDeps; calls: DoorCall[] } {
-  const calls: DoorCall[] = [];
-  return {
-    calls,
-    deps: {
-      env: FULL_ENV,
-      resolveSession: liveSession,
-      newOpKey: () => "op-key-pinned",
-      readFirmName: async () => "ROME PROPERTIES",
-      mailerFor: () => obs.mailer,
-      callDoor: async <T,>(fn: string, args: Record<string, unknown>): Promise<T> => {
-        calls.push({ fn, args });
-        if (door.reject) throw door.reject;
-        return door.resolve as T;
-      },
-      ...overrides,
-    },
-  };
-}
-
-const OK_RECEIPT = { invite_id: INVITE_ID, token_hash: "not-read-by-the-courier", expires_at: EXPIRES, token: PLAINTEXT };
-
-async function json(res: Response): Promise<Record<string, unknown>> {
-  return (await res.json()) as Record<string, unknown>;
-}
+import { InviteMailFailure } from "../lib/members/invite-mail";
+import {
+  deadSession,
+  deps,
+  EXPIRES,
+  FIRM_A,
+  FIRM_B,
+  FULL_ENV,
+  HASHED,
+  INVITE_ID,
+  json,
+  observer,
+  OK_RECEIPT,
+  OK_RECEIPT_WITH_FIRM,
+  ORIGIN,
+  PLAINTEXT,
+  post,
+} from "./invite-courier-fixtures";
 
 // ---------------------------------------------------------------------------
 // THE NEGATIVE AND ITS POSITIVE CONTROL — the order's own headline pair.
@@ -168,6 +88,80 @@ describe("a refused door sends no mail", () => {
     assert.equal(res.status, 502);
     assert.equal((await json(res)).code, "transport");
     assert.equal(obs.sends.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIND-1 — AN ADDRESS THAT ALREADY HAS AN ACCOUNT NEVER REACHES THE DOOR.
+//
+// `generateLink({type:"invite"})` rejects an address belonging to a confirmed
+// user, and `uq_membership_active_user` (`0002:221`) makes that the NORMAL case
+// for anyone moving between firms. Asking AFTER the door has minted is how a
+// person's address gets blocked for seven days behind an invite whose plaintext
+// no longer exists. So it is asked BEFORE, and every non-ok answer refuses.
+// ---------------------------------------------------------------------------
+
+describe("the pre-door capability check (FIND-1)", () => {
+  test("already_registered → 409, and NOTHING is minted: no door call, no token", async () => {
+    const obs = observer({ canMint: { ok: false, reason: "already_registered" } });
+    const { deps: d, calls } = deps(obs, { resolve: OK_RECEIPT });
+    const res = await handleInviteRequest(post({ email: "moving@example.test", role: "admin" }), d);
+
+    assert.equal(res.status, 409);
+    const body = await json(res);
+    assert.equal(body.code, "recipient_has_account");
+    assert.equal(
+      body.message,
+      "This address already has a Clara account — ask them to sign in with it.",
+      "A FIXED SENTENCE CLARA OWNS — never the auth provider's own wording",
+    );
+    assert.equal(calls.length, 0, "the door must NOT have been called — nothing may be minted");
+    assert.equal(obs.mints.length, 0, "and no Supabase token may be minted either");
+    assert.equal(obs.sends.length, 0);
+    assert.deepEqual(obs.mintChecks, ["moving@example.test"], "the check is asked with the address the door would have had");
+  });
+
+  test("POSITIVE CONTROL: the same fixture answering ok makes ONE door call and ONE mint", async () => {
+    // Without this, the two zeros above are equally true of a courier that
+    // refuses everything, or of a `canMintFor` seam nothing ever consults.
+    const obs = observer({ canMint: { ok: true } });
+    const { deps: d, calls } = deps(obs, { resolve: OK_RECEIPT });
+    const res = await handleInviteRequest(post({ email: "moving@example.test", role: "admin" }), d);
+
+    assert.equal(res.status, 200);
+    assert.equal(calls.length, 1, "the door IS reachable on this fixture");
+    assert.equal(obs.mints.length, 1, "…and the mint half of the observer DOES fire");
+    assert.equal(obs.sends.length, 1);
+  });
+
+  test("a check that THROWS refuses before the door too — a doubt is never a yes", async () => {
+    // Review law 2: "I could not read the directory" is not "the address is
+    // free". The fail-closed branch answers 503 and mints nothing.
+    const obs = observer({ canMintThrows: new InviteMailFailure("directory_unreadable", 503) });
+    const { deps: d, calls } = deps(obs, { resolve: OK_RECEIPT });
+    const res = await handleInviteRequest(post({ email: "unknown@example.test", role: "viewer" }), d);
+
+    assert.equal(res.status, 503);
+    assert.equal((await json(res)).code, "mail_unavailable");
+    assert.equal(calls.length, 0, "A CHECK THAT COULD NOT ANSWER MUST NOT MINT");
+    assert.equal(obs.mints.length, 0);
+    assert.equal(obs.sends.length, 0);
+  });
+
+  test("the ceiling exception refuses too — the directory-too-large branch is not optimistic", async () => {
+    const obs = observer({ canMintThrows: new InviteMailFailure("directory_too_large") });
+    const { deps: d, calls } = deps(obs, { resolve: OK_RECEIPT });
+    const res = await handleInviteRequest(post({ email: "unknown@example.test", role: "viewer" }), d);
+    assert.equal(res.status, 503);
+    assert.equal(calls.length, 0);
+  });
+
+  test("the check runs AFTER the session gate, so a prober learns nothing", async () => {
+    const obs = observer({ canMint: { ok: false, reason: "already_registered" } });
+    const { deps: d } = deps(obs, { resolve: OK_RECEIPT }, { resolveSession: deadSession });
+    const res = await handleInviteRequest(post({ email: "moving@example.test", role: "admin" }), d);
+    assert.equal(res.status, 401, "no session answers 401 — never a 409 that reveals a third party's account");
+    assert.equal(obs.mintChecks.length, 0, "and the directory is not even consulted");
   });
 });
 
@@ -301,23 +295,13 @@ describe("the plaintext invite token", () => {
     assert.deepEqual(parsed, { ok: true, invite_id: INVITE_ID, expires_at: EXPIRES });
   });
 
-  test("the mail names the firm and the role, and carries no client data", async () => {
+  test("the mail names the role and carries no client data", async () => {
     const obs = observer();
     const { deps: d } = deps(obs, { resolve: OK_RECEIPT });
     await handleInviteRequest(post({ email: "new@example.test", role: "bookkeeper" }), d);
     const sent = obs.sends[0]!;
-    assert.match(sent.subject, /ROME PROPERTIES/);
     assert.match(sent.html, /bookkeeper/);
     assert.match(sent.html, /expires on 2026-09-06T00:00:00Z/);
-  });
-
-  test("an unreadable firm name degrades to a nameless subject, never a guessed one", async () => {
-    const obs = observer();
-    const { deps: d } = deps(obs, { resolve: OK_RECEIPT }, { readFirmName: async () => { throw new Error("read failed"); } });
-    const res = await handleInviteRequest(post({ email: "new@example.test", role: "viewer" }), d);
-    assert.equal(res.status, 200, "a courtesy read must not turn a successful invite into an error");
-    assert.equal(obs.sends.length, 1);
-    assert.equal(obs.sends[0]!.subject, "You have been invited to Clara");
   });
 
   test("a receipt with NO plaintext (an op_key replay) sends nothing and names the invite", async () => {
@@ -341,9 +325,71 @@ describe("the plaintext invite token", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// LOW-8 — THE COURTESY FIRM NAME IS BOUND TO THE FIRM THE DOOR ACTED IN.
+//
+// `caller_context` is a SECOND read, taken after the write, on a session that may
+// hold more than one membership. A name from it is not by construction the name
+// of the firm `invite_member` minted the invite in — and an invitation naming the
+// WRONG firm is a disclosure about a firm the invitee has nothing to do with.
+// ---------------------------------------------------------------------------
+
+describe("the firm name in the subject line", () => {
+  test("TODAY'S REAL RECEIPT names no firm, so the subject names none either", async () => {
+    // `_finish_op` returns `{invite_id, token_hash, expires_at}` verbatim. There
+    // is nothing to bind the name to, so the honest answer is no name at all.
+    const obs = observer();
+    const { deps: d, firmReads } = deps(obs, { resolve: OK_RECEIPT });
+    const res = await handleInviteRequest(post({ email: "new@example.test", role: "viewer" }), d);
+
+    assert.equal(res.status, 200);
+    assert.equal(obs.sends[0]!.subject, "You have been invited to Clara");
+    assert.ok(!obs.sends[0]!.html.includes("ROME PROPERTIES"), "an unbindable name must not reach the body either");
+    assert.equal(firmReads.length, 1, "…and the read still HAPPENED — this is a binding wall, not a deleted read");
+  });
+
+  test("A MATCHING receipt firm DOES name it — the positive control for the wall above", async () => {
+    const obs = observer();
+    const { deps: d } = deps(obs, { resolve: OK_RECEIPT_WITH_FIRM });
+    await handleInviteRequest(post({ email: "new@example.test", role: "bookkeeper" }), d);
+    assert.match(obs.sends[0]!.subject, /ROME PROPERTIES/, "when the two agree, the courtesy is paid");
+  });
+
+  test("FIRM-A RECEIPT + FIRM-B CONTEXT → no name is rendered", async () => {
+    const obs = observer();
+    const { deps: d } = deps(
+      obs,
+      { resolve: { ...OK_RECEIPT, firm_id: FIRM_A } },
+      { readFirmContext: async () => ({ firm_id: FIRM_B, firm_name: "SOMEONE ELSE SDN BHD" }) },
+    );
+    const res = await handleInviteRequest(post({ email: "new@example.test", role: "viewer" }), d);
+
+    assert.equal(res.status, 200, "a mismatch degrades the courtesy, it does not fail the invite");
+    const sent = obs.sends[0]!;
+    assert.equal(sent.subject, "You have been invited to Clara");
+    assert.ok(
+      !sent.html.includes("SOMEONE ELSE SDN BHD"),
+      "A NAME FROM A DIFFERENT FIRM MUST NEVER BE MAILED — that is a disclosure about a firm the invitee has nothing to do with",
+    );
+  });
+
+  test("an unreadable firm context degrades to a nameless subject, never a guessed one", async () => {
+    const obs = observer();
+    const { deps: d } = deps(
+      obs,
+      { resolve: OK_RECEIPT_WITH_FIRM },
+      { readFirmContext: async () => { throw new Error("read failed"); } },
+    );
+    const res = await handleInviteRequest(post({ email: "new@example.test", role: "viewer" }), d);
+    assert.equal(res.status, 200, "a courtesy read must not turn a successful invite into an error");
+    assert.equal(obs.sends.length, 1);
+    assert.equal(obs.sends[0]!.subject, "You have been invited to Clara");
+  });
+});
+
 describe("a send that fails after the door succeeded", () => {
   test("names the invite so it can be revoked, and leaks no plaintext", async () => {
-    const obs = observer({ sendThrows: new Error("450: the mail provider rejected the recipient") });
+    const obs = observer({ sendThrows: new InviteMailFailure("provider_rejected", 450) });
     const { deps: d } = deps(obs, { resolve: OK_RECEIPT });
     const res = await handleInviteRequest(post({ email: "a@b.test", role: "admin" }), d);
     assert.equal(res.status, 502);
@@ -351,12 +397,12 @@ describe("a send that fails after the door succeeded", () => {
     const body = await json(res);
     assert.equal(body.code, "mail_failed");
     assert.deepEqual(body.invite, { invite_id: INVITE_ID, expires_at: EXPIRES });
-    assert.match(String(body.detail), /the mail provider rejected the recipient/);
+    assert.equal(body.correlation_id, "corr-pinned", "the admin is given the id the server logged it under");
     assert.ok(!text.includes(PLAINTEXT), "not even a failure may carry the plaintext");
   });
 
   test("a failed MINT is the same class of answer — the door already succeeded", async () => {
-    const obs = observer({ mintThrows: new Error("email_exists") });
+    const obs = observer({ mintThrows: new InviteMailFailure("provider_rejected", 422) });
     const { deps: d } = deps(obs, { resolve: OK_RECEIPT });
     const res = await handleInviteRequest(post({ email: "a@b.test", role: "admin" }), d);
     assert.equal(res.status, 502);
@@ -399,11 +445,43 @@ describe("errorFromCourierBody reconstructs the SAME classes", () => {
       code: "mail_failed",
       message: "the invite was created but the email could not be sent",
       invite: { invite_id: INVITE_ID, expires_at: EXPIRES },
-      detail: "450",
+      correlation_id: "corr-pinned",
     });
     assert.ok(e instanceof InviteCourierError);
     assert.equal((e as InviteCourierError).code, "mail_failed");
     assert.deepEqual((e as InviteCourierError).invite, { invite_id: INVITE_ID, expires_at: EXPIRES });
+    assert.equal((e as InviteCourierError).correlationId, "corr-pinned", "the id travels to the client that must quote it");
+  });
+
+  test("the 409 refusal round-trips as its own code, not as a generic transport", () => {
+    const e = errorFromCourierBody(409, {
+      ok: false,
+      kind: "courier",
+      code: "recipient_has_account",
+      message: "This address already has a Clara account — ask them to sign in with it.",
+    });
+    assert.ok(e instanceof InviteCourierError);
+    assert.equal((e as InviteCourierError).code, "recipient_has_account");
+  });
+
+  test("EVERY courier code has a rendered sentence — a code with no copy is a raw key on screen", async () => {
+    // The gap this closes was real and shipped: `recipient_has_account` and
+    // `mail_unavailable` were added to `INVITE_COURIER_CODES` without a
+    // `Members.courier` entry, so `tCourier(courier.code)` had nothing to render.
+    // A list and its copy kept by hand in two files is a drift waiting to happen;
+    // this walks the ONE list against the catalogue.
+    const { INVITE_COURIER_CODES } = await import("../lib/members/doors");
+    const messages = (await import("../messages/en.json", { with: { type: "json" } })).default as {
+      Members: { courier: Record<string, string> };
+    };
+    for (const code of INVITE_COURIER_CODES) {
+      assert.equal(
+        typeof messages.Members.courier[code],
+        "string",
+        `messages/en.json has no Members.courier.${code} — the banner would render the key itself`,
+      );
+    }
+    assert.ok(INVITE_COURIER_CODES.length >= 8, "VACUITY GUARD: the code list was actually read");
   });
 
   test("FAIL-CLOSED: an unrecognised body, and an unknown code, both become transport", () => {
