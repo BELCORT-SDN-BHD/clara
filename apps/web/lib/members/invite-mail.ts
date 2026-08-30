@@ -390,8 +390,9 @@ export function sameAddress(a: string, b: string): boolean {
  *
  * GoTrue serialises a nil `email_confirmed_at` with `omitempty`, making ABSENCE
  * the ordinary unconfirmed wire shape. Explicit null means the same. A present,
- * parseable ISO-8601 string is confirmed. A malformed string or a non-string is
- * not "unconfirmed" evidence: it is an unreadable directory row and throws
+ * parseable, calendar-valid RFC3339 string is confirmed. A malformed string, an
+ * impossible calendar date or a non-string is not "unconfirmed" evidence: it is
+ * an unreadable directory row and throws
  * `directory_unreadable`, so it can never license the door to mint.
  */
 export function isConfirmedUser(user: unknown): boolean {
@@ -400,11 +401,26 @@ export function isConfirmedUser(user: unknown): boolean {
   }
   const u = user as Record<string, unknown>;
   if (!Object.hasOwn(u, "email_confirmed_at") || u.email_confirmed_at === null) return false;
-  if (
-    typeof u.email_confirmed_at === "string" &&
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(u.email_confirmed_at) &&
-    Number.isFinite(Date.parse(u.email_confirmed_at))
-  ) return true;
+  if (typeof u.email_confirmed_at === "string") {
+    const timestamp = u.email_confirmed_at;
+    const shaped = /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.exec(timestamp);
+    const parsed = Date.parse(timestamp);
+    if (shaped !== null && Number.isFinite(parsed)) {
+      // `Date.parse` normalises impossible dates such as 2026-02-30. Round-trip
+      // the calendar part at UTC midnight so offset-bearing but valid RFC3339
+      // timestamps keep their own local date while impossible dates cannot pass.
+      const datePart = shaped[1] as string;
+      const calendar = Date.parse(`${datePart}T00:00:00Z`);
+      const [year, month, day] = datePart.split("-").map(Number);
+      const roundTrip = new Date(calendar);
+      if (
+        Number.isFinite(calendar) &&
+        roundTrip.getUTCFullYear() === year &&
+        roundTrip.getUTCMonth() + 1 === month &&
+        roundTrip.getUTCDate() === day
+      ) return true;
+    }
+  }
   throw new InviteMailFailure("directory_unreadable", null);
 }
 

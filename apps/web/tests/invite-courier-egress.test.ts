@@ -544,19 +544,34 @@ function routeDelegationIssues(code: string): string[] {
   );
   if (!post?.body) return [...issues, "missing_direct_post_body"];
 
-  const routeConfigNames = new Set([
-    "runtime",
-    "dynamic",
-    "dynamicParams",
-    "revalidate",
-    "fetchCache",
-    "preferredRegion",
-    "maxDuration",
+  const routeConfigDomains = new Map<string, ReadonlySet<string>>([
+    ["runtime", new Set(["nodejs"])],
+    ["dynamic", new Set(["auto", "force-dynamic", "error", "force-static"])],
   ]);
-  let configStatements = 0;
+  const runtimeValueImports = (statement: ts.ImportDeclaration): ts.ImportSpecifier[] | null => {
+    const clause = statement.importClause;
+    if (clause === undefined) return null;
+    if (clause.isTypeOnly) return [];
+    if (clause.name !== undefined) return null;
+    const bindings = clause.namedBindings;
+    if (bindings === undefined) return [];
+    if (!ts.isNamedImports(bindings)) return null;
+    return bindings.elements.filter((element) => !element.isTypeOnly);
+  };
   for (const statement of file.statements) {
     if (statement === post) continue;
-    if (ts.isImportDeclaration(statement) && statement.importClause !== undefined) continue;
+    if (ts.isImportDeclaration(statement)) {
+      const values = runtimeValueImports(statement);
+      const exactCourierValueImport =
+        values !== null &&
+        values.length === 1 &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        statement.moduleSpecifier.text === COURIER_MODULE &&
+        (values[0]?.propertyName?.text ?? values[0]?.name.text) === "handleInviteRequest";
+      if ((values !== null && values.length === 0) || exactCourierValueImport) continue;
+      issues.push("unexpected_top_level_statement");
+      continue;
+    }
     if (
       ts.isVariableStatement(statement) &&
       hasExportModifier(statement) &&
@@ -564,9 +579,15 @@ function routeDelegationIssues(code: string): string[] {
       statement.declarationList.declarations.length === 1
     ) {
       const declaration = statement.declarationList.declarations[0];
-      if (declaration !== undefined && ts.isIdentifier(declaration.name) && routeConfigNames.has(declaration.name.text)) {
-        configStatements += 1;
-        if (configStatements <= 1) continue;
+      if (declaration !== undefined && ts.isIdentifier(declaration.name)) {
+        const domain = routeConfigDomains.get(declaration.name.text);
+        const initializer = declaration.initializer;
+        if (
+          domain !== undefined &&
+          initializer !== undefined &&
+          ts.isStringLiteral(initializer) &&
+          domain.has(initializer.text)
+        ) continue;
       }
     }
     issues.push("unexpected_top_level_statement");
@@ -673,6 +694,38 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
       assert.ok(
         routeDelegationIssues(mutant).includes("unexpected_top_level_statement"),
         `${shape} ran outside POST but the route wrapper pin did not refuse it`,
+      );
+    }
+  });
+
+  test("RED-BEFORE N7: runtime and dynamic are independent literal configs, while effectful initializers fail closed", () => {
+    const wrapper =
+      'import { handleInviteRequest } from "@/lib/members/courier";\n' +
+      "export async function POST(request: Request): Promise<Response> {\n" +
+      "  return handleInviteRequest(request);\n" +
+      "}\n";
+    const bothApproved =
+      'export const runtime = "nodejs";\n' +
+      'export const dynamic = "force-dynamic";\n' +
+      wrapper;
+    assert.deepEqual(
+      routeDelegationIssues(bothApproved),
+      [],
+      "runtime and dynamic are two independent approved config exports, not a one-config total",
+    );
+
+    const mutants: Record<string, string> = {
+      "call initializer": "export const runtime = sideEffect();\n" + wrapper,
+      "new initializer": "export const runtime = new RuntimeChoice();\n" + wrapper,
+      "await initializer": "export const runtime = await runtimeChoice;\n" + wrapper,
+      "template-expression initializer": "export const runtime = `${runtimeChoice}`;\n" + wrapper,
+      "JSON value import": 'import data from "./x.json" with { type: "json" };\nvoid data;\n' + wrapper,
+      "bare side-effect import": 'import "./x";\n' + wrapper,
+    };
+    for (const [shape, mutant] of Object.entries(mutants)) {
+      assert.ok(
+        routeDelegationIssues(mutant).includes("unexpected_top_level_statement"),
+        `${shape} escaped the route-file allowlist`,
       );
     }
   });

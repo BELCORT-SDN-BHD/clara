@@ -54,6 +54,14 @@ const UNAUTHORISED: { name: string; rows: unknown }[] = [
     name: "a contradictory role/rank row (bookkeeper claiming owner rank)",
     rows: [callerRow("bookkeeper", { role_rank: 3 })],
   },
+  {
+    name: "an admin spelling paired with owner rank (equality conjunct discriminator)",
+    rows: [callerRow("admin", { role_rank: 3 })],
+  },
+  {
+    name: "an owner spelling paired with admin rank (role-set conjunct discriminator)",
+    rows: [callerRow("owner", { role_rank: 2 })],
+  },
   { name: "a NULL rank — the DB's type permits it, so it is no evidence", rows: [callerRow("admin", { role_rank: null })] },
   { name: "a payload that is not an array", rows: { role: "admin" } },
 ];
@@ -223,7 +231,7 @@ describe("N2: the address is canonicalised once and used identically everywhere"
     assert.equal(canonicalAddress("  A@B.test  "), "a@b.test");
     assert.equal(canonicalAddress("a@b.test\t"), "a@b.test\t", "a TAB is not trimmed, because the DB does not trim it");
     assert.equal(canonicalAddress("\na@b.test"), "\na@b.test");
-    assert.equal(canonicalAddress(""), "", "an empty address stays empty — CLR10 is the DB's to raise, not ours");
+    assert.equal(canonicalAddress(""), "", "canonicalisation preserves empty; the raw courier gate decides which layer sees it");
   });
 
   test("ASCII case folds; a PLUS TAG does not — they are different addresses", async () => {
@@ -281,7 +289,21 @@ describe("N2: the address is canonicalised once and used identically everywhere"
     assert.equal(isAsciiAddress("naïve@example.test"), false);
   });
 
-  test("a SPACES-ONLY address still reaches the door — the courier does not pre-empt CLR10", async () => {
+  test("an EMPTY raw address is the courier's unsupported_address, before the door", async () => {
+    const obs = observer();
+    const { deps: d, calls, callerReads } = deps(obs, { resolve: OK_RECEIPT });
+    const res = await handleInviteRequest(post({ email: "", role: "wizard" }), d);
+
+    assert.equal(res.status, 400);
+    assert.equal((await json(res)).code, "unsupported_address");
+    assert.equal(callerReads.length, 0, "the courier refuses the raw empty address before authority reads");
+    assert.equal(obs.mintChecks.length, 0, "no directory read");
+    assert.equal(calls.length, 0, "no door call — this is the courier layer, not CLR10");
+    assert.equal(obs.mints.length, 0);
+    assert.equal(obs.sends.length, 0);
+  });
+
+  test("a SPACES-ONLY address still reaches the door — the other half of the residual two-layer/two-code split", async () => {
     const obs = observer();
     const { deps: d, calls } = deps(obs, { resolve: OK_RECEIPT });
     await handleInviteRequest(post({ email: "   ", role: "wizard" }), d);
@@ -340,6 +362,14 @@ describe("N2: the address is canonicalised once and used identically everywhere"
 describe("confirmation timestamps and production loopback fail closed before writes", () => {
   for (const [name, timestamp, expectedStatus, expectedCode] of [
     ["unparseable", "not-a-date", 503, "mail_unavailable"],
+    ["date-only (shape discriminator)", "2026-08-01", 503, "mail_unavailable"],
+    ["year-only", "2026", 503, "mail_unavailable"],
+    ["RFC spelling", "Sat, 01 Aug 2026 00:00:00 GMT", 503, "mail_unavailable"],
+    ["JavaScript spelling", "Sat Aug 01 2026 00:00:00 GMT+0000 (UTC)", 503, "mail_unavailable"],
+    ["out-of-range timestamp (parse discriminator)", "9999-99-99T99:99:99Z", 503, "mail_unavailable"],
+    ["normalised February 30", "2026-02-30T00:00:00Z", 503, "mail_unavailable"],
+    ["normalised non-leap February 29", "2025-02-29T00:00:00Z", 503, "mail_unavailable"],
+    ["valid leap day", "2024-02-29T00:00:00Z", 409, "recipient_has_account"],
     ["valid future", "2099-01-01T00:00:00Z", 409, "recipient_has_account"],
   ] as const) {
     test(`${name} email_confirmed_at produces ${expectedStatus} with no writes`, async () => {

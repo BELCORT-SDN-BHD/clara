@@ -300,10 +300,13 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
   }
 
   // ---- 2. Structure only. -------------------------------------------------
-  // NOT a business check: an empty email and an unknown role are passed STRAIGHT
-  // THROUGH to the door, which answers CLR10 'a valid email is required'
-  // (`0147:380`) and CLR10 'bad role' (`0147:382`) in its own words. Validating
-  // them here would be the UI guessing the DB's answer — plan §2 rule (b).
+  // NOT a business check: an unknown role passes straight through to the door,
+  // which answers CLR10 'bad role' (`0147:382`) in its own words. Email emptiness
+  // currently has a RESIDUAL TWO-LAYER/TWO-CODE split: raw "" fails the courier's
+  // non-empty printable-ASCII predicate as `unsupported_address`, while spaces
+  // pass that predicate, canonicalise to "", and reach the DB's CLR10 'a valid
+  // email is required' (`0147:380`). Both branches are pinned by the authority
+  // battery; neither should be described as passing straight through.
   const body: unknown = await request.json().catch(() => null);
   if (!isRecord(body) || typeof body.email !== "string" || typeof body.role !== "string") {
     return courierError(400, "invalid_request", 'expected a JSON body of {"email": string, "role": string}');
@@ -324,9 +327,10 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
   // below is the ONLY address this handler uses from this line on — the scan, the
   // door, the mint and the send all receive these exact bytes, so the four can no
   // longer disagree about which address was invited. The transform IS the door's
-  // own (`lower(btrim())`, `0147:378-408`), so this pre-empts no refusal: an
-  // empty address is still empty and an invalid one is still invalid when the DB
-  // sees it, and CLR10 'a valid email is required' remains the DB's to raise.
+  // own (`lower(btrim())`, `0147:378-408`). A spaces-only address therefore
+  // becomes empty and leaves CLR10 'a valid email is required' to the DB. A raw
+  // empty address never gets here: the courier's non-empty ASCII check above has
+  // already answered `unsupported_address` — the residual two-layer split.
   const email = canonicalAddress(body.email);
   const role = body.role;
 

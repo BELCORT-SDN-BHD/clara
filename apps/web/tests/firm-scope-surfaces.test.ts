@@ -52,12 +52,36 @@ type CourierRefusal = { readonly code: string; readonly start: number; readonly 
 /** Every courierError return the handler can take before its first governed door
  * call. This is the executable refusal surface, not a list of expected spellings. */
 function preDoorCourierRefusals(source: string): CourierRefusal[] {
-  const file = ts.createSourceFile("courier.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const fileName = "/courier.ts";
+  const parsed = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const host: ts.CompilerHost = {
+    fileExists: (candidate) => candidate === fileName,
+    readFile: (candidate) => candidate === fileName ? source : undefined,
+    getSourceFile: (candidate) => candidate === fileName ? parsed : undefined,
+    getDefaultLibFileName: () => "/lib.d.ts",
+    writeFile: () => undefined,
+    getCurrentDirectory: () => "/",
+    getDirectories: () => [],
+    getCanonicalFileName: (candidate) => candidate,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+  };
+  const program = ts.createProgram([fileName], { noLib: true, noResolve: true, target: ts.ScriptTarget.Latest }, host);
+  const file = program.getSourceFile(fileName);
+  assert.ok(file, "courier source file was not bound");
+  const checker = program.getTypeChecker();
   const handler = file.statements.find(
     (statement): statement is ts.FunctionDeclaration =>
       ts.isFunctionDeclaration(statement) && statement.name?.text === "handleInviteRequest",
   );
   assert.ok(handler?.body, "handleInviteRequest body was not found");
+  const courierError = file.statements.find(
+    (statement): statement is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(statement) && statement.name?.text === "courierError",
+  );
+  assert.ok(courierError?.name, "courierError declaration was not found");
+  const courierErrorSymbol = checker.getSymbolAtLocation(courierError.name);
+  assert.ok(courierErrorSymbol, "courierError declaration was not bound");
   let doorAt = Number.POSITIVE_INFINITY;
   const locateDoor = (node: ts.Node): void => {
     if (
@@ -71,22 +95,44 @@ function preDoorCourierRefusals(source: string): CourierRefusal[] {
   assert.ok(Number.isFinite(doorAt), "the governed door call was not found");
 
   const refusals: CourierRefusal[] = [];
-  const visit = (node: ts.Node): void => {
-    if (node.getStart(file) >= doorAt) return;
-    if (
-      ts.isReturnStatement(node) &&
-      node.expression !== undefined &&
-      ts.isCallExpression(node.expression) &&
-      ts.isIdentifier(node.expression.expression) &&
-      node.expression.expression.text === "courierError"
-    ) {
-      const code = node.expression.arguments[1];
-      assert.ok(code !== undefined && ts.isStringLiteralLike(code), "pre-door courierError has no literal code");
-      refusals.push({ code: code.text, start: node.getStart(file), end: node.end });
-    }
-    ts.forEachChild(node, visit);
+  const visited = new Set<ts.FunctionDeclaration>();
+  const visitFunction = (fn: ts.FunctionDeclaration, cutoff: number): void => {
+    if (visited.has(fn) || fn.body === undefined) return;
+    visited.add(fn);
+    const visit = (node: ts.Node): void => {
+      if (node.getStart(file) >= cutoff) return;
+      if (node !== fn.body && ts.isFunctionLike(node)) return;
+      if (ts.isReturnStatement(node) && node.expression !== undefined && ts.isCallExpression(node.expression)) {
+        const call = node.expression;
+        const callee = call.expression;
+        const symbol = ts.isIdentifier(callee) ? checker.getSymbolAtLocation(callee) : undefined;
+        if (symbol === courierErrorSymbol) {
+          const code = call.arguments[1];
+          assert.ok(code !== undefined && ts.isStringLiteralLike(code), "pre-door courierError has no literal code");
+          refusals.push({ code: code.text, start: node.getStart(file), end: node.end });
+          return;
+        }
+
+        // Review law 3: a matching spelling is not a helper identity. Follow only
+        // the declaration the checker bound this exact call to, in this file.
+        const declaration = symbol?.valueDeclaration;
+        if (
+          declaration !== undefined &&
+          ts.isFunctionDeclaration(declaration) &&
+          declaration.getSourceFile() === file &&
+          declaration.body !== undefined
+        ) {
+          visitFunction(declaration, Number.POSITIVE_INFINITY);
+          return;
+        }
+        const rendered = callee.getText(file).replace(/\s+/g, " ");
+        throw new Error(`courier_refusal_return_call_unresolved:${rendered}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(fn.body, visit);
   };
-  ts.forEachChild(handler.body, visit);
+  visitFunction(handler, doorAt);
   return refusals.sort((a, b) => a.start - b.start);
 }
 
@@ -695,6 +741,51 @@ describe("the deliberate exemptions stay exempt", () => {
     assert.ok(countWord);
     assert.match(exemption.reason, new RegExp(`${countWord} pre-door refusal sites`));
     assert.match(exemption.reason, /seven conceptual gates/);
+  });
+
+  it("RED-BEFORE N6: a refusal returned by a reachable same-file helper enters the census", () => {
+    const source = readSource("lib/members/courier.ts");
+    const baseline = preDoorCourierRefusals(source);
+    const insertion = source.indexOf("  const call = deps.callDoor ?? realCallDoor;");
+    assert.ok(insertion >= 0, "the helper mutant insertion point before the door was not found");
+    const mutant =
+      source.slice(0, insertion) +
+      '  if (request.headers.has("x-helper-refusal")) return addedHelperRefusal();\n' +
+      source.slice(insertion) +
+      '\nfunction addedHelperRefusal(): Response {\n  return courierError(418, "added_helper_refusal", "added");\n}\n';
+    const refusals = preDoorCourierRefusals(mutant);
+    assert.equal(refusals.length, baseline.length + 1, "a ninth refusal inside a reachable helper escaped");
+    assert.ok(refusals.some((refusal) => refusal.code === "added_helper_refusal"));
+  });
+
+  it("N6: a helper throw converted by one catch is one response exit, not two", () => {
+    const source = readSource("lib/members/courier.ts");
+    const baseline = preDoorCourierRefusals(source);
+    const insertion = source.indexOf("  const call = deps.callDoor ?? realCallDoor;");
+    assert.ok(insertion >= 0, "the caught-throw mutant insertion point before the door was not found");
+    const mutant =
+      source.slice(0, insertion) +
+      '  try { await addedThrow(); } catch { return courierError(418, "caught_helper_throw", "caught"); }\n' +
+      source.slice(insertion) +
+      '\nasync function addedThrow(): Promise<void> { throw new Error("added"); }\n';
+    const refusals = preDoorCourierRefusals(mutant);
+    assert.equal(refusals.length, baseline.length + 1);
+    assert.equal(refusals.filter((refusal) => refusal.code === "caught_helper_throw").length, 1);
+  });
+
+  it("N6: an unresolved return-call helper fails closed by name", () => {
+    const source = readSource("lib/members/courier.ts");
+    const insertion = source.indexOf("  const call = deps.callDoor ?? realCallDoor;");
+    assert.ok(insertion >= 0, "the unresolved-helper mutant insertion point before the door was not found");
+    const mutant =
+      'import { unresolvedHelper } from "./unresolved-helper";\n' +
+      source.slice(0, insertion) +
+      '  if (request.headers.has("x-unresolved-helper")) return unresolvedHelper();\n' +
+      source.slice(insertion);
+    assert.throws(
+      () => preDoorCourierRefusals(mutant),
+      /courier_refusal_return_call_unresolved:unresolvedHelper/,
+    );
   });
 
   it("logout keeps the two walls that DO matter there", () => {

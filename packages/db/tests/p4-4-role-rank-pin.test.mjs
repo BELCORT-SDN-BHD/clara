@@ -34,3 +34,21 @@ test("P4-4 role_rank(text) exists and maps the four ROLE_LADDER entries exactly"
     await pool.end();
   }
 });
+
+test("P4-4 role_rank has exactly one catalog row, whose identity argument types are text", async () => {
+  const pool = makePool();
+  try {
+    const result = await pool.query(
+      `select count(*)::int as overload_count,
+              array_agg(pg_catalog.oidvectortypes(p.proargtypes) order by p.oid) as identity_argument_types
+         from pg_catalog.pg_proc p
+         join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'clara'
+          and p.proname = 'role_rank'`,
+    );
+    assert.equal(result.rows[0]?.overload_count, 1, "clara.role_rank must have exactly one overload");
+    assert.deepEqual(result.rows[0]?.identity_argument_types, ["text"]);
+  } finally {
+    await pool.end();
+  }
+});

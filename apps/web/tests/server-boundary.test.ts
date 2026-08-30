@@ -117,8 +117,9 @@ export function runtimeSpecifiers(source: string): string[] {
   return out;
 }
 
-/** Resolve a relative or `@/`-aliased specifier to a file in the tree, or null
- *  for a bare package specifier (which this walk does not follow). */
+/** Resolve a relative or `@/`-aliased specifier to a file in the tree. Bare
+ * package specifiers return null because this source-tree walk does not follow
+ * them; a LOCAL edge that does not resolve throws by name instead of vanishing. */
 function resolveLocal(tree: Tree, fromFile: string, spec: string): string | null {
   const base = spec.startsWith("@/")
     ? spec.slice(2)
@@ -130,7 +131,7 @@ function resolveLocal(tree: Tree, fromFile: string, spec: string): string | null
   const extensionSubstitutions: Record<string, readonly string[]> = {
     ".js": [".ts", ".tsx"],
     ".jsx": [".tsx"],
-    ".mjs": [".mts"],
+    ".mjs": [".mts", ".ts"],
     ".cjs": [".cts"],
   };
   for (const [runtimeExtension, sourceExtensions] of Object.entries(extensionSubstitutions)) {
@@ -162,7 +163,7 @@ function resolveLocal(tree: Tree, fromFile: string, spec: string): string | null
     const candidate = `${base}${ext}`;
     if (tree.exists(candidate)) return candidate;
   }
-  return null;
+  throw new Error(`local_module_unresolved:${fromFile}:${spec}`);
 }
 
 /** The transitive runtime closure of one entry. */
@@ -381,12 +382,33 @@ describe("N6: the three edges the first version of this walk could not see", () 
     assert.ok(closureOf(tree, "components/root.ts").has(COURIER));
   });
 
+  test("RED-BEFORE N9: JavaScript and MJS specifiers try every approved TypeScript substitute", () => {
+    const tree = syntheticTree({
+      "components/root.ts": 'import "@/lib/tsx-only.js";\nimport "@/lib/ts-only.mjs";\n',
+      "lib/tsx-only.tsx": "export const tsxOnly = true;\n",
+      "lib/ts-only.ts": "export const tsOnly = true;\n",
+    });
+    const reached = closureOf(tree, "components/root.ts");
+    assert.ok(reached.has("lib/tsx-only.tsx"), ".js must substitute .tsx when .ts is absent");
+    assert.ok(reached.has("lib/ts-only.ts"), ".mjs must substitute .ts when .mts is absent");
+  });
+
   test("a literal CommonJS require is a runtime edge", () => {
     const tree = syntheticTree({
       "components/root.ts": 'const courier = require("@/lib/members/courier");\n',
       [COURIER]: "export const courier = true;\n",
     });
     assert.ok(closureOf(tree, "components/root.ts").has(COURIER));
+  });
+
+  test("RED-BEFORE N9: a missing literal local require fails closed by named reason", () => {
+    const tree = syntheticTree({
+      "components/root.ts": 'require("@/lib/does-not-exist");\n',
+    });
+    assert.throws(
+      () => closureOf(tree, "components/root.ts"),
+      /local_module_unresolved:components\/root\.ts:@\/lib\/does-not-exist/,
+    );
   });
 
   test("a non-literal dynamic import fails closed by a named reason", () => {
