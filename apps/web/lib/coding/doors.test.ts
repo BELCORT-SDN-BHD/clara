@@ -87,10 +87,11 @@ test("acknowledgeSweepRun: posts acknowledge_sweep_run with run/op_key ONLY", as
   let seenFn = ""; let seenBody: Record<string, unknown> = {};
   await withMockedFetch(
     async (url, init) => { seenFn = rpcName(url); seenBody = JSON.parse(String(init?.body)); return jsonResponse(null); },
-    async () => { await acknowledgeSweepRun("run-1", { session: fakeSession() }); },
+    async () => { await acknowledgeSweepRun("run-1", "caller-owned-sweep-key", { session: fakeSession() }); },
   );
   assert.equal(seenFn, "acknowledge_sweep_run");
   assert.deepEqual(Object.keys(seenBody).sort(), ["p_op_key", "p_run"]);
+  assert.equal(seenBody.p_op_key, "caller-owned-sweep-key");
 });
 
 test("cancelAgentTask: posts cancel_agent_task with task/op_key ONLY", async () => {

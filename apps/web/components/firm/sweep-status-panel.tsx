@@ -5,33 +5,35 @@
 // (lib/firm/use-review-queue.ts's `sweep` field — measured UNUSED anywhere
 // in apps/web before this train) — zero extra network calls.
 //
-// RUNG-0 SCOPE NOTE, TRUED (owner-ruled, 裁-20 —
-// docs/plan/active/mohe-grill-rulings-2026-08-28.md:268-272): there is no
-// BROWSABLE LIST of sweep runs anywhere — the queue envelope carries only
-// `open_run` (a boolean) plus two timestamps, `list_sweep_runs` does not
-// exist, and neither `sweep_runs` nor `sweep_run_items` carries a human
-// SELECT policy (owner-only; measured 2026-08-28). A run id DOES reach the
-// human, honestly, through a channel this panel does not cover: Clara posts
-// a `sweep_receipt` part (`lib/parts/types.ts`'s `SweepReceiptPart`, already
-// live in the 18-member catalog) into the thread carrying its own `run_id`
-// when a sweep finalizes — `get_sweep_run`/`acknowledge_sweep_run` are real,
-// callable doors FOR THAT id. That part renders today as a generic id-only
-// summary card (components/parts/PartRenderer.tsx's `SUMMARY_TYPES` bucket,
-// alongside eight OTHER identifier-only part types nobody has hydrated yet).
-// Flagged here at rung 0 rather than built quietly; the owner has since
-// RULED it (裁-20, confirming the conductor's own call): `SweepReceiptPart`
-// upgrades to a rich card calling `get_sweep_run`/offering
-// `acknowledge_sweep_run` INSIDE the P6 four-part wire bump (`chatTurn_v16` —
-// TRUED 2026-08-30, was v15; v15 shipped 2026-08-29 for the unrelated F-A6
-// PR-2, alongside the other unhydrated part types) — no separate train owns it.
-// This queue-altitude panel renders the ONE thing it genuinely has (the
-// envelope's own state) and names that ruled, tracked home rather than a
-// vague gap.
+// RUNG-0 SCOPE NOTE — 裁-20 IS NOW DISCHARGED (P6-2, 2026-08-30). This block
+// used to say the upgrade below was OWED; it has SHIPPED, and a comment that
+// still claimed otherwise would be exactly the stale-not-built class the note
+// was written to avoid.
+//
+// THE GRANT PICTURE HAS NOT CHANGED, and it is still the whole reason this
+// panel hosts no acknowledge control of its own: there is no BROWSABLE LIST of
+// sweep runs anywhere — the queue envelope carries only `open_run` (a boolean)
+// plus two timestamps, `list_sweep_runs` does not exist, and neither
+// `sweep_runs` nor `sweep_run_items` carries a human SELECT policy (owner-only;
+// measured 2026-08-28). A run id reaches a human through exactly one channel:
+// Clara posts a `sweep_receipt` part (`lib/parts/types.ts`'s
+// `SweepReceiptPart`) into the thread carrying its own `run_id` when a sweep
+// finalizes, and `get_sweep_run`/`acknowledge_sweep_run` are real, callable
+// doors FOR THAT id.
+//
+// WHAT CHANGED: that part no longer renders as a generic id-only summary card
+// (it left PartRenderer.tsx's `SUMMARY_TYPES` bucket, which is now nine members
+// rather than ten). `components/parts/SweepReceiptCard.tsx` hydrates
+// `get_sweep_run` on mount and offers the audited bookkeeper+
+// `acknowledge_sweep_run` on a FINALIZED run — precisely what 裁-20
+// (docs/plan/active/mohe-grill-rulings-2026-08-28.md:268-272) ruled should land
+// inside the P6 wire bump, with no separate train. This queue-altitude panel
+// still renders the ONE thing it genuinely has (the envelope's own state), and
+// now points at a control that EXISTS.
 
 import { useTranslations } from "next-intl";
 import { SectionHeader } from "@/components/common/section-header";
 import { StateBanner } from "@/components/common/state";
-import { NotBuiltNote } from "@/components/common/not-built-note";
 import { businessDateTime } from "@/lib/business-date";
 import type { ReviewQueueSweep } from "@/lib/firm/needs-you";
 
@@ -54,7 +56,12 @@ export function SweepStatusPanel({ sweep }: { sweep: ReviewQueueSweep | null }) 
         <dt>{t("lastAckLabel")}</dt>
         <dd>{sweep.last_ack_at ? businessDateTime(sweep.last_ack_at) : t("never")}</dd>
       </dl>
-      <NotBuiltNote>{t("acknowledgeGap")}</NotBuiltNote>
+      {/* NOT a NotBuiltNote any more (P6-2): the acknowledge control EXISTS —
+          it lives on Clara's own sweep-receipt card, which is the only surface
+          that ever holds a run id. A NotBuiltNote here would now be a false
+          claim, and the P6-X exit gate sweeps every note whose lane has
+          merged. This is a plain pointer to where the control lives. */}
+      <p className="text-xs text-muted-foreground">{t("acknowledgeHome")}</p>
     </div>
   );
 }

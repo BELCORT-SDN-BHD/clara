@@ -5,10 +5,17 @@
 // `agent_receipt` part's WORKBENCH half named in port-wave-plan part2 §8.1
 // ("three of the four [P6] parts have a workbench half in T1 … shipping the
 // card before the workbench would mean a card whose 'open the full object'
-// destination does not exist"). The chat-rail CARD itself (a proactive
-// `agent_receipt` typed part) is the P6 four-part wire bump's own scope, not
-// this train's — recorded here, not fabricated as a NotBuiltNote, because the
-// workbench destination below is real and live.
+// destination does not exist").
+//
+// THE CARD NOW EXISTS (TRUED P6-2, 2026-08-30) — this block used to record it
+// as the wire bump's own scope and not yet built. `components/parts/
+// V16Cards.tsx`'s `AgentReceiptCard` renders the `agent_receipt` kind
+// chatTurn_v16 declares. It reads a DIFFERENT surface from this panel, and
+// deliberately: this panel calls `list_agent_act_receipts` (client-scoped, the
+// close lane's own door), while the card hydrates
+// `clara.agent_receipts_visible` by the `(receipt_kind, receipt_id)` pair —
+// the one bookkeeper+ read spanning EVERY receipt-bearing lane, which is what a
+// generic card needs. Neither is the other's duplicate.
 //
 // Client-scoped (the door takes p_client + optional p_since, no p_fy).
 

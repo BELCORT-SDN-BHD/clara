@@ -286,9 +286,14 @@ export async function settleCloseProposal(
   proposalId: string,
   state: "adopted" | "withdrawn",
   reason: string | null,
+  operationKey: string,
   opts: Opts = {},
 ): Promise<unknown> {
-  return callDoor("settle_close_proposal", { p_proposal: proposalId, p_state: state, p_reason: reason, p_op_key: opKey() }, opts);
+  return callDoor(
+    "settle_close_proposal",
+    { p_proposal: proposalId, p_state: state, p_reason: reason, p_op_key: operationKey },
+    opts,
+  );
 }
 
 // --- plain table/view reads (getRows — RLS-scoped grants, no RPC involved) --
