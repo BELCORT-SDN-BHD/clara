@@ -439,16 +439,41 @@ test("bpr3.C5 — an IDENTITY DRIFT between draft and approve REFUSES, and its m
   assert.equal(reasonOf(err), "binding_identity_drifted");
   assert.equal(await entryStatus(d.entry), "draft");
 
+  // TWO MUTANTS, because a merged counterparty turns out to be defended TWICE — and a cell that
+  // only ran the first one would report "the wall is still there" as if one arm had done it.
+  //
+  // (a) Neutralise the identity arm ALONE: the entry is still refused, but the WORD changes to
+  //     binding_changed. That proves the arm is what produces the discriminant a classifier
+  //     reads, and it surfaces the second rung instead of hiding behind it.
   const b2 = await liveBinding("C5m");
   const d2 = await boundDraft(b2, "C5m");
   await mergeAway(b2.cp.id, (await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "C5mwin")).id);
-  await withMutant(APPROVE_CORE_SIG,
-    [["      v_pt_reason:='binding_identity_drifted';", "      v_pt_reason:=v_pt_reason;"]],
-    async () => {
-      const r = await approve(d2, "bpr3c5m");
-      assert.equal(r.status, "approved",
-        "with the drift arm neutralised the refusal disappears — the wall is that arm");
-    });
+  const NEUTRALISE_DRIFT = ["      v_pt_reason:='binding_identity_drifted';",
+    "      v_pt_reason:=v_pt_reason;"];
+  await withMutant(APPROVE_CORE_SIG, [NEUTRALISE_DRIFT], async () => {
+    const err2 = await assertRaises("CLR36", () => approve(d2, "bpr3c5ma"),
+      "a merged counterparty with ONLY the identity arm neutralised");
+    assert.equal(reasonOf(err2), "binding_changed",
+      "the second rung still stops it — the merge is caught twice, and the word says which arm spoke");
+  });
+
+  // (b) Neutralise BOTH — the identity arm and the live-population fallback that also refuses a
+  //     counterparty the `bm` lateral can no longer see — and the entry POSTS. That is the state
+  //     the pair of walls exists to prevent: an authority whose vendor was merged away, honoured
+  //     verbatim on a new document.
+  const b3 = await liveBinding("C5m2");
+  const d3 = await boundDraft(b3, "C5m2");
+  await mergeAway(b3.cp.id, (await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "C5m2win")).id);
+  await withMutant(APPROVE_CORE_SIG, [
+    NEUTRALISE_DRIFT,
+    [`      elsif coalesce(v_pt_matches,0)<>1
+         or v_pt_matching_binding is distinct from e.vendor_binding_id then`,
+    "      elsif false then"],
+  ], async () => {
+    const r = await approve(d3, "bpr3c5mb");
+    assert.equal(r.status, "approved",
+      "with BOTH rungs gone the merged-away authority is honoured and the entry posts");
+  });
 });
 
 test("bpr3.C6 — a pair a human DECLINED is suppressed at post time too, and its mutant posts", async () => {
