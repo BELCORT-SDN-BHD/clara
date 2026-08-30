@@ -129,6 +129,28 @@ test("P1 sst_threshold_schedule is seeded G + I at 50,000,000¢ effective 2018-0
                        and a.privilege_type='EXECUTE')`,
   );
   assert.equal(writers.rows.length, 0, `no firm-lane fn writes the schedule (found: ${writers.rows.map((x) => x.proname).join(",")})`);
+
+  // F-T1 PR-1 RE-CUT (conductor fix-round 2026-08-24, F7 — Annex A.1's own "the re-cut ships in
+  // the same PR"): once F-T1's migration has widened this table, it also carries a full
+  // immutability trigger pair (not merely the ACL/RLS posture asserted above) and a
+  // self-supersession block. INLINE-GATED on F-T1's own stem, never on has16 alone — this file
+  // is shared, and a database carrying 0016 without F-T1 must see the ORIGINAL assertions only
+  // (unweakened above; nothing here runs before F-T1 lands).
+  const hasFT1 = (await rootQuery(
+    "select 1 from clara.schema_migrations where version ~ '_f_t1_sst_reference_tables$'",
+  )).rowCount > 0;
+  if (hasFT1) {
+    const trigCount = (await rootQuery(
+      `select count(*)::int as n from pg_trigger t
+         join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace
+        where n.nspname='clara' and c.relname='sst_threshold_schedule' and not t.tgisinternal`,
+    )).rows[0].n;
+    assert.equal(trigCount, 3, "F-T1's F3 fix: sst_threshold_schedule carries exactly 3 non-internal triggers (0016's no_truncate + F-T1's new no_delete + supersede_only)");
+    const selfSupersede = (await rootQuery(
+      "select pg_get_constraintdef(oid) as d from pg_constraint where conrelid='clara.sst_threshold_schedule'::regclass and conname='ck_sst_threshold_schedule_no_self_supersede'",
+    )).rows[0]?.d;
+    assert.equal(selfSupersede, "CHECK ((superseded_by IS DISTINCT FROM id))", "F-T1's F4 fix: self-supersession is blocked structurally on sst_threshold_schedule");
+  }
 });
 
 test("P1 CHECK vocabularies: tri-state classification, watch states, event kinds, future-method, typed conclusions; one-open-episode partial unique", async (t) => {
