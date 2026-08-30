@@ -89,6 +89,36 @@ export function loadFirmOpenQuestions(session: SessionTokenAccessor): Promise<Fi
   });
 }
 
+/** ONE firm question by id, IN ANY STATUS — the hydrate behind the
+ *  `firm_question` transcript card (P6-2).
+ *
+ *  DELIBERATELY UNFILTERED ON `status`, unlike `loadFirmOpenQuestions` above.
+ *  The queue only ever wants what still awaits a human, so filtering there is
+ *  correct. A transcript card is the opposite case: Clara raised the question in
+ *  a conversation that stays on screen forever, and the single most useful thing
+ *  the card can say once someone settles it is that it IS settled, by whom, with
+ *  what text. Re-reading with `status=eq.open` would make an answered question
+ *  render as "not visible" — a card that goes blank the moment it succeeds, and
+ *  the exact "vanishing row on refusal" class this module's own
+ *  `isActingRowPresent` helpers exist to defend against, arriving through the
+ *  read instead of the write. The view carries the settled columns
+ *  (`settled_by`, `settled_at`, `settlement_text`, `named_client`) precisely so
+ *  a settled row can be READ; nothing here re-derives that verdict.
+ *
+ *  `null` when RLS admits no such row — rendered as "not visible", never as an
+ *  invented question. */
+export async function getFirmOpenQuestionById(
+  session: SessionTokenAccessor,
+  questionId: string,
+): Promise<FirmOpenQuestionRow | null> {
+  const rows = await getRows<FirmOpenQuestionRow>("firm_open_questions_visible", {
+    select: FIRM_OPEN_QUESTION_COLS,
+    filters: { id: `eq.${questionId}` },
+    session,
+  });
+  return rows[0] ?? null;
+}
+
 /** clara.resolve_firm_question(p_question, p_resolution, p_client, p_op_key)
  *  — bookkeeper+ governed write (0103_f_a7_pi_additive.sql:637-677). Marks the
  *  row resolved and stamps `named_client` — the human's own attribution.

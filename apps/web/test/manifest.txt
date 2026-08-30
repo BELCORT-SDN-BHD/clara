@@ -63,6 +63,10 @@ components/journals/journals-governance-keyboard.test.tsx
 components/journals/journals-keyboard.test.tsx
 components/journals/use-amount-input.test.ts
 components/parts/v14-receipt-cards.test.tsx
+components/parts/v16-read-cards.test.tsx
+components/parts/v16-act-cards.test.tsx
+components/parts/sweep-receipt-card.test.tsx
+components/parts/v16-cards-a11y.test.tsx
 components/registers/accounts-a11y.test.tsx
 components/registers/accounts-keyboard.test.tsx
 components/registers/accounts-render-states.test.tsx

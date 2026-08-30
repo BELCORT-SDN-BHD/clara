@@ -5,24 +5,27 @@
 // frontend-handoff-2026-08-23.md §3.1 count of 21 is STALE — kb_rule_proposal,
 // rule_post_receipt and bank_rule_proposal retired with F-A2/F-A3 and are not
 // ported here. Four more part types (agent_receipt, firm_question,
-// close_proposal, freeform_result) land in a LATER, single batched wire bump
-// (mohe-grill-rulings-2026-08-27.md Q8) — this module and its catalog
-// (./catalog.ts) are built so that bump is an additive edit, not a rewrite.
+// close_proposal, freeform_result) were owed by a LATER, single batched wire
+// bump (mohe-grill-rulings-2026-08-27.md Q8) — this module and its catalog
+// (./catalog.ts) were built so that bump would be an additive edit, not a
+// rewrite, and it LANDED that way: see the chatTurn_v16 block below.
 //
-// 22 MEMBERS AS OF 2026-08-29 (MBB-4, docs/plan/active/mohe-alignment-audit-
-// 2026-08-29.md §2): the four chatTurn_v14 receipt kinds at the bottom of this
-// file joined the union. They are NOT the Q8 four — that bump is still owed and
-// still lands on top of these, taking the catalog to 26. The v14 four were
+// 26 MEMBERS AS OF 2026-08-30 (P6-2). The count reached 22 on 2026-08-29
+// (MBB-4, docs/plan/active/mohe-alignment-audit-2026-08-29.md §2) when the four
+// chatTurn_v14 receipt kinds joined; the Q8 four — a DIFFERENT four — landed on
+// top of those with the `chatTurn_v16` wire bump (P6-1), taking the catalog to
+// 26 exactly as this header predicted. The v14 four were
 // already ON THE WIRE and rendering as the "Unsupported part" warning chip,
 // because the registry was `chatTurn: chatTurn_v14` at the time this count was
-// taken (registry.ts:54); TRUED 2026-08-30 — the LIVE registry is now
-// `chatTurn: chatTurn_v15` (registry.ts:61, F-A6 PR-2, 2026-08-29), which adds
-// no new part kind, so the count and the wire union below are unaffected. Its wire union is
+// taken (registry.ts:54). Its wire union is
 //   ClaraPartV14 = ClaraPart | EntryPostedPart | QuestionOpenedPart
 //                | BankActPart | BankPackPart
 // (packages/runtime/workflows/chatTurn.v14.prompt.ts:27). Declaring them here
-// is purely additive on the frontend — no runtime version bump is involved,
-// since the emitter already ships them.
+// was purely additive on the frontend — no runtime version bump was involved,
+// since the emitter already shipped them. `chatTurn_v15` (F-A6 PR-2,
+// 2026-08-29) then shipped for an unrelated reason and adds NO new part kind
+// (`ClaraPartV15 = ClaraPartV14`, chatTurn.v15.prompt.ts:33), so it moved
+// neither the count nor the union. `chatTurn_v16` is the one that did.
 //
 // Every member below carries IDENTIFIERS ONLY (plus the two live-transcript
 // leaf types, `text`/`clarify`, which are themselves the payload) — hydrate-
@@ -173,10 +176,119 @@ export type BankPackPart = {
   pack: Record<string, unknown>;
 };
 
-/** The canonical transcript wire union: 22 live members (9 base + 4 Wave-A +
- *  1 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b + 4 chatTurn_v14). Adding a member here
- *  without a matching ./catalog.ts entry fails `tsc` — see catalog.ts's
- *  AllCovered/NoExtra guard. */
+// --- The chatTurn_v16 kinds (P6-2, ruling Q8) ---------------------------------
+// TRANSCRIBED FIELD FOR FIELD from the frozen declarer
+// `packages/runtime/workflows/chatTurn.v16.parts.ts` — read at P6-1 branch tip
+// `5bc6e6c8fffd833afa130c6732e2725995f6fe9e`, file blob
+// `f35fde1dd013fa1698858d6bb85838f4020de210`. The same law the v14 block above
+// states applies twice over here, and P6-1's own header states the other half of
+// it: "THIS FILE IS THE DECLARER, AND IT EXISTS SO THERE IS EXACTLY ONE." Do not
+// add, rename or widen a field below to make a card nicer — the wire does not
+// carry it. Each docblock keeps the DECLARER's reason for the field list, so a
+// reviewer checks the transcription rather than trusting it; the full grounding
+// (view, migration line, act door) lives in that file and is not re-copied here.
+//
+// RESERVED, NOT SHIPPED — the tax-draft part (裁-44 / 裁-62 / 裁-70). There is a
+// fifth Q8-era kind owed, and it is deliberately ABSENT from this union: the
+// `tax_prep` draft card. Its part shape is designed by the `ft3-taxprep-design`
+// lane alongside the `tax_prep` wake body, its needs-you card and its allowlist
+// rows — the declarer is another lane's design AND another package's code, so
+// inventing its fields here to "get ahead" would break the reader-is-never-the-
+// declarer law in both directions at once. 裁-62 additionally rules the tax
+// module INERT at beta (every treatment refuses `treatment_code_unsigned`, so
+// Clara cannot draft a computation at all), and 裁-70 puts the client-page "Tax"
+// tab in P6-T. A card for a part nothing emits is the same defect as a control
+// for a door that does not exist — so this is a comment, and nothing else.
+
+/** ONE agent act's receipt, generic across every receipt-bearing lane.
+ *
+ *  THE ADDRESS IS THE PAIR, NOT `receipt_id` ALONE — `clara.agent_receipts_visible`
+ *  is a UNION of per-item shim views whose `receipt_id` is "the member row's own
+ *  primary key rendered as text", unique inside its member table and nowhere
+ *  else. `receipt_kind` is the discriminator that closes it, so the card's own
+ *  hydrate filters on BOTH (lib/firm/reads.ts's `getAgentReceipt`).
+ *
+ *  `receipt_kind` IS `string`, and the declarer's reason is measured rather than
+ *  stylistic: `clara.agent_receipt_surfaces` is a TABLE later migrations insert
+ *  into — 0103 seeded seven and a rig at frontier 0155 reads NINE. A union of
+ *  literals would have shipped two kinds short on the day it was written. Same
+ *  open-union posture as `RefusalCode` above.
+ *
+ *  `client_id` IS NULLABLE, and structurally so: NULL where the act is
+ *  structurally client-less (a pre-attribution filing, a firm-narrow read). The
+ *  card renders the firm-altitude case AS firm-altitude; it never infers a
+ *  client for it, and it never builds a client route out of a null. */
+export type AgentReceiptPart = {
+  type: "agent_receipt";
+  receipt_kind: string;
+  receipt_id: string;
+  client_id: string | null;
+};
+
+/** A FIRM-scoped open question — the carrier for a document that has no client
+ *  yet. One field wide, and that IS the whole field list: `question_id` is the
+ *  subject argument of both act doors (`resolve_firm_question` /
+ *  `dismiss_firm_question`).
+ *
+ *  IT CARRIES NO `client_id`, AND THAT IS THE POINT RATHER THAN AN OMISSION —
+ *  `clara.firm_open_questions` has no client_id COLUMN AT ALL (not nullable:
+ *  absent), because "a question that exists BECAUSE no client is known cannot
+ *  carry one". A `client_id` here would re-create at the wire exactly what the
+ *  schema refused. The client a human names when they answer lands in
+ *  `named_client` on the settled row — a hydrate read, never a part field.
+ *
+ *  `document_id` is deliberately not carried either: it is NOT NULL on the row,
+ *  so every hydrate returns it, and a copy here would give the card a second,
+ *  older source for a value it already reads. */
+export type FirmQuestionPart = { type: "firm_question"; question_id: string };
+
+/** ONE close proposal — the close agent's drafted plan, standing until a human
+ *  settles it. Three fields, each forced:
+ *    `proposal_id`  — `settle_close_proposal`'s subject argument.
+ *    `close_run_id` — needed to FETCH at all. The ABI publishes no single-row
+ *      getter; the only read is "every proposal for one close run"
+ *      (lib/close/api.ts's `listCloseProposalsForRun`), so the card fetches that
+ *      list and picks its own row by `proposal_id` — the same "pick by id from a
+ *      list" fallback `staff_advance` documents above, never a fabricated read fn.
+ *    `client_id`    — the route to the close workbench, and NOT NULL on the row.
+ *
+ *  NOTHING FROM THE PROPOSAL'S OWN CONTENT RIDES HERE — not `state`, not
+ *  `narrative`, not `drafted`, not `bound_digests`, not `model_name`. `state` is
+ *  the one a copy would actively LIE about: at most one proposal per run is ever
+ *  `open` (`uq_close_proposal_live`), and a human adopting or withdrawing it
+ *  flips that value under a card already on screen. The card re-reads; it never
+ *  renders a remembered verdict. */
+export type CloseProposalPart = {
+  type: "close_proposal";
+  proposal_id: string;
+  close_run_id: string;
+  client_id: string;
+};
+
+/** ONE audited freeform read — the receipt of a SELECT the model composed and the
+ *  DATABASE ran. There is no act door and no history getter
+ *  (`clara.list_freeform_reads` does not exist anywhere in the estate), so the
+ *  card renders the one receipt it was handed and offers no "see all" link it
+ *  cannot honour.
+ *
+ *  THE RESULT ROWS ARE NOT HERE, AND THEY ARE NOWHERE DURABLE — only the RECEIPT
+ *  is (the SQL, the stated purpose, the compiled scope, the rung vector, the row
+ *  and byte counts, the outcome; every one of them DB-owned). The rows themselves
+ *  stay where the transcript already carries them, in the `tool_result` part of
+ *  the same turn.
+ *
+ *  `read_id` IS A STRING CARRYING A BIGINT. `clara.freeform_read_log.id` is a
+ *  bigint and the verb returns it as a jsonb NUMBER; the emitter stringifies once
+ *  at the boundary, for the same reason `agent_receipt_contract` renders every
+ *  member primary key as text — a part is persisted to jsonb and re-parsed by a
+ *  browser, and a bigint that round-trips through a JS number can come back
+ *  wrong. The card filters `id=eq.<read_id>` and never does arithmetic on it. */
+export type FreeformResultPart = { type: "freeform_result"; read_id: string };
+
+/** The canonical transcript wire union: 26 live members (9 base + 4 Wave-A +
+ *  1 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b + 4 chatTurn_v14 + 4 chatTurn_v16).
+ *  Adding a member here without a matching ./catalog.ts entry fails `tsc` — see
+ *  catalog.ts's AllCovered/NoExtra guard. */
 export type ClaraPart =
   | { type: "text"; text: string }
   | { type: "tool_call"; tool: string; tool_call_id: string; input: unknown }
@@ -199,4 +311,8 @@ export type ClaraPart =
   | EntryPostedPart
   | QuestionOpenedPart
   | BankActPart
-  | BankPackPart;
+  | BankPackPart
+  | AgentReceiptPart
+  | FirmQuestionPart
+  | CloseProposalPart
+  | FreeformResultPart;

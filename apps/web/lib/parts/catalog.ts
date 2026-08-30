@@ -22,10 +22,14 @@ export type CatalogEntry = { renderBranch: true; fixtures: ClaraPart[] };
 
 /** The part types that render a VISIBLE persisted element. Every key here MUST
  *  have a branch in PartRenderer.tsx; the parity test (./catalog.test.tsx) enforces
- *  it. 20 render-branch entries + the 2 STATUS_RESOLVER_TYPES above = 22 total,
- *  matching the live ClaraPart union in ./types.ts exactly. (16 + 2 = 18 until
- *  2026-08-29, when MBB-4 registered the four chatTurn_v14 receipt kinds the live
- *  emitter was already putting on the wire.) */
+ *  it. 24 render-branch entries + the 2 STATUS_RESOLVER_TYPES above = 26 total,
+ *  matching the live ClaraPart union in ./types.ts exactly.
+ *
+ *  The count's own history, because every step of it was a measurement rather
+ *  than a plan: 16 + 2 = 18 until 2026-08-29, when MBB-4 registered the four
+ *  chatTurn_v14 receipt kinds the live emitter was already putting on the wire
+ *  (20 + 2 = 22); then 24 + 2 = 26 on 2026-08-30, when P6-2 registered the four
+ *  chatTurn_v16 kinds P6-1 declared (ruling Q8). */
 export const PART_CATALOG = {
   text: {
     renderBranch: true,
@@ -189,6 +193,52 @@ export const PART_CATALOG = {
     fixtures: [
       { type: "bank_pack", bank_account_id: "acct-2121", digest: "sha256:2121deadbeef", pack: { lines: 12 } },
     ],
+  },
+
+  // --- The four chatTurn_v16 kinds (P6-2, ruling Q8) --------------------------
+  // Every fixture below is shaped from the frozen DECLARER's own type
+  // (packages/runtime/workflows/chatTurn.v16.parts.ts, transcribed into
+  // ./types.ts field for field), never from a guess about what a card would
+  // like to receive.
+  //
+  // THESE FIXTURES DELIBERATELY EXERCISE THE UN-HYDRATED SHELL, and that is the
+  // property worth having here rather than a limitation to apologise for. The
+  // parity test renders through `renderToStaticMarkup`, where effects never run,
+  // so each card paints its pre-hydrate state: title, wire identifiers, and the
+  // loading line. That is exactly the state a real user sees for the first paint
+  // of every one of these cards, and asserting it is non-empty and not the
+  // fallback chip is what proves the branch exists at all. The HYDRATED bodies
+  // (and every act, gate and refusal branch) are proven separately, against real
+  // mounted components with mocked reads, in
+  // ../../components/parts/v16-cards.test.tsx.
+  agent_receipt: {
+    renderBranch: true,
+    fixtures: [
+      { type: "agent_receipt", receipt_kind: "entry_post", receipt_id: "receipt-2222", client_id: "client-1111" },
+      // `client_id` is NULLABLE and structurally so — the view's ordinal 4:
+      // "NULL where the act is structurally client-less (pre-attribution
+      // filing, a firm-narrow read)". The card renders that case as
+      // firm-altitude; it must never infer a client for it.
+      { type: "agent_receipt", receipt_kind: "agent_filing", receipt_id: "receipt-2323", client_id: null },
+    ],
+  },
+  firm_question: {
+    renderBranch: true,
+    fixtures: [{ type: "firm_question", question_id: "fq-2424" }],
+  },
+  close_proposal: {
+    renderBranch: true,
+    fixtures: [
+      { type: "close_proposal", proposal_id: "prop-2525", close_run_id: "run-2525", client_id: "client-1111" },
+    ],
+  },
+  freeform_result: {
+    renderBranch: true,
+    // `read_id` is a STRING carrying a bigint (clara.freeform_read_log.id is a
+    // bigint; the emitter stringifies once at the boundary because a bigint
+    // round-tripped through a JS number can come back wrong). The fixture is a
+    // string for that reason, not by accident.
+    fixtures: [{ type: "freeform_result", read_id: "90071992547409911" }],
   },
 } satisfies Record<string, CatalogEntry>;
 

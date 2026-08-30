@@ -82,15 +82,19 @@ for (const type of STATUS_RESOLVER_TYPES) {
   });
 }
 
-// Belt-and-braces: the catalog is exactly 22 live types (20 render branches + 2
+// Belt-and-braces: the catalog is exactly 26 live types (24 render branches + 2
 // status resolvers). It was 18 (16 + 2) — the corrected count from
 // docs/plan/active/codex-frontend-handoff-errata-2026-08-27.md (ii), not the stale
 // 21 in frontend-handoff-2026-08-23.md §3.1 — until MBB-4 registered the four
-// chatTurn_v14 receipt kinds the live emitter was already putting on the wire.
-// The Q8 four (agent_receipt/firm_question/close_proposal/freeform_result) are a
-// DIFFERENT four and still owed: when that bump lands, this reads 26 (24 + 2).
-test("the catalog totals 22 live part types (20 render branches + 2 status resolvers)", () => {
-  assert.equal(RENDER_BRANCH_TYPES.length, 20);
+// chatTurn_v14 receipt kinds the live emitter was already putting on the wire
+// (22), and 26 since P6-2 registered the Q8 four that chatTurn_v16 declares.
+// This test is the one cell in the suite that had to be EDITED by this PR rather
+// than added to, and its failing beforehand was the proof that the catalog's own
+// completeness mechanism works: the guards in ./catalog.ts and the parity loop
+// above cannot be satisfied by a count, so this assertion is the only thing
+// standing between "four kinds registered" and "four SPECIFIC kinds registered".
+test("the catalog totals 26 live part types (24 render branches + 2 status resolvers)", () => {
+  assert.equal(RENDER_BRANCH_TYPES.length, 24);
   assert.equal(STATUS_RESOLVER_TYPES.length, 2);
   const retired = ["kb_rule_proposal", "rule_post_receipt", "bank_rule_proposal"];
   for (const t of retired) {
@@ -102,6 +106,28 @@ test("the catalog totals 22 live part types (20 render branches + 2 status resol
     assert.ok(
       RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]),
       `${t} is on the LIVE chatTurn_v14 wire (chatTurn.v14.prompt.ts:27) — it must have a render branch, never the unsupported chip`,
+    );
+  }
+  // The Q8 four, BY NAME and for the same reason. These are the exact four
+  // spelled in the declarer's own `CHATTURN_V16_PART_KINDS` array
+  // (packages/runtime/workflows/chatTurn.v16.parts.ts), which exists so a census
+  // can assert the names against a declaration rather than a comment —
+  // "spelling is not identity" applies to a card catalog too.
+  for (const t of ["agent_receipt", "firm_question", "close_proposal", "freeform_result"]) {
+    assert.ok(
+      RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]),
+      `${t} is on the chatTurn_v16 wire — it must have a render branch, never the unsupported chip`,
+    );
+  }
+  // 裁-44 / 裁-62 / 裁-70: the tax-draft kind is RESERVED and must NOT be here.
+  // Its shape belongs to the ft3-taxprep-design lane, and the tax module is
+  // inert at beta — a card for a part nothing emits is the same defect as a
+  // control for a door that does not exist. This cell reds the day someone
+  // registers one to "get ahead".
+  for (const t of ["tax_draft", "tax_prep", "tax_computation"]) {
+    assert.ok(
+      !RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]),
+      `${t} is reserved to the ft3-taxprep-design lane (裁-44) and inert at beta (裁-62) — it must not be registered here`,
     );
   }
 });
