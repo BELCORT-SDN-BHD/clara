@@ -213,6 +213,11 @@ test("firm_question: the Submit gate is CLOSED on empty text, and resolving post
         assert.equal(body.p_resolution, "It is ROME PROPERTIES — the site address matches.");
         assert.equal(body.p_client, "client-rome", "the human's named client rides p_client");
         assert.ok(typeof body.p_op_key === "string" && body.p_op_key.length > 0, "the actor-scoped deterministic op_key reaches the door");
+        const questionReads = seen.calls.filter((candidate) => candidate.url.includes("/rest/v1/firm_open_questions_visible"));
+        assert.ok(questionReads.length >= 2, "the resolve path must read before and after the act");
+        for (const read of questionReads) {
+          assert.doesNotMatch(read.url, /(?:\?|&)status=/, "a transcript hydrate must keep the settled row visible");
+        }
 
         // THE DISCRIMINATING POST-CONDITION: settled facts that did NOT exist on
         // screen before the click, plus the act controls genuinely gone.
@@ -367,6 +372,8 @@ test("close_proposal renders Clara's reasoning and the drafted gate items, and N
         assert.match(text, /Close proposal/);
         assert.ok(text.includes(CP_OPEN.narrative), "the proposal's narrative is DB-stored prose — rendered verbatim");
         assert.ok(text.includes(CP_OPEN.rationale), "the rationale likewise");
+        assert.match(text, /Clara's proposal/, "the narrative is labelled as Clara's words");
+        assert.match(text, /Clara's reasoning/, "the rationale is labelled as Clara's words");
         assert.match(text, /claude-fable-5 2026-08-01/, "the authoring model is named");
         // The drafted items are LISTED by their DB keys, never counted.
         assert.match(text, /bank_reconciled · acct-1/, "a drafted item with an item_key renders both");

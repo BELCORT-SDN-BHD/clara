@@ -146,6 +146,32 @@ test("agent_receipt addresses its read by the PAIR (receipt_kind, receipt_id) â€
   );
 });
 
+test("agent_receipt refuses an ambiguous pair instead of painting the first receipt", async () => {
+  const rowB = {
+    ...RECEIPT_ROW,
+    acting_actor: "clara-agent-second-row",
+    rationale: "A second row sharing the same receipt address must make the read ambiguous.",
+  };
+  await withMockedEnv(
+    () => jsonResponse([RECEIPT_ROW, rowB]),
+    async (seen) => {
+      const h = await renderComponent(App(RECEIPT));
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        const read = seen.urls.find((u) => u.includes("/rest/v1/agent_receipts_visible"));
+        assert.ok(read, "the card must read agent_receipts_visible");
+        assert.match(read, /limit=2/, "the read must ask for two rows so ambiguity stays observable");
+        const text = h.text();
+        assert.match(text, /not visible to your session/, "zero rows and an ambiguous pair share the honest no-single-row arm");
+        assert.doesNotMatch(text, /Vendor matched an existing coding rule/, "row A must never win an ambiguous address");
+        assert.doesNotMatch(text, /second row sharing the same receipt address/i, "row B must not win either");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("agent_receipt renders the DB row's own facts and links to the client workspace that owns the act", async () => {
   await withMockedEnv(
     () => jsonResponse([RECEIPT_ROW]),
@@ -189,7 +215,7 @@ test("agent_receipt fails closed when the hydrated row belongs to a different cl
   );
 });
 
-test("agent_receipt fails closed when the wire declares firm altitude but hydration returns a client row", async () => {
+test("agent_receipt treats a null wire client as unpinned and follows the hydrated DB row", async () => {
   await withMockedEnv(
     () => jsonResponse([RECEIPT_ROW]),
     async () => {
@@ -197,9 +223,9 @@ test("agent_receipt fails closed when the wire declares firm altitude but hydrat
       try {
         for (let i = 0; i < 4; i++) await h.settle();
         const text = h.text();
-        assert.match(text, /could not be opened/, "wire null versus hydrated non-null is an identity mismatch");
-        assert.doesNotMatch(text, /client-9b71/, "the client-scoped row must not be laundered into a firm-altitude receipt");
-        assert.deepEqual(hrefs(h), [], "the mismatched client route must not render");
+        assert.doesNotMatch(text, /could not be opened/, "a nullable wire client is an omitted pin, not a mismatch");
+        assert.match(text, /client-9b71/, "the hydrated row remains the authority for the receipt's actual altitude");
+        assert.deepEqual(hrefs(h), ["/clients/client-9b71"], "the destination follows the positively read client id");
       } finally {
         await h.unmount();
       }

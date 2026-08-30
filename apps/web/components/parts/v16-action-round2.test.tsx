@@ -258,6 +258,11 @@ test("one thread-wide guard drops a synchronous duplicate and a cross-card act, 
 
         assert.equal(acknowledgeA, 1, "a synchronous same-button double click must emit one RPC");
         assert.equal(acknowledgeB, 0, "a second PartSlot must be dropped while the first card owns the thread guard");
+        assert.equal(
+          calls.filter((call) => call.url.includes("/rest/v1/caller_context")).length,
+          1,
+          "one mounted thread performs one shared caller-context read, not one read per card",
+        );
         const firstCall = calls.find((call) => call.url.includes("/rest/v1/rpc/acknowledge_sweep_run"));
         assert.equal((firstCall?.body as { p_op_key?: unknown } | undefined)?.p_op_key, expectedKey, "the UI key must bind the positively read actor and hydrated run");
         const pending = findAll(h.container, (node) => node.tagName === "BUTTON");
@@ -275,26 +280,88 @@ test("one thread-wide guard drops a synchronous duplicate and a cross-card act, 
 });
 
 test("governed card controls fail closed when caller_context does not positively identify exactly one actor", async () => {
+  const invalidContexts = [
+    { name: "absent", value: [] },
+    { name: "ambiguous", value: [CALLER_CONTEXT[0], { ...CALLER_CONTEXT[0], user_id: "33333333-3333-4333-8333-333333333333" }] },
+    { name: "malformed", value: [{ ...CALLER_CONTEXT[0], user_id: "not-a-uuid" }] },
+  ];
+  for (const invalid of invalidContexts) {
+    await withMockedEnv(
+      (url, body) => {
+        if (url.includes("/rest/v1/rpc/get_sweep_run")) {
+          return jsonResponse(sweepDetail((body as { p_run?: string } | null)?.p_run ?? ""));
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+      async (calls) => {
+        const h = await renderComponent(App(SWEEP_A));
+        try {
+          for (let i = 0; i < 6; i++) await h.settle();
+          const control = h.find(buttonNamed("Acknowledge this run"));
+          assert.ok(control);
+          assert.equal(control.disabled, true, `${invalid.name} caller context is not actor evidence`);
+          assert.equal(
+            calls.some((call) => call.url.includes("/rpc/acknowledge_sweep_run")),
+            false,
+            `${invalid.name} caller context must mint no key and reach no door`,
+          );
+        } finally {
+          await h.unmount();
+        }
+      },
+      invalid.value,
+    );
+  }
+});
+
+test("unknown firm status, question kind, and sweep outcome render through honest fail-soft arms", async () => {
+  const unknownOutcome = "refused_something_new";
   await withMockedEnv(
     (url, body) => {
+      if (url.includes("/rest/v1/firm_open_questions_visible")) {
+        return jsonResponse([{ ...FQ_OPEN, kind: "onboarding_proposed", status: "escalated" }]);
+      }
+      if (url.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
       if (url.includes("/rest/v1/rpc/get_sweep_run")) {
-        return jsonResponse(sweepDetail((body as { p_run?: string } | null)?.p_run ?? ""));
+        const runId = (body as { p_run?: string } | null)?.p_run ?? "";
+        return jsonResponse({
+          ...sweepDetail(runId),
+          items: [{
+            run_id: runId,
+            filing_id: "filing-unknown",
+            firm_id: "firm-1",
+            client_id: "client-rome",
+            document_id: "document-unknown",
+            outcome: unknownOutcome,
+            entry_id: null,
+            refusal_token: null,
+            tokens_reserved: 0,
+            tokens_spent: 0,
+            created_at: "2026-08-30T00:10:00Z",
+          }],
+        });
       }
       throw new Error(`unexpected fetch: ${url}`);
     },
-    async (calls) => {
-      const h = await renderComponent(App(SWEEP_A));
+    async () => {
+      const h = await renderComponent(AppMany([FQ, SWEEP_A]));
       try {
         for (let i = 0; i < 6; i++) await h.settle();
-        const control = h.find(buttonNamed("Acknowledge this run"));
-        assert.ok(control);
-        assert.equal(control.disabled, true, "absence is not actor evidence");
-        assert.equal(calls.some((call) => call.url.includes("/rpc/acknowledge_sweep_run")), false);
+        const text = h.text();
+        assert.match(text, /Unrecognized kind \(onboarding_proposed\)/, "an unregistered question kind must use the translated unknown arm");
+        assert.match(text, /Status not recognised/, "an unregistered status must use the translated unknown arm");
+        assert.match(text, /refused_something_new/, "an unregistered outcome must preserve the DB's own spelling");
+        const badge = h.find((node) => node.tagName === "SPAN" && textOf(node).trim() === unknownOutcome);
+        assert.ok(badge, "the unknown sweep outcome must render as a badge");
+        const classList = badge.classList as { contains: (name: string) => boolean } | undefined;
+        assert.ok(classList, "the rendered badge exposes its applied tone classes");
+        assert.equal(classList.contains("bg-muted"), true, "unknown outcomes use the neutral arm");
+        assert.equal(classList.contains("bg-info-muted"), false, "unknown outcomes are never bucketed as success/info");
+        assert.equal(classList.contains("bg-warning-muted"), false, "a familiar prefix is not proof of a known refusal kind");
       } finally {
         await h.unmount();
       }
     },
-    [],
   );
 });
 

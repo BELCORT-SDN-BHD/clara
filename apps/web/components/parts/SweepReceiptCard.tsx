@@ -54,7 +54,7 @@ import type { SweepReceiptPart } from "@/lib/parts/types";
  *  silently bucketed as something it is not. */
 function outcomeTone(outcome: string): "info" | "warning" | "neutral" {
   if (outcome === "drafted" || outcome === "posted") return "info";
-  if (outcome.startsWith("refused_")) return "warning";
+  if (outcome === "refused_budget" || outcome === "refused_concurrency" || outcome === "refused_attempts") return "warning";
   return "neutral";
 }
 

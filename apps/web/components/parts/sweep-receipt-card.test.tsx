@@ -98,6 +98,13 @@ function App(part: ClaraPart): ReactElement {
 
 const ackButton = (n: Stub) => n.tagName === "BUTTON" && textOf(n).trim() === "Acknowledge this run";
 
+function textWithElementBoundaries(node: Stub): string {
+  if (node.nodeType === 3) return String(node.nodeValue ?? "");
+  const children = (node.childNodes as Stub[] | undefined) ?? [];
+  if (children.length > 0) return children.map(textWithElementBoundaries).join(" ");
+  return typeof node.textContent === "string" ? node.textContent : "";
+}
+
 const SWEEP: SweepReceiptPart = { type: "sweep_receipt", run_id: "run-3c88" };
 
 /** A FINALIZED run. The five counters are deliberately MULTI-DIGIT and chosen so
@@ -156,9 +163,11 @@ test("sweep_receipt hydrates get_sweep_run and prints the DB's five counters —
         assert.ok(call, "the card must call get_sweep_run — the ONLY human-reachable read of a sweep run");
         assert.deepEqual(call.body, { p_run: "run-3c88" }, "addressed by the part's own run_id");
 
-        const text = h.text();
+        const compactText = h.text();
+        const text = textWithElementBoundaries(h.container);
         assert.doesNotMatch(text, new RegExp(FALLBACK_UNSUPPORTED_PREFIX), "sweep_receipt must never reach the unsupported-part chip");
         assert.match(text, /Auto-draft sweep receipt/);
+        assert.doesNotMatch(text, /\bnull\b|\bundefined\b/, "absent acknowledgement facts drop their rows instead of becoming text");
         // The five DB columns, each under its OWN label — a stronger claim than
         // "the digits appear somewhere", which a card mislabelling two counters
         // would also satisfy. (`textOf` concatenates with no separator, so a
@@ -166,7 +175,7 @@ test("sweep_receipt hydrates get_sweep_run and prints the DB's five counters —
         for (const [label, value] of [
           ["expected", 1009], ["drafted", 601], ["posted", 307], ["skipped", 71], ["refused", 23],
         ] as const) {
-          assert.match(text, new RegExp(`${label}${value}`), `${label} must render its own DB column's value`);
+          assert.match(compactText, new RegExp(`${label}${value}`), `${label} must render its own DB column's value`);
         }
         // And nothing this UI derived from them. 0108's own comment on
         // posted_count is why: the schema split these apart so a posted row

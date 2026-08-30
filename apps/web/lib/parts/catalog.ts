@@ -210,7 +210,9 @@ export const PART_CATALOG = {
   // fallback chip is what proves the branch exists at all. The HYDRATED bodies
   // (and every act, gate and refusal branch) are proven separately, against real
   // mounted components with mocked reads, in
-  // ../../components/parts/v16-cards.test.tsx.
+  // `../../components/parts/v16-read-cards.test.tsx`,
+  // `../../components/parts/v16-act-cards.test.tsx`, and
+  // `../../components/parts/v16-cards-a11y.test.tsx`.
   agent_receipt: {
     renderBranch: true,
     fixtures: [

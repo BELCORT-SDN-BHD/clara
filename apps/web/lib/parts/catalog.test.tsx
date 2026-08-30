@@ -15,6 +15,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
@@ -22,6 +25,8 @@ import type { ClaraPart } from "./types";
 import { PART_CATALOG, RENDER_BRANCH_TYPES, STATUS_RESOLVER_TYPES } from "./catalog";
 import { PartRenderer, FALLBACK_UNSUPPORTED_PREFIX } from "../../components/parts/PartRenderer";
 import messages from "../../messages/en.json";
+
+const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 // THE PROVIDER WRAP (MBB-4, 2026-08-29): the four chatTurn_v14 receipt branches
 // route their copy through next-intl, so this harness has to supply the same
@@ -139,4 +144,40 @@ test("refusal renders the CLR code and message verbatim", () => {
   assert.match(html, /CLR21/);
   assert.match(html, /amount_conflict/);
   assert.match(html, /the proposed lines do not match the machine-corroborated total/);
+});
+
+test("parts-module test citations resolve to existing test files", () => {
+  const modules = [
+    "components/parts/V16Cards.tsx",
+    "components/parts/V16ActCards.tsx",
+    "components/parts/SweepReceiptCard.tsx",
+    "components/parts/PartCardShell.tsx",
+    "lib/parts/catalog.ts",
+  ];
+  const citationPattern = /`((?:\.\.?\/)*(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.test\.tsx)`/g;
+  let citationCount = 0;
+
+  for (const modulePath of modules) {
+    const source = readFileSync(resolve(WEB_ROOT, modulePath), "utf8");
+    const citations = [...source.matchAll(citationPattern)]
+      .map((match) => match[1])
+      .filter((citation): citation is string => citation !== undefined);
+    for (const citation of new Set(citations)) {
+      citationCount += 1;
+      const target = resolve(WEB_ROOT, dirname(modulePath), citation);
+      assert.ok(existsSync(target), `${modulePath} cites missing test file ${citation}`);
+    }
+  }
+
+  assert.ok(citationCount >= 5, `expected at least five walked citations, found ${citationCount}`);
+
+  const fakeCitation = [..."`missing-card.test.tsx`".matchAll(citationPattern)].map((match) => match[1]);
+  assert.deepEqual(fakeCitation, ["missing-card.test.tsx"], "vacuity control: the walker must recognize a test citation");
+  const missingCitation = fakeCitation[0];
+  assert.ok(missingCitation);
+  assert.equal(
+    existsSync(resolve(WEB_ROOT, "components/parts", missingCitation)),
+    false,
+    "vacuity control: the recognized missing citation must fail the existence check",
+  );
 });

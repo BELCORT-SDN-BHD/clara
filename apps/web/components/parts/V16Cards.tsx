@@ -34,7 +34,9 @@
 //     rather than merely intended — a numeral hiding inside one of those
 //     payloads is model-authored by construction, so not walking them is what
 //     guarantees no model-authored numeral is ever formatted as a number.
-//     `v16-cards.test.tsx` mutates a numeral into each one and asserts it never
+//     `v16-act-cards.test.tsx` mutates a numeral into each act-card payload and
+//     `v16-read-cards.test.tsx` does the same for both read-card payloads; each
+//     asserts that the numeral never
 //     reaches the screen. DB-stored PROSE is the deliberate other side of that
 //     line — see `AgentProse` in ./PartCardShell.tsx for why.
 //
@@ -96,7 +98,7 @@ export function AgentReceiptCard({ part }: { part: AgentReceiptPart }) {
 
   if (!addressable) return <MalformedPart kind="agent_receipt" fields={["receipt_kind", "receipt_id"]} />;
   const row = state.data?.row ?? null;
-  if (row !== null && row.client_id !== part.client_id) {
+  if (row !== null && part.client_id !== null && part.client_id !== row.client_id) {
     return <MalformedPart kind="agent_receipt" fields={["receipt_kind", "receipt_id", "client_id"]} />;
   }
 
