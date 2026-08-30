@@ -33,6 +33,34 @@
 --      is exhaustive, not merely local to the one occurrence this migration
 --      edited. Excludes by exact OID, not by proname, so a differently-typed
 --      overload of the same name could never be silently skipped.
+--
+-- ---------------------------------------------------------------------------
+-- TRUED 2026-08-30 BY 裁-18b PR-3 (binding_pr_3_post_time_recheck). THIS FILE
+-- WAS ALREADY RED, at two probes, and had been for two frontiers -- found by
+-- RUNNING it on a pristine 0001..0155 replay rather than by reading it:
+--
+--   probe 2  pinned the remedy phrase "withdraw the draft and re-draft; the new
+--            draft will resolve against the current counterparty landscape".
+--            0053 §7-A F8 REWORDED that remedy -- it now carries a parenthetical
+--            naming the doors that actually exist -- so the pin has matched ZERO
+--            occurrences since 0053 applied. PR-3 additionally replaces the word
+--            "budget" in that parenthetical with the live successor gate name
+--            "concurrency" (F-A9 PR-1B removed the token-budget gate whole;
+--            measured on the live comment-stripped body of admit_autodraft_task).
+--            The pin below is the CURRENT live phrase, in full.
+--
+--   probe 4  pinned the audit call as clara._audit(c.firm,c.actor,null,null,...).
+--            0106 §E change (2) replaced those two hard-coded nulls with the ctx
+--            identity channels v_obo / v_via_wake_kind. The pin is now written to
+--            the part of that call that 0035 actually owns -- the fn name, the
+--            entry and the filing key -- so it stops re-breaking every time an
+--            unrelated file threads another channel through the same call.
+--
+-- What 0035 CLAIMS has not changed and neither has any probe's INTENT: this is a
+-- pin refresh against the live catalog, not a relaxation. Probe 3's three
+-- position pins and probe 5's whole-schema sole-carrier scan are untouched in
+-- substance; probe 5 simply follows probe 2's phrase.
+-- ---------------------------------------------------------------------------
 
 do $post$
 declare
@@ -69,12 +97,16 @@ begin
     raise exception '0035 postverify: the old "revise the draft" remedy phrase is still present (% occurrences) in clara._approve_entry_core', v_old_count;
   end if;
   v_new_count:=(length(v_src)-length(replace(v_src,
-      'withdraw the draft and re-draft; the new draft will resolve against the current counterparty landscape','')))
-    / length('withdraw the draft and re-draft; the new draft will resolve against the current counterparty landscape');
+      'withdraw the draft and re-draft (after withdrawing, a bookkeeper can ask the autodraft door to try again; it may still refuse on the usual lane, consent, concurrency or attempt gates, or you can re-draft through the chat or hand-draft lanes); the new draft will resolve against the current counterparty landscape','')))
+    / length('withdraw the draft and re-draft (after withdrawing, a bookkeeper can ask the autodraft door to try again; it may still refuse on the usual lane, consent, concurrency or attempt gates, or you can re-draft through the chat or hand-draft lanes); the new draft will resolve against the current counterparty landscape');
   if v_new_count <> 1 then
     raise exception '0035 postverify: the new CLR23 remedy phrase must appear exactly once in clara._approve_entry_core -- found %', v_new_count;
   end if;
-  if position('withdraw the draft and re-draft; the new draft will resolve against the current counterparty landscape'' using errcode=''clr23' in v_src) = 0 then
+  -- ...and the RETIRED gate name is gone, which is the half a count alone cannot say.
+  if position('lane, consent, budget or attempt gates' in v_src) <> 0 then
+    raise exception '0035 postverify: the remedy still names the retired token-budget gate (F-A9 PR-1B removed it)';
+  end if;
+  if position('the new draft will resolve against the current counterparty landscape'' using errcode=''clr23' in v_src) = 0 then
     raise exception '0035 postverify: the new remedy phrase is not attached to errcode CLR23';
   end if;
   raise notice '0035 postverify OK (2/5): section B''s old remedy phrase is fully retired from clara._approve_entry_core and the new phrase appears exactly once, still CLR23';
@@ -104,8 +136,11 @@ begin
   if v_pos_return=0 or v_pos_return_case=0 or v_pos_return_case < v_pos_return then
     raise exception '0035 postverify: the final return does not carry the conditional warnings-array append';
   end if;
+  -- The fn name + entry + filing key are what 0035 owns here. The two identity arguments in
+  -- between are NOT: 0106 §E replaced their hard-coded nulls with v_obo / v_via_wake_kind, and a
+  -- pin that spanned them re-broke this probe for a change it was never about.
   v_pos_audit:=position(
-    'perform clara._audit(c.firm,c.actor,null,null,''approve_entry'',p_entry, jsonb_build_object(''filing'''
+    '''approve_entry'',p_entry, jsonb_build_object(''filing'''
     in v_src);
   v_pos_audit_case:=position(
     'jsonb_build_object(''warning'',v_no_cp_warning)'
@@ -129,7 +164,7 @@ begin
       v_leak_old_count:=v_leak_old_count+1;
       raise notice '0035 postverify: LEAK (old phrase) -- % still carries the old remedy phrase', r.proname;
     end if;
-    if v_scan_src ilike '%withdraw the draft and re-draft; the new draft will resolve against the current counterparty landscape%' then
+    if v_scan_src ilike '%the new draft will resolve against the current counterparty landscape%' then
       v_leak_new_count:=v_leak_new_count+1;
       raise notice '0035 postverify: LEAK (new phrase) -- % unexpectedly also carries the new remedy phrase', r.proname;
     end if;

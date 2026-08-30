@@ -57,7 +57,71 @@ export async function revoke(sub, { binding, reason, opKey } = {}) {
 // So `has29()` is no longer the right question for any cell, and it is kept only where a cell
 // genuinely asks about the LEDGER. The question a signing cell asks is postTimeControlLive().
 export const POST_TIME_MARKER = "binding_post_time_recheck_v1";
-const APPROVE_CORE_SIG = "clara._approve_entry_core(jsonb,uuid,uuid,text,text)";
+export const APPROVE_CORE_SIG = "clara._approve_entry_core(jsonb,uuid,uuid,text,text)";
+
+// ---------------------------------------------------------------------------
+// SUCCESSION (裁-18b PR-3, .claude/rules/db-tests.md's succession pattern)
+// ---------------------------------------------------------------------------
+// PR-3 makes the post-time control REAL: it splices the re-check into the approve path and
+// mints the witness row itself. From that frontier on, `withPostTimeControl` must NOT plant
+// anything — the row it used to insert would collide with the real one on the primary key, and
+// the body it used to recut is the very body the registry attests to.
+//
+// The succession witness is a CATALOG WITNESS probed by EXACT SIGNATURE: PR-3 creates
+// clara.reset_binding_revocation, a body that exists on no earlier frontier. Not a
+// schema_migrations version string (this file is UNNUMBERED on the branch and its number is
+// claimed at merge), not the marker text in the approve path (a text projection — the very
+// thing FOLD-1 replaced), and not the presence of a witness ROW (a fixture can plant one).
+let postTimeDeployedCache = null;
+export async function postTimeControlDeployed() {
+  if (postTimeDeployedCache !== null) return postTimeDeployedCache;
+  try {
+    const r = await rootQuery(
+      "select to_regprocedure('clara.reset_binding_revocation(uuid,text,text)') is not null as ok");
+    postTimeDeployedCache = r.rows[0]?.ok === true;
+  } catch { postTimeDeployedCache = false; }
+  return postTimeDeployedCache;
+}
+
+/** Run `fn()` with the witness registry holding EXACTLY the row(s) in `rows` for the post-time
+ *  control, then put whatever was there back. Post-PR-3 the registry holds the migration's own
+ *  row, so a cell that wants to drive a wrong/stale witness has to take the real one out first
+ *  — an INSERT would collide on the primary key, and an UPDATE cannot re-point `proc`
+ *  (t_control_witnesses_identity_frozen refuses that by design).
+ *
+ *  Restore outranks the probe: a cell that leaves the real witness missing has silently turned
+ *  every later signing cell in the suite into a refusal test. */
+export async function withWitnessReplaced(rows, fn) {
+  const saved = (await rootQuery(
+    "select control, proc, prosrc_sha, minted_in_migration from clara.control_witnesses where control = $1",
+    [POST_TIME_MARKER])).rows;
+  await rootQuery("delete from clara.control_witnesses where control = $1", [POST_TIME_MARKER]);
+  for (const row of rows) {
+    await rootQuery(
+      `insert into clara.control_witnesses(control, proc, prosrc_sha, minted_in_migration)
+       values ($1, $2, $3, $4)`,
+      [POST_TIME_MARKER, row.proc, row.sha, row.mintedIn ?? "rig-fixture:withWitnessReplaced"]);
+  }
+  let out; let probeError = null;
+  try { out = await fn(); } catch (e) { probeError = e; }
+  await rootQuery("delete from clara.control_witnesses where control = $1", [POST_TIME_MARKER]);
+  for (const row of saved) {
+    await rootQuery(
+      `insert into clara.control_witnesses(control, proc, prosrc_sha, minted_in_migration)
+       values ($1, $2, $3, $4)`,
+      [row.control, row.proc, row.prosrc_sha, row.minted_in_migration]);
+  }
+  const back = (await rootQuery(
+    "select count(*)::int c from clara.control_witnesses where control = $1", [POST_TIME_MARKER])).rows[0].c;
+  if (back !== saved.length) {
+    throw new Error(
+      `withWitnessReplaced: RESTORE FAILED (${back} row(s) back, expected ${saved.length}) — every later `
+      + "signing cell in this suite is now untrustworthy."
+      + (probeError ? ` The probe had also failed: ${probeError.message}` : ""));
+  }
+  if (probeError) throw probeError;
+  return out;
+}
 
 /** Does the approve path carry the ratified post-time binding re-check? (Catalog + body marker,
  *  never a migration-name proxy — review law 3: a name is a projection of the thing.) */
@@ -101,6 +165,22 @@ export async function restoreApproveCore(def, expectedSha) {
   }
 }
 
+/** A byte-real, behaviour-NEUTRAL edit to the approve path (裁-18b PR-3 succession). It moves
+ *  prosrc — so a witness minted against the previous bytes goes stale and its gate closes —
+ *  without changing one thing the body does. This is how a post-succession cell drills
+ *  "the control is not the reviewed body" now that ABSENCE is no longer reachable: the migration
+ *  minted the witness, so the only way to a closed gate is DRIFT, which is the state a later
+ *  lane creates by recutting a witnessed control and forgetting to re-witness it. */
+export const driftApproveCore = (def) => {
+  const needle = "\ndeclare";
+  if (!def.includes(needle)) {
+    throw new Error(
+      "driftApproveCore: '\\ndeclare' is absent from the approve path's definition, so nothing "
+      + "would drift and the cell would prove the opposite of what it claims.");
+  }
+  return def.replace(needle, `${needle}\n  -- rig fixture: byte drift, no behaviour; removed by restoreApproveCore`);
+};
+
 /** The rig's stand-in for PR-3's own recut: plant the marker as REAL CODE. What the gate reads is
  *  the resulting sha, not this text — the text only makes the stub honest to look at. */
 export const plantMarker = (def) => {
@@ -131,6 +211,14 @@ export const plantMarker = (def) => {
  * any probe error is re-thrown.
  */
 export async function withPostTimeControl(fn) {
+  // SUCCESSION ARM (裁-18b PR-3). Once the real control ships there is nothing to plant: the
+  // approve path carries the re-check and the migration minted the witness for those exact
+  // bytes. Planting here would be strictly WORSE than a no-op — the insert collides on the
+  // primary key, and recutting the body would make the door refuse the very calls this helper
+  // exists to let through. So the helper gets out of the way and the caller signs through the
+  // real door with the real control behind it.
+  if (await postTimeControlDeployed()) return fn();
+
   const before = (await rootQuery(
     "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as s from pg_proc p where p.oid = $1::regprocedure",
     [APPROVE_CORE_SIG])).rows[0].s;

@@ -116,17 +116,32 @@ test("x35.a section B: counterparty-landscape-changed refusal carries the new re
   //
   // TWO PROPERTIES OF THE WORDING ARE DELIBERATE, and both were review findings:
   //   * IT PROMISES NOTHING UNCONDITIONAL. The same call can still return refused_attempts,
-  //     lane_changed, skipped_direction or refused_budget, and 0053 additionally gates
+  //     lane_changed, skipped_direction or refused_concurrency, and 0053 additionally gates
   //     re-admission on a HUMAN origin -- so the message says a bookkeeper "can ask", and
   //     names the gates, rather than claiming the filing "re-admits".
+  //   * IT NAMES ONLY GATES THAT EXIST (裁-18b PR-3, folding PROGRESS Known-issues 3d). The word
+  //     was "budget" until F-A9 PR-1B (0151) removed the token-budget gate whole and moved gate
+  //     6's reason strings to `refused_concurrency`. Measured rather than assumed: the live
+  //     COMMENT-STRIPPED body of clara.admit_autodraft_task emits exactly
+  //     {admitted, already_done, lane_changed, refused_attempts, refused_concurrency,
+  //     skipped_direction} -- `refused_budget` and `refused_sales_cap` survive in COMMENTS only,
+  //     which is precisely why a grep of the raw prosrc would have said the gate was still there.
+  //     A remedy that sends a human to look for a gate that no longer exists is a promise, not
+  //     an instruction. The other three names are live too: lane_changed / refused_attempts
+  //     above, and `consent` is clara._coding_lane_core's own gate (the only body in the schema
+  //     carrying that word).
   //   * IT PRESUPPOSES NO FILING. This refusal fires for ANY entry carrying a proposed
   //     counterparty, including chat and adjustment drafts where filing_id IS NULL and a
   //     phrase like "the withdrawn filing" would name nothing.
   // Asserted by EXACT equality (not .includes()) for the O-round reason recorded above.
   assert.equal(
     caught.message,
-    "counterparty match landscape changed; withdraw the draft and re-draft (after withdrawing, a bookkeeper can ask the autodraft door to try again; it may still refuse on the usual lane, consent, budget or attempt gates, or you can re-draft through the chat or hand-draft lanes); the new draft will resolve against the current counterparty landscape",
+    "counterparty match landscape changed; withdraw the draft and re-draft (after withdrawing, a bookkeeper can ask the autodraft door to try again; it may still refuse on the usual lane, consent, concurrency or attempt gates, or you can re-draft through the chat or hand-draft lanes); the new draft will resolve against the current counterparty landscape",
     `refusal message must be exactly the new remedy text -- got: ${caught.message}`,
+  );
+  assert.ok(
+    !/budget/.test(caught.message),
+    "the remedy must never name the token-budget gate F-A9 PR-1B removed",
   );
   assert.ok(
     !/re-admits through the autodraft door|the withdrawn filing/.test(caught.message),

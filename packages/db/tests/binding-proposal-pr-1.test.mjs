@@ -29,7 +29,8 @@ import { buildWorld } from "./x1-helpers.mjs";
 import {
   has28, has29, seedPayableAccount, propose, sign, revoke,
   signLive, withPostTimeControl, postTimeControlLive, POST_TIME_MARKER,
-  recutApproveCore, restoreApproveCore, seedClientHardIdentifier
+  recutApproveCore, restoreApproveCore, seedClientHardIdentifier,
+  postTimeControlDeployed, withWitnessReplaced, driftApproveCore, APPROVE_CORE_SIG,
 } from "./x36-vendor-binding-helpers.mjs";
 import { insertUser, addMember, createClient, upsertAccount, COA } from "./rig-fixtures.mjs";
 import {
@@ -2114,24 +2115,52 @@ test("bp1.S-postcontrol C3 — the gate refuses when the approve-path control is
   // BOTH HALVES MEASURED, positively: the ledger row is present, AND the approve path carries no
   // marker. The pair is the defect; neither half alone is evidence of it.
   assert.equal(await has29(), true, "control: the 0029 LEDGER row is present (and always will be)");
-  assert.equal(await postTimeControlLive(), false,
-    "control: the approve path does NOT carry the ratified re-check — PR-3 has not landed");
 
   const { cp, basis } = await eligibleVendor("Spc");
   const p = await proposeAsAgent(await filingActor(), { client: w.clients.A1, counterparty: cp.id, basis });
-  const err = await assertRaises("CLR36",
-    () => sign(w.users.alice, { binding: p.binding_id }), "signing with no post-time control deployed");
-  assert.equal(reasonOf(err), "post_time_control_absent");
-  assert.equal((await bindingRow(p.binding_id)).status, "proposed", "nothing went live");
+
+  // SUCCESSION (裁-18b PR-3, .claude/rules/db-tests.md). Post-PR-3 the control is REAL and the
+  // migration minted its witness, so "the control is absent" is no longer a state this estate
+  // can be in — and a cell that kept asserting it would be asserting the frontier, not the wall.
+  // The same wall is drilled the only way that remains available, which is also the way a later
+  // lane will actually break it: DRIFT the witnessed body (recut it without re-witnessing) and
+  // the gate closes. Both arms end with the SAME positive control on the same binding.
+  if (await postTimeControlDeployed()) {
+    assert.equal(await postTimeControlLive(), true,
+      "control: with PR-3 deployed the identity gate reads OPEN before anything is disturbed");
+    const baseSha = (await rootQuery(
+      "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as s from pg_proc p where p.oid = $1::regprocedure",
+      [APPROVE_CORE_SIG])).rows[0].s;
+    const { original, sha } = await recutApproveCore(driftApproveCore);
+    assert.notEqual(sha, baseSha, "the drift really moved the body");
+    let err = null;
+    try {
+      err = await assertRaises("CLR36",
+        () => sign(w.users.alice, { binding: p.binding_id }), "signing against a DRIFTED control body");
+    } finally {
+      await restoreApproveCore(original, baseSha);
+    }
+    assert.equal(reasonOf(err), "post_time_control_absent");
+    assert.equal((await bindingRow(p.binding_id)).status, "proposed", "nothing went live");
+    assert.equal(await postTimeControlLive(), true, "…and the gate reads OPEN again after the restore");
+  } else {
+    assert.equal(await postTimeControlLive(), false,
+      "control: the approve path does NOT carry the ratified re-check — PR-3 has not landed");
+    const err = await assertRaises("CLR36",
+      () => sign(w.users.alice, { binding: p.binding_id }), "signing with no post-time control deployed");
+    assert.equal(reasonOf(err), "post_time_control_absent");
+    assert.equal((await bindingRow(p.binding_id)).status, "proposed", "nothing went live");
+  }
 
   // A POSITIVE CONTROL ON THE INSTRUMENT. Without it this cell could be passing because the door
-  // refuses everything. Plant PR-3's ratified marker on the live approve path, sign the SAME
-  // binding through the SAME door, and the gate opens — then the marker comes off and the body is
-  // verified byte-identical again.
+  // refuses everything. Pre-PR-3 the helper plants PR-3's control and witnesses it; post-PR-3 it
+  // steps aside and the REAL control carries the call. Either way the SAME binding goes live
+  // through the SAME door with every other wall running.
   const signed = await withPostTimeControl(
     () => sign(w.users.alice, { binding: p.binding_id, opKey: opk("spcok") }));
   assert.equal(signed.status, "live", "with the control deployed the very same call succeeds");
-  assert.equal(await postTimeControlLive(), false, "…and the marker is gone again afterwards");
+  assert.equal(await postTimeControlLive(), await postTimeControlDeployed(),
+    "the registry is back exactly as this cell found it — open iff the control genuinely ships");
 });
 
 test("bp1.S-postcontrol-src C3 — the gate reads IDENTITY, never a ledger row and never text", async () => {
@@ -2146,9 +2175,25 @@ test("bp1.S-postcontrol-src C3 — the gate reads IDENTITY, never a ledger row a
     "the signer must not read the 0029 ledger row — that row is permanent and proves nothing");
   assert.ok(src.includes("clara.control_witnesses"), "the signer reads the witness registry");
   assert.ok(src.includes("prosrc_sha"), "…and compares the reviewed body's sha");
-  // The registry SHIPS EMPTY: PR-3 mints the row. That is the closed state this PR intends.
+  // PR-1 SHIPS THE REGISTRY EMPTY and PR-3 mints the row. Both are asserted, because "empty" and
+  // "holds exactly the reviewed body" are two different closed-state claims and each is only
+  // true on its own frontier.
   const n = await rootQuery("select count(*)::int c from clara.control_witnesses");
-  assert.equal(n.rows[0].c, 0, "no control is witnessed yet — the interlock ships closed");
+  if (await postTimeControlDeployed()) {
+    assert.equal(n.rows[0].c, 1, "PR-3 landed: the registry holds exactly one witness");
+    const row = (await rootQuery(
+      `select w.proc, w.minted_in_migration,
+              (encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') = w.prosrc_sha) as matches
+         from clara.control_witnesses w join pg_proc p on p.oid = to_regprocedure(w.proc)
+        where w.control = $1`, [POST_TIME_MARKER])).rows[0];
+    assert.ok(row, "…and it is the post-time control's row, naming a function that resolves");
+    assert.equal(row.proc, APPROVE_CORE_SIG, "…pointed at the approve path by exact signature");
+    assert.equal(row.matches, true, "…and it still matches the live body byte-for-byte (D2)");
+    assert.ok(!/^rig-fixture:/.test(row.minted_in_migration),
+      `…minted by a MIGRATION, not left behind by a fixture (${row.minted_in_migration})`);
+  } else {
+    assert.equal(n.rows[0].c, 0, "no control is witnessed yet — the interlock ships closed");
+  }
 });
 
 test("bp1.C3-identity — TEXT does not open the gate, in any of the three shapes; IDENTITY does", async () => {
@@ -2171,30 +2216,33 @@ test("bp1.C3-identity — TEXT does not open the gate, in any of the three shape
     ["C3-unused-variable", (def) => def.replace("\ndeclare",
       "\ndeclare\n  v_binding_post_time_recheck_v1 boolean := true;")],
   ];
-  for (const [label, edit] of shapes) {
-    const { original, sha } = await recutApproveCore(edit);
-    assert.notEqual(sha, baseSha, `${label}: the recut really changed the body`);
-    const err = await assertRaises("CLR36",
-      () => sign(w.users.alice, { binding: p.binding_id, opKey: opk(label) }),
-      `${label}: the marker text is present and unwitnessed`);
-    assert.equal(reasonOf(err), "post_time_control_absent", `${label}: refused for the control reason`);
-    await restoreApproveCore(original, baseSha);
-  }
+  // SUCCESSION: post-PR-3 the registry already holds the migration's row for this control, so
+  // the three text shapes must be driven with that row TAKEN OUT — otherwise a shape would be
+  // refused because the drifted body no longer matches the real witness, which is a DIFFERENT
+  // wall from the one this panel is about ("text does not open an EMPTY gate"). withWitnessReplaced
+  // with no rows reproduces PR-1's empty-registry state and puts the real row back afterwards.
+  await withWitnessReplaced([], async () => {
+    for (const [label, edit] of shapes) {
+      const { original, sha } = await recutApproveCore(edit);
+      assert.notEqual(sha, baseSha, `${label}: the recut really changed the body`);
+      const err = await assertRaises("CLR36",
+        () => sign(w.users.alice, { binding: p.binding_id, opKey: opk(label) }),
+        `${label}: the marker text is present and unwitnessed`);
+      assert.equal(reasonOf(err), "post_time_control_absent", `${label}: refused for the control reason`);
+      await restoreApproveCore(original, baseSha);
+    }
+  });
 
   // …and a WITNESS whose sha no longer matches the live body refuses too — the case a later lane
   // creates by recutting a witnessed control and forgetting to re-witness it.
-  await rootQuery(
-    `insert into clara.control_witnesses(control, proc, prosrc_sha, minted_in_migration)
-     values ($1, $2, repeat('0', 64), 'rig-fixture:C3-mismatch')`,
-    [POST_TIME_MARKER, "clara._approve_entry_core(jsonb,uuid,uuid,text,text)"]);
-  try {
-    const err = await assertRaises("CLR36",
-      () => sign(w.users.alice, { binding: p.binding_id, opKey: opk("c3mismatch") }),
-      "a witness whose sha does not match the live body");
-    assert.equal(reasonOf(err), "post_time_control_absent");
-  } finally {
-    await rootQuery("delete from clara.control_witnesses where control = $1", [POST_TIME_MARKER]);
-  }
+  await withWitnessReplaced(
+    [{ proc: APPROVE_CORE_SIG, sha: "0".repeat(64), mintedIn: "rig-fixture:C3-mismatch" }],
+    async () => {
+      const err = await assertRaises("CLR36",
+        () => sign(w.users.alice, { binding: p.binding_id, opKey: opk("c3mismatch") }),
+        "a witness whose sha does not match the live body");
+      assert.equal(reasonOf(err), "post_time_control_absent");
+    });
 
   // …and the positive control: recut AND witnessed, the same call opens.
   const signed = await withPostTimeControl(
@@ -2215,24 +2263,24 @@ test("bp1.C3-wrong-proc FOLD-6 — a witness naming ANOTHER live function, with 
   const otherSha = (await rootQuery(
     "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as s from pg_proc p where p.oid = $1::regprocedure",
     [other])).rows[0].s;
-  await rootQuery(
-    `insert into clara.control_witnesses(control, proc, prosrc_sha, minted_in_migration)
-     values ($1, $2, $3, 'rig-fixture:C3-wrong-proc')`, [POST_TIME_MARKER, other, otherSha]);
-  try {
-    // The witness is internally PERFECT — the function exists and the sha is its real one.
-    const consistent = await rootQuery(
-      `select (encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') = w.prosrc_sha) as ok
-         from clara.control_witnesses w join pg_proc p on p.oid = to_regprocedure(w.proc)
-        where w.control = $1`, [POST_TIME_MARKER]);
-    assert.equal(consistent.rows[0].ok, true,
-      "control: the wrong-proc witness is internally consistent — only the door's own pin can refuse it");
-    const err = await assertRaises("CLR36",
-      () => sign(w.users.alice, { binding: p.binding_id, opKey: opk("c3wp") }),
-      "a witness pointing at the wrong function");
-    assert.equal(reasonOf(err), "post_time_control_absent");
-  } finally {
-    await rootQuery("delete from clara.control_witnesses where control = $1", [POST_TIME_MARKER]);
-  }
+  // SUCCESSION: the real row has to come OUT first, and it cannot be re-pointed in place —
+  // t_control_witnesses_identity_frozen refuses an UPDATE that changes `proc`, which is exactly
+  // the guard this cell's attack would otherwise have to defeat. Delete-and-restore, not update.
+  await withWitnessReplaced(
+    [{ proc: other, sha: otherSha, mintedIn: "rig-fixture:C3-wrong-proc" }],
+    async () => {
+      // The witness is internally PERFECT — the function exists and the sha is its real one.
+      const consistent = await rootQuery(
+        `select (encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') = w.prosrc_sha) as ok
+           from clara.control_witnesses w join pg_proc p on p.oid = to_regprocedure(w.proc)
+          where w.control = $1`, [POST_TIME_MARKER]);
+      assert.equal(consistent.rows[0].ok, true,
+        "control: the wrong-proc witness is internally consistent — only the door's own pin can refuse it");
+      const err = await assertRaises("CLR36",
+        () => sign(w.users.alice, { binding: p.binding_id, opKey: opk("c3wp") }),
+        "a witness pointing at the wrong function");
+      assert.equal(reasonOf(err), "post_time_control_absent");
+    });
 });
 
 test("bp1.C3-spoof-under-stale FOLD-6 — the three marker shapes refuse under a STALE witness too", async () => {
@@ -2247,25 +2295,28 @@ test("bp1.C3-spoof-under-stale FOLD-6 — the three marker shapes refuse under a
   const baseSha = (await rootQuery(
     "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as s from pg_proc p where p.oid = $1::regprocedure",
     [sig])).rows[0].s;
-  await rootQuery(
-    `insert into clara.control_witnesses(control, proc, prosrc_sha, minted_in_migration)
-     values ($1, $2, repeat('a', 64), 'rig-fixture:C3-stale')`, [POST_TIME_MARKER, sig]);
-  try {
-    for (const [label, edit] of [
-      ["string-literal", (def) => def.replace("\ndeclare", "\ndeclare\n  v_c3 text := 'binding_post_time_recheck_v1';")],
-      ["dollar-body", (def) => def.replace("\ndeclare", "\ndeclare\n  v_c3 text := $c3$ binding_post_time_recheck_v1 $c3$;")],
-      ["unused-variable", (def) => def.replace("\ndeclare", "\ndeclare\n  v_binding_post_time_recheck_v1 boolean := true;")],
-    ]) {
-      const { original } = await recutApproveCore(edit);
-      const err = await assertRaises("CLR36",
-        () => sign(w.users.alice, { binding: p.binding_id, opKey: opk(`c3su${label.slice(0, 6)}`) }),
-        `${label} under a stale witness`);
-      assert.equal(reasonOf(err), "post_time_control_absent", `${label}: refused for the control reason`);
-      await restoreApproveCore(original, baseSha);
-    }
-  } finally {
-    await rootQuery("delete from clara.control_witnesses where control = $1", [POST_TIME_MARKER]);
-  }
+  // SUCCESSION: same reason as C3-identity — the migration's own row must come out, or these
+  // three shapes would refuse against a DIFFERENT witness than the one this cell means to stage.
+  await withWitnessReplaced(
+    [{ proc: sig, sha: "a".repeat(64), mintedIn: "rig-fixture:C3-stale" }],
+    async () => {
+      for (const [label, edit] of [
+        ["string-literal", (def) => def.replace("\ndeclare", "\ndeclare\n  v_c3 text := 'binding_post_time_recheck_v1';")],
+        ["dollar-body", (def) => def.replace("\ndeclare", "\ndeclare\n  v_c3 text := $c3$ binding_post_time_recheck_v1 $c3$;")],
+        ["unused-variable", (def) => def.replace("\ndeclare", "\ndeclare\n  v_binding_post_time_recheck_v1 boolean := true;")],
+      ]) {
+        const { original } = await recutApproveCore(edit);
+        let err = null;
+        try {
+          err = await assertRaises("CLR36",
+            () => sign(w.users.alice, { binding: p.binding_id, opKey: opk(`c3su${label.slice(0, 6)}`) }),
+            `${label} under a stale witness`);
+        } finally {
+          await restoreApproveCore(original, baseSha);
+        }
+        assert.equal(reasonOf(err), "post_time_control_absent", `${label}: refused for the control reason`);
+      }
+    });
 });
 
 test("bp1.A3g FOLD-7 — a client with NO recorded hard identifier cannot bind at all", async () => {

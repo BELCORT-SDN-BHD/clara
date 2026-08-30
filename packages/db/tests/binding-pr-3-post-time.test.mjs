@@ -1,0 +1,710 @@
+// 裁-18b PR-3 — the POST-TIME binding re-check inside clara._approve_entry_core, the control
+// witness it mints, and 裁-46's clara.reset_binding_revocation door.
+//
+// Design of record: docs/plan/active/binding-proposal-design.md (裁-25 header block, G6
+// OVERRULED). Gate record: binding-proposal-gate-record.md G6. PR-0 gate:
+// binding-proposal-pr0-gate-2026-08-29.md — B8 (the contract and the port source) and O3 (the
+// ruled semantics: REFUSE on revoked, ANNOTATE-and-post on expired, REVERSALS BYPASS).
+// Ruling ledger: mohe-grill-rulings-2026-08-30.md 裁-46.
+//
+// EVERY WALL HAS A MUTANT. A wall with no mutant is a wall nobody has measured: each refusal
+// cell below is paired with a `withMutant` run that removes EXACTLY that arm from the LIVE body
+// and proves the refusal disappears. Without that pairing a cell can be green because the door
+// refuses everything, and green would mean nothing.
+//
+// FAIL, NEVER SKIP. The migration is UNNUMBERED on the branch (the conductor claims its number
+// at merge prep), so readiness is probed by CATALOG — exact-signature to_regprocedure — not by a
+// schema_migrations version string that does not exist yet. Against the pre-migration frontier
+// this battery goes RED, deliberately (.claude/rules/db-tests.md; the estate's fail0017 idiom).
+//
+// Serial discipline: --test-concurrency=1 (shared rig convention).
+
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import {
+  opk, assertRaises, endPool, rootQuery, humanQuery, roleQuery, namedCall, CLR, PG, ROLES,
+} from "./rig-helpers.mjs";
+import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
+import { buildWorld } from "./x1-helpers.mjs";
+import { approveEntry, COA } from "./rig-fixtures.mjs";
+import {
+  seedPayableAccount, seedClientHardIdentifier, seedPassingWindow, seedBareDocument,
+  seedF123Evidence, propose, signLive, revoke, postTimeControlLive, POST_TIME_MARKER,
+  APPROVE_CORE_SIG, recutApproveCore, restoreApproveCore, driftApproveCore, AP_ACCOUNT,
+} from "./x36-vendor-binding-helpers.mjs";
+import {
+  reasonOf, withMutant, withoutConstraint, declineBinding, resetDecline,
+  seedWindow, DATES_OK, mergeAway, seedUniqueFamilyVendor,
+} from "./binding-proposal-pr-1-helpers.mjs";
+
+const RESET_REVOCATION_SIG = "clara.reset_binding_revocation(uuid,text,text)";
+
+let live = false;
+let w = null;
+
+/** READINESS BY CATALOG, never by a migration name: this file is UNNUMBERED on the branch.
+ *  Both halves of what PR-3 ships are probed, because a half-applied database is its own
+ *  failure and must not read as either clean state. */
+async function pr3Live() {
+  try {
+    const r = await rootQuery(
+      `select to_regprocedure($1) as door,
+              (select count(*)::int from clara.control_witnesses where control = $2) as witness`,
+      [RESET_REVOCATION_SIG, POST_TIME_MARKER]);
+    const row = r.rows[0] ?? {};
+    return Boolean(row.door) && row.witness === 1;
+  } catch { return false; }
+}
+
+function failPr3() {
+  if (!live) {
+    throw new Error(
+      "裁-18b PR-3 NOT applied (clara.reset_binding_revocation does not resolve at its exact "
+      + "signature, or the binding_post_time_recheck_v1 witness is not minted) — this battery is "
+      + "REQUIRED to fail against the pre-migration frontier rather than skip "
+      + "(.claude/rules/db-tests.md).");
+  }
+}
+
+before(async () => {
+  live = await pr3Live();
+  if (!live) return;
+  w = await buildWorld();
+  await seedPayableAccount(w.firms.A, w.clients.A1);
+  await seedClientHardIdentifier(w.firms.A, w.clients.A1);
+  // A2 is prepared too: bpr3.C8 needs a GENUINE live binding on a second client, and FOLD-7's
+  // own-client wall refuses any client with no recorded hard identifier.
+  await seedPayableAccount(w.firms.A, w.clients.A2);
+  await seedClientHardIdentifier(w.firms.A, w.clients.A2);
+});
+after(async () => { printLaneNotes("binding-pr-3-post-time"); await endPool(); });
+
+const bindingRow = async (id) =>
+  (await rootQuery("select * from clara.vendor_identity_bindings where id=$1", [id])).rows[0];
+const postResolution = async (entry) => (await rootQuery(
+  "select * from clara.vendor_binding_resolutions where entry_id=$1 and phase='post' order by created_at desc,id desc limit 1",
+  [entry])).rows[0] ?? null;
+const entryStatus = async (id) =>
+  (await rootQuery("select status from clara.journal_entries where id=$1", [id])).rows[0].status;
+
+/** A LIVE binding over a fully-qualifying window, signed through the REAL audited door. */
+async function liveBinding(tag) {
+  const cp = await seedPassingWindow(w, tag);
+  const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  const signed = await signLive(w.users.alice, { binding: proposed.binding_id });
+  assert.equal(signed.status, "live", `${tag}: the fixture binding must be LIVE`);
+  return { cp, binding: signed };
+}
+
+/**
+ * A DRAFT entry carrying `binding`'s marker, over a document whose CURRENT facts genuinely
+ * satisfy every rung of the restored control — so the only thing any cell below changes is the
+ * ONE fact it is about. Built by direct insert (the draft lane's own admission gates are not
+ * this battery's subject), but APPROVED through the real clara.approve_entry door: the wall
+ * under test lives inside clara._approve_entry_core and reaching it any other way would prove
+ * nothing about the door.
+ *
+ * The document deliberately prints NO invoice.vendor_registration: that is the A.1-clean shape
+ * the ported control's receipt half admits (0046:1529), and it keeps the page-resolution rung
+ * on its ordinary path — the name resolves to the bound counterparty, so v_pt_page_same holds.
+ */
+async function boundDraft({ cp, binding }, tag, { reversalOf = null } = {}) {
+  const doc = await seedBareDocument(w.firms.A, `bpr3-${tag}`);
+  // The printed invoice id must EXTEND the binding's stored F2 prefix (0030: F1/F2 are prefix
+  // relations, never equalities) and be unique, so the duplicate-bill wall never fires instead.
+  const invoiceId = `${binding.f2_invoice_prefix.toUpperCase()}${Date.now().toString(36).toUpperCase()}`;
+  await seedF123Evidence(w.firms.A, doc.id, cp, invoiceId, cp.name);
+  const maker = (await rootQuery(
+    "select user_id from clara.firm_memberships where firm_id=$1 and status='active' limit 1",
+    [w.firms.A])).rows[0].user_id;
+  const resolution = (await rootQuery(
+    `insert into clara.client_resolutions(firm_id,client_id,subject_kind,subject_id,confidence,method,evidence,resolved_by)
+     values($1,$2,'document',$3,1.0,'human','{}'::jsonb,$4) returning id`,
+    [w.firms.A, w.clients.A1, doc.id, maker])).rows[0].id;
+  const filing = (await rootQuery(
+    `insert into clara.document_filings(firm_id,document_id,client_id,filed_by,basis,resolution_id)
+     values($1,$2,$3,$4,'seed-0007',$5) returning id`,
+    [w.firms.A, doc.id, w.clients.A1, maker, resolution])).rows[0].id;
+  const entry = (await rootQuery(
+    `with e as (
+       insert into clara.journal_entries(firm_id,client_id,status,posting_date,origin,document_id,
+           filing_id,source_doc_sha256,maker_actor,coding_kind,vendor_binding_id,reversal_of)
+       values($1,$2,'draft',current_date,'manual',$3,$4,$5,$6,'supplier_bill',$7,$8)
+       returning id,revision_token
+     ), l as (
+       insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents,description,counterparty_id)
+       select e.id,1,$9,100000,0,'bill',$10::uuid from e
+       union all
+       select e.id,2,$11,0,100000,'payable',$10::uuid from e
+     )
+     select id, revision_token from e`,
+    [w.firms.A, w.clients.A1, doc.id, filing, doc.sha, maker, binding.binding_id, reversalOf,
+      COA.expense, cp.id, AP_ACCOUNT])).rows[0];
+  // THE DRAFT-PHASE RESOLUTION the control compares against. Without it the ladder's own
+  // draft-resolution rung refuses `binding_changed` and every cell below would pass for the
+  // wrong reason.
+  await rootQuery(
+    `insert into clara.vendor_binding_resolutions(
+       binding_id,firm_id,client_id,document_id,entry_id,phase,
+       facts_extraction_id,ocr_extraction_id,entry_revision_token,raw_proposal,outcome)
+     values($1,$2,$3,$4,$5,'draft',
+       (select id from clara.document_extractions where document_id=$4 and engine_kind='invoice_facts'
+         and status='done' order by version_n desc,id desc limit 1),
+       (select id from clara.document_extractions where document_id=$4 and engine_kind='ocr'
+         and status='done' order by version_n desc,id desc limit 1),
+       $6,'{}'::jsonb,'bound')`,
+    [binding.binding_id, w.firms.A, w.clients.A1, doc.id, entry.id, entry.revision_token]);
+  // RE-READ THE TOKEN LAST. clara._tf_entry_revision bumps it on every write to the row, so the
+  // value the INSERT returned is already stale by the time the fixture finishes — approve_entry
+  // would then refuse CLR06 and the cell would be measuring the revision gate, not this control.
+  return { doc, entry: entry.id, revision: await currentRev(entry.id), invoiceId };
+}
+
+/**
+ * A REVERSAL draft of `orig`, still carrying the binding marker.
+ *
+ * Built the way clara.reverse_entry builds one — mirror lines (debits and credits swapped),
+ * origin='reversal', reversal_of set, coding_kind NULL — plus the two things reverse_entry does
+ * NOT carry and this cell needs: the document and the binding marker. Without the document the
+ * control could not reach its binding arms at all, and the mutant below would refuse for the
+ * wrong reason (binding_changed rather than binding_revoked), which is a mutant that proves the
+ * cell can be red rather than that this wall is the one holding it up.
+ */
+async function boundReversal(orig, binding, tag) {
+  const src = (await rootQuery(
+    "select firm_id,client_id,document_id,filing_id,source_doc_sha256,maker_actor from clara.journal_entries where id=$1",
+    [orig.entry])).rows[0];
+  const entry = (await rootQuery(
+    `with e as (
+       insert into clara.journal_entries(firm_id,client_id,status,posting_date,origin,document_id,
+           filing_id,source_doc_sha256,maker_actor,vendor_binding_id,reversal_of,memo)
+       values($1,$2,'draft',current_date,'reversal',$3,$4,$5,$6,$7,$8,$9)
+       returning id,revision_token
+     ), l as (
+       insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents,description,counterparty_id)
+       select e.id,o.line_no,o.account_code,o.credit_cents,o.debit_cents,o.description,o.counterparty_id
+         from e cross join clara.journal_lines o where o.entry_id=$8 order by o.line_no
+     )
+     select id, revision_token from e`,
+    [src.firm_id, src.client_id, src.document_id, src.filing_id, src.source_doc_sha256,
+      src.maker_actor, binding.binding_id, orig.entry, `Reversal: ${tag}`])).rows[0];
+  await rootQuery(
+    `insert into clara.vendor_binding_resolutions(
+       binding_id,firm_id,client_id,document_id,entry_id,phase,
+       facts_extraction_id,ocr_extraction_id,entry_revision_token,raw_proposal,outcome)
+     values($1,$2,$3,$4,$5,'draft',
+       (select id from clara.document_extractions where document_id=$4 and engine_kind='invoice_facts'
+         and status='done' order by version_n desc,id desc limit 1),
+       (select id from clara.document_extractions where document_id=$4 and engine_kind='ocr'
+         and status='done' order by version_n desc,id desc limit 1),
+       $6,'{}'::jsonb,'bound')`,
+    [binding.binding_id, src.firm_id, src.client_id, src.document_id, entry.id, entry.revision_token]);
+  return { entry: entry.id, revision: await currentRev(entry.id) };
+}
+
+const currentRev = async (id) => (await rootQuery(
+  "select revision_token from clara.journal_entries where id=$1", [id])).rows[0].revision_token;
+
+/**
+ * Expire a LIVE binding the way the estate actually expires one.
+ *
+ * NOT by moving `expires_at`: clara._tf_vendor_identity_binding_update FREEZES that column once
+ * `signed_at` is set (measured, not assumed — a direct update raises CLR36 'vendor binding
+ * content is frozen'), which is the right behaviour and this fixture does not weaken it. The
+ * reachable form of expiry on a signed row is the STATUS write, and it has a real producer:
+ * every `status='expired'` write in 0028 filters `status='live'`, so a proposal door expiring a
+ * stale live binding puts a row in exactly this state. The control's arm is one condition
+ * (`status='expired' OR expires_at<=now()`), so drilling the reachable disjunct drills the arm —
+ * and the other disjunct is unreachable on a signed row BY DESIGN, which is recorded here rather
+ * than papered over with a fixture that tears a trigger off to reach it.
+ */
+const expireBinding = async (id) => rootQuery(
+  "update clara.vendor_identity_bindings set status='expired' where id=$1 and status='live'", [id])
+  .then((r) => assert.equal(r.rowCount, 1, "the fixture must have expired exactly one LIVE binding"));
+
+const approve = async (d, tag) => approveEntry(w.users.alice,
+  { entry: d.entry, expectedRevision: await currentRev(d.entry), attestation: "rig post-time probe", opKey: opk(tag) });
+
+// ===========================================================================
+// READINESS + THE WITNESS
+// ===========================================================================
+
+test("bpr3.R0 — the control ships as REAL CODE and the witness attests to THOSE bytes", async () => {
+  failPr3();
+  // D2 (packages/db/README.md): the witness must be the LIVE body, byte for byte, or the door it
+  // gates has quietly stopped working. Asked the way the door asks it — resolve the expected
+  // identity to an OID first, then compare the sha — so this cell and the door can never disagree.
+  const r = await rootQuery(
+    `select w.proc, w.minted_in_migration,
+            (encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') = w.prosrc_sha) as matches
+       from clara.control_witnesses w join pg_proc p on p.oid = to_regprocedure(w.proc)
+      where w.control = $1`, [POST_TIME_MARKER]);
+  assert.equal(r.rowCount, 1, "exactly one witness row for the post-time control");
+  assert.equal(r.rows[0].proc, APPROVE_CORE_SIG, "…naming the approve path by EXACT signature");
+  assert.equal(r.rows[0].matches, true, "…and matching the live body byte-for-byte");
+  assert.ok(!/^rig-fixture:/.test(r.rows[0].minted_in_migration),
+    `…minted by the MIGRATION, not left behind by a fixture (${r.rows[0].minted_in_migration})`);
+  // …and the control is real code, not a marker: the ruled O3 gate is IN the body.
+  const src = (await rootQuery(
+    `select regexp_replace(regexp_replace(p.prosrc,'/\\*.*?\\*/','','gs'),'--[^\\n]*','','g') as s
+       from pg_proc p where p.oid = $1::regprocedure`, [APPROVE_CORE_SIG])).rows[0].s;
+  assert.ok(src.includes("if e.vendor_binding_id is not null and e.reversal_of is null then"),
+    "the ruled gate (bound AND not a reversal) is in the comment-stripped body");
+  assert.ok(src.includes("clara._binding_lock_pair"), "…and the block takes the pair key");
+  // The breeding block 0106 §E excised must NOT have come back with this splice (B8's `[N]`).
+  for (const gone of ["insert into clara.rule_sightings", "bank_rule_suggested", "uq_rule_sightings_mapping"]) {
+    assert.ok(!src.includes(gone), `the splice did not restore an earlier generation: "${gone}"`);
+  }
+});
+
+test("bpr3.R1 — the signer's gate is OPEN after PR-3, and CLOSES again the moment the body drifts", async () => {
+  failPr3();
+  // The half PR-1 could only prove as a refusal. A migration that recuts a witnessed body and
+  // forgets to re-witness it closes the control's gate — deliberately, because a control whose
+  // body changed without review is a control nobody has reviewed. Drilled here as the state
+  // that actually produces it, since ABSENCE is no longer reachable on this frontier.
+  assert.equal(await postTimeControlLive(), true, "the gate reads OPEN on the reviewed bytes");
+  const { cp } = await liveBinding("R1");
+  const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id })
+    .then(() => { throw new Error("unreachable"); })
+    .catch((e) => e);
+  assert.equal(proposed.code, "CLR36", "control: a second proposal on a LIVE pair is refused");
+
+  const cp2 = await seedPassingWindow(w, "R1b");
+  const p2 = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp2.id });
+  const baseSha = (await rootQuery(
+    "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as s from pg_proc p where p.oid = $1::regprocedure",
+    [APPROVE_CORE_SIG])).rows[0].s;
+  const { original, sha } = await recutApproveCore(driftApproveCore);
+  assert.notEqual(sha, baseSha, "the drift really moved the body");
+  let err = null;
+  try {
+    err = await assertRaises("CLR36",
+      () => humanQuery(w.users.alice,
+        namedCall("sign_vendor_identity_binding", [{ name: "p_binding" }, { name: "p_op_key" }]),
+        [p2.binding_id, opk("r1drift")]),
+      "signing while the witnessed body has drifted");
+  } finally {
+    await restoreApproveCore(original, baseSha);
+  }
+  assert.equal(reasonOf(err), "post_time_control_absent");
+  assert.equal((await bindingRow(p2.binding_id)).status, "proposed", "nothing went live");
+  assert.equal(await postTimeControlLive(), true, "…and the gate is OPEN again after the restore");
+});
+
+// ===========================================================================
+// THE CONTROL — the clean path, then one cell per ruled arm, each with its mutant
+// ===========================================================================
+
+test("bpr3.C1 — a still-valid binding approves UNCHANGED, and records phase='post' outcome='bound'", async () => {
+  failPr3();
+  // The control on every refusal cell below. If a valid binding could not post, every refusal
+  // here would be indistinguishable from a door that refuses everything.
+  const b = await liveBinding("C1");
+  const d = await boundDraft(b, "C1");
+  const r = await approve(d, "bpr3c1");
+  assert.equal(r.status, "approved", `a valid binding must still post: ${JSON.stringify(r)}`);
+  assert.equal(await entryStatus(d.entry), "approved");
+  const res = await postResolution(d.entry);
+  assert.ok(res, "the control persisted its phase='post' resolution — the record 0118 killed");
+  assert.equal(res.outcome, "bound");
+  assert.equal(res.refusal_reason, null);
+  assert.equal(res.binding_id, b.binding.binding_id);
+  assert.ok(res.compared_to_resolution_id, "…joined to the DRAFT resolution it was compared against");
+  assert.equal(res.entry_revision_token, d.revision, "…pinned to the revision that was approved");
+  // ANNOTATION-FREE: the clean path adds nothing to the caller's return.
+  assert.equal(r.binding_post_check, undefined, "a clean re-check annotates nothing");
+});
+
+test("bpr3.C2 — an UNBOUND entry never enters the control at all (and its mutant proves the gate)", async () => {
+  failPr3();
+  // O3's gate: fourteen call sites reach this body and most carry no binding. An ungated check
+  // would fire in every one of them.
+  const b = await liveBinding("C2");
+  const d = await boundDraft(b, "C2");
+  await rootQuery("update clara.journal_entries set vendor_binding_id=null where id=$1", [d.entry]);
+  const rev = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [d.entry])).rows[0].revision_token;
+  const r = await approveEntry(w.users.alice,
+    { entry: d.entry, expectedRevision: rev, attestation: "rig", opKey: opk("bpr3c2") });
+  assert.equal(r.status, "approved", "an unbound entry posts without touching the binding machinery");
+  assert.equal(await postResolution(d.entry), null, "…and writes no post-time resolution");
+
+  // THE MUTANT: drop the `vendor_binding_id is not null` half of the gate, and the SAME unbound
+  // entry is dragged into a control that has no authority row to judge.
+  const b2 = await liveBinding("C2m");
+  const d2 = await boundDraft(b2, "C2m");
+  await rootQuery("update clara.journal_entries set vendor_binding_id=null where id=$1", [d2.entry]);
+  const rev2 = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [d2.entry])).rows[0].revision_token;
+  await withMutant(APPROVE_CORE_SIG,
+    [["if e.vendor_binding_id is not null and e.reversal_of is null then",
+      "if e.reversal_of is null then"]],
+    async () => {
+      const err = await assertRaises("CLR36", () => approveEntry(w.users.alice,
+        { entry: d2.entry, expectedRevision: rev2, attestation: "rig", opKey: opk("bpr3c2m") }),
+      "an unbound entry with the gate's first half removed");
+      assert.equal(reasonOf(err), "binding_changed");
+    });
+});
+
+test("bpr3.C3 — a REVOKED binding REFUSES at approve (O3), and its mutant posts instead", async () => {
+  failPr3();
+  // THE EXPOSURE G6 NAMED: an entry drafted under a live binding and approved after the binding
+  // is revoked was posted with the binding's identity attribution and no re-check. Not a wrong
+  // number — the accounts, amounts and direction were always judged under the other walls — a
+  // stale IDENTITY AUTHORITY. Ruled: refuse. A human took the authority away.
+  const b = await liveBinding("C3");
+  const d = await boundDraft(b, "C3");
+  await revoke(w.users.bob, { binding: b.binding.binding_id, reason: "wrong vendor after all" });
+  const err = await assertRaises("CLR36", () => approve(d, "bpr3c3"),
+    "approving an entry bound to a since-REVOKED binding");
+  assert.equal(reasonOf(err), "binding_revoked");
+  assert.equal(await entryStatus(d.entry), "draft", "the entry stays a DRAFT — the raise unwound it");
+  assert.equal(await postResolution(d.entry), null,
+    "a REFUSED post-time check leaves no resolution row: the raise rolls the insert back with it, "
+    + "and the durable evidence of the refusal is the still-draft entry plus the typed reason");
+
+  // THE MUTANT: move `revoked` into the ANNOTATE set and the same call POSTS.
+  const b2 = await liveBinding("C3m");
+  const d2 = await boundDraft(b2, "C3m");
+  await revoke(w.users.bob, { binding: b2.binding.binding_id, reason: "mutant probe" });
+  await withMutant(APPROVE_CORE_SIG,
+    [["v_pt_annotate:=(v_pt_reason='binding_expired');",
+      "v_pt_annotate:=(v_pt_reason in ('binding_expired','binding_revoked'));"]],
+    async () => {
+      const r = await approve(d2, "bpr3c3m");
+      assert.equal(r.status, "approved",
+        "with revoked moved to the annotate arm the refusal disappears — the wall is this arm and nothing else");
+    });
+});
+
+test("bpr3.C4 — an EXPIRED binding POSTS and is ANNOTATED (O3), and its mutant refuses instead", async () => {
+  failPr3();
+  // O3, in the owner's words: expiry is a CLOCK, revocation is an ACT. An entry drafted three
+  // days before expiry and approved two days after should not be stranded over a date. It posts,
+  // the divergence is recorded, and the annotation reaches the caller rather than living only in
+  // a table nobody reads.
+  const b = await liveBinding("C4");
+  const d = await boundDraft(b, "C4");
+  await expireBinding(b.binding.binding_id);
+  const r = await approve(d, "bpr3c4");
+  assert.equal(r.status, "approved", `an expired binding must not strand the entry: ${JSON.stringify(r)}`);
+  assert.ok(r.binding_post_check, "the caller is told, on the return");
+  assert.equal(r.binding_post_check.code, "binding_expired_at_post");
+  assert.equal(r.binding_post_check.binding_id, b.binding.binding_id);
+  assert.equal(r.binding_post_check.resolution_recorded, true);
+  const res = await postResolution(d.entry);
+  assert.ok(res, "…the divergence is RECORDED, not merely narrated");
+  assert.equal(res.outcome, "divergence");
+  assert.equal(res.refusal_reason, "binding_expired");
+  // …and the audit row carries it too, under its own key beside (never inside) the pre-existing
+  // no-counterparty warning slot.
+  const audit = (await rootQuery(
+    "select args from clara.audit_log where fn='approve_entry' and entry_id=$1 order by at desc limit 1",
+    [d.entry])).rows[0];
+  assert.ok(audit, "the approval left an audit row");
+  assert.equal(audit.args.binding_post_check?.code, "binding_expired_at_post");
+
+  // THE MUTANT: empty the annotate set and the same call REFUSES.
+  const b2 = await liveBinding("C4m");
+  const d2 = await boundDraft(b2, "C4m");
+  await expireBinding(b2.binding.binding_id);
+  await withMutant(APPROVE_CORE_SIG,
+    [["v_pt_annotate:=(v_pt_reason='binding_expired');", "v_pt_annotate:=false;"]],
+    async () => {
+      const err = await assertRaises("CLR36", () => approve(d2, "bpr3c4m"),
+        "an expired binding with the annotate arm removed");
+      assert.equal(reasonOf(err), "binding_expired");
+    });
+});
+
+test("bpr3.C5 — an IDENTITY DRIFT between draft and approve REFUSES, and its mutant posts", async () => {
+  failPr3();
+  // The registration the binding was signed against is the identity it authorises. If the
+  // counterparty's registration moves after the card was signed, the authority names a company
+  // that is no longer the one in front of us.
+  // THE DRIFT VECTOR IS A MERGE, not a registration rewrite. clara._tf_counterparty_update_0011
+  // allows exactly {name, name_normalized, payment_terms_days} on a live row and exactly
+  // {merged_into, retired_at} on a merge — a direct registration_normalized change raises
+  // 'illegal counterparty mutation' (measured, and correctly so), and a lone retired_at is
+  // refused for the same reason. Tearing that trigger off to reach the state would be weakening
+  // one mechanism to test another. A merge is a REAL product transition and lands on the SAME
+  // ladder arm, whose disjuncts — counterparty gone, merged, retired, or registration moved —
+  // are one condition.
+  const b = await liveBinding("C5");
+  const d = await boundDraft(b, "C5");
+  await mergeAway(b.cp.id, (await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "C5win")).id);
+  const err = await assertRaises("CLR36", () => approve(d, "bpr3c5"),
+    "approving after the bound counterparty was merged away");
+  assert.equal(reasonOf(err), "binding_identity_drifted");
+  assert.equal(await entryStatus(d.entry), "draft");
+
+  const b2 = await liveBinding("C5m");
+  const d2 = await boundDraft(b2, "C5m");
+  await mergeAway(b2.cp.id, (await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "C5mwin")).id);
+  await withMutant(APPROVE_CORE_SIG,
+    [["      v_pt_reason:='binding_identity_drifted';", "      v_pt_reason:=v_pt_reason;"]],
+    async () => {
+      const r = await approve(d2, "bpr3c5m");
+      assert.equal(r.status, "approved",
+        "with the drift arm neutralised the refusal disappears — the wall is that arm");
+    });
+});
+
+test("bpr3.C6 — a pair a human DECLINED is suppressed at post time too, and its mutant posts", async () => {
+  failPr3();
+  // Defence in depth, and it is labelled as such rather than sold as the primary wall: PR-1's
+  // signer already refuses a suppressed pair, so a LIVE binding on a declined pair should be
+  // unreachable. The fail-closed direction on a wall a human deliberately raised is to leave it
+  // standing anyway — so the fixture manufactures the state directly and the door still refuses.
+  const b = await liveBinding("C6");
+  const d = await boundDraft(b, "C6");
+  // A second, DECLINED row for the same pair. Inserted directly: no door can produce this while
+  // uq_vib_one_active_binding stands, which is exactly why the rung is depth and not the wall.
+  await rootQuery(
+    `insert into clara.vendor_identity_bindings(
+       firm_id,client_id,counterparty_id,status,f1_vendor_name_norm,f2_invoice_prefix,
+       registration_at_signing,content_hash,created_by,declined_by,declined_at,decline_reason,expires_at)
+     select firm_id,client_id,counterparty_id,'declined',f1_vendor_name_norm,f2_invoice_prefix,
+       registration_at_signing,$2,created_by,$3,now(),'rig decline',expires_at
+       from clara.vendor_identity_bindings where id=$1`,
+    [b.binding.binding_id, randomUUID().replace(/-/g, "").padEnd(64, "0").slice(0, 64), w.users.alice]);
+  assert.equal((await rootQuery("select clara._binding_suppression($1,$2,$3) as s",
+    [w.firms.A, w.clients.A1, b.cp.id])).rows[0].s, "declined",
+  "control: the pair really does read as suppressed before the approve");
+  const err = await assertRaises("CLR36", () => approve(d, "bpr3c6"),
+    "approving on a pair a human declined");
+  assert.equal(reasonOf(err), "binding_suppressed");
+
+  await withMutant(APPROVE_CORE_SIG,
+    [["v_pt_suppression:=clara._binding_suppression(e.firm_id,e.client_id,v_pt_b.counterparty_id);",
+      "v_pt_suppression:=null;"]],
+    async () => {
+      const r = await approve(d, "bpr3c6m");
+      assert.equal(r.status, "approved",
+        "with the suppression read stubbed out the refusal disappears");
+    });
+});
+
+test("bpr3.C7 — a REVERSAL of an entry posted under a since-revoked binding BYPASSES entirely", async () => {
+  failPr3();
+  // O3, and it is NOT optional under any arm: an entry posted under a since-revoked binding is
+  // exactly the entry a human needs to reverse. A check that refused it would block its own
+  // remedy — the entry would be stuck posted, under an authority nobody wants, with no way out.
+  const b = await liveBinding("C7");
+  const d = await boundDraft(b, "C7");
+  assert.equal((await approve(d, "bpr3c7a")).status, "approved", "the original posts while the binding is live");
+  await revoke(w.users.bob, { binding: b.binding.binding_id, reason: "revoked after posting" });
+
+  // A reversal carrying the SAME binding marker, so the ONLY difference from the C3 shape —
+  // which refuses — is that this one is a reversal.
+  const rev = await boundReversal(d, b.binding, "C7rev");
+  const r = await approve(rev, "bpr3c7b");
+  assert.equal(r.status, "approved",
+    `the reversal must post even though the binding is revoked: ${JSON.stringify(r)}`);
+  assert.equal(await postResolution(rev.entry), null, "…and the control never ran for it");
+
+  // THE MUTANT: remove the bypass and the remedy is blocked by the very control meant to protect
+  // the books from the thing it is remedying.
+  const b2 = await liveBinding("C7m");
+  const d2 = await boundDraft(b2, "C7m");
+  await approve(d2, "bpr3c7ma");
+  await revoke(w.users.bob, { binding: b2.binding.binding_id, reason: "mutant probe" });
+  const rev2 = await boundReversal(d2, b2.binding, "C7mrev");
+  await withMutant(APPROVE_CORE_SIG,
+    [["if e.vendor_binding_id is not null and e.reversal_of is null then",
+      "if e.vendor_binding_id is not null then"]],
+    async () => {
+      const err = await assertRaises("CLR36", () => approve(rev2, "bpr3c7mb"),
+        "a reversal with the bypass removed");
+      assert.equal(reasonOf(err), "binding_revoked",
+        "without the bypass the remedy is refused by the control it exists to remedy");
+    });
+});
+
+test("bpr3.C8 — a binding belonging to ANOTHER book cannot authorise this entry", async () => {
+  failPr3();
+  // The marker is a bare uuid on the entry with no composite FK behind it, so an authority
+  // belonging to another client would otherwise be honoured verbatim.
+  // TWO WALLS, and the order matters for what this cell is allowed to claim.
+  //
+  // The PRIMARY wall is STRUCTURAL and it is not this PR's: fk_je_vendor_binding is a COMPOSITE
+  // foreign key over (vendor_binding_id, firm_id, client_id), so an entry cannot even be STAMPED
+  // with another book's authority. That is measured first, with a genuine LIVE binding on client
+  // A2 built through the real propose/sign doors — not a rewritten row.
+  //
+  // The body's own arm is therefore a FLOOR BENEATH a wall no path can get past today, and it is
+  // labelled as one rather than sold as the thing holding the line. It is still worth having and
+  // still worth measuring: an FK is one `alter table` away from being dropped by a later lane,
+  // and a floor nobody ever drove is a promise. So the second half drops exactly that FK — the
+  // estate's own withoutConstraint idiom for reaching a branch a constraint hides — and proves
+  // the body refuses on its own.
+  const b = await liveBinding("C8");
+  const d = await boundDraft(b, "C8");
+  const cpB = await seedWindow(w, "C8other", { dates: DATES_OK, client: w.clients.A2 });
+  const pB = await propose(w.users.bob, { client: w.clients.A2, counterparty: cpB.id });
+  const sB = await signLive(w.users.alice, { binding: pB.binding_id });
+  assert.equal(sB.status, "live", "control: the foreign authority really is LIVE");
+
+  await assertRaises(PG.foreignKeyViolation,
+    () => rootQuery("update clara.journal_entries set vendor_binding_id=$2 where id=$1",
+      [d.entry, sB.binding_id]),
+    "stamping another book's authority onto this entry");
+
+  await withoutConstraint({
+    table: "journal_entries",
+    constraint: "fk_je_vendor_binding",
+    ddl: `alter table clara.journal_entries add constraint fk_je_vendor_binding
+            foreign key (vendor_binding_id, firm_id, client_id)
+            references clara.vendor_identity_bindings(id, firm_id, client_id)`,
+  }, async () => {
+    await rootQuery("update clara.journal_entries set vendor_binding_id=$2 where id=$1",
+      [d.entry, sB.binding_id]);
+    const err = await assertRaises("CLR36", () => approve(d, "bpr3c8"),
+      "approving under an authority scoped to another client, with the FK out of the way");
+    assert.equal(reasonOf(err), "binding_changed");
+    assert.equal(await entryStatus(d.entry), "draft");
+    // Put the marker back before the FK returns, or the constraint would refuse to validate.
+    await rootQuery("update clara.journal_entries set vendor_binding_id=$2 where id=$1",
+      [d.entry, b.binding.binding_id]);
+  });
+});
+
+// ===========================================================================
+// 裁-46 — clara.reset_binding_revocation
+// ===========================================================================
+
+const resetRevocation = (sub, { binding, reason = "rig reset", opKey } = {}) =>
+  humanQuery(sub, namedCall("reset_binding_revocation",
+    [{ name: "p_binding" }, { name: "p_reason" }, { name: "p_op_key" }]),
+  [binding, reason, opKey ?? opk("resetrevo")]).then((r) => r.rows[0].result);
+
+async function revokedBinding(tag) {
+  const b = await liveBinding(tag);
+  await revoke(w.users.bob, { binding: b.binding.binding_id, reason: `${tag} revoke` });
+  return b;
+}
+
+test("bpr3.K1 — the door lifts a REVOCATION, receipts every column it cleared, and un-suppresses the pair", async () => {
+  failPr3();
+  const b = await revokedBinding("K1");
+  const before = await bindingRow(b.binding.binding_id);
+  assert.equal(before.status, "revoked");
+  assert.ok(before.revoked_at && before.revoke_reason && before.revoked_by);
+
+  const r = await resetRevocation(w.users.alice,
+    { binding: b.binding.binding_id, reason: "vendor re-confirmed with SSM" });
+  assert.equal(r.status, "expired", "the row lands on the estate's terminal status, not deleted");
+  const after = await bindingRow(b.binding.binding_id);
+  assert.equal(after.status, "expired");
+  assert.equal(after.revoked_at, null, "ck_vib_revoked is an equality — the stamp must clear");
+  assert.equal(after.revoke_reason, null);
+  assert.equal(after.revoked_by, before.revoked_by, "WHO took the authority away stays on the row");
+
+  // THE RECEIPT CARRIES WHAT THE DOOR ERASED. An audit line naming some of what it cleared and
+  // not the rest is a summary, not a receipt — and the reason a human ended an authority is
+  // exactly what a later reader will want back.
+  const audit = (await rootQuery(
+    "select args from clara.audit_log where fn='reset_binding_revocation' order by at desc limit 1")).rows[0];
+  assert.ok(audit, "the door left an audit row");
+  assert.equal(audit.args.binding_id, b.binding.binding_id);
+  assert.equal(audit.args.reason, "vendor re-confirmed with SSM");
+  assert.equal(audit.args.revoke_reason, "K1 revoke", "…including the revocation's own reason");
+  assert.equal(audit.args.revoked_by, before.revoked_by);
+  assert.equal(audit.args.prior_status, "revoked");
+  assert.equal(typeof audit.args.approved_entries, "number",
+    "…and the DB-derived count of what the authority actually posted");
+
+  const ev = (await rootQuery(
+    "select count(*)::int c from clara.domain_events where event_type='kb_binding.revocation_reset' and payload->>'binding_id'=$1",
+    [b.binding.binding_id])).rows[0].c;
+  assert.equal(ev, 1, "…and one typed event under its OWN name (裁-46: a revocation's undo carries its own name)");
+
+  // THE POINT OF THE DOOR: the pair stops being suppressed and can be proposed again.
+  assert.equal((await rootQuery("select clara._binding_suppression($1,$2,$3) as s",
+    [w.firms.A, w.clients.A1, b.cp.id])).rows[0].s, null, "the pair is no longer suppressed");
+  const re = await propose(w.users.bob, { client: w.clients.A1, counterparty: b.cp.id });
+  assert.equal(re.status, "proposed", "…and a fresh proposal is admitted");
+});
+
+test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason, and refuses a non-revoked row", async () => {
+  failPr3();
+  const b = await revokedBinding("K2");
+  // FLOOR. carol is a bookkeeper in firm A (buildWorld's roster); the floor is the signer's rank.
+  await assertRaises(CLR.authz,
+    () => resetRevocation(w.users.carol, { binding: b.binding.binding_id }),
+    "a bookkeeper reopening a revocation");
+  // REASON MANDATORY, and non-blank after trim — a receipt whose reason is three spaces is not
+  // a reason.
+  for (const blank of ["", "   "]) {
+    const err = await assertRaises("CLR36",
+      () => resetRevocation(w.users.alice, { binding: b.binding.binding_id, reason: blank }),
+      `a blank reason (${JSON.stringify(blank)})`);
+    assert.equal(reasonOf(err), "reset_reason_required");
+  }
+  // AND CAPPED. The reason lands verbatim on an audit row; PR-0's M2 ruled the uncapped shape out.
+  await assertRaises(CLR.badRequest,
+    () => resetRevocation(w.users.alice, { binding: b.binding.binding_id, reason: "x".repeat(4001) }),
+    "a 4001-character reason");
+  assert.equal((await bindingRow(b.binding.binding_id)).status, "revoked",
+    "…and none of those refusals moved the row");
+
+  // NON-REVOKED refuses: this door re-opens a revocation and nothing else.
+  const liveOne = await liveBinding("K2live");
+  const e1 = await assertRaises("CLR36",
+    () => resetRevocation(w.users.alice, { binding: liveOne.binding.binding_id }),
+    "reopening a LIVE binding");
+  assert.equal(reasonOf(e1), "binding_not_revoked");
+  // …and a DECLINED row too — that one has its own named door.
+  const cp3 = await seedPassingWindow(w, "K2dec");
+  const p3 = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp3.id });
+  await declineBinding(w.users.alice, { binding: p3.binding_id, reason: "not this vendor" });
+  const e2 = await assertRaises("CLR36",
+    () => resetRevocation(w.users.alice, { binding: p3.binding_id }), "reopening a DECLINED binding");
+  assert.equal(reasonOf(e2), "binding_not_revoked");
+  // …and the sibling still refuses the revoked one, verbatim (M-11 is untouched by 裁-46).
+  const e3 = await assertRaises("CLR36",
+    () => resetDecline(w.users.alice, { binding: b.binding.binding_id, reason: "wrong door" }),
+    "reset_binding_decline on a revoked row");
+  assert.equal(reasonOf(e3), "binding_revoked_reset_requires_ruling");
+});
+
+test("bpr3.K3 — the door is firm-scoped, idempotent, and EXECUTE-able by clara_authenticated alone", async () => {
+  failPr3();
+  const b = await revokedBinding("K3");
+  // NO EXISTENCE ORACLE: a firm-B admin gets not-found, never a typed refusal that would confirm
+  // the row exists somewhere.
+  await assertRaises(CLR.notFound,
+    () => resetRevocation(w.users.dave, { binding: b.binding.binding_id }),
+    "a firm-B admin reopening firm A's revocation");
+  assert.equal((await bindingRow(b.binding.binding_id)).status, "revoked", "…and it did not move");
+
+  // IDEMPOTENCY: the same op key replays its own answer rather than double-auditing the act.
+  const key = opk("k3reset");
+  const first = await resetRevocation(w.users.alice,
+    { binding: b.binding.binding_id, reason: "re-confirmed", opKey: key });
+  const replay = await resetRevocation(w.users.alice,
+    { binding: b.binding.binding_id, reason: "re-confirmed", opKey: key });
+  assert.deepEqual(replay, first, "a retried RPC replays its answer");
+  const n = (await rootQuery(
+    "select count(*)::int c from clara.audit_log where fn='reset_binding_revocation' and args->>'binding_id'=$1",
+    [b.binding.binding_id])).rows[0].c;
+  assert.equal(n, 1, "…and audits the act exactly once");
+
+  // ACL, read from the catalog rather than from the migration's GRANT line.
+  assert.equal((await rootQuery(
+    "select has_function_privilege('clara_authenticated',$1,'execute') as ok", [RESET_REVOCATION_SIG])).rows[0].ok,
+  true, "clara_authenticated holds EXECUTE");
+  for (const role of ["clara_agent_ro", "clara_wake_filing", "clara_wake_interactive",
+    "clara_wake_bank", "clara_wake_proactive", "clara_freeform_ro", "public"]) {
+    assert.equal((await rootQuery(
+      "select has_function_privilege($2,$1,'execute') as ok", [RESET_REVOCATION_SIG, role])).rows[0].ok,
+    false, `${role} must NOT hold EXECUTE on the 裁-46 door`);
+  }
+  // …and the agent-read role cannot reach it even through its own login role.
+  await assertRaises(PG.insufficientPrivilege,
+    () => roleQuery(ROLES.agentRo, `select ${RESET_REVOCATION_SIG.replace(/\(.*/, "")}($1,$2,$3)`,
+      [b.binding.binding_id, "probe", opk("k3acl")]),
+    "clara_agent_ro calling the door directly");
+  noteLane("bpr3.K3: the 裁-46 door's frontend home is the admin / vendor-bindings panel, on a revoked row's admin menu (the P4/P6 train)");
+});
