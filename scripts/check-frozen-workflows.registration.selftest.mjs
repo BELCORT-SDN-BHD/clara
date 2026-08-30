@@ -14,12 +14,14 @@
 // "runs WITHOUT a git base — Node built-ins only" and drives the pure checkers with string
 // fixtures. This property is not pure — registration is decided by the script walking a real
 // tree against a real base ref — so it builds a THROWAWAY GIT REPO and runs the real
-// `check-frozen-workflows.mjs` inside it, four times, asserting the whole sequence:
+// `check-frozen-workflows.mjs` inside it, asserting the whole sequence:
 //
 //   1. fail BEFORE   — a new frozen path is UNREGISTERED and the gate exits non-zero
 //   2. pass AFTER    — `--update` registers it and the gate exits zero
 //   3. additions-only — the manifest gained exactly the new paths, dropped none
 //   4. prior hashes UNCHANGED — and no `deployed` flag was granted or revoked by --update
+//   5. semantic compare — a final-key addition passes; duplicate keys, changed hashes/flags,
+//      and removed entries all fail without relying on textual diff punctuation
 //
 // (4) is the one that matters most: it is the real content of "you did not edit a frozen body",
 // and it is what a reviewer should check after any `--update`.
@@ -148,6 +150,49 @@ try {
     const fresh = after.workflows["packages/runtime/workflows/demo.v2.ts"];
     if (fresh.deployed === true) throw new Error("--update must NOT grant deployed:true to a newly registered path — the ceremony does that.");
   });
+
+  // --- THE SEMANTIC ADDITIONS-ONLY PROOF -----------------------------------------------------
+  const manifestPath = join(root, "frozen-workflows.json");
+  const cleanHeadRaw = readFileSync(manifestPath, "utf8");
+  const compare = () => run("--compare-base", "selftest-base");
+  const expectCompareReject = (code) => {
+    const result = compare();
+    const output = result.stdout + result.stderr;
+    if (result.status === 0) throw new Error(`semantic compare passed; expected ${code}:\n${output}`);
+    if (!output.includes(code)) throw new Error(`semantic compare rejected for the wrong reason; expected ${code}:\n${output}`);
+  };
+
+  check("5a · FINAL-KEY ADDITION passes semantic compare (no comma-sensitive textual diff)", () => {
+    const result = compare();
+    if (result.status !== 0) throw new Error(`expected semantic compare exit 0, got ${result.status}:\n${result.stdout}${result.stderr}`);
+  });
+
+  check("5b · DUPLICATE-KEY override is rejected even though JSON.parse would keep the later value", () => {
+    const duplicate = `    "packages/runtime/workflows/demo.v1.ts": { "sha256": "${"0".repeat(64)}", "note": "override", "deployed": false },\n`;
+    writeFileSync(manifestPath, cleanHeadRaw.replace('  "workflows": {\n', '  "workflows": {\n' + duplicate), "utf8");
+    try { expectCompareReject("DUPLICATE-KEY"); } finally { writeFileSync(manifestPath, cleanHeadRaw, "utf8"); }
+  });
+
+  check("5c · MOVED HASH on an existing entry is rejected semantically", () => {
+    const changed = JSON.parse(cleanHeadRaw);
+    changed.workflows["packages/runtime/workflows/demo.v1.ts"].sha256 = "f".repeat(64);
+    writeFileSync(manifestPath, JSON.stringify(changed, null, 2) + "\n", "utf8");
+    try { expectCompareReject("CHANGED-HASH"); } finally { writeFileSync(manifestPath, cleanHeadRaw, "utf8"); }
+  });
+
+  check("5d · REMOVED existing entry is rejected semantically", () => {
+    const changed = JSON.parse(cleanHeadRaw);
+    delete changed.workflows["packages/runtime/workflows/demo.v1.ts"];
+    writeFileSync(manifestPath, JSON.stringify(changed, null, 2) + "\n", "utf8");
+    try { expectCompareReject("REMOVED-ENTRY"); } finally { writeFileSync(manifestPath, cleanHeadRaw, "utf8"); }
+  });
+
+  check("5e · CHANGED deployed flag on an existing entry is rejected semantically", () => {
+    const changed = JSON.parse(cleanHeadRaw);
+    changed.workflows["packages/runtime/workflows/demo.v1.ts"].deployed = false;
+    writeFileSync(manifestPath, JSON.stringify(changed, null, 2) + "\n", "utf8");
+    try { expectCompareReject("CHANGED-FLAG"); } finally { writeFileSync(manifestPath, cleanHeadRaw, "utf8"); }
+  });
 } finally {
   rmSync(root, { recursive: true, force: true });
 }
@@ -156,4 +201,4 @@ if (failures > 0) {
   console.error(`\nfreeze-lint registration selftest: ${failures} case(s) FAILED.`);
   process.exit(1);
 }
-console.log("\nfreeze-lint registration selftest: OK — a new _vN requires --update, and --update is additions-only.");
+console.log("\nfreeze-lint registration selftest: OK — a new _vN requires --update, and semantic base comparison proves additions-only.");

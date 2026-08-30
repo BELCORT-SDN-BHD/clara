@@ -64,13 +64,12 @@ export const workflows = {
   // union by four kinds and emits ONE of them (`freeform_result`, off an admitted
   // `read_books_freeform`); the other three have producers in other lanes, walled there by
   // grant and by wake-kind allowlist (chatTurn.v16.prompt.ts's header names each wall).
-  // NOTHING RIDES WITH THIS IMAGE — no migration, no ceremony, no secret: every read the four
-  // cards hydrate on is already live and already granted (0103's agent_receipts_visible, 0137's
-  // firm_open_questions_visible, 0138/0140's close_proposals, 0131's freeform_read_log), and
-  // v15's own `CLARA_FREEFORM_DATABASE_URL` precondition is unchanged and already met by the
-  // running image. So the deploy order is free in BOTH directions, which is rare enough here to
-  // be worth stating: a v16 image on today's database emits a card whose read surface exists,
-  // and a rollback to v15 simply stops minting the card.
+  // THE DATABASE NEEDS NO COUPLED MIGRATION, ceremony or new secret: all four hydrate surfaces
+  // are already live, and v15's `CLARA_FREEFORM_DATABASE_URL` precondition is unchanged. But the
+  // DEPLOY IS HELD on reader parity: apps/web must first declare every kind v16 can emit. The
+  // Docker build runs `check-parts-parity.mjs` and refuses while that reader trails the declarer.
+  // A rollback to v15 still requires the standing parked-run preflight; it then stops minting the
+  // new card without changing the database.
   chatTurn: chatTurn_v16,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,

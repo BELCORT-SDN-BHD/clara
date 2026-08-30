@@ -138,14 +138,13 @@ export type CloseProposalPart = {
  * every one of them DB-owned — while the rows themselves stay exactly where the transcript
  * already carries them, in the `tool_result` part of the same turn.
  *
- * `read_id` IS A STRING CARRYING A BIGINT. `clara.freeform_read_log.id` is a bigint
- * (`apps/web/lib/reports/types.ts:120-121` types the row's own field `number`) and the verb
- * returns it as a jsonb NUMBER — `'read_id', v_read_id` at 0131:1266. It is rendered as text
- * on this wire for the same reason `clara.agent_receipt_contract` ordinal 2 renders every
- * member primary key as text: a part is persisted to jsonb and re-parsed by a browser, and a
- * bigint that round-trips through a JS number is a number that can come back wrong. The
- * emitter (`toTypedParts_v16`) stringifies once, at the boundary; the card filters
- * `id=eq.<read_id>`.
+ * `read_id` IS A STRING CARRYING A BIGINT AT THE WRAPPER-TO-PART BOUNDARY, not yet at the DB
+ * boundary. `clara.freeform_read_log.id` is bigint, but today's `wake_freeform_read` body emits
+ * `'read_id', v_read_id` as a jsonb NUMBER (0131:1266); pg-types JSON-parses that before the
+ * wrapper sees it. `toTypedParts_v16` stringifies only a SAFE number or accepts a canonical
+ * string. Therefore an id above 2^53 is omitted — no card, never a wrong card — until a later D1
+ * DB recut emits `v_read_id::text` (and the web report row moves from numeric id to string id).
+ * The card then filters `id=eq.<read_id>`.
  */
 export type FreeformResultPart = { type: "freeform_result"; read_id: string };
 

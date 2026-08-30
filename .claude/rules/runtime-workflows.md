@@ -16,9 +16,14 @@ behavioural change is never an edit:
    **and** a new `_vN` of an existing one both do (freeze-lint raises `UNREGISTERED` on any
    `@frozen`-marked or import-closure file absent from the manifest —
    `scripts/check-frozen-workflows.mjs:364,374`). Then PROVE the regenerated manifest is
-   ADDITIONS-ONLY: `git diff origin/main -- frozen-workflows.json | grep '^-[^-]'` must be empty.
-   A MOVED hash on an EXISTING entry is the real signal that you edited a frozen body — undo that
-   rather than regenerate.
+   ADDITIONS-ONLY semantically: run
+   `node scripts/check-frozen-workflows.mjs --compare-base <ref>` (normally `<ref>` is
+   `origin/main`). It parses both manifests duplicate-safely and refuses any removed entry or any
+   changed existing hash/deployed flag. A MOVED hash on an EXISTING entry is the real signal that
+   you edited a deployed frozen body — undo that rather than regenerate.
+
+Every chatTurn successor version carries the live decoy-vs-receipt provenance cell coupled to the
+CURRENT `registry.workflows.chatTurn`, beside (not instead of) its exact-version registry pin.
 
 Never rename or delete an export that has in-flight runs. The workflow name derives from
 path plus export, so a rename strands every parked run filed under the old name.

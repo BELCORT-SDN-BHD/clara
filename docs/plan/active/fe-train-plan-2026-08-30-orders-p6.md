@@ -32,8 +32,10 @@ the way v15 extends v14 — re-export every carried shape, add exactly the four 
 `agent_receipt` (generic; reads `agent_receipts_visible`) · `firm_question` (carries the
 resolve/dismiss doors' subject) · `close_proposal` · `freeform_result`. Then repoint `registry.ts`.
 **Never edit a frozen body**, and remember that the prompt and tool files inside a frozen closure
-*are* that body — `pnpm freeze:update` is for a brand-new frozen CLASS only; if freeze-lint demands
-an update for your change, you edited a frozen body: undo it.
+*are* that body. Run `pnpm freeze:update` for every added frozen path — both a brand-new class and
+a new `_vN` of an existing class require registration. Then run the rule's semantic
+`--compare-base` proof: any moved hash on a pre-existing deployed entry is a body edit to undo,
+never a reason to accept a re-baseline.
 
 **Live/working state stays at the SSE layer, not as a persisted part type** (Q8, verbatim).
 
@@ -49,8 +51,10 @@ the bundle was still on v13). **Rollback preflight** before any revert: confirm 
 still exports every workflow name and version holding non-terminal runs.
 
 **Acceptance.** v1..v15 byte-identical (prove it — `git diff --stat` on those paths is empty) ·
-freeze-lint passes without a manifest regeneration · the four kinds' field lists are the file's
-own declarations · the built-bundle grep is in the report.
+freeze-lint passes after registering the new v16 closure, and
+`node scripts/check-frozen-workflows.mjs --compare-base origin/main` proves the manifest is
+semantically additions-only · the four kinds' field lists are the file's own declarations · the
+built-bundle grep is in the report.
 
 ---
 

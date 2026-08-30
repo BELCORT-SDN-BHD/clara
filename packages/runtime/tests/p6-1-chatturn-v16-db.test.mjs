@@ -31,8 +31,20 @@ import * as ff from "../lib/freeform-read.mjs";
 
 const { register } = await import("tsx/esm/api");
 register();
+const registry = await import("../workflows/registry.ts");
 const prompt16 = await import("../workflows/chatTurn.v16.prompt.ts");
 const freeform15 = await import("../workflows/chatTurn.v15.freeform.ts");
+
+// Successor-proofing: the live decoy-vs-receipt cell below promotes through the CURRENT registry
+// version. The exact v16 pin remains its own cell, so a successor must deliberately update that
+// assertion while automatically inheriting the live provenance battery.
+const currentChatName = registry.workflows.chatTurn.name;
+const currentChatMatch = /^chatTurn_v([1-9][0-9]*)$/.exec(currentChatName);
+assert.ok(currentChatMatch, `registry.workflows.chatTurn has an unrecognised export name: ${currentChatName}`);
+const currentChatVersion = Number(currentChatMatch[1]);
+const currentPrompt = await import(`../workflows/chatTurn.v${currentChatVersion}.prompt.ts`);
+const currentPromote = currentPrompt[`toTypedParts_v${currentChatVersion}`];
+assert.equal(typeof currentPromote, "function", `${currentChatName}'s prompt module must export toTypedParts_v${currentChatVersion}`);
 
 // The tool path reads its pools off the same global the supervisor injects at boot — the
 // f-a6-pr2-freeform-db.test.mjs convention, reused rather than reinvented.
@@ -57,6 +69,11 @@ const READY = await rig
 const skip = READY ? false : "P6-1: the Q8 hydrate surfaces (0103/0126/0131/0137/0138) are absent";
 
 const AGENT_ROLES = ["clara_agent_ro", "clara_wake_interactive", "clara_wake_proactive", "clara_wake_bank", "clara_wake_filing", "clara_freeform_ro", "clara_runtime"];
+
+test("p6-1.db.registry: the exact P6-1 pin is v16 while the live provenance instrument follows the registry", () => {
+  assert.equal(currentChatName, "chatTurn_v16", "P6-1's exact-version pin remains explicit");
+  assert.equal(currentPromote, prompt16.toTypedParts_v16, "at this tip the registry-coupled promoter IS v16's own export");
+});
 
 test("p6-1.db.allowlist: freeform is OPEN to a chat credential; firm-question and close-proposal are NOT", { skip }, async () => {
   const r = await rig.rootQuery(
@@ -237,9 +254,9 @@ async function turnFixture(label) {
 }
 
 /** Drive the REAL tool wrapper, then the REAL promotion, exactly as a segment does. */
-async function cardsFromRead(ctx, sql, purpose, seq) {
+async function cardsFromRead(ctx, sql, purpose, seq, promote = currentPromote) {
   const out = await freeform15.runFreeformRead(ctx, { sql, purpose }, "gpt-5.6-terra", 0, seq);
-  const parts = prompt16.toTypedParts_v16([
+  const parts = promote([
     { type: "tool-result", toolCallId: `tc-${seq}`, toolName: freeform15.FREEFORM_READ_TOOL, output: out },
   ]);
   return { out, parts, cards: parts.filter((p) => p.type === "freeform_result") };
@@ -281,6 +298,48 @@ test("p6-1.db.freeform.read-id-provenance: a REFUSED read mints no card at all",
   assert.ok(
     parts.some((p) => p.type === "refusal"),
     "control — v15's own refusal arm still fires, so the zero above is a verdict rather than an empty promotion",
+  );
+});
+
+test("p6-1.db.freeform.read-id-high-sequence: DB->wrapper loss is measured and fails closed", { skip: skipFreeform }, async (t) => {
+  const { ctx } = await turnFixture("p61highseq");
+  const highId = "9007199254740993"; // 2^53 + 1: the first odd bigint JS cannot represent.
+
+  // Root-only rig setup: make the NEXT identity value exactly 2^53+1. This changes only the
+  // throwaway sequence; the production body and every security mechanism remain untouched.
+  await rig.rootQuery(
+    "select setval(pg_get_serial_sequence('clara.freeform_read_log','id')::regclass,$1::bigint,true)",
+    ["9007199254740992"],
+  );
+
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await cardsFromRead(ctx, "select count(*) as n from clara.journal_entries", "high-sequence wire boundary", 1);
+  }, "an unsafe JSON number omits the card without throwing the turn");
+
+  const receipt = await rig.rootQuery(
+    "select id from clara.freeform_read_log where op_key = $1",
+    [freeform15.freeformOpKey(ctx.taskId, 0, 1)],
+  );
+  assert.equal(receipt.rows.length, 1, "the admitted read committed exactly one audit row");
+  assert.equal(String(receipt.rows[0].id), highId, "the DB-owned receipt id is exactly 2^53+1");
+
+  const wrapperId = result.out.read.read_id;
+  assert.equal(typeof wrapperId, "number", "the current DB body emits a JSON number, so pg-types JSON.parse reaches the wrapper as number");
+  assert.equal(Number.isSafeInteger(wrapperId), false, "that wrapper number is already unsafe and cannot identify the receipt honestly");
+  assert.equal(result.cards.length, 0, "the current registry version emits NO card rather than a wrong id");
+
+  // Mutation control: a promoter that stringified the already-rounded number would mint a card.
+  // Run the cell's decisive assertion against that result and require it to red.
+  const assertNoCard = (parts) => assert.equal(parts.filter((part) => part.type === "freeform_result").length, 0, "unsafe DB->wrapper numbers emit no card");
+  assert.throws(
+    () => assertNoCard([{ type: "freeform_result", read_id: String(wrapperId) }]),
+    /unsafe DB->wrapper numbers emit no card/,
+    "mutation control: stringify-an-unsafe-number is caught by this cell",
+  );
+
+  t.diagnostic(
+    `receipt ${highId} reached the wrapper as unsafe JSON number ${String(wrapperId)}; ${currentChatName} omitted the card without throwing (DB text recut still owed)`,
   );
 });
 test("p6-1.db.stamp: no chatturn engine id is priced, so moving the stamp v15 -> v16 moves no cost line", { skip }, async () => {

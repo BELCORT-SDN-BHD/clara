@@ -34,6 +34,10 @@ COPY packages/runtime/lib ./packages/runtime/lib
 COPY packages/runtime/workflows ./packages/runtime/workflows
 COPY packages/runtime/plugins ./packages/runtime/plugins
 COPY packages/runtime/scripts ./packages/runtime/scripts
+# Deploy hold: runtime is the declarer and apps/web is the reader. The v16 image must not be
+# buildable while the reader lacks any kind the pinned workflow can emit.
+COPY apps/web/lib/parts/types.ts ./apps/web/lib/parts/types.ts
+RUN node packages/runtime/scripts/check-parts-parity.mjs
 RUN pnpm --filter @clara/runtime build
 
 # 3. A PRUNED PRODUCTION node_modules for the runner (S4-AB2). The nitro bundle does
