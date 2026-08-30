@@ -126,4 +126,3 @@ test("G1B-ALLOC-7 裁-44 R3 / FOLD-15 — an identifier too short to be specific
   assert.equal(pack.canonicalIdentifier("8899-041722"), "8899041722", "canonicalisation is [a-z0-9] after lowercasing");
   assert.equal(pack.canonicalIdentifier("MBB/514 202"), "mbb514202");
 });
-

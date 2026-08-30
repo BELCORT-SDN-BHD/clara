@@ -196,4 +196,3 @@ test("G1B-I11 裁-44 R2 / FOLD-14(a) — the pack attempt key FAILS CLOSED; ther
   assert.doesNotMatch(fn, /Date\.now|Math\.random|performance\.now/, "no clock, no randomness — the key is an identity or it is nothing");
   assert.equal((fn.match(/throw new Error/g) ?? []).length, 2, "both unusable-metadata branches throw");
 });
-

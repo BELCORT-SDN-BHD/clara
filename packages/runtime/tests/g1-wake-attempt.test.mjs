@@ -50,25 +50,16 @@ test("G1B-I8-retry 裁-44 R4 / FOLD-21 — a stream failure AFTER tool activity 
   // N12's rule. Without this the cell would have quietly redefined the close lane.
   assert.equal(close.classifyCloseOutcome({ ...closeMid, streamFault: false }, "").kind, "proposed");
 
-  // (2b) AND THE SHIPPING CATCH BLOCK ACTUALLY CONSULTS IT. The two checks above are pure — they
-  // would both still pass against a body that rethrew unconditionally, because neither reaches the
-  // stream's own catch. No cell in this repo can execute that catch (it needs a real model stream
-  // inside a real WDK step), so the branch is pinned by READING THE SHIPPING SOURCE, exactly as
-  // G1B-I11 pins the attempt key's missing clock. Named as a source pin rather than dressed up as
-  // behaviour.
-  const { readFileSync } = await import("node:fs");
-  const { fileURLToPath } = await import("node:url");
-  for (const [file, guard] of [
-    ["bankAgent.v1.impl.ts", /if \(!hadToolActivity\(rec\)\) throw err;/],
-    ["closePrep.v1.impl.ts", /if \(rec\.toolCalls > 0\) \{/],
-  ]) {
-    const src = readFileSync(fileURLToPath(new URL(`../workflows/${file}`, import.meta.url)), "utf8");
-    const start = src.indexOf("catch (err) {");
-    const body = src.slice(start, src.indexOf("} finally {", start));
-    assert.match(body, guard, `${file}: the stream catch must gate its rethrow on tool activity`);
-    assert.match(body, /streamFault = true/, `${file}: and latch the fault onto this attempt's own record`);
-    assert.match(body, /return \{ outcome: classify/, `${file}: returning an outcome THIS attempt settles`);
-  }
+  // (2b) AND THE SHIPPING DECISION ITSELF, driven rather than read. 裁-44 R5 / FOLD-24 pulled the
+  // rethrow-or-settle branch out of the catch into ONE named function per lane, which is what
+  // finally makes it executable — the round-four version of this cell could only PIN the catch's
+  // source text, and said so. G1B-I8-stream-part below drives the whole schedule end to end; these
+  // two lines are the decision on its own.
+  assert.equal(bank.latchStreamFault({ ...tools.newBankRunRecord("attempt-1"), toolCalls: 0 }), "retry", "nothing happened yet, so the WDK may have a clean attempt");
+  const latched = { ...tools.newBankRunRecord("attempt-1"), toolCalls: 2 };
+  assert.equal(bank.latchStreamFault(latched), "settle", "after tool activity THIS attempt owns the outcome");
+  assert.equal(latched.streamFault, true, "and the fault is latched onto its own record");
+  assert.equal(latched.infraFaults, 1, "counted as ours, which is what carries the settle to internal");
 
   // (3) THE SECOND ATTEMPT STANDS DOWN. Once attempt one has settled the task, a retry's claim CAS
   // finds it no longer 'running' — the existing wall, named here as the other half of the story.
@@ -83,6 +74,164 @@ test("G1B-I8-retry 裁-44 R4 / FOLD-21 — a stream failure AFTER tool activity 
   const second = await rig.asRuntime((c) => infra.claimBankTask(c, t.taskId, randomUUID()));
   assert.equal(second.claimed, false, "and a retry cannot claim a task that is no longer running");
   assert.equal(second.bound, false, "so it settles nothing and cannot overwrite the failure");
+});
+
+test("G1B-I8-stream-part 裁-44 R5 / FOLD-24 — an SDK ERROR PART is a stream failure too, and a tool-error part is a different event", async () => {
+  // THE DEFECT: FOLD-21's latch lived in a `catch`, so it ran only when the ITERATOR rejected. The
+  // AI SDK does not always throw — `streamText` carries failures as PARTS, and its documented
+  // failed-follow-up path enqueues an error part and closes WITHOUT a `finish`. Both loops read
+  // only `text-delta`, so a run could act, lose its stream, and still settle through ordinary
+  // classification with `streamFault` unset.
+  //
+  // The injected streams below are hand-rolled async generators, and the tool call inside them is
+  // a REAL call through the SHIPPING tool set — which is what makes it tool ACTIVITY rather than a
+  // number this cell wrote onto a record. The calls fail LOCALLY (no pools injected), before any
+  // database access.
+  const bank = await import("../workflows/bankAgent.v1.impl.ts");
+  const close = await import("../workflows/closePrep.v1.impl.ts");
+  const bankTools = await import("../workflows/bankAgent.v1.tools.ts");
+  const closeTools = await import("../workflows/closePrep.v1.tools.ts");
+  const { randomUUID } = await import("node:crypto");
+
+  const previous = globalThis.__claraPools;
+  globalThis.__claraPools = undefined;
+  try {
+    // ---- BANK: a tool call, then a TERMINAL error part, then the stream closes with no finish ---
+    const brec = bankTools.newBankRunRecord("attempt-1");
+    const bbuilt = bankTools.buildBankAgentTools(
+      { taskId: randomUUID(), firmId: randomUUID(), clientId: randomUUID(), bankAccountId: randomUUID(), dueReason: null },
+      "gpt-5.6-terra",
+      brec,
+    );
+    async function* bankDied() {
+      yield { type: "text-delta", text: "reading the pack first" };
+      const out = await bbuilt.get_bank_pack.execute({ rationale: "the call the model made before its stream died" });
+      assert.ok(out?.error, "the tool call failed locally — it still HAPPENED, which is the whole point");
+      yield { type: "error", error: new Error("provider connection reset") };
+      // and the generator RETURNS here: no `finish` part, exactly the shape the SDK's failed
+      // follow-up produces and the shape the old loop discarded.
+    }
+    await assert.rejects(bank.drainBankStream(brec, bankDied()), /ended on an error part/, "a terminal error part must be RAISED, not discarded");
+    assert.ok(brec.toolCalls >= 1, "the shipping tool moved the shared counter, so this attempt owns its outcome");
+    assert.equal(bank.latchStreamFault(brec), "settle");
+    assert.equal(brec.streamFault, true);
+    const bout = bank.classifyBankOutcome(brec, "");
+    assert.equal(bout.kind, "refused", "the bank lane settles the truncated pass as a failure");
+    assert.equal(bout.code, "internal", "and it is OUR code, not the model's");
+
+    // THE INVERSE: an error part BEFORE any tool call may retry — nothing durable happened.
+    const bfresh = bankTools.newBankRunRecord("attempt-1");
+    async function* bankDiedEarly() {
+      yield { type: "error", error: new Error("provider connection reset") };
+    }
+    await assert.rejects(bank.drainBankStream(bfresh, bankDiedEarly()), /ended on an error part/);
+    assert.equal(bfresh.toolCalls, 0);
+    assert.equal(bank.latchStreamFault(bfresh), "retry", "a retry is lawful when nothing has happened");
+    assert.equal(bfresh.streamFault, false, "and nothing is latched onto a record that owes nothing");
+    assert.equal(bfresh.infraFaults, 0);
+
+    // A `tool-error` PART IS NOT THE SAME EVENT. One call failed; the loop may continue and the
+    // model may recover and act. It counts as activity and as OUR fault — and it must NOT set
+    // streamFault, or a pass that recovered would settle as though it had been cut off.
+    const brecovered = bankTools.newBankRunRecord("attempt-1");
+    async function* bankRecovered() {
+      yield { type: "tool-error", error: new Error("the SDK could not parse the model's tool input") };
+      yield { type: "text-delta", text: "trying again" };
+      yield { type: "finish" };
+    }
+    assert.equal(await bank.drainBankStream(brecovered, bankRecovered()), "trying again", "a tool-error does not end the drain");
+    assert.equal(brecovered.toolCalls, 1, "the model DID call something");
+    assert.equal(brecovered.infraFaults, 1, "and it failed on our side of the model");
+    assert.equal(brecovered.streamFault, false, "but the stream did not die");
+
+    // ---- CLOSE: the same schedule, and the same distinction, on the lane where it is VISIBLE ----
+    const crec = closeTools.newCloseRunRecord();
+    const cbuilt = closeTools.buildClosePrepTools({ taskId: randomUUID(), firmId: randomUUID(), clientId: randomUUID() }, "gpt-5.6-terra", crec);
+    async function* closeDied() {
+      const out = await cbuilt.list_fiscal_years.execute({ rationale: "the read the model made before its stream died" });
+      assert.ok(out?.error, "the read failed locally — it still happened");
+      yield { type: "error", error: "the provider closed the stream" };
+    }
+    await assert.rejects(close.drainCloseStream(crec, closeDied()), /ended on an error part/);
+    assert.ok(crec.toolCalls >= 1);
+    assert.equal(close.latchCloseStreamFault(crec), "settle");
+    assert.equal(crec.streamFault, true);
+    const cout = close.classifyCloseOutcome(crec, "");
+    assert.equal(cout.kind, "refused");
+    assert.equal(cout.code, "internal");
+
+    const cfresh = closeTools.newCloseRunRecord();
+    async function* closeDiedEarly() {
+      yield { type: "error", error: null };
+    }
+    await assert.rejects(close.drainCloseStream(cfresh, closeDiedEarly()), /ended on an error part/);
+    assert.equal(close.latchCloseStreamFault(cfresh), "retry");
+    assert.equal(cfresh.streamFault, false);
+
+    // AND THE HALF THAT KEEPS THIS FROM BEING A BLUNT INSTRUMENT — a run that took a tool-error and
+    // WENT ON TO ACT must settle green. Flattening the two part kinds into "the stream failed"
+    // would fail this night, which is why they are two entry points and not one.
+    const crecovered = closeTools.newCloseRunRecord();
+    async function* closeRecovered() {
+      yield { type: "tool-error", error: new Error("one call failed") };
+      yield { type: "finish" };
+    }
+    await close.drainCloseStream(crecovered, closeRecovered());
+    assert.equal(crecovered.toolCalls, 1);
+    assert.equal(crecovered.infraFaults, 1);
+    assert.equal(crecovered.streamFault, false);
+    const settled = close.classifyCloseOutcome({ ...crecovered, acts: 2, reads: 4, writeAttempts: 2 }, "");
+    assert.equal(settled.kind, "proposed", "N12's partial-success rule still stands for a pass that RECOVERED");
+  } finally {
+    globalThis.__claraPools = previous;
+  }
+});
+
+test("G1B-I8-tool-counter 裁-44 R5 (LOW) — every shipping tool moves the SHARED counter, on both lanes", async () => {
+  // G1B-I8-retry drives the predicate on a record it increments BY HAND, so deleting a shipping
+  // `rec.toolCalls += 1` would leave it green while the retry latch went blind. Every bank verb and
+  // both close paths are invoked for real here; with no pools injected they all fail LOCALLY,
+  // before any database access, which is what makes driving all of them cheap.
+  const bankTools = await import("../workflows/bankAgent.v1.tools.ts");
+  const closeTools = await import("../workflows/closePrep.v1.tools.ts");
+  const { randomUUID } = await import("node:crypto");
+
+  const previous = globalThis.__claraPools;
+  globalThis.__claraPools = undefined;
+  try {
+    const brec = bankTools.newBankRunRecord("counter");
+    const b = bankTools.buildBankAgentTools(
+      { taskId: randomUUID(), firmId: randomUUID(), clientId: randomUUID(), bankAccountId: randomUUID(), dueReason: null },
+      "gpt-5.6-terra",
+      brec,
+    );
+    const crec = closeTools.newCloseRunRecord();
+    const c = closeTools.buildClosePrepTools({ taskId: randomUUID(), firmId: randomUUID(), clientId: randomUUID() }, "gpt-5.6-terra", crec);
+
+    const calls = [
+      ["bank", brec, "get_bank_pack", () => b.get_bank_pack.execute({ rationale: "a read that never reaches the database" })],
+      ["bank", brec, "match_bank_line", () => b.match_bank_line.execute({ lines: [randomUUID()], entries: [randomUUID()], rationale: "an ungrounded match" })],
+      ["bank", brec, "propose_line_exception", () => b.propose_line_exception.execute({ line_id: randomUUID(), kind: "disputed", reason: "r", rationale: "an ungrounded exception" })],
+      ["bank", brec, "propose_identifier_promotion", () => b.propose_identifier_promotion.execute({ counterparty_id: randomUUID(), identifier_kind: "tin", identifier_value: "123456789", rationale: "an ungrounded promotion" })],
+      ["close", crec, "list_fiscal_years", () => c.list_fiscal_years.execute({ rationale: "a read that never reaches the database" })],
+      ["close", crec, "open_fiscal_year", () => c.open_fiscal_year.execute({ label: "FY2030", starts_on: "2030-01-01", rationale: "a write that never reaches the database" })],
+    ];
+
+    for (const [lane, rec, name, call] of calls) {
+      const before = rec.toolCalls;
+      const out = await call();
+      assert.ok(out?.error, `${lane}/${name} must fail locally in this cell — got ${JSON.stringify(out)?.slice(0, 200)}`);
+      assert.equal(rec.toolCalls, before + 1, `${lane}/${name} must move the SHARED counter, not a local one`);
+    }
+    // ENUMERATED, so a fifth bank verb that forgets the increment is caught by the count as well as
+    // by its own row above.
+    assert.equal(Object.keys(b).length, 4, "all four bank verbs were driven");
+    assert.equal(brec.toolCalls, 4);
+    assert.equal(crec.toolCalls, 2, "one close read and one close write, the two shapes the counter lives in");
+    assert.equal(crec.writeAttempts, 1, "and the write went through the gate, which is where a write's counter sits");
+  } finally {
+    globalThis.__claraPools = previous;
+  }
 });
 
 test("G1B-I13 裁-44 R4 / FOLD-22(a) — a purported success that carries no verifiable receipt is OURS, not an act", { skip: skip0138 }, async () => {
@@ -129,4 +278,44 @@ test("G1B-I13 裁-44 R4 / FOLD-22(a) — a purported success that carries no ver
   assert.equal(crec.acts, 0);
   assert.equal(crec.refusals, 0);
   assert.equal(crec.infraFaults, 1);
+
+  // --- 裁-44 R5 / FOLD-25: the RESULT'S KIND IS THE VERB'S, in BOTH directions -----------------
+  // `typeof [] === "object"` is true, so `result: []` used to pass as an act on every verb: a
+  // structurally drifted write with a real receipt id incremented `acts`, took `nothing_due`, and
+  // settled green against the wrong contract.
+  //
+  // AND THE OPPOSITE ERROR WOULD HAVE BEEN WORSE, which is why this is a MAP and not a ban:
+  // wake_list_fiscal_years returns coalesce(jsonb_agg(...), '[]') (0138:1012-1019), so `[]` is the
+  // lawful reply of the lane's very FIRST call on a client with no fiscal years — measured on a rig,
+  // not reasoned about. "Arrays are malformed" would have INFRA-faulted every run's opening read.
+  assert.equal(reads.closeResultKind("wake_list_fiscal_years"), "array", "the one collection read among the twelve");
+  for (const verb of ["wake_get_close_plan", "wake_get_close_readiness", "wake_verify_close", "wake_snapshot_state",
+    "wake_dry_run_close_readiness", "wake_open_fiscal_year", "wake_begin_close", "wake_abandon_close",
+    "wake_propose_close", "wake_run_depreciation_catchup", "wake_mint_month_snapshot"]) {
+    assert.equal(reads.closeResultKind(verb), "record", `${verb} returns a jsonb OBJECT — its result must be a record`);
+  }
+
+  const acted = (result, opts) => reads.classifyCloseReply({ status: "acted", receipt_id: id, result }, opts);
+  // null is malformed EVERYWHERE, whichever kind the verb owes.
+  assert.equal(acted(null), "malformed");
+  assert.equal(acted(null, { resultKind: "array" }), "malformed");
+  // `[]` is the LIST read's own answer, and nobody else's.
+  assert.equal(acted([], { resultKind: "array" }), "acted", "an empty fiscal-year list is a real, admitted read");
+  assert.equal(acted([{ fiscal_year_id: other }], { resultKind: "array" }), "acted");
+  assert.equal(acted([]), "malformed", "the same shape from an object-returning read or write is not that verb's result");
+  assert.equal(acted([{ close_run_id: other }], { needsCloseRunId: true }), "malformed", "and a write cannot smuggle its run id inside an array");
+  // A record where an array is owed fails the other way — the map is read in both directions.
+  assert.equal(acted({ fiscal_years: [] }, { resultKind: "array" }), "malformed", "a record is not the list read's contract either");
+  // The valid shapes still pass, so the gate is not simply refusing everything.
+  assert.equal(acted({ fiscal_year_id: other }), "acted");
+  assert.equal(acted({ close_run_id: other }, { needsCloseRunId: true }), "acted");
+
+  // Driven through the SHIPPING read counter as well, not only the classifier: the verb's kind has
+  // to reach it, or the map above is a fact nothing consults.
+  const lrec = reads.newCloseRunRecord();
+  reads.countIfAdmitted(lrec, { status: "acted", receipt_id: id, result: [] }, { resultKind: reads.closeResultKind("wake_list_fiscal_years") });
+  assert.equal(lrec.acts, 1, "the list read's empty array is an ACT");
+  reads.countIfAdmitted(lrec, { status: "acted", receipt_id: id, result: [] }, { resultKind: reads.closeResultKind("wake_propose_close") });
+  assert.equal(lrec.acts, 1, "and the same shape from propose_close is not");
+  assert.equal(lrec.infraFaults, 1, "it is OURS — a purported success we cannot verify");
 });

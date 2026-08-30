@@ -20,7 +20,7 @@ import {
   type PgExec,
 } from "./closePrep.v1.infra.js";
 import { SYSTEM_PROMPT_CLOSE_PREP_V1, CLOSE_PREP_STEP_BUDGET, type ClosePrepOutcome } from "./closePrep.v1.prompt.js";
-import { buildClosePrepTools, newCloseRunRecord } from "./closePrep.v1.tools.js";
+import { buildClosePrepTools, newCloseRunRecord, type CloseRunRecord } from "./closePrep.v1.tools.js";
 import { closePrepEngineId, recordClosePrepUsage, onUsageProblem } from "./closePrep.v1.usage.js";
 
 /** STEP 1 — the CAS-and-bind. A false claim is a clean stand-down, never a thrown error. */
@@ -94,12 +94,9 @@ export async function runClosePrepModelStep(ctx: CloseTaskContext, modelId: stri
   let text = "";
   let usage: { inputTokens?: number; outputTokens?: number } = {};
   try {
-    for await (const part of result.fullStream) {
-      if ((part as { type?: string }).type === "text-delta") {
-        const delta = (part as { text?: string }).text;
-        if (typeof delta === "string") text += delta;
-      }
-    }
+    // 裁-44 R5 / FOLD-24 — see the drain's own header: it raises a terminal `{type:"error"}` part
+    // into this catch and counts a non-terminal `tool-error` without ending the pass.
+    text = await drainCloseStream(rec, result.fullStream);
     usage = ((await result.usage) ?? {}) as { inputTokens?: number; outputTokens?: number };
   } catch (err) {
     await recordClosePrepUsage(ctx, closePrepEngineId(modelId), { durationMs: Date.now() - startedAt }, "error");
@@ -107,13 +104,12 @@ export async function runClosePrepModelStep(ctx: CloseTaskContext, modelId: stri
     // rethrown into a clean retry whose record starts at zero. See bankAgent.v1.impl.ts's own copy
     // for the schedule and for the residual (the latch is per-attempt by construction; the
     // monotonic version is DB-side and booked as G1 PR-2).
-    if (rec.toolCalls > 0) {
-      rec.streamFault = true;
-      rec.infraFaults += 1;
-      console.warn(`[closePrep_v1] model stream failed after ${rec.toolCalls} tool call(s); settling this attempt rather than retrying clean: ${err instanceof Error ? err.message : String(err)}`);
-      return { outcome: classifyCloseOutcome(rec, ""), usageTokens: 0 };
-    }
-    throw err;
+    //
+    // 裁-44 R5 / FOLD-24 — the decision is ONE named function now, shared with the error-part path
+    // that used to bypass this catch entirely. It latches the fault on "settle".
+    if (latchCloseStreamFault(rec) === "retry") throw err;
+    console.warn(`[closePrep_v1] model stream failed after ${rec.toolCalls} tool call(s); settling this attempt rather than retrying clean: ${err instanceof Error ? err.message : String(err)}`);
+    return { outcome: classifyCloseOutcome(rec, ""), usageTokens: 0 };
   } finally {
     writer.releaseLock();
   }
@@ -142,6 +138,61 @@ export async function runClosePrepModelStep(ctx: CloseTaskContext, modelId: stri
 
   const usageTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
   return { outcome: classifyCloseOutcome(rec, text), usageTokens };
+}
+
+/** A stream part's own error, as one non-throwing sentence — see bankAgent.v1.impl.ts's own copy
+ *  for why this never JSON.stringifies. */
+function describeStreamError(part: unknown): string {
+  const e = (part as { error?: unknown } | null)?.error;
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  return Object.prototype.toString.call(e);
+}
+
+/** Has this attempt done anything yet? ONE named predicate, the same question bankAgent_v1's
+ *  hadToolActivity asks — duplicated rather than imported, because a frozen closure may not reach
+ *  into another frozen closure's module without splicing the two hashes together. */
+export function hadCloseToolActivity(rec: { toolCalls: number }): boolean {
+  return rec.toolCalls > 0;
+}
+
+/**
+ * 裁-44 R5 / FOLD-24 — THE STREAM CAN FAIL WITHOUT THROWING. See bankAgent.v1.impl.ts's own copy
+ * for the full statement; the two lanes read the same SDK contract and answer it the same way.
+ *
+ * The distinction that matters on BOTH lanes: a `tool-error` part is ONE CALL failing — activity
+ * plus an infrastructure fault, but the loop may continue and the pass may still propose — while
+ * `{type:"error"}` is TERMINAL and is raised into the catch below, where an iterator rejection
+ * already lands. On this lane the difference is visible in the settle: `streamFault` sends the run
+ * to `refused/internal` even when acts landed (N12's partial-success rule is set aside for a
+ * TRUNCATED pass), so flattening a recoverable tool failure into a terminal one would fail nights
+ * that actually worked.
+ */
+export async function drainCloseStream(rec: CloseRunRecord, fullStream: AsyncIterable<unknown>): Promise<string> {
+  let text = "";
+  for await (const part of fullStream) {
+    const type = (part as { type?: unknown } | null)?.type;
+    if (type === "text-delta") {
+      const delta = (part as { text?: string }).text;
+      if (typeof delta === "string") text += delta;
+    } else if (type === "tool-error") {
+      rec.toolCalls += 1;
+      rec.infraFaults += 1;
+      console.warn(`[closePrep_v1] a tool call failed inside the SDK rather than in this closure: ${describeStreamError(part)}`);
+    } else if (type === "error") {
+      throw new Error(`the model stream ended on an error part: ${describeStreamError(part)}`);
+    }
+  }
+  return text;
+}
+
+/** What this attempt owes after a TERMINAL stream failure — the one decision FOLD-21 and FOLD-24
+ *  share, drivable by a cell. Mutates on "settle": the fault is latched onto THIS attempt. */
+export function latchCloseStreamFault(rec: CloseRunRecord): "retry" | "settle" {
+  if (!hadCloseToolActivity(rec)) return "retry";
+  rec.streamFault = true;
+  rec.infraFaults += 1;
+  return "settle";
 }
 
 /** The N12 signal, as a PURE function so it can be driven by a cell (the emission itself lives in

@@ -190,17 +190,25 @@ const isCloseUuid = (v: unknown): boolean => typeof v === "string" && CLOSE_UUID
  */
 export type CloseReplyVerdict = "acted" | "refused" | "malformed";
 
-export function classifyCloseReply(reply: unknown, opts: { needsCloseRunId?: boolean } = {}): CloseReplyVerdict {
+export type CloseReplyOpts = { needsCloseRunId?: boolean; resultKind?: CloseResultKind };
+
+export function classifyCloseReply(reply: unknown, opts: CloseReplyOpts = {}): CloseReplyVerdict {
   const r = reply as { status?: unknown; receipt_id?: unknown; result?: unknown } | null;
   if (r === null || typeof r !== "object") return "refused";
   if (r.status !== "acted") return "refused";
   if (!isCloseUuid(r.receipt_id)) return "malformed";
   if (r.result === null || typeof r.result !== "object") return "malformed";
+  // 裁-44 R5 / FOLD-25 — `typeof [] === "object"` IS TRUE, and that was the hole. A structurally
+  // drifted write or singular read carrying `result: []` passed as an act: `acts`/`reads` moved,
+  // the run took `nothing_due`, and a receipt vouched for the wrong contract. The kind is the
+  // VERB'S, in both directions — see closeResultKind's own note for why "arrays are malformed"
+  // would have INFRA-faulted the lane's opening read on every clean book.
+  if (Array.isArray(r.result) !== ((opts.resultKind ?? "record") === "array")) return "malformed";
   if (opts.needsCloseRunId && !isCloseUuid((r.result as { close_run_id?: unknown }).close_run_id)) return "malformed";
   return "acted";
 }
 
-export function countIfAdmitted(rec: CloseRunRecord, reply: unknown, opts: { needsCloseRunId?: boolean } = {}): CloseReplyVerdict {
+export function countIfAdmitted(rec: CloseRunRecord, reply: unknown, opts: CloseReplyOpts = {}): CloseReplyVerdict {
   const verdict = classifyCloseReply(reply, opts);
   if (verdict === "acted") rec.acts += 1;
   else if (verdict === "refused") rec.refusals += 1;
@@ -217,13 +225,91 @@ const RATIONALE = z
   .max(CLOSE_PROSE_MAX)
   .describe("Why you are making this call, in one plain sentence.");
 
-/** The shared one-at-a-time queue (裁-44 R4 / FOLD-20b). It is PASSED IN rather than created here
- *  because the reads and the writes must share ONE chain: a read and a write interleaving is the
- *  same hazard as two reads, and two independent queues would serialise each half against itself
- *  while leaving the halves free to race each other. */
+/** The shared one-at-a-time queue (裁-44 R4 / FOLD-20b). ONE chain for the reads and the writes
+ *  together: a read and a write interleaving is the same hazard as two reads, and two independent
+ *  queues would serialise each half against itself while leaving the halves free to race. */
 export type CloseSerialiser = <T>(body: () => Promise<T>) => Promise<T>;
 
-export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec: CloseRunRecord, serial: CloseSerialiser) {
+/** Each body links onto the previous one's SETTLEMENT, both branches — a rejection must not break
+ *  the chain, or one thrown write would un-serialise the rest of the pass. */
+export function newCloseSerialiser(): CloseSerialiser {
+  let chain: Promise<unknown> = Promise.resolve();
+  return <T>(body: () => Promise<T>): Promise<T> => {
+    const next = chain.then(body, body);
+    chain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
+}
+
+/**
+ * 裁-44 R5 / FOLD-23 — SERIALISATION IS A BOUNDARY, NOT A HABIT, AND THIS LANE IS WHY.
+ *
+ * FOLD-20(b) applied the mutex AT EVERY CALL SITE. Ten of this lane's twelve tools went through it;
+ * `begin_close` and `propose_close` called `write()` directly, so two write executors could overlap
+ * each other and the queued reads, mutating one record — the read counter, the act counter,
+ * `closeRunId` — concurrently. Both could pass `guardWrite`, mint a live task-bound credential and
+ * perform a durable act inside the window the other was still in.
+ *
+ * THE FIX IS THE SHAPE. The tool map is assembled plainly and wrapped in ONE place, so an
+ * unserialised tool is not expressible and a thirteenth verb is serialised by existing. A tool with
+ * no `execute` throws rather than passing through unguarded (absence is not evidence).
+ *
+ * NEVER WRAP TWICE: a serialised body that itself calls `serial` waits on a chain it is already the
+ * head of — a deadlock, not a double lock.
+ *
+ * DUPLICATED FROM bankAgent.v1.pack.ts RATHER THAN SHARED, for the reason every duplicate in these
+ * two closures carries: a frozen closure may not import a mutable module, and importing the bank
+ * closure's copy would splice two frozen bodies into one hash.
+ */
+const SERIALISED_EXECUTES = new WeakSet<object>();
+
+/** Is this THE wrapped function? An identity test, not a spelling one (review law 3): a hand-written
+ *  execute that merely mentions `serial` satisfies a source grep and cannot satisfy this. */
+export function isSerialisedCloseExecute(fn: unknown): boolean {
+  return typeof fn === "function" && SERIALISED_EXECUTES.has(fn as object);
+}
+
+export function serialiseCloseTools<T extends Record<string, unknown>>(tools: T, serial: CloseSerialiser): T {
+  const out: Record<string, unknown> = {};
+  for (const [name, spec] of Object.entries(tools)) {
+    const inner = (spec as { execute?: unknown } | null)?.execute;
+    if (typeof inner !== "function") {
+      throw new Error(`tool ${name} has no execute to serialise — every tool in this closure runs one at a time, and a tool this boundary cannot wrap must not ship`);
+    }
+    const call = inner as (...args: unknown[]) => unknown;
+    const wrapped = (...args: unknown[]): Promise<unknown> => serial(async () => call(...args));
+    SERIALISED_EXECUTES.add(wrapped);
+    out[name] = { ...(spec as Record<string, unknown>), execute: wrapped };
+  }
+  return out as T;
+}
+
+/** THE ONE COLLECTION READ AMONG THE TWELVE — 裁-44 R5 / FOLD-25.
+ *
+ *  `wake_list_fiscal_years` returns `coalesce(jsonb_agg(...), '[]'::jsonb)` (0138:1012-1019), so an
+ *  ARRAY is its lawful reply and `[]` is what a client with no fiscal years actually gets — the
+ *  lane's very first call on a fresh book, measured on a rig, not reasoned about. Every other
+ *  wrapper, read or write, returns a jsonb OBJECT: the five remaining reads all build one
+ *  (`_close_readiness_core` :983, `_verify_close_core` :922, `get_close_plan` 0064:242,
+ *  `_close_dry_run_core` 0104:519, and `wake_snapshot_state`'s own jsonb_build_object 0138:1953),
+ *  and every write core's `result` is read back with `->>` field access.
+ *
+ *  SO THE TEST IS VERB-AWARE IN BOTH DIRECTIONS, and that is the correction the as-built lane
+ *  measured: "arrays are malformed" would INFRA-fault every run's opening read, and "objects only"
+ *  applied to the list read would do the same. A collection verb REQUIRES an array; a singular one
+ *  REQUIRES a non-null, non-array record. */
+export type CloseResultKind = "array" | "record";
+
+const COLLECTION_READS = new Set<string>(["wake_list_fiscal_years"]);
+
+export function closeResultKind(verb: string): CloseResultKind {
+  return COLLECTION_READS.has(verb) ? "array" : "record";
+}
+
+export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec: CloseRunRecord) {
   /** A read counts ONLY when the database says it acted.
    *
    *  THIS IS THE COUNTER THAT DECIDES WHETHER THE RUN SETTLED HONESTLY, which is why it gets the
@@ -245,7 +331,8 @@ export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec:
       // 裁-44 R4 / FOLD-22(a) — a READ counts only on the DOCUMENTED acted shape. `status:'acted'`
       // alone used to be enough, so a reply with no receipt could carry a run to `nothing_due` and
       // a green settle. A purported success we cannot verify is an infrastructure fault.
-      const verdict = classifyCloseReply(out);
+      // 裁-44 R5 / FOLD-25 — and the RESULT'S OWN KIND is this verb's, never "any object".
+      const verdict = classifyCloseReply(out, { resultKind: closeResultKind(verb) });
       if (verdict === "acted") rec.reads += 1;
       else if (verdict === "malformed") {
         rec.infraFaults += 1;
@@ -262,31 +349,31 @@ export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec:
     [READ_TOOLS.LIST_FY]: tool({
       description: "List this client's fiscal years: which are open, reopened or closed, and when each ends. Start here.",
       inputSchema: z.object({ rationale: RATIONALE }),
-      execute: ({ rationale }: { rationale: string }) => serial(() => read(
+      execute: ({ rationale }: { rationale: string }) => read(
           "wake_list_fiscal_years",
           ctx.clientId,
           "select clara.wake_list_fiscal_years(p_client => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
           [ctx.clientId],
           rationale,
-        )),
+        ),
     }),
 
     [READ_TOOLS.CLOSE_PLAN]: tool({
       description: "Read the close plan for one fiscal year — the ordered steps a close of this year involves.",
       inputSchema: z.object({ fiscal_year_id: z.string().uuid(), rationale: RATIONALE }),
-      execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) => serial(() => read(
+      execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) => read(
           "wake_get_close_plan",
           fiscal_year_id,
           "select clara.wake_get_close_plan(p_fiscal_year_id => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
           [fiscal_year_id],
           rationale,
-        )),
+        ),
     }),
 
     [READ_TOOLS.READINESS]: tool({
       description: "Read whether this fiscal year is ready to close, and what is blocking it if not. Blockers are facts; read them before acting.",
       inputSchema: z.object({ fiscal_year_id: z.string().uuid(), rationale: RATIONALE }),
-      execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) => serial(() => read(
+      execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) => read(
           "wake_get_close_readiness",
           fiscal_year_id,
           // TWO ADJACENT UUIDs — transposition case B. Named notation closes ONE HALF of that
@@ -298,43 +385,43 @@ export function buildCloseReadTools(ctx: CloseTaskContext, modelId: string, rec:
           "select clara.wake_get_close_readiness(p_client => $1, p_fy => $2, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [ctx.clientId, fiscal_year_id],
           rationale,
-        )),
+        ),
     }),
 
     [READ_TOOLS.DRY_RUN]: tool({
       description: "Test close readiness WITHOUT committing to anything — use this to check a shape before you act on it.",
       inputSchema: z.object({ fiscal_year_id: z.string().uuid(), rationale: RATIONALE }),
-      execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) => serial(() => read(
+      execute: ({ fiscal_year_id, rationale }: { fiscal_year_id: string; rationale: string }) => read(
           "wake_dry_run_close_readiness",
           fiscal_year_id,
           "select clara.wake_dry_run_close_readiness(p_client => $1, p_fy => $2, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [ctx.clientId, fiscal_year_id],
           rationale,
-        )),
+        ),
     }),
 
     [READ_TOOLS.VERIFY]: tool({
       description: "Verify an existing close receipt — what it covers and whether it still holds.",
       inputSchema: z.object({ close_receipt_id: z.string().uuid(), rationale: RATIONALE }),
-      execute: ({ close_receipt_id, rationale }: { close_receipt_id: string; rationale: string }) => serial(() => read(
+      execute: ({ close_receipt_id, rationale }: { close_receipt_id: string; rationale: string }) => read(
           "wake_verify_close",
           close_receipt_id,
           "select clara.wake_verify_close(p_receipt => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
           [close_receipt_id],
           rationale,
-        )),
+        ),
     }),
 
     [READ_TOOLS.SNAPSHOT_STATE]: tool({
       description: "Read the state of one period snapshot.",
       inputSchema: z.object({ snapshot_id: z.string().uuid(), rationale: RATIONALE }),
-      execute: ({ snapshot_id, rationale }: { snapshot_id: string; rationale: string }) => serial(() => read(
+      execute: ({ snapshot_id, rationale }: { snapshot_id: string; rationale: string }) => read(
           "wake_snapshot_state",
           snapshot_id,
           "select clara.wake_snapshot_state(p_snapshot => $1, p_rationale => $2, p_model => $3::jsonb, p_op_key => $4) as r",
           [snapshot_id],
           rationale,
-        )),
+        ),
     }),
   };
 }

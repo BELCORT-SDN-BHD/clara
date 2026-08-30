@@ -355,13 +355,21 @@ test("G1B-ALLOC-8 裁-44 R3 / FOLD-18 — an aggregate this process cannot carry
   const l2b = randomUUID();
   const e1b = randomUUID();
   const e2b = randomUUID();
+  // 裁-44 R5 (LOW) — EVERY CASE NOW NAMES THE REASON IT EXPECTS, and the sweep compares the EXACT
+  // SET rather than a floor. `seen.size >= 5` let any case regress into a reason another case had
+  // already produced without failing: six staged shapes could collapse onto four reasons and the
+  // sweep would still say it had covered them. The two the previous round left unstaged —
+  // `no_lines` and `no_entries` — are staged here too, and their unreachability from the MODEL is
+  // pinned separately below rather than assumed from the schema's shape.
   const cases = [
-    [viewOf([line(l1b, 10000)], [cand(e1b, 25000, 0), cand(e2b, 25000, 0)]), [l1b], [e1b, e2b]],
-    [viewOf([line(l1b, 10000)], [cand(e1b, 0, 5000)]), [l1b], [e1b]],
-    [viewOf([line(l1b, 0)], [cand(e1b, 5000, 0)]), [l1b], [e1b]],
-    [viewOf([line(l1b, 100)], [cand(e1b, 100, 0)]), [randomUUID()], [e1b]],
-    [viewOf([line(l1b, 100)], [cand(e1b, 100, 0)]), [l1b], [randomUUID()]],
-    [viewOf([line(l1b, HALF), line(l2b, HALF)], [cand(e1b, HALF, 0)]), [l1b, l2b], [e1b]],
+    ["entries_do_not_tie", viewOf([line(l1b, 10000)], [cand(e1b, 25000, 0), cand(e2b, 25000, 0)]), [l1b], [e1b, e2b]],
+    ["entry_has_no_capacity", viewOf([line(l1b, 10000)], [cand(e1b, 0, 5000)]), [l1b], [e1b]],
+    ["lines_net_to_zero", viewOf([line(l1b, 0)], [cand(e1b, 5000, 0)]), [l1b], [e1b]],
+    ["line_not_in_pack", viewOf([line(l1b, 100)], [cand(e1b, 100, 0)]), [randomUUID()], [e1b]],
+    ["entry_not_in_pack", viewOf([line(l1b, 100)], [cand(e1b, 100, 0)]), [l1b], [randomUUID()]],
+    ["aggregate_unrepresentable", viewOf([line(l1b, HALF), line(l2b, HALF)], [cand(e1b, HALF, 0)]), [l1b, l2b], [e1b]],
+    ["no_lines", viewOf([line(l1b, 100)], [cand(e1b, 100, 0)]), [], [e1b]],
+    ["no_entries", viewOf([line(l1b, 100)], [cand(e1b, 100, 0)]), [l1b], []],
   ];
   // IDs ARE STRIPPED BEFORE THE CHECK, and that distinction is the point rather than a dodge: an
   // entry id is WHICH ROW, an amount is HOW MUCH. The first is what makes a refusal actionable and
@@ -369,9 +377,10 @@ test("G1B-ALLOC-8 裁-44 R3 / FOLD-18 — an aggregate this process cannot carry
   // uuid contains digit runs, so a naive digit sweep would forbid the ids too.
   const stripIds = (s) => s.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<id>");
   const seen = new Set();
-  for (const [view, ls, es] of cases) {
+  for (const [expected, view, ls, es] of cases) {
     const out = pack.deriveMatchAllocation(view, ls, es);
     assert.equal(out.ok, false, "each of these must refuse, or the sweep below is vacuous");
+    assert.equal(out.reason, expected, `this shape must refuse for ${expected}, not ${out.reason} — a case that drifts onto another case's reason leaves a branch unswept`);
     seen.add(out.reason);
     assert.doesNotMatch(
       stripIds(out.detail),
@@ -379,10 +388,29 @@ test("G1B-ALLOC-8 裁-44 R3 / FOLD-18 — an aggregate this process cannot carry
       `refusal "${out.reason}" must carry no amount — got: ${out.detail}`,
     );
   }
-  // The sweep is only worth anything if it actually reached the reasons it claims to cover.
-  assert.ok(seen.has("entries_do_not_tie"), "the reason FOLD-22(b) fixed is in the sweep");
-  assert.ok(seen.has("aggregate_unrepresentable") && seen.has("entry_has_no_capacity"), "and so are the two the ruling left alone");
-  assert.ok(seen.size >= 5, `the sweep covered ${seen.size} distinct refusal reasons`);
+  // THE EXACT SET, not a floor: every reason this function can produce is here, and nothing else is.
+  // The ninth branch — the CAPACITY-side `aggregate_unrepresentable` — shares this token and has its
+  // own cell (G1B-ALLOC-8b), which is why the set has eight members and not nine.
+  assert.deepEqual(
+    [...seen].sort(),
+    ["aggregate_unrepresentable", "entries_do_not_tie", "entry_has_no_capacity", "entry_not_in_pack",
+      "line_not_in_pack", "lines_net_to_zero", "no_entries", "no_lines"],
+    "the sweep must cover every refusal reason deriveMatchAllocation can produce, exactly",
+  );
+
+  // AND THE TWO THAT NO MODEL CAN REACH ARE PINNED AS SUCH, through the SHIPPING schema rather than
+  // by reading the source: `no_lines`/`no_entries` are defence-in-depth for a caller inside this
+  // closure, not refusals the model can ever be shown. Stated as a measurement so that widening the
+  // schema later makes this cell speak.
+  const built = tools.buildBankAgentTools(
+    { taskId: randomUUID(), firmId: randomUUID(), clientId: randomUUID(), bankAccountId: randomUUID(), dueReason: null },
+    "gpt-5.6-terra",
+    pack.newBankRunRecord("cell"),
+  );
+  const schema = built.match_bank_line.inputSchema;
+  assert.equal(schema.safeParse({ lines: [], entries: [e1b], rationale: "x" }).success, false, "an empty line list never reaches the derivation");
+  assert.equal(schema.safeParse({ lines: [l1b], entries: [], rationale: "x" }).success, false, "nor an empty entry list");
+  assert.equal(schema.safeParse({ lines: [l1b], entries: [e1b], rationale: "x" }).success, true, "the positive control: the schema is genuinely evaluating these");
 });
 
 test("G1B-ALLOC-8b 裁-44 R4 (LOW) — the CAPACITY aggregation is guarded too, not just the line total", async () => {

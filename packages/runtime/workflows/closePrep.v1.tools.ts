@@ -25,6 +25,8 @@ import {
   callCloseVerb,
   closeRefusal,
   countIfAdmitted,
+  newCloseSerialiser,
+  serialiseCloseTools,
   type CloseRunRecord,
 } from "./closePrep.v1.reads.js";
 import { pools, readCloseTaskStatus, type CloseTaskContext, type PgExec } from "./closePrep.v1.infra.js";
@@ -78,16 +80,15 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
 
   /** 裁-44 R4 / FOLD-20(b) — one tool at a time, whatever the provider does. See
    *  bankAgent.v1.tools.ts's own copy for the schedule this closes; this lane shares a mutable
-   *  record too (the read counter, the act counter, closeRunId), so the same hazard applies. */
-  let chain: Promise<unknown> = Promise.resolve();
-  const serial = <T>(body: () => Promise<T>): Promise<T> => {
-    const next = chain.then(body, body);
-    chain = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    return next;
-  };
+   *  record too (the read counter, the act counter, closeRunId), so the same hazard applies.
+   *
+   *  裁-44 R5 / FOLD-23 — AND IT IS NOW APPLIED AT THE BOUNDARY. Ten of the twelve tools below used
+   *  to wrap themselves and two did not; `begin_close` and `propose_close` called `write()`
+   *  directly, so two write executors could overlap each other and the queued reads on ONE record.
+   *  The tools are written PLAIN and serialiseCloseTools wraps every one of them at the return, so
+   *  a thirteenth verb is serialised by existing. Never wrap a body here as well: a serialised body
+   *  that re-enters the queue deadlocks on itself. */
+  const serial = newCloseSerialiser();
 
   const write = async (verb: string, subject: string, sql: string, args: unknown[], rationale: string, opts: { needsCloseRunId?: boolean } = {}) => {
     rec.toolCalls += 1;
@@ -108,8 +109,11 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
     }
   };
 
-  return {
-    ...buildCloseReadTools(ctx, modelId, rec, serial),
+  // 裁-44 R5 / FOLD-23 — THE MAP IS BUILT PLAIN AND SERIALISED AS A WHOLE at the return below.
+  // Every `execute` in what this function hands back is the wrapped function, BEGIN's own
+  // `closeRunId` extraction included — the assignment that used to sit outside the mutex.
+  const plain = {
+    ...buildCloseReadTools(ctx, modelId, rec),
 
     [WRITE_TOOLS.DEPRECIATION]: tool({
       description:
@@ -118,25 +122,25 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         through: z.string().describe("An ISO date (YYYY-MM-DD). A date beyond the book clock is refused, correctly."),
         rationale: RATIONALE,
       }),
-      execute: ({ through, rationale }: { through: string; rationale: string }) => serial(() => write(
+      execute: ({ through, rationale }: { through: string; rationale: string }) => write(
           "wake_run_depreciation_catchup",
           ctx.clientId,
           "select clara.wake_run_depreciation_catchup(p_client => $1, p_through => $2::date, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [ctx.clientId, through],
           rationale,
-        )),
+        ),
     }),
 
     [WRITE_TOOLS.SNAPSHOT_MINT]: tool({
       description: "Mint the month snapshot for a month start date, where one is owed.",
       inputSchema: z.object({ month_start: z.string().describe("An ISO date (YYYY-MM-DD), the first of the month."), rationale: RATIONALE }),
-      execute: ({ month_start, rationale }: { month_start: string; rationale: string }) => serial(() => write(
+      execute: ({ month_start, rationale }: { month_start: string; rationale: string }) => write(
           "wake_mint_month_snapshot",
           ctx.clientId,
           "select clara.wake_mint_month_snapshot(p_client => $1, p_month_start => $2::date, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [ctx.clientId, month_start],
           rationale,
-        )),
+        ),
     }),
 
     [WRITE_TOOLS.OPEN_FY]: tool({
@@ -149,7 +153,7 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         starts_on: z.string().describe("An ISO date (YYYY-MM-DD) — the day after the previous year ends."),
         rationale: RATIONALE,
       }),
-      execute: ({ label, starts_on, rationale }: { label: string; starts_on: string; rationale: string }) => serial(() => write(
+      execute: ({ label, starts_on, rationale }: { label: string; starts_on: string; rationale: string }) => write(
           "wake_open_fiscal_year",
           ctx.clientId,
           // TRANSPOSITION CASE C: p_label and p_rationale are both free-form text and both guards
@@ -159,7 +163,7 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
           "select clara.wake_open_fiscal_year(p_client => $1, p_label => $2, p_starts_on => $3::date, p_rationale => $4, p_model => $5::jsonb, p_op_key => $6) as r",
           [ctx.clientId, label, starts_on],
           rationale,
-        )),
+        ),
     }),
 
     [WRITE_TOOLS.BEGIN]: tool({
@@ -265,7 +269,7 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
         reason: z.string().min(1).max(CLOSE_PROSE_MAX).describe("What made this run un-continuable. Concrete, not apologetic."),
         rationale: RATIONALE,
       }),
-      execute: ({ close_run_id, reason, rationale }: { close_run_id: string; reason: string; rationale: string }) => serial(() => write(
+      execute: ({ close_run_id, reason, rationale }: { close_run_id: string; reason: string; rationale: string }) => write(
           "wake_abandon_close",
           close_run_id,
           // TRANSPOSITION CASE A's sibling: p_reason and p_rationale, adjacent, both prose, both
@@ -273,7 +277,13 @@ export function buildClosePrepTools(ctx: CloseTaskContext, modelId: string, rec:
           "select clara.wake_abandon_close(p_close_run => $1, p_reason => $2, p_rationale => $3, p_model => $4::jsonb, p_op_key => $5) as r",
           [close_run_id, reason],
           rationale,
-        )),
+        ),
     }),
   };
+
+  // 裁-44 R5 / FOLD-23 — THE ONLY PLACE THE MUTEX IS APPLIED, and the reason it is a wall rather
+  // than a convenience: serialiseCloseTools throws on a tool it cannot wrap, so a verb that slipped
+  // past this boundary would fail the build of its own tool set rather than ship unserialised.
+  // G1B-E10-boundary pins every returned execute BY IDENTITY.
+  return serialiseCloseTools(plain, serial);
 }

@@ -24,7 +24,7 @@ import {
   type PgExec,
 } from "./bankAgent.v1.infra.js";
 import { SYSTEM_PROMPT_BANK_AGENT_V1, BANK_AGENT_STEP_BUDGET, type BankAgentOutcome } from "./bankAgent.v1.prompt.js";
-import { beginModelStep, buildBankAgentTools, hadToolActivity, newBankRunRecord } from "./bankAgent.v1.tools.js";
+import { beginModelStep, buildBankAgentTools, hadToolActivity, newBankRunRecord, type BankRunRecord } from "./bankAgent.v1.tools.js";
 import { bankAgentEngineId, recordBankAgentUsage, onUsageProblem } from "./bankAgent.v1.usage.js";
 
 /** STEP 1 — the CAS-and-bind. Returns a plain, non-secret verdict; a false claim is a clean
@@ -115,12 +115,10 @@ export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: strin
   let text = "";
   let usage: { inputTokens?: number; outputTokens?: number } = {};
   try {
-    for await (const part of result.fullStream) {
-      if ((part as { type?: string }).type === "text-delta") {
-        const delta = (part as { text?: string }).text;
-        if (typeof delta === "string") text += delta;
-      }
-    }
+    // 裁-44 R5 / FOLD-24 — the drain is a named function so a cell can feed it a real stream; it
+    // RAISES a terminal `{type:"error"}` part into this catch and counts a non-terminal
+    // `tool-error` without ending the pass.
+    text = await drainBankStream(rec, result.fullStream);
     usage = ((await result.usage) ?? {}) as { inputTokens?: number; outputTokens?: number };
   } catch (err) {
     await recordBankAgentUsage(ctx, bankAgentEngineId(modelId), { durationMs: Date.now() - startedAt }, "error");
@@ -142,9 +140,10 @@ export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: strin
     // observed in attempt one to a settlement written by attempt three — nothing in this process
     // outlives the attempt. The monotonic version is DB-side (a per-task grounding-fault row that
     // writes and settlement both consult) and is booked as G1 PR-2 / the 裁-44 DB pass.
-    if (!hadToolActivity(rec)) throw err;
-    rec.streamFault = true;
-    rec.infraFaults += 1;
+    //
+    // 裁-44 R5 / FOLD-24 — the decision is ONE named function now, shared with the error-part path
+    // that used to bypass this catch entirely. It latches the fault on "settle".
+    if (latchStreamFault(rec) === "retry") throw err;
     console.warn(`[bankAgent_v1] model stream failed after ${rec.toolCalls} tool call(s); settling this attempt rather than retrying clean: ${err instanceof Error ? err.message : String(err)}`);
     return { outcome: classifyBankOutcome(rec, ""), usageTokens: 0 };
   } finally {
@@ -168,6 +167,73 @@ export async function runBankAgentModelStep(ctx: BankTaskContext, modelId: strin
 
   const usageTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
   return { outcome: classifyBankOutcome(rec, text), usageTokens };
+}
+
+/** A stream part's own error, as one non-throwing sentence. Never JSON.stringify: an SDK error
+ *  object may be circular, and a describer that throws inside a failure path hides the failure. */
+function describeStreamError(part: unknown): string {
+  const e = (part as { error?: unknown } | null)?.error;
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  return Object.prototype.toString.call(e);
+}
+
+/**
+ * 裁-44 R5 / FOLD-24 — THE STREAM CAN FAIL WITHOUT THROWING, AND THE TWO FAILURES ARE NOT ONE EVENT.
+ *
+ * FOLD-21 latched a stream failure onto this attempt — but the latch lived in a `catch`, so it ran
+ * only when the ITERATOR rejected or `result.usage` threw. The AI SDK does not always throw:
+ * `streamText`'s full stream carries failures as PARTS, and its documented failed-follow-up path
+ * enqueues an error part and closes WITHOUT a `finish` part. This loop inspected only `text-delta`,
+ * so both kinds were silently discarded and the run fell through to ordinary classification with
+ * `streamFault` unset and no fault counted.
+ *
+ * THE TWO PARTS ARE DIFFERENT EVENTS AND STAY DIFFERENT HERE:
+ *   `tool-error`     — ONE CALL failed. The loop may continue and the model may recover and go on
+ *                      to act. It IS tool activity (the model called something) and it IS an
+ *                      infrastructure fault, but it does not cut the run off — so it must not
+ *                      settle a pass that recovered as `refused/internal`.
+ *   `{type:"error"}` — TERMINAL: the stream is over. It is RAISED here so it lands in the same
+ *                      catch an iterator rejection lands in. One failure path, one decision.
+ * Flattening the two would fail a run that worked; ignoring either is the defect this closes.
+ *
+ * ON DOUBLE-COUNTING, DELIBERATELY: if a tool's own execute threw and the SDK reported it, that
+ * call already incremented `toolCalls` on entry, so this adds a second. Over-counting ACTIVITY can
+ * only ever make this attempt settle its own outcome instead of retrying clean — the fail-closed
+ * half — while under-counting would hand the WDK a retry whose record starts at zero.
+ */
+export async function drainBankStream(rec: BankRunRecord, fullStream: AsyncIterable<unknown>): Promise<string> {
+  let text = "";
+  for await (const part of fullStream) {
+    const type = (part as { type?: unknown } | null)?.type;
+    if (type === "text-delta") {
+      const delta = (part as { text?: string }).text;
+      if (typeof delta === "string") text += delta;
+    } else if (type === "tool-error") {
+      rec.toolCalls += 1;
+      rec.infraFaults += 1;
+      console.warn(`[bankAgent_v1] a tool call failed inside the SDK rather than in this closure: ${describeStreamError(part)}`);
+    } else if (type === "error") {
+      throw new Error(`the model stream ended on an error part: ${describeStreamError(part)}`);
+    }
+  }
+  return text;
+}
+
+/**
+ * WHAT THIS ATTEMPT OWES AFTER A TERMINAL STREAM FAILURE — the ONE decision FOLD-21 and FOLD-24
+ * share, extracted so a cell drives the SHIPPING branch rather than pinning its source text (the
+ * previous round could only pin it, and named that honestly; this round can execute it).
+ *
+ * "retry"  — nothing durable happened, so a rethrow is lawful and the WDK's next attempt is clean.
+ * "settle" — tool activity already happened; the fault is LATCHED ONTO THIS ATTEMPT'S RECORD and
+ *            this attempt settles the task itself. It MUTATES, and that mutation is the point.
+ */
+export function latchStreamFault(rec: BankRunRecord): "retry" | "settle" {
+  if (!hadToolActivity(rec)) return "retry";
+  rec.streamFault = true;
+  rec.infraFaults += 1;
+  return "settle";
 }
 
 /** The N12 signal, PURE so a cell can drive it; the emission lives in the step above. Null when

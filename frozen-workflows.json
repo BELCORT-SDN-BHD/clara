@@ -333,7 +333,7 @@
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.impl.ts": {
-      "sha256": "74e306c55f5d6f1f49e20cb7ee2dedb0707bfeb44767c01b38489015a713e0fd",
+      "sha256": "841972efc072921357eda02e8727473b1fdeeb61f0ca7bfd13bf6172783ae650",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.infra.ts": {
@@ -341,7 +341,7 @@
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.pack.ts": {
-      "sha256": "c0f09cf2268e17baccd528edde9f80a09ef8b5f75fda660b84718b227bc92c28",
+      "sha256": "72240d5794ff332d623b3c9c16b6e3ab03b1d82ac523fe716611949774ab6f0a",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.prompt.ts": {
@@ -349,7 +349,7 @@
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.tools.ts": {
-      "sha256": "29e24f155c2f20fd493855d54aeca139f0912ba9ceb9eec8326f1a2aaa35e127",
+      "sha256": "a9631acb7e7b55236c4b3ce8493180fb30ae68fbf7cca9945d6a98ba3feca07b",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.ts": {
@@ -797,7 +797,7 @@
       "deployed": true
     },
     "packages/runtime/workflows/closePrep.v1.impl.ts": {
-      "sha256": "ef11823f373956cc2fc26c92f2f3fa3a29b8f9c2ba8b54b95d4e7c0aa5ec8b98",
+      "sha256": "b77ac74301a57f3602769015e60339bed0bedae6fe9ff6a74ff4d9d62587d544",
       "note": ""
     },
     "packages/runtime/workflows/closePrep.v1.infra.ts": {
@@ -809,11 +809,11 @@
       "note": ""
     },
     "packages/runtime/workflows/closePrep.v1.reads.ts": {
-      "sha256": "4b76bba8aaae9b00525f6eef5124e69af5cf840c1664ba16f28578371772e231",
+      "sha256": "d4baeadb77b5e1a600487ee02d8b41266fc1b2aca64f1c2fb6f97175a5631f14",
       "note": ""
     },
     "packages/runtime/workflows/closePrep.v1.tools.ts": {
-      "sha256": "d17aed59d79d2b037bd484434b464b2dffade18fb4e8d0e33e7f09eeb04e0873",
+      "sha256": "3cae2cd2777b5d55125afbee7572c209375abf655ba46b7105dbab752336660a",
       "note": ""
     },
     "packages/runtime/workflows/closePrep.v1.ts": {

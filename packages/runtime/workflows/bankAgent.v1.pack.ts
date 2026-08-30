@@ -173,6 +173,67 @@ export function newBankRunRecord(attemptKey: string): BankRunRecord {
   };
 }
 
+/**
+ * 裁-44 R5 / FOLD-23 — SERIALISATION IS A BOUNDARY, NOT A HABIT.
+ *
+ * FOLD-20(b) put a promise-chain mutex in this closure and then applied it AT EVERY CALL SITE. The
+ * fifth review round found the cost of that shape on the sibling lane: ten of closePrep's twelve
+ * tools went through it and two did not, so two write executors could overlap each other and the
+ * queued reads, mutating one record concurrently. The bank lane's four call sites were all covered
+ * — and were one new verb away from the same defect, because "remember to wrap it" is a
+ * convention, and a convention is not a wall.
+ *
+ * SO THE MUTEX IS APPLIED ONCE, TO THE WHOLE MAP. The builder assembles its tools plainly and hands
+ * them here; every `execute` in the returned map is the wrapped function, and an unwrapped tool is
+ * not expressible — a new verb is serialised by existing. A tool with no `execute` throws rather
+ * than passing through unguarded (absence is not evidence).
+ *
+ * NEVER WRAP TWICE. `serial` links each body onto the previous one's settlement, so a serialised
+ * body that itself calls `serial` waits on a chain it is already the head of — a deadlock, not a
+ * double lock. That is why the builders below pass their tools here PLAIN.
+ */
+export type ToolSerialiser = <T>(body: () => Promise<T>) => Promise<T>;
+
+/** Every execute this factory produced. A WeakSet rather than a marker property, because the
+ *  question a cell must be able to ask is "is this THE wrapped function?" — review law 3, spelling
+ *  is not identity: a hand-written execute that merely mentions `serial` can satisfy a source grep
+ *  and cannot satisfy this. */
+const SERIALISED_EXECUTES = new WeakSet<object>();
+
+export function isSerialisedExecute(fn: unknown): boolean {
+  return typeof fn === "function" && SERIALISED_EXECUTES.has(fn as object);
+}
+
+export function serialiseTools<T extends Record<string, unknown>>(tools: T, serial: ToolSerialiser): T {
+  const out: Record<string, unknown> = {};
+  for (const [name, spec] of Object.entries(tools)) {
+    const inner = (spec as { execute?: unknown } | null)?.execute;
+    if (typeof inner !== "function") {
+      throw new Error(`tool ${name} has no execute to serialise — every tool in this closure runs one at a time, and a tool this boundary cannot wrap must not ship`);
+    }
+    const call = inner as (...args: unknown[]) => unknown;
+    const wrapped = (...args: unknown[]): Promise<unknown> => serial(async () => call(...args));
+    SERIALISED_EXECUTES.add(wrapped);
+    out[name] = { ...(spec as Record<string, unknown>), execute: wrapped };
+  }
+  return out as T;
+}
+
+/** The chain itself, built per tool set (per run record) — one queue for reads and writes alike,
+ *  because a read and a write interleaving is the same hazard as two reads. Each body links onto
+ *  the previous one's SETTLEMENT, both branches: a rejection must not break the chain. */
+export function newToolSerialiser(): ToolSerialiser {
+  let chain: Promise<unknown> = Promise.resolve();
+  return <T>(body: () => Promise<T>): Promise<T> => {
+    const next = chain.then(body, body);
+    chain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** An id the DATABASE could have written, lowercased. Anything else is null and fails the parse —

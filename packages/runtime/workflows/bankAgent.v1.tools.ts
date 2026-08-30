@@ -37,8 +37,10 @@ import {
   dbRefusalReason,
   isAdmittedBankReply,
   isDbVerdict,
+  newToolSerialiser,
   readPackView,
   refusal,
+  serialiseTools,
   type BankRunRecord,
   type BankVerb,
 } from "./bankAgent.v1.pack.js";
@@ -55,8 +57,11 @@ export {
   hadToolActivity,
   isAdmittedBankReply,
   isSafeBig,
+  isSerialisedExecute,
   newBankRunRecord,
+  newToolSerialiser,
   readPackView,
+  serialiseTools,
   type BankPackParse,
   type BankPackView,
   type BankReplyVerdict,
@@ -101,7 +106,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
   const prose = (describe: string) => z.string().min(1).max(BANK_PROSE_MAX).describe(describe);
 
   /**
-   * 裁-44 R4 / FOLD-20(b) — ONE TOOL AT A TIME, ENFORCED HERE, whatever the provider does.
+   * 裁-44 R4 / FOLD-20(b) — ONE TOOL AT A TIME, whatever the provider does.
    *
    * The provider is asked not to issue parallel tool calls (FOLD-20(a), in the impl), but a
    * provider setting is a REQUEST, not a wall: it can be defaulted differently, ignored by a
@@ -111,19 +116,13 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
    * task-status round trip; sibling read A clears and re-arms; sibling read B parses malformed and
    * counts a fault WITHOUT clearing A's pack; the write resumes and derives from A's pack.
    *
-   * A PROMISE CHAIN IS THE WHOLE MECHANISM. Each execute links onto the previous one's settlement
-   * (both branches — a rejection must not break the chain), so the bodies run strictly in call
-   * order and the record is only ever touched by one of them.
+   * 裁-44 R5 / FOLD-23 — AND IT IS APPLIED AT THE BOUNDARY, NOT AT THE CALL SITES. This lane's four
+   * sites were each wrapped by hand and were all correct; the sibling lane's twelve were not, and
+   * two write executors could overlap. The tools below are written PLAIN and every one of them is
+   * wrapped in ONE place at the return, so a fifth verb cannot be added unserialised. Never wrap a
+   * body here as well — a serialised body that re-enters the queue deadlocks on itself.
    */
-  let chain: Promise<unknown> = Promise.resolve();
-  const serial = <T>(body: () => Promise<T>): Promise<T> => {
-    const next = chain.then(body, body);
-    chain = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    return next;
-  };
+  const serial = newToolSerialiser();
 
   /** Count a LOCAL refusal — an act the model attempted that never reached the database because
    *  this closure refused it first. It is a refusal, never an infra fault: the fault is the
@@ -215,14 +214,17 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
     return refusal(rec, e);
   };
 
-  return {
+  // 裁-44 R5 / FOLD-23 — THE MAP IS BUILT PLAIN AND SERIALISED AS A WHOLE, one line below. Every
+  // `execute` in what this function returns is the wrapped function; none of the bodies here calls
+  // `serial` itself.
+  const plain = {
     [PACK_TOOL]: tool({
       description:
         "Read the bank pack for this run's bank account: the live statement, its unmatched lines, the candidate approved journal entries, open items and any open proposals. This read is itself receipted. Call it first.",
       inputSchema: z.object({
         rationale: prose("Why you are reading — one plain sentence."),
       }),
-      execute: ({ rationale }: { rationale: string }) => serial(async () => {
+      execute: async ({ rationale }: { rationale: string }) => {
         rec.toolCalls += 1;
         try {
           // A READ CARRIES A COUNTER (S8), AND THE COUNTER CARRIES THE STEP ATTEMPT (FOLD-8).
@@ -269,7 +271,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         } catch (e) {
           return refusal(rec, e);
         }
-      }),
+      },
     }),
 
     [MATCH_TOOL]: tool({
@@ -290,7 +292,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
           .describe("Approved journal entry ids from the pack's `candidates`. Amounts are the database's, not yours."),
         rationale: prose("What ties these together, in plain words a bookkeeper can check."),
       }),
-      execute: ({ lines, entries, rationale }: { lines: string[]; entries: string[]; rationale: string }) => serial(async () => {
+      execute: async ({ lines, entries, rationale }: { lines: string[]; entries: string[]; rationale: string }) => {
         rec.toolCalls += 1;
         const blocked = await guardWrite(lines);
         if (blocked) return blocked;
@@ -337,7 +339,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         } catch (e) {
           return writeRefusal(e);
         }
-      }),
+      },
     }),
 
     [EXCEPTION_TOOL]: tool({
@@ -355,7 +357,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         reason: prose("What is wrong with this line, concretely."),
         rationale: prose("Why an exception rather than a match — name what you ruled out."),
       }),
-      execute: ({ line_id, kind, reason, rationale }: { line_id: string; kind: string; reason: string; rationale: string }) => serial(async () => {
+      execute: async ({ line_id, kind, reason, rationale }: { line_id: string; kind: string; reason: string; rationale: string }) => {
         rec.toolCalls += 1;
         const blocked = await guardWrite([line_id]);
         if (blocked) return blocked;
@@ -381,7 +383,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         } catch (e) {
           return writeRefusal(e);
         }
-      }),
+      },
     }),
 
     [PROMOTION_TOOL]: tool({
@@ -411,12 +413,12 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
           .max(BANK_PROSE_MAX - SIGHTINGS_NOTE_BUDGET)
           .describe("Why this identifier belongs to this counterparty — name what you saw."),
       }),
-      execute: (a: {
+      execute: async (a: {
         counterparty_id: string;
         identifier_kind: string;
         identifier_value: string;
         rationale: string;
-      }) => serial(async () => {
+      }) => {
         rec.toolCalls += 1;
         // NO LINE TO BIND (裁-44 / FOLD-4): a promotion names a counterparty, not a statement line,
         // so the pack's line set has nothing to say about it. The gate still runs — it is what
@@ -467,7 +469,12 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         } catch (e) {
           return writeRefusal(e);
         }
-      }),
+      },
     }),
   };
+
+  // 裁-44 R5 / FOLD-23 — THE ONLY PLACE THE MUTEX IS APPLIED. serialiseTools throws on a tool it
+  // cannot wrap, so this line is the wall rather than a convenience: a fifth verb added above is
+  // serialised by existing, and G1B-E10-boundary pins every returned execute BY IDENTITY.
+  return serialiseTools(plain, serial);
 }
