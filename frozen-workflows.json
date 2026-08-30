@@ -791,6 +791,10 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/clientOnboarding.v4.ts": {
+      "sha256": "7a7338cfaf7cc9978f52f2f365002b28b600d28ea011647a47642ed0864227ad",
+      "note": ""
+    },
     "packages/runtime/workflows/closeExample.v1.ts": {
       "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
       "note": "",
@@ -918,6 +922,10 @@
       "sha256": "437fae6fa821162fe57630f43d4a5a978b927d56822dabb6fd64796209477f77",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/interview.v3.questions.ts": {
+      "sha256": "65209166a631ae7f62e2f5336dfe550773fb66bf6900103204bcecd7de5e8ba5",
+      "note": ""
     },
     "packages/runtime/workflows/invoiceFacts.v1.behavior.mjs": {
       "sha256": "f2d3ef98ed9ce533d04252fd5771e463b017c8b66c77ec70d74a457f534bd7b1",
