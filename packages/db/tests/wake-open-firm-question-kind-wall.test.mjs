@@ -202,22 +202,35 @@ test("kind wall: the refusal fires even on a REPLAY of the same op_key -- there 
 
 // ===========================================================================
 // PART B -- the POSITIVE ROSTER, proven over the EXACT seven-value live vocabulary
-// (Codex FIX-REQUIRED HIGH on #447, ruled 2026-08-30: replace the single-name deny with
-// a positive generic-kind roster; admit exactly the four ladder-derived kinds, refuse
-// the three proposal kinds as door-owned; a future CHECK value fails closed by default).
+// (Codex FIX-REQUIRED HIGH on #447, ruled 2026-08-30 and reaffirmed by the native review's
+// FIND-3, same ruling: replace the single-name deny with a positive generic-kind roster;
+// admit exactly the four ladder-derived kinds, refuse the three proposal kinds as
+// door-owned; a future CHECK value fails closed by default).
 // ===========================================================================
 
 const ADMITTED_KINDS = ["unattributed", "collision", "contradiction", "identity_document"];
 const DOOR_OWNED_KINDS = ["onboarding_proposed", "correction_proposed", "promotion_proposed"];
 
-test("kind wall ROSTER: the exact live seven-value vocabulary splits exactly 4 admit / 3 refuse -- no eighth member exists to leave untested", async (t) => {
+// THE STANDING CLOSED-SET TRIPWIRE (native #447 review: an 8th CHECK value, e.g. a
+// hypothetical `engagement_proposed`, reds ZERO of the estate's 76 relevant cells today --
+// this migration's own roster wall would fail-closed on it AT RUNTIME, correctly, but
+// nothing at CI time forces a human to make the classify-it-or-not decision on purpose.
+// THIS cell is that forcing function: the moment `firm_open_questions_kind_check` gains
+// or loses a member, the list below stops matching the live CHECK and this cell reds --
+// on a genuinely new kind, PostgreSQL's own catalog moved by design (a real migration did
+// its job); this test's job is only to make that landing IMPOSSIBLE to merge silently.
+test("kind wall ROSTER (standing closed-set tripwire): the live seven-value vocabulary is EXACTLY these 4 admitted + 3 door-owned kinds -- if this reds, a migration widened firm_open_questions_kind_check and the NEXT AUTHOR must classify the new kind (add it to ADMITTED_KINDS only if it is a DERIVED ladder verdict with no dedicated proposal door of its own; otherwise add it to DOOR_OWNED_KINDS and this test's own admit/refuse batteries) before merging -- never leave it unclassified, which silently ADMITS it by falling through the `not in (...)` refusal's negative form", async (t) => {
   if (unready(t)) return;
   const def = await rootQuery(
     `select pg_get_constraintdef(oid) as def from pg_constraint
       where conrelid='clara.firm_open_questions'::regclass and conname='firm_open_questions_kind_check'`);
   const live = [...def.rows[0].def.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]);
   assert.deepEqual([...live].sort(), [...ADMITTED_KINDS, ...DOOR_OWNED_KINDS].sort(),
-    "the live CHECK vocabulary is EXACTLY these seven values -- if a migration ever adds an eighth, this assertion reds and names the gap instead of silently under-testing it");
+    "the live CHECK vocabulary no longer matches this file's own closed-set roster -- " +
+    "STOP: classify the new/removed kind in ADMITTED_KINDS or DOOR_OWNED_KINDS above " +
+    "(and extend wake_open_firm_question's own roster check in the migration if it is " +
+    "newly admitted) before merging; do not widen this assertion to silence it without " +
+    "making that classification decision explicitly, in the same PR");
 });
 
 for (const kind of ADMITTED_KINDS) {

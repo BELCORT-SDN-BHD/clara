@@ -25,13 +25,18 @@
 --   * the firm-narrow CLR28 egress authorization -- live, admissible-purpose, bound to
 --     THIS document's sha256 and the 'attribution' moment (0143:563-576) -- and its
 --     consumption (0143:578-579);
---   * 裁-22's basis resolution machinery is Door 1's, not Door 2's -- Door 2 carries no
---     basis resolution of its own to bypass; this file's header text above therefore
---     narrows to the two Door-2 protections that are actually Door 2's: A14 + CLR28.
---     (PROGRESS's own phrasing bundles a third clause that belongs to Door 1's page;
---     re-read against the live bodies here rather than restated uncritically -- review
---     law 2, absence/derivation is not evidence, cuts the other way here too: a body
---     that isn't there cannot be "bypassed".)
+--   * 裁-22's basis resolution -- CORRECTED (fold review FIND-1, native #447 review,
+--     ruled 2026-08-30): an EARLIER draft of this file claimed Door 2 "carries no basis
+--     resolution of its own to bypass", reasoning from 0142's PRE-裁-22 body (review law
+--     2/3's own trap, caught by the review rather than by this file's own first draft --
+--     spelling is not identity, and neither is an older migration's text). MEASURED
+--     against the LIVE body: 0143's own CREATE OR REPLACE (0143:630) calls
+--     `clara._resolve_proposal_basis(array[p_document], w.firm_id, p_basis)` inside
+--     wake_propose_client_onboarding itself -- Door 2 DOES resolve its own basis, DB-side,
+--     against the triggering document's real citations, and this generic verb's
+--     caller-supplied p_candidates (accepted with NO resolution at all) bypasses that
+--     too. PROGRESS 3a's original three-clause finding stands as originally written:
+--     A14 + CLR28 + 裁-22 basis resolution, all three genuinely Door 2's own.
 -- So a wake credential that can call wake_open_firm_question at all (clara_wake_filing,
 -- the same role Door 2 grants) can open an 'onboarding_proposed' question on ANY
 -- document in its firm with an ARBITRARY proposed name and candidates, no name-family
@@ -57,8 +62,11 @@
 -- clara._agent_file_document_core's own case dispatch) -- and refuses every other live
 -- vocabulary member as door-owned:
 --   * onboarding_proposed -- clara.wake_propose_client_onboarding (Door 2)'s own kind,
---     PROGRESS 3a's original finding (the A14 name-family wall + firm-narrow CLR28
---     egress authorization this generic verb cannot see);
+--     PROGRESS 3a's original three-clause finding, restored (fold FIND-1): the A14
+--     name-family wall, the firm-narrow CLR28 egress authorization, and 裁-22's own
+--     basis resolution (0143:630, `_resolve_proposal_basis(array[p_document],
+--     w.firm_id, p_basis)`, called inside Door 2 itself) -- none of which this generic
+--     verb runs;
 --   * correction_proposed -- the wrong-client-correction proposal's own kind (0126:1926),
 --     which authorises off a real, resolved destination-attribution judgement
 --     (`client_resolutions... method in ('human','rule','judgement')`) this verb never
@@ -420,6 +428,6 @@ $blk$;
     end if;
   end;
 
-  raise notice 'wake_open_firm_question_kind_wall tail: OK -- wake_open_firm_question resolves at exactly ONE overload, SECURITY DEFINER + pinned search_path + clara_fn_owner-owned, its ACL and its REACHABILITY (measured through has_function_privilege, not an ACL string) both byte/set-unchanged at clara_wake_filing exclusively; every prior wall string (credential/op_key/rationale/model/receipt-first) survives verbatim; the new refusal (CLR10/door_owned_kind on p_kind=''onboarding_proposed'') is present and positioned strictly BEFORE the op-key reservation, so a refused attempt settles no receipt; clara.wake_propose_client_onboarding (Door 2) is untouched and still carries its own body check, A14 name-family wall and CLR28 egress authorization -- the honest recourse this refusal points a caller toward; firm_open_questions_kind_check is unmoved at its exact 7-value text (this is a verb-side refusal, not a vocabulary change). No table in workflow/graphile_worker/spike touched.';
+  raise notice 'wake_open_firm_question_kind_wall tail: OK -- wake_open_firm_question resolves at exactly ONE overload, SECURITY DEFINER + pinned search_path + clara_fn_owner-owned, its ACL and its REACHABILITY (measured through has_function_privilege, not an ACL string) both byte/set-unchanged at clara_wake_filing exclusively; every prior wall string (credential/op_key/rationale/model/receipt-first, incl. the four restored not_a_ladder_run provenance comment lines) survives verbatim; the new POSITIVE ROSTER refusal (CLR10/door_owned_kind, admitting EXACTLY unattributed/collision/contradiction/identity_document and refusing onboarding_proposed/correction_proposed/promotion_proposed, NULL, and any unrostered spelling) is present, byte-parity-proven against the pinned preimage outside its own splice, and positioned strictly BEFORE the op-key reservation, so a refused attempt settles no receipt; clara.wake_propose_client_onboarding (Door 2) is untouched and still carries its own body check, the A14 name-family wall, the firm-narrow CLR28 egress authorization AND 裁-22''s own basis resolution -- the honest recourse this refusal points a caller toward; firm_open_questions_kind_check is unmoved at its exact 7-value text (this is a verb-side refusal, not a vocabulary change). No table in workflow/graphile_worker/spike touched.';
 end
 $tail$;
