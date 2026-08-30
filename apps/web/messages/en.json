@@ -1238,9 +1238,17 @@
     "subjectMismatch": "This browser is signed in as a different account. Sign out first, then open your invite link again.",
     "setPasswordTitle": "Set your password",
     "setPasswordDescription": "Your invite is confirmed. Choose a password to finish setting up your account.",
+    "nameLabel": "Your name",
     "passwordLabel": "Password",
     "submit": "Continue",
-    "submitting": "Saving…"
+    "submitting": "Saving…",
+    "refusalTitle": "Your invitation could not be completed",
+    "linkIncompleteTitle": "This invite link is incomplete",
+    "linkIncompleteDescription": "It's missing the part that identifies your invitation, so it can't be used here. If you've already finished setting up your account, sign in from the login page. Otherwise, ask whoever invited you to send a new link.",
+    "linkIncompleteSignIn": "Go to sign in",
+    "unconfirmedTitle": "Your account is set up",
+    "unconfirmedDescription": "Your invitation went through, but we couldn't confirm your access to the firm just now. Check again, or sign in from the login page.",
+    "unconfirmedRetry": "Check again"
   },
   "CloseLifecycle": {},
   "OpeningCarryDown": {

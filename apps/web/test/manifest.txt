@@ -24,6 +24,9 @@
 #
 # Blank lines and lines starting with # are ignored by both scripts above.
 
+components/invite-accept-a11y.test.tsx
+components/invite-accept-form.test.tsx
+components/invite-accept-keyboard.test.tsx
 components/bank/bank-a11y.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
@@ -133,6 +136,7 @@ lib/firm/use-review-queue.test.ts
 lib/firm-admin/chat-sharing.test.ts
 lib/firm-admin/compliance.test.ts
 lib/firm-admin/vendor-bindings.test.ts
+lib/identity/doors.test.ts
 lib/journals/api-compose.test.ts
 lib/journals/api.test.ts
 lib/journals/balance.test.ts
