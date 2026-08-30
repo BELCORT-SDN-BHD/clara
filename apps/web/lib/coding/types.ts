@@ -190,7 +190,8 @@ export type OpenQuestionDetail = { question: OpenQuestionRow; rule: CodingRuleRo
 // card (components/parts/PartRenderer.tsx) rather than a rich card hydrating
 // get_sweep_run/acknowledge_sweep_run. OWNER-RULED (裁-20,
 // docs/plan/active/mohe-grill-rulings-2026-08-28.md:268-272): that upgrade
-// ships inside the P6 four-part wire bump (chatTurn_v15), no separate train.
+// ships inside the P6 four-part wire bump (chatTurn_v16 — TRUED 2026-08-30, was
+// v15; v15 shipped 2026-08-29 for the unrelated F-A6 PR-2), no separate train.
 // RECORDED SCOPE NOTE (rung 0, port-wave plan §7.0): the queue-altitude
 // sweep panel this train owes (components/firm/sweep-status-panel.tsx)
 // renders the STATE the review-queue envelope already carries, honestly,

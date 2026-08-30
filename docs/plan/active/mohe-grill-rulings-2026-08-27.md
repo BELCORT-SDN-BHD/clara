@@ -66,7 +66,12 @@ adversarially-verified alignment scan of `clarabook-frontend` PR #1 vs clara @ `
    `agent_receipt` (generic, reads `agent_receipts_visible`) · `firm_question`
    (resolve/dismiss doors) · `close_proposal` · `freeform_result`. Live/working state renders
    at the SSE layer (AG-UI shape borrowed, no dependency), NOT as a persisted part type.
-   Catalog total: 18 live + 4 new = 22. The generative-UI stack is layered: **AI SDK carries
+   Catalog total: 18 live + 4 new = 22. **[TRUED 2026-08-30, ruling preserved as written:
+   `chatTurn_v15` shipped 2026-08-29 for the unrelated F-A6 PR-2 freeform read and is now
+   consumed+frozen, so this Q8 bump lands as `chatTurn_v16`; MBB-4 also found the catalog
+   baseline already at 22 (the `chatTurn_v14` receipt kinds were already live on the wire), so
+   the delta this bump completes is 22 → 26, not 18 → 22.]** The generative-UI stack is
+   layered: **AI SDK carries
    the parts (wire) · shadcn + ClaraBook tokens dress the cards (visual) · our registered
    catalog + tsc guard + hydrate-never-trust hooks govern them (mechanism)`; model-authored
    markup (streamUI-style) is forbidden.**

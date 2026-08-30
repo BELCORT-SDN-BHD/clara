@@ -14,8 +14,10 @@
 // file joined the union. They are NOT the Q8 four — that bump is still owed and
 // still lands on top of these, taking the catalog to 26. The v14 four were
 // already ON THE WIRE and rendering as the "Unsupported part" warning chip,
-// because the LIVE registry is `chatTurn: chatTurn_v14`
-// (packages/runtime/workflows/registry.ts:54) and its wire union is
+// because the registry was `chatTurn: chatTurn_v14` at the time this count was
+// taken (registry.ts:54); TRUED 2026-08-30 — the LIVE registry is now
+// `chatTurn: chatTurn_v15` (registry.ts:61, F-A6 PR-2, 2026-08-29), which adds
+// no new part kind, so the count and the wire union below are unaffected. Its wire union is
 //   ClaraPartV14 = ClaraPart | EntryPostedPart | QuestionOpenedPart
 //                | BankActPart | BankPackPart
 // (packages/runtime/workflows/chatTurn.v14.prompt.ts:27). Declaring them here

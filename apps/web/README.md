@@ -311,9 +311,10 @@ workbench here, contradicting the real workbenches those routes mount):
 - The **P4 firm-admin UI tranche** — firm creation, staff invite/roster, capabilities and
   the metering rollup. The design of record is merged (#376) and the DB half is live
   (`0141`, `0145`); the web build has not started.
-- The **P6 polish + cutover wave** — the `chatTurn_v15` wire bump's four Q8 part kinds
-  (裁-20), the WCAG 2.2 SC 2.5.8 target-size gate (裁-13), the Clara mascot (裁-14), the
-  R3 focus-ring recut, and the cutover PR that retires `apps/dashboard`.
+- The **P6 polish + cutover wave** — the `chatTurn_v16` wire bump's four Q8 part kinds
+  (裁-20; TRUED 2026-08-30, was `v15` — `v15` shipped 2026-08-29 for the unrelated F-A6 PR-2
+  and is consumed+frozen), the WCAG 2.2 SC 2.5.8 target-size gate (裁-13), the Clara mascot
+  (裁-14), the R3 focus-ring recut, and the cutover PR that retires `apps/dashboard`.
 - **⌘K "Do"** — still a statically disabled row (see `lib/command/routes.ts` for Go, which
   is live and mechanically checked by `lib/command/routes.test.ts`).
 
