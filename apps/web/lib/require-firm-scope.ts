@@ -321,6 +321,16 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
       "agent actor, on their own authority.",
   },
   {
+    path: "app/(entry)/auth/confirm/page.tsx",
+    url: "/auth/confirm",
+    public: true,
+    reason:
+      "The email link must render before a session exists, and its GET is " +
+      "deliberately paint-only so mail scanners cannot consume the token. The " +
+      "explicit button POST exchanges a hard-coded email token and redirects to " +
+      "the fixed /signup route; there is no firm-scoped read to guard here.",
+  },
+  {
     path: "app/(entry)/pending/page.tsx",
     url: "/pending",
     reason:
@@ -345,10 +355,10 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
   {
     path: "app/(entry)/layout.tsx",
     reason:
-      "The (entry) group's own layout, wrapping all four pre-firm faces: login, " +
-      "signup, invite-accept and the holding page. It is a THIRD sibling group to " +
-      "(firm) and (full), deliberately outside the spine — three of its four leaves " +
-      "run with no session at all and the fourth is the holding state, so a check " +
+      "The (entry) group's own layout, wrapping all five pre-firm faces: login, " +
+      "signup, email-confirm, invite-accept and the holding page. It is a THIRD sibling group to " +
+      "(firm) and (full), deliberately outside the spine — four of its five leaves " +
+      "can run with no session at all and the fifth is the holding state, so a check " +
       "here would refuse or loop every caller the group exists to serve. It renders " +
       "chrome only: the identity-canvas ground, the brand lockup and the 裁-2 4a " +
       "card shadow. It reads nothing and calls no door.",
@@ -388,6 +398,15 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
       "no firm-scoped data at all, and its own walls are the ones that matter " +
       "there: an exact same-origin proof (Origin + Sec-Fetch-Site, both " +
       "fail-closed) and POST-only.",
+  },
+  {
+    path: "app/(entry)/auth/confirm/verify/route.ts",
+    reason:
+      "EXEMPT BY NECESSITY. PUBLIC AUTH EXCHANGE. This POST runs before firm membership exists and " +
+      "returns no firm data. Its own boundary is the single-use Supabase token: " +
+      "the handler hard-codes type=email, ignores caller redirects, requires a " +
+      "positive matching session, seals the cookie response, and redirects only " +
+      "to fixed entry URLs. A firm-scope check would refuse every new signup.",
   },
   {
     path: "app/api/invite/route.ts",

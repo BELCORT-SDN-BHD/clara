@@ -25,7 +25,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -146,7 +145,7 @@ export interface InviteAuthClient {
  *     segment and leaves /invite/:token byte-identical. ***
  *  2. `updateUser({ password })` — once verification has produced a session
  *     for a PROVEN subject, the invited person sets the password they will
- *     sign in with afterwards (app/login).
+ *     sign in with afterwards (`app/(entry)/login/page.tsx`).
  *  3. `clara.accept_invite(p_token, p_display_name, p_op_key)` — ADDED BY
  *     P4-1. See below: without it the whole journey completes nothing.
  *
@@ -428,7 +427,7 @@ export function InviteAcceptForm({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>{t("linkIncompleteTitle")}</CardTitle>
+          <h1 className="text-base font-semibold">{t("linkIncompleteTitle")}</h1>
           <CardDescription>{t("linkIncompleteDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -447,7 +446,7 @@ export function InviteAcceptForm({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>{t("confirmTitle")}</CardTitle>
+          <h1 className="text-base font-semibold">{t("confirmTitle")}</h1>
           <CardDescription>{t("confirmDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -467,7 +466,7 @@ export function InviteAcceptForm({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>{t("verifyingTitle")}</CardTitle>
+          <h1 className="text-base font-semibold">{t("verifyingTitle")}</h1>
           <CardDescription>{t("verifyingDescription")}</CardDescription>
         </CardHeader>
       </Card>
@@ -478,7 +477,7 @@ export function InviteAcceptForm({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>{t("errorTitle")}</CardTitle>
+          <h1 className="text-base font-semibold">{t("errorTitle")}</h1>
           <CardDescription>{t("errorDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -497,7 +496,7 @@ export function InviteAcceptForm({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>{t("unconfirmedTitle")}</CardTitle>
+          <h1 className="text-base font-semibold">{t("unconfirmedTitle")}</h1>
           <CardDescription>{t("unconfirmedDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -518,7 +517,7 @@ export function InviteAcceptForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t("setPasswordTitle")}</CardTitle>
+        <h1 className="text-base font-semibold">{t("setPasswordTitle")}</h1>
         <CardDescription>{t("setPasswordDescription")}</CardDescription>
       </CardHeader>
       <CardContent>

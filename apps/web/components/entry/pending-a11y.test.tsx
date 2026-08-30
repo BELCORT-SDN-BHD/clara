@@ -64,7 +64,7 @@ const STATES: { state: HoldingState; distinctive: RegExp }[] = [
   { state: { kind: "rejected", firmName: "ROME PROPERTIES", reason: "the firm name matches an existing member firm" }, distinctive: /the firm name matches an existing member firm/ },
   { state: { kind: "rejected", firmName: "ROME PROPERTIES", reason: null }, distinctive: /No reason was recorded/ },
   { state: { kind: "approved", firmName: "ROME PROPERTIES" }, distinctive: /Your registration was accepted/ },
-  { state: { kind: "invite-expected" }, distinctive: /not in a firm yet/ },
+  { state: { kind: "invite-expected" }, distinctive: /No registration request was found/ },
   { state: { kind: "unidentified" }, distinctive: /couldn't confirm who you are/ },
   { state: { kind: "read-failed" }, distinctive: /couldn't read your registration/ },
 ];
@@ -110,7 +110,7 @@ test("THE HEADING IS REAL — no synthetic h1 is propping these scans up", async
     for (let i = 0; i < 2; i++) await h.settle();
     const h1 = findIn(h.container as never, (n) => n.tagName === "H1");
     assert.ok(h1, "the holding card renders no <h1> of its own");
-    assert.match(textOf(h1 as never), /not in a firm yet/);
+    assert.match(textOf(h1 as never), /No registration request was found/);
   } finally {
     await h.unmount();
   }

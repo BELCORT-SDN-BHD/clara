@@ -326,7 +326,7 @@ export const PAIR_SPECS = [
   // introduces. A cream focus row here would assert a composition that does not
   // ship. P6-3 lands the 70% recut and its six composited rows together.
   { id: "foreground-on-identity-canvas", fg: (h) => h("foreground"), bg: (h) => h("identity-canvas"), threshold: 4.5,
-    source: "the default body text of every card and every prose line on the four (entry) faces, wherever it is drawn on the group's ground rather than inside the white card — app/(entry)/layout.tsx (bg-identity-canvas)" },
+    source: "the default body text of every card and every prose line on the five (entry) faces, wherever it is drawn on the group's ground rather than inside the white card — app/(entry)/layout.tsx (bg-identity-canvas)" },
   { id: "brand-on-identity-canvas", fg: (h) => h("brand"), bg: (h) => h("identity-canvas"), threshold: 4.5,
     source: "components/entry/brand-lockup.tsx — the wordmark (font-serif text-brand) sitting directly on the canvas above the card, the ONE element on these pages drawn on the ground with no card between" },
   { id: "secondary-ink-on-identity-canvas", fg: (h) => h("secondary-ink"), bg: (h) => h("identity-canvas"), threshold: 4.5,

@@ -4,19 +4,14 @@
 // a11y gates, and sits squarely in P4-3's blast radius: this train moves its
 // route into the `(entry)` group, grounds it on the identity canvas and adds the
 // 裁-57 sign-up link to it. Registering it is P4-3's order, and it is the last
-// unscanned surface on the four entry faces.
+// unscanned surface on the entry faces.
 //
 // Both of its states are scanned — the resting form and the sign-in failure,
 // which renders Supabase's own message verbatim in a `StateBanner`.
 //
-// THE SYNTHETIC <h1>, AND WHY IT IS HONEST HERE. Unlike the signup and holding
-// faces (which carry their own real `<h1>`), `LoginForm` is P2's component and
-// its title is a `CardTitle` div; the page heading belongs to the route. P4-3
-// does not restructure another train's component to suit a scan. So this file
-// follows `components/invite-accept-a11y.test.tsx`'s established idiom — wrap in
-// an `<h1>` so `heading-order` is scanned against a realistic document — and
-// then closes the masking hazard the idiom carries with an explicit second cell:
-// the scan is ALSO run bare, so a violation cannot be hidden by the wrapper.
+// The real `(entry)` layout and `LoginForm` composition is rendered here. The
+// form owns its actual `<h1>`; the test supplies no synthetic heading that could
+// conceal a missing page title.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -30,6 +25,7 @@ import { enableDomInspection } from "../test/domInspect";
 import { checkAccessibility } from "../test/a11yRules";
 import messages from "../messages/en.json";
 import { LoginForm, type LoginAuthClient } from "./login-form";
+import EntryLayout from "../app/(entry)/layout";
 
 enableDomInspection();
 
@@ -53,10 +49,7 @@ const authClient = (error: { message: string } | null): (() => LoginAuthClient) 
  *  harness supplies it: `LoginForm` reads `useSearchParams()` on the success
  *  path, and outside that context the hook returns NULL and the handler throws
  *  on `.get`. Without it these scans would pass only by never reaching the line. */
-function App(node: ReactElement, withHeading: boolean) {
-  const children = withHeading
-    ? [createElement("h1", { key: "h" }, "Sign in"), node]
-    : [node];
+function App(node: ReactElement) {
   return createElement(NextIntlClientProvider, {
     locale: "en",
     messages,
@@ -70,7 +63,7 @@ function App(node: ReactElement, withHeading: boolean) {
             replace: () => {}, refresh: () => {}, push: () => {}, back: () => {}, forward: () => {}, prefetch: () => {},
           } as never,
         },
-        createElement("div", null, ...children),
+        createElement(EntryLayout, null, node),
       ),
     ),
   });
@@ -89,7 +82,7 @@ const byLabelledInput = (label: RegExp) => (n: Node) =>
 
 test("the sign-in form has zero a11y violations", async () => {
   const h = await renderComponent(
-    App(createElement(LoginForm, { createSupabaseClient: authClient(null) }), true),
+    App(createElement(LoginForm, { createSupabaseClient: authClient(null) })),
   );
   try {
     for (let i = 0; i < 3; i++) await h.settle();
@@ -103,22 +96,20 @@ test("the sign-in form has zero a11y violations", async () => {
   }
 });
 
-test("VACUITY CONTROL: the scan is clean BARE too — the synthetic h1 hides nothing", async () => {
+test("N4: the actual entry-layout/login composition owns exactly one h1", async () => {
   // The masking hazard of the wrapper idiom, closed by measurement rather than
   // by argument. If the `<h1>` were papering over a real violation, this cell
   // reds. (It also documents what is true: LoginForm renders no heading of its
   // own, which is P2's shape and not something this train silently changes.)
   const h = await renderComponent(
-    App(createElement(LoginForm, { createSupabaseClient: authClient(null) }), false),
+    App(createElement(LoginForm, { createSupabaseClient: authClient(null) })),
   );
   try {
     for (let i = 0; i < 3; i++) await h.settle();
     assert.deepEqual(checkAccessibility(h.container as never), []);
-    assert.equal(
-      findIn(h.container as never, (n) => n.tagName === "H1"),
-      null,
-      "LoginForm now renders its own h1 — retire the synthetic wrapper above",
-    );
+    const headings = (h.container as unknown as { querySelectorAll(selector: string): unknown[] })
+      .querySelectorAll("h1");
+    assert.equal(headings.length, 1, "the composed login document must own exactly one h1");
   } finally {
     await h.unmount();
   }
@@ -131,7 +122,6 @@ test("the SIGN-IN FAILURE state has zero a11y violations", async () => {
   const h = await renderComponent(
     App(
       createElement(LoginForm, { createSupabaseClient: authClient({ message: "Invalid login credentials" }) }),
-      true,
     ),
   );
   try {
@@ -167,7 +157,7 @@ test("裁-57 — the sign-up link renders, is a real link, and points at /signup
   // rendered, and would "pass" a link pointing nowhere. Same idiom as
   // components/clara/onboarding-begin-keyboard.test.tsx.
   const h = await renderComponent(
-    App(createElement(LoginForm, { createSupabaseClient: authClient(null) }), true),
+    App(createElement(LoginForm, { createSupabaseClient: authClient(null) })),
   );
   try {
     for (let i = 0; i < 3; i++) await h.settle();

@@ -169,6 +169,7 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     for (const expected of [
       "app/(entry)/login/page.tsx",
       "app/(entry)/signup/page.tsx",
+      "app/(entry)/auth/confirm/page.tsx",
       "app/(entry)/pending/page.tsx",
       "app/(entry)/invite/[token]/page.tsx",
       "app/logout/route.ts",
@@ -203,6 +204,7 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     assert.equal(byFile.get("app/(entry)/login/page.tsx"), "/login");
     assert.equal(byFile.get("app/(entry)/invite/[token]/page.tsx"), "/invite/[token]");
     assert.equal(byFile.get("app/(entry)/signup/page.tsx"), "/signup");
+    assert.equal(byFile.get("app/(entry)/auth/confirm/page.tsx"), "/auth/confirm");
     assert.equal(byFile.get("app/(entry)/pending/page.tsx"), "/pending");
 
     // And the pre-move paths are GONE — a leftover copy at the old path would
@@ -224,15 +226,16 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     );
   });
 
-  it("the four (entry) leaves classify, and /pending is NOT public", () => {
-    // The census's "EVERY leaf classifies" cell would also pass if all four were
+  it("the five (entry) pages classify, and /pending is NOT public", () => {
+    // The census's "EVERY leaf classifies" cell would also pass if all five were
     // registered wrongly-but-consistently, so the CLASS of each is pinned by
-    // name here. All four are pages under a group whose layout is not an
+    // name here. All five are pages under a group whose layout is not an
     // entrance, so none can be ancestor-covered: each needs its own registry
     // row, and each has one.
     for (const file of [
       "app/(entry)/login/page.tsx",
       "app/(entry)/signup/page.tsx",
+      "app/(entry)/auth/confirm/page.tsx",
       "app/(entry)/pending/page.tsx",
       "app/(entry)/invite/[token]/page.tsx",
     ]) {
@@ -240,7 +243,7 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
       assert.equal(ancestorCovered(file), false, `${file} claims an entrance ancestor it does not have`);
     }
 
-    // THE ONE ASYMMETRY THAT MATTERS. Three of the four are public — they run
+    // THE ONE ASYMMETRY THAT MATTERS. Four of the five are public — they run
     // with no session at all. /pending is NOT: it requires a session and merely
     // does not require a firm (design §4 E). If it ever gained `public: true`
     // the cross-check against PUBLIC_PATH_PREFIXES would force /pending into
@@ -249,6 +252,7 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     const entry = (p: string) => SCOPE_UNSCOPED_SURFACES.find((s) => s.path === p);
     assert.equal(entry("app/(entry)/login/page.tsx")?.public, true);
     assert.equal(entry("app/(entry)/signup/page.tsx")?.public, true);
+    assert.equal(entry("app/(entry)/auth/confirm/page.tsx")?.public, true);
     assert.equal(entry("app/(entry)/invite/[token]/page.tsx")?.public, true);
     assert.equal(
       entry("app/(entry)/pending/page.tsx")?.public,
@@ -260,14 +264,16 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
   it("no (entry) surface calls the spine — the self-redirect loop /pending would be", () => {
     // requireFirmScope() sends a no-firm caller to HOLDING_ROUTE, which IS
     // /pending. A check on that page redirects it to itself forever, and a check
-    // in the group's layout does the same to all four faces while also refusing
-    // every caller who has no session yet — which is three of the four by
+    // in the group's layout does the same to all five faces while also refusing
+    // every caller who has no session yet — which is four of the five by
     // design. The registry says these are unscoped; this cell proves the files
     // agree with the registry.
     for (const file of [
       "app/(entry)/layout.tsx",
       "app/(entry)/login/page.tsx",
       "app/(entry)/signup/page.tsx",
+      "app/(entry)/auth/confirm/page.tsx",
+      "app/(entry)/auth/confirm/verify/route.ts",
       "app/(entry)/pending/page.tsx",
       "app/(entry)/invite/[token]/page.tsx",
     ]) {
@@ -655,9 +661,13 @@ describe("HIGH-1 — the guard dominates the proxy, and owns the outbound identi
 });
 
 describe("the deliberate exemptions stay exempt", () => {
-  it("the registry names both, each with a substantial reason", () => {
+  it("the registry names every exemption, each with a substantial reason", () => {
     const paths = SCOPE_EXEMPT_SURFACES.map((e) => e.path).sort();
-    assert.deepEqual(paths, ["app/api/invite/route.ts", "app/logout/route.ts"]);
+    assert.deepEqual(paths, [
+      "app/(entry)/auth/confirm/verify/route.ts",
+      "app/api/invite/route.ts",
+      "app/logout/route.ts",
+    ]);
     for (const entry of SCOPE_EXEMPT_SURFACES) {
       assert.ok(entry.reason.length >= 120, `${entry.path}'s reason is too thin to survive a later lane`);
       assert.match(entry.reason, /EXEMPT (BY NECESSITY|ON PRINCIPLE)/);

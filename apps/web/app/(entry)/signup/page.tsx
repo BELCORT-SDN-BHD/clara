@@ -1,7 +1,6 @@
 import { getTranslations } from "next-intl/server";
 
-import { SignupAccountForm } from "@/components/entry/signup-account-form";
-import { SignupFirmForm } from "@/components/entry/signup-firm-form";
+import { SignupStep } from "@/components/entry/signup-step";
 import { resolveServerSession } from "@/lib/supabase/server-session";
 
 export async function generateMetadata() {
@@ -28,8 +27,8 @@ export async function generateMetadata() {
  * reachable:
  *
  *   no session  → `SignupAccountForm`  — supabase.auth.signUp, then "check your
- *                                        email". The confirmation link returns
- *                                        the person to this same URL.
+ *                                        email". The link opens /auth/confirm;
+ *                                        an explicit POST returns to this URL.
  *   session     → `SignupFirmForm`     — claim_identity, then
  *                                        request_firm_registration, then
  *                                        /pending.
@@ -54,6 +53,5 @@ export async function generateMetadata() {
  * is the authority on, and it would have to guess where to send them.
  */
 export default async function SignupPage() {
-  const session = await resolveServerSession();
-  return session === null ? <SignupAccountForm /> : <SignupFirmForm />;
+  return <SignupStep session={await resolveServerSession()} />;
 }

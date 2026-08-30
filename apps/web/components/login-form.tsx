@@ -13,7 +13,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,7 +25,8 @@ import { StateBanner } from "@/components/common/state";
  * It read: "Invite-only (docs/plan/active/frontend-handoff-2026-08-23.md §0.4)
  * — there is deliberately no 'create an account' link or self-serve signup
  * route anywhere in this app; an account exists only once someone accepts an
- * invite (app/invite/[token])." The handoff citation stands, unamended, and the
+ * invite (`app/(entry)/invite/[token]/page.tsx`)." The handoff citation stands,
+ * unamended, and the
  * sentence was true of every tip before this one. It is kept here rather than
  * deleted because deleting it would erase why the link below was once
  * deliberately absent — which is exactly what makes a later reader re-litigate
@@ -129,7 +129,7 @@ export function LoginForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t("title")}</CardTitle>
+        <h1 className="text-base font-semibold">{t("title")}</h1>
         <CardDescription>{t("description")}</CardDescription>
       </CardHeader>
       <CardContent>

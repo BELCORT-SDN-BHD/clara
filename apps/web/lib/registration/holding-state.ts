@@ -56,6 +56,7 @@ import type {
   RegistrationRequestRow,
 } from "./reads";
 import type { OwnRegistrationResult } from "./server-reads";
+import type { CallerContextDenial } from "@/lib/identity/doors";
 
 export type HoldingState =
   /** An open request. `firmName` is the DB's, verbatim. */
@@ -73,8 +74,12 @@ export type HoldingState =
   /** The read did not succeed. Fail-closed, and NOT emptiness. */
   | {
       readonly kind: "read-failed";
-      readonly reason?: "malformed" | "wrong_subject" | "read_error";
+      readonly reason?: CallerContextDenial | "read_error";
     };
+
+/** The page redirects on a positively observed membership; the other six
+ * decisions are renderable holding states. */
+export type HoldingDecision = HoldingState | { readonly kind: "member" };
 
 /** Runtime decoder for ALL TEN columns declared by
  * `REGISTRATION_REQUESTS_SELECT`. A typed `getRows<T>` call does not validate
@@ -115,8 +120,19 @@ export function isRegistrationRequestRow(
 export function holdingStateFrom(
   result: OwnRegistrationResult,
   verifiedSubject: string | null = result.ok ? result.subject : null,
-): HoldingState {
+): HoldingDecision {
   if (!result.ok) return { kind: "unidentified" };
+  const context: unknown = result.context;
+  if (typeof context !== "object" || context === null || !("ok" in context)) {
+    return { kind: "read-failed", reason: "malformed" };
+  }
+  if (context.ok === true) return { kind: "member" };
+  if (context.ok !== false || !("reason" in context) || typeof context.reason !== "string") {
+    return { kind: "read-failed", reason: "malformed" };
+  }
+  if (context.reason !== "no_membership") {
+    return { kind: "read-failed", reason: context.reason as CallerContextDenial };
+  }
   const newest = result.rows[0];
   if (newest === undefined) return { kind: "invite-expected" };
   if (!isRegistrationRequestRow(newest)) {

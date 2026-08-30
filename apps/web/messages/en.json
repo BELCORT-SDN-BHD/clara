@@ -1113,6 +1113,9 @@
     "checkEmailDescription": "Your account exists, but it isn't active until you confirm it.",
     "checkEmailBanner": "We've sent you a confirmation link. Open it and you'll come straight back here to name your firm.",
     "checkEmailSignIn": "Already confirmed? <link>Sign in</link>.",
+    "configurationErrorTitle": "Sign-up is not configured safely",
+    "configurationErrorDescription": "Your account was created without the required email-confirmation step.",
+    "configurationErrorBanner": "Sign-up confirmation is not enforced on this project. Firm registration is blocked until the hosted Supabase setting is corrected.",
     "firmTitle": "Tell us about your firm",
     "firmDescription": "Your email is confirmed. Two things left, and then you're done.",
     "nameLabel": "Your name",
@@ -1123,6 +1126,16 @@
     "firmSubmitting": "Registering…",
     "refusalTitle": "This registration was refused",
     "unknownFailure": "The registration didn't complete, and no reason came back. Nothing was saved."
+  },
+  "ConfirmEmail": {
+    "metaTitle": "Confirm your email",
+    "title": "Confirm your email",
+    "description": "This confirmation changes your account, so Clara waits for your explicit click.",
+    "submit": "Confirm my email",
+    "missingTitle": "This confirmation link is incomplete",
+    "missingDescription": "No confirmation token was present, so nothing was changed.",
+    "invalidTitle": "This email could not be confirmed",
+    "invalidDescription": "The confirmation token was invalid, expired, or already used. No firm-registration step was opened."
   },
   "Pending": {
     "metaTitle": "Your registration",
@@ -1143,9 +1156,9 @@
       "banner": "Sign out and sign back in. If you still land here afterwards, whoever set your firm up will need to add you to it."
     },
     "invite-expected": {
-      "title": "You're signed in, but not in a firm yet",
-      "description": "Nothing is wrong. This account simply isn't attached to a firm.",
-      "banner": "If someone is inviting you to their firm, open the link they sent you — it will bring you in. If you meant to start your own firm, sign out and create it from the sign-up page."
+      "title": "No registration request was found",
+      "description": "We read your registration history and found no request to show.",
+      "banner": "If you expected a registration request here, check that you signed in with the same email address you used to apply."
     },
     "unidentified": {
       "title": "We couldn't confirm who you are",

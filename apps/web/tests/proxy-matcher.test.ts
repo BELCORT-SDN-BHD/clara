@@ -57,6 +57,8 @@ describe("the proxy gate runs on every protected route", () => {
     "/login",
     "/invite/some-token-hash",
     "/signup",
+    "/auth/confirm?token_hash=example",
+    "/auth/confirm/verify",
     // NOT public — it needs a session — but still MATCHED, so the proxy runs
     // and redirects an unauthenticated caller to /login.
     "/pending",
@@ -113,13 +115,15 @@ describe("only real framework/static namespaces are exempt", () => {
  * matches the declared prefixes against `SCOPE_UNSCOPED_SURFACES`'s `public`
  * entries both ways, so a page cannot be public here and unregistered there.
  */
-describe("P4-3 — /signup is public, and the holding route deliberately is not", () => {
-  it("all three public entries resolve public, exactly and as ancestors", () => {
+describe("P4-3 — signup confirmation is public, and the holding route deliberately is not", () => {
+  it("all public entries resolve public, exactly and as ancestors", () => {
     for (const pathname of [
       "/login",
       "/invite",
       "/invite/some-token-hash",
       "/signup",
+      "/auth/confirm",
+      "/auth/confirm/verify",
     ]) {
       assert.equal(isPublicPath(pathname), true, `${pathname} must be public`);
     }
@@ -156,12 +160,14 @@ describe("P4-3 — /signup is public, and the holding route deliberately is not"
       "/signup-old",
       "/loginx",
       "/invitees",
+      "/auth/confirmation",
       "/pendingx",
     ]) {
       assert.equal(isPublicPath(pathname), false, `${pathname} must NOT be public`);
     }
     // …while a genuine child segment IS public.
     assert.equal(isPublicPath("/signup/step-2"), true);
+    assert.equal(isPublicPath("/auth/confirm/verify"), true);
   });
 
   it("VACUITY CONTROL: the predicate is a real function that can answer BOTH ways", () => {

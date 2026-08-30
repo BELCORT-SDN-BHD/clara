@@ -15,6 +15,7 @@ import messages from "../../messages/en.json";
 import { enableDomInspection } from "../../test/domInspect";
 import { renderComponent } from "../../test/hookHarness";
 import type { HoldingState } from "../../lib/registration/holding-state";
+import { EmailConfirmationCard } from "./email-confirmation-card";
 import { HoldingCard } from "./holding-card";
 import { SignupAccountForm, type SignupAuthClient } from "./signup-account-form";
 import { SignupFirmForm } from "./signup-firm-form";
@@ -95,7 +96,7 @@ const HOLDING_STATES: HoldingState[] = [
   { kind: "read-failed", reason: "read_error" },
 ];
 
-test("MED-1: none of the four entry faces renders a literal i18n key", async () => {
+test("MED-1: none of the five entry faces renders a literal i18n key", async () => {
   const faces: Array<{ name: string; node: ReactElement }> = [
     {
       name: "invite",
@@ -114,6 +115,12 @@ test("MED-1: none of the four entry faces renders a literal i18n key", async () 
       node: createElement(SignupAccountForm, { createSupabaseClient: signupClient }),
     },
     { name: "signup firm step", node: createElement(SignupFirmForm) },
+    {
+      name: "email confirmation",
+      node: createElement(EmailConfirmationCard, {
+        state: { kind: "ready", tokenHash: "token-hash" },
+      }),
+    },
     ...HOLDING_STATES.map((state) => ({
       name: `pending/${state.kind}`,
       node: createElement(HoldingCard, { state }),
@@ -144,6 +151,7 @@ test("MED-1 vacuity control: the literal-key detector catches the review mutant"
 });
 
 const TRANSLATION_SOURCES = {
+  ConfirmEmail: ["components/entry/email-confirmation-card.tsx"],
   Signup: [
     "components/entry/signup-account-form.tsx",
     "components/entry/signup-firm-form.tsx",
@@ -193,14 +201,15 @@ function valueAt(catalogue: unknown, dotted: string): unknown {
   }, catalogue);
 }
 
-for (const namespace of ["Signup", "Pending"] as const) {
+for (const namespace of ["ConfirmEmail", "Signup", "Pending"] as const) {
   test(`MED-1: every ${namespace} key read by the entry components exists and is nonblank`, () => {
     const literal = TRANSLATION_SOURCES[namespace].flatMap(literalTranslationReads);
     const dynamic = namespace === "Pending"
       ? HOLDING_KINDS.flatMap((kind) => [`${kind}.title`, `${kind}.description`])
       : [];
     const keys = [...new Set([...literal, ...dynamic])];
-    assert.ok(keys.length >= (namespace === "Signup" ? 20 : 18), `${namespace}: too few reads were found`);
+    const minimum = namespace === "Signup" ? 20 : namespace === "Pending" ? 18 : 7;
+    assert.ok(keys.length >= minimum, `${namespace}: too few reads were found`);
     const catalogue = messages[namespace];
     for (const key of keys) {
       const value = valueAt(catalogue, key);
@@ -247,10 +256,25 @@ test("LOW-2: every backticked source path cited by an entry module resolves", ()
 
 test("MED-3/LOW-3: the deploy obligations cover signup redirect and both password surfaces", () => {
   const readme = readFileSync(join(WEB_ROOT, "README.md"), "utf8");
-  assert.match(readme, /### 4\.[\s\S]*<origin>\/signup[\s\S]*no wildcard/i);
+  assert.match(readme, /### 4\.[\s\S]*<origin>\/auth\/confirm[\s\S]*no wildcard/i);
   assert.match(readme, /### 4\.[\s\S]*\*\*Configure:\*\*[\s\S]*\*\*Verify \(receipt\):\*\*[\s\S]*\*\*Residual/i);
-  assert.match(readme, /### 4\.[\s\S]*Confirm\s+Email[\s\S]*PRD §8/i);
+  assert.match(readme, /### 4\.[\s\S]*Confirm\s+Email[\s\S]*PRD (?:§\s*|Section\s+)8/i);
+  assert.match(readme, /\{\{ \.SiteURL \}\}\/auth\/confirm\?token_hash=\{\{ \.TokenHash \}\}&type=email/);
+  assert.match(readme, /disable_signup[\s\S]*false[\s\S]*mailer_autoconfirm[\s\S]*false/i);
   assert.match(readme, /components\/invite-accept-form\.tsx[\s\S]*components\/entry\/signup-account-form\.tsx/);
+});
+
+test("N6: live entry prose names only the moved route-group paths", () => {
+  const files = [
+    "README.md",
+    "components/invite-accept-form.tsx",
+    "lib/identity/doors.ts",
+  ];
+  for (const file of files) {
+    const source = readFileSync(join(WEB_ROOT, file), "utf8");
+    assert.doesNotMatch(source, /`?app\/login\b/);
+    assert.doesNotMatch(source, /`?app\/invite\/\[token\]/);
+  }
 });
 
 test("LOW-4: the DPA checkbox is described as a client gate, never as the security wall", () => {

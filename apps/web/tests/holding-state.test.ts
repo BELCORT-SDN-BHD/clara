@@ -3,10 +3,12 @@ import { describe, it } from "node:test";
 
 import {
   holdingStateFrom,
+  type HoldingDecision,
   type HoldingState,
 } from "../lib/registration/holding-state";
 import type { RegistrationRequestRow } from "../lib/registration/reads";
 import type { OwnRegistrationResult } from "../lib/registration/server-reads";
+import type { CallerContextOutcome } from "../lib/identity/doors";
 
 /**
  * THE HOLDING STATE's DECISION (design §4 E) — every branch driven directly.
@@ -40,11 +42,30 @@ const ROW = (over: Partial<RegistrationRequestRow> = {}): RegistrationRequestRow
 
 const SUBJECT = "22222222-2222-2222-2222-222222222222";
 
-const ok = (rows: RegistrationRequestRow[]): OwnRegistrationResult => ({
+const NO_MEMBERSHIP: CallerContextOutcome = { ok: false, reason: "no_membership" };
+
+const ok = (
+  rows: RegistrationRequestRow[],
+  context: CallerContextOutcome = NO_MEMBERSHIP,
+): OwnRegistrationResult =>
+  ({
+    ok: true,
+    subject: SUBJECT,
+    rows,
+    context,
+  }) as unknown as OwnRegistrationResult;
+
+const MEMBER_CONTEXT: CallerContextOutcome = {
   ok: true,
-  subject: SUBJECT,
-  rows,
-});
+  context: {
+    user_id: SUBJECT,
+    firm_id: "33333333-3333-3333-3333-333333333333",
+    firm_name: "BELCORT",
+    role: "owner",
+    role_rank: 40,
+    is_operator: true,
+  },
+};
 
 describe("holdingStateFrom — the six renderings, one per observable fact", () => {
   it("an OPEN row is `pending`, carrying the DB's own firm name", () => {
@@ -113,7 +134,7 @@ describe("holdingStateFrom — the six renderings, one per observable fact", () 
     // Absence is not evidence: without this cell, a mapper that could never
     // produce (say) `approved` would still pass every cell above that does not
     // exercise it. This enumerates the reachable set and pins its size.
-    const reached = new Set<HoldingState["kind"]>([
+    const reached = new Set([
       holdingStateFrom(ok([ROW({ status: "open" })])).kind,
       holdingStateFrom(ok([ROW({ status: "rejected" })])).kind,
       holdingStateFrom(ok([ROW({ status: "approved" })])).kind,
@@ -161,6 +182,33 @@ describe("the NEWEST row decides — decided rows accumulate", () => {
     // still answer from rows[0], proving it never looked at the timestamps.
     const state = holdingStateFrom(ok([OLDER_REJECTED, NEWEST_OPEN]));
     assert.equal(state.kind, "rejected", "the function re-sorted by created_at instead of trusting the read");
+  });
+});
+
+describe("N3: membership evidence outranks registration history", () => {
+  it("a proved firm member with ZERO requests leaves /pending", () => {
+    assert.deepEqual(holdingStateFrom(ok([], MEMBER_CONTEXT)), { kind: "member" });
+  });
+
+  it("a proved firm member with a historical request still leaves /pending", () => {
+    assert.deepEqual(
+      holdingStateFrom(ok([ROW({ status: "rejected", reason: "historical" })], MEMBER_CONTEXT)),
+      { kind: "member" },
+    );
+  });
+
+  it("an ambiguous membership fails closed instead of reporting a request", () => {
+    assert.deepEqual(
+      holdingStateFrom(ok([ROW()], { ok: false, reason: "ambiguous" })),
+      { kind: "read-failed", reason: "ambiguous" },
+    );
+  });
+
+  it("a malformed membership fails closed instead of deriving no membership", () => {
+    assert.deepEqual(
+      holdingStateFrom(ok([], { ok: false, reason: "malformed" })),
+      { kind: "read-failed", reason: "malformed" },
+    );
   });
 });
 
@@ -216,7 +264,7 @@ describe("MED-4: hydrated rows are validated and bound to the verified subject",
 
 describe("RED-BEFORE — each mutant is measured to give a DIFFERENT answer", () => {
   /** MUTANT A: the fail-closed collapse — `!result.ok` treated as emptiness. */
-  const collapseUnidentified = (r: OwnRegistrationResult): HoldingState =>
+  const collapseUnidentified = (r: OwnRegistrationResult): HoldingDecision =>
     !r.ok ? { kind: "invite-expected" } : holdingStateFrom(r);
 
   /** MUTANT B: an unknown status guessed as pending instead of refused. */
@@ -230,13 +278,13 @@ describe("RED-BEFORE — each mutant is measured to give a DIFFERENT answer", ()
   };
 
   /** MUTANT C: `approved` folded into `invite-expected`. */
-  const foldApproved = (r: OwnRegistrationResult): HoldingState => {
+  const foldApproved = (r: OwnRegistrationResult): HoldingDecision => {
     const real = holdingStateFrom(r);
     return real.kind === "approved" ? { kind: "invite-expected" } : real;
   };
 
   /** MUTANT D: a fabricated reason where the DB recorded none. */
-  const inventReason = (r: OwnRegistrationResult): HoldingState => {
+  const inventReason = (r: OwnRegistrationResult): HoldingDecision => {
     const real = holdingStateFrom(r);
     return real.kind === "rejected" && real.reason === null
       ? { ...real, reason: "Your application did not meet our criteria." }
@@ -244,7 +292,7 @@ describe("RED-BEFORE — each mutant is measured to give a DIFFERENT answer", ()
   };
 
   /** MUTANT E: scan for an open row anywhere instead of taking the newest. */
-  const scanForOpen = (r: OwnRegistrationResult): HoldingState => {
+  const scanForOpen = (r: OwnRegistrationResult): HoldingDecision => {
     if (!r.ok) return { kind: "unidentified" };
     const open = (r.rows as readonly RegistrationRequestRow[]).find(
       (x) => x.status === "open",

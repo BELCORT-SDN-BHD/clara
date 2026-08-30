@@ -14,9 +14,9 @@ import {
  * testable independent of the file Next.js requires at the app root.
  *
  * Gate: EVERY route is protected EXCEPT /login, /invite/:token (the
- * invite-accept flow, which must work before a session exists) and /signup
- * (the tier-3 self-serve registration face, which by definition runs before
- * an account exists at all), plus the framework/static paths the exported
+ * invite-accept flow), /signup (the tier-3 self-serve registration face), and
+ * /auth/confirm (the explicit email-token exchange). Each must work before a
+ * session exists, alongside the framework/static paths the exported
  * `config.matcher` below already excludes. There is no public marketing root
  * in this app — "/" is the firm-altitude home and is gated like everything
  * else (docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3; §0.4 of the
@@ -59,7 +59,7 @@ import {
  *    away and the browser kept a stale, half-dead session.
  */
 
-const PUBLIC_PATH_PREFIXES = ["/login", "/invite", "/signup"];
+const PUBLIC_PATH_PREFIXES = ["/login", "/invite", "/signup", "/auth/confirm"];
 
 /**
  * EXPORTED so `tests/proxy-matcher.test.ts` drives THIS function rather than a
@@ -151,10 +151,13 @@ export async function updateSession(request: NextRequest) {
   // redirect (findings 1 and 12). lib/supabase/response-state.ts.
   applyAuthState(response, queued);
 
-  // The invite link's `token_hash` is a single-use bearer capability sitting
-  // in the URL (review finding 9). `no-referrer` keeps it out of the
-  // `Referer` header of every asset and API request the invite page makes.
-  if (request.nextUrl.pathname.startsWith("/invite")) {
+  // Invite and signup-confirmation token hashes are single-use bearer
+  // capabilities sitting in the URL. `no-referrer` keeps them out of the
+  // `Referer` header of every asset and API request either page makes.
+  if (
+    request.nextUrl.pathname.startsWith("/invite") ||
+    request.nextUrl.pathname.startsWith("/auth/confirm")
+  ) {
     response.headers.set("Referrer-Policy", "no-referrer");
   }
 

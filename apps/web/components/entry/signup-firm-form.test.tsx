@@ -283,3 +283,66 @@ test("op_keys: STABLE across a retry of the same attempt, FRESH after an edit", 
     },
   );
 });
+
+test("N5: a lost registration response replays the SAME second-door op_key before navigating", async () => {
+  const router: Router = { replaced: [] };
+  let registrationCommitted = false;
+  let registrationAttempts = 0;
+
+  await withEstate(
+    (fn) => {
+      if (fn === "claim_identity") {
+        return jsonResponse({ user_id: "u1", display_name: "Aisyah Rahman" });
+      }
+      registrationAttempts += 1;
+      if (registrationAttempts === 1) {
+        // The DB commit happened; only its HTTP response was lost.
+        registrationCommitted = true;
+        throw new Error("response lost after registration commit");
+      }
+      assert.equal(registrationCommitted, true, "the retry ran before the first registration committed");
+      return jsonResponse({ request_id: "r1", status: "open", replayed: true });
+    },
+    async (calls) => {
+      const h = await mounted(router);
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        await fillAndSubmit(h);
+
+        assert.deepEqual(
+          calls.map((call) => call.fn),
+          ["claim_identity", "request_firm_registration"],
+        );
+        const firstRegistrationKey = calls[1]!.body.p_op_key;
+        assert.deepEqual(router.replaced, [], "the lost response navigated before a replay answered");
+
+        const form = findIn(h.container as never, (node) => node.tagName === "FORM");
+        assert.ok(form, "the retry form disappeared after the lost response");
+        await h.fireEvent(form as never, "submit");
+        for (let i = 0; i < 8; i++) await h.settle();
+
+        assert.deepEqual(
+          calls.map((call) => call.fn),
+          [
+            "claim_identity",
+            "request_firm_registration",
+            "claim_identity",
+            "request_firm_registration",
+          ],
+        );
+        assert.equal(
+          calls[3]!.body.p_op_key,
+          firstRegistrationKey,
+          "the second door re-minted its op_key after the response was lost",
+        );
+        assert.deepEqual(
+          router.replaced,
+          ["/pending"],
+          "navigation did not wait for the replay response",
+        );
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});

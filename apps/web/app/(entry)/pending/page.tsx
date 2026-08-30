@@ -1,7 +1,8 @@
 import { getTranslations } from "next-intl/server";
+import { redirect } from "next/navigation";
 
 import { HoldingCard } from "@/components/entry/holding-card";
-import { holdingStateFrom, type HoldingState } from "@/lib/registration/holding-state";
+import { holdingStateFrom, type HoldingDecision } from "@/lib/registration/holding-state";
 import { loadOwnRegistrationRequests } from "@/lib/registration/server-reads";
 
 export async function generateMetadata() {
@@ -34,7 +35,7 @@ export async function generateMetadata() {
  * the caller's own registration.
  *
  * ===========================================================================
- * THE READ, AND THE THREE OUTCOMES IT CAN HAVE
+ * THE READ, AND THE POSITIVE MEMBERSHIP FORK
  * ===========================================================================
  * `loadOwnRegistrationRequests` is SELF-scoped twice over: the view's own
  * `applicant = clara.jwt_sub()` predicate, plus an explicit applicant filter on
@@ -43,7 +44,12 @@ export async function generateMetadata() {
  * read would receive the whole estate's queue (`lib/registration/reads.ts`'s
  * header). No firm-scoped data crosses this page at all.
  *
- * The read can succeed, report an unverifiable caller, or THROW. The throw is
+ * Alongside the SELF-scope registration read, this page positively reads the
+ * caller-context projection. A proved member leaves the holding route; an
+ * ambiguous or malformed membership fails closed. Only a positively observed
+ * `no_membership` denial permits registration history to choose the card.
+ *
+ * The registration read can succeed, report an unverifiable caller, or THROW. The throw is
  * caught here — and this is not a swallowed guard: nothing on this page decides
  * authority, so there is no denial to lose. What the catch buys is the order
  * §0.5 rule that loading, empty and error stay three distinguishable states. An
@@ -57,12 +63,13 @@ export async function generateMetadata() {
  * each, rather than being reachable only through a live request scope.
  */
 export default async function PendingPage() {
-  let state: HoldingState;
+  let state: HoldingDecision;
   try {
     const result = await loadOwnRegistrationRequests();
     state = holdingStateFrom(result, result.ok ? result.subject : null);
   } catch {
     state = { kind: "read-failed", reason: "read_error" };
   }
+  if (state.kind === "member") redirect("/");
   return <HoldingCard state={state} />;
 }

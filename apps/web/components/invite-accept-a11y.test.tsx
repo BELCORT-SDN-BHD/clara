@@ -1,7 +1,7 @@
 // GATE (b) — structural a11y scan of the invite-accept surface.
 //
 // THIS SURFACE HAD NEVER BEEN IN EITHER SCAN before P4-1, despite being the
-// ONLY admission path into the app (no self-serve signup route exists) — so
+// original admission path into the app (self-serve signup now also exists) — so
 // every one of its six states is scanned here, not just the happy one. The
 // two P4-1 adds (the display-name field and the refusal banner) are exactly
 // the kind of thing an unscanned surface accumulates.
@@ -22,6 +22,7 @@ import { checkAccessibility } from "../test/a11yRules";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../lib/session-accessor";
 import messages from "../messages/en.json";
 import { InviteAcceptForm, type InviteAuthClient } from "./invite-accept-form";
+import EntryLayout from "../app/(entry)/layout";
 
 enableDomInspection();
 
@@ -81,7 +82,7 @@ function App(form: ReactElement) {
     children: createElement(
       AppRouterContext.Provider as never,
       { value: { replace: () => {}, refresh: () => {}, push: () => {}, back: () => {}, forward: () => {}, prefetch: () => {} } as never },
-      createElement("div", null, createElement("h1", null, "Invite"), form),
+      createElement(EntryLayout, null, form),
     ),
   });
 }
@@ -138,6 +139,9 @@ test("the click-gate state has zero a11y violations", async () => {
     try {
       for (let i = 0; i < 3; i++) await h.settle();
       assert.match(textOf(h.container as never), /Accept your invitation/, "the gate must have rendered");
+      const headings = (h.container as unknown as { querySelectorAll(selector: string): unknown[] })
+        .querySelectorAll("h1");
+      assert.equal(headings.length, 1, "the composed invite document must own exactly one h1");
       assert.deepEqual(checkAccessibility(h.container as never), []);
     } finally {
       await h.unmount();

@@ -16,7 +16,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import { StateBanner } from "@/components/common/state";
-import { SignupFirmForm } from "./signup-firm-form";
 
 /**
  * SIGNUP, STEP 1 OF 2 — create the Supabase account (design §4 A step 1).
@@ -37,8 +36,9 @@ import { SignupFirmForm } from "./signup-firm-form";
  * clicks the link in their inbox.
  *
  * So the journey is: this form creates the account and stops honestly at "check
- * your email". The confirmation link brings the person BACK to /signup, now
- * holding a session, and `SignupFirmForm` runs steps 2 and 3. Collapsing the two
+ * your email". The link opens `/auth/confirm`, whose inert GET waits for an
+ * explicit button POST; successful verification then returns to /signup with a
+ * cookie session, and `SignupFirmForm` runs steps 2 and 3. Collapsing the two
  * into one screen is not a polish decision that was skipped — it is not
  * expressible, and a form that appeared to do it would be reporting success for
  * doors it never called. That is the exact defect P4-1 repaired one route over.
@@ -111,7 +111,7 @@ export interface SignupAuthClient {
   };
 }
 
-type Stage = "form" | "submitting" | "check-email" | "firm";
+type Stage = "form" | "submitting" | "check-email" | "configuration-error";
 
 // NOTE the absence of a `= {}` default on the parameter itself. React always
 // passes a props object, and defaulting the whole parameter widens the inferred
@@ -157,7 +157,9 @@ export function SignupAccountForm({
         // handler only ever runs in a browser, but reading `window` without
         // the guard would make the module hostile to any future server render.
         emailRedirectTo:
-          typeof window === "undefined" ? undefined : `${window.location.origin}/signup`,
+          typeof window === "undefined"
+            ? undefined
+            : `${window.location.origin}/auth/confirm`,
       },
     });
 
@@ -173,14 +175,14 @@ export function SignupAccountForm({
     // Branch on Supabase's TWO documented success shapes, not merely `user`.
     // With confirmation ON the detector is exactly `data.user &&
     // !data.session`; only that shape may promise an email. With auto-confirm
-    // both values exist, so the caller already holds what step 2 needs and must
-    // see the firm form rather than a confirmation message that is false.
+    // both values exist, proving the project is misconfigured; fail closed
+    // instead of opening the firm step under an unenforced confirmation policy.
     if (data?.user && !data.session) {
       setStage("check-email");
       return;
     }
     if (data?.user && data.session) {
-      setStage("firm");
+      setStage("configuration-error");
       return;
     }
 
@@ -190,7 +192,19 @@ export function SignupAccountForm({
     setStage("form");
   }
 
-  if (stage === "firm") return <SignupFirmForm />;
+  if (stage === "configuration-error") {
+    return (
+      <Card>
+        <CardHeader>
+          <h1 className="text-base font-semibold">{t("configurationErrorTitle")}</h1>
+          <CardDescription>{t("configurationErrorDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <StateBanner tone="error">{t("configurationErrorBanner")}</StateBanner>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (stage === "check-email") {
     return (

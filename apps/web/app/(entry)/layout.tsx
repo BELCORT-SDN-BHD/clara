@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import { BrandLockup } from "@/components/entry/brand-lockup";
 
 /**
- * THE (entry) ROUTE GROUP — the four faces a person meets before they are inside
- * a firm: /login, /signup, /invite/:token and /pending.
+ * THE (entry) ROUTE GROUP — the five faces a person meets before they are inside
+ * a firm: /login, /signup, /invite/:token, /auth/confirm and /pending.
  *
  * WHY A GROUP AND NOT A PATH SEGMENT. A Next.js route group contributes NO URL
  * segment, so /login and /invite/:token keep byte-identical URLs across P4-3's
@@ -14,8 +14,8 @@ import { BrandLockup } from "@/components/entry/brand-lockup";
  * no `?next=` value `lib/supabase/proxy.ts` writes had to change.
  *
  * THIS LAYOUT DOES NOT CALL `requireFirmScope()`, AND MUST NOT (P4-2's spine,
- * `lib/require-firm-scope.ts`). Three of the four faces run with NO session at
- * all, and the fourth — /pending — is the holding state for a session that has a
+ * `lib/require-firm-scope.ts`). Four of the five faces can run with NO session at
+ * all, and the fifth — /pending — is the holding state for a session that has a
  * user but no firm: gating it on firm scope would redirect it to itself forever.
  * The registry in `lib/require-firm-scope.ts` names each of these leaves and its
  * reason, and the census suite reds if one of them ever starts calling the spine.
@@ -29,7 +29,7 @@ import { BrandLockup } from "@/components/entry/brand-lockup";
  * `shadow-lg` plus `Card`'s own `ring-1 ring-foreground/10` hairline — both
  * decorative, neither identifying, so neither faces the contrast gate.
  *
- * The shadow is applied HERE, to the card slot, rather than in each of the four
+ * The shadow is applied HERE, to the card slot, rather than in each of the five
  * faces: `LoginForm` and `InviteAcceptForm` are P2/P4-1's files and this train
  * only MOVES their routes. Reaching into them to add a class would be this train
  * editing another lane's component to achieve a layout effect that belongs to the
@@ -40,7 +40,7 @@ export default function EntryLayout({ children }: { children: ReactNode }) {
     <main
       className={[
         "flex min-h-dvh flex-col items-center justify-center gap-6 bg-identity-canvas p-6",
-        // The 裁-2 4a card edge, applied to every `Card` any of the four faces
+        // The 裁-2 4a card edge, applied to every `Card` any of the five faces
         // renders — `data-slot="card"` is components/ui/card.tsx's own marker.
         "[&_[data-slot=card]]:shadow-lg",
       ].join(" ")}

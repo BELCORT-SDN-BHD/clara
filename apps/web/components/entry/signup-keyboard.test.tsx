@@ -185,7 +185,7 @@ test("THE ACCOUNT STEP IS KEYBOARD-OPERABLE, and the DPA gate is a REAL wall", a
   });
 });
 
-test("MED-2: emailRedirectTo is the exact origin /signup URL and ignores the query string", async () => {
+test("N1: emailRedirectTo is the exact origin /auth/confirm URL and ignores the query string", async () => {
   type SignupCredentials = Parameters<SignupAuthClient["auth"]["signUp"]>[0];
   let captured: SignupCredentials | null = null;
   const client: () => SignupAuthClient = () => ({
@@ -212,7 +212,7 @@ test("MED-2: emailRedirectTo is the exact origin /signup URL and ignores the que
         await submitAcceptedAccount(h);
         assert.equal(
           captured?.options?.emailRedirectTo,
-          "https://app.clarabook.example/signup",
+          "https://app.clarabook.example/auth/confirm",
           "the confirmation target was sourced from caller-controlled query input",
         );
         assert.doesNotMatch(captured?.options?.emailRedirectTo ?? "", /evil\.example/);
@@ -228,7 +228,7 @@ test("MED-2: emailRedirectTo is the exact origin /signup URL and ignores the que
   }
 });
 
-test("LOW-1: Supabase's auto-confirm {user, session} shape opens the firm step", async () => {
+test("N2: Supabase's auto-confirm {user, session} shape refuses the misconfigured project", async () => {
   const client: () => SignupAuthClient = () => ({
     auth: {
       signUp: async () => ({
@@ -245,7 +245,12 @@ test("LOW-1: Supabase's auto-confirm {user, session} shape opens the firm step",
       for (let i = 0; i < 3; i++) await h.settle();
       await submitAcceptedAccount(h);
       const text = textOf(h.container as never);
-      assert.match(text, /Tell us about your firm/, "the auto-confirmed session did not reach step 2");
+      assert.match(
+        text,
+        /sign-up confirmation is not enforced on this project/i,
+        "the auto-confirmed session did not produce the configuration refusal",
+      );
+      assert.doesNotMatch(text, /Tell us about your firm/, "the misconfigured project reached step 2");
       assert.doesNotMatch(text, /Confirm your email/, "the auto-confirm shape was mislabelled as confirmation-required");
     } finally {
       await h.unmount();
