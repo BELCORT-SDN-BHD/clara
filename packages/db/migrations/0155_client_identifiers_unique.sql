@@ -1,10 +1,11 @@
--- UNNUMBERED_client_identifiers_unique.sql -- OWNER RULING 裁-41 (2026-08-30,
+-- 0155_client_identifiers_unique.sql -- OWNER RULING 裁-41 (2026-08-30,
 -- docs/plan/active/mohe-grill-rulings-2026-08-29.md): clara.client_identifiers gains a UNIQUE
--- over (client_id, kind, value_normalized) before beta. NUMBER IS CLAIMED AT MERGE, not here
--- (standing law, AGENTS.md constraint 10 + .claude/rules/db-migrations.md) -- 0149..0154 were
--- held by sibling lanes at authoring time, so this file was rig-replayed as 0155 against a
--- chain whose frontier is 0148_promotion_dup_open_wall. The conductor renumbers at merge; the
--- number is comment-only and the body is number-independent.
+-- over (client_id, kind, value_normalized) before beta. NUMBER 0155 CLAIMED AT MERGE PREP
+-- 2026-08-30 (standing law, AGENTS.md constraint 10 + .claude/rules/db-migrations.md) --
+-- authored as UNNUMBERED_client_identifiers_unique.sql while 0149..0154 were held by sibling
+-- lanes, rig-replayed as 0155 at the 0148, 0151 and 0154 frontiers (pre-image shas measured
+-- unmoved at each), reviewed CLEAR by an independent as-built lane at bd2225f5. The number is
+-- comment-only and the body is number-independent.
 --
 -- =====================================================================================
 -- THE GAP THIS FILE CLOSES -- MEASURED AT THE LIVE BODIES, NOT ASSUMED

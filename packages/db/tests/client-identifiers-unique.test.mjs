@@ -2,7 +2,7 @@
 // (client_id, kind, value_normalized), and both direct writers gain the narrow
 // unique_violation -> typed-refusal map.
 //
-// Migration: packages/db/migrations/UNNUMBERED_client_identifiers_unique.sql (numbered at merge).
+// Migration: packages/db/migrations/0155_client_identifiers_unique.sql (authored UNNUMBERED; 0155 claimed at merge prep 2026-08-30).
 // Ground: docs/plan/active/mohe-grill-rulings-2026-08-29.md 裁-41; the gap it closes is the
 // CONFIRM-side race that 0148_promotion_dup_open_wall's partial unique deliberately leaves open
 // (settling a card frees the slot, so a second card can legally open and be confirmed).
