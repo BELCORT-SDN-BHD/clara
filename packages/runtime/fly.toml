@@ -46,9 +46,10 @@ primary_region = "sin"
   # taxonomy HALT, cold storage, or the second consecutive warm storage-write failure.
   # This is a FULL-SERVICE gate on ONE non-HA machine: Fly holds chat, turns, SSE,
   # interviews, uploads and reports together when any hard gate is red.
-  # The 60s grace exceeds the eager probe's 3s default deadline and leaves cold-start
-  # runway on shared-cpu-1x; clamd signature loading has already OOM-killed the 1 GB VM.
-  # Raise this grace before deploy if CLARA_STORAGE_PROBE_TIMEOUT_MS is raised above 3000.
+  # The 60s grace delays the first check; it never bypasses /ready or routes before a pass.
+  # It exceeds the eager probe's 3s default deadline, but full shared-cpu-1x + clamd startup
+  # remains unmeasured: measure boot-to-first-pass at the first deploy and tune from evidence.
+  # Re-evaluate this grace before raising CLARA_STORAGE_PROBE_TIMEOUT_MS above 3000.
   [[http_service.checks]]
     interval = "15s"
     timeout = "5s"

@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { StorageError } from "../lib/storage.mjs";
-import { readinessHasHardFailure } from "../lib/readiness-policy.mjs";
+import { readinessHasHardFailure, storageWriteHardFailureReason } from "../lib/readiness-policy.mjs";
 import {
   _currentProbeForTest,
   _probeStorageOnceForTest,
@@ -198,10 +198,39 @@ test("readiness policy: absent or malformed storage_write verdicts fail closed",
   assert.equal(hardFailure(undefined), true, "an absent verdict is not positive storage evidence");
   assert.equal(hardFailure({}), true, "an empty verdict is not positive storage evidence");
   assert.equal(hardFailure({ ok: false, pending: false }), true, "a missing failure counter fails closed");
+  for (const counter of ["1", true, null, ""]) {
+    const verdict = { ok: false, pending: false, consecutive_failures: counter };
+    assert.equal(
+      hardFailure(verdict),
+      true,
+      `a coerced count-like value (${JSON.stringify(counter)}) must fail closed`,
+    );
+    assert.equal(storageWriteHardFailureReason(verdict), "storage_verdict_malformed");
+  }
   assert.equal(
     hardFailure({ ok: false, pending: false, consecutive_failures: "nope" }),
     true,
     "a malformed failure counter fails closed",
+  );
+  assert.equal(
+    hardFailure({ ok: true, pending: false }),
+    true,
+    "an otherwise-successful verdict with no counter fails closed",
+  );
+  assert.equal(
+    hardFailure({ ok: "true", pending: false, consecutive_failures: 0 }),
+    true,
+    "a countable verdict with a non-boolean ok field fails closed",
+  );
+  assert.equal(
+    hardFailure({ ok: true, pending: false, consecutive_failures: -1 }),
+    true,
+    "a negative failure counter fails closed",
+  );
+  assert.equal(
+    hardFailure({ ok: true, pending: false, consecutive_failures: 1.5 }),
+    true,
+    "a fractional failure counter fails closed",
   );
   assert.equal(
     hardFailure({ ok: false, pending: false, consecutive_failures: 1 }),

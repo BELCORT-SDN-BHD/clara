@@ -30,14 +30,15 @@ startStorageProbe();
 
 // Graceful-shutdown gate + active-request tracking (S4-FX2). Runs BEFORE every route:
 // captures the HTTP listener (so serve.mjs can server.close() on SIGTERM), refuses
-// NEW requests with 503 GLOBALLY while draining (except /health liveness), and counts
-// in-flight requests + SSE streams so the supervisor can wait for zero-active.
+// NEW requests with 503 GLOBALLY while draining (except /health liveness and /ready's
+// structured shutdown response), and counts in-flight requests + SSE streams so the
+// supervisor can wait for zero-active.
 app.use((req, res, next) => {
   if (!sup.httpServer) {
     const s = (req.socket as unknown as { server?: Server }).server;
     if (s) sup.httpServer = s;
   }
-  if (sup.shuttingDown && req.path !== "/health") {
+  if (sup.shuttingDown && req.path !== "/health" && req.path !== "/ready") {
     res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
     return;
   }

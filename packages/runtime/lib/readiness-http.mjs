@@ -1,4 +1,5 @@
 import { checkReadiness } from "./health.mjs";
+import { readinessFailure } from "./readiness-policy.mjs";
 
 /** The shipped /ready HTTP handler. Kept in plain ESM so the DB-backed runtime suite can
  * exercise the exact status/body mapping that src/index.ts mounts, without reimplementing it. */
@@ -8,7 +9,7 @@ export async function readinessHandler(_req, res) {
     res.status(503).json({
       ready: false,
       checks: { shutdown: true },
-      failures: [{ check: "shutdown", reason: "runtime_shutting_down" }],
+      failures: [readinessFailure("shutdown", "runtime_shutting_down")],
       warnings: [],
       ts: new Date().toISOString(),
     });

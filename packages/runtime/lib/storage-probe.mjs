@@ -64,9 +64,11 @@
 // It returns from memory, ~0ms, every time. A background setInterval (started eagerly by
 // src/index.ts at boot, unref'd so it never keeps the process alive on its own) refreshes that verdict at
 // most once every CACHE_MS (default 60s — a real outage still surfaces within one interval,
-// comfortably inside any on-call's noticing window). Each refresh cycle is still individually
-// bounded by TIMEOUT_MS (default 3s). The deadline aborts the actual storage requests; interval
-// ownership remains held until the aborted call settles and scratch cleanup completes.
+// comfortably inside any on-call's noticing window). Each refresh verdict is individually
+// bounded by TIMEOUT_MS (default 3s). The deadline aborts the actual storage requests. Interval
+// ownership then waits up to another 2x TIMEOUT_MS for the aborted call and scratch cleanup to
+// settle: Node 20's mkdtemp/rm promises accept no AbortSignal, so a wedged filesystem cannot own
+// the refresh slot forever.
 //
 // TRANSITIONS ARE LOGGED, STEADY STATE IS NOT. The incident's own observability defect #1 was
 // "the runtime logs nothing" — fly logs is the real alarm surface for a single-maintainer
@@ -142,7 +144,8 @@ async function runProbeOnce(signal) {
 }
 
 /** Start one abortable probe cycle. `verdict` resolves at the deadline, while `settled`
- * remains pending until the aborted operation and its finally cleanup have actually ended. */
+ * remains pending until the aborted operation and its finally cleanup have actually ended.
+ * writeFile and both storage calls receive the signal; mkdtemp and rm have no signal option. */
 function startHardTimeout(fn, ms, onTimeout) {
   const controller = new AbortController();
   let timeoutWon = false;
@@ -222,7 +225,15 @@ async function refreshOnce(generation) {
       );
     }
   } finally {
-    await cycle.settled;
+    // Bound the settlement wait: an UNABORTABLE hang (mkdtemp/rm on a wedged fs) must not own
+    // the refresh slot forever. Overlap is still prevented wherever the cycle can settle.
+    let settlementTimer;
+    const bound = new Promise((resolve) => {
+      settlementTimer = setTimeout(resolve, timeoutMs() * 2);
+      settlementTimer.unref?.();
+    });
+    await Promise.race([cycle.settled, bound]);
+    clearTimeout(settlementTimer);
     if (activeController === cycle.controller) activeController = null;
   }
 }

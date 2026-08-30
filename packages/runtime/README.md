@@ -104,13 +104,16 @@ There is deliberately no runtime status route. Human status reads use migration
 | `CLARA_STORAGE_URL` | Full private-bucket object base, for example the Storage REST `/storage/v1/object/<bucket>` base. |
 | `CLARA_STORAGE_ROLE` | Exact dedicated custom role expected in the Storage JWT (`clara_storage_docs` at the ceremony); required outside tests. |
 | `CLARA_STORAGE_ROLE_JWT` | Rotated, unexpired dedicated custom-role JWT with object `INSERT` + `SELECT` only. `anon`, `authenticated`, and `service_role` are rejected; no `UPDATE`/`DELETE`. |
-| `CLARA_STORAGE_PROBE_CACHE_MS` | Background interval after the immediate boot probe; default `60000`. A finite value at least `1000` is accepted; smaller/non-finite values fall back to `60000` so configuration cannot create a storage hot loop. `/ready` never waits for this interval or performs probe I/O itself. **BREAK-GLASS:** set this very high and redeploy so only the eager boot probe runs in the operational window and the storage gate cannot re-fire; this deliberately suspends ongoing storage assurance and must be reverted after recovery. A redeploy also yields a fresh READY Machine for its readiness grace window. |
-| `CLARA_STORAGE_PROBE_TIMEOUT_MS` | Per-cycle write+readback deadline; default `3000`. A finite positive value is accepted; zero/negative/non-finite values fall back to `3000`. The deadline aborts both storage calls and their fetches, and refresh ownership remains held through settlement and scratch cleanup. Values above `3000` require the Fly readiness grace arithmetic below to be raised before deploy. |
+| `CLARA_STORAGE_PROBE_CACHE_MS` | Background interval after the immediate boot probe; default `60000`. A finite value at least `1000` is accepted; smaller/non-finite values fall back to `60000` so configuration cannot create a storage hot loop. `/ready` never waits for this interval or performs probe I/O itself. **BREAK-GLASS:** set this very high and redeploy so only the eager boot probe runs in the operational window and the storage gate cannot re-fire; this helps only if that eager boot probe succeeds, deliberately suspends ongoing storage assurance, and must be reverted after recovery. Storage down at boot remains 503 by design. |
+| `CLARA_STORAGE_PROBE_TIMEOUT_MS` | Per-cycle write+readback deadline; default `3000`. A finite positive value is accepted; zero/negative/non-finite values fall back to `3000`. The deadline aborts both storage calls and their fetches. Refresh ownership then waits up to another 2x deadline for settlement and scratch cleanup; an unabortable filesystem hang cannot own the slot forever. Re-evaluate the Fly readiness grace below before raising this value above `3000`. |
 
-Fly's readiness grace is `60s`. It exceeds the default `3s` eager-probe deadline and
-leaves runway for a slow `shared-cpu-1x` cold start, including clamd signature loading
-(which previously OOM-killed the 1 GB Machine). If the timeout is raised above `3000`,
-raise the grace before deploy; the cache interval is irrelevant to the first probe.
+Fly's configured readiness grace is `60s`: it delays the first check, providing startup
+runway, but never makes `/ready` return 200 and never routes traffic before a passing check.
+It exceeds the default `3s` eager-probe deadline; whether it also covers the full
+`shared-cpu-1x` cold start and clamd signature loading is an **unmeasured assumption**.
+Measure boot-to-first-passing-`/ready` at the first deploy and tune the grace from that
+evidence. Re-evaluate it before raising the probe timeout above `3000`; the cache interval
+is irrelevant to the first probe.
 
 `RELAY_TEST_MODE=1` is the only adapter gate: tests inject/localize scanner,
 Storage, and Azure behavior. The real production adapters have no dev bypass.

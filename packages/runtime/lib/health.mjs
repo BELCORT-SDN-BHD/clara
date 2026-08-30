@@ -27,7 +27,12 @@ import { factsGateHealth } from "./facts-gate.mjs";
 import { classifyHealth } from "./classify.mjs";
 import { wikiProjectionHealth } from "./wiki-projection-ops.mjs";
 import { storageProbeHealth } from "./storage-probe.mjs";
-import { readinessHasHardFailure, storageWriteHasHardFailure } from "./readiness-policy.mjs";
+import {
+  readinessFailure,
+  readinessHasHardFailure,
+  storageWriteHardFailureReason,
+  storageWriteHasHardFailure,
+} from "./readiness-policy.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
@@ -320,12 +325,10 @@ export async function checkReadiness() {
   checks.storage_write = storage;
   const storageHardFailure = storageWriteHasHardFailure(storage);
   if (storageHardFailure) {
-    failures.push({
-      check: "storage_write",
-      reason: storage.reason ?? "storage_probe_pending",
+    failures.push(readinessFailure("storage_write", storageWriteHardFailureReason(storage), {
       pending: storage.pending,
       consecutive_failures: storage.consecutive_failures,
-    });
+    }));
   } else if (!storage.ok) {
     warnings.push(
       `storage write probe failed (${storage.consecutive_failures} consecutive): ` +
@@ -336,14 +339,14 @@ export async function checkReadiness() {
   if (!result || result.ok !== true) {
     // DB unreachable or the whole check timed out.
     checks.db = { ok: false, error: result?.timeout ? "db_timeout" : "db_unreachable" };
-    failures.unshift({ check: "db", reason: checks.db.error });
+    failures.unshift(readinessFailure("db", checks.db.error));
     return { ready: false, checks, failures, warnings };
   }
 
   if (worldEnabled()) {
-    if (checks.world?.ok === false) failures.push({ check: "world", reason: "world_heartbeat_stale" });
-    if (checks.control?.ok === false) failures.push({ check: "control", reason: "control_heartbeat_stale" });
-    if (checks.taxonomy?.ok === false) failures.push({ check: "taxonomy", reason: "taxonomy_halt" });
+    if (checks.world?.ok === false) failures.push(readinessFailure("world", "world_heartbeat_stale"));
+    if (checks.control?.ok === false) failures.push(readinessFailure("control", "control_heartbeat_stale"));
+    if (checks.taxonomy?.ok === false) failures.push(readinessFailure("taxonomy", "taxonomy_halt"));
   }
 
   const failed = readinessHasHardFailure(checks, worldEnabled());

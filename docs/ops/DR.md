@@ -279,10 +279,12 @@ Storage timing knobs: `CLARA_STORAGE_PROBE_CACHE_MS` defaults to `60000` (finite
 at least `1000` are accepted; invalid/lower values fall back to the default), and controls
 only the interval after the immediate boot cycle. `CLARA_STORAGE_PROBE_TIMEOUT_MS`
 defaults to `3000` (finite positive values accepted; otherwise default) and aborts both
-storage requests at the deadline. The Fly readiness grace is 60s: it exceeds the 3s default
-first-probe deadline and leaves runway for a slow `shared-cpu-1x` cold start, including clamd
-signature loading (which previously OOM-killed the 1 GB Machine). Raising the probe timeout
-above 3000 requires raising that grace before deploy.
+storage requests at the deadline. Fly's configured 60s readiness grace delays the first check;
+it is startup runway, not a readiness bypass, and Fly still requires a passing `/ready` response
+before routing. It exceeds the 3s default first-probe deadline, but the claim that it covers the
+whole `shared-cpu-1x` + clamd cold start is an **unmeasured assumption**. Measure
+boot-to-first-passing-`/ready` at the first deploy and tune the grace from that evidence;
+re-evaluate it before raising the probe timeout above 3000.
 
 The DB branch was verified locally on 2026-07-17; the storage-aware response contract was
 re-verified on the throwaway runtime rig on 2026-08-30:
@@ -306,6 +308,27 @@ re-verified on the throwaway runtime rig on 2026-08-30:
 The real response also carries the current warn-only consumer and intake checks; the sample
 above spells out every hard-gate field and every top-level key. There is no `latency_ms` field.
 
+`failures[].reason` is a closed public taxonomy. The shipped literal set is:
+
+<!-- readiness-failure-reasons:start -->
+```json
+[
+  "db_timeout",
+  "db_unreachable",
+  "world_heartbeat_stale",
+  "control_heartbeat_stale",
+  "taxonomy_halt",
+  "storage_probe_pending",
+  "storage_error",
+  "storage_probe_error",
+  "storage_probe_timeout",
+  "storage_probe_readback_mismatch",
+  "storage_verdict_malformed",
+  "runtime_shutting_down"
+]
+```
+<!-- readiness-failure-reasons:end -->
+
 When the DB is down, storage has not yet succeeded since boot, or a warm
 `checks.storage_write.consecutive_failures` reaches 2, `/ready` returns
 `{"ready":false,...}` with HTTP 503.
@@ -321,11 +344,13 @@ window during the outage.
 
 **BREAK-GLASS (operator, degraded assurance):** set
 `CLARA_STORAGE_PROBE_CACHE_MS` very high and redeploy. The eager boot probe still runs, but
-after it succeeds the gate cannot re-fire during the chosen operational window; the operator
-has deliberately suspended continuing storage assurance and must revert the override after
-recovery. A redeploy also yields a fresh READY Machine for its 60s readiness grace window. Record
-the override and keep investigating storage: this lever restores the rest of the single-machine
-service only by accepting that later storage regressions will not be detected during the window.
+only after it succeeds can the long interval prevent the gate re-firing during the chosen
+operational window; storage down at boot remains 503 by design. The operator has deliberately
+suspended continuing storage assurance and must revert the override after recovery. The 60s Fly
+grace only delays the first check; it neither forces a READY result nor routes before a passing
+check. Record the override and keep investigating storage: this lever restores the rest of the
+single-machine service only by accepting that later storage regressions will not be detected
+during the window.
 
 > **A 503 right after a HARD runtime restart is usually not a DB fault, and none of this
 > document is the fix.** A machine that died without a clean shutdown leaves its pooler

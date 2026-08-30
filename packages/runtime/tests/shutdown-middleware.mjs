@@ -54,7 +54,20 @@ try {
   check("non-health route 503 while draining (global gate)", drainWorkflows.status === 503);
   const body = await drainWorkflows.json().catch(() => ({}));
   check("503 body says shutting_down", body.error === "shutting_down");
-  check("/ready 503 while draining", (await fetch(`${BASE}/ready`)).status === 503);
+  const drainReady = await fetch(`${BASE}/ready`);
+  const readyBody = await drainReady.json().catch(() => ({}));
+  check("/ready 503 while draining", drainReady.status === 503);
+  check(
+    "/ready emits the exact structured shutdown readiness envelope",
+    JSON.stringify({ ...readyBody, ts: "<timestamp>" }) === JSON.stringify({
+      ready: false,
+      checks: { shutdown: true },
+      failures: [{ check: "shutdown", reason: "runtime_shutting_down" }],
+      warnings: [],
+      ts: "<timestamp>",
+    }),
+  );
+  check("/ready shutdown envelope carries an ISO timestamp", !Number.isNaN(Date.parse(readyBody.ts)));
 
   // (3) Active-request tracking returns to zero after each request settles (finish/close
   // both decrement, once-guarded). After all the awaited fetches above, it must be 0.
