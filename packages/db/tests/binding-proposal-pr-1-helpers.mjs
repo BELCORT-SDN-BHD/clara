@@ -109,8 +109,28 @@ export function reasonOf(err) {
   return m ? m[1] : null;
 }
 
-/** mint_wake_credential(p_wake_kind, p_firm, p_on_behalf_of, p_ttl, p_client). */
+/** mint_wake_credential(p_wake_kind, p_firm, p_on_behalf_of, p_ttl, p_client).
+ *
+ *  G1 PR-2a: a bank_agent credential is bound to a live wake task from that migration on, so the
+ *  producer's own artefacts are materialised first (the "wall implies fixtures" law). Gated on the
+ *  gate's own EXACT SIGNATURE so this helper is unchanged against a pre-PR-2a chain -- which is
+ *  what the control side of a same-corpus pair runs. The account is left NULL deliberately: this
+ *  battery's bank_agent credentials exist only to be REFUSED by the grant and allowlist walls
+ *  (B3/B4), which fire long before §F's account arm, so binding a made-up account would add a
+ *  fiction without adding a proof. */
 export async function mintCred({ kind, firm, onBehalfOf = null, ttl = "15 minutes", client = null }) {
+  if (kind === "bank_agent" && client) {
+    const { hasG1Pr2a, makeBankWakeTask } = await import("./g1-pr-2a-fixtures.mjs");
+    if (await hasG1Pr2a()) {
+      const live = await rootQuery(
+        `select id from clara.agent_tasks
+          where firm_id=$1 and client_id=$2 and kind='wake' and status in ('held','running','cancel_requested')`,
+        [firm, client]);
+      if (live.rowCount === 0) {
+        await makeBankWakeTask({ firm, client, bankAccount: null, status: "running" });
+      }
+    }
+  }
   const r = await roleQuery(
     ROLES.runtime,
     "select * from clara.mint_wake_credential(p_wake_kind => $1, p_firm => $2, p_on_behalf_of => $3, p_ttl => $4::interval, p_client => $5)",

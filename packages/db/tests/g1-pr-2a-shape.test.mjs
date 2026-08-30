@@ -1,0 +1,324 @@
+// G1 PR-2a -- §G (the settle CAS), §A/§B (the two rosters), §C (the producer registration) and
+// §D (the prose caps + the abandonment roster). The walls that live in the SHAPE of the schema
+// rather than in a wake credential; §E/§F are g1-pr-2a-walls.test.mjs's.
+//
+// GATED on clara._bank_wake_task_gate's EXACT SIGNATURE, never a migration number.
+// NEVER LIVE: this file drives writes and runs only against a disposable rig.
+
+import { test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import {
+  rootQuery, endPool, printLaneNotes, printSkipCount, noteLane, markSkip,
+  a21EnsureReady, buildWorld, firmOf,
+} from "./a21-helpers.mjs";
+import { caught } from "./x38-match-fixtures.mjs";
+import { getPool } from "./rig-helpers.mjs";
+import { hasG1Pr2a, makeBankWakeTask, retireLiveBankWakeTasks, forgetBankWakeTasks } from "./g1-pr-2a-fixtures.mjs";
+
+let ready = false;
+let W = null; let FIRM = null; let CLIENT = null; let FY = null;
+
+/** A fiscal year, minted by a raw root insert. close_runs carries a COMPOSITE FK to
+ *  (fiscal_years.id, firm_id), so a random uuid would fail on THAT foreign key and the
+ *  end_reason_code cells below would then be measuring the wrong constraint entirely -- the
+ *  "right conclusion, wrong reason" class this repo has paid for three times. */
+async function mintFiscalYear(ordinal) {
+  return (await rootQuery(
+    `insert into clara.fiscal_years(firm_id, client_id, label, starts_on, ends_on, ordinal, status, fy_end_source, opened_by, opened_at)
+       values ($1,$2,$3, make_date(2000 + $4, 1, 1), make_date(2000 + $4, 12, 31), $4, 'open', 'asserted', $5, now())
+     returning id`,
+    [FIRM, CLIENT, `p2a FY${2000 + ordinal}`, ordinal, W.users.alice])).rows[0].id;
+}
+
+function gate(t) {
+  if (!ready) { markSkip(); t.skip("G1 PR-2a surface absent -- battery dormant"); return true; }
+  return false;
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const reasonOf = (err) => { try { return JSON.parse(err?.detail ?? "{}").reason ?? null; } catch { return null; } };
+
+/** A fresh live wake task, bound to a synthetic account id (this file never calls a bank verb,
+ *  so the account only has to EXIST in the payload, not resolve to a bank_accounts row). */
+async function freshWakeTask(status = "running") {
+  await retireLiveBankWakeTasks({ firm: FIRM, client: CLIENT });
+  forgetBankWakeTasks();
+  return makeBankWakeTask({ firm: FIRM, client: CLIENT, bankAccount: randomUUID(), status });
+}
+
+before(async () => {
+  const r0 = await a21EnsureReady();
+  if (!(r0.base && (await hasG1Pr2a()))) { noteLane("G1 PR-2a surface absent -- battery dormant"); return; }
+  ready = true;
+  W = await buildWorld();
+  CLIENT = W.clients.A1;
+  FIRM = await firmOf(CLIENT);
+  FY = await mintFiscalYear(1);
+});
+after(async () => {
+  printLaneNotes("g1-pr-2a-shape");
+  printSkipCount("g1-pr-2a-shape");
+  await endPool();
+});
+
+// =====================================================================================
+// §G -- the settle becomes a conditional CAS.
+// =====================================================================================
+test("p2a.G1 a settle naming the WRONG run refuses; naming the right one settles", async (t) => {
+  if (gate(t)) return;
+  const { taskId } = await freshWakeTask();
+  await rootQuery("update clara.agent_tasks set workflow_run_id='run-A' where id=$1", [taskId]);
+  const err = await caught(() => rootQuery(
+    "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4)",
+    [taskId, "completed", null, "run-B"]));
+  assert.ok(err, "G1: a settle from a run that does not hold the task must refuse");
+  assert.equal(err.code, "CLR10", `G1: expected CLR10, got ${err.code}: ${err.message}`);
+  assert.equal(reasonOf(err), "wake_settle_run_mismatch", `G1: expected wake_settle_run_mismatch, got ${err.detail}`);
+  assert.equal((await rootQuery("select status from clara.agent_tasks where id=$1", [taskId])).rows[0].status,
+    "running", "G1: a REFUSED settle must leave the row alone -- refusing, never no-opping, is only half of it");
+  // Control: one argument differs.
+  await rootQuery("select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4)",
+    [taskId, "completed", null, "run-A"]);
+  assert.equal((await rootQuery("select status from clara.agent_tasks where id=$1", [taskId])).rows[0].status, "completed");
+});
+
+test("p2a.G1b a settle of an UNBOUND task that names a run refuses -- a null run id is not a wildcard", async (t) => {
+  if (gate(t)) return;
+  const { taskId } = await freshWakeTask();
+  const err = await caught(() => rootQuery(
+    "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4)",
+    [taskId, "failed", "internal", "run-Z"]));
+  assert.equal(reasonOf(err), "wake_settle_run_mismatch",
+    `G1b: an unbound task must not silently satisfy a run expectation, got ${err?.detail}`);
+  assert.match(err.message, /<unbound>/, "G1b: the refusal says the task is unbound rather than printing a null");
+});
+
+test("p2a.G2 a settle naming the WRONG status refuses; the right one settles", async (t) => {
+  if (gate(t)) return;
+  const { taskId } = await freshWakeTask();
+  const err = await caught(() => rootQuery(
+    "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4, p_expect_status => $5)",
+    [taskId, "completed", null, null, "cancel_requested"]));
+  assert.equal(reasonOf(err), "wake_settle_status_mismatch", `G2: expected wake_settle_status_mismatch, got ${err?.detail}`);
+  await rootQuery(
+    "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3, p_expect_run => $4, p_expect_status => $5)",
+    [taskId, "completed", null, null, "running"]);
+  assert.equal((await rootQuery("select status from clara.agent_tasks where id=$1", [taskId])).rows[0].status, "completed");
+});
+
+test("p2a.G3 the THREE-argument call every frozen caller makes still resolves and still settles", async (t) => {
+  if (gate(t)) return;
+  // The regression twin for the DROP+CREATE. If the defaults were wrong or a second overload
+  // existed, this is a 42883/42725 rather than a settle.
+  const { taskId } = await freshWakeTask();
+  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", "internal"]);
+  const row = (await rootQuery("select status, error_code from clara.agent_tasks where id=$1", [taskId])).rows[0];
+  assert.equal(row.status, "failed");
+  assert.equal(row.error_code, "internal");
+  // And 0133's own first-write-wins rule survives the recut: a replay carrying a different code
+  // must not overwrite the first cause.
+  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", "timeout"]);
+  assert.equal((await rootQuery("select error_code from clara.agent_tasks where id=$1", [taskId])).rows[0].error_code,
+    "internal", "G3: first-write-wins on error_code is unchanged by the CAS recut");
+});
+
+test("p2a.G4 the settle HOLDS the task row: a second settle blocks on the first until it commits", async (t) => {
+  if (gate(t)) return;
+  // The conjuncts are opt-in; the LOCK is not, and it is the half that bites with no caller
+  // change at all. Proven by pg_blocking_pids, never by a sleep (db-tests.md).
+  const { taskId } = await freshWakeTask();
+  const c1 = await getPool().connect();
+  const c2 = await getPool().connect();
+  try {
+    const pid2 = (await c2.query("select pg_backend_pid() as pid")).rows[0].pid;
+    const pid1 = (await c1.query("select pg_backend_pid() as pid")).rows[0].pid;
+    await c1.query("begin");
+    await c1.query("select clara._settle_wake_task($1,$2,$3)", [taskId, "completed", null]);
+    // T2 fires from inside T1's open window and must observably WAIT on T1's row lock.
+    const blocked = c2.query("select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", "internal"]);
+    let sawBlock = false;
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+      const r = await rootQuery(
+        "select wait_event_type as wet, pg_blocking_pids(pid) as blockers from pg_stat_activity where pid=$1", [pid2]);
+      const row = r.rows[0];
+      if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(pid1))) { sawBlock = true; break; }
+      await sleep(25);
+    }
+    assert.ok(sawBlock, "G4: the second settle must observably block on the first's row lock");
+    await c1.query("commit");
+    // Once T1 commits, T2 re-evaluates against the SETTLED row -- the transition trigger is what
+    // refuses it, which is the correct division of labour (the lock serialises, the matrix rules).
+    const err = await caught(() => blocked);
+    assert.ok(err, "G4: completed -> failed is not a legal transition, so T2 must refuse once unblocked");
+  } finally {
+    for (const c of [c1, c2]) {
+      try { await c.query("rollback"); } catch { /* not in a txn */ }
+      try { await c.query("reset role"); await c.query("reset all"); } catch { /* closing anyway */ }
+      c.release();
+    }
+  }
+});
+
+// =====================================================================================
+// §A / §B -- the two rosters, extend-only in both directions.
+// =====================================================================================
+test("p2a.A1 llm_usage_events admits bank_agent + close_prep, still admits the nine, and still refuses a stranger", async (t) => {
+  if (gate(t)) return;
+  const def = (await rootQuery(
+    `select pg_get_constraintdef(oid) as def from pg_constraint
+      where conrelid='clara.llm_usage_events'::regclass and conname='ck_llm_usage_events_call_kind'`)).rows[0].def;
+  for (const k of ["document_extraction", "chat", "unattended_posting", "freeform_read", "interview_extraction",
+                   "filing_attribution", "web_fetch", "tier1_policy_fetch", "reporting", "bank_agent", "close_prep"]) {
+    assert.ok(def.includes(`'${k}'`), `A1: the roster must admit ${k}`);
+  }
+  assert.equal((def.match(/'[a-z0-9_]+'::text/g) ?? []).length, 11, "A1: exactly eleven members -- no stranger smuggled in");
+  assert.ok(!def.includes("'bank_agent_x'"), "A1: control -- a near-miss spelling is not a member");
+});
+
+test("p2a.A2 close_prep's login pool is trued to the write pool, and BOTH sources stay disabled", async (t) => {
+  if (gate(t)) return;
+  const rows = (await rootQuery("select source_key, login_pool, enabled from clara.wake_engine_sources order by source_key")).rows;
+  assert.deepEqual(rows.map((r) => r.source_key), ["bank_agent", "close_prep"]);
+  assert.equal(rows.find((r) => r.source_key === "close_prep").login_pool, "write", "A2: 裁-49's truing");
+  assert.equal(rows.find((r) => r.source_key === "bank_agent").login_pool, "bank", "A2: bank_agent's pool is untouched");
+  for (const r of rows) assert.equal(r.enabled, false, `A2: ${r.source_key} stays disabled -- 裁-40's flip is the owner's ceremony`);
+});
+
+test("p2a.B1 agent_tasks admits all_writes_refused, still admits the six, and still refuses a stranger", async (t) => {
+  if (gate(t)) return;
+  const { taskId } = await freshWakeTask();
+  await rootQuery("update clara.agent_tasks set status='failed', error_code='all_writes_refused' where id=$1", [taskId]);
+  assert.equal((await rootQuery("select error_code from clara.agent_tasks where id=$1", [taskId])).rows[0].error_code,
+    "all_writes_refused", "B1: the new code lands on a real row, not just in a constraint's text");
+  const { taskId: t2 } = await freshWakeTask();
+  const err = await caught(() => rootQuery(
+    "update clara.agent_tasks set status='failed', error_code='every_write_refused' where id=$1", [t2]));
+  assert.ok(err, "B1: a near-miss spelling is still refused -- the roster is closed, not opened");
+  const def = (await rootQuery(
+    `select pg_get_constraintdef(oid) as def from pg_constraint
+      where conrelid='clara.agent_tasks'::regclass and conname='agent_tasks_error_code_check'`)).rows[0].def;
+  for (const k of ["model_error", "tool_error", "timeout", "engine_lost", "limit", "internal", "all_writes_refused"]) {
+    assert.ok(def.includes(`'${k}'`), `B1: the roster must admit ${k}`);
+  }
+  assert.equal((def.match(/'[a-z0-9_]+'::text/g) ?? []).length, 7, "B1: exactly seven members");
+});
+
+// =====================================================================================
+// §C -- the producer registration, in BOTH halves of the coupled pair.
+// =====================================================================================
+test("p2a.C1 bank.agent_due is registered client_scoped at a WAKE-BOUND decision, and coverage stays whole", async (t) => {
+  if (gate(t)) return;
+  const et = (await rootQuery("select client_scoped from clara.event_types where name='bank.agent_due'")).rows[0];
+  assert.ok(et, "C1: the type is registered");
+  assert.equal(et.client_scoped, true,
+    "C1: a firm-level type refuses a client_id outright, so a firm-scoped bank.agent_due could never produce a runnable task");
+  const tx = (await rootQuery(
+    `select decision from clara.trigger_taxonomy
+      where event_type='bank.agent_due' and version=(select version from clara.taxonomy_active)`)).rows[0];
+  assert.ok(tx, "C1: the taxonomy half is registered too -- registering one alone is a half-registration");
+  assert.ok(["internal_task", "notification", "background_review"].includes(tx.decision),
+    `C1: the decision must be one relay.mjs treats as wake-bound; got ${tx.decision}`);
+  assert.equal(tx.decision, "internal_task", "C1: and specifically internal_task -- Clara's own work, not a human notification");
+  const gaps = (await rootQuery(
+    `select count(*)::int as n from clara.event_types e
+      where not exists (select 1 from clara.trigger_taxonomy t
+                         where t.event_type=e.name and t.version=(select version from clara.taxonomy_active))`)).rows[0].n;
+  assert.equal(gaps, 0, "C1: coverage is WHOLE over the entire registry");
+});
+
+test("p2a.C2 a bank.agent_due event REALLY appends with a client, and an unregistered type is still refused", async (t) => {
+  if (gate(t)) return;
+  const seq = (await rootQuery(
+    "select clara._append_event($1,'bank.agent_due',$2,null,null,null,null,null,null,$3::jsonb) as seq",
+    [FIRM, CLIENT, JSON.stringify({ bank_account_id: randomUUID() })])).rows[0].seq;
+  const ev = (await rootQuery("select client_id, payload from clara.domain_events where firm_id=$1 and seq=$2", [FIRM, seq])).rows[0];
+  assert.equal(ev.client_id, CLIENT, "C2: the event carries the client the wake insert arm will derive from it");
+  assert.ok(ev.payload.bank_account_id, "C2: and the account the run's gate will read");
+  // The control: registering one name must not have opened the gate for every name.
+  const err = await caught(() => rootQuery(
+    "select clara._append_event($1,'bank.agent_not_a_real_type',$2,null,null,null,null,null,null,'{}'::jsonb)", [FIRM, CLIENT]));
+  assert.ok(err, "C2: an unregistered event type is still refused");
+});
+
+// =====================================================================================
+// §D -- the prose caps and the abandonment roster.
+// =====================================================================================
+test("p2a.D1 every model-authored prose column is capped at 4000, and 4000 itself is admitted", async (t) => {
+  if (gate(t)) return;
+  const long = "x".repeat(4001);
+  const cases = [
+    ["clara.bank_agent_proposals", "rationale"],
+    ["clara.close_proposals", "narrative"],
+    ["clara.close_proposals", "rationale"],
+    ["clara.close_runs", "end_reason"],
+  ];
+  for (const [rel, col] of cases) {
+    const def = (await rootQuery(
+      `select string_agg(pg_get_constraintdef(oid), ' | ') as d from pg_constraint
+        where conrelid=$1::regclass and contype='c' and pg_get_constraintdef(oid) like '%length(' || $2 || ')%'`,
+      [rel, col])).rows[0].d;
+    assert.ok(def && def.includes("4000"), `D1: ${rel}.${col} carries a 4000-character cap (${def})`);
+  }
+  // Behavioural, on the one table this battery can populate cheaply: the CHECK really refuses.
+  const err = await caught(() => rootQuery(
+    `insert into clara.close_runs(firm_id, client_id, fiscal_year_id, state, started_by, ended_by, ended_at, end_reason)
+       values ($1,$2,$3,'abandoned',$4,$4,now(),$5)`, [FIRM, CLIENT, FY, W.users.alice, long]));
+  assert.ok(err, "D1: a 4001-character end_reason is refused by the database, not merely by a TypeScript schema");
+  assert.equal(err.constraint, "ck_close_runs_end_reason_len",
+    `D1: and refused by the length CHECK BY NAME, never by an FK or another guard (${err.constraint}: ${err.message})`);
+});
+
+test("p2a.D1b drafted[].text is capped per ELEMENT, and a lawful drafted array still passes", async (t) => {
+  if (gate(t)) return;
+  const ok = await rootQuery("select clara._drafted_prose_within($1::jsonb, 4000) as v",
+    [JSON.stringify([{ check_key: "a", item_key: "b", text: "x".repeat(4000) }])]);
+  assert.equal(ok.rows[0].v, true, "D1b: exactly 4000 is admitted");
+  const bad = await rootQuery("select clara._drafted_prose_within($1::jsonb, 4000) as v",
+    [JSON.stringify([{ check_key: "a", item_key: "b", text: "ok" }, { check_key: "c", item_key: "d", text: "x".repeat(4001) }])]);
+  assert.equal(bad.rows[0].v, false, "D1b: a LATER element over the cap is caught -- the walk is per-element, not first-element");
+  const empty = await rootQuery("select clara._drafted_prose_within('[]'::jsonb, 4000) as v");
+  assert.equal(empty.rows[0].v, true, "D1b: an empty array is close_proposals_drafted_check's business, not this one's");
+});
+
+test("p2a.D2 the abandonment roster is a closed, forced-RLS vocabulary and end_reason_code is FK-bound to it", async (t) => {
+  if (gate(t)) return;
+  const rls = (await rootQuery(
+    `select relrowsecurity, relforcerowsecurity from pg_class c join pg_namespace n on n.oid=c.relnamespace
+      where n.nspname='clara' and c.relname='close_abandon_reasons'`)).rows[0];
+  assert.equal(rls.relrowsecurity, true, "D2: RLS enabled");
+  assert.equal(rls.relforcerowsecurity, true, "D2: RLS FORCED");
+  const codes = (await rootQuery("select code from clara.close_abandon_reasons order by sort_order")).rows.map((r) => r.code);
+  assert.ok(codes.includes("other"), "D2: 'other' exists so a cause outside the roster is recordable, not unrecordable");
+  assert.ok(codes.length >= 5, `D2: the roster is populated (${codes.length})`);
+  // The wall that bites TODAY: an unrostered code is refused. A REAL fiscal year, because the
+  // composite FK to (fiscal_years.id, firm_id) would otherwise be what refused this row.
+  const err = await caught(() => rootQuery(
+    `insert into clara.close_runs(firm_id, client_id, fiscal_year_id, state, started_by, ended_by, ended_at, end_reason, end_reason_code)
+       values ($1,$2,$3,'abandoned',$4,$4,now(),'r','not_a_real_code')`, [FIRM, CLIENT, FY, W.users.alice]));
+  assert.ok(err, "D2: an unrostered end_reason_code is refused");
+  assert.equal(err.code, "23503", `D2: refused by the FOREIGN KEY specifically, got ${err.code}: ${err.message}`);
+  // POSITIVE CONTROL on the identical row: a ROSTERED code lands. Without it the cell above would
+  // pass just as well against a column nothing could ever be written to.
+  const fy2 = await mintFiscalYear(2);
+  const ok = await rootQuery(
+    `insert into clara.close_runs(firm_id, client_id, fiscal_year_id, state, started_by, ended_by, ended_at, end_reason, end_reason_code)
+       values ($1,$2,$3,'abandoned',$4,$4,now(),'r','other') returning id, end_reason_code`,
+    [FIRM, CLIENT, fy2, W.users.alice]);
+  assert.equal(ok.rows[0].end_reason_code, "other", "D2: a rostered code lands on a real row");
+  // And a rostered code on a run that is NOT abandoned is refused -- a code is a cause, and a run
+  // that did not end has none.
+  const fy3 = await mintFiscalYear(3);
+  const err2 = await caught(() => rootQuery(
+    `insert into clara.close_runs(firm_id, client_id, fiscal_year_id, state, started_by, end_reason_code)
+       values ($1,$2,$3,'in_progress',$4,'other')`, [FIRM, CLIENT, fy3, W.users.alice]));
+  assert.ok(err2, "D2: a code on a non-abandoned run is refused");
+  assert.equal(err2.constraint, "ck_close_runs_end_reason_code_abandoned",
+    `D2: and by the pairing CHECK by name, not by something else (${err2.constraint}: ${err2.message})`);
+  // The carrier is written by NO PRODUCTION VERB yet -- that is the named follow-up, and it is
+  // recorded as a measurement rather than a comment: the only rows carrying a code are the ones
+  // this cell wrote by hand. A verb that started setting it would show up here.
+  const written = (await rootQuery(
+    "select count(*)::int as n from clara.close_runs where end_reason_code is not null and id <> $1", [ok.rows[0].id])).rows[0].n;
+  assert.equal(written, 0, "D2: nothing but this cell's own hand-written row carries a code -- the writer is still owed");
+});

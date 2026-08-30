@@ -8,19 +8,57 @@ import { rootQuery } from "./a21-helpers.mjs";
 import { withTxn } from "./rig-txn.mjs";
 import { GUARD } from "./x38-match-fixtures.mjs";
 import { wakeQuery } from "./rig-helpers.mjs";
+import { hasG1Pr2a, makeBankWakeTask } from "./g1-pr-2a-fixtures.mjs";
 
 export const WAKE_ROLE = "clara_wake_bank_login";
 export const RATIONALE = "f31w battery: unattended agent judgement";
 export const MODEL = { provider: "openai", model: "gpt-5.6-terra", version: "v1" };
 
 /** Mint a real wake credential and return { id, secret } (mint_wake_credential builds no ctx,
- *  so rootQuery is fine -- the pinned shape f-a3-pr1b-agent-limb.test.mjs's f31b.f already uses). */
+ *  so rootQuery is fine -- the pinned shape f-a3-pr1b-agent-limb.test.mjs's f31b.f already uses).
+ *
+ *  G1 PR-2a -- THE WALL IMPLIES ITS FIXTURES. From that migration on, a bank_agent credential is
+ *  BOUND to a live wake task: the plain mint refuses bank_agent_task_absent when the firm/client
+ *  has none, and every bank act is then gated on that task's status and its bank account. So the
+ *  producer's own artefacts have to exist before a bank_agent credential can. They are built HERE,
+ *  once, rather than in each of the four batteries that mint one -- and CONDITIONALLY, on the
+ *  gate's own EXACT SIGNATURE, so this same file still mints exactly as it always did against a
+ *  pre-PR-2a chain (which is what the control side of a same-corpus pair runs). */
 export async function mintCred(kind, firm, client, obo = null) {
+  if (kind === "bank_agent" && client && (await hasG1Pr2a())) {
+    await ensureBankWakeTaskForClient({ firm, client });
+  }
   const r = await rootQuery(
     "select * from clara.mint_wake_credential($1,$2,$3,'00:15:00'::interval,$4)",
     [kind, firm, obo, client]);
   return { id: r.rows[0].id, secret: r.rows[0].secret };
 }
+
+/** The client's ONE live bank wake task, memoized per (firm, client).
+ *
+ *  The account it binds to is DERIVED: the client's single active bank account. That is not a
+ *  guess dressed as a derivation -- these batteries build exactly one bank account per client
+ *  (each buildWorld() call mints a fresh, uniquely-prefixed world, so accounts never accumulate
+ *  across files), and where a client genuinely has none or several the helper binds NOTHING and
+ *  lets §F's own wake_task_account_unbound refusal say so LOUDLY. Quietly picking one would make
+ *  a battery pass against an account it never meant to act on. */
+async function ensureBankWakeTaskForClient({ firm, client }) {
+  const key = `${firm}:${client}`;
+  if (_bankTaskCache.has(key)) return _bankTaskCache.get(key);
+  const live = await rootQuery(
+    `select id from clara.agent_tasks
+      where firm_id=$1 and client_id=$2 and kind='wake' and status in ('held','running','cancel_requested')`,
+    [firm, client]);
+  if (live.rowCount === 1) { _bankTaskCache.set(key, live.rows[0].id); return live.rows[0].id; }
+  if (live.rowCount > 1) return null;   // ambiguous by construction: let §E's own refusal name it
+  const acct = await rootQuery(
+    "select id from clara.bank_accounts where client_id=$1 and coalesce(status,'active')='active'", [client]);
+  const made = await makeBankWakeTask({
+    firm, client, bankAccount: acct.rowCount === 1 ? acct.rows[0].id : null, status: "running" });
+  _bankTaskCache.set(key, made.taskId);
+  return made.taskId;
+}
+const _bankTaskCache = new Map();
 
 export function callWrapper(name, specs) {
   return `select clara.${name}(${specs.map((s, i) => `${s.name} => $${i + 1}${s.cast ? `::${s.cast}` : ""}`).join(", ")}) as r`;
