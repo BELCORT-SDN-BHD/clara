@@ -239,8 +239,31 @@ export type CallerContextOutcome =
   | { ok: true; context: CallerContextRow }
   | { ok: false; reason: CallerContextDenial };
 
-const ALLOWED_ROLES = new Set(["viewer", "bookkeeper", "admin", "owner"]);
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * The four roles `clara.firm_memberships.role` admits. This is a COPY of the
+ * DB's own CHECK constraint (`0002_foundation.sql:215`), and a copy of a
+ * constraint is a projection of it, not the thing (review law 3) — it can
+ * silently drift the day someone adds a fifth role in a migration.
+ *
+ * EXPORTED so `doors.test.ts` can parse that CHECK out of the migration text
+ * and `deepEqual` it against this set. The test is the pin; this comment is
+ * only the pointer to it.
+ */
+export const ALLOWED_ROLES = new Set(["viewer", "bookkeeper", "admin", "owner"]);
+
+/**
+ * LOWERCASE ONLY — deliberately not `/i`.
+ *
+ * Postgres renders `uuid` in canonical lowercase (`uuid_out`), and Supabase's
+ * JWT `sub` is likewise lowercase, so every honest value on both sides of the
+ * subject comparison is lowercase. The comparison
+ * `row.user_id !== verifiedSubject` is case-SENSITIVE, so a case-insensitive
+ * shape check here would have admitted an uppercase id as well-formed and then
+ * denied it one line later as `wrong_subject` — the same refusal reported
+ * under the wrong reason. One rule, applied consistently: a non-canonical id
+ * is malformed, and it is named that.
+ */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Validates ALL SIX declared columns — not the four a caller happens to read.
  *  A row is trusted downstream as a whole, so a partial check hands a

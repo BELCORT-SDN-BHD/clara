@@ -11,11 +11,15 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   acceptInvite,
   loadCallerContext,
   readCallerContextForSubject,
   CALLER_CONTEXT_SELECT,
+  ALLOWED_ROLES,
 } from "./doors";
 import { DoorRefusal } from "../doors";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -139,9 +143,14 @@ test("acceptInvite: a 401 is NEVER classified as a governed refusal (status befo
 // shapes is pinned below, and every one must DENY.
 // ===========================================================================
 
-const SUBJECT = "11111111-1111-1111-1111-111111111111";
-const OTHER_SUBJECT = "22222222-2222-2222-2222-222222222222";
-const FIRM = "33333333-3333-3333-3333-333333333333";
+// LETTER-BEARING uuids on purpose. An all-digit fixture like
+// "11111111-1111-..." makes `.toUpperCase()` the IDENTICAL string, so a
+// case-sensitivity cell built on it asserts nothing at all — it went green
+// against both a case-sensitive and a case-insensitive validator until the
+// fixture could actually express the difference.
+const SUBJECT = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+const OTHER_SUBJECT = "9f8e7d6c-5b4a-4938-8271-6a5b4c3d2e1f";
+const FIRM = "0a1b2c3d-4e5f-4061-8273-8495a6b7c8d9";
 
 const GOOD_ROW = {
   user_id: SUBJECT, firm_id: FIRM, firm_name: "ROME PROPERTIES",
@@ -239,6 +248,14 @@ const MALFORMED: ReadonlyArray<{ what: string; row: unknown }> = [
   { what: "role missing", row: { ...GOOD_ROW, role: undefined } },
   { what: "role outside the CHECK constraint", row: { ...GOOD_ROW, role: "superuser" } },
   { what: "role empty", row: { ...GOOD_ROW, role: "" } },
+  // Case-sensitivity, pinned as a CELL rather than left to the regex's flags:
+  // Postgres renders uuid canonically lowercase and Supabase's `sub` matches,
+  // so an uppercase id is not a well-formed value here. Without this cell the
+  // `/i` flag could come back and nothing would notice until an uppercase id
+  // was admitted as well-formed and then denied as `wrong_subject` — the right
+  // refusal under the wrong reason.
+  { what: "user_id UPPERCASE (not the canonical rendering)", row: { ...GOOD_ROW, user_id: SUBJECT.toUpperCase() } },
+  { what: "firm_id UPPERCASE (not the canonical rendering)", row: { ...GOOD_ROW, firm_id: FIRM.toUpperCase() } },
   { what: "role_rank a string", row: { ...GOOD_ROW, role_rank: "1" } },
   { what: "role_rank a float", row: { ...GOOD_ROW, role_rank: 1.5 } },
   { what: "role_rank a negative float", row: { ...GOOD_ROW, role_rank: -0.5 } },
@@ -270,6 +287,35 @@ for (const malformed of MALFORMED) {
     });
   });
 }
+
+test("ALLOWED_ROLES is the DB's OWN CHECK, parsed from the migration — not a hand-copied list", async () => {
+  // Review law 3: a copy of a constraint is a PROJECTION of it. `ALLOWED_ROLES`
+  // looks right today and would go silently stale the day a migration adds a
+  // fifth role — the app would then reject a legitimate member as `malformed`
+  // and route them to the holding page with no clue why.
+  //
+  // So the list is read out of the constraint itself. Reaching into
+  // packages/db from the web suite is the established idiom here (P4-2's
+  // firm-scope census parses migration text the same way); the alternative is
+  // trusting two copies to agree, which is the thing this cell exists to stop.
+  const migration = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), "../../../../packages/db/migrations/0002_foundation.sql"),
+    "utf8",
+  );
+
+  // `role text not null check (role in ('viewer','bookkeeper','admin','owner'))`
+  // on clara.firm_memberships (0002:215).
+  const check = migration.match(/role\s+text\s+not null\s+check \(role in \(([^)]*)\)\)/);
+  assert.ok(check, "the role CHECK must be readable in 0002_foundation.sql — if this fails, READ the migration, do not relax the regex");
+  const declared = [...check[1]!.matchAll(/'([^']+)'/g)].map((m) => m[1]!);
+
+  assert.ok(declared.length > 0, "the CHECK must actually name roles (a vacuity guard on the parse itself)");
+  assert.deepEqual(
+    [...ALLOWED_ROLES].sort(),
+    [...declared].sort(),
+    "the app's accepted roles must equal the DB's CHECK, exactly — no more, no fewer",
+  );
+});
 
 test("VACUITY CONTROL: the malformed table would pass a row that IS well formed", async () => {
   // Without this, a validator that rejected everything would score 24 green
