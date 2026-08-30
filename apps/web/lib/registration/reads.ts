@@ -45,12 +45,18 @@
 //     `decided_at`, `reason` and `firm_id` are nullable; `id`, `applicant`,
 //     `firm_name`, `status` and `created_at` are NOT NULL.
 
+// ISOMORPHIC BY CONSTRUCTION — nothing here may reach `next/headers`.
+//
+// This module is value-imported by client components (P4-3's holding page renders
+// these rows), and a value import pulls the WHOLE module graph into the client
+// bundle. When `loadOwnRegistrationRequests` lived here it imported
+// `@/lib/supabase/server-session` → `@/lib/supabase/server` → `next/headers`, so
+// importing so much as a type-erased constant from this file broke any client
+// component that did it (found by P4-5, folded here). The server-only half now
+// lives in `./server-reads.ts`; `tests/firm-scope-db-pins.test.ts` walks this
+// file's transitive imports and reds if `next/headers` ever reappears in them.
+
 import { getRows } from "../read";
-import {
-  fixedTokenAccessor,
-  resolveServerSession,
-  type ServerSession,
-} from "@/lib/supabase/server-session";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 export const REGISTRATION_REQUESTS_RELATION =
@@ -65,7 +71,7 @@ export const REGISTRATION_REQUESTS_RELATION =
  *     ('firm_registration_requests_visible', 10,
  *      'id,applicant,firm_name,note,status,decided_by,decided_at,reason,firm_id,created_at')
  *
- * and `tests/require-firm-scope.test.ts` requires `REGISTRATION_REQUESTS_SELECT`
+ * and `tests/firm-scope-db-pins.test.ts` requires `REGISTRATION_REQUESTS_SELECT`
  * to equal that declared string byte for byte, parsed out of the migration rather
  * than retyped (review law 3 — spelling is not identity).
  */
@@ -133,62 +139,4 @@ export function loadRegistrationRequestsForApplicant(
     session,
     signal,
   });
-}
-
-/** The server seam `loadOwnRegistrationRequests` resolves the caller through,
- *  injectable so the fail-closed branch can be DRIVEN in a test rather than read
- *  off the source. Production passes nothing and takes the default. */
-export type OwnRegistrationDeps = {
-  readonly resolveSession?: () => Promise<ServerSession | null>;
-  readonly signal?: AbortSignal;
-};
-
-/**
- * What the holding page's read returns.
- *
- * A DISCRIMINATED RESULT, not a bare array (Codex review of #451, LOW-4). The
- * previous shape collapsed "your identity could not be verified" into `[]` — the
- * same value a verified applicant with no requests gets. Those are different
- * facts and the screen owes the person different words: one is "you have not
- * applied yet", the other is "we could not confirm who you are". Returning `[]`
- * for both would have the holding page confidently tell a signed-in applicant
- * their pending application does not exist, on nothing more than a claims
- * verification blip.
- *
- * `[]` is now reserved for exactly one case: a successful, applicant-filtered read
- * that observed zero rows.
- */
-export type OwnRegistrationResult =
-  | { readonly ok: true; readonly rows: RegistrationRequestRow[] }
-  | { readonly ok: false; readonly reason: "no_session" };
-
-/**
- * The server-side convenience the holding page uses: resolve the caller's own
- * verified session, then read their requests.
- *
- * FAIL-CLOSED ON AN UNVERIFIED CALLER: with no session — or a `sub` claim that is
- * absent, unverifiable or not a uuid — this returns the `no_session` branch
- * **without issuing any read at all**. Review law 2: an absent identity is not a
- * licence to widen the query, and an unfiltered read here is precisely the
- * operator-queue leak the header describes. The suite asserts the stronger
- * property — that `fetch` is never reached on this branch — because a returned
- * emptiness alone would also be true of a request that went out and came back
- * empty.
- *
- * A FAILED read THROWS rather than degrading into either branch: the caller must
- * distinguish loading, empty and error (§0.5's three distinguishable states), and
- * a read failure is none of the three answers this function is able to give.
- */
-export async function loadOwnRegistrationRequests(
-  deps: OwnRegistrationDeps = {},
-): Promise<OwnRegistrationResult> {
-  const resolve = deps.resolveSession ?? resolveServerSession;
-  const session = await resolve();
-  if (session === null) return { ok: false, reason: "no_session" };
-  const rows = await loadRegistrationRequestsForApplicant(
-    fixedTokenAccessor(session.accessToken),
-    session.subject,
-    deps.signal,
-  );
-  return { ok: true, rows };
 }

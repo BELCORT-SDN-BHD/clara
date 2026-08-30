@@ -58,7 +58,7 @@ export const CALLER_CONTEXT_RELATION = "caller_context";
  *     ('caller_context', 6, 'user_id,firm_id,firm_name,role,role_rank,is_operator')
  *
  * and `CALLER_CONTEXT_SELECT` below is required by
- * `tests/require-firm-scope.test.ts` to equal that declared string BYTE FOR BYTE,
+ * `tests/firm-scope-db-pins.test.ts` to equal that declared string BYTE FOR BYTE,
  * parsed out of the migration file rather than retyped. Review law 3 — spelling is
  * not identity: a hand-copied column list that merely LOOKS right is a projection
  * of the contract, not the contract. If the DB's contract ever changes, that test
@@ -92,7 +92,7 @@ export type CallerContextRow = {
 /**
  * The four roles `clara.firm_memberships.role` admits — its CHECK constraint,
  * verbatim and in ladder order (`0002:215`, `check (role in ('viewer',
- * 'bookkeeper','admin','owner'))`). `tests/firm-scope-surfaces.test.ts` parses
+ * 'bookkeeper','admin','owner'))`). `tests/firm-scope-db-pins.test.ts` parses
  * that constraint out of the migration and requires this list to match it as a
  * SET, so the wall below cannot drift from the DB's own vocabulary in silence.
  *

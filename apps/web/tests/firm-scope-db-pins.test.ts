@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
 
@@ -11,10 +11,10 @@ import {
 } from "../lib/firm/caller-context";
 import {
   REGISTRATION_REQUESTS_SELECT,
-  loadOwnRegistrationRequests,
   loadRegistrationRequestsForApplicant,
 } from "../lib/registration/reads";
-import { lexSql } from "../test/sourceOracle";
+import { loadOwnRegistrationRequests } from "../lib/registration/server-reads";
+import { lexSql, stripComments } from "../test/sourceOracle";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { ServerSession } from "../lib/supabase/server-session";
 
@@ -34,6 +34,107 @@ import type { ServerSession } from "../lib/supabase/server-session";
 
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const MIGRATIONS_DIR = join(WEB_ROOT, "..", "..", "packages", "db", "migrations");
+
+// ---------------------------------------------------------------------------
+// THE ISOMORPHIC WALL — a client-importable module may not reach next/headers
+// ---------------------------------------------------------------------------
+
+/** Resolve a relative or `@/`-aliased specifier to a file under apps/web, or null
+ *  for a bare package specifier (which this walk does not follow). */
+function resolveLocal(fromFile: string, spec: string): string | null {
+  const base = spec.startsWith("@/")
+    ? join(WEB_ROOT, spec.slice(2))
+    : spec.startsWith(".")
+      ? join(dirname(join(WEB_ROOT, fromFile)), spec)
+      : null;
+  if (base === null) return null;
+  for (const ext of [".ts", ".tsx", "/index.ts", "/index.tsx"]) {
+    const candidate = `${base}${ext}`;
+    if (existsSync(candidate)) return candidate.slice(WEB_ROOT.length + 1).split(sep).join("/");
+  }
+  return null;
+}
+
+/** Every specifier a module imports — VALUE imports only. `import type` is erased
+ *  at compile time and drags nothing into a bundle, which is exactly why a
+ *  type-only edge must not be followed here. */
+function valueImports(webRelative: string): string[] {
+  const code = stripComments(readFileSync(join(WEB_ROOT, webRelative), "utf8"));
+  const out: string[] = [];
+  for (const m of code.matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
+    if (/^\s*type\s/.test(m[1] as string)) continue;
+    out.push(m[2] as string);
+  }
+  for (const m of code.matchAll(/import\s*["']([^"']+)["']/g)) out.push(m[1] as string);
+  return out;
+}
+
+/** The transitive value-import closure, plus every bare specifier reached. */
+function importClosure(entry: string): { files: Set<string>; bare: Set<string> } {
+  const files = new Set<string>();
+  const bare = new Set<string>();
+  const queue = [entry];
+  while (queue.length > 0) {
+    const current = queue.pop() as string;
+    if (files.has(current)) continue;
+    files.add(current);
+    for (const spec of valueImports(current)) {
+      const local = resolveLocal(current, spec);
+      if (local === null) bare.add(spec);
+      else queue.push(local);
+    }
+  }
+  return { files, bare };
+}
+
+describe("client-importable modules never drag next/headers into the bundle", () => {
+  // P4-5 found this the hard way: value-importing anything from
+  // lib/registration/reads.ts pulled server-session.ts → supabase/server.ts →
+  // next/headers, so a client component that imported one constant broke. The
+  // server-only half moved to lib/registration/server-reads.ts; this walk is what
+  // keeps the split honest instead of trusting a comment.
+  const ISOMORPHIC = ["lib/registration/reads.ts", "lib/firm/caller-context.ts", "lib/read.ts"];
+
+  for (const entry of ISOMORPHIC) {
+    it(`${entry} reaches no server-only module`, () => {
+      const { files, bare } = importClosure(entry);
+      assert.ok(!bare.has("next/headers"), `${entry} transitively value-imports next/headers`);
+      assert.ok(
+        !files.has("lib/supabase/server.ts"),
+        `${entry} reaches lib/supabase/server.ts, which imports next/headers`,
+      );
+      assert.ok(
+        !files.has("lib/supabase/server-session.ts"),
+        `${entry} reaches lib/supabase/server-session.ts, which reaches next/headers`,
+      );
+    });
+  }
+
+  it("VACUITY CONTROL: the walk DOES find next/headers where it really is", () => {
+    const { files, bare } = importClosure("lib/registration/server-reads.ts");
+    assert.ok(files.has("lib/supabase/server-session.ts"), "the walk cannot see a one-hop edge");
+    assert.ok(
+      bare.has("next/headers"),
+      "the walk cannot see next/headers even on the module that genuinely imports it — every assertion above would be vacuous",
+    );
+  });
+
+  it("VACUITY CONTROL: a type-only edge is NOT followed", () => {
+    // `import type` is erased, so following it would red modules that are
+    // perfectly safe — lib/read.ts type-imports @/lib/session, which is
+    // browser-only, and that edge costs a bundle nothing.
+    const code = 'import type { X } from "@/lib/supabase/server";\nimport { y } from "./read";';
+    const specs = (() => {
+      const out: string[] = [];
+      for (const m of stripComments(code).matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
+        if (/^\s*type\s/.test(m[1] as string)) continue;
+        out.push(m[2] as string);
+      }
+      return out;
+    })();
+    assert.deepEqual(specs, ["./read"], "a type-only import was followed as a value edge");
+  });
+});
 
 const MIGRATION_FILES = readdirSync(MIGRATIONS_DIR)
   .filter((f) => f.endsWith(".sql"))
@@ -123,6 +224,30 @@ describe("the projections are the DB's own declared column contracts", () => {
     assert.equal(declared.count, 10);
     assert.equal(declared.columns, REGISTRATION_REQUESTS_SELECT);
     assert.equal(REGISTRATION_REQUESTS_SELECT.split(",").length, declared.count);
+  });
+
+  it("a module that NAMES its pinning test must name one that really pins it", () => {
+    // The nit this closes: both pin headers cited `tests/require-firm-scope.test.ts`
+    // and stayed that way after the pins moved here — a citation nobody could
+    // follow, found by a human reviewer rather than a gate. Prose is not usually
+    // checkable, but a cited FILE plus the SYMBOL it claims to pin is.
+    const CITATIONS: ReadonlyArray<{ module: string; symbol: string }> = [
+      { module: "lib/firm/caller-context.ts", symbol: "CALLER_CONTEXT_SELECT" },
+      { module: "lib/registration/reads.ts", symbol: "REGISTRATION_REQUESTS_SELECT" },
+    ];
+    for (const { module, symbol } of CITATIONS) {
+      const src = readFileSync(join(WEB_ROOT, module), "utf8");
+      const cited = [...src.matchAll(/`(tests\/[\w.-]+\.test\.tsx?)`/g)].map((m) => m[1] as string);
+      assert.ok(cited.length > 0, `${module} names no pinning test at all`);
+      for (const file of new Set(cited)) {
+        const abs = join(WEB_ROOT, file);
+        assert.ok(existsSync(abs), `${module} cites ${file}, which does not exist`);
+        assert.ok(
+          readFileSync(abs, "utf8").includes(symbol),
+          `${module} cites ${file}, but that file does not mention ${symbol} — the citation points at the wrong test`,
+        );
+      }
+    }
   });
 
   it("VACUITY CONTROL: the contract parser fails loudly on a relation it cannot find", () => {
