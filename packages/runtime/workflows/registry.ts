@@ -22,6 +22,7 @@ import { chatTurn_v12 } from "./chatTurn.v12.js";
 import { chatTurn_v13 } from "./chatTurn.v13.js";
 import { chatTurn_v14 } from "./chatTurn.v14.js";
 import { chatTurn_v15 } from "./chatTurn.v15.js";
+import { chatTurn_v16 } from "./chatTurn.v16.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -58,7 +59,19 @@ export const workflows = {
   // `clara_freeform_login` LOGIN + password ceremony and the CLARA_FREEFORM_DATABASE_URL secret,
   // which are a HARD PRECONDITION of the image booting at all (assertProductionPoolConfig is
   // fail-closed on that DSN — packages/runtime/lib/freeform-read.mjs states why).
-  chatTurn: chatTurn_v15,
+  //
+  // P6-1 (Q8's FOUR-CARD WIRE BUMP, 裁-9): REPOINTED v15 -> v16. v16 widens the transcript
+  // union by four kinds and emits ONE of them (`freeform_result`, off an admitted
+  // `read_books_freeform`); the other three have producers in other lanes, walled there by
+  // grant and by wake-kind allowlist (chatTurn.v16.prompt.ts's header names each wall).
+  // NOTHING RIDES WITH THIS IMAGE — no migration, no ceremony, no secret: every read the four
+  // cards hydrate on is already live and already granted (0103's agent_receipts_visible, 0137's
+  // firm_open_questions_visible, 0138/0140's close_proposals, 0131's freeform_read_log), and
+  // v15's own `CLARA_FREEFORM_DATABASE_URL` precondition is unchanged and already met by the
+  // running image. So the deploy order is free in BOTH directions, which is rare enough here to
+  // be worth stating: a v16 image on today's database emits a card whose read surface exists,
+  // and a rollback to v15 simply stops minting the card.
+  chatTurn: chatTurn_v16,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -544,6 +557,30 @@ export { chatTurn_v13 };
 // the human-answer kind, so a live run still resuming into v14's body at cutover is the expected
 // case, not a corner one.
 export { chatTurn_v14 };
+// P6-1 — Q8's FOUR-CARD WIRE BUMP (the runtime half) repointed `chatTurn:` v15 -> v16. Rulings:
+// Q8 (mohe-grill-rulings-2026-08-27.md:62-72) at 裁-9's tier (c) depth; order
+// docs/plan/active/fe-train-plan-2026-08-30-orders-p6.md §P6-1.
+//
+// WHAT CHANGES, IN ONE PARAGRAPH. v16 is v15 plus FOUR part kinds on the wire —
+// `agent_receipt`, `firm_question`, `close_proposal`, `freeform_result` — declared in ONE file
+// (chatTurn.v16.parts.ts) because apps/web is their reader and the runtime is their declarer.
+// Exactly one of the four has an emitter in this closure: an ADMITTED `read_books_freeform`
+// now promotes a `freeform_result` addressing its own receipt row, which is the card v15's own
+// header deferred to P6. The other three are declarations whose producers sit in the filing and
+// close lanes, refused to a chat credential by `clara_wake_filing`'s grant (0126:2103) and by
+// the `close_prep`-only allowlist row (0138:2531) respectively, and whose read surface —
+// `agent_receipts_visible` — is granted to the HUMAN session alone (0103:1030, with 0103's tail
+// asserting no agent role holds it). No tool is added, removed or renamed; no prompt word
+// changes; the C-19 terminal set, the park/hook ordering and the step budget are byte-carried.
+//
+// THERE IS NO COUPLED DEPLOY ORDER, WHICH IS WORTH SAYING BECAUSE EVERY REPOINT ABOVE HAS ONE.
+// No migration rides with this image and no ceremony precedes it: the four hydrate surfaces are
+// already live and already granted, and v15's `CLARA_FREEFORM_DATABASE_URL` boot precondition
+// is unchanged (v16 reaches the freeform read through v15's own tool set, by import). A v16
+// image against today's database mints a card whose read exists; a rollback to v15 simply stops
+// minting it. v15 STAYS FROZEN, BUILT AND EXPORTED so no parked run is stranded (policy (c)) —
+// chat parks are the human-answer kind, so a live run still resuming into v15's body at cutover
+// is the expected case, not a corner one.
 export { chatTurn_v15 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
