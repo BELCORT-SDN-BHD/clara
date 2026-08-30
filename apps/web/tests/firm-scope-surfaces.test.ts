@@ -18,6 +18,7 @@ import {
   exportedHttpMethods,
   reachableFrom,
   stripComments,
+  tryBlockRanges,
 } from "../test/sourceOracle";
 
 /**
@@ -377,6 +378,67 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
     );
   });
 
+  it("FIND-1b — no entrance calls the spine INSIDE a try block", () => {
+    // AWAITING IS NOT ENOUGH, AND NEITHER IS CALLING (#451 round-3, MED-2).
+    // `requireFirmScope()` denies by calling `redirect()`, which SIGNALS BY
+    // THROWING `NEXT_REDIRECT`. So `try { await requireFirmScope(); } catch {}`
+    // disarms the entrance completely — the redirect is swallowed and the layout
+    // paints firm chrome for a caller with no firm — while satisfying the FIND-1
+    // await pin, `@typescript-eslint/no-floating-promises` and `tsc` all at once.
+    // Measured: with that mutation in place the suite was 125 pass / 0 fail,
+    // eslint 0 and tsc 0. Nothing here could see it; this cell can.
+    //
+    // Applied to the 403 entrance too, where the mechanism differs but the
+    // conclusion does not: `firmScopeGuard()` returns its refusal rather than
+    // throwing, but a `catch` around it still turns a resolution failure into a
+    // silently continuing request. An entrance has no business swallowing either.
+    for (const entrance of SCOPE_ENTRANCES) {
+      for (const { root, code } of executionRoots(entrance.path)) {
+        const ranges = tryBlockRanges(code);
+        for (const call of code.matchAll(/\b(requireFirmScope|firmScopeGuard)\s*\(/g)) {
+          const at = call.index;
+          assert.equal(
+            ranges.some(([s, e]) => at >= s && at < e),
+            false,
+            `${entrance.path}: ${root} calls the spine inside a try block — a denial that THROWS is swallowed and the surface continues`,
+          );
+        }
+      }
+    }
+  });
+
+  it("VACUITY CONTROL: the try-block instrument sees the swallow, and only it", () => {
+    const swallowed = [
+      'import { requireFirmScope } from "@/lib/require-firm-scope";',
+      "export default async function S() { try { await requireFirmScope(); } catch {} return null; }",
+    ].join("\n");
+    const armed = [
+      'import { requireFirmScope } from "@/lib/require-firm-scope";',
+      "export default async function S() { await requireFirmScope(); try { await load(); } catch {} return null; }",
+    ].join("\n");
+    const swallowsSpine = (src: string) => {
+      const code = stripComments(src, { blankStrings: true });
+      const body = reachableFrom(code, defaultExportName(code) as string) ?? "";
+      const ranges = tryBlockRanges(body);
+      return [...body.matchAll(/\brequireFirmScope\s*\(/g)].some((m) =>
+        ranges.some(([s, e]) => m.index >= s && m.index < e),
+      );
+    };
+    assert.equal(swallowsSpine(swallowed), true, "a try/catch around the spine call is invisible");
+    assert.equal(
+      swallowsSpine(armed),
+      false,
+      "a try block ELSEWHERE in the body is read as swallowing the guard — the cell would red on honest code",
+    );
+    // The instrument reads the same string-blanked code every other cell here
+    // does, so a `try {` written inside a string literal is not a try block.
+    assert.equal(
+      tryBlockRanges(stripComments('const s = "try {"; try { a(); } catch {}', { blankStrings: true })).length,
+      1,
+      "a `try {` inside a string counted as a real try block",
+    );
+  });
+
   it("VACUITY CONTROL: a guarded GET does not cover an unguarded POST", () => {
     const src = [
       'import { firmScopeGuard } from "@/lib/require-firm-scope";',
@@ -392,6 +454,42 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
       /firmScopeGuard\(/,
       "POST is unguarded but the walker reports it covered — the per-method claim is vacuous",
     );
+  });
+
+  it("VACUITY CONTROL: an ALIASED or `let`-bound method export is still a root", () => {
+    // MED-1. Next 16 dispatches off the module's export RECORD (`handlers[method]`
+    // / `method in userland`), so `export { raw as DELETE }` and `export let
+    // DELETE = raw` route exactly as `export function DELETE()` does. The census
+    // read only the two easy spellings, so an unguarded DELETE added in either
+    // shape passed BOTH per-root cells — "the API entrance's roots ARE its
+    // exported HTTP methods" and "EVERY execution root calls the spine" — because
+    // it was never named as a root at all. Review law 3: the instrument was
+    // reading a SPELLING and calling it the export.
+    const aliased = [
+      'import { firmScopeGuard } from "@/lib/require-firm-scope";',
+      "async function handler() { const g = await firmScopeGuard(); return g; }",
+      "async function raw() { return Response.json({ ok: true }); }",
+      "export { handler as GET };",
+      "export { raw as DELETE };",
+    ].join("\n");
+    const aliasedCode = stripComments(aliased, { blankStrings: true });
+    assert.deepEqual(exportedHttpMethods(aliasedCode).sort(), ["DELETE", "GET"]);
+    // And the alias resolves to the RIGHT body, both ways — otherwise every
+    // aliased export would red for want of a body rather than for want of a guard.
+    assert.match(reachableFrom(aliasedCode, "GET") ?? "", /firmScopeGuard\(/);
+    assert.doesNotMatch(reachableFrom(aliasedCode, "DELETE") ?? "", /firmScopeGuard\(/);
+
+    const letBound = [
+      'import { firmScopeGuard } from "@/lib/require-firm-scope";',
+      "async function raw() { return Response.json({ ok: true }); }",
+      "export let DELETE = raw;",
+    ].join("\n");
+    const letCode = stripComments(letBound, { blankStrings: true });
+    assert.deepEqual(exportedHttpMethods(letCode), ["DELETE"]);
+    assert.doesNotMatch(reachableFrom(letCode, "DELETE") ?? "", /firmScopeGuard\(/);
+
+    // A type-only clause exports nothing at runtime and must not invent a root.
+    assert.deepEqual(exportedHttpMethods(stripComments("export type { DELETE };")), []);
   });
 
   it("FIND-1 — the 403 entrance RETURNS the refusal, not merely computes it", () => {

@@ -160,7 +160,16 @@ const migration = (name: string): string => readFileSync(join(MIGRATIONS_DIR, na
 function viewDefinitions(view: string): { file: string; offset: number }[] {
   const out: { file: string; offset: number }[] = [];
   for (const file of MIGRATION_FILES) {
-    const re = new RegExp(`create\\s+(or\\s+replace\\s+)?view\\s+clara\\.${view}\\b`, "gi");
+    // THE SCHEMA QUALIFIER IS SQL, NOT A FIXED STRING (#451 round-3, LOW-1).
+    // PostgreSQL accepts `clara . caller_context` and `clara."caller_context"` as
+    // the very same relation, and `clara\.${view}` saw neither — a second live
+    // body written in either spelling would have passed a census whose whole claim
+    // is "exactly one, estate-wide". `\b` sits INSIDE the optional closing quote
+    // so it still anchors on the identifier's last character in both spellings.
+    const re = new RegExp(
+      `create\\s+(or\\s+replace\\s+)?view\\s+"?clara"?\\s*\\.\\s*"?${view}\\b"?`,
+      "gi",
+    );
     for (const m of lexSql(migration(file)).statements.matchAll(re)) {
       out.push({ file, offset: m.index ?? -1 });
     }
@@ -264,6 +273,69 @@ describe("LOW-5 — the SQL lexer, controlled before it is trusted", () => {
   it("a DDL decoy nested in an inner dollar string does not count either", () => {
     const sql = "do $$ begin\n  perform $q$ create view clara.probe as select 1; $q$;\nend $$;";
     assert.ok(!/create\s+view\s+clara\.probe/i.test(lexSql(sql).statements));
+  });
+
+  it("MED-3 — a BARE DDL inside a top-level do block IS a definition", () => {
+    // The three cells above prove what stays MASKED. This one proves the lexer
+    // did not buy that by blinding itself: `do $$ begin create or replace view
+    // …; end $$;` is executable SQL that really defines the view, and blanking
+    // the whole body hid a live body from the one-definition census (#451
+    // round-3, MED-3). The discrimination is by KIND, not by depth alone — the
+    // quoted decoy and the nested payload above still do not count.
+    const sql = "do $$ begin\n  create or replace view clara.probe as select 1;\nend $$;";
+    assert.ok(
+      /create\s+or\s+replace\s+view\s+clara\.probe/i.test(lexSql(sql).statements),
+      "a real CREATE VIEW inside a do block is invisible to the census",
+    );
+  });
+
+  it("LOW-2 — an unterminated string keeps both views the same length", () => {
+    // `statements` re-emitted a closing quote the input never had, so it came out
+    // ONE BYTE LONGER than `withoutComments` — and every offset-based read in
+    // these pins is built on the two views addressing the same bytes.
+    const sql = "select '";
+    const { withoutComments, statements } = lexSql(sql);
+    assert.equal(withoutComments.length, sql.length);
+    assert.equal(statements.length, sql.length);
+  });
+
+  it("LOW-3 — `$1$` is a parameter, not a dollar tag", () => {
+    // `$1$` has no closing tag, so reading it as one masked the rest of the FILE.
+    const sql = "select $1$::text;\ncreate view clara.probe as select 1;";
+    const { statements, withoutComments } = lexSql(sql);
+    assert.ok(/create\s+view\s+clara\.probe/i.test(statements), "everything after `$1$` was masked away");
+    assert.equal(withoutComments.length, sql.length);
+  });
+
+  it("LOW-3 — an UNTERMINATED dollar tag does not mask to EOF", () => {
+    // The fail-OPEN direction: one malformed tag silently erasing every statement
+    // after it is exactly how a live body would leave a census clean.
+    const sql = "do $body$ begin end;\ncreate view clara.probe as select 1;";
+    const { statements } = lexSql(sql);
+    assert.ok(
+      /create\s+view\s+clara\.probe/i.test(statements),
+      "an unterminated $body$ swallowed the statements that follow it",
+    );
+    assert.equal(statements.length, sql.length);
+  });
+
+  it("LOW-1 — a spaced or quoted schema qualifier is the SAME relation", () => {
+    // `clara . probe` and `clara."probe"` are both `clara.probe` to PostgreSQL;
+    // a census that reads only `clara\.probe` would call a second live body zero.
+    for (const spelling of ['clara . probe', 'clara."probe"', '"clara"."probe"', "clara.probe"]) {
+      const defs = [
+        ...lexSql(`create or replace view ${spelling} as select 1;`).statements.matchAll(
+          /create\s+(or\s+replace\s+)?view\s+"?clara"?\s*\.\s*"?probe\b"?/gi,
+        ),
+      ];
+      assert.equal(defs.length, 1, `${spelling} was not seen as a definition of clara.probe`);
+    }
+    const near = [
+      ...lexSql("create view clara.probe_other as select 1;").statements.matchAll(
+        /create\s+(or\s+replace\s+)?view\s+"?clara"?\s*\.\s*"?probe\b"?/gi,
+      ),
+    ];
+    assert.equal(near.length, 0, "clara.probe_other matched the pin for clara.probe");
   });
 
   it("every view is LENGTH-PRESERVING — the property the CHECK cell relies on", () => {

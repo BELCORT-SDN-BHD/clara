@@ -33,7 +33,17 @@ import {
   tokenFromSession,
   type ServerSession,
 } from "../lib/supabase/server-session";
-import { stripComments } from "../test/sourceOracle";
+import { moduleLevelDeclarations, stripComments } from "../test/sourceOracle";
+
+/** The four modules a request's firm scope is decided by. A cache in ANY of them
+ *  outlives the request that filled it (#451 round-3, MED-4). */
+const SPINE_MODULES = [
+  "lib/supabase/server-session.ts",
+  "lib/require-firm-scope.ts",
+  "lib/runtime/outbound.ts",
+  "lib/firm/caller-context.ts",
+] as const;
+
 /**
  * THE SCOPE SPINE'S BEHAVIOUR (P4-2; design `p4-design-2026-08-27.md` §4 E).
  * Its structural half — the route-leaf census, the three registries, the
@@ -494,12 +504,66 @@ describe("the cost of a scoped request", () => {
       /new\s+(Map|Set|WeakMap|WeakSet|Array)\s*(<[^>]*>)?\s*\(/,
       "a module-level collection is a cache that outlives a request",
     );
+    // A CACHE DOES NOT HAVE TO BE A COLLECTION (#451 round-3, MED-4). `const c:
+    // Record<string, T> = {}` and `const a: T[] = []` are the two plainest ways to
+    // write one, and `new X(` saw neither. EMPTY literals only, deliberately: a
+    // cache starts empty, whereas a populated literal is a constant table (this
+    // estate's `CAPABILITY_LEGS` and `FIRM_SCOPE_FORBIDDEN_BODY` are exactly that)
+    // and banning those would red honest code.
+    assert.doesNotMatch(
+      code,
+      /^\s*(export\s+)?const\s+[A-Za-z_$][\w$]*\s*(:[^=]*)?=\s*(\{\s*\}|\[\s*\]|Object\.create\s*\()/m,
+      "a module-level object/array literal is a cache that outlives a request",
+    );
     for (const m of code.matchAll(/=\s*\/(?:[^/\\\n]|\\.)+\/([a-z]*)/g)) {
       const flags = m[1] as string;
       assert.ok(
         !flags.includes("g") && !flags.includes("y"),
         `a module-level regex with /${flags} carries lastIndex across calls`,
       );
+    }
+  });
+
+  it("NO spine module holds module-level mutable state — all four, scoped", () => {
+    // The cell above reads ONE file. The spine is four (#451 round-3, MED-4, INFO):
+    // the memoised session resolver, the decision itself, the outbound credential
+    // rule, and the caller_context reader. A cache in any of them carries one
+    // caller's data into the next request just as effectively.
+    //
+    // `let`/`var` IS ASKED AT MODULE LEVEL, not with `/^\s*let\s/m`. Three of these
+    // four modules contain a perfectly legitimate function-local `let`
+    // (`require-firm-scope.ts:155`, `:163`, `outbound.ts:98`) — per-call state,
+    // which is not what this bans. `moduleLevelDeclarations` drops anything nested
+    // inside another declaration, so the question asked is the one meant.
+    for (const rel of SPINE_MODULES) {
+      const code = stripComments(readFileSync(join(WEB_ROOT, rel), "utf8"));
+
+      assert.doesNotMatch(
+        code,
+        /new\s+(Map|Set|WeakMap|WeakSet|Array)\s*(<[^>]*>)?\s*\(/,
+        `${rel}: a collection here is a cache that outlives a request`,
+      );
+      assert.doesNotMatch(
+        code,
+        /^\s*(export\s+)?const\s+[A-Za-z_$][\w$]*\s*(:[^=]*)?=\s*(\{\s*\}|\[\s*\]|Object\.create\s*\()/m,
+        `${rel}: an empty object/array literal is a cache that outlives a request`,
+      );
+      for (const m of code.matchAll(/=\s*\/(?:[^/\\\n]|\\.)+\/([a-z]*)/g)) {
+        const flags = m[1] as string;
+        assert.ok(
+          !flags.includes("g") && !flags.includes("y"),
+          `${rel}: a regex with /${flags} carries lastIndex across calls`,
+        );
+      }
+
+      const top = moduleLevelDeclarations(code);
+      assert.ok(top.length > 0, `${rel}: the declaration walk found nothing — this cell would be vacuous`);
+      for (const d of top) {
+        assert.ok(
+          d.kind === "function" || d.kind === "const",
+          `${rel}: module-level \`${d.kind} ${d.name}\` is mutable state that outlives a request`,
+        );
+      }
     }
   });
 
@@ -512,6 +576,24 @@ describe("the cost of a scoped request", () => {
     assert.equal(rejects("let sessions = null;", /^\s*(export\s+)?(let|var)\s/m), true);
     assert.equal(rejects("var sessions = null;", /^\s*(export\s+)?(let|var)\s/m), true);
     assert.equal(rejects("const SAFE = 1;", /^\s*(export\s+)?(let|var)\s/m), false);
+
+    // The two literal shapes MED-4 added, and the populated forms that must stay
+    // legal — a check that rejected `const T = { a: 1 }` would red honest code.
+    const LITERAL =
+      /^\s*(export\s+)?const\s+[A-Za-z_$][\w$]*\s*(:[^=]*)?=\s*(\{\s*\}|\[\s*\]|Object\.create\s*\()/m;
+    assert.equal(rejects("const c: Record<string, T> = {};", LITERAL), true, "an empty object cache passes");
+    assert.equal(rejects("const a: T[] = [];", LITERAL), true, "an empty array cache passes");
+    assert.equal(rejects("export const c = {};", LITERAL), true);
+    assert.equal(rejects("const c = Object.create(null);", LITERAL), true);
+    assert.equal(rejects('const T = { error: "no_firm_scope" } as const;', LITERAL), false);
+    assert.equal(rejects('const L = ["content-type"] as const;', LITERAL), false);
+
+    // And the module-level scoping: a nested `let` is per-call, a top-level one is
+    // not, and reading them the same way is what would make the widened cell noise.
+    const kinds = (src: string) =>
+      moduleLevelDeclarations(stripComments(src)).map((d) => `${d.kind} ${d.name}`);
+    assert.deepEqual(kinds("export let leaked = null;"), ["let leaked"]);
+    assert.deepEqual(kinds("function f() {\n  let local = 1;\n  return local;\n}"), ["function f"]);
     assert.ok(stripComments("const c = new Map();").includes("new Map("));
     assert.ok(!stripComments("// const c = new Map();").includes("new Map("));
     const flagsOf = (src: string) =>

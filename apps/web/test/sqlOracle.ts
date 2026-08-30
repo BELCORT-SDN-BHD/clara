@@ -27,9 +27,16 @@ export type SqlViews = {
    *  strings. */
   readonly withoutComments: string;
   /** Comments blanked AND every literal payload masked — single-quoted strings,
-   *  escape strings and all dollar payloads. What remains is statement-level SQL,
-   *  where a `create view` is a real definition rather than text inside a body, a
-   *  notice message or a decoy. */
+   *  escape strings, and every NESTED dollar payload. What remains is
+   *  statement-level SQL, where a `create view` is a real definition rather than a
+   *  notice message, a quoted decoy, or a nested literal.
+   *
+   *  A TOP-LEVEL `do $$ … $$` BODY IS NOT A LITERAL AND IS NOT MASKED. It is
+   *  executable SQL that Postgres runs, so `do $$ begin create or replace view
+   *  clara.x …; end $$;` really does define the view — masking it hid a live body
+   *  from the one-definition census (#451 round-3, MED-3). What it CONTAINS is
+   *  still masked by kind: a `raise notice '…'` decoy is a string, a `$q$ … $q$`
+   *  payload is a nested dollar literal. */
   readonly statements: string;
 };
 
@@ -101,6 +108,11 @@ export function lexSql(sql: string, depth = 0): SqlViews {
       const start = i;
       if (isEscapeString) i += 1;
       i += 1; // the opening quote
+      // Whether a CLOSING quote was actually consumed. A string left unterminated
+      // at EOF has none, and re-emitting one anyway made `statements` one byte
+      // LONGER than `withoutComments` — breaking the length-preserving property
+      // every offset-based read in the pins relies on (#451 round-3, LOW-2).
+      let closed = false;
       while (i < sql.length) {
         if (isEscapeString && sql[i] === "\\") {
           i += 2;
@@ -112,35 +124,56 @@ export function lexSql(sql: string, depth = 0): SqlViews {
         }
         if (sql[i] === "'") {
           i += 1;
+          closed = true;
           break;
         }
         i += 1;
       }
       const raw = sql.slice(start, i);
       const lead = isEscapeString ? 2 : 1;
-      emit(raw, `${raw.slice(0, lead)}${blank(raw.length - lead - 1)}'`);
+      const tail = closed ? "'" : "";
+      emit(raw, `${raw.slice(0, lead)}${blank(raw.length - lead - tail.length)}${tail}`);
       continue;
     }
 
-    const dollar = /^\$[A-Za-z_]?[\w]*\$/.exec(sql.slice(i));
+    // A DOLLAR-QUOTE TAG IS `$$` OR `$identifier$` — the tag body, when present,
+    // must START with a letter or underscore. `$1$` is a positional PARAMETER
+    // followed by a `$`, and PostgreSQL does not read it as a quote; the old
+    // `[A-Za-z_]?[\w]*` accepted it, and since nothing closes it the lexer then
+    // masked the entire rest of the file (#451 round-3, LOW-3).
+    const dollar = /^\$([A-Za-z_]\w*)?\$/.exec(sql.slice(i));
     if (dollar) {
       const tag = dollar[0];
       const close = sql.indexOf(tag, i + tag.length);
-      const innerEnd = close < 0 ? sql.length : close;
-      const inner = sql.slice(i + tag.length, innerEnd);
-      const closer = close < 0 ? "" : tag;
+      if (close < 0) {
+        // UNTERMINATED. PostgreSQL would reject the file outright, so this is not
+        // a dollar quote — and masking to EOF is the FAIL-OPEN direction: every
+        // statement after it would vanish from the census silently. Emit the `$`
+        // as the literal it is and carry on, leaving what follows visible.
+        emit("$", "$");
+        i += 1;
+        continue;
+      }
+      const inner = sql.slice(i + tag.length, close);
+      const closer = tag;
       if (depth === 0) {
-        // A `do $$ … $$` / function body: executable SQL. Lex it, so comments
-        // inside it are blanked and any dollar string nested WITHIN it is masked.
-        emit(`${tag}${lexSql(inner, depth + 1).withoutComments}${closer}`,
-             `${tag}${blankPreservingLines(inner)}${closer}`);
+        // A `do $$ … $$` / function body: executable SQL. Lex it for BOTH views —
+        // comments inside it are blanked, a dollar string nested WITHIN it is
+        // masked, and a statement inside it is a STATEMENT. Blanking the whole
+        // body in `statements` made `do $$ begin create or replace view
+        // clara.caller_context …; end $$;` invisible to the one-live-body census,
+        // which is precisely what that census exists to catch (#451 round-3,
+        // MED-3). A `raise notice 'create view …'` decoy stays masked because it
+        // is a string; a `$q$ … $q$` payload stays masked because it is depth 1.
+        const lexed = lexSql(inner, depth + 1);
+        emit(`${tag}${lexed.withoutComments}${closer}`, `${tag}${lexed.statements}${closer}`);
       } else {
         // Nested: a string literal, whatever it looks like. Masked in BOTH views —
         // a contract tuple or a CREATE VIEW in here is text, not evidence.
         const masked = blankPreservingLines(inner);
         emit(`${tag}${masked}${closer}`, `${tag}${masked}${closer}`);
       }
-      i = close < 0 ? sql.length : close + tag.length;
+      i = close + tag.length;
       continue;
     }
 

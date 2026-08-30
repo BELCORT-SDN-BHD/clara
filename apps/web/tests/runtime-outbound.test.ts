@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 import {
@@ -9,6 +12,7 @@ import {
   isJwtShaped,
   legFor,
 } from "../lib/runtime/outbound";
+import { matchBlock, stripComments } from "../test/sourceOracle";
 
 /**
  * THE RUNTIME PROXY'S OUTBOUND CREDENTIAL (P4-2).
@@ -116,6 +120,87 @@ describe("the leg switch is the runtime's own contract", () => {
       assert.equal(leg.method, leg.method.toUpperCase(), "the registry method must be uppercase");
       assert.ok(["PUT", "POST"].includes(leg.method));
     }
+  });
+});
+
+/**
+ * THE RUNTIME'S OWN ROUTE TABLE, censused independently (#451 round-3, MED-5 /
+ * NEW-1).
+ *
+ * Until this cell, `CAPABILITY_LEGS` was bound to `packages/runtime/src/
+ * intakeRoutes.ts` by CITATION ONLY — each entry's `why` names a file and a line,
+ * and nothing checked that the line still says what it said. A leg renamed,
+ * re-verbed or added on the runtime side would leave the proxy classifying against
+ * a registry nobody had touched: a new capability route would silently take the
+ * SESSION lane (the fail-closed direction, but the upload would break), and a
+ * retired one would keep forwarding a caller-supplied bearer.
+ *
+ * Parsed off COMMENT-STRIPPED source with a brace-matched call range, not a
+ * non-greedy regex: a `)` inside a comment or a string must not be able to end a
+ * handler early and hide the `bearerCapability()` inside it.
+ */
+const INTAKE_ROUTES = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+  "packages",
+  "runtime",
+  "src",
+  "intakeRoutes.ts",
+);
+
+function runtimeRoutes(): { call: string; capability: boolean }[] {
+  const src = stripComments(readFileSync(INTAKE_ROUTES, "utf8"));
+  const out: { call: string; capability: boolean }[] = [];
+  for (const m of src.matchAll(/router\.(get|post|put|patch|delete)\s*\(\s*"([^"]+)"\s*,/g)) {
+    const open = src.indexOf("(", m.index);
+    const end = matchBlock(src, open);
+    assert.ok(end > 0, `router.${m[1]}("${m[2]}"): unbalanced call — this parser is blind`);
+    // The proxy sees everything after `/api/runtime/`, and an Express `:param` is
+    // one dynamic segment — the registry's `*`.
+    const path = (m[2] as string)
+      .replace(/^\/api\//, "")
+      .split("/")
+      .map((s) => (s.startsWith(":") ? "*" : s))
+      .join("/");
+    out.push({
+      call: `${(m[1] as string).toUpperCase()} ${path}`,
+      capability: src.slice(open, end).includes("bearerCapability("),
+    });
+  }
+  return out;
+}
+
+describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () => {
+  const routes = runtimeRoutes();
+
+  it("VACUITY CONTROL: the parser actually read the runtime's route table", () => {
+    assert.deepEqual(
+      routes.map((r) => r.call).sort(),
+      ["POST intake/documents", "POST intake/documents/*/finalize", "PUT intake/documents/*/bytes"],
+      "the runtime's intake route table changed — re-read packages/runtime/src/intakeRoutes.ts before touching the registry",
+    );
+  });
+
+  it("CAPABILITY_LEGS equals the runtime's bearerCapability routes, BOTH ways", () => {
+    const fromRuntime = routes.filter((r) => r.capability).map((r) => r.call).sort();
+    const fromRegistry = CAPABILITY_LEGS.map((l) => `${l.method} ${l.path.join("/")}`).sort();
+    assert.deepEqual(
+      fromRegistry,
+      fromRuntime,
+      "CAPABILITY_LEGS has drifted from intakeRoutes.ts — the proxy is classifying against a stale contract",
+    );
+  });
+
+  it("VACUITY CONTROL: the begin leg is NOT capability-guarded", () => {
+    // If `bearerCapability(` were read as present everywhere, the equality above
+    // would hold for the wrong reason. The session leg is the discriminator: it
+    // authenticates a JWT (`authenticate(`), and must not appear as a capability.
+    const begin = routes.find((r) => r.call === "POST intake/documents");
+    assert.ok(begin, "the begin leg vanished from the runtime's route table");
+    assert.equal(begin.capability, false, "begin reads a capability — the leg split itself would be wrong");
+    assert.equal(routes.filter((r) => r.capability).length, 2, "the bearerCapability() read is not discriminating");
   });
 });
 
