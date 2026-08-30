@@ -165,6 +165,12 @@ behaviour is a PostgreSQL property, not a Clara mechanism.)
 > registered witness still matches its live body, so a forgotten re-witness reds the suite rather
 > than surfacing as a door that has quietly stopped working.
 
+**Retired deploy artifacts.** `deploy/vendor-identity-binding-0028-postverify.sql` was retired
+2026-08-30 (owner ruling 裁-48): its probe 6 pinned `clara.execute_rule_post(uuid,text)` by exact
+signature, which `0118` dropped at the F-A2 cutover, so the script red for every frontier since —
+a dead instrument that would mislead a ceremony. `0028`'s standing claims are proven by the
+migration replay and the estate suite, not by a deploy-time script.
+
 ## Transaction-isolation pins
 
 Every migration opens **READ COMMITTED**, stated explicitly on the `BEGIN` and then
