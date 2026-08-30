@@ -202,7 +202,7 @@ The prior build had no event layer, no context pack, and no stale-context detect
 | Automated import/post into external ERP | File export only (CSV/PDF/XLSX) — never an ERP import/post. |
 | Editing the DB schema from the app | Schema is operator-versioned; the app/agent does DML only. |
 | An autonomy-dial settings page | Autonomy lives in the Agentic Charter (ADR-0071) + the structural invariants; there is no dial — the posture is uniform and permanent. |
-| Billing/subscriptions (deferred pre-launch) | Interim guardrail = email-verify + fail-closed admission gate + per-firm usage METERING (visible monthly spend, never a cap that pauses automation — narrowed by ADR-0071/G8; engine-protective concurrency floors stay). |
+| ~~Billing/subscriptions (deferred pre-launch)~~ — **SCOPE NOTE, not a non-goal (裁-71④):** billing is IN SCOPE for beta | Stripe Checkout + webhooks, paid seats/Active-Client-slots, a firm-wide AI allowance in RM, on the critical path (裁-42, 裁-50–56, 裁-57, 裁-58, 裁-68). Only the ringgit AMOUNTS defer to a dedicated pricing sitting — `amounts_ruled=false` until then, checkout runs at RM0/trial, `issue_invoice` refuses. |
 | Held WebSocket chat | SSE only. |
 | Outbound MyInvois issuance | Track C is inbound-only — the local no-egress UBL parse is live (ADR-025/026/027); API pull + issuance stay future scope. |
 | Multi-entity / group consolidation | Single-entity books per client. |
