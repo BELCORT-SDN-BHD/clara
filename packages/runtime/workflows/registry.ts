@@ -45,6 +45,8 @@ import { firmInterview_v3 } from "./firmInterview.v3.js";
 import { clientOnboarding_v1 } from "./clientOnboarding.v1.js";
 import { clientOnboarding_v2 } from "./clientOnboarding.v2.js";
 import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";
+import { bankAgent_v1 } from "./bankAgent.v1.js";
+import { closePrep_v1 } from "./closePrep.v1.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
@@ -93,6 +95,22 @@ export const workflows = {
   autoDraft: autoDraft_v9,
   firmInterview: firmInterview_v3,
   clientOnboarding: clientOnboarding_v3,
+  // GATE G1's TWO WAKE BODIES — NEW CLASSES, never repoints. These two keys are what
+  // clara.wake_engine_sources' own `workflow_export` column already names: migration 0133 §G
+  // seeded ('bank_agent', ..., workflow_export 'bankAgent', ...) and ('close_prep', ...,
+  // workflow_export 'closePrep', ...), BOTH enabled=false. The engine resolves a source's body
+  // by bracket-indexing `workflowsByName` with that column's value (startWorld.ts), so the
+  // registry KEY is the binding — there is no second table to update and no migration owed for
+  // the wiring itself.
+  //
+  // WHAT CHANGES THE DAY THIS DEPLOYS: nothing at runtime. Both sources stay enabled=false, so
+  // the engine never claims for them and never calls start() on either export. What DOES change
+  // is that startWorld.ts's own note — "no bankAgent/closePrep export exists yet ... an enabled
+  // row naming an export the registry does not carry would throw at start()" — becomes
+  // false-to-fact: the exports now exist, so the owner's flip at the G1 rollout ceremony
+  // dispatches a real body instead of dead-lettering.
+  bankAgent: bankAgent_v1,
+  closePrep: closePrep_v1,
 } as const;
 
 // Gate G1 (opus/Codex review, MUST D): a loosely-typed VIEW of the SAME `workflows` object above
