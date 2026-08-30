@@ -133,6 +133,14 @@ describe("the SQL lexer is controlled before the migration census trusts it", ()
     assert.equal(viewDefinitionOffsets(invoked, "probe").length, 1);
     assert.equal(viewDefinitionOffsets(performed, "probe").length, 1);
     assert.equal(viewDefinitionOffsets(uninvoked, "probe").length, 0);
+
+  });
+
+  it("PIN SQL-7b: CALL exposes an invoked local procedure's DDL", () => {
+    const called = `create or replace procedure clara.install_probe() language plpgsql as $fn$
+      begin create view clara.probe as select 1; end $fn$;
+      call clara.install_probe();`;
+    assert.equal(viewDefinitionOffsets(called, "probe").length, 1);
   });
 
   it("PIN SQL-8: quoted DO body is executable; ordinary quoted value is data", () => {
@@ -151,16 +159,26 @@ describe("the SQL lexer is controlled before the migration census trusts it", ()
     assert.equal(viewDefinitionOffsets(dollar, "probe").length, 1);
     assert.equal(viewDefinitionOffsets(quoted, "probe").length, 1);
     assert.equal(viewDefinitionOffsets(data, "probe").length, 0);
-    const unresolved = lexSql("do $$ begin execute format('create view clara.%I as select 1', name); end $$;");
-    assert.match(unresolved.unresolvedDynamicSql[0] ?? "", /unmodelled: unresolved dynamic SQL at sql-oracle\.sql:1/);
+  });
+
+  it("PIN SQL-9a: every unresolved dynamic EXECUTE throws, even when the census found zero", () => {
     assert.throws(
       () => viewDefinitionOffsets("do $$ begin execute format('create view clara.%I as select 1', name); end $$;", "probe"),
       /unmodelled: unresolved dynamic SQL/,
     );
     assert.throws(
-      () => viewDefinitionOffsets("do $$ begin execute v_sql; end $$; create view clara.probe as select 1;", "probe"),
+      () => viewDefinitionOffsets("do $$ begin execute v_sql; end $$;", "probe"),
       /unmodelled: unresolved dynamic SQL/,
-      "a census answered exactly one while unresolved dynamic SQL was present",
+      "a zero-result census silently accepted unresolved dynamic SQL",
+    );
+  });
+
+  it("PIN SQL-9b: a pure literal concatenation folds; a mixed expression throws", () => {
+    const concatenated = "do $$ begin execute 'create view clara.' || 'probe as select 1;'; end $$;";
+    assert.equal(viewDefinitionOffsets(concatenated, "probe").length, 1);
+    assert.throws(
+      () => viewDefinitionOffsets("do $$ begin execute $q$create view clara.$q$ || format('%I as select 1', name); end $$;", "probe"),
+      /unmodelled: unresolved dynamic SQL/,
     );
   });
 

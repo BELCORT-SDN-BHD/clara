@@ -151,11 +151,26 @@ const INTAKE_ROUTES = join(
 );
 
 function runtimeRoutes(): { call: string; capability: boolean }[] {
-  return runtimeRoutesFrom(readFileSync(INTAKE_ROUTES, "utf8"));
+  return runtimeRouteRegistrations({ path: INTAKE_ROUTES, code: readFileSync(INTAKE_ROUTES, "utf8") })
+    .map(({ call, capability }) => ({ call, capability }));
 }
 
 function runtimeRoutesFrom(src: string): { call: string; capability: boolean }[] {
-  return runtimeRouteRegistrations(src).map(({ call, capability }) => ({ call, capability }));
+  let code = src;
+  if (!/\bexport\s+function\s+intakeRoutes\b/u.test(code)) {
+    const imports = [...code.matchAll(/^\s*import\s+[\s\S]*?;\s*$/gmu)].map((match) => match[0]);
+    const body = imports.reduce((rest, statement) => rest.replace(statement, ""), code);
+    const expressImport = imports.some((statement) => /from\s+["']express["']/u.test(statement))
+      ? ""
+      : 'import express from "express";';
+    code = `${expressImport}\n${imports.join("\n")}\nexport function intakeRoutes() {
+      const router = express.Router();
+      ${body}
+      return router;
+    }`;
+  }
+  return runtimeRouteRegistrations({ path: "runtime-fixture.ts", code })
+    .map(({ call, capability }) => ({ call, capability }));
 }
 
 describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () => {
@@ -236,7 +251,7 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
   it("PIN NEW-1e: an unknown helper registration fails closed by helper name", () => {
     assert.throws(
       () => runtimeRoutesFrom(`addRoute(router, "put", "/api/intake/hidden", () => bearerCapability("x"));`),
-      /unmodelled: unmodelled registration addRoute\(router, .* at source-oracle\.tsx:1/,
+      /unmodelled: unmodelled registration addRoute\(router, .* at runtime-fixture\.ts:/,
     );
   });
 
@@ -262,7 +277,7 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
         (_req, res, next) => { res.setHeader("x-before", "1"); next(); },
         (req, res) => { bearerCapability(req.header("authorization")); res.end(); },
       );`;
-    assert.throws(() => runtimeRoutesFrom(actingFirst), /unmodelled: handler before capability at source-oracle\.tsx:2/);
+    assert.throws(() => runtimeRoutesFrom(actingFirst), /unmodelled: handler before capability at runtime-fixture\.ts:/);
 
     const noOpFirst = `import { bearerCapability } from "../lib/intake.mjs";
       router.put("/api/intake/documents/:id/bytes",
@@ -276,11 +291,57 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
     for (const source of [
       'child.put("/x", handler);',
       'app.use("/api", child);',
+      "router.use(child);",
       'router.route("/x").put(handler);',
       'register(child, "put", "/api/x", handler);',
     ]) {
-      assert.throws(() => runtimeRoutesFrom(source), /unmodelled: unmodelled registration .* at source-oracle\.tsx:1/);
+      assert.throws(
+        () => runtimeRoutesFrom(source),
+        /unmodelled: (?:unmodelled registration .*|mounted child router) at runtime-fixture\.ts:/,
+      );
     }
+  });
+
+  it("PIN NEW-1f-a: registrations after return are dead", () => {
+    const source = `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      export function intakeRoutes() {
+        const router = express.Router();
+        router.put("/api/intake/live", () => bearerCapability("x"));
+        return router;
+        router.put("/api/intake/dead", () => bearerCapability("x"));
+      }`;
+    assert.deepEqual(runtimeRoutesFrom(source), [{ call: "PUT intake/live", capability: true }]);
+  });
+
+  it("PIN NEW-1f-b: a shadow router is not the exported builder's router", () => {
+    const source = `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      export function intakeRoutes() {
+        const router = express.Router();
+        router.put("/api/intake/live", () => bearerCapability("x"));
+        { const router = makeImpostor(); router.put("/api/intake/shadow", () => bearerCapability("x")); }
+        return router;
+      }`;
+    assert.deepEqual(runtimeRoutesFrom(source), [{ call: "PUT intake/live", capability: true }]);
+  });
+
+  it("PIN NEW-1g-a: a response before the bearer is not protected", () => {
+    const source = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/response-first", (_req, res) => { res.end(); bearerCapability("x"); });`;
+    assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false]);
+  });
+
+  it("PIN NEW-1g-b: a bearer in a dead branch is not protection", () => {
+    const source = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/dead-gate", (_req, res) => { if (false) bearerCapability("x"); res.end(); });`;
+    assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false]);
+  });
+
+  it("PIN NEW-1g-c: a swallowed bearer denial is not protection", () => {
+    const source = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/swallowed", (_req, res) => { try { bearerCapability("x"); } catch {} res.end(); });`;
+    assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false]);
   });
 });
 

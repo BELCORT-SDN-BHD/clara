@@ -9,6 +9,11 @@ import { readFileSync } from "node:fs";
 
 import ts from "typescript";
 
+export type SourceUnit = {
+  readonly path: string;
+  readonly code: string;
+};
+
 export type StripOptions = {
   /** Blank string/template/regex payloads as well as comments. Delimiters and
    * newlines remain, so offsets and parse structure stay stable. */
@@ -28,18 +33,29 @@ function diagnosticLocation(file: ts.SourceFile, start = 0): string {
   return `${file.fileName}:${position.line + 1}:${position.character + 1}`;
 }
 
-function sourceFile(code: string): ts.SourceFile {
-  const file = ts.createSourceFile("source-oracle.tsx", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+function scriptKind(path: string): ts.ScriptKind {
+  const extension = /(?:\.([^.\\/]+))$/u.exec(path)?.[1]?.toLowerCase();
+  if (extension === "ts" || extension === "mts" || extension === "cts") return ts.ScriptKind.TS;
+  if (extension === "tsx") return ts.ScriptKind.TSX;
+  if (extension === "js" || extension === "mjs" || extension === "cjs") return ts.ScriptKind.JS;
+  if (extension === "jsx") return ts.ScriptKind.JSX;
+  throw new Error(`unmodelled: unsupported source extension at ${path}`);
+}
+
+function sourceFile(unit: SourceUnit): ts.SourceFile {
+  const kind = scriptKind(unit.path);
+  const file = ts.createSourceFile(unit.path, unit.code, ts.ScriptTarget.Latest, true, kind);
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.Latest,
     jsx: ts.JsxEmit.Preserve,
+    allowJs: kind === ts.ScriptKind.JS || kind === ts.ScriptKind.JSX,
     noLib: true,
     noResolve: true,
   };
   const host = ts.createCompilerHost(options, true);
   host.getSourceFile = (fileName) => fileName === file.fileName ? file : undefined;
   host.fileExists = (fileName) => fileName === file.fileName;
-  host.readFile = (fileName) => fileName === file.fileName ? code : undefined;
+  host.readFile = (fileName) => fileName === file.fileName ? unit.code : undefined;
   const program = ts.createProgram([file.fileName], options, host);
   const parseDiagnostics = (file as ts.SourceFile & { readonly parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics ?? [];
   const diagnostics = [...parseDiagnostics, ...program.getSyntacticDiagnostics(file)];
@@ -63,15 +79,61 @@ type ImportBinding = { readonly importedFrom: string; readonly importedName: str
 
 function importBinding(identifier: ts.Identifier, file: ts.SourceFile): ImportBinding | null {
   const symbol = checkerFor(file).getSymbolAtLocation(identifier);
+  const validated = (binding: ImportBinding): ImportBinding => {
+    if (SPINE_NAMES.has(binding.importedName) && binding.importedFrom !== SPINE_IMPORT) {
+      throw new Error(`unmodelled: unresolvable spine import identity at ${diagnosticLocation(file, identifier.getStart(file))}`);
+    }
+    return binding;
+  };
   for (const declaration of symbol?.declarations ?? []) {
-    if (!ts.isImportSpecifier(declaration)) continue;
-    const importDeclaration = declaration.parent.parent.parent;
-    if (!ts.isImportDeclaration(importDeclaration) || !ts.isStringLiteral(importDeclaration.moduleSpecifier)) continue;
-    return {
-      importedFrom: importDeclaration.moduleSpecifier.text,
-      importedName: declaration.propertyName?.text ?? declaration.name.text,
-    };
+    if (ts.isImportSpecifier(declaration)) {
+      const importDeclaration = declaration.parent.parent.parent;
+      if (!ts.isImportDeclaration(importDeclaration) || !ts.isStringLiteral(importDeclaration.moduleSpecifier)) continue;
+      if (declaration.isTypeOnly || importDeclaration.importClause?.isTypeOnly === true) {
+        throw new Error(`unmodelled: type-only import of the spine at ${diagnosticLocation(file, declaration.getStart(file))}`);
+      }
+      return validated({
+        importedFrom: importDeclaration.moduleSpecifier.text,
+        importedName: declaration.propertyName?.text ?? declaration.name.text,
+      });
+    }
+    if (ts.isImportClause(declaration) && declaration.name?.text === identifier.text) {
+      const importDeclaration = declaration.parent;
+      if (!ts.isStringLiteral(importDeclaration.moduleSpecifier)) continue;
+      if (declaration.isTypeOnly) {
+        throw new Error(`unmodelled: type-only import of the spine at ${diagnosticLocation(file, declaration.getStart(file))}`);
+      }
+      return validated({ importedFrom: importDeclaration.moduleSpecifier.text, importedName: "default" });
+    }
+    if (ts.isNamespaceImport(declaration)) {
+      const importDeclaration = declaration.parent.parent;
+      if (!ts.isImportDeclaration(importDeclaration) || !ts.isStringLiteral(importDeclaration.moduleSpecifier)) continue;
+      if (importDeclaration.importClause?.isTypeOnly === true) {
+        throw new Error(`unmodelled: type-only import of the spine at ${diagnosticLocation(file, declaration.getStart(file))}`);
+      }
+      return validated({ importedFrom: importDeclaration.moduleSpecifier.text, importedName: "*" });
+    }
   }
+  const dynamicBinding = (symbol?.declarations ?? []).some((declaration) => {
+    if (!ts.isBindingElement(declaration)) return false;
+    const variable = declaration.parent.parent;
+    if (!ts.isVariableDeclaration(variable) || variable.initializer === undefined) return false;
+    let initializer = variable.initializer;
+    if (ts.isAwaitExpression(initializer)) initializer = initializer.expression;
+    return ts.isCallExpression(initializer) && initializer.expression.kind === ts.SyntaxKind.ImportKeyword;
+  });
+  if (dynamicBinding || (symbol === undefined && SPINE_NAMES.has(identifier.text))) {
+    throw new Error(`unmodelled: unresolvable spine import identity at ${diagnosticLocation(file, identifier.getStart(file))}`);
+  }
+  return null;
+}
+
+const SPINE_IMPORT = "@/lib/require-firm-scope";
+const SPINE_NAMES = new Set(["requireFirmScope", "firmScopeGuard"]);
+
+function spineBinding(identifier: ts.Identifier, file: ts.SourceFile): ImportBinding | null {
+  const binding = importBinding(identifier, file);
+  if (binding?.importedFrom === SPINE_IMPORT && SPINE_NAMES.has(binding.importedName)) return binding;
   return null;
 }
 
@@ -94,9 +156,12 @@ function literalMask(text: string): string {
  * `export/**\/const` token-separated. When requested, parsed literal ranges are
  * masked too, including regex literals — a `/}/` can never close a block scan.
  */
-export function stripComments(src: string, opts: StripOptions = {}): string {
+export function stripComments(unit: SourceUnit, opts: StripOptions = {}): SourceUnit {
+  const src = unit.code;
   const replacements: Array<{ start: number; end: number; text: string }> = [];
-  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, ts.LanguageVariant.JSX, src);
+  const kind = scriptKind(unit.path);
+  const variant = kind === ts.ScriptKind.TSX || kind === ts.ScriptKind.JSX ? ts.LanguageVariant.JSX : ts.LanguageVariant.Standard;
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, variant, src);
   for (let token = scanner.scan(); token !== ts.SyntaxKind.EndOfFileToken; token = scanner.scan()) {
     if (token === ts.SyntaxKind.SingleLineCommentTrivia || token === ts.SyntaxKind.MultiLineCommentTrivia) {
       const start = scanner.getTokenPos();
@@ -106,7 +171,7 @@ export function stripComments(src: string, opts: StripOptions = {}): string {
   }
 
   if (opts.blankStrings === true) {
-    const file = sourceFile(src);
+    const file = sourceFile(unit);
     const visit = (node: ts.Node): void => {
       if (
         ts.isStringLiteral(node) ||
@@ -139,20 +204,21 @@ export function stripComments(src: string, opts: StripOptions = {}): string {
     const masked = replacement.text.split("");
     for (let i = replacement.start; i < replacement.end; i += 1) chars[i] = masked[i - replacement.start] ?? " ";
   }
-  return chars.join("");
+  return { ...unit, code: chars.join("") };
 }
 
-export function readCode(path: string, opts: StripOptions = {}): string {
-  return stripComments(readFileSync(path, "utf8"), opts);
+export function readCode(path: string, opts: StripOptions = {}): SourceUnit {
+  return stripComments({ path, code: readFileSync(path, "utf8") }, opts);
 }
 
 /** Index after the syntactic construct that opens at `{`, `(` or `[`. The AST
  * supplies the range when possible; the fallback balances a literal-masked view. */
-export function matchBlock(src: string, open: number): number {
+export function matchBlock(unit: SourceUnit, open: number): number {
+  const src = unit.code;
   const opener = src[open];
   const closer = opener === "{" ? "}" : opener === "(" ? ")" : opener === "[" ? "]" : null;
   if (closer === null) return -1;
-  const file = sourceFile(src);
+  const file = sourceFile(unit);
   let best: ts.Node | null = null;
   const visit = (node: ts.Node): void => {
     const start = node.getStart(file);
@@ -163,7 +229,7 @@ export function matchBlock(src: string, open: number): number {
   const matched = best as ts.Node | null;
   if (matched !== null) return matched.end;
 
-  const code = stripComments(src, { blankStrings: true });
+  const code = stripComments(unit, { blankStrings: true }).code;
   let depth = 0;
   for (let i = open; i < code.length; i += 1) {
     if (code[i] === opener) depth += 1;
@@ -218,8 +284,8 @@ function declarationKind(list: ts.VariableDeclarationList): "const" | "let" | "v
   return "var";
 }
 
-function collectDeclarations(code: string): { file: ts.SourceFile; declarations: InternalDecl[] } {
-  const file = sourceFile(code);
+function collectDeclarations(unit: SourceUnit): { file: ts.SourceFile; declarations: InternalDecl[] } {
+  const file = sourceFile(unit);
   const declarations: InternalDecl[] = [];
 
   const add = (decl: Omit<InternalDecl, "scopeStart" | "scopeEnd">): void => {
@@ -339,9 +405,10 @@ function collectDeclarations(code: string): { file: ts.SourceFile; declarations:
 
 /** Module-lifetime declarations. Function/arrow/class-method/static-block locals
  * are excluded; module blocks and class static state remain visible. */
-export function moduleLevelDeclarations(code: string): Decl[] {
-  return collectDeclarations(code).declarations
-    .filter((decl) => decl.scopeStart === 0 && decl.scopeEnd === sourceFile(code).end)
+export function moduleLevelDeclarations(unit: SourceUnit): Decl[] {
+  const collected = collectDeclarations(unit);
+  return collected.declarations
+    .filter((decl) => decl.scopeStart === 0 && decl.scopeEnd === collected.file.end)
     .map((decl) => ({
       name: decl.name,
       kind: decl.kind,
@@ -355,8 +422,8 @@ export function moduleLevelDeclarations(code: string): Decl[] {
 
 type ExportTarget = { readonly local: string | null; readonly reason: string | null };
 
-function exportTargets(code: string): Map<string, ExportTarget> {
-  const file = sourceFile(code);
+function exportTargets(unit: SourceUnit): Map<string, ExportTarget> {
+  const file = sourceFile(unit);
   const targets = new Map<string, ExportTarget>();
   const uninspectable = (node: ts.Node, shape: string): void => {
     targets.set(`__unmodelled_${node.getStart(file)}`, {
@@ -396,12 +463,21 @@ function exportTargets(code: string): Map<string, ExportTarget> {
     }
   }
 
+  const exportsObject = (expression: ts.Expression): boolean => ts.isIdentifier(expression)
+    ? expression.text === "exports"
+    : ts.isPropertyAccessExpression(expression)
+      && ts.isIdentifier(expression.expression) && expression.expression.text === "module"
+      && expression.name.text === "exports";
   const visit = (node: ts.Node): void => {
-    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-        && ts.isPropertyAccessExpression(node.left) && ts.isIdentifier(node.left.expression)
-        && node.left.expression.text === "module" && node.left.name.text === "exports") {
-      uninspectable(node, "module.exports assignment");
-      return;
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      if (exportsObject(node.left as ts.Expression)
+          || ((ts.isPropertyAccessExpression(node.left) || ts.isElementAccessExpression(node.left))
+            && exportsObject(node.left.expression))) {
+        uninspectable(node, ts.isElementAccessExpression(node.left)
+          ? "computed CommonJS export assignment"
+          : "CommonJS export assignment");
+        return;
+      }
     }
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
         && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "Object"
@@ -418,34 +494,40 @@ function exportTargets(code: string): Map<string, ExportTarget> {
 
 /** `export { raw as "DELETE" }` maps DELETE to raw. Re-exports are present with
  * an empty local target so callers fail closed rather than inventing a body. */
-export function exportClauseAliases(code: string): Map<string, string> {
+function assertInspectableExports(targets: ReadonlyMap<string, ExportTarget>): void {
+  const reason = [...targets.values()].find((target) => target.reason !== null)?.reason;
+  if (reason !== null && reason !== undefined) throw new Error(reason);
+}
+
+export function exportClauseAliases(unit: SourceUnit): Map<string, string> {
   const aliases = new Map<string, string>();
-  for (const [name, target] of exportTargets(code)) aliases.set(name, target.local ?? "");
+  const targets = exportTargets(unit);
+  assertInspectableExports(targets);
+  for (const [name, target] of targets) aliases.set(name, target.local ?? "");
   return aliases;
 }
 
 export const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
 
-export function uninspectableExportReasons(code: string): string[] {
-  return [...exportTargets(code).values()].flatMap((target) => target.reason === null ? [] : [target.reason]);
-}
-
-export function exportedHttpMethods(code: string): string[] {
+export function exportedHttpMethods(unit: SourceUnit): string[] {
   const methods = new Set<string>(HTTP_METHODS);
   const found: Array<{ name: string; start: number }> = [];
-  for (const decl of collectDeclarations(code).declarations) {
+  for (const decl of collectDeclarations(unit).declarations) {
     if (decl.exported && !decl.isDefault && methods.has(decl.name)) found.push({ name: decl.name, start: decl.start });
   }
-  const targets = exportTargets(code);
+  const targets = exportTargets(unit);
+  assertInspectableExports(targets);
   for (const [name] of targets) if (methods.has(name)) found.push({ name, start: Number.MAX_SAFE_INTEGER });
   return [...new Set(found.sort((a, b) => a.start - b.start).map((item) => item.name))];
 }
 
-export function defaultExportName(code: string): string | null {
-  const declarations = collectDeclarations(code).declarations;
+export function defaultExportName(unit: SourceUnit): string | null {
+  const declarations = collectDeclarations(unit).declarations;
+  const targets = exportTargets(unit);
+  assertInspectableExports(targets);
   const direct = declarations.find((decl) => decl.isDefault);
   if (direct !== undefined) return direct.name;
-  return exportTargets(code).get("default")?.local ?? null;
+  return targets.get("default")?.local ?? null;
 }
 
 function resolveName(declarations: InternalDecl[], name: string, at: number): InternalDecl | null {
@@ -455,9 +537,11 @@ function resolveName(declarations: InternalDecl[], name: string, at: number): In
   return candidates.sort((a, b) => (a.scopeEnd - a.scopeStart) - (b.scopeEnd - b.scopeStart) || b.start - a.start)[0] ?? null;
 }
 
-function resolveRoot(code: string, rootName: string): { file: ts.SourceFile; declarations: InternalDecl[]; root: InternalDecl | null; reason: string | null } {
-  const collected = collectDeclarations(code);
-  const target = exportTargets(code).get(rootName);
+function resolveRoot(unit: SourceUnit, rootName: string): { file: ts.SourceFile; declarations: InternalDecl[]; root: InternalDecl | null; reason: string | null } {
+  const collected = collectDeclarations(unit);
+  const targets = exportTargets(unit);
+  assertInspectableExports(targets);
+  const target = targets.get(rootName);
   if (target?.reason !== null && target?.reason !== undefined) return { ...collected, root: null, reason: target.reason };
   const local = target?.local || rootName;
   let root = collected.declarations.find((decl) => decl.name === local && (decl.exported || local !== rootName))
@@ -524,8 +608,8 @@ function callableTextWithoutNestedBodies(body: ts.ConciseBody, file: ts.SourceFi
   return chars.join("");
 }
 
-function reachableGraph(code: string, rootName: string): { texts: string[]; calls: ReachableCall[]; reason: string | null } {
-  const resolved = resolveRoot(code, rootName);
+function reachableGraph(unit: SourceUnit, rootName: string): { texts: string[]; calls: ReachableCall[]; reason: string | null } {
+  const resolved = resolveRoot(unit, rootName);
   if (resolved.root === null) return { texts: [], calls: [], reason: resolved.reason };
   const queue: InternalDecl[] = [resolved.root];
   const reached = new Set<string>();
@@ -575,13 +659,15 @@ function reachableGraph(code: string, rootName: string): { texts: string[]; call
 
 /** Code from the root plus locally INVOKED declarations only. Merely mentioning a
  * helper, or declaring an uninvoked local arrow, creates no call-graph edge. */
-export function reachableFrom(code: string, rootName: string): string | null {
-  const graph = reachableGraph(code, rootName);
-  return graph.reason === null ? stripComments(graph.texts.join("\n"), { blankStrings: true }) : null;
+export function reachableFrom(unit: SourceUnit, rootName: string): string | null {
+  const graph = reachableGraph(unit, rootName);
+  return graph.reason === null
+    ? stripComments({ path: unit.path, code: graph.texts.join("\n") }, { blankStrings: true }).code
+    : null;
 }
 
-export function reachableCallsFrom(code: string, rootName: string): readonly ReachableCall[] {
-  return reachableGraph(code, rootName).calls;
+export function reachableCallsFrom(unit: SourceUnit, rootName: string): readonly ReachableCall[] {
+  return reachableGraph(unit, rootName).calls;
 }
 
 export type SpineGuardProof = {
@@ -603,7 +689,7 @@ function awaitedBareSpineCall(
   if (expression === undefined || !ts.isAwaitExpression(expression)) return null;
   const call = expression.expression;
   if (!ts.isCallExpression(call) || call.arguments.length !== 0 || !ts.isIdentifier(call.expression)) return null;
-  const binding = importBinding(call.expression, file);
+  const binding = spineBinding(call.expression, file);
   return binding?.importedFrom === "@/lib/require-firm-scope"
       && (binding.importedName === "requireFirmScope" || binding.importedName === "firmScopeGuard")
     ? binding.importedName
@@ -629,8 +715,8 @@ function hasAbruptCompletion(block: ts.Block): boolean {
  * The accepted form is the root's first statement, or the first statement of a
  * top-level try with NO catch. A finally-only wrapper is safe because it cannot
  * swallow redirect's throw. */
-export function spineGuardProof(code: string, rootName: string): SpineGuardProof {
-  const resolved = resolveRoot(code, rootName);
+export function spineGuardProof(unit: SourceUnit, rootName: string): SpineGuardProof {
+  const resolved = resolveRoot(unit, rootName);
   if (resolved.root === null || resolved.root.callable === null) {
     return { inspectable: false, call: null, dominates: false, reason: resolved.reason ?? "has no locally inspectable/provable spine call" };
   }
@@ -665,8 +751,8 @@ export function spineGuardProof(code: string, rootName: string): SpineGuardProof
 
 /** Ranges of try blocks whose catch can swallow a throw. Finally-only tries are
  * deliberately absent. */
-export function tryBlockRanges(code: string): [number, number][] {
-  const file = sourceFile(code);
+export function tryBlockRanges(unit: SourceUnit): [number, number][] {
+  const file = sourceFile(unit);
   const ranges: [number, number][] = [];
   const visit = (node: ts.Node): void => {
     if (ts.isTryStatement(node) && node.catchClause !== undefined) {
@@ -776,8 +862,8 @@ function mutatedNames(file: ts.SourceFile): Set<string> {
 
 /** Return every unallowlisted module-lifetime store. Allowlist entries must carry
  * a substantial reason; a bare name is not evidence. */
-export function moduleStateHazards(code: string, allowlist: ReadonlyMap<string, string> = new Map()): string[] {
-  const collected = collectDeclarations(code);
+export function moduleStateHazards(unit: SourceUnit, allowlist: ReadonlyMap<string, string> = new Map()): string[] {
+  const collected = collectDeclarations(unit);
   const mutated = mutatedNames(collected.file);
   const hazards: string[] = [];
   const at = (node: ts.Node): string => diagnosticLocation(collected.file, node.getStart(collected.file));
@@ -852,11 +938,11 @@ export function scopeSpineModuleStateReport(webRoot: string): ReadonlyArray<{
   readonly hazards: readonly string[];
 }> {
   return SCOPE_SPINE_MODULES.map((file) => {
-    const code = readFileSync(`${webRoot}/${file}`, "utf8");
+    const unit = { path: `${webRoot}/${file}`, code: readFileSync(`${webRoot}/${file}`, "utf8") };
     return {
       file,
-      declarationCount: moduleLevelDeclarations(code).length,
-      hazards: moduleStateHazards(code, SCOPE_SPINE_ALLOWLISTS.get(file)),
+      declarationCount: moduleLevelDeclarations(unit).length,
+      hazards: moduleStateHazards(unit, SCOPE_SPINE_ALLOWLISTS.get(file)),
     };
   });
 }
@@ -895,19 +981,104 @@ function flattenHandlers(nodes: readonly ts.Expression[], file: ts.SourceFile): 
   return handlers;
 }
 
-function containsImportedBearer(handler: ts.Expression, file: ts.SourceFile): boolean {
+const RESPONSE_METHODS = new Set([
+  "download", "end", "json", "redirect", "send", "setHeader", "status", "write", "writeHead",
+]);
+
+function isFalseLiteral(expression: ts.Expression): boolean {
+  return expression.kind === ts.SyntaxKind.FalseKeyword
+    || (ts.isParenthesizedExpression(expression) && isFalseLiteral(expression.expression));
+}
+
+function isTrueLiteral(expression: ts.Expression): boolean {
+  return expression.kind === ts.SyntaxKind.TrueKeyword
+    || (ts.isParenthesizedExpression(expression) && isTrueLiteral(expression.expression));
+}
+
+function underDeadBranch(node: ts.Node, boundary: ts.Node): boolean {
+  for (let current: ts.Node | undefined = node; current !== undefined && current !== boundary; current = current.parent) {
+    const parent: ts.Node | undefined = current.parent;
+    if (parent !== undefined && ts.isIfStatement(parent) && parent.thenStatement === current && isFalseLiteral(parent.expression)) return true;
+    if (parent !== undefined && ts.isIfStatement(parent) && parent.elseStatement === current && isTrueLiteral(parent.expression)) return true;
+  }
+  return false;
+}
+
+function callIsResponse(node: ts.CallExpression): boolean {
+  return ts.isPropertyAccessExpression(node.expression) && RESPONSE_METHODS.has(node.expression.name.text);
+}
+
+function branchTerminatesAfter(node: ts.Node, handler: ts.ArrowFunction | ts.FunctionExpression): boolean {
+  let current: ts.Node = node;
+  while (current.parent !== undefined && current.parent !== handler) {
+    const parent: ts.Node | undefined = current.parent;
+    if (ts.isBlock(parent)) {
+      const statementIndex = parent.statements.findIndex((statement) =>
+        statement === current || (current.pos >= statement.pos && current.end <= statement.end));
+      if (statementIndex >= 0 && parent.statements.slice(statementIndex + 1).some((statement) =>
+        ts.isReturnStatement(statement) || ts.isThrowStatement(statement))) {
+        return parent.parent !== handler;
+      }
+    }
+    current = parent;
+  }
+  return false;
+}
+
+function conditionalBearer(node: ts.Node, handler: ts.ArrowFunction | ts.FunctionExpression): boolean {
+  for (let current: ts.Node | undefined = node; current !== undefined && current !== handler; current = current.parent) {
+    const parent: ts.Node | undefined = current.parent;
+    if (parent !== undefined && ts.isIfStatement(parent)
+        && (parent.thenStatement === current || parent.elseStatement === current)
+        && !isTrueLiteral(parent.expression)) return true;
+    if (parent !== undefined && (ts.isForStatement(parent) || ts.isForInStatement(parent)
+        || ts.isForOfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent))) return true;
+  }
+  return false;
+}
+
+function swallowedBearer(node: ts.Node, handler: ts.ArrowFunction | ts.FunctionExpression): boolean {
+  for (let current: ts.Node | undefined = node; current !== undefined && current !== handler; current = current.parent) {
+    const parent: ts.Node | undefined = current.parent;
+    if (parent === undefined || !ts.isTryStatement(parent) || parent.tryBlock !== current || parent.catchClause === undefined) continue;
+    const block = parent.parent;
+    if (!ts.isBlock(block)) return true;
+    const index = block.statements.indexOf(parent);
+    return block.statements.slice(index + 1).some((statement) => {
+      let response = false;
+      const visit = (candidate: ts.Node): void => {
+        if (candidate !== statement && (ts.isFunctionLike(candidate) || ts.isClassLike(candidate))) return;
+        if (ts.isCallExpression(candidate) && callIsResponse(candidate)) response = true;
+        ts.forEachChild(candidate, visit);
+      };
+      visit(statement);
+      return response;
+    });
+  }
+  return false;
+}
+
+function containsDominatingBearer(handler: ts.Expression, file: ts.SourceFile): boolean {
   if (!ts.isArrowFunction(handler) && !ts.isFunctionExpression(handler)) return false;
-  let found = false;
+  const bearerCalls: ts.CallExpression[] = [];
+  const responseCalls: ts.CallExpression[] = [];
   const visit = (node: ts.Node): void => {
     if (node !== handler && (ts.isFunctionLike(node) || ts.isClassLike(node))) return;
-    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
-      const binding = importBinding(node.expression, file);
-      if (binding?.importedFrom === CAPABILITY_IMPORT && binding.importedName === "bearerCapability") found = true;
+    if (ts.isCallExpression(node)) {
+      if (ts.isIdentifier(node.expression)) {
+        const binding = importBinding(node.expression, file);
+        if (binding?.importedFrom === CAPABILITY_IMPORT && binding.importedName === "bearerCapability") bearerCalls.push(node);
+      }
+      if (callIsResponse(node)) responseCalls.push(node);
     }
     ts.forEachChild(node, visit);
   };
   visit(handler);
-  return found;
+  return bearerCalls.some((bearer) => {
+    if (underDeadBranch(bearer, handler) || conditionalBearer(bearer, handler) || swallowedBearer(bearer, handler)) return false;
+    return !responseCalls.some((response) => response.getStart(file) < bearer.getStart(file)
+      && !underDeadBranch(response, handler) && !branchTerminatesAfter(response, handler));
+  });
 }
 
 function recognisedNoOp(handler: ts.Expression): boolean {
@@ -926,7 +1097,7 @@ function recognisedNoOp(handler: ts.Expression): boolean {
 
 function capabilityProof(handlersRaw: readonly ts.Expression[], file: ts.SourceFile, site: ts.CallExpression): boolean {
   const handlers = flattenHandlers(handlersRaw, file);
-  const capabilityAt = handlers.findIndex((handler) => containsImportedBearer(handler, file));
+  const capabilityAt = handlers.findIndex((handler) => containsDominatingBearer(handler, file));
   if (capabilityAt < 0) return false;
   if (handlers.slice(0, capabilityAt).some((handler) => !recognisedNoOp(handler))) {
     throw new Error(`unmodelled: handler before capability at ${diagnosticLocation(file, site.getStart(file))}`);
@@ -942,71 +1113,144 @@ function routeCall(method: string, path: string): string {
 /** Parse direct `router.<method>(path, ...handlers)` calls and the one explicit
  * helper shape `register(router, "put", path, ...handlers)`. A call that handles a
  * router through any other shape throws with its name instead of disappearing. */
-export function runtimeRouteRegistrations(code: string): RuntimeRouteRegistration[] {
-  const file = sourceFile(code);
+export function runtimeRouteRegistrations(unit: SourceUnit): RuntimeRouteRegistration[] {
+  const file = sourceFile(unit);
   const routes: RuntimeRouteRegistration[] = [];
-  const unmodelledRegistration = (node: ts.CallExpression, shape: string): never => {
+  const fail = (node: ts.CallExpression, shape: string): never => {
     throw new Error(`unmodelled: unmodelled registration ${shape} at ${diagnosticLocation(file, node.getStart(file))}`);
   };
-  const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node)) {
-      if (ts.isPropertyAccessExpression(node.expression)) {
-        const receiver = node.expression.expression;
-        const method = node.expression.name.text.toLowerCase();
-        const literalPath = node.arguments[0] !== undefined
-          && (ts.isStringLiteral(node.arguments[0]) || ts.isNoSubstitutionTemplateLiteral(node.arguments[0]));
-        if (method === "route" && ts.isIdentifier(receiver) && receiver.text === "router") {
-          unmodelledRegistration(node, "router.route(…)");
-        }
-        if (ROUTE_METHODS.has(method) && !(ts.isIdentifier(receiver) && receiver.text === "router")
-            && (ts.isCallExpression(receiver) || literalPath)) {
-          unmodelledRegistration(node, `${receiver.getText(file)}.${method}(…)`);
-        }
-        if (method === "use" && literalPath && node.arguments.slice(1).some((argument) => ts.isIdentifier(argument))) {
-          unmodelledRegistration(node, `${receiver.getText(file)}.use(…, child)`);
-        }
-      } else if (ts.isIdentifier(node.expression) && node.arguments[0] !== undefined
-          && ts.isIdentifier(node.arguments[0]) && node.arguments[0].text !== "router"
-          && node.arguments[1] !== undefined && ts.isStringLiteralLike(node.arguments[1])
-          && ROUTE_METHODS.has(node.arguments[1].text.toLowerCase())
-          && node.arguments[2] !== undefined && ts.isStringLiteralLike(node.arguments[2])) {
-        unmodelledRegistration(node, `${node.expression.text}(${node.arguments[0].text}, …)`);
-      }
-      if (ts.isPropertyAccessExpression(node.expression) && ts.isIdentifier(node.expression.expression)
-          && node.expression.expression.text === "router") {
-        const method = node.expression.name.text.toLowerCase();
-        if (method === "use") {
-          ts.forEachChild(node, visit);
+  const checker = checkerFor(file);
+  const declarations = collectDeclarations(unit).declarations;
+  const builders: Array<{ readonly declaration: InternalDecl; readonly routerSymbol: ts.Symbol }> = [];
+  for (const declaration of declarations) {
+    if (!declaration.exported || declaration.callable?.body === undefined || !ts.isBlock(declaration.callable.body)) continue;
+    const body = declaration.callable.body;
+    let candidateSymbol: ts.Symbol | undefined;
+    const visitRouter = (node: ts.Node): void => {
+      if (candidateSymbol !== undefined || (node !== body && (ts.isFunctionLike(node) || ts.isClassLike(node)))) return;
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined
+          && ts.isCallExpression(node.initializer) && ts.isPropertyAccessExpression(node.initializer.expression)
+          && node.initializer.expression.name.text === "Router" && ts.isIdentifier(node.initializer.expression.expression)) {
+        const binding = importBinding(node.initializer.expression.expression, file);
+        if (binding?.importedFrom === "express" && (binding.importedName === "default" || binding.importedName === "*")) {
+          candidateSymbol = checker.getSymbolAtLocation(node.name);
           return;
         }
-        if (!ROUTE_METHODS.has(method)) unmodelledRegistration(node, `router.${method}(…)`);
+      }
+      ts.forEachChild(node, visitRouter);
+    };
+    visitRouter(body);
+    if (candidateSymbol !== undefined) builders.push({ declaration, routerSymbol: candidateSymbol });
+  }
+  if (builders.length !== 1) {
+    const shape = builders.length === 0 ? "missing" : "ambiguous";
+    throw new Error(`unmodelled: ${shape} exported route builder at ${diagnosticLocation(file)}`);
+  }
+  const selected = builders[0] as { readonly declaration: InternalDecl; readonly routerSymbol: ts.Symbol };
+  const selectedBuilder = selected.declaration;
+  const selectedRouterSymbol = selected.routerSymbol;
+  if (selectedBuilder.callable?.body === undefined || !ts.isBlock(selectedBuilder.callable.body)) {
+    throw new Error(`unmodelled: missing exported route builder at ${diagnosticLocation(file)}`);
+  }
+  const builderBody = selectedBuilder.callable.body;
+
+  const isRealRouter = (expression: ts.Expression): boolean =>
+    ts.isIdentifier(expression) && checker.getSymbolAtLocation(expression) === selectedRouterSymbol;
+  const recognisedMiddleware = (expression: ts.Expression): boolean => {
+    if (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) return true;
+    if (!ts.isCallExpression(expression) || !ts.isPropertyAccessExpression(expression.expression)
+        || !ts.isIdentifier(expression.expression.expression)) return false;
+    const binding = importBinding(expression.expression.expression, file);
+    return binding?.importedFrom === "express" && expression.expression.name.text === "json";
+  };
+  const mountedChild = (node: ts.CallExpression, argumentsToCheck: readonly ts.Expression[]): void => {
+    const child = argumentsToCheck.find((argument) =>
+      (ts.isIdentifier(argument) || ts.isCallExpression(argument)) && !recognisedMiddleware(argument));
+    if (child !== undefined) {
+      throw new Error(`unmodelled: mounted child router at ${diagnosticLocation(file, node.getStart(file))}`);
+    }
+  };
+
+  const inspectCall = (node: ts.CallExpression): boolean => {
+    if (ts.isPropertyAccessExpression(node.expression)) {
+      const receiver = node.expression.expression;
+      const method = node.expression.name.text.toLowerCase();
+      const literalPath = node.arguments[0] !== undefined && ts.isStringLiteralLike(node.arguments[0]);
+      if (method === "use") {
+        mountedChild(node, literalPath ? node.arguments.slice(1) : node.arguments);
+        if (isRealRouter(receiver)) return true;
+      }
+      if (isRealRouter(receiver)) {
+        if (method === "route") fail(node, "router.route(...)");
+        if (!ROUTE_METHODS.has(method)) fail(node, `router.${method}(...)`);
         const path = stringArgument(node.arguments[0], `router.${method}`, file);
-        if (node.arguments.length < 2) unmodelledRegistration(node, `router.${method}("${path}") without a handler`);
+        if (node.arguments.length < 2) fail(node, `router.${method}("${path}") without a handler`);
         routes.push({
           call: routeCall(method, path),
           capability: capabilityProof(node.arguments.slice(1), file, node),
           shape: "router-method",
         });
-      } else {
-        const routerArg = node.arguments.find((argument) => ts.isIdentifier(argument) && argument.text === "router");
-        if (routerArg !== undefined) {
-          if (!ts.isIdentifier(node.expression) || node.expression.text !== "register" || node.arguments[0] !== routerArg) {
-            unmodelledRegistration(node, `${node.expression.getText(file)}(router, …)`);
-          }
-          const method = stringArgument(node.arguments[1], "register(router, method)", file).toLowerCase();
-          if (!ROUTE_METHODS.has(method)) unmodelledRegistration(node, `register(router, "${method}", …)`);
-          const path = stringArgument(node.arguments[2], `register(router, "${method}", path)`, file);
-          if (node.arguments.length < 4) unmodelledRegistration(node, `register(router, "${method}", "${path}") without a handler`);
-          routes.push({
-            call: routeCall(method, path),
-            capability: capabilityProof(node.arguments.slice(3), file, node),
-            shape: "register-helper",
-          });
-        }
+        return true;
+      }
+      if (ROUTE_METHODS.has(method) && literalPath) {
+        if (ts.isIdentifier(receiver) && receiver.text === "router") return true;
+        fail(node, `${receiver.getText(file)}.${method}(...)`);
       }
     }
-    ts.forEachChild(node, visit);
+    if (ts.isIdentifier(node.expression) && node.arguments[0] !== undefined
+        && ts.isIdentifier(node.arguments[0]) && !isRealRouter(node.arguments[0])
+        && node.arguments[1] !== undefined && ts.isStringLiteralLike(node.arguments[1])
+        && ROUTE_METHODS.has(node.arguments[1].text.toLowerCase())
+        && node.arguments[2] !== undefined && ts.isStringLiteralLike(node.arguments[2])) {
+      fail(node, `${node.expression.text}(${node.arguments[0].text}, ...)`);
+    }
+    const routerArg = node.arguments.find((argument) => isRealRouter(argument));
+    if (routerArg !== undefined) {
+      if (!ts.isIdentifier(node.expression) || node.expression.text !== "register" || node.arguments[0] !== routerArg) {
+        fail(node, `${node.expression.getText(file)}(router, ...)`);
+      }
+      const method = stringArgument(node.arguments[1], "register(router, method)", file).toLowerCase();
+      if (!ROUTE_METHODS.has(method)) fail(node, `register(router, "${method}", ...)`);
+      const path = stringArgument(node.arguments[2], `register(router, "${method}", path)`, file);
+      if (node.arguments.length < 4) fail(node, `register(router, "${method}", "${path}") without a handler`);
+      routes.push({
+        call: routeCall(method, path),
+        capability: capabilityProof(node.arguments.slice(3), file, node),
+        shape: "register-helper",
+      });
+      return true;
+    }
+    return false;
   };
-  visit(file);
+
+  const inspectNode = (node: ts.Node): void => {
+    if (node !== builderBody && (ts.isFunctionLike(node) || ts.isClassLike(node))) return;
+    if (ts.isCallExpression(node) && inspectCall(node)) return;
+    ts.forEachChild(node, inspectNode);
+  };
+  const inspectStatement = (statement: ts.Statement): boolean => {
+    if (ts.isReturnStatement(statement) || ts.isThrowStatement(statement)) {
+      if (statement.expression !== undefined) inspectNode(statement.expression);
+      return false;
+    }
+    if (ts.isBlock(statement)) {
+      for (const child of statement.statements) if (!inspectStatement(child)) break;
+      return true;
+    }
+    if (ts.isIfStatement(statement)) {
+      if (!isFalseLiteral(statement.expression)) inspectStatement(statement.thenStatement);
+      if (statement.elseStatement !== undefined && !isTrueLiteral(statement.expression)) inspectStatement(statement.elseStatement);
+      return true;
+    }
+    if (ts.isTryStatement(statement)) {
+      inspectStatement(statement.tryBlock);
+      if (statement.catchClause !== undefined) inspectStatement(statement.catchClause.block);
+      if (statement.finallyBlock !== undefined) inspectStatement(statement.finallyBlock);
+      return true;
+    }
+    inspectNode(statement);
+    return true;
+  };
+  for (const statement of builderBody.statements) if (!inspectStatement(statement)) break;
   return routes;
 }

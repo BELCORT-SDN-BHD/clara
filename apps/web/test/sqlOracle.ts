@@ -144,6 +144,63 @@ function attachedExecuteStart(statements: string): number | null {
   return match === null ? null : current.start + match.index;
 }
 
+type SqlStringLiteral = { readonly value: string; readonly end: number };
+
+function sqlStringLiteral(sql: string, start: number): SqlStringLiteral | null {
+  const escaped = (sql[start] === "E" || sql[start] === "e") && sql[start + 1] === "'";
+  if (sql[start] === "'" || escaped) {
+    let i = start + (escaped ? 2 : 1);
+    let value = "";
+    while (i < sql.length) {
+      if (escaped && sql[i] === "\\" && i + 1 < sql.length) {
+        value += sql[i + 1] as string;
+        i += 2;
+      } else if (sql[i] === "'" && sql[i + 1] === "'") {
+        value += "'";
+        i += 2;
+      } else if (sql[i] === "'") {
+        return { value, end: i + 1 };
+      } else {
+        value += sql[i] as string;
+        i += 1;
+      }
+    }
+    return null;
+  }
+  if (sql[start] === "$") {
+    const tag = dollarDelimiter(sql, start);
+    if (tag === null) return null;
+    const close = sql.indexOf(tag, start + tag.length);
+    if (close < 0) return null;
+    return { value: sql.slice(start + tag.length, close), end: close + tag.length };
+  }
+  return null;
+}
+
+function foldLiteralExecute(sql: string, start: number): SqlStringLiteral | null {
+  let cursor = start;
+  let value = "";
+  while (true) {
+    const literal = sqlStringLiteral(sql, cursor);
+    if (literal === null) return null;
+    value += literal.value;
+    cursor = literal.end;
+    while (/\s/u.test(sql[cursor] ?? "")) cursor += 1;
+    if (sql.slice(cursor, cursor + 2) !== "||") break;
+    cursor += 2;
+    while (/\s/u.test(sql[cursor] ?? "")) cursor += 1;
+  }
+  const tail = sql.slice(cursor);
+  if (tail.length > 0 && tail[0] !== ";" && !/^(?:into|using)\b/iu.test(tail)) return null;
+  return { value, end: cursor };
+}
+
+function executableProjection(raw: string, executable: string): string {
+  const projected = blankPreservingLines(raw).split("");
+  for (let i = 0; i < executable.length && i < projected.length; i += 1) projected[i] = executable[i] as string;
+  return projected.join("");
+}
+
 function attachedFunctionIdentity(statements: string): readonly string[] | null {
   const current = currentStatement(statements).text;
   if (!/\bas\s*$/iu.test(current)) return null;
@@ -252,8 +309,21 @@ function lexExecutable(sql: string, baseOffset: number, context: LexContext): Sq
       const inner = raw.slice(lead, raw.length - tail.length);
       const executeAt = attachedExecuteStart(statements);
       const functionIdentity = attachedFunctionIdentity(statements);
-      if (attachedToDo(statements) || executeAt !== null) {
-        if (executeAt !== null) context.resolvedExecutes.add(baseOffset + executeAt);
+      if (executeAt !== null) {
+        const folded = foldLiteralExecute(sql, start);
+        if (folded !== null) {
+          context.resolvedExecutes.add(baseOffset + executeAt);
+          const lexed = lexExecutable(folded.value, baseOffset + start, context);
+          const expression = sql.slice(start, folded.end);
+          emit(
+            executableProjection(expression, lexed.withoutComments),
+            executableProjection(expression, lexed.statements),
+          );
+          i = folded.end;
+          continue;
+        }
+      }
+      if (attachedToDo(statements)) {
         const lexed = lexExecutable(inner, baseOffset + start + lead, context);
         emit(`${raw.slice(0, lead)}${lexed.withoutComments}${tail}`, `${raw.slice(0, lead)}${lexed.statements}${tail}`);
       } else if (functionIdentity !== null) {
@@ -277,8 +347,21 @@ function lexExecutable(sql: string, baseOffset: number, context: LexContext): Sq
         const inner = sql.slice(i + tag.length, close);
         const executeAt = attachedExecuteStart(statements);
         const functionIdentity = attachedFunctionIdentity(statements);
-        if (attachedToDo(statements) || executeAt !== null) {
-          if (executeAt !== null) context.resolvedExecutes.add(baseOffset + executeAt);
+        if (executeAt !== null) {
+          const folded = foldLiteralExecute(sql, i);
+          if (folded !== null) {
+            context.resolvedExecutes.add(baseOffset + executeAt);
+            const lexed = lexExecutable(folded.value, baseOffset + i, context);
+            const expression = sql.slice(i, folded.end);
+            emit(
+              executableProjection(expression, lexed.withoutComments),
+              executableProjection(expression, lexed.statements),
+            );
+            i = folded.end;
+            continue;
+          }
+        }
+        if (attachedToDo(statements)) {
           const lexed = lexExecutable(inner, baseOffset + i + tag.length, context);
           const delimiterMask = blank(tag.length);
           emit(`${delimiterMask}${lexed.withoutComments}${delimiterMask}`, `${delimiterMask}${lexed.statements}${delimiterMask}`);
@@ -326,7 +409,7 @@ function invokedIdentities(statements: string): readonly string[][] {
   const tokens = sqlTokens(statements);
   const invoked: string[][] = [];
   for (let i = 0; i < tokens.length; i += 1) {
-    if (!isKeyword(tokens[i], "select") && !isKeyword(tokens[i], "perform")) continue;
+    if (!isKeyword(tokens[i], "select") && !isKeyword(tokens[i], "perform") && !isKeyword(tokens[i], "call")) continue;
     const parsed = qualifiedIdentifier(tokens, i + 1);
     if (parsed !== null && tokens[parsed.next]?.kind === "symbol" && tokens[parsed.next]?.value === "(") {
       invoked.push(parsed.identity);
@@ -394,10 +477,7 @@ export function viewDefinitionOffsets(sql: string, view: string, sourceName = "s
       offsets.push(tokens[i]?.start ?? -1);
     }
   }
-  const unresolved = views.unresolvedDynamicSql.find((hazard) => {
-    const formatLiteral = /\bexecute\s+format\s*\(\s*E?'([^']*)'/iu.exec(hazard)?.[1];
-    return formatLiteral === undefined ? offsets.length > 0 : /\bcreate\b[\s\S]*\bview\b/iu.test(formatLiteral);
-  });
+  const unresolved = views.unresolvedDynamicSql[0];
   if (unresolved !== undefined) throw new Error(unresolved);
   return offsets;
 }

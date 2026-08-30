@@ -20,7 +20,7 @@ import {
   reachableCallsFrom,
   spineGuardProof,
   stripComments,
-  uninspectableExportReasons,
+  type SourceUnit,
 } from "../test/sourceOracle";
 
 /**
@@ -56,8 +56,12 @@ function readSource(webRelativePath: string): string {
   return readFileSync(join(WEB_ROOT, webRelativePath), "utf8");
 }
 
+function readSourceUnit(webRelativePath: string): SourceUnit {
+  return { path: webRelativePath, code: readSource(webRelativePath) };
+}
+
 /** Comments stripped, strings KEPT — for import specifiers and header reads. */
-const codeWithStrings = (p: string): string => stripComments(readSource(p));
+const codeWithStrings = (p: string): string => stripComments(readSourceUnit(p)).code;
 
 /**
  * THE EXECUTION ROOTS of a surface — the entry points a REQUEST actually runs
@@ -77,21 +81,21 @@ const codeWithStrings = (p: string): string => stripComments(readSource(p));
 function executionRoots(p: string): { root: string; code: string; calls: ReturnType<typeof reachableCallsFrom>; proof: ReturnType<typeof spineGuardProof> }[] {
   // Import module specifiers are binding identity. Keep strings for the AST;
   // `reachableFrom()` blanks literal payloads in the regex-facing text it returns.
-  const code = stripComments(readSource(p));
+  const unit = stripComments(readSourceUnit(p));
   if (isRouteLeaf(p)) {
-    return exportedHttpMethods(code).map((method) => ({
+    return exportedHttpMethods(unit).map((method) => ({
       root: method,
-      code: reachableFrom(code, method) ?? "",
-      calls: reachableCallsFrom(code, method),
-      proof: spineGuardProof(code, method),
+      code: reachableFrom(unit, method) ?? "",
+      calls: reachableCallsFrom(unit, method),
+      proof: spineGuardProof(unit, method),
     }));
   }
-  const name = defaultExportName(code);
+  const name = defaultExportName(unit);
   return name === null ? [] : [{
     root: name,
-    code: reachableFrom(code, name) ?? "",
-    calls: reachableCallsFrom(code, name),
-    proof: spineGuardProof(code, name),
+    code: reachableFrom(unit, name) ?? "",
+    calls: reachableCallsFrom(unit, name),
+    proof: spineGuardProof(unit, name),
   }];
 }
 
@@ -227,9 +231,14 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     // see, so the census would be silently INCOMPLETE rather than wrong — the
     // worse of the two failures, because nothing reds. Nothing in the tree does
     // this today; this cell is what keeps that true.
-    const hiding = leaves
-      .filter((l) => isRouteLeaf(l.file))
-      .flatMap((l) => uninspectableExportReasons(readSource(l.file)).map((reason) => `${l.file}: ${reason}`));
+    const hiding = leaves.filter((l) => isRouteLeaf(l.file)).flatMap((l) => {
+      try {
+        exportedHttpMethods(readSourceUnit(l.file));
+        return [];
+      } catch (error) {
+        return [`${l.file}: ${error instanceof Error ? error.message : String(error)}`];
+      }
+    });
     assert.deepEqual(
       hiding,
       [],

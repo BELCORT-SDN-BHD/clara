@@ -60,7 +60,10 @@ function resolveLocal(fromFile: string, spec: string): string | null {
  *  at compile time and drags nothing into a bundle, which is exactly why a
  *  type-only edge must not be followed here. */
 function valueImports(webRelative: string): string[] {
-  const code = stripComments(readFileSync(join(WEB_ROOT, webRelative), "utf8"));
+  const code = stripComments({
+    path: webRelative,
+    code: readFileSync(join(WEB_ROOT, webRelative), "utf8"),
+  }).code;
   const out: string[] = [];
   for (const m of code.matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
     if (/^\s*type\s/.test(m[1] as string)) continue;
@@ -127,7 +130,8 @@ describe("client-importable modules never drag next/headers into the bundle", ()
     const code = 'import type { X } from "@/lib/supabase/server";\nimport { y } from "./read";';
     const specs = (() => {
       const out: string[] = [];
-      for (const m of stripComments(code).matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
+      for (const m of stripComments({ path: "type-only-control.ts", code }).code
+        .matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
         if (/^\s*type\s/.test(m[1] as string)) continue;
         out.push(m[2] as string);
       }
@@ -145,7 +149,10 @@ const migration = (name: string): string => readFileSync(join(MIGRATIONS_DIR, na
 
 /**
  * Every real, statement-level `create [or replace] view clara.<name>` OCCURRENCE
- * in the corpus, with its file and byte offset.
+ * from the pinned live definition onward. A migration whose dynamic SQL the
+ * oracle cannot resolve is recorded as a named barrier, never an invented
+ * absence; independently inspectable successors are still censused so one
+ * barrier cannot hide later static evidence.
  *
  * OCCURRENCES, NOT FILENAMES, AND A FRESH REGEX PER FILE (#451 Codex round 2,
  * item 3 — a bug in this gate, not in the code it guards). The previous version
@@ -157,23 +164,46 @@ const migration = (name: string): string => readFileSync(join(MIGRATIONS_DIR, na
  * cell exists to catch. Ironic and instructive: a stateful module-level regex is
  * the same hazard the cache-safety cell now bans by name.
  */
-function viewDefinitions(view: string): { file: string; offset: number }[] {
+function viewDefinitions(
+  view: string,
+  expectedFile: string,
+): { definitions: { file: string; offset: number }[]; blockedAt: string[] } {
   const out: { file: string; offset: number }[] = [];
-  for (const file of MIGRATION_FILES) {
-    for (const offset of viewDefinitionOffsets(migration(file), view)) out.push({ file, offset });
+  const blockedAt: string[] = [];
+  const first = MIGRATION_FILES.indexOf(expectedFile);
+  assert.notEqual(first, -1, `the pinned live migration ${expectedFile} is absent`);
+  for (const file of MIGRATION_FILES.slice(first)) {
+    let offsets: number[];
+    try {
+      offsets = viewDefinitionOffsets(migration(file), view, file);
+    } catch (error) {
+      assert.match(
+        error instanceof Error ? error.message : String(error),
+        new RegExp(`^unmodelled: unresolved dynamic SQL at ${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:`),
+      );
+      blockedAt.push(file);
+      continue;
+    }
+    for (const offset of offsets) out.push({ file, offset });
   }
-  return out;
+  return { definitions: out, blockedAt };
 }
 
-/** The one live body, asserted to be exactly one OCCURRENCE estate-wide. */
+/** The pinned body plus every successor the oracle can positively inspect. */
 function theOnlyDefinition(view: string, expectedFile: string): void {
-  const defs = viewDefinitions(view);
+  const census = viewDefinitions(view, expectedFile);
+  const defs = census.definitions;
   assert.deepEqual(
     defs.map((d) => `${d.file}@${d.offset}`),
     defs.length === 1 && defs[0]?.file === expectedFile
       ? [`${expectedFile}@${defs[0].offset}`]
       : [`${expectedFile}@<exactly one>`],
     `clara.${view} must have exactly ONE statement-level definition, in ${expectedFile} — re-run the rung-0 census`,
+  );
+  assert.equal(
+    census.blockedAt[0],
+    "0146_ninth_rowkind_seeding_proposal.sql",
+    `clara.${view}'s successor census did not record the named unresolved-dynamic-SQL barrier`,
   );
 }
 
@@ -189,7 +219,7 @@ function declaredContract(sql: string, relation: string): { count: number; colum
 }
 
 describe("the projections are the DB's own declared column contracts", () => {
-  it("clara.caller_context has ONE live body — 0141:544, nothing superseding it", () => {
+  it("clara.caller_context has ONE pinned body — successors throw at the 0146 dynamic barrier", () => {
     theOnlyDefinition("caller_context", "0141_p4_tranche1_invite_rbac.sql");
   });
 
@@ -200,7 +230,7 @@ describe("the projections are the DB's own declared column contracts", () => {
     assert.equal(CALLER_CONTEXT_SELECT.split(",").length, declared.count);
   });
 
-  it("clara.firm_registration_requests_visible has ONE live body — 0145:911", () => {
+  it("clara.firm_registration_requests_visible has ONE pinned body — successors throw at the 0146 dynamic barrier", () => {
     theOnlyDefinition(
       "firm_registration_requests_visible",
       "0145_p4_tranche2_registration_operator_alias.sql",

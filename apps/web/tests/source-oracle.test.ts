@@ -2,19 +2,36 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  defaultExportName,
-  exportClauseAliases,
-  exportedHttpMethods,
-  matchBlock,
-  moduleLevelDeclarations,
-  moduleStateHazards,
-  reachableCallsFrom,
-  reachableFrom,
-  spineGuardProof,
-  stripComments,
-  tryBlockRanges,
-  uninspectableExportReasons,
+  defaultExportName as defaultExportNameUnit,
+  exportClauseAliases as exportClauseAliasesUnit,
+  exportedHttpMethods as exportedHttpMethodsUnit,
+  matchBlock as matchBlockUnit,
+  moduleLevelDeclarations as moduleLevelDeclarationsUnit,
+  moduleStateHazards as moduleStateHazardsUnit,
+  reachableCallsFrom as reachableCallsFromUnit,
+  reachableFrom as reachableFromUnit,
+  spineGuardProof as spineGuardProofUnit,
+  stripComments as stripCommentsUnit,
+  tryBlockRanges as tryBlockRangesUnit,
+  type SourceUnit,
 } from "../test/sourceOracle";
+
+const sourceUnit = (code: string, path = "source-oracle.ts"): SourceUnit => ({ path, code });
+const defaultExportName = (code: string, path?: string) => defaultExportNameUnit(sourceUnit(code, path));
+const exportClauseAliases = (code: string, path?: string) => exportClauseAliasesUnit(sourceUnit(code, path));
+const exportedHttpMethods = (code: string, path?: string) => exportedHttpMethodsUnit(sourceUnit(code, path));
+const matchBlock = (code: string, open: number, path?: string) => matchBlockUnit(sourceUnit(code, path), open);
+const moduleLevelDeclarations = (code: string, path?: string) => moduleLevelDeclarationsUnit(sourceUnit(code, path));
+const moduleStateHazards = (code: string, pathOrAllowlist?: string | ReadonlyMap<string, string>) =>
+  moduleStateHazardsUnit(
+    sourceUnit(code, typeof pathOrAllowlist === "string" ? pathOrAllowlist : undefined),
+    typeof pathOrAllowlist === "string" ? undefined : pathOrAllowlist,
+  );
+const reachableCallsFrom = (code: string, root: string, path?: string) => reachableCallsFromUnit(sourceUnit(code, path), root);
+const reachableFrom = (code: string, root: string, path?: string) => reachableFromUnit(sourceUnit(code, path), root);
+const spineGuardProof = (code: string, root: string, path?: string) => spineGuardProofUnit(sourceUnit(code, path), root);
+const stripComments = (code: string, path?: string) => stripCommentsUnit(sourceUnit(code, path)).code;
+const tryBlockRanges = (code: string, path?: string) => tryBlockRangesUnit(sourceUnit(code, path));
 
 describe("the TypeScript source oracle parses the module's real export record", () => {
   it("PIN AST-1: comments separate tokens instead of deleting them into invisibility", () => {
@@ -45,10 +62,10 @@ describe("the TypeScript source oracle parses the module's real export record", 
 
   it("re-exports fail closed with an honest locally-inspectable reason", () => {
     const named = 'export { handler as GET } from "./handler";';
-    assert.deepEqual(exportedHttpMethods(named), ["GET"]);
-    assert.equal(reachableFrom(named, "GET"), null);
-    assert.match(spineGuardProof(named, "GET").reason, /has no locally inspectable\/provable spine call/);
-    assert.match(uninspectableExportReasons('export * from "./handler";')[0] ?? "", /has no locally inspectable\/provable spine call/);
+    assert.throws(() => exportedHttpMethods(named), /re-exported GET/);
+    assert.throws(() => reachableFrom(named, "GET"), /re-exported GET/);
+    assert.throws(() => spineGuardProof(named, "GET"), /re-exported GET/);
+    assert.throws(() => exportedHttpMethods('export * from "./handler";'), /export-star re-export/);
   });
 
   it("default declarations, assignments, and aliases resolve the render root", () => {
@@ -74,7 +91,13 @@ describe("the AST call graph and execution-dominance proof", () => {
 
   it("PIN AST-8: syntactically broken input throws before an oracle answer", () => {
     const broken = "export default async function S() { await requireFirmScope();";
-    assert.throws(() => spineGuardProof(broken, "S"), /unmodelled: syntactically invalid source at source-oracle\.tsx:1/);
+    assert.throws(() => spineGuardProof(broken, "S"), /unmodelled: syntactically invalid source at source-oracle\.ts:1/);
+  });
+
+  it("PIN AST-8: a .ts generic arrow parses as TypeScript while real TSX remains JSX", () => {
+    const generic = "const identity = <T>(x: T): T => x; const cache = identity({ firm: null }); cache.firm = null;";
+    assert.match(moduleStateHazards(generic, "generic.ts")[0] ?? "", /mutated/);
+    assert.deepEqual(moduleStateHazards("const view = <section data-scope='firm' />;", "view.tsx"), []);
   });
 
   it("PIN AST-9: canonical spelling does not prove guard identity", () => {
@@ -91,6 +114,29 @@ describe("the AST call graph and execution-dominance proof", () => {
     assert.equal(spineGuardProof(localOnly, "S").dominates, false);
     assert.equal(spineGuardProof(shadowed, "S").dominates, false);
     assert.equal(spineGuardProof(aliased, "S").dominates, true, "an aliased canonical import stopped being the guard");
+  });
+
+  it("PIN AST-9a: a type-only spine import throws", () => {
+    const source = `import type { requireFirmScope } from "@/lib/require-firm-scope";
+      export default async function S() { await requireFirmScope(); }`;
+    assert.throws(() => spineGuardProof(source, "S"), /type-only import of the spine/);
+  });
+
+  it("PIN AST-9b: a barrel spine import throws", () => {
+    const source = `import { requireFirmScope } from "./scope-barrel";
+      export default async function S() { await requireFirmScope(); }`;
+    assert.throws(() => spineGuardProof(source, "S"), /unresolvable spine import identity/);
+  });
+
+  it("PIN AST-9c: a dynamic spine import throws", () => {
+    const source = `const { requireFirmScope } = await import("@/lib/require-firm-scope");
+      export default async function S() { await requireFirmScope(); }`;
+    assert.throws(() => spineGuardProof(source, "S"), /unresolvable spine import identity/);
+  });
+
+  it("PIN AST-9d: an unresolved spine binding throws", () => {
+    const source = "export default async function S() { await requireFirmScope(); }";
+    assert.throws(() => spineGuardProof(source, "S"), /unresolvable spine import identity/);
   });
 
   it("only INVOKED local functions enter the reachable graph", () => {
@@ -119,7 +165,7 @@ describe("the AST call graph and execution-dominance proof", () => {
       function unused() { return guard.response; }
       return proxy();
     }`;
-    assert.doesNotMatch(reachableFrom(dead, "S") ?? "", /return\s+guard\.response/);
+    assert.doesNotMatch(reachableFrom(withSpineImports(dead), "S") ?? "", /return\s+guard\.response/);
 
     const callback = `export default async function S() { items.map(() => guard.response); return proxy(); }`;
     const objectMethod = `export default async function S() { const x = { unused() { return guard.response; } }; return x; }`;
@@ -228,10 +274,14 @@ describe("module-level state is scoped by the AST, not a whole-file regex", () =
     assert.equal(moduleStateHazards(source).length, 4);
   });
 
-  it("PIN AST-7: populated or mutated containers red unless explicitly immutable", () => {
+  it("PIN AST-7a: empty and populated mutable literals have their own diagnoses", () => {
+    assert.match(moduleStateHazards("const cache = {};")[0] ?? "", /empty mutable object/);
     assert.match(moduleStateHazards("const cache = { firm: null };")[0] ?? "", /populated mutable object/);
     assert.match(moduleStateHazards("const cache = [null];")[0] ?? "", /populated mutable array/);
-    assert.match(moduleStateHazards("const cache = {}; function put(v: unknown) { cache.firm = v; }")[0] ?? "", /empty mutable object|mutated/);
+  });
+
+  it("PIN AST-7: populated or mutated containers red unless explicitly immutable", () => {
+    assert.match(moduleStateHazards("const cache = makeStore(); function put(v: unknown) { cache.firm = v; }")[0] ?? "", /mutated/);
     assert.deepEqual(moduleStateHazards("const table = { code: 403 } as const;"), []);
     assert.deepEqual(moduleStateHazards("const table = Object.freeze({ code: 403 });"), []);
   });
@@ -292,15 +342,24 @@ describe("module-level state is scoped by the AST, not a whole-file regex", () =
 });
 
 describe("unsupported export mechanisms fail closed", () => {
-  it("PIN AST-13: default GET is not a named method; unsupported export mechanisms are uninspectable", () => {
+  it("PIN AST-13: default GET is not a named method; unsupported export mechanisms throw at the census", () => {
     assert.deepEqual(exportedHttpMethods("export default async function GET() {}"), []);
     for (const source of [
+      'export * from "./handler";',
+      'export { GET } from "./handler";',
       "async function GET() {} export = GET;",
       "async function GET() {} module.exports = { GET };",
+      'async function GET() {} module.exports["GET"] = GET;',
+      "async function GET() {} exports[name] = GET;",
       'async function GET() {} Object.defineProperty(exports, "GET", { value: GET });',
     ]) {
-      assert.match(uninspectableExportReasons(source)[0] ?? "", /unmodelled: uninspectable export mechanism at source-oracle\.tsx:1/);
+      assert.throws(() => exportedHttpMethods(source), /unmodelled: (?:uninspectable export mechanism|export-star re-export|re-exported GET) at source-oracle\.ts:1/);
     }
+    assert.throws(
+      () => defaultExportName('export default function S() {} export * from "./handler";'),
+      /unmodelled: export-star re-export/,
+      "a direct default must not hide an unsupported sibling export",
+    );
   });
 
   it("VACUITY CONTROL: the stripper keeps string literals, drops both comment forms", () => {
