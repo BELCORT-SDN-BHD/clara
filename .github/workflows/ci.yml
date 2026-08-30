@@ -227,6 +227,14 @@ jobs:
       # layout — the one layout that worked — so only a post-build check can see this.
       - name: Worker-path gate (spawn sites + built-image layout)
         run: node scripts/check-worker-paths.mjs
+      # MUST run after Build, for the same reason the worker-path gate does — and it is the ONLY
+      # lane that can make this claim at all. The estate suite deliberately runs unbuilt, so a
+      # bundle assertion living only in a test cell SKIPPED in every job and certified nothing
+      # (P6-1 Codex review, MEDIUM-1; law 28 — absence is not evidence). A missing bundle is a
+      # FAILURE inside this script, never a skip. It reads the pinned version out of registry.ts
+      # rather than hardcoding one, so it needs no edit at the next _vN.
+      - name: Workflow-bundle gate (registry pins + WDK directives reached the served artifact)
+        run: node scripts/check-workflow-bundle.mjs
 
   # =========================================================================
   # DB ESTATE LEG (ADR-0073 lever 2): the two per-PR backstops the owner's ruling

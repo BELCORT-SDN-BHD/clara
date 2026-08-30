@@ -23,9 +23,27 @@
 // `assert_wake_allowed`. Both halves are read below, separately, and the file says which one
 // does the work.
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import * as rig from "./rig.mjs";
+import { mintWakeCredentialObo, mintWakeCredentialClientObo, withRuntime, endPools } from "../lib/pools.mjs";
+import * as ff from "../lib/freeform-read.mjs";
+
+const { register } = await import("tsx/esm/api");
+register();
+const prompt16 = await import("../workflows/chatTurn.v16.prompt.ts");
+const freeform15 = await import("../workflows/chatTurn.v15.freeform.ts");
+
+// The tool path reads its pools off the same global the supervisor injects at boot — the
+// f-a6-pr2-freeform-db.test.mjs convention, reused rather than reinvented.
+const priorPools = globalThis.__claraPools;
+globalThis.__claraPools = { mintWakeCredentialObo, mintWakeCredentialClientObo, withFreeformRead: ff.withFreeformRead, withRuntime };
+
+after(async () => {
+  globalThis.__claraPools = priorPools;
+  await endPools();
+  await rig.endPool();
+});
 
 const READY = await rig
   .rootQuery(
@@ -186,6 +204,85 @@ test("p6-1.db.freeform: the receipt id is a bigint and the verb publishes it as 
   assert.equal(v.rows[0].publishes, true, "and its result envelope carries read_id — the value toTypedParts_v16 promotes the card from");
 });
 
+// ==============================================================================================
+// read_id PROVENANCE — the card's id comes from the DATABASE, never from the model's own rows.
+// ==============================================================================================
+//
+// WHY THIS CELL EXISTS (Codex review, MEDIUM-2). The original pin searched `wake_freeform_read`'s
+// prosrc for the SPELLING `'read_id'`. That is a projection of the thing, not the thing (review
+// law 3): it would stay green if that key were later bound to a model-derived value, and the unit
+// cells cannot help — they feed SYNTHETIC envelopes whose ids I chose. Constraint 2 is what is
+// actually at stake: the model composes the SQL, so anything it can put in its own result rows is
+// model-supplied, and a card addressing a receipt by a model-supplied id would let the model point
+// a human at another read.
+//
+// THE INSTRUMENT: a REAL admitted read whose rows deliberately contain `999 AS read_id`. Two
+// values then exist with the same name, one from each authority — the DB's receipt id at the
+// envelope's top level, and the model's 999 nested under `rows`. The cell walks the WHOLE chain
+// (verb -> tool wrapper -> toTypedParts_v16 -> card) and asserts the card carries the DB's and not
+// the model's. A mutant binding the promotion to `rows[0].read_id` reds it.
+
+const FREEFORM_READY = await rig
+  .rootQuery("select to_regprocedure('clara.wake_freeform_read(text,text,uuid,text,int)') is not null as ok")
+  .then((r) => r.rows[0]?.ok === true)
+  .catch(() => false);
+const skipFreeform = FREEFORM_READY ? false : "P6-1: the F-A6 freeform surface (0131) is absent";
+
+/** A firm + a chat session + a LIVE turn — the three things TA-P4's turn binding needs. */
+async function turnFixture(label) {
+  const { owner, firm, client } = await rig.buildFirm(label);
+  const session = await rig.createChatSession({ author: owner, client });
+  const receipt = await rig.beginChatTurn({ session, author: owner });
+  return { ctx: { firmId: firm, clientId: client, createdBy: owner, taskId: receipt.task_id } };
+}
+
+/** Drive the REAL tool wrapper, then the REAL promotion, exactly as a segment does. */
+async function cardsFromRead(ctx, sql, purpose, seq) {
+  const out = await freeform15.runFreeformRead(ctx, { sql, purpose }, "gpt-5.6-terra", 0, seq);
+  const parts = prompt16.toTypedParts_v16([
+    { type: "tool-result", toolCallId: `tc-${seq}`, toolName: freeform15.FREEFORM_READ_TOOL, output: out },
+  ]);
+  return { out, parts, cards: parts.filter((p) => p.type === "freeform_result") };
+}
+
+test("p6-1.db.freeform.read-id-provenance: the card carries the DB's receipt id, NOT the model's own row", { skip: skipFreeform }, async () => {
+  const { ctx } = await turnFixture("p61prov");
+  // The rows deliberately carry a column NAMED read_id. If the promotion ever read the model's
+  // rows instead of the verb's envelope, it would mint "999" and this cell would say so.
+  const sql = "select 999 as read_id, count(*) as n from clara.journal_entries";
+  const { out, cards } = await cardsFromRead(ctx, sql, "provenance probe: a row that calls itself read_id", 1);
+
+  assert.equal(out.ok, true, `expected an ADMITTED read, got ${JSON.stringify(out).slice(0, 400)}`);
+  assert.equal(cards.length, 1, "an admitted read mints exactly one card");
+
+  // The control that makes the assertion below meaningful: the decoy really IS in the payload.
+  assert.equal(Number(out.read.rows[0].read_id), 999, "control — the model's own row really does carry read_id = 999");
+
+  const receipt = await rig.rootQuery(
+    "select id from clara.freeform_read_log where op_key = $1",
+    [freeform15.freeformOpKey(ctx.taskId, 0, 1)],
+  );
+  assert.equal(receipt.rows.length, 1, "exactly one receipt row was committed for this read");
+  const dbId = String(receipt.rows[0].id);
+
+  assert.equal(cards[0].read_id, dbId, "the card's read_id IS clara.freeform_read_log.id for this read");
+  assert.notEqual(cards[0].read_id, "999", "...and is NOT the model-supplied row value of the same name");
+  // Belt: the two are genuinely different values, so the equality above is not passing by luck.
+  assert.notEqual(dbId, "999", "the receipt id and the decoy differ, so this cell can discriminate");
+});
+
+test("p6-1.db.freeform.read-id-provenance: a REFUSED read mints no card at all", { skip: skipFreeform }, async () => {
+  const { ctx } = await turnFixture("p61refuse");
+  // `clara.users` is enumerated but `pg_proc` is not — a relation outside the census is refused by
+  // the DATABASE, which is the refusal path this arm exercises.
+  const { out, parts, cards } = await cardsFromRead(ctx, "select 999 as read_id from pg_proc limit 1", "provenance probe: a refused read", 1);
+  assert.equal(out.ok, false, `expected a REFUSED read, got ${JSON.stringify(out).slice(0, 400)}`);
+  assert.equal(cards.length, 0, "a refused read mints no freeform_result — there is no receipt to address");
+  assert.ok(
+    parts.some((p) => p.type === "refusal"),
+    "control — v15's own refusal arm still fires, so the zero above is a verdict rather than an empty promotion",
+  );
+});
 test("p6-1.db.stamp: no chatturn engine id is priced, so moving the stamp v15 -> v16 moves no cost line", { skip }, async () => {
   const r = await rig.rootQuery(
     `select count(*) filter (where engine_id like '%chatturn%')::int as chatturn_rows,

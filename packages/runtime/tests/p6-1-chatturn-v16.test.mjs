@@ -28,6 +28,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const { register } = await import("tsx/esm/api");
@@ -384,35 +388,57 @@ test("p6-1.stamp: the recorder is v15's by identity — the stamp moved, the met
 // ==============================================================================================
 
 const BUNDLE = fileURLToPath(new URL("../.output/server/index.mjs", import.meta.url));
+const GATE = fileURLToPath(new URL("../../../scripts/check-workflow-bundle.mjs", import.meta.url));
 const bundleBuilt = await stat(BUNDLE).then(() => true).catch(() => false);
 
+// THE ASSERTIONS LIVE IN THE SCRIPT, NOT HERE — and that is the fix for this cell's own defect.
+// As first written, this cell held the bundle assertions itself and SKIPPED when `.output/` was
+// absent. CI's build job builds and stops; the estate suite deliberately runs unbuilt. So it
+// skipped in every lane and the bundle claim was never actually certified anywhere (Codex review
+// MEDIUM-1; law 28 — absence is not evidence). `scripts/check-workflow-bundle.mjs` now runs in
+// the build job right after `pnpm build`, where a missing bundle is a FAILURE. This cell invokes
+// that same script so there is ONE assertion list: a change to the gate cannot pass here and
+// fail there, or the reverse.
+//
+// The skip that remains is honest — in an unbuilt checkout there is no artifact to judge — and
+// `CLARA_REQUIRE_BUNDLE=1` removes it for any lane that wants the hard failure.
+const REQUIRE_BUNDLE = process.env.CLARA_REQUIRE_BUNDLE === "1";
+
 test(
-  "p6-1.bundle: the WDK registered v16's workflow AND step directives, and the emitter survived the compile",
-  { skip: bundleBuilt ? false : "no .output/ — run pnpm --filter @clara/runtime build" },
-  async () => {
-    // The WDK compiler can silently swallow a directive: the source reads correctly, the build
-    // succeeds, and the behaviour is simply absent at runtime (.claude/rules/runtime-workflows.md).
-    // Typecheck does not cover it and neither does reading the source, so this is the only cell
-    // in the file that can catch it. The `path//export` shape is F-A6's own instrument
-    // (f-a6-pr2-fixround-unit.test.mjs), reused rather than reinvented.
-    const src = await readFile(BUNDLE, "utf8");
-    assert.ok(src.includes("workflows/chatTurn.v16//chatTurn_v16"), "the WDK registered the WORKFLOW directive (path//export)");
-    assert.ok(src.includes("workflows/chatTurn.v16.impl//runModelSegmentStepV16"), "...and the STEP directive — the half a swallowed directive would drop");
-    assert.ok(src.includes("chatTurn: chatTurn_v16"), "the registry pin itself reaches the bundle");
-    assert.ok(!src.includes("chatTurn: chatTurn_v15"), "...and the OLD pin does not — a bundle carrying both would mean the repoint did not take");
-
-    // THE BEHAVIOUR, not only the wiring. A registry line can be right while the promotion that
-    // makes the bump worth shipping was dropped; this is the string that proves it was not.
-    assert.ok(src.includes('type: "freeform_result"'), "the freeform_result promotion is IN the served bundle");
-    assert.ok(src.includes("chatturn-v16"), "and so is the v16 engine stamp");
-
-    // Policy (c): a parked run resumes into the body it left, so every prior body must still SHIP,
-    // not merely still exist in the repo.
-    for (const v of ["v1", "v10", "v13", "v14", "v15"]) {
-      assert.ok(src.includes(`workflows/chatTurn.${v}//chatTurn_${v}`), `chatTurn_${v}'s workflow directive still ships — no parked run is stranded`);
-    }
+  "p6-1.bundle: the shipped workflow-bundle gate passes against this checkout's built artifact",
+  { skip: bundleBuilt || REQUIRE_BUNDLE ? false : "no .output/ — run pnpm --filter @clara/runtime build (or set CLARA_REQUIRE_BUNDLE=1 to make this a failure)" },
+  () => {
+    // Run the REAL gate as CI runs it, through its own process, so what passes here is the same
+    // program that guards the build job — never a re-implementation that could drift from it.
+    const r = spawnSync(process.execPath, [GATE], { encoding: "utf8" });
+    assert.equal(
+      r.status,
+      0,
+      `check-workflow-bundle exited ${r.status}. This is the gate CI runs after \`pnpm build\`:\n${r.stdout}${r.stderr}`,
+    );
+    // A DISCRIMINATING post-condition: exit 0 alone would also be produced by a gate that
+    // checked nothing, so assert it reports having actually looked at the things it names.
+    assert.match(r.stdout, /check-workflow-bundle: OK/, "the gate reports OK");
+    assert.match(r.stdout, /chatTurn pinned at v16/, "...and says which version it found pinned in the served artifact");
+    assert.match(r.stdout, /freeform_result emitter/, "...and that the emitter survived the compile");
+    assert.match(r.stdout, /superseded body\(ies\) still ship for parked runs/, "...and that policy (c) holds in the image");
   },
 );
+
+test("p6-1.bundle.gate-is-fail-closed: a MISSING bundle fails the gate rather than skipping it", () => {
+  // The defect this whole section exists to close, pinned directly: point the gate at a tree
+  // with no `.output/` and it must EXIT NON-ZERO. A gate that stood down politely here is a gate
+  // that certified nothing in both of CI's lanes.
+  const empty = mkdtempSync(join(tmpdir(), "p6-1-nobundle-"));
+  try {
+    const r = spawnSync(process.execPath, [GATE], { cwd: empty, encoding: "utf8" });
+    // `cwd` outside a git tree also makes the gate's own repo-root probe fail; either way the
+    // requirement is the same and it is the only thing asserted: it must NOT exit 0.
+    assert.notEqual(r.status, 0, `the gate must fail without a built bundle; it exited ${r.status}:\n${r.stdout}${r.stderr}`);
+  } finally {
+    rmSync(empty, { recursive: true, force: true });
+  }
+});
 
 test("p6-1.impl: the segment step is v16's own and binds v16's prompt, parts and stamp", () => {
   assert.equal(typeof impl16.runModelSegmentStepV16, "function");
