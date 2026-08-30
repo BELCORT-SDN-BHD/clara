@@ -80,12 +80,12 @@ function checkSynthetic(runtimeSources, options = {}) {
   });
 }
 
-test("p6-1.parts-parity: v16 plus the live 22-kind reader REFUSES the unrendered freeform_result emitter", () => {
+test("p6-1.parts-parity: v16 plus the live 26-kind reader admits the freeform_result emitter", () => {
   const result = checkPartsParity({ declarerSource: DECLARER, readerSource: READER, runtimeSources: RUNTIME_SOURCES });
-  assert.deepEqual(result.reader, PRE_P6_READER_KINDS, "control: this branch still carries the literal pre-P6 reader roster");
+  assert.deepEqual(result.reader, POST_P6_READER_KINDS, "control: merged P6-2 carries the literal post-bump reader roster");
   assert.deepEqual(result.emittable, ["freeform_result"], "only the kind with an object-literal construction site is emittable here");
-  assert.equal(result.ok, false, "the commit-parity gate refuses a reader behind the emitter");
-  assert.deepEqual(result.missing, ["freeform_result"]);
+  assert.equal(result.ok, true, "the commit-parity gate admits the merged reader at parity with the emitter");
+  assert.deepEqual(result.missing, []);
   assert.match(
     result.census.find(({ kind }) => kind === "freeform_result").constructionSites[0],
     /^packages\/runtime\/workflows\/chatTurn\.v16\.prompt\.ts:\d+$/,
