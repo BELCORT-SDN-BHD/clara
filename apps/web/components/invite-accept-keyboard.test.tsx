@@ -26,8 +26,9 @@ type Node = { tagName?: string; childNodes?: Node[]; parentNode?: Node; disabled
 
 const SUB = "11111111-1111-1111-1111-111111111111";
 const CLARA_TOKEN = "c".repeat(64);
+const FIRM = "33333333-3333-3333-3333-333333333333";
 const CONTEXT_ROW = {
-  user_id: SUB, firm_id: "f1", firm_name: "ROME PROPERTIES",
+  user_id: SUB, firm_id: FIRM, firm_name: "ROME PROPERTIES",
   role: "bookkeeper", role_rank: 1, is_operator: false,
 };
 

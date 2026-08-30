@@ -31,8 +31,12 @@ type Node = { tagName?: string; childNodes?: Node[]; parentNode?: Node; disabled
 
 const SUB = "11111111-1111-1111-1111-111111111111";
 const CLARA_TOKEN = "c".repeat(64);
+const FIRM = "33333333-3333-3333-3333-333333333333";
+// The membership row must be WELL FORMED to confirm — real uuids, a non-empty
+// firm name, an in-CHECK role. The read validates all six columns (Codex
+// MEDIUM-1), so a placeholder like "f1" is now correctly rejected as malformed.
 const CONTEXT_ROW = {
-  user_id: SUB, firm_id: "f1", firm_name: "ROME PROPERTIES",
+  user_id: SUB, firm_id: FIRM, firm_name: "ROME PROPERTIES",
   role: "bookkeeper", role_rank: 1, is_operator: false,
 };
 
@@ -58,7 +62,7 @@ function fakeEstate(options: { acceptRefusal?: { code: string; message: string }
       state.acceptCalls.push(JSON.parse(String(init?.body ?? "{}")));
       if (options.acceptRefusal) return jsonResponse(options.acceptRefusal, 400);
       state.membership = true;
-      return jsonResponse({ user_id: SUB, firm_id: "f1", membership_id: "m1" });
+      return jsonResponse({ user_id: SUB, firm_id: FIRM, membership_id: "m1" });
     }
     if (url.includes("/rest/v1/caller_context")) {
       state.contextReads += 1;
@@ -261,6 +265,80 @@ test("A FAILED membership read is NOT treated as a confirmed one — and never a
       await walkToSubmit(h);
       assert.deepEqual(router.replaced, [], "a failed read takes the fail-closed branch — absence is not evidence");
       assert.match(textOf(h.container as never), /Your account is set up/);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+// ===========================================================================
+// THE POSITIVE READ IS EXACT (Codex MEDIUM-1) — at the SURFACE.
+//
+// The wrapper suite (lib/identity/doors.test.ts) pins all four denial reasons
+// exhaustively. These cells pin the thing the USER experiences: for every
+// non-exact answer the door "succeeded" but the journey does NOT leave. Only
+// the exact, well-formed, verified-subject row redirects.
+// ===========================================================================
+
+const NON_CONFIRMING: ReadonlyArray<{ what: string; rows: unknown }> = [
+  { what: "zero rows", rows: [] },
+  { what: "TWO rows", rows: [{ ...CONTEXT_ROW }, { ...CONTEXT_ROW, firm_id: "44444444-4444-4444-4444-444444444444" }] },
+  { what: "a 200 carrying [{}]", rows: [{}] },
+  { what: "a row for a DIFFERENT user_id", rows: [{ ...CONTEXT_ROW, user_id: "99999999-9999-9999-9999-999999999999" }] },
+  { what: "a row with firm_id missing", rows: [{ ...CONTEXT_ROW, firm_id: undefined }] },
+  { what: "a row with a non-uuid user_id", rows: [{ ...CONTEXT_ROW, user_id: "u1" }] },
+  { what: "a row with an empty firm_name", rows: [{ ...CONTEXT_ROW, firm_name: "" }] },
+  { what: "a row with a role outside the CHECK", rows: [{ ...CONTEXT_ROW, role: "superuser" }] },
+  { what: "a row with is_operator as the STRING true", rows: [{ ...CONTEXT_ROW, is_operator: "true" }] },
+];
+
+for (const scenario of NON_CONFIRMING) {
+  test(`NO REDIRECT on ${scenario.what}: the door succeeded, but the membership is not confirmed`, async () => {
+    let doorCalls = 0;
+    await withMockedEnv(
+      (async (u: RequestInfo | URL) => {
+        const url = String(u);
+        if (url.includes("/rpc/accept_invite")) {
+          doorCalls += 1;
+          return jsonResponse({ user_id: SUB, firm_id: FIRM, membership_id: "m1" });
+        }
+        if (url.includes("/rest/v1/caller_context")) return jsonResponse(scenario.rows);
+        throw new Error(`unexpected fetch: ${url}`);
+      }) as typeof fetch,
+      async () => {
+        const { h, router } = await mount(
+          createElement(InviteAcceptForm, {
+            token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+            createSupabaseClient: authClient(),
+          }),
+        );
+        try {
+          await walkToSubmit(h);
+          assert.equal(doorCalls, 1, "control: the door really was called and really did succeed");
+          assert.deepEqual(router.replaced, [], `${scenario.what} must NOT redirect`);
+          assert.match(textOf(h.container as never), /couldn't confirm your access/, "the person stays, told what is known");
+        } finally {
+          await h.unmount();
+        }
+      },
+    );
+  });
+}
+
+test("POSITIVE CONTROL: the exact well-formed verified-subject row is the ONLY thing that redirects", async () => {
+  // Without this the nine cells above would all pass against a component that
+  // never redirects at all.
+  const { impl } = fakeEstate();
+  await withMockedEnv(impl, async () => {
+    const { h, router } = await mount(
+      createElement(InviteAcceptForm, {
+        token: "supabase-token-hash", inviteToken: CLARA_TOKEN,
+        createSupabaseClient: authClient(),
+      }),
+    );
+    try {
+      await walkToSubmit(h);
+      assert.deepEqual(router.replaced, ["/"], "the exact row DOES redirect");
     } finally {
       await h.unmount();
     }

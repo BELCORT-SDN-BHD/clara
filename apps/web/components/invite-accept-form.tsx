@@ -11,8 +11,9 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import {
   acceptInvite,
-  callerContext,
+  readCallerContextForSubject,
   INVITE_CLARA_TOKEN_PARAM,
+  type CallerContextOutcome,
 } from "@/lib/identity/doors";
 import { isDoorRefusal } from "@/lib/doors";
 import { Button } from "@/components/ui/button";
@@ -288,15 +289,30 @@ export function InviteAcceptForm({
    *  every other outcome (zero rows, a failed read) takes the fail-closed
    *  branch and stays on this page, because absence is not evidence. */
   async function confirmMembershipThenLeave(): Promise<void> {
-    let context: Awaited<ReturnType<typeof callerContext>> = null;
-    try {
-      context = await callerContext();
-    } catch {
+    // No proven subject means there is nothing to bind a row TO, so no read can
+    // be positive. Unreachable from the shipped flow (this stage is only
+    // reached through the subject-binding check) — kept because a guard that
+    // depends on an upstream invariant for its safety is one refactor away
+    // from being wrong, and this branch costs nothing.
+    if (!verifiedSubject) {
       setStage("unconfirmed");
       return;
     }
 
-    if (!context) {
+    let outcome: CallerContextOutcome;
+    try {
+      outcome = await readCallerContextForSubject(verifiedSubject);
+    } catch {
+      // The read never came back. Different fact from "the DB said no", same
+      // fail-closed answer — absence is not evidence.
+      setStage("unconfirmed");
+      return;
+    }
+
+    // no_membership · ambiguous · malformed · wrong_subject — every one denies.
+    // A 200 carrying `[{}]`, two rows, or a row for somebody else are exactly
+    // the shapes that used to sail through a `rows[0] ?? null` read.
+    if (!outcome.ok) {
       setStage("unconfirmed");
       return;
     }

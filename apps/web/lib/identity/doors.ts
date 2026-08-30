@@ -132,13 +132,26 @@ export async function acceptInvite(
 // ---------------------------------------------------------------------------
 // A READ, NOT A DOOR — labelled as such at its definition, per apps/web/AGENTS.md.
 //
-// *** P4-2 OWNS THE CANONICAL HOME. Its order creates
-// `apps/web/lib/firm/caller-context.ts` as "the typed read + its wire-shape
-// pin", and `lib/require-firm-scope.ts` as THE one check over it. P4-1 merges
-// FIRST and needs this read to prove its own post-condition, so the minimal
-// projection lives here for now. P4-2 should FOLD this into its module and
-// repoint this import — one implementation, not two. Named loudly so the fold
-// is a deliberate step rather than a duplicate nobody notices. ***
+// *** P4-2 OWNS THE CANONICAL HOME, AND THIS LAYER IS SHAPED FOR A 1:1 FOLD.
+// Its `apps/web/lib/firm/caller-context.ts` is "the typed read + its wire-shape
+// pin"; `lib/require-firm-scope.ts` is THE one check over it. P4-1 merges FIRST
+// and needs this read to prove its own post-condition, so it lives here until
+// that fold.
+//
+// The names below are deliberately P4-2's, so the fold is a DELETION plus an
+// import rather than a reconciliation of two vocabularies:
+//   CALLER_CONTEXT_RELATION · CALLER_CONTEXT_COLUMNS · CALLER_CONTEXT_SELECT ·
+//   CallerContextRow · loadCallerContext  → replace with P4-2's, verbatim
+//   readCallerContextForSubject           → keep, or move beside their check
+// and the four denial reasons are P4-2's four:
+//   no_membership | ambiguous | malformed | wrong_subject
+//
+// TWO THINGS THIS LAYER DOES THAT P4-2's DID NOT, both from the same Codex
+// round — carry them across at the fold rather than losing them:
+//   (1) it validates ALL SIX columns, not four (their MEDIUM-2);
+//   (2) it binds the row to a KNOWN subject (`wrong_subject`), which their
+//       spine has no equivalent of because it has no proven subject to bind to
+//       at that point. Do not drop the binding when folding THIS caller. ***
 // ---------------------------------------------------------------------------
 
 /** `clara.caller_context` (`0141:544`) — a `security_barrier` view over
@@ -152,30 +165,129 @@ export async function acceptInvite(
  *  This view does not read that claim at all, so it reports the freshly-minted
  *  membership on the very same token. `uq_membership_active_user` is what makes
  *  "at most one row" a DB guarantee rather than an observation. */
-export type CallerContext = {
+export const CALLER_CONTEXT_RELATION = "caller_context";
+
+export const CALLER_CONTEXT_COLUMNS = [
+  "user_id",
+  "firm_id",
+  "firm_name",
+  "role",
+  "role_rank",
+  "is_operator",
+] as const;
+
+export const CALLER_CONTEXT_SELECT = CALLER_CONTEXT_COLUMNS.join(",");
+
+/** One row of the view. Nullability read off the BASE TABLES, not assumed —
+ *  and `role_rank` is genuinely nullable: `clara.role_rank` (`0002:326-331`) is
+ *  a `case … else null end`, so an out-of-ladder role ranks NULL. Today's CHECK
+ *  on `firm_memberships.role` makes that unreachable, but typing it non-null
+ *  here would be this module asserting a guarantee the DB does not give. */
+export type CallerContextRow = {
   user_id: string;
   firm_id: string;
   firm_name: string;
   role: string;
-  role_rank: number;
+  role_rank: number | null;
   is_operator: boolean;
 };
 
-const CALLER_CONTEXT_COLUMNS = "user_id,firm_id,firm_name,role,role_rank,is_operator";
-
-/** Reads the caller's own membership context. Resolves the single row when one
- *  exists and `null` when none does — zero rows is a legitimate state (no
- *  membership yet), never an error to invent a request around. A FAILED read
- *  throws: the caller decides, and every caller here takes the fail-closed
- *  branch, because absence is not evidence (review law 2). */
-export async function callerContext(
+/** Reads the caller's own context and returns the rows VERBATIM — zero, one, or
+ *  (a structural surprise `uq_membership_active_user` says cannot happen) more.
+ *
+ *  `limit: 2`, NOT `limit: 1`: a cap of one silently TRUNCATES a broken >1-row
+ *  invariant into a perfectly ordinary-looking single row, so the breakage
+ *  becomes unobservable at exactly the moment it matters. Two lets the caller
+ *  SEE it and deny (Codex MEDIUM-1). A FAILED read throws — it never degrades
+ *  into the same empty array that "no membership" returns, because those are
+ *  different facts and collapsing them would delete the distinction before the
+ *  caller that cares ever sees it (review law 2). */
+export function loadCallerContext(
   opts: { session?: SessionTokenAccessor; signal?: AbortSignal } = {},
-): Promise<CallerContext | null> {
-  const rows = await getRows<CallerContext>("caller_context", {
-    select: CALLER_CONTEXT_COLUMNS,
-    limit: 1,
+): Promise<CallerContextRow[]> {
+  return getRows<CallerContextRow>(CALLER_CONTEXT_RELATION, {
+    select: CALLER_CONTEXT_SELECT,
+    limit: 2,
     session: opts.session,
     signal: opts.signal,
   });
-  return rows[0] ?? null;
+}
+
+/** Why a membership could NOT be positively confirmed. Every value denies.
+ *
+ *  These four names are DELIBERATELY the ones P4-2's `require-firm-scope`
+ *  uses, so its fold replaces this layer 1:1 rather than re-deriving a second
+ *  vocabulary for the same four facts. */
+export type CallerContextDenial =
+  /** The read succeeded and observed zero rows — the holding state's own
+   *  trigger, and a legitimate answer, not an error. */
+  | "no_membership"
+  /** More than one active membership came back. `uq_membership_active_user`
+   *  says this is impossible; if it happens the index is broken or the response
+   *  is not the DB's, and either way nothing here may pick one. */
+  | "ambiguous"
+  /** One row, but it does not satisfy the view's own declared column contract —
+   *  a missing field, a wrong type, an empty firm name, a role outside the
+   *  CHECK. An HTTP 200 carrying `[{}]` lands here. */
+  | "malformed"
+  /** One well-formed row, for SOMEBODY ELSE. The view is `jwt_sub()`-scoped so
+   *  this cannot happen against an honest DB — which is exactly why it must
+   *  deny rather than be assumed away. */
+  | "wrong_subject";
+
+export type CallerContextOutcome =
+  | { ok: true; context: CallerContextRow }
+  | { ok: false; reason: CallerContextDenial };
+
+const ALLOWED_ROLES = new Set(["viewer", "bookkeeper", "admin", "owner"]);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Validates ALL SIX declared columns — not the four a caller happens to read.
+ *  A row is trusted downstream as a whole, so a partial check hands a
+ *  half-validated object onward wearing a fully-typed name (the exact defect
+ *  Codex found in P4-2's own validator). Every field is checked here. */
+function isCallerContextRow(value: unknown): value is CallerContextRow {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  if (typeof row.user_id !== "string" || !UUID.test(row.user_id)) return false;
+  if (typeof row.firm_id !== "string" || !UUID.test(row.firm_id)) return false;
+  if (typeof row.firm_name !== "string" || row.firm_name.trim() === "") return false;
+  if (typeof row.role !== "string" || !ALLOWED_ROLES.has(row.role)) return false;
+  // Nullable BY THE DB's own declaration (see CallerContextRow), but never a
+  // string, a float, or a NaN masquerading as a rank.
+  if (row.role_rank !== null && !Number.isInteger(row.role_rank)) return false;
+  // Strictly boolean — `"true"` is not true (Codex: a string here would grant).
+  if (typeof row.is_operator !== "boolean") return false;
+  return true;
+}
+
+/**
+ * THE POSITIVE READ, and the only thing in this module that may authorise the
+ * invite journey to leave the page. Returns `ok: true` for EXACTLY ONE row that
+ * is fully well-formed AND belongs to the subject `verifyOtp` positively proved.
+ * Every other observation denies with its reason.
+ *
+ * WHY THE SUBJECT COMPARISON EXISTS even though the view is `jwt_sub()`-scoped:
+ * "the view filters by the caller" is a property of the DB, and this function's
+ * job is to not *depend* on a property it cannot see. A 200 is supplied by
+ * whatever answered the request — a proxy, a cache, a compromised edge — and
+ * the whole point of the post-condition is that it is evidence rather than
+ * trust. Binding the row to `verifiedSubject` costs one comparison and closes
+ * the case where the response is well-formed but not ours.
+ *
+ * A FAILED read still THROWS (it does not become a denial): the caller must be
+ * able to tell "the DB said no" from "we never heard back", and both take the
+ * fail-closed branch for different displayed reasons.
+ */
+export async function readCallerContextForSubject(
+  verifiedSubject: string,
+  opts: { session?: SessionTokenAccessor; signal?: AbortSignal } = {},
+): Promise<CallerContextOutcome> {
+  const rows = await loadCallerContext(opts);
+  if (rows.length === 0) return { ok: false, reason: "no_membership" };
+  if (rows.length > 1) return { ok: false, reason: "ambiguous" };
+  const row = rows[0];
+  if (!isCallerContextRow(row)) return { ok: false, reason: "malformed" };
+  if (row.user_id !== verifiedSubject) return { ok: false, reason: "wrong_subject" };
+  return { ok: true, context: row };
 }
