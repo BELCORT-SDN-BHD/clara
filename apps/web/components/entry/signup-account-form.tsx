@@ -112,11 +112,17 @@ export interface SignupAuthClient {
 
 type Stage = "form" | "submitting" | "check-email";
 
+// NOTE the absence of a `= {}` default on the parameter itself. React always
+// passes a props object, and defaulting the whole parameter widens the inferred
+// props to `| undefined`, which makes `createElement(SignupAccountForm, {...})`
+// fall through every typed overload to bare `Attributes` — so a test passing the
+// seam gets "createSupabaseClient does not exist" from tsc. Every prop is
+// individually optional, which is what callers actually need.
 export function SignupAccountForm({
   createSupabaseClient = createClient,
 }: {
   createSupabaseClient?: () => SignupAuthClient;
-} = {}) {
+}) {
   const t = useTranslations("Signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

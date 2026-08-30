@@ -41,7 +41,7 @@ export function LogoutButton({
   variant?: "ghost" | "outline";
   align?: "end" | "stretch";
   fullWidth?: boolean;
-} = {}) {
+}) {
   const t = useTranslations("Logout");
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);

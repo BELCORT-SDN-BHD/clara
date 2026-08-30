@@ -43,8 +43,49 @@ import { StateBanner } from "@/components/common/state";
  *
  * TWO ENTRANCES, AND THIS PAGE NOW NAMES BOTH: /signup for someone starting
  * their own firm, and the invite link in their inbox for someone joining one.
+ *
+ * ===========================================================================
+ * THE TRANSPORT SEAM (added by P4-3, so this surface can be SCANNED)
+ * ===========================================================================
+ * `createSupabaseClient` is the same seam `InviteAcceptForm` has carried since
+ * P2 (`InviteAuthClient`), added here for the same measured reason: the real
+ * browser client cannot be constructed under the Node 20 test runner. It is
+ * not merely awkward — `@supabase/realtime-js` needs a native `WebSocket`, and
+ * the auth client's own refresh timers KEEP THE PROCESS ALIVE after the test
+ * finishes. Measured on this branch: a login scan that constructed the real
+ * client ran to a 200-SECOND timeout instead of the ~80ms the assertions take,
+ * and would have hung `pnpm test` for the whole app.
+ *
+ * This surface had never been in either a11y or keyboard scan before P4-3
+ * (`components/login-a11y.test.tsx`), and the seam is what makes registering it
+ * possible at all.
+ *
+ * IT IS A TRANSPORT SEAM ONLY. Every wall on this journey — the open-redirect
+ * guard below, and Supabase's own credential check — runs identically whichever
+ * client is supplied. Nothing injectable can make a failed sign-in look like a
+ * successful one: this component navigates only when `signInWithPassword`
+ * returns no error, and a stub that returns no error is a stub asserting a
+ * successful sign-in, which is what the test intends to simulate.
+ *
+ * REVIEW LAW 3 — the proof that this interface still describes the REAL client
+ * is the default parameter itself (`createSupabaseClient = createClient`):
+ * `tsc` must accept `typeof createClient` as `() => LoginAuthClient`, so an SDK
+ * shape change reds the typecheck rather than drifting behind a structural type.
  */
-export function LoginForm() {
+export interface LoginAuthClient {
+  auth: {
+    signInWithPassword(credentials: {
+      email: string;
+      password: string;
+    }): Promise<{ error: { message: string } | null }>;
+  };
+}
+
+export function LoginForm({
+  createSupabaseClient = createClient,
+}: {
+  createSupabaseClient?: () => LoginAuthClient;
+}) {
   const t = useTranslations("Login");
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -55,7 +96,7 @@ export function LoginForm() {
 
   async function handleLogin(event: React.FormEvent) {
     event.preventDefault();
-    const supabase = createClient();
+    const supabase = createSupabaseClient();
     setIsLoading(true);
     setError(null);
 
