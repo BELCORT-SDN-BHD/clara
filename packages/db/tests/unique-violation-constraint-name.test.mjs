@@ -24,7 +24,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { opk, assertRaises, endPool, rootQuery, PG } from "./rig-helpers.mjs";
-import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
+import { printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import { has28, seedPayableAccount, seedClientHardIdentifier, propose } from "./x36-vendor-binding-helpers.mjs";
 import { seedWindow, DATES_OK } from "./binding-proposal-pr-1-helpers.mjs";
