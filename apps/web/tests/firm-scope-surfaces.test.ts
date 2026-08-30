@@ -602,6 +602,17 @@ describe("the deliberate exemptions stay exempt", () => {
     assert.match(src, /SCOPE_EXEMPT_SURFACES/);
   });
 
+  it("the invite courier carries its exemption in its OWN source too (P4-4)", () => {
+    const src = readSource("app/api/invite/route.ts");
+    assert.match(src, /DELIBERATELY EXEMPT FROM THE SCOPE SPINE/);
+    assert.match(src, /do not "fix"/);
+    assert.match(src, /SCOPE_EXEMPT_SURFACES/);
+    // The reason, not just the label: the registry's own words are "THE DB IS
+    // THE WALL", and a courier whose source stopped saying why is one round of
+    // "tidying" from acquiring a scope check.
+    assert.match(src, /THE DB IS THE WALL/);
+  });
+
   it("logout keeps the two walls that DO matter there", () => {
     const code = codeWithStrings("app/logout/route.ts");
     assert.match(code, /isSameOriginRequest\(/, "the same-origin wall is gone");

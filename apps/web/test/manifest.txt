@@ -27,6 +27,11 @@
 components/invite-accept-a11y.test.tsx
 components/invite-accept-form.test.tsx
 components/invite-accept-keyboard.test.tsx
+components/admin/invite-dialog-a11y.test.tsx
+components/admin/invite-dialog-keyboard.test.tsx
+components/admin/members-a11y.test.tsx
+components/admin/members-keyboard.test.tsx
+components/admin/members-walls.test.tsx
 components/bank/bank-a11y.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
@@ -138,6 +143,7 @@ lib/journals/balance.test.ts
 lib/journals/diff-reads.test.ts
 lib/journals/governance-doors.test.ts
 lib/journals/use-journals-workbench.test.ts
+lib/members/members-doors.test.ts
 lib/onboarding/api.test.ts
 lib/parts/catalog.test.tsx
 lib/parts/hooks.test.ts
@@ -168,6 +174,7 @@ tests/client-scope.test.ts
 tests/firm-scope-db-pins.test.ts
 tests/firm-scope-surfaces.test.ts
 tests/focusRailSubscription.test.mjs
+tests/invite-courier.test.ts
 tests/invite-verification.test.ts
 tests/proxy-matcher.test.ts
 tests/public-key.test.ts
