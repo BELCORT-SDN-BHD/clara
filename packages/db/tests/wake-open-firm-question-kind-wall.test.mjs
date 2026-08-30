@@ -42,7 +42,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
-  CLR, PG, ROLES, assertRaises, opk, rootQuery, roleQuery, humanQuery,
+  CLR, ROLES, assertRaises, opk, rootQuery, roleQuery,
   wakeActor, runAs, namedCall, ensureReady, buildWorld, mintWake, endPool,
 } from "./rig-fixtures.mjs";
 import { seedVerifiedDocument, ensureFirmNarrowAttribution, seedExtraction, seedRegion } from "./rig-docs-fixtures.mjs";
