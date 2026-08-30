@@ -128,6 +128,86 @@ test("POSITIVE CONTROL — an operator-firm OWNER sees the real queue, zero a11y
   );
 });
 
+// --- FOLD (Codex LOW-4) regression pins: the queue's INITIAL states are
+// mutually exclusive — pending / HTTP 500 / [] must each render EXACTLY
+// one of loading/error/empty, never two at once. Before the fix, an
+// initial 500 rendered BOTH the error banner AND "Loading pending
+// registrations…" simultaneously (the error was set, but `rows` stayed
+// null forever, so the unconditional loading branch also painted). ---
+
+test("FOLD LOW-4: a queue read still PENDING renders ONLY the loading state", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/caller_context")) return jsonResponse(callerContext(true, "owner", 3));
+      if (url.includes("/rest/v1/firm_registration_requests_visible")) {
+        // Deliberately never resolves — simulates a read still in flight.
+        return new Promise<Response>(() => {});
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App(createElement(RegistrationsQueuePanel), "Firm registrations"));
+      try {
+        for (let i = 0; i < 4; i++) await h.settle();
+        assert.match(h.text(), /Loading pending registrations/, "the loading state must render");
+        assert.doesNotMatch(h.text(), /does not carry that authority/, "no operator-gate refusal — the caller IS eligible");
+        assert.doesNotMatch(h.text(), /No pending registrations/, "the empty state must not render while still loading");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("FOLD LOW-4: a queue read that returns HTTP 500 renders ONLY the error state, never loading alongside it", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/caller_context")) return jsonResponse(callerContext(true, "owner", 3));
+      if (url.includes("/rest/v1/firm_registration_requests_visible")) {
+        return jsonResponse({ message: "internal error" }, 500);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App(createElement(RegistrationsQueuePanel), "Firm registrations"));
+      try {
+        for (let i = 0; i < 5; i++) await h.settle();
+        assert.doesNotMatch(h.text(), /Loading pending registrations/, "loading must NOT render once the read has failed");
+        assert.doesNotMatch(h.text(), /No pending registrations/, "the empty state must not render on a genuine failure");
+        const violations = checkAccessibility(h.container as never);
+        assert.deepEqual(violations, [], JSON.stringify(violations));
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("FOLD LOW-4: an empty queue ([]) renders ONLY the empty state", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/caller_context")) return jsonResponse(callerContext(true, "owner", 3));
+      if (url.includes("/rest/v1/firm_registration_requests_visible")) return jsonResponse([]);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App(createElement(RegistrationsQueuePanel), "Firm registrations"));
+      try {
+        for (let i = 0; i < 5; i++) await h.settle();
+        assert.match(h.text(), /No pending registrations/, "the empty state must render");
+        assert.doesNotMatch(h.text(), /Loading pending registrations/);
+        const violations = checkAccessibility(h.container as never);
+        assert.deepEqual(violations, [], JSON.stringify(violations));
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("the Reject dialog (open, with its required reason textarea) has zero a11y violations", async () => {
   await withMockedEnv(
     async (u) => mockFetch(callerContext(true, "owner", 3))(String(u)),
@@ -147,6 +227,47 @@ test("the Reject dialog (open, with its required reason textarea) has zero a11y 
       } finally {
         await h.unmount();
         for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
+// FOLD (Codex LOW-5): a null `note` used to render a hardcoded "—" that
+// next-intl could never touch. This test supplies a DELIBERATELY DIFFERENT
+// test translation for `Registrations.noteUnavailable` and asserts THAT
+// string renders — the coincidence that the real en.json copy also
+// happens to be "—" would make a same-string mutation invisible to any
+// test that only checked for "—" (the exact "spelling is not identity"
+// trap this repo's own review law names).
+const NOTE_MARKER_MESSAGES = {
+  ...messages,
+  Registrations: { ...messages.Registrations, noteUnavailable: "NO-NOTE-TEST-MARKER" },
+};
+
+function AppWithNoteMarker(children: unknown, heading: string) {
+  return createElement(NextIntlClientProvider, {
+    locale: "en",
+    messages: NOTE_MARKER_MESSAGES,
+    children: createElement("div", null, createElement("h1", null, heading), children as never),
+  });
+}
+
+test("FOLD (Codex LOW-5): a null note routes through next-intl — a distinct test translation for noteUnavailable actually renders", async () => {
+  const rowWithNullNote = { ...OPEN_REQUEST, note: null };
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/caller_context")) return jsonResponse(callerContext(true, "owner", 3));
+      if (url.includes("/rest/v1/firm_registration_requests_visible")) return jsonResponse([rowWithNullNote]);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(AppWithNoteMarker(createElement(RegistrationsQueuePanel), "Firm registrations"));
+      try {
+        for (let i = 0; i < 5; i++) await h.settle();
+        assert.match(h.text(), /NO-NOTE-TEST-MARKER/, "the distinct test translation must actually render for a null note");
+      } finally {
+        await h.unmount();
       }
     },
   );

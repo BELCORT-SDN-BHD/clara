@@ -31,8 +31,9 @@
 // REFUSALS, both doors, in the order the live body checks them:
 //   - CLR04 "insufficient role" — the caller is not owner+ in an
 //     `is_operator` firm. THE authority wall; never pre-empted here.
-//   - CLR10 "op_key is required" — cannot fire in practice, this module
-//     always supplies one (crypto.randomUUID()).
+//   - CLR10 "op_key is required" — cannot fire in practice, the caller
+//     (registrations-queue.tsx) always supplies one (its own per-request
+//     cache, never blank — see the FOLD note on each wrapper below).
 //   - CLR10 "unknown registration request" — `p_request` does not exist.
 //   - CLR04 "cannot decide your own registration request" — the F7
 //     self-decision wall (0145:794-801/856-860): an operator may never
@@ -135,14 +136,27 @@ export function loadOperatorRegistrationQueue(
 
 /** `clara.approve_firm_registration` — the RPC's own verbatim return, per
  *  this file's header. `callDoor` throws `DoorRefusal` for every CLR
- *  refusal listed above; this module never inspects or narrows it. */
+ *  refusal listed above; this module never inspects or narrows it.
+ *
+ *  FOLD (Codex HIGH-1, independent review on #453): `opKey` is now
+ *  CALLER-OWNED, never minted in here. `_reserve_op`'s own replay contract
+ *  (0004:46-60) is keyed on `(firm, fn, op_key)` and re-hashes `{request,
+ *  actor}` (0145:788-789) — a FRESH random key on every call is exactly what
+ *  defeats that contract: if the first attempt actually committed but its
+ *  HTTP response was lost, a retry minting a NEW key never finds the old
+ *  receipt; it re-enters the door body fresh, the request is no longer
+ *  'open', and the retry gets a spurious CLR09 instead of the original
+ *  `{firm_id, plan_id}` replaying. The caller (registrations-queue.tsx) now
+ *  holds ONE key per request until the mandatory re-read proves the row
+ *  left the open queue — see that file's own header. */
 export function approveFirmRegistration(
   session: SessionTokenAccessor,
   requestId: string,
+  opKey: string,
 ): Promise<{ request_id: string; firm_id: string; plan_id: string }> {
   return callDoor(
     "approve_firm_registration",
-    { p_request: requestId, p_op_key: crypto.randomUUID() },
+    { p_request: requestId, p_op_key: opKey },
     { session },
   );
 }
@@ -152,15 +166,23 @@ export function approveFirmRegistration(
  *  Confirm button on an empty reason (Mobbin grounding §2 takeaway 3), but
  *  that UI gate is a courtesy — the trimmed string still travels here
  *  untouched, and a caller that bypassed the dialog gets the SAME CLR10 the
- *  DB would give anyone else. */
+ *  DB would give anyone else.
+ *
+ *  FOLD (Codex HIGH-1): `opKey` is CALLER-OWNED, same reasoning as
+ *  `approveFirmRegistration` above — reject's own hash additionally binds
+ *  `reason` (0145:850-851), so the caller keys its cache on `(request,
+ *  normalized reason)`: the SAME key replays a retry of the SAME reason, and
+ *  a genuinely EDITED reason correctly mints a fresh key rather than hitting
+ *  `_reserve_op`'s "op_key reused with different args" CLR10. */
 export function rejectFirmRegistration(
   session: SessionTokenAccessor,
   requestId: string,
   reason: string,
+  opKey: string,
 ): Promise<{ request_id: string; status: string }> {
   return callDoor(
     "reject_firm_registration",
-    { p_request: requestId, p_reason: reason, p_op_key: crypto.randomUUID() },
+    { p_request: requestId, p_reason: reason, p_op_key: opKey },
     { session },
   );
 }

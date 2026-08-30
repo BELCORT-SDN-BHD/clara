@@ -2529,6 +2529,9 @@
     "rejectDescription": "This request will not be re-opened. The applicant sees your reason on their own pending screen.",
     "reasonLabel": "Reason for rejecting",
     "reasonPlaceholder": "Why is this registration being rejected?",
+    "reasonCounter": "{count}/{max} characters",
+    "reasonTooLong": "The reason must be {max} characters or fewer.",
+    "noteUnavailable": "—",
     "cancel": "Cancel",
     "working": "Working…",
     "rejectConfirm": "Reject registration"

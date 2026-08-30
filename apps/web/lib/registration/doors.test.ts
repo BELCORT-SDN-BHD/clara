@@ -94,38 +94,72 @@ test("loadOperatorRegistrationQueue: reads firm_registration_requests_visible, s
   assert.doesNotMatch(seenUrl, /applicant=eq\./);
 });
 
-test("approveFirmRegistration posts to approve_firm_registration with p_request + a fresh op_key, and returns the RPC's own receipt verbatim", async () => {
+// FOLD (Codex HIGH-1): these two REVERSE the pre-fold assertions on purpose
+// — the wrapper must send EXACTLY the key the caller gave it, never mint
+// its own. A regression back to internal `crypto.randomUUID()` breaks
+// BOTH assertions below (the body would carry some OTHER string).
+
+test("approveFirmRegistration posts EXACTLY the caller-owned op_key — never mints its own", async () => {
   const receipt = { request_id: "r1", firm_id: "f1", plan_id: "p1" };
   const { impl, seen } = captureFetch(receipt);
   await withMockedFetch(impl, async () => {
-    const out = await approveFirmRegistration(fakeSession(), "r1");
+    const out = await approveFirmRegistration(fakeSession(), "r1", "caller-key-1");
     assert.deepEqual(out, receipt);
   });
   const s = seen.first();
   assert.match(s.url, /\/rpc\/approve_firm_registration$/);
   assert.equal(s.body.p_request, "r1");
-  assert.equal(typeof s.body.p_op_key, "string");
-  assert.ok((s.body.p_op_key as string).length > 0);
+  assert.equal(s.body.p_op_key, "caller-key-1");
 });
 
-test("rejectFirmRegistration posts p_request/p_reason + a fresh op_key to reject_firm_registration", async () => {
+test("rejectFirmRegistration posts p_request/p_reason + EXACTLY the caller-owned op_key", async () => {
   const { impl, seen } = captureFetch({ request_id: "r1", status: "rejected" });
   await withMockedFetch(impl, async () => {
-    const out = await rejectFirmRegistration(fakeSession(), "r1", "Duplicate of an existing client relationship.");
+    const out = await rejectFirmRegistration(fakeSession(), "r1", "Duplicate of an existing client relationship.", "caller-key-2");
     assert.deepEqual(out, { request_id: "r1", status: "rejected" });
   });
   const s = seen.first();
   assert.match(s.url, /\/rpc\/reject_firm_registration$/);
   assert.equal(s.body.p_request, "r1");
   assert.equal(s.body.p_reason, "Duplicate of an existing client relationship.");
-  assert.equal(typeof s.body.p_op_key, "string");
+  assert.equal(s.body.p_op_key, "caller-key-2");
+});
+
+// FOLD (Codex HIGH-1, THE pinning test): a lost response (the network call
+// itself throws — the DB may or may not have committed) followed by a
+// retry that reuses the SAME caller-owned key must send that IDENTICAL key
+// twice. This is what `_reserve_op`'s replay contract (0004:46-60) needs to
+// return the ORIGINAL receipt on the second attempt instead of finding the
+// request already decided and refusing CLR09 — see doors.ts's own header.
+test("approveFirmRegistration: a lost-response retry with the SAME key sends that IDENTICAL key both times", async () => {
+  const receipt = { request_id: "r1", firm_id: "f1", plan_id: "p1" };
+  let call = 0;
+  const seenKeys: unknown[] = [];
+  const impl = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    call += 1;
+    seenKeys.push(JSON.parse(String(init?.body ?? "{}")).p_op_key);
+    if (call === 1) throw new TypeError("network request failed — the response never arrived");
+    return jsonResponse(receipt, 200);
+  }) as typeof fetch;
+
+  await withMockedFetch(impl, async () => {
+    const key = "stable-request-key-r1";
+    await assert.rejects(() => approveFirmRegistration(fakeSession(), "r1", key));
+    const out = await approveFirmRegistration(fakeSession(), "r1", key);
+    assert.deepEqual(out, receipt);
+  });
+
+  assert.equal(call, 2, "the retry must actually reach the network a second time");
+  assert.equal(seenKeys[0], "stable-request-key-r1");
+  assert.equal(seenKeys[1], "stable-request-key-r1");
+  assert.equal(seenKeys[0], seenKeys[1], "both attempts must carry the IDENTICAL op_key");
 });
 
 test("a governed refusal (CLR04, not owner+operator) survives verbatim through approveFirmRegistration", async () => {
   const { impl } = captureFetch({ code: "CLR04", message: "insufficient role" }, 400);
   await withMockedFetch(impl, async () => {
     await assert.rejects(
-      () => approveFirmRegistration(fakeSession(), "r1"),
+      () => approveFirmRegistration(fakeSession(), "r1", "k1"),
       (e: unknown) => {
         assert.ok(isDoorRefusal(e));
         assert.equal((e as { code: string }).code, "CLR04");
@@ -140,7 +174,7 @@ test("a governed refusal (CLR10, empty reason) survives verbatim through rejectF
   const { impl } = captureFetch({ code: "CLR10", message: "a rejection reason is required" }, 400);
   await withMockedFetch(impl, async () => {
     await assert.rejects(
-      () => rejectFirmRegistration(fakeSession(), "r1", ""),
+      () => rejectFirmRegistration(fakeSession(), "r1", "", "k2"),
       (e: unknown) => {
         assert.ok(isDoorRefusal(e));
         assert.equal((e as { code: string }).code, "CLR10");
@@ -154,7 +188,7 @@ test("a governed refusal (CLR09, request no longer open) survives verbatim throu
   const { impl } = captureFetch({ code: "CLR09", message: "this request is no longer open (status: approved)" }, 400);
   await withMockedFetch(impl, async () => {
     await assert.rejects(
-      () => rejectFirmRegistration(fakeSession(), "r1", "Too late."),
+      () => rejectFirmRegistration(fakeSession(), "r1", "Too late.", "k3"),
       (e: unknown) => {
         assert.ok(isDoorRefusal(e));
         assert.equal((e as { code: string }).code, "CLR09");
