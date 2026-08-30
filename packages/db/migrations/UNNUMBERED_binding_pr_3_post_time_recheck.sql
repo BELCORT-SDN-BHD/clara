@@ -993,7 +993,16 @@ begin
   -- (decline_vendor_identity_binding, reset_binding_decline, and revoke's own spelling) carry the
   -- same single-arg idiom; that is NOT this PR's to change and is on the fix queue.
   v_reason := nullif(btrim(coalesce(p_reason, ''), E' \t\n\r\f' || chr(11)), '');
-  if v_reason is null then
+  -- ROUND 4: ordinary trimming is not a Unicode/invisible classifier. This second, explicit
+  -- CLOSED set refuses a reason made entirely from the exact whitespace/format controls the
+  -- review named, including mixtures with the ordinary trim bytes. No locale-dependent class
+  -- (`\s`, `[[:space:]]`, or an ICU property) gets to widen silently under an upgrade.
+  if v_reason is null
+     or btrim(v_reason,
+       E' \t\n\r\f' || chr(11)
+       || U&'\00A0\202F\200B\2060\FEFF'
+       || U&'\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A'
+       || U&'\3000\180E\200C\200D') = '' then
     raise exception 'a revocation-reset reason is required' using errcode = 'CLR36',
       detail = '{"reason":"reset_reason_required"}';
   end if;
@@ -1004,8 +1013,12 @@ begin
     raise exception 'a revocation-reset reason is at most 4000 characters' using errcode = 'CLR10',
       detail = '{"reason":"invalid_request","class":"reset_reason_length"}';
   end if;
+  -- ROUND 4: _reserve_op is keyed by firm/function/op_key, not by actor. The request hash must
+  -- therefore bind the directing human too, or a second admin can receive the first admin's
+  -- cached success and attribution by reusing the same otherwise-identical request.
   v_dedupe := clara._reserve_op(c.firm, 'reset_binding_revocation', p_op_key,
-    clara._hash(jsonb_build_object('binding_id', p_binding, 'reason', v_reason)));
+    clara._hash(jsonb_build_object(
+      'binding_id', p_binding, 'reason', v_reason, 'actor', c.actor)));
   if v_dedupe is not null then return v_dedupe; end if;
 
   -- H6 / C-1: THE ONE ORDER (0154 SS5b). Pair read unlocked, key, then the row for update.

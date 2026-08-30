@@ -27,7 +27,7 @@ import {
 } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
-import { approveEntry, COA } from "./rig-fixtures.mjs";
+import { approveEntry, COA, membershipId, setMemberRole } from "./rig-fixtures.mjs";
 import {
   seedPayableAccount, seedClientHardIdentifier, seedPassingWindow, seedBareDocument,
   seedF123Evidence, propose, signLive, revoke, postTimeControlLive, POST_TIME_MARKER,
@@ -832,6 +832,46 @@ test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason,
       `a blank reason (${JSON.stringify(blank)})`);
     assert.equal(reasonOf(err), "reset_reason_required");
   }
+  // ROUND 4: Unicode whitespace and format controls are not removed by PostgreSQL's default
+  // btrim. Each code point below is therefore driven alone, and a mixed string proves the wall
+  // is a closed-set test rather than a one-character special case. The labels make a regression
+  // name the exact code point it admitted.
+  const invisibleOnlyReasons = [
+    ["NBSP U+00A0", "\u00a0"],
+    ["NNBSP U+202F", "\u202f"],
+    ["ZERO WIDTH SPACE U+200B", "\u200b"],
+    ["WORD JOINER U+2060", "\u2060"],
+    ["BOM U+FEFF", "\ufeff"],
+    ...Array.from({ length: 11 }, (_, offset) => {
+      const codePoint = 0x2000 + offset;
+      return [`U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`, String.fromCodePoint(codePoint)];
+    }),
+    ["IDEOGRAPHIC SPACE U+3000", "\u3000"],
+    ["MONGOLIAN VOWEL SEPARATOR U+180E", "\u180e"],
+    ["ZERO WIDTH NON-JOINER U+200C", "\u200c"],
+    ["ZERO WIDTH JOINER U+200D", "\u200d"],
+  ];
+  for (const [label, invisible] of invisibleOnlyReasons) {
+    const err = await assertRaises("CLR36",
+      () => resetRevocation(w.users.alice, { binding: b.binding.binding_id, reason: invisible }),
+      `an invisible-only reason (${label})`);
+    assert.equal(reasonOf(err), "reset_reason_required", `${label} is blank for this audited door`);
+  }
+  const mixedInvisible = invisibleOnlyReasons.map(([, value]) => value).join("");
+  const mixedErr = await assertRaises("CLR36",
+    () => resetRevocation(w.users.alice,
+      { binding: b.binding.binding_id, reason: ` \t${mixedInvisible}\r\n` }),
+    "a mixed sequence of every explicitly refused invisible code point");
+  assert.equal(reasonOf(mixedErr), "reset_reason_required");
+  const unicodeMutantRow = await revokedBinding("K2unicodeM");
+  await withMutant(RESET_REVOCATION_SIG,
+    [[String.raw`U&'\00A0\202F\200B\2060\FEFF'`, String.raw`U&'\202F\200B\2060\FEFF'`]],
+    async () => {
+      const out = await resetRevocation(w.users.alice,
+        { binding: unicodeMutantRow.binding.binding_id, reason: "\u00a0", opKey: opk("k2unicodeM") });
+      assert.equal(out.status, "expired",
+        "with U+00A0 removed from the explicit set, an NBSP-only reason reopens the revocation");
+    });
   // DOCUMENTARY ASSERTION, NOT A RED-BEFORE: PostgreSQL 17 recognises E'\v' as chr(11), although
   // the lexical-syntax table does not document that spelling. Therefore E' \t\n\r\f\v' and the
   // migration's deliberately unambiguous E' \t\n\r\f' || chr(11) spelling trim the same bytes,
@@ -863,6 +903,16 @@ test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason,
   assert.equal(wideMeasured.c, 4000, "…stored at its full 4 000 characters");
   assert.ok(wideMeasured.b > 4000,
     `…and it really is multibyte (${wideMeasured.b} bytes), so length() and octet_length() disagree here`);
+  const multilingualReason = "Pembekal disahkan semula；供应商已重新确认";
+  const multilingualRow = await revokedBinding("K2multi");
+  const multilingualOut = await resetRevocation(w.users.alice,
+    { binding: multilingualRow.binding.binding_id, reason: multilingualReason, opKey: opk("k2multi") });
+  assert.equal(multilingualOut.status, "expired", "a meaningful Malay/Chinese reason is accepted");
+  assert.equal((await rootQuery(
+    `select args->>'reason' as reason from clara.audit_log
+      where fn='reset_binding_revocation' and args->>'binding_id'=$1`,
+    [multilingualRow.binding.binding_id])).rows[0].reason,
+  multilingualReason, "…and the multilingual reason is stored byte-for-byte");
   assert.equal((await bindingRow(b.binding.binding_id)).status, "revoked",
     "…and none of those refusals moved the row");
 
@@ -957,17 +1007,41 @@ test("bpr3.K3 — the door is firm-scoped, idempotent, and EXECUTE-able by clara
     "a firm-B admin reopening firm A's revocation");
   assert.equal((await bindingRow(b.binding.binding_id)).status, "revoked", "…and it did not move");
 
-  // IDEMPOTENCY: the same op key replays its own answer rather than double-auditing the act.
+  // IDEMPOTENCY IS ACTOR-BOUND. Promote Bob through the audited membership door so the firm has
+  // two legitimate admin+ callers. Alice's exact retry must replay, while Bob's byte-identical
+  // binding/reason/op-key must be different arguments to _reserve_op rather than a cached success
+  // attributed to Alice.
+  await setMemberRole(w.users.alice,
+    { membership: await membershipId(w.firms.A, w.users.bob), role: "admin", opKey: opk("k3admin") });
   const key = opk("k3reset");
   const first = await resetRevocation(w.users.alice,
     { binding: b.binding.binding_id, reason: "re-confirmed", opKey: key });
   const replay = await resetRevocation(w.users.alice,
     { binding: b.binding.binding_id, reason: "re-confirmed", opKey: key });
-  assert.deepEqual(replay, first, "a retried RPC replays its answer");
-  const n = (await rootQuery(
-    "select count(*)::int c from clara.audit_log where fn='reset_binding_revocation' and args->>'binding_id'=$1",
-    [b.binding.binding_id])).rows[0].c;
-  assert.equal(n, 1, "…and audits the act exactly once");
+  assert.deepEqual(replay, first, "the same actor's retried RPC replays byte-identically");
+  await assertRaises(CLR.badRequest,
+    () => resetRevocation(w.users.bob,
+      { binding: b.binding.binding_id, reason: "re-confirmed", opKey: key }),
+    "a second admin reusing another actor's otherwise-identical op key");
+  const audits = (await rootQuery(
+    `select actor from clara.audit_log
+      where fn='reset_binding_revocation' and args->>'binding_id'=$1 order by at,id`,
+    [b.binding.binding_id])).rows;
+  assert.deepEqual(audits, [{ actor: w.users.alice }],
+    "the act is audited once and remains attributed only to the first actor");
+  const actorMutantRow = await revokedBinding("K3actorM");
+  await withMutant(RESET_REVOCATION_SIG,
+    [["'binding_id', p_binding, 'reason', v_reason, 'actor', c.actor",
+      "'binding_id', p_binding, 'reason', v_reason"]],
+    async () => {
+      const mutantKey = opk("k3actorM");
+      const aliceResult = await resetRevocation(w.users.alice,
+        { binding: actorMutantRow.binding.binding_id, reason: "re-confirmed", opKey: mutantKey });
+      const bobResult = await resetRevocation(w.users.bob,
+        { binding: actorMutantRow.binding.binding_id, reason: "re-confirmed", opKey: mutantKey });
+      assert.deepEqual(bobResult, aliceResult,
+        "without actor in the hash, Bob receives Alice's cached success instead of CLR10");
+    });
 
   // ACL, read from the catalog rather than from the migration's GRANT line.
   assert.equal((await rootQuery(
