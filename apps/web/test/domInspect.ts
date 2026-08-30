@@ -253,6 +253,29 @@ function enhanceElement(node: Stub): Stub {
     const doc = node.ownerDocument;
     if (doc && doc.activeElement === node) doc.activeElement = doc.body;
   };
+  // A ZERO-GEOMETRY BOX, added by P4-4 so @base-ui/react's Menu can mount at
+  // all. `Menu.Root` is modal by default and renders `InternalBackdrop`, whose
+  // very first line calls `cutout.getBoundingClientRect()` on the trigger —
+  // absent from this stub, so an open DropdownMenu died with
+  // "cutout.getBoundingClientRect is not a function" before a single menu item
+  // ever rendered. (Dialog never hit this: its backdrop has no cutout.)
+  //
+  // NOTHING MAY JUDGE GEOMETRY FROM THIS. Every number is 0, which is a
+  // deliberate, honest admission that this environment has no layout engine —
+  // exactly the wall this file's own header records as the reason axe-core was
+  // abandoned (its accessible-name algorithm trusted real geometry and produced
+  // a CONFIRMED false positive). The rule engine (a11yRules.ts) and the keyboard
+  // walk (keyboardWalk.ts) read attributes, tags and text only; neither calls
+  // this, and neither may start. Its whole job is to let a component that ASKS
+  // for a rect proceed instead of throwing — the same posture as the
+  // `requestAnimationFrame` polyfill below: enough for the real state machine to
+  // run, never a claim about what a browser would paint.
+  const zeroRect = () => ({
+    x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0,
+    toJSON() { return this; },
+  });
+  node.getBoundingClientRect = () => zeroRect();
+  node.getClientRects = () => [];
   node.matches = (selector: string) => matchesSimpleSelector(node, selector);
   node.closest = (selector: string) => {
     let n: Stub | null | undefined = node;
