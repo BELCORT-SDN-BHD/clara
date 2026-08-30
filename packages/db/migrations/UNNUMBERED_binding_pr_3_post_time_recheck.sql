@@ -353,7 +353,7 @@ begin
                  || '|owner=' || p.proowner::regrole::text
                  || '|cfg='   || coalesce(array_to_string(p.proconfig, ','), '(none)')
                  || '|secdef='|| p.prosecdef::text
-                 || '|vol='   || p.provolatile
+                 || '|vol='   || p.provolatile::text
             from pg_proc p where p.oid = to_regprocedure(s))
     from unnest(array['clara.propose_vendor_identity_binding(jsonb,text)',
                       'clara._derive_vendor_binding_proposal(uuid,uuid,uuid)',
@@ -853,16 +853,23 @@ begin
     raise exception 'binding pr-3 postcheck: the control marker appears % time(s), expected exactly 1', v_n
       using errcode='CLR10';
   end if;
-  if position($p1$if e.vendor_binding_id is not null and e.reversal_of is null then$p1$ in v_def) = 0 then
-    raise exception 'binding pr-3 postcheck: the ruled O3 gate (bound AND not a reversal) is not in the live body'
-      using errcode='CLR10';
-  end if;
-  if position($p2$v_pt_reason:='binding_revoked'$p2$ in v_def) = 0
-     or position($p3$v_pt_annotate:=(v_pt_reason in ('binding_expired','binding_revocation_lifted'))$p3$ in v_def) = 0
-     or position($p4$when v_pt_lifted then 'binding_revocation_lifted'$p4$ in v_def) = 0 then
-    raise exception 'binding pr-3 postcheck: the revoked-refuses / expired-annotates / revocation-lifted arms are not all live'
-      using errcode='CLR10';
-  end if;
+  -- EVERY POSTCHECK PIN IS A CENSUS, never a presence probe. A malformed pin used to report the
+  -- same generic "arms are not all live" message as a genuinely missing arm; worse, a duplicated
+  -- fragment still passed. Naming each pin and requiring exactly one occurrence makes the
+  -- measuring instrument fail closed in both directions.
+  for r in select * from (values
+      ('p1', $p1$if e.vendor_binding_id is not null and e.reversal_of is null then$p1$),
+      ('p2', $p2$v_pt_reason:='binding_revoked'$p2$),
+      ('p3', $p3$v_pt_annotate:=(v_pt_reason in ('binding_expired','binding_revocation_lifted'))$p3$),
+      ('p4', $p4$v_pt_reason := case when v_pt_lifted then 'binding_revocation_lifted' else 'binding_expired' end;$p4$)
+    ) t(pin, marker)
+  loop
+    v_n := (length(v_def) - length(replace(v_def, r.marker, ''))) / length(r.marker);
+    if v_n <> 1 then
+      raise exception 'binding pr-3 postcheck: pin $%$ matched % times, expected exactly 1', r.pin, v_n
+        using errcode='CLR10';
+    end if;
+  end loop;
 
   -- THE ANTI-REVERT CENSUS. 0040:7148 pinned eleven markers at exact counts precisely so a
   -- later file could not rebuild this body from one migration's text and silently drop the
@@ -951,6 +958,10 @@ reset role;
 -- exactly what a later reader will want back.
 set role clara_fn_owner;
 
+-- DOCUMENTARY NOTE FOR THE TRIM SET BELOW: the earlier `endor...` observation came from the
+-- NON-E spelling ' \t\n\r\f\v'. With standard_conforming_strings on, that is eleven literal
+-- characters (space, five backslashes, and t/n/r/f/v), including the letter `v`; it says
+-- nothing about E'\v', which PostgreSQL 17.11 measures as chr(11).
 create function clara.reset_binding_revocation(
     p_binding uuid, p_reason text, p_op_key text)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fn$
@@ -1283,7 +1294,7 @@ begin
            || '|owner=' || p.proowner::regrole::text
            || '|cfg='   || coalesce(array_to_string(p.proconfig, ','), '(none)')
            || '|secdef='|| p.prosecdef::text
-           || '|vol='   || p.provolatile
+           || '|vol='   || p.provolatile::text
       into v_sha
       from pg_proc p where p.oid = to_regprocedure(substr(r.k, 5));
     if v_sha is null then

@@ -832,11 +832,12 @@ test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason,
       `a blank reason (${JSON.stringify(blank)})`);
     assert.equal(reasonOf(err), "reset_reason_required");
   }
-  // AND ACCEPTED REASONS SURVIVE BYTE-FOR-BYTE. This is the RED-before cell for Codex r2's HIGH:
-  // PostgreSQL's E'' strings have NO `\v` escape and an unknown escape yields the FOLLOWING
-  // CHARACTER, so a trim set spelled E' \t\n\r\f\v' contains the LETTER `v` and silently ate a
-  // leading or trailing `v` off every reason. A reason that both starts and ends with `v` is the
-  // shape that makes that visible, and it is asserted on the AUDIT ROW, not on the return.
+  // DOCUMENTARY ASSERTION, NOT A RED-BEFORE: PostgreSQL 17 recognises E'\v' as chr(11), although
+  // the lexical-syntax table does not document that spelling. Therefore E' \t\n\r\f\v' and the
+  // migration's deliberately unambiguous E' \t\n\r\f' || chr(11) spelling trim the same bytes,
+  // and this assertion passes against either. It still documents that an accepted reason survives
+  // byte-for-byte on the AUDIT ROW; K2's real RED-before is the whitespace-only loop above, which
+  // the inherited single-argument btrim admitted.
   const vReason = "vendor verified by SSM v";
   const vRow = await revokedBinding("K2v");
   await resetRevocation(w.users.alice, { binding: vRow.binding.binding_id, reason: `  ${vReason}  `, opKey: opk("k2v") });

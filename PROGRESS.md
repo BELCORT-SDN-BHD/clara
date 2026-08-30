@@ -24,7 +24,7 @@ tranche-2 #411 · `0146` 裁-17 #412 — ceremonied in ONE ~51-s D1 window 2026-
   instrument** (`gh workflow run ci.yml --ref main`).
 - **Owed next, in order:** the owner's noon batch (billing OQ-1..8 · 裁-18b (a)(b)(c) · 裁-41 route ·
   G1 `call_kind`/`login_pool` · the VHDX compaction) → **G1 PR-2** (the producers + the eight deferred
-  DB items; precondition of the 裁-40 flip) → **裁-18b PR-3** (post-time re-check + `control_witnesses`
+  DB items; precondition of the 裁-40 flip) → **裁-18b PR-3 (#452, in review; fold round 3)** (post-time re-check + `control_witnesses`
   row; its window applies `0154`) → the 裁-44 tax_prep wake → P4 UI → P6.
 
 - **THE 磨合 (frontend integration) WINDOW OPENED 2026-08-26/27** — its own session, per
