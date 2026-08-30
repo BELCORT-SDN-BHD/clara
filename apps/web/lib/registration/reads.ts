@@ -134,28 +134,40 @@ export function loadRegistrationRequestsForApplicant(
   });
 }
 
+/** The two server seams `loadOwnRegistrationRequests` resolves the caller through,
+ *  injectable so the fail-closed branch can be DRIVEN in a test rather than read
+ *  off the source. Production passes nothing and takes both defaults. */
+export type OwnRegistrationDeps = {
+  readonly subject?: () => Promise<string | null>;
+  readonly session?: SessionTokenAccessor;
+  readonly signal?: AbortSignal;
+};
+
 /**
  * The server-side convenience the holding page uses: resolve the caller's own
  * verified subject, then read their requests.
  *
  * FAIL-CLOSED ON AN ABSENT SUBJECT: with no session — or a `sub` claim that is
- * absent or not a uuid — this returns an EMPTY LIST rather than reading
- * unfiltered. Review law 2: an absent identity is not a licence to widen the
- * query, and an unfiltered read here is precisely the operator-queue leak the
- * header describes.
+ * absent or not a uuid — this returns an EMPTY LIST **without issuing any read at
+ * all**. Review law 2: an absent identity is not a licence to widen the query, and
+ * an unfiltered read here is precisely the operator-queue leak the header
+ * describes. The suite asserts the stronger property — that `fetch` is never
+ * reached on this branch — because "returned []" alone would also be true of a
+ * request that went out and happened to come back empty.
  *
  * An empty list is NOT the same fact as "no requests" at the render layer — the
  * caller must distinguish loading, empty and error itself (§0.5's three
  * distinguishable states); this function reports only what a read returned.
  */
 export async function loadOwnRegistrationRequests(
-  signal?: AbortSignal,
+  deps: OwnRegistrationDeps = {},
 ): Promise<RegistrationRequestRow[]> {
-  const applicant = await serverCallerSubject();
+  const resolveSubject = deps.subject ?? serverCallerSubject;
+  const applicant = await resolveSubject();
   if (!applicant) return [];
   return loadRegistrationRequestsForApplicant(
-    serverSessionTokenAccessor,
+    deps.session ?? serverSessionTokenAccessor,
     applicant,
-    signal,
+    deps.signal,
   );
 }

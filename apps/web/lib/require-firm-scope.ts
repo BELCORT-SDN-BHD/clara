@@ -207,6 +207,26 @@ export async function firmScopeRefusal(
 }
 
 /**
+ * THE ENTRANCE REGISTRY — every surface that calls this spine, as data.
+ *
+ * `tests/require-firm-scope.test.ts` matches this list against the real `app/`
+ * tree BOTH WAYS: every path here must call the spine, and no other file under
+ * `app/` may. That is what makes design §4 E's "a fourth authenticated surface
+ * later means calling the helper — the seam is visible, not implicit" a gate
+ * rather than a hope: a fifth entrance cannot appear without a line landing here,
+ * in front of a reviewer, and an entrance cannot silently STOP calling the spine
+ * either.
+ */
+export const SCOPE_ENTRANCES: ReadonlyArray<{
+  readonly path: string;
+  readonly onDenial: "redirect" | "403";
+}> = [
+  { path: "app/(firm)/layout.tsx", onDenial: "redirect" },
+  { path: "app/(full)/layout.tsx", onDenial: "redirect" },
+  { path: "app/api/runtime/[...path]/route.ts", onDenial: "403" },
+];
+
+/**
  * THE EXEMPTION REGISTRY — the two authenticated surfaces that deliberately do NOT
  * call this spine, and why.
  *
