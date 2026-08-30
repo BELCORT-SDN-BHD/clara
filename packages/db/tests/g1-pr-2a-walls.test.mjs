@@ -228,18 +228,25 @@ test("p2a.F3 an act on ANOTHER of the client's bank accounts refuses; the task's
 
 test("p2a.F3b the ADMITTED pack read's receipt names the task's account as its subject", async (t) => {
   if (gatePurpose(t)) return;
-  const { taskId } = await freshTask({ account: ACCT_A });
+  // Its OWN account, minted here. bank_agent_receipts carries a partial unique index over
+  // (act_kind, subject_id) WHERE outcome='admitted' -- at most ONE admitted pack_read per account,
+  // ever -- so a cell that needs a genuine admission cannot reuse an account an earlier cell has
+  // already read. Without this the cell would fail on a uniqueness collision and look like a gate
+  // defect.
+  const acct = idOf(await addBankAccount(W.users.alice, {
+    client: CLIENT, coaAccountCode: BANKCOA1, accountNumber: `2003${randomUUID().slice(0, 8)}` }), "bank_account_id", "id");
+  const { taskId } = await freshTask({ account: acct });
   const cred = await mintForTask("bank_agent", FIRM, CLIENT, taskId);
   const key = opk("p2a-f3b-admit");
   const r = await wakeQuery(WAKE_ROLE, cred.rows[0].secret, callWrapper("wake_get_bank_pack", PACK),
-    [CLIENT, ACCT_A, RATIONALE, JSON.stringify(MODEL), key]);
+    [CLIENT, acct, RATIONALE, JSON.stringify(MODEL), key]);
   assert.match(r.rows[0].r.digest ?? "", /^[0-9a-f]{64}$/, "F3b: a real pack came back");
   const rec = (await rootQuery(
     "select subject_id, act_kind, outcome from clara.bank_agent_receipts where firm_id=$1 and op_key=$2", [FIRM, key])).rows[0];
   assert.ok(rec, "F3b: the pack read wrote its receipt");
   assert.equal(rec.act_kind, "pack_read");
   assert.equal(rec.outcome, "admitted");
-  assert.equal(rec.subject_id, ACCT_A,
+  assert.equal(rec.subject_id, acct,
     "F3b: the receipt's subject IS the account the task was minted for -- the account-bound provenance the work order asks for");
 });
 

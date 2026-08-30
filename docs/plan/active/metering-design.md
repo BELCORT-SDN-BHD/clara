@@ -111,10 +111,19 @@ document-extraction call cannot.
 CHECK-extension idiom — F-A2 design §3.7.2):** `document_extraction` (live, F-A1) ·
 `chat` · `unattended_posting` (F-A2's own coder, distinct from chat) · `freeform_read`
 (F-A6) · `interview_extraction` (F-A7b) · `filing_attribution` (F-A7a) · `web_fetch`
-(F-A8 tier 2) · `tier1_policy_fetch` (F-A8 tier 1) · `reporting` (F-A5). Each later
+(F-A8 tier 2) · `tier1_policy_fetch` (F-A8 tier 1) · `reporting` (F-A5) ·
+`bank_agent` and `close_prep` (**裁-49**, added by G1 PR-2a: the two G1 wake lanes were
+borrowing `unattended_posting`, a label minted for F-A2's own coder, so a metering read could
+not tell the clocked lanes apart from it). Each later
 item's own design adds its value via a one-line CHECK extension: `call_kind` is
 descriptive metadata, never authority-bearing, so widening it is not a
 "narrows an enumeration" hazard.
+
+> **The two 裁-49 values are DB-side only until a runtime follow-up lands.**
+> `bankAgent.v1.usage.ts`'s `BANK_AGENT_CALL_KIND` and `closePrep.v1.usage.ts`'s
+> `CLOSE_PREP_CALL_KIND` are constants in FROZEN workflow files (hard constraint 9) and still
+> read `unattended_posting`; repointing them is a new frozen version's work. Extend-only means
+> every row already written under the old label stays lawful and no backfill is owed.
 
 **`client_id` resolution is per-lane, never backfilled by a trigger** (Annex A, D4).
 Lanes holding a client at record time pass it; legacy `document_extraction` rows are
