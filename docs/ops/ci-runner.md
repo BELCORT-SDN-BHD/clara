@@ -165,7 +165,7 @@ cap) rather than removing a runner instance.
 Sweep 33283730630 reded `db-estate` on `fetch-base-main` (`.github/actions/fetch-base-main`):
 `git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main` was rejected
 non-fast-forward. Both call sites (`lint`, `db-estate`) checkout with `fetch-depth: 0`, so
-`refs/remotes/origin/main` already exists locally, fully-historied, from job start; this
+the remote-tracking ref for main already exists locally, fully-historied, from job start; this
 step's own fetch is a *separate*, shallow (`--depth=1`) re-fetch of just the tip, done later
 in the job to pick up any main-tip movement since checkout. When another PR merges into
 `main` while a long self-hosted job (the `db-estate` suite in particular) is still running,
