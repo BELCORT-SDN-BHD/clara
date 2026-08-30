@@ -168,6 +168,30 @@ export function renderInviteEmail(args: {
  * the same fake proves both directions.
  */
 export type InviteMailer = {
+  /**
+   * CAN AN INVITE FOR THIS ADDRESS BE MINTED AT ALL? Asked BEFORE the door, and
+   * the reason is FIND-1 (independent review of #455, HIGH).
+   *
+   * `generateLink({type:"invite"})` REJECTS an address that already belongs to a
+   * CONFIRMED Supabase user — Supabase's own words, re-read via context7 on
+   * 2026-08-30: *"Inviting an email that already belongs to a confirmed user will
+   * return an error."* That is not an edge case here. `uq_membership_active_user`
+   * (`0002:221`) allows ONE active membership per user across the whole estate,
+   * and `lib/members/doors.ts` records that re-inviting a removed person mints a
+   * FRESH membership row — so **every move-between-firms invite** takes that
+   * path. Without this check the sequence was: `invite_member` succeeds → the row
+   * is minted → `generateLink` throws → 502 `mail_failed` → the plaintext is
+   * unrecoverable → and the address is blocked in that firm for SEVEN DAYS behind
+   * CLR10 'an invite is already pending for this email' until an admin notices
+   * and revokes it. The old test pinned the SHAPE of that failure; it never
+   * proved the flow worked.
+   *
+   * Resolves `{ok:false, reason:"already_registered"}` when the address is
+   * positively found. THROWS when it cannot answer — never `{ok:true}` on a
+   * doubt. The courier treats both non-ok outcomes the same way: refuse BEFORE
+   * the door, mint nothing.
+   */
+  canMintFor(email: string): Promise<{ ok: true } | { ok: false; reason: "already_registered" }>;
   /** Mints (and, for a new address, creates) the Supabase auth user's invite OTP
    *  and returns its `hashed_token` — the value `{{ .TokenHash }}` would have
    *  rendered, and the value `verifyOtp` consumes. Sends no email. */
@@ -192,8 +216,61 @@ function resendFailureDetail(status: number, body: unknown): string {
  * module scope, so a key rotated in the environment takes effect without a
  * redeploy and no client outlives the request that made it.
  */
+/**
+ * How far `canMintFor` will page before it gives up and REFUSES TO ANSWER.
+ *
+ * `supabase-js`'s admin API has no lookup-by-email: `listUsers(params?)` takes
+ * `PageParams` — `{page, perPage}` and NOTHING else — and there is no
+ * `getUserByEmail` (verified twice on 2026-08-30: the installed
+ * `@supabase/auth-js@2.112.4` typings, and the current Supabase reference via
+ * context7, which spells out "The only parameter type for listUsers is PageParams
+ * … No email or filter field exists"). GoTrue's REST endpoint does accept a
+ * `filter` query parameter, but it is undocumented in that reference, and a
+ * filter that were silently IGNORED would hand back page 1 of every user, find no
+ * match, and answer "not registered" — re-opening the exact bug this check
+ * closes, invisibly. So this pages the documented, typed API instead.
+ *
+ * 20 × 1000 covers 20,000 accounts, which is orders of magnitude beyond an
+ * accounting firm's staff roster. Past that the answer is an EXCEPTION, never an
+ * optimistic `{ok:true}`: "I did not find it in the pages I read" is not "it does
+ * not exist" (review law 2), and the courier turns that into a refusal before the
+ * door rather than a dead invite.
+ */
+export const CAN_MINT_PAGE_SIZE = 1000;
+export const CAN_MINT_MAX_PAGES = 20;
+
+/** Case-insensitive, whitespace-trimmed address equality — the same normalisation
+ *  `clara.invite_member` applies (`0147:379`: `lower(btrim(p_email))`), so this
+ *  check and the door agree on what "the same address" means. */
+export function sameAddress(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
 export function productionInviteMailer(config: InviteMailConfig): InviteMailer {
   return {
+    async canMintFor(email: string): Promise<{ ok: true } | { ok: false; reason: "already_registered" }> {
+      const admin = createClient(config.supabaseUrl, config.serviceRoleKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      for (let page = 1; page <= CAN_MINT_MAX_PAGES; page += 1) {
+        const { data, error } = await admin.auth.admin.listUsers({ page, perPage: CAN_MINT_PAGE_SIZE });
+        if (error) throw new Error(error.message);
+        const users = data?.users ?? [];
+        for (const user of users) {
+          const found = (user as { email?: string | null }).email;
+          if (typeof found === "string" && sameAddress(found, email)) {
+            return { ok: false, reason: "already_registered" };
+          }
+        }
+        // A SHORT PAGE IS THE END OF THE LIST — and it is the only thing that
+        // licenses `{ok:true}`, because only then has this function actually SEEN
+        // every account rather than merely not-seen one.
+        if (users.length < CAN_MINT_PAGE_SIZE) return { ok: true };
+      }
+      throw new Error(
+        `the account directory exceeds ${CAN_MINT_MAX_PAGES * CAN_MINT_PAGE_SIZE} entries — this check cannot confirm the address is free`,
+      );
+    },
     async mintSupabaseTokenHash(email: string): Promise<string> {
       const admin = createClient(config.supabaseUrl, config.serviceRoleKey, {
         auth: { autoRefreshToken: false, persistSession: false },

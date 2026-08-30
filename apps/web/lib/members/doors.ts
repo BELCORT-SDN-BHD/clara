@@ -239,6 +239,14 @@ export const INVITE_COURIER_PATH = "/api/invite";
  *   cross_origin        the same-origin proof failed
  *   invalid_request     the body was not `{email, role}` with non-empty strings
  *   mail_not_configured no mail transport is configured — NOTHING was minted
+ *   recipient_has_account the address already belongs to a Clara account, so an
+ *                       invite for it can never be minted (FIND-1). Refused
+ *                       BEFORE the door — NOTHING was minted, and the address is
+ *                       not blocked for seven days behind a dead invite.
+ *   mail_unavailable    the mail transport is configured but could not be
+ *                       reached to answer that question. Also refused BEFORE the
+ *                       door: a check that cannot answer must not be read as a
+ *                       yes (review law 2). NOTHING was minted.
  *   mail_failed         the DOOR SUCCEEDED and the mail did not go out. The
  *                       invite EXISTS and its plaintext token is now
  *                       unrecoverable, so the only remedy is to revoke it and
@@ -251,8 +259,24 @@ export type InviteCourierCode =
   | "cross_origin"
   | "invalid_request"
   | "mail_not_configured"
+  | "recipient_has_account"
+  | "mail_unavailable"
   | "mail_failed"
   | "transport";
+
+/** The closed set, as DATA — `errorFromCourierBody` matches against this rather
+ *  than a second hand-typed list, so a code added above cannot be silently
+ *  unrecognised on the client and folded into `transport`. */
+export const INVITE_COURIER_CODES: readonly InviteCourierCode[] = [
+  "no_session",
+  "cross_origin",
+  "invalid_request",
+  "mail_not_configured",
+  "recipient_has_account",
+  "mail_unavailable",
+  "mail_failed",
+  "transport",
+];
 
 export class InviteCourierError extends Error {
   readonly code: InviteCourierCode;
@@ -339,11 +363,10 @@ export function errorFromCourierBody(status: number, body: unknown): Error {
   }
   if (isRecord(body) && body.kind === "courier" && typeof body.code === "string") {
     const b = body as CourierErrorBody;
-    const known: readonly string[] = [
-      "no_session", "cross_origin", "invalid_request",
-      "mail_not_configured", "mail_failed", "transport",
-    ];
-    if (known.includes(b.code)) {
+    // The ONE list, imported rather than retyped (FIND-1's fold): a second
+    // hand-kept copy is how a new code ships on the server and silently degrades
+    // to `transport` on the client.
+    if ((INVITE_COURIER_CODES as readonly string[]).includes(b.code)) {
       return new InviteCourierError(b.code, typeof b.message === "string" && b.message !== "" ? b.message : b.code, {
         invite: isRecord(b.invite) && typeof b.invite.invite_id === "string" && typeof b.invite.expires_at === "string"
           ? { invite_id: b.invite.invite_id, expires_at: b.invite.expires_at }

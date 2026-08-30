@@ -181,6 +181,46 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
     );
   }
 
+  // ---- 4b. CAN AN INVITE FOR THIS ADDRESS EXIST AT ALL? (FIND-1) ----------
+  // Still a CAPABILITY question, not an authority one — it asks whether this
+  // courier can finish the job, reads no role and grants nothing — but unlike
+  // step 4 it depends on the recipient, so it needs its own branch.
+  //
+  // `generateLink({type:"invite"})` refuses an address that already belongs to a
+  // confirmed Supabase account, and `uq_membership_active_user` makes that the
+  // NORMAL case for anyone moving between firms. Asking after the door minted the
+  // row is how a person's address gets blocked for seven days behind an invite
+  // whose plaintext no longer exists. So it is asked here, and BOTH non-ok
+  // outcomes refuse before the door: a positive "already registered", and a check
+  // that could not answer at all.
+  const mailer = (deps.mailerFor ?? productionInviteMailer)(capability.config);
+  let mintable: { ok: true } | { ok: false; reason: "already_registered" };
+  try {
+    mintable = await mailer.canMintFor(email);
+  } catch (e) {
+    return courierError(
+      503,
+      "mail_unavailable",
+      "the invitation service could not be reached — nothing was created",
+      { detail: e instanceof Error ? e.message : String(e) },
+    );
+  }
+  if (!mintable.ok) {
+    // A FIXED SENTENCE CLARA OWNS, never the provider's text. Two reasons: the
+    // provider's wording is not ours to put in front of a person, and this
+    // response is the one place where the answer is ABOUT a third party's
+    // account. Enumeration is bounded to admin+ callers of a governed, audited
+    // door — `_human_ctx` has not run yet at this point, but `invite_member`'s
+    // own CLR10 'that email already belongs to a member of this firm' already
+    // leaks the same class of fact to the same audience, so this widens nothing.
+    // Recorded rather than assumed, and the owner is told (PR body OQ).
+    return courierError(
+      409,
+      "recipient_has_account",
+      "This address already has a Clara account — ask them to sign in with it.",
+    );
+  }
+
   // ---- 5. THE DOOR. The DB performs the authority check. ------------------
   const call = deps.callDoor ?? realCallDoor;
   const opKey = (deps.newOpKey ?? (() => crypto.randomUUID()))();
