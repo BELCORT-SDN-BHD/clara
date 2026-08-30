@@ -310,6 +310,13 @@ test("p2a.F7 CENSUS: all fourteen bank wrappers carry exactly one gate call, and
     } else {
       assert.match(args, /,\s*true\s*,/, `F7: ${r.proname} is a WRITE and must demand a running task`);
     }
+    // POSITION, pinned. The gate must be the LAST statement before the core call. Ahead of the
+    // wrapper's own client-pin / op_key / rationale checks it MASKS them -- a cross-client call
+    // would refuse for the gate's reason instead of credential_client_pin, which is the
+    // right-conclusion-wrong-reason class. Nothing else in this battery would see that.
+    const after = r.prosrc.slice(r.prosrc.indexOf(args) + args.length);
+    assert.match(after, /^\s*\n?\s*return clara\._agent_/,
+      `F7: ${r.proname}'s gate must sit immediately before its core call, not ahead of the wrapper's own refusals`);
   }
   const grants = (await rootQuery(
     `select count(*)::int as n from pg_roles r where r.rolname like 'clara\\_%' and r.rolname <> 'clara_fn_owner'

@@ -4,6 +4,7 @@
 // also used by f-a3-pr1b-fixtures.mjs and x38-match-fixtures.mjs). Every function here is
 // STATELESS except where it plainly says otherwise.
 
+import { randomUUID } from "node:crypto";
 import { rootQuery } from "./a21-helpers.mjs";
 import { withTxn } from "./rig-txn.mjs";
 import { GUARD } from "./x38-match-fixtures.mjs";
@@ -53,8 +54,14 @@ async function ensureBankWakeTaskForClient({ firm, client }) {
   if (live.rowCount > 1) return null;   // ambiguous by construction: let §E's own refusal name it
   const acct = await rootQuery(
     "select id from clara.bank_accounts where client_id=$1 and coalesce(status,'active')='active'", [client]);
-  const made = await makeBankWakeTask({
-    firm, client, bankAccount: acct.rowCount === 1 ? acct.rows[0].id : null, status: "running" });
+  // EXACTLY ONE -> that one. NONE -> a synthetic id, because the account a wake task names is
+  // whatever its producing event named, and a client with no bank account can only be driving the
+  // four verbs that HAVE no account subject (add_bank_account, upsert_account, the staff-advance
+  // booking, the identifier promotion) -- for which the value is never compared to anything.
+  // SEVERAL -> null, which makes §F refuse wake_task_account_unbound out loud: a helper that
+  // silently picked one would let a battery pass against an account it never meant to act on.
+  const bankAccount = acct.rowCount === 1 ? acct.rows[0].id : (acct.rowCount === 0 ? randomUUID() : null);
+  const made = await makeBankWakeTask({ firm, client, bankAccount, status: "running" });
   _bankTaskCache.set(key, made.taskId);
   return made.taskId;
 }

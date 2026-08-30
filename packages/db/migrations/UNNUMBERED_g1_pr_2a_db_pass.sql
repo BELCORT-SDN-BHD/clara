@@ -900,9 +900,18 @@ comment on function clara._bank_wake_task_gate(text, uuid, boolean, boolean) is
 revoke all on function clara._bank_wake_task_gate(text, uuid, boolean, boolean) from public;
 
 -- -------------------------------------------------------------------------------------------------
--- THE FOURTEEN. Each body below is its live prestate text with EXACTLY ONE line added, immediately
--- after its own assert_wake_allowed call: the gate. Nothing else moves -- the tail proves it by
--- deleting the added line from the new prosrc and comparing byte-for-byte against the pin.
+-- THE FOURTEEN. Each body below is its live prestate text with EXACTLY ONE line added: the gate.
+-- Nothing else moves -- the tail proves it by deleting the added line from the new prosrc and
+-- comparing byte-for-byte against the pin.
+--
+-- THE LINE GOES LAST, immediately before the core call, and the position is a decision rather than
+-- a formatting choice. An earlier draft put it right after assert_wake_allowed, which MASKED every
+-- refusal each wrapper already made: a bank_agent credential pinned to client A calling with
+-- client B used to refuse CLR11 credential_client_pin, and with the gate ahead of that check it
+-- refused CLR03 wake_act_account_unresolved instead -- the right outcome for the wrong stated
+-- reason, which is the class this repo has paid for three times. Last-before-the-core keeps every
+-- pre-existing refusal's precedence exactly as it was, and loses nothing: the gate is still inside
+-- the wrapper's own transaction and still ahead of every write the core makes.
 -- The three arguments after the verb name are the verb's own account subject (derived HERE, in
 -- SQL, from the arguments the caller actually passed), whether it is a WRITE, and whether an
 -- unresolvable account is a refusal. Signatures, argument names, SECURITY DEFINER and search_path
@@ -920,7 +929,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_add_bank_account');
-  perform clara._bank_wake_task_gate('wake_add_bank_account', null::uuid, true, false);
   if w.client_id is not null and p_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
   end if;
@@ -930,6 +938,7 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_add_bank_account', null::uuid, true, false);
   return clara._agent_add_bank_account_core(p_client, p_coa_account_code, p_proposal_id, p_bank_code, p_account_number, p_bank_name_display, p_rationale, p_model, p_inputs_digest, p_op_key);
 end $function$;
 
@@ -944,7 +953,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_book_staff_advance_application');
-  perform clara._bank_wake_task_gate('wake_book_staff_advance_application', null::uuid, true, false);
   if w.client_id is not null and p_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
   end if;
@@ -954,6 +962,7 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_book_staff_advance_application', null::uuid, true, false);
   return clara._agent_book_staff_advance_application_core(p_client, p_posting_date, p_memo,
     p_lines, p_allocations, p_kind, p_reason, p_rationale, p_model, p_inputs_digest, p_op_key);
 end
@@ -970,7 +979,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_complete_bank_reconciliation');
-  perform clara._bank_wake_task_gate('wake_complete_bank_reconciliation', (select s.bank_account_id from clara.bank_statements s where s.id = p_statement), true, true);
   select client_id into v_client from clara.bank_statements where id = p_statement;
   if w.client_id is not null and v_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
@@ -981,6 +989,7 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_complete_bank_reconciliation', (select s.bank_account_id from clara.bank_statements s where s.id = p_statement), true, true);
   return clara._agent_complete_bank_reconciliation_core(p_statement, p_ack_outstanding, p_rationale, p_model, p_inputs_digest, p_op_key);
 end $function$;
 
@@ -995,13 +1004,13 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_get_bank_pack');
-  perform clara._bank_wake_task_gate('wake_get_bank_pack', p_bank_account, false, true);
   if w.client_id is not null and p_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
   end if;
   if nullif(btrim(coalesce(p_op_key,'')),'') is null then
     raise exception 'an unattended act needs its idempotency key' using errcode='CLR10',detail='{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_get_bank_pack', p_bank_account, false, true);
   return clara._agent_get_bank_pack_core(p_client, p_bank_account, p_rationale, p_model, p_op_key);
 end $function$;
 
@@ -1016,7 +1025,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_match_bank_line');
-  perform clara._bank_wake_task_gate('wake_match_bank_line', (select case when count(distinct l.bank_account_id) = 1 then (array_agg(distinct l.bank_account_id))[1] end from clara.bank_statement_lines l where l.id in (select (case jsonb_typeof(elem) when 'string' then elem #>> '{}' else elem->>'line_id' end)::uuid from jsonb_array_elements(coalesce(p_lines,'[]'::jsonb)) as elem where (case jsonb_typeof(elem) when 'string' then elem #>> '{}' else elem->>'line_id' end) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')), true, true);
   if w.client_id is not null and p_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
   end if;
@@ -1026,6 +1034,7 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_match_bank_line', (select case when count(distinct l.bank_account_id) = 1 then (array_agg(distinct l.bank_account_id))[1] end from clara.bank_statement_lines l where l.id in (select (case jsonb_typeof(elem) when 'string' then elem #>> '{}' else elem->>'line_id' end)::uuid from jsonb_array_elements(coalesce(p_lines,'[]'::jsonb)) as elem where (case jsonb_typeof(elem) when 'string' then elem #>> '{}' else elem->>'line_id' end) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')), true, true);
   return clara._agent_match_bank_line_core(p_client, p_lines, p_entries, p_adjustments, p_ack_period_exceptions, p_rationale, p_model, p_inputs_digest, p_op_key);
 end $function$;
 
@@ -1040,7 +1049,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_propose_bank_identifier_promotion');
-  perform clara._bank_wake_task_gate('wake_propose_bank_identifier_promotion', null::uuid, true, false);
   if w.client_id is not null and p_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
   end if;
@@ -1050,6 +1058,7 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_propose_bank_identifier_promotion', null::uuid, true, false);
   return clara._agent_propose_bank_identifier_promotion_core(p_client, p_counterparty, p_identifier_kind, p_identifier_value, p_times_seen, p_rationale, p_model, p_inputs_digest, p_op_key);
 end $function$;
 
@@ -1064,7 +1073,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_propose_bank_line_exception');
-  perform clara._bank_wake_task_gate('wake_propose_bank_line_exception', (select l.bank_account_id from clara.bank_statement_lines l where l.id = p_line), true, true);
   select client_id into v_client from clara.bank_statement_lines where id = p_line;
   if w.client_id is not null and v_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
@@ -1075,6 +1083,7 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_propose_bank_line_exception', (select l.bank_account_id from clara.bank_statement_lines l where l.id = p_line), true, true);
   return clara._agent_propose_line_exception_core(p_line, p_kind, p_reason, p_evidence_document, p_rationale, p_model, p_inputs_digest, p_op_key);
 end $function$;
 
@@ -1089,7 +1098,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_resolve_and_book_bank_line');
-  perform clara._bank_wake_task_gate('wake_resolve_and_book_bank_line', (select e.bank_account_id from clara.bank_line_exceptions e where e.id = p_exception), true, true);
   if w.client_id is not null and p_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
   end if;
@@ -1099,6 +1107,7 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_resolve_and_book_bank_line', (select e.bank_account_id from clara.bank_line_exceptions e where e.id = p_exception), true, true);
   return clara._agent_resolve_and_book_core(p_client, p_exception, p_disposition, p_note, p_draft,
     p_allocations, p_adjustments, p_advance_applications, p_charge_cents, p_charge_account,
     p_rationale, p_model, p_inputs_digest, p_op_key, p_ack_period_exceptions);
@@ -1115,7 +1124,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_resolve_bank_line_exception');
-  perform clara._bank_wake_task_gate('wake_resolve_bank_line_exception', (select e.bank_account_id from clara.bank_line_exceptions e where e.id = p_exception), true, true);
   select client_id into v_client from clara.bank_line_exceptions where id = p_exception;
   if w.client_id is not null and v_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
@@ -1126,6 +1134,7 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_resolve_bank_line_exception', (select e.bank_account_id from clara.bank_line_exceptions e where e.id = p_exception), true, true);
   return clara._agent_resolve_bank_line_exception_core(p_exception, p_disposition, p_note, p_counterpart_line, p_rationale, p_model, p_inputs_digest, p_op_key);
 end $function$;
 
@@ -1140,7 +1149,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_settle_from_bank_line');
-  perform clara._bank_wake_task_gate('wake_settle_from_bank_line', (select l.bank_account_id from clara.bank_statement_lines l where l.id = p_line), true, true);
   if w.client_id is not null and p_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
   end if;
@@ -1153,6 +1161,7 @@ begin
   -- p_attestation is absent BY DESIGN (design §3.4/Annex A.1) -- the agent takes her own
   -- approval_arm ('agent_unattended') and writes no attestation, because an attestation
   -- asserts a judgement a human made.
+  perform clara._bank_wake_task_gate('wake_settle_from_bank_line', (select l.bank_account_id from clara.bank_statement_lines l where l.id = p_line), true, true);
   return clara._agent_settle_from_bank_line_core(p_client, p_line, p_counterparty, p_allocations,
     p_memo, p_posting_date, p_charge_cents, p_charge_account, p_adjustments, p_control_account,
     p_rationale, p_model, p_inputs_digest, p_op_key);
@@ -1169,7 +1178,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_unmatch_bank_match');
-  perform clara._bank_wake_task_gate('wake_unmatch_bank_match', (select m.bank_account_id from clara.bank_matches m where m.id = p_match), true, true);
   if w.client_id is not null and p_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
   end if;
@@ -1179,6 +1187,7 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_unmatch_bank_match', (select m.bank_account_id from clara.bank_matches m where m.id = p_match), true, true);
   return clara._agent_unmatch_bank_match_core(p_client, p_match, p_reason, p_rationale, p_model, p_inputs_digest, p_op_key);
 end $function$;
 
@@ -1193,7 +1202,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_upsert_account');
-  perform clara._bank_wake_task_gate('wake_upsert_account', null::uuid, true, false);
   if w.client_id is not null and p_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
   end if;
@@ -1203,6 +1211,7 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_upsert_account', null::uuid, true, false);
   return clara._agent_upsert_account_core(p_client, p_code, p_name, p_type, p_special_acc_type, p_account_class, p_rationale, p_model, p_inputs_digest, p_op_key);
 end $function$;
 
@@ -1217,7 +1226,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_void_bank_reconciliation');
-  perform clara._bank_wake_task_gate('wake_void_bank_reconciliation', (select r.bank_account_id from clara.bank_reconciliations r where r.id = p_recon), true, true);
   select client_id into v_client from clara.bank_reconciliations where id = p_recon;
   if w.client_id is not null and v_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
@@ -1228,6 +1236,7 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_void_bank_reconciliation', (select r.bank_account_id from clara.bank_reconciliations r where r.id = p_recon), true, true);
   return clara._agent_void_bank_reconciliation_core(p_recon, p_reason, p_rationale, p_model, p_inputs_digest, p_op_key);
 end $function$;
 
@@ -1242,7 +1251,6 @@ begin
   select * into w from clara.wake_context();
   if w.credential_id is null then raise exception 'no valid wake credential' using errcode='CLR03'; end if;
   perform clara.assert_wake_allowed(w.wake_kind, 'wake_void_bank_statement');
-  perform clara._bank_wake_task_gate('wake_void_bank_statement', (select s.bank_account_id from clara.bank_statements s where s.id = p_statement), true, true);
   if w.client_id is not null and p_client is distinct from w.client_id then
     raise exception 'this wake credential is pinned to another client' using errcode='CLR11',detail='{"reason":"credential_client_pin"}';
   end if;
@@ -1252,6 +1260,7 @@ begin
   if nullif(btrim(coalesce(p_rationale,'')),'') is null then
     raise exception 'an unattended act must state its rationale' using errcode='CLR10',detail='{"reason":"invalid_request","class":"rationale","constraint":"nonempty"}';
   end if;
+  perform clara._bank_wake_task_gate('wake_void_bank_statement', (select s.bank_account_id from clara.bank_statements s where s.id = p_statement), true, true);
   return clara._agent_void_bank_statement_core(p_client, p_statement, p_reason, p_rationale, p_model, p_inputs_digest, p_op_key);
 end $function$;
 
