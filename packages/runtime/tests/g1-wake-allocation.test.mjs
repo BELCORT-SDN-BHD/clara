@@ -226,17 +226,24 @@ test("G1B-ALLOC-4 裁-44 R2 / FOLD-12 — a pack this parser cannot fully accoun
   // `nothing_due` — a corrupt read reported as a quiet night. The cell asserted that behaviour.
   const D = "a".repeat(64);
   const id = randomUUID();
-  const bad = (reply, reason) => {
+  const bad = (reply, reason, why = "") => {
     const r = pack.readPackView(reply);
-    assert.equal(r.ok, false, `must FAIL: ${reason} — got ${JSON.stringify(r).slice(0, 200)}`);
+    assert.equal(r.ok, false, `must FAIL: ${reason} ${why} — got ${JSON.stringify(r).slice(0, 200)}`);
     assert.equal(r.reason, reason, `and by NAME, so the failure is diagnosable`);
     return r;
   };
 
   bad(null, "pack_not_object");
   bad("a string", "pack_not_object");
-  bad({ lines: [], candidates: [] }, "no_digest");
-  bad({ digest: "", lines: [], candidates: [] }, "no_digest");
+  bad({ lines: [], candidates: [] }, "digest_malformed");
+  bad({ digest: "", lines: [], candidates: [] }, "digest_malformed");
+  // 裁-44 R3 / FOLD-16 — THE DIGEST IS A SHA-256, NOT "any non-empty string". `{digest:"x"}` used
+  // to be accepted, which made a one-character string authoritative evidence for a whole run —
+  // and every write re-presents this value as p_inputs_digest.
+  bad({ digest: "x", lines: [], candidates: [] }, "digest_malformed");
+  bad({ digest: "a".repeat(63), lines: [], candidates: [] }, "digest_malformed");
+  bad({ digest: D.toUpperCase(), lines: [], candidates: [] }, "digest_malformed", "the verb emits lowercase hex; an uppercase spelling is not what it computed");
+  bad({ digest: "g".repeat(64), lines: [], candidates: [] }, "digest_malformed", "64 characters is not enough — they must be HEX");
   // DIGEST-ONLY is the shape the old reader called an empty pack. It is a reply missing both of
   // the arrays the verb ALWAYS builds (coalesce(jsonb_agg(...), '[]'), 0121:5715/:5736), so it is
   // not this verb's reply at all.
@@ -253,6 +260,12 @@ test("G1B-ALLOC-4 裁-44 R2 / FOLD-12 — a pack this parser cannot fully accoun
   bad({ digest: D, lines: [{ line_id: id, amount_cents: 10.5 }], candidates: [] }, "line_cents_unrepresentable");
   bad({ digest: D, lines: [{ line_id: "not-a-uuid", amount_cents: 1 }], candidates: [] }, "line_id_malformed");
   bad({ digest: D, lines: [{ line_id: id, amount_cents: 1, description: 42 }], candidates: [] }, "line_description_malformed");
+  // 裁-44 R3 / FOLD-16 — AN ABSENT description KEY IS NOT A LAWFUL NULL. The column is nullable, so
+  // an EXPLICIT null is a real state of the books; but the verb always emits the key
+  // (0121:5719), so a reply missing it is not this verb's reply. Treating undefined as null let a
+  // truncated payload arm the run with empty evidence — which is what FOLD-11's sighting count is
+  // derived from.
+  bad({ digest: D, lines: [{ line_id: id, amount_cents: 1 }], candidates: [] }, "line_description_absent");
   bad({ digest: D, lines: [], candidates: [{ entry_id: id }] }, "capacity_unrepresentable");
   bad({ digest: D, lines: [], candidates: [{ entry_id: id, debit_remaining_cents: 1 }] }, "capacity_unrepresentable");
   bad({ digest: D, lines: [], candidates: [{ entry_id: "x", debit_remaining_cents: 1, credit_remaining_cents: 0 }] }, "entry_id_malformed");
@@ -333,14 +346,96 @@ test("G1B-ALLOC-6 裁-44 R2 / FOLD-11 — the promotion count is COUNTED from th
     ],
     [],
   );
-  assert.equal(pack.countIdentifierSightings(v, "MBB-514202-9"), 2, "case-insensitive exact substring, counted over the pack's own lines");
+  assert.equal(pack.countIdentifierSightings(v, "MBB-514202-9"), 2, "canonicalised on both sides, counted over the pack's own lines");
   assert.equal(pack.countIdentifierSightings(v, "mbb-514202-9"), 2, "the model's spelling of the case does not change the count");
+  assert.equal(pack.countIdentifierSightings(v, "mbb5142029"), 2, "nor does dropping the separators the statement prints (裁-44 R3 / FOLD-15)");
   assert.equal(pack.countIdentifierSightings(v, "88214"), 1);
   assert.equal(pack.countIdentifierSightings(v, "NOT-ON-THIS-STATEMENT"), 0, "and an identifier that appears nowhere counts ZERO — there is no floor of one");
   assert.equal(pack.countIdentifierSightings(v, "   "), 0, "a blank needle matches nothing rather than everything");
+
+  // 裁-44 R3 / FOLD-15 — THE TOKEN BOUNDARY. Raw substring matching made a short needle an oracle:
+  // "1" counted every line containing a 1 anywhere, so the model could not pick the NUMBER but
+  // could pick an identifier that made the number whatever it liked. A token must match WHOLE.
+  assert.equal(pack.countIdentifierSightings(v, "1"), 0, "a one-character needle matches no whole token");
+  assert.equal(pack.countIdentifierSightings(v, "514202"), 0, "and a fragment of a longer run is not a sighting of it");
+  assert.equal(pack.countIdentifierSightings(v, "8821"), 0, "nor is a prefix of one");
+  const longer = viewOf([line(a, 100, "CHEQUE 8821499 UNRELATED"), line(b, 200, "CHEQUE 88214 REAL")], []);
+  assert.equal(pack.countIdentifierSightings(longer, "88214"), 1, "a longer digit run that CONTAINS the identifier is not counted; the exact token is");
 
   // A line the DB reported with no description carries no text, so it can never contribute a
   // sighting — the conservative direction.
   const nulled = viewOf([{ line_id: a, amount_cents: 100, description: null }], []);
   assert.equal(pack.countIdentifierSightings(nulled, "anything"), 0);
+  assert.ok(c, "the third fixture line is used by the token cases above");
+});
+
+test("G1B-ALLOC-7 裁-44 R3 / FOLD-15 — an identifier too short to be specific is refused BEFORE it is counted", async () => {
+  // The floor is not a formatting nicety: it is what stops the model choosing a needle that
+  // matches everything, which would put the derived count back in its hands.
+  for (const [kind, value] of [["tin", "12345"], ["ssm", "abc"], ["bank_account", "8899041"], ["bank_account", "1"]]) {
+    assert.ok(pack.identifierTooShort(kind, value), `${kind} "${value}" must be refused`);
+  }
+  // Separators do not count toward the floor — the length is measured AFTER canonicalisation, so
+  // "1-2-3-4-5-6" is six characters, not eleven.
+  assert.ok(pack.identifierTooShort("tin", "1-2-3-4-5"), "five digits dressed up with separators is still five");
+  assert.equal(pack.identifierTooShort("tin", "1-2-3-4-5-6"), null, "six is six however it is printed");
+
+  // bank_account carries the higher, DIGIT-AWARE bar: prose can clear a bare character count, and
+  // "g1 bank line" is exactly the value G1B-BANK-E2 used to admit as an account number.
+  assert.ok(pack.identifierTooShort("bank_account", "g1 bank line"), "prose is not an account number");
+  assert.ok(pack.identifierTooShort("bank_account", "abcdefghij"), "ten letters are not eight digits");
+  assert.equal(pack.identifierTooShort("bank_account", "8899041722"), null, "a real ten-digit account passes");
+  assert.equal(pack.identifierTooShort("bank_account", "mbb-88990417"), null, "and a bank prefix in front of eight digits is fine");
+
+  // The positive controls, so the four refusals above are the floor speaking and not a predicate
+  // that refuses everything.
+  assert.equal(pack.identifierTooShort("tin", "C12345678"), null);
+  assert.equal(pack.identifierTooShort("ssm", "202301012345"), null);
+  assert.equal(pack.canonicalIdentifier("8899-041722"), "8899041722", "canonicalisation is [a-z0-9] after lowercasing");
+  assert.equal(pack.canonicalIdentifier("MBB/514 202"), "mbb514202");
+});
+
+test("G1B-ALLOC-8 裁-44 R3 / FOLD-18 — an aggregate this process cannot carry is refused, and a write reply hands the model no cents", async () => {
+  // FOLD-10 gated the LEAVES. A sum of safe integers is not itself guaranteed safe: enough large
+  // lines add past 2^53 and the total starts rounding — the same defect one level up. The
+  // aggregation is BigInt and the result is checked.
+  const l1 = randomUUID();
+  const l2 = randomUUID();
+  const e1 = randomUUID();
+  const e2 = randomUUID();
+  const HALF = Number("4503599627370496"); // 2^52 — safe on its own, unsafe when doubled.
+  const over = viewOf([line(l1, HALF), line(l2, HALF)], [cand(e1, HALF, 0), cand(e2, HALF, 0)]);
+  const agg = pack.deriveMatchAllocation(over, [l1, l2], [e1]);
+  assert.equal(agg.ok, false, "two safe line amounts whose SUM is unsafe must be refused");
+  assert.equal(agg.reason, "aggregate_unrepresentable");
+  assert.match(agg.detail, /smaller groups/, "and the model is told what to do instead");
+
+  // The positive control on the same shape: just under the boundary still derives.
+  const under = viewOf([line(l1, HALF - 1), line(l2, HALF - 1)], [cand(e1, HALF - 1, 0), cand(e2, HALF - 1, 0)]);
+  const okAgg = pack.deriveMatchAllocation(under, [l1, l2], [e1, e2]);
+  assert.equal(okAgg.ok, true, `just under the boundary is ordinary arithmetic — ${JSON.stringify(okAgg).slice(0, 160)}`);
+  assert.equal(okAgg.lineCents, 2 * (HALF - 1));
+  assert.equal(pack.isSafeBig(BigInt(Number.MAX_SAFE_INTEGER)), true);
+  assert.equal(pack.isSafeBig(BigInt(Number.MAX_SAFE_INTEGER) + 1n), false);
+
+  // THE REPLY SHAPE. An admitted match used to hand back line_cents / entry_cents /
+  // adjustment_cents — the books' own arithmetic, as text the model can quote and reason from.
+  // A write reply says WHETHER it landed and WHICH row it made; nothing else.
+  const matchId = randomUUID();
+  const projected = tools.projectReply("match", {
+    status: "live", match_id: matchId, line_cents: 10000, entry_cents: 10000, adjustment_cents: 0, adjustment_entry_ids: [],
+  });
+  assert.deepEqual(projected, { status: "live", match_id: matchId }, "status and id only");
+  const propId = randomUUID();
+  assert.deepEqual(
+    tools.projectReply("exception", { status: "open", proposal_id: propId, line_id: l1, times_seen: 3 }),
+    { status: "open", proposal_id: propId, line_id: l1 },
+    "a proposal keeps its subject and drops everything else",
+  );
+
+  // A REFUSAL PASSES THROUGH UNCHANGED — rung_vector is pass/fail tokens and carries no cent, and
+  // it is what makes a refusal actionable. Projecting it away would be a regression.
+  const refusal = { status: "refused", rung_vector: { tie_nonzero: "fail" } };
+  assert.deepEqual(tools.projectReply("match", refusal), refusal);
+  assert.deepEqual(tools.projectReply("match", null), null);
 });

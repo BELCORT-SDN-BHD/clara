@@ -37,20 +37,26 @@ import {
   countIfAdmitted,
   dbRefusalReason,
   deriveMatchAllocation,
+  identifierTooShort,
+  isAdmittedBankReply,
   isDbVerdict,
   readPackView,
   refusal,
   type BankRunRecord,
+  type BankVerb,
 } from "./bankAgent.v1.pack.js";
 
 export {
   BANK_PROSE_MAX,
+  canonicalIdentifier,
   countIdentifierSightings,
   countIfAdmitted,
   dbRefusalReason,
   deriveMatchAllocation,
   exactCents,
+  identifierTooShort,
   isAdmittedBankReply,
+  isSafeBig,
   newBankRunRecord,
   readPackView,
   type BankAllocation,
@@ -64,6 +70,31 @@ export {
  *  appends (裁-44 R2 / FOLD-11). Budgeted rather than truncated: a slice could cut the note in
  *  half and leave the human reading a number with no sentence around it. */
 const SIGHTINGS_NOTE_BUDGET = 64;
+
+/**
+ * WHAT A WRITE HANDS BACK TO THE MODEL — 裁-44 R3 / FOLD-18.
+ *
+ * An admitted `wake_match_bank_line` reply carries `line_cents`, `entry_cents` and
+ * `adjustment_cents` straight from the delegate. Those are RAW numerals, and handing them to the
+ * model puts the books' own arithmetic into its context as text it can quote, restate or reason
+ * from — the exact channel FOLD-1 and FOLD-11 spent two rounds closing at the input side. A write
+ * reply's job is to say WHETHER the act landed and WHICH row it made; the amounts are the
+ * database's and the model has no use for them it should be having.
+ *
+ * THE PACK READ IS DELIBERATELY NOT PROJECTED, and the asymmetry is the point: the pack is the
+ * model's EVIDENCE — it cannot choose lines and entries without seeing amounts — and every cent in
+ * it has already been through exactCents, so a pack the run armed on carries no unsafe value. The
+ * distinction is evidence-in versus verdict-out, not "numbers are dangerous".
+ *
+ * A REFUSAL PASSES THROUGH UNCHANGED. `rung_vector` is pass/fail tokens and `reason` is a typed
+ * string; neither carries a cent, and both are what make a refusal actionable.
+ */
+export function projectReply(verb: BankVerb, reply: unknown): unknown {
+  if (!isAdmittedBankReply(verb, reply)) return reply;
+  const r = reply as Record<string, unknown>;
+  if (verb === "match") return { status: r.status, match_id: r.match_id };
+  return { status: r.status, proposal_id: r.proposal_id, ...(typeof r.line_id === "string" ? { line_id: r.line_id } : {}), ...(typeof r.counterparty_id === "string" ? { counterparty_id: r.counterparty_id } : {}) };
+}
 
 export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: BankRunRecord) {
   const model = bankModelIdentity(modelId);
@@ -153,6 +184,13 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
           // constant key would make exactly that re-read raise CLR10 op_key_identity_mismatch,
           // because acting MOVES the pack digest. A RUN-LOCAL counter has the same defect one
           // level up: a retried step restarts it at 1 while the digest has moved. See bankOpKey.
+          // 裁-44 R3 / FOLD-16 — DISARM BEFORE READING, not after. A re-read that comes back
+          // malformed used to leave the PREVIOUS pack armed, so the run kept deriving amounts
+          // from evidence it had just failed to refresh — stale evidence presented as current,
+          // which is worse than none. Clearing first makes the window fail-closed: between the
+          // clear and a successful parse the run cannot write at all.
+          rec.pack = null;
+          rec.digest = null;
           const opKey = bankOpKey("pack", ctx.taskId, `${ctx.bankAccountId}_${rec.attemptKey}_${(rec.packReads += 1)}`);
           const pack = await bankScoped(ctx, (c: PgExec) =>
             c
@@ -246,7 +284,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
                 rec.digest,
                 opKey,
               ])
-              .then((r) => countIfAdmitted(rec, "match", r.rows[0]?.r ?? null)),
+              .then((r) => projectReply("match", countIfAdmitted(rec, "match", r.rows[0]?.r ?? null))),
           );
         } catch (e) {
           return writeRefusal(e);
@@ -289,7 +327,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
                 rec.digest,
                 opKey,
               ])
-              .then((r) => countIfAdmitted(rec, "exception", r.rows[0]?.r ?? null)),
+              .then((r) => projectReply("exception", countIfAdmitted(rec, "exception", r.rows[0]?.r ?? null))),
           );
         } catch (e) {
           return writeRefusal(e);
@@ -337,6 +375,12 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
         if (blocked) return blocked;
         const pack = rec.pack;
         if (pack === null) return localRefusal(`call ${PACK_TOOL} first — every act must be grounded in a pack read from this run.`);
+        // 裁-44 R3 / FOLD-15 — TOO SHORT TO BE COUNTABLE IS REFUSED BEFORE IT IS COUNTED. FOLD-11
+        // took the number out of the model's hands; a one-character identifier put it back, by
+        // letting the model choose a needle that matches everything. A length floor is not a
+        // formatting nicety here — it is what keeps the derived count from being model-chosen.
+        const tooShort = identifierTooShort(a.identifier_kind, a.identifier_value);
+        if (tooShort !== null) return localRefusal(`refused (identifier_too_short): ${tooShort}`);
         // 裁-44 R2 / FOLD-11 — THE COUNT IS DERIVED, AND ZERO IS A REFUSAL RATHER THAN A ONE.
         // A floor of 1 would have let the model promote an identifier that appears NOWHERE in the
         // statement this run read, with the tool itself vouching for one sighting. FOLD-4's rule,
@@ -368,7 +412,7 @@ export function buildBankAgentTools(ctx: BankTaskContext, modelId: string, rec: 
                 rec.digest,
                 opKey,
               ])
-              .then((r) => countIfAdmitted(rec, "promotion", r.rows[0]?.r ?? null)),
+              .then((r) => projectReply("promotion", countIfAdmitted(rec, "promotion", r.rows[0]?.r ?? null))),
           );
         } catch (e) {
           return writeRefusal(e);

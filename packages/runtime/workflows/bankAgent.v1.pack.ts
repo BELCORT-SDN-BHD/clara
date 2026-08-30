@@ -179,6 +179,11 @@ const uuidKey = (v: unknown): string | null => {
  * The lossless answer is bigint end to end (decimal strings out of the pack, BigInt sums, decimal
  * strings back in). That is a v2 change to a frozen body and is recorded as a known limit.
  */
+/** A BigInt aggregate this process can carry back as an exact JS integer (裁-44 R3 / FOLD-18). */
+export function isSafeBig(v: bigint): boolean {
+  return v <= BigInt(Number.MAX_SAFE_INTEGER) && v >= BigInt(Number.MIN_SAFE_INTEGER);
+}
+
 export function exactCents(v: unknown): number | null {
   if (typeof v === "number") return Number.isSafeInteger(v) ? v : null;
   if (typeof v === "string") {
@@ -211,7 +216,15 @@ const packFail = (reason: string, detail: string): BankPackParse => ({ ok: false
 export function readPackView(pack: unknown): BankPackParse {
   const p = pack as { digest?: unknown; lines?: unknown; candidates?: unknown } | null;
   if (p === null || typeof p !== "object") return packFail("pack_not_object", "the pack reply is not an object");
-  if (typeof p.digest !== "string" || p.digest.length === 0) return packFail("no_digest", "the pack reply carries no digest");
+  // 裁-44 R3 / FOLD-16 — THE DIGEST IS A SHA-256, NOT "any non-empty string". The verb computes it
+  // as encode(clara._hash(v_pack), 'hex') (0121:5785), so lowercase 64-hex is its ONLY lawful
+  // shape. Accepting `{digest:"x", lines:[], candidates:[]}` made a one-character string
+  // authoritative evidence — the same absence-as-evidence this parser exists to refuse, one field
+  // over. Every write re-presents this value as p_inputs_digest, so a digest we cannot vouch for
+  // is a write we cannot ground.
+  if (typeof p.digest !== "string" || !/^[0-9a-f]{64}$/.test(p.digest)) {
+    return packFail("digest_malformed", "the pack reply's digest is not the lowercase 64-hex sha-256 the verb computes");
+  }
   // EXPLICIT ARRAYS, NOT "whatever is iterable". The verb always builds both with
   // coalesce(jsonb_agg(...), '[]'::jsonb), so an ABSENT one means the reply is not the verb's.
   if (!Array.isArray(p.lines)) return packFail("lines_not_array", "the pack reply carries no `lines` array");
@@ -227,14 +240,23 @@ export function readPackView(pack: unknown): BankPackParse {
     if (cents === null) {
       return packFail("line_cents_unrepresentable", `line ${id}'s amount_cents is missing, non-integer, or beyond this process's exact range`);
     }
-    // description is NULLABLE in the schema (0038:546) — null/absent is a real state of the books
-    // and becomes empty text, which matches no identifier. Any OTHER type is a malformed reply.
-    const text = l?.description;
-    if (text !== null && text !== undefined && typeof text !== "string") {
+    // 裁-44 R3 / FOLD-16 — EXACTLY string OR null, and ABSENT is neither. The column is NULLABLE
+    // (0038:546) so an explicit null is a real state of the books; but the verb ALWAYS emits the
+    // key (jsonb_build_object('description', l.description), 0121:5719), so a reply with the key
+    // MISSING is not this verb's reply. Treating undefined as lawful null let a truncated or
+    // foreign payload arm the run with empty evidence — which is exactly what FOLD-11's sighting
+    // count is derived from.
+    if (l === null || typeof l !== "object" || !("description" in l)) {
+      return packFail("line_description_absent", `line ${id} carries no description key at all — this is not the pack verb's own reply`);
+    }
+    const text = l.description;
+    if (text !== null && typeof text !== "string") {
       return packFail("line_description_malformed", `line ${id}'s description is neither text nor null`);
     }
     lineCents.set(id, cents);
-    lineText.set(id, typeof text === "string" ? text.toLowerCase() : "");
+    // Stored RAW (whitespace intact): FOLD-15's matching tokenises on whitespace and canonicalises
+    // each token, so it needs the printed boundaries the statement actually has.
+    lineText.set(id, typeof text === "string" ? text : "");
   }
 
   const entryCaps = new Map<string, { dr: number; cr: number }>();
@@ -252,29 +274,72 @@ export function readPackView(pack: unknown): BankPackParse {
   return { ok: true, view: { digest: p.digest, lineCents, lineText, entryCaps } };
 }
 
+/** Separators are noise on BOTH sides of an identifier comparison — "9988-776655" printed on a
+ *  statement and "9988776655" typed by a model are the same account. Canonicalising to [a-z0-9]
+ *  is what lets the token match below be exact without being brittle (裁-44 R3 / FOLD-15). */
+export function canonicalIdentifier(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** The floor each identifier kind must clear AFTER canonicalisation (裁-44 R3 / FOLD-15).
+ *  A bank account is a number and the longest of the three, so it carries the higher bar. */
+const MIN_CANON_CHARS: Record<string, number> = { tin: 6, ssm: 6, bank_account: 8 };
+
+/** Is this identifier long and specific enough to be COUNTABLE at all? Returns null when it is,
+ *  otherwise the typed reason the caller refuses with. */
+export function identifierTooShort(kind: string, value: string): string | null {
+  const canon = canonicalIdentifier(value);
+  const min = MIN_CANON_CHARS[kind] ?? 6;
+  if (canon.length < min) {
+    return `an identifier of kind ${kind} needs at least ${min} letters/digits once separators are removed; "${value}" has ${canon.length}`;
+  }
+  // A BANK ACCOUNT IS A NUMBER. A bank prefix may precede it, but eight digits must be there —
+  // otherwise a phrase like "g1 bank line" clears a bare character count and is then matched
+  // against every line that happens to print it.
+  if (kind === "bank_account" && (canon.match(/\d/g) ?? []).length < 8) {
+    return `a bank_account identifier needs at least 8 digits; "${value}" has ${(canon.match(/\d/g) ?? []).length}`;
+  }
+  return null;
+}
+
 /**
- * COUNT THE SIGHTINGS OF AN IDENTIFIER IN THE PACK THIS RUN READ — 裁-44 R2 / FOLD-11.
+ * COUNT THE SIGHTINGS OF AN IDENTIFIER IN THE PACK THIS RUN READ — 裁-44 R2 / FOLD-11, hardened
+ * against the model by 裁-44 R3 / FOLD-15.
  *
  * `times_seen` used to be the MODEL's number, and 0121:5634 stores it verbatim in the proposal
  * payload a human reads to decide. That is a model-generated numeral in a durable artifact with no
  * deterministic evaluator behind it — the pack's own `learned_payers` is explicitly
- * `{"not_implemented": true}` (0121:5781), so there was nothing to reproduce it from. Hard
- * constraint 2, in the same shape FOLD-1 closed one table over.
+ * `{"not_implemented": true}` (0121:5781). Hard constraint 2, in the same shape FOLD-1 closed one
+ * table over.
  *
- * THE DERIVATION IS DELIBERATELY THE DUMBEST ONE THAT IS TRUE: the number of lines in THIS pack
- * whose printed descriptive text contains the proposed identifier, matched case-insensitively as
- * an exact substring. It is not fuzzy matching and does not try to be — a human settles the
- * proposal, and what they need is a count they can check against the same statement.
+ * THE FIRST DERIVATION WAS STILL THE MODEL'S TO GAME. A raw case-insensitive SUBSTRING search over
+ * a one-character identifier counts every line with a "1" anywhere in it — so the model could not
+ * choose the number directly, but it could choose an identifier that made the number whatever it
+ * liked. Deriving from DB-owned inputs is not enough on its own: the QUESTION has to be one the
+ * model cannot bend.
  *
- * THERE IS NO FLOOR. Zero sightings is not "at least one", it is a proposal grounded in nothing
- * this run saw, and the caller REFUSES it — FOLD-4's rule one table over: propose only what you
- * actually read.
+ * SO THE MATCH IS TOKEN-BOUNDED, ON BOTH SIDES. The description is split on whitespace — the
+ * boundaries the statement actually prints — and each token is canonicalised to [a-z0-9] alone.
+ * The identifier is canonicalised the same way, and a sighting is a token that EQUALS it. Two
+ * consequences worth naming:
+ *   - "9988-776655" printed on the statement is found by an identifier written "9988776655", and
+ *     vice versa: separators are noise on both sides, which is what canonicalisation is for.
+ *   - "1" can never match "514202" — it is not a whole token — and the length floor refuses it
+ *     before matching anyway.
+ * A longer digit run therefore never contains a shorter identifier by accident.
+ *
+ * THERE IS NO FLOOR ON THE COUNT. Zero sightings is not "at least one", it is a proposal grounded
+ * in nothing this run saw, and the caller REFUSES it — FOLD-4's rule one table over: propose only
+ * what you actually read.
  */
 export function countIdentifierSightings(pack: BankPackView, identifierValue: string): number {
-  const needle = identifierValue.trim().toLowerCase();
+  const needle = canonicalIdentifier(identifierValue);
   if (needle.length === 0) return 0;
   let seen = 0;
-  for (const text of pack.lineText.values()) if (text.includes(needle)) seen += 1;
+  for (const text of pack.lineText.values()) {
+    const hit = text.split(/\s+/).some((token) => canonicalIdentifier(token) === needle);
+    if (hit) seen += 1;
+  }
   return seen;
 }
 
@@ -326,7 +391,16 @@ export function deriveMatchAllocation(pack: BankPackView, lineIds: string[], ent
     return { ok: false, reason: "entry_not_in_pack", detail: `entry ${missingEntry} is not among the candidates of the pack this run read` };
   }
 
-  const lineCents = lines.reduce((sum, id) => sum + (pack.lineCents.get(id) ?? 0), 0);
+  // 裁-44 R3 / FOLD-18 — THE AGGREGATE IS SUMMED IN BigInt AND CHECKED. Every LEAF is a safe
+  // integer by now (exactCents refused anything else), but a sum of safe integers is not itself
+  // guaranteed safe: enough large lines add past 2^53 and the total starts rounding, which is the
+  // very defect FOLD-10 closed one level down. BigInt makes the addition exact; the check refuses
+  // a total this process cannot carry rather than shipping a rounded one.
+  const lineTotal = lines.reduce((sum, id) => sum + BigInt(pack.lineCents.get(id) ?? 0), 0n);
+  if (!isSafeBig(lineTotal)) {
+    return { ok: false, reason: "aggregate_unrepresentable", detail: "the lines you named total more than this run can carry exactly — match them in smaller groups" };
+  }
+  const lineCents = Number(lineTotal);
   if (lineCents === 0) {
     return { ok: false, reason: "lines_net_to_zero", detail: "the lines you named net to zero, and a match must settle a non-zero amount" };
   }
@@ -352,7 +426,13 @@ export function deriveMatchAllocation(pack: BankPackView, lineIds: string[], ent
     return { ok: true, entries: [{ entry_id: only, matched_cents: sign * magnitude }], lineCents };
   }
 
-  const total = entries.reduce((sum, id) => sum + capacityOf(id), 0);
+  // Same BigInt discipline on the capacity side (裁-44 R3 / FOLD-18): several full capacities can
+  // sum past 2^53 even though each one is exact.
+  const totalBig = entries.reduce((sum, id) => sum + BigInt(capacityOf(id)), 0n);
+  if (!isSafeBig(totalBig)) {
+    return { ok: false, reason: "aggregate_unrepresentable", detail: "the entries you named carry more capacity between them than this run can carry exactly — match them in smaller groups" };
+  }
+  const total = Number(totalBig);
   if (total !== want) {
     return {
       ok: false,

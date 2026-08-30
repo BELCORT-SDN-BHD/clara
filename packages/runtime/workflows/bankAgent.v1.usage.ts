@@ -106,7 +106,20 @@ export async function recordBankAgentUsage(
       // reconciliation pass, not a document extraction. p_triggering_actor is NULL because the
       // clocked lane HAS no directing human: the same structural NULL the credential mint
       // enforces, never a director by inference (law 68).
-      await c.query("select clara.record_agent_usage_event($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) as id", [
+      // 裁-44 R3 / FOLD-19 — NAMED NOTATION, and this is the call that needed it most in the whole
+      // closure. Fifteen positional arguments, of which p_client/p_document/p_document_task/
+      // p_agent_task/p_triggering_actor are five ADJACENT uuids (four of them NULL here) and
+      // p_input_tokens/p_output_tokens/p_duration_ms are three adjacent integers. Every one of
+      // those transpositions is admitted by the driver and by the column types, and lands as a
+      // metering row attributing this run's tokens to the wrong subject — silently, on the surface
+      // whose entire job is telling the truth about what the lane spent.
+      await c.query(
+        `select clara.record_agent_usage_event(
+            p_firm => $1, p_call_kind => $2, p_engine_id => $3, p_outcome => $4, p_client => $5,
+            p_document => $6, p_document_task => $7, p_agent_task => $8, p_triggering_actor => $9,
+            p_via_wake_kind => $10, p_channel => $11, p_prompt_hash => $12,
+            p_input_tokens => $13, p_output_tokens => $14, p_duration_ms => $15) as id`,
+        [
         ctx.firmId,
         BANK_AGENT_CALL_KIND,
         engineId,
@@ -122,7 +135,8 @@ export async function recordBankAgentUsage(
         asInt(usage.inputTokens),
         asInt(usage.outputTokens),
         asInt(usage.durationMs),
-      ]);
+        ],
+      );
     });
   } catch (e) {
     // Law 76: metering never gates spend, so a write fault is not fatal to the run — but it is

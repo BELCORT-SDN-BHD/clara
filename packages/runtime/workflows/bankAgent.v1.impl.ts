@@ -156,6 +156,26 @@ export function classifyBankOutcome(
   // acts that landed before the cancel keep their own durable receipts; what this decides is only
   // what the TASK's terminal state says, and a task somebody cancelled did not complete.
   if (rec.cancelledAs !== null) return { kind: "cancelled", observed: rec.cancelledAs };
+  // 裁-44 R3 / FOLD-16 — AN INFRASTRUCTURE FAULT ANYWHERE IN THE RUN OUTRANKS AN ADMITTED ACT,
+  // and this ordering is the fix rather than a tidy-up. On THIS lane the pack is the EVIDENCE
+  // every write derives its amounts from, so a fault while reading it is not an unrelated blip:
+  // it means the run's own grounding failed at least once. The pre-fix ordering let a later
+  // admitted write outrank that — a good read, a malformed re-read, one more act, and the task
+  // settled COMPLETED with a corrupt read on its record and nobody told.
+  //
+  // THE ACTS THAT LANDED KEEP THEIR RECEIPTS either way; what this decides is only what the TASK's
+  // terminal state says, and for an unattended nightly lane a visible failure that the next wake
+  // retries beats a green night nobody re-examines. THE CLOSE LANE DELIBERATELY KEEPS N12's
+  // opposite rule (a partial success stays a success, with the fault reported through
+  // onUsageProblem) because it has no pack: an infra fault there cannot have corrupted the
+  // evidence a later act was derived from. The asymmetry is the difference, not an oversight.
+  if (rec.infraFaults > 0) {
+    return {
+      kind: "refused",
+      code: "internal",
+      message: `${rec.infraFaults} tool call(s) never reached the database — this run's grounding failed, so its acts are not a green night`,
+    };
+  }
   if (rec.admitted > 0) return { kind: "acted", acts: rec.admitted, refusals: rec.refusals };
   // A pass that read the pack and lawfully found nothing to do is a SUCCESS, not a failure —
   // "stopping early is a correct outcome" is in the prompt because it is true of the settle too.

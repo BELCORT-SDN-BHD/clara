@@ -217,36 +217,60 @@ test("G1B-LOST-2 裁-44 R2 / FOLD-13 — 'not found' is the ENGINE'S OWN CLASS, 
   const { WorkflowRunNotFoundError } = await import("workflow/internal/errors");
   const { isWakeRunNotFound } = await import("../lib/reconciler-wake.mjs");
 
-  // (1) THE REAL THING — the error the engine actually throws for a run it does not have.
-  const real = new WorkflowRunNotFoundError(randomUUID());
-  assert.equal(isWakeRunNotFound(real), true, "the engine's own error is recognised");
-  assert.equal(typeof real.runId, "string", "and it carries the brand an impostor cannot fake");
+  // (1) THE REAL THING — the error the engine actually throws for a run it does not have, asked
+  // about the run the task is actually bound to.
+  const boundRun = randomUUID();
+  const real = new WorkflowRunNotFoundError(boundRun);
+  assert.equal(isWakeRunNotFound(real, boundRun), true, "the engine's own error, about THIS task's run, is recognised");
 
-  // (2) THE IMPOSTOR — identical name, identical message, not the engine's class. This is the
-  // assertion that reds against the old name-matching predicate.
-  const impostor = Object.assign(new Error(`Workflow run "${randomUUID()}" not found`), { name: "WorkflowRunNotFoundError" });
+  // (2) THE IMPOSTOR — identical name, identical message, AND a runId, but not the engine's class.
+  // 裁-44 R3 / FOLD-17: the previous round accepted the vendor predicate plus a `runId` brand, and
+  // `runId` is a PUBLIC field — so this exact object was accepted and terminal-ized live work. Its
+  // negative control passed for the wrong reason because it omitted `runId`; it carries one now.
+  const impostor = Object.assign(new Error(`Workflow run "${boundRun}" not found`), {
+    name: "WorkflowRunNotFoundError",
+    runId: boundRun,
+  });
   assert.equal(WorkflowRunNotFoundError.is(impostor), true, "the VENDOR's own predicate is fooled — this is the measured fact the fix is built on");
-  assert.equal(isWakeRunNotFound(impostor), false, "and this lane's test is not");
+  assert.equal(isWakeRunNotFound(impostor, boundRun), false, "and this lane's test is not, even with a matching runId");
 
-  // (3) The ordinary transients, none of which may terminal-ize anything.
-  assert.equal(isWakeRunNotFound(Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" })), false);
-  assert.equal(isWakeRunNotFound(new Error("run 123 not found")), false, "a bare message match is no longer enough");
-  assert.equal(isWakeRunNotFound(null), false);
-  assert.equal(isWakeRunNotFound("a string"), false);
+  // (3) THE RIGHT CLASS, THE WRONG RUN. An error about some OTHER run says nothing about this
+  // task, and a probe that answered for the wrong run is a bug better seen as a stuck row.
+  assert.equal(isWakeRunNotFound(new WorkflowRunNotFoundError(randomUUID()), boundRun), false, "a not-found about a different run does not settle THIS task");
+  assert.equal(isWakeRunNotFound(real, null), false, "and an unbound task has no run to compare against");
+  assert.equal(isWakeRunNotFound(real, ""), false);
 
-  // (4) AND BEHAVIOURALLY, through the shipping belt: the impostor leaves a bound running task
+  // (4) The ordinary transients, none of which may terminal-ize anything.
+  assert.equal(isWakeRunNotFound(Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }), boundRun), false);
+  assert.equal(isWakeRunNotFound(new Error("run 123 not found"), boundRun), false, "a bare message match is no longer enough");
+  assert.equal(isWakeRunNotFound(null, boundRun), false);
+  assert.equal(isWakeRunNotFound("a string", boundRun), false);
+
+  // (5) AND BEHAVIOURALLY, through the shipping belt: the impostor leaves a bound running task
   // exactly where it was, while G1B-LOST-1's real-class probe settles it.
   const w = await rig.buildFirm("g1blost3");
   const t = await plantHeldWakeTask({ owner: w.owner, client: w.client, payload: { bank_account_id: randomUUID() } });
-  await rig.rootQuery("update clara.agent_tasks set status='running', workflow_run_id=$2 where id=$1", [t.taskId, randomUUID()]);
+  const runId = randomUUID();
+  await rig.rootQuery("update clara.agent_tasks set status='running', workflow_run_id=$2 where id=$1", [t.taskId, runId]);
   const out = await rig.asRuntime((c) =>
     reconcileWakeEngineTasks(c, {
       onlyFirm: w.firm,
-      getRun: () => ({ get status() { throw Object.assign(new Error("Workflow run \"x\" not found"), { name: "WorkflowRunNotFoundError" }); } }),
+      // The impostor carries the CORRECT runId, so only the class check can refuse it.
+      getRun: (id) => ({ get status() { throw Object.assign(new Error(`Workflow run "${id}" not found`), { name: "WorkflowRunNotFoundError", runId: id }); } }),
     }),
   );
-  assert.equal(out.wakeSettled, 0, "an impostor settles NOTHING");
+  assert.equal(out.wakeSettled, 0, "an impostor settles NOTHING, even spelled perfectly and carrying the right run id");
   assert.equal((await readTask(t.taskId)).status, "running", "the row stays live for the next sweep");
+
+  // (6) THE RIGHT CLASS ABOUT THE WRONG RUN, through the belt — the second conjunct, behaviourally.
+  const wrongRun = await rig.asRuntime((c) =>
+    reconcileWakeEngineTasks(c, {
+      onlyFirm: w.firm,
+      getRun: () => ({ get status() { throw new WorkflowRunNotFoundError(randomUUID()); } }),
+    }),
+  );
+  assert.equal(wrongRun.wakeSettled, 0, "a real not-found about a DIFFERENT run settles nothing either");
+  assert.equal((await readTask(t.taskId)).status, "running");
 
   const settled = await rig.asRuntime((c) =>
     reconcileWakeEngineTasks(c, {

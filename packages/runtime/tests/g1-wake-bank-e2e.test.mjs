@@ -27,7 +27,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as rig from "./rig.mjs";
 import { skip, plantHeldWakeTask } from "./g1-wake-bodies.fixtures.mjs";
-import { buildApprovedEntries, buildBankAccount, buildBankPrereqs, injectBankPools } from "./g1-wake-bank-fixtures.mjs";
+import { BANK_COA, buildApprovedEntries, buildBankAccount, buildBankPrereqs, injectBankPools } from "./g1-wake-bank-fixtures.mjs";
 
 // No `after()` hook in this file: importing g1-wake-bodies.fixtures.mjs already registers one
 // (it calls rig.endPool() unconditionally) — a second one would just be a harmless no-op call
@@ -43,7 +43,14 @@ test("G1B-BANK-E2 a REAL bank_agent wake credential calling the REAL wrapper sta
   // against entry 1 (10,000 of debit capacity). Line 2 (5,000) and entry 2 (3,000) are the
   // NEGATIVE CONTROL's own pair, and both are fresh — see that cell's own comment for why reusing
   // line 1 or entry 1 would fail for a different reason than the one it names.
-  const acct = await buildBankAccount(w, [10000, 5000]);
+  // 裁-44 R3 / FOLD-15 — the promotion cell below needs a REAL account-shaped identifier printed
+  // on the statement. The default descriptions ("g1 bank line 1") are prose, and prose is now
+  // correctly refused for kind `bank_account`: it clears no digit floor. That refusal is the fix
+  // working, so the fixture prints an account number instead of the cell weakening the rule.
+  const acct = await buildBankAccount(w, [10000, 5000], "a", BANK_COA, [
+    "TRANSFER FROM 8899-041722 ACME SDN BHD",
+    "STANDING ORDER 8899-041722 MONTHLY",
+  ]);
   const entries = await buildApprovedEntries(w, [10000, 3000]);
   const [line1Id, line2Id] = acct.lineIds;
   const [entry1, entry2] = entries;
@@ -165,13 +172,14 @@ test("G1B-BANK-E2 a REAL bank_agent wake credential calling the REAL wrapper sta
     const counterpartyId = counterparty.counterparty_id ?? counterparty.id;
     assert.ok(counterpartyId, `the audited writer must name the counterparty it created — got ${JSON.stringify(counterparty)?.slice(0, 200)}`);
     // 裁-44 R2 / FOLD-11 — NO COUNT IS PASSED. The identifier is one the fixture actually prints
-    // on its lines (see buildBankAccount's own descriptions), so the tool's derived count is
-    // non-zero and the proposal is admitted; G1B-BANK-E8 owns the count's own assertions.
+    // on its lines, so the tool's derived count is non-zero and the proposal is admitted;
+    // G1B-BANK-E8 owns the count's own assertions. Written WITHOUT the separator the statement
+    // prints, which is 裁-44 R3 / FOLD-15's canonicalisation earning its keep in passing.
     const promotion = await built.propose_identifier_promotion.execute({
       counterparty_id: counterpartyId,
       identifier_kind: "bank_account",
-      identifier_value: "g1 bank line",
-      rationale: "this printed token appears against this supplier on the statement's own lines",
+      identifier_value: "8899041722",
+      rationale: "this printed account number appears against this supplier on the statement's own lines",
     });
     assert.equal(promotion?.status, "open", `the promotion proposal must be ADMITTED — got ${JSON.stringify(promotion)?.slice(0, 400)}`);
     assert.ok(promotion.proposal_id);

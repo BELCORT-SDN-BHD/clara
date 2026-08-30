@@ -241,7 +241,16 @@ export async function reconcileTasks(client, deps) {
         // running->cancel_requested. settle_chat_turn refuses CLR10 for any kind<>'chat_turn', so
         // falling through to the generic branch below would raise on every such row — settle
         // through clara._settle_wake_task instead, which keeps wakes_outbox in sync too.
-        await client.query("select clara._settle_wake_task($1,$2,$3)", [t.id, "cancelled", null]);
+        // 裁-44 R3 / FOLD-19 — named notation, like every other _settle_wake_task call site. This
+        // one sits OUTSIDE the ruling's named six (it is reconciler.mjs, not reconciler-wake.mjs),
+        // and it is corrected here for one reason: the bundle check this fold adds asserts that NO
+        // positional settle survives, and a check that has to be weakened to accommodate a known
+        // survivor is not a check. Behaviour-identical, one line, same verb, same adjacent
+        // outcome/error-code hazard the other six were fixed for.
+        await client.query(
+          "select clara._settle_wake_task(p_task => $1, p_outcome => $2, p_error_code => $3)",
+          [t.id, "cancelled", null],
+        );
       } else {
         await settleTaskTerminal(client, t.id, "cancelled", null);
       }

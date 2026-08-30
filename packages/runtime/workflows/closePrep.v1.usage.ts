@@ -82,7 +82,15 @@ export async function recordClosePrepUsage(
       // p_document / p_document_task / p_channel are NULL by nature. p_triggering_actor is NULL
       // because the clocked lane HAS no directing human — the same structural NULL the
       // task-bound mint enforces, never a director by inference (law 68).
-      await c.query("select clara.record_agent_usage_event($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) as id", [
+      // 裁-44 R3 / FOLD-19 — named notation; see bankAgent.v1.usage.ts's own copy for why these
+      // fifteen positional arguments were the most transposition-prone call in the closure.
+      await c.query(
+        `select clara.record_agent_usage_event(
+            p_firm => $1, p_call_kind => $2, p_engine_id => $3, p_outcome => $4, p_client => $5,
+            p_document => $6, p_document_task => $7, p_agent_task => $8, p_triggering_actor => $9,
+            p_via_wake_kind => $10, p_channel => $11, p_prompt_hash => $12,
+            p_input_tokens => $13, p_output_tokens => $14, p_duration_ms => $15) as id`,
+        [
         ctx.firmId,
         CLOSE_PREP_CALL_KIND,
         engineId,
@@ -98,7 +106,8 @@ export async function recordClosePrepUsage(
         asInt(usage.inputTokens),
         asInt(usage.outputTokens),
         asInt(usage.durationMs),
-      ]);
+        ],
+      );
     });
   } catch (e) {
     onUsageProblem({ reason: "write_failed", detail: e instanceof Error ? e.message : String(e) });

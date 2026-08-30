@@ -325,7 +325,7 @@
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.impl.ts": {
-      "sha256": "7f3394952abdc79af31d5832e492e3aeac61b7a3c4d3329d915db39fc6a7d4ce",
+      "sha256": "d43c70e110a3fb6836e95f88ddb7f6bf3e544e821123c6ec6951895157bea81d",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.infra.ts": {
@@ -333,7 +333,7 @@
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.pack.ts": {
-      "sha256": "bec343837bd6b47511344e2defc63f9ffdf11739a7c047dd57fdf15e2ea7b730",
+      "sha256": "6240513b3feba5f1c97a20bd0b6196163d0edc7649830fe54e54acdd6e7aee34",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.prompt.ts": {
@@ -341,7 +341,7 @@
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.tools.ts": {
-      "sha256": "c566c16b0bd64d867c6d04c5dfcfda78bcaaaff2525346931fa690c11e5fec19",
+      "sha256": "076b9df83d371a9b3e1316504e76ee9c7087222242885f142ed96fe14688758f",
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.ts": {
@@ -349,7 +349,7 @@
       "note": ""
     },
     "packages/runtime/workflows/bankAgent.v1.usage.ts": {
-      "sha256": "bb23e79cb6e02d2f344f0de265c1baaa7b90721dae391f5766f4d9763ca9c0d5",
+      "sha256": "2b545092f68108ece8d85c01701f2542814936707cf18216fd7173ad7af875df",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.impl.ts": {
@@ -813,7 +813,7 @@
       "note": ""
     },
     "packages/runtime/workflows/closePrep.v1.usage.ts": {
-      "sha256": "9bfddebbacacc72cc9d2f11fe30cbadd69dae115b0c95cdee3250e6fa4b9cb3f",
+      "sha256": "dcdc9f82b4df469bc52024802da36eb1c9d2679abc26ab1957bab0e008430d50",
       "note": ""
     },
     "packages/runtime/workflows/documentIngest.behavior.mjs": {
