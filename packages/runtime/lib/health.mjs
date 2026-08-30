@@ -5,12 +5,13 @@
 //   * world dead                (when CLARA_START_WORLD=1 — no engine to run turns)
 //   * control listener dead     (parked clarifies would never resume)
 //   * taxonomy HALT             (the relay cannot route — an un-routable state)
+//   * storage write red twice   (client uploads cannot enter canonical custody)
 //
 // A dead relay LEADER is handled by the supervisor's fail-fast (S4-ND5), not here.
 // Relay lag / dead-letters / backlog are WARNINGS only (degraded, still serving) —
-// surfaced from clara.relay_health(). The storage write probe (R9, below) joins this
-// same WARN-only class: a broken document lane is not "nothing works." Everything is
-// bounded + sanitized: /ready must never hang and never leak raw DB text.
+// surfaced from clara.relay_health(). The storage write probe (R9, below) tolerates one
+// transient failure, hard-fails on the second consecutive failure, and recovers on the
+// first success. Everything is bounded + sanitized: /ready must never hang or leak secrets.
 
 import { withRuntime } from "./pools.mjs";
 import { scannerReachable } from "./scan.mjs";
@@ -24,6 +25,7 @@ import { factsGateHealth } from "./facts-gate.mjs";
 import { classifyHealth } from "./classify.mjs";
 import { wikiProjectionHealth } from "./wiki-projection-ops.mjs";
 import { storageProbeHealth } from "./storage-probe.mjs";
+import { readinessHasHardFailure } from "./readiness-policy.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
@@ -301,19 +303,23 @@ export async function checkReadiness() {
 
   // Storage write probe (R9, docs/plan/active/harness-audit-rulings-2026-08-26.md — the
   // MEASUREMENT half of follow-up (a) of docs/ops/incident-2026-07-26-intake-storage.md; the
-  // ALARM/ROUTING half is DR.md:300's still-open "external /ready uptime checks" item, not
-  // this change). WARN-only, like every other intake-adjacent signal above: a storage outage
-  // takes the DOCUMENT LANE down, not "nothing works" — the /ready contract at the top of this
-  // file fails only on the latter. storageProbeHealth() is SYNCHRONOUS (storage-probe.mjs runs
+  // ALARM/ROUTING half is DR.md:304's still-open "external /ready uptime checks" item, not
+  // this change). A storage outage makes client uploads unusable, so the second consecutive
+  // failure becomes a hard gate. storageProbeHealth() is SYNCHRONOUS (storage-probe.mjs runs
   // the actual round trip on its own background interval, off this call entirely) — no await,
   // no bounded() wrap, ~0ms: three SEQUENTIAL bounded() network round trips already share fly's
-  // 5s /ready timeout above, and this check's own verdict cannot change the status code, so it
-  // must never spend any of that budget. The object it returns is already the full public
-  // shape (ok/reason/pending only — never the raw vendor error text) — safe to assign as-is to
+  // 5s /ready timeout above, so the storage verdict must never spend any of that budget.
+  // The object it returns is already the full public shape (classified reason + consecutive
+  // count only — never raw vendor error text) — safe to assign as-is to
   // an unauthenticated endpoint's response.
   const storage = storageProbeHealth();
-  checks.storage = storage;
-  if (!storage.ok) warnings.push(`storage write probe failed: ${storage.reason || (storage.pending ? "first probe still pending" : "unknown")}`);
+  checks.storage_write = storage;
+  if (!storage.ok) {
+    warnings.push(
+      `storage write probe failed (${storage.consecutive_failures} consecutive): ` +
+        `${storage.reason || (storage.pending ? "first probe still pending" : "unknown")}`,
+    );
+  }
 
   if (!result || result.ok !== true) {
     // DB unreachable or the whole check timed out.
@@ -321,9 +327,7 @@ export async function checkReadiness() {
     return { ready: false, checks, warnings };
   }
 
-  const failed =
-    checks.db?.ok === false ||
-    (worldEnabled() && (checks.world?.ok === false || checks.control?.ok === false || checks.taxonomy?.ok === false));
+  const failed = readinessHasHardFailure(checks, worldEnabled());
 
   return { ready: !failed, checks, warnings };
 }

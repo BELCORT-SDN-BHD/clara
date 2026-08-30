@@ -59,9 +59,9 @@
 // every 15s with a 5s TOTAL timeout, and health.mjs's own DB and intake checks are each
 // SEQUENTIALLY bounded (up to READY_DEADLINE_MS) against that same 5s — so a THIRD sequential
 // network round trip here, even bounded to a "few seconds", could eat most of the remaining
-// budget on a cache miss for a value that cannot change /ready's status code (this check is
-// WARN-only; see health.mjs). So storageProbeHealth() is SYNCHRONOUS: it returns the last
-// known verdict from memory, ~0ms, every time. A background setInterval (started lazily on
+// budget on a cache miss. So storageProbeHealth() is SYNCHRONOUS: it returns the last
+// verdict health.mjs uses for its two-failure hard gate, without doing I/O in the request.
+// It returns from memory, ~0ms, every time. A background setInterval (started lazily on
 // first use, unref'd so it never keeps the process alive on its own) refreshes that verdict at
 // most once every CACHE_MS (default 60s — a real outage still surfaces within one interval,
 // comfortably inside any on-call's noticing window). Each refresh cycle is still individually
@@ -70,11 +70,12 @@
 //
 // TRANSITIONS ARE LOGGED, STEADY STATE IS NOT. The incident's own observability defect #1 was
 // "the runtime logs nothing" — fly logs is the real alarm surface for a single-maintainer
-// operation, so a red<->green flip gets a console.error line (carrying the vendor-error detail
-// for diagnosis); an already-known-red cycle stays silent to avoid spamming that log once a
+// operation, so a red<->green flip gets a console.error line carrying ONLY the classified
+// reason. Raw vendor detail can echo a credential or URL query, so it is never retained or
+// logged; an already-known-red cycle stays silent to avoid spamming that log once a
 // minute forever. The public verdict (storageProbeHealth()'s return value, which becomes
-// checks.storage on the UNAUTHENTICATED /ready response) never carries that raw detail — only
-// a short classified `reason` code. See docs/ops/DR.md:300 for the still-open other half of
+// checks.storage_write on the UNAUTHENTICATED /ready response) carries only a classified
+// `reason` and consecutive count. See docs/ops/DR.md:304 for the still-open other half of
 // this follow-up: an EXTERNAL uptime check that pages someone on that transition. This file
 // only makes the runtime know and log; it does not page anyone.
 
@@ -116,8 +117,8 @@ export function _currentProbeForTest() {
 }
 
 /** One write -> read-back-verify round trip through the SAME storage.mjs functions
- * production intake uses. Never throws: resolves { ok:true } or { ok:false, reason, detail }.
- * `detail` is for server-side logging ONLY — never forward it into the public verdict. */
+ * production intake uses. Never throws: resolves { ok:true } or { ok:false, reason }.
+ * Raw vendor detail is not retained because transition logs must never echo secrets. */
 async function runProbeOnce() {
   const { payload, sha256, key } = currentProbe();
   let scratchDir;
@@ -130,9 +131,9 @@ async function runProbeOnce() {
     return { ok: true };
   } catch (err) {
     const reason = err instanceof StorageError
-      ? (err.code === "checksum_mismatch" ? "storage_probe_readback_mismatch" : err.code)
+      ? (err.code === "checksum_mismatch" ? "storage_probe_readback_mismatch" : "storage_error")
       : "storage_probe_error";
-    return { ok: false, reason, detail: String(err?.message ?? err).slice(0, 120) };
+    return { ok: false, reason };
   } finally {
     if (scratchDir) await rm(scratchDir, { recursive: true, force: true }).catch(() => {});
   }
@@ -172,9 +173,9 @@ export async function _probeStorageOnceForTest() {
   return withHardTimeout(runProbeOnce, timeoutMs(), { ok: false, reason: "storage_probe_timeout" });
 }
 
-// Optimistic until the first cycle completes: a fresh boot has no evidence of a problem yet,
-// this check is WARN-only (never gates readiness), and the window is bounded to one TIMEOUT_MS.
-let cachedResult = { ok: true, pending: true };
+// Optimistic until the first cycle completes: a fresh boot has no evidence of a problem yet.
+// After settlement, health.mjs gates on two consecutive failures; one failure remains tolerated.
+let cachedResult = { ok: true, reason: null, pending: true, consecutive_failures: 0 };
 let intervalHandle = null;
 let inFlight = null; // the current/most-recent refresh cycle's promise (test determinism seam)
 let busy = false; // never let two probe cycles overlap (a slow cycle + a short CACHE_MS otherwise races)
@@ -185,12 +186,18 @@ async function refreshOnce() {
   try {
     const wasOk = cachedResult.ok;
     const result = await withHardTimeout(runProbeOnce, timeoutMs(), { ok: false, reason: "storage_probe_timeout" });
-    cachedResult = { ok: result.ok, reason: result.reason, pending: false };
+    const consecutiveFailures = result.ok ? 0 : cachedResult.consecutive_failures + 1;
+    cachedResult = {
+      ok: result.ok,
+      reason: result.ok ? null : (result.reason ?? "storage_probe_error"),
+      pending: false,
+      consecutive_failures: consecutiveFailures,
+    };
     if (wasOk !== result.ok) {
       // Deliberate alarm line — see the header comment ("TRANSITIONS ARE LOGGED...").
       console.error(
         `[storage-probe] ${wasOk ? "GREEN -> RED" : "RED -> GREEN"}` +
-          `${result.reason ? ` (${result.reason})` : ""}${result.detail ? `: ${result.detail}` : ""}`,
+          `${result.reason ? ` (${result.reason})` : ""}`,
       );
     }
   } finally {
@@ -211,7 +218,7 @@ function ensureStarted() {
  * Synchronous — returns the last known verdict instantly, no I/O on the calling path (see the
  * header comment: this is off /ready's latency budget entirely). A background interval,
  * started lazily on first use, keeps the verdict refreshed at most once per CACHE_MS.
- * @returns {{ok:boolean, reason?:string, pending?:boolean}}
+ * @returns {{ok:boolean, reason:string|null, pending:boolean, consecutive_failures:number}}
  */
 export function storageProbeHealth() {
   ensureStarted();
@@ -225,7 +232,7 @@ export function _resetStorageProbeCacheForTest() {
   intervalHandle = null;
   inFlight = null;
   busy = false;
-  cachedResult = { ok: true, pending: true };
+  cachedResult = { ok: true, reason: null, pending: true, consecutive_failures: 0 };
 }
 
 /** Test-only: await the most recently started (or currently in-flight) background refresh
@@ -234,5 +241,11 @@ export function _resetStorageProbeCacheForTest() {
 export async function _waitForStorageProbeSettleForTest() {
   storageProbeHealth();
   await inFlight;
+  return { ...cachedResult };
+}
+
+/** Test-only: force one additional sequential refresh without waiting for the interval. */
+export async function _refreshStorageProbeForTest() {
+  await refreshOnce();
   return { ...cachedResult };
 }

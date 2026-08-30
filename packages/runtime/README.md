@@ -40,7 +40,10 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   retired with F-A2 PR-3.) **Supervisor** (`scripts/serve.mjs`):
   one crash-only process group.
 - **HTTP** (`src/index.ts`): chat sessions/messages/turns, an SSE stream that
-  survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7).
+  survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7). The cached
+  `checks.storage_write` probe tolerates one transient failure, returns **503 on the
+  second consecutive failure**, and recovers on the first success; its public shape is
+  `ok` + classified `reason` + `pending` + `consecutive_failures`, never raw vendor text.
 - **Workflow-versioning**: `registry.ts` names the newest version enqueue sites
   target; the CI freeze-lint golden-hashes every frozen body + its import
   closure. Prompt + tools live INSIDE the frozen closure by design (§4.9).
@@ -335,7 +338,8 @@ would strand them — quiesce/drain those runs first, or do not roll back to it.
 ### First-deploy verification checklist
 
 1. `GET /health` → 200; `GET /ready` → 200 with `checks.world.ok` +
-   `checks.control.ok` + `checks.taxonomy.ok` all true.
+   `checks.control.ok` + `checks.taxonomy.ok` all true, and `checks.storage_write`
+   settled at `{ ok: true, reason: null, pending: false, consecutive_failures: 0 }`.
 2. One seeded-firm chat turn: `POST /api/chat/:sessionId/turns` (valid JWT) →
    202 `{task_id}`; the task reaches `completed` with an assistant message
    (typed parts) and non-zero recorded usage.

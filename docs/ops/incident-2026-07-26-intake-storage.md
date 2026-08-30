@@ -255,13 +255,14 @@ upload needs it, and unproven grants on a security boundary are how boundaries r
    headline above — there was no ~12h outage; every observed failure was a duplicate
    re-upload.)* What stayed true regardless of that correction: `/ready` never touched storage
    at all, so it could not have corroborated anything storage-side, real or not — a read-only
-   reachability check would have stayed green either way. **Shipped 2026-08-27** (PR #358 —
-   `checks.storage` in `packages/runtime/lib/health.mjs`, the probe itself in
-   `packages/runtime/lib/storage-probe.mjs`): this closes the MEASUREMENT half of this
-   follow-up — the runtime now knows, and logs (`console.error`) on a red<->green transition.
-   The ALARM/ROUTING half — an external check that pages someone when it flips — is
-   `docs/ops/DR.md`:300's still-open "external `/ready` uptime checks" wiring piece; this PR
-   does not close that.
+   reachability check would have stayed green either way. **Shipped 2026-08-27** (PR #358;
+   promoted to a hard readiness gate by 裁-61 on 2026-08-30): `checks.storage_write` in
+   `packages/runtime/lib/health.mjs`, with the probe itself in
+   `packages/runtime/lib/storage-probe.mjs`. The runtime logs classified red↔green transitions,
+   tolerates one transient failure, and `/ready` returns 503 on the second consecutive failure;
+   Fly then marks the machine unhealthy for routing. The remaining ALARM half — an external
+   check that pages someone when it flips — is `docs/ops/DR.md`:304's still-open "external
+   `/ready` uptime checks" wiring piece.
 3. **Rig-cover the storage grant surface.** The fixture written for this amendment
    (`scratchpad/storage-fixture.sql`) should become a permanent battery so a vendor change
    that needs another privilege fails in CI instead of in production.

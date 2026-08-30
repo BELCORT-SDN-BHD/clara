@@ -269,7 +269,10 @@ would re-open the confined agent/wake lanes' reach).
 - `GET /ready` — **readiness**: performs a real DB round-trip (`select 1`) and
   returns **503** when the DB is unreachable, so an orchestrator/load balancer
   holds traffic instead of routing to an instance that cannot reach the source
-  of truth. Also reports whether the durable world is enabled.
+  of truth. It also reports whether the durable world is enabled and reads the
+  background storage-write verdict from `checks.storage_write`: one transient
+  failure is tolerated; the second consecutive failure returns 503; the first
+  success resets the count and restores readiness.
 
 Verified locally (2026-07-17) against the live DB:
 
@@ -278,7 +281,8 @@ GET /health -> {"ok":true,"service":"clara-runtime",...}
 GET /ready  -> {"ready":true,"checks":{"db":{"ok":true,"latency_ms":122},"world":{"enabled":false}}}  HTTP 200
 ```
 
-When the DB is down, `/ready` returns `{"ready":false,...}` with HTTP 503.
+When the DB is down, or `checks.storage_write.consecutive_failures` reaches 2,
+`/ready` returns `{"ready":false,...}` with HTTP 503.
 
 > **A 503 right after a HARD runtime restart is usually not a DB fault, and none of this
 > document is the fix.** A machine that died without a clean shutdown leaves its pooler
@@ -304,6 +308,7 @@ the external `/ready` uptime checks remain the open wiring piece.
 | Runtime availability | 99.5% monthly | `/ready` == 200 (external check, 30s) | 2 consecutive failures |
 | DB reachability | 99.9% | `/ready` `checks.db.ok` | any false for >1 min |
 | DB read latency | p95 < 300ms | `/ready` `checks.db.latency_ms` | p95 > 1s for 5 min |
+| Storage write path | uploads can enter canonical custody | `/ready` `checks.storage_write` | second consecutive probe failure; recover on first success |
 | Backup freshness (Free/Pro) | dump age < 24h | last `backups/` timestamp / managed backup age | age > 26h |
 | Restore drill | passes quarterly | `dr:selftest` exit code | any failure |
 | Durable-run backlog (Slice 4+) | drained < 5 min | outbox / graphile queue depth | depth rising 10 min |

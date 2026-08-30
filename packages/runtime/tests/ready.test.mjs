@@ -1,7 +1,7 @@
-// /ready fail-vs-warn matrix (contract §4.7). checkReadiness FAILS only on DB
-// unreachable / world dead / control dead / taxonomy HALT; relay lag/dead-letters/
-// backlog are warnings. Exercised directly against clara_rt_test by toggling the
-// world switch and the heartbeat freshness. (Taxonomy-HALT is NOT exercised here —
+// /ready fail-vs-warn matrix (contract §4.7). checkReadiness FAILS on DB unreachable,
+// world dead, control dead, taxonomy HALT, or the second consecutive storage-write
+// failure; relay lag/dead-letters/backlog remain warnings. Exercised against clara_rt_test by
+// toggling the world switch and heartbeat freshness. (Taxonomy-HALT is NOT exercised here —
 // removing the shared active pointer would corrupt the relay suite.)
 
 import { test, before, after } from "node:test";
@@ -12,7 +12,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as rig from "./rig.mjs";
 import { checkReadiness } from "../lib/health.mjs";
-import { _resetStorageProbeCacheForTest } from "../lib/storage-probe.mjs";
+import { StorageError } from "../lib/storage.mjs";
+import { endPools } from "../lib/pools.mjs";
+import {
+  _refreshStorageProbeForTest,
+  _resetStorageProbeCacheForTest,
+  _waitForStorageProbeSettleForTest,
+} from "../lib/storage-probe.mjs";
 
 const READY = await rig.runtimeReady();
 const skip = READY ? false : "Slice-4 (0006) surface absent";
@@ -69,13 +75,64 @@ test("ready: world ON with fresh world+control beats is READY", { skip }, async 
     await setBeat("control", "now()");
     const r = await checkReadiness();
     assert.equal(r.ready, true, `ready with fresh beats (${JSON.stringify(r.checks)})`);
-    assert.ok("storage" in r.checks, "the storage probe verdict must surface on /ready");
+    assert.ok("storage_write" in r.checks, "the storage probe verdict must surface under its failing-check name");
     assert.equal(r.checks.world.ok, true);
     assert.equal(r.checks.control.ok, true);
     assert.equal(r.checks.taxonomy.ok, true, "seed taxonomy pointer present");
   } finally {
     if (prev === undefined) delete process.env.CLARA_START_WORLD;
     else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready: storage write hard-fails on the second consecutive failure and one success recovers", { skip }, async () => {
+  const prev = process.env.CLARA_START_WORLD;
+  delete process.env.CLARA_START_WORLD;
+  _resetStorageProbeCacheForTest();
+  globalThis.__claraStorageForTest = {
+    put: async () => {
+      throw new StorageError("storage_error", "simulated write rejection");
+    },
+  };
+  try {
+    await _waitForStorageProbeSettleForTest();
+    const first = await checkReadiness();
+    assert.equal(first.ready, true, "one transient storage failure stays inside the tolerance");
+    assert.deepEqual(first.checks.storage_write, {
+      ok: false,
+      reason: "storage_error",
+      pending: false,
+      consecutive_failures: 1,
+    });
+
+    await _refreshStorageProbeForTest();
+    const second = await checkReadiness();
+    assert.equal(second.ready, false, "the second consecutive storage failure is a hard readiness failure");
+    assert.deepEqual(second.checks.storage_write, {
+      ok: false,
+      reason: "storage_error",
+      pending: false,
+      consecutive_failures: 2,
+    });
+    assert.ok(
+      second.warnings.some((warning) => warning.includes("storage write probe failed (2 consecutive)")),
+      `expected the count-bearing storage warning, got ${JSON.stringify(second.warnings)}`,
+    );
+
+    delete globalThis.__claraStorageForTest;
+    await _refreshStorageProbeForTest();
+    const recovered = await checkReadiness();
+    assert.equal(recovered.ready, true, "one successful write probe clears the hard failure immediately");
+    assert.deepEqual(recovered.checks.storage_write, {
+      ok: true,
+      reason: null,
+      pending: false,
+      consecutive_failures: 0,
+    });
+  } finally {
+    delete globalThis.__claraStorageForTest;
+    _resetStorageProbeCacheForTest();
+    if (prev !== undefined) process.env.CLARA_START_WORLD = prev;
   }
 });
 
@@ -155,5 +212,42 @@ test("ready: world ON with a STALE control beat FAILS (control listener dead)", 
   } finally {
     if (prev === undefined) delete process.env.CLARA_START_WORLD;
     else process.env.CLARA_START_WORLD = prev;
+  }
+});
+
+test("ready: a DB-only failure still hard-fails while storage is healthy", { skip }, async () => {
+  const previous = {
+    databaseUrl: process.env.DATABASE_URL,
+    runtimeDatabaseUrl: process.env.CLARA_RUNTIME_DATABASE_URL,
+    pgHost: process.env.PGHOST,
+    pgPort: process.env.PGPORT,
+    startWorld: process.env.CLARA_START_WORLD,
+  };
+  delete process.env.DATABASE_URL;
+  delete process.env.CLARA_RUNTIME_DATABASE_URL;
+  delete process.env.CLARA_START_WORLD;
+  process.env.PGHOST = "127.0.0.1";
+  process.env.PGPORT = "1";
+  _resetStorageProbeCacheForTest();
+  try {
+    await _waitForStorageProbeSettleForTest();
+    await endPools();
+    const r = await checkReadiness();
+    assert.equal(r.ready, false, "DB unreachability remains a hard readiness failure");
+    assert.deepEqual(r.checks.db, { ok: false, error: "db_timeout" });
+    assert.equal(r.checks.storage_write.ok, true, "the failure is DB-only, not storage-derived");
+  } finally {
+    await endPools();
+    if (previous.databaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = previous.databaseUrl;
+    if (previous.runtimeDatabaseUrl === undefined) delete process.env.CLARA_RUNTIME_DATABASE_URL;
+    else process.env.CLARA_RUNTIME_DATABASE_URL = previous.runtimeDatabaseUrl;
+    if (previous.pgHost === undefined) delete process.env.PGHOST;
+    else process.env.PGHOST = previous.pgHost;
+    if (previous.pgPort === undefined) delete process.env.PGPORT;
+    else process.env.PGPORT = previous.pgPort;
+    if (previous.startWorld === undefined) delete process.env.CLARA_START_WORLD;
+    else process.env.CLARA_START_WORLD = previous.startWorld;
+    _resetStorageProbeCacheForTest();
   }
 });

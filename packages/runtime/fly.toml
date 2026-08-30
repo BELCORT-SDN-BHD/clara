@@ -42,8 +42,8 @@ primary_region = "sin"
   min_machines_running = 1
 
   # Readiness gate (§4.7): /ready FAILS on DB unreachable / world dead / control
-  # listener dead / taxonomy HALT — the LB then holds traffic (and a crash-only exit
-  # takes the machine down for Fly to restart).
+  # listener dead / taxonomy HALT, or the second consecutive storage-write failure —
+  # the LB then holds traffic (and a crash-only exit takes the machine down for Fly to restart).
   [[http_service.checks]]
     interval = "15s"
     timeout = "5s"

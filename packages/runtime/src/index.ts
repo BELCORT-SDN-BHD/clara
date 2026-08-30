@@ -59,9 +59,10 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "clara-runtime", pid: process.pid, ts: new Date().toISOString() });
 });
 
-// Readiness — should we receive traffic? FAILS (503) only on DB unreachable, world
-// dead, control listener dead, or taxonomy HALT (§4.7); relay lag / dead-letters /
-// backlog are warnings[] (degraded, still serving). Bounded + sanitized.
+// Readiness — should we receive traffic? FAILS (503) on DB unreachable, world dead,
+// control listener dead, taxonomy HALT, or the second consecutive storage-write probe
+// failure; relay lag / dead-letters / backlog are warnings[] (degraded, still serving).
+// Bounded + sanitized.
 app.get("/ready", async (_req, res) => {
   // During graceful shutdown, report NOT ready so the LB stops routing new traffic.
   const sup = (globalThis as unknown as { __claraSupervisor?: { shuttingDown?: boolean } }).__claraSupervisor;

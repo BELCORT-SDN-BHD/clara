@@ -3,7 +3,7 @@
 // level: exercises storage-probe.mjs directly against storage.mjs's own RELAY_TEST_MODE seams
 // (local-fs fallback + the injectable globalThis.__claraStorageForTest shim already defined in
 // storage.mjs), so no DB rig and no live Supabase credential are needed. checkReadiness()'s own
-// wiring of checks.storage is presence-pinned in ready.test.mjs's fresh-beats cell (rig-gated).
+// wiring of checks.storage_write is presence-pinned in ready.test.mjs's fresh-beats cell (rig-gated).
 
 import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
@@ -13,9 +13,11 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { StorageError } from "../lib/storage.mjs";
+import { readinessHasHardFailure } from "../lib/readiness-policy.mjs";
 import {
   _currentProbeForTest,
   _probeStorageOnceForTest,
+  _refreshStorageProbeForTest,
   _resetStorageProbeCacheForTest,
   _waitForStorageProbeSettleForTest,
   storageProbeHealth,
@@ -121,13 +123,49 @@ test("storage probe: read-back-mismatch arm — tampered bytes on readback repor
 
 test("storage probe facade: cold start is optimistic (ok:true, pending:true) and returns synchronously", async () => {
   const r = storageProbeHealth();
-  assert.equal(r.ok, true, "a fresh boot has no evidence of a problem yet");
-  assert.equal(r.pending, true, "cold start must say so, so a caller can tell 'unknown' from 'known healthy'");
+  assert.deepEqual(r, { ok: true, reason: null, pending: true, consecutive_failures: 0 });
   // storageProbeHealth() kicked off a real background cycle as a side effect of the call
   // above; drain it before this test returns so it cannot land, unawaited, inside the NEXT
   // test's window (that stray-call race is exactly what production the busy guard prevents
   // for OVERLAPPING cycles, but a cross-test leak needs the test itself to drain).
   await _waitForStorageProbeSettleForTest();
+});
+
+test("storage probe facade: consecutive failures count upward and the first success resets the count", async () => {
+  globalThis.__claraStorageForTest = {
+    put: async () => {
+      throw new StorageError("storage_error", "simulated write rejection");
+    },
+  };
+  const first = await _waitForStorageProbeSettleForTest();
+  assert.deepEqual(first, { ok: false, reason: "storage_error", pending: false, consecutive_failures: 1 });
+  assert.equal(
+    readinessHasHardFailure({ db: { ok: true }, storage_write: first }, false),
+    false,
+    "the first storage failure remains inside the readiness tolerance",
+  );
+
+  const second = await _refreshStorageProbeForTest();
+  assert.deepEqual(second, { ok: false, reason: "storage_error", pending: false, consecutive_failures: 2 });
+  assert.equal(
+    readinessHasHardFailure({ db: { ok: true }, storage_write: second }, false),
+    true,
+    "the second consecutive storage failure is a hard readiness failure",
+  );
+
+  delete globalThis.__claraStorageForTest;
+  const recovered = await _refreshStorageProbeForTest();
+  assert.deepEqual(recovered, { ok: true, reason: null, pending: false, consecutive_failures: 0 });
+  assert.equal(
+    readinessHasHardFailure({ db: { ok: true }, storage_write: recovered }, false),
+    false,
+    "the first successful probe resets readiness",
+  );
+  assert.equal(
+    readinessHasHardFailure({ db: { ok: false }, storage_write: recovered }, false),
+    true,
+    "a DB-only failure remains a hard readiness failure",
+  );
 });
 
 test("storage probe facade: settles once, then repeat calls stay synchronous (no re-probe) until the cache expires", async () => {
@@ -188,18 +226,30 @@ test("storage probe facade: logs via console.error only on a red<->green transit
   }
 });
 
-test("storage probe facade: the public verdict never carries the raw vendor error text", async () => {
+test("storage probe facade: neither logs nor the public verdict carry raw credential or URL-query material", async () => {
+  const rawCredentialMaterial = "synthetic-role-material";
+  const rawUrlQuery = "https://storage.invalid/object?signature=synthetic-query-material";
   globalThis.__claraStorageForTest = {
     put: async () => {
-      throw new StorageError("storage_error", "raw vendor body: {\"secret\":\"should-not-leak\"}");
+      throw new StorageError(
+        `vendor_code_${rawCredentialMaterial}_${rawUrlQuery}`,
+        `vendor echoed ${rawCredentialMaterial} at ${rawUrlQuery}`,
+      );
     },
   };
-  const settled = await _waitForStorageProbeSettleForTest();
-  assert.equal(settled.ok, false);
-  assert.equal(settled.reason, "storage_error");
-  assert.equal("detail" in settled, false, "checks.storage (unauthenticated /ready) must not carry the raw error detail");
-  const publicShape = storageProbeHealth();
-  assert.equal("detail" in publicShape, false);
+  const logs = [];
+  const originalError = console.error;
+  console.error = (...args) => logs.push(args.join(" "));
+  try {
+    const settled = await _waitForStorageProbeSettleForTest();
+    assert.deepEqual(settled, { ok: false, reason: "storage_error", pending: false, consecutive_failures: 1 });
+    assert.deepEqual(logs, ["[storage-probe] GREEN -> RED (storage_error)"]);
+    assert.equal(logs[0].includes(rawCredentialMaterial), false);
+    assert.equal(logs[0].includes(rawUrlQuery), false);
+    assert.equal("detail" in storageProbeHealth(), false, "the unauthenticated /ready shape must not carry raw detail");
+  } finally {
+    console.error = originalError;
+  }
 });
 
 // --- the probe key is pinned to the LIVE policy grammar, never retyped (review law 3) -------
