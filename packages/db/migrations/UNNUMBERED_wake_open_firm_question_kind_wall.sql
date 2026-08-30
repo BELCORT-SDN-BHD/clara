@@ -412,7 +412,12 @@ $blk$;
   if v_src is null
      or position('clara.name_family_is_ambiguous(w.firm_id, v_name)' in v_src) = 0
      or position('no live, admissible-purpose egress authorization for this proposal' in v_src) = 0
-     or position('an onboarding proposal is already open for this document' in v_src) = 0 then
+     or position('an onboarding proposal is already open for this document' in v_src) = 0
+     -- fold review round 2, new LOW: the tail's own notice below claims to have SEEN basis
+     -- resolution -- so this predicate must actually read it (0143:630's exact call), not
+     -- merely assert it in prose. clara._resolve_proposal_basis(array[p_document], w.firm_id,
+     -- p_basis) is the third of the three protections this file's own header (FIND-1) names.
+     or position('clara._resolve_proposal_basis(array[p_document], w.firm_id, p_basis)' in v_src) = 0 then
     raise exception 'wake_open_firm_question_kind_wall tail: wake_propose_client_onboarding lost a wall this file''s refusal points callers toward -- this file must not have touched it' using errcode = 'CLR10';
   end if;
 

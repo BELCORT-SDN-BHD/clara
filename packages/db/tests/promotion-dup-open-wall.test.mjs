@@ -10,9 +10,16 @@
 //     partial unique index uq_firm_open_questions_onboarding_open and the map in the SHARED
 //     core clara._firm_question_core. The interesting cell here is NOT Door 2's own second
 //     call -- 0142's `select ... from clara.documents ... for update` already serialized that,
-//     and the race cell below PROVES that rather than assuming it -- but
-//     clara.wake_open_firm_question, a SECOND writer of the same kind that holds no document
-//     lock and runs no duplicate check, which the body check can never see.
+//     and the race cell below PROVES that rather than assuming it -- but AT THIS FILE'S OWN
+//     AUTHORING (0148), clara.wake_open_firm_question was a SECOND writer of the same kind
+//     that held no document lock and ran no duplicate check, which the body check could never
+//     see. TRUED since (packages/db/migrations/UNNUMBERED_wake_open_firm_question_kind_wall
+//     .sql, PROGRESS 3a): that verb no longer writes onboarding_proposed AT ALL -- it refuses
+//     the kind outright, before ever reaching this shared core -- so the cells below that used
+//     to race or duplicate-collide THROUGH it were re-pointed to call clara._firm_question_core
+//     DIRECTLY (bypassing every wrapper, "under an owner test session") to keep proving THIS
+//     file's own index+handler still work, independent of which wrapper happens to reach them
+//     today.
 //   PART C -- the two indexes read BY PROPERTY at the rig layer. A migration-time fact that no
 //     test ever re-asserts is treated as permanent by assumption, not by proof (rev-pb A5's
 //     own lesson, applied here).
@@ -131,8 +138,12 @@ const ofqVals = (o) => [
   JSON.stringify(o.candidates ?? []), o.rationale ?? "rig rationale",
   JSON.stringify(o.model ?? validModel()), o.opKey ?? opk("mbb7ofq"),
 ];
-/** The SECOND writer of kind='onboarding_proposed' -- caller-supplied kind, no document lock,
- *  no duplicate-open check of its own. This is the path Door 2's body check cannot see. */
+/** clara.wake_open_firm_question, called with a caller-supplied kind. AT 0148's OWN AUTHORING
+ *  this was a SECOND writer of kind='onboarding_proposed' -- no document lock, no duplicate-open
+ *  check of its own, a path Door 2's body check could never see. TRUED since (PROGRESS 3a,
+ *  UNNUMBERED_wake_open_firm_question_kind_wall.sql): it refuses onboarding_proposed outright
+ *  now, before reaching this shared core at all -- still used below (a) to prove that refusal
+ *  itself, and (b) unchanged, for every OTHER kind this verb still legitimately writes. */
 const openFirmQuestion = (secret, o) =>
   runAs(wakeActor("clara_wake_filing", secret), namedCall("wake_open_firm_question", OFQ_SPECS), ofqVals(o));
 

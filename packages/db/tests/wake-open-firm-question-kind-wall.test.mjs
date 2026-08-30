@@ -1,21 +1,25 @@
 // PROGRESS.md "Known issues" (3a) -- clara.wake_open_firm_question could mint the FIRST
 // 'onboarding_proposed' question with a caller-supplied kind and candidates, bypassing DOOR 2's
-// own protections (clara.wake_propose_client_onboarding's A14 name-family wall and firm-narrow
-// CLR28 egress authorization). Design of record: the migration's own header
-// (packages/db/migrations/UNNUMBERED_wake_open_firm_question_kind_wall.sql -- the number is
-// claimed at merge, packages/db/README.md "Migration numbers are claimed at MERGE time").
+// own protections (clara.wake_propose_client_onboarding's A14 name-family wall, firm-narrow
+// CLR28 egress authorization, and 裁-22's own DB-resolved basis). Design of record: the
+// migration's own header (packages/db/migrations/UNNUMBERED_wake_open_firm_question_kind_wall
+// .sql -- the number is claimed at merge, packages/db/README.md "Migration numbers are claimed
+// at MERGE time").
 //
 // WHAT IS UNDER TEST: an AUTHORITY wall, not a duplicate-open wall (0148's
 // uq_firm_open_questions_onboarding_open already ships that, structurally, for every writer
 // including this one -- see promotion-dup-open-wall.test.mjs). This file's wall does not ask
 // "does one already exist" -- it asks "is this the right door", and refuses UNCONDITIONALLY,
-// whether or not a question is already open.
+// whether or not a question is already open. TRUED (fold review round 2, native+Codex): the
+// wall is a POSITIVE ROSTER, not a single-name deny -- it admits EXACTLY the four ladder-derived
+// kinds and refuses the other THREE (onboarding_proposed, correction_proposed,
+// promotion_proposed) as door-owned, never "every other kind".
 //   PART A -- the refusal itself: unconditional, typed CLR10/door_owned_kind, settles no
 //     op-key receipt and writes no row.
-//   PART B -- NARROWNESS, proven positively: every OTHER kind in the live vocabulary is still
-//     admitted through this verb -- the wall targets exactly one kind, not a blanket lockdown
-//     of the verb's own documented ad hoc purpose ("triage could not even produce a
-//     candidate", 0126's own header).
+//   PART B -- the POSITIVE ROSTER, proven positively over the exact live vocabulary: EXACTLY
+//     the four ladder-derived kinds are admitted, and EXACTLY the three door-owned kinds refuse
+//     -- including the two spoofing attacks and the NULL/unknown/whitespace/case-variant sweep
+//     -- with a standing closed-set tripwire pinning the split itself.
 //   PART C -- the honest recourse: wake_propose_client_onboarding (Door 2), the door this
 //     refusal's own message points a caller toward, still genuinely works.
 //
@@ -36,6 +40,7 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   CLR, PG, ROLES, assertRaises, opk, rootQuery, roleQuery, humanQuery,
   wakeActor, runAs, namedCall, ensureReady, buildWorld, mintWake, endPool,
@@ -219,7 +224,7 @@ const DOOR_OWNED_KINDS = ["onboarding_proposed", "correction_proposed", "promoti
 // or loses a member, the list below stops matching the live CHECK and this cell reds --
 // on a genuinely new kind, PostgreSQL's own catalog moved by design (a real migration did
 // its job); this test's job is only to make that landing IMPOSSIBLE to merge silently.
-test("kind wall ROSTER (standing closed-set tripwire): the live seven-value vocabulary is EXACTLY these 4 admitted + 3 door-owned kinds -- if this reds, a migration widened firm_open_questions_kind_check and the NEXT AUTHOR must classify the new kind (add it to ADMITTED_KINDS only if it is a DERIVED ladder verdict with no dedicated proposal door of its own; otherwise add it to DOOR_OWNED_KINDS and this test's own admit/refuse batteries) before merging -- never leave it unclassified, which silently ADMITS it by falling through the `not in (...)` refusal's negative form", async (t) => {
+test("kind wall ROSTER (standing closed-set tripwire): the live seven-value vocabulary is EXACTLY these 4 admitted + 3 door-owned kinds -- if this reds, a migration widened firm_open_questions_kind_check and the NEXT AUTHOR must classify the new kind (add it to ADMITTED_KINDS only if it is a DERIVED ladder verdict with no dedicated proposal door of its own; otherwise add it to DOOR_OWNED_KINDS and this test's own admit/refuse batteries) before merging -- the wall's own default for an unclassified kind is already the SAFE direction (`p_kind not in (...)` refuses it), so silence here would not open a hole; it would silently BREAK a legitimate new ladder-derived kind that needed adding to ADMITTED_KINDS, with no one noticing why it started refusing", async (t) => {
   if (unready(t)) return;
   const def = await rootQuery(
     `select pg_get_constraintdef(oid) as def from pg_constraint
@@ -338,22 +343,37 @@ test("kind wall: NULL, an unknown spelling, a whitespace variant and a wrong-cas
 
 // ===========================================================================
 // PART D -- SOURCE-ORDER, permanently pinned (Codex FIX-REQUIRED MEDIUM finding 2 on
-// #447, ruled 2026-08-30). A ROLLED-BACK transaction cannot behaviourally distinguish
-// "the guard ran BEFORE _reserve_op" from "the guard ran after _reserve_op but the whole
-// call then rolled back anyway" -- every PART A/B/spoofing cell above proves the SECOND
-// (no receipt, no row, no op_receipts row survive a refusal), which is necessary but not
-// sufficient. This cell reads the live prosrc BY POSITION -- a fact no rollback can mask
-// -- so a future recut that moves the guard AFTER _reserve_op (still refusing, still
-// leaving no row, because the whole call still rolls back) reds this cell even though
-// every behavioural cell above would keep passing.
+// #447, ruled 2026-08-30; round 2 NOT-CLOSED finding on the SAME cell, ruled 2026-08-30).
+// A ROLLED-BACK transaction cannot behaviourally distinguish "the guard ran BEFORE
+// _reserve_op" from "the guard ran after _reserve_op but the whole call then rolled back
+// anyway" -- every PART A/B/spoofing cell above proves the SECOND (no receipt, no row, no
+// op_receipts row survive a refusal), which is necessary but not sufficient. This cell
+// reads the live prosrc BY POSITION -- a fact no rollback can mask -- so a future recut
+// that moves the guard AFTER _reserve_op (still refusing, still leaving no row, because
+// the whole call still rolls back) reds this cell even though every behavioural cell
+// above would keep passing.
+//
+// ROUND 2: `indexOf()` on marker strings alone is itself spoofable -- a future recut
+// could plant the exact guard marker text inside an EARLY COMMENT, move the real
+// executable guard after _reserve_op, and still pass every position assertion below (the
+// FIRST occurrence of the marker is the comment, not the code). Closed by ALSO pinning
+// the live prosrc's sha256 to the exact reviewed postimage -- any recut, marker-preserving
+// or not, changes the body's bytes, and a later LEGITIMATE recut must deliberately update
+// this pin (the same discipline the migration's own tail already carries at deploy time;
+// this is that same fact, permanent, at CI time).
 // ===========================================================================
 
-test("kind wall SOURCE ORDER (permanent catalog pin): the roster guard's own source position is strictly BEFORE _reserve_op, the agent_filing_receipts INSERT, and the _firm_question_core call -- read from live prosrc, a fact no rollback can mask", async (t) => {
+test("kind wall SOURCE ORDER (permanent catalog pin): the roster guard's own source position is strictly BEFORE _reserve_op, the agent_filing_receipts INSERT, and the _firm_question_core call -- read from live prosrc, a fact no rollback can mask; AND the live prosrc sha256 equals the exact reviewed postimage, so a marker planted in an early comment (which indexOf() alone cannot see through) cannot pass this cell silently", async (t) => {
   if (unready(t)) return;
   const r = await rootQuery(
     `select p.prosrc as src from pg_proc p
       where p.oid = 'clara.wake_open_firm_question(uuid,text,text,jsonb,text,jsonb,text)'::regprocedure`);
   const src = r.rows[0].src;
+  const liveSha = createHash("sha256").update(src, "utf8").digest("hex");
+  assert.equal(liveSha, "a592b6128da3fda2ef5497eae82331ddb382b3650abfc842ef710a6f59871964",
+    "the live prosrc no longer matches the exact reviewed postimage -- a later LEGITIMATE " +
+    "recut must deliberately update this pin, in the same PR that changes the body, so a " +
+    "reviewer sees the sha move rather than trusting a marker-string position check alone");
   const guardPos = src.indexOf("if p_kind is null or p_kind not in (");
   const reserveOpPos = src.indexOf("v_dedupe := clara._reserve_op(w.firm_id,'wake_open_firm_question'");
   const receiptInsertPos = src.indexOf("insert into clara.agent_filing_receipts(");
