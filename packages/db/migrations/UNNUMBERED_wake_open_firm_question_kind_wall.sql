@@ -38,35 +38,61 @@
 -- check, no egress authorization, and no document lock -- a full side door around every
 -- rung Door 2 was built to enforce.
 --
--- SCOPE, DELIBERATELY NARROW ("a small migration", per the fix queue). The live kind
--- vocabulary (firm_open_questions_kind_check, read byte-exact in the prestate below) has
--- seven members: unattributed, collision, contradiction, identity_document,
--- correction_proposed, promotion_proposed, onboarding_proposed. Of those, only
--- 'onboarding_proposed' is a DOOR-2-OWNED kind in the sense PROGRESS 3a names -- written
--- by exactly one OTHER purpose-built entrance (wake_propose_client_onboarding) that
--- layers real authorization the generic verb cannot see. The four ladder-derived kinds
--- (unattributed/collision/contradiction/identity_document) are written only by the
--- attribution ladder's own core (0126:1435) as a DERIVED verdict of a real ladder run,
--- and 'correction_proposed' by the wrong-client-correction proposal (0126:1926) --
--- wake_open_firm_question minting either of THOSE ad hoc is exactly the verb's own
--- documented purpose: "TA-P4 A applies to every agent act, including one that opens a
--- question without an attribution attempt behind it (e.g. triage could not even produce
--- a candidate)" (0126, wake_open_firm_question's own header). A blanket whitelist would
--- break that documented use; this file walls only the one kind PROGRESS 3a actually
--- measured and named. 'promotion_proposed' is in the CHECK vocabulary but has NO writer
--- anywhere in the catalog today (measured: zero literal writes across every migration) --
--- there is no door to protect yet, so it is left alone rather than walled speculatively.
+-- SCOPE -- WIDENED PER FOLD REVIEW (Codex FIX-REQUIRED HIGH on #447, ruled 2026-08-30).
+-- The first cut of this file denied exactly 'onboarding_proposed' and admitted everything
+-- else by default -- a single-name DENY list. The review's own attack: an
+-- onboarding-shaped candidates payload (a proposed_name + basis) minted under
+-- p_kind='promotion_proposed', or a from/to-client pair minted under
+-- p_kind='correction_proposed', would still be ADMITTED by that deny list and land a
+-- durable, real firm_open_questions + agent_filing_receipts row -- spoofing the SHAPE of
+-- a real proposal card through a door that runs none of the checks the real proposal
+-- doors do. No accept verb reads those candidates as a fact TODAY (measured: neither kind
+-- has a live consumer), but "no consumer exists yet" is an ABSENCE, and review law 2 says
+-- absence is not evidence -- it is not evidence that one never will, and a future accept
+-- path built to read `correction_proposed` candidates by SHAPE rather than by the
+-- question's own typed carrier identity would silently trust a forged card. So the wall
+-- is now a POSITIVE, fail-closed ALLOW list, not a deny list: this verb admits EXACTLY
+-- the four kinds the attribution ladder itself DERIVES as a real ladder run's own
+-- verdict -- unattributed, collision, contradiction, identity_document (0126:1435,
+-- clara._agent_file_document_core's own case dispatch) -- and refuses every other live
+-- vocabulary member as door-owned:
+--   * onboarding_proposed -- clara.wake_propose_client_onboarding (Door 2)'s own kind,
+--     PROGRESS 3a's original finding (the A14 name-family wall + firm-narrow CLR28
+--     egress authorization this generic verb cannot see);
+--   * correction_proposed -- the wrong-client-correction proposal's own kind (0126:1926),
+--     which authorises off a real, resolved destination-attribution judgement
+--     (`client_resolutions... method in ('human','rule','judgement')`) this verb never
+--     checks;
+--   * promotion_proposed -- a live CHECK member with NO writer in the catalog today
+--     (measured: zero literal writes across every migration) -- walled anyway, per the
+--     review's own instruction, because "no door claims it yet" is exactly the absence
+--     review law 2 refuses to treat as permission; a future door that DOES claim it must
+--     widen THIS roster deliberately, in its own PR, rather than inherit an open-by-
+--     default admission it never asked for.
+-- The four admitted kinds remain reachable ad hoc, matching this verb's own documented
+-- purpose ("TA-P4 A applies to every agent act, including one that opens a question
+-- without an attribution attempt behind it (e.g. triage could not even produce a
+-- candidate)", 0126, wake_open_firm_question's own header) -- they are DERIVED verdicts
+-- with no dedicated proposal door of their own to bypass. A FUTURE CHECK value (an
+-- eighth kind added by some later migration) is refused by this roster BY DEFAULT until
+-- a door claims it and a later PR deliberately widens the admit list -- fail closed, not
+-- fail open, on the axis that matters: a kind this verb has never heard of is never
+-- assumed safe.
 --
 -- =====================================================================================
 -- WHAT THIS FILE SHIPS
 -- =====================================================================================
 -- ONE typed, structural refusal inside clara.wake_open_firm_question (CREATE OR REPLACE
 -- at the UNCHANGED 7-arg signature, so the ACL and the filing-allowlist row are preserved
--- by construction): if p_kind = 'onboarding_proposed', refuse CLR10 before ANY other
--- work -- ahead of the op-key reservation, alongside the verb's other early structural
--- checks (op_key/rationale/model), so a caller spends no reservation on a request this
--- verb will never honour. Every prior wall string is byte-preserved; the ONLY change is
--- this one new early check.
+-- by construction): unless p_kind is EXACTLY one of the four admitted ladder-derived
+-- kinds, refuse CLR10/door_owned_kind before ANY other work -- ahead of the op-key
+-- reservation, alongside the verb's other early structural checks (op_key/rationale/
+-- model), so a caller spends no reservation on a request this verb will never honour.
+-- The membership test is exact-string, case-sensitive `IN`, so NULL, an unknown spelling,
+-- a whitespace variant, and a differently-cased spelling of an admitted kind ALL fail it
+-- and refuse -- none of those four failure shapes needs its own branch; the same one test
+-- catches all of them by construction. Every prior wall string is byte-preserved; the
+-- ONLY change is this one new early check.
 --
 -- NOT a duplicate-open wall (0148 already ships that, structurally, for every writer
 -- including this one) -- this is an AUTHORITY wall: it does not ask "does one already
@@ -81,10 +107,11 @@
 -- at an unchanged signature: no overload shadowed, no ACL moves, no allowlist row
 -- touched. SEVERITY: a call that spans this migration finishes on the OLD body, which
 -- has no kind wall -- so in the one narrow window where an in-flight call ALSO happens
--- to be an 'onboarding_proposed' side-door attempt, it would still succeed on the old
--- body. No row is corrupted and no OTHER wall is skipped; the exposure is exactly this
--- one gap, unclosed for one more call. A D1 window is still taken: the obligation is
--- mechanical (packages/db/README.md "Deploy contract"), not severity-tiered.
+-- to be a door-owned-kind side-door attempt (onboarding_proposed, correction_proposed,
+-- or promotion_proposed), it would still succeed on the old body. No row is corrupted
+-- and no OTHER wall is skipped; the exposure is exactly this one gap, unclosed for one
+-- more call. A D1 window is still taken: the obligation is mechanical (packages/db/
+-- README.md "Deploy contract"), not severity-tiered.
 --
 -- NO NEW `clara_authenticated` DOOR. .claude/rules/db-migrations.md's frontend-home rule
 -- does not engage: this file adds no function, no table, and grants no role anything new.
@@ -103,7 +130,12 @@ begin
   -- 0.1 Dependencies -- NOT a frontier equality (sibling lanes claim numbers
   -- concurrently): this file names the migrations whose OBJECTS it edits.
   if not exists (select 1 from clara.schema_migrations where version = '0148_promotion_dup_open_wall') then
-    raise exception 'wake_open_firm_question_kind_wall prestate: 0148_promotion_dup_open_wall is not applied -- this file edits the same verb 0148 recut for the duplicate-open handler'
+    -- LINEAGE, corrected (fold FIND-3 / LOW): 0148 recut clara._firm_question_core, the
+    -- shared UNGRANTED core this wrapper delegates to -- it never recut this wrapper
+    -- itself. Repository history shows no wrapper CREATE OR REPLACE between 0126 (birth)
+    -- and this file. Named here because this file's own tail re-verifies 0148's duplicate-
+    -- open handler is still present in that CORE, not in the wrapper this file edits.
+    raise exception 'wake_open_firm_question_kind_wall prestate: 0148_promotion_dup_open_wall is not applied -- this file edits the wrapper that delegates to clara._firm_question_core, the shared core 0148 recut for the duplicate-open handler'
       using errcode = 'CLR10';
   end if;
   if not exists (select 1 from clara.schema_migrations where version = '0142_fa7b_pr_a_client_onboarding_open') then
@@ -206,17 +238,24 @@ begin
       using errcode='CLR10',
       detail='{"reason":"invalid_request","class":"model_snapshot","constraint":"provider+model+version"}';
   end if;
-  -- PROGRESS.md Known-issues 3a / this migration: onboarding_proposed is a DOOR-2-OWNED
-  -- kind -- clara.wake_propose_client_onboarding is the only lawful entrance, and it
-  -- layers real authority this generic verb cannot see (the A14 name-family wall, the
-  -- firm-narrow CLR28 egress authorization, the document lock). Refused here, BEFORE the
-  -- op-key reservation, so a refused attempt settles no receipt. This does not ask
-  -- whether one is already open (0148's uq_firm_open_questions_onboarding_open already
-  -- binds that structurally, for every writer) -- it asks whether THIS is the right door.
-  if p_kind = 'onboarding_proposed' then
-    raise exception 'onboarding_proposed questions must be opened through wake_propose_client_onboarding, which carries the name-family wall and the egress authorization this verb does not'
+  -- PROGRESS.md Known-issues 3a / this migration, WIDENED per fold review (Codex
+  -- FIX-REQUIRED HIGH on #447, ruled 2026-08-30): a POSITIVE, fail-closed roster -- admit
+  -- EXACTLY the four kinds the attribution ladder itself DERIVES as a real ladder run's
+  -- own verdict (unattributed, collision, contradiction, identity_document -- 0126:1435's
+  -- own case dispatch), refuse every other live kind as door-owned: onboarding_proposed
+  -- (Door 2's -- the A14 name-family wall + firm-narrow CLR28 egress authorization this
+  -- generic verb cannot see), correction_proposed (the wrong-client-correction proposal's
+  -- own resolved-destination authority), and promotion_proposed (no writer exists today --
+  -- review law 2: absence is not evidence it never will, so it is walled anyway). The
+  -- membership test is exact-string, case-sensitive `in`, so NULL, an unknown spelling, a
+  -- whitespace variant, and a differently-cased admitted kind all fail it by the SAME one
+  -- test. Refused here, BEFORE the op-key reservation, so a refused attempt settles no
+  -- receipt. A FUTURE eighth CHECK value is refused by default until a later PR
+  -- deliberately widens this roster -- fail closed, never open by default.
+  if p_kind is null or p_kind not in ('unattributed','collision','contradiction','identity_document') then
+    raise exception 'a firm question of this kind must be opened through its own purpose-built door, not the generic wake_open_firm_question verb'
       using errcode='CLR10',
-      detail='{"reason":"door_owned_kind","class":"kind","kind":"onboarding_proposed"}';
+      detail=jsonb_build_object('reason','door_owned_kind','class','kind','kind',p_kind)::text;
   end if;
   v_dedupe := clara._reserve_op(w.firm_id,'wake_open_firm_question',p_op_key,
     clara._hash(jsonb_build_object('document',p_document,'kind',p_kind,'question',p_question)));
@@ -227,6 +266,10 @@ begin
     values (w.firm_id, p_document, null, null,
       p_model->>'model', p_model->>'version', p_rationale,
       jsonb_build_object('citations','[]'::jsonb, 'note','standalone firm question, no ladder run'),
+      -- NOT a borrowed Annex A.2 rung token (a first draft used attribution_no_basis, which
+      -- would over-count B3's failure rate the moment design SS7's re-measurement runs -- MEASURED
+      -- by independent review, corrected). This IS a ladder-external act, so it gets its own,
+      -- honestly-named, out-of-vocabulary marker that no rung ever emits.
       array['not_a_ladder_run']::text[], w.wake_kind, 'wake_task', w.credential_id::text,
       clara.agent_user_id(), w.on_behalf_of)
     returning id into v_receipt_id;
@@ -236,13 +279,17 @@ begin
     jsonb_build_object('question_id', v_question_id, 'receipt_id', v_receipt_id));
 end $fn$;
 comment on function clara.wake_open_firm_question(uuid,text,text,jsonb,text,jsonb,text) is
-  'PROGRESS 3a: refuses p_kind=''onboarding_proposed'' (CLR10/door_owned_kind) before op-key '
-  'reservation -- that kind''s sole lawful entrance is clara.wake_propose_client_onboarding '
-  '(Door 2), which layers the A14 name-family wall and the firm-narrow CLR28 egress '
-  'authorization this generic verb cannot see. Every prior wall (op_key/rationale/model '
-  'shape, TA-P4 A receipt-first-then-question) is byte-preserved from the pre-existing '
-  '0126 body. Delegates to the shared clara._firm_question_core (0103, its own '
-  'duplicate-open handler from 0148 unTouched), reachable by clara_wake_filing only.';
+  'PROGRESS 3a, WIDENED per fold review (Codex FIX-REQUIRED HIGH on #447): admits EXACTLY '
+  'the four ladder-derived kinds (unattributed, collision, contradiction, '
+  'identity_document) and refuses every other live kind -- onboarding_proposed, '
+  'correction_proposed, promotion_proposed -- as door-owned (CLR10/door_owned_kind), '
+  'before op-key reservation. NULL/unknown/whitespace/case variants all fail the same '
+  'exact-string membership test. A future CHECK value fails closed until a door claims '
+  'it and a later PR widens this roster. Every prior wall (op_key/rationale/model shape, '
+  'TA-P4 A receipt-first-then-question) is byte-preserved from the pre-existing 0126 '
+  'body. Delegates to the shared, UNGRANTED clara._firm_question_core (born 0103, RECUT '
+  'by 0148 for the duplicate-open handler -- 0148 never touched this wrapper), reachable '
+  'by clara_wake_filing only.';
 
 reset role;
 
@@ -302,14 +349,53 @@ begin
      or position('insert into clara.agent_filing_receipts' in v_src) = 0 then
     raise exception 'wake_open_firm_question_kind_wall tail: the recut wake_open_firm_question lost a pre-existing wall string' using errcode = 'CLR10';
   end if;
-  if position('if p_kind = ''onboarding_proposed'' then' in v_src) = 0
-     or position('"reason":"door_owned_kind","class":"kind","kind":"onboarding_proposed"' in v_src) = 0 then
-    raise exception 'wake_open_firm_question_kind_wall tail: the recut wake_open_firm_question is missing its new door-owned-kind refusal' using errcode = 'CLR10';
+  if position('if p_kind is null or p_kind not in (''unattributed'',''collision'',''contradiction'',''identity_document'') then' in v_src) = 0
+     or position('jsonb_build_object(''reason'',''door_owned_kind'',''class'',''kind'',''kind'',p_kind)::text' in v_src) = 0 then
+    raise exception 'wake_open_firm_question_kind_wall tail: the recut wake_open_firm_question is missing its new positive-roster door-owned-kind refusal' using errcode = 'CLR10';
   end if;
-  if position('if p_kind = ''onboarding_proposed'' then' in v_src)
+  if position('if p_kind is null or p_kind not in (''unattributed'',''collision'',''contradiction'',''identity_document'') then' in v_src)
      >= position('v_dedupe := clara._reserve_op(w.firm_id,''wake_open_firm_question''' in v_src) then
     raise exception 'wake_open_firm_question_kind_wall tail: the new refusal is not positioned before the op-key reservation' using errcode = 'CLR10';
   end if;
+
+  -- (1b) fold FIND-3 / LOW: the recut is BYTE-IDENTICAL to the 3d6c6d8a... preimage
+  -- OUTSIDE the one ruled splice -- a marker census (checking that wall strings and
+  -- prior wall strings are present) can be fooled by a recut that keeps every marker AND
+  -- adds the wall AND changes something else nearby (e.g. drops a provenance comment);
+  -- this cannot. Removing EXACTLY this splice must reproduce the preimage with NOTHING
+  -- else different, or it raises (0144's own "surgical-delta strip-the-block" idiom).
+  declare
+    v_inserted_block text; v_stripped text; v_postimage_sha text;
+  begin
+    v_inserted_block := $blk$  -- PROGRESS.md Known-issues 3a / this migration, WIDENED per fold review (Codex
+  -- FIX-REQUIRED HIGH on #447, ruled 2026-08-30): a POSITIVE, fail-closed roster -- admit
+  -- EXACTLY the four kinds the attribution ladder itself DERIVES as a real ladder run's
+  -- own verdict (unattributed, collision, contradiction, identity_document -- 0126:1435's
+  -- own case dispatch), refuse every other live kind as door-owned: onboarding_proposed
+  -- (Door 2's -- the A14 name-family wall + firm-narrow CLR28 egress authorization this
+  -- generic verb cannot see), correction_proposed (the wrong-client-correction proposal's
+  -- own resolved-destination authority), and promotion_proposed (no writer exists today --
+  -- review law 2: absence is not evidence it never will, so it is walled anyway). The
+  -- membership test is exact-string, case-sensitive `in`, so NULL, an unknown spelling, a
+  -- whitespace variant, and a differently-cased admitted kind all fail it by the SAME one
+  -- test. Refused here, BEFORE the op-key reservation, so a refused attempt settles no
+  -- receipt. A FUTURE eighth CHECK value is refused by default until a later PR
+  -- deliberately widens this roster -- fail closed, never open by default.
+  if p_kind is null or p_kind not in ('unattributed','collision','contradiction','identity_document') then
+    raise exception 'a firm question of this kind must be opened through its own purpose-built door, not the generic wake_open_firm_question verb'
+      using errcode='CLR10',
+      detail=jsonb_build_object('reason','door_owned_kind','class','kind','kind',p_kind)::text;
+  end if;
+$blk$;
+    v_stripped := replace(v_src, v_inserted_block, '');
+    if encode(sha256(convert_to(v_stripped,'UTF8')),'hex') <> '3d6c6d8ada9ac43f326cb8ffb14da41e2dae77a1d8e1600564fe014ba331cf46' then
+      raise exception 'wake_open_firm_question_kind_wall tail: stripping the exactly-one-inserted splice from the new body does not reproduce the 3d6c6d8a... preimage byte-for-byte -- the recut touched something beyond the ruled wall (e.g. a dropped provenance comment), or this check''s own splice text has drifted from the live body' using errcode = 'CLR10';
+    end if;
+    v_postimage_sha := encode(sha256(convert_to(v_src,'UTF8')),'hex');
+    if v_postimage_sha <> 'a592b6128da3fda2ef5497eae82331ddb382b3650abfc842ef710a6f59871964' then
+      raise exception 'wake_open_firm_question_kind_wall tail: the reviewed postimage prosrc sha256 mismatch (got %, expected a592b6128da3fda2ef5497eae82331ddb382b3650abfc842ef710a6f59871964) -- the live body no longer matches the exact text the fold review reviewed', v_postimage_sha using errcode = 'CLR10';
+    end if;
+  end;
 
   -- (3) the sole other kind-vocabulary writer this file is scoped around, unmoved: Door 2
   -- still exists, still carries its own body check, name-family wall and egress auth.

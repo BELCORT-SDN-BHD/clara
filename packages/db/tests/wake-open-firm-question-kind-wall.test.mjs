@@ -201,11 +201,27 @@ test("kind wall: the refusal fires even on a REPLAY of the same op_key -- there 
 });
 
 // ===========================================================================
-// PART B -- NARROWNESS, proven positively: every OTHER kind is still admitted
+// PART B -- the POSITIVE ROSTER, proven over the EXACT seven-value live vocabulary
+// (Codex FIX-REQUIRED HIGH on #447, ruled 2026-08-30: replace the single-name deny with
+// a positive generic-kind roster; admit exactly the four ladder-derived kinds, refuse
+// the three proposal kinds as door-owned; a future CHECK value fails closed by default).
 // ===========================================================================
 
-for (const kind of ["unattributed", "collision", "contradiction", "identity_document", "correction_proposed"]) {
-  test(`kind wall NARROWNESS: p_kind='${kind}' is still fully admitted through wake_open_firm_question -- the wall targets exactly onboarding_proposed`, async (t) => {
+const ADMITTED_KINDS = ["unattributed", "collision", "contradiction", "identity_document"];
+const DOOR_OWNED_KINDS = ["onboarding_proposed", "correction_proposed", "promotion_proposed"];
+
+test("kind wall ROSTER: the exact live seven-value vocabulary splits exactly 4 admit / 3 refuse -- no eighth member exists to leave untested", async (t) => {
+  if (unready(t)) return;
+  const def = await rootQuery(
+    `select pg_get_constraintdef(oid) as def from pg_constraint
+      where conrelid='clara.firm_open_questions'::regclass and conname='firm_open_questions_kind_check'`);
+  const live = [...def.rows[0].def.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]);
+  assert.deepEqual([...live].sort(), [...ADMITTED_KINDS, ...DOOR_OWNED_KINDS].sort(),
+    "the live CHECK vocabulary is EXACTLY these seven values -- if a migration ever adds an eighth, this assertion reds and names the gap instead of silently under-testing it");
+});
+
+for (const kind of ADMITTED_KINDS) {
+  test(`kind wall NARROWNESS: p_kind='${kind}' (ladder-derived, admitted) is still fully admitted through wake_open_firm_question`, async (t) => {
     if (unready(t)) return;
     const { secret } = await mintFiling();
     const doc = await freshDoc();
@@ -219,12 +235,121 @@ for (const kind of ["unattributed", "collision", "contradiction", "identity_docu
   });
 }
 
-test("kind wall NARROWNESS: 'promotion_proposed' -- a live CHECK vocabulary member with no writer at all today -- is still ADMITTED through this verb (deliberately left unwalled; no door to protect exists yet)", async (t) => {
+for (const kind of DOOR_OWNED_KINDS) {
+  test(`kind wall: p_kind='${kind}' (door-owned) refuses CLR10/door_owned_kind, settles no receipt, writes no row`, async (t) => {
+    if (unready(t)) return;
+    const { secret } = await mintFiling();
+    const doc = await freshDoc();
+    const beforeReceipts = await receiptCount(doc.documentId);
+    const opKey = opk(`kw-doorowned-${kind}`);
+    const err = await assertRaises(CLR.badRequest,
+      () => openFirmQuestion(secret, { document: doc.documentId, kind, opKey }),
+      `wake_open_firm_question(kind='${kind}')`);
+    assert.equal(detailReason(err), "door_owned_kind");
+    assert.equal(detailClass(err), "kind");
+    assert.equal(detailKind(err), kind);
+    const q = await rootQuery("select count(*)::int as n from clara.firm_open_questions where document_id=$1 and kind=$2", [doc.documentId, kind]);
+    assert.equal(q.rows[0].n, 0, `no firm_open_questions row of kind='${kind}' was written`);
+    assert.equal(await receiptCount(doc.documentId), beforeReceipts, "no agent_filing_receipts row was written");
+    const opr = await rootQuery("select count(*)::int as n from clara.op_receipts where firm_id=$1 and fn='wake_open_firm_question' and op_key=$2", [world.firms.A, opKey]);
+    assert.equal(opr.rows[0].n, 0, "no op_receipts row was written -- the refusal precedes _reserve_op");
+  });
+}
+
+// THE SPOOFING ATTACK the review named directly: a candidates payload SHAPED like a real
+// proposal, minted under a door-owned kind this verb has no business writing. Both must
+// refuse identically to any other door-owned kind, leaving zero rows anywhere -- proving
+// the wall does not inspect candidate SHAPE (which a spoofed payload could imitate) but
+// the KIND itself, which is exactly what closes the spoofing hole.
+test("kind wall SPOOFING: an onboarding-SHAPED candidates payload (proposed_name + basis) under p_kind='promotion_proposed' still refuses door_owned_kind -- the wall reads the kind, never the candidate shape", async (t) => {
   if (unready(t)) return;
   const { secret } = await mintFiling();
   const doc = await freshDoc();
-  const r = await openFirmQuestion(secret, { document: doc.documentId, kind: "promotion_proposed", opKey: opk("kw-narrow-promo") });
-  assert.ok(r.rows[0].result.question_id, "promotion_proposed is admitted -- this migration walls onboarding_proposed only");
+  const beforeReceipts = await receiptCount(doc.documentId);
+  const opKey = opk("kw-spoof-onboarding-under-promo");
+  const err = await assertRaises(CLR.badRequest,
+    () => openFirmQuestion(secret, {
+      document: doc.documentId, kind: "promotion_proposed", opKey,
+      candidates: [{ proposed_name: "Spoofed Onboarding Sdn Bhd", basis: { sightings: 3, citations: [] } }],
+    }),
+    "onboarding-shaped candidates under promotion_proposed");
+  assert.equal(detailReason(err), "door_owned_kind");
+  assert.equal(detailKind(err), "promotion_proposed");
+  const q = await rootQuery("select count(*)::int as n from clara.firm_open_questions where document_id=$1", [doc.documentId]);
+  assert.equal(q.rows[0].n, 0, "zero firm_open_questions rows -- the spoofed candidates never landed");
+  assert.equal(await receiptCount(doc.documentId), beforeReceipts, "zero agent_filing_receipts rows");
+  const opr = await rootQuery("select count(*)::int as n from clara.op_receipts where firm_id=$1 and fn='wake_open_firm_question' and op_key=$2", [world.firms.A, opKey]);
+  assert.equal(opr.rows[0].n, 0, "zero op_receipts rows");
+});
+
+test("kind wall SPOOFING: a fake from/to-client correction payload under p_kind='correction_proposed' still refuses door_owned_kind -- the wall reads the kind, never the candidate shape", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await freshDoc();
+  const beforeReceipts = await receiptCount(doc.documentId);
+  const opKey = opk("kw-spoof-correction");
+  const err = await assertRaises(CLR.badRequest,
+    () => openFirmQuestion(secret, {
+      document: doc.documentId, kind: "correction_proposed", opKey,
+      candidates: [{ from_client: world.clients.A1, to_client: world.clients.A2, reason: "spoofed correction" }],
+    }),
+    "fake correction candidates under correction_proposed");
+  assert.equal(detailReason(err), "door_owned_kind");
+  assert.equal(detailKind(err), "correction_proposed");
+  const q = await rootQuery("select count(*)::int as n from clara.firm_open_questions where document_id=$1", [doc.documentId]);
+  assert.equal(q.rows[0].n, 0, "zero firm_open_questions rows -- the spoofed candidates never landed");
+  assert.equal(await receiptCount(doc.documentId), beforeReceipts, "zero agent_filing_receipts rows");
+  const opr = await rootQuery("select count(*)::int as n from clara.op_receipts where firm_id=$1 and fn='wake_open_firm_question' and op_key=$2", [world.firms.A, opKey]);
+  assert.equal(opr.rows[0].n, 0, "zero op_receipts rows");
+});
+
+test("kind wall: NULL, an unknown spelling, a whitespace variant and a wrong-case admitted kind all refuse door_owned_kind -- the same one exact-membership test catches all four shapes", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await freshDoc();
+  const cases = [
+    ["NULL", null],
+    ["an unknown spelling", "not_a_real_kind"],
+    ["a whitespace variant of an admitted kind", "collision "],
+    ["a wrong-case admitted kind", "Collision"],
+  ];
+  for (const [label, kind] of cases) {
+    const err = await assertRaises(CLR.badRequest,
+      () => openFirmQuestion(secret, { document: doc.documentId, kind, opKey: opk(`kw-variant-${Math.random().toString(36).slice(2, 8)}`) }),
+      label);
+    assert.equal(detailReason(err), "door_owned_kind", `${label} refuses door_owned_kind`);
+  }
+  const q = await rootQuery("select count(*)::int as n from clara.firm_open_questions where document_id=$1", [doc.documentId]);
+  assert.equal(q.rows[0].n, 0, "none of the four variant shapes wrote a row");
+});
+
+// ===========================================================================
+// PART D -- SOURCE-ORDER, permanently pinned (Codex FIX-REQUIRED MEDIUM finding 2 on
+// #447, ruled 2026-08-30). A ROLLED-BACK transaction cannot behaviourally distinguish
+// "the guard ran BEFORE _reserve_op" from "the guard ran after _reserve_op but the whole
+// call then rolled back anyway" -- every PART A/B/spoofing cell above proves the SECOND
+// (no receipt, no row, no op_receipts row survive a refusal), which is necessary but not
+// sufficient. This cell reads the live prosrc BY POSITION -- a fact no rollback can mask
+// -- so a future recut that moves the guard AFTER _reserve_op (still refusing, still
+// leaving no row, because the whole call still rolls back) reds this cell even though
+// every behavioural cell above would keep passing.
+// ===========================================================================
+
+test("kind wall SOURCE ORDER (permanent catalog pin): the roster guard's own source position is strictly BEFORE _reserve_op, the agent_filing_receipts INSERT, and the _firm_question_core call -- read from live prosrc, a fact no rollback can mask", async (t) => {
+  if (unready(t)) return;
+  const r = await rootQuery(
+    `select p.prosrc as src from pg_proc p
+      where p.oid = 'clara.wake_open_firm_question(uuid,text,text,jsonb,text,jsonb,text)'::regprocedure`);
+  const src = r.rows[0].src;
+  const guardPos = src.indexOf("if p_kind is null or p_kind not in (");
+  const reserveOpPos = src.indexOf("v_dedupe := clara._reserve_op(w.firm_id,'wake_open_firm_question'");
+  const receiptInsertPos = src.indexOf("insert into clara.agent_filing_receipts(");
+  const corePos = src.indexOf("clara._firm_question_core(clara.agent_user_id()");
+  assert.ok(guardPos > -1, "the guard is present in the live body");
+  assert.ok(reserveOpPos > -1 && receiptInsertPos > -1 && corePos > -1, "all three downstream anchors are present");
+  assert.ok(guardPos < reserveOpPos, "the guard precedes _reserve_op");
+  assert.ok(guardPos < receiptInsertPos, "the guard precedes the agent_filing_receipts INSERT");
+  assert.ok(guardPos < corePos, "the guard precedes the _firm_question_core call");
 });
 
 // ===========================================================================

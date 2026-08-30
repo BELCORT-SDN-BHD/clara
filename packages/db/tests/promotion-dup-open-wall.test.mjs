@@ -397,6 +397,68 @@ test("MBB-7(a) D2 THE SECOND WRITER, TRUED: wake_open_firm_question(kind='onboar
   assert.equal(await openOnboardingQuestions(doc.documentId), 1, "still exactly the one Door 2 opened");
 });
 
+// RESTORED (Codex FIX-REQUIRED MEDIUM finding 1 on #447, ruled 2026-08-30). The kind-wall
+// truing above replaced the ORIGINAL "second writer" proof with a wrapper-level assertion --
+// which is correct for what wake_open_firm_question does today, but it no longer exercises
+// 0148's own index+handler in clara._firm_question_core AT ALL (the wrapper's new roster wall
+// refuses before the core is ever reached). This cell restores that direct proof: bypass EVERY
+// wrapper and call the ungranted core straight, as the review asked ("under an owner test
+// session"). rootQuery's connection is the migration runner's own superuser role, which (like
+// clara_fn_owner, the core's owner) bypasses EXECUTE grants entirely -- the honest "owner
+// session" this finding names.
+test("MBB-7(a) D2 DIRECT CORE (restored, fold FIND-2/MEDIUM): a preseeded onboarding_proposed question, then a DIRECT call to clara._firm_question_core -- bypassing every wrapper -- for the same document and kind, still refuses typed CLR10/already_open through 0148's own index+handler", async (t) => {
+  if (unready(t)) return;
+  const { secret } = await mintFiling();
+  const doc = await freshDoc();
+  const { citation } = await seedOneRegion(doc.documentId);
+  await proposeOnboarding(secret, {
+    document: doc.documentId, basis: { sightings: 1, citations: [citation] },
+    authorization: await freshAuthorization(doc.sha256),
+  });
+  assert.equal(await openOnboardingQuestions(doc.documentId), 1, "setup: Door 2 opened one");
+  const err = await assertRaises(CLR.badRequest,
+    () => rootQuery(
+      `select clara._firm_question_core($1,$2,null,'filing',$3,'onboarding_proposed',
+         'Rig: direct-core duplicate probe','[]'::jsonb,null)`,
+      [world.agent, world.firms.A, doc.documentId]),
+    "a DIRECT _firm_question_core call for a document that already has an open onboarding_proposed question");
+  assert.equal(detailReason(err), "already_open");
+  assert.equal(detailClass(err), "onboarding_proposed");
+  assert.equal(await openOnboardingQuestions(doc.documentId), 1, "still exactly the one -- the direct call wrote nothing");
+});
+
+test("MBB-7(a) D2 DIRECT CORE RACE (restored, fold FIND-2/MEDIUM): two owner sessions calling clara._firm_question_core directly for the SAME document+kind -- the loser is observably BLOCKED on uq_firm_open_questions_onboarding_open (never a sleep), then refuses typed CLR10/already_open; exactly one question survives", async (t) => {
+  if (unready(t)) return;
+  const doc = await freshDoc();
+  const call = "select clara._firm_question_core($1,$2,null,'filing',$3,'onboarding_proposed','Rig: direct-core race probe','[]'::jsonb,null) as id";
+  const vals = [world.agent, world.firms.A, doc.documentId];
+
+  let t1 = null; let t2 = null; let blocked = false; let loser;
+  try {
+    t1 = { c: await getPool().connect() };
+    t1.pid = (await t1.c.query("select pg_backend_pid() as pid")).rows[0].pid;
+    await t1.c.query("begin");
+    await t1.c.query(call, vals);
+
+    t2 = { c: await getPool().connect() };
+    t2.pid = (await t2.c.query("select pg_backend_pid() as pid")).rows[0].pid;
+    const t2p = t2.c.query(call, vals).then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+
+    blocked = await waitBlockedByOrThrow(t2.pid, t1.pid, "the uq_firm_open_questions_onboarding_open insert conflict (direct core)");
+    await t1.c.query("commit");
+    loser = await t2p;
+  } finally {
+    if (t1) { await t1.c.query("rollback").catch(() => {}); t1.c.release(); }
+    if (t2) { await t2.c.query("rollback").catch(() => {}); t2.c.release(); }
+  }
+
+  assert.ok(blocked, "T2 must be observably blocked on T1's uncommitted direct-core insert");
+  assert.equal(loser.ok, false, "the loser must REFUSE, not open a second onboarding question");
+  assert.equal(loser.e.code, CLR.badRequest, `the loser refuses typed CLR10, not a raw ${PG.uniqueViolation}`);
+  assert.equal(detailReason(loser.e), "already_open");
+  assert.equal(await openOnboardingQuestions(doc.documentId), 1);
+});
+
 // TRUED by the kind wall (same migration as above): wake_open_firm_question can no longer mint
 // 'onboarding_proposed' at all, so the onboarding leg now goes through Door 2 -- the wall's own
 // honest recourse -- while the point of THIS cell (a different kind is untouched, and settling
