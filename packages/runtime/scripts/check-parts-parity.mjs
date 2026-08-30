@@ -8,7 +8,7 @@
 // unless its non-part file is explicitly reviewed below. Unknown never means safe.
 
 import { readFileSync, readdirSync } from "node:fs";
-import { extname, relative, resolve } from "node:path";
+import { extname, posix, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { declaredPartShapes } from "./part-shapes.mjs";
@@ -75,6 +75,90 @@ function unwrapExpression(node) {
 function propertyNameText(name) {
   if (!name) return null;
   if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
+  return null;
+}
+
+function topLevelConstBindings(file) {
+  const bindings = new Map();
+  for (const statement of file.statements) {
+    if (!ts.isVariableStatement(statement) || !(statement.declarationList.flags & ts.NodeFlags.Const)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && declaration.initializer) {
+        bindings.set(declaration.name.text, declaration.initializer);
+      }
+    }
+  }
+  return bindings;
+}
+
+function namedImports(file) {
+  const imports = new Map();
+  for (const statement of file.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const named = statement.importClause?.namedBindings;
+    if (!named || !ts.isNamedImports(named)) continue;
+    for (const element of named.elements) {
+      imports.set(element.name.text, {
+        importedName: element.propertyName?.text ?? element.name.text,
+        specifier: statement.moduleSpecifier.text,
+      });
+    }
+  }
+  return imports;
+}
+
+function resolveImportedPath(fromPath, specifier, contexts) {
+  if (!specifier.startsWith(".")) return null;
+  const raw = posix.normalize(posix.join(posix.dirname(fromPath), specifier));
+  const extension = posix.extname(raw);
+  const stem = extension ? raw.slice(0, -extension.length) : raw;
+  const candidates = extension
+    ? [raw, ...RUNTIME_SCRIPT_KINDS.keys()].map((candidate, index) => (index === 0 ? candidate : `${stem}${candidate}`))
+    : [raw, ...[...RUNTIME_SCRIPT_KINDS.keys()].map((suffix) => `${raw}${suffix}`)];
+  return candidates.find((candidate) => contexts.has(candidate)) ?? null;
+}
+
+function dereferenceExpression(node, context, contexts, seen = new Set()) {
+  let current = unwrapExpression(node);
+  let currentContext = context;
+  let currentSeen = seen;
+  while (ts.isIdentifier(current)) {
+    const key = `${currentContext.path}:${current.text}`;
+    if (currentSeen.has(key)) return null;
+    const nextSeen = new Set(currentSeen);
+    nextSeen.add(key);
+    let targetContext = currentContext;
+    let initializer = currentContext.bindings.get(current.text);
+    if (!initializer) {
+      const imported = currentContext.imports.get(current.text);
+      const importedPath = imported && resolveImportedPath(currentContext.path, imported.specifier, contexts);
+      targetContext = importedPath ? contexts.get(importedPath) : null;
+      initializer = targetContext?.bindings.get(imported?.importedName);
+    }
+    if (!initializer || !targetContext) return null;
+    current = unwrapExpression(initializer);
+    currentContext = targetContext;
+    currentSeen = nextSeen;
+  }
+  return { context: currentContext, node: current, seen: currentSeen };
+}
+
+function staticStringValue(node, context, contexts, seen = new Set()) {
+  const resolved = dereferenceExpression(node, context, contexts, seen);
+  if (!resolved) return null;
+  const current = resolved.node;
+  if (ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current)) return current.text;
+  if (ts.isPropertyAccessExpression(current)) {
+    const owner = dereferenceExpression(current.expression, resolved.context, contexts, resolved.seen);
+    if (!owner) return null;
+    const object = owner.node;
+    if (!ts.isObjectLiteralExpression(object)) return null;
+    const matches = object.properties.filter(
+      (property) => property.name && propertyNameText(property.name) === current.name.text,
+    );
+    if (matches.length !== 1 || !ts.isPropertyAssignment(matches[0])) return null;
+    return staticStringValue(matches[0].initializer, owner.context, contexts, owner.seen);
+  }
   return null;
 }
 
@@ -162,6 +246,7 @@ function constructionSiteCensus(runtimeSources, declared) {
   }
   const sites = new Map(declared.map((kind) => [kind, []]));
   const paths = new Set();
+  const contexts = new Map();
   for (const entry of runtimeSources) {
     if (!entry || typeof entry.path !== "string" || typeof entry.source !== "string") {
       throw new Error("every runtime census entry must carry string path and source fields");
@@ -169,6 +254,16 @@ function constructionSiteCensus(runtimeSources, declared) {
     if (paths.has(entry.path)) throw new Error(`runtime construction-site census contains duplicate path ${entry.path}`);
     paths.add(entry.path);
     const file = sourceFile(entry.path, entry.source);
+    contexts.set(entry.path, {
+      bindings: topLevelConstBindings(file),
+      entry,
+      file,
+      imports: namedImports(file),
+      path: entry.path,
+    });
+  }
+  for (const context of contexts.values()) {
+    const { entry, file } = context;
     const refuseUnclassifiable = (node) => {
       if (exemptions.has(entry.path)) return;
       const line = file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1;
@@ -178,14 +273,9 @@ function constructionSiteCensus(runtimeSources, declared) {
       if (ts.isObjectLiteralExpression(node)) {
         let hasDeclaredTypeProperty = false;
         for (const property of node.properties) {
-          const computedName = property.name && ts.isComputedPropertyName(property.name)
-            ? unwrapExpression(property.name.expression)
-            : null;
-          if (computedName && (
-            (ts.isStringLiteral(computedName) && computedName.text === "type")
-            || (ts.isNoSubstitutionTemplateLiteral(computedName) && computedName.text === "type")
-          )) {
-            refuseUnclassifiable(property);
+          if (property.name && ts.isComputedPropertyName(property.name)) {
+            const computedName = staticStringValue(property.name.expression, context, contexts);
+            if (computedName === null || computedName === "type") refuseUnclassifiable(property);
             continue;
           }
           if (!property.name || propertyNameText(property.name) !== "type") continue;

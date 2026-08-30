@@ -135,10 +135,24 @@ test("p6-1.parts-parity: a computed type key THROWS instead of disappearing from
       readerSource: readerFixture(["freeform_result"]),
       runtimeSources: [{
         path: "packages/runtime/workflows/computed-discriminant.mutant.ts",
-        source: 'export const emitted = { ["type"]: "agent_receipt" };\n',
+        source: 'const key = "type"; export const emitted = { [key]: "agent_receipt" };\n',
       }],
     }),
     /parts-parity: unclassifiable discriminant at packages\/runtime\/workflows\/computed-discriminant\.mutant\.ts:1/,
+  );
+});
+
+test("p6-1.parts-parity: an unresolved computed key THROWS instead of being assumed non-type", () => {
+  assert.throws(
+    () => checkPartsParity({
+      declarerSource: DECLARER,
+      readerSource: readerFixture(["freeform_result"]),
+      runtimeSources: [{
+        path: "packages/runtime/workflows/unknown-computed-key.mutant.ts",
+        source: 'export const emitted = { [runtimeKey]: "agent_receipt" };\n',
+      }],
+    }),
+    /parts-parity: unclassifiable discriminant at packages\/runtime\/workflows\/unknown-computed-key\.mutant\.ts:1/,
   );
 });
 
