@@ -2,9 +2,13 @@
 // Commit-parity gate: apps/web's reader must cover every part kind this runtime can emit.
 // Declared-only kinds are exempt only through the explicit produced-elsewhere allowlist, and
 // each exemption is invalidated by any object-literal construction site in packages/runtime.
+// Scope is every non-test runtime package source file, across TS/JS module variants;
+// tests and build/install outputs are not runtime sources. The census detects object-literal
+// constructions: a literal discriminant is classified, while a non-literal discriminant throws
+// unless its non-part file is explicitly reviewed below. Unknown never means safe.
 
 import { readFileSync, readdirSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { extname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { declaredPartShapes } from "./part-shapes.mjs";
@@ -14,14 +18,40 @@ const DEFAULT_DECLARER = "packages/runtime/workflows/chatTurn.v16.parts.ts";
 const DEFAULT_READER = "apps/web/lib/parts/types.ts";
 const DEFAULT_RUNTIME_ROOT = "packages/runtime";
 
+const RUNTIME_SCRIPT_KINDS = new Map([
+  [".ts", ts.ScriptKind.TS],
+  [".tsx", ts.ScriptKind.TSX],
+  [".mts", ts.ScriptKind.TS],
+  [".js", ts.ScriptKind.JS],
+  [".mjs", ts.ScriptKind.JS],
+  [".cjs", ts.ScriptKind.JS],
+]);
+
 export const PRODUCED_ELSEWHERE_PART_KINDS = [
   "agent_receipt",
   "firm_question",
   "close_proposal",
 ];
 
+export const UNCLASSIFIABLE_DISCRIMINANT_EXEMPTIONS = [
+  {
+    path: "packages/runtime/workflows/chatTurn.v14.bankSchemas.ts",
+    reason: "Zod input schema field for a bank account class; it does not construct a chat part",
+  },
+  {
+    path: "packages/runtime/lib/myinvois-ubl.mjs",
+    reason: "MyInvois UBL tax-category projection field; it does not construct a chat part",
+  },
+];
+
+function scriptKindForPath(path) {
+  const kind = RUNTIME_SCRIPT_KINDS.get(extname(path).toLowerCase());
+  if (kind === undefined) throw new Error(`parts-parity: unsupported runtime source extension at ${path}`);
+  return kind;
+}
+
 function sourceFile(path, source) {
-  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, scriptKindForPath(path));
   const errors = file.parseDiagnostics ?? [];
   if (errors.length > 0) {
     const detail = errors.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")).join("; ");
@@ -103,10 +133,10 @@ export function readRuntimeSources(runtimeRoot = resolve(REPO_ROOT, DEFAULT_RUNT
   const sources = [];
   const walk = (directory) => {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (entry.name === "node_modules" || entry.name === ".output" || entry.name === ".nitro") continue;
+      if (entry.name === "node_modules" || entry.name === "tests" || entry.name === ".output" || entry.name === ".nitro") continue;
       const path = resolve(directory, entry.name);
       if (entry.isDirectory()) walk(path);
-      else if (entry.isFile() && entry.name.endsWith(".ts")) {
+      else if (entry.isFile() && RUNTIME_SCRIPT_KINDS.has(extname(entry.name).toLowerCase())) {
         sources.push({
           path: relative(REPO_ROOT, path).replaceAll("\\", "/"),
           source: readFileSync(path, "utf8"),
@@ -120,7 +150,15 @@ export function readRuntimeSources(runtimeRoot = resolve(REPO_ROOT, DEFAULT_RUNT
 
 function constructionSiteCensus(runtimeSources, declared) {
   if (!Array.isArray(runtimeSources) || runtimeSources.length === 0) {
-    throw new Error("runtime construction-site census requires at least one TypeScript source");
+    throw new Error("runtime construction-site census requires at least one runtime source");
+  }
+  const exemptions = new Map();
+  for (const exemption of UNCLASSIFIABLE_DISCRIMINANT_EXEMPTIONS) {
+    if (!exemption || typeof exemption.path !== "string" || typeof exemption.reason !== "string" || exemption.reason.trim() === "") {
+      throw new Error("unclassifiable-discriminant exemptions require path and reason strings");
+    }
+    if (exemptions.has(exemption.path)) throw new Error(`duplicate unclassifiable-discriminant exemption ${exemption.path}`);
+    exemptions.set(exemption.path, exemption.reason);
   }
   const sites = new Map(declared.map((kind) => [kind, []]));
   const paths = new Set();
@@ -131,14 +169,44 @@ function constructionSiteCensus(runtimeSources, declared) {
     if (paths.has(entry.path)) throw new Error(`runtime construction-site census contains duplicate path ${entry.path}`);
     paths.add(entry.path);
     const file = sourceFile(entry.path, entry.source);
+    const refuseUnclassifiable = (node) => {
+      if (exemptions.has(entry.path)) return;
+      const line = file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1;
+      throw new Error(`parts-parity: unclassifiable discriminant at ${entry.path}:${line}`);
+    };
     const visit = (node) => {
       if (ts.isObjectLiteralExpression(node)) {
+        let hasDeclaredTypeProperty = false;
         for (const property of node.properties) {
-          if (!ts.isPropertyAssignment(property) || propertyNameText(property.name) !== "type") continue;
+          const computedName = property.name && ts.isComputedPropertyName(property.name)
+            ? unwrapExpression(property.name.expression)
+            : null;
+          if (computedName && (
+            (ts.isStringLiteral(computedName) && computedName.text === "type")
+            || (ts.isNoSubstitutionTemplateLiteral(computedName) && computedName.text === "type")
+          )) {
+            refuseUnclassifiable(property);
+            continue;
+          }
+          if (!property.name || propertyNameText(property.name) !== "type") continue;
+          if (!ts.isPropertyAssignment(property)) {
+            refuseUnclassifiable(property);
+            continue;
+          }
           const initializer = unwrapExpression(property.initializer);
-          if (!ts.isStringLiteral(initializer) || !sites.has(initializer.text)) continue;
+          if (!ts.isStringLiteral(initializer)) {
+            refuseUnclassifiable(property);
+            continue;
+          }
+          if (!sites.has(initializer.text)) continue;
+          hasDeclaredTypeProperty = true;
           const line = file.getLineAndCharacterOfPosition(property.getStart(file)).line + 1;
           sites.get(initializer.text).push(`${entry.path}:${line}`);
+        }
+        if (hasDeclaredTypeProperty) {
+          for (const property of node.properties) {
+            if (ts.isSpreadAssignment(property)) refuseUnclassifiable(property);
+          }
         }
       }
       ts.forEachChild(node, visit);

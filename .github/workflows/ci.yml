@@ -235,6 +235,8 @@ jobs:
       # rather than hardcoding one, so it needs no edit at the next _vN.
       - name: Workflow-bundle gate (registry pins + WDK directives reached the served artifact)
         run: node scripts/check-workflow-bundle.mjs
+      # Commit parity is meaningful only after the served workflow bundle has been certified:
+      # the runtime's object-literal census must not outrun the web reader in this same commit.
       - name: Parts parity (web reader covers runtime-emittable kinds)
         run: node packages/runtime/scripts/check-parts-parity.mjs
 
