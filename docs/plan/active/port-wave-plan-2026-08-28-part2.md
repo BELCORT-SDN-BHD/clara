@@ -129,7 +129,9 @@ Q8, verbatim: chat wire adds **exactly four** part types in **a single** runtime
 (chatTurn_v15 era) — `agent_receipt` (generic, reads `agent_receipts_visible`) ·
 `firm_question` (resolve/dismiss doors) · `close_proposal` · `freeform_result`. Live/working
 state renders at the SSE layer, **not** as a persisted part type. Catalog total: 18 live + 4
-= **22**.
+= **22**. **[TRUED 2026-08-30, quote preserved verbatim: this bump is `chatTurn_v16`, catalog
+22→26 — `chatTurn_v15` shipped 2026-08-29 for the unrelated F-A6 PR-2 and is consumed+frozen,
+and MBB-4 moved the baseline from 18 to 22 before this bump lands.]**
 
 Mechanically this touches the three files the P2 parts lane built and the compile-time guard
 already protects: the union in `apps/web/lib/parts/types.ts`, the registry in
@@ -137,8 +139,11 @@ already protects: the union in `apps/web/lib/parts/types.ts`, the registry in
 `apps/web/components/parts/PartRenderer.tsx`. The `AllCovered`/`NoExtra` exhaustiveness
 guards make a missing catalog entry a `tsc` failure and the runtime parity test makes a
 missing render branch a test failure — so the mechanism enforces its own completeness. Plus
-the runtime side: a **new `chatTurn_v15` export**, never an edit to `chatTurn_v14`'s body
-(hard constraint 9, freeze-lint enforced), and the registry repointed.
+the runtime side: a **new `chatTurn_v16` export**, never an edit to `chatTurn_v15`'s body
+(hard constraint 9, freeze-lint enforced), and the registry repointed. **TRUED 2026-08-30**:
+this was written against `chatTurn_v14` as the frozen predecessor; `chatTurn_v15` has since
+shipped (2026-08-29, F-A6 PR-2, unrelated purpose) and is now itself consumed+frozen, so P6's
+bump is the next free version, `v16`.
 
 **Why it runs after Wave C, not before.** Three of the four parts have a workbench half in
 T1 (`close_proposal`, `agent_receipt`) and T7 (`firm_question`), and Q8's design is
@@ -147,8 +152,9 @@ whose "open the full object" destination does not exist.
 
 **Deploy note.** A runtime version bump is a ceremony from merged `main`, and the standing
 lesson applies: after deploy, prove the serving bundle by an **in-VM bundle grep** for
-`chatTurn: chatTurn_v15`, never by the deploy's own success. `PROGRESS.md` records the
-2026-08-26 case where the tag was assumed and the bundle was still on v13.
+`chatTurn: chatTurn_v16`, never by the deploy's own success — registry reads `chatTurn_v16`
+and the v16 bundle serves. `PROGRESS.md` records the 2026-08-26 case where the tag was assumed
+and the bundle was still on v13.
 
 ### 8.2 · The cutover PR — *size 0.5, ceremony-grade*
 
@@ -318,8 +324,9 @@ it needs a backend change has found a census error and should stop and report it
 
 - **No redesign.** Trains extend proven surfaces under existing house laws. A train that
   wants to restructure a P3 surface raises it rather than doing it.
-- **No new part types beyond Q8's four.** The catalog goes 18 → 22 and stops. A train that
-  wants a fifth has found a P6 scope question, not a build task.
+- **No new part types beyond Q8's four.** The catalog goes 22 → 26 and stops (TRUED 2026-08-30;
+  was 18 → 22 — MBB-4 found the baseline already at 22). A train that wants a fifth has found a
+  P6 scope question, not a build task.
 - **No `apps/dashboard` feature work.** It is being retired; nothing is added to it.
 - **No mobile surfaces.** Q6's mobile decision corridor (needs-you · Clara threads ·
   receipts read · reserved human-act doors) is unchanged by this wave; no train builds a
