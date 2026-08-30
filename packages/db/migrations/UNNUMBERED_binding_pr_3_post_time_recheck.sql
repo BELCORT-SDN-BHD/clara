@@ -378,7 +378,8 @@ begin
   v_pt_page_fp jsonb; v_pt_page_birth boolean; v_pt_page_candidate uuid;
   v_pt_page_counterparty uuid; v_pt_page_same boolean; v_pt_page_ambiguous boolean;
   v_pt_detail text; v_pt_detail_j jsonb;
-  v_pt_suppression text; v_pt_outcome text; v_pt_annotate boolean; v_pt_warning jsonb;$t1$);
+  v_pt_suppression text; v_pt_outcome text; v_pt_annotate boolean; v_pt_warning jsonb;
+  v_pt_expired boolean;$t1$);
 
   -- ---------------------------------------------------------------------------------
   -- (2) THE CONTROL ITSELF, immediately before the approve UPDATE -- after every other wall,
@@ -630,14 +631,38 @@ begin
     v_pt_suppression:=clara._binding_suppression(e.firm_id,e.client_id,v_pt_b.counterparty_id);
 
     -- FIRST REASON WINS, and REVOKED outranks everything: a human took the authority away.
+    --
+    --
+    -- THE ONE PLACE THIS PORT DEVIATES FROM 0046'S PRECEDENCE, AND WHY IT HAS TO.
+    -- 0046 judged the clock SECOND, right after revocation, and unguarded -- expiry overrode any
+    -- reason the receipt/page ladder had already found. That was harmless there because 0046
+    -- REFUSED on expiry: overriding one refusal with another still refuses. Under O3 expiry
+    -- ANNOTATES AND POSTS, so a verbatim port would let a stale clock MASK a live identity
+    -- problem and wave the entry through -- the exact opposite of what "annotate" is for.
+    --
+    -- So the chain is judged in THREE passes, and the split is not cosmetic:
+    --   (1) EVERYTHING THAT OUTRANKS THE CLOCK. Revocation, the human "no", and every rung that
+    --       is a fact about THIS document against THIS authority -- none of which cares whether
+    --       the authority is still live.
+    --   (2) THE CLOCK, only if pass (1) found nothing. Annotate-and-post is lawful when a date
+    --       ran out and NOTHING ELSE is wrong.
+    --   (3) THE RUNGS DEFINED OVER THE LIVE BINDING POPULATION. `bm` counts bindings filtered
+    --       `status='live' and expires_at>now()`, so for an expired row it is 0 BY CONSTRUCTION
+    --       and every `matches`-based arm would fire for a reason that is really just the clock
+    --       again. They are therefore asked only of a binding that IS live -- which is exactly
+    --       the population they were ever able to describe.
+    --
+    -- WHAT THIS COSTS, stated rather than buried: for a LIVE binding with MORE THAN ONE rung
+    -- true at once, the reported WORD can differ from 0046's, because three `matches`-based arms
+    -- moved below f1/f2/f3. The refusal itself is unchanged in every such case -- the same set of
+    -- states refuses, and only the discriminant a classifier reads can move.
+    v_pt_expired := (v_pt_b.status='expired' or v_pt_b.expires_at<=now());
+
+    -- (1) ------------------------------------------------------------------------------------
     if v_pt_b.status='revoked' or v_pt_suppression='revoked' then
       v_pt_reason:='binding_revoked';
     elsif v_pt_suppression='declined' then
       v_pt_reason:='binding_suppressed';
-    elsif v_pt_b.status='expired' or v_pt_b.expires_at<=now() then
-      v_pt_reason:='binding_expired';
-    elsif not v_pt_live and v_pt_reason is null then
-      v_pt_reason:='binding_changed';
     elsif (v_pt_cpb.id is null or v_pt_cpb.merged_into is not null
         or v_pt_cpb.retired_at is not null
         or v_pt_cpb.registration_normalized is distinct from v_pt_b.registration_at_signing)
@@ -650,11 +675,6 @@ begin
       v_pt_reason:='binding_changed';
     elsif v_pt_ocr is null and v_pt_reason is null then
       v_pt_reason:='binding_no_corroboration_source';
-    elsif coalesce(v_pt_matches,0)>1 and v_pt_reason is null then
-      v_pt_reason:='binding_ambiguous';
-    elsif coalesce(v_pt_matches,0)=1 and not coalesce(v_pt_matching_f2_ok,false)
-        and v_pt_reason is null then
-      v_pt_reason:='binding_features_changed';
     elsif (not coalesce(v_pt_f1_ok,false) or not coalesce(v_pt_f2_ok,false))
         and v_pt_reason is null then
       v_pt_reason:='binding_features_changed';
@@ -662,9 +682,25 @@ begin
       v_pt_reason:='binding_uncorroborated';
     elsif v_counterparty is distinct from v_pt_b.counterparty_id and v_pt_reason is null then
       v_pt_reason:='binding_changed';
-    elsif (coalesce(v_pt_matches,0)<>1 or v_pt_matching_binding is distinct from e.vendor_binding_id)
-        and v_pt_reason is null then
-      v_pt_reason:='binding_changed';
+    end if;
+
+    -- (2) ------------------------------------------------------------------------------------
+    if v_pt_reason is null and v_pt_expired then
+      v_pt_reason:='binding_expired';
+    end if;
+
+    -- (3) ------------------------------------------------------------------------------------
+    if v_pt_reason is null then
+      if not v_pt_live then
+        v_pt_reason:='binding_changed';
+      elsif coalesce(v_pt_matches,0)>1 then
+        v_pt_reason:='binding_ambiguous';
+      elsif coalesce(v_pt_matches,0)=1 and not coalesce(v_pt_matching_f2_ok,false) then
+        v_pt_reason:='binding_features_changed';
+      elsif coalesce(v_pt_matches,0)<>1
+         or v_pt_matching_binding is distinct from e.vendor_binding_id then
+        v_pt_reason:='binding_changed';
+      end if;
     end if;
 
     -- O3: EXPIRY IS A CLOCK, REVOCATION IS AN ACT. An entry drafted three days before expiry

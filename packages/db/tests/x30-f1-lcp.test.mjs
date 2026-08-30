@@ -426,6 +426,14 @@ test("x30.2a a non-prefix current fragment is unresolved at Slot A", async (t) =
 // seedAutopostRule mints a live rule via propose_autopost_rule/sign_autopost_rule — all
 // three are dropped whole. The F1/LCP vendor-identity resolution this file otherwise
 // tests at DRAFT time (the other seven cells) is untouched by this PR.
+//
+// ITS CLAIM HAS A LIVE SUCCESSOR AGAIN (裁-18b PR-3, 2026-08-30). The post-time re-check is
+// restored inside clara._approve_entry_core, so "a drifted post-time fragment refuses and never
+// approves" is measured once more — through clara.approve_entry rather than the dropped
+// executor — by binding-pr-3-post-time.test.mjs (bpr3.C5 for the identity half, bpr3.C1 for the
+// clean control). This cell stays retired because its FIXTURE has no producer, not because the
+// property stopped mattering; the successor is named here so the next reader does not have to
+// re-derive that.
 test("x30.2b a non-prefix post-time fragment refuses and never approves", { skip: "execute_rule_post + the autopost-rule tier retired with F-A2 PR-3 — this cell's post-time fixture has no producer left" }, async (t) => {
   if (requireReady(t)) return;
   assert.ok(ezCp && ezBinding, "x30.1 must establish the live EZSEC binding");
@@ -482,6 +490,9 @@ test("x30.2c a genuine suffix extension of the stored F1 resolves bound at Slot 
 
 // RETIRED (F-A2 PR-3, Annex B.1): this cell's post() helper calls execute_rule_post,
 // dropped whole along with the autopost-rule tier its fixture (x30.2b) relies on.
+// SUCCESSOR (裁-18b PR-3): "a genuine suffix extension posts, and the phase='post' resolution
+// records outcome='bound'" is bpr3.C1 in binding-pr-3-post-time.test.mjs — the same assertions,
+// driven through clara.approve_entry.
 test("x30.2d a genuine suffix extension of the stored F1 posts successfully at post-time", { skip: "execute_rule_post retired with F-A2 PR-3 — this cell's post-time fixture has no producer left" }, async (t) => {
   if (requireReady(t)) return;
   assert.ok(ezCp && ezBinding, "x30.1 must establish the live EZSEC binding");

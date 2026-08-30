@@ -570,6 +570,44 @@ test("bpr3.C8 — a binding belonging to ANOTHER book cannot authorise this entr
   });
 });
 
+test("bpr3.C9 — an EXPIRED binding whose identity ALSO drifted REFUSES; the clock never masks", async () => {
+  failPr3();
+  // THE DEFECT THIS CELL EXISTS FOR, found in this PR's own body rather than in the port source.
+  // 0046 judged the clock SECOND and UNGUARDED, which was safe there because expiry REFUSED:
+  // overriding one refusal with another still refuses. O3 makes expiry ANNOTATE AND POST, so a
+  // verbatim port would have let a stale date wave through an entry whose vendor identity had
+  // moved — the opposite of what annotation is for. Two things are wrong here; the entry must
+  // stop for the one that is not a date.
+  const b = await liveBinding("C9");
+  const d = await boundDraft(b, "C9");
+  await mergeAway(b.cp.id, (await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "C9win")).id);
+  await expireBinding(b.binding.binding_id);
+  const err = await assertRaises("CLR36", () => approve(d, "bpr3c9"),
+    "approving on a binding that is BOTH expired and identity-drifted");
+  assert.equal(reasonOf(err), "binding_identity_drifted",
+    "the identity fact outranks the clock, and the refusal says which one stopped it");
+  assert.equal(await entryStatus(d.entry), "draft");
+  assert.equal(await postResolution(d.entry), null, "nothing was annotated — nothing posted");
+
+  // THE MUTANT: restore 0046's precedence verbatim — judge the clock FIRST and unguarded — and
+  // the same doubly-broken entry POSTS with a mere annotation.
+  const b2 = await liveBinding("C9m");
+  const d2 = await boundDraft(b2, "C9m");
+  await mergeAway(b2.cp.id, (await seedUniqueFamilyVendor(w.firms.A, w.clients.A1, "C9mwin")).id);
+  await expireBinding(b2.binding.binding_id);
+  await withMutant(APPROVE_CORE_SIG,
+    [["    if v_pt_reason is null and v_pt_expired then\n      v_pt_reason:='binding_expired';\n    end if;",
+      "    if v_pt_expired then\n      v_pt_reason:='binding_expired';\n    end if;"]],
+    async () => {
+      const r = await approve(d2, "bpr3c9m");
+      assert.equal(r.status, "approved",
+        "with the clock judged unguarded the drifted identity is masked and the entry posts — "
+        + "which is precisely the port-verbatim behaviour this arm exists to prevent");
+      assert.equal(r.binding_post_check?.code, "binding_expired_at_post",
+        "…and it is annotated as a mere expiry, so a reader would never learn the identity moved");
+    });
+});
+
 // ===========================================================================
 // 裁-46 — clara.reset_binding_revocation
 // ===========================================================================
