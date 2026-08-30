@@ -38,17 +38,49 @@ export async function generateMetadata() {
  * caller-controlled. A future OTP kind gets its OWN route with its own
  * verification, never a query parameter on this one.
  */
+/**
+ * THE ONE LINE THE PENDING RULING REPOINTS (P4-1 rung-0 scope note).
+ *
+ * This journey needs TWO independent secrets. The PATH SEGMENT is Supabase's
+ * `token_hash`, consumed by `verifyOtp` — unchanged from P2. `accept_invite`
+ * needs a DIFFERENT one: CLARA's own invite token, minted by
+ * `clara.invite_member` (`0147:404`) and matched by `sha256()` against
+ * `firm_invites.token_hash` (`0145:702`). Feeding the path segment to the door
+ * would refuse `CLR10 "invalid invite token"` every time — the two secrets
+ * are not interchangeable.
+ *
+ * Nothing in the P4 design corpus or the four mohe-grill ruling ledgers says
+ * how both travel in one URL, and the courier that will hold Clara's plaintext
+ * token is P4-4's. So this constant is the provisional seam, chosen because it
+ * is the one shape that leaves the path segment and every P2 wall
+ * byte-untouched. When the ruling lands, this name (and P4-4's link builder)
+ * is what changes — not the form, which takes the token as a plain prop.
+ *
+ * The document already carries `referrer: "no-referrer"` below, so this half
+ * of the link leaks no further than the path half it sits beside.
+ */
+const CLARA_INVITE_TOKEN_PARAM = "ct";
+
 export default async function InvitePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { token } = await params;
+  const query = await searchParams;
+
+  // A repeated parameter arrives as an array. Take NO token rather than
+  // guessing which of two a caller meant — the form's own guard then refuses
+  // honestly and consumes nothing, which is the fail-closed answer.
+  const raw = query[CLARA_INVITE_TOKEN_PARAM];
+  const inviteToken = typeof raw === "string" && raw !== "" ? raw : null;
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-2 bg-shell p-6">
       <div className="w-full max-w-sm">
-        <InviteAcceptForm token={token} />
+        <InviteAcceptForm token={token} inviteToken={inviteToken} />
       </div>
     </main>
   );
