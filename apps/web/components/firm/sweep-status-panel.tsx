@@ -21,8 +21,9 @@
 // Flagged here at rung 0 rather than built quietly; the owner has since
 // RULED it (裁-20, confirming the conductor's own call): `SweepReceiptPart`
 // upgrades to a rich card calling `get_sweep_run`/offering
-// `acknowledge_sweep_run` INSIDE the P6 four-part wire bump (`chatTurn_v15`,
-// alongside the other unhydrated part types) — no separate train owns it.
+// `acknowledge_sweep_run` INSIDE the P6 four-part wire bump (`chatTurn_v16` —
+// TRUED 2026-08-30, was v15; v15 shipped 2026-08-29 for the unrelated F-A6
+// PR-2, alongside the other unhydrated part types) — no separate train owns it.
 // This queue-altitude panel renders the ONE thing it genuinely has (the
 // envelope's own state) and names that ruled, tracked home rather than a
 // vague gap.

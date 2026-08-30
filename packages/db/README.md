@@ -12,13 +12,14 @@ truth (`docs/ARCHITECTURE.md` §3).
 > structural invariants, the balance/immutability/append-only triggers, and
 > money-as-cents. See `docs/plan/completed/rebuild-plan-history.md`.
 >
-> **Migration ledger — TRUED 2026-08-26 (counted, not remembered).** The repo carries **131
-> migration files, `0001`–`0136`** (the sequence skips `0032`, which never existed, and the
-> `0055`-era gaps), and **live is applied through the frontier `0136_fix_freeform_basis_types`**
-> — matching `PROGRESS.md`'s posture line. *(Was: "97 migrations, `0001`–`0102`, frontier
-> `0102_f_a2_statement_activation`, as of 2026-08-23" — stale by 34 files and 34 numbers.)* The
-> paragraph below is the **2026-08-09 arrivals note**, kept as the record of that batch rather
-> than rewritten:
+> **Migration ledger — TRUED 2026-08-30 (counted, not remembered).** The repo carries **150
+> migration files, `0001`–`0155`** (the sequence skips `0032`, which never existed, and
+> `0073`–`0076`), and **live is applied through the frontier `0153_f_t1_sst_reference_tables`
+> (148 applied)** — matching `PROGRESS.md`'s posture line (`0155`/LIVE 148/`0153`). *(Was: "131
+> migrations, `0001`–`0136`, frontier `0136_fix_freeform_basis_types`, as of 2026-08-26" — stale
+> by 19 files and 19 numbers; the prior `0055`-era gap has since been filled.)* The paragraph
+> below is the **2026-08-09 arrivals note**, kept as the record of that batch rather than
+> rewritten:
 >
 > The most recent arrivals
 > are the **F6–F9 batch** (ADR-066, applied 2026-08-08 23:24Z in ONE D1-quiesced ceremony):
