@@ -4,15 +4,20 @@
 // own shape (real rig, per-client fixtures built through audited verbs) — never a mock pg client,
 // because the belt's own logic is thin glue over real SQL.
 //
+// REWRITTEN AT THE G1 PR-2b FOLD (Codex r1 review of #449 — HIGH-3, MEDIUM-4). Idempotency is
+// now DB-owned via clara.claim_close_prep_task (UNIQUE(fiscal_year_id), with atomic reclaim of
+// a terminal-task row) — the runtime no longer inserts into clara.agent_tasks directly at all,
+// so the OLD "plant a raw row" cell no longer describes a reachable code path and is replaced.
+//
 // close_prep is a GLOBAL registry row (wake_engine_sources has no firm_id, wake-engine.test.mjs's
-// own header note) — this file toggles the REAL bank_agent/close_prep rows 0133 seeded, restoring
-// both to enabled=false in after() so no other suite run against this rig inherits a stray flip.
+// own header note) — this file toggles the REAL close_prep row 0133 seeded, restoring it to
+// enabled=false in after() so no other suite run against this rig inherits a stray flip.
 
 process.env.RELAY_TEST_MODE ??= "1";
 
-import { test, after } from "node:test";
+import { test, after, describe } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, humanQuery, asRuntime, opk, buildFirm, endPool } from "./relay-fixtures.mjs";
+import { rootQuery, humanQuery, asRuntime, opk, buildFirm, endPool, getPool } from "./relay-fixtures.mjs";
 import { produceClosePrepTasks } from "../lib/reconciler-close-prep.mjs";
 
 async function hasClosePrepDue() {
@@ -21,6 +26,13 @@ async function hasClosePrepDue() {
 }
 const HAS_ORACLE = await hasClosePrepDue();
 const skip = HAS_ORACLE ? false : "clara.close_prep_due() absent — migrate the target first";
+
+async function hasClaimDoor() {
+  const r = await rootQuery("select to_regprocedure('clara.claim_close_prep_task(uuid,uuid,uuid,text)') is not null as ok");
+  return r.rows[0]?.ok === true;
+}
+const HAS_CLAIM_DOOR = await hasClaimDoor();
+const skipClaim = HAS_CLAIM_DOOR ? false : "clara.claim_close_prep_task absent — apply UNNUMBERED_g1_pr_2b_bank_agent_due_emit.sql first";
 
 after(async () => {
   // Restore the REAL registry row to its shipped default (0133: enabled=false) regardless of what
@@ -49,7 +61,10 @@ async function bookToday() {
 
 /** An OPEN fiscal year that ended yesterday on the book clock — close_prep_due()'s own admission
  *  (0138 §F): status='open', ends_on <= _book_today(), no hold, no run, no active close receipt,
- *  no credential minted in the window. Built through the ONE audited writer, open_fiscal_year. */
+ *  no credential minted in the window. Built through the ONE audited writer, open_fiscal_year.
+ *  NONE of close_prep_due()'s own admission conditions look at clara.agent_tasks or the new
+ *  claims table, so this FY stays reported "due" across ticks regardless of what THIS belt has
+ *  done with it — which is exactly what the reclaim cell below needs. */
 async function buildOverdueFiscalYear(w, label) {
   const today = await bookToday();
   const startsOn = await rootQuery("select ($1::date - interval '1 year')::date::text as s", [today]);
@@ -79,7 +94,7 @@ async function liveTaskFor(clientId) {
   return r.rows[0] ?? null;
 }
 
-test("close_prep producer: DISABLED source appends nothing, even with a genuinely overdue FY", { skip }, async () => {
+test("close_prep producer: DISABLED source appends nothing, even with a genuinely overdue FY", { skip: skip || skipClaim }, async () => {
   const w = await buildFirm("g1cp-off");
   await buildOverdueFiscalYear(w, "FY-off");
   await setCloseEnabled(false);
@@ -90,7 +105,7 @@ test("close_prep producer: DISABLED source appends nothing, even with a genuinel
   assert.equal(await taskCountFor(w.client), 0, "and nothing landed in agent_tasks either");
 });
 
-test("close_prep producer: ENABLED + overdue FY queues exactly one task, correctly shaped", { skip }, async () => {
+test("close_prep producer: ENABLED + overdue FY queues exactly one task, correctly shaped", { skip: skip || skipClaim }, async () => {
   const w = await buildFirm("g1cp-on");
   await buildOverdueFiscalYear(w, "FY-on");
   await setCloseEnabled(true, w.owner);
@@ -103,7 +118,15 @@ test("close_prep producer: ENABLED + overdue FY queues exactly one task, correct
   assert.ok(task.model_snapshot && task.model_snapshot.trim().length > 0, "model_snapshot must be non-blank (the insert-trigger's own requirement)");
 });
 
-test("close_prep producer: TWO TICKS in a row queue exactly ONE task for the same client (the two-tick idempotency cell)", { skip }, async () => {
+// NOTE ON SCOPE, every cell below: close_prep_due() is REAL, uncontrolled data (unlike
+// bank_agent's own rig-only stub) — it scans EVERY open/reopened fiscal year across the WHOLE
+// rig, so an EARLIER test's own overdue FY (built while the source happened to be disabled, or
+// simply not yet claimed) can still be picked up on a LATER test's tick and inflate the belt's
+// own AGGREGATE counters. Every assertion below is therefore scoped to THIS test's own client
+// (taskCountFor/liveTaskFor), never to the belt's whole-rig totals, exactly the same discipline
+// the very first cut of this file already used for its "at least one" checks.
+
+test("close_prep producer: TWO TICKS in a row queue exactly ONE task for the same client (DB-owned claim, HIGH-3)", { skip: skip || skipClaim }, async () => {
   const w = await buildFirm("g1cp-2t");
   await buildOverdueFiscalYear(w, "FY-2tick");
   await setCloseEnabled(true, w.owner);
@@ -111,25 +134,135 @@ test("close_prep producer: TWO TICKS in a row queue exactly ONE task for the sam
   const second = await asRuntime((c) => produceClosePrepTasks(c, {}));
   assert.equal(first.closePrepOk, true);
   assert.equal(second.closePrepOk, true);
-  assert.ok(first.closePrepQueued >= 1, "the first tick must queue the task");
-  assert.equal(second.closePrepSkipped >= 1 || second.closePrepQueued === 0, true, "the second tick must not queue a second one");
   assert.equal(await taskCountFor(w.client), 1, "exactly ONE close_prep task must exist for this client after two ticks");
 });
 
-test("close_prep producer: a client with a LIVE close_prep task already queued is skipped, not doubled", { skip }, async () => {
+test("close_prep producer: a pre-existing LIVE claim (via claim_close_prep_task directly) is skipped by the belt, not doubled", { skip: skip || skipClaim }, async () => {
   const w = await buildFirm("g1cp-live");
-  await buildOverdueFiscalYear(w, "FY-live");
+  const fy = await buildOverdueFiscalYear(w, "FY-live");
   await setCloseEnabled(true, w.owner);
-  // Plant the live task directly (mirrors autodraft's own request_autodraft insert shape,
-  // 0011:2569) — this proves the belt's OWN skip check, independent of whether it was the one
-  // that queued the row.
-  await rootQuery(
-    `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot)
-       values ($1, $2, 'close_prep', 'queued', 'planted-by-this-cell')`,
-    [w.firm, w.client],
-  );
+  // Plant the live claim directly through the SAME door the belt itself uses — proves the
+  // belt's OWN skip is driven by the DB's own claim state, not by a runtime-side memory of what
+  // IT queued.
+  const planted = await asRuntime((c) => c.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fy, "planted-by-this-cell"]));
+  assert.equal(planted.rows[0].r.appended, true);
   const out = await asRuntime((c) => produceClosePrepTasks(c, {}));
   assert.equal(out.closePrepOk, true);
-  assert.ok(out.closePrepSkipped >= 1, `expected the planted row to be SKIPPED, got ${JSON.stringify(out)}`);
   assert.equal(await taskCountFor(w.client), 1, "still exactly one row — the planted one, untouched");
+});
+
+test("close_prep producer: once the claimed task reaches a TERMINAL state, the SAME still-due FY is reclaimed on the next tick (a reopened FY must not stay stuck)", { skip: skip || skipClaim }, async () => {
+  const w = await buildFirm("g1cp-reclaim");
+  await buildOverdueFiscalYear(w, "FY-reclaim");
+  await setCloseEnabled(true, w.owner);
+  await asRuntime((c) => produceClosePrepTasks(c, {}));
+  const firstTask = await liveTaskFor(w.client);
+  assert.ok(firstTask, "the first tick must have queued a task for this client");
+  // Terminalize it directly (mirrors the consumer's own eventual settle — this belt does not
+  // touch settlement, only production). The live matrix admits queued->running->{completed,...}
+  // only — a bare queued->completed is illegal (0120's own transition arm) — so the two-step
+  // path is the honest one, not a shortcut. close_prep_due()'s own admission law does not look
+  // at agent_tasks/close_prep_fy_claims at all, so the SAME FY is still reported due on the next
+  // tick — exactly the schedule that would otherwise leave a reopened FY stuck behind a resolved
+  // claim.
+  await rootQuery("update clara.agent_tasks set status='running' where id=$1", [firstTask.id]);
+  await rootQuery("update clara.agent_tasks set status='completed' where id=$1", [firstTask.id]);
+  await asRuntime((c) => produceClosePrepTasks(c, {}));
+  assert.equal(await taskCountFor(w.client), 2, "two tasks now exist for this client — the terminal one and the fresh reclaim");
+  const newest = await liveTaskFor(w.client);
+  assert.notEqual(newest.id, firstTask.id, "the reclaim must mint a genuinely NEW task id");
+  assert.equal(newest.status, "queued", "a terminal-task claim must be RECLAIMED, not treated as still-live");
+});
+
+test("close_prep producer: absent close_prep_due/claim_close_prep_task surface is DORMANT, never a failure", async () => {
+  const src = await import("node:fs/promises").then((fs) =>
+    fs.readFile(new URL("../lib/reconciler-close-prep.mjs", import.meta.url), "utf8"),
+  );
+  assert.match(src, /checkFunctionSurface/, "the belt must use the shared shape-checking helper (MEDIUM-4), not a bare to_regprocedure probe");
+  assert.match(src, /dormant:\s*true/, "an absent surface must answer dormant:true, never throw");
+});
+
+// =====================================================================================
+// MEDIUM-4 — a PRESENT but WRONGLY-SHAPED surface is a belt FAILURE, never dormancy.
+// =====================================================================================
+
+describe("close_prep producer: MEDIUM-4 — present-but-invalid surfaces are a belt failure, not dormancy", { skip }, () => {
+  test("a SCALAR jsonb close_prep_due() (a SETOF is expected) is refused, not silently treated as dormant", async () => {
+    await rootQuery("create or replace function clara._g1pr2b_shadow_scalar() returns jsonb language sql as $$ select '{}'::jsonb $$");
+    await rootQuery("alter function clara.close_prep_due() rename to _g1pr2b_close_prep_due_real");
+    await rootQuery("alter function clara._g1pr2b_shadow_scalar() rename to close_prep_due");
+    try {
+      const out = await asRuntime((c) => produceClosePrepTasks(c, {}));
+      assert.equal(out.closePrepOk, false, "a scalar function must NOT satisfy the SETOF surface check");
+      assert.equal(out.dormant, false);
+    } finally {
+      await rootQuery("alter function clara.close_prep_due() rename to _g1pr2b_shadow_scalar");
+      await rootQuery("drop function clara._g1pr2b_shadow_scalar()");
+      await rootQuery("alter function clara._g1pr2b_close_prep_due_real() rename to close_prep_due");
+    }
+  });
+
+  test("a TEXT-returning claim_close_prep_task with the same name/arity is refused", { skip: skipClaim }, async () => {
+    await rootQuery("alter function clara.claim_close_prep_task(uuid,uuid,uuid,text) rename to _g1pr2b_claim_real");
+    await rootQuery("create function clara.claim_close_prep_task(p_firm uuid, p_client uuid, p_fiscal_year uuid, p_model_snapshot text) returns text language sql as $$ select 'nope' $$");
+    await rootQuery("grant execute on function clara.claim_close_prep_task(uuid,uuid,uuid,text) to clara_runtime");
+    try {
+      const out = await asRuntime((c) => produceClosePrepTasks(c, {}));
+      assert.equal(out.closePrepOk, false);
+      assert.equal(out.dormant, false);
+    } finally {
+      await rootQuery("drop function clara.claim_close_prep_task(uuid,uuid,uuid,text)");
+      await rootQuery("alter function clara._g1pr2b_claim_real(uuid,uuid,uuid,text) rename to claim_close_prep_task");
+    }
+  });
+});
+
+// =====================================================================================
+// HIGH-2 (symmetry with bank_agent's own fold) — the SECURITY DEFINER owner.
+// =====================================================================================
+
+test("HIGH-2 symmetry: claim_close_prep_task is owned by clara_fn_owner, SECURITY DEFINER, search_path pinned, clara_runtime-only ACL", { skip: skipClaim }, async () => {
+  const r = await rootQuery(
+    `select p.proowner::regrole::name as owner, p.prosecdef as secdef,
+            'search_path=clara, pg_temp' = any(coalesce(p.proconfig,'{}'::text[])) as path_pinned
+       from pg_proc p where p.oid = 'clara.claim_close_prep_task(uuid,uuid,uuid,text)'::regprocedure`,
+  );
+  assert.equal(r.rows[0].owner, "clara_fn_owner");
+  assert.equal(r.rows[0].secdef, true);
+  assert.equal(r.rows[0].path_pinned, true);
+  const sig = "clara.claim_close_prep_task(uuid,uuid,uuid,text)";
+  for (const role of ["public", "clara_authenticated"]) {
+    const priv = await rootQuery("select has_function_privilege($2, $1, 'execute') as ok", [sig, role]);
+    assert.equal(priv.rows[0].ok, false, `${role} must NOT be able to execute claim_close_prep_task`);
+  }
+});
+
+// =====================================================================================
+// HIGH-3 — the DB-owned claim under REAL concurrency (two independent connections, barriered).
+// =====================================================================================
+
+test("HIGH-3: two independent runtime connections racing the SAME fiscal_year_id — exactly one appended, one skipped", { skip: skipClaim }, async () => {
+  const w = await buildFirm("g1cp-race");
+  const fy = await buildOverdueFiscalYear(w, "FY-race");
+
+  const pool = getPool();
+  const c1 = await pool.connect();
+  const c2 = await pool.connect();
+  try {
+    await c1.query("set role clara_runtime");
+    await c2.query("set role clara_runtime");
+    const [r1, r2] = await Promise.all([
+      c1.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fy, "race-1"]),
+      c2.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fy, "race-2"]),
+    ]);
+    const results = [r1.rows[0].r, r2.rows[0].r];
+    assert.equal(results.filter((r) => r.appended === true).length, 1, `exactly one concurrent call must have appended, got ${JSON.stringify(results)}`);
+    assert.equal(results.filter((r) => r.appended === false).length, 1, `exactly one must have been skipped, got ${JSON.stringify(results)}`);
+    assert.equal(await taskCountFor(w.client), 1, "exactly one task survived the race");
+  } finally {
+    await c1.query("reset role").catch(() => {});
+    await c2.query("reset role").catch(() => {});
+    c1.release();
+    c2.release();
+  }
 });

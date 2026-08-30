@@ -214,6 +214,24 @@ test("G1B-I8-stream-integration Gate G1 PR-2b (Codex r6 LOW #2) — a REAL regis
   //       carrying the malformed-input tool-error (rec.toolCalls becomes 1, matching
   //       drainBankStream's own tool-error branch, `bankAgent.v1.impl.ts`); step 2's raw stream
   //       is the terminal error. `stopWhen` lets the SDK's own multi-step loop request step 2.
+  //
+  // MEDIUM-6 (G1 PR-2b fold, Codex r1 review of #449): "this is genuine SDK integration, but
+  // still a component test — it never drives runBankAgentModelStep or workflow settlement."
+  // Correct, and DEFERRED to a G1 PR-2c follow-up rather than built here, for a concrete reason
+  // rather than a silent skip: `runBankAgentModelStep` carries `"use step"` (bankAgent.v1.impl.ts)
+  // and cannot be invoked outside a real WDK-managed workflow run — the ONLY harness in this
+  // codebase that drives a real WDK run end-to-end is `tests/world-e2e.mjs`, built specifically
+  // for the HTTP-triggered chatTurn family (boots the full built server with
+  // CLARA_START_WORLD=1, mints a JWT, polls agent_tasks over HTTP). It has never been extended to
+  // a wake-engine-dispatched workflow, and #437's OWN battery (which shipped bankAgent_v1/
+  // closePrep_v1) explicitly declined to drive the model loop through the real pipeline for the
+  // identical reason (g1-wake-bank-e2e.test.mjs's own header: "It does NOT drive the model loop
+  // — no LLM is called; the tools' `.execute` is invoked directly"). Building a wake-engine
+  // analogue of world-e2e.mjs — enabling wake_engine_sources, booting the built server, injecting
+  // a mock model, and polling through routing -> drain -> wake-engine-claim -> model-run -> settle
+  // — is a materially larger undertaking than this PR's own producer-plumbing scope. The API
+  // that is missing, named per MEDIUM-6's own instruction: a WDK-native test harness for
+  // wake-engine-dispatched (as opposed to HTTP-dispatched) workflow runs.
   const bank = await import("../workflows/bankAgent.v1.impl.ts");
   const bankTools = await import("../workflows/bankAgent.v1.tools.ts");
   const { streamText, isStepCount } = await import("ai");

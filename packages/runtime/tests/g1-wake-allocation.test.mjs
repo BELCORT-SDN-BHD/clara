@@ -43,12 +43,51 @@ const tools = await import("../workflows/bankAgent.v1.tools.ts");
 // reason added to deriveMatchAllocation tomorrow would silently NOT be swept unless this array
 // grew with it, and the sweep's own "not covered" assertion (below) is what makes that
 // omission loud instead of silent.
+// LOW-7 (G1 PR-2b fold, Codex r1 review of #449): the regex this cell used to use
+// (`/reason:\s*"([a-z_]+)"/g`) derives SPELLING, not IDENTITY (review law 3) — it sees no match
+// at all for `const reason = "new_reason"; return { ok: false, reason };` (a computed/shorthand
+// property), so a NEW branch introduced that way would silently pass this roster census with the
+// new reason simply absent from BOTH sides of the comparison. An AST walk over the REAL
+// TypeScript syntax tree closes that: every `reason:` property inside an object literal in
+// bankAgent.v1.alloc.ts is inspected, and the walk THROWS — failing the roster census loudly,
+// not silently under-covering it — the moment it finds one whose value is not a plain string
+// literal (an identifier, a shorthand property, a template expression, a call — anything this
+// walk cannot statically resolve to one fixed string).
 async function productionAllocationReasons() {
-  const src = await import("node:fs/promises").then((fs) =>
-    fs.readFile(new URL("../workflows/bankAgent.v1.alloc.ts", import.meta.url), "utf8"),
-  );
+  const ts = await import("typescript");
+  const fs = await import("node:fs/promises");
+  const path = new URL("../workflows/bankAgent.v1.alloc.ts", import.meta.url);
+  const src = await fs.readFile(path, "utf8");
+  const sourceFile = ts.createSourceFile("bankAgent.v1.alloc.ts", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const found = new Set();
-  for (const m of src.matchAll(/reason:\s*"([a-z_]+)"/g)) found.add(m[1]);
+
+  function lineOf(node) {
+    return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
+  }
+
+  function visit(node) {
+    if (ts.isPropertyAssignment(node) && ts.isIdentifier(node.name) && node.name.text === "reason") {
+      if (ts.isStringLiteralLike(node.initializer)) {
+        found.add(node.initializer.text);
+      } else {
+        throw new Error(
+          `g1-wake-allocation.test.mjs productionAllocationReasons: bankAgent.v1.alloc.ts:${lineOf(node)} ` +
+            `has a 'reason:' property whose value is NOT a plain string literal (kind=${ts.SyntaxKind[node.initializer.kind]}) — ` +
+            `this AST walk cannot statically resolve it to one fixed token, so the roster census must FAIL ` +
+            `rather than silently omit it (LOW-7, review law 3: spelling is not identity)`,
+        );
+      }
+    }
+    if (ts.isShorthandPropertyAssignment(node) && node.name.text === "reason") {
+      throw new Error(
+        `g1-wake-allocation.test.mjs productionAllocationReasons: bankAgent.v1.alloc.ts:${lineOf(node)} ` +
+          `has a SHORTHAND '{ reason }' property (a computed local variable, not a literal) — ` +
+          `the roster census cannot statically resolve this and must FAIL rather than silently omit it (LOW-7)`,
+      );
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
   return found;
 }
 

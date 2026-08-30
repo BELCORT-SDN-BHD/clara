@@ -6,37 +6,44 @@
 // and measured that nothing has ever inserted such a row (PROGRESS.md 2026-08-30 noon: "neither
 // source has a PRODUCER"). This belt is that missing half, for THIS source.
 //
-// FEATURE-DETECT, EXACT SIGNATURE, PER CYCLE (the reconciler-fa.mjs/-adjustments.mjs idiom,
-// cloned verbatim). clara.close_prep_due() already shipped in 0138 (F-A4 PR-1c) — AHEAD of this
-// belt, the reverse of FA/ADJ's own runtime-image-first ceremony order — but the probe is kept
-// anyway, defensively, exactly as reconciler-render.mjs/-sandbox.mjs keep theirs even once their
-// own migration is already live: a runtime image that somehow ships ahead of a future signature
-// change to this function boots dormant rather than throwing.
+// TWO DB SURFACES ARE FEATURE-DETECTED, PER CYCLE, NEVER CACHED (the reconciler-fa.mjs/
+// -adjustments.mjs idiom, cloned verbatim) — and, since the G1 PR-2b fold (Codex r1 review of
+// #449, MEDIUM-4), checked for exact SHAPE via pg-fn-surface.mjs, not merely exact NAME:
+//   clara.close_prep_due()                      — already shipped in 0138 (F-A4 PR-1c), AHEAD of
+//                                                  this belt, the reverse of FA/ADJ's own
+//                                                  runtime-image-first ceremony order — but the
+//                                                  probe is kept anyway, defensively, exactly as
+//                                                  reconciler-render.mjs/-sandbox.mjs keep theirs
+//                                                  even once their own migration is already live.
+//   clara.claim_close_prep_task(uuid,uuid,uuid,text) — THIS gate's own atomic claim-and-insert
+//                                                  door (UNNUMBERED_g1_pr_2b_bank_agent_due_
+//                                                  emit.sql), replacing this PR's own first-cut
+//                                                  raw `insert into clara.agent_tasks` from the
+//                                                  runtime (HIGH-3, Codex r1).
+// ABSENT (to_regprocedure itself null) -> a clean {dormant:true} no-op. PRESENT BUT THE WRONG
+// SHAPE (a same-name procedure, a scalar where close_prep_due() must be SETOF, a text-returning
+// claim door) -> a belt FAILURE (closePrepOk:false), never dormancy (MEDIUM-4).
 //
 // close_prep_due() IS A SET-RETURNING ORACLE (unlike FA/ADJ's per-client scalar): 0138 already
 // scans every open/reopened fiscal year across every firm's every active client in ONE call, and
 // it ALREADY carries its own one-book-day idempotency window (0138's own comment: "keyed on the
 // CLIENT... because wake_credentials carries a client but no fiscal year"). This belt therefore
 // needs NO client loop and NO per-client chase (contrast reconciler-fa.mjs) — it asks ONCE per
-// cycle, and for each row the oracle names, ensures at most one LIVE close_prep task exists for
-// that client before inserting a new queued one.
+// cycle, and for each row the oracle names, calls claim_close_prep_task UNCONDITIONALLY.
 //
-// THIS BELT'S OWN IDEMPOTENCY LAYER IS A SEPARATE, NARROWER WINDOW than the oracle's. The
-// oracle's one-book-day window is keyed on a MINTED wake_credentials ROW, which is written only
-// once the wake engine actually CLAIMS and DISPATCHES the task (design §1.2b: the credential is
-// minted by the dispatched workflow's own first step, never by the producer or the consumer).
-// Two belt ticks inside the SAME leader poll interval (~2s), before any claim has happened, would
-// therefore both see the SAME due row and both insert a SECOND queued task for the same client —
-// the two-tick duplicate this PR's acceptance list names. The fix mirrors close_prep_due()'s own
-// shape: before inserting, check for an existing NON-TERMINAL close_prep task for that client
-// (status in queued/running/cancel_requested) and skip if one is already there. Single-leader
-// (this belt runs only inside the ONE leader-lock-holding cycle) makes a plain check-then-insert
-// race-free — no concurrent invocation of this belt can ever exist to race it.
+// IDEMPOTENCY IS NOW DB-OWNED (HIGH-3, Codex r1 review of #449; REPLACES the pre-fold cut's own
+// runtime-side check-then-insert, a genuine two-round-trip TOCTOU race). claim_close_prep_task
+// atomically claims UNIQUE(fiscal_year_id) — reclaiming a stale, terminal-task row in the SAME
+// call when needed (a reopened FY, 0138's own admission law, must not stay stuck behind a
+// resolved claim) — before inserting the queued task, all in one statement/transaction. This
+// belt calls it UNCONDITIONALLY for every due row and trusts its own {appended, reason} reply;
+// there is no runtime-side pre-check left to race.
 //
-// PER-ROW ERROR ISOLATION (the reconciler-fa.mjs precedent): a poisoned row's existence-check or
-// insert throw is counted (closePrepFailed) and the belt moves on to the next row — it never
-// flips closePrepOk, which gates only the leader's cadence. closePrepOk goes false ONLY for a
-// WHOLE-BELT failure (the oracle call itself threw, or the source-enabled lookup threw).
+// PER-ROW ERROR ISOLATION (the reconciler-fa.mjs precedent): a poisoned row's claim-call throw
+// is counted (closePrepFailed) and the belt moves on to the next row — it never flips
+// closePrepOk, which gates only the leader's cadence. closePrepOk goes false ONLY for a
+// WHOLE-BELT failure (the oracle call itself threw, a surface check came back 'invalid', or the
+// source-enabled lookup threw).
 //
 // wake_engine_sources.enabled IS THE FIRST GATE, read fresh every cycle (never cached) — a
 // disabled source must append literally NOTHING, per design §3 ("a source with enabled=false is
@@ -57,15 +64,10 @@
 // its own — runReconcilerSweep beats 'reconciler' once per full cycle; this module is one more
 // pass folded into that same beat.
 
+import { checkFunctionSurface } from "./pg-fn-surface.mjs";
+
 function closePrepModelSnapshot() {
   return process.env.CLARA_CLOSE_PREP_MODEL || process.env.CLARA_CHAT_MODEL || "gpt-5.6-terra";
-}
-
-/** True iff clara.close_prep_due() exists — the EXACT signature, evaluated PER CYCLE, never
- *  cached at startup (the wiki-projection.mjs:321-346 R5 idiom). */
-async function hasClosePrepDueSurface(client) {
-  const r = await client.query("select to_regprocedure('clara.close_prep_due()') is not null as surface");
-  return r.rows[0]?.surface === true;
 }
 
 /** True iff wake_engine_sources names close_prep ENABLED right now. An absent row reads as
@@ -77,24 +79,10 @@ async function isCloseSourceEnabled(client) {
   return r.rows[0]?.enabled === true;
 }
 
-/** True iff the client already carries a non-terminal close_prep task (queued/running/
- *  cancel_requested) — this belt's own idempotency layer, independent of close_prep_due()'s own
- *  1-book-day/wake_credentials window (see module header: that window only starts once the task
- *  is actually claimed, so two ticks before any claim would otherwise both insert). */
-async function hasLiveClosePrepTask(client, clientId) {
-  const r = await client.query(
-    `select 1 from clara.agent_tasks
-      where kind = 'close_prep' and client_id = $1 and status in ('queued','running','cancel_requested')
-      limit 1`,
-    [clientId],
-  );
-  return r.rowCount > 0;
-}
-
 /**
  * Produce ONE close_prep task per (firm, client, fiscal_year) close_prep_due() names as due,
- * skipping any client that already carries a live close_prep task. Disabled source or an absent
- * DB surface both return a clean no-op.
+ * atomically claimed via clara.claim_close_prep_task. Disabled source or either absent/invalid
+ * DB surface both return a clean no-op (absent) or a counted failure (invalid — MEDIUM-4).
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  */
 export async function produceClosePrepTasks(client, opts = {}) {
@@ -108,14 +96,24 @@ export async function produceClosePrepTasks(client, opts = {}) {
     dormant: false,
   };
 
-  let surface;
+  let dueSurface;
+  let claimSurface;
   try {
-    surface = await hasClosePrepDueSurface(client);
+    dueSurface = await checkFunctionSurface(client, { signature: "clara.close_prep_due()", returnType: "record", returnsSet: true });
+    claimSurface = await checkFunctionSurface(client, { signature: "clara.claim_close_prep_task(uuid,uuid,uuid,text)", returnType: "jsonb" });
   } catch (err) {
-    log(`[reconcile] close_prep due-surface probe error: ${err?.message ?? err}`);
+    log(`[reconcile] close_prep surface probe error: ${err?.message ?? err}`);
     return { ...out, closePrepOk: false };
   }
-  if (!surface) {
+  if (dueSurface.status === "invalid") {
+    log(`[reconcile] close_prep due-surface present but INVALID shape: ${JSON.stringify(dueSurface.detail)}`);
+    return { ...out, closePrepOk: false };
+  }
+  if (claimSurface.status === "invalid") {
+    log(`[reconcile] close_prep claim-surface present but INVALID shape: ${JSON.stringify(claimSurface.detail)}`);
+    return { ...out, closePrepOk: false };
+  }
+  if (dueSurface.status === "absent" || claimSurface.status === "absent") {
     return { ...out, dormant: true };
   }
 
@@ -142,20 +140,20 @@ export async function produceClosePrepTasks(client, opts = {}) {
   for (const row of rows) {
     out.closePrepExamined += 1;
     try {
-      if (await hasLiveClosePrepTask(client, row.client_id)) {
+      const reply = (await client.query("select clara.claim_close_prep_task($1, $2, $3, $4) as r", [row.firm_id, row.client_id, row.fiscal_year_id, modelSnapshot])).rows[0]?.r;
+      if (reply?.appended === true) {
+        out.closePrepQueued += 1;
+        log(`[reconcile] close_prep queued client=${row.client_id} fiscal_year=${row.fiscal_year_id} reason=${row.reason} task=${reply.task_id}`);
+      } else if (reply?.appended === false) {
         out.closePrepSkipped += 1;
-        continue;
+        log(`[reconcile] close_prep client=${row.client_id} fiscal_year=${row.fiscal_year_id} already claimed — skipped`);
+      } else {
+        out.closePrepFailed += 1;
+        log(`[reconcile] close_prep client=${row.client_id} claim_close_prep_task returned an unexpected shape (expected {appended:boolean,...}, got ${JSON.stringify(reply)})`);
       }
-      await client.query(
-        `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot)
-           values ($1, $2, 'close_prep', 'queued', $3)`,
-        [row.firm_id, row.client_id, modelSnapshot],
-      );
-      out.closePrepQueued += 1;
-      log(`[reconcile] close_prep queued client=${row.client_id} fiscal_year=${row.fiscal_year_id} reason=${row.reason}`);
     } catch (err) {
       out.closePrepFailed += 1;
-      log(`[reconcile] close_prep queue client=${row.client_id} error: ${err?.message ?? err}`);
+      log(`[reconcile] close_prep claim client=${row.client_id} error: ${err?.message ?? err}`);
     }
   }
 

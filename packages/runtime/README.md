@@ -56,7 +56,34 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   one bank account; `closePrep_v1` prepares a year-end close and leaves a proposal a human settles.
   Neither can settle, finalize, attest or reopen: those four doors are `clara_authenticated`-only
   and the containment is the database's, not the tool sets'. Both sources stay disabled until the
-  ceremony, and **neither source has a producer yet** — the clock half is F-A3's and F-A4's own.
+  ceremony.
+- **Gate G1 PR-2b's two PRODUCERS** (`lib/reconciler-bank-agent.mjs`, `lib/reconciler-close-prep.mjs`,
+  registered in `reconciler.mjs`/wired in `leader.mjs`; migration
+  `UNNUMBERED_g1_pr_2b_bank_agent_due_emit.sql`) — the clock half both wake bodies above needed to
+  ever actually run. Each feature-detects its own DB surface (exact signature AND shape —
+  `prokind`/`prorettype`/`proretset`, `lib/pg-fn-surface.mjs` — a present-but-wrongly-shaped
+  surface is a belt FAILURE, never silent dormancy) and stays dormant until it exists.
+  - **bank_agent**: `CLARA_BANK_AGENT_RECONCILE_MS` (default 1 hour, owner-recorded, no design
+    ruling on the number) gates how often the belt asks `clara.bank_agent_run_due(uuid)` per
+    active client. **The one thing still outstanding is F-A3's own domain due-predicate** —
+    `bank_agent_run_due` itself does not exist yet, so this belt is a well-formed no-op in
+    production until F-A3 ships it. The predicate's own reply is switched through a CLOSED
+    reason table (`reconciler-bank-agent.mjs`'s `classifyBankDueReason`, mirroring
+    bank-agency-annexes-1-mechanics.md's own table): `unmatched_lines`/`reconcilable`/
+    `retry_later` emit; `chase_statement` is a notification, never an event (no
+    clara_runtime-reachable notification door exists yet — deferred, proven to append zero
+    events); `purpose_unconsented`/`held`/`nothing_due` are quiet; anything else is a counted
+    failure, never a silent emit. **The due_key contract**: the predicate's `due:true` reply
+    must carry a `due_key` string, stable across repeated answers for the SAME occurrence and
+    distinct for a genuinely new one — `clara.emit_bank_agent_due` atomically claims
+    `UNIQUE(client_id, bank_account_id, due_key)` before appending, so idempotency is DB-owned,
+    not a runtime check-then-write.
+  - **close_prep**: `CLARA_CLOSE_PREP_RECONCILE_MS` (default 24h, matching `close_prep_due()`'s
+    own stated cadence, 0138) gates how often the belt calls the already-shipped
+    `clara.close_prep_due()`. `clara.claim_close_prep_task` atomically claims
+    `UNIQUE(fiscal_year_id)` before inserting the queued task — reclaiming a stale
+    (terminal-task) row in the same call, so a reopened fiscal year is never stuck behind a
+    resolved claim.
 
 ## The world is OFF by default
 
