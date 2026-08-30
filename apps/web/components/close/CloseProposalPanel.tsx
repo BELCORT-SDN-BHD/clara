@@ -8,12 +8,20 @@
 // (getRows — a real table read, p_cp_human: bookkeeper+, firm-scoped) and
 // lets a human settle it (adopt/withdraw) through `settle_close_proposal`.
 //
-// What is STILL NOT BUILT here: the CARD — a proactive `close_proposal` typed
-// part Clara raises unprompted in the chat rail. That is the P6 four-part
-// wire bump's own scope (chatTurn_v16 — TRUED 2026-08-30, was v15; v15 shipped
-// 2026-08-29 for the unrelated F-A6 PR-2 — apps/web/lib/parts/{types,catalog}.ts
-// + PartRenderer.tsx) — recorded here as P6-owed, not fabricated as a
-// NotBuiltNote, because the object this panel opens is real and live.
+// THE CARD NOW EXISTS (TRUED P6-2, 2026-08-30). This block used to record it as
+// P6-owed: a proactive `close_proposal` typed part Clara raises unprompted in
+// the chat rail. The chatTurn_v16 wire bump landed it —
+// `apps/web/lib/parts/{types,catalog}.ts` declare the kind and
+// `components/parts/V16ActCards.tsx`'s `CloseProposalCard` renders it, hydrating
+// the SAME `clara.close_proposals` read this panel uses and calling the SAME
+// `settle_close_proposal` door.
+//
+// THE TWO ARE NOT REDUNDANT, AND THE SPLIT IS DELIBERATE. This panel is the
+// WORKBENCH: it lists every proposal for a close run in the context of the
+// close page, and it is where the card's own link points. The card is the
+// TRANSCRIPT half — one proposal, in the conversation where Clara raised it,
+// so a human can settle it without leaving the thread. Neither invents state;
+// both re-read the row.
 
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
@@ -69,8 +77,8 @@ export function CloseProposalPanel({
           <span className="text-xs text-muted-foreground">{t("drafted", { count: p.drafted.length })}</span>
           {p.state === "open" ? (
             <div className="flex flex-wrap gap-2">
-              <AdoptDialog proposal={p} busy={proposals.busy} onConfirm={() => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "adopted", null, { session }); })} />
-              <WithdrawDialog busy={proposals.busy} onConfirm={(reason) => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "withdrawn", reason, { session }); })} />
+              <AdoptDialog proposal={p} busy={proposals.busy} onConfirm={() => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "adopted", null, crypto.randomUUID(), { session }); })} />
+              <WithdrawDialog busy={proposals.busy} onConfirm={(reason) => actAndReloadPlan(async () => { await settleCloseProposal(p.id, "withdrawn", reason, crypto.randomUUID(), { session }); })} />
             </div>
           ) : (
             <span className="text-xs text-muted-foreground">
