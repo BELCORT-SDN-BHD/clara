@@ -17,8 +17,15 @@
 >
 > **Two files, one design of record.** This file carries §1-§6; **`tax-prep-wake-annexes.md`
 > carries §7 failure isolation · §8 the battery · §9 what is NOT built · §10 the build work
-> order · §11 sequencing and the ceremony.** The split happened at authoring to keep each file
-> inside the 500-line harness budget; nothing was dropped in the move.
+> order · §11 sequencing and the ceremony · **§11.1 what `tax_prep` needs from the clock, per
+> carrier** · **§12 裁-33 and 裁-44 resolved, and what P6's Tax tab actually is**.** The split
+> happened at authoring to keep each file inside the 500-line harness budget; nothing was
+> dropped in the move.
+>
+> **If you read one section, read annexes §12** — 裁-33 and 裁-44 resolved (they constrain
+> different verbs: Clara does everything up to the signature and nothing past it), and the
+> surface P6 builds: a **proposal/receipt** tab whose form-shaped residue is exactly the nine
+> inputs Clara structurally cannot supply, each indexed by the refusal that demands it.
 >
 > **Measured ground.** Throwaway `postgres:17` (`ft3design-rig`, port 33701, credential minted
 > per-run and env-only, never argv, never a file), `0001` → `0155`, **150 files, all green**,
@@ -60,8 +67,8 @@ producer rides the same seam** — one more pure predicate beside the six and on
 ## 2 · The carrier — `direct_queue`, and the measured argument for it
 
 裁-44 says "built like `close_prep`", which is the **direct_queue** carrier. The engine offers
-exactly two carriers and a third is forbidden, so this is a real fork. It is decided here on
-measurement, not on the ruling's wording, so that the reasons survive the sentence.
+exactly two carriers and a third is forbidden, so this is a real fork, decided here on
+measurement rather than on the ruling's wording so the reasons survive the sentence.
 
 **The `wake_outbox` alternative, priced honestly.** A `wake_outbox` source rides
 `task_kind='wake'` — a value `ck_wes_task_kind_wake_owned` **already admits** — so it needs
@@ -401,18 +408,18 @@ evidence of what happened — constraint 2 in its narrowest form.
 裁-44: *"Every rung carries its statutory citation and her own explanation of why the rung reads
 the way it does, so a professional reviews reasoning, not just a number."*
 
-The **citation** half is structural and already built: every add-back line's treatment resolves
-to a `tax_treatment_codes` row, which carries `statutory_ref` (NOT NULL, non-blank — measured)
-and `authority_id → tax_authorities` (NOT NULL). A dataset point whose treatment resolves to
-**zero** authorities is `citation_missing`, `cell_status='refused'` — seeded in `0152`. **The
-citation is bound once, to the code, by the signer — not re-picked per run by a model**, which
-is the failure class the survey found in the prior research: a depreciation add-back cannot cite
-the wrong paragraph on Tuesday and the right one on Wednesday.
+The **citation** half is structural and already stored: every add-back line's treatment resolves
+to a `tax_treatment_codes` row carrying `statutory_ref` (NOT NULL, non-blank) and
+`authority_id → tax_authorities` (NOT NULL); a treatment resolving to **zero** authorities is
+`citation_missing`. **The citation is bound once, to the code, by the signer — never re-picked
+per run by a model**: a depreciation add-back cannot cite the wrong paragraph on Tuesday and the
+right one on Wednesday. **But stored is not readable — `0152` granted nothing, so no human
+surface can display any of it today. That gap is gate-record GB-4, and PR-4 owes its fold.**
 
-The **explanation** half is Clara's prose, and it has exactly one home: `proposal_basis` on
-`tax_account_treatments` (PR-4) and `rationale` on the receipt (`agent_act_receipts.rationale
-NOT NULL`, non-blank, ≤4000 chars — measured). **Neither is a numeral and neither is a citation**,
-so the severance is untouched: she narrates, the code cites, the DB computes.
+The **explanation** half is Clara's prose, with exactly one home: `proposal_basis` on
+`tax_account_treatments` (PR-4) and `rationale` on the receipt (NOT NULL, ≤4000 chars).
+**Neither is a numeral and neither is a citation**, so the severance is untouched: she narrates,
+the code cites, the DB computes.
 
 ---
 
@@ -488,7 +495,6 @@ coverage-guard entry, and its i18n namespace; PR-9 owes the read surface it hydr
 
 ---
 
-**Continue at `tax-prep-wake-annexes.md`** — §7 failure isolation and observability · §8 the
-sixteen-cell battery · §9 what is explicitly NOT built and why · §10 the PR-9 build work order
-(prestate, body, tail, the two-body D1 inventory, the frontend homes) · §11 sequencing and the
-**fifth ceremony act** 裁-40 does not yet have.
+**Continue at `tax-prep-wake-annexes.md`** — §7 failure isolation · §8 the battery · §9 what is
+NOT built · §10 the build work order · §11 sequencing and the **fifth ceremony act** 裁-40 lacks ·
+**§11.1** the per-carrier clock statement · **§12** the 裁-33/裁-44 synthesis and P6's Tax tab.

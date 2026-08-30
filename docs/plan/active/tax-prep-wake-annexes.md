@@ -218,3 +218,110 @@ and is **independent of 裁-49's `call_kind` extension either way**, by design �
 clara.wake_fn_allowlist group by 1`, and `select evaluator_name, version, deployed from
 clara.evaluator_versions`. Those four reads reproduce every claim this annex makes about the
 estate's shape.
+
+### 11.1 · What `tax_prep` needs from the clock — stated per carrier, because the four differ
+
+*(Added 2026-08-30 for the batched owner question "are G1's producers a Wave-G precondition?" —
+which cannot be answered once for four sources, because they do not need the same thing.)*
+
+**`tax_prep` needs nothing from the event spine.** The measurement in §2 of the design file is
+what settles it: `close.finalized` is registered and emitted, and its taxonomy decision at the
+active version is **`ignore`** — so no `wake_intent`, no `wakes_outbox` row, no `drain` hop, no
+held task. There is no close-seal *trigger* to wait for, and **flipping that decision is not on
+this lane's path** (§2 argues why it should not be on anyone's).
+
+What `tax_prep` needs is exactly the **direct_queue minting seam**, in two pieces:
+
+1. one pure predicate, `taxPrepDue(lastRunMs, nowMs, intervalMs)`, beside the six already in
+   `packages/runtime/lib/leader.mjs` (`autopostReconcileDue`, `sstReconcileDue`,
+   `lintReconcileDue`, `depreciationRunDue`, `adjustmentRunDue`, `renderEnqueueDue`);
+2. one call in `startLeaderLoop`'s cycle body that, when due, asks `clara.tax_prep_due()` and
+   mints one `agent_tasks(kind='tax_prep', status='queued')` row per returned row.
+
+**That is the SAME seam `close_prep` needs**, which is the fact the owner question turns on:
+
+| Source | Carrier | What its producer still owes |
+|---|---|---|
+| `close_prep` | `direct_queue` | the minting seam (predicate + cycle call) |
+| **`tax_prep`** | `direct_queue` | **the same seam, one more predicate — nothing else** |
+| `bank_agent` | `wake_outbox` | strictly more: `bank.agent_due` must be **registered** in `clara.event_types`, **emitted** by a belt, **and** given a non-`ignore` `trigger_taxonomy` row — measured, it is in **neither** table today |
+| binding-expiry sweep | its own | its own (裁-18b's) |
+
+**And the honest answer for this lane: `tax_prep` should NOT gate Wave G, whatever the ruling on
+producers.** Its producer is the cheapest of the four, and that is irrelevant — the source cannot
+do anything until PR-2…PR-6 and PR-9 have merged and the evaluator has been deployed (§11,
+OQ-D). Holding Wave G for `tax_prep` would hold it for a chain that is not close to landing;
+letting `tax_prep` ship disabled costs nothing, because a disabled source is never claimed and
+its absence is visible in `wakeEngineHealth` rather than silent.
+
+---
+
+## 12 · 裁-33 and 裁-44 resolved, and what P6's Tax tab actually is
+
+*(Added 2026-08-30 at the lead's census, which named this as the design question. The two
+rulings are compatible; what follows is the mechanism that makes them so, and the surface that
+falls out of it.)*
+
+**The apparent tension.** 裁-33 walls tax at **DRAFT-ONLY** — there is no golden bar, nothing
+ever reaches `issued`, PR-7 is not built for beta. Read alone, that makes the Tax tab a **form**:
+a place where a human enters a computation Clara merely stores. 裁-44 makes tax **AGENTIC** — a
+fourth clock source that drafts R1–R10 and the CP204 estimate unasked and **proposes** every
+account's treatment. Read alone, that makes the tab a **proposal/receipt surface**: a place where
+a human reviews and signs work already done.
+
+**They are not in tension, and the reason is that they constrain different verbs.** 裁-33
+constrains the **terminal** verb — what may become final, and by whose hand. 裁-44 constrains the
+**initial** verb — who starts, and whether the first draft exists before a human asks for it.
+Nothing in the estate makes those the same act; the severance is precisely the machinery that
+keeps them apart. Stated as one sentence: **Clara does everything up to the signature and nothing
+past it, and there is no signature that ends in `issued`.**
+
+**So P6 builds a PROPOSAL/RECEIPT surface, not a form.** The tab's default state is *"here is
+what Clara drafted for YA 20XX, rung by rung, each with its statutory citation and her
+explanation of why it reads that way — and here is what she could not decide"*. Three
+consequences the build should not have to re-derive:
+
+1. **The tab is never empty for a sealed year once `tax_prep` is enabled** — the draft arrives
+   unasked. Before that, and for any year the due oracle excludes (annexes §11.1, gate record
+   GB-2/GB-3), it says **why** it is empty, naming the gap. An empty tab with no explanation is
+   the failure this design's whole refusal vocabulary exists to prevent.
+2. **Nothing on the tab issues anything.** The terminal control is *adopt this draft* (gate
+   record OQ-E), which marks it professionally reviewed and is **not** an issue: `report_runs`
+   keeps its `issued` value untouched, F-T3 builds no verb that reaches it, and
+   `tax_issue_unavailable` is seeded and waiting for the day PR-7 exists.
+3. **The signature the tab DOES carry is 裁-38's, and it is on the CODE, not the card** — a named
+   licensed tax agent signing a `tax_treatment_codes` row, with the licence reference recorded.
+   That act is estate-wide and happens once per code, not once per client per year. The tab
+   surfaces it as a **blocking gap** ("13 codes await signature"), not as a per-draft step.
+
+**The form-shaped part is the RESIDUE, and the refusal vocabulary is its exact index.** This is
+the synthesis worth carrying: the fields a human types are precisely the ones Clara
+*structurally cannot* supply, and every one of them is already named by a seeded refusal in
+`0152`. There is no separate "tax form" to design — **the form is what is left when you subtract
+everything Clara can propose**, and each field is reached *through the refusal that demanded it*:
+
+| The human keys | Because | Reached through |
+|---|---|---|
+| the apportionment percentage | it is the one judgement **number**, and `_tf_tax_treatment_human_only` refuses a machine principal in that column | `mixed_account_needs_split` |
+| the basis period | s.21A turns on a DGIR direction Clara cannot see | `basis_period_undetermined` |
+| the dated entity facts (paid-up capital, holdings, residence, source count) | they are as-at facts about the entity, not the books | `sme_facts_missing` · `business_source_count_unknown` |
+| the CP204 figure actually filed | Clara cannot e-file, so she cannot know | `prior_estimate_unknown` |
+| the carryforward opening balances | a professional's figure for history predating Clara — **and a nil must be keyed as 0 with a basis**, because "nobody entered it" and "there is none" are different states | `losses_brought_forward_unknown` |
+| the statutory disposal value | Sch 3 para 62(1) is the greater of market value and net proceeds, not the accounting proceeds | `disposal_value_not_established` |
+| the CA classification | 裁-38's `set_ca_classification` door | `ca_class_unassigned` |
+| the TIN / SSM | governed elsewhere, in `client_identifiers` | `entity_identifier_missing` |
+| the s.44(6) approved-institution relief | capped at 10% of aggregate income — a figure that does not exist until R7, so `fraction_bp × movement` cannot express it | `s44_6_relief_unmodelled` |
+
+**Nine fields, nine named refusals, zero free-form form.** A reviewer can check this design's
+honesty by inverting it: any input the tab asks a human for that is **not** in that column is
+either a field Clara should have proposed (a 裁-44 gap) or a numeral escaping the severance (a
+constraint-2 breach). That inversion is a better acceptance test than any wording, and P6 should
+use it.
+
+**What P6 therefore owes** — recorded here so the frontend lane inherits it rather than
+rediscovering it: the tax-draft card as the nineteenth `parts[]` member (design §6); the Tax
+tab's two panels (**drafted rungs**, hydrated from `list_tax_drafts` + the cells; **what needs
+you**, one affordance per outstanding refusal, each opening the door in the table above); the
+adopt control; the codes-await-signature banner; and i18n for the two new
+`agent_act_receipts.act_kind` labels (gate record GM-3). **No panel on this tab renders a number
+the model produced** — every figure resolves through a `metric_cell` id.

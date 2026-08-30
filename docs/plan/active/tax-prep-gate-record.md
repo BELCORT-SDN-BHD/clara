@@ -17,7 +17,12 @@
 >
 > **Verdict: BUILD-READY for PR-2 through PR-6 subject to GB-1's routing question; PR-9 is
 > DESIGN-COMPLETE but GATED on five unbuilt PRs and one ceremony act that does not yet exist.**
-> Two blockers, eight materials, five cards. Every blocker carries a proposed fold.
+> **Four blockers**, eight materials, five cards. Every blocker carries a proposed fold.
+>
+> *(GB-4 was added 2026-08-30 from the lead's census — the citation the card is required to show
+> is stored but ungranted and unreadable. The 裁-33 / 裁-44 reading the census also raised is
+> **resolved, not carried as a finding**: they constrain different verbs, and the resolution plus
+> the surface P6 builds is `tax-prep-wake-annexes.md` §12.)*
 
 ---
 
@@ -95,6 +100,41 @@ column), "are any codes signed?" is a single estate-level read, not a per-client
 client is due**, with the state surfaced as a firm-visible gap rather than a wake. One cheap
 read gates the whole belt. Battery cell T-7 gains the arm; the fold also makes the lane's launch
 behaviour honest: it does nothing until the professional act that unlocks it has happened.
+
+---
+
+### GB-4 · The card is required to cite law it cannot read
+
+**Found at:** the lead's 2026-08-30 census, item 2, followed to its consequence. **Severity:
+blocker for the card, not for the ladder.**
+
+裁-44 requires that **"every rung carries its statutory citation"**, and the design's answer
+(wake design §5) is that the citation is bound once to the `tax_treatment_codes` row —
+`statutory_ref` NOT NULL, `authority_id → tax_authorities` NOT NULL. That is where the citation
+**is stored**. It is not where it can be **read**.
+
+Measured: all six `0152` relations carry `relacl` **NULL** — no grant to `clara_authenticated`,
+to `clara_runtime`, to anything — and the migration minted exactly one function, the immutability
+trigger. **There is no grant and no reader.** So a tax-draft card rendered today could name the
+code (`ADDBACK_ENTERTAINMENT_50`, which it holds in its own `rungs` array) and could **not**
+render `s.39(1)(l) ITA 1967` or the authority behind it. A card that looks like it cites law and
+cannot is worse than one that admits it does not — and this is the surface a professional signs
+against.
+
+**Proposed fold — a reader, not a grant.** PR-4 ships
+`clara.list_tax_treatment_codes(p_as_of_ya int)` (bookkeeper floor, `_human_ctx`) returning
+`(code, direction, fraction_bp, requires_apportionment, statutory_ref, authority_label,
+authority_url, accessed_at, owner_signed_at, conflict)`. Three reasons a reader beats a table
+grant: the law tables stay ungranted and keep the `llm_price_table` closed-world posture `0152`
+deliberately chose; the reader can project the **signature state** and the **conflict** (§1's
+C-1) into the same row the card renders, so "unsigned" and "conflicted" are visible where the
+decision is made, not two joins away; and a reader is the estate's established shape for exactly
+this (`list_agent_act_receipts`, `list_review_queue`).
+
+**And it changes the PR-4 acceptance:** a cell asserting the reader returns the citation **and**
+the unsigned state for all 13 seeded codes, plus a cell asserting a firm viewer's JWT cannot
+`select` the underlying tables directly — the direct-path floor `0138` FIX-6 had to retrofit
+once already.
 
 ---
 

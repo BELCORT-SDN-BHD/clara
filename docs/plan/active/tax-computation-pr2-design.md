@@ -62,6 +62,26 @@ string that does not appear in the list above **cannot be persisted at all**
 on NULL via its outer `COALESCE(..., false)`). That is the reuse the order asks for: this
 increment **consumes** `0152`'s catalog and mints nothing beside it.
 
+**`0152` granted NOTHING, so nothing in F-T3 is wireable yet — and the first grant is PR-2's.**
+Measured at the replay, and confirmed by the migration's own tail census: all six relations are
+owned by `clara_fn_owner` with `enable` + `force` RLS, exactly one unconditional `clara_fn_owner`
+policy, and **`relacl` NULL** — a true closed world, no grant to any role. The migration minted
+exactly **one** function, `clara._tf_ft3_law_row_immutable()`. So there is **no grant and no
+reader**: today no human surface can display a treatment code, a rate band, or a citation.
+
+That is correct for PR-1 (it is the `llm_price_table` posture, deliberately chosen) but it makes
+the grant sequence load-bearing, and it is stated here so no lane assumes a surface exists:
+
+| PR | First `clara_authenticated` reach it opens |
+|---|---|
+| PR-1 ✅ | **none** — zero grants, `relacl` NULL on all six |
+| **PR-2** | **the FIRST grant in all of F-T3**: `record_client_tax_attribute` (the door) plus the firm-scoped select on `client_tax_attributes` and `tax_basis_periods` |
+| PR-3 | `set_ca_classification` (裁-38) |
+| PR-4 | `approve_tax_treatment` · `sign_tax_treatment_code` · **and the law-table READER the card needs — gate-record GB-4** |
+| PR-5 | `record_cp204_filing` · `record_tax_carryforward` |
+| PR-6 | none (the member is called by the wrapper, not by a human) |
+| PR-9 | `hold_tax_prep` · `release_tax_prep` · `list_tax_drafts` |
+
 **One code carries an unresolved conflict into the signature act.** `ADDBACK_DEPRECIATION_100`
 records **CONFLICT C-1** in its own `conflict` column: the 裁-21 dossier cites s.39(1)(k) while
 the 08-23 survey read of Act 53 reports (k) as the motor-vehicle rental restriction. The row is
