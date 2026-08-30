@@ -8,7 +8,7 @@ the named-skills rule, and the report shape. Only the deltas are restated below.
 
 **P6 runs at 裁-9's tier (c), full depth** — every built surface re-checked screen by screen
 against the COMPLETE resource set (the token contract, the design-rule docs, the FD-001..FD-047
-decision log, `EMIL-CRAFT-AUDIT.md`, all eight vendored Emil skills, the shadcn registry + live
+decision log, the handoff repo's EMIL-CRAFT-AUDIT, all eight vendored Emil skills, the shadcn registry + live
 MCP, the Mobbin references, and the high-fidelity prototype screens). **Deviations are recorded by
 ruling, never absorbed.** No P6 order may start before the entry gate (plan §5.1) closes.
 
@@ -16,7 +16,7 @@ ruling, never absorbed.** No P6 order may start before the entry gate (plan §5.
 
 ## P6-1 · `chatTurn_v16` — the runtime half of the four-part bump
 
-**Branch** `runtime/chatturn-v16`. **Size 0.8. Depends on: the P6 entry gate.**
+**Branch:** runtime/chatturn-v16. **Size 0.8. Depends on: the P6 entry gate.**
 **`.claude/rules/runtime-workflows.md` binds this order.**
 
 **Read the truing first.** Every prior document names this bump *"`chatTurn_v15`"*. **That version
@@ -37,8 +37,9 @@ an update for your change, you edited a frozen body: undo it.
 
 **Live/working state stays at the SSE layer, not as a persisted part type** (Q8, verbatim).
 
-**Verify.** `pnpm --filter @clara/runtime typecheck` · `test` · **`build`, then grep `.output/` for
-`chatTurn_v16`** — the WDK compiler can silently swallow a directive, so the source reading
+**Verify.** `pnpm --filter @clara/runtime typecheck` · `test` · **`build`, then grep the built
+output directory for `chatTurn_v16`** — the WDK compiler can silently swallow a directive, so the
+source reading
 correctly and the build succeeding are **not** evidence the behaviour shipped. Report the grep.
 
 **Deploy is a separate ceremony from merged `main`, run by the lead** — and the standing lesson
@@ -55,7 +56,7 @@ own declarations · the built-bundle grep is in the report.
 
 ## P6-2 · The card wave — union 22 → 26, four rich cards, the sweep-card upgrade
 
-**Branch** `web/p6-2-cards`. **Size 0.9. Depends on P6-1 MERGED** (not designed — merged).
+**Branch:** web/p6-2-cards. **Size 0.9. Depends on P6-1 MERGED** (not designed — merged).
 **Mobbin/skills: `emil-design-eng`, `animate`, `shadcn`; the card catalog in `docs/design/`.**
 
 **Why this waits for P6-1's merge.** `apps/web/lib/parts/types.ts:104-108` states the law: *"the
@@ -65,9 +66,16 @@ of the four shapes field for field from the merged `chatTurn.v16.*` closure.** W
 in one pass would have the reader and the declarer written by the same hand — exactly the mismatch
 that law exists to prevent.
 
-**Files.** `apps/web/lib/parts/types.ts` (union **22 → 26**) · `catalog.ts` (four entries with
-fixtures) · `components/parts/PartRenderer.tsx` (four render branches) ·
-`components/parts/` new card components · `messages/en.json`.
+**Files:**
+
+```
+apps/web/lib/parts/types.ts                  EDIT  the union, 22 -> 26
+apps/web/lib/parts/catalog.ts                EDIT  four entries with fixtures
+apps/web/components/parts/PartRenderer.tsx   EDIT  four render branches + the sweep upgrade
+apps/web/components/parts/V16Cards.tsx       NEW   the four rich cards
+apps/web/messages/en.json                    EDIT  one new namespace
+```
+
 The `AllCovered`/`NoExtra` guards make a missing catalog entry a `tsc` failure and the parity test
 makes a missing render branch a test failure — **the mechanism enforces its own completeness**, so
 do not add a hand-written "did I cover them all" assertion.
@@ -90,8 +98,8 @@ a pinned DB read on mount and after every act, through the shared `useHydratedPa
 number, verb, receipt or link.** `agent_receipt`'s link-out goes to the workbench that owns the
 object — **not** to a byte download, which F-A5b PR-3 has not built (plan §4).
 
-**Tests.** Extend `lib/parts/catalog.test.tsx` (fixtures for all four) · a
-`*-a11y.test.tsx` per new card · `components/parts/v16-cards.test.tsx` with a **discriminating**
+**Tests.** Extend `apps/web/lib/parts/catalog.test.tsx` (fixtures for all four) · an a11y file per
+new card · a card suite beside the new component with a **discriminating**
 post-condition per act · a RED-before mutant for each refusal branch · the sweep card's
 acknowledge gate asserted **through `clickButton`** (it throws on a disabled node — assert the gate,
 then act).
@@ -105,7 +113,7 @@ a comment, not a component.
 
 ## P6-3 · The a11y + token finish — 裁-13, 裁-1, 裁-2 4c
 
-**Branch** `web/p6-3-a11y-tokens`. **Size 0.8. Depends on P4-2 merged** (the cream ground must
+**Branch:** web/p6-3-a11y-tokens. **Size 0.8. Depends on P4-2 merged** (the cream ground must
 exist before its composited rows can be honest). **Skills: `impeccable`, `emil-design-eng`, `shadcn`.**
 
 **Three ruled items, executed in one PR because they share three files.**
@@ -120,13 +128,21 @@ design — a real violation is a component fix, never an allowlist entry.
 
 **② 裁-1 · the focus ring at 70%, and the Button treatment.** Ten components carry the idiom today,
 **all still at `/50`** — and the robust census is the **colour token, not the width or the
-variant**: `grep -rl "ring-ring/50" apps/web/components/` returns exactly ten
-(`ui/button.tsx`, `input.tsx`, `textarea.tsx`, `select.tsx`, `badge.tsx` — which spells it
-`ring-[3px]` — `input-group.tsx` — which puts it on the **wrapper** via
-`has-[[data-slot=input-group-control]:focus-visible]:ring-3`, so the literal `focus-visible:`
-prefix never appears — `common/native-select.tsx`, `common/section-tabs.tsx`,
-`journals/drafts-queue-panel.tsx`, `clara/ClaraThreadView.tsx`). **That census took three attempts
-to get right; re-run it, do not trust this list blind.**
+variant**: `grep -rl "ring-ring/50" apps/web/components/` returns exactly ten —
+
+```
+components/ui/button.tsx          components/ui/input.tsx
+components/ui/textarea.tsx        components/ui/select.tsx
+components/ui/badge.tsx           <- spells it ring-[3px], not focus-visible:ring-3
+components/ui/input-group.tsx     <- on the WRAPPER, via
+                                     has-[[data-slot=input-group-control]:focus-visible]:ring-3,
+                                     so the literal focus-visible: prefix never appears
+components/common/native-select.tsx        components/common/section-tabs.tsx
+components/journals/drafts-queue-panel.tsx components/clara/ClaraThreadView.tsx
+```
+
+(all relative to `apps/web/`). **That census took three attempts to get right; re-run it, do not
+trust this list blind.**
 
 **The order inside the PR is annex 2 §F's and it is not negotiable: rule (done — 裁-1 = 70%) →
 change the components → add the rows.** At 0.65 the accent ground measures 2.970 and would red CI
@@ -152,7 +168,7 @@ outline as the fallback for anything not carrying the shadcn idiom**, and say so
 
 **③ 裁-2 4c · the `--input` recut.** `app/globals.css:247` still reads `--input: #c7c5bd`, which
 never reaches 3:1 on any product ground (1.728 white, 1.611 shell, 1.598 cream, 1.594
-surface-subtle) while `components/ui/input.tsx` ships `bg-transparent` — so the border is the only
+surface-subtle) while `apps/web/components/ui/input.tsx` ships `bg-transparent` — so the border is the only
 identifier and SC 1.4.11 applies squarely. **Plan §6 OQ-1 is open:** the ruling puts the recut in
 the `clarabook-frontend` repo first. **Recommendation, needing the lead's confirmation before you
 author:** set the value here and open the clarabook recut PR in the same sitting. Add
@@ -173,21 +189,34 @@ its value.
 
 ## P6-4 · ONE shared signed money input
 
-**Branch** `web/p6-4-money-input`. **Size 0.6. Depends on: the entry gate.** **Skills: `tdd`,
+**Branch:** web/p6-4-money-input. **Size 0.6. Depends on: the entry gate.** **Skills: `tdd`,
 `codebase-design`, `emil-design-eng`.**
 
 **Why this is its own train.** Money entry has produced two of the estate's most expensive
 frontend defects: Wave A's *"a residual input that turned a typed RM50.00 into RM5.00 (three doors,
 proven key-by-key)"* and Wave C's *"a signed money field that could not take a negative"*. There
-are currently **four independent implementations** plus editors consuming them —
-`components/journals/use-amount-input.ts` (the hook, `:23`) ·
-`components/registers/opening-signed-amount-input.tsx` (`SignedAmountInput`, `:55`) ·
-`components/close/close-money-input.tsx` · `components/registers/staff-advance-money-input.tsx` —
-consumed by `entry-lines-editor`, `adjustment-lines-editor`, `opening-lines-editor`,
-`opening-item-fields`, `opening-fixed-asset-dialog`, `opening-target-keyed-panel`,
-`staff-advance-lines-editor`, `staff-advance-allocations-editor`, `fa-particulars-fields`,
-`matching-section` and `FutureAttestationPanel`. **Re-census this list yourself** — it is a grep on
-a moving tree, not a fixed roster.
+are currently **four independent implementations**, plus eleven consumers — all paths relative to
+`apps/web/`:
+
+```
+THE FOUR
+  components/journals/use-amount-input.ts               the hook, line 23
+  components/registers/opening-signed-amount-input.tsx  SignedAmountInput, line 55
+  components/close/close-money-input.tsx
+  components/registers/staff-advance-money-input.tsx
+
+THE CONSUMERS
+  components/journals/entry-lines-editor.tsx        components/registers/adjustment-lines-editor.tsx
+  components/registers/opening-lines-editor.tsx     components/registers/opening-item-fields.tsx
+  components/registers/opening-fixed-asset-dialog.tsx
+  components/registers/opening-target-keyed-panel.tsx
+  components/registers/staff-advance-lines-editor.tsx
+  components/registers/staff-advance-allocations-editor.tsx
+  components/registers/fa-particulars-fields.tsx    components/bank/matching-section.tsx
+  components/close/FutureAttestationPanel.tsx
+```
+
+**Re-census this list yourself** — it is a grep on a moving tree, not a fixed roster.
 
 **Deliverable.** One shared component + hook under `apps/web/components/common/`, with the union of
 every behaviour the four carry: cents-integer state (**never a float**), the signed case, paste,
@@ -205,15 +234,15 @@ every total.
 
 ## P6-5 · The agentic surface finish
 
-**Branch** `web/p6-5-agentic-finish`. **Size 0.7. Depends on P6-2 merged** (the sweep card).
+**Branch:** web/p6-5-agentic-finish. **Size 0.7. Depends on P6-2 merged** (the sweep card).
 
-**① 裁-37 · ⌘K "Do", behind a LIVE allowlist check.** Today `components/command/command-palette.tsx`
-ships a statically disabled row. Light it **only for the DB-allowlisted wake verbs**, with **a live
+**① 裁-37 · ⌘K "Do", behind a LIVE allowlist check.** Today
+`apps/web/components/command/command-palette.tsx` ships a statically disabled row. Light it **only for the DB-allowlisted wake verbs**, with **a live
 allowlist check per action** — the palette asks the database what it may do, **every time**, rather
 than shipping a hard-coded list that drifts the day a grant changes. Use the same allowlist-read
-shape the rest of the estate uses; this mints no new mechanism. **`messages/en.json`'s
-`disabledLabel` and every sibling "built in P3" string** (`:33,37,106,123,153,464,948,1044` per the
-audit) get an undated honest form in the same PR.
+shape the rest of the estate uses; this mints no new mechanism. **`apps/web/messages/en.json`'s
+`disabledLabel` and every sibling "built in P3" string** (lines 33, 37, 106, 123, 153, 464, 948 and
+1044 per the audit) get an undated honest form in the same PR.
 
 **② 裁-27 · "Amend resolution" on a RESOLVED onboarding item (T11 N2).** The live
 `resolve_onboarding_plan_item` re-resolves an item in any state; the card disables settled items,
@@ -241,7 +270,7 @@ resolution still visible · the seventh kind asserted against the live CHECK's o
 
 ## P6-6 · The identity finish
 
-**Branch** `web/p6-6-identity`. **Size 0.6. Depends on P4-2 and P6-3 merged.**
+**Branch:** web/p6-6-identity. **Size 0.6. Depends on P4-2 and P6-3 merged.**
 **Skills: `impeccable`, `frontend-design`, `emil-design-eng`, `animate`, `apple-design`.**
 
 **① 裁-14 · the Clara mascot.** `apps/web/public/` holds **five font files and nothing else** —
@@ -259,7 +288,7 @@ domain folders through P2/P3's reviewed builds) — conformance binds at the **t
 **④ The entry-face finish** — 裁-2 4a's white-card-on-canvas treatment, taken from structural
 (P4-2) to finished, with the third conformance pass's prototype screens as the parity reference.
 
-**Craft rules that bind and are already held** (`EMIL-CRAFT-AUDIT.md`, verified consumed): **no
+**Craft rules that bind and are already held** (the handoff repo's EMIL-CRAFT-AUDIT, verified consumed): **no
 `transition-all`**; ⌘K deliberately skips decorative dialog motion. Do not regress either.
 
 **Acceptance.** All four commands green · the mascot appears in **no** loading state anywhere
@@ -271,7 +300,7 @@ default-palette classes (the eslint ban is now mechanical — confirm it did not
 
 ## P6-T · Track B's frontend home — the Tax tab, the deadline feed, the compliance line
 
-**Branch** `web/p6-t-track-b`. **Size 0.7. BACKEND-GATED — read this before scoping.**
+**Branch:** web/p6-t-track-b. **Size 0.7. BACKEND-GATED — read this before scoping.**
 
 裁-34 ruled one home each, **all of it in P6, with the backend — no new phase**: a **`Tax` tab on
 the client workbench** (SST registration status · the period's output tax · the SST-02 draft from
@@ -286,8 +315,9 @@ grant and no verb**. F-T2's `apps/dashboard` page target is dead by this same ru
 the target.**
 
 **So this order's unconditional deliverable is the IA, and only the IA:** the
-`app/(firm)/clients/[clientId]/tax/page.tsx` route, its entry in
-`components/client-workspace-nav.tsx`, its `lib/command/routes.ts` rows, and **one `NotBuiltNote`
+tax route under the client workspace, its entry in
+`apps/web/components/client-workspace-nav.tsx`, its `apps/web/lib/command/routes.ts` rows, and
+**one `NotBuiltNote`
 per panel naming the verb and the lane that owes it** — the house mechanism, never a fake control.
 Then **three ride-alongs, one per backend merge** (~0.2 each), each wiring its panel against the
 doors that lane actually shipped. **Do not invent a panel for a door that does not exist**, and do
@@ -302,7 +332,7 @@ the report with their preconditions.
 
 ## P6-X · The cutover PR — retiring `apps/dashboard`
 
-**Branch** `web/p6-x-cutover`. **Size 0.5. CEREMONY-GRADE. Depends on: every train above, plus
+**Branch:** web/p6-x-cutover. **Size 0.5. CEREMONY-GRADE. Depends on: every train above, plus
 both exit gates green (plan §5.2).** **Run from merged `main`, never from a branch, with an as-run
 record.**
 

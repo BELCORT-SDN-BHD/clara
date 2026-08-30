@@ -57,7 +57,7 @@ pnpm --filter @clara/web build    # public-key class gate, then next build
 
 **Every new test file MUST be added to `apps/web/test/manifest.txt`**, one path per line,
 alphabetical by directory then name — Node 20 does not directory-scan, and
-`scripts/check-test-manifest.mjs` reds the build on an unenumerated file. **Report your test count
+`apps/web/scripts/check-test-manifest.mjs` reds the build on an unenumerated file. **Report your test count
 both ways**: the manifest's non-comment line count before and after, and the delta by NAME.
 
 ### 0.5 The instrument laws — each one cost a real defect
@@ -104,41 +104,48 @@ fresh-context review and the cross-model leg; you answer fold rounds on the same
 
 ## P4-1 · The scope spine — `requireFirmScope()`, one implementation, three entrances
 
-**Branch** `web/p4-1-scope-spine`. **Size 0.6. Depends on: nothing. Everything else depends on it.**
+**Branch:** web/p4-1-scope-spine. **Size 0.6. Depends on: nothing. Everything else depends on it.**
 **This is judgement logic on its face and takes review law 1's independent pass.**
 
-**Why one file, three callers.** `app/(full)/` and `app/api/runtime/` are **SIBLINGS** of
-`app/(firm)/`, not children — a route group adds no URL segment and wraps nothing outside itself.
-A check placed only in `(firm)/layout.tsx` leaves a no-membership session able to reach
-`/clara/[threadId]` and the runtime proxy, landing in exactly the NULL-`jwt_firm()` state this
-train eliminates (design §4 E).
+**Why one file, three callers.** The (full) route group and the runtime API route are **SIBLINGS**
+of the (firm) group, not children — a route group adds no URL segment and wraps nothing outside
+itself. A check placed only in the firm layout leaves a no-membership session able to reach
+/clara/:threadId and the runtime proxy, landing in exactly the NULL-`jwt_firm()` state this train
+eliminates (design §4 E).
 
-**Files.**
-- `apps/web/lib/require-firm-scope.ts` **NEW** — reads `clara.caller_context` via `getRows`
-  (`0141:544`; self-scoped, **0 or 1 row**, columns `user_id, firm_id, firm_name, role, role_rank,
-  is_operator`). Returns the context on exactly one row; **on zero rows AND on a failed read it
-  takes the fail-closed branch** — both grant nothing.
-- `apps/web/app/(firm)/layout.tsx` · `apps/web/app/(full)/layout.tsx` **EDIT** — call it; redirect
-  to `/pending` on the fail-closed branch.
-- `apps/web/app/api/runtime/[...path]/route.ts` **EDIT** — call it; **return 403**, not a redirect
-  (a redirect is not an answer to a data request).
-- `apps/web/lib/firm/caller-context.ts` **NEW** — the typed read + its wire-shape pin, so P4-3/P4-4
-  consume one loader rather than three.
-- `apps/web/lib/registration/reads.ts` **NEW** — `clara.firm_registration_requests_visible`
-  (`0145:911`), SELF scope: `id, applicant, firm_name, note, status, decided_by, decided_at,
-  reason, firm_id, created_at`. **`decided_by` is NULL outside the operator scope by design** —
-  render its absence, never infer an operator.
+**Files** — proposed paths in a fence because the NEW ones do not exist yet:
+
+```
+apps/web/lib/require-firm-scope.ts           NEW   the ONE check
+apps/web/lib/firm/caller-context.ts          NEW   the typed read + its wire-shape pin
+apps/web/lib/registration/reads.ts           NEW   the SELF-scope request read
+apps/web/app/(firm)/layout.tsx               EDIT  entrance 1 — redirect
+apps/web/app/(full)/layout.tsx               EDIT  entrance 2 — redirect
+apps/web/app/api/runtime/[...path]/route.ts  EDIT  entrance 3 — 403, never a redirect
+apps/web/tests/require-firm-scope.test.ts    NEW   the battery
+```
+
+- **require-firm-scope** reads `clara.caller_context` via `getRows` (`0141:544`; self-scoped,
+  **0 or 1 row**, columns `user_id, firm_id, firm_name, role, role_rank, is_operator`). It returns
+  the context on exactly one row; **on zero rows AND on a failed read it takes the fail-closed
+  branch** — both grant nothing.
+- The two layouts redirect to /pending on that branch; **the API route returns 403**, because a
+  redirect is not an answer to a data request.
+- **registration/reads** projects `clara.firm_registration_requests_visible` (`0145:911`), SELF
+  scope: `id, applicant, firm_name, note, status, decided_by, decided_at, reason, firm_id,
+  created_at`. **`decided_by` is NULL outside the operator scope by design** — render its absence,
+  never infer an operator.
 
 **Two exemptions that must stay exempt, and their reasons written in-file** (an unexplained
-exemption is what a later lane "fixes"): `app/logout/route.ts` is exempt **by necessity** — a
-session with no firm must still be able to log out, or the holding state strands exactly the people
-it exists for. `app/api/invite/route.ts` (P4-3's courier) is exempt **on principle** — it calls
+exemption is what a later lane "fixes"): `apps/web/app/logout/route.ts` is exempt **by necessity**
+— a session with no firm must still be able to log out, or the holding state strands exactly the
+people it exists for. The invite Route Handler (P4-3's courier) is exempt **on principle** — it calls
 `invite_member` as the caller and `_human_ctx(role_rank('admin'))` already raises `CLR04`, so **the
 DB is the wall**; adding a scope check would be the courier pretending to be a guard. The rule both
 imply: *a surface calls `requireFirmScope()` when it renders or returns firm-scoped data on its own
 authority, and does not when a governed door is already the wall.*
 
-**Tests** (`apps/web/tests/`, both directions, per annex 2 §G): `require-firm-scope.test.ts` —
+**Tests** (in `apps/web/tests/`, both directions, per annex 2 §G): the scope-spine suite proves it
 redirects on an **empty** read AND on a **failed** one, at all three entrances, with a **positive
 control** that a real membership passes through; the API entrance returns **403**, asserted as a
 status, not a redirect; the two exemptions are asserted as exemptions.
@@ -149,21 +156,31 @@ case rendered honestly · the two exemptions carry their reasons in the source.
 
 ---
 
-## P4-2 · The entry group — `(entry)`, signup, the holding page, invite-accept extended
+## P4-2 · The entry group — signup, the holding page, invite-accept extended
 
-**Branch** `web/p4-2-entry-group`. **Size 1.0. Depends on P4-1 merged.**
+**Branch:** web/p4-2-entry-group. **Size 1.0. Depends on P4-1 merged.**
 **Mobbin grounding: [`p4-mobbin-grounding-2026-08-28.md`](p4-mobbin-grounding-2026-08-28.md) §1.**
 
-**Files.** `apps/web/app/(entry)/layout.tsx` **NEW** (the identity-canvas ground + the white card,
-裁-2 4a — **card edge by shadow, decorative border only**, never a new meaning-bearing border that
-would face the contrast gate) · `login/page.tsx` **MOVED** from `app/login` · `invite/[token]/page.tsx`
-**MOVED** from `app/invite/[token]` · `signup/page.tsx` **NEW** · `pending/page.tsx` **NEW** (the
-FOURTH entry face, 裁-2 4b) · `apps/web/components/entry/` **NEW** · `apps/web/app/globals.css`
-**EDIT** · `apps/web/lib/supabase/proxy.ts:42` **EDIT** · `apps/web/lib/identity/doors.ts` **NEW**.
+**Files:**
 
-**Route-group moves keep every URL byte-identical** (a group adds no segment), so `/login` and
-`/invite/:token` are unchanged and `PUBLIC_PATH_PREFIXES` needs only `/signup` appended.
-`apps/web/tests/proxy-matcher.test.ts`'s asserted set extends with it, **both ways** — `/signup`
+```
+apps/web/app/(entry)/layout.tsx             NEW    the identity-canvas ground + the white card
+apps/web/app/(entry)/login/page.tsx         MOVED  from apps/web/app/login
+apps/web/app/(entry)/invite/[token]/page.tsx MOVED from apps/web/app/invite/[token]
+apps/web/app/(entry)/signup/page.tsx        NEW
+apps/web/app/(entry)/pending/page.tsx       NEW    the FOURTH entry face (裁-2 4b)
+apps/web/components/entry/*                 NEW    signup form, pending states, brand lockup
+apps/web/lib/identity/doors.ts              NEW    claim_identity + request_firm_registration
+apps/web/app/globals.css                    EDIT   the --color-identity-canvas bridge
+apps/web/lib/supabase/proxy.ts              EDIT   /signup joins PUBLIC_PATH_PREFIXES (line 42)
+```
+
+The layout carries 裁-2 4a's treatment: **card edge by shadow, decorative border only** — never a
+new meaning-bearing border, which would face the contrast gate.
+
+**Route-group moves keep every URL byte-identical** (a group adds no segment), so /login and
+/invite/:token are unchanged and `PUBLIC_PATH_PREFIXES` needs only /signup appended.
+`apps/web/tests/proxy-matcher.test.ts`'s asserted set extends with it, **both ways** — /signup
 resolves public and every other new route does not.
 
 **The signup chain** (design §4 A), in order, each step's refusal rendered verbatim:
@@ -206,9 +223,10 @@ composition that does not ship (plan §6 OQ-6).
 
 **Tests.** `signup-a11y` · `signup-keyboard` · `pending-a11y` · **`login-a11y` · `login-keyboard` ·
 `invite-accept-a11y` · `invite-accept-keyboard`** — the last four register the two P2 surfaces that
-**have never been in either scan** and sit squarely in this train's blast radius. Plus
-`lib/identity/doors.test.ts` (wire-shape pinning: exact verb name, exact argument names, refusal
-passthrough) and the extended `proxy-matcher.test.ts`.
+**have never been in either scan** and sit squarely in this train's blast radius. Plus a
+door-wrapper suite beside the new identity doors module (wire-shape pinning: exact verb name,
+exact argument names, refusal passthrough) and the extended
+`apps/web/tests/proxy-matcher.test.ts`.
 
 **Acceptance.** All four commands green · every URL byte-identical after the moves (assert by
 route, not by claim) · the three holding states distinguishable, each with a RED-before mutant ·
@@ -219,13 +237,19 @@ comment rewritten, not deleted.
 
 ## P4-3 · Members, roles, invites — the roster, the role menu, the dialog, the courier
 
-**Branch** `web/p4-3-members`. **Size 1.0. Depends on P4-1 merged.**
+**Branch:** web/p4-3-members. **Size 1.0. Depends on P4-1 merged.**
 **Mobbin grounding: §3.** **The courier is judgement logic and takes review law 1's pass.**
 
-**Files.** `apps/web/app/(firm)/admin/members/page.tsx` **NEW** ·
-`apps/web/components/admin/` **NEW** (roster table, role control, invite dialog, revoke dialog) ·
-`apps/web/lib/members/reads.ts` + `doors.ts` **NEW** · `apps/web/app/api/invite/route.ts` **NEW**
-(the server-only mail courier) · `apps/web/components/ui/dropdown-menu.tsx` **VENDORED**.
+**Files:**
+
+```
+apps/web/app/(firm)/admin/members/page.tsx   NEW       the roster route
+apps/web/components/admin/*                  NEW       roster table, role control, both dialogs
+apps/web/lib/members/reads.ts                NEW       the two visible views
+apps/web/lib/members/doors.ts                NEW       the five governed doors
+apps/web/app/api/invite/route.ts             NEW       the server-only mail courier
+apps/web/components/ui/dropdown-menu.tsx     VENDORED  the row-level role/remove menu
+```
 
 **Reads.** `clara.firm_members_visible` (`0141:512`) — `membership_id, user_id, display_name,
 email, role, role_rank, status, created_at, removed_at`; **roster is bookkeeper+ and `email` is
@@ -260,14 +284,15 @@ persist or return the plaintext** — it goes into the mail body and nowhere els
 **Vendor DropdownMenu** via `pnpm dlx shadcn@latest add dropdown-menu` from `apps/web/`, **strip
 every `dark:` class** (light-theme-only, Q4), and both gates pass in the same PR. **Do NOT vendor
 RadioGroup** (design §4 F: with tier assignment operator-only, a chooser is a control that cannot
-act). **Do NOT vendor Tabs** — `components/common/section-tabs.tsx` covers the hub's sections.
+act). **Do NOT vendor Tabs** — `apps/web/components/common/section-tabs.tsx` covers the sections.
 From the Mobbin grounding's anti-patterns: **no bulk approve/deny bar** (no plural door exists) and
 **no "Delivered" badge** (the DB cannot back a delivery claim).
 
 **Tests.** `members-a11y` · `members-keyboard` · `invite-dialog-a11y` · `invite-dialog-keyboard`
-(the focus trap and the escape path are the two that matter) · `lib/members/doors.test.ts` ·
-`tests/invite-courier.test.ts` — **the negative is the one worth writing: the courier sends NO mail
-when the door refused**, with a positive control proving the send-observer would have fired.
+(the focus trap and the escape path are the two that matter) · a door-wrapper suite beside the new
+members doors module · a courier suite in `apps/web/tests/` — **the negative is the one
+worth writing: the courier sends NO mail when the door refused**, with a positive control proving
+the send-observer would have fired.
 
 **Acceptance.** All four commands green · the three walls asserted with RED-before mutants · the
 masked email rendered as an absence with its rank named · the plaintext token confirmed absent from
@@ -277,11 +302,15 @@ every log, response body and store (grep the diff and say so) · DropdownMenu ca
 
 ## P4-4 · The operator approval queue
 
-**Branch** `web/p4-4-registrations`. **Size 0.6. Depends on P4-1 merged.** **Mobbin grounding: §2.**
+**Branch:** web/p4-4-registrations. **Size 0.6. Depends on P4-1 merged.** **Mobbin grounding: §2.**
 
-**Files.** `apps/web/app/(firm)/admin/registrations/page.tsx` **NEW** ·
-`apps/web/components/admin/registrations-queue.tsx` **NEW** ·
-`apps/web/lib/registration/doors.ts` **NEW** (extends P4-1's `reads.ts`).
+**Files:**
+
+```
+apps/web/app/(firm)/admin/registrations/page.tsx    NEW  the operator route
+apps/web/components/admin/registrations-queue.tsx   NEW  the queue + approve/reject dialogs
+apps/web/lib/registration/doors.ts                  NEW  extends P4-1's registration/reads.ts
+```
 
 **Authority.** `approve_firm_registration(uuid,text)` (`0145:766`) and
 `reject_firm_registration(uuid,text,text)` (`0145:832`) both floor at **owner+ AND the caller's
@@ -309,8 +338,9 @@ the same ceremony as 裁-40's four clock switches** (裁-43). That is correct fa
 **The rung-5 live walk for this train is therefore DEFERRED to that ceremony** and the order says so
 rather than claiming a walk it cannot run.
 
-**Tests.** `registrations-a11y` · `registrations-keyboard` · `lib/registration/doors.test.ts`. The
-two positive controls that matter, per annex 2 §G: **a non-operator owner is refused**, and **an
+**Tests.** `registrations-a11y` · `registrations-keyboard` · a door-wrapper suite beside the new
+registration doors module. The two positive controls that matter, per annex 2 §G:
+**a non-operator owner is refused**, and **an
 operator-firm admin is refused** — testing only the happy operator path leaves both halves of that
 conjunction unproven.
 
@@ -322,17 +352,17 @@ or explicitly recorded as unused · the deferred rung-5 stated in the report, no
 
 ## P4-5 · Nav, ⌘K and the admin hub
 
-**Branch** `web/p4-5-nav`. **Size 0.3. Depends on P4-2, P4-3 and P4-4 merged.**
+**Branch:** web/p4-5-nav. **Size 0.3. Depends on P4-2, P4-3 and P4-4 merged.**
 
 Rank-shape `apps/web/components/firm-nav.tsx` (hide below-rank surfaces; the operator console only
-on the operator predicate) · turn `app/(firm)/admin/page.tsx` from an honest empty state into the
-**hub**, using the existing `components/common/section-tabs.tsx` · add the new rows to
-`apps/web/lib/command/routes.ts`. **The href-resolution gate already exists** —
-`lib/command/routes.test.ts:27,46,107` derives its oracle from the live `app/` tree with a vacuity
-control — so a wrong `href` or a stale `status` goes RED on its own. Add the rows and let the gate
-prove them; do not hand-assert.
+on the operator predicate) · turn `apps/web/app/(firm)/admin/page.tsx` from an honest empty state
+into the **hub**, using the existing `apps/web/components/common/section-tabs.tsx` · add the new
+rows to `apps/web/lib/command/routes.ts`. **The href-resolution gate already exists** —
+`apps/web/lib/command/routes.test.ts` (lines 27, 46, 107) derives its oracle from the live app tree
+with a vacuity control — so a wrong `href` or a stale `status` goes RED on its own. Add the rows
+and let the gate prove them; do not hand-assert.
 
-**Acceptance.** All four commands green · `routes.test.ts` passes with the new rows and its vacuity
+**Acceptance.** All four commands green · the routes suite passes with the new rows and its vacuity
 control still meaningful · `firm-admin-pages-a11y.test.tsx` extended to the hub's new sections ·
 nav shaping asserted at each of the four ranks.
 
@@ -340,7 +370,7 @@ nav shaping asserted at each of the four ranks.
 
 ## P4-D · The DB half P4's tranche carries — 裁-26 and 裁-36
 
-**Branch** `db/p4-admission-and-antiabuse`. **Size 0.7. Needs a rig (assigned by the lead).**
+**Branch:** db/p4-admission-and-antiabuse. **Size 0.7. Needs a rig (assigned by the lead).**
 **This order does NOT start until its short design sitting closes — see plan §6 OQ-3.**
 
 **Scope.** ① **裁-26** — bind admission tokens to an email **at issue**, so `create_firm`'s token

@@ -40,11 +40,12 @@ belongs to P6's own later batched wire bump"*; `:33` `export type ClaraPartV15 =
 This is a naming truing, not a scope change; the work is identical.
 
 **② The catalog is 22, not 18 — MBB-4 is CLOSED, and the bump lands 26.**
-`apps/web/lib/parts/types.ts:178-200` declares 22 union members; `:12-15` records the four
+`apps/web/lib/parts/types.ts:178-200` declares 22 union members; `:12-16` records the four
 `chatTurn_v14` receipt kinds (`entry_posted`, `question_opened`, `bank_act`, `bank_pack`) joining
-on 2026-08-29, and `components/parts/V14ReceiptCards.tsx` renders all four. So the audit's MBB-4
+on 2026-08-29, and `apps/web/components/parts/V14ReceiptCards.tsx` renders all four. So the MBB-4
 ("four kinds neither frontend can render") no longer holds, and §8.1's *"18 + 4 = 22"* arithmetic
-is superseded: **22 + 4 = 26.**
+is superseded: **22 + 4 = 26** — a figure the file's own header at `:15` already states, so this
+truing is corroborated by the declarer, not only by this lane's count.
 
 **③ 裁-1, 裁-2 (4a/4b/4c) and 裁-13 are ALL UNEXECUTED at the tip.** Measured, not assumed:
 `grep -rl "ring-ring/50" apps/web/components/` returns the same **ten** carriers annex 2 §F
@@ -54,9 +55,9 @@ censused, every one still at **`/50`**, not 裁-1's ruled `/70`. `app/globals.cs
 These are the four polish rulings that have been ruled longest and executed least.
 
 **④ The 08-29 alignment audit's agent-buildable findings LANDED; two remain.** Verified at this
-tip: MBB-5 closed — `lib/command/routes.ts` reads `status: "built"` on all fifteen rows, `needsYou`
-→ `/needs-you`, and `routes.test.ts:27,46,107` derives the oracle from the live `app/` tree with a
-vacuity control, closing the class as the fix required. MBB-8 closed —
+tip: MBB-5 closed — `apps/web/lib/command/routes.ts` reads `status: "built"` on all fifteen rows,
+`needsYou` → /needs-you, and `apps/web/lib/command/routes.test.ts` (lines 27, 46, 107) derives its
+oracle from the live app tree with a vacuity control, closing the class. MBB-8 closed —
 `eslint.config.mjs:66-78` carries `NO_RAW_COLOR_VALUES` + `NO_TAILWIND_DEFAULT_PALETTE` scoped to
 `app/**` + `components/**`. P-2 closed — `.mcp.json` carries the `mobbin` HTTP server. P-3 closed —
 `apps/web/README.md:13-17` carries its own dated truing note. **Still open and owed to P6: P-1**
@@ -76,9 +77,9 @@ app/(full)/          clara/[threadId] · clients/[clientId]/clara/[threadId]
 app/                 login · invite/[token] · logout (route) · api/runtime/[...path] (route)
 ```
 
-**Nothing exists at** `/signup`, `/pending`, `/admin/members`, `/admin/registrations`,
-`/admin/tiers`, `/admin/billing`, `/clients/[clientId]/tax`, or `app/(entry)/`. There is **no**
-`lib/require-firm-scope.ts` (`grep -rn "requireFirmScope" apps/web/` → zero hits).
+**Nothing exists at** /signup, /pending, /admin/members, /admin/registrations, /admin/tiers,
+/admin/billing, /clients/:clientId/tax, or an `(entry)` route group. There is **no**
+require-firm-scope module (`grep -rn "requireFirmScope" apps/web/` → zero hits).
 
 ### 1.2 The parts union — 22 members, 5 rich + 4 v14 cards + 10 id-only summaries
 
@@ -117,12 +118,13 @@ the whole unbuilt P4 tranche plus one T8 ride-along.
 
 ### 1.4 Tests and gates
 
-- **148 test files** (`test/manifest.txt`, comment/blank lines excluded), run by
-  `scripts/run-tests.mjs`; `check-test-manifest.mjs` + its selftest red the build on an
-  unenumerated file.
-- **Three a11y CI gates, all green:** `scripts/check-token-contrast.mjs` (**27 declared pairs**,
-  all PASS, unconditionally strict) · `test/a11yRules.ts` (hand-written rule engine, no axe) ·
-  `test/keyboardWalk.ts`. **A fourth is owed:** WCAG 2.2 SC 2.5.8 target-size (裁-13) — absent.
+- **148 test files** (`apps/web/test/manifest.txt`, comment/blank lines excluded), run by
+  `apps/web/scripts/run-tests.mjs`; `apps/web/scripts/check-test-manifest.mjs` + its selftest red
+  the build on an unenumerated file.
+- **Three a11y CI gates, all green:** `apps/web/scripts/check-token-contrast.mjs` (**27 declared
+  pairs**, all PASS, unconditionally strict) · `apps/web/test/a11yRules.ts` (hand-written rule
+  engine, no axe) · `apps/web/test/keyboardWalk.ts`. **A fourth is owed:** WCAG 2.2 SC 2.5.8
+  target-size (裁-13) — absent.
 - **Token contract:** the ClaraBook brand package verifies **42/42** (Q4/#357); the 27 gate pairs
   are the *contrast* subset of it, not the same number — those two figures are not comparable and
   no document should treat them as one.
@@ -145,17 +147,18 @@ that same repo (裁-2 4c) · and the **third conformance pass** over the DESCRIP
 ## 2 · The P4 trains
 
 **Five build orders, one DB order, two deferred surfaces.** The partition is by *file ownership*,
-so five lanes can run concurrently without touching each other's tree: P4-1 owns `lib/` + the two
-layouts + the runtime route handler; P4-2 owns `app/(entry)/**`; P4-3 owns `app/(firm)/admin/members`
-+ `app/api/invite`; P4-4 owns `app/(firm)/admin/registrations`; P4-5 owns nav/⌘K/i18n truing.
-`messages/en.json` is the one genuinely shared file — §2.7 states the seam rule.
+so five lanes can run concurrently without touching each other's tree: **P4-1** owns the new lib
+modules + the two layouts + the runtime route handler; **P4-2** owns the new (entry) route group;
+**P4-3** owns admin/members + the invite Route Handler; **P4-4** owns admin/registrations; **P4-5**
+owns nav, ⌘K and the i18n truing. `apps/web/messages/en.json` is the one genuinely shared file —
+§2.7 states the seam rule.
 
 | # | Train | Doors / reads | Depends on | Size |
 |---|---|---|---|---|
 | **P4-1** | **The scope spine** — `requireFirmScope()`, one implementation, three entrances; the holding state's data | `caller_context`, `firm_registration_requests_visible` | — | 0.6 |
 | **P4-2** | **The entry group** — `(entry)` route group on the identity canvas; signup; the holding page; invite-accept extended | `claim_identity`, `request_firm_registration`, `accept_invite` | P4-1 | 1.0 |
 | **P4-3** | **Members, roles, invites** — the roster, the role menu, the invite dialog, the mail courier | `firm_members_visible`, `firm_invites_visible`, `invite_member`, `revoke_invite`, `set_member_role`, `remove_member` | P4-1 | 1.0 |
-| **P4-4** | **The operator approval queue** — `/admin/registrations`, operator-only | `firm_registration_requests_visible`, `approve_firm_registration`, `reject_firm_registration` | P4-1 | 0.6 |
+| **P4-4** | **The operator approval queue** — /admin/registrations, operator-only | `firm_registration_requests_visible`, `approve_firm_registration`, `reject_firm_registration` | P4-1 | 0.6 |
 | **P4-5** | **Nav, ⌘K and the admin hub** — rank-shaped nav, five new route rows, the hub's sections | reads only | P4-2..4 merged | 0.3 |
 | **P4-D** | **DB: 裁-26 + 裁-36** — the admission token's email binding; the DPA e-sign wall; the rate wall | new | its own mini-gate (§6 OQ-3) | 0.7 |
 
@@ -178,13 +181,13 @@ home and a precondition, which is the mechanism the house already uses.
   exist** (`grep` across all 155 migrations → zero hits); it is ruled to ride **裁-18b PR-3**, which
   also owns a D1 window on `_approve_entry_core`. **Home:** the existing
   `apps/web/components/firm-admin/vendor-bindings-panel.tsx`, as a row-level admin action beside
-  the decline/reset controls, on `/admin/vendor-bindings`. **Disposition:** a ride-along PR after
+  the decline/reset controls, on /admin/vendor-bindings. **Disposition:** a ride-along PR after
   PR-3 merges, ~0.2. Nothing ships before the door.
 - **Billing / checkout.** [`billing-design.md`](billing-design.md) §5 makes the UI **billing PR-4**
   and calls it *"this is P4's checkout tranche"*, landing **with** 裁-36's DPA e-sign + rate wall
   and 裁-26's email-bound token. PR-1/2/3 (the configuration relations, the lifecycle doors, the
   `evaluate_firm_billing_v1` rollup, `get_firm_invoice`, the Stripe mirror) are **unbuilt**, and
-  PR-1 carries the tranche's one D1 window. **Home:** `/admin/billing` under the admin hub,
+  PR-1 carries the tranche's one D1 window. **Home:** /admin/billing under the admin hub,
   admin/owner only (裁-51). **What it must do when it runs:** every price renders through the one
   named placeholder component while `billing_plans.amounts_ruled = false` (裁-50 — never a number,
   never `RM0`, never an em-dash) · the client status `onboarding` renders as the i18n label
@@ -199,8 +202,8 @@ home and a precondition, which is the mechanism the house already uses.
 `apps/web/messages/en.json` is touched by all five P4 orders. **Rule (the T0 seam's own, port-wave
 plan §3.1):** each order writes **one new top-level namespace** (`Signup`, `Pending`, `Members`,
 `Registrations`) and appends to `Admin` **only at its end**, so a conflict is between two orders in
-the same alphabetical neighbourhood rather than a whole-file collision. `test/manifest.txt` follows
-the same rule — alphabetical by directory, then name.
+the same alphabetical neighbourhood rather than a whole-file collision.
+`apps/web/test/manifest.txt` follows the same rule — alphabetical by directory, then name.
 
 ---
 
@@ -283,8 +286,9 @@ at P6's exit gate against whether its lane merged (the STALE-NOT-BUILT class).
    CUTOVER-OWED and zero un-dispositioned ORPHAN in direction 1; direction 2 still 100%.** It also
    closes §2's 81-vs-87 arithmetic by measurement.
 2. **The conformance re-audit** — `routes.ts` re-derived from the live tree (the gate now exists:
-   `routes.test.ts`), **every `NotBuiltNote`/`NotBuiltBadge` swept** against whether its named lane
-   merged (16 files carry one today), the manifest count control run as a gate, and R1's Ledger
+   the routes suite), **every `NotBuiltNote`/`NotBuiltBadge` swept** against whether its named lane
+   merged (**ten** surfaces carry one today, excluding the three note components themselves and the
+   two test files), the manifest count control run as a gate, and R1's Ledger
    Fold + the ClaraBook copy pass confirmed landed.
 3. **The a11y set, at four gates not three** — contrast (strict), rule engine, keyboard walk, and
    **target size** (裁-13), with every `--target-min` exception visible and reasoned.
