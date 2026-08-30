@@ -61,6 +61,10 @@ export async function mintClosePrepSession(firm, client) {
        values ($1, $2, 'close_prep', 'queued', $3) returning id`,
     [firm, client, JSON.stringify(MODEL)]);
   const task = t.rows[0].id;
+  // The engine claims a direct-queue task before the workflow's first step mints its credential.
+  // Keep the fixture on that production order: the exact minter's generic live-task wall now
+  // refuses a merely queued task, just as it refuses a terminal one.
+  await rootQuery("update clara.agent_tasks set status='running' where id=$1", [task]);
   const c = await rootQuery(
     "select * from clara.mint_wake_credential_for_task($1,$2,$3,$4,'00:30:00'::interval)",
     ["close_prep", firm, client, task]);

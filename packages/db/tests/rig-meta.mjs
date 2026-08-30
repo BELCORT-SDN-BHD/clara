@@ -1093,6 +1093,8 @@ const F_A4_PR1C_HUMAN_FNS = [
 //   rather than a silently-widened wall. `_adjustment_run_due_core` / `_depreciation_run_due_core`
 //   are OQ-9(a)/R-L11's additive extractions BELOW each live oracle's own admission — the live
 //   verbs keep their grants and their _assert_due_read_ctx, so x42.d8's closed census is unmoved.
+//   G1 PR-2a recuts `_close_wake_ctx` to add the task-status lock, but does not create a new door:
+//   its exact 0138 ungranted floor therefore remains pinned in this same frontier-safe cohort.
 const F_A4_PR1C_UNGRANTED_FNS = [
   "_wake_task_id", "_close_subject_client", "_close_expected_op_key", "_close_wake_ctx",
   "_close_prep_hold_active", "_close_tier_b_common", "_close_drawer1_unclean",

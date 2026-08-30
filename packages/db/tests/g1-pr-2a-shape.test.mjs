@@ -163,11 +163,33 @@ test("p2a.G3 missing status is refused by the strict door; legacy skip is quaran
   const row = (await rootQuery("select status, error_code from clara.agent_tasks where id=$1", [taskId])).rows[0];
   assert.equal(row.status, "failed");
   assert.equal(row.error_code, "internal");
-  // And 0133's own first-write-wins rule survives the recut: a replay carrying a different code
-  // must not overwrite the first cause.
-  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", "timeout"]);
+});
+
+test("p2a.G3c DRAIN-WINDOW RESIDUAL — revoked by the forward D1: stale run A settles after rebind to B through compat_3arg, but a terminal task cannot be re-settled", async (t) => {
+  if (gate(t)) return;
+  const { taskId } = await freshWakeTask();
+  await rootQuery("update clara.agent_tasks set workflow_run_id='run-A' where id=$1", [taskId]);
+  // The durable binding moves to B. The frozen run-A caller has only the short door, which carries
+  // no run expectation at all: during the drain window it therefore still settles B's current row.
+  await rootQuery("update clara.agent_tasks set workflow_run_id='run-B' where id=$1", [taskId]);
+  const beforeAudit = (await rootQuery(
+    `select count(*)::int as n from clara.audit_log
+      where args->>'task_id'=$1 and args->>'settled_via'='compat_3arg'`, [taskId])).rows[0].n;
+  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", "internal"]);
+  assert.equal((await rootQuery("select status from clara.agent_tasks where id=$1", [taskId])).rows[0].status,
+    "failed", "G3c residual: the stale short caller settles after A→B rebind until the forward D1 revokes it");
+  const afterAudit = (await rootQuery(
+    `select count(*)::int as n from clara.audit_log
+      where args->>'task_id'=$1 and args->>'settled_via'='compat_3arg'`, [taskId])).rows[0].n;
+  assert.equal(afterAudit, beforeAudit + 1,
+    "G3c: every successful short-door settle is measurable as settled_via=compat_3arg");
+
+  const replayErr = await caught(() => rootQuery(
+    "select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", "timeout"]));
+  assert.equal(reasonOf(replayErr), "wake_task_not_live",
+    `G3c: a terminal task cannot be re-settled through the short door, got ${replayErr?.detail}`);
   assert.equal((await rootQuery("select error_code from clara.agent_tasks where id=$1", [taskId])).rows[0].error_code,
-    "internal", "G3: first-write-wins on error_code is unchanged by the CAS recut");
+    "internal", "G3c: the refused replay leaves the first terminal cause unchanged");
 });
 
 test("p2a.G3b NULL is a real expected run: a concurrent bind after observation refuses", async (t) => {
@@ -442,12 +464,19 @@ test("p2a.D2 the abandonment roster is a closed, forced-RLS vocabulary and end_r
 
 test("p2a.D3 retirement preserves history but blocks new assignments; roster rows are append-or-retire only", async (t) => {
   if (gate(t)) return;
-  const existing = await abandonRun({ fy: await mintFiscalYear(), endReasonCode: "operator_abandoned" });
+  // Retire a test-owned row, never one of the ten seeded product values. Retirement is deliberately
+  // irreversible, so mutating a seed here made a second run of this corpus fail before testing its
+  // own wall.
+  const retiredCode = `p2a_retire_${randomUUID().replaceAll("-", "")}`;
+  await rootQuery(
+    `insert into clara.close_abandon_reasons(code,label,description,sort_order)
+       values ($1,'P2A retirement probe','Test-owned append-or-retire probe',999)`, [retiredCode]);
+  const existing = await abandonRun({ fy: await mintFiscalYear(), endReasonCode: retiredCode });
   assert.equal(existing.err, null, `D3: pre-retirement reference must land (${existing.err?.message})`);
-  await rootQuery("update clara.close_abandon_reasons set active=false where code='operator_abandoned'");
+  await rootQuery("update clara.close_abandon_reasons set active=false where code=$1", [retiredCode]);
   assert.equal((await rootQuery("select end_reason_code from clara.close_runs where id=$1", [existing.id])).rows[0].end_reason_code,
-    "operator_abandoned", "D3: retirement leaves existing references intact");
-  const fresh = await abandonRun({ fy: await mintFiscalYear(), endReasonCode: "operator_abandoned" });
+    retiredCode, "D3: retirement leaves existing references intact");
+  const fresh = await abandonRun({ fy: await mintFiscalYear(), endReasonCode: retiredCode });
   assert.equal(reasonOf(fresh.err), "close_abandon_reason_inactive",
     `D3: a new assignment of a retired code must refuse, got ${fresh.err?.detail}`);
 
@@ -456,7 +485,7 @@ test("p2a.D3 retirement preserves history but blocks new assignments; roster row
     ["label edit", "update clara.close_abandon_reasons set label=label || ' changed' where code=$1", ["other"]],
     ["description edit", "update clara.close_abandon_reasons set description=description || ' changed' where code=$1", ["other"]],
     ["sort edit", "update clara.close_abandon_reasons set sort_order=998 where code=$1", ["other"]],
-    ["reactivate", "update clara.close_abandon_reasons set active=true where code=$1", ["operator_abandoned"]],
+    ["reactivate", "update clara.close_abandon_reasons set active=true where code=$1", [retiredCode]],
     ["delete", "delete from clara.close_abandon_reasons where code=$1", ["other"]],
   ]) {
     const err = await caught(() => rootQuery(sql, params));

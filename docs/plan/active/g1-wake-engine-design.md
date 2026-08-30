@@ -525,6 +525,11 @@ quarantined rather than smuggled into the five-argument door. Its catalog commen
 cutover after which the three-argument door is revoked and the compatibility body removed. When
 the runtime repoints, I3 requires all five strict arguments by name, in order.
 
+The residual is explicit: during that drain window the exact three-argument door can let stale run
+A settle a task after it has rebound to run B. Every successful compatibility settle is audited as
+`settled_via='compat_3arg'`; once five-argument terminal/reconciler versions are deployed and that
+counter stays at zero through the drain horizon, the forward D1 revokes the short door.
+
 **What bites with no caller change at all is the `FOR UPDATE`**, and it is subtler than
 serialisation: the row was already locked by the UPDATE at the end of the body. What the clause
 buys is that the CAS conjuncts are evaluated against the COMMITTED row rather than a snapshot taken
@@ -534,7 +539,7 @@ CLR13, in the field a dead-letter triage reads first.
 
 ### 8.5 What the DB now says, that the runtime cannot yet say
 
-Four destinations exist that no production caller reaches, each a NAMED follow-up rather than an
+Five destinations exist that no production caller reaches, each a NAMED follow-up rather than an
 oversight, and each blocked on the same thing: the caller is a FROZEN body (constraint 9).
 
 | destination | who must repoint |

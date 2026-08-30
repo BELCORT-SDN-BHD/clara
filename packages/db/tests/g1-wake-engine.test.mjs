@@ -19,6 +19,7 @@ import {
 } from "./rig-runtime-fixtures.mjs";
 
 let ready = false;
+let STRICT_SETTLE = false;
 let SKIPPED = 0;
 function skip(t, why) {
   SKIPPED += 1;
@@ -51,6 +52,9 @@ before(async () => {
     noteLane("Gate G1 surface absent — g1-wake-engine battery skipped whole");
     return;
   }
+  STRICT_SETTLE = (await rootQuery(
+    "select to_regprocedure('clara._settle_wake_task_cas(uuid,text,text,text,text)') is not null as present",
+  )).rows[0].present;
   // Defensive: a PRIOR partial/aborted run of this file (or a rig re-run) may have left
   // bank_agent enabled — reset to the shipped default before this run's own assertions,
   // which assume the birth state (this file never touches close_prep's flag).
@@ -67,6 +71,17 @@ before(async () => {
   OP = await seedFreshFirm(`g1op_${randomUUID().slice(0, 8)}`, "op");
   await rootQuery("update clara.firms set is_operator=true where id=$1", [OP.firm]);
 });
+
+async function replaySettle(task, outcome, errorCode) {
+  if (!STRICT_SETTLE) {
+    return rootQuery("select clara._settle_wake_task($1,$2,$3)", [task, outcome, errorCode]);
+  }
+  const observed = (await rootQuery(
+    "select workflow_run_id, status from clara.agent_tasks where id=$1", [task],
+  )).rows[0];
+  return rootQuery("select clara._settle_wake_task_cas($1,$2,$3,$4,$5)",
+    [task, outcome, errorCode, observed.workflow_run_id, observed.status]);
+}
 after(async () => {
   printLaneNotes("g1-wake-engine");
   console.log(`[g1-wake-engine] skipped: ${SKIPPED}`);
@@ -283,11 +298,9 @@ test("D3 _settle_wake_task settles agent_tasks AND flips wakes_outbox to 'settle
   const outboxRow = (await rootQuery("select status from clara.wakes_outbox where intent_id=$1", [intent.intentId])).rows[0];
   assert.equal(outboxRow.status, "settled", "D3: the SAME call flips the paired wakes_outbox row to 'settled'");
 
-  // Idempotent replay: settling the SAME task again must NOT raise (the update affects the
-  // task row 0 times since it is no longer kind='wake' AND status-filtered... actually the
-  // verb filters on kind='wake' only, not status, so a re-settle re-writes the SAME outcome —
-  // proven a no-op on the OUTBOX half, which is the crash-recovery-critical one).
-  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [task, "completed", null]);
+  // Idempotent replay stays available through the strict door once PR-2a ships. The frozen short
+  // door is deliberately narrower during its drain window: it refuses a task already terminal.
+  await replaySettle(task, "completed", null);
   const outboxRow2 = (await rootQuery("select status from clara.wakes_outbox where intent_id=$1", [intent.intentId])).rows[0];
   assert.equal(outboxRow2.status, "settled", "D3: a replayed settle is idempotent — still 'settled', no raise");
 });
@@ -491,9 +504,9 @@ test("MUST B: _settle_wake_task settles a direct_queue (close_prep) task — no 
   const settled = await readRow("agent_tasks", taskId);
   assert.equal(settled.status, "completed", "MUST B: a close_prep (direct_queue) task settles through the SAME verb a wake task uses");
 
-  // A SECOND settle (crash-recovery replay shape) must stay idempotent, never raise, even though
-  // v_intent is structurally null on every close_prep row (never "zero rows matched").
-  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "completed", null]);
+  // A SECOND settle (crash-recovery replay shape) stays idempotent through the strict door once
+  // PR-2a exists, even though v_intent is structurally null on every close_prep row.
+  await replaySettle(taskId, "completed", null);
   const replayed = await readRow("agent_tasks", taskId);
   assert.equal(replayed.status, "completed", "MUST B: a replayed close_prep settle is idempotent — no raise, no wakes_outbox touch attempted");
 });
@@ -513,7 +526,7 @@ test("NOTE C: a re-settle replay with a null error_code never ERASES an earlier 
 
   // A replay carrying a null error_code (a caller that does not re-derive the original code)
   // must NOT blank it out — NOTE C's own finding, probed live pre-fix.
-  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", null]);
+  await replaySettle(taskId, "failed", null);
   const replayed = await readRow("agent_tasks", taskId);
   assert.equal(replayed.error_code, "internal", "NOTE C: error_code survives a null-carrying replay — coalesce, never overwrite");
 });
@@ -536,7 +549,7 @@ test("S2 (a): FIRST-WRITE-WINS — a LATER replay carrying a DIFFERENT non-null 
 
   // A plain coalesce() would have picked THIS non-null value and clobbered the first cause —
   // that is exactly the bug S2 closes: only the FIRST non-null write may ever land.
-  await rootQuery("select clara._settle_wake_task($1,$2,$3)", [taskId, "failed", "timeout"]);
+  await replaySettle(taskId, "failed", "timeout");
   const after = await readRow("agent_tasks", taskId);
   assert.equal(after.error_code, "internal", "S2(a): a LATER replay's DIFFERENT error_code ('timeout') must be discarded — the FIRST cause ('internal') is the one that survives, forever");
 });
@@ -573,12 +586,17 @@ test("S3: wake_engine_sources.task_kind refuses an out-of-domain value (e.g. 'au
   assert.match(err.message ?? "", /ck_wes_task_kind_wake_owned/i, "S3: the refusal names the S3 wall specifically");
 
   // The two LEGITIMATE values are unaffected.
-  const legit = await rootQuery(
-    `insert into clara.wake_engine_sources (source_key, carrier, event_type, task_kind, wake_kind, workflow_export, login_pool)
-       values ($1,'direct_queue',null,'close_prep','close_prep','g1TestWorkflow','runtime') returning task_kind`,
-    [`g1_test_s3_legit_${randomUUID().slice(0, 8)}`],
-  );
-  assert.equal(legit.rows[0].task_kind, "close_prep", "S3: the wall admits the real, legitimate direct_queue kind without friction");
+  const legitKey = `g1_test_s3_legit_${randomUUID().slice(0, 8)}`;
+  try {
+    const legit = await rootQuery(
+      `insert into clara.wake_engine_sources (source_key, carrier, event_type, task_kind, wake_kind, workflow_export, login_pool)
+         values ($1,'direct_queue',null,'close_prep','close_prep','g1TestWorkflow','runtime') returning task_kind`,
+      [legitKey],
+    );
+    assert.equal(legit.rows[0].task_kind, "close_prep", "S3: the wall admits the real, legitimate direct_queue kind without friction");
+  } finally {
+    await rootQuery("delete from clara.wake_engine_sources where source_key=$1", [legitKey]);
+  }
 });
 
 // =====================================================================================
