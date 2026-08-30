@@ -32,30 +32,26 @@ import assert from "node:assert/strict";
 import { opk, assertRaises, endPool, rootQuery, PG } from "./rig-helpers.mjs";
 import { printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
-import { has28, seedPayableAccount, seedClientHardIdentifier, propose } from "./x36-vendor-binding-helpers.mjs";
+import { seedPayableAccount, seedClientHardIdentifier, propose } from "./x36-vendor-binding-helpers.mjs";
 import { seedWindow, DATES_OK } from "./binding-proposal-pr-1-helpers.mjs";
+import { readUniqueViolationConstraintNameGate } from "./unique-violation-constraint-name-gate.mjs";
 
 let ready = false;
 let w = null;
 let missingReason = null;
 
 before(async () => {
-  // The catalog gate names the WALL's own marker text (constraint_name), not just the door's
-  // existence -- propose_vendor_identity_binding has resolved since 0028, so a bare
-  // to_regprocedure check would pass on a pre-migration chain and this file's cells would then
-  // hard-fail on "expected binding_conflict, got a raw 23505" with no single diagnosis of WHY.
-  const catalog = await rootQuery(
-    `select position('constraint_name' in p.prosrc) <> 0 as walled
-       from pg_proc p where p.oid = 'clara.propose_vendor_identity_binding(jsonb,text)'::regprocedure`,
+  const gate = await readUniqueViolationConstraintNameGate(
+    rootQuery,
+    process.env.CLARA_ALLOW_MISSING_UNIQUE_VIOLATION_CONSTRAINT_NAME,
   );
-  if (!(await has28()) || !catalog.rows[0]?.walled) {
-    missingReason =
-      "unique-violation-constraint-name premise missing: 0028 absent, or " +
-      "clara.propose_vendor_identity_binding does not read constraint_name -- this migration and " +
-      "this test file ship together (packages/db/migrations/UNNUMBERED_unique_violation_" +
-      "constraint_name.sql).";
-    if (process.env.CLARA_ALLOW_MISSING_UNIQUE_VIOLATION_CONSTRAINT_NAME === "1") return;
-    throw new Error(`${missingReason} Focused/post-migration runs fail loudly; only the explicit package-wide preintegration sweep may skip.`);
+  if (gate.action !== "execute") {
+    missingReason = gate.reason;
+    if (gate.action === "skip") return;
+    throw new Error(
+      `${missingReason}. Focused/post-migration runs fail loudly; only the explicit ` +
+      "package-wide preintegration sweep may skip.",
+    );
   }
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
