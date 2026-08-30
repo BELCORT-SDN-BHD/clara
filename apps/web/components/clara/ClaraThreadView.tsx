@@ -16,6 +16,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { ClaraThreadUiState } from "@/lib/clara/threadStore";
 import { useClaraThread, useComposerFocusRequest } from "@/lib/clara/useClaraThread";
+import { ThreadActionCoordinatorProvider } from "@/lib/parts/thread-action-coordinator";
 import { cn } from "@/lib/utils";
 
 export function ClaraThreadView({
@@ -69,7 +70,8 @@ export function ClaraThreadView({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <ThreadActionCoordinatorProvider session={auth}>
+      <div className="flex h-full flex-col">
       <div className="flex-1 space-y-3 overflow-y-auto p-3" role="log" aria-live="polite">
         {/* T11: the onboarding checklist card — a stateful card INLINE in the
             message stream (R7, the Manus precedent), never a side panel.
@@ -152,7 +154,8 @@ export function ClaraThreadView({
           {busy ? t("sending") : t("send")}
         </Button>
       </form>
-    </div>
+      </div>
+    </ThreadActionCoordinatorProvider>
   );
 }
 
