@@ -129,6 +129,15 @@ const byButtonText = (re: RegExp) => (n: Node) =>
 const byLabelledInput = (label: RegExp) => (n: Node) =>
   n.tagName === "INPUT" && label.test(textOf((n.parentNode ?? {}) as never));
 
+/** The nth recorded `accept_invite` body, proven present before it is read —
+ *  an index into a shorter-than-expected list must fail the CELL, never
+ *  silently read `undefined` and compare two absences as equal. */
+function callAt(calls: Record<string, unknown>[], i: number): Record<string, unknown> {
+  const call = calls[i];
+  assert.ok(call, `expected an accept_invite call at index ${i}`);
+  return call;
+}
+
 /** Drives the shipped journey: click the gate, fill both fields, submit. */
 async function walkToSubmit(
   h: Awaited<ReturnType<typeof renderComponent>>,
@@ -176,10 +185,10 @@ test("ACCEPTANCE: after a successful acceptance a MEMBERSHIP EXISTS — asserted
       // (1) The door was actually called, with CLARA's token — not the
       //     Supabase path segment, which would refuse CLR10 in the real DB.
       assert.equal(state.acceptCalls.length, 1, "accept_invite must be called exactly once");
-      assert.equal(state.acceptCalls[0].p_token, CLARA_TOKEN, "the door must receive CLARA's invite token");
-      assert.equal(state.acceptCalls[0].p_display_name, "Aisyah Rahman", "the typed display name must reach the wire");
+      assert.equal(callAt(state.acceptCalls, 0).p_token, CLARA_TOKEN, "the door must receive CLARA's invite token");
+      assert.equal(callAt(state.acceptCalls, 0).p_display_name, "Aisyah Rahman", "the typed display name must reach the wire");
       assert.equal(
-        Object.keys(state.acceptCalls[0]).includes("p_email"), false,
+        Object.keys(callAt(state.acceptCalls, 0)).includes("p_email"), false,
         "the email is NEVER form input — the door reads it from the JWT claim",
       );
 
@@ -327,7 +336,7 @@ test("a re-submit with the SAME display name replays the SAME op_key; changing t
 
       assert.equal(state.acceptCalls.length, 2);
       assert.equal(
-        state.acceptCalls[0].p_op_key, state.acceptCalls[1].p_op_key,
+        callAt(state.acceptCalls, 0).p_op_key, callAt(state.acceptCalls, 1).p_op_key,
         "same args => same op_key, so a retry replays the dedupe branch instead of a CLR09 dead end",
       );
 
@@ -338,7 +347,7 @@ test("a re-submit with the SAME display name replays the SAME op_key; changing t
 
       assert.equal(state.acceptCalls.length, 3);
       assert.notEqual(
-        state.acceptCalls[2].p_op_key, state.acceptCalls[0].p_op_key,
+        callAt(state.acceptCalls, 2).p_op_key, callAt(state.acceptCalls, 0).p_op_key,
         "the door's request hash binds the display name, so changed args need a fresh key",
       );
     } finally {
