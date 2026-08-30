@@ -120,7 +120,7 @@ CI-green and awaiting its independent lane's two-polarity verdict.
 
 ---
 
-## Evening sitting (2026-08-30, ~20:10–21:30 MYT) — 裁-57 … 裁-71
+## Evening sitting (2026-08-30, ~20:10 MYT onward) — 裁-57 … 裁-72
 
 ### 裁-57 · Beta is a PAID launch — no invited-free tier
 
@@ -272,6 +272,27 @@ two small DB items ride the next DB pass (`ck_llm_usage_events_call_kind` + `ban
 PROGRESS Known issues (0123's `firm_egress_dispatch_authorizations` owned by postgres;
 `bank_agent_due_claims` has no retention path; the wake allowlist is name-bound not
 signature-bound — items 76/77/3).
+
+### 裁-72 · The P6 cutover scope — ALL 110 verbs get an apps/web home before the switch
+
+**What was asked.** The verb-coverage census found 81 CUTOVER-OWED verbs (wired only in the
+retiring `apps/dashboard`) and 29 ORPHANS (no UI anywhere at all, headlined by "nothing can open
+a fiscal year"). Does the P6 cutover need every one of the 110 ported before the domain switch, or
+can it go with the 81 alone (dashboard-behind-admin-flag or named Known-issues deferrals for the
+rest)?
+
+**Ruling.** **The P6 cutover scope is ALL 110 verbs** — the 81 CUTOVER-OWED and the 29 ORPHANS
+both get an `apps/web` home BEFORE the domain switch. "110 个全接完再切." Verb-coverage census
+(`docs/plan/active/verb-coverage-census-2026-08-28.md`) dispositions 1+2 CLOSED.
+
+**Orchestrator's dissent, recorded then executed** (cost: ~8+ frontend trains, beta moves by
+weeks). *Execution:* the work is organised as domain trains **P6-C1…C7** in criticality order
+(fiscal-year/close cluster → firm admin/onboarding/egress → journals/governance/coding →
+opening/carry-down → counterparty/documents/questions → fixed assets/depreciation + staff
+advances → adjustments + reports/sweeps/seeding), each shipping dated NotBuilt cards for the
+verbs still ahead of it so the product stays honest mid-programme. **裁-60's "cutover as soon as
+P6-2 renders" becomes "cutover when C7 lands."** `requeue_render_job`'s possible P3 scope-down
+(disposition 3) is reconciled inside C7.
 
 ### Closed without a new number (already ruled or superseded)
 
