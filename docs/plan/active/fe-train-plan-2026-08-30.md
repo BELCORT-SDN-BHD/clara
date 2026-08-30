@@ -409,7 +409,7 @@ would put two lanes in the same file for no gain:
 
 ## 6 · Open questions — each with this lane's recommendation, none resolved here
 
-0. **DOES BETA CHARGE AT ALL — paid, or invited-and-unpaid?** This is the one question that adds or
+0. **RULED 裁-57 — beta IS a paid launch, no invited-free tier.** DOES BETA CHARGE AT ALL — paid, or invited-and-unpaid? This is the one question that adds or
    removes a whole train. 裁-28 and 裁-42 settle the billing MODEL and leave the AMOUNTS open;
    neither says whether money moves during beta. If beta is **invited-unpaid**, the checkout shell
    is unbuilt for beta and §2.6's billing train drops out of the wave; if beta **charges**, it
@@ -417,18 +417,18 @@ would put two lanes in the same file for no gain:
    裁-26's email-bound token in with it. *Recommend: ask it in the next batch, before the wave is
    sequenced — this is cheap to answer and expensive to guess, and a half-built checkout is the one
    outcome neither answer wants.*
-1. **The `--input` recut's origin (裁-2 4c).** The ruling puts the recut in the **clarabook**
+1. **RULED 裁-64② — recommendation accepted verbatim.** The `--input` recut's origin (裁-2 4c). The ruling puts the recut in the **clarabook**
    repo, with `apps/web` re-porting after it merges. No such PR exists, and P6-3 cannot add the
    four `input-on-*` contrast rows without the value. *Recommend: let **P6-3 set the value in
    `apps/web` and open the clarabook recut PR in the same sitting**, citing 裁-2 4c — the token
    contract stays the record, and the two repos land the same hex. The alternative (block P6-3 on
    an external repo) trades a real gate for a bookkeeping preference.*
-2. **The Button focus treatment (裁-1's second half, annex 2 §H.2 ③).** `--ring` and `--primary`
+2. **RULED 裁-64③ — recommendation accepted verbatim.** The Button focus treatment (裁-1's second half, annex 2 §H.2 ③). `--ring` and `--primary`
    are the same hex, so a default Button's swapped border against its own fill measures **1.000**;
    no halo alpha fixes it. *Recommend: an **offset ring** (`outline-offset`, so the halo sits
    against the page rather than the fill) over a contrasting border token — one property, no new
    token, and it composites against grounds the gate already measures.*
-3. **裁-36's rate wall needs an IP, and the browser cannot be trusted with one.** *"One firm per
+3. **RULED 裁-64① — recommendation accepted verbatim.** 裁-36's rate wall needs an IP, and the browser cannot be trusted with one. *"One firm per
    IP per day"* is a DB wall by ruling, but `request_firm_registration` takes no IP argument and a
    client-supplied one is not a wall. *Recommend: **P4-D gets its own short design sitting before
    it is authored** — the honest shapes are (a) a server-only Route Handler couriering the
@@ -440,7 +440,7 @@ would put two lanes in the same file for no gain:
    on a successful return**. *Recommend: the acceptance test that matters most is the negative —
    **the courier sends no mail when the door refused** — written with a positive control proving
    the mock would have observed a send.*
-5. **`app.clarabook.com` still serves `apps/dashboard`, and no repo evidence settles it** (audit
+5. **RULED 裁-60 — the sequencing half is settled** (the deploy-record check below still stands as the cutover PR's own first act). **`app.clarabook.com` still serves `apps/dashboard`, and no repo evidence settles it** (audit
    §5). *Recommend: a deploy-record check as the cutover PR's first act, not an assumption in its
    body — absence of a Workers deployment record is not evidence of a Pages one.*
 6. **~~The main checkout cannot supply `apps/web`'s dependencies~~ — RESOLVED 2026-08-30, kept on
