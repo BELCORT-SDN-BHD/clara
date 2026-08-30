@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
@@ -158,22 +159,36 @@ const DEFAULT_MIGRATION_CORPUS: MigrationCorpus = { files: MIGRATION_FILES, read
 /** Exact, reviewed dynamic-SQL barriers. A new migration is never admitted here
  * merely because the lexer could not inspect it: adding an entry is a review act
  * and the reason records why this specific barrier is understood. */
-const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, string>([
+type ReviewedDynamicSqlBarrier = { readonly reason: string; readonly sha256: string };
+
+const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlBarrier>([
   [
     "0146_ninth_rowkind_seeding_proposal.sql",
-    "Reviewed splice of clara.list_review_queue() from pg_get_functiondef; it cannot replace either P4 scope view.",
+    {
+      reason: "Reviewed splice of clara.list_review_queue() from pg_get_functiondef; it cannot replace either P4 scope view.",
+      sha256: "561ede4d64af78cbc150894b8ca6014f7b1514d45fa5d313ef6681012d2398a6",
+    },
   ],
   [
     "0147_db_hardening_b_hash_only_bearer_tokens.sql",
-    "Reviewed ALTER TABLE formatter drops the discovered firm_admissions primary-key constraint; it emits no view definition.",
+    {
+      reason: "Reviewed ALTER TABLE formatter drops the discovered firm_admissions primary-key constraint; it emits no view definition.",
+      sha256: "28cfc3f7d83e28818e455c96849efe61ab87008bd7482239dfab41d0499f8121",
+    },
   ],
   [
     "0149_counterparty_merge_pr_1.sql",
-    "Reviewed pg_get_functiondef splices recut four named counterparty functions only; neither P4 scope view is a target.",
+    {
+      reason: "Reviewed pg_get_functiondef splices recut four named counterparty functions only; neither P4 scope view is a target.",
+      sha256: "e44758a0a931122c1be8452fa4f4866d29e180bbffa0cff1ea3c9a9a94425cb5",
+    },
   ],
   [
     "0151_f_a9_pr_1b_brake_census.sql",
-    "Reviewed pg_get_functiondef loop recuts the explicit F-A9 function roster only; neither P4 scope view is a target.",
+    {
+      reason: "Reviewed pg_get_functiondef loop recuts the explicit F-A9 function roster only; neither P4 scope view is a target.",
+      sha256: "f6d093e5b5e6037386522581ec07fab6ad955b4944f3871fc5a31b2635173b7b",
+    },
   ],
 ]);
 
@@ -212,11 +227,13 @@ function viewDefinitions(
         error instanceof Error ? error.message : String(error),
         new RegExp(`^unmodelled: unresolved dynamic SQL at ${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:`),
       );
-      const reason = REVIEWED_DYNAMIC_SQL_BARRIERS.get(file);
-      if (reason === undefined) {
+      const reviewed = REVIEWED_DYNAMIC_SQL_BARRIERS.get(file);
+      if (reviewed === undefined) {
         throw new Error(`unmodelled: unreviewed dynamic-SQL barrier at ${file} - the successor census cannot prove this migration unrelated`);
       }
-      assert.ok(reason.length >= 40, `${file}'s reviewed barrier reason is too thin`);
+      const actualSha256 = createHash("sha256").update(corpus.read(file), "utf8").digest("hex");
+      assert.equal(actualSha256, reviewed.sha256, `reviewed dynamic-SQL barrier sha256 mismatch at ${file}`);
+      assert.ok(reviewed.reason.length >= 40, `${file}'s reviewed barrier reason is too thin`);
       blockedAt.push(file);
       continue;
     }
@@ -312,7 +329,7 @@ describe("the projections are the DB's own declared column contracts", () => {
     try {
       const files = [
         ["0141_base.sql", "create view clara.probe as select 1;"],
-        ["0146_ninth_rowkind_seeding_proposal.sql", "do $$ begin execute v_sql; end $$;"],
+        ["0146_ninth_rowkind_seeding_proposal.sql", migration("0146_ninth_rowkind_seeding_proposal.sql")],
         ["0147_unreviewed_successor.sql", "do $$ begin execute later_sql; end $$;"],
       ] as const;
       for (const [file, sql] of files) writeFileSync(join(scratch, file), sql, "utf8");
@@ -327,6 +344,20 @@ describe("the projections are the DB's own declared column contracts", () => {
     } finally {
       rmSync(scratch, { recursive: true, force: true });
     }
+  });
+
+  it("PIN N1: an edited reviewed barrier fails its content-addressed identity pin", () => {
+    const barrier = "0146_ninth_rowkind_seeding_proposal.sql";
+    const corpus: MigrationCorpus = {
+      files: ["0141_base.sql", barrier],
+      read: (file) => file === barrier
+        ? `${migration(barrier)}\n-- edited after review`
+        : "create view clara.probe as select 1;",
+    };
+    assert.throws(
+      () => viewDefinitions("probe", "0141_base.sql", corpus),
+      /reviewed dynamic-SQL barrier sha256 mismatch at 0146_ninth_rowkind_seeding_proposal\.sql/,
+    );
   });
 
   it("the registration view's 10-column contract matches REGISTRATION_REQUESTS_SELECT", () => {

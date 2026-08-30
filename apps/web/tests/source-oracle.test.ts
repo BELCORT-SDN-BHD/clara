@@ -149,6 +149,13 @@ describe("the AST call graph and execution-dominance proof", () => {
     const source = `const scope = await import("@/lib/require-firm-scope");
       export default async function S() { await scope.requireFirmScope(); }`;
     assert.throws(() => spineGuardProof(source, "S"), /unresolvable spine import identity/);
+    const computed = `import * as scope from "@/lib/require-firm-scope";
+      const key = "requireFirmScope";
+      export default async function S() { await scope[key](); }`;
+    const thirdExport = `import * as scope from "@/lib/require-firm-scope";
+      export default async function S() { await scope.resolveFirmScope(); }`;
+    assert.throws(() => spineGuardProof(computed, "S"), /unresolvable spine import identity/);
+    assert.throws(() => spineGuardProof(thirdExport, "S"), /unresolvable spine import identity/);
   });
 
   it("only INVOKED local functions enter the reachable graph", () => {
@@ -309,15 +316,20 @@ describe("module-level state is scoped by the AST, not a whole-file regex", () =
   });
 
   it("PIN F7: cast-wrapped writes invalidate immutable module containers", () => {
-    for (const source of [
+    const sources = [
       "const c = makeStore(); (c as unknown as { seen: number }).seen += 1;",
       "const c = Object.freeze({ seen: 0 }); (c as { seen: number }).seen = 1;",
       "const c = [] as const; (c as unknown as string[]).push('value');",
+      'const c = [] as const; (c as unknown as string[])["push"]("value");',
+      "const c = { seen: 0 } as const; delete c.seen;",
       "const c = makeStore(); ((c satisfies { seen: number })!).seen = 1;",
       "const c = makeStore(); (<{ seen: number }>c).seen = 1;",
-    ]) {
-      assert.match(moduleStateHazards(source)[0] ?? "", /mutated/, source);
-    }
+    ];
+    assert.deepEqual(
+      sources.map((source) => /mutated/.test(moduleStateHazards(source)[0] ?? "")),
+      sources.map(() => true),
+      sources.join("\n"),
+    );
     assert.deepEqual(moduleStateHazards("const c = Object.freeze({ seen: 0 });"), []);
   });
 
@@ -402,6 +414,7 @@ describe("unsupported export mechanisms fail closed", () => {
       'async function GET() {} module["exports"]["GET"] = GET;',
       'async function GET() {} module["exports"] = { GET };',
       'async function GET() {} Object.defineProperty(module.exports, "GET", { value: GET });',
+      'async function GET() {} Object["defineProperty"](module.exports, "GET", { value: GET });',
     ]) {
       assert.throws(() => exportedHttpMethods(source), /unmodelled: uninspectable export mechanism/);
     }

@@ -129,7 +129,7 @@ function importBinding(identifier: ts.Identifier, file: ts.SourceFile): ImportBi
 }
 
 const SPINE_IMPORT = "@/lib/require-firm-scope";
-const SPINE_NAMES = new Set(["requireFirmScope", "firmScopeGuard"]);
+const SPINE_NAMES = new Set(["requireFirmScope", "firmScopeGuard", "resolveFirmScope"]);
 
 function spineBinding(identifier: ts.Identifier, file: ts.SourceFile): ImportBinding | null {
   const binding = importBinding(identifier, file);
@@ -143,6 +143,20 @@ function unwrappedExpression(expression: ts.Expression): ts.Expression {
       || ts.isSatisfiesExpression(value) || ts.isNonNullExpression(value)
       || ts.isTypeAssertionExpression(value)) value = value.expression;
   return value;
+}
+
+type MemberAccess = { readonly receiver: ts.Expression; readonly member: string | null };
+
+function memberAccess(expression: ts.Expression): MemberAccess | null {
+  const value = unwrappedExpression(expression);
+  if (ts.isPropertyAccessExpression(value)) return { receiver: value.expression, member: value.name.text };
+  if (!ts.isElementAccessExpression(value)) return null;
+  return {
+    receiver: value.expression,
+    member: value.argumentExpression !== undefined && ts.isStringLiteralLike(value.argumentExpression)
+      ? value.argumentExpression.text
+      : null,
+  };
 }
 
 function dynamicImportSource(expression: ts.Expression): string | null {
@@ -168,20 +182,11 @@ function namespaceSource(identifier: ts.Identifier, file: ts.SourceFile): string
 
 function assertResolvableSpineCallee(expression: ts.Expression, file: ts.SourceFile): void {
   const value = unwrappedExpression(expression);
-  let receiver: ts.Expression | undefined;
-  let member: string | null = null;
-  if (ts.isPropertyAccessExpression(value)) {
-    receiver = value.expression;
-    member = value.name.text;
-  } else if (ts.isElementAccessExpression(value) && value.argumentExpression !== undefined
-      && ts.isStringLiteralLike(value.argumentExpression)) {
-    receiver = value.expression;
-    member = value.argumentExpression.text;
-  }
-  if (receiver === undefined || member === null || !SPINE_NAMES.has(member)) return;
-  const root = unwrappedExpression(receiver);
+  const access = memberAccess(value);
+  if (access === null) return;
+  const root = unwrappedExpression(access.receiver);
   const source = ts.isIdentifier(root) ? namespaceSource(root, file) : dynamicImportSource(root);
-  if (source !== null) {
+  if (source === SPINE_IMPORT && (access.member === null || SPINE_NAMES.has(access.member))) {
     throw new Error(`unmodelled: unresolvable spine import identity at ${diagnosticLocation(file, value.getStart(file))}`);
   }
 }
@@ -534,9 +539,11 @@ function exportTargets(unit: SourceUnit): Map<string, ExportTarget> {
         return;
       }
     }
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
-        && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "Object"
-        && node.expression.name.text === "defineProperty" && node.arguments[0] !== undefined
+    const callee = ts.isCallExpression(node) ? memberAccess(node.expression) : null;
+    if (ts.isCallExpression(node) && callee !== null
+        && ts.isIdentifier(unwrappedExpression(callee.receiver))
+        && (unwrappedExpression(callee.receiver) as ts.Identifier).text === "Object"
+        && callee.member === "defineProperty" && node.arguments[0] !== undefined
         && exportsObject(node.arguments[0] as ts.Expression)) {
       uninspectable(node, "Object.defineProperty(exports, …)");
       return;
@@ -958,14 +965,19 @@ function mutatedNames(file: ts.SourceFile): Set<string> {
         && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
       const name = rootIdentifier(node.left as ts.Expression);
       if (name !== null) names.add(name);
-    } else if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-      const name = rootIdentifier(node.expression.expression);
-      if (name !== null && MUTATING_METHODS.has(node.expression.name.text)) names.add(name);
-      if (ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "Object"
-          && node.expression.name.text === "assign" && node.arguments[0] !== undefined) {
+    } else if (ts.isCallExpression(node)) {
+      const access = memberAccess(node.expression);
+      const name = access === null ? null : rootIdentifier(access.receiver);
+      if (name !== null && access !== null && access.member !== null && MUTATING_METHODS.has(access.member)) names.add(name);
+      const receiver = access === null ? null : unwrappedExpression(access.receiver);
+      if (receiver !== null && ts.isIdentifier(receiver) && receiver.text === "Object"
+          && access?.member === "assign" && node.arguments[0] !== undefined) {
         const assigned = rootIdentifier(node.arguments[0]);
         if (assigned !== null) names.add(assigned);
       }
+    } else if (ts.isDeleteExpression(node)) {
+      const name = rootIdentifier(node.expression);
+      if (name !== null) names.add(name);
     } else if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
         && (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)) {
       const name = rootIdentifier(node.operand);
@@ -1080,6 +1092,9 @@ function stringArgument(expression: ts.Expression | undefined, context: string, 
 }
 
 const CAPABILITY_IMPORT = "../lib/intake.mjs";
+const RESPONSE_HELPER_NAMES = new Set(["sendError"]);
+const RESPONSE_TERMINAL_METHODS = new Set(["download", "end", "json", "redirect", "send", "sendFile", "sendStatus"]);
+const RESPONSE_CHAIN_METHODS = new Set(["attachment", "cookie", "header", "links", "location", "set", "setHeader", "status", "type", "vary"]);
 
 function flattenHandlers(nodes: readonly ts.Expression[], file: ts.SourceFile): ts.Expression[] {
   const handlers: ts.Expression[] = [];
@@ -1228,6 +1243,52 @@ function directBearerStatement(statement: ts.Statement, file: ts.SourceFile): bo
   return declaration?.initializer !== undefined && directBearerExpression(declaration.initializer, file);
 }
 
+function responseOnlyCatch(
+  catchClause: ts.CatchClause,
+  handler: ts.ArrowFunction | ts.FunctionExpression,
+  file: ts.SourceFile,
+): boolean {
+  const responseName = handler.parameters[1]?.name;
+  if (responseName === undefined || !ts.isIdentifier(responseName) || catchClause.block.statements.length === 0) return false;
+  const checker = checkerFor(file);
+  const responseSymbol = checker.getSymbolAtLocation(responseName);
+  if (responseSymbol === undefined) return false;
+  const helperDeclarationRanges = new Set<string>();
+  for (const statement of file.statements) {
+    if (!ts.isFunctionDeclaration(statement) || statement.name === undefined
+        || !RESPONSE_HELPER_NAMES.has(statement.name.text)) continue;
+    helperDeclarationRanges.add(`${statement.getStart(file)}:${statement.end}`);
+  }
+  const directResponse = (expression: ts.Expression): boolean => {
+    const value = unwrappedExpression(expression);
+    return ts.isIdentifier(value) && checker.getSymbolAtLocation(value) === responseSymbol;
+  };
+  const responseChain = (expression: ts.Expression): boolean => {
+    const value = unwrappedExpression(expression);
+    if (directResponse(value)) return true;
+    if (!ts.isCallExpression(value)) return false;
+    const access = memberAccess(value.expression);
+    return access !== null && access.member !== null && RESPONSE_CHAIN_METHODS.has(access.member)
+      && responseChain(access.receiver);
+  };
+  const responseCall = (call: ts.CallExpression): boolean => {
+    const callee = unwrappedExpression(call.expression);
+    if (ts.isIdentifier(callee)) {
+      const symbol = checker.getSymbolAtLocation(callee);
+      const knownHelper = (symbol?.declarations ?? []).some((declaration) => ts.isFunctionDeclaration(declaration)
+        && helperDeclarationRanges.has(`${declaration.getStart(declaration.getSourceFile())}:${declaration.end}`));
+      return knownHelper
+        && call.arguments[0] !== undefined && directResponse(call.arguments[0]);
+    }
+    const access = memberAccess(callee);
+    return access !== null && access.member !== null && RESPONSE_TERMINAL_METHODS.has(access.member)
+      && responseChain(access.receiver);
+  };
+  return catchClause.block.statements.every((statement) => ts.isExpressionStatement(statement)
+    && ts.isCallExpression(unwrappedExpression(statement.expression))
+    && responseCall(unwrappedExpression(statement.expression) as ts.CallExpression));
+}
+
 function containsDominatingBearer(handler: ts.Expression, file: ts.SourceFile): boolean {
   if (!ts.isArrowFunction(handler) && !ts.isFunctionExpression(handler)) return false;
   if (!ts.isBlock(handler.body)) return directBearerExpression(handler.body, file);
@@ -1241,6 +1302,8 @@ function containsDominatingBearer(handler: ts.Expression, file: ts.SourceFile): 
   if (ts.isTryStatement(first)) {
     const inTry = first.tryBlock.statements[0];
     if (inTry === undefined || !directBearerStatement(inTry, file)) return false;
+    if (first.finallyBlock !== undefined && first.finallyBlock.statements.length > 0) return false;
+    if (first.catchClause !== undefined && !responseOnlyCatch(first.catchClause, handler, file)) return false;
     // A caught denial may answer the request, but no fallthrough statement may do
     // work after the catch. The real intake handlers end at this try/catch.
     return statements.slice(candidate + 1).length === 0;

@@ -182,8 +182,22 @@ describe("the SQL lexer is controlled before the migration census trusts it", ()
   });
 
   it("PIN SQL-9c: PostgreSQL E-string escapes never erase executable DDL", () => {
-    const escapedSpace = String.raw`do $$ begin execute E'create\x20view clara.probe as select 1;'; end $$;`;
-    assert.equal(viewDefinitionOffsets(escapedSpace, "probe").length, 1);
+    const inputs = [
+      String.raw`do $$ begin execute E'create\x20view clara.probe as select 1;'; end $$;`,
+      String.raw`do $$ begin execute E'create\040view clara.probe as select 1;'; end $$;`,
+      String.raw`do $$ begin execute E'create\U00000020view clara.probe as select 1;'; end $$;`,
+      String.raw`do $$ begin execute E'create\\x20view clara.probe as select 1;'; end $$;`,
+      String.raw`do $$ begin execute E'create\qview clara.probe as select 1;'; end $$;`,
+    ];
+    const outcomes = inputs.map((sql): number | "unresolved" => {
+      try {
+        return viewDefinitionOffsets(sql, "probe").length;
+      } catch (error) {
+        assert.match(error instanceof Error ? error.message : String(error), /unmodelled: unresolved dynamic SQL/);
+        return "unresolved";
+      }
+    });
+    assert.deepEqual(outcomes, [1, 1, 1, 0, "unresolved"], "hex, octal, Unicode, literal backslash, unresolved escape");
   });
 
   it("PIN SQL-9b: a pure literal concatenation folds; a mixed expression throws", () => {

@@ -378,6 +378,40 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
     assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false]);
   });
 
+  it("PIN NEW-1g-g: caught denial is response-only and active finally is refused", () => {
+    const routeWith = (tail: string, helper = "", prelude = "") => `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      ${helper}
+      export function intakeRoutes() {
+        const router = express.Router();
+        router.put("/api/intake/caught", async (_req, res, next) => {
+          ${prelude}
+          try { bearerCapability("x"); } ${tail}
+        });
+        return router;
+      }`;
+    const attacks = [
+      "catch { await mutateBooks(); }",
+      "catch { next(); }",
+      "finally { await mutateBooks(); }",
+    ].map((tail) => runtimeRoutesFrom(routeWith(tail))[0]?.capability);
+    assert.deepEqual(attacks, [false, false, false], "catch/finally work survived bearer denial");
+
+    const responseOnly = routeWith(
+      "catch (err) { sendError(res, err); }",
+      "function sendError(response: express.Response, _err: unknown): void { response.end(); }",
+    );
+    assert.deepEqual(runtimeRoutesFrom(responseOnly).map((route) => route.capability), [true]);
+    const responseMethod = routeWith('catch { res.status(401).json({ error: "denied" }); }');
+    assert.deepEqual(runtimeRoutesFrom(responseMethod).map((route) => route.capability), [true]);
+    const shadowedHelper = routeWith(
+      "catch (err) { sendError(res, err); }",
+      "function sendError(response: express.Response, _err: unknown): void { response.end(); }",
+      "const sendError = mutateBooks;",
+    );
+    assert.deepEqual(runtimeRoutesFrom(shadowedHelper).map((route) => route.capability), [false]);
+  });
+
   it("PIN NEW-1f-c: definite termination propagates through blocks and constant branches", () => {
     const blocked = `import express from "express";
       import { bearerCapability } from "../lib/intake.mjs";
@@ -393,8 +427,16 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
         if (true) return router;
         router.put("/api/intake/dead-if", () => bearerCapability("x"));
       }`;
+    const tried = `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      export function intakeRoutes() {
+        const router = express.Router();
+        try { return router; } finally {}
+        router.put("/api/intake/dead-try", () => bearerCapability("x"));
+      }`;
     assert.deepEqual(runtimeRoutesFrom(blocked), []);
     assert.deepEqual(runtimeRoutesFrom(constant), []);
+    assert.deepEqual(runtimeRoutesFrom(tried), []);
   });
 
   it("PIN NEW-1f-d: an if(false) registration is dead but later live work remains", () => {
