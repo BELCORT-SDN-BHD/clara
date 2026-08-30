@@ -41,8 +41,9 @@
 //     line — see `AgentProse` in ./PartCardShell.tsx for why.
 //
 //  3. NEVER A BROKEN LINK, AND NEVER AN INVENTED ONE. Each card links only where
-//     the row it just READ proves a destination exists — the same "no client id
-//     on the wire means no link at all" discipline EntryPostedCard documents.
+//     the HYDRATED ROW proves a destination exists; a null wire client is an
+//     unpinned hint, not evidence that no client destination exists. The
+//     `v16-read-cards.test.tsx:218` null-as-unpinned cell pins that distinction.
 
 import { useTranslations } from "next-intl";
 

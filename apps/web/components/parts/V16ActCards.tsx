@@ -204,6 +204,7 @@ export function FirmQuestionCard({ part }: { part: FirmQuestionPart }) {
           {/* `candidates` is deliberately absent — V16Cards.tsx header rule 2.
               The queue row at /needs-you renders it; this card links there. */}
 
+          {isOpen && actionUnavailable ? <p className="text-xs text-muted-foreground">{tc("actionUnavailable")}</p> : null}
           {isOpen ? (
             mode ? (
               <div className="flex flex-col gap-2">
@@ -418,6 +419,7 @@ export function CloseProposalCard({ part }: { part: CloseProposalPart }) {
           />
           {/* `bound_digests` is deliberately absent — V16Cards.tsx header rule 2. */}
 
+          {isOpen && actionUnavailable ? <p className="text-xs text-muted-foreground">{tc("actionUnavailable")}</p> : null}
           {isOpen ? (
             mode === null ? (
               <div className="flex flex-wrap gap-2">

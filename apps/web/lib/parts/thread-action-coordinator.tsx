@@ -3,7 +3,9 @@
 // One coordinator per mounted Clara thread. The ref-backed guard closes the
 // pre-render double-click window synchronously; `busy` is the shared rendered
 // state every action-bearing PartSlot consumes. Caller identity is admitted
-// only after an exact-one, fully shaped `clara.caller_context` read.
+// only after an exact-one, fully shaped `clara.caller_context` read;
+// ../../components/parts/v16-action-round2.test.tsx:282 pins `limit=2` so an
+// ambiguous context remains observable instead of being truncated into one.
 
 import {
   createContext,

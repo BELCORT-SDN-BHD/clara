@@ -183,6 +183,7 @@ export function SweepReceiptCard({ part }: { part: SweepReceiptPart }) {
             >
               {actionBusy ? tc("submitting") : t("acknowledge")}
             </Button>
+            {actionUnavailable ? <p className="text-xs text-muted-foreground">{tc("actionUnavailable")}</p> : null}
             {!finalized ? <p className="text-xs text-muted-foreground">{t("acknowledgeBlockedNotFinalized")}</p> : null}
             {finalized && acknowledged ? <p className="text-xs text-muted-foreground">{t("acknowledgeAlreadyDone")}</p> : null}
           </div>

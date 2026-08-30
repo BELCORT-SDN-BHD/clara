@@ -300,6 +300,18 @@ test("governed card controls fail closed when caller_context does not positively
           const control = h.find(buttonNamed("Acknowledge this run"));
           assert.ok(control);
           assert.equal(control.disabled, true, `${invalid.name} caller context is not actor evidence`);
+          const callerContextCall = calls.find((call) => call.url.includes("/rest/v1/caller_context"));
+          assert.ok(callerContextCall, "the fail-closed gate must be based on a caller-context read");
+          assert.equal(
+            new URL(callerContextCall.url).searchParams.get("limit"),
+            "2",
+            "the read must retain both rows so an ambiguous caller context cannot be truncated into one actor",
+          );
+          assert.match(
+            h.text(),
+            /This session's identity could not be confirmed, so actions are paused\./,
+            `${invalid.name} caller context must render the reason beside its disabled action`,
+          );
           assert.equal(
             calls.some((call) => call.url.includes("/rpc/acknowledge_sweep_run")),
             false,
@@ -317,17 +329,16 @@ test("governed card controls fail closed when caller_context does not positively
 test("unknown firm status, question kind, and sweep outcome render through honest fail-soft arms", async () => {
   const unknownOutcome = "refused_something_new";
   await withMockedEnv(
-    (url, body) => {
+    (url) => {
       if (url.includes("/rest/v1/firm_open_questions_visible")) {
         return jsonResponse([{ ...FQ_OPEN, kind: "onboarding_proposed", status: "escalated" }]);
       }
       if (url.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
       if (url.includes("/rest/v1/rpc/get_sweep_run")) {
-        const runId = (body as { p_run?: string } | null)?.p_run ?? "";
         return jsonResponse({
-          ...sweepDetail(runId),
+          ...sweepDetail("run-a"),
           items: [{
-            run_id: runId,
+            run_id: "run-a",
             filing_id: "filing-unknown",
             firm_id: "firm-1",
             client_id: "client-rome",
@@ -343,10 +354,12 @@ test("unknown firm status, question kind, and sweep outcome render through hones
       }
       throw new Error(`unexpected fetch: ${url}`);
     },
-    async () => {
+    async (calls) => {
       const h = await renderComponent(AppMany([FQ, SWEEP_A]));
       try {
         for (let i = 0; i < 6; i++) await h.settle();
+        const sweepRead = calls.find((call) => call.url.includes("/rest/v1/rpc/get_sweep_run"));
+        assert.deepEqual(sweepRead?.body, { p_run: "run-a" }, "the request must carry the literal run id the fixture returns");
         const text = h.text();
         assert.match(text, /Unrecognized kind \(onboarding_proposed\)/, "an unregistered question kind must use the translated unknown arm");
         assert.match(text, /Status not recognised/, "an unregistered status must use the translated unknown arm");

@@ -15,8 +15,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -146,38 +147,134 @@ test("refusal renders the CLR code and message verbatim", () => {
   assert.match(html, /the proposed lines do not match the machine-corroborated total/);
 });
 
-test("parts-module test citations resolve to existing test files", () => {
-  const modules = [
-    "components/parts/V16Cards.tsx",
-    "components/parts/V16ActCards.tsx",
-    "components/parts/SweepReceiptCard.tsx",
-    "components/parts/PartCardShell.tsx",
-    "lib/parts/catalog.ts",
-  ];
-  const citationPattern = /`((?:\.\.?\/)*(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.test\.tsx)`/g;
-  let citationCount = 0;
+const PART_SOURCE_ROOTS = [resolve(WEB_ROOT, "components/parts"), resolve(WEB_ROOT, "lib/parts")];
+const SOURCE_MODULE_PATTERN = /\.(?:[cm]?js|jsx|tsx?)$/;
+const TEST_MODULE_PATTERN = /\.test\.(?:[cm]?js|jsx|tsx?)$/;
+const TEST_CITATION_PATTERN = /((?:\.\.?\/)*(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.test\.(?:tsx|ts|mjs))(?::\d+)?/g;
 
-  for (const modulePath of modules) {
-    const source = readFileSync(resolve(WEB_ROOT, modulePath), "utf8");
-    const citations = [...source.matchAll(citationPattern)]
-      .map((match) => match[1])
-      .filter((citation): citation is string => citation !== undefined);
-    for (const citation of new Set(citations)) {
-      citationCount += 1;
-      const target = resolve(WEB_ROOT, dirname(modulePath), citation);
-      assert.ok(existsSync(target), `${modulePath} cites missing test file ${citation}`);
+type SourceModule = { modulePath: string; source: string };
+
+function modulePathFrom(filePath: string): string {
+  return relative(WEB_ROOT, filePath).replaceAll("\\", "/");
+}
+
+function walkPartSourceModules(roots: readonly string[] = PART_SOURCE_ROOTS): SourceModule[] {
+  const modules: SourceModule[] = [];
+
+  const visit = (directory: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const filePath = resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(filePath);
+      } else if (entry.isFile() && SOURCE_MODULE_PATTERN.test(entry.name) && !TEST_MODULE_PATTERN.test(entry.name)) {
+        modules.push({ modulePath: modulePathFrom(filePath), source: readFileSync(filePath, "utf8") });
+      }
+    }
+  };
+
+  for (const root of roots) visit(root);
+  if (modules.length === 0) {
+    throw new Error(`citation walker enumerated zero non-test source files under ${roots.join(", ")}`);
+  }
+  return modules.sort((a, b) => a.modulePath.localeCompare(b.modulePath));
+}
+
+function extractTestCitations(source: string): string[] {
+  return [...source.matchAll(TEST_CITATION_PATTERN)]
+    .map((match) => match[1])
+    .filter((citation): citation is string => citation !== undefined);
+}
+
+function resolveTestCitation(modulePath: string, citation: string): string {
+  return resolve(WEB_ROOT, dirname(modulePath), citation);
+}
+
+function validatePartTestCitations(options: {
+  roots?: readonly string[];
+  sourceOverrides?: ReadonlyMap<string, string>;
+} = {}): Map<string, Set<string>> {
+  const citationsByModule = new Map<string, Set<string>>();
+  for (const module of walkPartSourceModules(options.roots)) {
+    const source = options.sourceOverrides?.get(module.modulePath) ?? module.source;
+    const citations = new Set(extractTestCitations(source));
+    if (citations.size > 0) citationsByModule.set(module.modulePath, citations);
+    for (const citation of citations) {
+      assert.ok(
+        existsSync(resolveTestCitation(module.modulePath, citation)),
+        `${module.modulePath} cites missing test file ${citation}`,
+      );
     }
   }
+  return citationsByModule;
+}
 
-  assert.ok(citationCount >= 5, `expected at least five walked citations, found ${citationCount}`);
+test("the parts citation walker resolves every named real citation across both source trees", () => {
+  const citationsByModule = validatePartTestCitations();
+  const expectedByModule: Readonly<Record<string, readonly string[]>> = {
+    "components/parts/PartCardShell.tsx": ["v16-read-cards.test.tsx"],
+    "components/parts/PartRenderer.tsx": ["../../lib/parts/catalog.test.tsx"],
+    "components/parts/V16Cards.tsx": ["v16-act-cards.test.tsx", "v16-read-cards.test.tsx"],
+    "lib/parts/catalog.ts": [
+      "./catalog.test.tsx",
+      "../../components/parts/v14-receipt-cards.test.tsx",
+      "../../components/parts/v16-read-cards.test.tsx",
+      "../../components/parts/v16-act-cards.test.tsx",
+      "../../components/parts/v16-cards-a11y.test.tsx",
+    ],
+    "lib/parts/thread-action-coordinator.tsx": ["../../components/parts/v16-action-round2.test.tsx"],
+  };
 
-  const fakeCitation = [..."`missing-card.test.tsx`".matchAll(citationPattern)].map((match) => match[1]);
-  assert.deepEqual(fakeCitation, ["missing-card.test.tsx"], "vacuity control: the walker must recognize a test citation");
-  const missingCitation = fakeCitation[0];
-  assert.ok(missingCitation);
-  assert.equal(
-    existsSync(resolve(WEB_ROOT, "components/parts", missingCitation)),
-    false,
-    "vacuity control: the recognized missing citation must fail the existence check",
+  for (const [modulePath, expectedCitations] of Object.entries(expectedByModule)) {
+    const actual = citationsByModule.get(modulePath);
+    assert.ok(actual, `${modulePath} must remain in the walked citation census`);
+    for (const citation of expectedCitations) {
+      assert.ok(actual.has(citation), `${modulePath} must keep its named citation ${citation}`);
+    }
+  }
+  const expectedCount = Object.values(expectedByModule).reduce((sum, citations) => sum + citations.length, 0);
+  const walkedExpectedCount = Object.entries(expectedByModule).reduce(
+    (sum, [modulePath, citations]) => sum + citations.filter((citation) => citationsByModule.get(modulePath)?.has(citation)).length,
+    0,
   );
+  assert.equal(walkedExpectedCount, expectedCount, "every named citation must be found by the recursive walk");
+});
+
+test("the citation grammar handles backticks, bare prose, line suffixes, and punctuation without swallowing it", () => {
+  const source = [
+    "`./round-one.test.tsx:37`",
+    "../lib/worker.test.ts:12",
+    "./script.test.mjs",
+    "v16-cards-a11y.test.tsx.",
+    "v16-read-cards.test.tsx's own cell",
+    "(../../lib/parts/catalog.test.tsx)",
+  ].join(" ");
+  assert.deepEqual(extractTestCitations(source), [
+    "./round-one.test.tsx",
+    "../lib/worker.test.ts",
+    "./script.test.mjs",
+    "v16-cards-a11y.test.tsx",
+    "v16-read-cards.test.tsx",
+    "../../lib/parts/catalog.test.tsx",
+  ]);
+});
+
+test("a dangling citation in PartRenderer outside the former allowlist fails through the real validator", () => {
+  const modulePath = "components/parts/PartRenderer.tsx";
+  const source = `${readFileSync(resolve(WEB_ROOT, modulePath), "utf8")}\n// ` + "`./citation-walker-dangling.test.tsx:9`";
+  assert.throws(
+    () => validatePartTestCitations({ sourceOverrides: new Map([[modulePath, source]]) }),
+    /components\/parts\/PartRenderer\.tsx cites missing test file \.\/citation-walker-dangling\.test\.tsx/,
+  );
+});
+
+test("the citation walker aborts when its root enumerates zero source files", () => {
+  const emptyRoot = mkdtempSync(join(tmpdir(), "clara-citation-walker-empty-"));
+  try {
+    assert.throws(
+      () => walkPartSourceModules([emptyRoot]),
+      /citation walker enumerated zero non-test source files/,
+    );
+  } finally {
+    rmSync(emptyRoot, { recursive: true });
+  }
 });

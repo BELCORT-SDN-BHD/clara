@@ -37,10 +37,10 @@ const DOORS = [
 ] as const;
 
 for (const door of DOORS) {
-  const keyFor = (callerId: string, intent: readonly string[]) => threadActionOpKey({
+  const keyFor = (callerId: string, intent: readonly string[], objectId: string = door.objectId) => threadActionOpKey({
     callerId,
     objectType: door.objectType,
-    objectId: door.objectId,
+    objectId,
     action: door.action,
     intent,
   });
@@ -49,10 +49,12 @@ for (const door of DOORS) {
     const first = await keyFor(ACTOR_A, door.firstIntent);
     const retry = await keyFor(ACTOR_A, door.replayIntent);
     const secondActor = await keyFor(ACTOR_B, door.replayIntent);
+    const secondObject = await keyFor(ACTOR_A, door.replayIntent, `${door.objectId}-second`);
     const corrected = await keyFor(ACTOR_A, door.correctedIntent);
 
     assert.equal(first, retry, "normalising whitespace must preserve deterministic replay for the same human act");
     assert.notEqual(first, secondActor, "a second bookkeeper must never replay the first actor's stored result");
+    assert.notEqual(first, secondObject, "the same boilerplate act on a different object must never replay the first object's result");
     assert.notEqual(first, corrected, "corrected arguments must not collide with the earlier attempt");
     assert.doesNotMatch(first, /ROME|Duplicate|Statement/, "human prose must be hashed, never embedded in the operation key");
   });

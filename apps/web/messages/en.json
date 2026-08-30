@@ -234,6 +234,7 @@
         "submit": "Submit",
         "submitting": "Submitting…",
         "cancel": "Cancel",
+        "actionUnavailable": "This session's identity could not be confirmed, so actions are paused.",
         "firmAltitude": "firm-wide (no client)"
       },
       "summary": {
