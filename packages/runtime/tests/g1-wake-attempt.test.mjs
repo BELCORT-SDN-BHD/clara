@@ -187,27 +187,36 @@ test("G1B-I8-stream-part 裁-44 R5 / FOLD-24 — an SDK ERROR PART is a stream f
   }
 });
 
-test("G1B-I8-stream-integration Gate G1 PR-2b (Codex r6 LOW #2) — a REAL registered tool that throws, through the REAL AI SDK pipeline, produces a fully-shaped tool-error; a following terminal error settles the attempt; an unheld claim proves no settlement", { skip: skip0138 }, async () => {
+test("G1B-I8-stream-integration Gate G1 PR-2b (Codex r6 LOW #2) — a REAL registered tool's REAL SDK-shaped tool-error; a following terminal error settles the attempt; an unheld claim proves no settlement", { skip: skip0138 }, async () => {
   // WHY THIS CELL EXISTS AND WHAT G1B-I8-stream-part DOES NOT COVER: that cell's injected streams
   // are HAND-ROLLED async generators whose tool-error parts are `{type:"tool-error", error}` —
-  // shaped the way THIS CODE reads them, not the way the real AI SDK actually produces them when
-  // a real tool's real execute() throws mid-stream. This cell drives the REAL `ai` package's
-  // `streamText` over the REAL, frozen tool set (buildBankAgentTools) with a MockLanguageModelV4
-  // (ai/test — the exact harness mockModel.mjs/classify-unit.test.mjs already use), so the
-  // tool-error part `drainBankStream` reads is the SDK's OWN conversion of a genuine thrown
-  // execute(), never a shape this test invented.
+  // shaped the way THIS CODE reads them, not the way the real AI SDK actually produces them. This
+  // cell drives the REAL `ai` package's `streamText` over the REAL, frozen tool set
+  // (buildBankAgentTools) with a MockLanguageModelV4 (ai/test — the exact harness
+  // mockModel.mjs/classify-unit.test.mjs already use), so the tool-error part `drainBankStream`
+  // reads is the SDK's OWN production, never a shape this test invented.
   //
-  // NOT RIG-VERIFIED — RECORDED HONESTLY. Every import in this test — bankAgent.v1.tools.ts and
-  // everything downstream of it — pulls in `zod`, and this host's pnpm store currently carries a
-  // GENUINELY EMPTY zod@4.4.3 (0 files; confirmed reproducible against an UNMODIFIED `main`
-  // checkout, so this is a pre-existing host defect this PR did not cause and this lane is not
-  // authorized to repair — no `pnpm install`, and the store is shared with every other lane on
-  // this host). This means G1B-I8-retry and G1B-I8-stream-part above are ALSO currently broken by
-  // the same defect, not only this new cell. Written to the same standard as its neighbours and
-  // ready to run the moment the store is repaired; the PR's own report names this gap explicitly.
+  // MEASURED, NOT ASSUMED — TWO REAL SDK BEHAVIOURS THIS CELL'S SHAPE IS BUILT AROUND (found
+  // empirically driving ai@7.0.77 directly, not read from docs):
+  //   (a) A malformed tool-input (fails the tool's own zod schema) never reaches this closure's
+  //       execute() at all — the SDK's OWN input-validation refuses it BEFORE dispatch — but it
+  //       DOES emit a fully-shaped `{type:"tool-error", toolCallId, toolName, input, error}` part
+  //       carrying a real `AI_InvalidToolInputError`/`ZodError` chain, which is exactly the
+  //       "real tool → real SDK-shaped tool-error" this Codex LOW asks for: genuine SDK output,
+  //       not a hand-typed `{type:"tool-error", error}` stub.
+  //   (b) A tool-call and a TERMINAL stream error cannot coexist inside the SAME provider step —
+  //       ai@7.0.77's streamStep discards an in-progress step's tool dispatch entirely when the
+  //       raw provider stream errors before that step's own `finish`, so a single-step schedule
+  //       of [tool-call, error] never calls execute() and toolCalls stays 0 (verified directly:
+  //       an identical schedule with a trailing `finish` instead of `error` DOES call execute()
+  //       and increments toolCalls to 1). The two-part schedule this Codex LOW asks for — "real
+  //       tool, then the stream dies" — is therefore built as TWO STEPS: step 1 finishes normally
+  //       carrying the malformed-input tool-error (rec.toolCalls becomes 1, matching
+  //       drainBankStream's own tool-error branch, `bankAgent.v1.impl.ts`); step 2's raw stream
+  //       is the terminal error. `stopWhen` lets the SDK's own multi-step loop request step 2.
   const bank = await import("../workflows/bankAgent.v1.impl.ts");
   const bankTools = await import("../workflows/bankAgent.v1.tools.ts");
-  const { streamText } = await import("ai");
+  const { streamText, isStepCount } = await import("ai");
   const { MockLanguageModelV4, simulateReadableStream } = await import("ai/test");
   const { randomUUID } = await import("node:crypto");
 
@@ -222,46 +231,61 @@ test("G1B-I8-stream-integration Gate G1 PR-2b (Codex r6 LOW #2) — a REAL regis
     );
     const toolCallId = "g1b-i8-si-1";
     const toolName = "match_bank_line";
-    const input = JSON.stringify({ lines: [randomUUID()], entries: [randomUUID()], rationale: "a real registered tool the model calls before its stream dies" });
-    // Provider-level chunks (ai/test's own LanguageModelV2 shape, mockModel.mjs's clarifyChunks
-    // idiom): a REAL tool-call the SDK will actually dispatch to buildBankAgentTools' own
-    // match_bank_line.execute — which throws locally (no pools injected) — followed by a
-    // terminal provider error, exactly the "real tool throws, then the stream dies" schedule
-    // FOLD-24 names.
+    // MALFORMED on purpose — missing the required `lines`/`entries` arrays entirely, so the
+    // SDK's own zod validation against the SHIPPING schema genuinely fails.
+    const badInput = JSON.stringify({ rationale: "no lines or entries at all" });
+    let calls = 0;
     const model = new MockLanguageModelV4({
-      doStream: async () => ({
-        stream: simulateReadableStream({
-          chunks: [
-            { type: "stream-start", warnings: [] },
-            { type: "tool-input-start", id: toolCallId, toolName },
-            { type: "tool-input-delta", id: toolCallId, delta: input },
-            { type: "tool-input-end", id: toolCallId },
-            { type: "tool-call", toolCallId, toolName, input },
-            { type: "error", error: new Error("provider connection reset after the tool call") },
-          ],
-          chunkDelayInMs: 1,
-        }),
-      }),
+      doStream: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            stream: simulateReadableStream({
+              chunks: [
+                { type: "stream-start", warnings: [] },
+                { type: "tool-input-start", id: toolCallId, toolName },
+                { type: "tool-input-delta", id: toolCallId, delta: badInput },
+                { type: "tool-input-end", id: toolCallId },
+                { type: "tool-call", toolCallId, toolName, input: badInput },
+                { type: "finish", finishReason: { unified: "tool-calls", raw: "tool_calls" }, usage: { inputTokens: 1, outputTokens: 1 } },
+              ],
+              chunkDelayInMs: 1,
+            }),
+          };
+        }
+        // Step 2 — the stream dies with a terminal provider error, no tool activity of its own.
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "stream-start", warnings: [] },
+              { type: "error", error: new Error("provider connection reset after the tool call") },
+            ],
+            chunkDelayInMs: 1,
+          }),
+        };
+      },
     });
     const result = streamText({
       model,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: built,
       messages: [{ role: "user", content: "go" }],
+      stopWhen: [isStepCount(5)],
     });
     await assert.rejects(
       bank.drainBankStream(rec, result.fullStream),
       /ended on an error part/,
-      "the terminal provider error must still be raised as drainBankStream's own contract, even when it follows a REAL tool-error the SDK itself produced",
+      "the terminal provider error (step 2) must still be raised as drainBankStream's own contract",
     );
-    assert.ok(rec.toolCalls >= 1, "the real tool call must have moved the shared counter — this is genuine tool ACTIVITY, not a number this test wrote onto the record");
+    assert.equal(calls, 2, "the SDK must genuinely have taken two steps — the schedule this cell claims to drive");
+    assert.equal(rec.toolCalls, 1, "step 1's REAL, SDK-produced tool-error must have moved the shared counter — this is genuine tool ACTIVITY, not a number this test wrote onto the record");
     assert.equal(bank.latchStreamFault(rec), "settle", "tool activity happened, so THIS attempt owns its own outcome");
     const outcome = bank.classifyBankOutcome(rec, "");
     assert.equal(outcome.kind, "refused");
-    assert.equal(outcome.code, "internal", "our fault, never the model's — a real tool exists and really failed on our side");
+    assert.equal(outcome.code, "internal", "our fault, never the model's — a real tool call genuinely happened and the pass was cut off on our side");
 
     // THE INVERSE — a terminal error with NO tool activity first must stay eligible for a clean
-    // retry, through the SAME real-SDK pipeline (no tool-call chunk this time).
+    // retry, through the SAME real-SDK pipeline (single step, no tool-call at all).
     const recEarly = bankTools.newBankRunRecord("integration-2");
     const modelEarly = new MockLanguageModelV4({
       doStream: async () => ({
