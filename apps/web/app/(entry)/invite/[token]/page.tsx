@@ -20,7 +20,7 @@ export async function generateMetadata() {
  * firm. Public (proxy.ts allowlists "/invite").
  *
  * MOVED into the `(entry)` route group by P4-3. A route group adds no URL
- * segment, so this page still answers on **/invite/:token** — every invite link
+ * segment, so this page still answers on `/invite/:token` — every invite link
  * already sitting in someone's inbox, and the Supabase email template that
  * builds them, are byte-untouched by the move.
  * `tests/firm-scope-surfaces.test.ts` asserts that URL from the tree.

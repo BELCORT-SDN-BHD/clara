@@ -122,16 +122,28 @@ export interface InviteAuthClient {
 }
 
 /**
- * The invite-accept flow (app/invite/[token]/page.tsx). THREE governed calls
- * now — two through Supabase Auth's own SDK, then the Clara door that actually
- * mints the person:
+ * The invite-accept flow (app/(entry)/invite/[token]/page.tsx). THREE governed
+ * calls now — two through Supabase Auth's own SDK, then the Clara door that
+ * actually mints the person:
  *
  *  1. `verifyOtp({ token_hash, type: "invite" })` — the current official
  *     pattern for consuming a Supabase invite link (verified via context7 +
  *     supabase.com/docs/guides/auth/auth-email-templates, 2026-08-27). This
- *     is what proves the invite is real and establishes the session — it is
- *     the ONLY admission path into this app; there is no self-serve signup
- *     route anywhere (docs/plan/active/frontend-handoff-2026-08-23.md §0.4).
+ *     is what proves the invite is real and establishes the session.
+ *
+ *     *** COMMENT-ONLY TRUING BY P4-3 — no behaviour, no wall and no refusal
+ *     on this journey is touched by that train. This line used to end "— it
+ *     is the ONLY admission path into this app; there is no self-serve signup
+ *     route anywhere (docs/plan/active/frontend-handoff-2026-08-23.md §0.4)".
+ *     The handoff citation stands, unamended; only the conclusion inverts, by
+ *     **裁-57** (2026-08-30 evening): beta is a PAID launch and signup IS
+ *     self-serve, so `app/(entry)/signup/page.tsx` is a second admission path
+ *     for a different person — someone starting their OWN firm, where this
+ *     journey admits someone joining a firm that already exists. The sentence
+ *     is corrected rather than left standing because it asserts the absence of
+ *     a route the same train adds. P4-3's only other contact with this file's
+ *     journey is the route MOVE into the (entry) group, which adds no URL
+ *     segment and leaves /invite/:token byte-identical. ***
  *  2. `updateUser({ password })` — once verification has produced a session
  *     for a PROVEN subject, the invited person sets the password they will
  *     sign in with afterwards (app/login).

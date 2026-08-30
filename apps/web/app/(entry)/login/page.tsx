@@ -14,7 +14,7 @@ export async function generateMetadata() {
  * `useSearchParams`, which Next.js requires a Suspense boundary around.
  *
  * MOVED into the `(entry)` route group by P4-3. A route group adds no URL
- * segment, so this page still answers on **/login** — unchanged for every
+ * segment, so this page still answers on `/login` — unchanged for every
  * `?next=` redirect proxy.ts writes and every link that points here.
  * `tests/firm-scope-surfaces.test.ts` asserts that URL by resolving the tree,
  * not by trusting this sentence.

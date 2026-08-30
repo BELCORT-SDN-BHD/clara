@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
@@ -19,11 +20,29 @@ import { Label } from "@/components/ui/label";
 import { StateBanner } from "@/components/common/state";
 
 /**
- * Email + password sign-in via Supabase Auth cookie sessions. Invite-only
- * (docs/plan/active/frontend-handoff-2026-08-23.md §0.4) — there is
- * deliberately no "create an account" link or self-serve signup route
- * anywhere in this app; an account exists only once someone accepts an
- * invite (app/invite/[token]).
+ * Email + password sign-in via Supabase Auth cookie sessions.
+ *
+ * *** WHAT THIS COMMENT USED TO SAY, AND WHY ONLY ITS CONCLUSION CHANGED.
+ * It read: "Invite-only (docs/plan/active/frontend-handoff-2026-08-23.md §0.4)
+ * — there is deliberately no 'create an account' link or self-serve signup
+ * route anywhere in this app; an account exists only once someone accepts an
+ * invite (app/invite/[token])." The handoff citation stands, unamended, and the
+ * sentence was true of every tip before this one. It is kept here rather than
+ * deleted because deleting it would erase why the link below was once
+ * deliberately absent — which is exactly what makes a later reader re-litigate
+ * a settled question.
+ *
+ * **裁-57 (2026-08-30 evening) inverts the conclusion.** Beta is a PAID launch
+ * and there is no invited-free tier: "基本没有邀请免费这种东西, 只有signup 然后付费
+ * stripe开始自己的firm". Signup is tier-3 self-serve (裁-43, restated), so the
+ * "create an account" link below is now REQUIRED rather than forbidden — a
+ * sign-in page that hides the only self-serve entrance strands every new firm
+ * at the door. "Invite" keeps its other meaning intact: an RBAC membership
+ * invite INTO an existing firm (app/(entry)/invite/[token]), which is a
+ * different journey for a different person and is untouched by this. ***
+ *
+ * TWO ENTRANCES, AND THIS PAGE NOW NAMES BOTH: /signup for someone starting
+ * their own firm, and the invite link in their inbox for someone joining one.
  */
 export function LoginForm() {
   const t = useTranslations("Login");
@@ -104,6 +123,16 @@ export function LoginForm() {
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? t("submitting") : t("submit")}
           </Button>
+          {/* 裁-57 — the self-serve entrance, see this file's header. */}
+          <p className="text-sm text-muted-foreground">
+            {t.rich("noAccount", {
+              link: (chunks) => (
+                <Link className="text-primary underline" href="/signup">
+                  {chunks}
+                </Link>
+              ),
+            })}
+          </p>
         </form>
       </CardContent>
     </Card>

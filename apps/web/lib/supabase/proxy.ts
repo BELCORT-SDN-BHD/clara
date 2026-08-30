@@ -27,10 +27,13 @@ import {
  * "invite-only" reading is superseded by that ruling — "invite" now means an
  * RBAC membership invite INTO an existing firm, not the only way in.
  *
- * **/pending is deliberately NOT here.** The holding route requires a session;
+ * THE HOLDING ROUTE /pending IS DELIBERATELY NOT HERE. It requires a session;
  * it just does not require a FIRM (design §4 E). Adding it would let an
  * unauthenticated stranger load a page whose entire job is to report the
  * caller's own registration status.
+ * (Written without the bold markers the rest of this file uses for emphasis:
+ * a literal `**` before a path spells a comment terminator and silently ends
+ * this block — measured, on this exact line.)
  *
  * THIS LIST IS CROSS-CHECKED BOTH WAYS against `lib/require-firm-scope.ts`'s
  * `SCOPE_UNSCOPED_SURFACES` (the entries marked `public: true`) by

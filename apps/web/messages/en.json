@@ -1095,7 +1095,68 @@
     "emailLabel": "Email",
     "passwordLabel": "Password",
     "submit": "Sign in",
-    "submitting": "Signing in…"
+    "submitting": "Signing in…",
+    "noAccount": "Starting your own firm? <link>Create an account</link>."
+  },
+  "Signup": {
+    "title": "Create your account",
+    "description": "Start your own firm on Clara. You'll confirm your email, then tell us about the firm.",
+    "emailLabel": "Email",
+    "passwordLabel": "Password",
+    "submit": "Create account",
+    "submitting": "Creating your account…",
+    "haveAccount": "Already have an account? <link>Sign in</link>.",
+    "noAccountReturned": "The sign-up didn't complete. No account was created, so nothing was sent to your inbox. Please try again.",
+    "dpaLabel": "I agree to Clara's data processing terms, including that client documents are sent to an AI processor outside Malaysia.",
+    "dpaNotBuilt": "Not built yet: your agreement is not recorded anywhere. The door that stores it — and the owner-confirmed final wording — land with P4-D. The terms this refers to are the drafts in docs/ops/legal/, which have not been through owner review.",
+    "checkEmailTitle": "Confirm your email",
+    "checkEmailDescription": "Your account exists, but it isn't active until you confirm it.",
+    "checkEmailBanner": "We've sent you a confirmation link. Open it and you'll come straight back here to name your firm.",
+    "checkEmailSignIn": "Already confirmed? <link>Sign in</link>.",
+    "firmTitle": "Tell us about your firm",
+    "firmDescription": "Your email is confirmed. Two things left, and then you're done.",
+    "nameLabel": "Your name",
+    "firmNameLabel": "Firm name",
+    "noteLabel": "Anything we should know (optional)",
+    "noteHint": "Free text. Leave it blank if there's nothing to add.",
+    "firmSubmit": "Register my firm",
+    "firmSubmitting": "Registering…",
+    "refusalTitle": "This registration was refused",
+    "unknownFailure": "The registration didn't complete, and no reason came back. Nothing was saved."
+  },
+  "Pending": {
+    "metaTitle": "Your registration",
+    "checkoutNotBuilt": "Not built yet: the payment step. Clara's beta is a trial — nothing is charged while pricing is being set — but the checkout that starts it, and the plan it activates, ship with the billing train. Nothing is owed from you right now.",
+    "pending": {
+      "title": "Your registration is with us",
+      "description": "We have your request. There's nothing more for you to do yet.",
+      "banner": "This registration is open. You'll be able to sign in to your firm once it's live."
+    },
+    "rejected": {
+      "title": "This registration wasn't accepted",
+      "description": "The reason recorded against it is below, exactly as it was given.",
+      "noReason": "No reason was recorded against this decision."
+    },
+    "approved": {
+      "title": "Your registration was accepted",
+      "description": "Your firm exists, but this session isn't attached to it yet.",
+      "banner": "Sign out and sign back in. If you still land here afterwards, whoever set your firm up will need to add you to it."
+    },
+    "invite-expected": {
+      "title": "You're signed in, but not in a firm yet",
+      "description": "Nothing is wrong. This account simply isn't attached to a firm.",
+      "banner": "If someone is inviting you to their firm, open the link they sent you — it will bring you in. If you meant to start your own firm, sign out and create it from the sign-up page."
+    },
+    "unidentified": {
+      "title": "We couldn't confirm who you are",
+      "description": "Nothing was read, so nothing below is a statement about your registration.",
+      "banner": "Your session couldn't be verified, so we didn't look anything up. Sign out and sign in again."
+    },
+    "read-failed": {
+      "title": "We couldn't read your registration",
+      "description": "Nothing was read, so nothing below is a statement about your registration.",
+      "banner": "Something went wrong looking this up. This is not a decision about your registration — it means we couldn't check. Try again in a moment."
+    }
   },
   "Logout": {
     "submit": "Sign out",
