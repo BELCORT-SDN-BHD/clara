@@ -228,6 +228,13 @@ test("G1B-H2 the PRODUCTION withBankWakeScoped really does SET ROLE clara_wake_b
   // ceremony's own subject and has its own cell (G1B-G1).
   const pools = await import("../lib/pools.mjs");
   const w = await rig.buildFirm("g1bh2");
+  // G1 PR-2a: a bank_agent credential is bound to a live wake task from that migration on, and
+  // the plain mint refuses bank_agent_task_absent without one. Both mints below are for the SAME
+  // (firm, client), so both bind the same task -- which is the shape the wall requires, since two
+  // live tasks for one client would make the mint ambiguous instead. Gated on the gate's own
+  // presence so this cell is unchanged against a pre-PR-2a chain.
+  const { hasBankWakeGate, ensureBankWakeTask } = await import("./g1-wake-bank-fixtures.mjs");
+  if (await hasBankWakeGate()) await ensureBankWakeTask(w.firm, w.client);
   const minted = await rig.asRuntime((c) =>
     c.query("select secret from clara.mint_wake_credential($1,$2,$3,$4::interval,$5)", ["bank_agent", w.firm, null, "5 minutes", w.client]),
   );

@@ -186,12 +186,73 @@ export async function buildApprovedEntries(w, entryCents, suffix = "a", attestat
   return ids;
 }
 
+/** True iff G1 PR-2a's per-act bank gate is applied, probed by EXACT SIGNATURE (law 3 — a bare
+ *  name is a projection of the function, not the function) rather than by a migration number. */
+export async function hasBankWakeGate() {
+  const r = await rig.rootQuery(
+    "select to_regprocedure('clara._bank_wake_task_gate(text,uuid,boolean,boolean)') as g");
+  return r.rows[0].g != null;
+}
+
+/** THE PRODUCER'S OWN ARTEFACTS, which a bank_agent credential now presupposes.
+ *
+ *  G1 PR-2a binds every bank_agent credential to a live wake task: the plain mint refuses
+ *  bank_agent_task_absent when the firm/client has none, and every bank act is then gated on that
+ *  task's status and on the bank account its producing event named. So this builds the real chain
+ *  — a client-scoped `bank.agent_due` domain event carrying bank_account_id, its wake intent at
+ *  the ACTIVE taxonomy version, the held agent_tasks(kind='wake') row drain.mjs would project,
+ *  and the held->running claim the engine would make. Nothing is hand-stamped past what the
+ *  database's own derivation triggers already do.
+ *
+ *  MEMOIZED per (firm, client) for CORRECTNESS, not speed: the plain mint refuses outright when a
+ *  (firm, client) has MORE THAN ONE live wake task, so a helper that minted a fresh one per call
+ *  would make the second credential in any battery refuse bank_agent_task_ambiguous. */
+const _bankWakeTasks = new Map();
+export async function ensureBankWakeTask(firmId, clientId) {
+  const key = `${firmId}:${clientId}`;
+  if (_bankWakeTasks.has(key)) return _bankWakeTasks.get(key);
+  const live = await rig.rootQuery(
+    `select id from clara.agent_tasks where firm_id=$1 and client_id=$2 and kind='wake'
+       and status in ('held','running','cancel_requested')`, [firmId, clientId]);
+  if (live.rowCount === 1) { _bankWakeTasks.set(key, live.rows[0].id); return live.rows[0].id; }
+  if (live.rowCount > 1) return null;   // ambiguous by construction: let the mint's own refusal name it
+  // EXACTLY ONE active bank account -> that one; NONE -> a synthetic id (a client with no bank
+  // account can only be driving the verbs that HAVE no account subject, for which the value is
+  // never compared); SEVERAL -> null, so the gate's own wake_task_account_unbound says so out
+  // loud rather than a fixture quietly picking one.
+  const acct = await rig.rootQuery(
+    "select id from clara.bank_accounts where client_id=$1 and active", [clientId]);
+  const bankAccount = acct.rowCount === 1 ? acct.rows[0].id : (acct.rowCount === 0 ? randomUUID() : null);
+  const seq = (await rig.rootQuery(
+    "select clara._append_event($1,'bank.agent_due',$2,null,null,null,null,null,null,$3::jsonb) as seq",
+    [firmId, clientId, JSON.stringify(bankAccount == null ? {} : { bank_account_id: bankAccount })])).rows[0].seq;
+  const eventId = (await rig.rootQuery(
+    "select id from clara.domain_events where firm_id=$1 and seq=$2", [firmId, seq])).rows[0].id;
+  const decision = (await rig.rootQuery(
+    `select decision from clara.trigger_taxonomy
+      where event_type='bank.agent_due' and version=(select version from clara.taxonomy_active)`)).rows[0].decision;
+  const intentId = (await rig.asRuntime((c) => c.query(
+    "insert into clara.wake_intents (event_id, decision, taxonomy_version) values ($1,$2,(select version from clara.taxonomy_active)) returning id",
+    [eventId, decision]))).rows[0].id;
+  const taskId = (await rig.rootQuery(
+    "insert into clara.agent_tasks (firm_id, kind, status, origin_intent_id) values ($1,'wake','held',$2) returning id",
+    [firmId, intentId])).rows[0].id;
+  await rig.rootQuery("update clara.agent_tasks set status='running' where id=$1", [taskId]);
+  _bankWakeTasks.set(key, taskId);
+  return taskId;
+}
+
 /**
  * The pools the frozen bankAgent_v1 closure reaches through globalThis: role clara_wake_bank (not
  * clara_wake_interactive), and mintBankAgentCredential calling
  * clara.mint_wake_credential('bank_agent', firm, null, ttl, client) — the FIRM+CLIENT-scoped mint
- * bank_agent actually uses (unlike close_prep's TASK-scoped door; 0129's task binding for THIS lane
- * rides the op_key text alone, not the credential itself).
+ * bank_agent actually uses (unlike close_prep's TASK-scoped door).
+ *
+ * G1 PR-2a: that mint now DERIVES and binds the client's one live wake task, and refuses when
+ * there is none — so the stub materialises the producer's chain first, gated on the gate's own
+ * presence so this same file is unchanged against a pre-PR-2a chain. (The comment that used to
+ * stand here said this lane's task binding "rides the op_key text alone, not the credential
+ * itself". That was true of 0129 and is no longer true of the credential.)
  *
  * Returns the previous value so the caller restores it in its own finally.
  */
@@ -199,13 +260,15 @@ export function injectBankPools() {
   const previous = globalThis.__claraPools;
   globalThis.__claraPools = {
     withRuntime: (fn) => rig.asRuntime((c) => fn(c)),
-    mintBankAgentCredential: async (firmId, clientId, ttl) =>
-      rig.asRuntime(async (c) => {
+    mintBankAgentCredential: async (firmId, clientId, ttl) => {
+      if (await hasBankWakeGate()) await ensureBankWakeTask(firmId, clientId);
+      return rig.asRuntime(async (c) => {
         const r = await c.query("select credential_id, secret from clara.mint_wake_credential($1,$2,$3,$4::interval,$5)", [
           "bank_agent", firmId, null, ttl, clientId,
         ]);
         return { secret: String(r.rows[0].secret) };
-      }),
+      });
+    },
     // The wake secret is bound TXN-LOCALLY exactly as pools.mjs's own withBankWakeScoped does —
     // set_config(..., true) inside one transaction, COMMITted (not rolled back — get_bank_pack
     // itself writes a pack_read receipt, so even the "read" tool needs a connection that keeps its
