@@ -166,10 +166,11 @@ behaviour is a PostgreSQL property, not a Clara mechanism.)
 > than surfacing as a door that has quietly stopped working.
 
 **Retired deploy artifacts.** `deploy/vendor-identity-binding-0028-postverify.sql` was retired
-2026-08-30 (owner ruling 裁-48): its probe 6 pinned `clara.execute_rule_post(uuid,text)` by exact
-signature, which `0118` dropped at the F-A2 cutover, so the script red for every frontier since —
-a dead instrument that would mislead a ceremony. `0028`'s standing claims are proven by the
-migration replay and the estate suite, not by a deploy-time script.
+2026-08-30 (owner ruling 裁-48). It was the deploy-time probe set for `0028`'s apply; its probe 10 pinned `clara.execute_rule_post(uuid,text)`, which `0118` dropped at the F-A2 cutover,
+and it went stale there — `0154` (#433) made that probe succession-aware, and a rig run at the
+`0155` frontier on 2026-08-30 passed all 12 probes; it is retired because no ceremony, CI step or
+recipe runs it and its own header had flagged it for owner-batched cleanup, not because it fails. `0028`'s standing claims are proven by the migration replay and the
+estate suite, not by a deploy-time script.
 
 ## Transaction-isolation pins
 

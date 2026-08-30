@@ -43,8 +43,13 @@ stands as built (a firm that had a second admin for an afternoon is non-solo for
 
 ## 裁-48 · The dead 0028 postverify — "退休（删除），单独一个 PR"
 
-`packages/db/deploy/vendor-identity-binding-0028-postverify.sql` probes a body `0118` dropped; it
-reds for whoever runs it. **Ruling:** retire it (delete) in its own PR with one line in
+`packages/db/deploy/vendor-identity-binding-0028-postverify.sql` was `0028`'s deploy-time probe set;
+its probe 10 pinned a body `0118` dropped and went stale there. *(Corrected 2026-08-30 after the
+retirement PR's independent review: the sitting was told "it reds for whoever runs it" — that was
+the file's own stale header, not a run; `0154` (#433) had made the probe succession-aware that same
+morning, and a rig run at the `0155` frontier passed all 12 probes. The grounds that stand: no ceremony, CI step or recipe runs it, its
+header flagged it for owner-batched cleanup, and `0028`'s claims are proven by replay + the estate
+suite. The owner may overrule on the corrected premise — INFORM batched.)* **Ruling:** retire it (delete) in its own PR with one line in
 `packages/db/README.md`'s deploy contract. The agent does not delete owner-era files without this
 ruling; it now has it.
 
