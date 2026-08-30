@@ -395,3 +395,73 @@ version-agnostic, so the additive key itself is safe. The estate has done this e
 (0061 took the pack 4→5) and left the version history in comments in these same files, so the precedent is
 in-repo; the defect v1 carried was one of **scope**, not of difficulty.
 
+---
+
+## Annex G · Fix-round addenda (conductor review, 2026-08-24) — DOC-ONLY, build later
+
+**Two named F-T1 obligations F6 folded into PR-1's own migration comments, recorded here in full
+so a later PR does not have to reconstruct them from scratch.** Neither is discharged by PR-1 —
+PR-1 seeds no per-item threshold row and builds no evaluator — but both are now MEASURED facts,
+not predictions, and both bind whichever PR does the work.
+
+### G.1 · The five frozen 0016 group-grain readers have no successor-body owner yet
+
+**Measured at the rig (fix-round replay, 2026-08-24): exactly five live `clara.*` functions
+reference `sst_threshold_schedule`, and every one of them is keyed on `service_group` ALONE —
+none filters on `item_no` or `superseded_by`:**
+
+| function | the group-grain read |
+|---|---|
+| `ack_compliance_watch` | `where s.service_group=w.service_group and s.effective_from<=...` |
+| `evaluate_sst_watch` | TWO sites — the current-month lookup and the per-historical-month lookup inside its loop, both `where s.service_group=g and s.effective_from<=...` |
+| `evaluate_sst_watches_all` | the `schedule_note` receipt's `string_agg`, keyed on `service_group` with no dedupe (the same query G.2 below names) |
+| `record_future_attestation` | `where s.service_group=p_service_group` (existence check only) |
+| `set_turnover_classification` | `where s.service_group=p_service_group` (existence check only) |
+
+All five predate the F-T1 ALTER by construction (0016) and were never touched by it — the ALTER
+is additive by design (Annex A.1). **The risk is not hypothetical: it was measured directly in
+this fix round.** An early draft of PR-1's own battery left a superseded, unbounded, one-cent
+threshold row for group G as a test fixture (before F7's rollback-wrapped rewrite), and
+`evaluate_sst_watch`'s bare `select ... into` — no `ORDER BY`, no `LIMIT`, no `item_no` or
+`superseded_by` filter — silently picked up that row instead of the real RM500,000 row for a
+DIFFERENT test in a DIFFERENT file (`a21-watch.test.mjs`'s tier-boundary cell, which went from
+`monitored` to `early_warning` on an untouched fixture with no code change of its own). The
+symptom disappeared the moment the stray row was removed. **Postgres does not raise an error for
+a multi-row `SELECT ... INTO` — it silently keeps the last row the plan visits**, so a second
+live row for the same group is a correctness hazard, not merely a lint concern.
+
+**The obligation: before ANY per-item threshold row (`item_no <> '*'`) is ever seeded — the whole
+point of the ALTER's V-6 defect-2 repair — these five readers need a successor body that
+disambiguates by `item_no`, or they must be proven (not assumed) safe under the per-item shape
+first.** No lane currently owns this successor body; it is not scoped into any of F-T1's PR-2
+through PR-8 rows as written. Whichever PR first proposes seeding a real per-item row (Group H
+item 1's NIL threshold, or Group I items 14-16) must either land the successor body in the SAME
+PR or refuse to seed until one exists — the item-grain PK exists; using it safely does not, yet.
+
+### G.2 · The evaluator law: Malaysia has NO default/catch-all service tax on an unprescribed service
+
+Service tax is a **PRESCRIBED-LIST tax**: a supply is taxable only if it falls within a named
+First-Schedule group at all (survey S3.2, V-2/V-6's group enumeration). There is no residual
+"anything not in the 6% list is taxed at 8%" rule in the statute — `scope_key='general'` in
+`clara.sst_rate_schedule` is this estate's own MODELLING CONVENIENCE for "the 8% rate that
+applies to a service that IS otherwise prescribed and IS NOT in the reduced-rate First Schedule
+bucket," never a statement that every service is taxable by default.
+
+**A live self-correction inside this same migration proves the trap is real, not academic.**
+PR-1 v1's own header comment for the `rental_leasing` seed row originally asserted that, before
+2026-01-01 (the date item 14 was inserted into the First Schedule), rental/leasing "fell under
+scope_key='general' (8%)." That sentence assumes rental/leasing was a prescribed, taxable
+service THE WHOLE TIME and merely moved rate buckets — an assumption this seed's own survey
+citations do not support and this fix round does not independently verify either way. The row's
+source_note was corrected to name the trap rather than repeat the claim (S1.2 of this migration's
+own header), but the underlying evaluator-side rule is unbuilt.
+
+**The obligation, stated as a rule a future evaluator must enforce, never as a lookup shortcut:**
+before pricing ANY service at `scope_key='general'`, the evaluator confirms — from a real
+`sst_scope_treatments` classification (design part-2 S3, `taxable`) or an equivalent scope
+determination — that the service is prescribed in SOME First-Schedule group at all. A service
+with no scope classification is `not_evaluable` (the estate's standing three-valued discipline,
+law 68), never priced at the general rate by default. This binds whichever PR builds the S3.6
+sales/service evaluator (F-T1 PR-5 as currently sequenced) and the S3.5 scope evaluator (PR-3) —
+neither is scoped to enforce it as written today, and this addendum is the record that it must.
+

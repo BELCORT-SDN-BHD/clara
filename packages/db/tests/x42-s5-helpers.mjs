@@ -270,6 +270,40 @@ const SALES_LANE_0046_RETIRED_F_A2_PR3_CLOCK_NAMES = ["preview_ocr_sales_evidenc
 // 0055 [Wave E lane α]: record_client_fact stamps recorded_at/superseded_at with bare
 // now() — timestamptz audit stamps, the lawful class; the door never derives a DATE
 // from the session clock (its one date read is clara._book_today()'s authority).
+/** 裁-18b PR-1 — the bodies it adds that read a bare clock token, MEASURED against the live
+ *  catalog (the arm (D) diff named exactly these, no more): _expire_stale_proposals
+ *  (`expires_at <= now()`), _propose_vendor_binding_agent_core (`now() + interval '12 months'`
+ *  and its own expiry flip), decline_vendor_identity_binding (`declined_at = now()`) and
+ *  wake_list_binding_candidates (`expires_at > now()`). All are timestamptz stamps or wall-clock
+ *  TTLs -- never a DATE derived from the session clock -- which is the lawful-use test this
+ *  roster encodes.
+ *  LEDGER-GATED on the migration STEM, per this file's own :157-164 warning: `db-slice-frontiers`
+ *  runs this battery against databases pinned at 0042-0045, where none of these verbs exist, and
+ *  an unconditional append would make every one of those legs red with a diff that says
+ *  nothing about clock discipline. The stem (not the number) is the witness because the migration
+ *  ships UNNUMBERED and the conductor claims its number at merge.
+ *
+ *  FIFTH NAME, AND IT MOVED HOUSE TWICE IN ONE DAY. The 2026-08-30 fold round first added
+ *  `eligible_binding_signer_count`: it had been a bare `count(*)` over active memberships and read
+ *  no clock at all, and H5 made it a DURABLE ROSTER WINDOW reading `now()` for the 90-day
+ *  departure window. FOLD-8, the same day, then lifted that arithmetic OUT of it into
+ *  `clara.binding_signer_roster` so the count and the date the refusal reports come from ONE
+ *  snapshot — and the count door became a firm-congruent wrapper with no clock read left in it.
+ *  So the fifth name is `binding_signer_roster`, and `eligible_binding_signer_count` is NOT on
+ *  this roster: measured on the live catalog (`position('now()' in prosrc)` — false for the
+ *  count door, true for the roster), not inferred from which one the wall is spelled after.
+ *  The window is a wall-clock TTL over a timestamptz column, the lawful class; the function
+ *  derives no DATE from the session clock.
+ *
+ *  The roster is a MEASURED census, so it is trued at the tip that SHIPS, never at the tip that
+ *  was reviewed — carrying the earlier name forward reds this floor exactly as loudly as omitting
+ *  the new one, which is the property that made the move visible at all. */
+const BINDING_PROPOSAL_PR1_CLOCK_NAMES = [
+  "_expire_stale_proposals", "_propose_vendor_binding_agent_core",
+  "decline_vendor_identity_binding", "wake_list_binding_candidates",
+  "binding_signer_roster",
+];
+
 const CLIENT_FACTS_0055_CLOCK_NAMES = ["record_client_fact"];
 
 // 0056 [Wave E lane β]: five lawful bare-clock readers — timestamptz audit stamps
@@ -842,6 +876,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("f_a5_reporting_agency_pr1$")) names.push(...REPORTING_AGENCY_F_A5_CLOCK_NAMES);
   if (await appliedStem("f_a5b_pr1_sandbox_export$")) names.push(...SANDBOX_EXPORT_F_A5B_PR1_CLOCK_NAMES);
   if (await appliedStem("card1_substitution_seam$")) names.push(...CARD1_SEAM_CLOCK_NAMES);
+  if (await appliedStem("binding_proposal_pr_1$")) names.push(...BINDING_PROPOSAL_PR1_CLOCK_NAMES);
   // REVERSE gate — see CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES. `not applied` pushes the name
   // BACK, so a database at an earlier frontier still expects the clock-reading body it has.
   if (!(await appliedStem("f_a9_chat_token_cap$"))) names.push(...CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES);

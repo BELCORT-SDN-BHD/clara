@@ -523,6 +523,24 @@ const VENDOR_BINDING_0028_HUMAN_FNS = [
   "propose_vendor_identity_binding", "sign_vendor_identity_binding",
   "revoke_vendor_identity_binding", "list_vendor_bindings", "get_vendor_binding",
 ];
+
+// 裁-18b PR-1 — the Clara vendor-binding PROPOSAL door. FOUR human doors join the
+// clara_authenticated surface: decline (the other half of the two-party shape), its named
+// reset (a decline suppresses BOTH proposal writers, so there must be a way out),
+// eligible_binding_signer_count (the sign dialog reads it to know whether to ask for 裁-32's
+// self-approval attestation) and binding_identity_review (a read-only review list; it revokes
+// nothing). Written down UNCONDITIONALLY, unlike the closed-world ROSTERS this PR also touches:
+// grantMatrixFailures sweeps the LIVE catalog and only judges functions that exist, so a name
+// here that a pinned-frontier chain has not got is simply never reached.
+const BINDING_PROPOSAL_PR1_HUMAN_FNS = [
+  "decline_vendor_identity_binding", "reset_binding_decline",
+  "eligible_binding_signer_count", "binding_identity_review",
+];
+/** …and the two wake verbs, on `filing` AND `interactive` (G1 arm A) — the same chat-parity
+ *  shape wake_file_document already set: one allowlist row per kind, the grant on both roles. */
+const BINDING_PROPOSAL_PR1_WAKE_FNS = [
+  "wake_propose_vendor_identity_binding", "wake_list_binding_candidates",
+];
 export const VENDOR_BINDING_0028_COHORT = [...VENDOR_BINDING_0028_HUMAN_FNS];
 
 // 0037 — the Wave C-a subledger (design: docs/plan/completed/wave-c-a-subledger-design.md §4.9).
@@ -1326,6 +1344,8 @@ export const ALLOWED = {
     // P4 tranche 2 [registration + operator approval, 裁-11] the three human doors — see the
     // block above.
     ...P4T2_HUMAN_FNS,
+    // 裁-18b PR-1 the four human binding doors — see the block above.
+    ...BINDING_PROPOSAL_PR1_HUMAN_FNS,
     // 裁-21 PR-a [the firm-level standard chart of accounts, TEMPLATE half] the seven admin
     // writers + the two invoker-rights reads — clara_authenticated ONLY; agent + both wake
     // roles gain ZERO, by the design's own non-goal rather than by omission. See the block above.
@@ -1334,7 +1354,7 @@ export const ALLOWED = {
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
   [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
-  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS, ...CARD1_SEAM_WAKE_FNS,
+  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS, ...BINDING_PROPOSAL_PR1_WAKE_FNS, ...AUTHORING_0077_WAKE_FNS, ...POSTING_F_A2_WAKE_FNS, ...F_A5_PR2_WAKE_FNS, ...F_A5B_PR1_WAKE_FNS, ...CARD1_SEAM_WAKE_FNS,
     // [Wave-F Track A, F-A5b card 1] wake_compose_metric_preview_v2 -- 'interactive' ONLY,
     // permanently (CD-16), beside its untouched v1 twin in AUTHORING_0077_WAKE_FNS.
     // [Wave-F Track A, F-A7 beta, 0126] wake_file_document ONLY -- annexes-1 "clara_wake_filing +
