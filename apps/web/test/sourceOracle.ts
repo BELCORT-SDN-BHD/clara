@@ -241,7 +241,7 @@ export function moduleLevelDeclarations(code: string): Decl[] {
  */
 export function exportClauseAliases(code: string): Map<string, string> {
   const out = new Map<string, string>();
-  for (const m of code.matchAll(/export\s+(type\s+)?\{([^}]*)\}/g)) {
+  for (const m of code.matchAll(/\bexport\s*(type\s+)?\{([^}]*)\}/g)) {
     if (m[1]) continue;
     for (const spec of (m[2] as string).split(",")) {
       const parsed = /^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/.exec(spec.trim());

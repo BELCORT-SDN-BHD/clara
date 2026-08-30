@@ -207,6 +207,19 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     assert.ok(routes.length >= 2, `only ${routes.length} route handlers found — the walk is not seeing them`);
   });
 
+  it("CELL 1b — no route leaf hides its methods behind `export *`", () => {
+    // `exportedHttpMethods()` enumerates THIS module's declarations and export
+    // clauses (#451 round-3, MED-1). A star re-export routes methods it cannot
+    // see, so the census would be silently INCOMPLETE rather than wrong — the
+    // worse of the two failures, because nothing reds. Nothing in the tree does
+    // this today; this cell is what keeps that true.
+    const hiding = leaves
+      .filter((l) => isRouteLeaf(l.file))
+      .filter((l) => /\bexport\s*\*/.test(stripComments(readSource(l.file), { blankStrings: true })))
+      .map((l) => l.file);
+    assert.deepEqual(hiding, [], "a route handler star-re-exports — the method census cannot see through it");
+  });
+
   it("CELL 2 — every page.tsx has an entrance ANCESTOR or is registered unscoped", () => {
     const pages = leaves.filter((l) => !isRouteLeaf(l.file));
     const unproven = pages
@@ -490,6 +503,8 @@ describe("the spine has ONE implementation and exactly three entrances", () => {
 
     // A type-only clause exports nothing at runtime and must not invent a root.
     assert.deepEqual(exportedHttpMethods(stripComments("export type { DELETE };")), []);
+    // …and the whitespace between `export` and `{` is formatting, not meaning.
+    assert.deepEqual(exportedHttpMethods(stripComments("function raw() {}\nexport{raw as DELETE};")), ["DELETE"]);
   });
 
   it("FIND-1 — the 403 entrance RETURNS the refusal, not merely computes it", () => {
