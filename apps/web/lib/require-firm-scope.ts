@@ -355,12 +355,32 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
     //     `_human_ctx(role_rank('admin'))` (`0147:376`) judges the real person, and
     //     the role-ceiling wall (`0147:386`) judges their real rank.
     //   · It reads NO firm-scoped relation on its own authority. It touches
-    //     `caller_context` once, self-scoped, on the caller's own token, and only
-    //     for the mail's subject line — fail-open, discarded on error.
-    //   · Its own three gates decide nothing about AUTHORITY: same-origin (CSRF,
+    //     `caller_context` — self-scoped by the view itself, on the caller's own
+    //     token — and nothing else.
+    //   · TRUED 2026-08-30 BY CODEX ROUND 2 (M5/N1). The two bullets here used to
+    //     say the route made no pre-door authority-sensitive read and that "none
+    //     [of its gates] reads a role". BOTH ARE NOW FALSE, and saying so is the
+    //     point of this comment existing: the courier runs an ADMIN+ PREFLIGHT
+    //     before the door (`lib/members/courier.ts` step 3b). It had to. Step 4b
+    //     asks the auth provider whether an arbitrary address already has an
+    //     account, and that question answers differently for an existing and a
+    //     free address — an ACCOUNT-EXISTENCE ORACLE that, without the preflight,
+    //     any signed-in viewer or membership-less account could walk. The owner's
+    //     acceptance of that enumeration (裁-65) is explicitly bounded to admin+,
+    //     and a bound enforced only by the door is no bound at all, because the
+    //     disclosure happens before the door.
+    //   · SO WHY IS THIS STILL EXEMPT? Because the preflight is FAIL-CLOSED AND
+    //     CANNOT GRANT. It refuses six ways and admits exactly one shape, and
+    //     `_human_ctx(role_rank('admin'))` still judges the request independently
+    //     at the door. Two fail-closed checks in series cannot admit anything
+    //     either would refuse — which is precisely NOT the "second, drifting copy
+    //     of an authority decision" this list exists to keep out. What the spine
+    //     would add here is different in kind: `requireFirmScope()` REDIRECTS a
+    //     caller to the holding page, which is a page-render decision with no
+    //     meaning for a POST-only JSON courier.
+    //   · Its remaining gates decide nothing about authority: same-origin (CSRF,
     //     the wall `app/logout/route.ts` carries for the same reason), "is there a
     //     token at all", and a SERVER-CONFIG capability check that answers 503.
-    //     None reads a role; none can grant.
     //   · The service-role key it holds never authorises the DB act — it mints the
     //     Supabase half of the invite link AFTER the door has already said yes.
     reason:
@@ -370,8 +390,10 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
       "check in front would be the courier pretending to be a guard, and would put " +
       "a second, drifting copy of an authority decision in front of the real one. " +
       "Verified against the landed body, not the plan: it returns no firm-scoped " +
-      "data on its own authority, and its own gates (same-origin, a session to call " +
-      "with, a mail-transport capability check answering 503) read no role and " +
-      "grant nothing.",
+      "data on its own authority. It DOES run its own admin+ preflight before the " +
+      "door (Codex round 2, N1) — because the pre-door account-existence check is " +
+      "an oracle whose accepted audience is admin+ — but that preflight is " +
+      "fail-closed and can only REFUSE, so it is not a second copy of the wall, " +
+      "and _human_ctx still judges the act independently.",
   },
 ];

@@ -20,8 +20,13 @@ export const PLAINTEXT = "a".repeat(32) + "b".repeat(32);
 export const HASHED = "supabase-hashed-token";
 export const INVITE_ID = "11111111-1111-4111-8111-111111111111";
 export const EXPIRES = "2026-09-06T00:00:00Z";
-export const FIRM_A = "f-aaaaaaa";
-export const FIRM_B = "f-bbbbbbb";
+// REAL UUIDs, because `isCallerContextRow` requires them (`lib/firm/caller-context.ts`
+// validates every column of the pinned projection, `firm_id` included). A
+// placeholder like "f-aaaaaaa" would be rejected by the authority preflight and
+// every cell here would 403 for a reason that had nothing to do with what it was
+// testing.
+export const FIRM_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+export const FIRM_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 // The two secret-shaped values are the literal token `PLACEHOLDER`, which is
 // what `scripts/check-leaks.mjs` accepts as an EXPLICIT placeholder
@@ -42,6 +47,34 @@ export const FULL_ENV = {
 // the principal cells assert actually reached the door and the firm read.
 export const CALLER_BYTES = "caller-session-bytes";
 export const CALLER_SUBJECT = "11111111-1111-4111-8111-111111111111";
+
+/**
+ * THE AUTHORITY PREFLIGHT'S FIXTURES (Codex round 2, N1).
+ *
+ * `callerRow` builds a `clara.caller_context` row that `isCallerContextRow`
+ * ACCEPTS — every column of the pinned six-column projection, each of the type
+ * the view declares. A row that fails validation is indistinguishable, to the
+ * preflight, from no row at all, so a fixture that got this subtly wrong would
+ * make every courier cell 403 for the wrong reason.
+ */
+export function callerRow(
+  role: "viewer" | "bookkeeper" | "admin" | "owner",
+  overrides: Partial<Record<string, unknown>> = {},
+): Record<string, unknown> {
+  const rank = { viewer: 0, bookkeeper: 1, admin: 2, owner: 3 }[role];
+  return {
+    user_id: CALLER_SUBJECT,
+    firm_id: FIRM_A,
+    firm_name: "ROME PROPERTIES",
+    role,
+    role_rank: rank,
+    is_operator: false,
+    ...overrides,
+  };
+}
+
+/** The default principal every courier cell runs as: one firm, admin. */
+export const ADMIN_ROWS: unknown[] = [callerRow("admin")];
 
 export const liveSession = async (): Promise<ServerSession | null> => ({
   accessToken: CALLER_BYTES,
@@ -128,6 +161,8 @@ export type Rig = {
   calls: DoorCall[];
   /** The token `readFirmContext` was invoked with, once per call. */
   firmReads: string[];
+  /** The token the AUTHORITY PREFLIGHT was invoked with, once per call. */
+  callerReads: string[];
 };
 
 export function deps(
@@ -137,14 +172,23 @@ export function deps(
 ): Rig {
   const calls: DoorCall[] = [];
   const firmReads: string[] = [];
+  const callerReads: string[] = [];
   return {
     calls,
     firmReads,
+    callerReads,
     deps: {
       env: FULL_ENV,
       resolveSession: liveSession,
       newOpKey: () => "op-key-pinned",
       newCorrelationId: () => "corr-pinned",
+      // The default principal is an ADMIN of exactly one firm, so every cell in
+      // these batteries exercises the branch AFTER the authority preflight. The
+      // preflight's own cells override this seam.
+      readCallerRows: async (s) => {
+        callerReads.push((await s.getAccessToken()) ?? "<none>");
+        return ADMIN_ROWS;
+      },
       readFirmContext: async (s) => {
         firmReads.push((await s.getAccessToken()) ?? "<none>");
         return { firm_id: FIRM_A, firm_name: "ROME PROPERTIES" };

@@ -307,11 +307,92 @@ export function classifyProviderStatus(status: number): MailFailureCode {
 export const CAN_MINT_PAGE_SIZE = 1000;
 export const CAN_MINT_MAX_PAGES = 40;
 
-/** Case-insensitive, whitespace-trimmed address equality — the same normalisation
- *  `clara.invite_member` applies (`0147:379`: `lower(btrim(p_email))`), so this
- *  check and the door agree on what "the same address" means. */
+/**
+ * THE ONE CANONICAL FORM — `clara.invite_member`'s own, transcribed exactly
+ * (`0147:378-408`: `lower(btrim(p_email))`). Codex round 2, N2(2).
+ *
+ * FOUR SEAMS USED TO DISAGREE. The courier held the RAW address and gave it to
+ * the door and to `generateLink`; this module trimmed-and-lowercased for the
+ * directory scan; the DB stored `lower(btrim())`. So `" New@Example.test "`
+ * could pass a scan that looked for the trimmed form, be stored by the door
+ * under the trimmed form, and then be handed RAW to `generateLink` — after the
+ * plaintext token had already been minted and could never be re-issued. The
+ * courier now canonicalises ONCE at its boundary and passes the identical bytes
+ * to scan, door, mint and send.
+ *
+ * `btrim(x)` WITH NO SECOND ARGUMENT TRIMS SPACES, NOT WHITESPACE. PostgreSQL's
+ * default trim set is a single space (U+0020) — so a tab or a newline is NOT
+ * removed by the DB, and `String.prototype.trim()` (which strips every Unicode
+ * whitespace character) is the WRONG transcription: it would canonicalise
+ * `"a@b\t"` to `"a@b"` while the DB stored `"a@b\t"`, putting the two back out
+ * of step in exactly the way this function exists to prevent. Spaces only, both
+ * ends, then `lower`.
+ */
+export function canonicalAddress(raw: string): string {
+  return raw.replace(/^ +/, "").replace(/ +$/, "").toLowerCase();
+}
+
+/**
+ * IS THIS ADDRESS ONE THIS APP CAN CANONICALISE THE SAME WAY THE PROVIDER WILL?
+ *
+ * Only for pure ASCII can it say yes. `String.prototype.toLowerCase()` follows
+ * the Unicode default case-folding rules; PostgreSQL's `lower()` follows the
+ * database collation; GoTrue is a Go program with its own. For ASCII all three
+ * agree exactly. Outside it they demonstrably do not — U+0130 LATIN CAPITAL
+ * LETTER I WITH DOT ABOVE lowercases to a TWO-code-point sequence in JavaScript
+ * and to something else again elsewhere — and a canonical form that differs
+ * between the scanner, the door and the mail provider is precisely the
+ * dead-invite bug FIND-1 closes.
+ *
+ * So a non-ASCII address is REFUSED at the courier's boundary rather than
+ * guessed at. That is a real, if narrow, product limitation: it is recorded as
+ * an INFORM on the PR rather than hidden, and closing it properly means
+ * implementing provider-equivalent normalisation, not relaxing this.
+ */
+export function isAsciiAddress(value: string): boolean {
+  // eslint-disable-next-line no-control-regex
+  return /^[\x00-\x7F]*$/.test(value);
+}
+
+/** Address equality, on the canonical form both ends now share. */
 export function sameAddress(a: string, b: string): boolean {
-  return a.trim().toLowerCase() === b.trim().toLowerCase();
+  return canonicalAddress(a) === canonicalAddress(b);
+}
+
+/**
+ * IS THIS AUTH ROW A **CONFIRMED** USER? Codex round 2, N2(3).
+ *
+ * Supabase rejects `generateLink({type:"invite"})` for a CONFIRMED user and
+ * permits it for an unconfirmed or nonexistent one. The scan used to treat the
+ * mere EXISTENCE of a matching row as the refusal condition, which refused
+ * perfectly inviteable unconfirmed accounts — a self-inflicted 409 on a flow
+ * that would have worked.
+ *
+ * THE TWO DIRECTIONS ARE NOT SYMMETRIC, so this is not a plain boolean read:
+ *   · Wrongly "confirmed"   → the admin is told to ask them to sign in. Annoying,
+ *                             reversible, mints nothing.
+ *   · Wrongly "unconfirmed" → the courier proceeds, the door MINTS, and
+ *                             `generateLink` then throws — the plaintext is gone,
+ *                             the invite is dead, and the address is blocked for
+ *                             seven days. Exactly the bug FIND-1 closes.
+ * So the uncertain cases fail toward "confirmed". A timestamp positively present
+ * is confirmed; an explicit `null` is a positive reading of "not confirmed"; a
+ * field that is ABSENT, or of a type this app does not recognise, means the
+ * question was not answered — and an unanswered question is never the licence to
+ * mint (review law 2).
+ *
+ * `confirmed_at` is read as well as `email_confirmed_at` because Supabase's user
+ * object exposes both and the invite path cares about the account, not only the
+ * email factor.
+ */
+export function isConfirmedUser(user: unknown): boolean {
+  if (typeof user !== "object" || user === null) return true;
+  const u = user as Record<string, unknown>;
+  const stamped = (v: unknown): boolean => typeof v === "string" && v !== "";
+  if (stamped(u.email_confirmed_at) || stamped(u.confirmed_at)) return true;
+  const readable = (v: unknown): boolean => v === null || typeof v === "string";
+  if (readable(u.email_confirmed_at) && readable(u.confirmed_at)) return false;
+  return true;
 }
 
 /**
@@ -356,12 +437,30 @@ export function productionInviteMailer(
         const { data, error } = await client.auth.admin.listUsers({ page, perPage: CAN_MINT_PAGE_SIZE });
         // A directory that could not be read is a question that was not
         // answered. It never becomes `{ok:true}`.
+        //
+        // AND `error` MUST BE TESTED FIRST, because the shipped client returns
+        // `{ data: { users: [] }, error }` on an AuthError (`@supabase/auth-js`
+        // 2.112.4, `GoTrueAdminApi.js`'s own `listUsers` catch) — an unreadable
+        // directory arrives looking EXACTLY like the end of the list.
         if (error) throw new InviteMailFailure("directory_unreadable", error.status ?? null);
-        const users = data?.users ?? [];
+        // A POSITIVELY PRESENT ARRAY, or nothing (Codex round 2, N2(1)). The
+        // previous `data?.users ?? []` turned a null payload — or a payload of
+        // some shape this app has never seen — into an EMPTY PAGE, which the
+        // end-of-list test below then read as "I have seen the whole directory
+        // and the address is free". That is a derived state standing in as
+        // positive evidence, which review law 2 forbids, and it licenses the
+        // exact dead invite FIND-1 exists to prevent.
+        const users: unknown = (data as { users?: unknown } | null)?.users;
+        if (!Array.isArray(users)) throw new InviteMailFailure("directory_unreadable", null);
         for (const user of users) {
           const found = (user as { email?: string | null }).email;
           if (typeof found === "string" && sameAddress(found, email)) {
-            return { ok: false, reason: "already_registered" };
+            // A ROW IS NOT A CONFIRMATION (Codex round 2, N2(3)). Supabase
+            // rejects an invite only for a CONFIRMED user; an unconfirmed one
+            // may be re-invited, and refusing those turned a working flow into
+            // a 409 for no reason. So confirmation is READ, and read
+            // fail-closed in the direction that cannot mint a dead invite.
+            if (isConfirmedUser(user)) return { ok: false, reason: "already_registered" };
           }
         }
         // AN EMPTY PAGE IS THE END OF THE LIST, and it is the only thing that

@@ -332,6 +332,30 @@ leaks; the third is what stops Resend's own retained copy of the message from ho
 bearer factors for 30 days; the fourth bounds who inside the team can read what is retained
 anyway.
 
+### 4. `CLARA_PUBLIC_ORIGINS` must be set on any proxied deployment (Codex round 2, N3)
+
+The same-origin wall (`lib/same-origin.ts`) proves a request came from this app's own origin
+before any mutation route acts. Behind a proxy the request URL's authority is rewritten, so
+the wall used to accept `X-Forwarded-Host` as an independent second source of truth. **That
+header is written by whoever spoke to us.** An attacker could send `Origin:
+https://attacker.example` together with `X-Forwarded-Host: attacker.example`, satisfy the
+match against their own input, and have the invite courier mail a link carrying **both**
+bearer factors under their origin.
+
+The header is no longer consulted. What replaces it is configuration, because what a
+deployment's public origins are is a fact about the deployment:
+
+- **Configure:** `CLARA_PUBLIC_ORIGINS`, comma-separated exact origins (scheme + host +
+  non-default port) — every hostname this app is reachable on, aliases included.
+- **Verify:** POST from the real app (an invite, a logout) and confirm it succeeds; then
+  replay it with an `Origin` you did not list and confirm a 403.
+- **Unset is fail-closed, not permissive.** The wall falls back to the `Host` header and the
+  request URL. Local dev works unset; a proxied deployment will refuse its own same-origin
+  POSTs until this is set — which is the visible failure, not a silent downgrade.
+- **`NODE_ENV=production` also closes the loopback exception** (N5): `http://localhost` and
+  `http://127.0.0.1` origins are accepted only outside production, so a production invite can
+  never be mailed with both secrets pointing at the recipient's own machine.
+
 ### Also configuration, not code
 
 - **CDN caching.** The proxy sets `Cache-Control: private, no-store` on every gated response

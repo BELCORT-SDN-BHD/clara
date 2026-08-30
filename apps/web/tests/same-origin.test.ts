@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { isSameOriginRequest } from "../lib/same-origin";
+import { isSameOriginRequest, readSameOriginConfig } from "../lib/same-origin";
 
 /**
  * Finding 11 (LOW) — same-site logout CSRF. `SameSite=Lax` blocks cross-SITE
@@ -30,18 +30,76 @@ describe("isSameOriginRequest — accepts only proved same-origin requests", () 
     );
   });
 
-  it("accepts when only the forwarded host is available (behind a proxy)", () => {
+  it("N3: a FORWARDED HOST alone no longer licenses anything — the allowlist does", () => {
+    // CODEX ROUND 2, N3. This cell used to assert `true` for exactly this
+    // request, on the reasoning that a proxy rewrites the request URL and
+    // `x-forwarded-host` is how the real host survives. The hole: that header is
+    // written by whoever spoke to us, so an attacker sends BOTH it and the
+    // matching `Origin` and the wall compares their input against itself.
+    // Cloudflare documents that it generally passes incoming headers through,
+    // and nothing in this repo strips this one.
+    const proxied = headers({
+      origin: "https://app.clara.example",
+      "x-forwarded-host": "app.clara.example",
+      "sec-fetch-site": "same-origin",
+    });
+
+    // UNCONFIGURED → refused. Fail-closed and visible, rather than trusting the
+    // hop blindly.
     assert.equal(
-      isSameOriginRequest(
-        headers({
-          origin: "https://app.clara.example",
-          "x-forwarded-host": "app.clara.example",
-          "sec-fetch-site": "same-origin",
-        }),
-        "https://internal.worker.local/logout",
-      ),
-      true,
+      isSameOriginRequest(proxied, "https://internal.worker.local/logout", {
+        publicOrigins: [],
+        allowInsecureLoopback: false,
+      }),
+      false,
+      "a forwarded host with no configured allowlist must not prove anything",
     );
+
+    // CONFIGURED → accepted, because the OPERATOR named this origin. The proxied
+    // deployment still works; what changed is where the authority comes from.
+    assert.equal(
+      isSameOriginRequest(proxied, "https://internal.worker.local/logout", {
+        publicOrigins: ["https://app.clara.example"],
+        allowInsecureLoopback: false,
+      }),
+      true,
+      "an allowlisted origin is proof of authority however the hop was rewritten",
+    );
+  });
+
+  it("N3: THE ATTACK — a spoofed forwarded host cannot license the attacker's own origin", () => {
+    // The real Host is Clara's; the attacker supplies both the Origin and a
+    // matching X-Forwarded-Host. Under the old wall the proof came back
+    // `{ok:true, origin:"https://attacker.example"}` and the courier mailed BOTH
+    // bearer factors to a link on the attacker's domain.
+    const spoofed = headers({
+      origin: "https://attacker.example",
+      host: "app.clara.example",
+      "x-forwarded-host": "attacker.example",
+      "sec-fetch-site": "same-origin",
+    });
+    for (const config of [
+      { publicOrigins: [], allowInsecureLoopback: false },
+      { publicOrigins: ["https://app.clara.example"], allowInsecureLoopback: false },
+    ]) {
+      assert.equal(
+        isSameOriginRequest(spoofed, "https://app.clara.example/api/invite", config),
+        false,
+        `the spoofed forwarded host was accepted with publicOrigins=${JSON.stringify(config.publicOrigins)}`,
+      );
+    }
+  });
+
+  it("N3: the allowlist is parsed exactly — unparseable entries widen nothing", () => {
+    const { publicOrigins } = readSameOriginConfig({
+      CLARA_PUBLIC_ORIGINS: " https://App.Clara.example/ , not a url , , https://second.example:8443 ",
+    });
+    assert.deepEqual(
+      publicOrigins,
+      ["https://app.clara.example", "https://second.example:8443"],
+      "entries normalise through URL.origin; junk is DROPPED, never admitted",
+    );
+    assert.deepEqual(readSameOriginConfig({}).publicOrigins, [], "absent means not configured, not permissive");
   });
 
   it("accepts a browser that sends no Sec-Fetch-Site but a matching Origin", () => {
@@ -191,6 +249,52 @@ describe("isSameOriginRequest — scheme check (reviewer note 2)", () => {
         "http://127.0.0.1:3000/logout",
       ),
       true,
+    );
+  });
+
+  it("N5: the SAME loopback request is refused in production and accepted in development", () => {
+    // CODEX ROUND 2, N5. The two cells above pinned the loopback exception as
+    // UNCONDITIONAL, which is right for local dev and wrong everywhere else: a
+    // production invite could be mailed with both bearer factors pointing at
+    // `http://localhost/...`, i.e. at whatever is listening on the recipient's
+    // own machine. One request, two configs, two answers — so this measures the
+    // boundary rather than either side of it.
+    for (const [origin, url] of [
+      ["http://localhost:3000", "http://localhost:3000/logout"],
+      ["http://127.0.0.1:3000", "http://127.0.0.1:3000/logout"],
+    ] as const) {
+      const request = headers({ origin, host: new URL(origin).host, "sec-fetch-site": "same-origin" });
+      assert.equal(
+        isSameOriginRequest(request, url, { publicOrigins: [], allowInsecureLoopback: true }),
+        true,
+        `${origin} must still work in development`,
+      );
+      assert.equal(
+        isSameOriginRequest(request, url, { publicOrigins: [], allowInsecureLoopback: false }),
+        false,
+        `${origin} MUST NOT be accepted in production — that link carries both invite secrets`,
+      );
+    }
+  });
+
+  it("N5: the flag is derived from NODE_ENV, and only 'production' closes it", () => {
+    assert.equal(readSameOriginConfig({ NODE_ENV: "production" }).allowInsecureLoopback, false);
+    assert.equal(readSameOriginConfig({ NODE_ENV: "development" }).allowInsecureLoopback, true);
+    assert.equal(readSameOriginConfig({ NODE_ENV: "test" }).allowInsecureLoopback, true);
+    assert.equal(readSameOriginConfig({}).allowInsecureLoopback, true);
+  });
+
+  it("N5: an allowlisted HTTP loopback origin is still refused in production", () => {
+    // The allowlist widens the HOST match, never the SCHEME ruling. Naming
+    // `http://localhost:3000` in `CLARA_PUBLIC_ORIGINS` must not resurrect the
+    // insecure-scheme exception in production.
+    assert.equal(
+      isSameOriginRequest(
+        headers({ origin: "http://localhost:3000", "sec-fetch-site": "same-origin" }),
+        "https://app.clara.example/logout",
+        { publicOrigins: ["http://localhost:3000"], allowInsecureLoopback: false },
+      ),
+      false,
     );
   });
 

@@ -52,8 +52,16 @@ describe("the invitation link is built from the origin the wall PROVED", () => {
     // addressed `https://app.clara.example`, the proxy forwarded it under that
     // name, and the worker sees its OWN internal, plain-HTTP URL. The wall passes
     // on `x-forwarded-host`; the old code then built the link from `request.url`.
+    // THE ALLOWLIST IS WHAT LICENSES IT NOW (N3), not the forwarded header. The
+    // header is still present and still ignored; what makes this request pass is
+    // that the operator named `https://app.clara.example` in
+    // `CLARA_PUBLIC_ORIGINS`.
     const obs = observer();
-    const { deps: d } = deps(obs, { resolve: OK_RECEIPT });
+    const { deps: d } = deps(
+      obs,
+      { resolve: OK_RECEIPT },
+      { env: { ...FULL_ENV, CLARA_PUBLIC_ORIGINS: "https://app.clara.example" } },
+    );
     const request = new Request("http://internal.worker.local/api/invite", {
       method: "POST",
       headers: {
@@ -94,6 +102,68 @@ describe("the invitation link is built from the origin the wall PROVED", () => {
       "https://app.clara.example",
       "the fixture no longer makes the two derivations differ — this control has stopped controlling",
     );
+  });
+
+  test("N3: A SPOOFED FORWARDED HOST cannot make the courier mail both secrets to the attacker", async () => {
+    // CODEX ROUND 2, N3, END TO END. The wall used to treat `x-forwarded-host` as
+    // an independent peer of `Host`, so an attacker supplied BOTH it and the
+    // matching `Origin` and the proof came back carrying `attacker.example` — and
+    // this courier then built the invite URL from the proven origin and mailed it.
+    // The real Host here is Clara's; only the two attacker-controlled headers
+    // agree with each other.
+    const spoof = new Request("https://app.clara.example/api/invite", {
+      method: "POST",
+      headers: {
+        origin: "https://attacker.example",
+        host: "app.clara.example",
+        "x-forwarded-host": "attacker.example",
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ email: "victim@example.test", role: "admin" }),
+    });
+
+    for (const allowlist of ["", "https://app.clara.example"]) {
+      const obs = observer();
+      const { deps: d, calls } = deps(
+        obs,
+        { resolve: OK_RECEIPT },
+        { env: { ...FULL_ENV, CLARA_PUBLIC_ORIGINS: allowlist } },
+      );
+      const res = await handleInviteRequest(spoof.clone(), d);
+      assert.equal(res.status, 403, `accepted with CLARA_PUBLIC_ORIGINS=${JSON.stringify(allowlist)}`);
+      assert.equal((await json(res)).code, "cross_origin");
+      assert.equal(calls.length, 0, "nothing minted");
+      assert.equal(obs.sends.length, 0, "AND NOTHING MAILED — the link would have carried both bearer factors");
+    }
+  });
+
+  test("N3: an EXPLICITLY ALLOWED alias origin works — the allowlist is the licence", async () => {
+    // The positive control for the wall above, and the reason the allowlist
+    // exists at all: a deployment that genuinely answers on a second origin says
+    // so in configuration, and that origin then works even though the request URL
+    // reads as the internal hop.
+    const obs = observer();
+    const { deps: d } = deps(
+      obs,
+      { resolve: OK_RECEIPT },
+      { env: { ...FULL_ENV, CLARA_PUBLIC_ORIGINS: "https://app.clara.example, https://alias.clara.example" } },
+    );
+    const res = await handleInviteRequest(
+      new Request("http://internal.worker.local/api/invite", {
+        method: "POST",
+        headers: {
+          origin: "https://alias.clara.example",
+          "sec-fetch-site": "same-origin",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ email: "new@example.test", role: "bookkeeper" }),
+      }),
+      d,
+    );
+    assert.equal(res.status, 200);
+    const href = /href="([^"]+)"/.exec(obs.sends[0]!.html)?.[1];
+    assert.equal(new URL(href as string).origin, "https://alias.clara.example");
   });
 
   test("a request whose Origin matches nothing addressed is still refused, and mails nothing", async () => {

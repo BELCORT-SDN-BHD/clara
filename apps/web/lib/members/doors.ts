@@ -238,6 +238,15 @@ export const INVITE_COURIER_PATH = "/api/invite";
  *   no_session          the request carried no usable session
  *   cross_origin        the same-origin proof failed
  *   invalid_request     the body was not `{email, role}` with non-empty strings
+ *   not_authorised      the caller is not positively an admin+ of exactly one
+ *                       firm (Codex round 2, N1). This is the courier's own
+ *                       fail-closed PREFLIGHT, not the wall: `_human_ctx` still
+ *                       judges the request at the door. It exists because the
+ *                       account-existence check below is an ORACLE, and the
+ *                       owner's acceptance of that enumeration was bounded to
+ *                       admin+ — a bound that has to be enforced BEFORE the
+ *                       oracle runs, not by the door after it. One fixed body
+ *                       for every failure shape and every address.
  *   mail_not_configured no mail transport is configured — NOTHING was minted
  *   recipient_has_account the address already belongs to a Clara account, so an
  *                       invite for it can never be minted (FIND-1). Refused
@@ -258,6 +267,8 @@ export type InviteCourierCode =
   | "no_session"
   | "cross_origin"
   | "invalid_request"
+  | "unsupported_address"
+  | "not_authorised"
   | "mail_not_configured"
   | "recipient_has_account"
   | "mail_unavailable"
@@ -271,6 +282,8 @@ export const INVITE_COURIER_CODES: readonly InviteCourierCode[] = [
   "no_session",
   "cross_origin",
   "invalid_request",
+  "unsupported_address",
+  "not_authorised",
   "mail_not_configured",
   "recipient_has_account",
   "mail_unavailable",

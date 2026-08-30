@@ -73,18 +73,21 @@
 // that a caller's data can reach.
 
 import { callDoor as realCallDoor, DoorRefusal } from "../doors";
-import { proveSameOrigin } from "../same-origin";
+import { proveSameOrigin, readSameOriginConfig } from "../same-origin";
 import {
   fixedTokenAccessor,
   resolveServerSession,
   type ServerSession,
 } from "../supabase/server-session";
-import { loadCallerContext } from "../firm/caller-context";
+import { isCallerContextRow, loadCallerContext } from "../firm/caller-context";
+import { ADMIN_RANK, roleRank } from "./reads";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { InviteCourierCode } from "./doors";
 import {
   buildInviteUrl,
+  canonicalAddress,
   inviteMailCapability,
+  isAsciiAddress,
   isInviteMailFailure,
   productionInviteMailer,
   renderInviteEmail,
@@ -109,6 +112,11 @@ export type CourierDeps = {
    *  Returns null when it cannot be read — the sentence then omits the name
    *  rather than guessing one. */
   readFirmContext?: (session: SessionTokenAccessor) => Promise<{ firm_id: string; firm_name: string } | null>;
+  /** THE AUTHORITY PREFLIGHT'S READ (N1) — `clara.caller_context` on the
+   *  caller's own token, self-scoped by the view itself. Returns the rows
+   *  VERBATIM (zero, one, or the >1 the DB's unique index says cannot happen);
+   *  `isAdminOrAbove` is what judges them, and it refuses every shape but one. */
+  readCallerRows?: (session: SessionTokenAccessor) => Promise<unknown[]>;
   /** The op_key `invite_member` requires. Injectable only so a test can pin it. */
   newOpKey?: () => string;
   /** One id per request, printed to the admin and to the log so a support
@@ -214,6 +222,40 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null;
 }
 
+/**
+ * IS THIS CALLER POSITIVELY AN ADMIN OR OWNER OF EXACTLY ONE FIRM? (N1)
+ *
+ * Everything here is a POSITIVE read — review law 2. `null` (the read threw),
+ * a non-array, zero rows, more than one row, a row `isCallerContextRow` rejects,
+ * and a rank below admin are all the same answer: no.
+ *
+ * MORE THAN ONE ROW IS A REFUSAL, not a "pick the best". `uq_membership_active_user`
+ * (`0002:221`) makes at most one active membership a DB GUARANTEE and
+ * `loadCallerContext` reads with `limit: 2` precisely so a second row can be
+ * OBSERVED rather than truncated away. If one ever appears, this app does not know
+ * which firm the invite would land in — and `lib/firm/caller-context.ts` is
+ * explicit that zero and >1 are different facts that must not be folded.
+ *
+ * TWO INDEPENDENT RANK SOURCES MUST AGREE (review law 3 — spelling is not
+ * identity). `role_rank` arrives on the wire from `clara.role_rank(m.role)`;
+ * `roleRank(row.role)` re-derives it from the role NAME using this app's
+ * transcription of the same SQL `case`, which `lib/members/members-doors.test.ts`
+ * pins to `0002` byte for byte. Requiring both to clear the bar means a view that
+ * started publishing a rank inconsistent with its own role column refuses rather
+ * than grants. A NULL `role_rank` is permitted by the DB's type and is treated as
+ * "no evidence", so it refuses.
+ */
+function isAdminOrAbove(rows: unknown): boolean {
+  if (!Array.isArray(rows) || rows.length !== 1) return false;
+  const row: unknown = rows[0];
+  if (!isCallerContextRow(row)) return false;
+  const declared = row.role_rank;
+  if (typeof declared !== "number" || declared < ADMIN_RANK) return false;
+  const derived = roleRank(row.role);
+  if (derived === null || derived < ADMIN_RANK) return false;
+  return derived === declared;
+}
+
 /** `invite_member`'s own return, as far as this file reads it. `token_hash` is in
  *  the receipt and is deliberately NOT typed here: nothing in this app has a use
  *  for it, and a field that is never read cannot be leaked by a careless spread. */
@@ -241,7 +283,12 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
   // interchangeable with it: this wall deliberately accepts a match against
   // `x-forwarded-host`, so behind a proxy `request.url` can legitimately read
   // `http://internal.worker.local/...` on a request that passes.
-  const proof = proveSameOrigin(request.headers, request.url);
+  //
+  // THE WALL'S CONFIG COMES FROM THE SAME `env` EVERY OTHER GATE IN THIS FILE
+  // READS (N3/N5), so a test drives the allowlist and the production/dev loopback
+  // ruling through one seam rather than mutating `process.env` around the call.
+  const env = deps.env ?? process.env;
+  const proof = proveSameOrigin(request.headers, request.url, readSameOriginConfig(env));
   if (!proof.ok) {
     return courierError(403, "cross_origin", "this endpoint accepts same-origin requests only");
   }
@@ -255,8 +302,30 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
   if (!isRecord(body) || typeof body.email !== "string" || typeof body.role !== "string") {
     return courierError(400, "invalid_request", 'expected a JSON body of {"email": string, "role": string}');
   }
-  const email = body.email;
+  // CANONICALISED ONCE, HERE, AND NOWHERE ELSE (Codex round 2, N2(2)). `email`
+  // below is the ONLY address this handler uses from this line on — the scan, the
+  // door, the mint and the send all receive these exact bytes, so the four can no
+  // longer disagree about which address was invited. The transform IS the door's
+  // own (`lower(btrim())`, `0147:378-408`), so this pre-empts no refusal: an
+  // empty address is still empty and an invalid one is still invalid when the DB
+  // sees it, and CLR10 'a valid email is required' remains the DB's to raise.
+  const email = canonicalAddress(body.email);
   const role = body.role;
+
+  // …AND AN ADDRESS THIS APP CANNOT CANONICALISE THE PROVIDER'S WAY IS REFUSED
+  // rather than guessed at. See `isAsciiAddress` for why non-ASCII case-folding
+  // diverges between JavaScript, PostgreSQL and GoTrue, and why a divergence here
+  // specifically produces a DEAD INVITE. This is the one refusal in this file
+  // that the DB would not itself have made; it is a recorded product limitation
+  // (INFORM on the PR), not a wall, and it costs nothing for every address the
+  // product supports today.
+  if (!isAsciiAddress(email)) {
+    return courierError(
+      400,
+      "unsupported_address",
+      "this invitation service can only send to plain-ASCII email addresses — nothing was created",
+    );
+  }
 
   // ---- 3. A session to call the door WITH. --------------------------------
   // RESOLVED ONCE, AND THE DOOR IS CALLED WITH THOSE EXACT BYTES. Before P4-2's
@@ -272,8 +341,45 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
   }
   const session = fixedTokenAccessor(serverSession.accessToken);
 
+  // ---- 3b. THE AUTHORITY PREFLIGHT. ---------------------------------------
+  //
+  // N1 (Codex round 2), and it is the one place this file's own header was
+  // WRONG: it said steps 1 and 3 "are not authority checks either", which was
+  // true, and then went on to let an ACCOUNT-EXISTENCE ORACLE run for anybody
+  // holding a valid session. Step 4b asks Supabase whether an arbitrary address
+  // already has an account and answers 409 or continues — a difference any
+  // signed-in viewer, bookkeeper, removed member or membership-less account
+  // could read, one address at a time. The door's `_human_ctx` came too late to
+  // stop it, because the disclosure happened BEFORE the door.
+  //
+  // The owner's acceptance of this enumeration was explicitly "bounded to
+  // admin+". So the bound now exists, ahead of everything that touches the
+  // directory or reflects the recipient — including the config check, so a
+  // non-admin cannot even learn whether this deployment has mail set up.
+  //
+  // IT IS NOT A SECOND COPY OF THE WALL. It can only REFUSE; it grants nothing,
+  // and `invite_member`'s own `_human_ctx(role_rank('admin'))` (`0147:376`)
+  // still judges the request independently at step 5. Two fail-closed checks in
+  // series cannot admit anything one of them would refuse — which is the whole
+  // difference between this and the "drifting second copy of an authority
+  // decision" that `lib/require-firm-scope.ts` refuses to put here.
+  //
+  // FAIL-CLOSED ON EVERY UNCERTAINTY, and the opposite direction from the
+  // panel's affordance shaping (which fails OPEN, because there the DB is the
+  // only wall and a failed courtesy read must not strand a real admin). Here the
+  // read IS the bound, so a read that fails, returns nothing, returns more than
+  // one row, returns a row this app cannot validate, or returns a rank below
+  // admin all refuse identically.
+  const callerRows = await (deps.readCallerRows ?? loadCallerContext)(session).catch(() => null);
+  if (!isAdminOrAbove(callerRows)) {
+    // ONE FIXED BODY, WHATEVER THE ADDRESS WAS. No correlation id, no detail, no
+    // hint of which of the six failure shapes applied — a refusal that varied
+    // would be the same oracle wearing a different status code.
+    return courierError(403, "not_authorised", "inviting someone needs the admin or owner role in this firm");
+  }
+
   // ---- 4. Can this deployment deliver at all? (see the header) -------------
-  const capability = inviteMailCapability(deps.env ?? process.env);
+  const capability = inviteMailCapability(env);
   if (!capability.ok) {
     return courierError(
       503,

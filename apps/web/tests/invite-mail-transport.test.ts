@@ -39,6 +39,7 @@ import {
   CAN_MINT_PAGE_SIZE,
   classifyProviderStatus,
   InviteMailFailure,
+  isConfirmedUser,
   isInviteMailFailure,
   productionInviteMailer,
   RESEND_ENDPOINT,
@@ -201,6 +202,64 @@ describe("canMintFor answers {ok:true} only when it has SEEN the whole directory
     assert.equal(client.listUsersCalls.length, 1, "it stops the moment it has a positive answer");
   });
 
+  test("N2(3): an UNCONFIRMED matching row proceeds — only a CONFIRMED one is already_registered", async () => {
+    // CODEX ROUND 2, N2(3). The scan treated the mere EXISTENCE of a matching row
+    // as the refusal condition. Supabase rejects `generateLink({type:"invite"})`
+    // only for a CONFIRMED user and permits an unconfirmed one — so refusing
+    // those was a self-inflicted 409 on a flow that would have worked.
+    const unconfirmed = recordingClient({
+      listUsers: (p) =>
+        (p.page ?? 1) === 1
+          ? { data: { users: [{ email: "pending@example.test", email_confirmed_at: null, confirmed_at: null }] }, error: null }
+          : { data: { users: [] }, error: null },
+    });
+    assert.deepEqual(
+      await productionInviteMailer(CONFIG, { createClient: unconfirmed.createClient }).canMintFor("pending@example.test"),
+      { ok: true },
+      "an unconfirmed account may still be invited",
+    );
+
+    const confirmed = recordingClient({
+      listUsers: () => ({
+        data: { users: [{ email: "live@example.test", email_confirmed_at: "2026-08-01T00:00:00Z", confirmed_at: null }] },
+        error: null,
+      }),
+    });
+    assert.deepEqual(
+      await productionInviteMailer(CONFIG, { createClient: confirmed.createClient }).canMintFor("live@example.test"),
+      { ok: false, reason: "already_registered" },
+    );
+  });
+
+  test("N2(3): confirmation is read FAIL-CLOSED — an unreadable field counts as confirmed", async () => {
+    // The two directions are not symmetric. Wrongly "confirmed" annoys an admin
+    // and mints nothing; wrongly "unconfirmed" mints a DEAD invite and blocks the
+    // address for seven days. So only an explicit null on BOTH fields is a
+    // positive reading of "not confirmed"; absence or an odd type is not an
+    // answer, and an unanswered question never licenses the mint.
+    for (const user of [
+      { email: "x@example.test" }, // both fields ABSENT — cannot tell
+      { email: "x@example.test", email_confirmed_at: undefined, confirmed_at: undefined },
+      { email: "x@example.test", email_confirmed_at: 17, confirmed_at: null },
+      { email: "x@example.test", email_confirmed_at: "2026-08-01T00:00:00Z" },
+      { email: "x@example.test", confirmed_at: "2026-08-01T00:00:00Z" }, // phone-confirmed account
+    ]) {
+      const client = recordingClient({ listUsers: () => ({ data: { users: [user] }, error: null }) });
+      assert.deepEqual(
+        await productionInviteMailer(CONFIG, { createClient: client.createClient }).canMintFor("x@example.test"),
+        { ok: false, reason: "already_registered" },
+        `${JSON.stringify(user)} must fail CLOSED — a dead invite is the expensive direction`,
+      );
+    }
+
+    // POSITIVE CONTROL: the one readable shape that really does mean "not
+    // confirmed" still lets the invite through, so the rule above is a
+    // discrimination and not a blanket refusal.
+    assert.equal(isConfirmedUser({ email_confirmed_at: null, confirmed_at: null }), false);
+    assert.equal(isConfirmedUser({ email_confirmed_at: "2026-08-01T00:00:00Z", confirmed_at: null }), true);
+    assert.equal(isConfirmedUser(null), true, "a non-object row is not an answer either");
+  });
+
   test("the match is case- and whitespace-insensitive, exactly as the door normalises", async () => {
     // `0147:379` applies `lower(btrim(p_email))`. A check that disagreed with the
     // door about what "the same address" means would refuse the wrong requests.
@@ -272,13 +331,37 @@ describe("canMintFor answers {ok:true} only when it has SEEN the whole directory
     );
   });
 
-  test("a null data payload is not an answer either", async () => {
-    const client = recordingClient({ listUsers: () => ({ data: null, error: null }) });
+  test("A NULL OR MALFORMED PAYLOAD IS NOT AN EMPTY DIRECTORY — it refuses", async () => {
+    // CODEX ROUND 2, N2(1), and the cell that used to sit here BLESSED the
+    // defect: it asserted `{ok:true}` for `data: null` on the reasoning that "a
+    // null payload cannot hide a matching address". That reasoning is exactly
+    // backwards. A null payload cannot REVEAL one either — and `{ok:true}` is not
+    // "no match found", it is the positive claim "I have read the entire
+    // directory and this address is free", which then licenses a mint. A derived
+    // state standing in as positive evidence is what review law 2 forbids, and
+    // here it buys a dead invite and a seven-day block on the address.
+    for (const payload of [
+      { data: null, error: null },
+      { data: {} as { users: AdminUser[] }, error: null },
+      { data: { users: null } as unknown as { users: AdminUser[] }, error: null },
+      { data: { users: "nope" } as unknown as { users: AdminUser[] }, error: null },
+    ]) {
+      const client = recordingClient({ listUsers: () => payload });
+      const mailer = productionInviteMailer(CONFIG, { createClient: client.createClient });
+      await assert.rejects(
+        () => mailer.canMintFor("free@example.test"),
+        (e: unknown) => isInviteMailFailure(e) && e.code === "directory_unreadable",
+        `a payload of ${JSON.stringify(payload.data)} must refuse, never answer {ok:true}`,
+      );
+    }
+  });
+
+  test("POSITIVE CONTROL: a genuinely present EMPTY array still answers {ok:true}", async () => {
+    // Without this the cell above is equally green on a transport that refuses
+    // everything — and the empty-page signal is the only thing that ever
+    // licenses a mint, so it has to keep working.
+    const client = recordingClient({ listUsers: () => ({ data: { users: [] }, error: null }) });
     const mailer = productionInviteMailer(CONFIG, { createClient: client.createClient });
-    // `data: null` with no error yields zero users, which the walk reads as the
-    // end of a list it has fully seen. Recorded rather than assumed: this is the
-    // one path where "no rows" and "no payload" are treated alike, and it is
-    // sound only because a null payload cannot hide a matching address.
     assert.deepEqual(await mailer.canMintFor("free@example.test"), { ok: true });
   });
 });

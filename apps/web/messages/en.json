@@ -239,6 +239,8 @@
       "no_session": "You are not signed in any more. Sign in and try again.",
       "cross_origin": "That request did not come from this app, so it was refused.",
       "invalid_request": "The invitation form sent something this server could not read.",
+      "unsupported_address": "This invitation service can only send to plain-ASCII email addresses, so nothing was created.",
+      "not_authorised": "Inviting someone needs the admin or owner role in this firm. Nothing was created.",
       "mail_not_configured": "This deployment has no invitation mail set up, so nothing was created. Ask whoever runs it to configure the mail transport.",
       "recipient_has_account": "This address already has a Clara account — ask them to sign in with it. Nothing was created.",
       "mail_unavailable": "The invitation service could not be reached, so nothing was created. Try again in a moment.",

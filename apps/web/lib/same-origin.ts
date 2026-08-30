@@ -33,6 +33,57 @@
  * second derivation.
  */
 
+/**
+ * CODEX ROUND 2, N3 — WHY A FORWARDED HOST IS NOT EVIDENCE ON ITS OWN.
+ *
+ * The version above compared the `Origin` header against `x-forwarded-host` as an
+ * independent PEER of `Host` and the request URL. A forwarded header is written by
+ * whoever spoke to us; Cloudflare's own documentation is that it generally passes
+ * incoming request headers through, and nothing in this repo established that this
+ * one is stripped or overwritten. So a direct authenticated request could send
+ * `Origin: https://attacker.example` AND `X-Forwarded-Host: attacker.example`,
+ * satisfy the match against ITSELF, and walk away with a proof carrying the
+ * attacker's origin — which the invite courier then puts in an email carrying BOTH
+ * bearer factors. Two untrusted headers agreeing is not two pieces of evidence.
+ *
+ * THE FIX IS A CONFIGURED ALLOWLIST, `CLARA_PUBLIC_ORIGINS`. What a deployment's
+ * own public origins are is a fact about the deployment, not something a request
+ * can assert. When it is set, the proven origin must be a member — so a forwarded
+ * host can no longer license anything the operator has not named. When it is NOT
+ * set, `x-forwarded-host` is not consulted AT ALL: the wall falls back to `Host`
+ * and the request URL, which is fail-closed (a proxied deployment with no
+ * allowlist refuses rather than trusting the proxy blindly) and is visible
+ * immediately rather than silently permissive.
+ */
+export type SameOriginConfig = {
+  /** Exact serialized origins this deployment answers on, from
+   *  `CLARA_PUBLIC_ORIGINS`. Empty means "not configured" — see above. */
+  readonly publicOrigins: readonly string[];
+  /** N5: `http://localhost` / `http://127.0.0.1` are accepted ONLY here. In
+   *  production an insecure loopback origin is refused, because a production
+   *  invite mailed to `http://localhost/...` carries both bearer factors to
+   *  whatever is listening on the recipient's own machine. */
+  readonly allowInsecureLoopback: boolean;
+};
+
+/** Parse the allowlist. Each entry is normalised through `URL.origin`, so
+ *  `https://App.Clara.example/` and `https://app.clara.example` are the same
+ *  entry, and anything unparseable is DROPPED rather than admitted. */
+export function readSameOriginConfig(env: Record<string, string | undefined>): SameOriginConfig {
+  const raw = env.CLARA_PUBLIC_ORIGINS ?? "";
+  const publicOrigins: string[] = [];
+  for (const part of raw.split(",")) {
+    const trimmed = part.trim();
+    if (trimmed === "") continue;
+    try {
+      publicOrigins.push(new URL(trimmed).origin);
+    } catch {
+      // An unparseable entry contributes nothing. It never widens the wall.
+    }
+  }
+  return { publicOrigins, allowInsecureLoopback: env.NODE_ENV !== "production" };
+}
+
 /** What the wall PROVED, not merely whether it passed. `origin` is the
  *  serialized origin of the `Origin` header this function positively matched
  *  against a host the browser addressed — never the request URL's own authority,
@@ -51,6 +102,7 @@ export type SameOriginProof = { ok: true; origin: string } | { ok: false };
 export function proveSameOrigin(
   headers: Headers,
   requestUrl: string,
+  config: SameOriginConfig = readSameOriginConfig(process.env),
 ): SameOriginProof {
   // Sec-Fetch-Site is sent by every browser that implements Fetch Metadata.
   // "same-origin" is the only acceptable value; "same-site", "cross-site" and
@@ -80,8 +132,15 @@ export function proveSameOrigin(
   // or spoofed-scheme Origin pass a HOST-only match. Deployment-robust: this
   // checks the ORIGIN's own scheme, never the request URL's authority (which
   // a proxy may rewrite independently).
+  //
+  // N5: AND ONLY OUTSIDE PRODUCTION. Local dev serves HTTP on loopback, so the
+  // exception has to exist — but a PRODUCTION deployment never legitimately sees
+  // one, and accepting it there means a production invite can be mailed with both
+  // bearer factors pointing at `http://localhost/...`, i.e. at whatever happens to
+  // be listening on the recipient's own machine.
   const isLoopback = originUrl.hostname === "localhost" || originUrl.hostname === "127.0.0.1";
-  if (originUrl.protocol !== "https:" && !(originUrl.protocol === "http:" && isLoopback)) {
+  const loopbackAllowed = isLoopback && config.allowInsecureLoopback;
+  if (originUrl.protocol !== "https:" && !(originUrl.protocol === "http:" && loopbackAllowed)) {
     return { ok: false };
   }
 
@@ -92,11 +151,13 @@ export function proveSameOrigin(
   // which is why comparing the two is the check that works — including behind
   // a proxy that rewrites the request URL's authority. Every candidate must
   // be positively present to count.
+  // `x-forwarded-host` IS NOT IN THIS LIST (N3). It is written by whoever spoke
+  // to us and cannot corroborate an Origin that the same party also chose. The
+  // allowlist below is what lets a proxied deployment work, and it is a fact the
+  // OPERATOR states, not one a request asserts.
   const candidates = new Set<string>();
-  for (const header of ["host", "x-forwarded-host"]) {
-    const value = headers.get(header);
-    if (value) candidates.add(value);
-  }
+  const hostHeader = headers.get("host");
+  if (hostHeader) candidates.add(hostHeader);
   try {
     candidates.add(new URL(requestUrl).host);
   } catch {
@@ -104,7 +165,14 @@ export function proveSameOrigin(
     // make the check pass.
   }
 
-  if (!candidates.has(originHost)) return { ok: false };
+  // THE CONFIGURED ALLOWLIST IS ITS OWN, SUFFICIENT PROOF OF AUTHORITY, and it is
+  // what makes this wall correct behind a proxy that rewrites the request URL:
+  // the operator has named the origins this deployment answers on, so an `Origin`
+  // that is one of them is addressing us however the hop was rewritten. It is a
+  // WIDENING of the host match, never a replacement — an origin that matches the
+  // host the browser addressed still passes with no allowlist configured at all.
+  const allowlisted = config.publicOrigins.includes(originUrl.origin);
+  if (!allowlisted && !candidates.has(originHost)) return { ok: false };
 
   // THE PROVEN ORIGIN, and it is the ORIGIN HEADER'S — not the request URL's.
   // `URL.origin` serializes scheme + host (+ non-default port), so what a
@@ -120,6 +188,10 @@ export function proveSameOrigin(
  * boolean callers already read (`app/logout/route.ts`), because a wall with two
  * implementations is a wall with two behaviours.
  */
-export function isSameOriginRequest(headers: Headers, requestUrl: string): boolean {
-  return proveSameOrigin(headers, requestUrl).ok;
+export function isSameOriginRequest(
+  headers: Headers,
+  requestUrl: string,
+  config: SameOriginConfig = readSameOriginConfig(process.env),
+): boolean {
+  return proveSameOrigin(headers, requestUrl, config).ok;
 }
