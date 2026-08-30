@@ -285,7 +285,6 @@ test("G1B-I8-stream-integration Gate G1 PR-2b (Codex r6 LOW #2) — a REAL regis
     });
     const result = streamText({
       model,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: built,
       messages: [{ role: "user", content: "go" }],
       stopWhen: [isStepCount(5)],
@@ -321,26 +320,21 @@ test("G1B-I8-stream-integration Gate G1 PR-2b (Codex r6 LOW #2) — a REAL regis
     globalThis.__claraPools = previous;
   }
 
-  // "EXACTLY ONE releaseLock" — a STRUCTURAL proof off the shipping source rather than a live
-  // WDK step invocation: runBankAgentModelStep's "use step" directive means calling it directly
-  // outside a real workflow context is not a claim this test can safely make (getWritable/
-  // getWorkflowMetadata come from the "workflow" package's own runtime, which this file does not
-  // stand up). A `finally` block runs EXACTLY once by JS's own semantics regardless of how the
-  // try exits — the property this cell needs is that releaseLock lives in exactly one finally
-  // wrapping the whole drain, which is a positive read of the source, not an inference from its
-  // absence (review law 2).
+  // "EXACTLY ONE releaseLock" — a STRUCTURAL proof off the shipping source (no harness here can
+  // drive the real "use step" wrapper — the same gap MEDIUM-6 names). FIND-12 (opus r1 review of
+  // #449): kept as a regex deliberately (a fake-writer count would only prove something about a
+  // stand-in), widened whitespace/comment-tolerant (`[\s\S]*?`) so a reformat can't false-red it.
   const implSrc = await import("node:fs/promises").then((fs) =>
     fs.readFile(new URL("../workflows/bankAgent.v1.impl.ts", import.meta.url), "utf8"),
   );
   const releaseLockCalls = implSrc.match(/writer\.releaseLock\(\)/g) ?? [];
   assert.equal(releaseLockCalls.length, 1, "writer.releaseLock() must appear exactly once in the shipping source");
-  assert.match(implSrc, /finally\s*\{\s*writer\.releaseLock\(\);\s*\}/, "and it must sit alone in a finally block, so it runs on every exit path exactly once");
+  assert.match(implSrc, /finally\s*\{[\s\S]*?writer\.releaseLock\(\);[\s\S]*?\}/, "and it must sit inside a finally block, so it runs on every exit path exactly once");
 
   // "AN UNHELD RUN PROVES NO SETTLEMENT" — claimBankTask/settleBankTask are plain, rig-callable
-  // functions (NOT "use step" themselves — only their outer wrappers are), so this half IS
-  // directly testable, mirroring G1B-I8-retry's own part (3) exactly: a task that never reached
-  // 'running' cannot be claimed, and this cell adds the missing other half — proving nothing
-  // settles it either, by reading the row back unchanged.
+  // functions, so this half IS directly testable. FIND-5 (opus r1 review of #449): the ORIGINAL
+  // cut never actually CALLED settleBankTask — "no settle call is made" proved nothing about its
+  // OWN refusal wall. Fixed: call it for real and assert CLR13 (no legal edge out of 'cancelled').
   const infra = await import("../workflows/bankAgent.v1.infra.ts");
   const { plantHeldWakeTask, readTask } = await import("./g1-wake-bodies.fixtures.mjs");
   const w = await rig.buildFirm("g1bi8si");
@@ -352,10 +346,13 @@ test("G1B-I8-stream-integration Gate G1 PR-2b (Codex r6 LOW #2) — a REAL regis
   assert.equal(claim.bound, false, "and it was never bound to any run");
   const before = await readTask(t.taskId);
   assert.equal(before.status, "cancelled", "the failed claim must not have touched the row's status");
-  // No settle call is made here AT ALL — the proof is that nothing in this cell's own flow ever
-  // reaches settleBankTask for an unheld run, and the row is read back byte-identical.
+  await assert.rejects(
+    rig.asRuntime((c) => infra.settleBankTask(c, t.taskId, "failed", "internal")),
+    /CLR13|illegal.*transition/i,
+    "settleBankTask must itself refuse a settle attempt on an already-terminal, never-run task — this is the wall, not merely this test's own restraint",
+  );
   const after = await readTask(t.taskId);
-  assert.deepEqual(after, before, "unchanged — an unheld run settles nothing");
+  assert.deepEqual(after, before, "unchanged — a REJECTED settle attempt on an unheld run must leave the row untouched too");
 });
 
 test("G1B-I8-tool-counter 裁-44 R5 (LOW) — every shipping tool moves the SHARED counter, on both lanes", async () => {

@@ -336,11 +336,64 @@ test("the probes' dormant path is UNCHANGED — a genuinely absent surface is st
 test("a probe failure inside a DAILY belt skips that belt ONLY — the sweep behind it completes", async () => {
   const client = sweepClient({ failOn: (sql) => (/to_regprocedure/.test(sql) ? new Error("connection reset") : null) });
   const log = [];
-  const swept = await runReconcilerSweep(client, { ...chatDeps((m) => log.push(m)), faRuns: true, adjRuns: true, prune: true });
+  // FIND-7 (opus r1 review of #449): bankAgentRuns/closePrepRuns join the SAME drill as FA/ADJ —
+  // their surface probe also feature-detects via to_regprocedure (pg-fn-surface.mjs), so the SAME
+  // fault injector reds them the SAME way, self-contained (see beltErrors below).
+  const swept = await runReconcilerSweep(client, { ...chatDeps((m) => log.push(m)), faRuns: true, adjRuns: true, bankAgentRuns: true, closePrepRuns: true, prune: true });
   assert.equal(swept.faOk, false, "the FA belt reports its own failure…");
   assert.equal(swept.adjOk, false, "…and so does the adjustment belt, independently");
-  assert.deepEqual(swept.beltErrors, [], "both contained THEMSELVES — nothing escaped to the assembly wrapper");
+  assert.equal(swept.bankAgentOk, false, "…and so does bank_agent…");
+  assert.equal(swept.closePrepOk, false, "…and so does close_prep, all four independently");
+  assert.deepEqual(swept.beltErrors, [], "all four contained THEMSELVES — nothing escaped to the assembly wrapper");
   assert.equal(typeof swept.pruned, "number", "the trace prune, sequenced last of all, still ran");
+});
+
+// FIND-7 (opus r1 review of #449): a THROW-INJECTION per producer belt, proving the OUTER belt()
+// wrapper in reconciler.mjs is a second line of defense, not merely that each belt's own internal
+// try/catch catches everything today — both belts' final summary `log(...)` sits OUTSIDE every
+// internal try/catch, so a `log` that throws there reaches the wrapper's `run()` unhandled (the
+// "assembly: a belt that THROWS" cell's shape). ONE shared mock: `/from pg_proc/` (the shape
+// query) is checked BEFORE the bare `/to_regprocedure/` existence probe, since the shape query's
+// own WHERE clause also contains that literal (found empirically — reversed, both cells fail
+// empty); `proretset` is decided from the signature PARAM (close_prep_due() is SETOF, the others
+// are not) so one mock serves both belts.
+function throwInjectionClient() {
+  return {
+    query(sql, params) {
+      const s = String(sql);
+      if (/from pg_proc/.test(s)) {
+        const isSetReturning = /close_prep_due/.test(String(params?.[0] ?? ""));
+        return Promise.resolve({ rows: [{ prokind: "f", return_type_ok: true, proretset: isSetReturning, executable: true }], rowCount: 1 });
+      }
+      if (/to_regprocedure/.test(s)) return Promise.resolve({ rows: [{ oid: 1 }], rowCount: 1 });
+      if (/wake_engine_sources/.test(s)) return Promise.resolve({ rows: [{ enabled: true }], rowCount: 1 });
+      return Promise.resolve({ rows: [], rowCount: 0 }); // zero active clients / zero due rows — reaches the final summary log
+    },
+  };
+}
+
+test("FIND-7: bank_agent's OWN summary log throwing still escapes to the outer belt() wrapper, named in beltErrors", async () => {
+  const client = throwInjectionClient();
+  const log = [];
+  const throwingLog = (m) => {
+    if (/bank_agent examined=/.test(m)) throw new Error("log sink down");
+    log.push(m);
+  };
+  const swept = await runReconcilerSweep(client, { ...chatDeps(() => {}), log: throwingLog, bankAgentRuns: true });
+  assert.deepEqual(swept.beltErrors, ["bank_agent produce"], "the wrapper's OWN containment caught the escape and named the belt");
+  assert.ok(log.some((m) => /\[reconcile\] bank_agent produce error: log sink down/.test(m)), "the estate's own '[reconcile] <belt> error:' idiom");
+});
+
+test("FIND-7: close_prep's OWN summary log throwing still escapes to the outer belt() wrapper, named in beltErrors", async () => {
+  const client = throwInjectionClient();
+  const log = [];
+  const throwingLog = (m) => {
+    if (/close_prep examined=/.test(m)) throw new Error("log sink down");
+    log.push(m);
+  };
+  const swept = await runReconcilerSweep(client, { ...chatDeps(() => {}), log: throwingLog, closePrepRuns: true });
+  assert.deepEqual(swept.beltErrors, ["close_prep produce"], "the wrapper's OWN containment caught the escape and named the belt");
+  assert.ok(log.some((m) => /\[reconcile\] close_prep produce error: log sink down/.test(m)), "the estate's own '[reconcile] <belt> error:' idiom");
 });
 
 test("render enqueue: its surface probe is isolated like its dispatch sibling (renderEnqueueOk:false, not a throw)", async () => {

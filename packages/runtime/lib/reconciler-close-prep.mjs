@@ -63,8 +63,24 @@
 // SHARED HEARTBEAT. Like every other sweeper in this family, this belt writes no heartbeat of
 // its own — runReconcilerSweep beats 'reconciler' once per full cycle; this module is one more
 // pass folded into that same beat.
+//
+// TWO INDEPENDENT DB-OWNED WALLS (FIND-6, opus r1 review of #449, STANDS AS RULED / widened):
+// claim_close_prep_task now enforces BOTH close_prep_fy_claims's own UNIQUE(fiscal_year_id) —
+// at most one live CLAIM per fiscal year — AND a second, client-scoped wall,
+// uq_agent_task_one_live_close_prep on clara.agent_tasks itself — at most one LIVE close_prep
+// TASK per client, across every fiscal year at once. The advisory relay-leader lock
+// (leader.mjs's own acquireLeaderLock) is the reason two producer ticks can never race each
+// other in production TODAY — this loop is single-leader by construction — so this second wall
+// is defense-in-depth against a future where that operational guarantee no longer holds (a
+// second reconciler process, a manual claim_close_prep_task call from an ops surface), not a
+// wall this belt's own single-process behaviour currently needs to survive a real race against.
+// A client-level refusal surfaces as {appended:false, reason:'client_has_live_close_prep'} —
+// counted identically to `already_claimed` below (closePrepSkipped): from this belt's own point
+// of view both are "nothing to queue this cycle," and the oracle will re-offer the same
+// fiscal-year row on a later tick once the client's other live task resolves.
 
 import { checkFunctionSurface } from "./pg-fn-surface.mjs";
+import { TaxonomyHaltError } from "./relay.mjs";
 
 function closePrepModelSnapshot() {
   return process.env.CLARA_CLOSE_PREP_MODEL || process.env.CLARA_CHAT_MODEL || "gpt-5.6-terra";
@@ -102,6 +118,9 @@ export async function produceClosePrepTasks(client, opts = {}) {
     dueSurface = await checkFunctionSurface(client, { signature: "clara.close_prep_due()", returnType: "record", returnsSet: true });
     claimSurface = await checkFunctionSurface(client, { signature: "clara.claim_close_prep_task(uuid,uuid,uuid,text)", returnType: "jsonb" });
   } catch (err) {
+    // FIND-9 (opus r1 review of #449): a HALT must reach the leader even through a per-belt
+    // catch (the reconciler-fa.mjs:82-87 idiom, applied to EVERY catch in this belt).
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err;
     log(`[reconcile] close_prep surface probe error: ${err?.message ?? err}`);
     return { ...out, closePrepOk: false };
   }
@@ -121,6 +140,7 @@ export async function produceClosePrepTasks(client, opts = {}) {
   try {
     enabled = await isCloseSourceEnabled(client);
   } catch (err) {
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err; // FIND-9
     log(`[reconcile] close_prep source-enabled probe error: ${err?.message ?? err}`);
     return { ...out, closePrepOk: false };
   }
@@ -132,6 +152,7 @@ export async function produceClosePrepTasks(client, opts = {}) {
   try {
     rows = (await client.query("select firm_id, client_id, fiscal_year_id, ends_on, reason from clara.close_prep_due()")).rows;
   } catch (err) {
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err; // FIND-9
     log(`[reconcile] close_prep due-oracle error: ${err?.message ?? err}`);
     return { ...out, closePrepOk: false };
   }
@@ -145,13 +166,17 @@ export async function produceClosePrepTasks(client, opts = {}) {
         out.closePrepQueued += 1;
         log(`[reconcile] close_prep queued client=${row.client_id} fiscal_year=${row.fiscal_year_id} reason=${row.reason} task=${reply.task_id}`);
       } else if (reply?.appended === false) {
+        // FIND-6: `already_claimed` (the fiscal-year wall) and `client_has_live_close_prep`
+        // (the NEW client-scoped wall) are counted identically — from this belt's own point of
+        // view both mean "nothing to queue this cycle," and the reason is still named in the log.
         out.closePrepSkipped += 1;
-        log(`[reconcile] close_prep client=${row.client_id} fiscal_year=${row.fiscal_year_id} already claimed — skipped`);
+        log(`[reconcile] close_prep client=${row.client_id} fiscal_year=${row.fiscal_year_id} skipped — reason=${reply.reason ?? "unknown"}`);
       } else {
         out.closePrepFailed += 1;
         log(`[reconcile] close_prep client=${row.client_id} claim_close_prep_task returned an unexpected shape (expected {appended:boolean,...}, got ${JSON.stringify(reply)})`);
       }
     } catch (err) {
+      if (err instanceof TaxonomyHaltError || err?.halt) throw err; // FIND-9
       out.closePrepFailed += 1;
       log(`[reconcile] close_prep claim client=${row.client_id} error: ${err?.message ?? err}`);
     }

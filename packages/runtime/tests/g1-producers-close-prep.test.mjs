@@ -174,6 +174,46 @@ test("close_prep producer: once the claimed task reaches a TERMINAL state, the S
   assert.equal(newest.status, "queued", "a terminal-task claim must be RECLAIMED, not treated as still-live");
 });
 
+/** An EARLIER overdue fiscal year, opened BEFORE buildOverdueFiscalYear(w, ...)'s own period so
+ *  the two chain FORWARD contiguously (fiscal years open in strictly chronological order — the
+ *  contiguity wall refuses backfilling an earlier period once a later one already exists). Both
+ *  periods end before _book_today(), so both are independently overdue. */
+async function buildEarlierOverdueFiscalYear(w, label) {
+  const today = await bookToday();
+  const startsOn = await rootQuery("select ($1::date - interval '2 years')::date::text as s", [today]);
+  const endsOn = await rootQuery("select ($1::date - interval '1 year' - interval '1 day')::date::text as e", [today]);
+  const r = await humanQuery(
+    w.owner,
+    `select clara.open_fiscal_year(p_client=>$1,p_label=>$2,p_starts_on=>$3::date,p_ends_on=>$4::date,
+       p_length_reason=>$5,p_op_key=>$6) as r`,
+    [w.client, label, startsOn.rows[0].s, endsOn.rows[0].e, "g1 pr-2b rig fixture — an EARLIER, contiguous, also-overdue FY", opk("g1pr2b-fy-earlier")],
+  );
+  return r.rows[0].r.fiscal_year_id;
+}
+
+test("FIND-6: a SECOND overdue fiscal year for the SAME client is refused client_has_live_close_prep while the first stays live — and clears once the first goes terminal", { skip: skip || skipClaim }, async () => {
+  const w = await buildFirm("g1cp-onelive");
+  // Opened in FORWARD chronological order (the contiguity wall requires it); fyB is the one this
+  // cell claims FIRST (arbitrary — the wall this cell proves does not care about opening order).
+  const fyB = await buildEarlierOverdueFiscalYear(w, "FY-onelive-b");
+  const fyA = await buildOverdueFiscalYear(w, "FY-onelive-a");
+  const claimA = await asRuntime((c) => c.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fyA, "onelive-a"]));
+  assert.equal(claimA.rows[0].r.appended, true, "the FIRST fiscal year's claim must succeed — the client has no live task yet");
+  const claimB = await asRuntime((c) => c.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fyB, "onelive-b"]));
+  assert.equal(claimB.rows[0].r.appended, false, "a SECOND, DIFFERENT fiscal year for the SAME client must be refused while the first task is still live");
+  assert.equal(claimB.rows[0].r.reason, "client_has_live_close_prep", "the refusal must name the client-scoped wall, not 'already_claimed' (that wall is per-fiscal-year, this one fired instead)");
+  assert.equal(await taskCountFor(w.client), 1, "only ONE task exists for this client — the second claim never inserted anything");
+
+  // Terminalize the FIRST task — the client's one live slot opens up — and prove fyB's OWN claim
+  // (never touched by fyA's own reclaim, which is scoped to fyA's fiscal_year_id) now succeeds.
+  const liveA = await liveTaskFor(w.client);
+  await rootQuery("update clara.agent_tasks set status='running' where id=$1", [liveA.id]);
+  await rootQuery("update clara.agent_tasks set status='completed' where id=$1", [liveA.id]);
+  const claimBRetry = await asRuntime((c) => c.query("select clara.claim_close_prep_task($1,$2,$3,$4) as r", [w.firm, w.client, fyB, "onelive-b-retry"]));
+  assert.equal(claimBRetry.rows[0].r.appended, true, "once the first task is terminal, the SECOND fiscal year's own claim must now succeed");
+  assert.equal(await taskCountFor(w.client), 2, "both fiscal years now carry their own task");
+});
+
 test("close_prep producer: absent close_prep_due/claim_close_prep_task surface is DORMANT, never a failure", async () => {
   const src = await import("node:fs/promises").then((fs) =>
     fs.readFile(new URL("../lib/reconciler-close-prep.mjs", import.meta.url), "utf8"),

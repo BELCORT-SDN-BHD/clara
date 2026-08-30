@@ -80,13 +80,25 @@
 // as disabled too.
 
 import { checkFunctionSurface } from "./pg-fn-surface.mjs";
+import { TaxonomyHaltError } from "./relay.mjs";
 
 const EMIT_REASONS = new Set(["unmatched_lines", "reconcilable", "retry_later"]);
 const NOTIFY_REASONS = new Set(["chase_statement"]);
 const QUIET_REASONS = new Set(["purpose_unconsented", "held", "nothing_due"]);
 
 /** The closed reason->action switch (HIGH-1, bank-agency-annexes-1-mechanics.md §D.0's tail).
- *  PURE — no I/O — so it is unit-testable on its own and the belt below is thin glue over it. */
+ *  PURE — no I/O — so it is unit-testable on its own and the belt below is thin glue over it.
+ *
+ *  FIND-11 (opus r1 review of #449) splits the old single "malformed" bucket in two, mirroring
+ *  reconciler-fa.mjs's own "ANOMALOUS SHAPE, LOUD" precedent (lines 114-130 there): a RECOGNISED
+ *  emit-worthy reason whose OWN required fields are missing (bank_account_id/due_key) is a
+ *  transient/self-healing shape hiccup in an otherwise-well-formed exchange — logged loudly but
+ *  NOT counted as a belt failure, exactly like FA's malformed due-probe reply. An UNRECOGNISED
+ *  reason string stays "malformed" and COUNTED (bankAgentFailed, unchanged from the first
+ *  HIGH-1 cut) — that one is a genuine wiring-drift signal between this belt and F-A3's
+ *  predicate (a reason value added to the predicate's vocabulary this belt's closed table does
+ *  not know about), and HIGH-1's own ruling was explicit that THAT case must stay loud AND
+ *  counted, a deliberate departure from FA's softer precedent. */
 export function classifyBankDueReason(due) {
   const reason = due?.reason;
   if (typeof reason !== "string" || reason.length === 0) {
@@ -94,8 +106,8 @@ export function classifyBankDueReason(due) {
   }
   if (EMIT_REASONS.has(reason)) {
     if (due?.due !== true) return { action: "malformed", detail: `reason '${reason}' requires due:true (got ${JSON.stringify(due)})` };
-    if (!due?.bank_account_id) return { action: "malformed", detail: `reason '${reason}' requires bank_account_id (got ${JSON.stringify(due)})` };
-    if (!due?.due_key) return { action: "malformed", detail: `reason '${reason}' requires due_key (got ${JSON.stringify(due)})` };
+    if (!due?.bank_account_id) return { action: "anomalous", detail: `reason '${reason}' requires bank_account_id (got ${JSON.stringify(due)})` };
+    if (!due?.due_key) return { action: "anomalous", detail: `reason '${reason}' requires due_key (got ${JSON.stringify(due)})` };
     return { action: "emit", reason };
   }
   if (NOTIFY_REASONS.has(reason)) {
@@ -150,6 +162,10 @@ export async function produceBankAgentWakes(client, opts = {}) {
     dueSurface = await checkFunctionSurface(client, { signature: "clara.bank_agent_run_due(uuid)", returnType: "jsonb" });
     emitSurface = await checkFunctionSurface(client, { signature: "clara.emit_bank_agent_due(uuid,uuid,text,text)", returnType: "jsonb" });
   } catch (err) {
+    // FIND-9 (opus r1 review of #449): a HALT must reach the leader even through a per-belt
+    // catch (the reconciler-fa.mjs:82-87 idiom, applied to EVERY catch in this belt) — re-check
+    // and re-throw before containing anything else.
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err;
     log(`[reconcile] bank_agent surface probe error: ${err?.message ?? err}`);
     return { ...out, bankAgentOk: false };
   }
@@ -169,6 +185,7 @@ export async function produceBankAgentWakes(client, opts = {}) {
   try {
     enabled = await isBankAgentSourceEnabled(client);
   } catch (err) {
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err; // FIND-9
     log(`[reconcile] bank_agent source-enabled probe error: ${err?.message ?? err}`);
     return { ...out, bankAgentOk: false };
   }
@@ -180,6 +197,7 @@ export async function produceBankAgentWakes(client, opts = {}) {
   try {
     ids = await activeClientIds(client);
   } catch (err) {
+    if (err instanceof TaxonomyHaltError || err?.halt) throw err; // FIND-9
     log(`[reconcile] bank_agent client discovery error: ${err?.message ?? err}`);
     return { ...out, bankAgentOk: false };
   }
@@ -199,6 +217,13 @@ export async function produceBankAgentWakes(client, opts = {}) {
         // that came up empty). Proven: this branch fires, and it appends NOTHING.
         out.bankAgentNotifyDeferred += 1;
         log(`[reconcile] bank_agent client=${clientId} reason=chase_statement — notification DEFERRED (no runtime-reachable door yet, F-A3's own obligation), zero events`);
+        continue;
+      }
+      if (verdict.action === "anomalous") {
+        // FIND-11 (opus r1 review of #449): a RECOGNISED emit-worthy reason with a missing
+        // required field — logged loudly, but NOT counted (reconciler-fa.mjs's own "ANOMALOUS
+        // SHAPE, LOUD" precedent). Distinct from "malformed" below, which stays counted.
+        log(`[reconcile] bank_agent client=${clientId} due-probe returned an anomalous shape for a recognised reason (expected {due:true,bank_account_id,due_key,...}, got ${JSON.stringify(due)}) — treating as not-due this cycle`);
         continue;
       }
       if (verdict.action === "malformed") {
@@ -221,6 +246,7 @@ export async function produceBankAgentWakes(client, opts = {}) {
         log(`[reconcile] bank_agent client=${clientId} emit_bank_agent_due returned an unexpected shape (expected {appended:boolean,...}, got ${JSON.stringify(reply)})`);
       }
     } catch (err) {
+      if (err instanceof TaxonomyHaltError || err?.halt) throw err; // FIND-9
       out.bankAgentFailed += 1;
       log(`[reconcile] bank_agent client=${clientId} error: ${err?.message ?? err}`);
     }

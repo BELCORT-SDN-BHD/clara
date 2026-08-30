@@ -73,9 +73,11 @@ test("classifyBankDueReason: the closed reason table, every member, both directi
   // Consistency checks — a reason paired with the WRONG due boolean is malformed, not silently accepted.
   assert.equal(classifyBankDueReason({ due: false, reason: "unmatched_lines", bank_account_id: randomUUID(), due_key: "k" }).action, "malformed");
   assert.equal(classifyBankDueReason({ due: true, reason: "nothing_due" }).action, "malformed");
-  // An emit reason missing bank_account_id or due_key is malformed, never silently emitted.
-  assert.equal(classifyBankDueReason({ due: true, reason: "unmatched_lines", due_key: "k" }).action, "malformed");
-  assert.equal(classifyBankDueReason({ due: true, reason: "unmatched_lines", bank_account_id: randomUUID() }).action, "malformed");
+  // FIND-11 (opus r1 review of #449): an emit reason missing bank_account_id or due_key is
+  // "anomalous" (logged, not counted) — a RECOGNISED reason with a shape hiccup, distinct from a
+  // genuinely unrecognised reason (still "malformed" and counted, asserted below).
+  assert.equal(classifyBankDueReason({ due: true, reason: "unmatched_lines", due_key: "k" }).action, "anomalous");
+  assert.equal(classifyBankDueReason({ due: true, reason: "unmatched_lines", bank_account_id: randomUUID() }).action, "anomalous");
   // An UNRECOGNISED reason is a counted failure, never emit/quiet/notify.
   assert.equal(classifyBankDueReason({ due: true, reason: "some_new_reason_nobody_ruled" }).action, "malformed");
   assert.equal(classifyBankDueReason({}).action, "malformed");
@@ -158,6 +160,38 @@ test("bank_agent producer: an UNRECOGNISED reason is a counted failure, never an
   assert.equal(out.bankAgentAppended, 0);
   assert.equal(out.bankAgentFailed, 1);
   assert.equal((await eventsFor(acct)).length, 0);
+});
+
+// FIND-11 (opus r1 review of #449): a RECOGNISED emit reason with a missing required field is
+// ANOMALOUS, not a counted failure — the belt continues, logs loudly, appends nothing. Two
+// cells (both required fields, each missing in turn) using the existing stub's own optional
+// bank_account_id/due_key — no fixture change needed, since stubReply already omits either as
+// SQL NULL when the caller's reply object leaves it out.
+test("bank_agent producer: a recognised reason missing bank_account_id is ANOMALOUS — logged, appended=0, failed=0 (not counted)", { skip }, async () => {
+  await resetDueStub();
+  const w = await buildFirm("g1ba-anom1");
+  await setBankAgentEnabled(true, w.owner);
+  await stubReply(w.client, { due: true, reason: "unmatched_lines", due_key: "k-anom1" }); // bank_account_id omitted
+  const log = [];
+  const out = await asRuntime((c) => produceBankAgentWakes(c, { log: (m) => log.push(m) }));
+  assert.equal(out.bankAgentOk, true);
+  assert.equal(out.bankAgentAppended, 0);
+  assert.equal(out.bankAgentFailed, 0, "an anomalous shape must NOT be counted as a failure");
+  assert.ok(log.some((m) => /anomalous shape/.test(m)), "but it must still be logged loudly");
+});
+
+test("bank_agent producer: a recognised reason missing due_key is ANOMALOUS — logged, appended=0, failed=0 (not counted)", { skip }, async () => {
+  await resetDueStub();
+  const w = await buildFirm("g1ba-anom2");
+  await setBankAgentEnabled(true, w.owner);
+  const acct = await buildActiveBankAccount(w, "anom2");
+  await stubReply(w.client, { due: true, reason: "reconcilable", bank_account_id: acct }); // due_key omitted
+  const log = [];
+  const out = await asRuntime((c) => produceBankAgentWakes(c, { log: (m) => log.push(m) }));
+  assert.equal(out.bankAgentOk, true);
+  assert.equal(out.bankAgentAppended, 0);
+  assert.equal(out.bankAgentFailed, 0, "an anomalous shape must NOT be counted as a failure");
+  assert.ok(log.some((m) => /anomalous shape/.test(m)), "but it must still be logged loudly");
 });
 
 test("bank_agent producer: TWO TICKS with the SAME due_key append exactly ONE event (DB-owned claim, HIGH-3)", { skip }, async () => {

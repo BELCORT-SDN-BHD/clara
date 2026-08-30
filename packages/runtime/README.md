@@ -29,7 +29,9 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   principal + own-OR-firm-shared session predicate (indistinguishable 404).
 - **Control listener** (`lib/control.mjs`): leased clarify delivery + cancel
   settlement. **Leader loop** (`lib/leader.mjs`): routing + drain (`lib/drain.mjs`)
-  + reconcile (`lib/reconciler.mjs`; the daily `clara.reconcile_autopost_rules()`
+  + reconcile (`lib/reconciler.mjs`, whose own daily-cadence-flagged belts include
+  SST watch, wiki lint, the FA/adjustment sweeps, and Gate G1 PR-2b's two producers
+  below; the daily `clara.reconcile_autopost_rules()`
   sweep RETIRED with F-A2 PR-3, along with the rest of the rules-execution tier).
   **Consumer lanes**, each on its OWN dedicated connection + advisory lock:
   matcher (`lib/matcher.mjs`),
@@ -72,18 +74,20 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
     bank-agency-annexes-1-mechanics.md's own table): `unmatched_lines`/`reconcilable`/
     `retry_later` emit; `chase_statement` is a notification, never an event (no
     clara_runtime-reachable notification door exists yet — deferred, proven to append zero
-    events); `purpose_unconsented`/`held`/`nothing_due` are quiet; anything else is a counted
-    failure, never a silent emit. **The due_key contract**: the predicate's `due:true` reply
-    must carry a `due_key` string, stable across repeated answers for the SAME occurrence and
-    distinct for a genuinely new one — `clara.emit_bank_agent_due` atomically claims
-    `UNIQUE(client_id, bank_account_id, due_key)` before appending, so idempotency is DB-owned,
-    not a runtime check-then-write.
+    events); `purpose_unconsented`/`held`/`nothing_due` are quiet; a recognised emit reason with
+    a missing required field is ANOMALOUS (logged, not counted); anything genuinely unrecognised
+    is a counted failure, never a silent emit. **The due_key contract**: the predicate's
+    `due:true` reply must carry a `due_key` string, stable across repeated answers for the SAME
+    occurrence and distinct for a genuinely new one — `clara.emit_bank_agent_due` atomically
+    claims `UNIQUE(client_id, bank_account_id, due_key)` before appending, so idempotency is
+    DB-owned, not a runtime check-then-write.
   - **close_prep**: `CLARA_CLOSE_PREP_RECONCILE_MS` (default 24h, matching `close_prep_due()`'s
     own stated cadence, 0138) gates how often the belt calls the already-shipped
-    `clara.close_prep_due()`. `clara.claim_close_prep_task` atomically claims
-    `UNIQUE(fiscal_year_id)` before inserting the queued task — reclaiming a stale
-    (terminal-task) row in the same call, so a reopened fiscal year is never stuck behind a
-    resolved claim.
+    `clara.close_prep_due()`. `clara.claim_close_prep_task` enforces TWO independent DB-owned
+    walls: `UNIQUE(fiscal_year_id)` (reclaiming a stale terminal-task row in the same call, so a
+    reopened fiscal year is never stuck behind a resolved claim) and
+    `uq_agent_task_one_live_close_prep` — at most one LIVE close_prep task per client at a time,
+    across every fiscal year.
 
 ## The world is OFF by default
 

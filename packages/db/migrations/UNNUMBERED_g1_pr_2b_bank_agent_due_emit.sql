@@ -1,8 +1,36 @@
 -- G1 PR-2b (裁-40's own follow-up; g1-wake-engine-design.md §1.1/§3.6, bank-agency-design.md §3.6,
 -- bank-agency-annexes-1-mechanics.md's reason-to-action table at §D.0's tail): the two wake-engine
--- PRODUCERS' own DB surfaces. Rewritten in place after Codex's r1 review of #449 (HIGH-2, HIGH-3) —
--- this file has never been applied to a shared/live database (rig-only, never merged), so it is
--- edited rather than superseded by a second file.
+-- PRODUCERS' own DB surfaces. Rewritten in place after Codex's r1 review of #449 (HIGH-2, HIGH-3),
+-- then again after the opus r1 review of the same PR (FIND-1, FIND-6, FIND-10 below) — this file
+-- has never been applied to a shared/live database (rig-only, never merged), so it is edited
+-- rather than superseded by a second file.
+--
+-- OPUS R1 FOLD (three more DB-level findings, converging with/sharpening Codex's own):
+--   FIND-1 (=Codex HIGH-2, sharpened): the REVOKE/GRANT pair for each writer must run AS
+--     clara_fn_owner (a `set role` between the ALTER OWNER and the grants, `reset role` after) —
+--     otherwise the resulting ACL's own grantor field names the migration runner, not the
+--     object's owner, and the tail's exact-proacl-string matrix (the coa-template-pr-a.test.mjs
+--     idiom) would have to encode the wrong grantor to pass. Applied to BOTH new functions.
+--   FIND-6 (=Codex HIGH-3, STANDS AS RULED / widened): DB-enforced idempotency for close_prep
+--     gets a SECOND, independent wall — a partial unique index directly on clara.agent_tasks
+--     itself (uq_agent_task_one_live_close_prep, mirroring uq_agent_task_one_live_turn's own
+--     shape, 0006:165-166), scoped to CLIENT rather than fiscal year: at most one LIVE
+--     close_prep task per client at a time, even across two different fiscal years. This is
+--     ADDITIONAL to (never a replacement for) close_prep_fy_claims's own UNIQUE(fiscal_year_id)
+--     — the two walls answer different questions (one FY, one claim; one client, one live task)
+--     and claim_close_prep_task now honors both atomically. The advisory leader lock is the
+--     operational reason two producer ticks can never race each other TODAY (single leader,
+--     single connection) — this index is the DB-level backstop that holds even if that
+--     operational fact ever changes (a second reconciler process, a manual claim_close_prep_task
+--     call from an ops surface) — named again in reconciler-close-prep.mjs's own header.
+--   FIND-10: the close_prep_fy_claims reclaim check ("has this claim's task gone terminal")
+--     is INVERTED from a positive terminal-state list to `not in (<the five LIVE statuses>)` —
+--     agent_tasks' own status CHECK (0006:148-150) names NINE values; enumerating "terminal"
+--     positively silently under-covers if a tenth status is ever added (or, as found here, if
+--     'expired' — reachable in principle even though close_prep structurally cannot reach it
+--     today — is left out of a hand-written three-value list). The NEW partial index above uses
+--     the same NOT-IN shape for the identical reason. A drift-guard tail cell pins the CHECK's
+--     own nine-value text so a future migration that widens the domain is forced to look here.
 --
 -- WHAT THIS FILE SHIPS, and why each piece exists:
 --
@@ -157,8 +185,14 @@ begin
   return jsonb_build_object('appended', true, 'seq', v_seq);
 end $$;
 alter function clara.emit_bank_agent_due(uuid,uuid,text,text) owner to clara_fn_owner;
+-- FIND-1 (opus r1 review of #449): grant AS clara_fn_owner, not as the migration runner, so the
+-- resulting ACL's grantor is the object's own owner (the tail's exact-proacl-string matrix pins
+-- this). A migration always runs as a role that is either the target role itself or a superuser
+-- (never merely a co-member), so `set role` here is unconditionally available.
+set role clara_fn_owner;
 revoke all on function clara.emit_bank_agent_due(uuid,uuid,text,text) from public;
 grant execute on function clara.emit_bank_agent_due(uuid,uuid,text,text) to clara_runtime;
+reset role;
 
 comment on function clara.emit_bank_agent_due(uuid,uuid,text,text) is
   'G1 PR-2b: the bank_agent producer''s sole write. clara_runtime ONLY -- the leader-guarded '
@@ -194,6 +228,21 @@ comment on table clara.close_prep_fy_claims is
   'referenced task has reached a terminal state (a reopened FY, 0138''s own admission law, must '
   'not stay stuck behind a resolved claim). Written ONLY by that function.';
 
+-- FIND-6 (opus r1 review of #449): a SECOND, independent wall -- at most one LIVE close_prep
+-- task per CLIENT (not merely per fiscal year), mirroring uq_agent_task_one_live_turn's own
+-- shape (0006:165-166: one live chat_turn per session_id, predicated on the live/non-terminal
+-- statuses). FIND-10's own inversion applied here too: the predicate names what is NOT terminal
+-- (agent_tasks' own nine-value status CHECK, 0006:148-150) rather than a hand-picked "these are
+-- close_prep's reachable live states" list -- so a future matrix widening that gives close_prep
+-- a new interim status (say, an 'awaiting_input'-shaped pause) is covered by construction, not
+-- by remembering to revisit this index.
+create unique index uq_agent_task_one_live_close_prep on clara.agent_tasks (client_id)
+  where (kind = 'close_prep' and status not in ('completed', 'failed', 'cancelled', 'expired'));
+comment on index clara.uq_agent_task_one_live_close_prep is
+  'G1 PR-2b (FIND-6 fold): at most one LIVE close_prep task per client, independent of '
+  'close_prep_fy_claims''s own per-fiscal-year wall. claim_close_prep_task catches this '
+  'index''s unique_violation and reports {appended:false, reason:''client_has_live_close_prep''}.';
+
 create function clara.claim_close_prep_task(p_firm uuid, p_client uuid, p_fiscal_year uuid, p_model_snapshot text)
   returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -217,7 +266,13 @@ begin
     from clara.close_prep_fy_claims c join clara.agent_tasks t on t.id = c.task_id
    where c.fiscal_year_id = p_fiscal_year
    for update of c;
-  if found and v_existing_status in ('completed', 'failed', 'cancelled') then
+  -- FIND-10 (opus r1 review of #449): inverted from a positive terminal-state list to NOT IN
+  -- the five LIVE statuses (agent_tasks' own nine-value status CHECK, 0006:148-150) -- the same
+  -- reasoning as uq_agent_task_one_live_close_prep's own predicate above: a reclaim must fire
+  -- for EVERY terminal status this domain admits (including 'expired', unreachable for
+  -- close_prep today but not excluded by the CHECK), not merely the three this file's first cut
+  -- happened to enumerate by hand.
+  if found and v_existing_status not in ('queued', 'held', 'running', 'awaiting_input', 'cancel_requested') then
     delete from clara.close_prep_fy_claims where fiscal_year_id = p_fiscal_year;
   end if;
 
@@ -228,13 +283,28 @@ begin
     return jsonb_build_object('appended', false, 'reason', 'already_claimed');
   end if;
 
-  insert into clara.agent_tasks (id, firm_id, client_id, kind, status, model_snapshot)
-    values (v_task, p_firm, p_client, 'close_prep', 'queued', p_model_snapshot);
+  -- FIND-6 (opus r1 review of #449): the fiscal-year claim above succeeded, but
+  -- uq_agent_task_one_live_close_prep (the CLIENT-scoped wall) may still refuse this insert if
+  -- the SAME client already carries a live close_prep task under a DIFFERENT fiscal year. Caught
+  -- narrowly (unique_violation only -- anything else still propagates uncaught, exactly as
+  -- before) and the fiscal-year claim taken above is explicitly undone so a later call for THIS
+  -- fiscal year is not left stuck behind a claim whose task was never actually created.
+  begin
+    insert into clara.agent_tasks (id, firm_id, client_id, kind, status, model_snapshot)
+      values (v_task, p_firm, p_client, 'close_prep', 'queued', p_model_snapshot);
+  exception
+    when unique_violation then
+      delete from clara.close_prep_fy_claims where fiscal_year_id = p_fiscal_year and task_id = v_task;
+      return jsonb_build_object('appended', false, 'reason', 'client_has_live_close_prep');
+  end;
   return jsonb_build_object('appended', true, 'task_id', v_task);
 end $$;
 alter function clara.claim_close_prep_task(uuid,uuid,uuid,text) owner to clara_fn_owner;
+-- FIND-1 (opus r1 review of #449): same grantor-identity fix as emit_bank_agent_due above.
+set role clara_fn_owner;
 revoke all on function clara.claim_close_prep_task(uuid,uuid,uuid,text) from public;
 grant execute on function clara.claim_close_prep_task(uuid,uuid,uuid,text) to clara_runtime;
+reset role;
 
 comment on function clara.claim_close_prep_task(uuid,uuid,uuid,text) is
   'G1 PR-2b: the close_prep producer''s sole write. clara_runtime ONLY -- atomically claims '
@@ -339,5 +409,74 @@ begin
     raise exception 'g1_pr_2b tail: close_prep_fy_claims is not owned by clara_fn_owner' using errcode='CLR10';
   end if;
 
-  raise notice 'g1_pr_2b tail: OK -- emit_bank_agent_due(uuid,uuid,text,text) and claim_close_prep_task(uuid,uuid,uuid,text) both owned by clara_fn_owner, SECURITY DEFINER, search_path pinned, clara_runtime-only ACL (PUBLIC and clara_authenticated both refused execute); clara_runtime still cannot execute _append_event directly; both new claim tables (bank_agent_due_claims, close_prep_fy_claims) RLS-enabled+forced with the owner/human policy pair. No table in workflow/graphile_worker/spike touched.';
+  -- FIND-1 (opus r1 review of #449): the EXACT proacl matrix, not merely has_function_privilege
+  -- spot-checks -- the coa-template-pr-a.test.mjs:203 idiom (aclexplode, EXECUTE only, sorted
+  -- grantee list) so a wrongly-additional grantee (Codex r1's own M5 mutant: `grant ... to
+  -- clara_wake_bank`) fails this tail even though has_function_privilege('clara_runtime', ...)
+  -- would still read true. EXPECTED matrix is `clara_fn_owner,clara_runtime`, NOT `clara_runtime`
+  -- alone -- measured empirically (and matching coa-template-pr-a.test.mjs:203's own expected
+  -- string, which likewise names its object's owner): the FIRST statement that touches a
+  -- function's ACL (the `revoke all from public` above) materializes proacl from Postgres' own
+  -- implicit default (owner=ALL, PUBLIC=EXECUTE) into an explicit array, and that materialization
+  -- keeps the (now clara_fn_owner) owner's own implicit grant as a real ACL entry. This changes
+  -- nothing functionally (ownership itself, checked separately from the ACL, already gives
+  -- clara_fn_owner every privilege) but it is what the catalog actually shows, and asserting the
+  -- wrong string here would make this tail permanently red rather than a real security check.
+  declare
+    v_emit_acl text; v_claim_acl text;
+  begin
+    select coalesce(string_agg(g.grantee::regrole::text, ',' order by g.grantee::regrole::text), '<none>')
+      into v_emit_acl
+      from pg_proc p, aclexplode(p.proacl) g
+     where p.oid = 'clara.emit_bank_agent_due(uuid,uuid,text,text)'::regprocedure and g.privilege_type = 'EXECUTE';
+    if v_emit_acl is distinct from 'clara_fn_owner,clara_runtime' then
+      raise exception 'g1_pr_2b tail: emit_bank_agent_due EXECUTE matrix is [%] (want exactly clara_fn_owner,clara_runtime)', v_emit_acl using errcode='CLR10';
+    end if;
+    select coalesce(string_agg(g.grantee::regrole::text, ',' order by g.grantee::regrole::text), '<none>')
+      into v_claim_acl
+      from pg_proc p, aclexplode(p.proacl) g
+     where p.oid = 'clara.claim_close_prep_task(uuid,uuid,uuid,text)'::regprocedure and g.privilege_type = 'EXECUTE';
+    if v_claim_acl is distinct from 'clara_fn_owner,clara_runtime' then
+      raise exception 'g1_pr_2b tail: claim_close_prep_task EXECUTE matrix is [%] (want exactly clara_fn_owner,clara_runtime)', v_claim_acl using errcode='CLR10';
+    end if;
+  end;
+
+  -- FIND-6 (opus r1 review of #449): uq_agent_task_one_live_close_prep asserted BY PROPERTY
+  -- (indisunique/indisvalid/indisready/indislive + the key column + the predicate text), never
+  -- by name alone -- the estate's own standing convention (0154's own gate-B5 tail, this file's
+  -- sibling migration, asserts uq_vib_one_active_binding the identical way).
+  if not exists (
+    select 1
+      from pg_index x
+      join pg_class ic on ic.oid = x.indexrelid
+      join pg_class tc on tc.oid = x.indrelid
+      join pg_namespace n on n.oid = tc.relnamespace
+     where n.nspname = 'clara' and tc.relname = 'agent_tasks' and ic.relname = 'uq_agent_task_one_live_close_prep'
+       and x.indisunique and x.indisvalid and x.indisready and x.indislive
+       and (select array_agg(a.attname::text order by k.ord)
+              from unnest(x.indkey) with ordinality as k(attnum, ord)
+              join pg_attribute a on a.attrelid = x.indrelid and a.attnum = k.attnum) = array['client_id']
+       and pg_get_expr(x.indpred, x.indrelid) =
+           $pred$((kind = 'close_prep'::text) AND (status <> ALL (ARRAY['completed'::text, 'failed'::text, 'cancelled'::text, 'expired'::text])))$pred$
+  ) then
+    raise exception 'g1_pr_2b tail: uq_agent_task_one_live_close_prep is missing or the wrong shape' using errcode='CLR10';
+  end if;
+
+  -- FIND-10 (opus r1 review of #449): a drift guard on the CHECK this migration's own NOT-IN
+  -- predicates depend on -- if a future migration ever widens agent_tasks' status domain, this
+  -- assertion is what forces a reviewer back to THIS file's two now-inverted predicates rather
+  -- than letting them silently under- or over-cover the new value.
+  declare v_status_check text;
+  begin
+    select pg_get_constraintdef(oid) into v_status_check
+      from pg_constraint where conrelid = 'clara.agent_tasks'::regclass and contype = 'c'
+       and pg_get_constraintdef(oid) like '%status%queued%';
+    if v_status_check is distinct from
+       $chk$CHECK ((status = ANY (ARRAY['queued'::text, 'held'::text, 'running'::text, 'awaiting_input'::text, 'cancel_requested'::text, 'completed'::text, 'failed'::text, 'cancelled'::text, 'expired'::text])))$chk$
+    then
+      raise exception 'g1_pr_2b tail: agent_tasks status CHECK drifted from the nine-value set this file''s NOT-IN predicates assume (got: %)', coalesce(v_status_check, '(absent)') using errcode='CLR10';
+    end if;
+  end;
+
+  raise notice 'g1_pr_2b tail: OK -- emit_bank_agent_due(uuid,uuid,text,text) and claim_close_prep_task(uuid,uuid,uuid,text) both owned by clara_fn_owner, SECURITY DEFINER, search_path pinned, EXACT clara_runtime-only EXECUTE matrix (aclexplode); clara_runtime still cannot execute _append_event directly; both new claim tables (bank_agent_due_claims, close_prep_fy_claims) RLS-enabled+forced with the owner/human policy pair; uq_agent_task_one_live_close_prep (the client-scoped live-task wall) present by property; the agent_tasks status-domain drift guard holds. No table in workflow/graphile_worker/spike touched.';
 end $$;
