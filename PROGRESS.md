@@ -102,6 +102,7 @@ tranche-2 #411 · `0146` 裁-17 #412 — ceremonied in ONE ~51-s D1 window 2026-
   meta-gate. After any PR touching a closed drill or the pipeline: `gh workflow run ci.yml`.
 - **Hard-blocked ids** (canary `daba7f2e` · witness `d023b48c`) — hook-enforced
   (`scripts/hooks/pinned-ids-guard.mjs`, tracked `.claude/settings.json`).
+- **Evening sitting 2026-08-30: 裁-57…72 filed** — paid beta (RM0 trial until the pricing sitting), checkout tranche + tier-3 signup gate on the critical path, tax inert at beta (裁-62), cutover after ALL 110 dashboard-only/orphan verbs have an apps/web home (裁-72, trains P6-C1…C7), P4-7 magiclink arm (裁-65), `/ready` hard-fail (裁-61), DB-resolved proposal bases (裁-69). Ledger: `docs/plan/active/mohe-grill-rulings-2026-08-30.md`.
 
 ## Lanes
 
@@ -162,29 +163,12 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    gaps are NOT chased; the RPR series pick is the conductor's, recorded in the Wave-G setup doc,
    and **both Wave-G docs must be trued to that criterion before the run**. Then **beta live**.
    *(Also owed here: the F-A7b train · the live-data e2e walk, Q9 rung 5.)*
-2. **Owner-key acceptance items** (the constitutional human half): ~~the #43 sitting~~ —
-   **DONE 2026-08-16** (three dispositions, merged #249, ceremonied; **E-R14 OPEN**).
-   ~~The BEE FY2025 live close~~ — **RULED 2026-08-16, deferred WHOLESALE to the Wave-G reset**
-   (narrative archived; ADR-0072 ⑤ builds on it). **BEE's golden bar, confirmed 2026-08-20
-   against the client's own papers: FY2025 SALES RM 68,640.00 · net PROFIT RM 47,245.65 ·
-   capital B/F (65,747.97)** — FY2024's closing `FINANCED BY` total is that same
-   `(65,747.97)`, printed on two independently-produced documents. No BEE coding sittings in
-   Wave F. Then: the first real render/seal round-trip (closes DR-render's unrun-drill
-   boundary) → RPR historical MPERS pack → RS snapshot witness; the ms/zh claim-policy copy;
-   the optional elevated `diskpart` VHDX compact (~50GB, runners idle).
-3. ~~**F-A2 BUILD per its design**~~ — **DONE: PR-0 → PR-1 (W1) → PR-2 (D-a deploy) → PR-3
-   cutover+retirement (W2+W3, #324) all merged + ceremonied.** PR-4 acceptance remains, folded
-   into the Wave-G e2e corpus run per the owner's 2026-08-23 ruling (`wave-f-sprint-dag.md` §9 —
-   mechanism-smoke right after ceremony, SCALE legs fold into Wave-G; p50 ~T0+48h → ~T0+36h).
+2. **Owner-key acceptance items** (the constitutional human half) — ~~the #43 sitting~~ DONE and ~~the BEE FY2025 live close~~ RULED-deferred, both 2026-08-16 (full dispositions + BEE's golden-bar figures archived to `-part5.md`; **E-R14 OPEN**; no BEE coding sittings in Wave F). Then: the first real render/seal round-trip (closes DR-render's unrun-drill boundary) → RPR historical MPERS pack → RS snapshot witness; the ms/zh claim-policy copy; the optional elevated `diskpart` VHDX compact (~50GB, runners idle).
+3. ~~**F-A2 BUILD per its design**~~ — **DONE** (PR-0 → PR-1 → PR-2 → PR-3 all merged + ceremonied; full detail archived to `-part5.md`). **PR-4 acceptance remains**, folded into the Wave-G e2e corpus run per the owner's 2026-08-23 ruling (`wave-f-sprint-dag.md` §9 — mechanism-smoke right after ceremony, SCALE legs fold into Wave-G; p50 ~T0+48h → ~T0+36h).
 4. ~~**THE TRACK-A DESIGN FAN-OUT + BUILD**~~ — **DONE** (all seven sets v2-gated 2026-08-22;
    build DONE for F-A2/F-A3/F-A4/F-A5/F-A6 v1/F-A5b through card-1/F-A7 across W1+D-a+W2W3+W4).
    **Remaining, re-censused 2026-08-29 and RULED INTO THE SPRINT (裁-29, `mohe-grill-rulings-2026-08-29.md`)**: G1's wake sources still `enabled=false` on live — now **FOUR** at one ceremony (F-A3/F-A4/裁-18b/`tax_prep` bodies, then the flip; 裁-40 as amended by 裁-44) · ~~F-A6 PR-2 runtime~~ **DONE — merged #423, deployed `v69`, `chatTurn_v15` serving, freeform read live in chat** · the reports chain walked end to end + F-A5b PR-3 (download) · F-T3 (PR-0 gate RAN #420 → PR-1 building; **裁-33/裁-38 ruled its six cards, and 裁-44 adds a PR-9 `tax_prep` wake — tax is agentic**) · F-A9 **PR-1B** (PR-1A is `0110`, live — the old "PR-1A" here was STALE; its D1 is FIVE bodies, not two) · F-A4 PR-2b · F-T1 (rebased `e6f0d8e2` → fix round → merge → window) · F-T2 rows (**its 8 owner questions RULED 2026-08-30, 裁-39 — the lane is unblocked**). **Beta-era by the same ruling:** F-A8 · F-A6 v2 · F-T4's remainder.
-5. ~~**THE OWNER'S DIGEST SIGN-OFF**~~ — **GIVEN 2026-08-22** (laws 78-81 + the four annotated
-   laws ratified; every named follow-up landed or ruled — #287, invariant-(a) home, R1, corpus,
-   CI overhaul, OQ-2/3/5, R-OWNER, C6). **Still open for the owner**: FX-lite build timing ·
-   the corpus's oracle-tier gaps (BEE GL/TB both FYs + full FY2025 doc · RPR Feb/Mar-2025
-   statements or a written none-exist · named producer/certifier for RS+RPR · the
-   authoritative RPR series) · OD-3's bar figures for every slot but BEE.
+5. ~~**THE OWNER'S DIGEST SIGN-OFF**~~ — **GIVEN 2026-08-22** (laws 78-81 ratified; every named follow-up landed or ruled — full list archived to `-part5.md`). **Still open for the owner**: FX-lite build timing · the corpus's oracle-tier gaps (BEE GL/TB both FYs + full FY2025 doc · RPR Feb/Mar-2025 statements or a written none-exist · named producer/certifier for RS+RPR · the authoritative RPR series) · OD-3's bar figures for every slot but BEE.
 
 ## Backlog
 
@@ -226,10 +210,7 @@ its finding; none blocks beta):
 - **Dated-tripwire class, seen 3×** (f-a2 witness v2 08-21 · #352's closed-wave floor · B5.4) — pin the monotonic DIRECTION, never a ceremony-state; a trued pin proves both ways; sweep for a candidate at every ceremony. Same-audit reviewer items: `--lock-deployed` is BLANKET (stamps every non-`true` entry — run only when every dark entry is genuinely deployed; a scoped `--only` flag would be its own PR, none exists today) · the D-a window (08-24) has NO as-run document · the `frozen-evaluators.json` `evaluate_fs_pack_agent_v1` migration-path one-liner is fixed in this PR (see M1).
 **Owner rulings from the harness-audit sitting (2026-08-26)** — full text `docs/plan/active/harness-audit-rulings-2026-08-26.md`, one section per card:
 - **R1 — the judgement-confidence conjunct drop**: a future migration removes `assert_client_resolved`'s `confidence>=0.95` conjunct for `method='judgement'` rows (full ladder); until then it's a harmless failsafe (judgement rows mint at 1.0).
-- **R2 — PRD two-tier reporting wording**: §4/§6 gain the two-tier text; exact wording awaits the owner's word-by-word review — do NOT edit PRD.md for this without it.
-- **R3 — G1 wake-engine ADR**: owed next session — one page, mechanism (a) heard-vs-overruled + (b) chosen, cross-lane impact, plus its digest line.
-- **R4/R5/R7 — digest addenda owed**: §10 gains the #352 closed-wave-floor law + the four-runner-expansion CONFIRMATION (AMBIGUITY #2 from `harness-audit-2026-08-23.md` now CLOSED); §5 gains the evaluator two-halves ceremony beside law 50 (naming the 08-24 half-skip).
-- **R6 — a new docs/ops/ceremony-practices.md** *(not yet created)*: written during 磨合 (combined-window practice · sleeper-machine DSN recipe · run-id-pinned DONE watchers); maintained via clock-out sweep + harness-links.
+- **R4/R5/R7 — digest addenda owed**: §10 gains the #352 closed-wave-floor law + the four-runner-expansion CONFIRMATION (AMBIGUITY #2 from `harness-audit-2026-08-23.md` now CLOSED); §5 gains the evaluator two-halves ceremony beside law 50 (naming the 08-24 half-skip). *(R2 — PRD two-tier wording — LANDED, owner-approved word by word 2026-08-29, `docs/product/PRD.md` §15; R3 — the G1 wake-engine ADR — LANDED as `docs/adr/0076-g1-universal-wake-execution-engine.md`, digested; R6 — `docs/ops/ceremony-practices.md` — LANDED, on disk. All three dropped from this list.)*
 - **R8c — the pricing-amounts sitting**: SHAPE ruled (base monthly/firm + metered overage, F-A9's ledger the substrate); amounts deferred to a dedicated sitting.
 - **R9 — PITR HOLD**: deferred again; trigger = the beta-prep checklist. (R9's storage-probe half ships in 磨合 — Next item 1.)
 - **Tier-A raises leave NO durable trace** (no receipt, no audit row — design-consistent,
@@ -399,6 +380,7 @@ lint watch · `0084`'s `C:\ct\`-only tooling. Full text archived verbatim 2026-0
 - **F-A7 gamma residuals R1/R2/R3 — ALL THREE STAND; full text archived verbatim 2026-08-30 to `docs/plan/completed/progress-archive-2026-08-part4.md`** (R1 classify egress ungoverned until the
   runtime side lands · R2 no `consume_firm_egress_dispatch` verb, `expires_at` decorative · R3
   `document_intakes.origin` never extended with `onboarding_interview`, the live CHECK refuses).
+- **裁-71⑩ backend backlogs** — `clara.firm_egress_dispatch_authorizations` (0123) is owned by `postgres`, the only clara TABLE not owned by `clara_fn_owner` (a small owner-repoint migration) · `bank_agent_due_claims` has no retention path, owed before F-A3 enables the source · the wake-fn allowlist is name-bound, not signature-bound. **Also:** main's post-#457 push run 33314770566 went red on gitleaks for a since-rewritten P4-5 fixture commit (`381e8c82`, unreachable now); rerun dispatched.
 
 **THE NEXT-ROUND QUEUE (2026-08-21 re-measure; the first four are PROMPT-side — the evaluator
 stays strict, widening it = a frozen-evaluator change with its own version + ceremony).** Five
@@ -476,19 +458,9 @@ bare-SST-id vision-prompt check (lock 3's margin was one channel) · `coverage.p
 
 ## Session log
 
-*(Entries through the 2026-08-21 Window A+B ceremony are verbatim in
-`docs/plan/completed/progress-archive-2026-08.md` + `-part2.md`, alongside F-A1's operative
-records: its ceremony as-runs and the corpus measurement.)*
+*(Entries through 2026-08-21 are verbatim in `docs/plan/completed/progress-archive-2026-08.md` + `-part2.md`; the 2026-08-22…08-30-noon entries are verbatim in `-part4.md` + `-part5.md` — moved 2026-08-30 evening to keep this file inside its cap.)*
 
-- **2026-08-29/30 (THE 磨合 SPRINT, NIGHT TWO → NOON)** — 44 owner rulings landed (裁-21…裁-44);
-  eleven lanes ran; the 0148–0153 train merged AND ceremonied (two D1 windows); `0154`/`0155` +
-  the G1 wake bodies + the billing design set on main by noon; the host disk-full incident
-  recovered (82 GB of orphan docker volumes; VHDX compaction owed to the owner); two sweeps
-  (one harness race, one drill fix); the noon owner batch is in the sprint board.
-- *(The **2026-08-22 … 08-28** entries — the Track-A sitting, the alignment grill, the train
-  night + W1, the W2+W3 close, the 磨合 window opening and its first sprint night — moved
-  **verbatim** 2026-08-30 to `docs/plan/completed/progress-archive-2026-08-part4.md` to keep this
-  file inside its cap. Nothing was summarised on the way out.)*
+- **2026-08-30 evening (裁-57…72)** — paid-beta ruling, checkout tranche + tier-3 gate on the critical path, tax inert at beta, the P6 cutover criterion widened to all 110 verbs (trains P6-C1…C7), P4-7 magiclink arm, `/ready` hard-fail, DB-resolved proposal bases. Full ledger `docs/plan/active/mohe-grill-rulings-2026-08-30.md`; posture bullet above carries the digest.
 
 ---
 
