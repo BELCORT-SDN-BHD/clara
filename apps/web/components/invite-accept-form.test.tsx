@@ -570,7 +570,22 @@ test("no Clara invite token: refuses honestly, burns no OTP, calls no door, redi
       for (let i = 0; i < 4; i++) await h.settle();
       const rendered = textOf(h.container as never);
       assert.match(rendered, /This invite link is incomplete/);
-      assert.match(rendered, /has not been used up/, "the person must be told the link is still good");
+
+      // TWO CAUSES REACH THIS SCREEN and the copy must be true under BOTH.
+      // It used to say "this link has not been used up" — false for the
+      // invitee who ALREADY ACCEPTED and reloaded after the token was
+      // stripped: they are a member, and a fresh invite would refuse them.
+      assert.ok(
+        !/not been used up/.test(rendered),
+        "the surface must NOT assert the link is unused — it cannot know that",
+      );
+      assert.match(rendered, /already finished setting up your account/, "the accepted-invitee cause is addressed");
+      assert.match(rendered, /ask whoever invited you/i, "and so is the genuinely-malformed-link cause");
+
+      // The one real next step inside the product, as a REAL link.
+      const signIn = findIn(h.container as never, (n) => n.tagName === "A");
+      assert.ok(signIn, "the incomplete-link surface must offer the sign-in route");
+      assert.match(textOf(signIn as never), /sign in/i, "and name it");
       assert.equal(
         findIn(h.container as never, byButtonText(/Accept invitation/)), null,
         "the click gate must not be offered on a journey that cannot complete",

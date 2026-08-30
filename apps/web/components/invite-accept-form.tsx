@@ -1,8 +1,11 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+
+import { cn } from "@/lib/utils";
 
 import {
   readInviteVerification,
@@ -16,7 +19,7 @@ import {
   type CallerContextOutcome,
 } from "@/lib/identity/doors";
 import { isDoorRefusal } from "@/lib/doors";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -396,7 +399,19 @@ export function InviteAcceptForm({
   // FAIL-CLOSED, BEFORE THE CLICK GATE. Without Clara's token this journey
   // provably cannot complete, so the surface says so and consumes nothing —
   // it does not burn the single-use Supabase OTP on a dead end, and it never
-  // reports success. See the header's "TWO TOKENS" for the open question.
+  // reports success.
+  //
+  // TWO CAUSES REACH THIS SCREEN, and the copy must be true under BOTH — the
+  // reason it no longer claims "this link has not been used up":
+  //   (a) a genuinely malformed link (`ct` absent from the mail), where the
+  //       invite IS still pending and a fresh link is the answer; and
+  //   (b) an invitee who ALREADY ACCEPTED, then reloaded after
+  //       `stripInviteTokenFromUrl()` removed the spent token from the URL.
+  //       They are a member; a fresh invite would refuse them, and telling
+  //       them the link is unused is simply false.
+  // Only (b) has a real next step inside the product, so the surface offers
+  // it: the sign-in route. `<Link>`, not a Button — this is navigation, and
+  // it must work as a link (middle-click, copy, keyboard) rather than mimic one.
   if (!inviteToken || inviteToken.trim() === "") {
     return (
       <Card>
@@ -404,6 +419,14 @@ export function InviteAcceptForm({
           <CardTitle>{t("linkIncompleteTitle")}</CardTitle>
           <CardDescription>{t("linkIncompleteDescription")}</CardDescription>
         </CardHeader>
+        <CardContent>
+          <Link
+            href="/login"
+            className={cn(buttonVariants({ variant: "outline" }), "w-full")}
+          >
+            {t("linkIncompleteSignIn")}
+          </Link>
+        </CardContent>
       </Card>
     );
   }

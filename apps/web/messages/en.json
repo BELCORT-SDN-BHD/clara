@@ -1120,7 +1120,8 @@
     "submitting": "Saving…",
     "refusalTitle": "Your invitation could not be completed",
     "linkIncompleteTitle": "This invite link is incomplete",
-    "linkIncompleteDescription": "It's missing the part that identifies your invitation, so it can't be used. Ask whoever invited you to send a new one — this link has not been used up.",
+    "linkIncompleteDescription": "It's missing the part that identifies your invitation, so it can't be used here. If you've already finished setting up your account, sign in from the login page. Otherwise, ask whoever invited you to send a new link.",
+    "linkIncompleteSignIn": "Go to sign in",
     "unconfirmedTitle": "Your account is set up",
     "unconfirmedDescription": "Your invitation went through, but we couldn't confirm your access to the firm just now. Check again, or sign in from the login page.",
     "unconfirmedRetry": "Check again"

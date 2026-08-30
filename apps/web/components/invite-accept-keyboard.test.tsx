@@ -215,6 +215,39 @@ test("the REFUSAL state stays keyboard-operable — the person can correct and r
   );
 });
 
+test("the incomplete-link state's sign-in route is keyboard-reachable — the one way out of a dead end", async () => {
+  // This screen has no other control at all. An unreachable escape hatch here
+  // strands the exact person it exists for: an invitee who already accepted
+  // and reloaded after the spent token was stripped from the URL.
+  const router: Router = { replaced: [] };
+  await withMockedEnv(
+    (async (u: RequestInfo | URL) => { throw new Error(`unexpected fetch: ${String(u)}`); }) as typeof fetch,
+    async () => {
+      const h = await renderComponent(
+        App(
+          createElement(InviteAcceptForm, {
+            token: "supabase-token-hash", inviteToken: null, createSupabaseClient: authClient(),
+          }),
+          router,
+        ),
+      );
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        const signIn = findIn(h.container as never, (n) => n.tagName === "A");
+        assert.ok(signIn, "the sign-in route must render");
+        assert.match(textOf(signIn as never), /sign in/i, "and be named for what it does");
+        assert.ok(
+          focusableElements(h.container as never).includes(signIn as never),
+          "and be reachable from the keyboard",
+        );
+        assert.deepEqual(checkKeyboardWalk(h.container as never), []);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("the unconfirmed state's recovery control is keyboard-reachable and genuinely operable", async () => {
   let membership = false;
   let reportContext = false;
