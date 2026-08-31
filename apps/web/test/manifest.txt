@@ -192,6 +192,8 @@ tests/response-state.test.ts
 tests/runtime-outbound.test.ts
 tests/safe-redirect.test.ts
 tests/same-origin.test.ts
+tests/source-oracle.test.ts
+tests/sql-oracle.test.ts
 tests/streamAuthority.test.mjs
 tests/streamParser.test.mjs
 tests/streamReattach.test.mjs

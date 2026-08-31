@@ -60,16 +60,14 @@ import {
  * Where a session with no firm scope is sent. ONE constant, so the two layout
  * entrances cannot drift to two different destinations.
  *
- * ORDERING NOTE, now CLOSED — kept rather than deleted, because it records why
- * the wall was written unconditionally. P4-2 shipped this redirect before
- * `/pending` existed, so between the two merges it resolved to Next's not-found
- * page. That was the fail-closed outcome (a no-membership session reached
- * nothing firm-scoped either way) and it was deliberately NOT softened into
- * "redirect only once the page exists": a conditional wall is a wall with a hole
- * in it, and the window was one train long. **P4-3 closed the window** — the
- * route is `app/(entry)/pending/page.tsx`, registered in
- * `SCOPE_UNSCOPED_SURFACES` below, and the destination now renders the holding
- * state design §4 E specifies.
+ * ORDERING NOTE, recorded rather than papered over: `/pending` is built by P4-3
+ * (the (entry) route group), which forks AFTER this train merges. Between the two
+ * merges this redirect resolves to `app/not-found.tsx`. That is fail-closed for
+ * data, but it is a temporary navigation trap: both 404 links (`/` and
+ * `/needs-you`) re-enter `(firm)` and redirect to the still-missing `/pending`,
+ * while the scoped layout's LogoutButton never renders for this caller. The wall
+ * is deliberately NOT softened into "redirect only once the page exists": a
+ * conditional wall is a wall with a hole in it, and the window is one train long.
  *
  * `/pending` is NOT public. `lib/supabase/proxy.ts`'s `PUBLIC_PATH_PREFIXES` is
  * unchanged by this train and must stay unchanged: the holding route requires a
@@ -275,9 +273,9 @@ export const SCOPE_ENTRANCES: ReadonlyArray<{
  * this spine's idea of "public" cannot drift apart — that cross-check is what will
  * make P4-3 register `/signup` here when it appends it there.
  *
- * Next's built-in `/_not-found` is deliberately ABSENT: this app ships no
- * `app/not-found.tsx`, so there is no file to register and registering a
- * non-existent path would be an exemption for something nobody can read.
+ * The root `app/not-found.tsx` exists and renders outside both scoped route
+ * groups. It carries no firm-scoped data and is registered explicitly below;
+ * the page/route-leaf walk does not discover this file by itself.
  */
 export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
   readonly path: string;
@@ -292,9 +290,7 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
     reason:
       "The sign-in surface. It must render with NO session, so it can carry no " +
       "session-scoped check at all; gating it would make signing in require being " +
-      "signed in. MOVED into the (entry) group by P4-3 — a route group adds no URL " +
-      "segment, so the url below is unchanged and this is a path edit, not a " +
-      "reclassification.",
+      "signed in. MOVED into the (entry) route group by P4-3; the URL is unchanged.",
   },
   {
     path: "app/(entry)/invite/[token]/page.tsx",
@@ -305,44 +301,36 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
       "has a membership — accept_invite is the door that mints one. A scope check " +
       "here would refuse every invitee at the exact moment the estate wants them " +
       "in, and it is why the spine lives in the two route-group layouts rather " +
-      "than in the root one. MOVED into the (entry) group by P4-3; the URL is " +
-      "byte-identical and every invite link already in an inbox still resolves.",
+      "than in the root one. MOVED into the (entry) route group by P4-3; the URL " +
+      "is unchanged.",
   },
   {
     path: "app/(entry)/signup/page.tsx",
     url: "/signup",
     public: true,
     reason:
-      "The tier-3 self-serve registration face (裁-57: beta is a PAID launch and " +
-      "signup is sign-up-then-pay, not an invited-free tier). It must render with " +
-      "NO session — supabase.auth.signUp is its own first step, so there is no " +
-      "account to scope, let alone a firm. Its walls are the DB's: claim_identity " +
-      "and request_firm_registration each refuse CLR04 for an unauthenticated or " +
-      "agent actor, on their own authority.",
+      "P4-3's self-serve registration face. It must render with no session on the " +
+      "first visit and no firm on every visit after — gating it on firm scope " +
+      "would refuse the exact caller it exists to admit.",
   },
   {
     path: "app/(entry)/auth/confirm/page.tsx",
     url: "/auth/confirm",
     public: true,
     reason:
-      "The email link must render before a session exists, and its GET is " +
-      "deliberately paint-only so mail scanners cannot consume the token. The " +
-      "explicit button POST exchanges a hard-coded email token and redirects to " +
-      "the fixed /signup route; there is no firm-scoped read to guard here.",
+      "The email-confirmation face P4-3 added. GET is paint-only with no auth " +
+      "client and no session; the explicit button POSTs to the sibling route " +
+      "handler, which is its own exempt surface below.",
   },
   {
     path: "app/(entry)/pending/page.tsx",
     url: "/pending",
     reason:
-      "THE HOLDING STATE ITSELF — the one surface that must work with jwt_firm() " +
-      "NULL (design §4 E). It is NOT public: it requires a session, it just does " +
-      "not require a firm, which is why it is registered here WITHOUT `public: " +
-      "true` and is absent from proxy.ts's PUBLIC_PATH_PREFIXES. Calling the spine " +
-      "here would be a self-redirect loop: requireFirmScope() sends a no-firm " +
-      "caller to HOLDING_ROUTE, which is this page. It renders only the caller's " +
-      "OWN firm_registration_requests_visible rows, self-scoped by the view's " +
-      "applicant = jwt_sub() predicate AND by an explicit applicant filter — no " +
-      "firm-scoped data crosses it at all.",
+      "The holding state (design §4 E) — the one screen that must work with a " +
+      "session that belongs to no firm. It is HOLDING_ROUTE, the target every " +
+      "scope-entrance denial redirects to; gating it on firm scope would send " +
+      "every denial back here forever. It requires a session, so it carries no " +
+      "public: true.",
   },
   {
     path: "app/layout.tsx",
@@ -353,15 +341,12 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
       "the one API route, never above them.",
   },
   {
-    path: "app/(entry)/layout.tsx",
+    path: "app/not-found.tsx",
     reason:
-      "The (entry) group's own layout, wrapping all five pre-firm faces: login, " +
-      "signup, email-confirm, invite-accept and the holding page. It is a THIRD sibling group to " +
-      "(firm) and (full), deliberately outside the spine — four of its five leaves " +
-      "can run with no session at all and the fifth is the holding state, so a check " +
-      "here would refuse or loop every caller the group exists to serve. It renders " +
-      "chrome only: the identity-canvas ground, the brand lockup and the 裁-2 4a " +
-      "card shadow. It reads nothing and calls no door.",
+      "The root unmatched-URL surface renders outside both scoped route groups and " +
+      "returns no firm-scoped data. It has no single URL and is not proxy-public. " +
+      "During the P4-2/P4-3 window its two links re-enter the firm layout and loop " +
+      "through the missing /pending route; P4-3 closes that temporary navigation trap.",
   },
 ];
 
@@ -394,19 +379,11 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
     reason:
       "EXEMPT BY NECESSITY. A session with no firm must still be able to log out. " +
       "Gating logout on membership would strand exactly the people the holding " +
-      "state exists for — the only way out of /pending is this route. It returns " +
-      "no firm-scoped data at all, and its own walls are the ones that matter " +
-      "there: an exact same-origin proof (Origin + Sec-Fetch-Site, both " +
-      "fail-closed) and POST-only.",
-  },
-  {
-    path: "app/(entry)/auth/confirm/verify/route.ts",
-    reason:
-      "EXEMPT BY NECESSITY. PUBLIC AUTH EXCHANGE. This POST runs before firm membership exists and " +
-      "returns no firm data. Its own boundary is the single-use Supabase token: " +
-      "the handler hard-codes type=email, ignores caller redirects, requires a " +
-      "positive matching session, seals the cookie response, and redirects only " +
-      "to fixed entry URLs. A firm-scope check would refuse every new signup.",
+      "state exists for. Once P4-3 renders /pending this route is the deliberate " +
+      "exit; in the missing-/pending window no logout control renders and the 404 " +
+      "links loop through the wall. It returns no firm-scoped data at all, and its " +
+      "own walls are the ones that matter there: an exact same-origin proof " +
+      "(Origin + Sec-Fetch-Site, both fail-closed) and POST-only.",
   },
   {
     path: "app/api/invite/route.ts",
@@ -421,5 +398,14 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
       "not exist yet, and the suite refuses to let it inherit the exemption — P4-4 " +
       "must clear `pending` in the same PR that writes the body, which is the step " +
       "where someone reads what it actually does.",
+  },
+  {
+    path: "app/(entry)/auth/confirm/verify/route.ts",
+    reason:
+      "EXEMPT BY NECESSITY, same reasoning as signup and confirm themselves: the " +
+      "caller proving a token here has no firm yet, so a firm-scope check would " +
+      "refuse every new signup at the one step that confirms their email. Its own " +
+      "walls are the same-origin proof (proveSameOrigin, Origin + Sec-Fetch-Site) " +
+      "plus Supabase's own token verification — not this spine.",
   },
 ];

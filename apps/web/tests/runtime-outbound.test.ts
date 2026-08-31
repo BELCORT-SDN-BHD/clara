@@ -12,7 +12,7 @@ import {
   isJwtShaped,
   legFor,
 } from "../lib/runtime/outbound";
-import { matchBlock, stripComments } from "../test/sourceOracle";
+import { runtimeRouteRegistrations } from "../test/sourceOracle";
 
 /**
  * THE RUNTIME PROXY'S OUTBOUND CREDENTIAL (P4-2).
@@ -151,25 +151,26 @@ const INTAKE_ROUTES = join(
 );
 
 function runtimeRoutes(): { call: string; capability: boolean }[] {
-  const src = stripComments(readFileSync(INTAKE_ROUTES, "utf8"));
-  const out: { call: string; capability: boolean }[] = [];
-  for (const m of src.matchAll(/router\.(get|post|put|patch|delete)\s*\(\s*"([^"]+)"\s*,/g)) {
-    const open = src.indexOf("(", m.index);
-    const end = matchBlock(src, open);
-    assert.ok(end > 0, `router.${m[1]}("${m[2]}"): unbalanced call — this parser is blind`);
-    // The proxy sees everything after `/api/runtime/`, and an Express `:param` is
-    // one dynamic segment — the registry's `*`.
-    const path = (m[2] as string)
-      .replace(/^\/api\//, "")
-      .split("/")
-      .map((s) => (s.startsWith(":") ? "*" : s))
-      .join("/");
-    out.push({
-      call: `${(m[1] as string).toUpperCase()} ${path}`,
-      capability: src.slice(open, end).includes("bearerCapability("),
-    });
+  return runtimeRouteRegistrations({ path: INTAKE_ROUTES, code: readFileSync(INTAKE_ROUTES, "utf8") })
+    .map(({ call, capability }) => ({ call, capability }));
+}
+
+function runtimeRoutesFrom(src: string): { call: string; capability: boolean }[] {
+  let code = src;
+  if (!/\bexport\s+function\s+intakeRoutes\b/u.test(code)) {
+    const imports = [...code.matchAll(/^\s*import\s+[\s\S]*?;\s*$/gmu)].map((match) => match[0]);
+    const body = imports.reduce((rest, statement) => rest.replace(statement, ""), code);
+    const expressImport = imports.some((statement) => /from\s+["']express["']/u.test(statement))
+      ? ""
+      : 'import express from "express";';
+    code = `${expressImport}\n${imports.join("\n")}\nexport function intakeRoutes() {
+      const router = express.Router();
+      ${body}
+      return router;
+    }`;
   }
-  return out;
+  return runtimeRouteRegistrations({ path: "runtime-fixture.ts", code })
+    .map(({ call, capability }) => ({ call, capability }));
 }
 
 describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () => {
@@ -201,6 +202,317 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
     assert.ok(begin, "the begin leg vanished from the runtime's route table");
     assert.equal(begin.capability, false, "begin reads a capability — the leg split itself would be wrong");
     assert.equal(routes.filter((r) => r.capability).length, 2, "the bearerCapability() read is not discriminating");
+  });
+
+  it("PIN NEW-1a: a helper-added route is censused, never invisible", () => {
+    const helper = `import { bearerCapability } from "../lib/intake.mjs";
+    register(
+      router,
+      "put",
+      "/api/intake/documents/:id/retry",
+      async (req, res) => { bearerCapability(req.header("authorization")); res.end(); },
+    );`;
+    assert.deepEqual(runtimeRoutesFrom(helper), [
+      { call: "PUT intake/documents/*/retry", capability: true },
+    ]);
+  });
+
+  it("PIN NEW-1b: the word bearerCapability in a string is not a capability call", () => {
+    const decoy = `import { bearerCapability } from "../lib/intake.mjs";
+    router.put("/api/intake/documents/:id/bytes", (_req, res) => {
+      const log = "bearerCapability(req.header('authorization'))";
+      res.json({ log });
+    });`;
+    assert.deepEqual(runtimeRoutesFrom(decoy), [
+      { call: "PUT intake/documents/*/bytes", capability: false },
+    ]);
+  });
+
+  it("PIN NEW-1c: multiline direct calls remain visible", () => {
+    const multiline = `import { bearerCapability } from "../lib/intake.mjs";
+    router
+      .post(
+        "/api/intake/documents/:id/finalize",
+        async (req, res) => { bearerCapability(req.header("authorization")); res.end(); },
+      );`;
+    assert.deepEqual(runtimeRoutesFrom(multiline), [
+      { call: "POST intake/documents/*/finalize", capability: true },
+    ]);
+  });
+
+  it("PIN NEW-1d: a trailing slash remains a discriminating extra segment", () => {
+    const trailing = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/documents/:id/bytes/", () => bearerCapability("x"));`;
+    assert.deepEqual(runtimeRoutesFrom(trailing), [
+      { call: "PUT intake/documents/*/bytes/", capability: true },
+    ]);
+  });
+
+  it("PIN NEW-1e: an unknown helper registration fails closed by helper name", () => {
+    assert.throws(
+      () => runtimeRoutesFrom(`addRoute(router, "put", "/api/intake/hidden", () => bearerCapability("x"));`),
+      /unmodelled: registration addRoute\(router, .* at runtime-fixture\.ts:/,
+    );
+  });
+
+  it("PIN NEW-1f: shadowed or dead bearer call is not capability evidence", () => {
+    const shadowed = `import { bearerCapability as importedBearer } from "../lib/intake.mjs";
+      router.put("/api/intake/documents/:id/bytes", (_req, res) => {
+        function bearerCapability() { return "fake"; }
+        bearerCapability();
+        res.end(importedBearer);
+      });`;
+    const dead = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/documents/:id/bytes", (_req, res) => {
+        function unused() { bearerCapability("x"); }
+        res.end();
+      });`;
+    assert.deepEqual(runtimeRoutesFrom(shadowed), [{ call: "PUT intake/documents/*/bytes", capability: false }]);
+    assert.deepEqual(runtimeRoutesFrom(dead), [{ call: "PUT intake/documents/*/bytes", capability: false }]);
+  });
+
+  it("PIN NEW-1g: earlier handler cannot act before capability", () => {
+    const actingFirst = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/documents/:id/bytes",
+        (_req, res, next) => { res.setHeader("x-before", "1"); next(); },
+        (req, res) => { bearerCapability(req.header("authorization")); res.end(); },
+      );`;
+    assert.throws(() => runtimeRoutesFrom(actingFirst), /unmodelled: handler before capability at runtime-fixture\.ts:/);
+
+    const noOpFirst = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/documents/:id/bytes",
+        (_req, _res, next) => next(),
+        (req, res) => { bearerCapability(req.header("authorization")); res.end(); },
+      );`;
+    assert.deepEqual(runtimeRoutesFrom(noOpFirst), [{ call: "PUT intake/documents/*/bytes", capability: true }]);
+  });
+
+  it("PIN NEW-1h: mounted child router and hidden helper fail closed", () => {
+    for (const source of [
+      'child.put("/x", handler);',
+      'app.use("/api", child);',
+      "router.use(child);",
+      'router.route("/x").put(handler);',
+      'register(child, "put", "/api/x", handler);',
+    ]) {
+      assert.throws(
+        () => runtimeRoutesFrom(source),
+        /unmodelled: (?:registration .*|mounted child router) at runtime-fixture\.ts:/,
+      );
+    }
+  });
+
+  it("PIN NEW-1f-a: registrations after return are dead", () => {
+    const source = `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      export function intakeRoutes() {
+        const router = express.Router();
+        router.put("/api/intake/live", () => bearerCapability("x"));
+        return router;
+        router.put("/api/intake/dead", () => bearerCapability("x"));
+      }`;
+    assert.deepEqual(runtimeRoutesFrom(source), [{ call: "PUT intake/live", capability: true }]);
+  });
+
+  it("PIN NEW-1f-b: a shadow router is not the exported builder's router", () => {
+    const source = `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      export function intakeRoutes() {
+        const router = express.Router();
+        router.put("/api/intake/live", () => bearerCapability("x"));
+        { const router = makeImpostor(); router.put("/api/intake/shadow", () => bearerCapability("x")); }
+        return router;
+      }`;
+    assert.deepEqual(runtimeRoutesFrom(source), [{ call: "PUT intake/live", capability: true }]);
+  });
+
+  it("PIN NEW-1g-a: a response before the bearer is not protected", () => {
+    const source = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/response-first", (_req, res) => { res.end(); bearerCapability("x"); });`;
+    assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false]);
+  });
+
+  it("PIN NEW-1g-b: a bearer in a dead branch is not protection", () => {
+    const source = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/dead-gate", (_req, res) => { if (false) bearerCapability("x"); res.end(); });`;
+    assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false]);
+  });
+
+  it("PIN NEW-1g-c: a swallowed bearer denial is not protection", () => {
+    const source = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/swallowed", (_req, res) => { try { bearerCapability("x"); } catch {} res.end(); });`;
+    assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false]);
+  });
+
+  it("PIN NEW-1g-d: fallthrough work or next() before the bearer is not protection", () => {
+    for (const first of ["await mutateBooks();", "next();", "if (mutateBooks()) return;"]) {
+      const source = `import { bearerCapability } from "../lib/intake.mjs";
+        router.put("/api/intake/pre-bearer", async (req, res, next) => {
+          ${first}
+          bearerCapability(req.header("authorization"));
+          res.end();
+        });`;
+      assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false], first);
+    }
+  });
+
+  it("PIN NEW-1g-e: logical, ternary, and switch bearer calls are conditional", () => {
+    for (const statement of [
+      'flag && bearerCapability("x");',
+      'false && bearerCapability("x");',
+      'flag ? bearerCapability("x") : undefined;',
+      'switch (flag) { case true: bearerCapability("x"); break; }',
+    ]) {
+      const source = `import { bearerCapability } from "../lib/intake.mjs";
+        router.put("/api/intake/conditional", (_req, res) => { ${statement} res.end(); });`;
+      assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false], statement);
+    }
+  });
+
+  it("PIN NEW-1g-f: work after a caught bearer denial is not protected", () => {
+    const source = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/caught", async (_req, res) => {
+        try { bearerCapability("x"); } catch {}
+        await mutateBooks();
+      });`;
+    assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false]);
+  });
+
+  it("PIN NEW-1g-g: caught denial is response-only and active finally is refused", () => {
+    const routeWith = (tail: string, helper = "", prelude = "") => `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      ${helper}
+      export function intakeRoutes() {
+        const router = express.Router();
+        router.put("/api/intake/caught", async (_req, res, next) => {
+          ${prelude}
+          try { bearerCapability("x"); } ${tail}
+        });
+        return router;
+      }`;
+    const attacks = [
+      "catch { await mutateBooks(); }",
+      "catch { next(); }",
+      "finally { await mutateBooks(); }",
+    ].map((tail) => runtimeRoutesFrom(routeWith(tail))[0]?.capability);
+    assert.deepEqual(attacks, [false, false, false], "catch/finally work survived bearer denial");
+
+    const responseOnly = routeWith(
+      "catch (err) { sendError(res, err); }",
+      "function sendError(response: express.Response, _err: unknown): void { response.end(); }",
+    );
+    assert.deepEqual(runtimeRoutesFrom(responseOnly).map((route) => route.capability), [true]);
+    const responseMethod = routeWith('catch { res.status(401).json({ error: "denied" }); }');
+    assert.deepEqual(runtimeRoutesFrom(responseMethod).map((route) => route.capability), [true]);
+    const shadowedHelper = routeWith(
+      "catch (err) { sendError(res, err); }",
+      "function sendError(response: express.Response, _err: unknown): void { response.end(); }",
+      "const sendError = mutateBooks;",
+    );
+    assert.deepEqual(runtimeRoutesFrom(shadowedHelper).map((route) => route.capability), [false]);
+  });
+
+  it("PIN NEW-1g-h: response-only calls cannot evaluate denial-path work", () => {
+    const routeWith = (tail: string, helper = "") => `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      ${helper}
+      export function intakeRoutes() {
+        const router = express.Router();
+        router.put("/api/intake/caught", async (_req, res) => {
+          try { bearerCapability("x"); } ${tail}
+        });
+        return router;
+      }`;
+    const helper = "function sendError(response: express.Response, _err: unknown): void { response.end(); }";
+    const attacks = [
+      routeWith("catch { res.json(await mutateBooks()); }"),
+      routeWith('catch { res.status(await mutateBooks()).json({ error: "denied" }); }'),
+      routeWith("catch (err) { sendError(res, await mutateBooks()); }", helper),
+    ];
+    assert.deepEqual(
+      attacks.map((source) => runtimeRoutesFrom(source)[0]?.capability),
+      [false, false, false],
+    );
+
+    const passiveCalls = [
+      routeWith('catch { res.json({ error: "denied" }); }'),
+      routeWith("catch (err) { sendError(res, err); }", helper),
+    ];
+    assert.deepEqual(
+      passiveCalls.map((source) => runtimeRoutesFrom(source)[0]?.capability),
+      [true, true],
+    );
+  });
+
+  it("PIN NEW-1g-i: a named response helper must itself be response-only", () => {
+    const routeWith = (helper: string) => `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      ${helper}
+      export function intakeRoutes() {
+        const router = express.Router();
+        router.put("/api/intake/caught", async (_req, res) => {
+          try { bearerCapability("x"); } catch (err) { sendError(res, err); }
+        });
+        return router;
+      }`;
+    const mutating = routeWith(`function sendError(response: express.Response, _err: unknown): void {
+      mutateBooks();
+      response.end();
+    }`);
+    const clean = routeWith(
+      "function sendError(response: express.Response, _err: unknown): void { response.end(); }",
+    );
+    const chained = routeWith(`function finish(response: express.Response): void { response.end(); }
+      function sendError(response: express.Response, _err: unknown): void { finish(response); }`);
+    assert.deepEqual(
+      [mutating, clean, chained].map((source) => runtimeRoutesFrom(source)[0]?.capability),
+      [false, true, false],
+    );
+  });
+
+  it("PIN NEW-1g-j: an empty catch alone does not prove capability", () => {
+    const source = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/swallowed-only", (_req, _res) => { try { bearerCapability("x"); } catch {} });`;
+    assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false]);
+  });
+
+  it("PIN NEW-1f-c: definite termination propagates through blocks and constant branches", () => {
+    const blocked = `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      export function intakeRoutes() {
+        const router = express.Router();
+        { return router; }
+        router.put("/api/intake/dead-block", () => bearerCapability("x"));
+      }`;
+    const constant = `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      export function intakeRoutes() {
+        const router = express.Router();
+        if (true) return router;
+        router.put("/api/intake/dead-if", () => bearerCapability("x"));
+      }`;
+    const tried = `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      export function intakeRoutes() {
+        const router = express.Router();
+        try { return router; } finally {}
+        router.put("/api/intake/dead-try", () => bearerCapability("x"));
+      }`;
+    assert.deepEqual(runtimeRoutesFrom(blocked), []);
+    assert.deepEqual(runtimeRoutesFrom(constant), []);
+    assert.deepEqual(runtimeRoutesFrom(tried), []);
+  });
+
+  it("PIN NEW-1f-d: an if(false) registration is dead but later live work remains", () => {
+    const source = `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      export function intakeRoutes() {
+        const router = express.Router();
+        if (false) router.put("/api/intake/dead", () => bearerCapability("x"));
+        router.put("/api/intake/live", () => bearerCapability("x"));
+        return router;
+      }`;
+    assert.deepEqual(runtimeRoutesFrom(source), [{ call: "PUT intake/live", capability: true }]);
   });
 });
 
