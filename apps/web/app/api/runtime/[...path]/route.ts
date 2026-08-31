@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { firmScopeGuard } from "@/lib/require-firm-scope";
+import { buildOutbound } from "@/lib/runtime/outbound";
+
 // The same-origin runtime proxy — REPLACES next.config.ts's build-time `rewrites()`
 // (independent review 2026-08-27, F1/F2/F3/note16). Two findings drove this:
 //
@@ -36,7 +39,7 @@ function runtimeBase(): string | null {
 
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH"]);
 
-async function proxy(req: NextRequest, path: string[]): Promise<Response> {
+async function proxy(req: NextRequest, path: string[], accessToken: string): Promise<Response> {
   const base = runtimeBase();
   if (!base) {
     return NextResponse.json({ error: "runtime_not_configured" }, { status: 503 });
@@ -44,15 +47,17 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
 
   const target = `${base}/api/${path.map(encodeURIComponent).join("/")}${req.nextUrl.search}`;
 
-  // Allow-list ONLY these three inbound headers — never a wholesale copy (F3/note16:
-  // that is exactly how the old rewrite leaked the Supabase cookie jar).
-  const headers = new Headers();
-  const authorization = req.headers.get("authorization");
-  if (authorization) headers.set("authorization", authorization);
-  const contentType = req.headers.get("content-type");
-  if (contentType) headers.set("content-type", contentType);
-  const contentLength = req.headers.get("content-length");
-  if (contentLength) headers.set("content-length", contentLength);
+  // Allow-list ONLY the body headers, and choose the credential BY LEG — never a
+  // wholesale copy (F3/note16: that is how the old rewrite leaked the Supabase
+  // cookie jar), never the caller's bearer on a session leg (#451 HIGH-1), and
+  // never the session JWT on an upload-capability leg (#451 independent review:
+  // …/bytes and …/finalize take the runtime's short-lived capability, and
+  // overwriting it breaks every document upload). See lib/runtime/outbound.ts —
+  // the rule lives there so it can be DRIVEN by a test rather than read off this
+  // file and trusted.
+  const outbound = buildOutbound(req.headers, req.method, path, accessToken);
+  if (!outbound.ok) return outbound.response;
+  const headers = outbound.headers;
 
   const hasBody = METHODS_WITH_BODY.has(req.method) && req.body !== null;
 
@@ -96,9 +101,38 @@ async function proxy(req: NextRequest, path: string[]): Promise<Response> {
   return new Response(res.body, { status: res.status, headers: outHeaders });
 }
 
+// P4-2, ENTRANCE 3 OF THE SCOPE SPINE (design §4 E). `app/api/runtime` is a
+// SIBLING of the `(firm)` route group, not a child — a route group adds no URL
+// segment and wraps nothing outside itself — so the check in `(firm)/layout.tsx`
+// never runs for this handler. `proxy.ts` proves there is a SESSION here (its
+// matcher covers `/api/...`; only `_next/static`, `_next/image`, `favicon.ico`
+// and `brand/` are exempt), but not that the session holds an active firm
+// membership.
+//
+// A 403, NEVER A REDIRECT: a 307 to an HTML holding page is not an answer to a
+// `fetch`. `lib/documents/intake.ts`'s three legs and the bytes viewer read the
+// STATUS; a redirect would reach them as an unrecognisable failure — or, with
+// `redirect: "follow"` somewhere downstream, as an HTML body where JSON was
+// expected.
+//
+// BEFORE the `runtime_not_configured` 503 and before the outbound fetch, both
+// deliberately: a caller with no firm scope learns nothing about whether the
+// runtime is configured, and no unscoped request ever reaches the runtime at all.
+// The runtime still independently authenticates the forwarded bearer — this is a
+// SCOPE gate over the session, never a substitute for that.
+//
+// THE GUARD DOMINATES THE PROXY, and it hands over the identity rather than only a
+// verdict: `guard.session.accessToken` is the token `proxy` will send, so there is
+// no point in this file where a scope decision about one principal could authorise
+// a request made as another (Codex review of #451, HIGH-1). The suite asserts this
+// ordering positionally — the guard call must precede the `proxy(` call — and
+// asserts that this file never reads an inbound `authorization` header.
 async function handle(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }): Promise<Response> {
+  const guard = await firmScopeGuard();
+  if (!guard.ok) return guard.response;
+
   const { path } = await ctx.params;
-  return proxy(req, path);
+  return proxy(req, path, guard.session.accessToken);
 }
 
 export const GET = handle;

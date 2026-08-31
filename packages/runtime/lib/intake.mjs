@@ -59,6 +59,10 @@ export class IntakeError extends Error {
   }
 }
 
+export function isTypedIntakeError(err) {
+  return err instanceof IntakeError || err instanceof IntakeScanError || err instanceof StorageError;
+}
+
 function tokenHash(token) {
   return createHash("sha256").update(String(token)).digest("hex");
 }
@@ -227,7 +231,7 @@ export async function uploadDocumentBytes({ withRuntime, intakeId, token, readab
     });
     return { intake_id: intakeId, received_bytes: stored.byteSize };
   } catch (err) {
-    if (err instanceof IntakeError || err instanceof IntakeScanError || err instanceof StorageError) throw err;
+    if (isTypedIntakeError(err)) throw err;
     if (err?.code === "too_large") {
       if (meta) {
         await withRuntime((client) =>
@@ -490,7 +494,7 @@ export function bearerCapability(header) {
 }
 
 export function mapIntakeError(err) {
-  if (err instanceof IntakeError || err instanceof IntakeScanError || err instanceof StorageError) {
+  if (isTypedIntakeError(err)) {
     return { status: err.status || 500, code: err.code || "internal", message: err.message };
   }
   if (err?.code === "CLR16") return { status: 404, code: "not_found", message: "not found" };

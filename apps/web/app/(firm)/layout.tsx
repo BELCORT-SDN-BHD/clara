@@ -5,6 +5,7 @@ import { CommandKProvider } from "@/components/command";
 import { FirmNav } from "@/components/firm-nav";
 import { LogoutButton } from "@/components/logout-button";
 import { RailMount } from "@/components/clara/rail-mount";
+import { requireFirmScope } from "@/lib/require-firm-scope";
 
 /**
  * The firm-altitude shell — every route in this app lives under this route
@@ -12,6 +13,15 @@ import { RailMount } from "@/components/clara/rail-mount";
  * auth gate (redirects an unauthenticated request to /login before this
  * layout ever renders); this layout does not re-check auth — one authority,
  * one place.
+ *
+ * P4-2, ENTRANCE 1 OF THE SCOPE SPINE. Auth and SCOPE are two different
+ * questions, and the sentence above answers only the first: `proxy.ts` proves
+ * there is a session, not that the session holds an active firm membership.
+ * `requireFirmScope()` (lib/require-firm-scope.ts) is the second authority, in
+ * ONE place, called from here and from the two SIBLING surfaces a check here
+ * cannot reach — `app/(full)/layout.tsx` and `app/api/runtime/[...path]/
+ * route.ts`. It redirects to the holding route on an empty read AND on a
+ * failed one; nothing below renders on a denial, because `redirect()` throws.
  *
  * Two-level IA (owner ruling Q3): this is the firm level — sidebar nav
  * (Home · Needs you · Clients · Activity · Admin). The client level nests
@@ -29,6 +39,14 @@ export default async function FirmLayout({
 }: {
   children: ReactNode;
 }) {
+  // BEFORE the first await that produces markup, and with NO argument — the
+  // spine's own suite asserts every entrance calls it bare, so an entrance
+  // cannot quietly be handed a permissive reader. The returned `FirmScope` is
+  // deliberately unused here; P4-6 is the train that consumes it for rank
+  // shaping, and reading it now would be this layout guessing that train's
+  // shape.
+  await requireFirmScope();
+
   const t = await getTranslations("FirmShell");
 
   return (
