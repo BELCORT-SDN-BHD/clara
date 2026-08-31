@@ -23,7 +23,7 @@ tranche-2 #411 · `0146` 裁-17 #412 — ceremonied in ONE ~51-s D1 window 2026-
   docs merge advanced main mid-run; CI fix queue: force the ref; never merge into main mid-sweep) and
   33288656180 (green everywhere except the hrd-b drill, = #438). **The closing sweep ran GREEN** —
   workflow_dispatch 33294666367 on `main`, 2026-08-30 05:25Z; main has advanced since, so a fresh sweep is owed at the next merge.
-- **Owed next, in order:** **G1 PR-2a #456 → PR-2b #449** (producers + deferred DB items; precondition of the 裁-59 flip) → **裁-18b PR-2** (the tenth `row_kind`) → **裁-18b PR-3 #452** (post-time re-check + `control_witnesses`; its window applies `0154`) → P4 UI → P6.
+- **Owed next, in order:** the owner-run-when-idle VHDX compaction → **G1 PR-2a #456 → PR-2b #449** (producers + deferred DB items; precondition of the 裁-59 flip) → **裁-18b PR-2** (the tenth `row_kind`) → **裁-18b PR-3 #452** (post-time re-check + `control_witnesses`; its window applies `0154`) → P4 UI → P6.
 
 - **THE 磨合 (frontend integration) WINDOW OPENED 2026-08-26/27** — its own session, per
   `docs/plan/active/mohe-session-handoff-2026-08-26.md`; `chatTurn_v14` deployed +
