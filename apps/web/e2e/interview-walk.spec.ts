@@ -93,6 +93,26 @@ function latestTurn(page: Page): Locator {
   return page.getByRole("log", { name: "Interview activity" }).locator(":scope > div").last();
 }
 
+/** Establishes a real, cookie-backed session before the first navigation to
+ *  a fixture route — `openFixture` itself assumes one already exists (it
+ *  goes straight to the client route and expects the authenticated "Clara"
+ *  heading). Mirrors signup-confirm-pending.spec.ts's own explicit-confirm
+ *  precedent: navigate to /auth/confirm, click the explicit "Confirm my
+ *  email" button (never auto-submitted — the login-CSRF binding this
+ *  confirm face carries requires the click), which POSTs to
+ *  /auth/confirm/verify and drives the REAL @supabase/ssr client through
+ *  its own cookie-writing code — nothing here guesses the cookie format.
+ *  The live-stack harness's own serve-live.mjs answers the matching
+ *  `token_hash` with a genuinely-signed JWT for the fixture owner. Only
+ *  needs to run once per browser CONTEXT — the RACE test's second context
+ *  is opened with `storageState: await context.storageState()`, so it
+ *  inherits this session rather than needing its own confirm click. */
+async function establishSession(page: Page): Promise<void> {
+  await page.goto("/auth/confirm?token_hash=e2e-live-token-hash&type=email");
+  await page.getByRole("button", { name: "Confirm my email" }).click();
+  await expect(page).not.toHaveURL(/\/auth\/confirm/, { timeout: 30_000 });
+}
+
 async function openFixture(page: Page, value: Fixture): Promise<void> {
   await page.goto(fixturePath(value));
   await expect(page.getByRole("heading", { name: "Clara" })).toBeVisible();
@@ -104,7 +124,14 @@ async function openFixture(page: Page, value: Fixture): Promise<void> {
 async function answerCurrentPark(page: Page, value: string): Promise<void> {
   const field = page.getByLabel("Your answer");
   await field.fill(value);
-  await page.getByRole("button", { name: "Send", exact: true }).click();
+  // Scoped to the interview card (test-spec fix, first surfaced by this
+  // walk's own real-browser run, never caught by the unit harness's
+  // first-match `find`): the underlying Clara thread composer carries its
+  // OWN, separate "Send" button (Clara.thread's composer, always mounted
+  // alongside this card) — an unscoped getByRole("button", {name:"Send"})
+  // is a genuine Playwright strict-mode ambiguity between the two, not a
+  // product defect.
+  await card(page).getByRole("button", { name: "Send", exact: true }).click();
 }
 
 async function completeTrackedSegment(
@@ -133,7 +160,11 @@ async function completeAccountingBasis(page: Page): Promise<void> {
   // This runtime question is intentionally not in CLIENT_SEG_KEYS, so its
   // progress line degrades to null by contract. It still has to be answered
   // before the next tracked segment can become current.
-  await expect(latestTurn(page)).toContainText("On what basis", { timeout: 30_000 });
+  // Test-spec fix (first surfaced by this walk's own real-browser run): the
+  // live runtime's actual question text capitalizes BASIS — this was a
+  // guess made before ever seeing the real prompt, and the live walk is
+  // exactly the instrument that catches that class of mistake.
+  await expect(latestTurn(page)).toContainText("On what BASIS", { timeout: 30_000 });
   await answerCurrentPark(page, "accrual");
   await expect(latestTurn(page)).toContainText("I recorded:", { timeout: 30_000 });
   await answerCurrentPark(page, "yes");
@@ -142,6 +173,7 @@ async function completeAccountingBasis(page: Page): Promise<void> {
 test("client interview completes every tracked segment, unlocks Commit, and passes an axe scan", async ({ page }) => {
   const target = fixture("COMPLETE");
   test.skip(!target, "review/merge supplies the isolated COMPLETE client/thread fixture");
+  await establishSession(page);
   await openFixture(page, target!);
 
   for (let index = 0; index < KNOWN_CLIENT_SEGS.length; index += 1) {
@@ -171,6 +203,7 @@ test("client interview completes every tracked segment, unlocks Commit, and pass
 test("a separate interview run performs typed runtime-then-DB cancellation", async ({ page }) => {
   const target = fixture("CANCEL");
   test.skip(!target, "review/merge supplies the isolated CANCEL client/thread fixture");
+  await establishSession(page);
   await openFixture(page, target!);
 
   await page.getByRole("button", { name: "Cancel onboarding", exact: true }).click();
@@ -187,6 +220,7 @@ test("two browser contexts answering the same park converge on confirmed state w
   const target = fixture("RACE");
   test.skip(!target, "review/merge supplies the isolated RACE client/thread fixture");
 
+  await establishSession(page);
   await openFixture(page, target!);
   const secondContext = await browser.newContext({
     storageState: await context.storageState(),
@@ -202,17 +236,33 @@ test("two browser contexts answering the same park converge on confirmed state w
     const racedAnswer = "ROME PUBLIC ADVISORY RACE FIXTURE";
     await page.getByLabel("Your answer").fill(racedAnswer);
     await secondPage.getByLabel("Your answer").fill(racedAnswer);
+    // Scoped to the interview card — see answerCurrentPark's own note: an
+    // unscoped "Send" also matches the underlying Clara thread composer's
+    // own, separate Send button.
     await Promise.all([
-      page.getByRole("button", { name: "Send", exact: true }).click(),
-      secondPage.getByRole("button", { name: "Send", exact: true }).click(),
+      card(page).getByRole("button", { name: "Send", exact: true }).click(),
+      card(secondPage).getByRole("button", { name: "Send", exact: true }).click(),
+    ]);
+
+    // Both contexts converge on the same echo-confirm park (test-spec fix:
+    // legal_name is NOT in SKIPS_CONFIRMATION, so the answer above only
+    // reaches the 'c' phase — it is not yet durable/echoed until BOTH
+    // contexts also race the confirm itself, exactly like
+    // completeTrackedSegment's own answer-then-confirm shape, just doing
+    // both halves concurrently across two contexts).
+    for (const candidate of [page, secondPage]) {
+      await expect(latestTurn(candidate)).toContainText("I recorded:", { timeout: 30_000 });
+    }
+    await Promise.all([
+      answerCurrentPark(page, "yes"),
+      answerCurrentPark(secondPage, "yes"),
     ]);
 
     // Positive proof, not absence alone: both contexts hydrate the same
-    // confirmation park and the same durable echo. Because the card never
-    // appends locally, this rendered answer can only have come from /state.
+    // durable echo. Because the card never appends locally, this rendered
+    // answer can only have come from /state.
     for (const candidate of [page, secondPage]) {
-      await expect(latestTurn(candidate)).toContainText("I recorded:", { timeout: 30_000 });
-      await expect(candidate.getByRole("log", { name: "Interview activity" }).getByText(racedAnswer, { exact: true })).toBeVisible();
+      await expect(candidate.getByRole("log", { name: "Interview activity" }).getByText(racedAnswer, { exact: true })).toBeVisible({ timeout: 30_000 });
       await expect(candidate.getByLabel("Your answer")).toHaveValue("");
       await expect(card(candidate).getByRole("alert")).toHaveCount(0);
     }
