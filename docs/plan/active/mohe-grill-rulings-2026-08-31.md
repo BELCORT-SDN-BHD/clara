@@ -2,7 +2,7 @@
 
 *Same shape as the first three ledgers: one question per turn, 大白话 each, the owner's words where
 he gave them, the ruling, the consequences. The 08-28 ledger carries 裁-1…28, 08-29 裁-29…44, 08-30
-裁-45…72; this one carries **the 2026-08-31 direction** and **裁-73…裁-84** — the morning sitting
+裁-45…72; this one carries **the 2026-08-31 direction** and **裁-73…裁-93** — the morning sitting
 (~09:30–12:30 MYT) that followed the paused sprint night (`PROGRESS.md` "2026-08-31 dawn").*
 
 *Standing context at the sitting: main `652844d8`; repo frontier `0155`, live 148/`0153`; runtime
@@ -274,3 +274,92 @@ MCP of its own; the orders' §B stays as an optional recipe.
 **INFORM (fail-closed defaults under this sitting, overrule if wanted):** the native-built
 money-surface cross-model rule above; the handoff's reader is now "the next Claude Code session";
 the orchestrator-fable skill is the first act of every session on this repo.
+
+## The evening sitting (2026-08-31, ~19:50–20:40 MYT, in-terminal) — 裁-88…裁-93: the checkout gate is fully ruled
+
+### 裁-88 · G13 — beta runs the whole checkout journey on Stripe TEST mode; KYB moves to the launch sitting
+
+*(G13 is minted at this sitting — the merged gate record runs G1…G12; the record gains its own
+`G13 · NEW` row at the G1(B) redesign round, under the record's existing `· NEW` convention.)*
+
+**Ruling (two acts in one sitting; the second supersedes the first's KYB timing).** First act: at RM0
+the signup journey still runs through Stripe rather than a bypass (option A of the G13 grill — no
+"free-plan skips checkout" wall is ever built; a bypass is a hole's shape). Second act, superseding
+the KYB timing: **beta serves that journey on the TEST-mode account** — "太麻烦了; pricing 定好并
+official launch 我再做这个" — so **KYB/live activation is NOT a beta precondition**; it becomes a
+**hard precondition of the pricing + official-launch sitting**, submitted early enough to absorb
+Stripe's external review days (consistent with 裁-87's "TEST first; LIVE at the launch sitting").
+Two costs recorded, both accepted: at RM0 a real customer must never be asked to type a test card —
+payment-method collection is **config-driven** (`if_required` while the plan amount is 0, `always`
+once priced; the billing brief's configurability law, not a hard-code — **this supersedes the
+merged design part3's NIT-1 pin of `'always'`**, whose reason, 裁-58's "card collected, nothing
+charged", applies once priced, not at RM0-on-TEST-mode) — and **every beta firm re-establishes
+payment on live mode at the launch sitting** (a standing row on that sitting's checklist, minted
+here).
+
+### 裁-89 · G1 = (B) — the admission door folds into ONE transaction; 裁-73's wording amended
+
+**Ruling.** claim → create-firm → close-registration is **one database transaction behind one
+door**; the two-step mint-then-spend shape (and with it the repaired rotation) is retired before it
+is ever built. 裁-73 is **amended in place**: the journey stays Checkout → signed idempotent
+webhook → firm — only the admission-token seam between webhook and firm collapses. Grounds, from
+the gate's three review rounds: the stranding class and M5's unreachable closer lived in the seam;
+the fold **deletes `reconcile_paid_registrations` unbuilt** ("firm exists but registration open"
+becomes unreachable, so the recovery door has no subject); a live bearer credential never enters
+the application tier — the app↔DB hop is the wire with observability attached, the estate having
+already been billed once for `token_hash` reaching ingress logs — continuing 裁-16b's direction
+(at rest → in flight). Honestly scoped: the fold does **NOT** remove M7/G12's double payment
+(settled at ⑦ before ⑧ runs; `uq_frp_registration` + the applier's duplicate-payment problem row
+handle it under either shape). Consequence: a redesign round on the merged #473 documents (the
+door, the battery cells W-D/W-K/W-P/W-P2 and W-E2's affected part, the gate record's G1/G13 rows,
+part3's checkout-session row whose NIT-1 `'always'` pin 裁-88 supersedes, and the 裁-91/裁-92
+reshapes below) with a **fresh** independent review, then the build.
+
+### 裁-90 · G5 — the beta DPA text is delegated: the agent drafts, the owner pre-approves, the lawyer swaps at launch
+
+**Ruling (against G5's recommendation (i); takes option (ii), the interim text — with the owner's
+words kept, which is exactly the "ruling in writing" the gate record asked for before it would
+carry (ii)).** The record's named cost is accepted: *a real agreement with real legal effect,
+drafted by an AI, signed by real customers* — mitigated by the three constraints below and by the
+lawyer's swap at the launch sitting. The DPA is the onboarding consent text a customer confirms at
+signup — "like terms and conditions". The agent **drafts the bilingual (en/ms) beta text** from the
+existing legal pack (`docs/ops/legal/`: the PDPA s.129 cross-border memo and the client
+authorization letter as inputs) and the owner pre-approves it sight-unseen for beta — "你起草然后
+不用再问我了, 我都通过" — under three binding constraints: it is a **plain, visible consent step**
+(no dark patterns), it may not gate or alter any product or agentic functionality beyond the ruled
+signup gate itself, and it is a **placeholder**: at the official-launch sitting the owner and his
+lawyer finalise the real text and the agent swaps the template — mechanically a `dpa_documents`
+version bump (the design's mid-flow pin already handles in-flight signups), never a schema change.
+
+### 裁-91 · G11 — `stripe_events` stores a redacted projection; no customer PII lands in the database
+
+**Ruling (per recommendation).** The webhook verifier checks the signature on the raw body, then
+**projects and discards**: only reconciliation fields (event id, type, session/intent ids, amount,
+currency, status, timestamps) are stored; `customer_details` and every other personal field stay
+Stripe-side, where Stripe's own retention applies. PDPA's erasure right becomes structurally moot
+for this table — the append-only, no-UPDATE/DELETE shape is kept AND nothing personal is inside it.
+Cost accepted: dispute investigation reads the raw event in the Stripe dashboard, not the DB.
+
+### 裁-92 · G10 — the signup confirmation is a 6-digit email code, not the device-bound link
+
+**Ruling (against the recommendation — the owner weighs cross-device signup above the
+cryptographic binding).** The confirmation mail carries a **6-digit one-time code** typed into the
+originating browser (the `verifyOtp` API is already in use in the estate — but on the built
+invite-accept's **`token_hash` link arm**, the very shape this ruling replaces; the
+`{email, token}` 6-digit arm is NEW, and a build lane must not copy the link arm), so
+laptop-signup + phone-mail works by transcription. Costs recorded and accepted: the binding is
+weaker (a guessable code space, not a cryptographic verifier), so the **rate wall is mandatory**
+(裁-36/裁-68) — the redesign must specify attempts-per-code, single-use, expiry, lockout, **and
+G10(ii)'s own load-bearing clause: the email the code verifies against comes from the browser's
+own signup state, never from a URL parameter** (sourced from a URL, the binding is to nothing and
+the CSRF vector returns through a crafted URL), all as walls with RED-before cells; and B3's PKCE
+failure-card work is superseded for signup (wrong-code / expired / too-many-attempts cards replace
+it). The login-CSRF hole's link-click vector disappears with the link itself.
+
+### 裁-93 · The package — every remaining gate question per its recommendation; ADR-0077 signed; the CSRF deferral endorsed
+
+**Ruling.** Every remaining decision-sheet question and both declarations are ruled **per the
+recommendation written on the sheet**; **ADR-0077 is SIGNED** (the lean ladder, already operating);
+the R8 login-CSRF **deferral is ENDORSED** (its four fence pieces stand; 裁-92 changes the door the
+fix lands in). One guard on the wholesale: the redesign round re-reads each recommendation and
+**flags any invalidated by the fold or the OTP switch** rather than applying it stale.

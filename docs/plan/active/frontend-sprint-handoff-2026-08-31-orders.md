@@ -122,10 +122,32 @@ confirmed-user predicate instead of a local copy; retarget to `main` after #451 
 at `b6359309`; retarget after #451. Neither is the tier-3 path (裁-68: no operator queue for
 self-serve); #453 is operator tooling and the same-day fallback if the checkout train slips.
 
+**HARD PRECONDITION — on #455, and on ANY train that reaches the blind spot first (2026-08-31):**
+the gate below binds #455 by name, but the blind spot belongs to a SHAPE, not a PR: **any train that
+introduces a Server Action (`"use server"` export) or a layout-adjacent special file
+(`template`/`default`/`error`/`global-error`/`loading`/`not-found`) must either land after the census
+fix or carry it.** FS-4's checkout is the live example — a payment form is exactly the surface a lane
+would reach for a Server Action to build, and it is running in parallel; its design order has been
+told to design onto server-only ROUTE HANDLERS (which the census does classify) and to raise it as a
+gate question rather than choose an action silently.
+
+**The gap itself:** the firm-scope-surfaces census (apps/web/tests, arriving with #451) has a `LEAF`
+regex that sees only `page|route` files, so a root template.tsx and a `"use server"` action both reach firm-scoped data, full suite green
+(demonstrated by #451's reviewer, not argued). #455 is the train that adds mutating member surfaces,
+so it must not merge over a census that cannot see them. Scope, and the trap in it: extend `LEAF` to
+`default|template|not-found|error|global-error|loading`, register the legitimately-unscoped files,
+and add the `"use server"` class over `app/**` + `lib/**` — **with a positive control**, because at
+zero actions in the tree that census passes vacuously and would ship as a green that proves nothing.
+Full statement in `PROGRESS.md` Known issues.
+
 ## FS-4 · The checkout / signup-gate train (裁-73 · 74 · 68 · 81 · 26 · 36 · 64①) — design gate FIRST
 
 **This is the most dangerous door in a multi-tenant system** (R8, 2026-08-26: the self-serve
 tenant-creation door takes its OWN design gate + security review; never fold it into UI work).
+**Read FS-3's HARD PRECONDITION above before choosing a transport:** the scope-spine census is blind
+to Server Actions, so this train designs onto server-only ROUTE HANDLERS — a payment form is exactly
+where a lane would reach for a `"use server"` action, and that shape must not land before the census
+fix does.
 **Step 1 — the survey + design + gate record** (three new files, docs/plan/active/checkout-gate-survey.md ·
 -design.md · -gate-record.md — the estate's own shape): measure `create_firm` (`0147:497`), `firm_admissions` (hash-only since
 `0147`), `request_firm_registration`/`firm_registration_requests` (`0145:370, :911`),

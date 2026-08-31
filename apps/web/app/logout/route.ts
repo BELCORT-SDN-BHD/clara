@@ -35,6 +35,17 @@ import { createRouteClient } from "@/lib/supabase/server";
  * The response is sealed with the anti-cache headers Supabase queues for its
  * cookie writes (finding 1) — a cached logout response is a cached
  * `Set-Cookie`.
+ *
+ * DELIBERATELY EXEMPT FROM THE SCOPE SPINE (P4-2, design §4 E) — do not "fix"
+ * this by adding `requireFirmScope()`. A session with no active firm membership
+ * must still be able to log out; gating this route on membership would strand
+ * exactly the people the holding state exists for, since /pending's one action
+ * is this route. It returns no firm-scoped data on its own authority, so the
+ * spine's rule does not reach it, and the walls that DO matter here are the two
+ * above: an exact same-origin proof and POST-only. The exemption is registered
+ * as data in `lib/require-firm-scope.ts`'s `SCOPE_EXEMPT_SURFACES` and asserted
+ * by `tests/require-firm-scope.test.ts`, which goes RED if this file starts
+ * calling the spine.
  */
 
 export async function POST(request: NextRequest) {
