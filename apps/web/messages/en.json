@@ -2434,6 +2434,9 @@
       "shareTrigger": "Share with firm",
       "shareTitle": "Share this conversation with the firm",
       "shareDescription": "Every member of your firm will be able to read this conversation. This cannot be undone from here."
+    },
+    "registrations": {
+      "heading": "Firm registrations"
     }
   },
   "ClientOnboarding": {
