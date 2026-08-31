@@ -121,15 +121,9 @@ export interface InviteAuthClient {
 }
 
 /**
-<<<<<<< HEAD
  * The invite-accept flow (app/(entry)/invite/[token]/page.tsx). THREE governed
  * calls now — two through Supabase Auth's own SDK, then the Clara door that
  * actually mints the person:
-=======
- * The invite-accept flow (app/invite/[token]/page.tsx). THREE governed calls
- * now — two through Supabase Auth's own SDK, then the Clara door that actually
- * mints the person:
->>>>>>> origin/main
  *
  *  1. `verifyOtp({ token_hash, type: "invite" })` — the current official
  *     pattern for consuming a Supabase invite link (verified via context7 +
@@ -151,11 +145,7 @@ export interface InviteAuthClient {
  *     segment and leaves /invite/:token byte-identical. ***
  *  2. `updateUser({ password })` — once verification has produced a session
  *     for a PROVEN subject, the invited person sets the password they will
-<<<<<<< HEAD
  *     sign in with afterwards (`app/(entry)/login/page.tsx`).
-=======
- *     sign in with afterwards (app/login).
->>>>>>> origin/main
  *  3. `clara.accept_invite(p_token, p_display_name, p_op_key)` — ADDED BY
  *     P4-1. See below: without it the whole journey completes nothing.
  *
@@ -237,11 +227,7 @@ export interface InviteAuthClient {
  * the mail body and nowhere else").
  *
  * So this component takes the Clara token as its OWN prop and does not decide
-<<<<<<< HEAD
  * the URL shape. `app/(entry)/invite/[token]/page.tsx` sources it through one named
-=======
- * the URL shape. `app/invite/[token]/page.tsx` sources it through one named
->>>>>>> origin/main
  * constant, which is the single line the ruling repoints. **When it is absent
  * the surface refuses honestly and consumes nothing** — see the guard below:
  * the one outcome that is never acceptable is reporting success for a journey
@@ -441,11 +427,7 @@ export function InviteAcceptForm({
     return (
       <Card>
         <CardHeader>
-<<<<<<< HEAD
           <h1 className="text-base font-semibold">{t("linkIncompleteTitle")}</h1>
-=======
-          <CardTitle>{t("linkIncompleteTitle")}</CardTitle>
->>>>>>> origin/main
           <CardDescription>{t("linkIncompleteDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
@@ -514,11 +496,7 @@ export function InviteAcceptForm({
     return (
       <Card>
         <CardHeader>
-<<<<<<< HEAD
           <h1 className="text-base font-semibold">{t("unconfirmedTitle")}</h1>
-=======
-          <CardTitle>{t("unconfirmedTitle")}</CardTitle>
->>>>>>> origin/main
           <CardDescription>{t("unconfirmedDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
