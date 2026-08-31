@@ -13,13 +13,33 @@ import {
  * convention, verified via context7 2026-08-27) so the auth logic is
  * testable independent of the file Next.js requires at the app root.
  *
- * Gate: EVERY route is protected EXCEPT /login and /invite/:token (the
- * invite-accept flow, which must work before a session exists) and the
- * framework/static paths the exported `config.matcher` below already
- * excludes. There is no public marketing root in this app — "/" is the
- * firm-altitude home and is gated like everything else
- * (docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3; §0.4 of the
- * handoff — Supabase Auth cookie sessions, invite-only).
+ * Gate: EVERY route is protected EXCEPT /login, /invite/:token (the
+ * invite-accept flow), /signup (the tier-3 self-serve registration face), and
+ * /auth/confirm (the explicit email-token exchange). Each must work before a
+ * session exists, alongside the framework/static paths the exported
+ * `config.matcher` below already excludes. There is no public marketing root
+ * in this app — "/" is the firm-altitude home and is gated like everything
+ * else (docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3; §0.4 of the
+ * handoff — Supabase Auth cookie sessions).
+ *
+ * /signup joined the allowlist in P4-3 under **裁-57** (2026-08-30 evening):
+ * beta is a PAID launch and signup is tier-3 self-serve. The handoff's §0.4
+ * "invite-only" reading is superseded by that ruling — "invite" now means an
+ * RBAC membership invite INTO an existing firm, not the only way in.
+ *
+ * THE HOLDING ROUTE /pending IS DELIBERATELY NOT HERE. It requires a session;
+ * it just does not require a FIRM (design §4 E). Adding it would let an
+ * unauthenticated stranger load a page whose entire job is to report the
+ * caller's own registration status.
+ * (Written without the bold markers the rest of this file uses for emphasis:
+ * a literal `**` before a path spells a comment terminator and silently ends
+ * this block — measured, on this exact line.)
+ *
+ * THIS LIST IS CROSS-CHECKED BOTH WAYS against `lib/require-firm-scope.ts`'s
+ * `SCOPE_UNSCOPED_SURFACES` (the entries marked `public: true`) by
+ * `tests/firm-scope-surfaces.test.ts`, so the app's auth gate and the scope
+ * spine's idea of "public" cannot drift apart. Adding a prefix here without
+ * registering its page there reds that suite, and vice versa.
  *
  * RESPONSE CONSTRUCTION (cross-model security review 2026-08-27, findings 1
  * and 12). Cookie writes and the headers that protect them are QUEUED here
@@ -39,12 +59,50 @@ import {
  *    away and the browser kept a stale, half-dead session.
  */
 
-const PUBLIC_PATH_PREFIXES = ["/login", "/invite"];
+const PUBLIC_PATH_PREFIXES = ["/login", "/invite", "/signup", "/auth/confirm"];
 
-function isPublicPath(pathname: string): boolean {
+/**
+ * EXPORTED so `tests/proxy-matcher.test.ts` drives THIS function rather than a
+ * re-typed copy of the list (review law 3 — a test that re-declares the
+ * prefixes is asserting its own spelling, not this gate's behaviour). It is a
+ * pure predicate over a pathname: exporting it widens no surface.
+ *
+ * Prefix semantics, asserted both ways by that suite: a prefix matches the path
+ * EXACTLY or as a `/`-delimited ancestor. `/signup` is public; `/signup/x` is
+ * public; **`/signupsomething` is NOT** — the `${prefix}/` guard is what stops a
+ * mere string-prefix collision from opening a route nobody allowlisted.
+ */
+export function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
+}
+
+export type TokenRouteReferrerPolicy = "no-referrer" | "strict-origin";
+
+/**
+ * The confirmation POST needs the browser to retain its serialized Origin for
+ * the route's same-origin wall. `no-referrer` makes a form navigation's Origin
+ * opaque (`null`) in real browsers, so confirmation keeps only the origin and
+ * never the token-bearing path/query. Invite acceptance has no same-origin form
+ * POST and retains the stricter policy it already carried.
+ *
+ * Exported so the route split is driven directly in tests rather than inferred
+ * from a source-code spelling. Segment boundaries match `isPublicPath` above.
+ */
+export function referrerPolicyForPath(
+  pathname: string,
+): TokenRouteReferrerPolicy | null {
+  if (pathname === "/invite" || pathname.startsWith("/invite/")) {
+    return "no-referrer";
+  }
+  if (
+    pathname === "/auth/confirm" ||
+    pathname.startsWith("/auth/confirm/")
+  ) {
+    return "strict-origin";
+  }
+  return null;
 }
 
 export async function updateSession(request: NextRequest) {
@@ -120,11 +178,12 @@ export async function updateSession(request: NextRequest) {
   // redirect (findings 1 and 12). lib/supabase/response-state.ts.
   applyAuthState(response, queued);
 
-  // The invite link's `token_hash` is a single-use bearer capability sitting
-  // in the URL (review finding 9). `no-referrer` keeps it out of the
-  // `Referer` header of every asset and API request the invite page makes.
-  if (request.nextUrl.pathname.startsWith("/invite")) {
-    response.headers.set("Referrer-Policy", "no-referrer");
+  // Both URLs carry single-use bearer values. The invite sends no referrer;
+  // confirmation sends only its origin because its real browser form POST must
+  // carry a non-opaque Origin into the same-origin wall.
+  const referrerPolicy = referrerPolicyForPath(request.nextUrl.pathname);
+  if (referrerPolicy !== null) {
+    response.headers.set("Referrer-Policy", referrerPolicy);
   }
 
   return response;

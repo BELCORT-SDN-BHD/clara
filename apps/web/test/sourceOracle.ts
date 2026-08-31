@@ -5,7 +5,8 @@
 // whether module state can outlive a request. Keep them in test code. Product code
 // must never take a dependency on the TypeScript compiler.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 
 import ts from "typescript";
 
@@ -263,6 +264,51 @@ export function stripComments(unit: SourceUnit, opts: StripOptions = {}): Source
 
 export function readCode(path: string, opts: StripOptions = {}): SourceUnit {
   return stripComments({ path, code: readFileSync(path, "utf8") }, opts);
+}
+
+/** A `page`/`route` leaf the App Router serves. FS-4's design (`checkout-gate-design-part3.md`
+ *  §4.2, W-R-1) requires this regex to be importable from here rather than living
+ *  unexported inside the census test module — a second suite (its own transport
+ *  cell) needs the identical definition, and re-declaring it would let the two
+ *  drift. Route Handlers and pages are the only two LEAF kinds; every other
+ *  App-Router special file (`layout`, `template`, `default`, `loading`, `error`,
+ *  `global-error`, `not-found`) is deliberately NOT a LEAF — a request runs one
+ *  execution root per LEAF, but those special files run ALONGSIDE it, which is
+ *  exactly the fourth-entrance gap this file's own callers close. */
+export const LEAF = /^(page|route)\.(ts|tsx|js|jsx)$/;
+
+export type RouteLeaf = { readonly file: string; readonly url: string };
+
+/**
+ * Every LEAF file under `dir`, each paired with the URL path segments it answers
+ * on. `file` is reported relative to `webRoot` (forward-slash separated, matching
+ * every caller's own path convention).
+ *
+ * Route groups `(x)`, parallel slots `@x`, and private folders `_x` contribute NO
+ * URL segment — that is what makes a group a group, and it is exactly why a check
+ * in one group's layout does not cover a sibling's.
+ */
+export function routeLeaves(
+  webRoot: string,
+  // Defaults to `<webRoot>/app`, NOT `webRoot` itself — `webRoot` is normally the
+  // whole `apps/web` tree, and a caller who omits `dir` (the whole point of this
+  // export existing for a second caller, per the FS-4 design's W-R-1) must not
+  // silently walk `node_modules` alongside it.
+  dir: string = join(webRoot, "app"),
+  segments: readonly string[] = [],
+  out: RouteLeaf[] = [],
+): RouteLeaf[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const abs = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name.startsWith("_")) continue;
+      const isGroup = (entry.name.startsWith("(") && entry.name.endsWith(")")) || entry.name.startsWith("@");
+      routeLeaves(webRoot, abs, isGroup ? segments : [...segments, entry.name], out);
+    } else if (entry.isFile() && LEAF.test(entry.name)) {
+      out.push({ file: relative(webRoot, abs).split(sep).join("/"), url: `/${segments.join("/")}` });
+    }
+  }
+  return out;
 }
 
 /** Index after the syntactic construct that opens at `{`, `(` or `[`. The AST
