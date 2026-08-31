@@ -18,7 +18,7 @@
 // silently changed underneath it.
 //
 // =============================================================================================
-// THE MUTANT PANEL -- eight walls, each broken inside a rolled-back transaction so the shipping
+// THE MUTANT PANEL -- twelve walls, each broken inside a rolled-back transaction so the shipping
 // schema is never left mutated. A cell that cannot be made to fail is not a proof.
 //
 //  #  | wall                                  | mutation                                | what goes RED
@@ -31,6 +31,10 @@
 //  M6 | the ACL (no agent path to the apply)  | GRANT the door to clara_wake_interactive| the wake role gets past 42501
 //  M7 | coa_chart_state's legacy vocabulary   | drop 'lhdn_mpers_standard' from the read| a legacy-answer client reads `undecided`
 //  M8 | the effective-name indirection        | make the name read ignore entity_type   | the society's own drift read cries `renamed`
+//  M9 | section-only human opt-in              | restore the section trim-key disjunct   | a no-MSIC client auto-keeps the family
+// M10 | NULL family input                      | remove the named guard + NULL filter    | malformed input misses `family_key_null`
+// M11 | plan/list request identity             | restore the NULL/[] hash collision      | an explicit empty list replays a plan success
+// M12 | refusal ledger instrument              | write all five ledgers, then fake refusal| the clean-refusal assertion itself goes RED
 //
 // M3/M4 are the law-2 pair on this file's one scope judgement: they prove the society relabel and
 // the suppression are produced by the SEEDED ROWS and not by anything hard-coded in a body.
@@ -46,13 +50,18 @@ import { CLR, PG, opk, rootQuery, ensureReady, buildWorld, endPool, humanQuery, 
 import { COA_TEMPLATE_PR_B_SIGS, coaTemplatePrbSigFailures } from "./rig-meta.mjs";
 import {
   applyTemplate, addFamily, familyPlan, chartState, adoptionRead, drift, firmDrift,
-  newInterviewClient, recordFact, forceAdoptionRow, forgeAdoptedFamilies,
+  newInterviewClient, recordFact, forceAdoptionRow, forceProposedRow, forgeAdoptedFamilies,
   platformStarter, clientChartMap, expectedChartMap, coreFamilies, accountCount,
   eventCount, auditCount, rawAdoption,
-  withRolledBackTx, asHumanOn, raisedCode, refusalReason,
+  refusalLedgerCounts, withRolledBackTx, asHumanOn, raisedCode,
 } from "./coa-template-pr-b-helpers.mjs";
+import {
+  forkTemplate, upsertFamily, upsertTemplateAccount, publishTemplate,
+  waitBlockedByOrThrow, openHumanTxn, openHumanAutocommit, releaseSession,
+} from "./coa-template-pr-a-helpers.mjs";
 
 const APPLY_DOOR = "clara.apply_coa_template(uuid,uuid,text[],text)";
+const PR_B_MIGRATION = "UNNUMBERED_coa_pr_b_apply_template.sql";
 
 let world;
 let ready = false;
@@ -73,7 +82,8 @@ before(async () => {
   if (!row.apply || !row.addf || !row.state || !row.drift || !row.ovr) {
     if (process.env.CLARA_ALLOW_MISSING_COA_TEMPLATE_PR_B !== "1") {
       throw new Error(
-        `coa-template-pr-b premise missing (apply=${row.apply}, addf=${row.addf}, state=${row.state}, ` +
+        `coa-template-pr-b premise ${PR_B_MIGRATION} is not applied ` +
+          `(apply=${row.apply}, addf=${row.addf}, state=${row.state}, ` +
           `drift=${row.drift}, overrides=${row.ovr}) and CLARA_ALLOW_MISSING_COA_TEMPLATE_PR_B is unset -- ` +
           "this is a FOCUSED run and must fail loudly, not skip. Preload " +
           "./tests/coa-template-pr-b-preintegration-gate.mjs for an estate sweep against a pre-PR-b chain.",
@@ -93,10 +103,77 @@ after(async () => { await endPool(); });
 
 function unready(t) {
   if (!ready) {
-    t.skip("rig not ready: ensureReady() found no draft_entry, or PR-b's own catalog gate found the doors / the override table absent");
+    t.skip(`rig not ready: ensureReady() found no draft_entry, or ${PR_B_MIGRATION} is not applied ` +
+      "(PR-b doors / override table absent)");
     return true;
   }
   return false;
+}
+
+async function expectCleanRefusal(client, invoke, reason, message, code = null) {
+  const before = await refusalLedgerCounts(client);
+  let error = null;
+  try {
+    await invoke();
+  } catch (caught) {
+    error = caught;
+  }
+  assert.ok(error, `${message}: the call unexpectedly succeeded`);
+  let actual = `(no detail) ${error?.code ?? ""} ${error?.message ?? ""}`;
+  if (error?.detail) {
+    try { actual = JSON.parse(error.detail).reason ?? `(no reason key) ${error.detail}`; }
+    catch { actual = `(unparseable detail) ${error.detail}`; }
+  }
+  assert.equal(actual, reason, message);
+  if (code !== null) assert.equal(error.code, code, `${message}: SQLSTATE`);
+  const after = await refusalLedgerCounts(client);
+  assert.deepEqual(after, before,
+    `${reason}: refusal changed accounts/adoptions/op_receipts/audit_log/domain_events`);
+  return error;
+}
+
+async function buildSectionPlanTemplate(tag) {
+  const fork = await forkTemplate(world.users.alice, {
+    source: starter.id,
+    key: `rig_prb_sections_${tag}_${Date.now().toString(36)}`,
+    title: `PR-b sections ${tag}`,
+    basis: "rig section-only policy fixture",
+    opKey: opk(`fork_${tag}`),
+  });
+  const freeCodes = (await rootQuery(
+    `select g::text as code
+       from generate_series(7000, 8999) g
+      where not exists (select 1 from clara.coa_template_accounts a
+                         where a.template_id = $1 and a.account_code = g::text)
+      order by g limit 2`,
+    [fork.template_id],
+  )).rows.map((r) => r.code);
+  assert.equal(freeCodes.length, 2, "section fixture found two unused four-digit account codes");
+
+  await upsertFamily(world.users.alice, {
+    template: fork.template_id, familyKey: "rig_section_only", label: "Section-only",
+    inclusion: "opt_in", basis: "rig section C", sortOrdinal: 960,
+    msicSections: ["C"], msicDivisions: [], msicEdition: "MSIC 2008",
+    opKey: opk(`section_${tag}`),
+  });
+  await upsertTemplateAccount(world.users.alice, {
+    template: fork.template_id, familyKey: "rig_section_only", code: freeCodes[0],
+    name: "Section-only expense", type: "expense", sortOrdinal: 10,
+    opKey: opk(`section_acc_${tag}`),
+  });
+  await upsertFamily(world.users.alice, {
+    template: fork.template_id, familyKey: "rig_division_only", label: "Division-only",
+    inclusion: "opt_in", basis: "rig division 62", sortOrdinal: 961,
+    msicSections: [], msicDivisions: ["62"], msicEdition: "MSIC 2008",
+    opKey: opk(`division_${tag}`),
+  });
+  await upsertTemplateAccount(world.users.alice, {
+    template: fork.template_id, familyKey: "rig_division_only", code: freeCodes[1],
+    name: "Division-only expense", type: "expense", sortOrdinal: 10,
+    opKey: opk(`division_acc_${tag}`),
+  });
+  await publishTemplate(world.users.alice, { template: fork.template_id, opKey: opk(`publish_${tag}`) });
+  return fork.template_id;
 }
 
 // ===========================================================================
@@ -184,18 +261,20 @@ test("§2.1 rung 5: apply onto a NON-empty chart refuses chart_not_empty -- WITH
 
   // world.clients.A1 already carries a chart (buildWorld's buildCoa).
   assert.ok(await accountCount(world.clients.A1) > 0, "premise: A1 already has accounts");
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.bob, { client: world.clients.A1, template: starter.id, opKey: opk("ap") })),
-    "chart_not_empty", "裁-23 Q4: BELCORT's chart wins, and two charts on one client are refused");
-  assert.equal(
-    await raisedCode(() => applyTemplate(world.users.bob, { client: world.clients.A1, template: starter.id, opKey: opk("ap2") })),
-    CLR.badRequest, "the refusal is CLR10");
+  await expectCleanRefusal(
+    world.clients.A1,
+    () => applyTemplate(world.users.bob, { client: world.clients.A1, template: starter.id, opKey: opk("ap") }),
+    "chart_not_empty", "裁-23 Q4: BELCORT's chart wins, and two charts on one client are refused",
+    CLR.badRequest,
+  );
 
   // A SECOND apply on the client that just succeeded refuses the same way, under a DIFFERENT
   // op key: idempotence is the op-key path, never a silent no-op (Annex C cell 3).
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.bob, { client: fresh, template: starter.id, opKey: opk("different") })),
-    "chart_not_empty", "a different batch key on the same client refuses at rung 5");
+  await expectCleanRefusal(
+    fresh,
+    () => applyTemplate(world.users.bob, { client: fresh, template: starter.id, opKey: opk("different") }),
+    "chart_not_empty", "a different batch key on the same client refuses at rung 5",
+  );
 });
 
 test("§2.2 idempotence is the OP-KEY path: a replay returns the stored result and plants nothing new", async (t) => {
@@ -217,48 +296,98 @@ test("§2.3 rung 6: a client that already adopted refuses already_adopted (const
   const client = await newInterviewClient(world.users.alice, world.firms.A, { tag: "adopted", answers: { entity_type: "sdn_bhd" } });
   await forceAdoptionRow(world.firms.A, client, starter.id, starter.version, core, world.users.alice);
   assert.equal(await accountCount(client), 0, "premise: the chart is still EMPTY, so rung 5 cannot be what refuses");
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.bob, { client, template: starter.id, opKey: opk("ap") })),
-    "already_adopted", "rung 6 is reached and named");
+  await expectCleanRefusal(
+    client,
+    () => applyTemplate(world.users.bob, { client, template: starter.id, opKey: opk("ap") }),
+    "already_adopted", "rung 6 is reached and named",
+  );
 });
 
-test("§2.4 rung 7 + rung 8 name the offender", async (t) => {
+test("§2.4 NULL family keys refuse by name; rung 7 + rung 8 name the offender", async (t) => {
   if (unready(t)) return;
   const client = await newInterviewClient(world.users.alice, world.firms.A, { tag: "rungs", answers: { entity_type: "sdn_bhd" } });
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.bob, { client, template: starter.id, families: [...core, "no_such_family"], opKey: opk("ap") })),
-    "unknown_family", "rung 7");
-  await assert.rejects(
-    () => applyTemplate(world.users.bob, { client, template: starter.id, families: [...core, "no_such_family"], opKey: opk("ap2") }),
-    (e) => /no_such_family/.test(e.message), "rung 7 NAMES the offender in its message");
+  await expectCleanRefusal(
+    client,
+    () => applyTemplate(world.users.bob, { client, template: starter.id, families: [null], opKey: opk("null-only") }),
+    "family_key_null", "ARRAY[NULL] is malformed and never a zero-account adoption",
+  );
+  await expectCleanRefusal(
+    client,
+    () => applyTemplate(world.users.bob, {
+      client, template: starter.id, families: [...core, null], opKey: opk("null-mixed"),
+    }),
+    "family_key_null", "a NULL hidden beside a valid family set is still malformed",
+  );
+  const unknown = await expectCleanRefusal(
+    client,
+    () => applyTemplate(world.users.bob, {
+      client, template: starter.id, families: [...core, "no_such_family"], opKey: opk("ap"),
+    }),
+    "unknown_family", "rung 7",
+  );
+  assert.match(unknown.message, /no_such_family/, "rung 7 NAMES the offender in its message");
 
   const oneCoreDropped = core.filter((f) => f !== core[0]);
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.bob, { client, template: starter.id, families: oneCoreDropped, opKey: opk("ap3") })),
-    "core_family_dropped", "rung 8: `core` is never trimmable");
-  await assert.rejects(
-    () => applyTemplate(world.users.bob, { client, template: starter.id, families: oneCoreDropped, opKey: opk("ap4") }),
-    (e) => new RegExp(core[0]).test(e.message), "rung 8 NAMES the dropped core family");
+  const dropped = await expectCleanRefusal(
+    client,
+    () => applyTemplate(world.users.bob, {
+      client, template: starter.id, families: oneCoreDropped, opKey: opk("ap3"),
+    }),
+    "core_family_dropped", "rung 8: `core` is never trimmable",
+  );
+  assert.match(dropped.message, new RegExp(core[0]), "rung 8 NAMES the dropped core family");
   // Rung 6b -- an EMPTY set is refused by NAME rather than by ck_coa_adoption_families' bare
   // 23514. On the platform starter rung 8 would also catch it (it carries core families), so the
   // cell pins the REASON: `families_required` is the one that must answer, and it must answer
   // first.
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.bob, { client, template: starter.id, families: [], opKey: opk("ap5") })),
-    "families_required", "rung 6b: an empty family set is a named refusal, never a CHECK violation");
+  await expectCleanRefusal(
+    client,
+    () => applyTemplate(world.users.bob, { client, template: starter.id, families: [], opKey: opk("ap5") }),
+    "families_required", "rung 6b: an empty family set is a named refusal, never a CHECK violation",
+  );
   assert.equal(await accountCount(client), 0, "no refusal planted anything");
+
+  const twin = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "rungs_twin", answers: { entity_type: "sdn_bhd" },
+  });
+  const valid = await applyTemplate(world.users.bob, {
+    client: twin, template: starter.id, families: core, opKey: opk("valid-twin"),
+  });
+  assert.ok(valid.accounts > 0, "TWIN: the same caller-supplied shape without NULL succeeds");
+});
+
+test("§2.4b adoption families structurally reject NULL even if a future door misses it", async (t) => {
+  if (unready(t)) return;
+  const client = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "null_check", answers: { entity_type: "sdn_bhd" },
+  });
+  const insertBad = (c) => c.query(
+    `insert into clara.coa_template_adoptions
+       (firm_id, client_id, template_id, template_version, state, families, adopted_by, adopted_at)
+     values ($1, $2, $3, $4, 'adopted', array[null]::text[], $5, now())`,
+    [world.firms.A, client, starter.id, starter.version, world.users.alice],
+  );
+  await withRolledBackTx(async (c) => {
+    assert.equal(await raisedCode(() => insertBad(c)), PG.checkViolation,
+      "control: the structural no-NULL CHECK refuses a malformed adoption");
+    await c.query("rollback");
+    await c.query("begin");
+    await c.query("alter table clara.coa_template_adoptions drop constraint ck_coa_adoption_families_no_null");
+    assert.equal(await raisedCode(() => insertBad(c)), null,
+      "MUTANT: without the CHECK, ARRAY[NULL] is accepted -- the wall is load-bearing");
+  });
+  assert.equal((await rawAdoption(client)).length, 0, "the structural mutant left no adoption behind");
 });
 
 test("§2.5 rung 3/4: another firm's client refuses CLR11, and a DRAFT template refuses template_not_published", async (t) => {
   if (unready(t)) return;
   const clientB = await newInterviewClient(world.users.dave, world.firms.B, { tag: "b", answers: { entity_type: "sdn_bhd" } });
   // Firm A's bookkeeper cannot reach firm B's client. Both the class AND the reason.
-  assert.equal(
-    await raisedCode(() => applyTemplate(world.users.bob, { client: clientB, template: starter.id, opKey: opk("x") })),
-    CLR.notFound, "cross-firm apply is CLR11");
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.bob, { client: clientB, template: starter.id, opKey: opk("x2") })),
-    "client_not_in_firm", "and it is named");
+  await expectCleanRefusal(
+    clientB,
+    () => applyTemplate(world.users.bob, { client: clientB, template: starter.id, opKey: opk("x") }),
+    "client_not_in_firm", "cross-firm apply is CLR11 and named", CLR.notFound,
+  );
   assert.equal(await accountCount(clientB), 0, "nothing landed on the other firm's client");
 
   // TWIN: firm B's OWN bookkeeper-or-better succeeds on the same client -- so the refusal above is
@@ -271,22 +400,28 @@ test("§2.5 rung 3/4: another firm's client refuses CLR11, and a DRAFT template 
     "select clara.fork_coa_template(p_source => $1, p_template_key => $2, p_title => $3, p_framework_hint => 'MPERS', p_basis => 'rig', p_op_key => $4) as r",
     [starter.id, `rig_prb_draft_${Date.now().toString(36)}`, "PR-b draft", opk("fork")])).rows[0].r;
   const client = await newInterviewClient(world.users.alice, world.firms.A, { tag: "draft", answers: { entity_type: "sdn_bhd" } });
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.bob, { client, template: fork.template_id, opKey: opk("d") })),
-    "template_not_published", "rung 4 refuses a draft");
+  await expectCleanRefusal(
+    client,
+    () => applyTemplate(world.users.bob, { client, template: fork.template_id, opKey: opk("d") }),
+    "template_not_published", "rung 4 refuses a draft",
+  );
   // ...and firm B cannot even SEE firm A's firm-scoped template: the same call from firm B is a
   // not-found, never a not-published (no cross-firm existence oracle).
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.dave, { client: clientB, template: fork.template_id, opKey: opk("d2") })),
-    "template_not_found", "another firm's template is INVISIBLE, not merely unpublished");
+  await expectCleanRefusal(
+    clientB,
+    () => applyTemplate(world.users.dave, { client: clientB, template: fork.template_id, opKey: opk("d2") }),
+    "template_not_found", "another firm's template is INVISIBLE, not merely unpublished",
+  );
 });
 
 test("§2.6 op_key is required, and a reused key with different args RAISES rather than replaying", async (t) => {
   if (unready(t)) return;
   const client = await newInterviewClient(world.users.alice, world.firms.A, { tag: "opk", answers: { entity_type: "sdn_bhd" } });
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.bob, { client, template: starter.id, opKey: "  " })),
-    "op_key_required", "rung 1");
+  await expectCleanRefusal(
+    client,
+    () => applyTemplate(world.users.bob, { client, template: starter.id, opKey: "  " }),
+    "op_key_required", "rung 1",
+  );
   const key = opk("reuse");
   await applyTemplate(world.users.bob, { client, template: starter.id, families: core, opKey: key });
   assert.equal(
@@ -302,6 +437,141 @@ test("§2.7 the family list is order-insensitive: the same SET in a different or
   const shuffled = [...core].reverse();
   const replay = await applyTemplate(world.users.bob, { client, template: starter.id, families: shuffled, opKey: key });
   assert.deepEqual(replay, first, "the request hash covers the SORTED list, so a re-ordered replay is a replay");
+});
+
+test("§2.8 NULL-plan and caller [] are distinct idempotency requests", async (t) => {
+  if (unready(t)) return;
+  const client = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "hash_mode", answers: { entity_type: "sdn_bhd" },
+  });
+  const key = opk("hash-mode");
+  const first = await applyTemplate(world.users.bob, {
+    client, template: starter.id, families: null, opKey: key,
+  });
+  const before = await refusalLedgerCounts(client);
+  assert.equal(
+    await raisedCode(() => applyTemplate(world.users.bob, {
+      client, template: starter.id, families: [], opKey: key,
+    })),
+    CLR.badRequest,
+    "the same key cannot replay a plan-derived success for an explicit empty caller list",
+  );
+  assert.deepEqual(await refusalLedgerCounts(client), before,
+    "the op-key-reuse refusal changed one of the five ledgers");
+  assert.ok(first.accounts > 0, "premise: the NULL-plan request succeeded before the reuse attempt");
+});
+
+test("§2.9 concurrent apply loser gets chart_adoption_race, never a bare 23505", async (t) => {
+  if (unready(t)) return;
+  const client = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "apply_race", answers: { entity_type: "sdn_bhd" },
+  });
+  const key1 = opk("race-a");
+  const key2 = opk("race-b");
+  const beforeApplyReceipts = (await rootQuery(
+    "select count(*)::int as n from clara.op_receipts where fn = 'apply_coa_template' and op_key = any($1::text[])",
+    [[key1, key2]],
+  )).rows[0].n;
+  const beforeApplyAudit = await auditCount(world.firms.A, "apply_coa_template");
+  const beforeChartEvents = await eventCount(world.firms.A, "account.chart_applied");
+  let t1 = null;
+  let t2 = null;
+  try {
+    t1 = await openHumanTxn(world.users.bob);
+    const first = (await t1.client.query(
+      "select clara.apply_coa_template($1,$2,null::text[],$3) as r",
+      [client, starter.id, key1],
+    )).rows[0].r;
+    t2 = await openHumanAutocommit(world.users.bob);
+    const loser = t2.client.query(
+      "select clara.apply_coa_template($1,$2,null::text[],$3) as r",
+      [client, starter.id, key2],
+    ).then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+
+    await waitBlockedByOrThrow(t2.pid, t1.pid);
+    await t1.client.query("commit");
+    const out = await loser;
+    assert.equal(out.ok, false, "the concurrency loser unexpectedly succeeded");
+    assert.equal(out.e.code, CLR.badRequest, "the loser is translated to CLR10, not bare 23505");
+    assert.equal(JSON.parse(out.e.detail).reason, "chart_adoption_race",
+      "the concurrency loser names the serialisation race");
+
+    assert.equal(await accountCount(client), first.accounts, "only the winner's exact chart remains");
+    assert.equal((await rawAdoption(client)).length, 1, "exactly one adoption remains");
+    const afterApplyReceipts = (await rootQuery(
+      "select count(*)::int as n from clara.op_receipts where fn = 'apply_coa_template' and op_key = any($1::text[])",
+      [[key1, key2]],
+    )).rows[0].n;
+    assert.equal(afterApplyReceipts - beforeApplyReceipts, 1, "exactly one outer apply receipt remains");
+    assert.equal(await auditCount(world.firms.A, "apply_coa_template") - beforeApplyAudit, 1,
+      "exactly one apply audit remains");
+    assert.equal(await eventCount(world.firms.A, "account.chart_applied") - beforeChartEvents, 1,
+      "exactly one chart-level event remains");
+  } finally {
+    await releaseSession(t1);
+    await releaseSession(t2);
+  }
+});
+
+test("§2.9b concurrent apply on an EXISTING PROPOSED row: the loser gets chart_adoption_race too, never a silent overwrite", async (t) => {
+  if (unready(t)) return;
+  // The proposed-row TWIN of §2.9: two callers race the UPDATE branch (rung 6's "a 'proposed' row
+  // is the thing being applied"), not the INSERT branch. Without a state-conditional WHERE on that
+  // UPDATE, the second writer would block on the row lock, then -- once the WHERE clause is keyed
+  // only on id -- silently re-write the winner's already-adopted row instead of being refused.
+  const client = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "apply_race_prop", answers: { entity_type: "sdn_bhd" },
+  });
+  const proposalId = await forceProposedRow(world.firms.A, client, starter.id, starter.version, core);
+  const key1 = opk("race-prop-a");
+  const key2 = opk("race-prop-b");
+  const beforeApplyReceipts = (await rootQuery(
+    "select count(*)::int as n from clara.op_receipts where fn = 'apply_coa_template' and op_key = any($1::text[])",
+    [[key1, key2]],
+  )).rows[0].n;
+  const beforeApplyAudit = await auditCount(world.firms.A, "apply_coa_template");
+  const beforeChartEvents = await eventCount(world.firms.A, "account.chart_applied");
+  let t1 = null;
+  let t2 = null;
+  try {
+    t1 = await openHumanTxn(world.users.bob);
+    const first = (await t1.client.query(
+      "select clara.apply_coa_template($1,$2,null::text[],$3) as r",
+      [client, starter.id, key1],
+    )).rows[0].r;
+    t2 = await openHumanAutocommit(world.users.bob);
+    const loser = t2.client.query(
+      "select clara.apply_coa_template($1,$2,null::text[],$3) as r",
+      [client, starter.id, key2],
+    ).then((r) => ({ ok: true, r }), (e) => ({ ok: false, e }));
+
+    await waitBlockedByOrThrow(t2.pid, t1.pid);
+    await t1.client.query("commit");
+    const out = await loser;
+    assert.equal(out.ok, false, "the concurrency loser unexpectedly succeeded on the proposed-row path");
+    assert.equal(out.e.code, CLR.badRequest, "the loser is translated to CLR10, not a silent overwrite");
+    assert.equal(JSON.parse(out.e.detail).reason, "chart_adoption_race",
+      "the proposed-row loser names the SAME serialisation race as the insert-branch twin");
+
+    assert.equal(await accountCount(client), first.accounts, "only the winner's exact chart remains");
+    const rows = await rawAdoption(client);
+    assert.equal(rows.length, 1, "exactly one adoption remains -- the proposed row MOVED, never duplicated");
+    assert.equal(rows[0].id, proposalId, "the surviving row is the SAME id the proposal started as -- moved, not replaced");
+    assert.equal(rows[0].state, "adopted", "the surviving row is now adopted");
+    assert.equal(rows[0].adopted_by, world.users.bob, "the winner's actor stamped adopted_by, not the loser's");
+    const afterApplyReceipts = (await rootQuery(
+      "select count(*)::int as n from clara.op_receipts where fn = 'apply_coa_template' and op_key = any($1::text[])",
+      [[key1, key2]],
+    )).rows[0].n;
+    assert.equal(afterApplyReceipts - beforeApplyReceipts, 1, "exactly one outer apply receipt remains");
+    assert.equal(await auditCount(world.firms.A, "apply_coa_template") - beforeApplyAudit, 1,
+      "exactly one apply audit remains");
+    assert.equal(await eventCount(world.firms.A, "account.chart_applied") - beforeChartEvents, 1,
+      "exactly one chart-level event remains");
+  } finally {
+    await releaseSession(t1);
+    await releaseSession(t2);
+  }
 });
 
 // ===========================================================================
@@ -440,6 +710,28 @@ test("§4.5 the conjunction is FAIL-CLOSED: a family declaring two axes needs BO
     assert.ok(!p2.keep.includes(f), `${f} declares no key and is never auto-proposed`);
     assert.ok(p2.drop.includes(f), "...and it is reported as dropped, not omitted from the answer");
   }
+
+  // A section letter is metadata until the ruled future section MAPPING exists. It is not an
+  // operable trim key, so a sections-only family remains human opt-in for every client.
+  const sectionTemplate = await buildSectionPlanTemplate("shipping");
+  const noMsic = await newInterviewClient(world.users.alice, world.firms.A, { tag: "section_none" });
+  const noMsicPlan = await familyPlan(world.users.bob, noMsic, sectionTemplate);
+  assert.ok(!noMsicPlan.keep.includes("rig_section_only"),
+    "a sections-only family is not auto-kept when MSIC is absent");
+
+  const mismatch = await newInterviewClient(world.users.alice, world.firms.A, { tag: "section_mismatch" });
+  await recordFact(world.users.alice, { client: mismatch, key: "msic", value: "99999" });
+  const mismatchPlan = await familyPlan(world.users.bob, mismatch, sectionTemplate);
+  assert.ok(!mismatchPlan.keep.includes("rig_section_only"),
+    "a sections-only family is not auto-kept on an unrelated division");
+
+  const match = await newInterviewClient(world.users.alice, world.firms.A, { tag: "division_match" });
+  await recordFact(world.users.alice, { client: match, key: "msic", value: "62010" });
+  const matchPlan = await familyPlan(world.users.bob, match, sectionTemplate);
+  assert.ok(matchPlan.keep.includes("rig_division_only"),
+    "TWIN: an operable division key is kept for a positively matching client");
+  assert.ok(!matchPlan.keep.includes("rig_section_only"),
+    "even a client with MSIC does not make section metadata an implicit mapping");
 });
 
 test("§4.6 M5 MUTANT: turning the plan's AND into an OR proposes a family no axis matched", async (t) => {
@@ -463,6 +755,31 @@ test("§4.6 M5 MUTANT: turning the plan's AND into an OR proposes a family no ax
     "M5: with the msic conjunct removed, `manufacturing` is proposed on a client with no msic at all -- the mutant BITES");
   const after = await familyPlan(world.users.bob, half, starter.id);
   assert.ok(!after.keep.includes("manufacturing"), "and the shipping body is unchanged after the rollback");
+});
+
+test("§4.7 section-key MUTANT: treating metadata as an operable key auto-keeps the family", async (t) => {
+  if (unready(t)) return;
+  const template = await buildSectionPlanTemplate("mutant");
+  const client = await newInterviewClient(world.users.alice, world.firms.A, { tag: "section_mutant" });
+  const src = (await rootQuery(
+    "select prosrc from pg_proc where oid = 'clara._coa_family_plan(uuid,uuid)'::regprocedure"
+  )).rows[0].prosrc;
+  const fixed = "(ff.entity_types <> '{}' or ff.trade_natures <> '{}'\n                    or ff.msic_divisions <> '{}')";
+  const old = "(ff.entity_types <> '{}' or ff.trade_natures <> '{}'\n                    or ff.msic_sections <> '{}' or ff.msic_divisions <> '{}')";
+  assert.ok(src.includes(fixed), "the shipping body carries the fail-closed trim-key disjunct");
+  const kept = await withRolledBackTx(async (c) => {
+    await c.query("set local role clara_fn_owner");
+    await c.query(`create or replace function clara._coa_family_plan(p_client uuid, p_template uuid) returns jsonb
+      language plpgsql stable security invoker set search_path = clara, pg_temp as $mut$${src.replace(fixed, old)}$mut$`);
+    await c.query("reset role");
+    const r = await asHumanOn(c, world.users.bob,
+      "select clara.coa_template_family_plan($1,$2) as p", [client, template]);
+    return r.rows[0].p.keep;
+  });
+  assert.ok(kept.includes("rig_section_only"),
+    "MUTANT: restoring msic_sections to the trim-key disjunct auto-keeps it -- the mutant BITES");
+  assert.ok(!(await familyPlan(world.users.bob, client, template)).keep.includes("rig_section_only"),
+    "the shipping plan is restored after rollback");
 });
 
 // ===========================================================================
@@ -563,20 +880,32 @@ test("§6.1 the additive door plants one family and appends it to the adoption",
   assert.ok(ad.families.includes("motor_vehicles"), "the adoption row now carries the family -- attribution is not lost");
 });
 
-test("§6.2 the additive door's four refusals, each named", async (t) => {
+test("§6.2 the additive door's named refusals", async (t) => {
   if (unready(t)) return;
   const virgin = await newInterviewClient(world.users.alice, world.firms.A, { tag: "add2", answers: { entity_type: "sdn_bhd" } });
-  assert.equal(
-    await refusalReason(() => addFamily(world.users.bob, { client: virgin, template: starter.id, family: "motor_vehicles", opKey: opk("a") })),
-    "not_adopted", "a client with no adoption is refused");
+  await expectCleanRefusal(
+    virgin,
+    () => addFamily(world.users.bob, {
+      client: virgin, template: starter.id, family: "motor_vehicles", opKey: opk("a"),
+    }),
+    "not_adopted", "a client with no adoption is refused",
+  );
 
   await applyTemplate(world.users.bob, { client: virgin, template: starter.id, opKey: opk("ap") });
-  assert.equal(
-    await refusalReason(() => addFamily(world.users.bob, { client: virgin, template: starter.id, family: "no_such", opKey: opk("b") })),
-    "unknown_family", "an unknown family is refused");
-  assert.equal(
-    await refusalReason(() => addFamily(world.users.bob, { client: virgin, template: starter.id, family: "cash_and_bank", opKey: opk("c") })),
-    "family_already_applied", "a family already on the adoption is refused");
+  await expectCleanRefusal(
+    virgin,
+    () => addFamily(world.users.bob, {
+      client: virgin, template: starter.id, family: "no_such", opKey: opk("b"),
+    }),
+    "unknown_family", "an unknown family is refused",
+  );
+  await expectCleanRefusal(
+    virgin,
+    () => addFamily(world.users.bob, {
+      client: virgin, template: starter.id, family: "cash_and_bank", opKey: opk("c"),
+    }),
+    "family_already_applied", "a family already on the adoption is refused",
+  );
 
   // code_already_present: plant one of the family's codes by hand first, at the SAME shape.
   const other = await newInterviewClient(world.users.alice, world.firms.A, { tag: "add3", answers: { entity_type: "sdn_bhd" } });
@@ -587,9 +916,13 @@ test("§6.2 the additive door's four refusals, each named", async (t) => {
   await humanQuery(world.users.bob,
     "select clara.upsert_account(p_client => $1, p_code => $2, p_name => $3, p_type => $4, p_special_acc_type => null, p_account_class => $5, p_op_key => $6)",
     [other, mv.account_code, mv.name, mv.account_type, mv.account_class, opk("hand")]);
-  assert.equal(
-    await refusalReason(() => addFamily(world.users.bob, { client: other, template: starter.id, family: "motor_vehicles", opKey: opk("d") })),
-    "code_already_present", "an additive door does not silently upsert over a live account");
+  await expectCleanRefusal(
+    other,
+    () => addFamily(world.users.bob, {
+      client: other, template: starter.id, family: "motor_vehicles", opKey: opk("d"),
+    }),
+    "code_already_present", "an additive door does not silently upsert over a live account",
+  );
 
   // code_conflict: the same code at a DIFFERENT type.
   const third = await newInterviewClient(world.users.alice, world.firms.A, { tag: "add4", answers: { entity_type: "sdn_bhd" } });
@@ -598,9 +931,13 @@ test("§6.2 the additive door's four refusals, each named", async (t) => {
   await humanQuery(world.users.bob,
     "select clara.upsert_account(p_client => $1, p_code => $2, p_name => $3, p_type => $4, p_special_acc_type => null, p_account_class => null, p_op_key => $5)",
     [third, mv.account_code, "rig hand-made", wrongType, opk("hand2")]);
-  assert.equal(
-    await refusalReason(() => addFamily(world.users.bob, { client: third, template: starter.id, family: "motor_vehicles", opKey: opk("e") })),
-    "code_conflict", "a type/class collision is named BEFORE the loop starts");
+  await expectCleanRefusal(
+    third,
+    () => addFamily(world.users.bob, {
+      client: third, template: starter.id, family: "motor_vehicles", opKey: opk("e"),
+    }),
+    "code_conflict", "a type/class collision is named BEFORE the loop starts",
+  );
 });
 
 // ===========================================================================
@@ -796,9 +1133,11 @@ test("§9.2 M1 + M2 MUTANTS: rung 5 and rung 8 are the walls", async (t) => {
     "select clara.upsert_account(p_client => $1, p_code => '8811', p_name => 'Hand made', p_type => 'expense', p_special_acc_type => null, p_account_class => null, p_op_key => $2)",
     [dirty, opk("hand")]);
   assert.equal(await accountCount(dirty), 1, "premise: exactly one pre-existing account, and it carries no marker");
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.bob, { client: dirty, template: starter.id, opKey: opk("m1a") })),
-    "chart_not_empty", "the shipping door refuses BEFORE the mutation");
+  await expectCleanRefusal(
+    dirty,
+    () => applyTemplate(world.users.bob, { client: dirty, template: starter.id, opKey: opk("m1a") }),
+    "chart_not_empty", "the shipping door refuses BEFORE the mutation",
+  );
 
   const m1 = await withRolledBackTx(async (c) => {
     await replaceApply(c, src.replace(rung5, "if false then"));
@@ -806,9 +1145,11 @@ test("§9.2 M1 + M2 MUTANTS: rung 5 and rung 8 are the walls", async (t) => {
       "select clara.apply_coa_template($1,$2,null::text[],$3)", [dirty, starter.id, opk("m1")]));
   });
   assert.equal(m1, null, "M1: without rung 5 a client with a live chart takes the standard on top -- the mutant BITES");
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.bob, { client: dirty, template: starter.id, opKey: opk("m1b") })),
-    "chart_not_empty", "and the shipping door still refuses after the rollback");
+  await expectCleanRefusal(
+    dirty,
+    () => applyTemplate(world.users.bob, { client: dirty, template: starter.id, opKey: opk("m1b") }),
+    "chart_not_empty", "and the shipping door still refuses after the rollback",
+  );
   assert.equal(await accountCount(dirty), 1, "the mutant's apply was rolled back -- nothing survived");
 
   // M2 -- rung 8 removed: a core family can be dropped.
@@ -819,7 +1160,102 @@ test("§9.2 M1 + M2 MUTANTS: rung 5 and rung 8 are the walls", async (t) => {
       "select clara.apply_coa_template($1,$2,$3::text[],$4)", [client, starter.id, core.slice(1), opk("m2")]));
   });
   assert.equal(m2, null, "M2: without rung 8 the `core` promise is not a promise -- the mutant BITES");
-  assert.equal(
-    await refusalReason(() => applyTemplate(world.users.bob, { client, template: starter.id, families: core.slice(1), opKey: opk("m2b") })),
-    "core_family_dropped", "and the shipping door still refuses after the rollback");
+  await expectCleanRefusal(
+    client,
+    () => applyTemplate(world.users.bob, {
+      client, template: starter.id, families: core.slice(1), opKey: opk("m2b"),
+    }),
+    "core_family_dropped", "and the shipping door still refuses after the rollback",
+  );
+});
+
+test("§9.3 NULL-family MUTANT: removing the named guard and NULL filter reds §2.4", async (t) => {
+  if (unready(t)) return;
+  const client = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "null_mutant", answers: { entity_type: "sdn_bhd" },
+  });
+  const src = (await rootQuery("select prosrc from pg_proc where oid = $1::regprocedure", [APPLY_DOOR])).rows[0].prosrc;
+  const guard = "if p_families is not null and array_position(p_families, null) is not null then";
+  const filter = "array_agg(distinct x) filter (where x is not null)";
+  assert.ok(src.includes(guard) && src.includes(filter),
+    "the LIVE body carries both halves of the NULL-family defense");
+  const mutantReason = await withRolledBackTx(async (c) => {
+    const body = src.replace(guard, "if false then").replace(filter, "array_agg(distinct x)");
+    await c.query("set local role clara_fn_owner");
+    await c.query(`create or replace function clara.apply_coa_template(p_client uuid, p_template uuid,
+        p_families text[], p_op_key text) returns jsonb
+      language plpgsql security definer set search_path = clara, pg_temp as $mut$${body}$mut$`);
+    await c.query("reset role");
+    try {
+      await asHumanOn(c, world.users.bob,
+        "select clara.apply_coa_template($1,$2,$3::text[],$4)",
+        [client, starter.id, [null], opk("null-mutant")]);
+      return null;
+    } catch (e) {
+      try { return JSON.parse(e.detail).reason ?? `(no reason) ${e.detail}`; }
+      catch { return `(unparseable) ${e.detail ?? e.message}`; }
+    }
+  });
+  assert.notEqual(mutantReason, "family_key_null",
+    "MUTANT: §2.4 would red because the malformed list no longer gets its named refusal");
+  await expectCleanRefusal(
+    client,
+    () => applyTemplate(world.users.bob, { client, template: starter.id, families: [null], opKey: opk("null-live") }),
+    "family_key_null", "the shipping NULL-family wall is restored after rollback",
+  );
+});
+
+test("§9.4 request-hash MUTANT: restoring NULL/[] collision replays the wrong success", async (t) => {
+  if (unready(t)) return;
+  const client = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "hash_mutant", answers: { entity_type: "sdn_bhd" },
+  });
+  const src = (await rootQuery("select prosrc from pg_proc where oid = $1::regprocedure", [APPLY_DOOR])).rows[0].prosrc;
+  const fixed = `case when p_families is null then '"plan"'::jsonb
+                else coalesce((select jsonb_agg(distinct x order by x)
+                                 from unnest(p_families) x), '[]'::jsonb) end`;
+  const old = `case when p_families is null then null
+                else (select jsonb_agg(x order by x) from unnest(p_families) x) end`;
+  assert.ok(src.includes(fixed), "the LIVE body hashes caller mode distinctly from plan mode");
+  const replayed = await withRolledBackTx(async (c) => {
+    await c.query("set local role clara_fn_owner");
+    await c.query(`create or replace function clara.apply_coa_template(p_client uuid, p_template uuid,
+        p_families text[], p_op_key text) returns jsonb
+      language plpgsql security definer set search_path = clara, pg_temp as $mut$${src.replace(fixed, old)}$mut$`);
+    await c.query("reset role");
+    const key = opk("hash-mutant");
+    const first = await asHumanOn(c, world.users.bob,
+      "select clara.apply_coa_template($1,$2,null::text[],$3) as r", [client, starter.id, key]);
+    const second = await asHumanOn(c, world.users.bob,
+      "select clara.apply_coa_template($1,$2,'{}'::text[],$3) as r", [client, starter.id, key]);
+    return { first: first.rows[0].r, second: second.rows[0].r };
+  });
+  assert.deepEqual(replayed.second, replayed.first,
+    "MUTANT: the explicit empty caller list replays the plan success -- §2.8 would red");
+  assert.equal((await rawAdoption(client)).length, 0, "the request-hash mutant was rolled back");
+});
+
+test("§9.5 refusal-ledger MUTANT: a post-write fake refusal is caught by all-five-ledger accounting", async (t) => {
+  if (unready(t)) return;
+  const client = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "ledger_mutant", answers: { entity_type: "sdn_bhd" },
+  });
+  await assert.rejects(
+    () => expectCleanRefusal(
+      client,
+      async () => {
+        await applyTemplate(world.users.bob, {
+          client, template: starter.id, opKey: opk("ledger-mutant"),
+        });
+        const fake = new Error("mutant: caller receives a refusal after durable writes");
+        fake.code = CLR.badRequest;
+        fake.detail = JSON.stringify({ reason: "synthetic_post_write_refusal" });
+        throw fake;
+      },
+      "synthetic_post_write_refusal",
+      "the mutant must not pass as a clean refusal",
+    ),
+    /refusal changed accounts\/adoptions\/op_receipts\/audit_log\/domain_events/,
+    "M12: any durable write makes the five-ledger clean-refusal assertion itself go RED",
+  );
 });
