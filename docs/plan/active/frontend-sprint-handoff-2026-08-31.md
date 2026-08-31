@@ -171,11 +171,13 @@ full-suite gates.
    on the TEST-mode account (裁-87); give build lanes a TEST restricted key env-to-env; the LIVE
    key only at the launch sitting.
 2. Supabase Auth settings per `docs/ops/wave-g-setup-checklist.md` (signup ON, redirect URLs
-   exactly `/signup` + /auth/confirm, confirm-email ON, autoconfirm OFF, the token-hash templates,
-   password policy, JWT 900 s) — owner-proven with a receipt.
+   exactly `/signup` + /auth/confirm, confirm-email ON, autoconfirm OFF, the signup-confirmation
+   mail template in the 裁-92 6-digit-code form — the checklist's token-hash instruction is
+   superseded for signup; the invite-accept link arm keeps its template — password policy, JWT
+   900 s) — owner-proven with a receipt.
 3. Cloudflare: account access for the Workers deploy (`clara-web`) and the `app.clarabook.com` DNS
    switch; Resend hardening per the checklist.
-4. Sign ADR-0077 (the product-law rulings of 08-30/08-31) into the digest.
+4. ~~Sign ADR-0077~~ — **DONE: signed at the 2026-08-31 evening sitting (裁-93)**, digest §14 is law.
 5. The pricing sitting (the RM amounts, 裁-58) — before or after launch, the owner's date.
 
 ## 8 · Design law, and every resource you must consume (the owner's standing question)
