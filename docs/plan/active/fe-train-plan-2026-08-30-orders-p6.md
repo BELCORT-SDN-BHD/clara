@@ -6,6 +6,10 @@ here inherits that file's §0 preamble in full** — the reading list, rung-0 at
 worktree/junction mechanics, the four verify commands, the manifest rule, the five instrument laws,
 the named-skills rule, and the report shape. Only the deltas are restated below.*
 
+That inherited §0.6 includes the current-official-docs check for Next 16 App Router,
+`@opennextjs/cloudflare`, shadcn 4.19 and Supabase SSR; inherited §0.7 makes the PR-body
+**Skills/MCP consumed** line mandatory.
+
 **P6 runs at 裁-9's tier (c), full depth** — every built surface re-checked screen by screen
 against the COMPLETE resource set (the token contract, the design-rule docs, the FD-001..FD-047
 decision log, the handoff repo's EMIL-CRAFT-AUDIT, all eight vendored Emil skills, the shadcn registry + live
@@ -32,8 +36,10 @@ the way v15 extends v14 — re-export every carried shape, add exactly the four 
 `agent_receipt` (generic; reads `agent_receipts_visible`) · `firm_question` (carries the
 resolve/dismiss doors' subject) · `close_proposal` · `freeform_result`. Then repoint `registry.ts`.
 **Never edit a frozen body**, and remember that the prompt and tool files inside a frozen closure
-*are* that body — `pnpm freeze:update` is for a brand-new frozen CLASS only; if freeze-lint demands
-an update for your change, you edited a frozen body: undo it.
+*are* that body. Run `pnpm freeze:update` for every added frozen path — both a brand-new class and
+a new `_vN` of an existing class require registration. Then run the rule's semantic
+`--compare-base` proof: any moved hash on a pre-existing deployed entry is a body edit to undo,
+never a reason to accept a re-baseline.
 
 **Live/working state stays at the SSE layer, not as a persisted part type** (Q8, verbatim).
 
@@ -49,15 +55,19 @@ the bundle was still on v13). **Rollback preflight** before any revert: confirm 
 still exports every workflow name and version holding non-terminal runs.
 
 **Acceptance.** v1..v15 byte-identical (prove it — `git diff --stat` on those paths is empty) ·
-freeze-lint passes without a manifest regeneration · the four kinds' field lists are the file's
-own declarations · the built-bundle grep is in the report.
+freeze-lint passes after registering the new v16 closure, and
+`node scripts/check-frozen-workflows.mjs --compare-base origin/main` proves the manifest is
+semantically additions-only · the four kinds' field lists are the file's own declarations · the
+built-bundle grep is in the report.
 
 ---
 
 ## P6-2 · The card wave — union 22 → 26, four rich cards, the sweep-card upgrade
 
 **Branch:** web/p6-2-cards. **Size 0.9. Depends on P6-1 MERGED** (not designed — merged).
-**Mobbin/skills: `emil-design-eng`, `animate`, `shadcn`; the card catalog in `docs/design/`.**
+**Mobbin/skills: `emil-design-eng`, `animate`, `shadcn`; the card catalog is
+`apps/web/lib/parts/catalog.ts` with wire types in `apps/web/lib/parts/types.ts`; `docs/design/`
+holds design direction.**
 
 **Why this waits for P6-1's merge.** `apps/web/lib/parts/types.ts:104-108` states the law: *"the
 runtime is the declarer, this module is the reader … do not 'improve' a field name or widen a type
@@ -144,8 +154,8 @@ recut, and `globals.css` says so about itself** — `:185-200` is a comment head
 flat `:focus-visible` outline is still what this file declares, so the two idioms still coexist"*,
 while `:447-450` declares that flat outline. **Read that comment before you touch anything: it is
 the previous lane telling you exactly what state you are inheriting, and your PR replaces it rather
-than deleting it.** Ten components carry the ring idiom today, **all still at `/50`** — and the
-robust census is the **colour token, not the width or the variant**: `grep -rl "ring-ring/50" apps/web/components/` returns exactly ten —
+than deleting it.** Eleven components carry the ring idiom today, **all still at `/50`** — and the
+robust census is the **colour token, not the width or the variant**: `grep -rl "ring-ring/50" apps/web/components/` returns exactly eleven —
 
 ```
 components/ui/button.tsx          components/ui/input.tsx
@@ -156,6 +166,7 @@ components/ui/input-group.tsx     <- on the WRAPPER, via
                                      so the literal focus-visible: prefix never appears
 components/common/native-select.tsx        components/common/section-tabs.tsx
 components/journals/drafts-queue-panel.tsx components/clara/ClaraThreadView.tsx
+components/firm/compliance-watch-affordance.tsx <- snooze date input, line 140
 ```
 
 (all relative to `apps/web/`). **That census took three attempts to get right; re-run it, do not
@@ -197,7 +208,7 @@ as honest as those strings, and a row whose source is aspirational makes the gat
 composition nothing renders.
 
 **Acceptance.** All four commands green · the target-size gate RED on a deliberately undersized
-fixture (prove it) · every `--target-min` exception visible and reasoned · the ten-carrier census
+fixture (prove it) · every `--target-min` exception visible and reasoned · the eleven-carrier census
 re-run and reported by file · six composited rows added and passing at 0.70 · the two solid focus
 rows corrected · the base-outline fallback preserved and documented · `--input`'s rows landing with
 its value.

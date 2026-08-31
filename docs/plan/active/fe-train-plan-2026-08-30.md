@@ -54,7 +54,8 @@ is superseded: **22 + 4 = 26** — a figure the file's own header at `:15` alrea
 truing is corroborated by the declarer, not only by this lane's count.
 
 **③ 裁-1, 裁-2 (4a/4b/4c), 裁-13 and R3's arm (b) are ALL UNEXECUTED at the tip.** Measured, not
-assumed: `grep -rl "ring-ring/50" apps/web/components/` returns the same **ten** carriers annex 2
+assumed: `grep -rl "ring-ring/50" apps/web/components/` returns **eleven** carriers (the annex-2 ten
+plus `apps/web/components/firm/compliance-watch-affordance.tsx`, added by T10/#395)
 §F censused, every one still at **`/50`**, not 裁-1's ruled `/70`. **R3's arm (b) — the global
 recut — is not built either, and `globals.css` says so about itself**: `:185-200` is a comment
 headed *"FOCUS TREATMENT — RULED 2026-08-27 evening (R3), RECUT STILL OWED"* concluding
@@ -74,12 +75,13 @@ still hardcoded English, an older debt this change does not silently widen and d
 have paid."* Under 裁-3 tier (a) a conformance item is **fixed as found, never deferred**, so the
 i18n debt rides P6-2 (which is already inside that file) rather than waiting for a polish lane.
 
-**④ THE P4 TRANCHE IS MEASURABLY ZERO — AND THE SHIPPED INVITE FLOW IS BROKEN. This blocks beta.**
-Re-measured at this tip: **all sixteen** P4 door and relation names (the fifteen from `0141`/`0145`
-plus `counterparty_aliases_visible`) return **zero** occurrences across every `.ts`/`.tsx` file in
-`apps/web`. That much was the planned state of a sequenced lane. **The defect underneath it was
-not.** `apps/web/components/invite-accept-form.tsx` contains **no `callDoor` call and never names
-`accept_invite`** (byte-read this lane; `grep -n "callDoor\|accept_invite"` on that file → nothing).
+**④ TRUED 2026-08-31 — THE P4 TRANCHE WAS MEASURABLY ZERO; THE INVITE DEFECT IS REPAIRED.**
+Name-by-name remeasurement finds **2 of the stated 16 wired** (`accept_invite` and `caller_context`,
+both in `apps/web/lib/identity/doors.ts` after #450) and 14 unwired. The historical table below
+enumerates only fifteen names; the remeasurement included the omitted
+`clara.firm_registration_requests` relation named by the P4 design, which also has no app caller.
+Before #450, `apps/web/components/invite-accept-form.tsx` contained no `callDoor` call and never named
+`accept_invite`.
 Its `handleAcceptInvite` calls `supabase.auth.verifyOtp({type: "invite"})` (`:81`); its
 `handleSetPassword` checks the subject binding and calls `supabase.auth.updateUser({password})`
 (`:126`), then `router.replace("/")` (`:136`).
@@ -92,9 +94,8 @@ OTP, sets a password, sees a success redirect — and lands on `/` with a valid 
 returns NULL, so every RLS-scoped read returns zero rows and every governed write raises `CLR04` at
 `clara._human_ctx`. **The UI reports success for a journey that completed nothing.**
 
-This is the identity gap P4's design §3 predicted in the abstract, now confirmed as a **shipped
-defect on `main`**. It reorders this plan: **P4-1 is the invite repair** (§2), narrow and shippable
-on its own, ahead of the scope spine and everything else.
+This was the identity gap P4's design §3 predicted in the abstract and was a shipped defect until
+#450 repaired it. **P4-1 is now DONE/MERGED**; the remaining P4 sequence stays in §2.
 
 **⑤ The 08-29 alignment audit's agent-buildable findings LANDED; two remain.** Verified at this
 tip: MBB-5 closed — `apps/web/lib/command/routes.ts` reads `status: "built"` on all fifteen rows,
@@ -144,21 +145,20 @@ Live at `0141`/`0145`, with the **live bodies chased past both** (the superseded
 | `clara.approve_firm_registration(uuid, text)` | `0145:766` | **owner+ AND `is_operator`** | none |
 | `clara.reject_firm_registration(uuid, text, text)` | `0145:832` | same | none |
 | `clara.invite_member(text, text, text)` | **`0147:372`** | admin+, role-ceiling walled | none |
-| `clara.accept_invite(text, text, text)` | **`0145:694`** | authenticated; JWT-email wall | none |
+| `clara.accept_invite(text, text, text)` | **`0145:694`** | authenticated; JWT-email wall | `apps/web/lib/identity/doors.ts` (#450) |
 | `clara.revoke_invite(uuid, text)` | `0141:466` | admin+ | none |
 | `clara.add_member(uuid, uuid, text, text)` | `0145:671` | admin+, ceiling | none |
 | `clara.set_member_role(uuid, text, text)` | `0145:592` | admin+, ceiling, CLR09 last-owner | none |
 | `clara.create_firm(text, uuid, text)` | **`0147:497`** | authenticated + admission token | dashboard only |
 | `clara.firm_members_visible` | `0141:512` | roster bookkeeper+, **email admin+** | none |
 | `clara.firm_invites_visible` | `0141:532` | admin+ | none |
-| `clara.caller_context` | `0141:544` | self-scoped, 0-or-1 row | none |
+| `clara.caller_context` | `0141:544` | self-scoped, 0-or-1 row | `apps/web/lib/identity/doors.ts` (#450) |
 | `clara.firm_registration_requests_visible` | `0145:911` | SELF or OPERATOR | none |
 | `clara.counterparty_aliases_visible` | `0145:960` | firm-scoped | **none — R-2, still zero readers** |
 
-Estate-wide the app calls ~167 door verbs and 39 relations (audit §1.1). **Every name in the table
-above returns ZERO occurrences across `apps/web`** — re-measured this lane, name by name. The
-tranche is not partially wired; it is not wired at all, and `accept_invite`'s absence is a shipped
-defect rather than an unstarted feature (§0 ④).
+Estate-wide the app calls ~167 door verbs and 39 relations (audit §1.1). **TRUED 2026-08-31:** two
+of the stated sixteen names have real callers after #450; fourteen remain unwired. The historical
+table itself lists fifteen names, an arithmetic defect preserved explicitly in §0 ④.
 
 ### 1.4 Tests and gates
 
@@ -208,7 +208,7 @@ genuinely shared file — §2.7 states the seam rule.
 
 | # | Train | Doors / reads | Depends on | Size |
 |---|---|---|---|---|
-| **P4-1** | **THE INVITE REPAIR — beta blocker.** Wire the shipped accept journey to the door that mints the membership | `accept_invite` | — | **0.4** |
+| **P4-1** | ~~**THE INVITE REPAIR — beta blocker.** Wire the shipped accept journey to the door that mints the membership~~ — **DONE/MERGED 2026-08-31 (#450)** | `accept_invite` | — | **0.4** |
 | **P4-2** | **The scope spine** — `requireFirmScope()`, one implementation, three entrances; the holding state's data | `caller_context`, `firm_registration_requests_visible` | — | 0.6 |
 | **P4-3** | **The entry group** — the (entry) route group on the identity canvas; signup; the holding page | `claim_identity`, `request_firm_registration` | P4-1 + P4-2 | 0.9 |
 | **P4-4** | **Members, roles, invites** — the roster, the role menu, the invite dialog, the mail courier | `firm_members_visible`, `firm_invites_visible`, `invite_member`, `revoke_invite`, `set_member_role`, `remove_member` | P4-2 | 1.0 |
@@ -256,14 +256,10 @@ home and a precondition, which is the mechanism the house already uses.
   **"Draft"** with no schema rename (裁-52) · a past-grace firm renders **read-only** with pay and
   export live and every book-write control disabled-with-reason (裁-55) · BELCORT's operator-exempt
   plan shows full metering and **no invoice** (裁-53) · the invoice renders **every** line 裁-42⑨
-  names, from `invoice_lines`, and sums nothing client-side. **Disposition: deferred AND
-  CONDITIONAL** — sequenced behind billing PR-2 (`get_firm_invoice`), and gated on an owner question
-  that is not the amounts: **does beta charge at all, or is it invited-and-unpaid?** If beta is
-  invited-unpaid, the checkout shell is not merely un-priced, it is **unbuilt for beta** and the
-  train drops out of the wave entirely; if beta charges, it re-enters behind billing PR-2. Written
-  as a train that can be pulled in or out on one word, so the wave does not carry a half-built
-  checkout either way. *(裁-28 and 裁-42 settle the MODEL and leave the AMOUNTS open; neither
-  answers this question, which is about whether money moves during beta at all.)*
+  names, from `invoice_lines`, and sums nothing client-side. **Disposition: IN — RULED 裁-57/58/68:**
+  beta is a paid launch with no invited-free tier; the checkout is on the beta critical path,
+  sequenced behind billing PR-1/PR-2. /admin/billing and /clients/[clientId]/tax exist in no
+  branch. *(裁-28 and 裁-42 settle the MODEL and leave only the AMOUNTS open; see §6 item 0.)*
 
 ### 2.7 · The shared-file seam
 
@@ -336,7 +332,7 @@ at P6's exit gate against whether its lane merged (the STALE-NOT-BUILT class).
 | **`clara.list_freeform_reads`** | does not exist (zero hits across 155 migrations) | a browsable freeform-read history; P6-2's `freeform_result` "see all" | the card renders the single result it was handed; no history link |
 | **裁-18b PR-3 · `reset_binding_revocation`** | door unbuilt; PR-3 owns its own D1 window | 裁-46's admin control | `vendor-bindings-panel.tsx` names the verb in a NotBuiltNote (§2.6) |
 | **G1 producers** (`bank_agent`, `close_prep`, binding-expiry, `tax_prep`) | wake bodies for the first two merged (#437) **with both switches OFF**; the other two unbuilt | anything that renders an agent-initiated receipt on the clock | the cards render when a run exists; the surfaces do not assert one does |
-| **Billing PR-1/2/3** | unbuilt; gate closed 裁-50…裁-56 | the whole checkout tranche (§2.6) | deferred — no surface ships |
+| **Billing PR-1/2/3** | unbuilt; 裁-57/58/68 put paid billing on the beta critical path | the whole checkout tranche (§2.6) | IN, sequenced behind billing PR-1/PR-2; no surface ships before its doors |
 | **F-T1 / F-T2 / F-T3** | unmerged / DDL-empty / unbuilt | P6-T's three panels | the tab ships with three named NotBuiltNotes |
 | **The hygiene-panel pair — ONE PR, not two** | see below | T8's alias list + the merge record | a single ~0.3 ride-along, sequenced whenever a lane is free |
 
@@ -409,14 +405,9 @@ would put two lanes in the same file for no gain:
 
 ## 6 · Open questions — each with this lane's recommendation, none resolved here
 
-0. **RULED 裁-57 — beta IS a paid launch, no invited-free tier.** DOES BETA CHARGE AT ALL — paid, or invited-and-unpaid? This is the one question that adds or
-   removes a whole train. 裁-28 and 裁-42 settle the billing MODEL and leave the AMOUNTS open;
-   neither says whether money moves during beta. If beta is **invited-unpaid**, the checkout shell
-   is unbuilt for beta and §2.6's billing train drops out of the wave; if beta **charges**, it
-   re-enters behind billing PR-2 (`get_firm_invoice`) and pulls 裁-36's DPA e-sign + rate wall and
-   裁-26's email-bound token in with it. *Recommend: ask it in the next batch, before the wave is
-   sequenced — this is cheap to answer and expensive to guess, and a half-built checkout is the one
-   outcome neither answer wants.*
+0. ~~**DOES BETA CHARGE AT ALL?**~~ — **CLOSED by 裁-57/58/68:** beta is paid, with no
+   invited-free tier; billing is on the critical path behind billing PR-1/PR-2. 裁-28 and 裁-42
+   settle the model and leave only the amounts open. See §2.6.
 1. **RULED 裁-64② — recommendation accepted verbatim.** The `--input` recut's origin (裁-2 4c). The ruling puts the recut in the **clarabook**
    repo, with `apps/web` re-porting after it merges. No such PR exists, and P6-3 cannot add the
    four `input-on-*` contrast rows without the value. *Recommend: let **P6-3 set the value in

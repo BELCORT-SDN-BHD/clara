@@ -103,7 +103,13 @@ Vendored in `.claude/skills/`: the eight Emil-family skills — **`emil-design-e
 **`animation-vocabulary`**, **`apple-design`**, **`ask-sonner`** — plus **`shadcn`**,
 **`design-an-interface`**, **`codebase-design`** and **`tdd`**. Session skills: **`impeccable`**
 (the per-surface acceptance lens) and **`frontend-design`**. MCP (`.mcp.json`): **`mobbin`**
-(reference grounding) · **`shadcn`** (registry queries) · **`codebase-memory-mcp`**.
+(reference grounding) · **`shadcn`** (registry queries) · **`codebase-memory-mcp`**. Before using
+version-sensitive APIs, verify current official documentation via Context7 or a cited official
+source for **Next 16 App Router, `@opennextjs/cloudflare`, shadcn 4.19 and Supabase SSR**.
+Pinned official entry points: [Next App Router](https://nextjs.org/docs/app) ·
+[OpenNext Cloudflare](https://opennext.js.org/cloudflare) ·
+[shadcn/ui](https://ui.shadcn.com/docs/official) ·
+[Supabase SSR](https://supabase.com/docs/guides/auth/server-side).
 **Rule:** the report names which skills and which MCP queries the surface actually consumed. A
 named-but-unused skill is a false claim; an unnamed-but-used one is unreproducible.
 
@@ -119,6 +125,8 @@ rung-0 census table (door → live body → args → refusals → grant) · test
 **by name** · every new door call and its surface · which skills/MCP you consumed · open questions
 with your recommendation · **what you could NOT verify and why**. The lead runs the independent
 fresh-context review and the cross-model leg; you answer fold rounds on the same branch.
+The PR body MUST include a **Skills/MCP consumed** line, including an explicit `none` when none were
+used; polish/design-resource trains name the applicable design skills and Mobbin work there.
 
 ---
 

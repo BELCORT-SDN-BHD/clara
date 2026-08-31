@@ -1,5 +1,9 @@
 # Issue tracker: GitHub
 
+**Repository state and deferrals do not live in GitHub issues.** ADR-0075(6) and hard constraint 8
+make `PROGRESS.md` the state authority; use issues only for the external collaboration mechanics
+below, never as a second backlog, disposition ledger or project-state record.
+
 Issues and PRDs for this repo live as GitHub issues in `BELCORT-SDN-BHD/clara` (transferred from the personal account `mosaladtaooo/clara` on 2026-07-20 — old URLs still redirect, and issue/PR numbers were preserved). Use the `gh` CLI for all operations.
 
 ## Conventions
