@@ -110,12 +110,16 @@ The one real user-flow defect is the ⌘K manifest (§2, MBB-5).
 The widely-suspected gap — "9 of 10 receipt part kinds are never emitted" — **was refuted twice**:
 they are forward-declared by design with the reason written at the declaration site
 (`apps/dashboard/app/shared/parts.ts:85,100,118` — constraint 9 forbids editing a frozen `chatTurn`
-body, so a new kind must wait for a `_vN`), they are ruled into P6's `chatTurn_v15` bump (裁-20), and
-three of them (`doc_review`, `diff`, `open_question`) already render live from needs-you rows via
-`apps/dashboard/app/shared/queueKindCatalog.ts:199-208`.
+body, so a new kind must wait for a `_vN`), they are ruled into P6's `chatTurn_v15` bump (裁-20; **TRUED 2026-08-30**: `v15` shipped
+2026-08-29 for the unrelated F-A6 PR-2 and is consumed+frozen, so this bump is `chatTurn_v16`),
+and three of them (`doc_review`, `diff`, `open_question`) already render live from needs-you
+rows via `apps/dashboard/app/shared/queueKindCatalog.ts:199-208`.
 
 **But the refutation surfaced the converse defect, which nobody had filed — see MBB-4.** The live
-registry is `chatTurn: chatTurn_v14` (`packages/runtime/workflows/registry.ts:54`).
+registry **was** `chatTurn: chatTurn_v14` (`packages/runtime/workflows/registry.ts:54`) when this
+was measured; **TRUED 2026-08-30**: the live registry is now `chatTurn: chatTurn_v15`
+(`registry.ts:61`, F-A6 PR-2, 2026-08-29), which adds no new part kind, so the finding below is
+unaffected.
 `ClaraPartV14 = ClaraPart | EntryPostedPart | QuestionOpenedPart | BankActPart | BankPackPart`
 (`chatTurn.v14.prompt.ts:26`), and `toTypedParts_v14` pushes them onto the wire at `:92`/`:94`.
 Neither frontend union knows any of the four — `grep` over `apps/web/lib/parts/types.ts` +
@@ -533,8 +537,8 @@ sees the coverage, not only the residue.
 | 7 | Firm admin cannot invite/see roster/see usage; invites need the Supabase dashboard | Backend is **built, merged and ceremonied live** (0141: `invite_member`, `accept_invite`, `revoke_invite`, `firm_members_visible`, `firm_invites_visible`); the cited evidence describes the invite *email template* being Supabase-configured, not the invite-send act. UI is the tracked P4 tranche. |
 | 8 | No object-level "add a new client" affordance anywhere | **Premise false.** A labeled, always-visible `Begin client onboarding` button is mounted app-wide via the rail (`layout.tsx:60` → `rail-mount.tsx:26` → `ClaraThreadView.tsx:82` → `OnboardingChecklistCard.tsx:71` → `BeginOnboardingCard`), rail defaults open (`threadStore.ts:59`), pinned by three tests. The cited files were the register page, where R7 deliberately put nothing. |
 | 9 | Freeform "ask the books" is read-only; PROGRESS calls it a still-open gap | PROGRESS is **accurate** — `clara.list_freeform_reads` genuinely does not exist (zero hits across all migrations); the panel reads the base table under 0131's grant. The handoff row is a dated snapshot with a filed errata correcting row 23 by number. |
-| 10 | 9 of 10 receipt part kinds are never emitted by the backend at all | Documented, deliberate forward-declaration with the reason at the declaration site (constraint 9 freezes `chatTurn` bodies); ruled into P6's `chatTurn_v15` (裁-20); and 3 of the 9 render live from queue rows in the dashboard. **This refutation surfaced MBB-4, the converse defect.** |
-| 11 | The P6 four-part wire bump is not in the ClaraPart union | Owner-ruled twice (Q8, 裁-20), named as the next step in `PROGRESS.md:112`, plan-of-record wave with the exact catalog delta (18→22), and self-documented at `types.ts:7-10`. |
+| 10 | 9 of 10 receipt part kinds are never emitted by the backend at all | Documented, deliberate forward-declaration with the reason at the declaration site (constraint 9 freezes `chatTurn` bodies); ruled into P6's `chatTurn_v16` (裁-20; TRUED 2026-08-30, was `v15` — `v15` shipped 2026-08-29 for the unrelated F-A6 PR-2 and is consumed+frozen); and 3 of the 9 render live from queue rows in the dashboard. **This refutation surfaced MBB-4, the converse defect.** |
+| 11 | The P6 four-part wire bump is not in the ClaraPart union | Owner-ruled twice (Q8, 裁-20), named as the next step in `PROGRESS.md:112`, plan-of-record wave with the exact catalog delta (TRUED 2026-08-30: 22→26, was 18→22), and self-documented at `types.ts:7-10`. |
 | 12 | `open_question` names two unrelated mechanisms | **Premise inverted.** One table (`clara.open_questions`), one PK, one read (`get_open_question`), one door pair — the needs-you row and the chat card are two views of the same row, and the dashboard literally constructs the part *from* the row (`queueKindCatalog.ts:206-209`). Law 3 used backwards. |
 | 13 | needs-you compliance/lint detail objects are unused | **False for compliance:** `lib/firm-admin/compliance.ts:87-101` consumes `env.compliance` and `compliance-register-panel.tsx:120-149` renders every per-client field on a live route. No per-client `lint` detail object exists in the DB at all (`0017:627-631` builds a single boolean). Both row kinds also carry inline governed acts, not just counts. |
 | 14 | The 10th needs-you row_kind (裁-18b) is mid-design | Cited gate record is a **superseded body** — the live file reads "*CLOSED — all eight RULED 2026-08-29 (裁-25)*", with PR-2 the tenth row_kind in a numbered five-PR sequence tracked at `PROGRESS.md:129`. |

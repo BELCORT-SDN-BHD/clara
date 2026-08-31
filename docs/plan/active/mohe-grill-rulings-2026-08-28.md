@@ -272,6 +272,8 @@ D1 window; full ladder. T8's UI says exactly what the door does at each frontier
 **Ruled (confirming the conductor's call):** `SweepReceiptPart` upgrades from an id-only
 summary card to a rich card with `get_sweep_run` detail + `acknowledge_sweep_run` inside the
 P6 wire bump (`chatTurn_v15`), alongside the other unhydrated part types. No separate train.
+**[TRUED 2026-08-30: the bump this ruling names is `chatTurn_v16` — `v15` shipped 2026-08-29
+for the unrelated F-A6 PR-2 and is consumed+frozen.]**
 
 ### 裁-21 · A firm-level standard Malaysian SME chart of accounts — YES, before beta
 
@@ -393,12 +395,10 @@ touches an applied chart (D-2's copy-versioning is the structural reason); the *
 shows divergence; Clara may **PROPOSE single-account additions in chat** (`wake_upsert_account`
 is already allowlisted for `interactive_client`) — every structural change is propose → human
 click; and a human may also maintain the chart by hand.
-
 **Build consequence.** A **research lane precedes PR-0** — official sources + best practice + a
 survey of what mainstream Malaysian software ships, newest editions. The template ships
 PUBLISHED (the owner waived the review) and applies to no client until the human click. The
 design is trued at Q1/Q3/Q6/Q8/Q11 and their D-numbers.
-
 ### 裁-24 · 裁-19's OQ-1 — PHYSICAL, in the append-only shape (a HYBRID; amended, not superseded)
 
 **The gating question** was whether 裁-19's *"merge moves the open items"* named the OUTCOME or
@@ -419,6 +419,7 @@ So the canonicalising read layer **STAYS** — it is what frozen years use — *
 **WRITE door is added** over it for open items in open periods. **D-01 becomes a HYBRID, and the
 design set is AMENDED, not superseded.**
 
+> **NARROWED 2026-08-30 by 裁-35 (`docs/plan/active/mohe-grill-rulings-2026-08-29.md`): S0 is read-layer only; no write door. See `docs/plan/active/counterparty-merge-gate-record.md` §2.2/OQ-8.**
 The other six:
 
 - **OQ-2** — keep a visible `recorded_counterparty_id` on aging and statement rows: **YES.**
@@ -483,7 +484,6 @@ state; the card disables settled items; the card is the ONLY surface, so a mis-t
 uncorrectable from inside the product. **Ruled: arm (b) — "Amend resolution" is allowed on a
 RESOLVED onboarding item**, filed to **P6**. The append-only audit trail already exists, so the
 amend is a new resolution row, never an edit of the old one. Supersedes the fail-closed default.
-
 ### 裁-28 · The pricing amounts — NOT RULED; the owner brings his own plan
 
 The pricing-amounts sitting (R8c) was put and the owner **declined to rule today**: he will bring

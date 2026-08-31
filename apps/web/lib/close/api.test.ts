@@ -393,22 +393,22 @@ test("listAgentActReceipts posts p_client + p_since (null when omitted) to list_
   });
 });
 
-test("settleCloseProposal posts p_proposal + p_state + p_reason + a fresh op_key to settle_close_proposal", async () => {
+test("settleCloseProposal posts p_proposal + p_state + p_reason + the caller op_key verbatim", async () => {
   const { impl, seen } = captureFetch({ proposal_id: "p1", state: "adopted" });
   await withMockedFetch(impl, async () => {
-    await settleCloseProposal("p1", "adopted", null, { session: fakeSession() });
+    await settleCloseProposal("p1", "adopted", null, "caller-owned-close-key", { session: fakeSession() });
   });
   const s = seen.first();
   assert.equal(s.fn, "settle_close_proposal");
   assert.deepEqual({ p_proposal: s.body.p_proposal, p_state: s.body.p_state, p_reason: s.body.p_reason }, { p_proposal: "p1", p_state: "adopted", p_reason: null });
-  assert.match(String(s.body.p_op_key), /^[0-9a-f-]{36}$/);
+  assert.equal(s.body.p_op_key, "caller-owned-close-key");
 });
 
 test("settleCloseProposal's CLR41 close_proposal_already_settled refusal surfaces verbatim", async () => {
   const impl = (async () =>
     jsonResponse({ code: "CLR41", message: "close proposal p1 is already withdrawn; a settled proposal is terminal", details: '{"reason":"close_proposal_already_settled","state":"withdrawn"}' }, 400)) as typeof fetch;
   await withMockedFetch(impl, async () => {
-    await assert.rejects(settleCloseProposal("p1", "adopted", null, { session: fakeSession() }), (e: unknown) => {
+    await assert.rejects(settleCloseProposal("p1", "adopted", null, "caller-refusal-key", { session: fakeSession() }), (e: unknown) => {
       assert.ok(isDoorRefusal(e));
       assert.equal((e as import("./api").DoorRefusal).code, "CLR41");
       return true;
