@@ -420,9 +420,26 @@ describe("WALL 2 — every \"use server\" MODULE calls the spine or is registere
     assert.deepEqual(actionFiles, [], "a \"use server\" action now exists — the next cell governs it from here");
   });
 
-  it("MUST-NOT-RED CONTROL: an ordinary registered page/route carries no directive", () => {
-    assert.equal(isUseServerModule("app/login/page.tsx"), false);
-    assert.equal(isUseServerModule("app/api/runtime/[...path]/route.ts"), false);
+  it("MUST-NOT-RED CONTROL: no registered surface is a \"use server\" module or carries an inline directive", () => {
+    // DERIVED, not spelled — the exact defect class this PR exists to kill.
+    // This control used to hard-code "app/login/page.tsx"; #461 moved that
+    // file to app/(entry)/login/page.tsx and the spelled path went ENOENT on
+    // the merged base. Every registered surface in the two registries is
+    // checked instead: the registry moves with the tree (a path edit there IS
+    // the fix for a file move), and each registry's own "exists on disk"
+    // VACUITY CONTROL in the sibling census already guards against a stale
+    // entry silently doing nothing here.
+    let checked = 0;
+    for (const path of [...SCOPE_UNSCOPED_SURFACES.map((s) => s.path), ...SCOPE_EXEMPT_SURFACES.map((s) => s.path)]) {
+      if (!existsSync(join(WEB_ROOT, path))) continue;
+      checked += 1;
+      assert.equal(isUseServerModule(path), false, `${path} is registered but carries a "use server" directive`);
+      const stripped = stripComments(readSourceUnit(path)).code;
+      assert.deepEqual(inlineOccurrences(stripped), [], `${path} is registered but carries an inline "use server" directive`);
+    }
+    // Guards against the control going vacuously green if either registry
+    // were ever emptied out from under it.
+    assert.ok(checked > 0, "this control checked zero registered surfaces — it would be vacuously green");
   });
 
   it("every \"use server\" action calls the spine, or is registered with a written reason", () => {
