@@ -7,6 +7,10 @@ import "./next-runtime-globals";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 
 import { config } from "../proxy";
+import {
+  isPublicPath,
+  referrerPolicyForPath,
+} from "../lib/supabase/proxy";
 
 /**
  * Finding 3 (MEDIUM) — the static-extension matcher bypass.
@@ -55,6 +59,12 @@ describe("the proxy gate runs on every protected route", () => {
     // the session cookie on the login page.
     "/login",
     "/invite/some-token-hash",
+    "/signup",
+    "/auth/confirm?token_hash=example",
+    "/auth/confirm/verify",
+    // NOT public — it needs a session — but still MATCHED, so the proxy runs
+    // and redirects an unauthenticated caller to /login.
+    "/pending",
     "/logout",
   ];
 
@@ -87,5 +97,102 @@ describe("only real framework/static namespaces are exempt", () => {
     // happens to contain "brand/" deeper in is still gated.
     assert.equal(matches("/clients/acme/brand/assets.png"), true);
     assert.equal(matches("/clients/_next/static"), true);
+  });
+});
+
+/**
+ * P4-3 — THE PUBLIC ALLOWLIST, BOTH WAYS.
+ *
+ * The matcher above decides whether `proxy()` RUNS. This block decides what it
+ * does once it has: `isPublicPath` is the predicate that lets a request through
+ * with no session at all, so a path wrongly in it is an unauthenticated read of
+ * a protected surface, and a path wrongly out of it is a redirect loop for a
+ * page that must render before a session exists.
+ *
+ * IT DRIVES THE REAL FUNCTION, exported from `lib/supabase/proxy.ts` for exactly
+ * this. A test that re-declared the prefix list would be asserting its own
+ * spelling rather than the gate's behaviour (review law 3), and would keep
+ * passing after the real list changed underneath it.
+ *
+ * `tests/firm-scope-surfaces.test.ts` closes the other half of the loop: it
+ * matches the declared prefixes against `SCOPE_UNSCOPED_SURFACES`'s `public`
+ * entries both ways, so a page cannot be public here and unregistered there.
+ */
+describe("P4-3 — signup confirmation is public, and the holding route deliberately is not", () => {
+  it("all public entries resolve public, exactly and as ancestors", () => {
+    for (const pathname of [
+      "/login",
+      "/invite",
+      "/invite/some-token-hash",
+      "/signup",
+      "/auth/confirm",
+      "/auth/confirm/verify",
+    ]) {
+      assert.equal(isPublicPath(pathname), true, `${pathname} must be public`);
+    }
+  });
+
+  it("/pending is NOT public — its content is a report on the caller's own registration", () => {
+    // If this ever flips, an unauthenticated stranger can load the holding page.
+    // It is the one (entry) leaf that needs a session, and the single most
+    // consequential line in this file.
+    assert.equal(isPublicPath("/pending"), false);
+  });
+
+  it("nothing else the app serves is public", () => {
+    for (const pathname of [
+      "/",
+      "/needs-you",
+      "/clients",
+      "/clients/rome-properties/bank",
+      "/admin",
+      "/admin/members",
+      "/logout",
+      "/api/runtime/threads",
+    ]) {
+      assert.equal(isPublicPath(pathname), false, `${pathname} must NOT be public`);
+    }
+  });
+
+  it("a prefix matches only on a SEGMENT boundary — /signupsomething is not /signup", () => {
+    // The `${prefix}/` guard, asserted rather than assumed. Without it a plain
+    // `startsWith` would open every route whose name merely begins with an
+    // allowlisted one, and `/loginsomething` would be an ungated surface.
+    for (const pathname of [
+      "/signupsomething",
+      "/signup-old",
+      "/loginx",
+      "/invitees",
+      "/auth/confirmation",
+      "/pendingx",
+    ]) {
+      assert.equal(isPublicPath(pathname), false, `${pathname} must NOT be public`);
+    }
+    // …while a genuine child segment IS public.
+    assert.equal(isPublicPath("/signup/step-2"), true);
+    assert.equal(isPublicPath("/auth/confirm/verify"), true);
+  });
+
+  it("VACUITY CONTROL: the predicate is a real function that can answer BOTH ways", () => {
+    // Otherwise every cell above passes against a stub that always returns
+    // false, and the four public paths would be silently unreachable.
+    assert.equal(typeof isPublicPath, "function");
+    assert.notEqual(
+      isPublicPath("/signup"),
+      isPublicPath("/pending"),
+      "the predicate answers identically for a public and a non-public path",
+    );
+  });
+});
+
+describe("NEW-A: token-bearing entry routes send only the referrer data their POST needs", () => {
+  it("uses strict-origin on /auth/confirm so its real browser POST carries a non-null Origin", () => {
+    assert.equal(referrerPolicyForPath("/auth/confirm"), "strict-origin");
+    assert.equal(referrerPolicyForPath("/auth/confirm/verify"), "strict-origin");
+  });
+
+  it("keeps invite bearer URLs at no-referrer and leaves ordinary pages unchanged", () => {
+    assert.equal(referrerPolicyForPath("/invite/token-hash"), "no-referrer");
+    assert.equal(referrerPolicyForPath("/signup"), null);
   });
 });

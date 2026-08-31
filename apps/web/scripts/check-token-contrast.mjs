@@ -290,6 +290,62 @@ export const PAIR_SPECS = [
   { id: "info-on-info-muted", fg: (h) => h("info"), bg: (h) => h("info-muted"), threshold: 4.5,
     source: "components/parts/PartBadge.tsx info chip (bg-info-muted text-info); components/common/state.tsx TONE_CLASS.info (border-info/30 bg-info-muted text-info), rendered via <StateBanner tone=\"info\"> — e.g. data-state.tsx's ErrorMessage no_session state, which moved onto this boxed shape in the P3 polish (formerly a bare text-info line, now retired as its own pair — see the RETIRED note above)." },
 
+  // --- Text on the R2 / 裁-2 identity canvas — the (entry) route group's own
+  // ground. Ten pairs at 4.5:1, added by P4-3 when `--identity-canvas` was
+  // bridged into @theme and `app/(entry)/layout.tsx` began rendering on it.
+  // Before that bridge no utility could reach the token, so there was no
+  // consumed pair to gate; now there is exactly one layout, and these are the
+  // text roles the four entry faces draw on it.
+  //
+  // MEASURED, NOT TRANSCRIBED. Every ratio below was re-measured on this branch
+  // with THIS file's own parseRootTokens/resolveTokenHex/contrastRatio, and each
+  // agreed with annex 1 §C.2 to three decimals — foreground 14.355 · brand
+  // 11.010 · secondary-ink 7.297 · clara 6.339 · warning 6.283 · primary 6.197 ·
+  // error 6.079 · destructive 6.079 · success 5.703 · muted-foreground 4.636,
+  // the last being the tightest and the reason this set is worth pinning at all.
+  //
+  // WHY TEN AND NOT ELEVEN — the one judgement call in this block, recorded
+  // because §C.2 writes its list as nine `·`-separated entries, two of which
+  // name two tokens ("primary/interaction", "error/destructive"). Expanding both
+  // gives eleven; expanding neither gives nine. The rule applied here is the one
+  // this file already uses elsewhere: **an alias chain is ONE role; two
+  // independent literals are TWO.** `--primary: var(--interaction)` is an alias
+  // — one role wearing two names, and a row for each would be the same
+  // declaration measured twice. `--error: #b42318` and `--destructive: #b42318`
+  // are two SEPARATE literals that merely coincide today, exactly like
+  // clara-on-card/clara-on-background and sidebar-accent above, and either can
+  // be retuned without the other. So: primary collapses, error/destructive does
+  // not, and the count is ten. Reported to the lead as an open question rather
+  // than settled unilaterally — if the intended ten differ, this block is one
+  // edit and no ratio changes.
+  //
+  // NO COMPOSITED FOCUS ROW IS ADDED HERE, deliberately (plan §6 OQ-7, 裁-64 ④).
+  // The halo is still `ring-ring/50` on this tip and §C.1 measured it failing
+  // 3:1 against every ground it is drawn on — cream 2.317, and white 2.363, so
+  // the failure is ground-INDEPENDENT and not something the cream ground
+  // introduces. A cream focus row here would assert a composition that does not
+  // ship. P6-3 lands the 70% recut and its six composited rows together.
+  { id: "foreground-on-identity-canvas", fg: (h) => h("foreground"), bg: (h) => h("identity-canvas"), threshold: 4.5,
+    source: "the default body text of every card and every prose line on the five (entry) faces, wherever it is drawn on the group's ground rather than inside the white card — app/(entry)/layout.tsx (bg-identity-canvas)" },
+  { id: "brand-on-identity-canvas", fg: (h) => h("brand"), bg: (h) => h("identity-canvas"), threshold: 4.5,
+    source: "components/entry/brand-lockup.tsx — the wordmark (font-serif text-brand) sitting directly on the canvas above the card, the ONE element on these pages drawn on the ground with no card between" },
+  { id: "secondary-ink-on-identity-canvas", fg: (h) => h("secondary-ink"), bg: (h) => h("identity-canvas"), threshold: 4.5,
+    source: "the secondary prose role on the same ground; kept as its own row for the token-drift reason this file applies throughout — --secondary-ink is an independent literal, not an alias of --ink" },
+  { id: "clara-on-identity-canvas", fg: (h) => h("clara"), bg: (h) => h("identity-canvas"), threshold: 4.5,
+    source: "the Clara accent role on the entry ground — pinned with the rest of §C.2's measured set so a --clara retune cannot silently fail on the one ground no other pair covers" },
+  { id: "warning-on-identity-canvas", fg: (h) => h("warning"), bg: (h) => h("identity-canvas"), threshold: 4.5,
+    source: "components/common/state.tsx's StateBanner tone=\"warning\" (text-warning) as the holding page renders it for a REJECTED registration — components/entry/holding-card.tsx" },
+  { id: "primary-on-identity-canvas", fg: (h) => h("primary"), bg: (h) => h("identity-canvas"), threshold: 4.5,
+    source: "the inline-link idiom on the entry faces (text-primary underline) — components/login-form.tsx's 裁-57 sign-up link and components/entry/signup-account-form.tsx's two sign-in links. --primary aliases --interaction, so this ONE row covers both names (see the note above)" },
+  { id: "error-on-identity-canvas", fg: (h) => h("error"), bg: (h) => h("identity-canvas"), threshold: 4.5,
+    source: "StateBanner tone=\"error\" (text-error) on the entry faces — signup's verbatim door refusals (components/entry/signup-firm-form.tsx) and the holding page's two fail-closed branches" },
+  { id: "destructive-on-identity-canvas", fg: (h) => h("destructive"), bg: (h) => h("identity-canvas"), threshold: 4.5,
+    source: "the shadcn destructive text role on the same ground. Resolves to the same hex as --error today and is kept separate for the same token-drift reason clara-on-card/clara-on-background are two entries — the two are independent literals in globals.css, not an alias pair" },
+  { id: "success-on-identity-canvas", fg: (h) => h("success"), bg: (h) => h("identity-canvas"), threshold: 4.5,
+    source: "the success text role on the entry ground, pinned with the rest of §C.2's set" },
+  { id: "muted-foreground-on-identity-canvas", fg: (h) => h("muted-foreground"), bg: (h) => h("identity-canvas"), threshold: 4.5,
+    source: "THE TIGHTEST PAIR IN THIS BLOCK (4.636 against a 4.5 bar — 0.136 of headroom). The caption/hint role, and the most-used text colour on these faces: NotBuiltNote's body, signup's note hint, the sign-in and sign-up link lines. A --muted-readable retune of even one step reds here first, which is exactly what this row is for" },
+
   // --- The one non-text pair: the visible focus ring itself (WCAG 1.4.11 /
   // 2.4.7 UI-component threshold, 3:1). Named by hand because gate (c)'s
   // keyboard walks assert this ring is VISIBLE — a ring that fails contrast

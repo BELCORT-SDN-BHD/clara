@@ -189,7 +189,11 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     assert.ok(leaves.length > 15, `only ${leaves.length} route leaves found under ${APP_DIR}`);
     const files = leaves.map((l) => l.file);
     for (const expected of [
-      "app/login/page.tsx",
+      "app/(entry)/login/page.tsx",
+      "app/(entry)/signup/page.tsx",
+      "app/(entry)/auth/confirm/page.tsx",
+      "app/(entry)/pending/page.tsx",
+      "app/(entry)/invite/[token]/page.tsx",
       "app/logout/route.ts",
       "app/api/runtime/[...path]/route.ts",
       "app/(firm)/page.tsx",
@@ -202,7 +206,101 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     const byFile = new Map(leaves.map((l) => [l.file, l.url]));
     assert.equal(byFile.get("app/(firm)/page.tsx"), "/");
     assert.equal(byFile.get("app/(full)/clara/[threadId]/page.tsx"), "/clara/[threadId]");
-    assert.equal(byFile.get("app/login/page.tsx"), "/login");
+    assert.equal(byFile.get("app/(entry)/login/page.tsx"), "/login");
+  });
+
+  it("P4-3's MOVE kept every entry URL BYTE-IDENTICAL — resolved from the tree", () => {
+    // THE ACCEPTANCE THIS TRAIN IS JUDGED ON, asserted by ROUTE and not by
+    // claim (P4-3's order: "every URL byte-identical after the moves (assert by
+    // route, not by claim)"). /login and /invite/:token moved from `app/` into
+    // `app/(entry)/`; a route group contributes no URL segment, so both must
+    // still answer on exactly the paths they answered on before — every invite
+    // link already sitting in an inbox, every `?next=` value proxy.ts writes,
+    // and every internal link depends on it.
+    //
+    // The instrument is `routeLeaves()`, the same walk the classification cells
+    // use: it derives the URL from the directory chain, skipping `(group)`,
+    // `@slot` and `_private` folders. So this reads the real tree rather than a
+    // list somebody kept in step by hand.
+    const byFile = new Map(leaves.map((l) => [l.file, l.url]));
+    assert.equal(byFile.get("app/(entry)/login/page.tsx"), "/login");
+    assert.equal(byFile.get("app/(entry)/invite/[token]/page.tsx"), "/invite/[token]");
+    assert.equal(byFile.get("app/(entry)/signup/page.tsx"), "/signup");
+    assert.equal(byFile.get("app/(entry)/auth/confirm/page.tsx"), "/auth/confirm");
+    assert.equal(byFile.get("app/(entry)/pending/page.tsx"), "/pending");
+
+    // And the pre-move paths are GONE — a leftover copy at the old path would
+    // serve the same URL from two files, which is a Next build error in
+    // production but silently invisible to the assertions above.
+    const files = leaves.map((l) => l.file);
+    assert.equal(files.includes("app/login/page.tsx"), false, "the pre-move login page is still on disk");
+    assert.equal(files.includes("app/invite/[token]/page.tsx"), false, "the pre-move invite page is still on disk");
+
+    // VACUITY CONTROL for this cell: the walk genuinely resolves a group to no
+    // segment, rather than these four passing because it returns "" for
+    // everything. `(firm)/page.tsx` → "/" is the same mechanism, and the
+    // deep dynamic route below proves segments DO accumulate when they are not
+    // groups — so a walker that dropped every segment would red here.
+    assert.equal(byFile.get("app/(firm)/page.tsx"), "/");
+    assert.equal(
+      byFile.get("app/(full)/clients/[clientId]/clara/[threadId]/page.tsx"),
+      "/clients/[clientId]/clara/[threadId]",
+    );
+  });
+
+  it("the five (entry) pages classify, and /pending is NOT public", () => {
+    // The census's "EVERY leaf classifies" cell would also pass if all five were
+    // registered wrongly-but-consistently, so the CLASS of each is pinned by
+    // name here. All five are pages under a group whose layout is not an
+    // entrance, so none can be ancestor-covered: each needs its own registry
+    // row, and each has one.
+    for (const file of [
+      "app/(entry)/login/page.tsx",
+      "app/(entry)/signup/page.tsx",
+      "app/(entry)/auth/confirm/page.tsx",
+      "app/(entry)/pending/page.tsx",
+      "app/(entry)/invite/[token]/page.tsx",
+    ]) {
+      assert.equal(classify({ file, url: "" }), "registered unscoped", `${file} is not registered unscoped`);
+      assert.equal(ancestorCovered(file), false, `${file} claims an entrance ancestor it does not have`);
+    }
+
+    // THE ONE ASYMMETRY THAT MATTERS. Four of the five are public — they run
+    // with no session at all. /pending is NOT: it requires a session and merely
+    // does not require a firm (design §4 E). If it ever gained `public: true`
+    // the cross-check against PUBLIC_PATH_PREFIXES would force /pending into
+    // proxy.ts's allowlist, and an unauthenticated stranger could load a page
+    // whose entire content is a report on the caller's own registration.
+    const entry = (p: string) => SCOPE_UNSCOPED_SURFACES.find((s) => s.path === p);
+    assert.equal(entry("app/(entry)/login/page.tsx")?.public, true);
+    assert.equal(entry("app/(entry)/signup/page.tsx")?.public, true);
+    assert.equal(entry("app/(entry)/auth/confirm/page.tsx")?.public, true);
+    assert.equal(entry("app/(entry)/invite/[token]/page.tsx")?.public, true);
+    assert.equal(
+      entry("app/(entry)/pending/page.tsx")?.public,
+      undefined,
+      "the holding route is marked public — it requires a session",
+    );
+  });
+
+  it("no (entry) surface calls the spine — the self-redirect loop /pending would be", () => {
+    // requireFirmScope() sends a no-firm caller to HOLDING_ROUTE, which IS
+    // /pending. A check on that page redirects it to itself forever, and a check
+    // in the group's layout does the same to all five faces while also refusing
+    // every caller who has no session yet — which is four of the five by
+    // design. The registry says these are unscoped; this cell proves the files
+    // agree with the registry.
+    for (const file of [
+      "app/(entry)/layout.tsx",
+      "app/(entry)/login/page.tsx",
+      "app/(entry)/signup/page.tsx",
+      "app/(entry)/auth/confirm/page.tsx",
+      "app/(entry)/auth/confirm/verify/route.ts",
+      "app/(entry)/pending/page.tsx",
+      "app/(entry)/invite/[token]/page.tsx",
+    ]) {
+      assert.equal(callsSpine(file), false, `${file} calls the scope spine`);
+    }
   });
 
   it("EVERY leaf classifies — an unclassified authenticated surface is a hole", () => {
@@ -272,7 +370,7 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     );
     assert.equal(ancestorCovered("app/(firm)/scratch/route.ts"), false);
     assert.equal(ancestorCovered("app/(firm)/clients/page.tsx"), true);
-    assert.equal(classify({ file: "app/login/page.tsx", url: "/login" }), "registered unscoped");
+    assert.equal(classify({ file: "app/(entry)/login/page.tsx", url: "/login" }), "registered unscoped");
   });
 
   it("VACUITY CONTROL: the three registries are non-empty and their files exist", () => {
@@ -467,9 +565,13 @@ describe("HIGH-1 — the guard dominates the proxy, and owns the outbound identi
 });
 
 describe("the deliberate exemptions stay exempt", () => {
-  it("the registry names both, each with a substantial reason", () => {
+  it("the registry names every exemption, each with a substantial reason", () => {
     const paths = SCOPE_EXEMPT_SURFACES.map((e) => e.path).sort();
-    assert.deepEqual(paths, ["app/api/invite/route.ts", "app/logout/route.ts"]);
+    assert.deepEqual(paths, [
+      "app/(entry)/auth/confirm/verify/route.ts",
+      "app/api/invite/route.ts",
+      "app/logout/route.ts",
+    ]);
     for (const entry of SCOPE_EXEMPT_SURFACES) {
       assert.ok(entry.reason.length >= 120, `${entry.path}'s reason is too thin to survive a later lane`);
       assert.match(entry.reason, /EXEMPT (BY NECESSITY|ON PRINCIPLE)/);

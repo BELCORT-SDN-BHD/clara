@@ -1,7 +1,9 @@
 # The checkout / signup gate — design of record
 
-*Written 2026-08-31 for the FS-4 design gate (R8); **v2** after the independent review
-(FIX REQUIRED — 3 BLOCKER, 14 MATERIAL, 9 NIT; all folded). Measurement:
+*Written 2026-08-31 for the FS-4 design gate (R8). **v3** — amended to 裁-89, the owner's ruling
+on G1: **the admission door is ONE transaction.** (v2 was the fold of the independent review's
+3 BLOCKER / 14 MATERIAL / 9 NIT; that work stands, and the gate record of the two-step gate is the
+record of the gate that ran.) Measurement:
 [`checkout-gate-survey.md`](checkout-gate-survey.md). **Part 2** — the database objects:
 [`checkout-gate-design-part2.md`](checkout-gate-design-part2.md). **Part 3** — the webhook
 contract, the surfaces, the environment and the acceptance battery:
@@ -10,12 +12,15 @@ contract, the surfaces, the environment and the acceptance battery:
 [`checkout-gate-gate-record.md`](checkout-gate-gate-record.md) — **ten questions and two
 declarations, and this design builds around none of them.***
 
-> **What v2 changed, in one line.** The review proved the door I specified **stranded the paying
-> customer** — it demanded an unconsumed payment while consuming it on the first call, so the
-> retry path I named "rotation" was unreachable. Part 2 §1.3 carries the repair and states plainly
-> what was wrong; the partial-failure table in §5 was re-walked against the repaired door; and
-> **PKCE's cross-device cost is now a question to the owner (G10) rather than an unstated
-> regression.**
+> **What v3 changed.** 裁-89 folded `claim_paid_admission` + `create_firm` +
+> `close_paid_registration` into **one door in one transaction** (part 2 §1.3). Working it out
+> produced a consequence the ruling did not have to promise: **the folded door needs no admission
+> token at all**, so `clara.firm_admissions` is untouched, **`create_firm` is not re-cut, and the
+> D1 write-quiesce window disappears** — restoring 裁-73's own "unchanged, no D1 window"
+> prediction. `reconcile_paid_registrations` retires unbuilt; seven acceptance cells retire with
+> their subjects and one (W-E3) is added to keep those retirements honest. 裁-26's email-bound
+> token is superseded rather than built (gate record G7 item 4). **What the fold does NOT remove:
+> the double payment** — that is settled at ⑦, before the door runs.
 
 **Scope (裁-73 · 裁-74 · 裁-68 · 裁-26 · 裁-36 · 裁-64① · 裁-87).** A stranger's browser causes a
 new FIRM to exist, exactly once, after paying. **In scope:** the signup→confirm browser binding,
@@ -39,7 +44,7 @@ claimed at MERGE, so every new migration is named `UNNUMBERED_*` (constraint 10)
 
 ```
   ①  /signup            supabase.auth.signUp  ──►  confirmation mail
-  ②  /auth/confirm      POST code  ──►  exchangeCodeForSession   ← THE BROWSER BINDING (§3)
+  ②  /auth/confirm      POST {email, 6-digit code} ──► verifyOtp   ← 裁-92, and its walls (§3)
   ③  /signup            claim_identity  ──►  request_firm_registration (status=open)
   ④  /signup            sign_dpa                                      ← 裁-68①
   ⑤  POST /checkout     open_checkout_intent  ← THE RATE WALL (§4)
@@ -49,17 +54,17 @@ claimed at MERGE, so every new migration is named `UNNUMBERED_*` (constraint 10)
                         └─► record_stripe_event(id, type, payload)   append-only, idempotent
   ⑦  the applier        apply_stripe_events()  ──►  firm_registration_payments row
   ⑧  /checkout/success  GET paints; its POST does the work (M9)
-                        └─► claim_paid_admission(registration, op_key)  ──► admission token
-                        └─► create_firm(name, token, op_key)         ──► the firm exists
-                        └─► close_paid_registration(...)             ──► registration closed
+                        └─► claim_paid_firm(registration, op_key)    ──► ONE transaction (裁-89):
+                              claim · _create_firm_core · close the registration · stamp the payment
   ⑨  redirect to the firm home
 ```
 
 Steps ③–⑨ are refused by the database on its own authority. **Every route here is a courier**
 that carries values to a door and renders the door's verdict. No route is a wall.
 
-The six new doors, their exact signatures and every refusal code are **part 2 §1**; the webhook
-route's contract is **part 3 §1**.
+The **five** new doors, their exact signatures and every refusal code are **part 2 §1**; the
+webhook route's contract is **part 3 §1**. *(v3: 裁-89 folded two doors into one and retired a
+third, `reconcile_paid_registrations`, unbuilt.)*
 
 ### 1.1 · The transport is route handlers. NO Server Actions.
 
@@ -69,7 +74,7 @@ steps are client-side and one is not in this app at all:
 | step | where it runs |
 |---|---|
 | ① `signUp` | **client** — a client component calling Supabase directly |
-| ② confirm | the GET page is a **paint-only server component**; **the verify POST is a route handler** ← *server entry* |
+| ② confirm | the GET page is a **code-entry form** (server component); **the verify POST is a route handler** ← *server entry* |
 | ③ `claim_identity` + `request_firm_registration` | **client** — `signup-firm-form.tsx` opens `"use client"` and calls both doors through `callDoor`/PostgREST with the browser's own token |
 | ④ the DPA step | the text is **read** by a server component; **`sign_dpa` is called the same way ③ calls its doors — from the client, over PostgREST** (decided below) |
 | ⑤ POST /checkout | **route handler** ← *server entry*; it holds the Stripe secret and 303s |
@@ -148,10 +153,11 @@ the mutant that must redden its cell:
 - *two firms from one person* — `uq_membership_active_user` (survey F5). `_create_firm_core`
   refuses `CLR10 actor already belongs to a firm` before the insert **and** catches the
   `unique_violation` on the race.
-- *two firms from one registration* — a new UNIQUE index
-  `uq_firm_admissions_registration` on `firm_admissions(registration_id) WHERE registration_id
-  IS NOT NULL`, asserted BY PROPERTY from `pg_index` (unique + valid + ready + live + key columns
-  + predicate), never by name.
+- *two firms from one registration* — **the folded transaction itself.** The door reads the
+  registration `FOR UPDATE`, refuses unless `firm_id IS NULL`, and sets `firm_id` before it
+  commits, so a second caller either blocks and then sees a firm, or replays. Under 裁-89 this
+  needs no index at all: v2 spent two partial unique indexes and a rotation rule buying a property
+  the transaction boundary gives for free.
 - *two open registrations* — `uq_firm_registration_requests_open_applicant` (survey F4).
 - *two payment rows for one Stripe event* — `firm_registration_payments.stripe_event_id` UNIQUE,
   and the applier inserts `ON CONFLICT DO NOTHING`.
@@ -177,173 +183,159 @@ removed by this train **because the thing it names now exists** — not edited t
 
 ---
 
-## 3 · The login-CSRF binding — recommendation: **Supabase's native PKCE exchange**
+## 3 · Confirmation is a 6-DIGIT EMAIL CODE (裁-92) — and what that changes
 
-*This is §FS-4's mandatory design input. The finding is recorded at `PROGRESS.md:398` and its
-mechanism is confirmed at the source in survey §5.2.*
+*裁-92 ruled G10 against this design's own recommendation: **the owner chose cross-device
+experience over the cryptographic binding.** That is a legitimate trade and this section designs it
+honestly, including the walls it makes mandatory. The PKCE work v2/v3 specified is **superseded for
+signup**; §3.7 says what survives.*
 
-### 3.1 · The property that must hold
+### 3.1 · What the hole was, and why the code closes it by removing the vector
 
-The confirmation POST must refuse unless **the browser presenting the token is the browser that
-initiated the signup that token belongs to**. `proveSameOrigin` cannot supply that property by
-construction: it proves the click came from a page served by this deployment's origin, and in
-this attack the forged page *is* Clara's page. Widening or tightening the Origin check cannot
-reach the property, which is why 裁-68③/裁-26 point at a binding instead.
+The recorded finding: the confirmation POST proved only that a click came from a Clara page, never
+that **this** browser initiated the signup the token belonged to. The attack needed **a link the
+attacker could send** — their own legitimate confirmation link, clicked by a victim, installing the
+attacker's session in the victim's browser.
 
-### 3.2 · The recommendation, and the measurement behind it
+**裁-92 deletes the link.** The mail carries a six-digit code (`{{ .Token }}`) and nothing to click.
+There is no link to feed a victim, so the vector is gone — not walled, *absent*. What replaces it
+as the binding is weaker but sufficient, and it is worth stating exactly why:
 
-**Adopt Supabase's PKCE confirmation exchange.** The decisive fact was measured in the shipped
-package, not inferred from documentation: @supabase/ssr 0.12.5 — the installed version —
-hard-codes `flowType: "pkce"` in **both** client factories
-(`dist/main/createBrowserClient.js:44`, `dist/main/createServerClient.js:37`) and writes the
-verifier to cookies under `<storageKey>-code-verifier` plus per-flow slots
-(`dist/main/cookies.js:12-29`).
+> **`verifyOtp` is called with `{ email, token }`. A code is only ever verified against the address
+> it was issued to.** An attacker who mails a victim "your code is 123456" achieves nothing: the
+> victim types it into a form carrying **the victim's own address**, and Supabase refuses the pair.
+> For the attacker's session to be installed, the victim would have to type **the attacker's email
+> address** — which a real person never does, because they type their own.
 
-**The binding material already exists in this app and is simply never consulted.** The
-confirmation mail carries `{{ .TokenHash }}` and the route calls `verifyOtp`, which is the
-non-PKCE arm.
+**So the binding is: the address is the person's own.** That is a property about what a human types,
+not a cryptographic one, and §3.3's wall is what keeps it true.
 
-### 3.2a · The objection this must answer first — owner-batch item 85
+> **What a future lane may not weaken, stated because the base narrowed.** Under PKCE, a
+> same-origin forgery still failed for want of a verifier — the binding was a second, independent
+> layer. **Under the code flow it is not:** `proveSameOrigin` plus §3.3's address wall are the
+> WHOLE base. Weakening either one — accepting `Origin: null`, or letting the address arrive in a
+> URL — does not degrade a defence-in-depth layer here; it removes the defence.
 
-**`mohe-owner-batch-2026-08-31.md` item 85 (from #461's Codex leg, N1) already ruled the template
-the other way**, and its reason is correct as far as it goes: the *bare default*
-ConfirmationURL points at Supabase's own verify endpoint, so **a mail scanner's GET consumes the
-token before the customer ever clicks**. Supabase documents that limitation itself ("Email
-prefetching" — some providers prefetch links, prematurely consuming the confirmation URL). For a
-customer base of Malaysian accounting firms, largely on Microsoft 365, that is a real and
-frequent failure, and it is why P4-3 built an intermediate page with an explicit button.
+### 3.2 · Cross-device works fully, which was the point
 
-**But this is not a choice between the two properties.** Supabase's own documented mitigation for
-prefetching is *exactly* the intermediate page P4-3 already built — an email link of the form
-`{{ .SiteURL }}/confirm-signup?confirmation_url={{ .ConfirmationURL }}`, which the Auth
-email-templates guide describes as redirecting "users to an intermediate landing page containing
-a confirmation button to safeguard against automated link prefetchers". The emailed link points
-at **our** page, a scanner's GET consumes nothing, and the explicit click carries the PKCE flow.
+The person reads the code on a phone and types it into the tab where they signed up — or into a
+fresh tab, typing their own address alongside it. **Neither requires the original browser**, so the
+regression G10 priced is gone. This is the whole gain 裁-92 bought.
 
-**Item 85's prefetch requirement and this gate's binding requirement are satisfied by the same
-shape**; only the query parameter the page carries changes. Item 85's Wave-G setup line therefore
-needs amending **before the owner performs that setup act** — carried in the gate record.
+### 3.3 · The one wall that makes §3.1 true — the address may never come from a URL
 
-### 3.2b · The change, precisely
+**The email field is typed by the person, or read from THIS browser's own signup state. It is
+never populated from a query parameter, a path segment, or any other caller-supplied value.**
 
-1. **The template** becomes the intermediate-page form above, pointing at /auth/confirm and
-   carrying the confirmation URL as a query parameter. Prefetch-safe, unchanged in that respect.
-2. **The confirm page's GET stays paint-only and token-inert** — a scanner may visit twice and
-   consume nothing, exactly as today — and renders the button as a link to that URL. **NEW
-   WALL:** the page renders the parameter **only if its origin equals the project's own Supabase
-   URL**; anything else is refused as `status=invalid`. Without this the page is an open redirect
-   whose destination an attacker fills in — the same class as the client-settable-header trap in
-   §4.1.
-3. **Supabase's verify endpoint redirects back** to /auth/confirm with `?code=…` — a **query**
-   parameter the server sees, not the implicit flow's URL fragment that it never sees. That GET
-   is *also* paint-only: it renders a "finish signing in" card whose button POSTs the code.
-4. **The verify handler keeps `proveSameOrigin` verbatim** — it is still the CSRF wall on a
-   state-changing route — and replaces `verifyOtp({type:"email", token_hash})` with
-   `exchangeCodeForSession(code)`. `hasVerifiedSession`'s positive check on
-   `(user, session, matching ids)` is kept exactly as written: a null session is still not
-   evidence of success.
+Without this wall the attack returns in a worse form: a page that pre-fills the address from a URL
+lets the attacker choose it, and the victim then types the attacker's code beside the attacker's
+address — exactly the pair Supabase accepts. **This is the same class as §4.1's client-settable
+header:** a value the attacker fills in is not evidence. Cell **W-H** below.
 
-A browser holding no matching verifier cookie fails the exchange **at Supabase's own
-`/token?grant_type=pkce` endpoint**. The refusal is the platform's, in the protocol — not a
-branch we wrote and must then prove. **The explicit-click discipline, the same-origin wall and
-the prefetch safety all survive; the binding is added underneath them.**
+### 3.4 · A six-digit code is guessable, so the rate wall is MANDATORY (裁-36 / 裁-68②)
 
-### 3.3 · Why not a hand-rolled nonce
+One million codes is a small space. **Supabase's own documented posture is a 24-hour default expiry
+and unspecified "rate limits against brute force"** — a real second layer, but vague, and 24 hours
+is far too long for six digits. **This design does not rely on it as the wall.** Four walls, each
+with both-polarity cells in part 3 §4:
 
-| | native PKCE | hand-rolled nonce |
+| # | wall | value | refusal |
+|---|---|---|---|
+| **C1** | **attempts per address** | 5 rejected attempts per email digest per 15 minutes | `too many confirmation attempts` |
+| **C2** | **attempts per origin** | the same window keyed on the **origin digest** — because a per-address lock alone lets an attacker spray one guess each across many addresses | `too many confirmation attempts from this location` |
+| **C3** | **single use** | a consumed code cannot mint a second session — **this one is the platform's**, and is named as such rather than claimed as ours | *(Supabase refuses; our cell asserts the second POST mints nothing)* |
+| **C4** | **expiry** | the project's OTP expiry is shortened from the 24-hour default to **10 minutes** | *(the code simply fails)* |
+
+**The attempt is recorded BEFORE the verification, never after.** Otherwise an attacker aborts the
+request after a failed guess and is never counted — the counter must survive a killed connection.
+The objects and the two doors are part 2 §1.8.
+
+**C4 is project configuration, not repository content, and this design will not pretend otherwise.**
+No route, migration or CI job can read the project's OTP expiry — the same class as the email
+template. There is no fail-closed trick available here: a 24-hour code still verifies. **So C4 is a
+named Wave-G setup act with an owner receipt, and C1/C2 are what bound the exposure if it is
+missed** — five guesses per fifteen minutes makes even a 24-hour window worth about 480 attempts
+against a million-code space. The design states this rather than implying the expiry is enforced.
+
+### 3.5 · Where the wall lives — the DB, reached server-to-server
+
+裁-64① says the DB stays the wall. But the confirming caller **has no session yet** — they are
+confirming in order to get one — so the doors cannot be `clara_authenticated`, and G3 established
+that **`apps/web` holds no database credential**, a property worth keeping. So the runtime holds the
+DSN, as it already does, and the confirm route reaches it.
+
+**It reaches it DIRECTLY, server-to-server, reading `CLARA_RUNTIME_URL` itself — NOT through the
+generic proxy.** An earlier draft routed it through `apps/web/app/api/runtime/[...path]/route.ts`,
+and **that transport cannot run**:
+
+- The proxy is **entrance 3 of the scope spine**, by name: `apps/web/lib/require-firm-scope.ts:17`
+  lists it as *"app/api/runtime/[...path]/route.ts → 403, NEVER a redirect"*, `:257` registers it in
+  `SCOPE_ENTRANCES` with `onDenial: "403"`, and the route itself calls `firmScopeGuard()`
+  (`apps/web/app/api/runtime/[...path]/route.ts:131`, the guard at `require-firm-scope.ts:229`).
+- `PUBLIC_PATH_PREFIXES` (`apps/web/lib/supabase/proxy.ts:62`) is
+  `["/login", "/invite", "/signup", "/auth/confirm"]` — **/api/runtime is not in it**, so a session
+  is required to reach the proxy at all.
+
+**The confirming caller has no session and no firm BY DEFINITION, so that route refuses them twice
+over** — and C1/C2 would have had no working home. **The proxy's guard is the feature, not an
+obstacle:** it is a browser-facing, session-scoped surface, and the correct response to it refusing
+a pre-session step is to stop using it there, never to widen it.
+
+**The direct call adds no fourth server entry.** /auth/confirm is already public at the middleware
+(the same `PUBLIC_PATH_PREFIXES` line), and the confirm POST is already one of §1.1's three named
+server entries — it simply makes an outbound request of its own. **W-R's negative assertion is
+untouched.** *Rejected alternative:* give `apps/web` its own DSN — it saves nothing and costs the
+property G3 chose deliberately.
+
+### 3.6 · What happens to #461's confirmation surface
+
+**It keeps its shape and changes its input** — a materially smaller change than the PKCE redesign
+would have been:
+
+| | today (link flow) | under 裁-92 |
 |---|---|---|
-| new DB objects | none | a table, an expiry rule, a replay rule, a rotation rule |
-| new secrets | none | a cookie we name, scope, set and expire ourselves |
-| entropy | the platform's | `gen_random_uuid()` — **`pgcrypto` is not installed** (survey F9), so `gen_random_bytes` needs a new extension first |
-| who refuses | Supabase's token endpoint | our own code, which then has to be proven |
-| what it binds | the browser Supabase issued the flow to | a browser holding *our* cookie — which still has to be proven to be the browser Supabase issues the session to. **That is the same property again, one layer up.** |
-| the recorded sibling finding | a `code` in an ingress log is inert without the verifier cookie | a `token_hash` stays in the URL and stays a session |
-| review law 3 | the verifier **is** the flow | the nonce is a *name* for the browser; proving the name IS the thing is exactly the work PKCE already did |
+| the GET page | a landing card with an explicit button | **a code-entry form** (address + six digits) |
+| the POST route | `proveSameOrigin` → `verifyOtp({type:'email', token_hash})` → seal | `proveSameOrigin` → **the C1/C2 wall** → `verifyOtp({email, token, type:'signup'})` → seal |
+| `hasVerifiedSession` | kept verbatim | **kept verbatim** — a null session is still not evidence of success |
 
-The last two rows decide it. The sibling finding recorded with the hole — `token_hash` reaches
-ingress/access logs before app code can redact it (`PROGRESS.md:398`) — is **closed as a side
-effect** by PKCE and is **not closed at all** by a nonce. And a hand-rolled binding would be a
-second implementation of a property the platform already implements underneath it, with the
-platform's own version sitting unused directly below ours.
+`proveSameOrigin` stays exactly as it is: it was never the binding, but it is still the CSRF wall on
+a state-changing route, and `Origin: null` still 403s (cell W-G).
 
-### 3.4 · The cost, and the fail-closed answer to it
+**The estate already does this.** The built invite-accept path verifies with `verifyOtp`, so this is
+the shape the codebase uses for the adjacent journey — not a new mechanism.
 
-**The email template is Supabase project configuration, not repository content. No repo gate, no
-CI job and no migration can read it.** That is a real cost and it is answered structurally, not
-by a runbook line:
+**The three cards B3 specified for PKCE are superseded**, and the replacements map to the walls
+rather than to an exchange's error classes:
 
-> **The route accepts `code` and ONLY `code`. There is no `token_hash` arm, not even a
-> fallback.**
-
-If the template is ever mis-configured back to `{{ .TokenHash }}`, confirmation breaks **loudly**
-for everybody — nobody can sign up — rather than silently reverting to an unbound flow that still
-appears to work. A fallback arm would be this failure mode wearing the costume of resilience.
-The e2e in part 3 §6 walks the real journey on the built app and is the standing detector.
-
-The intermediate page's own new wall (§3.2b step 2) is fail-closed in the same direction: a
-confirmation-URL parameter whose origin is not the project's Supabase URL renders
-`status=invalid` and **no link at all**, rather than a link the page declined to check. Cell
-W-Q.
-
-### 3.5 · The second, independent layer
-
-PKCE binds the *session* to the browser. 裁-26's email-bound admission binds the *firm* to the
-email (part 2 §1.4). The two are independent: even if a session were somehow installed in the
-wrong browser, an admission minted for `victim@…` is refused by `create_firm` when the caller's
-`_jwt_email()` reads `attacker@…`. **裁-68's three walls map exactly onto this design:** ① the
-DPA e-sign (part 2 §1.1), ② the rate wall (§4 below), ③ the email-bound token (part 2 §1.4) —
-plus payment, which **is** the approval (裁-73; no operator queue for tier-3).
-
-### 3.6 · What PKCE costs — the cross-device regression (BLOCKER-3)
-
-**This is a product regression the owner has not been shown, and it is the largest cost in this
-design.** 裁-68③ asked for a browser binding; it did not ask to lose cross-device signup.
-
-**The mechanism.** The verifier cookie lives in the browser that called `signUp`. A person who
-signs up on a laptop and opens the confirmation mail **on their phone** has no verifier in that
-browser, and the exchange fails hard. For Malaysian accounting firms — largely Microsoft 365,
-mail routinely read on a phone — that is a material fraction of real signups, not an edge case.
-And §3.4 removes the escape *on purpose*: there is no `token_hash` arm.
-
-**This cost belongs to the BINDING, not to PKCE.** Any browser-bound scheme has it, a hand-rolled
-nonce included: the nonce cookie would sit in the same laptop. The only designs without it are
-the ones with no binding — which is the hole. So the question for the owner is not "PKCE or
-nonce", it is **"what is cross-device signup worth against the login-CSRF hole"** — gate question
-**G10**, which carries a third option that keeps both.
-
-**A second, subtler variant, measured at the auth-js source by the review.**
-`_exchangeCodeForSession` resolves the verifier from `options.flowId`, else from
-`window.location.href`'s `sb_flow_id`, else null; on a server `isBrowser()` is false, and
-`_maybeAppendFlowIdToRedirect` is gated on an experimental flag that is **off by default**. So
-with no explicit `flowId` the library falls back to the legacy fixed key
-`<storageKey>-code-verifier`. **A browser holding a second, newer pending PKCE flow — a password
-reset, a second signup — keeps only the newest verifier at that fixed key, and confirming the
-earlier link then fails.**
-
-**Decided and specified (BLOCKER-3 fix 2).** The route **reads `sb_flow_id` from the redirect and
-passes it as `options.flowId` when present, and otherwise accepts the fixed-key fallback.** Today
-the fallback is the live path, because the flag that appends the flow id is off; writing the
-`flowId` arm now means the design does not silently change behaviour on the day Supabase turns it
-on. The residual — one browser, two concurrent pending flows, the older link fails — is accepted
-at beta, and it **collapses into card 2 below**: that browser sends a *wrong* verifier rather than
-none, so the token endpoint returns the same error class a stale code does, and card 2's resend
-control is the fix. **It does not get a fourth card, because the error class cannot supply one** —
-promising a distinct message here would be promising something the instrument cannot distinguish.
-
-**Distinguished refusals (BLOCKER-3 fix 1), because three different failures previously rendered
-one indistinguishable `status=invalid`:**
-
-| what happened | what the person sees |
+| what happened | the card |
 |---|---|
-| no verifier in this browser | **"This link has to be opened on the device where you signed up"**, with a **send-me-a-new-link** control |
-| the code is stale, used, or expired | "this link has already been used or has expired", with the same resend control |
-| the template is mis-configured (no `code` at all) | the generic invalid card — **the loud failure §3.4 relies on**, now genuinely distinct from the other two |
+| the code does not match | *"that code is not right"* — **with the attempts remaining**, because the wall is the real defence and a person near lockout deserves to know |
+| the code has expired | *"that code has expired"*, with a send-me-a-new-one control |
+| C1 or C2 refused | *"too many attempts — wait N minutes, or request a new code"* |
 
-The exchange's own error class is what discriminates them; the card is chosen from it, never from
-the absence of a session. Cell **W-H2** pins that the cross-device case renders its own card, and
-the e2e's second browser context is what exercises it.
+### 3.7 · What survives, and what retires
 
----
+- **RETIRED: the PKCE code exchange for signup**, the intermediate landing page, the
+  `confirmation_url` origin check (**cell W-Q retires — there is no URL parameter to validate**),
+  and the flow-id handling. There is no link, so none of it has a subject.
+- **RETIRED: owner-batch item 85's amendment as this gate wrote it.** That paragraph told the owner
+  to set the token-hash template, and v2 amended it to the PKCE intermediate-page form. **Under
+  裁-92 the template emits `{{ .Token }}` and no link at all**, which moots the prefetch problem
+  entirely — a mail scanner cannot consume a code it merely reads. The gate record carries the
+  corrected setup line.
+- **SURVIVES:** `flowType: "pkce"` remains the `@supabase/ssr` package default (it is hard-coded in
+  both client factories; this design does not change it), and it still governs any *other* flow —
+  password recovery, the invite magiclink arm. **Signup simply stops using the code exchange.**
+- **SURVIVES:** every non-PKCE part of the confirmation surface — the same-origin wall, the explicit
+  POST, the paint-only GET, `hasVerifiedSession`'s positive check.
+
+### 3.8 · The residual, stated
+
+**A person who can read the victim's mail can complete the signup.** That was true of the link flow
+too. **What is new is that a person who can *guess* six digits inside the window can as well** —
+which is what C1–C4 bound, and why they are walls with cells rather than settings. The cryptographic
+binding PKCE would have given is genuinely gone; 裁-92 traded it for cross-device, knowingly, and
+this design's job is to make the trade's cost small and visible rather than to relitigate it.
 
 ## 4 · The rate wall (裁-36② · 裁-64①) — the DB stays the wall
 
@@ -412,10 +404,11 @@ against the paying customer. Both polarities of this are cells (part 3 §4, W-J)
 Every row is an acceptance cell, not a narrative. **No path may strand a paying customer without
 a firm, and no path may mint two firms.**
 
-> **This guarantee did not hold in v1 and the review caught it.** W9 required an unconsumed
-> payment while the minter consumed it, so the rotation these rows depend on was unreachable —
-> the design had specified strict-refuse under rotation's name. Part 2 §1.3 carries the repair
-> and what was wrong. Every row below was re-walked against the repaired door.
+> **v1 broke this guarantee; v2 repaired it; 裁-89 deletes the shape that could break it.** v1
+> required an unconsumed payment while the minter consumed it, so the retry it called "rotation"
+> was unreachable. v2 fixed that across three objects and a rotation rule. **v3 folds the door**,
+> and the two rows that used to describe mid-journey states collapse into one that says *nothing
+> partial exists* — the repair that needs no repairing.
 
 | the browser/network dies… | state on disk | what the customer sees | how it resolves | strand? | two firms? |
 |---|---|---|---|---|---|
@@ -429,8 +422,7 @@ a firm, and no path may mint two firms.**
 | **the webhook arrives while the DB is down** | nothing recorded | the success page cannot claim yet | Stripe **retries**, and the one-minute applier sweep re-applies whatever landed | no | no |
 | **the webhook is delivered twice** | one `stripe_events` row (PK), one payment row (UNIQUE) | — | the second `record_stripe_event` returns `recorded:false` | no | no |
 | **between ⑥ and ⑧** — the customer closes the tab after paying | a payment row, unconsumed | the holding page: **"payment received — finish opening your firm"** | they return and ⑧ runs | **no** | no |
-| **between `claim_paid_admission` and `create_firm`** | a live admission, the payment **still unconsumed** | the success or holding page | ⑧ again: W9 passes (it no longer reads the consumption stamp), rotation supersedes the stale token and mints a fresh one, and the flow completes | **no** | no — `uq_membership_active_user` |
-| **between `create_firm` and `close_paid_registration`** | the firm exists, `status` still `open` | the holding page **redirects to the firm home** — the live `holdingStateFrom` consults `caller_context` membership *before* registration history | the success route retries the close; **and `reconcile_paid_registrations` closes it on the next one-minute sweep** — the principal that can actually execute this is part 2 §1.3's reconciler, because the sweep's own role cannot call `close_paid_registration` | **no** | no |
+| **anywhere inside ⑧** | **nothing partial exists.** The claim, the creation, the closure and the payment stamp are one transaction: it committed or it did not | the success or holding page | call ⑧ again. If it did not commit, W7 still passes and the whole thing runs; if it did, the registration carries `firm_id` and the door replays | **no** | no — the `FOR UPDATE` read plus `uq_membership_active_user` |
 | ⑧ called twice concurrently | — | — | `for update` on the registration row serializes them; the loser sees W7 or rotates | no | no |
 | **`create_firm` succeeds and its response is lost** | the firm exists, the admission is consumed **with a receipt** | — | `create_firm`'s **own live** replay (`consumed_op_key = p_op_key` → return `consumed_result`) hands back the same `{firm_id, plan_id}` | no | no |
 
@@ -446,17 +438,16 @@ pretending the money is unspent.
 | PR | contents | D1 | gated on |
 |---|---|---|---|
 | **C-1** | `UNNUMBERED_checkout_gate_a` — `dpa_documents`, `dpa_signatures`, `registration_rate_events`, `sign_dpa`; the DPA row seeded from `docs/ops/legal/` **after the owner confirms the text once** (裁-68①) | no | the owner's confirmation (gate G5) |
-| **C-2** | `UNNUMBERED_checkout_gate_b` — `stripe_events`, `stripe_event_problems` (with its resolution columns), `stripe_object_map`, `record_stripe_event`, `apply_stripe_events`, **`list_stripe_event_problems` + `resolve_stripe_event_problem`**, the two roles and their three grants | no | — |
-| **C-3** | `UNNUMBERED_checkout_gate_c` — `uq_frr_id_applicant`, `checkout_intents` (with its pinned `dpa_version`), `firm_registration_payments` + `uq_frp_registration`, the **five** `firm_admissions` columns + the two partial unique indexes + three CHECKs, `open_checkout_intent`, `record_checkout_session`, `claim_paid_admission`, `close_paid_registration`, **`reconcile_paid_registrations`**, the two `event_types` rows | no | C-1, C-2 |
-| **C-4** | `UNNUMBERED_checkout_gate_d` — **the `create_firm` recut** (part 2 §1.4) | **YES — the one window** | C-3 |
+| **C-2** | `UNNUMBERED_checkout_gate_b` — `stripe_events`, `stripe_event_problems` (with its resolution columns), `stripe_object_map`, `record_stripe_event`, `apply_stripe_events`, **`list_stripe_event_problems` + `resolve_stripe_event_problem`**, the two roles, and the sweep role's **two** grants (the operator verbs are `clara_authenticated`, walled to the operator firm) | no | — |
+| **C-3** | `UNNUMBERED_checkout_gate_c` — `uq_frr_id_applicant`, `checkout_intents` (with its pinned `dpa_version`), `firm_registration_payments` + `uq_frp_registration`, `open_checkout_intent`, `record_checkout_session`, **`claim_paid_firm`** (the folded door), the two `event_types` rows. **No `firm_admissions` change of any kind** | no | C-1, C-2 |
+| ~~C-4~~ | **RETIRED by 裁-89.** The `create_firm` recut was the train's only D1 item and the fold cancels it — part 2 §1.4 | **none — the D1 inventory is EMPTY** | — |
 | **C-5** | the runtime: the raw-body webhook router mounted **before** `src/index.ts:55`, the applier sweep, the trusted-IP courier | no | C-2 |
-| **C-6** | `apps/web`: the PKCE confirm route (§3.2b), the DPA step, the checkout and success routes (**route.ts handlers, never Server Actions — §1.1**), the holding page's three arms, the e2e | no | C-3, C-5 |
+| **C-6** | `apps/web`: the **code-entry confirm route** (§3.6), the DPA step, the checkout and success routes (**route.ts handlers, never Server Actions — §1.1**), the holding page's three arms, the e2e | no | C-3, C-5 |
 
-**D1 write-quiesce list — exactly one live body:** `clara.create_firm(text,uuid,text)`, live tip
-`0147:497`, live `prosrc` sha12 **`59fa533d9c03`**. C-4 pins that sha **before** it re-cuts, and
-reconciles a divergence rather than overwriting it — the estate has been bitten by a cross-PR
-`CREATE OR REPLACE` silently reverting a live splice more than once. **Roster edits land in the
-same PR as the objects they name** (`rig-meta.mjs`'s function and table rosters).
+**D1 write-quiesce list: EMPTY.** No live body is replaced by this train. `clara.create_firm`
+stays at `0147:497`, `prosrc` sha12 `59fa533d9c03`, **unrecut** — the folded door calls
+`_create_firm_core` directly, exactly as `approve_firm_registration` already does. **Roster edits
+land in the same PR as the objects they name** (`rig-meta.mjs`'s function and table rosters).
 
 **Reviews.** Every PR here is judgement logic on its face (review law 1). C-2 · C-3 · C-4 · C-5
 are money / auth / webhook / tenant-creation surfaces, so §A step 4's security lens is mandatory,

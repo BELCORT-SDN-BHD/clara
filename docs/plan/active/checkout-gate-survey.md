@@ -46,7 +46,10 @@ The live body (`0147:497`, rig `prosrc` sha12 `59fa533d9c03`) looks the token up
 built — `0147`'s own header says so at line 60 ("`firm_admissions` has no such column").
 `clara.firm_admissions` carries seven columns and none of them is an email, an expiry, or a
 pointer to a registration. **Consequence:** anyone who obtains the plaintext becomes a firm's
-owner, and the new checkout path would be minting exactly such a credential on every payment.
+owner. *(Design consequence, trued after 裁-89: the two-step door would have minted exactly such
+a credential on every payment, which is why 裁-26's wall was owed. **The folded door mints no
+token at all**, so the finding stands as a measurement of the existing bearer-credential shape
+and stops being a hazard this train creates.)*
 
 **F2 · Nothing in the product mints an admission.** Whole-repo census (§4, absence A1). Two
 seed inserts, four test-fixture inserts, zero product writers.
@@ -255,8 +258,10 @@ forced**, one policy `p_firm_admissions_owner` with `USING (true)`, owner `clara
 application role can read or write it at all. Live rows on a freshly seeded rig: 2, of which 0
 unconsumed.
 
-**Absent, and needed by this train:** an email binding (裁-26), a link to the registration that
-paid for it, and an expiry.
+**Absent — and under 裁-89 NOT needed by this train.** An email binding (裁-26), a link to the
+registration, and an expiry were all owed by the two-step door, which had to hand a credential
+across a gap. The folded door has no gap, mints no token, and **adds nothing to this table**; the
+three absences remain true of the estate and are simply no longer this train's to fill.
 
 ### 3.2 · `clara.firm_registration_requests` (created `0145:324`)
 
@@ -439,10 +444,17 @@ plan flag and no webhook. **The design fills exactly that note.**
 Each is a *prediction from this measurement*, not a measurement of the future body — the build
 pins and reconciles rather than overwriting (the estate's standing prestate discipline).
 
-1. `clara.create_firm(text,uuid,text)` live `prosrc` sha256 begins `59fa533d9c03`. The train
-   **replaces this body** (裁-26's email wall + the registration link) and must pin it first.
-   It is the train's only D1 write-quiesce item.
+1. `clara.create_firm(text,uuid,text)` live `prosrc` sha256 begins `59fa533d9c03`. **TRUED
+   2026-08-31 evening (裁-89): the train does NOT replace this body.** The prediction as written —
+   a recut carrying 裁-26's email wall, and the train's one D1 item — was correct for the two-step
+   door and is void under the fold: the folded door calls `_create_firm_core` directly, as
+   `approve_firm_registration` already does, so `create_firm` is untouched and **the D1 inventory
+   is EMPTY**. *The measurement stands; only the prediction about what the train does with it
+   changed.* The build still pins the sha as its prestate control, to prove the body did **not**
+   move.
 2. `clara.firm_admissions` carries exactly the seven columns in §3.1 and exactly two indexes.
+   **Under 裁-89 the train adds none and changes none** — this is now an *unmoved* assertion, and
+   part 3's cell W-E3 is where it is proven after the battery runs.
 3. `clara.firm_registration_requests` carries no unique index over `(id, applicant)`; the train
    adds one so a composite FK can bind a payment to its registration *and* its applicant.
 4. `clara.event_types` holds 117 rows, of which exactly three are the `firm`/`firm_registration`

@@ -1,7 +1,7 @@
 # apps/web — Clara's production frontend
 
 **Status: P1–P3 and the whole port wave (T0–T11, 11/11) are merged on `main`.** The shell
-(Supabase SSR invite-only auth, the two-level workspace chrome, the Clara rail + full-screen
+(Supabase SSR cookie auth, the two-level workspace chrome, the Clara rail + full-screen
 thread escalation, the 22-part catalog renderer, `⌘K`) and the full P3 product workbench
 (journals, documents, bank, close, reports, registers, knowledge) are landed, and the port
 wave has since filled those workbenches with the ported door/read surface. Still ahead: the
@@ -111,7 +111,9 @@ app/(full)/    — the Clara full-screen escalation routes (/clara/:threadId and
                  segment): a viewport-owning minimal layout with NO firm chrome, plus a
                  thin scope layout so the client variant never escapes client-scope
                  activation.
-app/login · app/invite/[token] · app/logout — the auth surfaces (proxy-gated).
+app/(entry)/ — the pre-firm faces: login · signup · invite/[token] · pending ·
+               auth/confirm (route groups add no URL segment).
+app/logout — the POST-only sign-out route (proxy-gated).
 ```
 
 Every workbench tab page mounts a real workbench: hydrate-never-trust reads through
@@ -216,19 +218,21 @@ apps' `typecheck`/`build` stay green after it. Worth a second look from whoever 
 ## Security posture — owner/deploy obligations
 
 A cross-model adversarial security review of the P2 auth surface (Codex `gpt-5.6-sol`,
-2026-08-27) produced thirteen findings. Ten were fixed in code on this branch and are
+2026-08-27) produced thirteen findings; the round-two review added one deployment
+obligation. Ten were fixed in code on this branch and are
 covered by `tests/` (the redirect wall, the proxy matcher, the OTP hardening, the scope
 epoch, the key-class gate, the cookie hardening, the anti-cache headers, the logout wall).
 
-**Three are not code.** They are hosted-Supabase or deployment configuration that this
+**Four are not code.** They are hosted-Supabase or deployment configuration that this
 repository cannot enforce or prove, and they are the owner's to set and to re-verify after
 any Supabase project change. Each is stated with what must be true and how to check it.
 
 ### 1. Password policy must be set in Supabase Auth (review finding 10, LOW)
 
-The only constraint this repo can see is the invite form's `minLength={8}`, which a direct
-SDK or Auth API call bypasses entirely. The authoritative policy lives in the hosted
-project.
+The only constraints this repo can see are the `minLength={8}` courtesies on BOTH password
+surfaces: `components/invite-accept-form.tsx` and
+`components/entry/signup-account-form.tsx`. A direct SDK or Auth API call bypasses either
+entirely. The authoritative policy lives in the hosted project.
 
 - **Configure:** Supabase Dashboard → Authentication → Providers → Email → *Password
   requirements*. Set a minimum length of **at least 12** and require lower + upper +
@@ -239,8 +243,10 @@ project.
   `password_min_length`, `password_required_characters`,
   `password_hibp_enabled`. Keep the JSON response with the deploy record — a screenshot is
   not a receipt. Re-run it after any project restore.
-- **Keep aligned:** if the server minimum moves, move `minLength` in
-  `components/invite-accept-form.tsx` with it. The UI value is a courtesy, never the wall.
+- **Keep aligned:** if the server minimum moves, move `minLength` in BOTH
+  `components/invite-accept-form.tsx` and
+  `components/entry/signup-account-form.tsx` with it. The UI values are courtesies, never
+  the wall.
 
 ### 2. Access-JWT revocation window (review finding 5, MEDIUM)
 
@@ -283,23 +289,70 @@ the history stack. What remains is template and log hygiene:
   accepts. Keep access-log retention short and restricted, and prefer re-inviting over
   re-sending a leaked link.
 
+### 4. Signup confirmation round trip and enumeration posture (round-3 review, HIGH)
+
+`components/entry/signup-account-form.tsx` pins `emailRedirectTo` to the current origin's
+`/auth/confirm` leaf. A GET there only paints the **Confirm Email** face with a
+**Confirm my email** button; the explicit button POSTs
+the token hash to `/auth/confirm/verify`, whose handler hard-codes `type: "email"`, ignores
+caller `type`/`next`, and redirects only to `/signup` after a matching session is present.
+This prevents mail scanners from confirming an attacker-chosen password merely by fetching
+the email link, and avoids the implicit-flow fragment that a server cannot read. It preserves
+PRD §8's server-verified-session requirement at the transition into the firm step.
+
+- **Configure:** Supabase Dashboard → Authentication → Providers → Email: *Allow new users
+  to sign up* ON and *Confirm Email* ON (autoconfirm disabled). Under Authentication → Email
+  Templates → *Confirm signup*, replace the default `ConfirmationURL` link with exactly
+  `{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email`. Here `.RedirectTo` is the exact
+  `emailRedirectTo` value passed by this app — `<origin>/auth/confirm` — whereas `.SiteURL`
+  is the project's single configured Site URL. Under URL
+  Configuration → *Redirect URLs*, add the exact `<origin>/auth/confirm` URL for every
+  deployed origin, with no wildcard.
+- **Verify (receipt):** with the project's Management API token, positively read
+  `GET /v1/projects/{ref}/config/auth` and retain the JSON showing `disable_signup` is
+  `false`, `mailer_autoconfirm` is `false`, and `uri_allow_list` contains every exact
+  `<origin>/auth/confirm` entry. Retain a delivered *Confirm signup* message showing the
+  exact `.RedirectTo` + `TokenHash` template URL above; open it twice before clicking and record that both
+  visits paint the button without consuming the token. Re-run these reads after any project
+  restore or auth-configuration change. This positive Management API read is a blocking
+  **deploy gate**: repository code cannot read hosted project settings and no UI assertion
+  substitutes for the retained response.
+- **Residual:** the existing-account response remains controlled by hosted Auth. With the
+  required posture, Supabase returns the non-enumerating `user`/no-session shape and this app
+  renders the same “Confirm your email” copy for a new user, an `identities: []` user, and
+  stable duplicate-account error codes. Any `{user, session}` success is contained in the
+  browser by a local sign-out before the refusal paints. That containment is not the wall.
+  A fresh `/signup` render does re-read the same subject and require a valid
+  `email_confirmed_at`, but AUTOCONFIRMED users satisfy that predicate: a direct hosted-Auth
+  caller under autoconfirm drift reaches the firm step. The blocking Management-API deploy
+  receipt above, not this code, is the control against that drift. P4 follow-up: require the
+  signup fork to consume a same-subject server receipt minted by the explicit
+  `/auth/confirm/verify` POST (signed httpOnly cookie or DB row).
+- **Blocking log-control receipt:** the initial signup confirmation GET carries `token_hash`
+  in its query string, so edge/server **access logs** can capture the bearer despite
+  `Referrer-Policy: no-referrer`. Deployment is blocked until an instrument makes a
+  **positive read** of the effective edge/server logging configuration and retains the
+  response proving either query-string redaction or short retention plus restricted ACLs.
+  A policy statement or intended setting is not evidence. The delivered-message sample and
+  this retained log-control response are both required at deployment.
+
 ### Also configuration, not code
 
 - **CDN caching.** The proxy sets `Cache-Control: private, no-store` on every gated response
   and applies the stricter headers `@supabase/ssr` supplies when it writes a session cookie.
   Do not add a Cloudflare cache rule that overrides `Cache-Control` for this app's HTML —
   a cached response carrying `Set-Cookie` signs the next visitor in as the previous one.
-- **Public signup.** This app has no signup route, but that does not disable signup in the
-  hosted project. Confirm Authentication → Providers → Email → *Allow new users to sign up*
-  is **off**; invite-only is a product invariant, not a UI choice.
+- **Public signup.** The ruled tier-3 `/signup` route is ON for beta under obligation 4's
+  fail-closed posture. The admission gate remains a product invariant; neither hosted Auth
+  setting substitutes for it.
 - **`__Host-` cookies need HTTPS.** `lib/supabase/cookie-options.ts` names the session
   cookie `__Host-clara-auth` with `Secure`. Chrome and Firefox accept that on
   `http://localhost`; Safari does not — develop against HTTPS if you use Safari.
 
 ## What is deliberately NOT here yet
 
-The P2 fold landed the full shell: Supabase SSR invite-only auth (`proxy.ts`,
-`lib/supabase/`, `app/login`, `app/invite/[token]`, `app/logout`), the Clara rail/thread
+The P2 fold landed the full shell: Supabase SSR cookie auth (`proxy.ts`,
+`lib/supabase/`, `app/(entry)/login`, `app/(entry)/invite/[token]`, `app/logout`), the Clara rail/thread
 surfaces (`components/clara/`), the part-catalog renderer (`components/parts/`,
 `lib/parts/`), and `⌘K` (`components/command/`). P3 and the port wave then landed product
 data fetching and every workbench screen — journals, documents, bank, close, reports,

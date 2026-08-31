@@ -149,8 +149,10 @@ export function fixedTokenAccessor(accessToken: string): SessionTokenAccessor {
  * context a second time in the same render, instead of quietly doubling every
  * scoped page's session work.
  */
-export const resolveServerSession = cache(async (): Promise<ServerSession | null> => {
-  const supabase = await createClient();
+export const resolveServerSession = cache(async (
+  createSupabaseClient: typeof createClient = createClient,
+): Promise<ServerSession | null> => {
+  const supabase = await createSupabaseClient();
 
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
   if (sessionError) return null;
