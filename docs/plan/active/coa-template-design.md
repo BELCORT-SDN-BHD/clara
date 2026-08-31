@@ -214,7 +214,7 @@ The strict bulk door plus a narrow additive door beats one permissive door.
 
 **BLOCKER-1 (round-3, the lost-update wall on the SAME family).** The door takes the adoption
 row's lock FIRST — `select ... for update`
-(`UNNUMBERED_coa_pr_b_apply_template.sql:940`) — and drives both the `family_already_applied`
+(`0156_coa_apply_template.sql:945`) — and drives both the `family_already_applied`
 check and the additive `families[]` update from that locked read, never from a pre-lock record.
 Two arms, closed for two different reasons, exactly as the round-3 archaeology measured it: a
 caller-supplied `families[]` composed from the live `coa_template_adoptions.families` column
