@@ -19,15 +19,15 @@ Everything else (coding choices, materiality, close-readiness judgement) stays *
 
 ## 1. Topology — three planes, greenfield
 
-> **[TRUED 2026-08-23] What "Supabase" means here, at the bytes.** The Postgres IS a hosted
+> **[TRUED 2026-08-31] What "Supabase" means here, at the bytes.** The Postgres IS a hosted
 > Supabase project and the browser's bearer IS a Supabase-issued session JWT — both true. What is
-> NOT true, and what this diagram used to imply, is that any Supabase SDK is in the stack:
-> **zero `@supabase/*` packages exist anywhere in the repo.** The dashboard talks to PostgREST and
-> to the runtime by **raw `fetch`** (`apps/dashboard/app/shared/*.ts`), and the runtime verifies
+> now true is that production frontend `apps/web` ships `@supabase/ssr` 0.12.5 plus
+> `@supabase/supabase-js` for cookie-session auth (`apps/web/lib/supabase/client.ts`,
+> `apps/web/lib/supabase/server.ts`, `apps/web/lib/supabase/proxy.ts`). Its data
+> plane still talks to PostgREST through raw requests (`apps/web/lib/read.ts:144`,
+> `apps/web/lib/doors.ts:112`). The retiring dashboard likewise uses raw `fetch`, and the runtime verifies
 > the issuer's JWTs with **`jose`** (`packages/runtime/lib/authz.mjs:23` — `jwtVerify` +
-> `createRemoteJWKSet`; `jose` 6.2.3 in `packages/runtime/package.json`). *(The Codex frontend
-> build may adopt `@supabase/ssr` for cookie sessions — an owner ruling of 2026-08-23 — which
-> would change this paragraph; it has not happened yet.)*
+> `createRemoteJWKSet`; `jose` 6.2.3 in `packages/runtime/package.json`).
 
 ```
 Browser (Next.js dashboard)            Bearer = Supabase session USER JWT (firm claims)
@@ -45,7 +45,7 @@ Agent runtime (Clara) on Fly  ── long-lived Node service; durable runs/tasks
 
 - **Fresh Supabase project** + the **`packages/db` migration rig** for day-to-day dev — migrations are validated on a throwaway Postgres (CI's `postgres:17` service, or a scratch schema), never hand-applied to a live project. *(A local Supabase CLI stack was the original intent; it needs Docker, which is unavailable here, so the rig is the as-built target — see `PROGRESS.md`.)* Every schema change is a versioned migration in the repo from day one; seed scripts produce synthetic data. The old project stays frozen (read-only) until Phase-5 decommission sign-off.
 - Isolation is **RLS on `firm_id`**, not project-per-firm — the proven model from the old build (frozen-repo ADR-029, cited as salvage evidence — not an ADR in this repo's decision log), which is PORT. What changes is everything *above* the isolation boundary.
-- **Hosts:** the runtime is a long-lived process on **Fly** (region `sin`, co-located with Supabase `ap-southeast-1`) — the WDK world needs an always-on worker, not a serverless function; the dashboard is on **Cloudflare Pages** at `app.clarabook.com` (Vercel dropped, ADR-024); the DB is **Supabase**. The runtime host is ratified in `docs/adr/` (ADR-014) (Fly is also the frozen prior plane's host, so the ADR marks it a deliberate greenfield choice, not a carryover).
+- **Hosts:** the runtime is a long-lived process on **Fly** (region `sin`, co-located with Supabase `ap-southeast-1`) — the WDK world needs an always-on worker, not a serverless function; `apps/web` targets **Cloudflare Workers** through `@opennextjs/cloudflare`, while the retiring dashboard remains on **Cloudflare Pages** at `app.clarabook.com` until P6-X cutover; the DB is **Supabase**. The runtime host is ratified in `docs/adr/` (ADR-014) (Fly is also the frozen prior plane's host, so the ADR marks it a deliberate greenfield choice, not a carryover).
 
 ---
 
@@ -164,7 +164,7 @@ Integration shape (detail in the research file §6): engine schemas (`workflow_*
 8. **MCP consumption, skills/progressive-disclosure, multi-agent/background jobs** (bulk approve, reconciliation sweeps) as durable jobs.
 
 ### 4.1 Tool catalog (G4-G6)
-Curated typed tools, one per audited mutation class, plus the typed read surface + the audited read-only freeform tool. The catalog is generated from the DB function registry and lint-checked against it (fixes the doctrine drift where a tool named in doctrine had no ToolSpec and would hard-fail — F3-12/I-4). No shell/psql/file tools; the WEB READ tool exists under ADR-0071/G9's two-tier discipline (number-bearing facts only via effective-dated tables; open reading with inert-data + citation + official-source preference). Skill-load + context-pack retrieval are **gated before any consequential write** (fixes G9 convention-not-gate).
+**[GATE-2 TARGET — not built.]** Curated typed tools, one per audited mutation class, plus the typed read surface + the audited read-only freeform tool. The target catalog is generated from the DB function registry and lint-checked against it (fixes the doctrine drift where a tool named in doctrine had no ToolSpec and would hard-fail — F3-12/I-4). What exists instead is versioned, hand-authored workflow tool registration plus exact roster/census tests. No shell/psql/file tools; the WEB READ tool exists under ADR-0071/G9's two-tier discipline (number-bearing facts only via effective-dated tables; open reading with inert-data + citation + official-source preference). Skill-load + context-pack retrieval are **gated before any consequential write** (fixes G9 convention-not-gate).
 
 ### 4.2 Grounding (G2)
 In-context: the current doctrine pack (regenerated fresh against the real registry — fixes the wrong-OCR-vendor drift), the active skill, tool schemas, and the fresh context pack. Retrievable: the full PRD/architecture, the client wiki, historical data via typed reads. The exact in-context/retrievable split is documented and token-budgeted.
@@ -193,7 +193,9 @@ like a workflow body), `packages/reporting-render/lib/layout-sandbox.mjs` its si
 non-authoritative analysis lane, and `packages/reporting-render/scripts/render-worker.mjs` the
 worker driving both. **The two-tier split is SHIPPED FACT (digest law 74):** the sandbox lane is
 watermarked non-authoritative and structurally unreachable from the seal chain; the sealed
-lane runs the full open→evaluate→seal→render chain through the OBO lane.
+lane runs the full open→evaluate→seal→render chain through the OBO lane. The `0135` substitution
+seam closes the sandbox numeral path by resolving placeholder blocks through DB-owned `cell` basis
+references before output (migration header: `packages/db/migrations/0135_card1_substitution_seam.sql`).
 
 ---
 
@@ -214,6 +216,10 @@ The 7-year statutory clock anchors at **period-end + filing date** (ITA s.82/82A
 ---
 
 ## 8. Tax / SST engine
+
+> **TRUED 2026-08-31 (裁-62): the tax module is INERT at beta.** F-T3 PR-7 is held, no tax
+> artifacts issue, and all 13 treatment codes remain unsigned. The list below is target v1 scope,
+> not the current build state.
 
 The compliance-correct core (Gate-1 C5). **The normative requirements document is `docs/phase2-research/accounting-practice-map.md`** — grounded in the owner's SST primary-source research (Acts, regulations, MySST manuals) + the frozen repo's tax evidence, with a source register. The engine implements, at minimum:
 
