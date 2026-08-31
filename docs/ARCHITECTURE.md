@@ -22,7 +22,7 @@ Everything else (coding choices, materiality, close-readiness judgement) stays *
 > **[TRUED 2026-08-31] What "Supabase" means here, at the bytes.** The Postgres IS a hosted
 > Supabase project and the browser's bearer IS a Supabase-issued session JWT — both true. What is
 > now true is that production frontend `apps/web` ships `@supabase/ssr` 0.12.5 plus
-> `@supabase/supabase-js` for cookie-session auth (`apps/web/lib/supabase/client.ts`,
+> `@supabase/supabase-js` (`apps/web/package.json`) for cookie-session auth (`apps/web/lib/supabase/client.ts`,
 > `apps/web/lib/supabase/server.ts`, `apps/web/lib/supabase/proxy.ts`). Its data
 > plane still talks to PostgREST through raw requests (`apps/web/lib/read.ts:144`,
 > `apps/web/lib/doors.ts:112`). The retiring dashboard likewise uses raw `fetch`, and the runtime verifies

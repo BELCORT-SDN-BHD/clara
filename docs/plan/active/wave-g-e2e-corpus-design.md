@@ -85,7 +85,7 @@ not exist.
 
 | Tier | What it is | Who is in it | What it must satisfy |
 |---|---|---|---|
-| **ORACLE** | the acceptance bar — books that must tie, to the sen, against the owner's own documents | **BEE** (two FYs) · **ROME SECRETARY** (one terminal period) · **ROME PROPERTIES** (one terminal period) | §4's seven-item package, per client per period. Gaps are named in §3.1 and **the run cannot start without them** |
+| **ORACLE** | the acceptance bar — books that must tie, to the sen, against the owner's own documents | **BEE** (two FYs) · **ROME SECRETARY** (one terminal period) · **ROME PROPERTIES** (one terminal period) | §4's seven-item package, per client per period. Gaps are named in §3.1, marked **资料缺失** and never awaited per 裁-63; the run proceeds as-is. |
 | **REALITY** | **open intake** — real papers that exercise the product without carrying an acceptance figure | open; the owner adds slots as papers arrive | nothing. A slot may prove a MECHANISM without being an oracle |
 
 **Why the second tier exists at all, said plainly:** without it, a rich fixture gets
@@ -167,8 +167,8 @@ sen, with each remaining difference named as a specific missing document
 
 **A read-only assessment of the owner's three designated folders (2026-08-20) is the companion
 file of record**, split out under the 500-line limit. It holds the per-client verdicts against
-this section's seven-item package, **the named gaps that must close before an acceptance run
-can start**, the corpus exclusions and fixture sets, the classes that will exercise OCR hardest,
+this section's seven-item package, **the named gaps recorded as 资料缺失 and never awaited per
+裁-63**, the corpus exclusions and fixture sets, the classes that will exercise OCR hardest,
 and the personal-data inventory behind OD-4. Every figure in it was transcribed from a printed
 face; none was computed or inferred.
 
