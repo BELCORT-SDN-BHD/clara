@@ -78,6 +78,33 @@ export function isPublicPath(pathname: string): boolean {
   );
 }
 
+export type TokenRouteReferrerPolicy = "no-referrer" | "strict-origin";
+
+/**
+ * The confirmation POST needs the browser to retain its serialized Origin for
+ * the route's same-origin wall. `no-referrer` makes a form navigation's Origin
+ * opaque (`null`) in real browsers, so confirmation keeps only the origin and
+ * never the token-bearing path/query. Invite acceptance has no same-origin form
+ * POST and retains the stricter policy it already carried.
+ *
+ * Exported so the route split is driven directly in tests rather than inferred
+ * from a source-code spelling. Segment boundaries match `isPublicPath` above.
+ */
+export function referrerPolicyForPath(
+  pathname: string,
+): TokenRouteReferrerPolicy | null {
+  if (pathname === "/invite" || pathname.startsWith("/invite/")) {
+    return "no-referrer";
+  }
+  if (
+    pathname === "/auth/confirm" ||
+    pathname.startsWith("/auth/confirm/")
+  ) {
+    return "strict-origin";
+  }
+  return null;
+}
+
 export async function updateSession(request: NextRequest) {
   // Queued, never applied to a response inside the callback: the response
   // this function returns is not chosen until the gate decision below.
@@ -151,14 +178,12 @@ export async function updateSession(request: NextRequest) {
   // redirect (findings 1 and 12). lib/supabase/response-state.ts.
   applyAuthState(response, queued);
 
-  // Invite and signup-confirmation token hashes are single-use bearer
-  // capabilities sitting in the URL. `no-referrer` keeps them out of the
-  // `Referer` header of every asset and API request either page makes.
-  if (
-    request.nextUrl.pathname.startsWith("/invite") ||
-    request.nextUrl.pathname.startsWith("/auth/confirm")
-  ) {
-    response.headers.set("Referrer-Policy", "no-referrer");
+  // Both URLs carry single-use bearer values. The invite sends no referrer;
+  // confirmation sends only its origin because its real browser form POST must
+  // carry a non-opaque Origin into the same-origin wall.
+  const referrerPolicy = referrerPolicyForPath(request.nextUrl.pathname);
+  if (referrerPolicy !== null) {
+    response.headers.set("Referrer-Policy", referrerPolicy);
   }
 
   return response;

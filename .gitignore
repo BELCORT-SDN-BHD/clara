@@ -13,6 +13,8 @@ dist/
 .output/
 .nitro/
 .next/
+apps/web/e2e/.artifacts/
+apps/web/e2e/.runtime/
 out/
 *.tsbuildinfo
 

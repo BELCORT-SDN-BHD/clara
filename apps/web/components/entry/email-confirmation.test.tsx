@@ -61,6 +61,36 @@ function postRequest(fields: Array<[string, string]>): Request {
   });
 }
 
+function proxiedPostRequest(origin: string): Request {
+  const form = new FormData();
+  form.set("token_hash", "token-hash-proxied");
+  return new Request("https://internal.worker.local/auth/confirm/verify", {
+    method: "POST",
+    headers: {
+      origin,
+      host: "internal.worker.local",
+      "sec-fetch-site": "same-origin",
+    },
+    body: form,
+  });
+}
+
+async function withPublicOrigins<T>(
+  value: string | undefined,
+  run: () => Promise<T>,
+): Promise<T> {
+  const env = process.env as Record<string, string | undefined>;
+  const original = env.CLARA_PUBLIC_ORIGINS;
+  if (value === undefined) delete env.CLARA_PUBLIC_ORIGINS;
+  else env.CLARA_PUBLIC_ORIGINS = value;
+  try {
+    return await run();
+  } finally {
+    if (original === undefined) delete env.CLARA_PUBLIC_ORIGINS;
+    else env.CLARA_PUBLIC_ORIGINS = original;
+  }
+}
+
 function fakeClient(
   response: VerifyResponse,
   calls: Array<{ type: "email"; token_hash: string }>,
@@ -172,6 +202,63 @@ test("N1: one click makes exactly one hard-coded email verification and ignores 
   assert.equal(response.headers.get("location"), "https://app.clarabook.example/signup");
   assert.doesNotMatch(response.headers.get("location") ?? "", /token_hash|evil\.example/);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
+});
+
+test("NEW-B: a proxied confirmation derives authority from CLARA_PUBLIC_ORIGINS and fails closed when unset", async () => {
+  const calls: Array<{ type: "email"; token_hash: string }> = [];
+  let clientCreations = 0;
+  const createClient = async () => {
+    clientCreations += 1;
+    return fakeClient(validResponse(), calls, []);
+  };
+
+  await withPublicOrigins(undefined, async () => {
+    const refused = await handleEmailConfirmationPost(
+      proxiedPostRequest("https://app.clarabook.example"),
+      createClient,
+    );
+    assert.equal(refused.status, 403, "unset must refuse instead of trusting the rewritten hop");
+    assert.equal(clientCreations, 0, "the fail-closed arm must refuse before constructing the auth client");
+    assert.deepEqual(calls, []);
+  });
+
+  await withPublicOrigins("https://app.clarabook.example", async () => {
+    const allowed = await handleEmailConfirmationPost(
+      proxiedPostRequest("https://app.clarabook.example"),
+      createClient,
+    );
+    assert.equal(allowed.status, 303, "the operator-named public origin must remain usable behind the proxy");
+    assert.equal(allowed.headers.get("location"), "https://internal.worker.local/signup");
+    assert.equal(clientCreations, 1, "the configured positive control must reach the auth client exactly once");
+    assert.deepEqual(calls, [{ type: "email", token_hash: "token-hash-proxied" }]);
+  });
+});
+
+test("NEW-B: Origin null is 403 while a real allowlisted Origin succeeds", async () => {
+  const calls: Array<{ type: "email"; token_hash: string }> = [];
+  let clientCreations = 0;
+  const createClient = async () => {
+    clientCreations += 1;
+    return fakeClient(validResponse(), calls, []);
+  };
+
+  await withPublicOrigins("https://app.clarabook.example", async () => {
+    const refused = await handleEmailConfirmationPost(
+      proxiedPostRequest("null"),
+      createClient,
+    );
+    assert.equal(refused.status, 403, "an opaque Origin must never enter the token-consuming route");
+    assert.equal(clientCreations, 0, "Origin null must refuse before constructing the auth client");
+    assert.deepEqual(calls, []);
+
+    const allowed = await handleEmailConfirmationPost(
+      proxiedPostRequest("https://app.clarabook.example"),
+      createClient,
+    );
+    assert.equal(allowed.status, 303, "the same configured wall must admit a real public Origin");
+    assert.equal(clientCreations, 1, "the positive control must prove the observer can fire");
+    assert.deepEqual(calls, [{ type: "email", token_hash: "token-hash-proxied" }]);
+  });
 });
 
 const refusalCases: Array<{

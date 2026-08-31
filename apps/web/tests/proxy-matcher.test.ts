@@ -7,7 +7,10 @@ import "./next-runtime-globals";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 
 import { config } from "../proxy";
-import { isPublicPath } from "../lib/supabase/proxy";
+import {
+  isPublicPath,
+  referrerPolicyForPath,
+} from "../lib/supabase/proxy";
 
 /**
  * Finding 3 (MEDIUM) — the static-extension matcher bypass.
@@ -179,5 +182,17 @@ describe("P4-3 — signup confirmation is public, and the holding route delibera
       isPublicPath("/pending"),
       "the predicate answers identically for a public and a non-public path",
     );
+  });
+});
+
+describe("NEW-A: token-bearing entry routes send only the referrer data their POST needs", () => {
+  it("uses strict-origin on /auth/confirm so its real browser POST carries a non-null Origin", () => {
+    assert.equal(referrerPolicyForPath("/auth/confirm"), "strict-origin");
+    assert.equal(referrerPolicyForPath("/auth/confirm/verify"), "strict-origin");
+  });
+
+  it("keeps invite bearer URLs at no-referrer and leaves ordinary pages unchanged", () => {
+    assert.equal(referrerPolicyForPath("/invite/token-hash"), "no-referrer");
+    assert.equal(referrerPolicyForPath("/signup"), null);
   });
 });
