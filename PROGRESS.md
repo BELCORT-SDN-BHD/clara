@@ -180,7 +180,8 @@ Registered but not scheduled. Sources of record in brackets.
 **Fact-truing additions, 2026-08-31:**
 - **Frontier apply order:** `0154` applies inside 裁-18b PR-3's combined D1 window; `0155` applies only after the Wave-G factory reset (裁-45/裁-67), never by surgical delete or a weakened mechanism.
 - **P4-7 magiclink arm (裁-65):** no order or branch exists; #455 correctly keeps the fail-closed 409 until it lands.
-- **P6-C1…C7 (裁-72):** the trains are named, but their orders are not yet written.
+- **P6-C1…C7 (裁-72) DISCHARGED by 裁-75 (FS-0, 2026-08-31):** the re-measurement at `0155` (`docs/plan/active/verb-coverage-census-2026-08-31.md`) found the port wave executed the programme — no C-train remains; the residual is the open P4 PRs + FS-4/FS-7 + honest notes + dispositions.
+- **FS-0 census residual (2026-08-31):** the row-bound names and 8 NO-HOME dispositions live in `docs/plan/active/verb-coverage-census-2026-08-31.md` (§row-bound · §NO HOME) — capabilities (`grant/revoke_firm_capability`), `set_turnover_classification` (裁-80 note at P6-T), client-alias hygiene (`add/retire_client_alias`), `record_client_fact` (FS-5 rung-0 decides), `set_firm_high_stakes_threshold` + `verify_snapshot` (ruling/runbook at FS-8); each gets its FS-8 note or ruling, none is silent.
 - **F-A7b FIRM-side setup interview** remains owed (`docs/adr/0074-annex-a-mechanisms.md:131`).
 - **External `/ready` uptime/alerting wiring** remains owed (`docs/ops/DR.md`).
 - **CI synthetic-canary seed** remains owed (`docs/ops/DR-full-drill.md`).
