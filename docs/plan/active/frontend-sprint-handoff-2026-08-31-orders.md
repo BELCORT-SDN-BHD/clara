@@ -150,10 +150,29 @@ reminder mail; nothing deleted. **Stripe objects (裁-81):** mount the official 
 ~/.codex/config.toml with the TEST restricted key in that server's env; create Product/Price
 from `billing_plans` rows (PR-1's placeholder rows with `amounts_ruled=false`, or a minimal
 `billing_plans` seed if PR-1 is not built yet — say which), the webhook endpoint, Stripe Tax per
-裁-54 — every object recorded in `stripe_object_map`; never hand-author a price. **Walls to prove
+裁-54 — every object recorded in `stripe_object_map`; never hand-author a price.
+
+**MANDATORY DESIGN INPUT — the confirmation login-CSRF hole (found 2026-08-31 by #461's Codex
+law-28 security leg; mechanism verified by the orchestrator at the live bodies).** The confirmation
+route's POST (auth/confirm) proves only that the click came from a Clara page
+(`proveSameOrigin`), never that THIS browser
+initiated the signup that `token_hash` belongs to. An attacker signs up with credentials they
+control, sends their own legitimate confirmation link to a victim, and the victim's click consumes
+the token and installs the ATTACKER's session in the victim's browser — the victim then types their
+firm's details into `claim_identity` / `request_firm_registration` under the attacker's identity, and
+the attacker signs in later with their known password. The same-origin wall cannot see this by
+construction: the forged page IS Clara's page. **This design MUST answer it** — a browser-bound,
+server-verified signup-initiation nonce (the natural home for 裁-26's email-bound admission token and
+裁-68①'s tier-3 gate), never a widened Origin check. **Fenced meanwhile:** the fix was NOT bolted onto
+#461 because R8 reserves this door for THIS gate; the exposure is zero while `apps/web` is
+undeployed, and **"self-serve signup is unreachable in a deployed build until this train closes the
+binding" is a hard FS-10 cutover criterion** (`PROGRESS.md` Known issues carries the row).
+
+**Walls to prove
 with RED-before cells:** signature failure → no door; replayed event → one row; a paid registration
 of ANOTHER caller → refuse; a consumed admission → refuse; `Origin: null` → 403; the rate wall both
-polarities; the DPA unsigned → no checkout. **Beta scope:** checkout + admission + the holding page;
+polarities; the DPA unsigned → no checkout; **a confirmation token minted by a DIFFERENT browser →
+refuse (the login-CSRF binding above), with a positive control that the initiating browser succeeds.** **Beta scope:** checkout + admission + the holding page;
 NOT invoicing (nothing invoices at RM0). **Review:** the security lens (§A step 4) is mandatory, with the
 Codex read-only leg if a native lane built it. **E2E:** signup → checkout (Stripe TEST, a test
 card) → the webhook → the firm born → the firm home, in a real browser. **Stripe objects (裁-87):**
@@ -253,7 +272,10 @@ mascot · ClaraBook copy pass). Size 0.3.
 Everything in [`fe-train-plan-2026-08-30-orders-p6.md`](fe-train-plan-2026-08-30-orders-p6.md)
 §P6-X stands, with these amendments: the scope note's "after ALL SEVEN P6-C trains" is **replaced
 by 裁-75** (the measured residual + honest notes); **the interview runner has an `apps/web` home
-(裁-78)** is a hard acceptance line; the exit-gate census is FS-0's output re-run at the tip.
+(裁-78)** is a hard acceptance line; **self-serve signup must be unreachable in the deployed build
+until FS-4 closes the confirmation login-CSRF binding** (FS-4's mandatory design input; a positive
+read of the deployed route's behaviour, never an assumption) is a second hard acceptance line; the
+exit-gate census is FS-0's output re-run at the tip.
 **Workers deploy:** build on WSL/Linux with Node ≥ 22 (`pnpm --filter @clara/web cf:build`;
 `wrangler` needs it — the root pin is Node 20), secrets via `wrangler secret put` (env-to-env),
 `CLARA_RUNTIME_URL` + `CLARA_PUBLIC_ORIGINS` + the Supabase publishable key set, the Worker ≤ 10 MiB
