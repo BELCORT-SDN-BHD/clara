@@ -177,6 +177,17 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
 
 Registered but not scheduled. Sources of record in brackets.
 
+- **OPS.x — deployed parts-version hold (minted by PR #454 round 4):** CI now proves
+  `reader ⊇ emittable` inside one commit, but that cannot prove the web version already deployed is
+  at least the runtime version about to ship. A separate ops/CI PR must have the deployed web
+  publish a catalog/version stamp and make the runtime deploy read and compare it before rollout.
+  Until then, same-commit parity is a build gate, not the deploy-ordering hold. **Round 6 hardened that build
+  instrument fail-closed:** exact AST-site exemptions match once; mutable computed keys, every unreviewed
+  spread, unknown literal kind and unsupported declaration form throws; declarations come from the TypeScript
+  AST rather than regex. *(TRUED at the 2026-08-31 merge: #459's 26-kind reader is on main, and the
+  standalone gate was re-proven GREEN there — RED at the 22-kind historical reader — by the #454
+  fresh review.)*
+
 **Fact-truing additions, 2026-08-31:**
 - **Frontier apply order:** `0154` applies inside 裁-18b PR-3's combined D1 window; `0155` applies only after the Wave-G factory reset (裁-45/裁-67), never by surgical delete or a weakened mechanism.
 - **P4-7 magiclink arm (裁-65):** no order or branch exists; #455 correctly keeps the fail-closed 409 until it lands.
@@ -198,7 +209,6 @@ Registered but not scheduled. Sources of record in brackets.
 - **Q6 mobile decision corridor:** no train owns it; the owner must place it in a beta train or rule it out of beta.
 
 **THE DEBT-CLEARING SPRINT IS NEXT (owner mandate, 2026-08-24): everything except full Track B clears in the 磨合 window.** W2/W3 ladder items (2026-08-25), the forward-obligations block and the F-A5b/W4 items below ride it:
-- ~~**裁-22 — DB-resolved proposal citations**~~ — **DONE: `0143` (#409), merged + ceremonied 2026-08-29 03:17Z, live 141/`0146`; closed by fact per 裁-25 G2.**
 - **The two owner-excepted-door verdicts owed since `port-wave-plan-2026-08-28.md:82` — MEASURED 2026-08-30, not deferred further (mohe-alignment-audit-2026-08-29.md R-3):**
   - **`get_journal_entry` (single-arg, `0004:716`)** — grant to `clara_authenticated` stands, untouched since creation; the `clara_agent_ro` grant was revoked at `0009_coding_floor.sql:2885` in favour of the client-scoped `get_journal_entry_for` (`0011`), which every live `chatTurn` tool set (through `v15`) calls instead — `get_journal_entry` itself is registered as a tool nowhere in `v2`..`v15`'s tool files and has zero frontend call sites. **Disposition: RETIRE, as its OWN migration — do NOT bundle with 裁-12's `create_account_set_v1` retirement.** The two doors are functionally unrelated (report-metric account sets vs. a superseded single-arg journal read) and were named as two SEPARATE owner exceptions, not one; coupling them into one D1 window buys nothing and only entangles two independent rollbacks.
   - **`record_notification` / `wake_record_notification` (`0004:509,654`) — "verify-then-decide" verdict.** Measured: both doors are live, correctly audited (`_record_notification_core`, `0005:819`, inserts into `clara.notifications` and appends a `notification.recorded` event), but have **zero callers anywhere in the product** — no `chatTurn` tool file (`v1`..`v15`) ever registers either name, and no frontend file references `record_notification` at all. `clara.notifications` itself has **no `_visible` view and no frontend read path** — the table is write-only from the product's perspective today, though other migrations (`0007`,`0009`,`0015`-`0017`,`0027`,`0125`,`0131`) insert into it for their own purposes, so the table is not itself dead. **Disposition: KEEP AS-IS, no UI home yet.** The generic notification log is plausible future substrate (a firm-wide activity/notification feed), but no journey currently names it as its destination; opening a UI home is a product-scope question for a later wave, not a retirement candidate — recorded here so the "verify-then-decide" ledger line closes with a verdict rather than staying open indefinitely.
@@ -224,19 +234,16 @@ its finding; none blocks beta):
   · **The closed-wave-floor law (minted at #352)** now lives in the ADR digest §10 (#356) and
   `.claude/rules/db-tests.md`; the full text of each obligation above is archived verbatim in
   `docs/plan/completed/progress-archive-2026-08-part3.md`.
-- ~~**F-A6 PR-2 runtime obligations H-4/H-5/S-1**~~ — **DONE: shipped in #423, `packages/runtime/lib/freeform-read.mjs`** (see the F-A6 lane row).
 - **ClaraBook resource-audit residuals (2026-08-28, `docs/plan/active/clarabook-resource-audit-2026-08-28.md`)** — RULED 裁-13 (WCAG 2.2 target-size gate, P6) · RULED 裁-14 (Clara mascot, P6) · only the Mobbin flow-video viewing pass remains open (裁-4 7d).
 - **Gate-record OQ long tail (audited 2026-08-26)** — carried, not yet ruled: F-T1 OQ-1/2/3/5/6/7/8/9/10 · F-A4 OQ-1..6 · F-T3 OQ-2/3/9 · F-A8 OI-1 · F-A7 gate §5 item 3 (dual-attribution severance) · F-A9 TA-P13-OQ-2/4 · fix-queue's claims-auto-post widening trigger · bank-agency OQ-8's later-relation question · reporting-agency OQ-4 + P12 · freeform OQ-A — one row, pointers only.
 - **Small unrecorded follow-ups (audit 2026-08-26)** — wb-o's AMB-11 adjudication request (`docs/plan/research/wave-b/0017-ambiguity-adjudications.md`) · the metering `firm_usage_daily`/`task_usage` read-drop follow-up (`docs/plan/active/metering-survey.md`, design §3.9 — PR-1 only stops reading them) · per-rung friendly-message table · the wake cancel re-read landed in `bankAgent.v1`/`closePrep.v1`, but the DB-side status-predicated CAS settle remains with G1 PR-2.
 - **Dated-tripwire class, seen 3×** (f-a2 witness v2 08-21 · #352's closed-wave floor · B5.4) — pin the monotonic DIRECTION, never a ceremony-state; a trued pin proves both ways; sweep for a candidate at every ceremony. Same-audit reviewer items: `--lock-deployed` is BLANKET (stamps every non-`true` entry — run only when every dark entry is genuinely deployed; a scoped `--only` flag would be its own PR, none exists today) · the D-a window (08-24) has NO as-run document · the `frozen-evaluators.json` `evaluate_fs_pack_agent_v1` migration-path one-liner is fixed in this PR (see M1).
 **Owner rulings from the harness-audit sitting (2026-08-26)** — full text `docs/plan/active/harness-audit-rulings-2026-08-26.md`, one section per card:
 - **R1 — the judgement-confidence conjunct drop**: a future migration removes `assert_client_resolved`'s `confidence>=0.95` conjunct for `method='judgement'` rows (full ladder); until then it's a harmless failsafe (judgement rows mint at 1.0).
-- ~~**R4/R5/R7 digest addenda**~~ — **LANDED 2026-08-27:** evaluator two-halves ceremony (`docs/adr/README.md` §5), #352 closed-wave-floor law + four-runner confirmation (§10). *(R2/R3/R6 also LANDED and remain dropped.)*
 - **R8c — the pricing-amounts sitting**: SHAPE superseded by 裁-42 (per-firm base + paid seats + shared AI allowance + Active-Client slots + proration, configurable); amounts remain open, RM-denominated (裁-50), every plan RM0/`trial` until the sitting (裁-58).
 - **R9 — PITR HOLD**: deferred again; trigger = the beta-prep checklist. (R9's storage-probe half ships in 磨合 — Next item 1.)
 - **Tier-A raises leave NO durable trace** (no receipt, no audit row — design-consistent,
   conductor-closed with reviewer concurrence) — an OBSERVABILITY gap candidate, not a wall gap.
-- ~~β's §0 collision note~~ — **RESOLVED**: the rename (c623178) landed with pr-1b at W2+W3.
 - **F-A3 PR-3/C2's per-subject-account digest-binding is NOT implemented, for ANY of the
   thirteen agent bank cores** (Codex's final leg re-probed after the third round's PR-body note
   claimed "3 of 13 trivially derivable" — false on re-measurement, corrected: none of the
@@ -246,8 +253,6 @@ its finding; none blocks beta):
   A33** (not merely this line): a derivation path per core, a subject-binding parameter on
   `_agent_verify_inputs_digest`, and a same-task cross-account negative cell per derivable core.
   *(F-A3 PR-3 review rounds 3-4, 2026-08-25, PR #343.)*
-- ~~F-A3 PR-3/C1-bis D1 write-quiesce obligation~~ — **DISCHARGED 2026-08-26**: 0134 merged
-  (#348) + ceremonied inside W4's combined quiesced window; full record in `-part3.md`.
 - **The autonomous `bank_agent` driver, when built, must mint op_keys that either carry
   `taskId` at colon-field 2 (chatTurn_v14's own `bank-{verb}:{taskId}:{segment}:{payload}`
   shape) or contain no colons at all** — `_agent_verify_inputs_digest`'s C2 task-binding falls
@@ -258,7 +263,6 @@ its finding; none blocks beta):
 
 **Unowned gaps found by the 2026-08-23 alignment scan — now OWNED** (each was real work with no home;
 the owner is named so none of them drifts back into nobody's queue):
-- ~~**Manual journal-entry compose UI → the Codex frontend build.**~~ **DONE 2026-08-27** — `apps/web`'s P3 journals lane shipped hand-compose (`compose-dialog.tsx` + `entry-lines-editor.tsx`, #364); flagged closed by the handoff-conformance audit. · ~~**`coding_rules` propose/sign retirement**~~ — **DONE**: `0118` (F-A2 PR-3, #324) drops the five coding-rule verbs (with their five autopost siblings) outright, confirmed absent by the tail assertion; `coding_rules` stays KEEP-AS-HISTORY, consistent with OQ-2's ruling. · ~~**The autoDraft 8-step cap**~~ — **DONE**: `autoDraft.v9.impl.ts:197`, `AUTODRAFT_STEP_BUDGET = 8`, design-cell docstring (F-A2 PR-2, #323).
 - **Payroll document ingestion as a first-class product capability** (own purpose class + sensitivity walls) — owner decision, future scope. *(F-T2 B1/B14 ruling, 2026-08-23: `payroll-calendar-gate-record.md` OC-1.)*
 
 **Named build debts (deadline-triggered):**
@@ -385,23 +389,23 @@ lint watch · `0084`'s `C:\ct\`-only tooling. Full text archived verbatim 2026-0
 
 ## Known issues
 
+- **P6-1 bigint wire boundary, measured on PR #454's real Postgres 17 rig:**
+  `wake_freeform_read` emits `read_id` as a JSON number, so receipt `9007199254740993` reaches the
+  wrapper already rounded to `9007199254740992`. `chatTurn_v16` fails closed (no card, no throw),
+  but ids above 2^53 cannot render until the database emits text. **Fix queue 裁-71⑨, batched with
+  the next DB pass:** recut `wake_freeform_read` to emit `read_id::text`, and move
+  `apps/web/lib/reports/types.ts` from `id: number` to `id: string`; this is a live-writer D1
+  window and deliberately does not ride the runtime-only PR.
 - **PARKED UNDER THE 2026-08-31 PIVOT (裁-79 / 裁-76) — six backend PRs, each resumable ONLY from its own worktree (the uncommitted diff IS the round; never reset, never rebased by another lane); the per-round detail is the "2026-08-31 dawn" session-log entry:** #447 `wake_open_firm_question` kind wall — worktree bs-2-kind-wall, tip `ffa90df0`, gate round 2 uncommitted (37/0/0 applied; needs full suite + lint + push + PR body) · #448 `unique_violation` constraint_name — worktree bs-3-unique-violation, tip `394b8e40`, round 4 uncommitted (focused 8/8; **the pushed head is CI-red on db-estate as parked — a parked artefact, not a branch verdict**) · #452 裁-18b PR-3 — worktree binding-pr3, round 5 uncommitted (post-image `9682cb13` pinned, the union invisible wall, the three-arm positive-identity gate); `0154` stays on main UNAPPLIED until this PR's combined window · #456 G1 PR-2a — worktree g1-pr2-db, round 4 uncommitted (source-aware runtime fixtures; the HIGH that reds db-estate the moment the file is numbered; the roster pre-image; D3 own-row retirement); 裁-49's `call_kind`/`login_pool` truings ride it · #449 G1 PR-2b — worktree g1-pr2-rt, round 4 INCOMPLETE (the door derives `due_key` from verified subject ids; five pins move with the signature; after #456; the `rig-meta.mjs` conflict keeps BOTH cohorts); the `bank_agent_due_claims` retention belt is owed before the source is enabled · #460 `/ready` hard-fail (裁-61) — worktree ready-hard, round 6 uncommitted (five REDs incl. the re-armed counter battery; DR.md §6 trued; needs a targeted rerun + build with the ROOT junction + root lint + push); **the HA question first**. The seven rigs left up at dawn are throwaway and re-creatable.
 - **The four happy-path holes of the 2026-08-31 trace are OWNED by the handoff orders, not built around:** FS-4 (a paid signup → a born firm) · FS-5 (the interview runner in `apps/web`) · FS-7 (the report-run opener + PDF) · FS-0 (the census 裁-72 rests on).
 - **Two `op_key` conventions coexist:** most wrappers mint fresh keys; P4-5/P6-2 use deterministic actor-scoped keys. Rule to make: every deterministic key carries actor id from a positive caller read and every governed door hashes the actor server-side; audit `apps/web/lib/reports/api.ts` first. Owner sitting required.
 - **Unresolved worktree incident (2026-08-31 ~02:50 MYT):** an uncommitted `.claude/skills/orchestrator-fable/SKILL.md` edit vanished from the main checkout; content and cause are unknown. Ask the owner, try editor history, and add a post-lane main-status tripwire.
 - **Four v16 card readers precede their declarer:** main's apps/web renders `agent_receipt`, `firm_question`, `close_proposal`, and `freeform_result`, but #454's v16 declarer/registry repoint is unmerged and deployed `chatTurn_v15` cannot emit them.
 - **`clara.create_firm` has zero apps/web home:** its only caller remains `apps/dashboard/app/onboarding/firm/FirmCommitForm.tsx`; #461's signup flow uses different self-registration doors.
-- ~~Annex A.4 row 7~~ (RULED+BUILT, `0128` live, `no_preparation` mode) · ~~R-OWNER/B15's second door~~ (BUILT `0106`, #311, tail-proven; D18 stands for direction-SILENT documents only) · ~~the `AGENTS.md` invariant-(a) home~~ (DECIDED (b): PRD §6 invariant 2(b) is the single home) — all resolved; full records archived verbatim in `-part2.md`/`-part3.md`.
+- ~~Annex A.4 row 7~~ (RULED+BUILT, `0128` live, `no_preparation` mode) · ~~R-OWNER/B15's second door~~ (BUILT `0106`, #311, tail-proven; D18 stands for direction-SILENT documents only) · ~~the `AGENTS.md` invariant-(a) home~~ (DECIDED (b): PRD §6 invariant 2(b) is the single home) — all resolved; full records archived verbatim in `-part2.md`/`-part3.md`/`-part6.md`.
 - **The wiki dynamic-SQL gate reads CoR/DO-block comments UN-MASKED** (0097 2026-08-20; hit again by 裁-17 2026-08-29): a create-function phrase quoted in a comment inside dollar-quoting reclassifies the block as a dynamic creator. Workaround: never spell the DDL verb in such a comment. Real fix = mask the block's own comments + a selftest; **re-homed to the F-A2 fix queue.**
 - **Found by the 2026-08-29 dawn reviews, recorded not built around:** (1) ~~**M9 `list_open_items_by_counterparty` firm/client mismatch**~~ — **CLOSED: `0149` (#427), applied live 2026-08-30 00:30Z; tail drift-guarded.** (2) The interview asks "Apply the standard LHDN-aligned MPERS Chart of Accounts seed?" (`requiredForCommit`) and NOTHING consumes `coa_seed_decision` — a shipped promise 裁-21 closes. (3) ~~`wake_propose_identifier_promotion` has NO duplicate-open wall (0103)~~ — **CLOSED: #425 (`0148`) merged and APPLIED LIVE 2026-08-30 00:30Z (the duplicate-open wall on BOTH agent proposal doors, censused by property on live).** **Two successors it does NOT close, both minted by its own review and both pre-beta:** (3a) `wake_open_firm_question` can still mint the FIRST `onboarding_proposed` question with a caller-supplied kind and candidates, **bypassing Door 2's egress authorisation (CLR28), the A14 name-family wall and 裁-22's basis resolution** — the fix is a small migration refusing Door-2-owned kinds from that verb; (3b) 99 `exception when unique_violation` handlers in the chain and only ~15 read `constraint_name` — the live site is `0154_binding_proposal_pr_1.sql:2574-2576` (TRUED 2026-08-30; was `0028:769-771` — `0154` recut the body, this handler is byte-identical) **relabels EVERY unique_violation as `binding_conflict`**; a sweep at the fix queue. **And the identity table itself: RULED 2026-08-30 (裁-41) — `clara.client_identifiers` gains a UNIQUE `(client_id, kind, value_normalized)` before beta, its pre-flight NAMING existing duplicates and REFUSING, never deduping** (`0007:235` left it non-unique by design, so two separately-settled confirms still mint two identical identity rows). (3c) **P1, 裁-19 PR-1 — MEASURED AT THE 0149 APPLY (2026-08-30 00:30Z): live carried 0 pre-existing merges without a carrier row**, so PR-2's un-merge door will reach every live merge; the class stays recorded (a merge made on a frontier before `0149` would have had no carrier); the same measurement priced the canonicalising read at **~15% of an aging read** (14-15 µs per open item, ~+14 ms on a 1 000-item book), a third of which a `cross join lateral` rewrite removes in its own round. (3d) **F-A9 PR-1B's two:** `_approve_entry_core`'s refusal prose still names a "budget" gate that no longer exists (a sixth writer body, its own follow-up, with the drafting-trio exact-equality pin re-cut), and ~~the 0031 postverify step-4/6 red~~ **CLOSED #443 (`fa2a4ece`, 6/6 green on 0001–0155)**. (4) ~~`approve_opening_seed`/`approve_opening_correction` serializable proconfig pin~~ — **CLOSED: READ ON LIVE and confirmed at the 2026-08-29 ceremony.** (5) T11 N2: the live `resolve_onboarding_plan_item` re-resolves any state; the card disables settled items → **RULED 2026-08-29 (裁-27): "Amend resolution" is allowed on a resolved item, at P6.**
-- ~~**The sweep-red fixture class (2026-08-29, after #414)**~~ — **CLOSED**: the manual sweep went
-  RED on the closed-wave drill **§4.11** and all four **D-b frontier legs** because the shared
-  `seedAdmission` fixture followed HEAD and wrote `token_hash` at pre-`0147` frontiers; **#415
-  made it frontier-aware (catalog-probed) and its branch sweep turned the four frontier legs
-  green**; product code was never wrong, and `0147` applied after it (live 142). **THE LESSON
-  STANDS:** the closed drills and the frontier matrix run **only** on the weekly sweep or a manual
-  dispatch (ADR-0073), so a PR that changes a SHARED TEST FIXTURE must `gh workflow run ci.yml`
-  on its own branch **before merge** — the per-PR legs cannot see those legs at all.
+- **Shared-test-fixture law (the sweep-red class, CLOSED by #415):** a PR changing a SHARED TEST FIXTURE runs `gh workflow run ci.yml` on its own branch before merge — the sweep-only legs (ADR-0073) are blind per-PR; full record in `-part6.md`.
 - **Wave-B rung-0 gaps, TRUED 2026-08-31:** (1) ~~authenticated alias read missing~~ — **DB half CLOSED by `0145` §F:** masked security-barrier view `clara.counterparty_aliases_visible`, live since 2026-08-29; P6-R still owes T8's alias-panel wiring. (2) ~~SweepReceipt was id-only~~ — **CLOSED #459:** `SweepReceiptCard` hydrates `get_sweep_run` and offers `acknowledge_sweep_run`. *(The 2026-08-22 resolved quartet — riders ③④⑤ · corroboration 0/33 · ci.yml over 500 · the stranded pair — is archived in `-part2.md`.)*
 - **F-A7 gamma residuals R1/R2/R3 — ALL THREE STAND; full text archived verbatim 2026-08-30 to `docs/plan/completed/progress-archive-2026-08-part4.md`** (R1 classify egress ungoverned until the
   runtime side lands · R2 no `consume_firm_egress_dispatch` verb, `expires_at` decorative · R3
@@ -466,9 +470,6 @@ bare-SST-id vision-prompt check (lock 3's margin was one channel) · `coverage.p
   lane's checkout. The control is isolation. Practices that follow: cut every branch inside your
   worktree · print `git branch --show-current` INSIDE the commit command, not before it · after any
   surprise, resolve state against `git show origin/<branch>:<file>`, never against a working tree.
-- ~~**Local-only test-isolation flake in the db package**~~ — **MOOT, 2026-08-23 (F-A2 PR-3):**
-  a21-prestate.test.mjs, the file that leaked `PGDATABASE` into the shared Node process, is
-  whole-file RETIRED with the rules-execution tier (Annex B.1/B.6) — the flake retires with it.
 - **The estate-wide whitespace-blind blank-op-key idiom** stays REGISTERED under η residuals
   in the Backlog — noted here so a Known-issues-only reader does not miss it.
 - **2026-08-24: gitleaks scans EVERY ref, so any unmerged branch can red every PR's lint**

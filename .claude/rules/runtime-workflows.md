@@ -12,9 +12,18 @@ behavioural change is never an edit:
 1. Add the next version as a new file and export (`chatTurn.v11.ts` — not an edit to `v10`).
 2. Repoint `registry.ts`, which names the version new enqueue sites target. Older versions stay
    exported and frozen.
-3. Run `pnpm freeze:update` **only** when adding a brand-new frozen workflow class. A new `_vN`
-   of an existing class should pass freeze-lint on its own; if the lint demands an update for a
-   change you made, you edited a frozen body — undo it rather than regenerate the manifest.
+3. Run `pnpm freeze:update` whenever your change ADDS a frozen file — a brand-new workflow class
+   **and** a new `_vN` of an existing one both do (freeze-lint raises `UNREGISTERED` on any
+   `@frozen`-marked or import-closure file absent from the manifest —
+   `scripts/check-frozen-workflows.mjs:364,374`). Then PROVE the regenerated manifest is
+   ADDITIONS-ONLY semantically: run
+   `node scripts/check-frozen-workflows.mjs --compare-base <ref>` (normally `<ref>` is
+   `origin/main`). It parses both manifests duplicate-safely and refuses any removed entry or any
+   changed existing hash/deployed flag. A MOVED hash on an EXISTING entry is the real signal that
+   you edited a deployed frozen body — undo that rather than regenerate.
+
+Every chatTurn successor version carries the live decoy-vs-receipt provenance cell coupled to the
+CURRENT `registry.workflows.chatTurn`, beside (not instead of) its exact-version registry pin.
 
 Never rename or delete an export that has in-flight runs. The workflow name derives from
 path plus export, so a rename strands every parked run filed under the old name.
