@@ -48,6 +48,16 @@ import {
  * tripwire for the INLINE `"use server"` directive form, which the primary cell
  * does not and cannot model.
  *
+ * SECOND-REVIEW FOLD (F-8..F-10): the inline tripwire's exemption moved from
+ * byte offset 0 to SHAPE (`inlineOccurrences()`) — offset 0 false-flagged the
+ * ordinary case of a header comment preceding a legitimate module directive,
+ * because `stripComments` blanks comments IN PLACE rather than deleting them.
+ * `COLOCATED_MODULE_ROSTER` is pre-written for `#461`'s
+ * `app/(entry)/auth/confirm/verify/handler.ts` (not yet on disk on this
+ * branch — see the roster's own comment), every roster reason must now carry
+ * the literal token `NOT A ROUTER FILE`, and the WALL 2 scan now covers
+ * top-level FILES (`proxy.ts`, `next.config.ts`, …) as well as directories.
+ *
  * Kept in its OWN file, not appended to `firm-scope-surfaces.test.ts`, because it
  * is a genuinely separate enumeration (a different walk, a different directive
  * scan) and the census file was already at the repo's soft size guideline.
@@ -93,12 +103,24 @@ function walkSources(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** Every top-level directory under `webRoot` this file will scan for a Server
- *  Action — i.e. every directory that is NOT in `SOURCE_DIR_EXCLUDES`. */
-function topLevelSourceDirs(webRoot: string): string[] {
-  return readdirSync(webRoot, { withFileTypes: true })
+/**
+ * Every top-level entry under `webRoot` this file will scan for a Server
+ * Action — every directory NOT in `SOURCE_DIR_EXCLUDES`, walked recursively,
+ * AND every top-level `.ts`/`.tsx` FILE (F-10) — `proxy.ts` (the Routing
+ * Middleware entry), `next.config.ts`, `open-next.config.ts`. A directory-only
+ * walk left these invisible for a reason that has nothing to do with whether
+ * one COULD carry a directive; chosen over a "deliberate, and here is why"
+ * exemption because there is no such reason to write down.
+ */
+function topLevelSourceEntries(webRoot: string): string[] {
+  const entries = readdirSync(webRoot, { withFileTypes: true });
+  const dirs = entries
     .filter((entry) => entry.isDirectory() && !SOURCE_DIR_EXCLUDES.has(entry.name))
     .map((entry) => join(webRoot, entry.name));
+  const files = entries
+    .filter((entry) => entry.isFile() && SOURCE_EXT.test(entry.name))
+    .map((entry) => join(webRoot, entry.name));
+  return [...files, ...dirs.flatMap((dir) => walkSources(dir))];
 }
 
 /** Every `.ts`/`.tsx` file under `app/`, private (`_`-prefixed) folders excluded
@@ -158,10 +180,33 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
    * Non-route, non-special-file `.ts`/`.tsx` modules legitimately colocated under
    * `app/` (a helper, a local type file, a constants module) — the escape valve
    * the complement-of-LEAF tripwire below needs so ordinary code organization
-   * does not have to fight it. Empty today: `appSourceFiles()` — measured below —
-   * contains only LEAF and SPECIAL_FILE members; there is no third kind yet.
+   * does not have to fight it. Measured against `appSourceFiles()` today (before
+   * #461 lands): contains only LEAF and SPECIAL_FILE members, so this roster is
+   * still exercised at zero live entries by the cell below.
+   *
+   * PRE-WRITTEN AHEAD OF #461 (F-1b): #461's tree adds
+   * `app/(entry)/auth/confirm/verify/handler.ts` — measured directly from that
+   * PR's diff, not assumed — which is neither LEAF nor SPECIAL_FILE and will red
+   * the tripwire below the moment this branch rebases onto post-#461 main. Every
+   * reason here must contain the literal token `NOT A ROUTER FILE` (F-9): a
+   * disguised real routing file rostered here to dodge the tripwire would have
+   * to make that exact false claim rather than hide behind plausible prose.
    */
-  const COLOCATED_MODULE_ROSTER: ReadonlyArray<{ readonly path: string; readonly reason: string }> = [];
+  const COLOCATED_MODULE_ROSTER: ReadonlyArray<{ readonly path: string; readonly reason: string }> = [
+    {
+      path: "app/(entry)/auth/confirm/verify/handler.ts",
+      reason:
+        "NOT A ROUTER FILE. This is the extracted POST-handler body for the sibling " +
+        "app/(entry)/auth/confirm/verify/route.ts (#461, P4-3) — that route.ts is a " +
+        "five-line file whose only export, POST, does nothing but call " +
+        "handleEmailConfirmationPost from this module. handler.ts itself exports no " +
+        "page/route/HTTP-method surface, its basename matches no LEAF or SPECIAL_FILE " +
+        "pattern, and Next.js never routes to it, auto-imports it, or treats it as any " +
+        "kind of special file — it exists purely so route.ts's own body stays small " +
+        "and independently testable. `firm-scope-surfaces.test.ts`'s own census still " +
+        "governs the real entrance: route.ts's POST export, not this helper.",
+    },
+  ];
 
   function classifyAppFile(file: string): "LEAF" | "SPECIAL_FILE" | "rostered colocated module" | "UNCLASSIFIED" {
     const name = basename(file);
@@ -291,6 +336,12 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
     for (const entry of COLOCATED_MODULE_ROSTER) {
       assert.ok(existsSync(join(WEB_ROOT, entry.path)), `${entry.path} is rostered but does not exist`);
       assert.ok(entry.reason.length >= 80, `${entry.path}'s reason is too thin`);
+      assert.match(
+        entry.reason,
+        /NOT A ROUTER FILE/,
+        `${entry.path}'s reason must state NOT A ROUTER FILE verbatim (F-9) — an explicit, falsifiable ` +
+        "claim a disguised real routing file would have to make outright, not plausible prose it could hide behind.",
+      );
     }
   });
 });
@@ -350,13 +401,13 @@ describe("WALL 2 — every \"use server\" MODULE calls the spine or is registere
    */
   const USE_SERVER_ACTION_ROSTER: ReadonlyArray<{ readonly path: string; readonly reason: string }> = [];
 
-  /** F-2: every top-level source directory under apps/web, not just app/+lib/ —
-   *  the sibling census's own defect report named app/lib/COMPONENTS, and a
-   *  hard-coded pair is exactly the kind of blind spot a NEW directory (or one
-   *  this file's author simply forgot) reopens. `components/` alone holds four
-   *  `*-actions.tsx` files this scan was blind to before this fold. */
-  const scannedFiles = (): string[] =>
-    topLevelSourceDirs(WEB_ROOT).flatMap((dir) => walkSources(dir)).map(webRelative);
+  /** F-2/F-10: every top-level source directory AND top-level source FILE under
+   *  apps/web, not just app/+lib/ — the sibling census's own defect report named
+   *  app/lib/COMPONENTS, and a hard-coded pair is exactly the kind of blind spot
+   *  a NEW directory (or one this file's author simply forgot) reopens.
+   *  `components/` alone holds four `*-actions.tsx` files this scan was blind to
+   *  before this fold. */
+  const scannedFiles = (): string[] => topLevelSourceEntries(WEB_ROOT).map(webRelative);
 
   const actionFiles = scannedFiles().filter(isUseServerModule);
 
@@ -411,9 +462,7 @@ describe("WALL 2 — every \"use server\" MODULE calls the spine or is registere
   /** Every position of a bare `"use server"`/`'use server'` string-literal
    *  STATEMENT in DIRECTIVE POSITION — the start of the file, or immediately
    *  (whitespace only) after a `{`, `}`, or `;`, which is what a function body's
-   *  own first statement looks like once comments are blanked. Position 0 is the
-   *  module's own directive, already governed above; every other position is an
-   *  INLINE one this wall cannot verify, only refuse. */
+   *  own first statement looks like once comments are blanked. */
   function directiveShapedOccurrences(strippedCode: string): number[] {
     const positions: number[] = [];
     let match: RegExpExecArray | null;
@@ -428,10 +477,28 @@ describe("WALL 2 — every \"use server\" MODULE calls the spine or is registere
     return positions;
   }
 
+  /**
+   * F-8 FIX — exempt the module's OWN directive by SHAPE, not by byte offset 0.
+   * `stripComments` blanks a real header comment IN PLACE (offsets preserved,
+   * not deleted), so a file that opens with the header comment every file in
+   * this repo carries lands its own legitimate directive at some position > 0,
+   * not 0. Filtering `pos !== 0` (the FIRST cut of this wall) therefore flagged
+   * the ordinary, house-style case as "inline" — measured: three false
+   * positives, and the remedy text ("hoist it to a module") is not satisfiable
+   * because it ALREADY IS one. The correct exemption is SHAPE: an occurrence is
+   * the module's own leading directive, wherever it sits, exactly when nothing
+   * but blanked comments and/or whitespace precedes it — `.trim() === ""` on
+   * the prefix. Anything else preceding it (real code) means this occurrence is
+   * genuinely nested inside some other statement, i.e. inline.
+   */
+  function inlineOccurrences(strippedCode: string): number[] {
+    return directiveShapedOccurrences(strippedCode).filter((pos) => strippedCode.slice(0, pos).trim() !== "");
+  }
+
   it("TRIPWIRE — an inline Server Action directive is not modelled by this wall, and reds", () => {
     const offenders = scannedFiles().filter((f) => {
       const stripped = stripComments(readSourceUnit(f)).code;
-      return directiveShapedOccurrences(stripped).some((pos) => pos !== 0);
+      return inlineOccurrences(stripped).length > 0;
     });
     assert.deepEqual(
       offenders,
@@ -491,7 +558,7 @@ describe("WALL 2 — every \"use server\" MODULE calls the spine or is registere
     });
   });
 
-  describe("THE INLINE-DIRECTIVE POSITIVE CONTROL (F-3)", () => {
+  describe("THE INLINE-DIRECTIVE POSITIVE CONTROL (F-3, F-8)", () => {
     it("an inline directive nested inside a function body IS caught by the tripwire", () => {
       // Next's own documented shape: a component whose closure carries its own
       // directive, captioned "verify auth before saving" in the docs.
@@ -506,15 +573,30 @@ describe("WALL 2 — every \"use server\" MODULE calls the spine or is registere
         "}",
       ].join("\n");
       const stripped = stripComments({ path: "inline-plant.ts", code: plant }).code;
-      const inlineOnly = directiveShapedOccurrences(stripped).filter((pos) => pos !== 0);
-      assert.ok(inlineOnly.length > 0, "the inline directive went undetected");
+      assert.ok(inlineOccurrences(stripped).length > 0, "the inline directive went undetected");
     });
 
-    it("MUST-NOT-RED CONTROL: a legitimate module-level directive is NOT flagged by the inline tripwire", () => {
-      const plant = '"use server";\nexport async function act() { return null; }';
-      const stripped = stripComments({ path: "module-plant.ts", code: plant }).code;
-      const inlineOnly = directiveShapedOccurrences(stripped).filter((pos) => pos !== 0);
-      assert.deepEqual(inlineOnly, [], "the module's own directive must not double-count as an inline offender");
+    it("DISCRIMINATING CONTROL (F-8): a header comment before a module's own directive is NOT flagged as inline", () => {
+      // The house style EVERY file in this repo opens with (a header comment)
+      // shifts the module's own legitimate directive to byte offset > 0, since
+      // stripComments blanks comments IN PLACE rather than deleting them. The
+      // buggy `pos !== 0` exemption reds THIS exact, ordinary shape; the
+      // shape-based `inlineOccurrences()` fix does not. This cell is written to
+      // discriminate: run it against `directiveShapedOccurrences(...).filter(pos
+      // => pos !== 0)` (the pre-F-8 code) and it reds; run it against
+      // `inlineOccurrences()` (the shipped code) and it is green.
+      const plant = [
+        "// header comment, exactly what every real file in this repo opens with",
+        '"use server";',
+        "export async function act() { return null; }",
+      ].join("\n");
+      const stripped = stripComments({ path: "header-comment-plant.ts", code: plant }).code;
+      assert.notEqual(stripped.indexOf('"use server"'), 0, "the fixture stopped exercising a non-zero offset");
+      assert.deepEqual(
+        inlineOccurrences(stripped),
+        [],
+        "a header comment before the module's own directive must not make it count as inline",
+      );
     });
 
     it("MUST-NOT-RED CONTROL: this file's own plant literals do not trip the tripwire on themselves", () => {
@@ -523,8 +605,7 @@ describe("WALL 2 — every \"use server\" MODULE calls the spine or is registere
       // never in bare directive position, so this must stay green; if it ever
       // reds, a plant was rewritten into real directive position by mistake.
       const stripped = stripComments(readSourceUnit("tests/firm-scope-fourth-entrance.test.ts")).code;
-      const inlineOnly = directiveShapedOccurrences(stripped).filter((pos) => pos !== 0);
-      assert.deepEqual(inlineOnly, [], "this file's own plants are now sitting in real directive position");
+      assert.deepEqual(inlineOccurrences(stripped), [], "this file's own plants are now sitting in real directive position");
     });
   });
 });
