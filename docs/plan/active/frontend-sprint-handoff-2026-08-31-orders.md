@@ -44,7 +44,7 @@ the 08-30 ledger citing the measured residual. **Acceptance:** the denominator c
 
 ## FS-1 · #451 P4-2 — the scope spine, round 9 (resume, do not reset)
 
-Worktree .claude/worktrees/p4-2-cx, branch `web/p4-2-scope-spine`, tip `3abb2b0f` + an
+Worktree .claude/worktrees/p4-2-cx, branch web/p4-2-scope-spine, tip `3abb2b0f` + an
 uncommitted three-file draft. **The bar (the reviewer's 16-probe table, restated):** H1–H14 — a
 handler that mutates through a response ARGUMENT (`res.json(await mutateBooks())`), a name-trusted
 `sendError` body, a computed `[op]` mutator, an early-return before the guard, a guard that reads a
@@ -62,7 +62,7 @@ argument is a mutator). Full suite + lint + push; the same-reviewer re-verify.
 ## FS-2 · #461 P4-3 — the entry group, round 6 (merge-gating)
 
 Worktree .claude/worktrees/p4-3-entry (if absent, `git worktree add … origin/web/p4-3-entry-group`),
-tip `bebfb36e` (1402/1402). **NEW-A (HIGH):** `Referrer-Policy: no-referrer` on `/auth/confirm`
+tip `bebfb36e` (1402/1402). **NEW-A (HIGH):** `Referrer-Policy: no-referrer` on /auth/confirm
 makes the confirmation form POST send `Origin: null`, so the same-origin wall 403s every real
 browser. Fix `strict-origin`; **never accept `Origin: null`**. **Acceptance:** `pnpm --filter
 @clara/web build` → `next start` → a real browser click on the confirmation page succeeds, with the
@@ -127,7 +127,7 @@ is mandatory. Size ~0.4 BE + ~0.5 FE.
 `apps/web/app/api/runtime/[...path]/route.ts` (already generic, allow-lists three headers, reads
 `CLARA_RUNTIME_URL` at request time). **Shape (fa7b-onboarding-design.md §3.3, R7):** the interview
 is an ESCALATED Clara thread, URL-addressable under the client workspace
-(`/clients/[clientId]/clara/[threadId]` is the existing full-screen route family — the interview
+(the existing full-screen route family /clients/[clientId]/clara/[threadId] — the interview
 run rides it or a sibling `…/onboarding` route, URL-as-truth), collapsible to the rail, progress
 line as the thread header, the park/answer protocol unchanged, **no optimistic UI** (an answer is
 in the thread only after `GET /state` says so), the 409 on a second submitter rendered honestly.
@@ -194,9 +194,9 @@ whose lane is paused must name a row. Size 0.3 + 0.3.
 
 ## FS-9 · The third conformance pass (裁-9) — P6's entry gate
 
-Re-fetch `github.com/BELCORT-SDN-BHD/clarabook-frontend` at `main` (PR #1 merged `a7709883`; one
+Re-fetch github.com/BELCORT-SDN-BHD/clarabook-frontend at `main` (PR #1 merged `a7709883`; one
 open PR #2 on the brand guideline) and read the DESCRIPTIVE resources — the prototype screens and
-components under `g6-high-fidelity/clarabook-prototype/` — as the parity reference for every built
+components under that repo's g6-high-fidelity/clarabook-prototype/ tree — as the parity reference for every built
 surface; record deviations by ruling, never absorb them. Output: a new file docs/plan/active/clarabook-conformance-pass-3-2026-09-XX.md
 (consumed / diverged-by-ruling / owed) and the P6-6 identity items confirmed (Ledger Fold ·
 mascot · ClaraBook copy pass). Size 0.3.

@@ -111,15 +111,18 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 
 ## Working protocol
 
-**Run the `orchestrator-fable` skill first on any substantive task.** You are the
-orchestrator — plan, delegate, synthesize, verify, own the state. Workers are the hands:
-native lanes perform independent fresh-context review only; every build — any package, any
-size, backend or frontend — dispatches to Codex through direct `codex exec`. Inspect every
-result before accepting it, and run a
-cross-model review before merging anything security-critical. *Codex lane, learned the hard
-way:* the `codex:rescue` companion queue is unreliable (it has stalled for hours at
-"starting") — prefer a direct `codex exec` via Bash, backgrounded with a file-watcher on the
-output. This split was owner-ruled and recorded in `PROGRESS.md`'s 2026-08-31 dawn entry.
+**Who leads (2026-08-31, 裁-82).** **Codex is the development lead** for the beta sprint; the
+handoff of record is `docs/plan/active/frontend-sprint-handoff-2026-08-31.md` (+ its orders).
+Every build — any package, any size — is a Codex lane in its own worktree (direct `codex exec`,
+`gpt-5.6-sol`, `model_reasoning_effort=xhigh`). **Review (裁-84; ADR-0077 pending signature):**
+every code PR gets an independent pass by a FRESH, SEPARATE `codex exec` read-only session plus
+the owner's read before merge; docs-only PRs take the single-lane review (ADR-0069). A Claude
+Code session on this repo does harness/handoff hygiene or an explicit owner ask; if it
+orchestrates at all it runs the `orchestrator-fable` skill first and dispatches only Codex
+build lanes — plan, delegate, synthesize, verify, own the state; inspect every result before
+accepting it. *Codex lane, learned the hard way:* the `codex:rescue` companion queue is
+unreliable (it has stalled for hours at "starting") — prefer a direct `codex exec` via Bash,
+backgrounded with a file-watcher on the output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-08-31.md`.
 
 **Ground before you build.** On a new or compacted session, and before answering any
 architecture question or changing code: query the graph for structure (the

@@ -79,7 +79,7 @@ honest not-built-yet flows and lives in `PROGRESS.md` rows. Nothing in this file
 | PR | What | Disposition | Where the bar lives |
 |---|---|---|---|
 | #451 | P4-2 scope spine | **FINISH** — round 9 drafted-uncommitted in worktree p4-2-cx; verify bar = the 16-probe RED-before table (restated in orders FS-1) | orders FS-1 |
-| #461 | P4-3 entry group | **FINISH** — round 6 merge-gating: `Referrer-Policy: strict-origin` on `/auth/confirm` (never accept `Origin: null`) | orders FS-2 |
+| #461 | P4-3 entry group | **FINISH** — round 6 merge-gating: `Referrer-Policy: strict-origin` on /auth/confirm (never accept `Origin: null`) | orders FS-2 |
 | #455 | P4-4 members/invites | **FINISH** — CLEAR both legs at `1a131a5a`; merge-forward onto #451 | orders FS-3 |
 | #453 | P4-5 operator queue | **FINISH** — CLEAR at `b6359309`; retarget after #451; operator tooling, not the tier-3 path | orders FS-3 |
 | #454 | P6-1 `chatTurn_v16` | **FINISH** — merge-prepped `c5e0fef7`; one fresh read-only review, then merge + Fly deploy | orders FS-6 |
@@ -158,7 +158,7 @@ full-suite gates.
    TEST mode does not wait for it). Hand Codex a **TEST-mode restricted key** for its MCP env; the
    LIVE key only at the launch sitting.
 2. Supabase Auth settings per `docs/ops/wave-g-setup-checklist.md` (signup ON, redirect URLs
-   exactly `/signup` + `/auth/confirm`, confirm-email ON, autoconfirm OFF, the token-hash templates,
+   exactly `/signup` + /auth/confirm, confirm-email ON, autoconfirm OFF, the token-hash templates,
    password policy, JWT 900 s) — owner-proven with a receipt.
 3. Cloudflare: account access for the Workers deploy (`clara-web`) and the `app.clarabook.com` DNS
    switch; Resend hardening per the checklist.

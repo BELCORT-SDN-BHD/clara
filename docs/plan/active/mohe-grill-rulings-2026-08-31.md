@@ -154,7 +154,7 @@ connector configures account-level objects in a sitting). The owner corrected it
 你是要 handoff 的" — and rightly noted Codex can run the official Stripe MCP itself.
 
 **Ruling.** Codex owns the whole Stripe surface: it mounts the official Stripe MCP server in its
-own `~/.codex/config.toml` (none is mounted today; the machine's environment holds no `STRIPE*`
+own ~/.codex/config.toml (none is mounted today; the machine's environment holds no `STRIPE*`
 key), the owner supplies a **TEST-mode restricted key** into that config's env, and every Stripe
 object is created **from DB rows** (Product/Price from `billing_plans`, the webhook endpoint,
 Stripe Tax per 裁-54) — never authored by hand in the Stripe dashboard (裁-42's law, billing
@@ -214,9 +214,9 @@ recommendation was a Claude leg on those four only; it was declined. Executed as
   direction): a `NotBuiltNote` whose lane is paused is swept at the exit gate against its Backlog
   row, not against a merge that will not come. Overrule if wanted.
 - **The mobile decision corridor (Q6) is owned by no train** — a Backlog row; not on the beta path.
-- **`.codex/config.toml` mounts github · playwright · context7 · vercel · openaiDeveloperDocs and
+- **~/.codex/config.toml mounts github · playwright · context7 · vercel · openaiDeveloperDocs and
   the zoom family — no Stripe MCP yet** (裁-81's first act).
-- **Item 93 stands unanswered**: the uncommitted `orchestrator-fable/SKILL.md` edit that vanished
+- **Item 93 stands unanswered**: the uncommitted `.claude/skills/orchestrator-fable/SKILL.md` edit that vanished
   ~02:50 MYT — the owner did not say whether it was his; a Known-issues row carries it.
 - **#448's pushed head is CI-red** (db-estate) as parked — the row says so, so nobody reads the
   red as the branch's verdict.
