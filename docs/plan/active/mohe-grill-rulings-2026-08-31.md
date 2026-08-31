@@ -223,3 +223,54 @@ recommendation was a Claude leg on those four only; it was declined. Executed as
 - **ADR-0077 is owed** for the product-law rulings of 08-30/08-31 (裁-57 paid beta · 裁-58 RM0
   trial · 裁-62 tax inert at launch · 裁-75/76/84's amendments of 裁-72/59/law 28) — drafted this
   session, pending the owner's signature on the digest.
+
+---
+
+## The second sitting (2026-08-31, ~13:00 MYT) — 裁-85 … 裁-87: the seat stays here
+
+*After the handoff was written for Codex as lead, the owner reversed: "i decide not to 转去 codex,
+stay here and finish … 我也直接在我这里连所有 mcp including stripe. review ladder 保持精简, 用 opus
+就好 … 用回我们的 orchestrator-fable 原本的 philosophy: 在不牺牲品质的原则下用最 effective, 适合, 经济
+的 agent model … 可以加入 e2e, since it's mostly frontend."*
+
+### 裁-85 · The operating model is the orchestrator-fable philosophy — the Claude Code session leads; every lane picked by fit
+
+**Ruling (amends 裁-82).** The development seat stays in the Claude Code session — the orchestrator
+plans, dispatches, synthesises, verifies and owns the state; the handoff of record is that session's
+opening document, not a transfer. Lanes are chosen per task by the skill's own philosophy — **the
+most effective, suitable and economical model that does not sacrifice quality**: Codex
+`gpt-5.6-sol` xhigh for execution-heavy implementation, debugging and test-fixing (its own
+worktree, direct `codex exec`); native sonnet-5 xhigh for bounded work; opus-5 xhigh where
+ambiguity, architecture, security or judgement dominate. The 08-30 "every build → Codex" rule becomes
+the DEFAULT for heavy builds, not a wall: **when one family is out (Claude's weekly limit, Codex
+capacity) the other substitutes for that leg — builds included** — with the substitution recorded
+in the PR body. Every dispatch still pins model + effort (constraint 5); heavy lanes cap at 3–4.
+
+### 裁-86 · The lean review ladder — one fresh-context opus leg, plus a real-browser e2e leg on frontend trains
+
+**Ruling (amends 裁-84).** build → the four verify commands + RED-before proofs → **ONE fresh-context
+opus-5 xhigh review** (read-only, its own context, refute-first) → fold → the same reviewer
+re-verifies → the owner may read → merge on green CI; docs-only PRs stay single-lane (ADR-0069).
+**Law 28 is KEPT**, satisfied by the Codex-build / opus-review split; when a NATIVE lane built a
+money, auth, webhook or tenant-creation surface, a Codex read-only leg is added — otherwise no second
+leg. **E2E:** every frontend train's acceptance includes a real-browser **Playwright** walk of its
+journey on the BUILT app (`next build` → `next start`, never `next dev`) against a throwaway test
+firm (ADR-0075) — Q9's DONE rung 5 made mechanical — and the axe accessibility scan rides it
+(closing Q7's never-built gate (b)); a checked-in suite under apps/web/e2e/ is owed by the first
+train that walks (FS-2), and the reduced Wave G (裁-83) is browser-driven end to end. Instruments:
+the Playwright MCP and Claude-in-Chrome in this session.
+
+### 裁-87 · Stripe — this session's connector does the account-level work; lanes build the code
+
+**Ruling (amends 裁-81).** The owner connects every MCP in the Claude Code session — Mobbin, shadcn,
+codebase-memory (already in `.mcp.json`), Playwright, and the claude.ai **Stripe connector**
+(authenticated by the owner in-session on the TEST-mode account). The orchestrator creates and
+mirrors the account-level Stripe objects FROM DB rows through that connector (TEST first; LIVE at
+the launch sitting) and records the result in the checkout train's design record; build lanes
+write the code (the Checkout session, the signed idempotent webhook, `stripe_events` /
+`stripe_object_map`, the mirror script) with keys env-to-env only. A Codex lane needs no Stripe
+MCP of its own; the orders' §B stays as an optional recipe.
+
+**INFORM (fail-closed defaults under this sitting, overrule if wanted):** the native-built
+money-surface cross-model rule above; the handoff's reader is now "the next Claude Code session";
+the orchestrator-fable skill is the first act of every session on this repo.

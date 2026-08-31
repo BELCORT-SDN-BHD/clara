@@ -1,4 +1,4 @@
-# The frontend-sprint handoff — 2026-08-31 (Codex takes the lead)
+# The frontend-sprint handoff — 2026-08-31 (the beta sprint's opening document)
 
 *Written by the outgoing Claude orchestrator at the 2026-08-31 sitting, for a reader with **no
 session, no transcript and no task board — only this repo** (`.claude/rules/handoffs.md`). Every
@@ -9,7 +9,10 @@ this file is the dated bridge into it. The companion orders are
 
 ## 0 · Who you are, and what this is
 
-**You are Codex, and from this sitting you are the development lead** (裁-82,
+**You are the next Claude Code session — the orchestrator (裁-82 as amended by 裁-85: the seat
+stays here; Codex and native lanes are the hands, each picked per task by the `orchestrator-fable`
+philosophy — the most effective, suitable, economical model that does not sacrifice quality)** — and
+this is your opening document (裁-82,
 [`mohe-grill-rulings-2026-08-31.md`](mohe-grill-rulings-2026-08-31.md)). Clara's core backend is
 built, ceremonied and live; the production frontend `apps/web` is ~90 % on `main` and deployed
 nowhere; `app.clarabook.com` still serves the retiring `apps/dashboard`. **Your job is the beta
@@ -21,6 +24,8 @@ honest not-built-yet flows and lives in `PROGRESS.md` rows. Nothing in this file
 
 ## 1 · Clock-in, in this order
 
+0. Run the `orchestrator-fable` skill (the dispatch philosophy and the ladder); recall memory for
+   preferences and lessons only (constraint 8).
 1. `AGENTS.md` (the constraints; the harness menu — it now carries a frontend row).
 2. `PROGRESS.md` — "Current posture" (the 2026-08-31 pivot bullet) · Lanes · Next · Backlog ·
    Known issues (the parked PRs each have a row with its resume path).
@@ -66,10 +71,14 @@ honest not-built-yet flows and lives in `PROGRESS.md` rows. Nothing in this file
 - **裁-78** the F-A7b interview runner is ported before the cutover; a hard cutover criterion.
 - **裁-79** finish #462 + #454; park #447 #448 #452 #456 #449 #460 with rows.
 - **裁-80** Track B paused; P6-T ships the IA shell only.
-- **裁-81** Stripe: all by Codex; TEST mode first; keys only in the Codex MCP env + server secrets.
-- **裁-82** Codex is the development lead. **裁-83** a reduced Wave G precedes beta.
-- **裁-84** the independent review leg = a fresh, separate `codex exec` read-only review + the
-  owner's read; law 28's cross-model clause becomes cross-session (ADR-0077, pending signature).
+- **裁-81 → 裁-87** Stripe: this session's claude.ai connector does the account-level objects from
+  DB rows (TEST first); lanes build the code; keys env-to-env only.
+- **裁-82 → 裁-85** the seat stays in the Claude Code session; lanes by fit (Codex for heavy
+  execution, sonnet for bounded work, opus for judgement); a family that is out is substituted, builds
+  included, recorded in the PR body. **裁-83** a reduced Wave G precedes beta.
+- **裁-84 → 裁-86** the lean ladder: ONE fresh-context opus review leg (+ a Codex read-only leg only
+  when a native lane built a money/auth surface — law 28 kept) **+ a real-browser Playwright e2e leg
+  on every frontend train**, the axe scan riding it.
 - Standing and untouched: 裁-57 paid beta · 裁-58 RM0/"trial" (never render "RM0") · 裁-62 tax inert
   · 裁-68 the tier-3 gate (DPA e-sign · rate wall · email-bound token · checkout success) ·
   裁-64①②③④ · 裁-65 P4-7 · Q1–Q9 + Q-A…F (08-27) · R1–R7 · 裁-1…裁-56.
@@ -133,10 +142,13 @@ full-suite gates.
 - **Migrations claim numbers at MERGE; workflow bodies are frozen once deployed** — a behavioural
   change to `chatTurn` is a new `_vN` export + a registry repoint (constraint 9); the freeze-lint
   enforces it.
-- **The review ladder (裁-84):** build → own suite green (the four commands) → RED-before proofs →
-  push → **a fresh, separate `codex exec` read-only review** (different session; it must not see
-  the author's reasoning; report shape in orders §A) → fold → the same reviewer re-verifies → the
-  owner reads the PR → `gh pr merge --squash` on green CI. Uniform for every code PR (ADR-061).
+- **The review ladder (裁-86, lean):** build → own suite green (the four commands) → RED-before
+  proofs → push → **ONE fresh-context opus-5 xhigh read-only review** (its own context, refute-first;
+  report shape in orders §A) → fold → the same reviewer re-verifies → the owner may read →
+  `gh pr merge --squash` on green CI. Law 28 is kept by the Codex-build/opus-review split; a
+  NATIVE-built money/auth/webhook/tenant-creation surface adds a Codex read-only leg. **Every
+  frontend train also walks its journey in a real browser (Playwright) on the BUILT app** — the e2e
+  leg, with the axe scan riding it. Uniform for every code PR (ADR-061).
 - **A deferral's only lawful home is a `PROGRESS.md` Backlog/Known-issues row** (ADR-0075 §6). A
   paused lane's `NotBuiltNote` is swept against that row, not against a merge that will not come.
 - **Harness clock-out, every session:** true `PROGRESS.md` (posture · lanes · backlog · known
@@ -155,8 +167,9 @@ full-suite gates.
 ## 7 · The owner's own acts (nothing here is yours to do)
 
 1. Open the Stripe account; submit the Malaysian-entity KYB **today** (verification takes days;
-   TEST mode does not wait for it). Hand Codex a **TEST-mode restricted key** for its MCP env; the
-   LIVE key only at the launch sitting.
+   TEST mode does not wait for it). Authenticate the claude.ai **Stripe connector** in this session
+   on the TEST-mode account (裁-87); give build lanes a TEST restricted key env-to-env; the LIVE
+   key only at the launch sitting.
 2. Supabase Auth settings per `docs/ops/wave-g-setup-checklist.md` (signup ON, redirect URLs
    exactly `/signup` + /auth/confirm, confirm-email ON, autoconfirm OFF, the token-hash templates,
    password policy, JWT 900 s) — owner-proven with a receipt.
@@ -234,16 +247,20 @@ focus · no decorative perpetual animation) · `.claude/skills/animate` · `.cla
 `.claude/skills/find-animation-opportunities` · `.claude/skills/apple-design` · `.claude/skills/ask-sonner`
 · `.claude/skills/shadcn` (+ its rules, CLI and registry notes) · `.claude/skills/design-an-interface`
 · `.claude/skills/codebase-design` · `.claude/skills/tdd` · `.claude/skills/prototype` · `.claude/skills/qa`.
-The Claude-only plugin skills `impeccable` and `frontend-design` are NOT readable by you; their
-role — the per-surface polish/acceptance lens of Q9's DONE rung 4 — is filled by `emil-design-eng` +
+The plugin skills `impeccable` and `frontend-design` are available to this session (Claude plugins)
+— use them for the per-surface polish/acceptance lens of Q9's DONE rung 4; a Codex build lane cannot
+read them, so the orchestrator applies that lens at review, beside `emil-design-eng` +
 `apple-design` + the prototype parity pass (FS-9).
 
-**The MCP servers you must mount yourself** (Claude's `.mcp.json` does not reach a Codex session;
-exact TOML in the orders' §B): **mobbin** (reference grounding) · **shadcn** (registry queries) ·
-**codebase-memory-mcp** (the code graph, constraint 7) · **context7** (already mounted — the
-newest official docs for Next 16 · `@opennextjs/cloudflare` · shadcn · `@supabase/ssr` · Stripe,
-before building against a remembered API) · **stripe** (裁-81). **Every PR body carries the line
-"Skills/MCP consumed: …"** — "none" is honest; a named-but-unused skill is a false claim.
+**The MCP servers this session holds** (`.mcp.json` + the claude.ai connectors; the owner connects
+them in-session, 裁-87): **mobbin** (reference grounding) · **shadcn** (registry queries) ·
+**codebase-memory-mcp** (the code graph, constraint 7) · **context7** (the newest official docs for
+Next 16 · `@opennextjs/cloudflare` · shadcn · `@supabase/ssr` · Stripe, before building against a
+remembered API) · **Playwright / Claude-in-Chrome** (the e2e leg, 裁-86) · **the Stripe connector**
+(TEST-mode account, 裁-87). The orchestrator does the grounding and hands each lane a cited order; a
+Codex lane that itself needs Mobbin or Stripe mounts them per the orders' §B. **Every PR body
+carries the line "Skills/MCP consumed: …"** — "none" is honest; a named-but-unused skill is a
+false claim.
 
 ## 9 · What "beta-ready" means (the definition of done)
 

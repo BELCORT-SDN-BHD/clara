@@ -7,29 +7,39 @@ laws, the design-resources rule) plus §A below (the review ladder under 裁-84)
 units. Where an order says "rung 0", census the doors at the LIVE body on a throwaway rig before
 writing a line.*
 
-## §A · The review ladder under 裁-84 — how every PR in this sprint is reviewed
+## §A · The lean ladder under 裁-86 — how every PR in this sprint is built, walked and reviewed
 
-1. Build in your own worktree; the four verify commands green; a RED-before proof per wall
-   recorded in the PR body (mutant → which cell went red).
-2. Push; open the PR with a body that carries: the rung-0 census table (door → live body → args →
+0. **Dispatch by fit (裁-85):** the orchestrator picks the lane per task — Codex `gpt-5.6-sol`
+   xhigh for execution-heavy implementation/debugging/test-fixing, native sonnet-5 xhigh for bounded
+   work, opus-5 xhigh for judgement — every dispatch pinned (model + effort), every git-active lane
+   in its own worktree, heavy lanes capped at 3–4. A family that is out is substituted for that leg
+   (builds included) and the PR body says so.
+1. Build; the four verify commands green; a RED-before proof per wall recorded in the PR body
+   (mutant → which cell went red).
+2. **The e2e leg (frontend trains):** `pnpm --filter @clara/web build` → `next start` → a real
+   browser (Playwright) walks the train's journey end to end against a throwaway test firm, the
+   axe scan riding the walk; the script is checked in under apps/web/e2e/ (the first train, FS-2,
+   creates the suite) and its run is quoted in the PR body. `next dev` is not the app.
+3. Push; open the PR with a body that carries: the rung-0 census table (door → live body → args →
    refusals → grant) · test counts control vs branch by name · every new door call and its surface
-   · the skills/MCP line · what you could NOT verify and why.
-3. **The independent leg:** from a DIFFERENT terminal/session, `codex exec -C <a fresh worktree of
-   the PR branch> -m gpt-5.6-sol -c model_reasoning_effort="xhigh" -s read-only "<review prompt>"`.
-   The prompt names the PR, the design of record, the acceptance list, and asks for: findings as
-   BLOCKER / MATERIAL / NIT each with `file:line`, a refute-first stance (default "not a defect"
-   unless the bytes show it), an explicit attempt to bypass every wall the PR claims, and a verdict
-   `CLEAR` / `FIX REQUIRED`. Money/auth/webhook/tenant-creation PRs get a second reviewer prompt
-   with the security lens (walls, replay, idempotency, cross-tenant, secret handling).
-4. Fold on the same branch; the SAME reviewer session re-verifies to `CLEAR`; the owner reads the
-   PR; `gh pr merge --squash` on green CI. Never `--admin`; a stale branch takes
-   `gh pr update-branch`.
-5. Docs-only PRs (`AGENTS.md` / `PROGRESS.md` / `docs/**` only) take the single-lane review
+   · the e2e run · the skills/MCP line · what you could NOT verify and why.
+4. **The independent leg:** ONE fresh-context **opus-5 xhigh** read-only review in its own context
+   (a subagent that did not build; the prompt names the PR, the design of record and the acceptance
+   list, asks for findings as BLOCKER / MATERIAL / NIT with `file:line`, a refute-first stance, an
+   explicit attempt to bypass every wall the PR claims, and a verdict `CLEAR` / `FIX REQUIRED`).
+   Money/auth/webhook/tenant-creation surfaces get the security lens in the same prompt; **if a
+   NATIVE lane built such a surface, add a Codex read-only leg** (`codex exec … -s read-only`) —
+   law 28's cross-model requirement, kept.
+5. Fold on the same branch; the SAME reviewer re-verifies to `CLEAR`; the owner may read the PR;
+   `gh pr merge --squash` on green CI. Never `--admin`; a stale branch takes `gh pr update-branch`.
+6. Docs-only PRs (`AGENTS.md` / `PROGRESS.md` / `docs/**` only) take the single-lane review
    (ADR-0069); the CI path classifier decides, never the author.
 
-## §B · Mount the design and Stripe MCP servers in ~/.codex/config.toml (before FS-1)
+## §B · (Optional, 裁-87) Mounting the design and Stripe MCP servers in a Codex lane's ~/.codex/config.toml
 
-Claude's `.mcp.json` is not read by Codex. Measured 2026-08-31, `codex mcp list` shows github ·
+The orchestrating Claude session holds these connectors itself (`.mcp.json` + the claude.ai Stripe
+connector) and does the grounding; a Codex lane mounts them only when its order needs a direct
+Mobbin or Stripe call. Claude's `.mcp.json` is not read by Codex. Measured 2026-08-31, `codex mcp list` shows github ·
 playwright · context7 · vercel · openaiDeveloperDocs · the zoom family — **no mobbin, no shadcn, no
 codebase-memory-mcp, no stripe.** Add, in ~/.codex/config.toml (Windows paths as single-quoted TOML
 strings; the key placeholder is ENV-ONLY — never the value, never in the repo):
@@ -99,7 +109,9 @@ browser. Fix `strict-origin`; **never accept `Origin: null`**. **Acceptance:** `
 three instrument traps respected (a `fetch` from a test is not a browser; a `curl` with a forged
 Origin is not the browser; the check runs against the BUILT app, not `next dev`). NEW-B pins: the
 `Origin` allowlist is derived from `CLARA_PUBLIC_ORIGINS` (fail-closed when unset) and a cell pins
-`Origin: null` → 403 with a positive control. Then rebase onto #451's tip.
+`Origin: null` → 403 with a positive control. Then rebase onto #451's tip. **This train creates the
+e2e suite (裁-86):** apps/web/e2e/ with a Playwright walk signup → confirm → the holding page on the
+built app; its run is the acceptance's evidence, not a substitute for the three traps.
 
 ## FS-3 · #455 P4-4 and #453 P4-5 — merge-forward and retarget
 
@@ -142,8 +154,12 @@ from `billing_plans` rows (PR-1's placeholder rows with `amounts_ruled=false`, o
 with RED-before cells:** signature failure → no door; replayed event → one row; a paid registration
 of ANOTHER caller → refuse; a consumed admission → refuse; `Origin: null` → 403; the rate wall both
 polarities; the DPA unsigned → no checkout. **Beta scope:** checkout + admission + the holding page;
-NOT invoicing (nothing invoices at RM0). **Review:** the security lens reviewer prompt (§A step 3)
-is mandatory. Size ~0.4 BE + ~0.5 FE.
+NOT invoicing (nothing invoices at RM0). **Review:** the security lens (§A step 4) is mandatory, with the
+Codex read-only leg if a native lane built it. **E2E:** signup → checkout (Stripe TEST, a test
+card) → the webhook → the firm born → the firm home, in a real browser. **Stripe objects (裁-87):**
+the orchestrator creates them from the DB rows through the session's Stripe connector and records
+the ids in `stripe_object_map`; the lane's code reads them, never authors them. Size ~0.4 BE +
+~0.5 FE.
 
 ## FS-5 · The interview-runner port (裁-78) — size 0.7, hard cutover criterion
 
@@ -165,8 +181,9 @@ The materials fork (§3.4) and the five playbooks are PR-c scope — NOT this or
 stays two-valued. **Entry:** the onboarding checklist card (T11, `OnboardingChecklistCard`) gains
 the "start / continue the interview" control; `commit_client_onboarding` stays the human door it
 is. **Acceptance:** a real run against the live runtime with a throwaway test client (ADR-0075):
-start → answer every segment → cancel path → a second submitter's 409 → commit reachable; the
-routes suite; a11y rules + keyboard walk on the thread; the cutover proof line "the interview
+start → answer every segment → cancel path → a second submitter's 409 → commit reachable — walked
+in a real browser (the e2e leg, 裁-86) as well as in the unit harness; the routes suite; a11y rules +
+keyboard walk on the thread; the cutover proof line "the interview
 runner has an `apps/web` home" written into the P6-X order's acceptance.
 
 ## FS-6 · #462 / #463 and #454 (裁-79)
@@ -255,7 +272,7 @@ scoping; ADR-0075 — every firm/client is test data; the spike/workflow schemas
 constraint 15) → apply `0155` (its pre-flight refuses on duplicates; the reset removes them, 裁-67)
 → the Supabase/Resend/Cloudflare items of `docs/ops/wave-g-setup-checklist.md` proven → the
 sixteen-step walk on the desktop corpus with Stripe TEST mode (a non-zero test price + test cards
-proving charge → webhook → firm) → the as-run (a new file docs/plan/completed/wave-g-reduced-asrun-2026-09-XX.md)
+proving charge → webhook → firm), **driven end to end in a real browser (Playwright, 裁-86)** → the as-run (a new file docs/plan/completed/wave-g-reduced-asrun-2026-09-XX.md)
 → switch Stripe to LIVE + the RM0 price at the launch sitting → beta.
 
 ## FS-12 · Harness duties this sprint owes
