@@ -290,7 +290,11 @@ export type RouteLeaf = { readonly file: string; readonly url: string };
  */
 export function routeLeaves(
   webRoot: string,
-  dir: string = webRoot,
+  // Defaults to `<webRoot>/app`, NOT `webRoot` itself — `webRoot` is normally the
+  // whole `apps/web` tree, and a caller who omits `dir` (the whole point of this
+  // export existing for a second caller, per the FS-4 design's W-R-1) must not
+  // silently walk `node_modules` alongside it.
+  dir: string = join(webRoot, "app"),
   segments: readonly string[] = [],
   out: RouteLeaf[] = [],
 ): RouteLeaf[] {

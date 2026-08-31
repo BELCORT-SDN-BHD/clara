@@ -14,6 +14,7 @@ import {
   SCOPE_UNSCOPED_SURFACES,
 } from "../lib/require-firm-scope";
 import {
+  LEAF,
   moduleLevelDeclarations,
   reachableCallsFrom,
   stripComments,
@@ -38,7 +39,14 @@ import {
  *      to at all — no leaf, no special file, just an exported async function a
  *      client component calls directly. Zero exist today (measured below), which
  *      is exactly why this is a GATE gap rather than a live hole: #455 (members)
- *      and FS-4 (checkout) are the trains that add the first ones.
+ *      and FS-4 (checkout) are exactly the trains that add mutating surfaces.
+ *
+ * FIRST-REVIEW FOLD (fresh-context read on #477): WALL 1 gained the
+ * complement-of-LEAF tripwire and three more Next.js special-file names
+ * (`forbidden`/`unauthorized`/`global-not-found`); WALL 2 gained a scan of every
+ * top-level source directory (not just `app`/`lib`) and a second, narrower
+ * tripwire for the INLINE `"use server"` directive form, which the primary cell
+ * does not and cannot model.
  *
  * Kept in its OWN file, not appended to `firm-scope-surfaces.test.ts`, because it
  * is a genuinely separate enumeration (a different walk, a different directive
@@ -47,12 +55,23 @@ import {
 
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP_DIR = join(WEB_ROOT, "app");
-const LIB_DIR = join(WEB_ROOT, "lib");
 
 const SOURCE_EXT = /\.(ts|tsx)$/;
 
+/** Directories under `apps/web` this file never treats as application source:
+ *  the shared dependency store, Next's own build output, the two deploy-target
+ *  build outputs, VCS metadata, and the browser e2e harness (#461 adds `e2e/`).
+ *  Deliberately a SHORT denylist rather than an allowlist of source dirs — a new
+ *  top-level directory is scanned by DEFAULT, so it cannot create a fresh blind
+ *  spot the way a hard-coded `app`+`lib` pair already did once (F-2). */
+const SOURCE_DIR_EXCLUDES = new Set(["node_modules", ".next", ".open-next", ".wrangler", ".git", "e2e"]);
+
 function webRelative(abs: string): string {
   return relative(WEB_ROOT, abs).split(sep).join("/");
+}
+
+function basename(webRelativePath: string): string {
+  return webRelativePath.slice(webRelativePath.lastIndexOf("/") + 1);
 }
 
 function readSource(webRelativePath: string): string {
@@ -74,6 +93,31 @@ function walkSources(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/** Every top-level directory under `webRoot` this file will scan for a Server
+ *  Action — i.e. every directory that is NOT in `SOURCE_DIR_EXCLUDES`. */
+function topLevelSourceDirs(webRoot: string): string[] {
+  return readdirSync(webRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !SOURCE_DIR_EXCLUDES.has(entry.name))
+    .map((entry) => join(webRoot, entry.name));
+}
+
+/** Every `.ts`/`.tsx` file under `app/`, private (`_`-prefixed) folders excluded
+ *  — those contribute no route and Next.js never treats a file inside one as a
+ *  special file either, so a stray helper there is out of scope for both WALL 1
+ *  cells below. */
+function appSourceFiles(dir: string = APP_DIR, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const abs = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name.startsWith("_")) continue;
+      appSourceFiles(abs, out);
+    } else if (entry.isFile() && SOURCE_EXT.test(entry.name)) {
+      out.push(webRelative(abs));
+    }
+  }
+  return out;
+}
+
 /** The registered entrance layouts, as the directories they cover — identical in
  *  shape to `firm-scope-surfaces.test.ts`'s own, kept separate rather than shared
  *  so importing this file can never re-register that suite (W-R-1's own reason for
@@ -83,6 +127,14 @@ const ENTRANCE_LAYOUT_DIRS = SCOPE_ENTRANCES.filter((e) => e.path.endsWith("/lay
 );
 
 function ancestorCovered(file: string): boolean {
+  // No `isRouteLeaf` guard here, unlike the sibling census's own copy of this
+  // function. There, the guard exists because `ancestorCovered` is called on
+  // BOTH pages and route handlers, and a Route Handler renders no layout. Here,
+  // `ancestorCovered` is only ever called on a SPECIAL_FILE — and LEAF (which is
+  // where every route handler lives) and SPECIAL_FILE are regex-disjoint by
+  // construction, pinned by the "MUST-NOT-RED CONTROL" cell below. A route
+  // handler path can never reach this function in this file; do not "restore"
+  // the guard, it would be dead code.
   const dir = file.slice(0, file.lastIndexOf("/"));
   return ENTRANCE_LAYOUT_DIRS.some((d) => dir === d || dir.startsWith(`${d}/`));
 }
@@ -91,20 +143,36 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
   /** Every App-Router special file EXCEPT `page`/`route` (the census's own `LEAF`).
    *  `layout` is included: it is exactly as invisible to the LEAF walk as
    *  `template` is, and the estate's own measured roster today is five layouts
-   *  plus the root `not-found.tsx` (see the VACUITY CONTROL below). */
-  const SPECIAL_FILE = /^(layout|template|default|loading|error|global-error|not-found)\.(ts|tsx|js|jsx)$/;
+   *  plus the root `not-found.tsx` (see the VACUITY CONTROL below).
+   *  `forbidden`/`unauthorized` (Next 15+'s `forbidden()`/`unauthorized()`
+   *  file conventions, docs/01-app/03-api-reference/03-file-conventions) and
+   *  `global-not-found` (root-only, replaces `app/global-error.tsx`'s sibling for
+   *  the 404 case — it returns its own `<html>`/`<body>` and so, like
+   *  `global-error`, can never be ancestor-covered) are folded in on the same
+   *  review pass that added this comment — confirmed against the Next.js docs
+   *  (Context7 `/vercel/next.js/v16.2.9`), not assumed from memory. */
+  const SPECIAL_FILE =
+    /^(layout|template|default|loading|error|global-error|not-found|forbidden|unauthorized|global-not-found)\.(ts|tsx|js|jsx)$/;
 
-  function specialFiles(dir: string = APP_DIR, out: string[] = []): string[] {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const abs = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name.startsWith("_")) continue;
-        specialFiles(abs, out);
-      } else if (entry.isFile() && SPECIAL_FILE.test(entry.name)) {
-        out.push(webRelative(abs));
-      }
-    }
-    return out;
+  /**
+   * Non-route, non-special-file `.ts`/`.tsx` modules legitimately colocated under
+   * `app/` (a helper, a local type file, a constants module) — the escape valve
+   * the complement-of-LEAF tripwire below needs so ordinary code organization
+   * does not have to fight it. Empty today: `appSourceFiles()` — measured below —
+   * contains only LEAF and SPECIAL_FILE members; there is no third kind yet.
+   */
+  const COLOCATED_MODULE_ROSTER: ReadonlyArray<{ readonly path: string; readonly reason: string }> = [];
+
+  function classifyAppFile(file: string): "LEAF" | "SPECIAL_FILE" | "rostered colocated module" | "UNCLASSIFIED" {
+    const name = basename(file);
+    if (LEAF.test(name)) return "LEAF";
+    if (SPECIAL_FILE.test(name)) return "SPECIAL_FILE";
+    if (COLOCATED_MODULE_ROSTER.some((r) => r.path === file)) return "rostered colocated module";
+    return "UNCLASSIFIED";
+  }
+
+  function specialFiles(): string[] {
+    return appSourceFiles().filter((f) => SPECIAL_FILE.test(basename(f)));
   }
 
   /**
@@ -152,9 +220,10 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
   it("MUST-NOT-RED CONTROL: the special-file walk never picks up a LEAF file", () => {
     // Proves the two walks are disjoint — an ordinary new registered page.tsx or
     // route.ts (the OTHER census's job) can never appear here, and so can never
-    // redden this wall.
+    // redden this wall. Uses the imported LEAF itself, not a re-typed copy of the
+    // regex, so the two can never drift apart silently.
     assert.ok(
-      !files.some((f) => /\/(page|route)\.(ts|tsx|js|jsx)$/.test(f) || /^(page|route)\.(ts|tsx|js|jsx)$/.test(f)),
+      !files.some((f) => LEAF.test(basename(f))),
       "the special-file walk matched a page/route LEAF — SPECIAL_FILE has drifted onto LEAF's territory",
     );
   });
@@ -164,13 +233,14 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
     assert.deepEqual(
       unclassified.map((f) => `${f.file} → ${f.klass}`),
       [],
-      "a layout-adjacent special file (layout/template/default/loading/error/global-error/not-found) is " +
-      "registered nowhere. Register it in SCOPE_UNSCOPED_SURFACES or SCOPE_EXEMPT_SURFACES " +
-      "(apps/web/lib/require-firm-scope.ts) if it legitimately does or does not call the spine, or in " +
-      "SCOPE_ENTRANCES if it IS a fourth entrance calling requireFirmScope()/firmScopeGuard(); if none of " +
-      "those registries can express why, add a reasoned entry to SPECIAL_FILE_ROSTER in THIS file. Do NOT: " +
-      "bump a count, allowlist the bare path with no reason, or narrow the SPECIAL_FILE regex above — each of " +
-      "those retires this wall while looking like housekeeping.",
+      "a layout-adjacent special file (layout/template/default/loading/error/global-error/not-found/" +
+      "forbidden/unauthorized/global-not-found) is registered nowhere. Register it in " +
+      "SCOPE_UNSCOPED_SURFACES or SCOPE_EXEMPT_SURFACES (apps/web/lib/require-firm-scope.ts) if it " +
+      "legitimately does or does not call the spine, or in SCOPE_ENTRANCES if it IS a fourth entrance " +
+      "calling requireFirmScope()/firmScopeGuard(); if none of those registries can express why, add a " +
+      "reasoned entry to SPECIAL_FILE_ROSTER in THIS file. Do NOT: bump a count, allowlist the bare path " +
+      "with no reason, or narrow the SPECIAL_FILE regex above — each of those retires this wall while " +
+      "looking like housekeeping.",
     );
   });
 
@@ -183,6 +253,10 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
     // PR body records having produced with the file actually planted.
     assert.equal(classifySpecial("app/template.tsx"), "UNCLASSIFIED");
     assert.equal(classifySpecial("app/(firm)/error.tsx"), "ancestor-covered");
+    // A root boundary can never be ancestor-covered — it sits ABOVE every layout,
+    // entrance layouts included — so a legitimate `global-not-found.tsx` would
+    // have to be registered or rostered, not "found" by directory containment.
+    assert.equal(classifySpecial("app/global-not-found.tsx"), "UNCLASSIFIED");
   });
 
   it("every SPECIAL_FILE_ROSTER entry carries a substantial reason and exists on disk", () => {
@@ -191,9 +265,37 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
       assert.ok(entry.reason.length >= 80, `${entry.path}'s reason is too thin`);
     }
   });
+
+  it("TRIPWIRE — every app/** source file is a LEAF, a special file, or a rostered colocated module", () => {
+    // The derived COMPLEMENT of LEAF: every `.ts`/`.tsx` under `app/**` that is
+    // not a route leaf. Widening SPECIAL_FILE (a NEW Next.js special-file name)
+    // and adding a legitimate colocated helper (an ordinary module, never
+    // routed) are the only two ways to grow this set without reddening it —
+    // both require a deliberate, reviewed edit to THIS file.
+    const unclassified = appSourceFiles().filter((f) => classifyAppFile(f) === "UNCLASSIFIED");
+    assert.deepEqual(
+      unclassified,
+      [],
+      "a file under app/** matches neither LEAF nor a known special-file name and is not a rostered " +
+      "colocated module — it may be a Next.js special file this census does not yet recognize (widen " +
+      "SPECIAL_FILE above, citing the Next.js docs) or a legitimate helper (add a reasoned " +
+      "COLOCATED_MODULE_ROSTER entry in THIS file). Do NOT delete or skip this tripwire to clear it.",
+    );
+  });
+
+  it("VACUITY CONTROL: the tripwire's classifier would catch an unrostered colocated file", () => {
+    assert.equal(classifyAppFile("app/(firm)/clients/[clientId]/random-helper.ts"), "UNCLASSIFIED");
+  });
+
+  it("every COLOCATED_MODULE_ROSTER entry carries a substantial reason and exists on disk", () => {
+    for (const entry of COLOCATED_MODULE_ROSTER) {
+      assert.ok(existsSync(join(WEB_ROOT, entry.path)), `${entry.path} is rostered but does not exist`);
+      assert.ok(entry.reason.length >= 80, `${entry.path}'s reason is too thin`);
+    }
+  });
 });
 
-describe("WALL 2 — every \"use server\" action calls the spine, or is registered", () => {
+describe("WALL 2 — every \"use server\" MODULE calls the spine or is registered; an inline directive is refused, not missed", () => {
   // Duplicated locally rather than imported from firm-scope-surfaces.test.ts,
   // which is not designed to be imported — importing a test module re-registers
   // its `describe`/`it` blocks as a side effect (the exact reason W-R-1 moved
@@ -248,12 +350,21 @@ describe("WALL 2 — every \"use server\" action calls the spine, or is register
    */
   const USE_SERVER_ACTION_ROSTER: ReadonlyArray<{ readonly path: string; readonly reason: string }> = [];
 
-  const scannedFiles = (): string[] => [...walkSources(APP_DIR), ...walkSources(LIB_DIR)].map(webRelative);
+  /** F-2: every top-level source directory under apps/web, not just app/+lib/ —
+   *  the sibling census's own defect report named app/lib/COMPONENTS, and a
+   *  hard-coded pair is exactly the kind of blind spot a NEW directory (or one
+   *  this file's author simply forgot) reopens. `components/` alone holds four
+   *  `*-actions.tsx` files this scan was blind to before this fold. */
+  const scannedFiles = (): string[] =>
+    topLevelSourceDirs(WEB_ROOT).flatMap((dir) => walkSources(dir)).map(webRelative);
+
   const actionFiles = scannedFiles().filter(isUseServerModule);
 
   it("VACUITY CONTROL: zero \"use server\" files exist today (measured, not assumed)", () => {
-    // grep -rn '"use server"' app lib and grep -rn \"'use server'\" app lib both
-    // returned nothing on this branch. This is a GATE gap, not a live hole — #455
+    // grep -rn '"use server"' apps/web (excluding this file itself, which plants
+    // the string deliberately, never at its own module's first statement — the
+    // next describe block's positive controls prove this scan does not trip on
+    // itself) returns nothing else. This is a GATE gap, not a live hole — #455
     // (members) and FS-4 (checkout) are exactly the trains that add the first one.
     assert.deepEqual(actionFiles, [], "a \"use server\" action now exists — the next cell governs it from here");
   });
@@ -272,7 +383,9 @@ describe("WALL 2 — every \"use server\" action calls the spine, or is register
       [],
       "a \"use server\" export reads or writes firm-scoped state with no reachable call to " +
       "requireFirmScope()/firmScopeGuard()/resolveFirmScope() and no registered reason — call the spine, or " +
-      "add a reasoned USE_SERVER_ACTION_ROSTER entry in THIS file explaining why not.",
+      "add a reasoned USE_SERVER_ACTION_ROSTER entry in THIS file explaining why not. Do NOT: bump a count, " +
+      "allowlist the bare path with no reason, or narrow the USE_SERVER_DIRECTIVE regex or the scanned " +
+      "top-level-directory list above — each of those retires this wall while looking like housekeeping.",
     );
   });
 
@@ -281,6 +394,51 @@ describe("WALL 2 — every \"use server\" action calls the spine, or is register
       assert.ok(existsSync(join(WEB_ROOT, entry.path)), `${entry.path} is rostered but does not exist`);
       assert.ok(entry.reason.length >= 80, `${entry.path}'s reason is too thin`);
     }
+  });
+
+  /**
+   * F-3 — THE INLINE-DIRECTIVE TRIPWIRE. Next.js also accepts `"use server"` as
+   * the first statement of a FUNCTION BODY (docs' own example: an inner
+   * `saveAction` with "verify auth before saving" as its caption), marking just
+   * that one closure as a Server Action — not the module's first statement at
+   * all, so `hasUseServerDirective()`/`actionCallsSpine()` above never see it.
+   * This wall does not attempt to prove such a closure calls the spine (that
+   * would need a full statement-level parse of every function body in the
+   * scanned tree); it refuses to let one exist unexamined instead.
+   */
+  const USE_SERVER_TEXT = /(["'])use server\1/g;
+
+  /** Every position of a bare `"use server"`/`'use server'` string-literal
+   *  STATEMENT in DIRECTIVE POSITION — the start of the file, or immediately
+   *  (whitespace only) after a `{`, `}`, or `;`, which is what a function body's
+   *  own first statement looks like once comments are blanked. Position 0 is the
+   *  module's own directive, already governed above; every other position is an
+   *  INLINE one this wall cannot verify, only refuse. */
+  function directiveShapedOccurrences(strippedCode: string): number[] {
+    const positions: number[] = [];
+    let match: RegExpExecArray | null;
+    USE_SERVER_TEXT.lastIndex = 0;
+    while ((match = USE_SERVER_TEXT.exec(strippedCode)) !== null) {
+      const start = match.index;
+      const end = start + match[0].length;
+      const followedByTerminator = /^\s*(?:[;\r\n]|$)/.test(strippedCode.slice(end));
+      const precededByBoundary = /(?:^|[{};])\s*$/.test(strippedCode.slice(0, start));
+      if (followedByTerminator && precededByBoundary) positions.push(start);
+    }
+    return positions;
+  }
+
+  it("TRIPWIRE — an inline Server Action directive is not modelled by this wall, and reds", () => {
+    const offenders = scannedFiles().filter((f) => {
+      const stripped = stripComments(readSourceUnit(f)).code;
+      return directiveShapedOccurrences(stripped).some((pos) => pos !== 0);
+    });
+    assert.deepEqual(
+      offenders,
+      [],
+      "an inline Server Action directive is not modelled by this wall; hoist it to a \"use server\" module, " +
+      "or roster it.",
+    );
   });
 
   describe("THE POSITIVE CONTROL — four plants, so this wall cannot be vacuously green forever", () => {
@@ -330,6 +488,43 @@ describe("WALL 2 — every \"use server\" action calls the spine, or is register
         true,
         "a genuinely guarded action must pass",
       );
+    });
+  });
+
+  describe("THE INLINE-DIRECTIVE POSITIVE CONTROL (F-3)", () => {
+    it("an inline directive nested inside a function body IS caught by the tripwire", () => {
+      // Next's own documented shape: a component whose closure carries its own
+      // directive, captioned "verify auth before saving" in the docs.
+      const plant = [
+        "export default function Form() {",
+        "  async function saveAction(formData) {",
+        '    "use server";',
+        "    // verify auth before saving",
+        "    return formData;",
+        "  }",
+        "  return saveAction;",
+        "}",
+      ].join("\n");
+      const stripped = stripComments({ path: "inline-plant.ts", code: plant }).code;
+      const inlineOnly = directiveShapedOccurrences(stripped).filter((pos) => pos !== 0);
+      assert.ok(inlineOnly.length > 0, "the inline directive went undetected");
+    });
+
+    it("MUST-NOT-RED CONTROL: a legitimate module-level directive is NOT flagged by the inline tripwire", () => {
+      const plant = '"use server";\nexport async function act() { return null; }';
+      const stripped = stripComments({ path: "module-plant.ts", code: plant }).code;
+      const inlineOnly = directiveShapedOccurrences(stripped).filter((pos) => pos !== 0);
+      assert.deepEqual(inlineOnly, [], "the module's own directive must not double-count as an inline offender");
+    });
+
+    it("MUST-NOT-RED CONTROL: this file's own plant literals do not trip the tripwire on themselves", () => {
+      // scannedFiles() includes tests/ (F-2's whole-tree walk) — this file IS in
+      // its own input. Every plant above sits inside a string-literal ARGUMENT,
+      // never in bare directive position, so this must stay green; if it ever
+      // reds, a plant was rewritten into real directive position by mistake.
+      const stripped = stripComments(readSourceUnit("tests/firm-scope-fourth-entrance.test.ts")).code;
+      const inlineOnly = directiveShapedOccurrences(stripped).filter((pos) => pos !== 0);
+      assert.deepEqual(inlineOnly, [], "this file's own plants are now sitting in real directive position");
     });
   });
 });
