@@ -1,6 +1,6 @@
 # ADR-0077 · The beta pivot: a paid launch at RM0, tax inert at launch, the cutover re-scoped, the G1 clocks deferred, and the review leg under Codex
 
-**Date:** 2026-08-31 · **Status:** standing — **PENDING THE OWNER'S SIGNATURE on the digest**
+**Date:** 2026-08-31 · **Status:** standing — **SIGNED by the owner 2026-08-31 evening (裁-93)**
 (this entry minutes rulings the owner already gave in the dated ledgers; the digest's own law
 says additions land as ADR entries and the digest is re-trued when one does).
 **Source ledgers:** `docs/plan/active/mohe-grill-rulings-2026-08-30.md` (裁-57 · 58 · 62 · 72) and
