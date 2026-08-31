@@ -8,6 +8,12 @@ one coordinating lane + three domain lanes, every orphan claim spot-verified by 
 coordinator against law 2/3. Nothing here is derived from the prototype: the backend's
 granted surface IS the coverage authority.*
 
+> **SUPERSEDED 2026-08-31 by [`verb-coverage-census-2026-08-31.md`](verb-coverage-census-2026-08-31.md)**
+> (the FS-0 re-measurement at the live `0155` catalog, 裁-75). This file is pinned at `0138`,
+> pre-port-wave; its 81 CUTOVER-OWED / 29 ORPHAN lists and the "nothing can open a fiscal year"
+> headline are historical. The STALE-NOT-BUILT law it minted stands. 裁-72 governs as amended by
+> 裁-75 (the amendment note sits under 裁-72 in `mohe-grill-rulings-2026-08-30.md`).
+
 ## The verdict
 
 - **Direction 2 (frontend → backend): ZERO stale wiring, measured.** All 60 `callDoor`
@@ -116,8 +122,10 @@ doors → the addendum spec; Wave-7A backfill, closed).
 
 ## Dispositions owed (the owner's sheet)
 
-1. **The P6 cutover scope ruling** — the 81, three options (port-all · port-critical +
-   dashboard-behind-admin-flag · port-critical + named Known-issues deferrals).
-2. **The 29 orphan dispositions**, headlined by the fiscal-year cluster ("no UI can open
-   a fiscal year") — likely P6-close scope, needs the owner's word.
+1. ~~**The P6 cutover scope ruling**~~ — **RULED 裁-72: port-all.** All 110 verbs (the 81 +
+   the 29 orphans below) get an `apps/web` home before the domain switch, organised as
+   domain trains P6-C1…C7.
+2. ~~**The 29 orphan dispositions**~~ — **RULED 裁-72**, same disposition as item 1: the
+   fiscal-year cluster ("no UI can open a fiscal year") and the rest all port, inside the
+   P6-C trains.
 3. `requeue_render_job`'s possible unrecorded P3 scope-down — reconcile at P6.

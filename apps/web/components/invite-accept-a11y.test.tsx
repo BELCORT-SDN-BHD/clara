@@ -1,7 +1,11 @@
 // GATE (b) — structural a11y scan of the invite-accept surface.
 //
 // THIS SURFACE HAD NEVER BEEN IN EITHER SCAN before P4-1, despite being the
+<<<<<<< HEAD
 // original admission path into the app (self-serve signup now also exists) — so
+=======
+// ONLY admission path into the app (no self-serve signup route exists) — so
+>>>>>>> origin/main
 // every one of its six states is scanned here, not just the happy one. The
 // two P4-1 adds (the display-name field and the refusal banner) are exactly
 // the kind of thing an unscanned surface accumulates.
@@ -22,7 +26,10 @@ import { checkAccessibility } from "../test/a11yRules";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../lib/session-accessor";
 import messages from "../messages/en.json";
 import { InviteAcceptForm, type InviteAuthClient } from "./invite-accept-form";
+<<<<<<< HEAD
 import EntryLayout from "../app/(entry)/layout";
+=======
+>>>>>>> origin/main
 
 enableDomInspection();
 
@@ -73,15 +80,25 @@ function authClient(over: Partial<InviteAuthClient["auth"]> = {}): () => InviteA
   });
 }
 
+<<<<<<< HEAD
 /** Render the real entry-layout composition. `InviteAcceptForm` owns the one
  *  `<h1>` in every state; the harness adds no heading that could mask it. */
+=======
+/** Wrapped in a synthetic <h1>, the same idiom every registers a11y file uses
+ *  — the surface itself is a card inside a page whose heading belongs to the
+ *  route, and `heading-order` is scanned against the whole document. */
+>>>>>>> origin/main
 function App(form: ReactElement) {
   return createElement(NextIntlClientProvider, {
     locale: "en", messages,
     children: createElement(
       AppRouterContext.Provider as never,
       { value: { replace: () => {}, refresh: () => {}, push: () => {}, back: () => {}, forward: () => {}, prefetch: () => {} } as never },
+<<<<<<< HEAD
       createElement(EntryLayout, null, form),
+=======
+      createElement("div", null, createElement("h1", null, "Invite"), form),
+>>>>>>> origin/main
     ),
   });
 }
@@ -138,9 +155,12 @@ test("the click-gate state has zero a11y violations", async () => {
     try {
       for (let i = 0; i < 3; i++) await h.settle();
       assert.match(textOf(h.container as never), /Accept your invitation/, "the gate must have rendered");
+<<<<<<< HEAD
       const headings = (h.container as unknown as { querySelectorAll(selector: string): unknown[] })
         .querySelectorAll("h1");
       assert.equal(headings.length, 1, "the composed invite document must own exactly one h1");
+=======
+>>>>>>> origin/main
       assert.deepEqual(checkAccessibility(h.container as never), []);
     } finally {
       await h.unmount();

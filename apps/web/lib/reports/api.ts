@@ -197,6 +197,33 @@ export async function listFreeformReads(clientId: string, opts: Opts = {}): Prom
   return [...clientScoped, ...firmScoped].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 }
 
+/** ONE freeform-read receipt by id — the hydrate behind the `freeform_result`
+ *  transcript card (P6-2).
+ *
+ *  `readId` IS A STRING CARRYING A BIGINT, and it stays a string the whole way.
+ *  `clara.freeform_read_log.id` is a bigint; the wire part renders it as text
+ *  (the emitter stringifies once, at the boundary) for the same reason
+ *  `agent_receipt_contract` renders every member primary key as text — a part is
+ *  persisted to jsonb and re-parsed by a browser, and a bigint round-tripped
+ *  through a JS number can come back wrong. This function therefore interpolates
+ *  the string straight into the PostgREST filter and never calls `Number()` on
+ *  it: the DB does the comparison in its own type, which is the only place the
+ *  full 64-bit range is safe.
+ *
+ *  NO SCOPE FILTER OF ITS OWN. `listFreeformReads` above needs two queries
+ *  because it browses BY CLIENT and 0131's own CHECK forces `client_scope IS
+ *  NULL` on firm-scope rows. A card already holds the row's primary key, so
+ *  neither query shape applies — RLS alone floors it to the caller's firm.
+ *
+ *  `null` when RLS admits no such row. */
+export async function getFreeformRead(readId: string, opts: Opts = {}): Promise<FreeformReadLogRow | null> {
+  const rows = await getRows<FreeformReadLogRow>("freeform_read_log", {
+    filters: { id: `eq.${readId}` },
+    ...opts,
+  });
+  return rows[0] ?? null;
+}
+
 /** clara.report_agent_receipts, filtered to one client (firm-wide RLS scope; see
  *  ./types.ts's header). */
 export async function listReportAgentReceipts(clientId: string, opts: Opts = {}): Promise<ReportAgentReceiptRow[]> {

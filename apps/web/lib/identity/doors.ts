@@ -68,8 +68,13 @@ import type { SessionTokenAccessor } from "@/lib/session";
  * the door refuses `CLR10 "invalid invite token"` every time.
  *
  * **Declared here, in ONE file, so both ends import it rather than re-typing
+<<<<<<< HEAD
  * the string.** The two ends are `app/(entry)/invite/[token]/page.tsx` (reads it) and
  * P4-4's invite courier (builds the link). A courier that
+=======
+ * the string.** The two ends are `app/invite/[token]/page.tsx` (reads it) and
+ * P4-4's courier, `app/api/invite/route.ts` (builds the link). A courier that
+>>>>>>> origin/main
  * spelled it `?token=` would ship an invite nobody can accept, and nothing
  * would fail until a real employee clicked a real link.
  *
@@ -129,6 +134,7 @@ export async function acceptInvite(
   return (out ?? {}) as AcceptInviteReceipt;
 }
 
+<<<<<<< HEAD
 // ===========================================================================
 // P4-3's TWO DOORS — the self-serve signup chain's second and third steps.
 //
@@ -300,6 +306,8 @@ export async function requestFirmRegistration(
   return (out ?? {}) as RegistrationRequestReceipt;
 }
 
+=======
+>>>>>>> origin/main
 // ---------------------------------------------------------------------------
 // A READ, NOT A DOOR — labelled as such at its definition, per apps/web/AGENTS.md.
 //

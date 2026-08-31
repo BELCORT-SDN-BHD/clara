@@ -309,6 +309,11 @@ From the **repo root** (so the Docker build context is the pnpm workspace root):
 fly deploy --config packages/runtime/fly.toml
 ```
 
+CI proves reader ⊇ emittable at this commit — the deploy-ordering hold (deployed web ≥ runtime) is
+OPS.x. The CI gate runs after the workflow-bundle gate and fails closed when `apps/web`'s
+`ClaraPart` reader lacks a kind the runtime closure can construct. It is not a claim about the
+version of the web app already deployed.
+
 (Recommended: add a repo-root `.dockerignore` excluding `.git`, `node_modules`,
 `**/.output`, `**/.env` to speed the context upload — it does not affect
 correctness, since the Dockerfile copies source selectively.)
