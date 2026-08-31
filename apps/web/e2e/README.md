@@ -13,7 +13,14 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
   client-side validation, keyboard pass), an incomplete invite link, an unknown route, the
   holding page's anonymous-visitor redirect, and the confirm face's honest missing-token state
   (PR #461, the 裁-86 e2e leg — this walk was first run manually via the session's Playwright
-  MCP tools against the built app on 2026-08-31, then encoded here).
+  MCP tools against the built app on 2026-08-31, then encoded here). Also carries the two
+  positive controls the review round asked for: one proving the console-error collector fires
+  at all, one proving the `page.route` glob on the signup endpoint fires at all -- an `errors:
+  []` or a `signupCalls: 0` reading is not evidence either instrument works, only that neither
+  happened to catch anything. The signup SUBMISSION arm (mail -> confirm) is deliberately
+  excluded from the REST of this spec's tests and lands with FS-4's e2e instead -- 裁-92 (the
+  6-digit-code confirmation) replaces the as-built confirm flow before beta, and walking it now
+  would need a Supabase email-template act FS-4 immediately supersedes.
 - `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers.
 
 ## Why these specs are NOT in `apps/web/test/manifest.txt`

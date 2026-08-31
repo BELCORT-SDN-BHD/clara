@@ -17,6 +17,18 @@ import { expect, test } from "@playwright/test";
  * immediately supersedes. That arm is FS-4's e2e to write.
  */
 
+/**
+ * KNOWN RACE, NEVER A FALSE RED: Playwright delivers a page's `console` events
+ * asynchronously over CDP, so a message logged just before a test's final
+ * `await` can arrive AFTER that `await` resolves — the `errors` array this
+ * returns may still be empty when a test's last assertion reads it, even
+ * though the browser genuinely logged something a moment earlier. That
+ * direction is safe: it can only make a real error UNDER-REPORTED, never
+ * invent one, so no assertion below can red on a message that never
+ * happened. It CANNOT be trusted to prove a face is clean by absence alone
+ * without the positive control below, which proves the collector fires at
+ * all rather than that every face happened to stay quiet.
+ */
 function collectConsoleErrors(page: import("@playwright/test").Page): string[] {
   const errors: string[] = [];
   page.on("console", (msg) => {
@@ -28,6 +40,43 @@ function collectConsoleErrors(page: import("@playwright/test").Page): string[] {
   });
   return errors;
 }
+
+test("POSITIVE CONTROL: the console-error collector actually observes an error when one fires", async ({ page }) => {
+  // Review law 2: an `errors` array reading `[]` on every other test in this
+  // file is not evidence the collector works -- it is equally what a broken,
+  // never-firing listener would produce. This proves the instrument itself
+  // catches a REAL console.error, on a throwaway page, waited for
+  // deterministically rather than raced against the async-delivery note above.
+  const errors = collectConsoleErrors(page);
+  await page.goto("/login");
+  const sawIt = page.waitForEvent(
+    "console",
+    (msg) => msg.type() === "error" && msg.text().includes("FS-2-POSITIVE-CONTROL"),
+  );
+  await page.evaluate(() => console.error("FS-2-POSITIVE-CONTROL: proving the collector fires"));
+  await sawIt;
+  expect(errors).toContain("FS-2-POSITIVE-CONTROL: proving the collector fires");
+});
+
+test("POSITIVE CONTROL: a valid signup submission actually reaches the mock auth endpoint", async ({ page }) => {
+  // The refusal tests below only prove `signupCalls === 0` -- which a route
+  // glob that never matched ANYTHING would also produce. This proves the
+  // glob can fire at all: a genuinely valid submission must count as exactly
+  // one call, not zero.
+  let signupCalls = 0;
+  await page.route("**/auth/v1/signup**", (route) => {
+    signupCalls += 1;
+    return route.continue();
+  });
+
+  await page.goto("/signup");
+  await page.getByRole("checkbox").check();
+  await page.getByLabel("Email").fill(`e2e-positive-control-${Date.now()}@example.test`);
+  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("heading", { name: "Confirm your email" })).toBeVisible();
+  expect(signupCalls).toBe(1);
+});
 
 test("the login face renders on the identity canvas with no console errors", async ({ page }) => {
   const errors = collectConsoleErrors(page);
@@ -41,6 +90,10 @@ test("the login face renders on the identity canvas with no console errors", asy
 
 test("login keyboard pass: tab order is Email -> Password -> Sign in, with a visible focus indicator", async ({ page }) => {
   await page.goto("/login");
+  // A freshly navigated page is not guaranteed OS-level window focus yet; an
+  // unfocused page silently drops the first keyboard event rather than
+  // erroring, which reads as a wrong tab order instead of what it really is.
+  await page.bringToFront();
 
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Email")).toBeFocused();
@@ -74,7 +127,7 @@ test("the signup face renders on the identity canvas with Create account disable
 
 test("signup client-side validation refuses an empty submit and an invalid email before any network call", async ({ page }) => {
   let signupCalls = 0;
-  await page.route("**/auth/v1/signup", (route) => {
+  await page.route("**/auth/v1/signup**", (route) => {
     signupCalls += 1;
     return route.abort();
   });
@@ -100,6 +153,8 @@ test("signup client-side validation refuses an empty submit and an invalid email
 
 test("signup keyboard pass: tab order is Email -> Password -> consent -> Create account, Enter submits", async ({ page }) => {
   await page.goto("/signup");
+  // Same OS-focus caveat as the login keyboard pass above.
+  await page.bringToFront();
 
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Email")).toBeFocused();
@@ -149,7 +204,7 @@ test("the holding page redirects an unauthenticated visitor to login with the re
 test("the confirm face shows an honest missing-token state and makes no auth call", async ({ page }) => {
   const errors = collectConsoleErrors(page);
   let verifyCalls = 0;
-  await page.route("**/auth/v1/verify", (route) => {
+  await page.route("**/auth/v1/verify**", (route) => {
     verifyCalls += 1;
     return route.abort();
   });
