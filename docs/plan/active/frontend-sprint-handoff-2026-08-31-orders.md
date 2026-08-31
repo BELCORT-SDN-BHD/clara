@@ -211,7 +211,10 @@ by 裁-75** (the measured residual + honest notes); **the interview runner has a
 `wrangler` needs it — the root pin is Node 20), secrets via `wrangler secret put` (env-to-env),
 `CLARA_RUNTIME_URL` + `CLARA_PUBLIC_ORIGINS` + the Supabase publishable key set, the Worker ≤ 10 MiB
 compressed, a preview URL walked route by route BEFORE the DNS change, then the custom domain
-`app.clarabook.com` moved from the Pages project to the Worker, the Pages project retired
+`app.clarabook.com` moved from the Pages project to the Worker, **the Pages project's Git integration
+disconnected FIRST** (measured 2026-08-31: the Pages project `clara` builds on every PR and every
+push to `main`, so until it is disconnected every docs merge re-deploys the OLD dashboard), then the
+project retired
 (repoint first, prove, delete second). Ceremony-grade, from merged `main`, with an as-run in
 `docs/plan/completed/`.
 
