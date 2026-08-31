@@ -14,10 +14,12 @@ import {
   SCOPE_UNSCOPED_SURFACES,
 } from "../lib/require-firm-scope";
 import {
+  LEAF,
   defaultExportName,
   exportedHttpMethods,
   reachableFrom,
   reachableCallsFrom,
+  routeLeaves,
   spineGuardProof,
   spineGuardResponseIsReturned,
   stripComments,
@@ -46,7 +48,6 @@ import {
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP_DIR = join(WEB_ROOT, "app");
 
-const LEAF = /^(page|route)\.(ts|tsx|js|jsx)$/;
 const SOURCE_EXT = /\.(ts|tsx)$/;
 
 function webRelative(abs: string): string {
@@ -111,25 +112,6 @@ function walkSources(dir: string, out: string[] = []): string[] {
     const abs = join(dir, entry.name);
     if (entry.isDirectory()) walkSources(abs, out);
     else if (entry.isFile() && SOURCE_EXT.test(entry.name)) out.push(abs);
-  }
-  return out;
-}
-
-/** Every route leaf the App Router serves, with the URL path it answers on.
- *  Route groups `(x)`, parallel slots `@x` and private folders `_x` contribute no
- *  URL segment — that is what makes a group a group, and it is exactly why a check
- *  in one group's layout does not cover a sibling's. */
-function routeLeaves(dir: string = APP_DIR, segments: string[] = [], out: { file: string; url: string }[] = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const abs = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name.startsWith("_")) continue;
-      const isGroup =
-        (entry.name.startsWith("(") && entry.name.endsWith(")")) || entry.name.startsWith("@");
-      routeLeaves(abs, isGroup ? segments : [...segments, entry.name], out);
-    } else if (entry.isFile() && LEAF.test(entry.name)) {
-      out.push({ file: webRelative(abs), url: `/${segments.join("/")}` });
-    }
   }
   return out;
 }
@@ -202,7 +184,7 @@ function assertGuardBeforeCall(unit: SourceUnit, root: string, targetName: strin
 }
 
 describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () => {
-  const leaves = routeLeaves();
+  const leaves = routeLeaves(WEB_ROOT, APP_DIR);
 
   it("VACUITY CONTROL: the walk found the real tree", () => {
     assert.ok(leaves.length > 15, `only ${leaves.length} route leaves found under ${APP_DIR}`);
