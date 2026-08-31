@@ -27,6 +27,36 @@ writing a line.*
 5. Docs-only PRs (`AGENTS.md` / `PROGRESS.md` / `docs/**` only) take the single-lane review
    (ADR-0069); the CI path classifier decides, never the author.
 
+## §B · Mount the design and Stripe MCP servers in ~/.codex/config.toml (before FS-1)
+
+Claude's `.mcp.json` is not read by Codex. Measured 2026-08-31, `codex mcp list` shows github ·
+playwright · context7 · vercel · openaiDeveloperDocs · the zoom family — **no mobbin, no shadcn, no
+codebase-memory-mcp, no stripe.** Add, in ~/.codex/config.toml (Windows paths as single-quoted TOML
+strings; the key placeholder is ENV-ONLY — never the value, never in the repo):
+
+    [mcp_servers.mobbin]
+    url = "https://api.mobbin.com/mcp"
+
+    [mcp_servers.shadcn]
+    command = "cmd"
+    args = ["/c", "npx", "shadcn@4.12.0", "mcp"]
+
+    [mcp_servers.codebase-memory-mcp]
+    command = 'C:\Users\zhant\AppData\Local\Programs\codebase-memory-mcp\codebase-memory-mcp.exe'
+    args = []
+
+    [mcp_servers.stripe]
+    command = "cmd"
+    args = ["/c", "npx", "-y", "@stripe/mcp", "--tools=all"]
+    [mcp_servers.stripe.env]
+    STRIPE_SECRET_KEY = "<the owner's TEST-mode restricted key — env only>"
+
+Verify each with `codex mcp list` (status enabled, auth as the server requires); the Stripe server's
+exact invocation (local `@stripe/mcp` vs the remote OAuth endpoint at mcp.stripe.com) must be
+confirmed against the current official Stripe MCP docs through context7 before the first call — the
+snippet above is the shape, not a remembered fact. The `codebase-memory-mcp` project name is
+`C-Users-zhant-Desktop-clara-rebuild` (`docs/references/codebase-memory-graph.md`).
+
 ## FS-0 · The live-catalog verb census (裁-75) — size 0.3, no product code
 
 **Why:** 裁-72 rests on `verb-coverage-census-2026-08-28.md`, pinned at frontier `0138` before the
