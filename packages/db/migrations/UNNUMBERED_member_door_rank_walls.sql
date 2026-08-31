@@ -32,20 +32,28 @@
 --       `cannot assign a role above your own rank`). This wall is additional to, not a
 --       replacement for, that existing ceiling.
 --
---   (2) WALL-FIRST REORDER, remove_member and revoke_invite. Every wall (firm-membership, active/
---       pending status, the new rank wall) now runs BEFORE _reserve_op, matching the idiom
---       0145:598-606 states in its own comment for the siblings ("every sibling entrance already
---       puts its own wall before the dedupe reservation"). Behaviour-preserving otherwise: the
---       old order was never actually exploitable (a raised exception rolls the reservation insert
---       back inside the same transaction), so this is a house-style consistency fix, not a new
---       refusal path being introduced by the reorder itself -- the NEW refusal paths are walls
---       (1) and (3), not the reorder. set_member_role's own target-membership fetch is ALSO moved
---       earlier (before _reserve_op) in this file, even though the order above names only
---       remove_member/revoke_invite: this is a structural necessity of walls (1) and (3) needing
---       the target row's CURRENT role and user_id to compare against, not a distinct behavioural
---       choice -- set_member_role's own pre-existing F2 ceiling wall (comparing the ASSIGNED role,
---       which needs no target-row read) was already positioned before _reserve_op, so this file
---       is completing that same idiom for the two NEW walls rather than opening a new one.
+--   (2) AUTHZ-BEFORE / LIFECYCLE-AFTER REORDER, all three doors. Every AUTHZ-class wall
+--       (firm-membership scope, the new target-rank wall, the new self-act wall) now runs BEFORE
+--       _reserve_op; every LIFECYCLE-class check (active/pending status) runs AFTER it, inside the
+--       non-replay branch -- accept_invite's own established split (0141:420 the email-match wall
+--       before dedupe at :432, :442 the status/expiry checks after), applied uniformly to all
+--       three doors here for the first time. set_member_role's own target-membership fetch is
+--       ALSO moved before _reserve_op: a structural necessity of walls (1) and (3) needing the
+--       target row's CURRENT role and user_id to compare against.
+--
+--       #482 REVIEW MATERIAL-1 CORRECTION: this file's first cut moved the LIFECYCLE checks
+--       BEFORE _reserve_op too (an over-broad "every wall wall-first" reading of 0145:598-606,
+--       which only ever meant the ASSIGNED-role ceiling -- an AUTHZ wall). That breaks a
+--       legitimate same-op_key retry after success (a lost HTTP response, a courier re-drive):
+--       remove_member/revoke_invite's own mutation flips the very state their premature status
+--       check re-read, so a retry hit a fresh CLR11/CLR09 instead of the cached receipt
+--       (ARCHITECTURE.md: a retry is a no-op, not a duplicate). Fixed by moving LIFECYCLE checks
+--       to AFTER the dedupe branch in all three doors. Two consequences, both DELIBERATE and
+--       pinned by mdrw-rank-walls.test.mjs, not incidental: (i) a FRESH op_key acting on an
+--       ALREADY-INACTIVE target that ALSO fails the self/rank walls now answers CLR04, not the
+--       LIFECYCLE code that fired under the old order ("mdrw.precedence" cells); (ii) a same-
+--       op_key REPLAY of a successful call returns the identical cached receipt in all three
+--       doors ("mdrw.replay" cells).
 --
 --   (3) SELF-ACT REFUSAL (M2), set_member_role and remove_member only. `m.user_id = c.actor`
 --       refuses (CLR04, detail.reason=cannot_act_on_self) -- the lockout foot-gun: an actor
@@ -62,6 +70,31 @@
 --   (4) clara._tf_guard_last_owner (0003:415, attached 0003:477) is UNTOUCHED by this file -- it
 --       remains the final backstop under every wall above. The §K tail proves this NEGATIVELY:
 --       its prosrc is byte-identical to the §0 prestate stash.
+--
+--   (5) #482 REVIEW CODEX ADVERSARIAL LEG (F-C1/F-C2/F-C3), concurrency/TOCTOU class, all
+--       PRE-EXISTING hazards hardened in passing (confirmed against the pre-PR live prosrc:
+--       _human_ctx's floor check ran before ANY lock in all three original bodies too), never
+--       introduced by this file:
+--       F-C1 (HIGH, set_member_role + remove_member) -- actor authority was evaluated only ONCE,
+--       before the firm lock; an actor demoted/removed WHILE blocked on that lock could complete
+--       the call on privilege no longer held once unblocked (the target-rank/self walls only
+--       compare RELATIVE rank, so they do not by themselves catch this). Fixed: after the lock,
+--       re-read the actor's OWN membership FRESH and firm-qualified, re-verify liveness AND the
+--       admin floor, and source every downstream wall verdict from that read -- never
+--       clara.actor_role_rank() (0002:447), which the F-C2 finding also names for carrying no
+--       firm predicate at all.
+--       F-C2 (HIGH, revoke_invite) -- the rank re-read used clara.actor_role_rank(), unscoped by
+--       firm: an actor who moves their own membership from firm A to firm B while the invite row
+--       stays locked would have their FIRM-B rank compared against a FIRM-A invite -- cross-firm
+--       authority confusion. Fixed the same way as F-C1: a fresh, firm-qualified read.
+--       F-C3 (LOW, revoke_invite) -- the invite's FOR UPDATE lock ran BEFORE the firm-scope check,
+--       so a cross-firm invite id probe blocked on a foreign tenant's lock (an existence/latency
+--       oracle). Fixed: firm_id sits IN the locking WHERE itself, so a cross-firm id matches zero
+--       rows and refuses immediately, no lock contention.
+--       Final order per door, precedence table restated in the PR body: op_key/format checks ->
+--       firm lock/scope -> fresh firm-qualified actor re-validation (liveness + floor) -> the
+--       remaining AUTHZ walls (assigned-role ceiling, self-act, target-rank), all sourced from
+--       that fresh read -> _reserve_op -> LIFECYCLE checks -> the mutation.
 --
 -- D1 WRITE-QUIESCE (packages/db/README.md, "Deploy contract"): THREE live writer bodies are
 -- replaced by this file -- clara.set_member_role, clara.remove_member, clara.revoke_invite. An
@@ -207,32 +240,60 @@ set local lock_timeout = '15s';
 
 -- =================================================================================================
 -- §A -- set_member_role. Adds the target-rank wall (1) and the self-act wall (3); moves the target
--- membership fetch (and its firm/active checks, unchanged in substance) to BEFORE _reserve_op so
--- both new walls can read the target row wall-first, completing the idiom (2)'s header explains.
--- The pre-existing F2 assigned-role ceiling wall is untouched, in its original position.
+-- membership fetch and firm-scope check to BEFORE _reserve_op so both new AUTHZ walls can read
+-- the target row wall-first (idiom (2)); the LIFECYCLE status check is deferred to AFTER the
+-- dedupe branch (#482 review MATERIAL-1). The pre-existing F2 assigned-role ceiling wall is
+-- untouched, in its original position.
 -- =================================================================================================
 create or replace function clara.set_member_role(p_membership uuid, p_role text, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare c record; v_dedupe jsonb; m record;
+declare c record; v_dedupe jsonb; m record; v_actor_role text;
 begin
   c := clara._human_ctx(clara.role_rank('admin'));
   if p_op_key is null or btrim(p_op_key) = '' then raise exception 'op_key is required' using errcode = 'CLR10'; end if;
   if clara.role_rank(p_role) is null then raise exception 'bad role' using errcode = 'CLR10'; end if;
-  -- F2 fix (0145), unchanged: the ASSIGNED-role ceiling -- an actor may never assign a role above
-  -- their own rank.
-  if clara.role_rank(p_role) > coalesce(clara.actor_role_rank(), -1) then
+  -- #482 REVIEW F-C1 FIX (Codex adversarial leg, HIGH): _human_ctx's floor check (and, in the
+  -- pre-PR live body, the F2 ceiling too) ran BEFORE any lock -- a PRE-EXISTING hazard, confirmed
+  -- against 0145's live prosrc before this fix (both ran before the firm lock there as well, and
+  -- the firm lock itself came even LATER, after _reserve_op) -- hardened in passing here, not
+  -- introduced by this file. Race: an owner holds the firm lock demoting actor A (still admin in
+  -- committed state); A's own call passes _human_ctx's floor check on that stale snapshot, then
+  -- blocks on the SAME lock; once the owner commits and A's call resumes, nothing had re-verified
+  -- A still meets the floor -- the target-rank/self walls only compare RELATIVE rank, so a
+  -- just-demoted A could still act on a target ranked below their NEW (lower) role. FIX: after
+  -- the lock, re-read the actor's OWN membership FRESH, firm-qualified (never
+  -- clara.actor_role_rank(), 0002:447, which carries NO firm predicate at all -- the same
+  -- cross-firm confusion class F-C2 names for revoke_invite), and re-verify BOTH liveness and the
+  -- admin floor before any wall verdict below is trusted. The (pre-existing) F2 ceiling is moved
+  -- here too, sourced from this fresh read, per the same fix.
+  perform 1 from clara.firms where id = c.firm for update;
+  select m2.role into v_actor_role
+    from clara.firm_memberships m2
+   where m2.user_id = c.actor and m2.firm_id = c.firm and m2.status = 'active';
+  if v_actor_role is null or clara.role_rank(v_actor_role) < clara.role_rank('admin') then
+    raise exception 'you no longer meet the required rank for this action' using errcode = 'CLR04', detail = '{"reason":"actor_rank_changed"}';
+  end if;
+  -- F2 fix (0145), moved here (post-lock, fresh firm-qualified read) by the F-C1 fix above: the
+  -- ASSIGNED-role ceiling -- an actor may never assign a role above their own rank.
+  if clara.role_rank(p_role) > clara.role_rank(v_actor_role) then
     raise exception 'cannot assign a role above your own rank' using errcode = 'CLR04';
   end if;
   -- #455 review finding (BLOCKER): the ceiling above compares only the ASSIGNED role to the
-  -- caller -- never the TARGET's CURRENT rank. The target row is fetched HERE, before
-  -- _reserve_op, so the two new walls below run wall-first like every sibling door's firm/active
-  -- checks always have (0145:598-606's idiom) -- moving this fetch earlier is a structural
-  -- necessity of the new walls needing the target's role/user_id, not a separate behavioural
-  -- choice from the reorder (2) already makes in remove_member/revoke_invite.
-  perform 1 from clara.firms where id = c.firm for update;
+  -- caller -- never the TARGET's CURRENT rank. The target row is fetched HERE.
+  --
+  -- #482 REVIEW MATERIAL-1 FIX: AUTHZ-class walls (firm-scope, self-act, target-rank) run BEFORE
+  -- _reserve_op, matching accept_invite's own established idiom (0141:420 the email-match wall
+  -- before dedupe at :432, :442 the status/expiry checks AFTER) -- so a legitimate same-op_key
+  -- retry after success (a lost HTTP response, a courier re-drive) hits the dedupe branch and
+  -- returns the cached receipt, never a fresh refusal (ARCHITECTURE.md: a retry is a no-op, not a
+  -- duplicate). The LIFECYCLE check (m.status) is deferred to AFTER _reserve_op, in the
+  -- non-replay branch below, because a successful call CAN move the target out of the state that
+  -- check verifies (a concurrent remove_member on this same row between an original call and a
+  -- retry) -- checking status again before the dedupe would wrongly refuse the legitimate retry
+  -- on a state some call itself produced. The first cut of this file got this backwards (status
+  -- checked before the AUTHZ walls); fixed here.
   select * into m from clara.firm_memberships where id = p_membership;
   if not found or m.firm_id <> c.firm then raise exception 'membership not in your firm' using errcode = 'CLR11'; end if;
-  if m.status <> 'active' then raise exception 'membership is not active' using errcode = 'CLR11'; end if;
   -- M2, self-act refusal, ruled 裁-94 (2026-09-01 morning: KEEP THE WALL): an actor may not
   -- change their OWN role through this door -- a self-demotion lockout with no recovery path but
   -- another owner. CARVE-OUT (fix, found by this file's own rig run against T14/T14-HIGH-11 in
@@ -254,13 +315,19 @@ begin
   end if;
   -- #455 review finding (BLOCKER), the target-rank wall, ruled 裁-94: refuses acting on a target
   -- whose CURRENT rank exceeds the caller's. Strictly-greater only -- owner-on-owner and
-  -- admin-on-admin stay allowed, mirroring the assigned-role ceiling's `>`.
-  if clara.role_rank(m.role) > coalesce(clara.actor_role_rank(), -1) then
+  -- admin-on-admin stay allowed, mirroring the assigned-role ceiling's `>`. Sourced from the
+  -- fresh v_actor_role (F-C1 fix), never clara.actor_role_rank().
+  if clara.role_rank(m.role) > clara.role_rank(v_actor_role) then
     raise exception 'cannot act on a member ranked above you' using errcode = 'CLR04', detail = '{"reason":"cannot_act_on_superior"}';
   end if;
   v_dedupe := clara._reserve_op(c.firm, 'set_member_role', p_op_key,
     clara._hash(jsonb_build_object('mem', p_membership, 'r', p_role)));
   if v_dedupe is not null then return v_dedupe; end if;
+  -- LIFECYCLE check, deferred (MATERIAL-1): reached only on a fresh, non-replay call. A NEW
+  -- op_key acting on an already-inactive target that ALSO fails the self/rank walls above answers
+  -- THAT refusal (CLR04), never reaching here -- a chosen contract (#482 review point b), pinned
+  -- by mdrw-rank-walls.test.mjs's "mdrw.precedence" cell, not silent drift.
+  if m.status <> 'active' then raise exception 'membership is not active' using errcode = 'CLR11'; end if;
   update clara.firm_memberships set role = p_role where id = p_membership;  -- guard_last_owner backstops CLR09
   if clara.role_rank(p_role) < clara.role_rank('bookkeeper') then
     update clara.wake_credentials set revoked_at = statement_timestamp()
@@ -272,27 +339,41 @@ begin
 end $$;
 
 -- =================================================================================================
--- §B -- remove_member. Wall-first reorder (2): firm/active/rank/self all now run BEFORE
--- _reserve_op. Adds the target-rank wall (1) and the self-act wall (3). Behaviour otherwise
--- unchanged -- same statements, same order relative to each other, just moved ahead of the
--- reservation as a block.
+-- §B -- remove_member. AUTHZ-before/LIFECYCLE-after reorder (2): firm/rank/self run BEFORE
+-- _reserve_op; the active-status check runs AFTER it (#482 review MATERIAL-1). Adds the
+-- target-rank wall (1) and the self-act wall (3).
 -- =================================================================================================
 create or replace function clara.remove_member(p_membership uuid, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare c record; v_dedupe jsonb; m record;
+declare c record; v_dedupe jsonb; m record; v_actor_role text;
 begin
   c := clara._human_ctx(clara.role_rank('admin'));
   if p_op_key is null or btrim(p_op_key) = '' then raise exception 'op_key is required' using errcode = 'CLR10'; end if;
   -- #455 review finding (BLOCKER + wall-first reorder): this door had NO rank comparison at all
-  -- (never re-cut since 0005) and reserved the op BEFORE its walls. Every wall (firm, active,
-  -- rank, self) now runs BEFORE _reserve_op, matching the idiom 0145:598-606 states for the
-  -- siblings. Behaviour-preserving: the reservation rollback on a raised exception already made
-  -- the old order non-exploitable -- this reorder is a house-style consistency fix; the NEW
-  -- refusal paths are the rank and self walls below, not the reorder itself.
+  -- (never re-cut since 0005) and reserved the op BEFORE its walls.
+  --
+  -- #482 REVIEW F-C1 FIX (Codex adversarial leg, HIGH): _human_ctx's floor check ran BEFORE any
+  -- lock in the pre-PR live body too (0005's original had no firm lock at all before
+  -- _reserve_op) -- a PRE-EXISTING hazard, hardened in passing here; see set_member_role's
+  -- identical header comment for the full race and fix reasoning. Re-read the actor's OWN
+  -- membership FRESH, firm-qualified, after the lock, and re-verify the admin floor before any
+  -- wall verdict below is trusted.
   perform 1 from clara.firms where id = c.firm for update;
+  select m2.role into v_actor_role
+    from clara.firm_memberships m2
+   where m2.user_id = c.actor and m2.firm_id = c.firm and m2.status = 'active';
+  if v_actor_role is null or clara.role_rank(v_actor_role) < clara.role_rank('admin') then
+    raise exception 'you no longer meet the required rank for this action' using errcode = 'CLR04', detail = '{"reason":"actor_rank_changed"}';
+  end if;
+  --
+  -- #482 REVIEW MATERIAL-1 FIX: AUTHZ-class walls (firm, rank, self) run BEFORE _reserve_op,
+  -- matching accept_invite's own idiom (0141:420/442) -- see set_member_role's identical header
+  -- comment above for the full reasoning. The LIFECYCLE check (m.status) is deferred to AFTER
+  -- _reserve_op: this door's OWN mutation flips status to 'removed', so checking it again BEFORE
+  -- the dedupe would refuse a legitimate same-op_key retry on the exact state THIS call produced
+  -- -- the first cut of this file got this backwards; fixed here.
   select * into m from clara.firm_memberships where id = p_membership;
   if not found or m.firm_id <> c.firm then raise exception 'membership not in your firm' using errcode = 'CLR11'; end if;
-  if m.status <> 'active' then raise exception 'membership is not active' using errcode = 'CLR11'; end if;
   -- M2, self-act refusal, ruled 裁-94: an actor may not remove their OWN membership through this
   -- door. CARVE-OUT (fix, found by this file's own rig run against T14/T14-HIGH-11 in
   -- rig-isolation.test.mjs): the SOLE owner removing themselves is ALSO the pre-existing
@@ -309,12 +390,18 @@ begin
     raise exception 'cannot remove your own membership' using errcode = 'CLR04', detail = '{"reason":"cannot_act_on_self"}';
   end if;
   -- #455 review finding (BLOCKER), the target-rank wall, ruled 裁-94: same shape as
-  -- set_member_role's (1) -- strictly-greater only.
-  if clara.role_rank(m.role) > coalesce(clara.actor_role_rank(), -1) then
+  -- set_member_role's (1) -- strictly-greater only. Sourced from the fresh v_actor_role (F-C1
+  -- fix), never clara.actor_role_rank().
+  if clara.role_rank(m.role) > clara.role_rank(v_actor_role) then
     raise exception 'cannot act on a member ranked above you' using errcode = 'CLR04', detail = '{"reason":"cannot_act_on_superior"}';
   end if;
   v_dedupe := clara._reserve_op(c.firm, 'remove_member', p_op_key, clara._hash(jsonb_build_object('mem', p_membership)));
   if v_dedupe is not null then return v_dedupe; end if;
+  -- LIFECYCLE check, deferred (MATERIAL-1): reached only on a fresh, non-replay call. A NEW
+  -- op_key acting on an already-inactive target that ALSO fails the self/rank walls above answers
+  -- THAT refusal (CLR04), never reaching here -- a chosen contract (#482 review point b), pinned
+  -- by mdrw-rank-walls.test.mjs's "mdrw.precedence" cell, not silent drift.
+  if m.status <> 'active' then raise exception 'membership is not active' using errcode = 'CLR11'; end if;
   update clara.firm_memberships set status = 'removed', removed_at = now()
     where id = p_membership and status = 'active';                         -- guard_last_owner backstops CLR09
   update clara.wake_credentials set revoked_at = statement_timestamp()
@@ -325,30 +412,57 @@ begin
 end $$;
 
 -- =================================================================================================
--- §C -- revoke_invite. Wall-first reorder (2): firm/status/rank all now run BEFORE _reserve_op.
--- Adds the target-rank wall (1), keyed on the INVITE's own `role` column (there is no membership
--- yet). No self case (3): an invite has no actor-in-place to self-act on.
+-- §C -- revoke_invite. AUTHZ-before/LIFECYCLE-after reorder (2): firm/rank run BEFORE
+-- _reserve_op; the pending-status check runs AFTER it (#482 review MATERIAL-1). Adds the
+-- target-rank wall (1), keyed on the INVITE's own `role` column (there is no membership yet). No
+-- self case (3): an invite has no actor-in-place to self-act on.
 -- =================================================================================================
 create or replace function clara.revoke_invite(p_invite uuid, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare c record; v_dedupe jsonb; inv record;
+declare c record; v_dedupe jsonb; inv record; v_actor_role text;
 begin
   c := clara._human_ctx(clara.role_rank('admin'));
   if p_op_key is null or btrim(p_op_key) = '' then raise exception 'op_key is required' using errcode = 'CLR10'; end if;
-  -- #455 review finding (BLOCKER + wall-first reorder), the same class as remove_member: every
-  -- wall (firm, status, rank) now runs BEFORE _reserve_op. No self case here.
-  select * into inv from clara.firm_invites where id = p_invite for update;
-  if not found or inv.firm_id <> c.firm then raise exception 'invite not in your firm' using errcode = 'CLR11'; end if;
-  if inv.status <> 'pending' then
-    raise exception 'this invite is no longer open (status: %)', inv.status using errcode = 'CLR09';
+  -- #455 review finding (BLOCKER + wall-first reorder), the same class as remove_member: the
+  -- AUTHZ walls (firm, rank) now run BEFORE _reserve_op. No self case here.
+  --
+  -- #482 REVIEW F-C3 FIX (Codex adversarial leg, LOW): firm_id now sits IN the locking WHERE, not
+  -- a separate check after the lock -- a cross-firm invite id previously still acquired the FOR
+  -- UPDATE lock before the firm check ran (:410's old shape), so probing a foreign tenant's
+  -- invite id blocked on THEIR lock -- an existence/latency oracle. A cross-firm id now matches
+  -- ZERO rows and refuses immediately, no lock contention at all.
+  select * into inv from clara.firm_invites where id = p_invite and firm_id = c.firm for update;
+  if not found then raise exception 'invite not in your firm' using errcode = 'CLR11'; end if;
+  -- #482 REVIEW F-C2 FIX (Codex adversarial leg, HIGH): the rank re-read must be firm-qualified.
+  -- clara.actor_role_rank() (0002:447) reads the actor's SOLE active membership with NO firm
+  -- predicate at all. Race: an attacker holds the invite row locked (a slow client, or another
+  -- blocked call), moves their OWN membership from firm A to firm B during the hold (removed from
+  -- A, accepted into B), and the eventually-unblocked actor_role_rank() read would return
+  -- firm-B's rank while inv.firm_id was checked against firm A -- a cross-firm authority
+  -- confusion, not a rank comparison that corresponds to any real authority in firm A anymore.
+  -- Fixed the same way as F-C1 for the other two doors: a fresh, firm-qualified read of the
+  -- actor's own membership, which also re-verifies liveness/floor in this firm post-lock (this
+  -- door never had an F2-ceiling-style re-check of its own before this fix).
+  select m2.role into v_actor_role
+    from clara.firm_memberships m2
+   where m2.user_id = c.actor and m2.firm_id = c.firm and m2.status = 'active';
+  if v_actor_role is null or clara.role_rank(v_actor_role) < clara.role_rank('admin') then
+    raise exception 'you no longer meet the required rank for this action' using errcode = 'CLR04', detail = '{"reason":"actor_rank_changed"}';
   end if;
   -- #455 review finding (BLOCKER), the target-rank wall, ruled 裁-94: the invite's OWN `role`
   -- column stands in for the target rank -- there is no membership yet.
-  if clara.role_rank(inv.role) > coalesce(clara.actor_role_rank(), -1) then
+  if clara.role_rank(inv.role) > clara.role_rank(v_actor_role) then
     raise exception 'cannot act on an invite ranked above you' using errcode = 'CLR04', detail = '{"reason":"cannot_act_on_superior"}';
   end if;
   v_dedupe := clara._reserve_op(c.firm, 'revoke_invite', p_op_key, clara._hash(jsonb_build_object('invite', p_invite)));
   if v_dedupe is not null then return v_dedupe; end if;
+  -- LIFECYCLE check, deferred (MATERIAL-1): reached only on a fresh, non-replay call. A NEW
+  -- op_key acting on an already-revoked/accepted invite that ALSO fails the rank wall above
+  -- answers THAT refusal (CLR04), never reaching here -- a chosen contract (#482 review point b),
+  -- pinned by mdrw-rank-walls.test.mjs's "mdrw.precedence" cell, not silent drift.
+  if inv.status <> 'pending' then
+    raise exception 'this invite is no longer open (status: %)', inv.status using errcode = 'CLR09';
+  end if;
   update clara.firm_invites set status = 'revoked', revoked_at = now() where id = p_invite;
   perform clara._audit(c.firm, c.actor, null, null, 'revoke_invite', null, jsonb_build_object('invite', p_invite));
   perform clara._append_event(c.firm, 'invite.revoked', null, c.actor, null, null, null, null, null,
@@ -393,7 +507,29 @@ begin
   end if;
   if position('cannot act on a member ranked above you' in v_code) > position('_reserve_op(' in v_code)
      or position('cannot change your own role' in v_code) > position('_reserve_op(' in v_code) then
-    raise exception 'mdrw tail: set_member_role''s new walls do not run BEFORE _reserve_op (wall-first regressed)' using errcode = 'CLR10';
+    raise exception 'mdrw tail: set_member_role''s new AUTHZ walls do not run BEFORE _reserve_op (wall-first regressed)' using errcode = 'CLR10';
+  end if;
+  -- #482 review F-C1 fix: the fresh, firm-qualified actor re-validation is present, runs BEFORE
+  -- _reserve_op, and clara.actor_role_rank() (the non-firm-qualified helper the finding named) is
+  -- gone from this body entirely -- a strong negative proof it was fully replaced, not just
+  -- supplemented.
+  if position('actor_rank_changed' in v_code) = 0
+     or position('you no longer meet the required rank for this action' in v_code) = 0 then
+    raise exception 'mdrw tail: set_member_role is missing the F-C1 post-lock actor re-validation' using errcode = 'CLR10';
+  end if;
+  if position('you no longer meet the required rank for this action' in v_code) > position('_reserve_op(' in v_code) then
+    raise exception 'mdrw tail: set_member_role''s F-C1 actor re-validation does not run BEFORE _reserve_op' using errcode = 'CLR10';
+  end if;
+  if position('actor_role_rank(' in v_code) > 0 then
+    raise exception 'mdrw tail: set_member_role still calls the non-firm-qualified clara.actor_role_rank() (F-C1/F-C2 class regressed)' using errcode = 'CLR10';
+  end if;
+  -- #482 review MATERIAL-1: the LIFECYCLE check (status) must run AFTER _reserve_op -- checking
+  -- it before would refuse a legitimate same-op_key retry on state a prior call itself produced.
+  if position('membership is not active' in v_code) = 0 then
+    raise exception 'mdrw tail: set_member_role lost its lifecycle status check' using errcode = 'CLR10';
+  end if;
+  if position('membership is not active' in v_code) < position('_reserve_op(' in v_code) then
+    raise exception 'mdrw tail: set_member_role''s LIFECYCLE status check runs BEFORE _reserve_op (MATERIAL-1 regressed)' using errcode = 'CLR10';
   end if;
 
   -- (2) remove_member: ACL/owner unchanged, prosrc genuinely changed, both new walls present in
@@ -421,10 +557,29 @@ begin
     raise exception 'mdrw tail: remove_member is missing its self-act wall in CODE' using errcode = 'CLR10';
   end if;
   if position('membership not in your firm' in v_code) > position('_reserve_op(' in v_code)
-     or position('membership is not active' in v_code) > position('_reserve_op(' in v_code)
      or position('cannot remove your own membership' in v_code) > position('_reserve_op(' in v_code)
      or position('cannot act on a member ranked above you' in v_code) > position('_reserve_op(' in v_code) then
-    raise exception 'mdrw tail: remove_member''s walls do not all run BEFORE _reserve_op (wall-first reorder regressed)' using errcode = 'CLR10';
+    raise exception 'mdrw tail: remove_member''s AUTHZ walls (firm, self, rank) do not all run BEFORE _reserve_op (wall-first reorder regressed)' using errcode = 'CLR10';
+  end if;
+  -- #482 review F-C1 fix: same proof as set_member_role's.
+  if position('actor_rank_changed' in v_code) = 0
+     or position('you no longer meet the required rank for this action' in v_code) = 0 then
+    raise exception 'mdrw tail: remove_member is missing the F-C1 post-lock actor re-validation' using errcode = 'CLR10';
+  end if;
+  if position('you no longer meet the required rank for this action' in v_code) > position('_reserve_op(' in v_code) then
+    raise exception 'mdrw tail: remove_member''s F-C1 actor re-validation does not run BEFORE _reserve_op' using errcode = 'CLR10';
+  end if;
+  if position('actor_role_rank(' in v_code) > 0 then
+    raise exception 'mdrw tail: remove_member still calls the non-firm-qualified clara.actor_role_rank() (F-C1/F-C2 class regressed)' using errcode = 'CLR10';
+  end if;
+  -- #482 review MATERIAL-1: the LIFECYCLE check (status) must run AFTER _reserve_op -- this
+  -- door's own mutation flips status, so checking it before dedupe would refuse a legitimate
+  -- same-op_key retry on the state THIS call itself produced.
+  if position('membership is not active' in v_code) = 0 then
+    raise exception 'mdrw tail: remove_member lost its lifecycle status check' using errcode = 'CLR10';
+  end if;
+  if position('membership is not active' in v_code) < position('_reserve_op(' in v_code) then
+    raise exception 'mdrw tail: remove_member''s LIFECYCLE status check runs BEFORE _reserve_op (MATERIAL-1 regressed)' using errcode = 'CLR10';
   end if;
 
   -- (3) revoke_invite: ACL/owner unchanged, prosrc genuinely changed, the new wall present in
@@ -451,9 +606,36 @@ begin
     raise exception 'mdrw tail: revoke_invite unexpectedly carries a self-act wall -- invites have no self case' using errcode = 'CLR10';
   end if;
   if position('invite not in your firm' in v_code) > position('_reserve_op(' in v_code)
-     or position('this invite is no longer open' in v_code) > position('_reserve_op(' in v_code)
      or position('cannot act on an invite ranked above you' in v_code) > position('_reserve_op(' in v_code) then
-    raise exception 'mdrw tail: revoke_invite''s walls do not all run BEFORE _reserve_op (wall-first reorder regressed)' using errcode = 'CLR10';
+    raise exception 'mdrw tail: revoke_invite''s AUTHZ walls (firm, rank) do not all run BEFORE _reserve_op (wall-first reorder regressed)' using errcode = 'CLR10';
+  end if;
+  -- #482 review F-C3 fix: firm_id sits IN the locking WHERE (never a separate check after the
+  -- lock) -- a cross-firm invite id must match zero rows and never acquire a foreign tenant's
+  -- lock at all.
+  if position('where id = p_invite and firm_id = c.firm for update' in v_code) = 0 then
+    raise exception 'mdrw tail: revoke_invite''s invite lock no longer scopes firm_id IN the locking WHERE (F-C3 regressed -- a cross-firm probe would contend for a foreign lock again)' using errcode = 'CLR10';
+  end if;
+  -- #482 review F-C2 fix: same proof shape as F-C1 -- the fresh, firm-qualified actor
+  -- re-validation is present, runs BEFORE _reserve_op, and clara.actor_role_rank() (the
+  -- non-firm-qualified helper the finding named) is gone from this body entirely.
+  if position('actor_rank_changed' in v_code) = 0
+     or position('you no longer meet the required rank for this action' in v_code) = 0 then
+    raise exception 'mdrw tail: revoke_invite is missing the F-C2 firm-qualified actor re-validation' using errcode = 'CLR10';
+  end if;
+  if position('you no longer meet the required rank for this action' in v_code) > position('_reserve_op(' in v_code) then
+    raise exception 'mdrw tail: revoke_invite''s F-C2 actor re-validation does not run BEFORE _reserve_op' using errcode = 'CLR10';
+  end if;
+  if position('actor_role_rank(' in v_code) > 0 then
+    raise exception 'mdrw tail: revoke_invite still calls the non-firm-qualified clara.actor_role_rank() (F-C2 class regressed)' using errcode = 'CLR10';
+  end if;
+  -- #482 review MATERIAL-1: the LIFECYCLE check (status) must run AFTER _reserve_op -- this
+  -- door's own mutation flips status, so checking it before dedupe would refuse a legitimate
+  -- same-op_key retry on the state THIS call itself produced.
+  if position('this invite is no longer open' in v_code) = 0 then
+    raise exception 'mdrw tail: revoke_invite lost its lifecycle status check' using errcode = 'CLR10';
+  end if;
+  if position('this invite is no longer open' in v_code) < position('_reserve_op(' in v_code) then
+    raise exception 'mdrw tail: revoke_invite''s LIFECYCLE status check runs BEFORE _reserve_op (MATERIAL-1 regressed)' using errcode = 'CLR10';
   end if;
 
   -- (4) _tf_guard_last_owner: untouched, proven negatively -- byte-identical prosrc, still
@@ -471,5 +653,5 @@ begin
     raise exception 'mdrw tail: _tf_guard_last_owner is no longer attached to clara.firm_memberships' using errcode = 'CLR10';
   end if;
 
-  raise notice 'mdrw tail: OK -- set_member_role/remove_member/revoke_invite all: ACL byte-unchanged, owner still clara_fn_owner, prosrc genuinely changed, new wall(s) present in comment-stripped CODE, and every wall (pre-existing and new) runs BEFORE _reserve_op (wall-first, positionally proven); revoke_invite carries no self-act wall (by design, invites have no self case); _tf_guard_last_owner is byte-identical to its prestate stash and remains attached to firm_memberships -- the last-owner backstop is untouched under every new wall. Ruled 裁-94 (2026-09-01 morning): KEEP THE WALL is the shipped shape, not a pending default.';
+  raise notice 'mdrw tail: OK -- set_member_role/remove_member/revoke_invite all: ACL byte-unchanged, owner still clara_fn_owner, prosrc genuinely changed, new wall(s) present in comment-stripped CODE; every AUTHZ-class wall (firm scope, target-rank, self-act) runs BEFORE _reserve_op, and every LIFECYCLE-class check (active/pending status) runs AFTER it, positionally proven (#482 review MATERIAL-1 fix -- the first cut had this backwards for the lifecycle checks, breaking same-op_key retries); revoke_invite carries no self-act wall (by design, invites have no self case); _tf_guard_last_owner is byte-identical to its prestate stash and remains attached to firm_memberships -- the last-owner backstop is untouched under every new wall; all three bodies carry the F-C1/F-C2 fresh firm-qualified actor re-validation BEFORE _reserve_op and NO LONGER call clara.actor_role_rank() at all (the non-firm-qualified helper both findings named); revoke_invite''s invite lock scopes firm_id IN the locking WHERE (F-C3). Ruled 裁-94 (2026-09-01 morning): KEEP THE WALL is the shipped shape, not a pending default.';
 end $$;

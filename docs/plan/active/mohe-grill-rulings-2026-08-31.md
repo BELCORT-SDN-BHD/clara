@@ -368,7 +368,7 @@ fix lands in). One guard on the wholesale: the redesign round re-reads each reco
 
 ### 裁-94 · G14 — keep the wall: a subordinate never acts on a strict superior
 
-**The finding (#455's fresh review, DB PR `db/member-door-rank-walls`).** `set_member_role`
+**The finding (#455's fresh review, DB PR db/member-door-rank-walls).** `set_member_role`
 (0145:592-620) compared only the ASSIGNED role to the caller, never the TARGET's current rank —
 the existing F2 ceiling only stops an admin ASSIGNING 'owner', it says nothing about the rank of
 who is being acted on; `remove_member` (0005:732-751) carried no rank comparison at all, never
