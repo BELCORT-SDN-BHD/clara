@@ -272,8 +272,17 @@ export async function cleanCloseableFY(setupSub, { tag, prepSub = setupSub, star
 }
 
 /** Birth a counterparty via draft+approve of a tiny non-control entry (the x37/x55
- *  idiom: counterparties are born at APPROVE). */
-export async function birthCounterparty(sub, { client, name, kind = "customer" }) {
+ *  idiom: counterparties are born at APPROVE).
+ *
+ *  `postingDate` is OPTIONAL and, left unset, falls through to draftEntryV3's own
+ *  default ("2026-03-15") — unchanged for every caller that does not care where the
+ *  birth entry lands. A caller building a metric snapshot scoped to a ROLLING window
+ *  (e.g. `pastMonthStart(n)` off `clara._book_today()`) MUST pass an explicit date
+ *  outside that window: the fixed "2026-03-15" default is a wall-clock-collidable
+ *  literal that a rolling `pastMonthStart(n)` call sweeps into its own period for
+ *  exactly one real-world month (whenever "now" - n months == March 2026) — the same
+ *  date-rollover fixture class as the x42 watermark fix in this same PR. */
+export async function birthCounterparty(sub, { client, name, kind = "customer", postingDate = undefined }) {
   const proposal = { new: { name } };
   if (kind === "customer") proposal.kind = "customer";
   const d = await draftEntryV3(sub, {
@@ -282,6 +291,7 @@ export async function birthCounterparty(sub, { client, name, kind = "customer" }
       { account_code: EXPN, debit_cents: 100, credit_cents: 0, description: "birth-dr" },
       { account_code: REVN, debit_cents: 0, credit_cents: 100, description: "birth-cr" },
     ],
+    ...(postingDate !== undefined ? { postingDate } : {}),
     vendor: proposal, opKey: opk("x56-birth"),
   });
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x56-birtha") });
