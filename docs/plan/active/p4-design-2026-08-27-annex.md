@@ -209,10 +209,22 @@ composition decision (owner question 2), not as a violation.
 | identity-canvas vs background | 1.0814 | (−8, −9, −13) | 13 |
 | shell vs background | 1.0727 | (−8, −8, −10) | 10 |
 
-The entry pages render `bg-shell` today (both `apps/web/app/login/page.tsx` and
-`apps/web/app/invite/[token]/page.tsx` use the same `min-h-dvh … bg-shell` main). Moving them to
-`--identity-canvas` is a 3/255 max-channel change: imperceptible on any display. Cream reads
-only against white.
+The entry pages rendered `bg-shell` when this annex was written (both then-`apps/web/app/login/
+page.tsx` and then-`apps/web/app/invite/[token]/page.tsx` used the same `min-h-dvh … bg-shell`
+main). Moving them to `--identity-canvas` is a 3/255 max-channel change: imperceptible on any
+display. Cream reads only against white.
+
+**LANDED 2026-08-30 (P4-3), and the paths moved with it.** Both pages are now leaves of the
+`(entry)` route group — `apps/web/app/(entry)/login/page.tsx` and
+`apps/web/app/(entry)/invite/[token]/page.tsx` — and neither carries a ground of its own any
+more: `apps/web/app/(entry)/layout.tsx` renders the single `bg-identity-canvas` main for all
+four faces, with 裁-2 4a's shadow card edge. A route group adds no URL segment, so /login and
+/invite/:token are byte-identical; `apps/web/tests/firm-scope-surfaces.test.ts` asserts that
+from the tree. The measurement above is unchanged and was re-run with the production instrument
+on the P4-3 branch — see the ten `*-on-identity-canvas` rows now pinned in
+`apps/web/scripts/check-token-contrast.mjs`. *(The old paths are spelled un-backticked above on
+purpose: they no longer resolve, and the harness-links gate reads a backticked path as a file
+reference — it caught this very edit.)*
 
 ---
 

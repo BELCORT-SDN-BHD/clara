@@ -23,8 +23,11 @@ import {
 
 import {
   loadRegistrationRequestsForApplicant,
-  type RegistrationRequestRow,
 } from "./reads";
+import {
+  readCallerContextForSubject,
+  type CallerContextOutcome,
+} from "@/lib/identity/doors";
 
 /** The server seam `loadOwnRegistrationRequests` resolves the caller through,
  *  injectable so the fail-closed branch can be DRIVEN in a test rather than read
@@ -49,7 +52,20 @@ export type OwnRegistrationDeps = {
  * that observed zero rows.
  */
 export type OwnRegistrationResult =
-  | { readonly ok: true; readonly rows: RegistrationRequestRow[] }
+  | {
+      readonly ok: true;
+      /** The subject positively verified before the read was issued. Kept with
+       *  the rows so the holding mapper can bind every hydrated row back to the
+       *  identity that authorised this request. */
+      readonly subject: string;
+      /** Transport output is untrusted until holding-state validates all ten
+       *  columns. `getRows<T>` is a compile-time projection, not a runtime
+       *  decoder. */
+      readonly rows: readonly unknown[];
+      /** A separate, positive read of `clara.caller_context`. Zero registration
+       * rows never stand in for this membership evidence. */
+      readonly context: CallerContextOutcome;
+    }
   | { readonly ok: false; readonly reason: "no_session" };
 
 /**
@@ -75,10 +91,13 @@ export async function loadOwnRegistrationRequests(
   const resolve = deps.resolveSession ?? resolveServerSession;
   const session = await resolve();
   if (session === null) return { ok: false, reason: "no_session" };
-  const rows = await loadRegistrationRequestsForApplicant(
-    fixedTokenAccessor(session.accessToken),
-    session.subject,
-    deps.signal,
-  );
-  return { ok: true, rows };
+  const accessor = fixedTokenAccessor(session.accessToken);
+  const [rows, context] = await Promise.all([
+    loadRegistrationRequestsForApplicant(accessor, session.subject, deps.signal),
+    readCallerContextForSubject(session.subject, {
+      session: accessor,
+      signal: deps.signal,
+    }),
+  ]);
+  return { ok: true, subject: session.subject, rows, context };
 }
