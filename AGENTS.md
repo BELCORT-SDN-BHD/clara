@@ -111,18 +111,21 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 
 ## Working protocol
 
-**Who leads (2026-08-31, 裁-82).** **Codex is the development lead** for the beta sprint; the
-handoff of record is `docs/plan/active/frontend-sprint-handoff-2026-08-31.md` (+ its orders).
-Every build — any package, any size — is a Codex lane in its own worktree (direct `codex exec`,
-`gpt-5.6-sol`, `model_reasoning_effort=xhigh`). **Review (裁-84; ADR-0077 pending signature):**
-every code PR gets an independent pass by a FRESH, SEPARATE `codex exec` read-only session plus
-the owner's read before merge; docs-only PRs take the single-lane review (ADR-0069). A Claude
-Code session on this repo does harness/handoff hygiene or an explicit owner ask; if it
-orchestrates at all it runs the `orchestrator-fable` skill first and dispatches only Codex
-build lanes — plan, delegate, synthesize, verify, own the state; inspect every result before
-accepting it. *Codex lane, learned the hard way:* the `codex:rescue` companion queue is
-unreliable (it has stalled for hours at "starting") — prefer a direct `codex exec` via Bash,
-backgrounded with a file-watcher on the output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-08-31.md`.
+**Run the `orchestrator-fable` skill first on any substantive task.** You are the
+orchestrator — plan, delegate, synthesize, verify, own the state; the beta sprint's opening
+document is `docs/plan/active/frontend-sprint-handoff-2026-08-31.md` (+ its orders). **Lanes by
+fit (裁-85, 2026-08-31):** the most effective, suitable and economical model that does not
+sacrifice quality — Codex `gpt-5.6-sol` xhigh (direct `codex exec`, its own worktree) for
+execution-heavy implementation, debugging and test-fixing; native sonnet-5 xhigh for bounded
+work; opus-5 xhigh where judgement, security or ambiguity dominate; a family that is out is
+substituted for that leg, builds included, and the PR body says so. **The lean ladder (裁-86;
+ADR-0077 pending signature):** every code PR gets ONE fresh-context opus read-only review (+ a
+Codex read-only leg when a native lane built a money/auth surface — law 28 kept), and every
+frontend train walks its journey in a real browser (Playwright) on the built app; docs-only PRs
+take the single-lane review (ADR-0069). Inspect every result before accepting it. *Codex lane,
+learned the hard way:* the `codex:rescue` companion queue is unreliable (it has stalled for hours
+at "starting") — prefer a direct `codex exec` via Bash, backgrounded with a file-watcher on the
+output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-08-31.md`.
 
 **Ground before you build.** On a new or compacted session, and before answering any
 architecture question or changing code: query the graph for structure (the
