@@ -295,7 +295,14 @@ verbs still ahead of it so the product stays honest mid-programme. **裁-60's "c
 P6-2 renders" becomes "cutover when C7 lands."** `requeue_render_job`'s possible P3 scope-down
 (disposition 3) is reconciled inside C7.
 
-### Closed without a new number (already ruled or superseded)
+> **AMENDED by 裁-75 (2026-08-31; measured at FS-0, `verb-coverage-census-2026-08-31.md`).**
+> The re-measurement at the live `0155` catalog: 280 granted items → **178 wired** (the port wave
+> executed the bulk of the 110), 13 in-flight in the open P4 PRs, `create_firm` at FS-4, six
+> report doors whose product path is FS-7's chat tools, **15 row-bound + 8 NO-HOME dispositions +
+> 1 note-covered view** as the whole remaining residual. **The P6-C1…C7 train programme is
+> discharged** — the cutover no longer waits on it; "cutover when C7 lands" is replaced by the
+> FS-10 exit gate (this census re-run at the tip + honest notes + rows). `requeue_render_job`
+> resolved: wired (disposition 3 closed by measurement).
 
 - 46(b) solo attestation = 裁-47 (Clara-directed path only)
 - 46(c) = 裁-66
