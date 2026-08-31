@@ -157,6 +157,11 @@
 --     the same audit + account.upserted event, but a unique collision raises chart_adoption_race;
 --     the transaction rolls back and the human row survives verbatim. Accounting correctness
 --     outranks the original backend-contract sketch (hard constraint 1 / PRD invariant 15).
+--     add_coa_template_family shares this same insert-only plant and the CLR37 fixed-asset /
+--     type-change rungs it cannot reach are unreachable there TOO, but for a DIFFERENT reason:
+--     rung (9) below (code_conflict / code_already_present) already refuses any code the client
+--     carries at any type or class BEFORE the plant runs, so every code the plant reaches is
+--     provably new and can carry neither journal lines nor an fa_account_profiles row.
 -- (9) add_coa_template_family REFUSES A CODE CONFLICT BY TYPE OR CLASS (D-4's `code_conflict`,
 --     naming the code) BEFORE the loop starts, rather than letting the core's has-lines guard
 --     surface mid-loop. It also refuses a code the client already carries at the SAME type and

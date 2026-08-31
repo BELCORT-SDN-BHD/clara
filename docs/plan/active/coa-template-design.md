@@ -212,6 +212,20 @@ and without a named verb the recovery path is *"call `upsert_account` eleven tim
 which loses the family attribution and makes §6's drift read show a phantom off-template block.
 The strict bulk door plus a narrow additive door beats one permissive door.
 
+**BLOCKER-1 (round-3, the lost-update wall on the SAME family).** The door takes the adoption
+row's lock FIRST — `select ... for update`
+(`UNNUMBERED_coa_pr_b_apply_template.sql:940`) — and drives both the `family_already_applied`
+check and the additive `families[]` update from that locked read, never from a pre-lock record.
+Two arms, closed for two different reasons, exactly as the round-3 archaeology measured it: a
+caller-supplied `families[]` composed from the live `coa_template_adoptions.families` column
+(the round-2 self-reference) already serializes the DIFFERENT-families arm on its own —
+Postgres's own per-statement row lock on `UPDATE` re-evaluates that subquery against the
+post-commit row, so two callers adding two different families both land with no explicit prior
+lock needed. The explicit `for update` is what closes the SAME-family, different-op_key arm:
+without it, two callers naming the same family both read it absent, both pass the check, and the
+loser's plant re-inserts the winner's accounts. For the different-families arm the lock is
+defense-in-depth, not the sole cause of the fix.
+
 ---
 
 ## 4 · The agentic half — Clara trims, a human confirms
