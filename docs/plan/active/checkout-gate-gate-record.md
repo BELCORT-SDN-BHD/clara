@@ -6,9 +6,11 @@ all folded). The design gate R8 reserved for the self-serve tenant-creation door
 [`checkout-gate-design.md`](checkout-gate-design.md) + [part 2](checkout-gate-design-part2.md) +
 [part 3](checkout-gate-design-part3.md).*
 
-**What this file is.** **Seven open questions** (G3 · G4 · G5 · G6 · G7 · G10 · G11 · G12 — G12
-is a recommendation to confirm rather than a fork), each with a recommendation and what every
-option costs — plus **two RULED cards** (G1 · G13), **one withdrawn** (G8), and **two declarations** (things the orders already authorised me to
+**What this file is — now a CLOSED ledger.** 裁-93 ruled every remaining question per its
+recommendation, signed ADR-0077 and endorsed the CSRF deferral; 裁-89 · 裁-90 · 裁-91 · 裁-92 ruled
+G1 · G5 · G11 · G10 by name. **Nothing here is open.** Each card keeps the question as it was put,
+with its ruling at the top — plus **one withdrawn** (G8, whose subject the fold removed) and **two
+declarations** (things the orders already authorised me to
 decide, recorded rather than asked) and **two recorded constraints**. The design builds around
 none of the ten: it carries the recommended answer at the point of use, so a different ruling
 changes a named thing rather than the shape.
@@ -84,6 +86,10 @@ PR-1 own it whole and this train wait.
 
 ## G3 · Which app owns the webhook — the runtime, or `apps/web`?
 
+> **RULED — 裁-93, per recommendation: `packages/runtime`.** 裁-92 strengthens it rather than
+> disturbing it: the confirmation wall's doors are reached the same way, so `apps/web` still holds
+> no database credential.
+
 **Recommendation: `packages/runtime`.**
 
 | | `packages/runtime` *(rec.)* | `apps/web` |
@@ -100,6 +106,10 @@ DATABASE credential*, which is a sharper property and still decides it the same 
 ---
 
 ## G4 · The rate wall (裁-36 · 裁-64①) — the short design sitting
+
+> **RULED — 裁-93, per recommendation: option (B), the peppered digest; and G4b (i), a plain
+> refusal with a contact route.** 裁-92 gives the same pepper a second job — the confirmation
+> wall's email and origin digests (part 3 §2.1) — so one secret serves both walls.
 
 **大白话.** 裁-36 定了"一个 IP 一天只能开一间公司"，裁-64① 定了形状：网页把看到的地址传给数据库的
 门，**墙还是数据库**。没定的是：**传过去的是地址本身，还是地址的指纹？**
@@ -125,7 +135,25 @@ during beta, and never loses a real customer)* · (ii) raise the limit to N/day 
 
 ---
 
-## G5 · The DPA text does not exist — and it is not one of the three drafts
+## G5 · **RULED — 裁-90.** We draft the beta text; the owner and a lawyer swap it at launch
+
+> **RULED.** The beta DPA is **delegated to us** — drafted from the existing `docs/ops/legal/` pack
+> as a plain, visible consent step, standing as a **placeholder** until the owner and a lawyer swap
+> it at the official-launch sitting.
+>
+> **The design already carries the swap, and it costs nothing to perform.** A new text is a **new
+> `dpa_documents` row and a version bump** — `effective_to` stamped on the old row, the new one
+> current. **It is not a schema change and not a migration**, and M8 already ensures a customer
+> mid-flow is not stranded by it: `checkout_intents.dpa_version` pins the version their intent
+> opened under, and `claim_paid_firm`'s W8 reads *that* through the payment's own session id, never
+> "the newest". So the launch swap can happen with customers in flight.
+>
+> **What ships meanwhile is no longer empty.** The v2 fail-closed default was `dpa_documents`
+> shipping with no rows, which refused every firm creation. Under 裁-90 the delegated draft **is**
+> the beta row, so the door opens — and the honest note on the signup step says the agreement is a
+> beta text pending legal review, rather than implying it has had one.
+
+*The question as it was put, kept as the record:*
 
 **The finding I most want you to see.** 裁-68① requires a DPA e-sign at signup against "the
 `docs/ops/legal/` text, owner-confirmed once". That directory holds exactly three files and **none
@@ -150,6 +178,11 @@ blocker on building it.
 ---
 
 ## G6 · The pre-firm half of this journey cannot be audited — acceptable at beta?
+
+> **RULED — 裁-93, per recommendation: (i), accept at beta; the append-only tables are the
+> record.** *Nuance worth knowing rather than a change: 裁-91 makes `stripe_events` a projection,
+> so an investigation has the reconciliation keys but no customer identity — by design. The
+> identity lives on the registration and the user row, which is where it belongs.*
 
 **大白话.** Clara 的审计日志和事件流每一行都必须挂在一间公司底下 —— 我量过，两张表的 `firm_id` 都是
 NOT NULL。可是**公司出生之前的每一步**（认领身份、提交注册、签 DPA、付款、领钥匙）根本挂不上去。今天
@@ -224,7 +257,21 @@ off until BELCORT is registered, and nothing here needs a ruling.
 
 ---
 
-## G10 · NEW — PKCE costs cross-device signup. Is that acceptable? *(BLOCKER-3)*
+## G10 · **RULED — 裁-92, and AGAINST this card's recommendation.** The 6-digit code
+
+> **RULED: option (ii), the emailed six-digit code.** The owner chose **cross-device experience over
+> the cryptographic binding**. This card had recommended (i) — accept the cross-device cost now, rule
+> (ii) in later if beta showed failures — so **the ruling is a deliberate overrule, not an
+> application of the recommendation.** Recorded plainly here because 裁-93 rules the remaining cards
+> "per their recommendation", and applying that phrase to G10 would silently reinstate PKCE.
+>
+> **What it buys:** cross-device signup works fully, and **the login-CSRF vector disappears with the
+> link** — the attack needed a link the attacker could send, and there is no longer one.
+> **What it costs:** a six-digit space is guessable, so the rate wall becomes **mandatory**, and the
+> binding drops from cryptographic to "the address is the person's own". Part 1 §3 designs both,
+> §3.8 states the residual, and part 3 §2.1 + cells W-H…W-H6 are the walls.
+
+*The question as it was put, kept as the record:*
 
 **大白话.** 为了堵住那个安全漏洞，确认邮件**必须在"当初注册的那台机器"上打开**。在笔电上注册、
 用手机点邮件里的链接 —— 会失败。会计师事务所大多用 Microsoft 365，手机看邮件是常态。
@@ -244,7 +291,20 @@ week of beta shows cross-device failures. (ii) is a contained addition, not a re
 
 ---
 
-## G11 · NEW — PDPA retention and erasure for the Stripe event store
+## G11 · **RULED — 裁-91, per this card's recommendation.** A redacted projection
+
+> **RULED: option (i).** `stripe_events` stores a **redacted projection** — reconciliation fields
+> only (event id, type, session/intent ids, amount, currency, status, timestamps, livemode). **No
+> `customer_details` PII lands in the database at all**; the full raw event stays Stripe-side, and
+> the webhook route **verifies the signature over the raw body, projects, and discards it**.
+>
+> **This dissolves the problem structurally rather than building a door for it.** A store holding no
+> personal data needs no erasure path, so `stripe_events` stays strictly append-only — which was the
+> property option (ii) would have had to break. Part 2 §1.2 carries the DDL, the allow-list-is-the-
+> wall / CHECK-is-the-mistake-net reasoning, and the note that the applier is unaffected because
+> everything it reads was already a reconciliation field.
+
+*The question as it was put, kept as the record:*
 
 **The inconsistency worth your attention.** G4 puts a whole sitting to you about storing an **IP
 address** because it is personal data under this repo's own PDPA memo. Meanwhile the design stores
@@ -265,6 +325,10 @@ keeps the personal-data surface small. The applier needs the ids and the metadat
 ---
 
 ## G12 · NEW — the double-payment residual
+
+> **RULED — 裁-93, per recommendation: (i), leave it visible in the problems queue and handle it
+> by hand at beta — and (iii) stands: no real money is taken until the duplicate path has an
+> answer.** Unaffected by the fold and by 裁-92.
 
 Two Checkout Sessions can be in flight for one registration (the customer opens checkout twice).
 Both can complete, producing two distinct Stripe events. **The design now writes only one payment
@@ -335,13 +399,15 @@ watches that whole family as a named roster rather than two hand-picked names th
 zero. **If a build lane later wants an action, that is not a local call:** the census fix must
 land first, as a stated precondition on the build PR.
 
-**An amendment owed to owner-batch item 85, BEFORE you perform the Wave-G setup act.** Item 85
-tells you to set the Supabase "Confirm signup" template to the token-hash form, *not* the default
-ConfirmationURL, because mail scanners prefetch and consume it. **That reason is correct and this
-gate does not overturn it** — but the same protection is available *with* the browser binding:
-Supabase's own documented prefetch mitigation is an intermediate landing page carrying the
-confirmation URL as a query parameter, **which is exactly the page P4-3 already built**. The
-emailed link points at our page, a scanner consumes nothing, and the explicit click carries the
-PKCE flow. The token-hash form is prefetch-safe **and has no browser binding at all** — the hole
-this gate exists to close. So item 85's line should be amended to the intermediate-page form
-before you set the template.
+**The Wave-G setup line for the confirmation template, superseding owner-batch item 85 AND this
+gate's own v3 amendment of it.** Item 85 said the token-hash form (prefetch-safe, no binding); v3
+amended that to the PKCE intermediate-page form (prefetch-safe *and* bound). **裁-92 supersedes
+both**, and simplifies the act:
+
+| the Wave-G setup act | value |
+|---|---|
+| the "Confirm signup" template | emits **`{{ .Token }}`** — the six-digit code, **and no link at all** |
+| the prefetch problem item 85 raised | **moot** — a mail scanner cannot consume a code it merely reads. No link, no prefetch, no intermediate page, no `confirmation_url` to validate |
+| **the OTP expiry** | **shorten from the 24-hour default to 10 minutes.** This is the one act with no in-repo enforcement — no route, migration or CI job can read it (part 1 §3.4), so it needs your receipt. C1/C2's attempt walls are what bound the exposure if it is missed |
+| autoconfirm | stays **DISABLED**, unchanged |
+| the Redirect URLs allowlist | now needs only `<origin>/signup`; **/auth/confirm no longer receives a redirect** because nothing links to it |

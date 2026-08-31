@@ -72,9 +72,9 @@ them** — they are marked.
 
 | route | what changes |
 |---|---|
-| /auth/confirm + /auth/confirm/verify | `code` replaces `token_hash`; `exchangeCodeForSession` replaces `verifyOtp`; `proveSameOrigin` is kept **verbatim** (part 1 §3.2). **`Referrer-Policy` on this page must be `strict-origin`, never `no-referrer`** — FS-2's NEW-A: `no-referrer` makes real browsers send `Origin: null` on the form POST, which this wall 403s. **`Origin: null` is never accepted.** |
+| /auth/confirm + /auth/confirm/verify **(裁-92)** | the GET becomes a **code-entry form** (address + six digits, the address typed or read from this browser's own signup state — **never from a URL parameter**, part 1 §3.3). The POST keeps its shape and changes its input: `proveSameOrigin` **verbatim**, then the C1/C2 attempt wall through the runtime (§2.1), then `verifyOtp({email, token, type:'signup'})`, then seal. `hasVerifiedSession` unchanged. **`Referrer-Policy` on this page must be `strict-origin`, never `no-referrer`** — FS-2's NEW-A: `no-referrer` makes real browsers send `Origin: null` on the form POST, which this wall 403s. **`Origin: null` is never accepted.** |
 | `/signup` step 2 **(client door call)** | gains the DPA step. The text is **read** by a server component from `dpa_documents` (body + sha) and passed down as props; **`sign_dpa` is then called from the client over PostgREST, exactly as step ③ already calls `claim_identity` and `request_firm_registration`** — `signup-firm-form.tsx` is `"use client"` and uses `callDoor`. **This is a decision, not an omission:** an unnamed server-side step under a no-Server-Actions heading is where a build lane reaches for an action. `sign_dpa` is a governed door, the caller is the person, and the client-RPC pattern is already built and reviewed. If a later lane needs it server-side, it adds POST /signup/dpa as a route handler and registers it — never an action. The sha submitted is the one the person was shown. The existing `NotBuiltNote` is **removed because the thing it names now exists**. **With zero `dpa_documents` rows** — the fail-closed default while gate question G5 is open — the step renders a `NotBuiltNote` saying the agreement is not yet published and checkout cannot open, and the checkout control is **absent, not disabled-looking**: nothing on the page may imply a signature was recorded when none was (NIT-8) |
-| POST /checkout (new, server-only) | reads the trusted client-IP header → digest → `open_checkout_intent` → creates the Stripe Checkout Session in **subscription mode** at the zero-amount price id the door returned, with **`payment_method_collection` read from the plan row** — `'if_required'` while the plan's amount is 0, `'always'` once 裁-28's amounts are ruled. **G13 (test-mode beta) is why this is config-driven and not the flat `'always'` v2 pinned:** at RM0 a real beta customer would otherwise be asked for a card in TEST mode, i.e. a test card, to open a real firm. The value is a column on the plan row the Session is built from (the billing brief's configurability law), so it flips at the pricing sitting with no code change; Wave G still exercises the `'always'` arm against a non-zero test price and `metadata: {clara_registration_id, clara_applicant, clara_intent_id}` → `record_checkout_session` → 303 to Stripe |
+| POST /checkout (new, server-only) | reads the trusted client-IP header → digest → `open_checkout_intent` → creates the Stripe Checkout Session in **subscription mode** at the zero-amount price id the door returned, with **`payment_method_collection` read from the plan row** — `'if_required'` while the plan's amount is 0, `'always'` once 裁-28's amounts are ruled. **裁-88's configurability rule is the law here, and G13 (test-mode beta) is why it bites now rather than later — this is config-driven, not the flat `'always'` v2 pinned:** at RM0 a real beta customer would otherwise be asked for a card in TEST mode, i.e. a test card, to open a real firm. The value is a column on the plan row the Session is built from (the billing brief's configurability law), so it flips at the pricing sitting with no code change; Wave G still exercises the `'always'` arm against a non-zero test price and `metadata: {clara_registration_id, clara_applicant, clara_intent_id}` → `record_checkout_session` → 303 to Stripe |
 | /checkout/success (new) | **Stripe's `success_url` is a top-level navigation, so this arrives as a GET.** The GET is therefore **paint-only** — it renders "your payment went through; open your firm" with an explicit button — and a sibling route.ts POST calls **one door**, `claim_paid_firm` (裁-89), which claims, creates and closes in a single transaction, then redirects to the firm home. **This is the same GET-is-inert discipline the confirm page already has, applied to the route that CREATES THE FIRM** (M9); the first draft applied it to the confirmation and not here. Every refusal renders verbatim; **no optimistic UI**. The firm name is read **inside the door** from `firm_registration_requests.firm_name` — **the registration is the authority, and no name crosses the wire at all**, never a form field re-typed on the success page (NIT-6) |
 | `/pending` | the three new arms of part 1 §2.1 |
 
@@ -82,6 +82,54 @@ The Stripe **secret** key is used only by the server-only checkout route and the
 never bundled. Doors are called with the caller's own session token over PostgREST RPC
 (`apps/web/lib/doors.ts:86`), so every door sees `jwt_sub()` = the person — never a service
 identity.
+
+### 2.1 · The confirmation attempt wall (裁-92 · 裁-36 · 裁-64①)
+
+A six-digit code is guessable, so the walls part 1 §3.4 names need objects. **The caller has no
+session yet** — they are confirming in order to get one — so these doors are not
+`clara_authenticated`; they are reached by the runtime on `apps/web`'s behalf (part 1 §3.5), under a
+new NOLOGIN role `clara_auth_wall` + `clara_auth_wall_login` on the estate's measured idiom, granted
+EXECUTE on **exactly the two verbs below and nothing else**.
+
+```
+clara.confirmation_attempts(
+  id            uuid primary key default gen_random_uuid(),
+  email_digest  bytea not null,             -- sha256(pepper ‖ lower(email)) -- NOT the address
+  origin_digest bytea not null,             -- the same digest the rate wall uses (part 1 §4 opt B)
+  outcome       text,                       -- null until settled: 'accepted' | 'rejected'
+  attempted_at  timestamptz not null default now(),
+  settled_at    timestamptz,
+  constraint ck_confirmation_attempt_outcome
+    check ((outcome is null and settled_at is null)
+        or (outcome in ('accepted','rejected') and settled_at is not null)))
+-- append-only except the ONE settle stamp; indexes on (email_digest, attempted_at desc) and
+-- (origin_digest, attempted_at desc).
+-- 裁-91's posture applied here too: the ADDRESS never lands, only its peppered digest.
+```
+
+**`clara.claim_confirmation_attempt(p_email_digest bytea, p_origin_digest bytea) → jsonb`** —
+appends the attempt row **first**, then evaluates C1 and C2 over the preceding window.
+
+| # | wall | refusal | errcode |
+|---|---|---|---|
+| C1 | ≤ 5 rejected attempts per **email digest** per 15 minutes | `too many confirmation attempts` | `CLR09` |
+| C2 | ≤ 5 rejected attempts per **origin digest** per 15 minutes | `too many confirmation attempts from this location` | `CLR09` |
+| — | both digests are exactly 32 bytes | `a digest is required` | `CLR10` |
+
+Returns `{attempt_id, allowed, remaining}` — `remaining` is what the "that code is not right" card
+renders, because a person near lockout deserves to know.
+
+**The row is written BEFORE the verification, not after, and that ordering is the wall.** If the
+attempt were recorded on the way back, an attacker would abort the request after each failed guess
+and never be counted. **A killed connection must still cost an attempt.**
+
+**`clara.settle_confirmation_attempt(p_attempt uuid, p_outcome text) → jsonb`** — stamps the one
+outcome; refuses a re-settle. An attempt that is never settled stays `outcome IS NULL` and **counts
+against C1/C2 as if rejected**, which is the fail-closed reading.
+
+**C2 is why C1 is not enough.** A per-address lock bounds an attacker hammering one victim; it does
+nothing against one guess sprayed across ten thousand addresses, which at 10⁻⁶ per guess is a real
+expected yield at scale. Keying the same window on the origin is what closes that shape.
 
 ---
 
@@ -123,8 +171,12 @@ G2** — `billing_plans` does not exist yet (survey §4).
 | ~~W-E · W-E2 · W-F · W-F2 · W-F3~~ | **RETIRED by 裁-89** — every one of them tested the `create_firm` recut or a `firm_admissions` column this train no longer adds. **They retire because their subject does, not because they were satisfied**: there is no token to consume, supersede or bind, and no recut to regress. `create_firm`'s pre-existing behaviour is not this train's to test. See §4.3 | | | |
 | **W-E3** | **`firm_admissions` is untouched** — the positive form of the five retirements above | after the whole battery runs, `clara.firm_admissions` has the **same column set, the same two indexes and the same row count** as a freshly seeded rig | — | add any column to `firm_admissions` in this train's migrations |
 | **W-G** | `Origin: null` | POST the verify route with `Origin: null` → **403** | the deployment's own origin → 303 | make `proveSameOrigin` return `{ok:true}` on an unparseable origin |
-| **W-H** | **the browser binding** | a `code` minted in browser context **A**, POSTed from a fresh context **B** with no verifier cookie → the exchange fails and **no session cookie is written to B** (asserted on `Set-Cookie`, not on the redirect target) | the same `code` POSTed from **A** → a session, 303 | **the realistic wrong implementation:** resolve the verifier from a *server-side store keyed at signUp time* instead of the browser's cookie. That makes the exchange **succeed** for a verifier-less browser, so the refuse limb goes red while the positive control stays green. *(Replacing `exchangeCodeForSession` with `verifyOtp` was the previous mutant and is rejected: it reddens the POSITIVE control while the refuse limb still refuses — for the wrong reason.)* |
-| **W-H2** | the cross-device refusal is **distinguishable** (BLOCKER-3) | a verifier-less exchange renders the *"open this on the device where you signed up"* card with its resend control — **not** the generic `status=invalid` | a mis-configured template and a stale code each render their own distinct card | collapse the three error classes into one `status=invalid` |
+| **W-H** | **the address never comes from a URL** (part 1 §3.3 — the wall that keeps the code bound to its owner) | load the confirm page with the address supplied as a **query parameter** and a valid code for THAT address → the form does not pre-fill it and the POST does not accept it; **no session is written** (asserted on `Set-Cookie`) | the address typed by the person, or read from this browser's own signup state → a session, 303 | make the page read the address from `searchParams` — the realistic wrong implementation, and the one that would restore the whole login-CSRF class in a worse form |
+| **W-H2** | the three refusals are **distinguishable** | a wrong code, an expired code and a C1/C2 lockout each render **their own card**, the lockout one carrying the wait | a correct code inside the window → a session | collapse them into one generic invalid state |
+| **W-H3** | **C1 · attempts per address** | 6 rejected codes for one email digest inside the window → the 6th refuses `CLR09 too many confirmation attempts`, **and the refusal happens before `verifyOtp` is called** (asserted by a spy, not by the outcome) | 5 rejects then the correct code → a session | raise the ceiling, or move the attempt append to AFTER the verification |
+| **W-H4** | **C2 · attempts per origin** | one guess each against 6 different addresses from one origin digest → the 6th refuses `CLR09 too many confirmation attempts from this location` | the same 6 from 6 different origin digests → each proceeds | drop the origin limb, keeping only C1 — **the mutant that proves C1 alone is not enough** |
+| **W-H5** | the attempt is counted even if the caller vanishes | claim an attempt, then abandon the request without settling → the row persists with `outcome IS NULL` **and counts against C1/C2** | a settled `accepted` attempt does not count against the window | make an unsettled attempt not count |
+| **W-H6** | **C3 · single use** *(the platform's wall, named as such)* | POST the same correct code twice → the second mints **no** second session | the first → a session | — **a MUST-NOT-RED control**: it records that single-use is Supabase's property, not ours, so nobody later claims this design enforces it |
 | **W-I** | DPA unsigned | `open_checkout_intent` with no signature → `CLR09`; **and `claim_paid_firm` likewise**, so a payment that somehow arrived still cannot buy a firm | signed at the intent's own version → both proceed | delete W8 / X7 |
 | **W-I2** | DPA text integrity | `sign_dpa` with a `body_sha256` that is not the document's → `CLR10` | the matching sha → recorded | delete the sha comparison |
 | **W-I3** | a DPA supersede does not strand a mid-flow customer (M8) | supersede the version after the intent opened → `claim_paid_firm` **still succeeds**, because W8 reads `checkout_intents.dpa_version` through the payment's own session id | a signature for a *different* version → refuse | bind W8 to the CURRENT version instead of the intent's |
@@ -138,7 +190,7 @@ G2** — `billing_plans` does not exist yet (survey §4).
 | **W-O2** | **what the webhook DSN CAN do, stated honestly** (M11) | holding the DSN, forge a `checkout.session.completed` naming a real `(registration, applicant, intent, session)` tuple → **the applier applies it.** The cell asserts this *is* the behaviour, so the threat model is written down rather than assumed away | — | **a MUST-NOT-RED control**: it pins the measured truth that the webhook DSN is equivalent in power to the signing secret |
 | **W-P** | registration closure is **atomic with creation** | abort the transaction after `_create_firm_core` returns → **neither** the firm nor the closure survives; the registration is still `open` with `firm_id` NULL, and a re-call completes normally | the uninterrupted call leaves `status='approved'` + `firm_id` set | move the closure UPDATE into its own transaction — the cell then finds a firm with an open registration, which is exactly the state 裁-89 makes unreachable. **Only the on-disk state discriminates**; the holding page's redirect does NOT redden, because `holdingStateFrom` returns `{kind:"member"}` from `caller_context` before it reads any registration row (NIT-4) |
 | ~~W-P2~~ | **RETIRED by 裁-89** — it asserted that a principal existed who could close a registration whose firm already existed. That state is unreachable under the fold, and `reconcile_paid_registrations` retires unbuilt with it | | | |
-| **W-Q** | the intermediate page is not an open redirect | a confirmation-URL parameter whose origin is **not** the project's Supabase URL → `status=invalid` and **no link rendered** | the project's own URL → the button renders | compare only the path, or a suffix, instead of the origin |
+| ~~W-Q~~ | **RETIRED by 裁-92** — it validated the origin of a `confirmation_url` query parameter on the intermediate landing page. **There is no link and no such parameter**, so the cell has no subject. Its replacement in spirit is **W-H**, which walls the one caller-supplied value the code flow still has: the address |
 | **W-R** | the transport rule (part 1 §1.1) | **see the panel at §4.2** — the cell asserts the TRAIN's property, not a global count | | |
 | **W-S** | `record_checkout_session` ownership (M2) | caller B stamps caller A's unstamped intent → `CLR04 not your checkout intent`, **and the intent is still stampable by A afterwards** | A stamps it → recorded | delete the applicant comparison |
 | **W-T** | one paid session per registration (M7) | two Checkout Sessions for one registration both complete → the **first** writes a payment row; the second writes a `stripe_event_problems` row of kind `duplicate_payment` and **no second payment** | one session → one payment | drop `uq_frp_registration` |
@@ -268,6 +320,8 @@ this estate has a named lesson about. Each row states which:
 | **W-F** 裁-26 email binding | `firm_admissions.bound_email` | **W-D** — `req.applicant = jwt_sub()` is a stronger statement than an email match, and it was always the wall that mattered |
 | **W-F2 / W-F3** the minter cannot forget | two CHECKs on a row that is no longer written | **structural**: the door that verifies the DPA is the door that creates the firm, in one transaction. There is no separate minter left to forget |
 | **W-P2** the closer is reachable | `reconcile_paid_registrations` | the verb retires unbuilt; the state it recovered is unreachable |
+| **W-Q** the open-redirect check | the intermediate page's `confirmation_url` parameter | **W-H** — 裁-92 removes the link, and the one caller-supplied value left is the address |
+| **W-H/W-H2 as v3 wrote them** | the PKCE verifier exchange | **W-H…W-H6** — the same cells rewritten against the code flow: the address wall, three distinguishable refusals, and the four attempt walls a guessable code makes mandatory |
 
 **And one cell was ADDED to keep the retirements honest: W-E3.** Five of the seven retire because
 this train stops touching `firm_admissions`, so the battery now asserts that positively — same
@@ -303,15 +357,20 @@ accept on trust.**
 ## 6 · The e2e (裁-86, orders §A step 2)
 
 `pnpm --filter @clara/web build` → `next start` → Playwright on the **built** app against a
-throwaway test firm (ADR-0075), axe riding the walk: signup → confirm **in the initiating browser
-context** → `claim_identity` + `request_firm_registration` → sign the DPA → checkout in Stripe
-TEST with a test card → the webhook → the firm born → the firm home.
+throwaway test firm (ADR-0075), axe riding the walk: signup → **confirm by typing the emailed
+six-digit code, in a SECOND browser context** — the cross-device journey 裁-92 bought, so the happy
+path now proves it *works* rather than that it is forbidden → `claim_identity` +
+`request_firm_registration` → sign the DPA → checkout in Stripe **TEST mode** (裁-93/G13; at RM0 the
+zero-amount price collects no card, so the walk completes without one) → the webhook → the firm
+born → the firm home.
 
 **Three negative arms, each in its own browser context — these are the legs that prove the
 walls; the happy path alone passes just as well with every hole open:**
 
-1. **W-H's refuse limb** — the same `code` from a second context, asserting no `Set-Cookie`.
-2. **W-H2** — that the second context sees the *cross-device* card, not the generic invalid one.
+1. **W-H's refuse limb** — the confirm page loaded with the address in a query parameter,
+   asserting the form does not pre-fill it and no `Set-Cookie` is written.
+2. **W-H3** — six wrong codes, asserting the sixth is refused by the wall *before* `verifyOtp` is
+   reached, and that the card names the wait.
 3. **W-D** — a second signed-in test user calling `claim_paid_firm` on the first's paid
    registration, asserting no firm is born and the first's payment is untouched.
 

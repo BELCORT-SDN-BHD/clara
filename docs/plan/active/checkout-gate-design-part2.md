@@ -4,9 +4,7 @@
 Part 3 — the webhook contract, the surfaces, the environment, the acceptance battery: [`checkout-gate-design-part3.md`](checkout-gate-design-part3.md).
 Measurement: [`checkout-gate-survey.md`](checkout-gate-survey.md) · owner questions: [`checkout-gate-gate-record.md`](checkout-gate-gate-record.md).*
 
-**v2** — §1.3's door is rewritten: v1 **stranded the paying customer**, and the repair states what was wrong rather than quietly correcting it.
-
-**This part carries the objects, the webhook route contract, the environment and the acceptance battery.** Section numbering restarts; part 1 cites these as "part 2 §N".
+**v3** — §1.3's door is 裁-89's single transaction and §1.3.0 answers what that does to the admission row; §1.2's store is 裁-91's redacted projection. *(v2 repaired the v1 door that stranded the paying customer; that repair's account is kept in §1.3.2.)*
 
 ## 1 · The new database objects
 
@@ -70,11 +68,26 @@ signature against another.** Idempotency is structural (survey F6): a second cal
 ### 1.2 · `UNNUMBERED_checkout_gate_b` — the event store and the object map
 
 ```
-clara.stripe_events(
-  event_id    text primary key,             -- Stripe's own evt_… id
-  type        text not null,
-  payload     jsonb not null,
-  received_at timestamptz not null default now())
+clara.stripe_events(                        -- 裁-91: a REDACTED PROJECTION, never the raw event
+  event_id      text primary key,           -- Stripe's own evt_… id
+  type          text not null,
+  livemode      boolean not null,           -- G13: a TEST-mode beta must be able to SEE that
+  session_id    text,                       -- the reconciliation keys...
+  intent_id     uuid,
+  registration_id uuid,
+  applicant     uuid,
+  amount_total  bigint,                     -- cents, as Stripe reports them
+  currency      text,
+  payment_status text,
+  mode          text,
+  session_status text,
+  customer_id   text,                       -- Stripe's OPAQUE ids: not names, not addresses
+  subscription_id text,
+  projection    jsonb not null default '{}',-- the allow-listed remainder, for future event types
+  received_at   timestamptz not null default now(),
+  constraint ck_stripe_events_no_pii check (
+    not (projection ?| array['customer_details','customer_email','billing_details',
+                             'shipping_details','payment_method_details'])))
 -- STRICTLY append-only: BEFORE UPDATE/DELETE raises, BEFORE TRUNCATE raises.
 -- There is deliberately NO applied_at column and no update path (see below).
 
@@ -105,23 +118,49 @@ clara.stripe_object_map(
 -- a DB question.
 ```
 
+**裁-91 · what the webhook does with the raw body: verify → project → discard.** The route verifies
+the signature over the raw bytes, **builds the projection by copying an ALLOW-LISTED set of
+fields**, and calls the door with that. **The raw event is never persisted, never logged, and goes
+out of scope with the request**; Stripe stays the system of record for what Stripe saw, answerable
+by `event_id`. So **no `customer_details` — no email, name, address, phone or tax id — ever reaches
+this database**, which dissolves G11's PDPA problem *structurally*: a store holding no personal data
+needs no erasure door, and the table stays strictly append-only. That is the better answer, because
+an erasure path in an append-only table is a hole in a wall.
+
+**The allow-list is the wall; the CHECK is the mistake-net.** `ck_stripe_events_no_pii` refuses the
+named keys at the projection's top level, but a CHECK cannot cheaply see arbitrary nesting. **The
+containment is that the projector copies named fields rather than deleting unwanted ones** — the
+difference between an allow-list and a deny-list, and why a new Stripe field cannot arrive here by
+default; the CHECK catches the projector being edited wrongly later. *(The posture the estate states
+for the pinned-ids guard: a mistake-net for a write shape, not containment.)* **The applier is
+unaffected** — everything it reads was already a reconciliation field, columns now instead of
+`payload` lookups, so W-T and the problem-row shape work on the projection unchanged.
+
 **Why `stripe_events` has no `applied_at`.** Deriving "applied" from the existence of a
 `firm_registration_payments` row carrying that `stripe_event_id` means the applier needs no
 update path at all, so the append-only trigger can be **unconditional** — where a table that is
 append-only *except for one column* has an append-only claim that must be read carefully.
 
-**`clara.record_stripe_event(p_event_id text, p_type text, p_payload jsonb) → jsonb`** ·
+**`clara.record_stripe_event(p_event_id text, p_type text, p_projection jsonb) → jsonb`** ·
+**the third argument is the REDACTED projection, not the event** (裁-91). The door extracts the
+typed columns from it, so **the edge cannot forget to fill one** — extraction lives in exactly one
+place, and that place is the database. ·
 **granted to `clara_stripe_webhook` and to nothing else** — in particular **not** to
 `clara_authenticated`, so no browser can inject a Stripe event.
 
 ```
-insert into clara.stripe_events(event_id, type, payload)
-  values (p_event_id, p_type, p_payload)
+insert into clara.stripe_events(event_id, type, livemode, session_id, intent_id,
+                                registration_id, applicant, amount_total, currency,
+                                payment_status, mode, session_status, customer_id,
+                                subscription_id, projection)
+  select p_event_id, p_type, (p_projection->>'livemode')::boolean, …, p_projection
   on conflict (event_id) do nothing;
 return jsonb_build_object('event_id', p_event_id, 'recorded', found);
 ```
 
-Refusals: `event id and type are required` (`CLR10`), `payload must be a json object` (`CLR10`).
+Refusals: `event id and type are required` (`CLR10`), `projection must be a json object`
+(`CLR10`), **`projection carries a denied field`** (`CLR10`, from the CHECK — the mistake-net
+firing).
 **It writes nothing else — no book, no capacity, no status, no firm** (billing design §3.11
 rule 2). A redelivery writes zero rows and returns `recorded:false`: the idempotency is the
 primary key, not a procedure.
@@ -131,10 +170,11 @@ applier, granted to `clara_stripe_webhook` only, re-runnable and idempotent. For
 `stripe_events` row of type `checkout.session.completed` with no `firm_registration_payments`
 row and no unresolved `stripe_event_problems` row:
 
-1. read `payload -> 'data' -> 'object'`; require `payment_status = 'paid'` **or**
-   (`mode = 'subscription'` and `status = 'complete'`) — the zero-amount subscription case
-   (裁-58), where `payment_status` reads `no_payment_required`;
-2. read `metadata ->> 'clara_registration_id'`, `'clara_applicant'`, `'clara_intent_id'`;
+1. read the **projected columns** (裁-91 — there is no raw payload to walk); require
+   `payment_status = 'paid'` **or** (`mode = 'subscription'` and `session_status = 'complete'`) —
+   the zero-amount subscription case (裁-58), where `payment_status` reads `no_payment_required`;
+2. read `registration_id`, `applicant`, `intent_id`, projected from the session's metadata at the
+   edge;
 3. require all three to resolve, **and** require the intent's `session_id` to equal the event's
    session id **and** the intent's `(registration_id, applicant)` to equal the metadata's;
 4. `insert into clara.firm_registration_payments(…) … on conflict (stripe_event_id) do nothing`,
@@ -278,9 +318,8 @@ create unique index uq_frp_registration on clara.firm_registration_payments(regi
 
 **Why the composite foreign keys.** `(registration_id, applicant)` referencing `(id, applicant)`
 makes "this payment belongs to this applicant's registration" a **database** fact: a row naming
-registration A and applicant B cannot be written at all, so the door's cross-caller wall compares
-a value the schema already guarantees congruent rather than being a second, independently-fallible
-check.
+registration A and applicant B cannot be written, so the door's cross-caller wall compares a value
+the schema already guarantees congruent.
 
 #### 1.3.2 · The door
 
@@ -320,11 +359,11 @@ perform clara._append_event(…, 'firm_registration.paid', …);
 return jsonb_build_object('firm_id', …, 'plan_id', …, 'registration_id', p_registration);
 ```
 
-**The firm name is `req.firm_name`, read from the registration** — never a value re-submitted by
-the success page (NIT-6). `decided_by` is left **NULL**: writing the applicant there would read as
-self-approval, the act `approve_firm_registration` refuses by name, and on the self-serve road
-*nobody decided* — **payment is the approval** (裁-73). The `firm_registration.paid` event carries
-the payment's identity, which is the honest record of what authorised it.
+**The firm name is `req.firm_name`, read from the registration** — never re-submitted by the success
+page (NIT-6). `decided_by` stays **NULL**: writing the applicant there would read as self-approval,
+which `approve_firm_registration` refuses by name, and on the self-serve road *nobody decided* —
+**payment is the approval** (裁-73), and the `firm_registration.paid` event carries the payment's
+identity as the honest record of what authorised it.
 
 **Idempotency.** A second call finds `firm_id` already set and returns the same
 `{firm_id, plan_id, registration_id}` with `replay: true` — read from the registration row, not
@@ -334,15 +373,11 @@ rule failing to buy.
 
 #### 1.3.3 · What the fold removes, and what it does not
 
-**Removed.** The stranding class in full: there is no state in which a customer has paid, holds a
-consumed something, and cannot reach a firm — the transaction either committed or it did not, and
-if it did not, W7 still passes and the next call runs the whole thing again. **And M5's
-unreachable closer**, because closure is no longer a separate act by a separate principal.
-
-**NOT removed: the double payment (M7 / G12).** Two Checkout Sessions completing is settled at
-step ⑦, **before this door runs at all**. `uq_frp_registration` and the applier's
-`duplicate_payment` problem row handle it, identically to the two-door shape. Saying otherwise
-would be claiming a transaction boundary reaches backwards past its own inputs.
+**Removed:** the stranding class in full (the transaction committed or it did not; if it did not,
+W7 still passes and the next call runs the whole thing), and M5's unreachable closer, because
+closure is no longer a separate act by a separate principal. **NOT removed: the double payment
+(M7 / G12)** — two sessions completing is settled at ⑦, *before this door runs at all*, so
+`uq_frp_registration` and the duplicate-payment problem row handle it under either shape.
 
 #### 1.3.4 · `reconcile_paid_registrations` retires **unbuilt**
 
@@ -378,11 +413,10 @@ computes no cents and Stripe renders its own Price.
 stamps the one `session_id`; refuses `checkout session already recorded` (`CLR09`) on a re-stamp
 with a different value; replays on the same value. **It carries the same ownership wall as every
 other door here — `intent.applicant = clara.jwt_sub()`, else `CLR04 not your checkout intent`
-(M2).** Without it any authenticated caller who guessed an unstamped intent's uuid could stamp it
-with an arbitrary session id and brick it, since `session_id` is UNIQUE and the real stamp would
-then refuse. A guessed uuid is a high bar, which is exactly why it is worth naming: *"the id is
-unguessable"* is the bearer-credential pattern 裁-16b removed from this estate in `0147`, and it is
-not a wall.
+(M2)** — because without it any caller who guessed an unstamped intent's uuid could stamp it with an
+arbitrary session id and brick it (`session_id` is UNIQUE, so the real stamp then refuses). A
+guessed uuid is a high bar, which is why it is worth naming: *"the id is unguessable"* is the
+bearer-credential pattern 裁-16b removed in `0147`, and it is not a wall.
 
 ### 1.4 · There is no D1 item — and that is 裁-73's own prediction restored
 
@@ -402,6 +436,9 @@ live body stays at `0147:497`, `prosrc` sha12 `59fa533d9c03`, unrecut.
   and the two partial indexes all retire with the recut — none of them has a subject any more.
 - `firm_admissions` gains **no columns**. The seed's two rows and the fixtures' rows stay exactly
   as lawful as they are today, because nothing about that table changes.
+
+*(裁-92's confirmation-attempt wall is **part 3 §2.1**, beside the surface it walls: its doors are
+reached by the runtime on `apps/web`'s behalf, not by a firm-scoped caller.)*
 
 ### 1.5 · `op_receipts` is not used, deliberately
 
@@ -423,27 +460,23 @@ estate's measured idiom (survey F11). Its **entire** grant surface:
 | `clara.apply_stripe_events(integer)` | EXECUTE |
 | **everything else** | **none** — no table grants, no other function, **no `BYPASSRLS`** |
 
-**Two functions, not three.** The v2 draft granted a third, `reconcile_paid_registrations`; under
-裁-89 that verb retires unbuilt (§1.3.4), so the sweep's role goes back to exactly the two verbs
-the webhook lane needs. Cell W-O asserts the count.
+**Two functions, not three** — the v2 draft granted `reconcile_paid_registrations`, which 裁-89
+retires unbuilt (§1.3.4); cell W-O asserts the count. The connection executes
+`set role clara_stripe_webhook` on checkout, as the runtime's pools already do
+(`docs/ops/DR-render.md:204-205`).
 
-The connection executes `set role clara_stripe_webhook` on checkout, as the runtime's pools
-already do (`docs/ops/DR-render.md:204-205`).
+**What a compromised webhook DSN can actually do, stated honestly (M11).** An earlier draft claimed
+such a credential could only "run an applier that will refuse to resolve its metadata". **That was
+wrong:** `record_stripe_event` performs no authenticity check of its own — the signature check is in
+the route, not the door — so anyone holding the DSN who knows a real
+`(registration_id, applicant, intent_id, session_id)` tuple can append an event the applier **will**
+apply, and **every customer knows their own tuple.**
 
-**What a compromised webhook DSN can actually do, stated honestly (M11).** An earlier draft of
-this section claimed such a credential "can append a Stripe event and run an applier that will
-refuse to resolve its metadata". **That was wrong.** `record_stripe_event` performs no
-authenticity check of its own — the signature check lives in the route, not the door — so anyone
-holding the DSN who knows a real `(registration_id, applicant, intent_id, session_id)` tuple can
-append an event the applier **will** resolve and apply. **Every customer knows their own tuple.**
-
-**The honest statement is therefore: the webhook DSN is equivalent in power to the Stripe signing
-secret.** Both let their holder assert "this registration is paid". Neither can create a firm,
-mint an admission, close a registration or read a book — the grant is three functions and no
-tables — so the blast radius is *a free firm at RM0, and a free subscription once amounts are
-ruled*, not tenant compromise. It is held and rotated with the same care as
-`STRIPE_WEBHOOK_SECRET`, and cell W-O2 pins this as a MUST-NOT-RED control so the threat model is
-written down rather than assumed away.
+**So: the webhook DSN is equivalent in power to the Stripe signing secret.** Both let their holder
+assert "this registration is paid". Neither can create a firm, close a registration or read a book —
+the grant is two functions and no tables — so the blast radius is *a free firm at RM0, a free
+subscription once priced*, not tenant compromise. It is rotated with the same care as
+`STRIPE_WEBHOOK_SECRET`, and cell W-O2 pins it as a MUST-NOT-RED control.
 
 ### 1.7 · The audit gap, named rather than papered over
 
@@ -460,8 +493,4 @@ the ordinary spine takes over. **Gate question G6** puts the residual to the own
 first-class pre-firm audit relation is owed before beta.
 
 ---
-
-## 2 · Everything else
-
-The webhook contract, the surfaces, the environment and the acceptance battery are **part 3**: [`checkout-gate-design-part3.md`](checkout-gate-design-part3.md).
 
