@@ -5,9 +5,9 @@
 > surfaces (the review queue, `je_review`/`clarify`/`doc_review`, `/bank`, `/aging`,
 > `/assets`, `/clients/plan`, and more — see `apps/dashboard`) but they were built directly
 > surface by surface, with no separately authored token set, component library, or pattern
-> documentation behind them. **The as-built dashboard is the only truth about Clara's current
-> visual language** — read the code in `apps/dashboard`, not a spec, if you need to know what
-> Clara looks like today.
+> documentation behind them. **`apps/dashboard` is what is currently deployed and its as-built
+> code is the only reference for what ships today, but per the Pointer section below it is not the
+> design system of record — `apps/web` is.**
 >
 > **[TRUED 2026-08-23] The "built against shadcn/Tailwind primitives" clause was FALSE and is
 > removed.** At the bytes, `apps/dashboard/package.json` declares exactly four dependencies —

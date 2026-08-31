@@ -48,6 +48,8 @@ reds for whoever runs it. **Ruling:** retire it (delete) in its own PR with one 
 `packages/db/README.md`'s deploy contract. The agent does not delete owner-era files without this
 ruling; it now has it.
 
+> **REVERSED 2026-08-30 by 裁-66 — the file is KEPT.**
+
 ## 裁-49 · G1's two metering questions — "两个都改，搭 G1 PR-2 的 DB 那车"
 
 **Ruling.** `ck_llm_usage_events_call_kind` gains `bank_agent` and `close_prep` (extend-only), and
@@ -243,12 +245,11 @@ wires the three onto the signup page. Item 22 CLOSED.
 
 ### 裁-69 · Agent proposal bases carry DB-resolved citations — one contract for both doors
 
-**Ruling.** **Agent proposal BASES carry DB-RESOLVED citations, before beta, as ONE contract for
-BOTH doors** (`client_identifier_promotions` 0103 + F-A7b's `wake_propose_client_onboarding`):
-each citation must resolve to a `witness_citation_regions` row of the triggering document;
-`sightings` is derived by the DB from the rows, never accepted from the model; the needs-you card
-renders the resolved regions. One small migration pair (backend → Codex) + the card; one D1 window
-batched with the next. Item 1 CLOSED.
+**Ruling.** **Agent proposal BASES carry DB-RESOLVED citations as ONE contract for BOTH doors.**
+**TRUED 2026-08-31:** the migration half was already executed as `0143` (裁-22, #409, live
+2026-08-29): citations resolve to `clara.document_regions` through
+`clara._resolve_proposal_basis(p_documents uuid[], p_firm uuid, p_basis jsonb)`, and `sightings`
+is DB-derived. Only the needs-you card's resolved-region rendering remains owed. Item 1 CLOSED.
 
 ### 裁-70 · IA for the tax family in apps/web
 

@@ -142,3 +142,7 @@ derived state is not evidence**; (3) **spelling is not identity**.
   (widened by ADR-0075) is **DATA-scoped only**; the product's mechanisms, the engineering
   gates, and these criteria stay at full force — mechanisms NEVER move, the operative clause
   on any collision.
+- **SG-4 — Accessibility is a shipping gate** (Q7): `apps/web/scripts/check-token-contrast.mjs`
+  proves token-level OKLCH contrast, `apps/web/test/a11yRules.ts` runs the WCAG-mapped rule engine,
+  and `apps/web/test/keyboardWalk.ts` walks the approve/review/close journeys. **OWED per 裁-13:**
+  the WCAG 2.2 target-size gate joins `a11yRules.ts` in the P6 polish wave.

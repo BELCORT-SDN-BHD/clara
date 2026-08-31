@@ -85,7 +85,7 @@ not exist.
 
 | Tier | What it is | Who is in it | What it must satisfy |
 |---|---|---|---|
-| **ORACLE** | the acceptance bar — books that must tie, to the sen, against the owner's own documents | **BEE** (two FYs) · **ROME SECRETARY** (one terminal period) · **ROME PROPERTIES** (one terminal period) | §4's seven-item package, per client per period. Gaps are named in §3.1 and **the run cannot start without them** |
+| **ORACLE** | the acceptance bar — books that must tie, to the sen, against the owner's own documents | **BEE** (two FYs) · **ROME SECRETARY** (one terminal period) · **ROME PROPERTIES** (one terminal period) | §4's seven-item package, per client per period. Gaps are named in §3.1, marked **资料缺失** and never awaited per 裁-63; the run proceeds as-is. |
 | **REALITY** | **open intake** — real papers that exercise the product without carrying an acceptance figure | open; the owner adds slots as papers arrive | nothing. A slot may prove a MECHANISM without being an oracle |
 
 **Why the second tier exists at all, said plainly:** without it, a rich fixture gets
@@ -167,8 +167,8 @@ sen, with each remaining difference named as a specific missing document
 
 **A read-only assessment of the owner's three designated folders (2026-08-20) is the companion
 file of record**, split out under the 500-line limit. It holds the per-client verdicts against
-this section's seven-item package, **the named gaps that must close before an acceptance run
-can start**, the corpus exclusions and fixture sets, the classes that will exercise OCR hardest,
+this section's seven-item package, **the named gaps recorded as 资料缺失 and never awaited per
+裁-63**, the corpus exclusions and fixture sets, the classes that will exercise OCR hardest,
 and the personal-data inventory behind OD-4. Every figure in it was transcribed from a printed
 face; none was computed or inferred.
 
@@ -177,16 +177,17 @@ face; none was computed or inferred.
 - **The verdicts.** BEE **ACCEPTABLE-WITH-GAPS** and the strongest of the three · ROME SECRETARY
   **ACCEPTABLE-WITH-GAPS, one period only** · ROME PROPERTIES **INSUFFICIENT as an oracle**,
   though the best payroll and volume fixture in the corpus.
-- **The blocking gaps.** BEE has **no GL and no TB for either FY**; RPR is missing **Feb and
+- **The recorded gaps.** BEE has **no GL and no TB for either FY**; RPR is missing **Feb and
   Mar 2025** bank statements and has **no accounts at a period end**; **neither RS nor RPR names
-  a producer or certifier**, which evidence law 3 makes the gap that most directly blocks oracle
-  status. None of these is closed by this document.
+  a producer or certifier**. **TRUED 2026-08-31 by 裁-31/裁-63:** these gaps are CLOSED as
+  acceptance blockers — marked **资料缺失**, never awaited; MBB-1 is CLOSED. The desktop-corpus run
+  proceeds as-is and records the conductor/agent's measured RPR-series choice. See
+  `docs/ops/wave-g-setup-checklist.md`.
 - **BEE's bar is CONFIRMED against the client's own papers**, and its bank statements tie to
   both balance sheets **to the sen** across the FY boundary — the strongest independent
   corroboration anywhere in the three folders.
 - **RS and RPR are genuinely GREENFIELD** — every GL account opens at a printed `0.00`, so no
   opening seed is required and item 7 does not apply to them.
-
 <a id="rpa-collision"></a>
 
 > **The RPA NAME COLLISION — raised, and DISSOLVED by ADR-0072 ⑤.** `ROME PUBLIC ADVISORY
@@ -494,7 +495,6 @@ recommendation, both are shown — a declined recommendation is recorded, never 
 ---
 
 **Status: RULED, 2026-08-20 — this file is now the corpus's CONTRACT OF RECORD** for everything
-ADR-0072 ⑤ decided (§3.0, §10's eleven rows, §5's step-4 amendment). What remains genuinely open
-is named and small: **OD-3's acceptance figures for every slot but BEE**, the oracle-tier gaps in
-`wave-g-corpus-oracle-assessment.md` §1, open question 4, and the authoritative pick between
-RPR's two overlapping statement series. **The run cannot start until the gaps close.**
+ADR-0072 ⑤ decided (§3.0, §10's eleven rows, §5's step-4 amendment). **TRUED 2026-08-31 by
+裁-31/裁-63:** OD-3 remains open; corpus gaps are 资料缺失, never awaited, and the conductor/agent
+records the measured RPR-series choice in the as-run. The desktop-corpus run proceeds as-is.

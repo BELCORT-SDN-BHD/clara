@@ -40,7 +40,17 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
 
 - [ ] Supabase Auth → "Allow new users to sign up" is **ON**, for the tier-3 self-serve path
       (sign up → pay through Stripe → start; no approval queue, 裁-43/裁-68).
-- [ ] Proof: the Supabase Auth settings screenshot, dated, attached to the Wave-G as-run.
+- [ ] Auth → Redirect URLs contains exactly `<origin>/signup` and `<origin>/auth/confirm`; **no
+      wildcard** entry.
+- [ ] Email confirmation is **ON** and autoconfirm is **OFF**. The "Confirm signup" template uses
+      `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`, not `ConfirmationURL`.
+- [ ] Password policy is minimum **12 characters** with HIBP leaked-password protection enabled.
+- [ ] Access-token JWT expiry is **900 seconds**; refresh-token rotation remains on.
+- [ ] The invite template uses `{{ .SiteURL }}/invite/{{ .TokenHash }}` and Email OTP expiry is
+      **≤24 hours**.
+- [ ] Proof: dated settings screenshots plus Management API reads for the redirect allowlist,
+      confirmation/autoconfirm settings, template bodies, password policy/HIBP, `jwt_exp=900` and
+      OTP expiry, attached to the Wave-G as-run. Cross-check `apps/web/README.md` §Security posture.
 
 ## Billing (Stripe) — 裁-54 / 裁-58
 
