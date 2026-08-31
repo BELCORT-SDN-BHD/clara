@@ -121,11 +121,11 @@ clara.stripe_object_map(
 **裁-91 · what the webhook does with the raw body: verify → project → discard.** The route verifies
 the signature over the raw bytes, **builds the projection by copying an ALLOW-LISTED set of
 fields**, and calls the door with that. **The raw event is never persisted, never logged, and goes
-out of scope with the request**; Stripe stays the system of record for what Stripe saw, answerable
-by `event_id`. So **no `customer_details` — no email, name, address, phone or tax id — ever reaches
-this database**, which dissolves G11's PDPA problem *structurally*: a store holding no personal data
-needs no erasure door, and the table stays strictly append-only. That is the better answer, because
-an erasure path in an append-only table is a hole in a wall.
+out of scope with the request**; Stripe stays the system of record, answerable by `event_id`. So
+**no `customer_details` — no email, name, address, phone or tax id — reaches this database**, which
+dissolves G11's PDPA problem *structurally*: a store holding no personal data needs no erasure door,
+and the table stays strictly append-only — the better answer, because an erasure path in an
+append-only table is a hole in a wall.
 
 **The allow-list is the wall; the CHECK is the mistake-net.** `ck_stripe_events_no_pii` refuses the
 named keys at the projection's top level, but a CHECK cannot cheaply see arbitrary nesting. **The
@@ -188,28 +188,25 @@ step-1–3 failure write its problem row and carry on. Any failure of 1–3 writ
 **unresolved** problem row is skipped on later sweeps. Returns `{examined, applied, problems}`.
 
 > **BLOCKER-4 — the poison pill this repairs.** Step 4's `on conflict (stripe_event_id)` names one
-> index, but `uq_frp_registration` is a **different** one. A second completed session for the same
-> registration therefore raises `23505`, which — without the subtransaction — aborts the entire
-> sweep, writes **no** problem row (the step-1–3 handler does not cover step 4), and leaves the
-> poison event to be re-selected every minute forever. **No payment would apply for any customer,
-> indefinitely.** The `unique_violation` handler writes the `duplicate_payment` problem row and
-> continues.
+> index; `uq_frp_registration` is a **different** one. A second completed session for the same
+> registration raises `23505`, which — without the subtransaction — aborts the whole sweep, writes
+> **no** problem row (the step-1–3 handler does not cover step 4), and leaves the poison event to be
+> re-selected every minute forever: **no payment would apply for any customer, indefinitely.** The
+> `unique_violation` handler writes the `duplicate_payment` row and continues.
 >
-> **The tempting narrow repair is forbidden, and the design says so here so nobody re-proposes
-> it:** widening the `on conflict` clause to swallow *both* indexes makes the second payment
-> disappear silently. That destroys G12's whole property — a double payment must be **visible**,
-> not silently accepted — and after 裁-28's amounts are ruled it would be a real double charge
-> with no record that it happened.
+> **The tempting narrow repair is forbidden**, and is named here so nobody re-proposes it: widening
+> the `on conflict` to swallow *both* indexes makes the second payment disappear silently, which
+> destroys G12's property — a double payment must be **visible** — and after 裁-28's amounts are
+> ruled it is a real double charge with no record.
 
 **The problems must be watched by someone, so they have a surface (M4).**
 `clara.list_stripe_event_problems(p_include_resolved boolean default false) → setof` and
 `clara.resolve_stripe_event_problem(p_problem uuid, p_resolution text, p_op_key text)` are both
 walled to an **owner of the operator firm** — the same `firms.is_operator` predicate
-`approve_firm_registration` uses (survey §2.5), byte-copied so the two cannot drift. Resolving a
-row lets the next sweep re-attempt the event, which is the recovery path for a payment whose
-metadata was momentarily unresolvable. **Where it is watched:** the operator firm's own review
-surface, and an open unresolved row is a beta-checklist item — named here rather than left to a
-runbook nobody opens.
+`approve_firm_registration` uses (survey §2.5), byte-copied so the two cannot drift. Resolving a row
+lets the next sweep re-attempt the event: the recovery path for a payment whose metadata was
+momentarily unresolvable. **Where it is watched:** the operator firm's review surface, and an open
+unresolved row is a beta-checklist item — named here, not left to a runbook nobody opens.
 
 **The applier's step-1 disjunct is an RM0-scoped relaxation, and it is marked as one (M10).**
 `payment_status = 'paid'` OR (`mode='subscription'` AND `status='complete'`) — **the second
@@ -220,10 +217,9 @@ require a settled payment** (`payment_status='paid'`, or the subscription's firs
 or the applier will admit an unpaid session as a paid one. This sentence is the tightening's
 tripwire and belongs in the pricing sitting's own act list.
 
-> **Metadata is attacker-influenced only if the webhook secret leaks.** The signature check is
-> what makes it trustworthy; step 3's cross-check against `checkout_intents` is a second,
-> independent one — that intent row was written by *our* door, from *our* session, before
-> Stripe was ever called.
+> **Metadata is attacker-influenced only if the webhook secret leaks.** The signature check makes
+> it trustworthy; step 3's cross-check against `checkout_intents` is a second, independent one —
+> that intent row was written by *our* door, from *our* session, before Stripe was called.
 
 ### 1.3 · `UNNUMBERED_checkout_gate_c` — the money → firm path, **as one transaction** (裁-89)
 
@@ -305,9 +301,8 @@ clara.firm_registration_payments(
   foreign key (registration_id, applicant)
     references clara.firm_registration_requests(id, applicant))
 -- Append-only except the consumption stamp, CHECKed the way ck_firm_admissions_consumed_receipt_0017
--- guards its own: the three consumed_* columns are all null or all not null, and a consumed row is
--- never un-consumed or re-pointed.
--- `consumed_firm_id` REPLACES the two-door shape's `consumed_admission`: it names the thing the
+-- guards its own: the three consumed_* columns are all null or all not null, never re-pointed.
+-- `consumed_firm_id` REPLACES the two-door shape's `consumed_admission` -- it names what the
 -- payment actually bought rather than the credential that used to stand for it.
 create unique index uq_frp_registration on clara.firm_registration_payments(registration_id);
 -- M7: ONE payment row per registration. A second completed Checkout Session for the same
@@ -354,8 +349,8 @@ update clara.firm_registration_payments
        consumed_dpa_signature = v_signature
  where registration_id = p_registration and consumed_at is null;
 perform clara._audit(…, 'claim_paid_firm', …);
-perform clara._append_event(…, 'firm.self_serve_created', …);
-perform clara._append_event(…, 'firm_registration.paid', …);
+perform clara._append_event(…, 'firm.created', …);          -- seq 1, ALWAYS (see below)
+perform clara._append_event(…, 'firm_registration.paid', …); -- the decision-specific event, SECOND
 return jsonb_build_object('firm_id', …, 'plan_id', …, 'registration_id', p_registration);
 ```
 
@@ -386,12 +381,25 @@ creation and closure were separate transactions. Under 裁-89 that state cannot 
 is removed from this design rather than built and left dormant. Its grant retires with it (§1.6),
 and its acceptance cell (W-P2) retires with it (part 3 §4).
 
-**Two new `clara.event_types` rows** are registered in the same migration that emits them (survey
-F8 — `domain_events.event_type` is FK'd to that registry and a trigger raises `CLR10 unknown
-event_type %`): `firm.self_serve_created` and `firm_registration.paid`, both `client_scoped =
-false`. Both are emitted **inside the folded transaction**, after `_create_firm_core` returns —
-which is the earliest moment `_append_event` can be called at all, because
-`domain_events.firm_id` is NOT NULL.
+**`firm.created` is the firm's FIRST event — an estate invariant, not a preference.** `0145:448-452`
+states it: `_append_event('firm.created')` stays at **EACH ENTRANCE** rather than in the shared
+core, each naming its own action string, with any decision-specific event riding **second**. Both
+existing entrances do exactly that (`0147:531`, `0145:818`), and
+`packages/db/tests/rig-events.test.mjs:263` asserts *"the firm's first event is seq 1
+(firm.created)"*. **This door is the third entrance and follows the same rule.** *An earlier draft
+emitted `firm.self_serve_created` first, making seq 1 a name no other entrance uses and breaking
+that assertion.* The correction costs one word and **leaves exactly ONE new type to register**:
+`firm_registration.paid` (`client_scoped = false`).
+
+**It registers in BOTH `clara.event_types` AND `clara.trigger_taxonomy`, in the migration that emits
+it.** `0145:976-980` is the precedent (the new types, then
+`insert into clara.trigger_taxonomy(version, event_type, decision, note) select … cross join
+clara.taxonomy_active` at `'context_update'`), and `0145:1311-1316` asserts **both** in the tail at
+the active version. **Registering `event_types` alone is the half-registration the coverage census
+refuses by name.** `firm_registration.paid` takes `'context_update'`, matching its siblings.
+
+Both events are emitted **inside the folded transaction**, after `_create_firm_core` returns — the
+earliest `_append_event` can be called at all, because `domain_events.firm_id` is NOT NULL.
 
 **`clara.open_checkout_intent(p_registration uuid, p_origin_digest bytea, p_op_key text)
 → jsonb`** · grant `clara_authenticated`. Part 1 §4 is the rate-wall reasoning.
@@ -460,10 +468,7 @@ estate's measured idiom (survey F11). Its **entire** grant surface:
 | `clara.apply_stripe_events(integer)` | EXECUTE |
 | **everything else** | **none** — no table grants, no other function, **no `BYPASSRLS`** |
 
-**Two functions, not three** — the v2 draft granted `reconcile_paid_registrations`, which 裁-89
-retires unbuilt (§1.3.4); cell W-O asserts the count. The connection executes
-`set role clara_stripe_webhook` on checkout, as the runtime's pools already do
-(`docs/ops/DR-render.md:204-205`).
+**Two functions, not three** — the v2 draft granted `reconcile_paid_registrations`, which 裁-89 retires unbuilt (§1.3.4); cell W-O asserts the count. The connection executes `set role clara_stripe_webhook` on checkout, as the runtime's pools already do (`docs/ops/DR-render.md:204-205`).
 
 **What a compromised webhook DSN can actually do, stated honestly (M11).** An earlier draft claimed
 such a credential could only "run an applier that will refuse to resolve its metadata". **That was

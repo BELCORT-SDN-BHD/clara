@@ -210,6 +210,12 @@ as the binding is weaker but sufficient, and it is worth stating exactly why:
 **So the binding is: the address is the person's own.** That is a property about what a human types,
 not a cryptographic one, and §3.3's wall is what keeps it true.
 
+> **What a future lane may not weaken, stated because the base narrowed.** Under PKCE, a
+> same-origin forgery still failed for want of a verifier — the binding was a second, independent
+> layer. **Under the code flow it is not:** `proveSameOrigin` plus §3.3's address wall are the
+> WHOLE base. Weakening either one — accepting `Origin: null`, or letting the address arrive in a
+> URL — does not degrade a defence-in-depth layer here; it removes the defence.
+
 ### 3.2 · Cross-device works fully, which was the point
 
 The person reads the code on a phone and types it into the tab where they signed up — or into a
@@ -251,16 +257,35 @@ named Wave-G setup act with an owner receipt, and C1/C2 are what bound the expos
 missed** — five guesses per fifteen minutes makes even a 24-hour window worth about 480 attempts
 against a million-code space. The design states this rather than implying the expiry is enforced.
 
-### 3.5 · Where the wall lives — the DB, reached through the runtime
+### 3.5 · Where the wall lives — the DB, reached server-to-server
 
 裁-64① says the DB stays the wall. But the confirming caller **has no session yet** — they are
 confirming in order to get one — so the doors cannot be `clara_authenticated`, and G3 established
-that **`apps/web` holds no database credential**, a property worth keeping.
+that **`apps/web` holds no database credential**, a property worth keeping. So the runtime holds the
+DSN, as it already does, and the confirm route reaches it.
 
-**So the runtime is the courier.** `apps/web`'s confirm route calls a runtime endpoint through the
-existing generic proxy (`apps/web/app/api/runtime/[...path]/route.ts`), the runtime holds the DSN it
-already holds, and the DB refuses. *Rejected alternative:* give `apps/web` its own DSN — it buys one
-network hop on a step that happens once per signup, and costs the property G3 chose deliberately.
+**It reaches it DIRECTLY, server-to-server, reading `CLARA_RUNTIME_URL` itself — NOT through the
+generic proxy.** An earlier draft routed it through `apps/web/app/api/runtime/[...path]/route.ts`,
+and **that transport cannot run**:
+
+- The proxy is **entrance 3 of the scope spine**, by name: `apps/web/lib/require-firm-scope.ts:17`
+  lists it as *"app/api/runtime/[...path]/route.ts → 403, NEVER a redirect"*, `:257` registers it in
+  `SCOPE_ENTRANCES` with `onDenial: "403"`, and the route itself calls `firmScopeGuard()`
+  (`apps/web/app/api/runtime/[...path]/route.ts:131`, the guard at `require-firm-scope.ts:229`).
+- `PUBLIC_PATH_PREFIXES` (`apps/web/lib/supabase/proxy.ts:62`) is
+  `["/login", "/invite", "/signup", "/auth/confirm"]` — **/api/runtime is not in it**, so a session
+  is required to reach the proxy at all.
+
+**The confirming caller has no session and no firm BY DEFINITION, so that route refuses them twice
+over** — and C1/C2 would have had no working home. **The proxy's guard is the feature, not an
+obstacle:** it is a browser-facing, session-scoped surface, and the correct response to it refusing
+a pre-session step is to stop using it there, never to widen it.
+
+**The direct call adds no fourth server entry.** /auth/confirm is already public at the middleware
+(the same `PUBLIC_PATH_PREFIXES` line), and the confirm POST is already one of §1.1's three named
+server entries — it simply makes an outbound request of its own. **W-R's negative assertion is
+untouched.** *Rejected alternative:* give `apps/web` its own DSN — it saves nothing and costs the
+property G3 chose deliberately.
 
 ### 3.6 · What happens to #461's confirmation surface
 
