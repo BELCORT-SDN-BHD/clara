@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, beforeEach, describe, it } from "node:test";
@@ -15,7 +17,7 @@ import {
 } from "../lib/registration/reads";
 import { loadOwnRegistrationRequests } from "../lib/registration/server-reads";
 import { stripComments } from "../test/sourceOracle";
-import { lexSql } from "../test/sqlOracle";
+import { lexSql, viewDefinitionOffsets } from "../test/sqlOracle";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { ServerSession } from "../lib/supabase/server-session";
 
@@ -60,7 +62,10 @@ function resolveLocal(fromFile: string, spec: string): string | null {
  *  at compile time and drags nothing into a bundle, which is exactly why a
  *  type-only edge must not be followed here. */
 function valueImports(webRelative: string): string[] {
-  const code = stripComments(readFileSync(join(WEB_ROOT, webRelative), "utf8"));
+  const code = stripComments({
+    path: webRelative,
+    code: readFileSync(join(WEB_ROOT, webRelative), "utf8"),
+  }).code;
   const out: string[] = [];
   for (const m of code.matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
     if (/^\s*type\s/.test(m[1] as string)) continue;
@@ -127,7 +132,8 @@ describe("client-importable modules never drag next/headers into the bundle", ()
     const code = 'import type { X } from "@/lib/supabase/server";\nimport { y } from "./read";';
     const specs = (() => {
       const out: string[] = [];
-      for (const m of stripComments(code).matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
+      for (const m of stripComments({ path: "type-only-control.ts", code }).code
+        .matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
         if (/^\s*type\s/.test(m[1] as string)) continue;
         out.push(m[2] as string);
       }
@@ -143,9 +149,55 @@ const MIGRATION_FILES = readdirSync(MIGRATIONS_DIR)
 
 const migration = (name: string): string => readFileSync(join(MIGRATIONS_DIR, name), "utf8");
 
+type MigrationCorpus = {
+  readonly files: readonly string[];
+  readonly read: (name: string) => string;
+};
+
+const DEFAULT_MIGRATION_CORPUS: MigrationCorpus = { files: MIGRATION_FILES, read: migration };
+
+/** Exact, reviewed dynamic-SQL barriers. A new migration is never admitted here
+ * merely because the lexer could not inspect it: adding an entry is a review act
+ * and the reason records why this specific barrier is understood. */
+type ReviewedDynamicSqlBarrier = { readonly reason: string; readonly sha256: string };
+
+const REVIEWED_DYNAMIC_SQL_BARRIERS = new Map<string, ReviewedDynamicSqlBarrier>([
+  [
+    "0146_ninth_rowkind_seeding_proposal.sql",
+    {
+      reason: "Reviewed splice of clara.list_review_queue() from pg_get_functiondef; it cannot replace either P4 scope view.",
+      sha256: "561ede4d64af78cbc150894b8ca6014f7b1514d45fa5d313ef6681012d2398a6",
+    },
+  ],
+  [
+    "0147_db_hardening_b_hash_only_bearer_tokens.sql",
+    {
+      reason: "Reviewed ALTER TABLE formatter drops the discovered firm_admissions primary-key constraint; it emits no view definition.",
+      sha256: "28cfc3f7d83e28818e455c96849efe61ab87008bd7482239dfab41d0499f8121",
+    },
+  ],
+  [
+    "0149_counterparty_merge_pr_1.sql",
+    {
+      reason: "Reviewed pg_get_functiondef splices recut four named counterparty functions only; neither P4 scope view is a target.",
+      sha256: "e44758a0a931122c1be8452fa4f4866d29e180bbffa0cff1ea3c9a9a94425cb5",
+    },
+  ],
+  [
+    "0151_f_a9_pr_1b_brake_census.sql",
+    {
+      reason: "Reviewed pg_get_functiondef loop recuts the explicit F-A9 function roster only; neither P4 scope view is a target.",
+      sha256: "f6d093e5b5e6037386522581ec07fab6ad955b4944f3871fc5a31b2635173b7b",
+    },
+  ],
+]);
+
 /**
  * Every real, statement-level `create [or replace] view clara.<name>` OCCURRENCE
- * in the corpus, with its file and byte offset.
+ * from the pinned live definition onward. A migration whose dynamic SQL the
+ * oracle cannot resolve is recorded as a named barrier, never an invented
+ * absence; independently inspectable successors are still censused so one
+ * barrier cannot hide later static evidence.
  *
  * OCCURRENCES, NOT FILENAMES, AND A FRESH REGEX PER FILE (#451 Codex round 2,
  * item 3 — a bug in this gate, not in the code it guards). The previous version
@@ -157,35 +209,54 @@ const migration = (name: string): string => readFileSync(join(MIGRATIONS_DIR, na
  * cell exists to catch. Ironic and instructive: a stateful module-level regex is
  * the same hazard the cache-safety cell now bans by name.
  */
-function viewDefinitions(view: string): { file: string; offset: number }[] {
+function viewDefinitions(
+  view: string,
+  expectedFile: string,
+  corpus: MigrationCorpus = DEFAULT_MIGRATION_CORPUS,
+): { definitions: { file: string; offset: number }[]; blockedAt: string[] } {
   const out: { file: string; offset: number }[] = [];
-  for (const file of MIGRATION_FILES) {
-    // THE SCHEMA QUALIFIER IS SQL, NOT A FIXED STRING (#451 round-3, LOW-1).
-    // PostgreSQL accepts `clara . caller_context` and `clara."caller_context"` as
-    // the very same relation, and `clara\.${view}` saw neither — a second live
-    // body written in either spelling would have passed a census whose whole claim
-    // is "exactly one, estate-wide". `\b` sits INSIDE the optional closing quote
-    // so it still anchors on the identifier's last character in both spellings.
-    const re = new RegExp(
-      `create\\s+(or\\s+replace\\s+)?view\\s+"?clara"?\\s*\\.\\s*"?${view}\\b"?`,
-      "gi",
-    );
-    for (const m of lexSql(migration(file)).statements.matchAll(re)) {
-      out.push({ file, offset: m.index ?? -1 });
+  const blockedAt: string[] = [];
+  const first = corpus.files.indexOf(expectedFile);
+  assert.notEqual(first, -1, `the pinned live migration ${expectedFile} is absent`);
+  for (const file of corpus.files.slice(first)) {
+    let offsets: number[];
+    try {
+      offsets = viewDefinitionOffsets(corpus.read(file), view, file);
+    } catch (error) {
+      assert.match(
+        error instanceof Error ? error.message : String(error),
+        new RegExp(`^unmodelled: unresolved dynamic SQL at ${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:`),
+      );
+      const reviewed = REVIEWED_DYNAMIC_SQL_BARRIERS.get(file);
+      if (reviewed === undefined) {
+        throw new Error(`unmodelled: unreviewed dynamic-SQL barrier at ${file} - the successor census cannot prove this migration unrelated`);
+      }
+      const actualSha256 = createHash("sha256").update(corpus.read(file), "utf8").digest("hex");
+      assert.equal(actualSha256, reviewed.sha256, `reviewed dynamic-SQL barrier sha256 mismatch at ${file}`);
+      assert.ok(reviewed.reason.length >= 40, `${file}'s reviewed barrier reason is too thin`);
+      blockedAt.push(file);
+      continue;
     }
+    for (const offset of offsets) out.push({ file, offset });
   }
-  return out;
+  return { definitions: out, blockedAt };
 }
 
-/** The one live body, asserted to be exactly one OCCURRENCE estate-wide. */
+/** The pinned body plus every successor the oracle can positively inspect. */
 function theOnlyDefinition(view: string, expectedFile: string): void {
-  const defs = viewDefinitions(view);
+  const census = viewDefinitions(view, expectedFile);
+  const defs = census.definitions;
   assert.deepEqual(
     defs.map((d) => `${d.file}@${d.offset}`),
     defs.length === 1 && defs[0]?.file === expectedFile
       ? [`${expectedFile}@${defs[0].offset}`]
       : [`${expectedFile}@<exactly one>`],
     `clara.${view} must have exactly ONE statement-level definition, in ${expectedFile} — re-run the rung-0 census`,
+  );
+  assert.deepEqual(
+    census.blockedAt,
+    [...REVIEWED_DYNAMIC_SQL_BARRIERS.keys()],
+    `clara.${view}'s successor census did not record exactly the reviewed unresolved-dynamic-SQL barriers`,
   );
 }
 
@@ -200,160 +271,8 @@ function declaredContract(sql: string, relation: string): { count: number; colum
   return { count: Number(count), columns };
 }
 
-describe("LOW-5 — the SQL lexer, controlled before it is trusted", () => {
-  it("a commented-out CREATE VIEW is not a definition", () => {
-    const sql = "-- create view clara.decoy as select 1;\n/* create view clara.decoy as select 2; */\ncreate view clara.real as select 3;";
-    const { statements } = lexSql(sql);
-    assert.ok(!/create\s+view\s+clara\.decoy/i.test(statements), "a commented DDL counted");
-    assert.ok(/create\s+view\s+clara\.real/i.test(statements), "the real DDL was eaten");
-  });
-
-  it("a CREATE VIEW inside a dollar-quoted body is text, not a definition", () => {
-    const sql = "do $$ begin raise notice 'create view clara.decoy as select 1'; end $$;\ncreate view clara.real as select 1;";
-    const { statements } = lexSql(sql);
-    assert.ok(!/create\s+view\s+clara\.decoy/i.test(statements));
-    assert.ok(/create\s+view\s+clara\.real/i.test(statements));
-  });
-
-  it("comments INSIDE a dollar-quoted body are still stripped", () => {
-    // The contracts live inside `do $$ … $$`, so a decoy tuple one level down is
-    // exactly where it would hide.
-    const sql = "do $$ begin\n  -- ('decoy', 9, 'a,b')\n  perform ('real', 2, 'a,b');\nend $$;";
-    const { withoutComments } = lexSql(sql);
-    assert.ok(!withoutComments.includes("decoy"), "a comment inside a do-block survived");
-    assert.ok(withoutComments.includes("'real'"), "the live tuple was eaten");
-  });
-
-  it("a `--` inside a string is not a comment", () => {
-    const { withoutComments } = lexSql("select 'p4t1 tail: OK -- everything live', 1;");
-    assert.ok(withoutComments.includes("everything live"), "a string's contents were eaten as a comment");
-  });
-
-  it("an ESCAPE string `E'…\\'…'` does not end early — a DDL inside one stays masked", () => {
-    // PostgreSQL's E'' form escapes with a BACKSLASH, and the corpus really
-    // contains this syntax (0111_f_a5_reporting_agency_pr1.sql:606). Treating
-    // `\'` as the closing quote desynchronises everything after it.
-    //
-    // THE FIXTURE IS CHOSEN TO DISCRIMINATE, which an earlier version was not: the
-    // whole `; create view … ;` sits INSIDE one escape string, so correct lexing
-    // masks it and a lexer that ends the string at `\'` exposes it at statement
-    // level. An earlier fixture put the DDL after the string and let a `--`
-    // comment eat the evidence in both cases — a cell that passed either way.
-    const sql = "select E'\\'; create view clara.probe as select 1; ';";
-    const { statements } = lexSql(sql);
-    assert.ok(
-      !/create\s+view\s+clara\.probe/i.test(statements),
-      "a CREATE VIEW inside an escape string surfaced as a real definition — the lexer lost sync on \\'",
-    );
-  });
-
-  it("an escape string does not swallow the statement that follows it", () => {
-    const sql = "select E'a\\'b';\ncreate view clara.probe as select 1;";
-    assert.ok(
-      /create\s+view\s+clara\.probe/i.test(lexSql(sql).statements),
-      "the DDL after an escape string was swallowed",
-    );
-  });
-
-  it("the REAL corpus parses: 0111's escape string does not desynchronise it", () => {
-    const { withoutComments, statements } = lexSql(migration("0111_f_a5_reporting_agency_pr1.sql"));
-    assert.equal(withoutComments.length, statements.length);
-    assert.ok(withoutComments.length > 1000, "the file did not lex at all");
-  });
-
-  it("a contract decoy NESTED in an inner dollar string does not count", () => {
-    // The outer `do $$ … $$` is a body and is lexed; an inner `$q$ … $q$` inside it
-    // is a LITERAL and is masked. Retaining it let a contract-shaped decoy satisfy
-    // declaredContract() (#451 Codex round 2, item 4).
-    const sql = "do $$ begin\n  perform $q$ ('caller_context', 6, 'DECOY') $q$;\nend $$;";
-    const { withoutComments } = lexSql(sql);
-    assert.ok(!withoutComments.includes("DECOY"), "a nested dollar-string payload survived as evidence");
-  });
-
-  it("a DDL decoy nested in an inner dollar string does not count either", () => {
-    const sql = "do $$ begin\n  perform $q$ create view clara.probe as select 1; $q$;\nend $$;";
-    assert.ok(!/create\s+view\s+clara\.probe/i.test(lexSql(sql).statements));
-  });
-
-  it("MED-3 — a BARE DDL inside a top-level do block IS a definition", () => {
-    // The three cells above prove what stays MASKED. This one proves the lexer
-    // did not buy that by blinding itself: `do $$ begin create or replace view
-    // …; end $$;` is executable SQL that really defines the view, and blanking
-    // the whole body hid a live body from the one-definition census (#451
-    // round-3, MED-3). The discrimination is by KIND, not by depth alone — the
-    // quoted decoy and the nested payload above still do not count.
-    const sql = "do $$ begin\n  create or replace view clara.probe as select 1;\nend $$;";
-    assert.ok(
-      /create\s+or\s+replace\s+view\s+clara\.probe/i.test(lexSql(sql).statements),
-      "a real CREATE VIEW inside a do block is invisible to the census",
-    );
-  });
-
-  it("LOW-2 — an unterminated string keeps both views the same length", () => {
-    // `statements` re-emitted a closing quote the input never had, so it came out
-    // ONE BYTE LONGER than `withoutComments` — and every offset-based read in
-    // these pins is built on the two views addressing the same bytes.
-    const sql = "select '";
-    const { withoutComments, statements } = lexSql(sql);
-    assert.equal(withoutComments.length, sql.length);
-    assert.equal(statements.length, sql.length);
-  });
-
-  it("LOW-3 — `$1$` is a parameter, not a dollar tag", () => {
-    // `$1$` has no closing tag, so reading it as one masked the rest of the FILE.
-    const sql = "select $1$::text;\ncreate view clara.probe as select 1;";
-    const { statements, withoutComments } = lexSql(sql);
-    assert.ok(/create\s+view\s+clara\.probe/i.test(statements), "everything after `$1$` was masked away");
-    assert.equal(withoutComments.length, sql.length);
-  });
-
-  it("LOW-3 — an UNTERMINATED dollar tag does not mask to EOF", () => {
-    // The fail-OPEN direction: one malformed tag silently erasing every statement
-    // after it is exactly how a live body would leave a census clean.
-    const sql = "do $body$ begin end;\ncreate view clara.probe as select 1;";
-    const { statements } = lexSql(sql);
-    assert.ok(
-      /create\s+view\s+clara\.probe/i.test(statements),
-      "an unterminated $body$ swallowed the statements that follow it",
-    );
-    assert.equal(statements.length, sql.length);
-  });
-
-  it("LOW-1 — a spaced or quoted schema qualifier is the SAME relation", () => {
-    // `clara . probe` and `clara."probe"` are both `clara.probe` to PostgreSQL;
-    // a census that reads only `clara\.probe` would call a second live body zero.
-    for (const spelling of ['clara . probe', 'clara."probe"', '"clara"."probe"', "clara.probe"]) {
-      const defs = [
-        ...lexSql(`create or replace view ${spelling} as select 1;`).statements.matchAll(
-          /create\s+(or\s+replace\s+)?view\s+"?clara"?\s*\.\s*"?probe\b"?/gi,
-        ),
-      ];
-      assert.equal(defs.length, 1, `${spelling} was not seen as a definition of clara.probe`);
-    }
-    const near = [
-      ...lexSql("create view clara.probe_other as select 1;").statements.matchAll(
-        /create\s+(or\s+replace\s+)?view\s+"?clara"?\s*\.\s*"?probe\b"?/gi,
-      ),
-    ];
-    assert.equal(near.length, 0, "clara.probe_other matched the pin for clara.probe");
-  });
-
-  it("every view is LENGTH-PRESERVING — the property the CHECK cell relies on", () => {
-    for (const file of ["0002_foundation.sql", "0141_p4_tranche1_invite_rbac.sql"]) {
-      const raw = migration(file);
-      const { withoutComments, statements } = lexSql(raw);
-      assert.equal(withoutComments.length, raw.length, `${file}: withoutComments changed length`);
-      assert.equal(statements.length, raw.length, `${file}: statements changed length`);
-    }
-  });
-
-  it("VACUITY CONTROL: the migration corpus was actually read", () => {
-    assert.ok(MIGRATION_FILES.length > 100, `only ${MIGRATION_FILES.length} migrations found`);
-  });
-});
-
 describe("the projections are the DB's own declared column contracts", () => {
-  it("clara.caller_context has ONE live body — 0141:544, nothing superseding it", () => {
+  it("clara.caller_context has ONE pinned body — successors stop at the exact reviewed dynamic barriers", () => {
     theOnlyDefinition("caller_context", "0141_p4_tranche1_invite_rbac.sql");
   });
 
@@ -364,7 +283,7 @@ describe("the projections are the DB's own declared column contracts", () => {
     assert.equal(CALLER_CONTEXT_SELECT.split(",").length, declared.count);
   });
 
-  it("clara.firm_registration_requests_visible has ONE live body — 0145:911", () => {
+  it("clara.firm_registration_requests_visible has ONE pinned body — successors stop at the exact reviewed dynamic barriers", () => {
     theOnlyDefinition(
       "firm_registration_requests_visible",
       "0145_p4_tranche2_registration_operator_alias.sql",
@@ -403,6 +322,42 @@ describe("the projections are the DB's own declared column contracts", () => {
 
     const sound = inputs.filter((s) => [...s.matchAll(/create\s+view\s+clara\.probe\b/gi)].length > 0);
     assert.equal(sound.length, 2, "matchAll must see both");
+  });
+
+  it("PIN SQL-10: a second, unreviewed dynamic-SQL barrier fails the successor census", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "clara-scope-census-"));
+    try {
+      const files = [
+        ["0141_base.sql", "create view clara.probe as select 1;"],
+        ["0146_ninth_rowkind_seeding_proposal.sql", migration("0146_ninth_rowkind_seeding_proposal.sql")],
+        ["0147_unreviewed_successor.sql", "do $$ begin execute later_sql; end $$;"],
+      ] as const;
+      for (const [file, sql] of files) writeFileSync(join(scratch, file), sql, "utf8");
+      const corpus: MigrationCorpus = {
+        files: readdirSync(scratch).sort(),
+        read: (file) => readFileSync(join(scratch, file), "utf8"),
+      };
+      assert.throws(
+        () => viewDefinitions("probe", "0141_base.sql", corpus),
+        /unmodelled: unreviewed dynamic-SQL barrier at 0147_unreviewed_successor\.sql/,
+      );
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it("PIN N1: an edited reviewed barrier fails its content-addressed identity pin", () => {
+    const barrier = "0146_ninth_rowkind_seeding_proposal.sql";
+    const corpus: MigrationCorpus = {
+      files: ["0141_base.sql", barrier],
+      read: (file) => file === barrier
+        ? `${migration(barrier)}\n-- edited after review`
+        : "create view clara.probe as select 1;",
+    };
+    assert.throws(
+      () => viewDefinitions("probe", "0141_base.sql", corpus),
+      /reviewed dynamic-SQL barrier sha256 mismatch at 0146_ninth_rowkind_seeding_proposal\.sql/,
+    );
   });
 
   it("the registration view's 10-column contract matches REGISTRATION_REQUESTS_SELECT", () => {
@@ -551,8 +506,23 @@ describe("what the two reads actually put on the wire", () => {
   it("LOW-4: a verified caller with zero rows is a SUCCESSFUL empty result", async () => {
     const result = await loadOwnRegistrationRequests({ resolveSession: async () => SESSION });
     assert.equal(result.ok, true);
-    assert.deepEqual((result as { rows: unknown[] }).rows, []);
-    assert.equal(new URL(onlyCall()).searchParams.get("applicant"), `eq.${APPLICANT}`);
+    assert.deepEqual((result as { rows: readonly unknown[] }).rows, []);
+    assert.equal(
+      (result as { subject: string }).subject,
+      SESSION.subject,
+      "the mapper cannot bind hydrated rows unless the verified subject survives the read seam",
+    );
+    assert.deepEqual(
+      result.ok ? result.context : null,
+      { ok: false, reason: "no_membership" },
+      "zero registration rows were treated as membership evidence",
+    );
+    assert.equal(calls.length, 2, "the holding read did not positively ask both relations");
+    const urls = calls.map((call) => new URL(call));
+    const registrations = urls.find((url) => url.pathname.endsWith("/firm_registration_requests_visible"));
+    const context = urls.find((url) => url.pathname.endsWith("/caller_context"));
+    assert.equal(registrations?.searchParams.get("applicant"), `eq.${APPLICANT}`);
+    assert.equal(context?.searchParams.get("limit"), "2");
   });
 
   it("RED-before: collapsing both into [] makes the two indistinguishable", async () => {

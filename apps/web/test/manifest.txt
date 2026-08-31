@@ -33,6 +33,8 @@ components/admin/members-a11y.test.tsx
 components/admin/members-keyboard.test.tsx
 components/admin/members-single-fire.test.tsx
 components/admin/members-walls.test.tsx
+components/login-a11y.test.tsx
+components/login-keyboard.test.tsx
 components/bank/bank-a11y.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
@@ -53,6 +55,12 @@ components/documents/documents-a11y.test.tsx
 components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
 components/documents/lint-finding-detail.test.tsx
+components/entry/entry-contracts.test.tsx
+components/entry/email-confirmation.test.tsx
+components/entry/pending-a11y.test.tsx
+components/entry/signup-a11y.test.tsx
+components/entry/signup-firm-form.test.tsx
+components/entry/signup-keyboard.test.tsx
 components/firm/agent-tasks-a11y.test.tsx
 components/firm/agent-tasks-keyboard.test.tsx
 components/firm/compliance-watch-affordance.test.tsx
@@ -72,6 +80,11 @@ components/journals/journals-governance-keyboard.test.tsx
 components/journals/journals-keyboard.test.tsx
 components/journals/use-amount-input.test.ts
 components/parts/v14-receipt-cards.test.tsx
+components/parts/v16-read-cards.test.tsx
+components/parts/v16-act-cards.test.tsx
+components/parts/sweep-receipt-card.test.tsx
+components/parts/v16-action-round2.test.tsx
+components/parts/v16-cards-a11y.test.tsx
 components/registers/accounts-a11y.test.tsx
 components/registers/accounts-keyboard.test.tsx
 components/registers/accounts-render-states.test.tsx
@@ -138,6 +151,7 @@ lib/firm-admin/chat-sharing.test.ts
 lib/firm-admin/compliance.test.ts
 lib/firm-admin/vendor-bindings.test.ts
 lib/identity/doors.test.ts
+lib/identity/signup-doors.test.ts
 lib/journals/api-compose.test.ts
 lib/journals/api.test.ts
 lib/journals/balance.test.ts
@@ -149,6 +163,7 @@ lib/onboarding/api.test.ts
 lib/parts/catalog.test.tsx
 lib/parts/hooks.test.ts
 lib/parts/single-fire-guard.test.ts
+lib/parts/thread-action-coordinator.test.ts
 lib/read.test.ts
 lib/registers/accounts.test.ts
 lib/registers/adjustments-workbench.test.ts
@@ -173,8 +188,10 @@ test/keyboardWalk.test.ts
 tests/apiLimitBanner.test.mjs
 tests/client-scope.test.ts
 tests/firm-scope-db-pins.test.ts
+tests/firm-scope-fourth-entrance.test.ts
 tests/firm-scope-surfaces.test.ts
 tests/focusRailSubscription.test.mjs
+tests/holding-state.test.ts
 tests/invite-courier.test.ts
 tests/invite-courier-authority.test.ts
 tests/invite-courier-egress.test.ts
@@ -188,6 +205,8 @@ tests/runtime-outbound.test.ts
 tests/safe-redirect.test.ts
 tests/same-origin.test.ts
 tests/server-boundary.test.ts
+tests/source-oracle.test.ts
+tests/sql-oracle.test.ts
 tests/streamAuthority.test.mjs
 tests/streamParser.test.mjs
 tests/streamReattach.test.mjs

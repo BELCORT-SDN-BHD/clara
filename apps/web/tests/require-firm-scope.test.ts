@@ -33,16 +33,7 @@ import {
   tokenFromSession,
   type ServerSession,
 } from "../lib/supabase/server-session";
-import { moduleLevelDeclarations, stripComments } from "../test/sourceOracle";
-
-/** The four modules a request's firm scope is decided by. A cache in ANY of them
- *  outlives the request that filled it (#451 round-3, MED-4). */
-const SPINE_MODULES = [
-  "lib/supabase/server-session.ts",
-  "lib/require-firm-scope.ts",
-  "lib/runtime/outbound.ts",
-  "lib/firm/caller-context.ts",
-] as const;
+import { scopeSpineModuleStateReport } from "../test/sourceOracle";
 
 /**
  * THE SCOPE SPINE'S BEHAVIOUR (P4-2; design `p4-design-2026-08-27.md` §4 E).
@@ -69,6 +60,7 @@ const SPINE_MODULES = [
 
 const SUB = "11111111-1111-4111-8111-111111111111";
 const FIRM = "22222222-2222-4222-8222-222222222222";
+const SECOND_SUB = "33333333-3333-4333-8333-333333333333";
 
 /** A well-formed context row. Every field distinct and non-default, so a grant
  *  cell asserting `deepEqual` cannot pass against a fabricated blank. */
@@ -173,7 +165,7 @@ describe("resolveFirmScope — the one decision", () => {
     assert.equal(sawToken, SESSION.accessToken);
   });
 
-  it("NO SESSION denies — no_membership would be a different, wrong story", async () => {
+  it("N4 — an anonymous caller denies; no_membership would be a different, wrong story", async () => {
     await assertDenied(resolveFirmScope, noSession, "no_session");
     await assertMutantIsRed(noSession, "no_session");
   });
@@ -183,10 +175,75 @@ describe("resolveFirmScope — the one decision", () => {
     await assertMutantIsRed(sessionThrows, "no_session");
   });
 
-  it("an EMPTY read denies — no_membership", async () => {
+  it("N1 — a signed-in caller with no membership denies", async () => {
     await assertDenied(resolveFirmScope, withRows([]), "no_membership");
     await assertMutantIsRed(withRows([]), "no_membership");
   });
+
+  it("N2 — a removed member is denied by a fresh caller_context read", async () => {
+    let rows: CallerContextRow[] = [MEMBER];
+    let reads = 0;
+    const deps: ScopeDeps = {
+      resolveSession: async () => SESSION,
+      read: async () => {
+        reads += 1;
+        return rows;
+      },
+    };
+    assert.equal((await resolveFirmScope(deps)).granted, true, "control: membership was initially live");
+    rows = [];
+    await assertDenied(resolveFirmScope, deps, "no_membership");
+    assert.equal(reads, 2, "the second decision reused the prior membership instead of re-reading");
+  });
+
+  it("N3 — a second-firm session cannot inherit the first session's membership", async () => {
+    let session = SESSION;
+    let reads = 0;
+    const deps: ScopeDeps = {
+      resolveSession: async () => session,
+      read: async (resolved) => {
+        reads += 1;
+        return resolved.subject === SUB ? [MEMBER] : [];
+      },
+    };
+    assert.equal((await resolveFirmScope(deps)).granted, true, "control: the first firm session grants");
+    session = { accessToken: "token-B", subject: SECOND_SUB };
+    await assertDenied(resolveFirmScope, deps, "no_membership");
+    assert.equal(reads, 2, "the second firm session reused a cached membership object");
+  });
+
+  it("H10 — caller_context is re-read after accept_invite changes membership", async () => {
+    let rows: CallerContextRow[] = [];
+    let reads = 0;
+    const deps: ScopeDeps = {
+      resolveSession: async () => SESSION,
+      read: async () => {
+        reads += 1;
+        return rows;
+      },
+    };
+    await assertDenied(resolveFirmScope, deps, "no_membership");
+    // The governed accept_invite door has succeeded; its return is not authority.
+    // Only a new caller_context read may prove the membership it minted.
+    rows = [MEMBER];
+    const afterAccept = await resolveFirmScope(deps);
+    assert.equal(afterAccept.granted, true, "the post-accept caller_context row was not observed");
+    assert.equal(reads, 2, "accept_invite was trusted without a caller_context re-read");
+  });
+
+  for (const [probe, role, roleRank] of [
+    ["C1", "owner", 3],
+    ["C2", "admin", 2],
+    ["C3", "bookkeeper", 1],
+    ["C4", "viewer", 0],
+  ] as const) {
+    it(`${probe} — an active ${role} membership grants`, async () => {
+      const row = { ...MEMBER, role, role_rank: roleRank };
+      const outcome = await resolveFirmScope(withRows([row]));
+      assert.equal(outcome.granted, true);
+      assert.deepEqual((outcome as { context: CallerContextRow }).context, row);
+    });
+  }
 
   it("a FAILED read denies — read_failed, and never propagates the throw", async () => {
     await assertDenied(resolveFirmScope, readThrows, "read_failed");
@@ -484,121 +541,11 @@ describe("the cost of a scoped request", () => {
     assert.match(src, /from "react"/, "React's cache is not the memo being used");
   });
 
-  it("the session module holds NO module-level mutable state at all", () => {
-    // The old check only rejected a bare top-level `let`/`var` (#451 Codex round 2,
-    // item 6), so `export let`, a `const` Map/Set, and a stateful global regex all
-    // passed. Any of those can outlive a request and carry one caller's data into
-    // the next — the single failure mode that would make a per-request memo unsafe.
-    //
-    // The `g`-flag clause is not theoretical: a module-level global regex reused
-    // across calls carries `lastIndex`, and that exact hazard produced a real
-    // under-counting bug in this branch's OWN migration census.
-    const code = stripComments(readFileSync(join(WEB_ROOT, "lib/supabase/server-session.ts"), "utf8"));
-
-    assert.doesNotMatch(code, /^\s*(export\s+)?(let|var)\s/m, "a mutable module-level binding");
-    // The TYPE ARGUMENT matters: `new Map<string, T>(` does not contain the
-    // literal `new Map(`, and a substring check for it waves the cache straight
-    // through — caught by this suite's own mutant panel.
-    assert.doesNotMatch(
-      code,
-      /new\s+(Map|Set|WeakMap|WeakSet|Array)\s*(<[^>]*>)?\s*\(/,
-      "a module-level collection is a cache that outlives a request",
-    );
-    // A CACHE DOES NOT HAVE TO BE A COLLECTION (#451 round-3, MED-4). `const c:
-    // Record<string, T> = {}` and `const a: T[] = []` are the two plainest ways to
-    // write one, and `new X(` saw neither. EMPTY literals only, deliberately: a
-    // cache starts empty, whereas a populated literal is a constant table (this
-    // estate's `CAPABILITY_LEGS` and `FIRM_SCOPE_FORBIDDEN_BODY` are exactly that)
-    // and banning those would red honest code.
-    assert.doesNotMatch(
-      code,
-      /^\s*(export\s+)?const\s+[A-Za-z_$][\w$]*\s*(:[^=]*)?=\s*(\{\s*\}|\[\s*\]|Object\.create\s*\()/m,
-      "a module-level object/array literal is a cache that outlives a request",
-    );
-    for (const m of code.matchAll(/=\s*\/(?:[^/\\\n]|\\.)+\/([a-z]*)/g)) {
-      const flags = m[1] as string;
-      assert.ok(
-        !flags.includes("g") && !flags.includes("y"),
-        `a module-level regex with /${flags} carries lastIndex across calls`,
-      );
+  it("NO spine module holds unproved module-level mutable state — all four", () => {
+    for (const report of scopeSpineModuleStateReport(WEB_ROOT)) {
+      assert.ok(report.declarationCount > 0, `${report.file}: declaration walk is vacuous`);
+      assert.deepEqual(report.hazards, [], `${report.file}: mutable state outlives a request`);
     }
   });
 
-  it("NO spine module holds module-level mutable state — all four, scoped", () => {
-    // The cell above reads ONE file. The spine is four (#451 round-3, MED-4, INFO):
-    // the memoised session resolver, the decision itself, the outbound credential
-    // rule, and the caller_context reader. A cache in any of them carries one
-    // caller's data into the next request just as effectively.
-    //
-    // `let`/`var` IS ASKED AT MODULE LEVEL, not with `/^\s*let\s/m`. Three of these
-    // four modules contain a perfectly legitimate function-local `let`
-    // (`require-firm-scope.ts:155`, `:163`, `outbound.ts:98`) — per-call state,
-    // which is not what this bans. `moduleLevelDeclarations` drops anything nested
-    // inside another declaration, so the question asked is the one meant.
-    for (const rel of SPINE_MODULES) {
-      const code = stripComments(readFileSync(join(WEB_ROOT, rel), "utf8"));
-
-      assert.doesNotMatch(
-        code,
-        /new\s+(Map|Set|WeakMap|WeakSet|Array)\s*(<[^>]*>)?\s*\(/,
-        `${rel}: a collection here is a cache that outlives a request`,
-      );
-      assert.doesNotMatch(
-        code,
-        /^\s*(export\s+)?const\s+[A-Za-z_$][\w$]*\s*(:[^=]*)?=\s*(\{\s*\}|\[\s*\]|Object\.create\s*\()/m,
-        `${rel}: an empty object/array literal is a cache that outlives a request`,
-      );
-      for (const m of code.matchAll(/=\s*\/(?:[^/\\\n]|\\.)+\/([a-z]*)/g)) {
-        const flags = m[1] as string;
-        assert.ok(
-          !flags.includes("g") && !flags.includes("y"),
-          `${rel}: a regex with /${flags} carries lastIndex across calls`,
-        );
-      }
-
-      const top = moduleLevelDeclarations(code);
-      assert.ok(top.length > 0, `${rel}: the declaration walk found nothing — this cell would be vacuous`);
-      for (const d of top) {
-        assert.ok(
-          d.kind === "function" || d.kind === "const",
-          `${rel}: module-level \`${d.kind} ${d.name}\` is mutable state that outlives a request`,
-        );
-      }
-    }
-  });
-
-  it("VACUITY CONTROL: the mutable-store check catches each shape it claims to", () => {
-    const rejects = (src: string, pattern: RegExp) => {
-      const code = stripComments(src);
-      return pattern.test(code);
-    };
-    assert.equal(rejects("export let sessions = null;", /^\s*(export\s+)?(let|var)\s/m), true);
-    assert.equal(rejects("let sessions = null;", /^\s*(export\s+)?(let|var)\s/m), true);
-    assert.equal(rejects("var sessions = null;", /^\s*(export\s+)?(let|var)\s/m), true);
-    assert.equal(rejects("const SAFE = 1;", /^\s*(export\s+)?(let|var)\s/m), false);
-
-    // The two literal shapes MED-4 added, and the populated forms that must stay
-    // legal — a check that rejected `const T = { a: 1 }` would red honest code.
-    const LITERAL =
-      /^\s*(export\s+)?const\s+[A-Za-z_$][\w$]*\s*(:[^=]*)?=\s*(\{\s*\}|\[\s*\]|Object\.create\s*\()/m;
-    assert.equal(rejects("const c: Record<string, T> = {};", LITERAL), true, "an empty object cache passes");
-    assert.equal(rejects("const a: T[] = [];", LITERAL), true, "an empty array cache passes");
-    assert.equal(rejects("export const c = {};", LITERAL), true);
-    assert.equal(rejects("const c = Object.create(null);", LITERAL), true);
-    assert.equal(rejects('const T = { error: "no_firm_scope" } as const;', LITERAL), false);
-    assert.equal(rejects('const L = ["content-type"] as const;', LITERAL), false);
-
-    // And the module-level scoping: a nested `let` is per-call, a top-level one is
-    // not, and reading them the same way is what would make the widened cell noise.
-    const kinds = (src: string) =>
-      moduleLevelDeclarations(stripComments(src)).map((d) => `${d.kind} ${d.name}`);
-    assert.deepEqual(kinds("export let leaked = null;"), ["let leaked"]);
-    assert.deepEqual(kinds("function f() {\n  let local = 1;\n  return local;\n}"), ["function f"]);
-    assert.ok(stripComments("const c = new Map();").includes("new Map("));
-    assert.ok(!stripComments("// const c = new Map();").includes("new Map("));
-    const flagsOf = (src: string) =>
-      [...src.matchAll(/=\s*\/(?:[^/\\\n]|\\.)+\/([a-z]*)/g)].map((m) => m[1]);
-    assert.deepEqual(flagsOf("const R = /ab/gi;"), ["gi"], "a global regex is not detected");
-    assert.deepEqual(flagsOf("const R = /ab/i;"), ["i"]);
-  });
 });

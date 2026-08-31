@@ -28,7 +28,7 @@ from PROGRESS).**
 | F-T4 fix queue | PR-1 merged; remainder beta-era by ruling | 🟢 low |
 | F-A8 internet lane | partial branch f-a8/pr-1 (2026-08-23, an UNNUMBERED Tier-1 substrate), depends on F-T1's SST table | 🟢 low unless FX clients (FX timing is the owner's open item) |
 | F-A6 v2 cross-client | design gated; v1 refuses `cross_client_unavailable` naming the deferred action | ⚠️ HOME chat cannot answer firm-level cross-client questions |
-| (found) chat parts | 10 part types render id-only summaries (`PartRenderer.tsx:28`) | ⚠️ thin chat cards; P6's `chatTurn_v15`+ covers part |
+| (found) chat parts | 10 part types render id-only summaries (`PartRenderer.tsx:28`) | ⚠️ thin chat cards; P6's `chatTurn_v16`+ covers part (TRUED 2026-08-30, was `v15`) |
 
 **RULING (owner, ~09:20): "🔴+⚠️ 全拉进冲刺（推荐）".** ALL EIGHT are pulled into the sprint,
 before Wave G: G1 clock flips (the F-A3/F-A4 wake bodies + INSERT-and-flip) · F-A6 PR-2 runtime
@@ -347,6 +347,8 @@ follow-ups that F-A3 and F-A4 each owe converge on this single ceremony instead 
 > **AMENDED the same sitting by 裁-44: the list is FOUR, not three** — `bank_agent`, `close_prep`,
 > the binding-expiry sweep, and **`tax_prep`**. Same ceremony, same door, same operator, same
 > precondition that each source's wake body is built and reviewed first.
+
+> **NARROWED 2026-08-30 by 裁-59 (`docs/plan/active/mohe-grill-rulings-2026-08-30.md`): THREE switches open at the G1 ceremony — `bank_agent`, `close_prep`, binding-expiry. `tax_prep` gets its own later sitting; 裁-40 itself is not amended.**
 
 ## 裁-41 · `client_identifiers` gains a uniqueness wall before beta
 

@@ -47,10 +47,14 @@ after(async () => {
 // F-A6 PR-2 moved the chatTurn pin v14 -> v15 (the audited freeform read); autoDraft is
 // untouched. v14's assertion does not become wrong, it becomes a POLICY (c) assertion — the
 // same ladder every prior bump added to. EXTENDED, never re-cut.
-test("registry.ts pins autoDraft_v9/chatTurn_v15 and still exports superseded v8/v14/v13/v12 (policy (c))", () => {
+// P6-1 (Q8's four-card wire bump) moved it again, v15 -> v16, and v15 joins the same ladder for
+// the same reason. autoDraft is still untouched — stated because this cell's subject is the
+// PAIR, and a bump that moved only one of them is exactly what it exists to notice.
+test("registry.ts pins autoDraft_v9/chatTurn_v16 and still exports superseded v8/v15/v14/v13/v12 (policy (c))", () => {
   assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v9");
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v15");
+  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v16");
   assert.equal(typeof registryMod.autoDraft_v8, "function");
+  assert.equal(typeof registryMod.chatTurn_v15, "function");
   assert.equal(typeof registryMod.chatTurn_v14, "function");
   assert.equal(typeof registryMod.chatTurn_v13, "function");
   assert.equal(typeof registryMod.chatTurn_v12, "function");

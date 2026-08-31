@@ -194,7 +194,7 @@ export function closureOf(tree: Tree, entry: string): Set<string> {
 /** Does this file carry `"use client"` in its DIRECTIVE PROLOGUE? Directives may
  *  precede it; the prologue ends at the first non-string statement. */
 export function isClientComponent(source: string): boolean {
-  let code = stripComments(source).trimStart();
+  let code = stripComments({ path: "module.tsx", code: source }).code.trimStart();
   while (code !== "") {
     const directive = /^(["'])([^"'\\]*(?:\\.[^"'\\]*)*)\1(?:[ \t]*;)?(?:[ \t]*\r?\n|[ \t]*)/.exec(code);
     if (!directive) return false;
@@ -426,7 +426,7 @@ describe("N6: the three edges the first version of this walk could not see", () 
     // previous specifier reader recognised only `import … from` and bare
     // `import "…"`, so each of the three shapes above resolved to nothing.
     const oldSpecifiers = (source: string): string[] => {
-      const code = stripComments(source);
+      const code = stripComments({ path: "module.ts", code: source }).code;
       const out: string[] = [];
       for (const m of code.matchAll(/import\s+([\s\S]*?)from\s*["']([^"']+)["']/g)) {
         if (/^\s*type\s/.test(m[1] as string)) continue;

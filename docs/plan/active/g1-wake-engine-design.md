@@ -329,12 +329,10 @@ PR, per §O.4's "whichever lands second re-reads the live text" sequencing idiom
 `clara_wake_bank_login`'s pool wiring (M4, `bank-agency-annexes-3-build.md:58`, explicitly "GATED
 ON G1") is annexes §E's nine-step recipe, owned here.
 
-**close_prep is registered but DEFAULT-DISABLED at ship.** Its DB shape is complete and correct
-(survey §4); its runtime — `closePrep.v1`, `close_prep_due()`, `close_prep_holds` — is entirely
-unbuilt. The registry row can exist (`carrier='direct_queue', enabled=false`) the moment this
-gate's migration lands, so F-A4's own follow-up PR need only INSERT the missing pieces and flip
-`enabled=true` — no engine-side surgery, exactly the "rows-only" promise the ruling names close_prep
-under.
+**TRUED 2026-08-31 — close_prep is built, frozen and DEFAULT-DISABLED.** The registry row exists
+with `enabled=false`; `closePrep.v1` and `close_prep_due()` are merged/frozen in #437 and migration
+0138. Only the `wake_engine_sources.enabled` flip and G1 PR-2 producer/cadence wiring remain before
+rollout — no engine-side surgery, exactly the "rows-only" promise the ruling names close_prep under.
 
 **filing and F-A5's sources register when their own runtime trains land** — PR-ρ (F-A7,
 `filing-and-interview-design.md:446`, "the runtime train, rho, has not been authored") and

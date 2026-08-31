@@ -654,12 +654,12 @@ function routeDelegationIssues(code: string): string[] {
 
 describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and nothing else", () => {
   const ROUTE = "app/api/invite/route.ts";
-  const code = readCode(join(WEB_ROOT, ROUTE));
+  const code = readCode(join(WEB_ROOT, ROUTE)).code;
   // STRINGS BLANKED AS WELL AS COMMENTS (N4). `readCode`'s default keeps string
   // literals, so a reachable `const decoy = "handleInviteRequest(request)"` in the
   // POST body satisfied the delegation regex without calling anything. Blanking
   // is length-preserving, so offsets and reachability are unaffected.
-  const executable = readCode(join(WEB_ROOT, ROUTE), { blankStrings: true });
+  const executable = readCode(join(WEB_ROOT, ROUTE), { blankStrings: true }).code;
 
   test("it VALUE-imports handleInviteRequest from the EXACT courier module", () => {
     assert.ok(importedLocalName(code, "handleInviteRequest") !== null, `${ROUTE} does not value-import handleInviteRequest`);
@@ -672,7 +672,7 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
     // import.
     const local = importedLocalName(code, "handleInviteRequest");
     assert.ok(local !== null, "no value import to bind to");
-    const reachable = reachableFrom(executable, "POST");
+    const reachable = reachableFrom({ path: ROUTE, code: executable }, "POST");
     assert.ok(reachable !== null, `${ROUTE} exports no POST at all`);
     assert.match(
       reachable,
@@ -680,14 +680,14 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
       "POST must hand the REQUEST to the imported courier — not a rebuilt one, and not nothing",
     );
     assert.equal(
-      moduleLevelDeclarations(code).some((d) => d.name === local),
+      moduleLevelDeclarations({ path: ROUTE, code }).some((d) => d.name === local),
       false,
       `${ROUTE} declares its own ${local}, which would SHADOW the import the assertion above just matched`,
     );
   });
 
   test("POST is the ONLY verb exported — a second handler is a second, unguarded path", () => {
-    assert.deepEqual(exportedHttpMethods(code), ["POST"]);
+    assert.deepEqual(exportedHttpMethods({ path: ROUTE, code }), ["POST"]);
   });
 
   test("POST is structurally one exact delegation, with no shadow and no additional call side effect", () => {
@@ -776,6 +776,15 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
     // The decoy is a real, reachable statement in the POST body whose TEXT is the
     // call the pin looks for. Against comment-stripped-but-string-keeping source
     // it passes; against string-blanked source it does not.
+    //
+    // TRUED for #477's oracle: `reachableFrom` now blanks strings UNCONDITIONALLY
+    // inside its own implementation — the caller-supplied `blankStrings` option no
+    // longer exists as a lever on ITS output, so there is no "naive" `reachableFrom`
+    // call left to demonstrate. The naive arm below reads `stripComments` directly
+    // (comments stripped, strings kept — the raw, pre-reachability view an older,
+    // cruder text search would have used) to keep proving the SAME point: a decoy
+    // sitting inside a string literal is visible under that naive view and would
+    // fool a search that never separates "string contents" from "code".
     const raw = readFileSync(join(WEB_ROOT, ROUTE), "utf8");
     const mutant = raw.replace(
       /export async function POST\([\s\S]*$/,
@@ -785,15 +794,14 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
     );
     assert.notEqual(mutant, raw, "the mutation did not apply");
 
-    const naive = reachableFrom(stripComments(mutant), "POST");
-    assert.ok(naive !== null);
+    const naive = stripComments({ path: ROUTE, code: mutant }).code;
     assert.match(
       naive,
       /handleInviteRequest\s*\(\s*request\s*\)/,
       "THE OLD INSTRUMENT PASSES THE DECOY — which is why the pin reads string-blanked source",
     );
 
-    const sound = reachableFrom(stripComments(mutant, { blankStrings: true }), "POST");
+    const sound = reachableFrom(stripComments({ path: ROUTE, code: mutant }), "POST");
     assert.ok(sound !== null);
     assert.ok(
       !/handleInviteRequest\s*\(\s*request\s*\)/.test(sound),
@@ -817,14 +825,14 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
     const local = importedLocalName(mutant, "handleInviteRequest");
     assert.equal(local, "courier", "the import's LOCAL name is what a call must use");
 
-    const reachable = reachableFrom(mutant, "POST");
+    const reachable = reachableFrom({ path: ROUTE, code: mutant }, "POST");
     assert.ok(reachable !== null);
     assert.ok(
       !new RegExp(`\\b${local}\\s*\\(\\s*request\\s*\\)`).test(reachable),
       "THE PIN IS VACUOUS: the aliased import is never called and the pin did not notice",
     );
     assert.equal(
-      moduleLevelDeclarations(mutant).some((d) => d.name === "handleInviteRequest"),
+      moduleLevelDeclarations({ path: ROUTE, code: mutant }).some((d) => d.name === "handleInviteRequest"),
       true,
       "…and the shadowing local decoy is visible to the declaration walk that backs the assertion",
     );
@@ -845,7 +853,7 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
     };
     for (const [shape, addition] of Object.entries(shapes)) {
       assert.deepEqual(
-        exportedHttpMethods(stripComments(raw + addition)).sort(),
+        exportedHttpMethods(stripComments({ path: ROUTE, code: raw + addition })).sort(),
         ["GET", "POST"],
         `a second verb added as a ${shape} was invisible to the census`,
       );
@@ -869,7 +877,7 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
       "THE NAIVE INSTRUMENT PASSES THE MUTANT: the header still names the courier, which is exactly why raw text is not evidence",
     );
 
-    const mutantReachable = reachableFrom(stripComments(mutant), "POST");
+    const mutantReachable = reachableFrom(stripComments({ path: ROUTE, code: mutant }), "POST");
     assert.ok(mutantReachable !== null, "the mutant still exports POST");
     assert.ok(
       !/handleInviteRequest\s*\(\s*request\s*\)/.test(mutantReachable),
@@ -883,7 +891,7 @@ describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and no
     const raw = readFileSync(join(WEB_ROOT, ROUTE), "utf8");
     const mutant = `${raw}\nexport async function GET(): Promise<Response> {\n  return new Response(null);\n}\n`;
     assert.deepEqual(
-      exportedHttpMethods(stripComments(mutant)).sort(),
+      exportedHttpMethods(stripComments({ path: ROUTE, code: mutant })).sort(),
       ["GET", "POST"],
       "the methods pin cannot see a second exported verb",
     );

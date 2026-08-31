@@ -48,6 +48,7 @@
 //   node scripts/check-frozen-workflows.mjs                  # verify (CI gate)
 //   node scripts/check-frozen-workflows.mjs --update         # re-baseline (local only)
 //   node scripts/check-frozen-workflows.mjs --lock-deployed  # ceremony: lock every entry
+//   node scripts/check-frozen-workflows.mjs --compare-base <ref> # semantic additions-only proof
 //
 // `--update` is REFUSED under CI/GITHUB_ACTIONS — a re-baseline is a deliberate
 // local act, and CI's append-only-vs-base check is what actually gates a PR.
@@ -66,10 +67,12 @@ import { createHash } from "node:crypto";
 import { readFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, extname } from "node:path";
 import { execFileSync } from "node:child_process";
-// The (d)+(e) checkers are PURE (source strings in, violations out) and live in
-// a sibling module so the self-test can inject simulated base/head pairs.
+// Pure sibling checkers let selftests inject simulated base/head source pairs.
 import { checkRegistryMonotonicity, checkRegistryViewIntegrity, checkEnqueueSites, isTestPath, REGISTRY_REL } from "./freeze-lint-checks.mjs";
-
+import { runFrozenManifestCompareCli } from "./frozen-manifest-compare.mjs";
+import { FROZEN_WORKFLOW_FAILURE_GUIDANCE } from "./frozen-workflow-guidance.mjs";
+const COMPARE_BASE_INDEX = process.argv.indexOf("--compare-base");
+if (COMPARE_BASE_INDEX !== -1) process.exit(runFrozenManifestCompareCli(process.argv.slice(2)));
 // All git calls go through execFileSync with an argv array — never a shell string —
 // so a ref/path can never be interpreted as a shell command (no injection surface).
 function git(args, opts = {}) {
@@ -80,7 +83,6 @@ const REPO_ROOT = git(["rev-parse", "--show-toplevel"]).trim();
 const MANIFEST_REL = "frozen-workflows.json";
 const MANIFEST_PATH = join(REPO_ROOT, MANIFEST_REL);
 const FROZEN_MARKER = "@frozen";
-
 // A WDK workflow directive is a PROLOGUE STATEMENT — a bare string literal
 // `"use workflow";` on its own — not a prose mention of the words in a comment.
 // We strip comments first so a doc line like  // ... the `"use workflow"` directive
@@ -101,7 +103,6 @@ function hasWorkflowDirective(src) {
 // Defence-in-depth: reject a base ref that isn't a plain git ref name.
 const RAW_BASE_REF = process.env.FREEZE_BASE_REF || "origin/main";
 const BASE_REF = /^[A-Za-z0-9._/-]+$/.test(RAW_BASE_REF) ? RAW_BASE_REF : "origin/main";
-
 // Coverage scope: ALL tracked source under packages/ (spike/ is a throwaway and is
 // intentionally out of scope). Not a narrow per-directory allowlist.
 const SCAN_PATHSPEC = "packages";
@@ -486,7 +487,7 @@ function main() {
     console.error("freeze-lint: FAIL — frozen workflow policy violated (ARCHITECTURE.md Appendix A):\n");
     for (const v of violations) console.error("  - " + v);
     console.error(
-      `\n${violations.length} violation(s). Ship a behavioural change as a NEW _vN workflow; only re-baseline with --update (local) when ADDING a brand-new frozen workflow — you can never mutate or remove an existing frozen entry.`,
+      `\n${violations.length} violation(s). ${FROZEN_WORKFLOW_FAILURE_GUIDANCE}`,
     );
     return 1;
   }
