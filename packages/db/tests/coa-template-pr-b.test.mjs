@@ -18,7 +18,7 @@
 // silently changed underneath it.
 //
 // =============================================================================================
-// THE MUTANT PANEL -- twelve walls, each broken inside a rolled-back transaction so the shipping
+// THE MUTANT PANEL -- thirteen walls, each broken inside a rolled-back transaction so the shipping
 // schema is never left mutated. A cell that cannot be made to fail is not a proof.
 //
 //  #  | wall                                  | mutation                                | what goes RED
@@ -35,6 +35,7 @@
 // M10 | NULL family input                      | remove the named guard + NULL filter    | malformed input misses `family_key_null`
 // M11 | plan/list request identity             | restore the NULL/[] hash collision      | an explicit empty list replays a plan success
 // M12 | refusal ledger instrument              | write all five ledgers, then fake refusal| the clean-refusal assertion itself goes RED
+// M13 | manual + built chart precedence        | restore the old CASE arm order          | the ruled off-standard client reads declined
 //
 // M3/M4 are the law-2 pair on this file's one scope judgement: they prove the society relabel and
 // the suppression are produced by the SEEDED ROWS and not by anything hard-coded in a body.
@@ -880,7 +881,50 @@ test("§6.1 the additive door plants one family and appends it to the adoption",
   assert.ok(ad.families.includes("motor_vehicles"), "the adoption row now carries the family -- attribution is not lost");
 });
 
-test("§6.2 the additive door's named refusals", async (t) => {
+test("§6.2 concurrent family additions compose on the locked adoption row", async (t) => {
+  if (unready(t)) return;
+  const client = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "add_race", answers: { entity_type: "sdn_bhd" },
+  });
+  const applied = await applyTemplate(world.users.bob, {
+    client, template: starter.id, opKey: opk("add-race-apply"),
+  });
+  const familyA = "motor_vehicles";
+  const familyB = "club_subscriptions_and_entrance_fees"; // carries review witness account 6480
+  assert.ok(!applied.families.includes(familyA) && !applied.families.includes(familyB),
+    "premise: both opt-in families start outside the adoption");
+
+  let t1 = null;
+  let t2 = null;
+  try {
+    t1 = await openHumanTxn(world.users.bob);
+    const first = (await t1.client.query(
+      "select clara.add_coa_template_family($1,$2,$3,$4) as r",
+      [client, starter.id, familyA, opk("add-race-a")],
+    )).rows[0].r;
+    t2 = await openHumanAutocommit(world.users.bob);
+    const secondCall = t2.client.query(
+      "select clara.add_coa_template_family($1,$2,$3,$4) as r",
+      [client, starter.id, familyB, opk("add-race-b")],
+    );
+
+    await waitBlockedByOrThrow(t2.pid, t1.pid);
+    await t1.client.query("commit");
+    const second = (await secondCall).rows[0].r;
+    assert.ok(first.accounts > 0 && second.accounts > 0, "both additive calls committed accounts");
+
+    const ad = await adoptionRead(world.users.bob, client);
+    assert.ok(ad.families.includes(familyA),
+      "the first writer's family survives the blocked writer's later update");
+    assert.ok(ad.families.includes(familyB),
+      "the blocked writer's family is appended too -- no attribution is lost");
+  } finally {
+    await releaseSession(t1);
+    await releaseSession(t2);
+  }
+});
+
+test("§6.3 the additive door's named refusals", async (t) => {
   if (unready(t)) return;
   const virgin = await newInterviewClient(world.users.alice, world.firms.A, { tag: "add2", answers: { entity_type: "sdn_bhd" } });
   await expectCleanRefusal(
@@ -977,7 +1021,41 @@ test("§7.1 the five states, each CONSTRUCTED, plus the legacy answer value acce
     "Q4: the client is LISTED off-standard, which is honest rather than hidden");
 });
 
-test("§7.2 M7 MUTANT: dropping the legacy value from the read makes a legacy client read `undecided`", async (t) => {
+test("§7.2 manual + hand-built chart is off_standard; the old arm order hides it as declined", async (t) => {
+  if (unready(t)) return;
+  // 裁-23 Q4: docs/plan/active/coa-template-gate-record.md:183-186 keeps this exact population
+  // visible as off-standard: the client answered no/manual and then built the chart their way.
+  const client = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "manual_built", answers: { coa_seed_decision: { seed: "manual" } },
+  });
+  await humanQuery(world.users.bob,
+    "select clara.upsert_account(p_client => $1, p_code => '8876', p_name => 'Hand-built chart', p_type => 'expense', p_special_acc_type => null, p_account_class => null, p_op_key => $2)",
+    [client, opk("manual-built")]);
+  assert.ok(await accountCount(client) > 0, "premise: the manual-decision client built a chart");
+  assert.equal((await chartState(world.users.bob, client)).state, "off_standard",
+    "the overlap population follows the positive chart predicate before the manual-only fallback");
+
+  const src = (await rootQuery(
+    "select prosrc from pg_proc where oid = 'clara.coa_chart_state(uuid)'::regprocedure")).rows[0].prosrc;
+  const ruledOrder = /when ch\.accounts > 0 then 'off_standard'\s+when dec\.seed = 'manual' then 'declined'/;
+  const oldOrder = `when dec.seed = 'manual' then 'declined'
+      when ch.accounts > 0 then 'off_standard'`;
+  assert.match(src, ruledOrder, "the LIVE body puts the positive chart read before manual");
+  const mutated = await withRolledBackTx(async (c) => {
+    await c.query("set local role clara_fn_owner");
+    await c.query(`create or replace function clara.coa_chart_state(p_client uuid) returns jsonb
+      language sql stable set search_path = clara, pg_temp as $mut$${src.replace(ruledOrder, oldOrder)}$mut$`);
+    await c.query("reset role");
+    const r = await asHumanOn(c, world.users.bob, "select clara.coa_chart_state($1) as s", [client]);
+    return r.rows[0].s.state;
+  });
+  assert.equal(mutated, "declined",
+    "M13: restoring the old arm order hides the ruled off-standard client -- the mutant BITES");
+  assert.equal((await chartState(world.users.bob, client)).state, "off_standard",
+    "the shipping read is restored after the mutant rollback");
+});
+
+test("§7.3 M7 MUTANT: dropping the legacy value from the read makes a legacy client read `undecided`", async (t) => {
   if (unready(t)) return;
   const legacy = await newInterviewClient(world.users.alice, world.firms.A, {
     tag: "m7", answers: { coa_seed_decision: { seed: "lhdn_mpers_standard" } } });

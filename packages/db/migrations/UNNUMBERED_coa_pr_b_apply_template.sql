@@ -807,10 +807,19 @@ begin
     -- above, so a second caller racing the SAME proposed row blocks on the row lock and then --
     -- once unblocked, re-evaluating against the winner's now-'adopted' row -- matches zero rows
     -- instead of silently overwriting the winner's committed adoption.
-    update clara.coa_template_adoptions
-       set state = 'adopted', adopted_by = c.actor, adopted_at = now(), families = v_families
-     where id = v_prop.id and state = 'proposed'
-     returning id into v_adoption;
+    begin
+      update clara.coa_template_adoptions
+         set state = 'adopted', adopted_by = c.actor, adopted_at = now(), families = v_families
+       where id = v_prop.id and state = 'proposed'
+       returning id into v_adoption;
+    exception when unique_violation then
+      get stacked diagnostics v_constraint = CONSTRAINT_NAME;
+      if v_constraint = 'uq_coa_adoption_live' then
+        raise exception 'another chart adoption committed while this apply was in flight'
+          using errcode = 'CLR10', detail = '{"reason":"chart_adoption_race"}';
+      end if;
+      raise;
+    end;
     if v_adoption is null then
       raise exception 'another chart adoption committed while this apply was in flight'
         using errcode = 'CLR10', detail = '{"reason":"chart_adoption_race"}';
@@ -939,7 +948,7 @@ begin
 
   update clara.coa_template_adoptions
      set families = (select array_agg(distinct x order by x)
-                       from unnest(ad.families || p_family) x)
+                       from unnest(coa_template_adoptions.families || p_family) x)
    where id = ad.id;
 
   perform clara._audit(c.firm, c.actor, null, null, 'add_coa_template_family', null,
@@ -970,8 +979,8 @@ set role clara_fn_owner;
 
 -- S6.1 -- the deterministic plan, as a read. The checklist card's default checkbox state.
 -- INVOKER-rights, so a caller who cannot see the client or the template gets nothing -- but the
--- internals it calls are DEFINER, which is deliberate and narrow: the axes are a projection of
--- the client's own facts and the caller has already been RLS-filtered on the template.
+-- internals it calls are INVOKER and explicitly granted: the axes stay a projection of the
+-- caller's own RLS-visible facts, and the template has already been RLS-filtered too.
 create function clara.coa_template_family_plan(p_client uuid, p_template uuid) returns jsonb
   language sql stable set search_path = clara, pg_temp as $$
   select clara._coa_family_plan(p_client, t.id)
@@ -1014,9 +1023,9 @@ $$;
 -- The six states, and none of them is derived from an absence alone:
 --   adopted      an 'adopted' adoption row exists                        (positive)
 --   pending      the decision says the firm template AND the chart is still empty AND no adoption
---   declined     the decision says `manual` AND no adoption row          (Q4's escape hatch)
---   off_standard no adoption row AND the chart is NOT empty              (the honest "off-standard"
---                                                                        listing Q4 promises)
+--   declined     the decision says `manual` AND no adoption AND the chart is empty
+--   off_standard no adoption row AND the chart is NOT empty              (including Q4's escape
+--                                                                        hatch after a chart is built)
 --   undecided    no committed decision, no adoption, empty chart
 --   no_client    the caller cannot see this client at all                (RLS, not a state claim)
 create function clara.coa_chart_state(p_client uuid) returns jsonb
@@ -1048,8 +1057,8 @@ create function clara.coa_chart_state(p_client uuid) returns jsonb
     'families', to_jsonb(ad.families), 'adopted_at', ad.adopted_at,
     'state', case
       when ad.state = 'adopted' then 'adopted'
-      when dec.seed = 'manual' then 'declined'
       when ch.accounts > 0 then 'off_standard'
+      when dec.seed = 'manual' then 'declined'
       when dec.seed in ('firm_template','lhdn_mpers_standard') then 'pending'
       else 'undecided' end)
     from cl cross join ch left join dec on true left join ad on true;
