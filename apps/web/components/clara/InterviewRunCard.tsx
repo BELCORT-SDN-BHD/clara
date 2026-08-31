@@ -170,36 +170,53 @@ export function InterviewRunCard({
         ) : null}
       </CardContent>
 
-      {state ? (
+      {state || active ? (
         <CardFooter className="flex-col items-stretch gap-2">
-          {state?.pendingPark ? (
-            <form className="flex flex-col gap-2" onSubmit={(e) => void submit(e)}>
-              <Textarea
-                aria-label={t("answer.label")}
-                placeholder={state.pendingPark.phase === "c" ? t("answer.confirmPlaceholder") : t("answer.placeholder")}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void submit();
-                  }
-                }}
-                disabled={run.busy}
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button type="submit" size="sm" disabled={run.busy || draft.trim().length === 0}>
-                  {run.busy ? t("answer.sending") : t("answer.send")}
-                </Button>
-              </div>
-            </form>
-          ) : terminalMessage ? (
-            <p className="text-sm text-muted-foreground">{terminalMessage}</p>
-          ) : state?.chip === "working" ? (
-            <p className="text-sm text-muted-foreground">{t("working")}</p>
-          ) : (
-            <p className="text-sm text-muted-foreground">{t("noOpenQuestion")}</p>
-          )}
+          {/* MATERIAL-1 fix (review round 1): this block used to live inside
+              the OUTER `{state ? … : null}` guard, so `runId && state ===
+              null` (start succeeded, then the runtime never answers /state —
+              down, or a session-expired redirect) rendered NEITHER this
+              card's own cancel door NOR the checklist's standalone one (that
+              door is suppressed by `onActiveChange` for as long as `active`
+              is true, per R1). The human was left with an error banner and
+              no way to reach `cancel_client_onboarding` — the one door in
+              the whole two-step cancel that does NOT need the runtime. The
+              footer now mounts on `state || active`, and the cancel dialog
+              below is independent of `state` entirely — `cancel()` already
+              runtime-cancels only when `run.state?.pendingPark` exists,
+              so no other change was needed. Proven RED against the
+              pre-fix shape by interview-run-keyboard.test.tsx's MATERIAL-1
+              cell before this fix was restored. */}
+          {state ? (
+            state.pendingPark ? (
+              <form className="flex flex-col gap-2" onSubmit={(e) => void submit(e)}>
+                <Textarea
+                  aria-label={t("answer.label")}
+                  placeholder={state.pendingPark.phase === "c" ? t("answer.confirmPlaceholder") : t("answer.placeholder")}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void submit();
+                    }
+                  }}
+                  disabled={run.busy}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button type="submit" size="sm" disabled={run.busy || draft.trim().length === 0}>
+                    {run.busy ? t("answer.sending") : t("answer.send")}
+                  </Button>
+                </div>
+              </form>
+            ) : terminalMessage ? (
+              <p className="text-sm text-muted-foreground">{terminalMessage}</p>
+            ) : state.chip === "working" ? (
+              <p className="text-sm text-muted-foreground">{t("working")}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">{t("noOpenQuestion")}</p>
+            )
+          ) : null}
           {active ? (
             <OnboardingDoorDialog
               triggerLabel={t("cancel.trigger")}

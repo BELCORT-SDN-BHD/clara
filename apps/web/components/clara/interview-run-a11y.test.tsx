@@ -135,7 +135,11 @@ test("the real thread route stays accessible before start, at an open park, and 
         assert.deepEqual(openPark, [PRE_EXISTING_COMPOSER_FINDING], `open park: ${JSON.stringify(openPark)}`);
 
         const cancelTrigger = h.find((node) => node.tagName === "BUTTON" && textOf(node) === "Cancel onboarding");
-        assert.ok(cancelTrigger, "the active interview must own the sole cancel trigger");
+        // N1 (review round 1): `h.find` only proves a FIRST match exists — it
+        // cannot prove uniqueness. The count property ("exactly one Cancel
+        // onboarding button") is interview-run-keyboard.test.tsx's own
+        // assertion; this file only needs the trigger to be reachable at all.
+        assert.ok(cancelTrigger, "a cancel trigger for the active interview must render");
         await h.fireEvent(cancelTrigger!, "click");
         for (let i = 0; i < 6; i++) await h.settle();
 

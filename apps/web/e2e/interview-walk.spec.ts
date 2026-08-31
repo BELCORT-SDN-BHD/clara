@@ -34,7 +34,36 @@ function fixturePath(value: Fixture): string {
   return `/clients/${encodeURIComponent(value.clientId)}/clara/${encodeURIComponent(value.threadId)}`;
 }
 
-const ANSWERS: Record<(typeof CLIENT_SEG_KEYS)[number], string> = {
+// N4 (review round 1): api.ts's own `CLIENT_SEG_KEYS` export stays
+// `readonly string[]` on purpose (segmentProgress's `.indexOf(seg: string)`
+// call needs the wider type against a runtime-supplied segment), so
+// `(typeof CLIENT_SEG_KEYS)[number]` resolves to plain `string` and gave
+// ANSWERS below zero compile-time exhaustiveness — a typo'd or omitted key
+// was only ever caught by the runtime `if (answer === undefined) throw`
+// further down, never by tsc. This is a literal, `as const` mirror scoped to
+// this file only, so ANSWERS can be typed over a real union and a missing/
+// misspelled key becomes a compile error. The mirror is checked against the
+// live export below so the two cannot silently drift, and the runtime throw
+// stays exactly where it was — a type-level guarantee here is not a licence
+// to drop the defense against whatever segment the LIVE runtime actually
+// sends (accountingBasis's own `completeAccountingBasis`, below, is the
+// documented case of exactly that: a real segment outside this list).
+const KNOWN_CLIENT_SEGS = [
+  "legal_name", "entity_type", "ssm", "turnover", "tin", "msic", "sst_regime",
+  "sst_no", "statutory", "banks", "currency", "fye", "framework", "coa_seed",
+  "opening_position", "fa_depreciation", "sample_invoices",
+] as const;
+
+if (
+  KNOWN_CLIENT_SEGS.length !== CLIENT_SEG_KEYS.length ||
+  KNOWN_CLIENT_SEGS.some((seg, i) => seg !== CLIENT_SEG_KEYS[i])
+) {
+  throw new Error("KNOWN_CLIENT_SEGS (interview-walk.spec.ts) has drifted from CLIENT_SEG_KEYS (lib/interview/api.ts) — update both together");
+}
+
+type KnownClientSeg = (typeof KNOWN_CLIENT_SEGS)[number];
+
+const ANSWERS: Record<KnownClientSeg, string> = {
   legal_name: "ROME PUBLIC ADVISORY",
   entity_type: "sole_prop",
   ssm: "202401047756",
@@ -81,7 +110,7 @@ async function answerCurrentPark(page: Page, value: string): Promise<void> {
 async function completeTrackedSegment(
   page: Page,
   index: number,
-  seg: (typeof CLIENT_SEG_KEYS)[number],
+  seg: KnownClientSeg,
 ): Promise<void> {
   const progress = page.getByText(`step ${index + 1} · ${seg}`, { exact: true });
   await expect(progress).toBeVisible({ timeout: 30_000 });
@@ -115,9 +144,9 @@ test("client interview completes every tracked segment, unlocks Commit, and pass
   test.skip(!target, "review/merge supplies the isolated COMPLETE client/thread fixture");
   await openFixture(page, target!);
 
-  for (let index = 0; index < CLIENT_SEG_KEYS.length; index += 1) {
-    const seg = CLIENT_SEG_KEYS[index];
-    if (seg === undefined) throw new Error(`missing CLIENT_SEG_KEYS entry at ${index}`);
+  for (let index = 0; index < KNOWN_CLIENT_SEGS.length; index += 1) {
+    const seg = KNOWN_CLIENT_SEGS[index];
+    if (seg === undefined) throw new Error(`missing KNOWN_CLIENT_SEGS entry at ${index}`);
     await completeTrackedSegment(page, index, seg);
     if (seg === "framework") await completeAccountingBasis(page);
   }

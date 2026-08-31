@@ -86,6 +86,19 @@ export function useInterviewRun(args: {
   const errorRef = useRef<RunError | null>(null);
   const genRef = useRef(0);
 
+  // N3 (review round 1): the same sessionRef + primitive-dep discipline as
+  // lib/parts/hooks.ts's useHydratedPart. `session` is read via this ref
+  // everywhere below, written on every render, and dropped from every
+  // useCallback's own dependency array — a caller that (against convention)
+  // passes a fresh SessionTokenAccessor object every render can no longer
+  // change `refresh`'s identity, which is what the poll effect below depends
+  // on ([runId, refresh]); an unstable identity there would re-arm the
+  // interval on every parent re-render, exactly the busy-poll class
+  // hooks.ts was hardened against. Every call still resolves whichever
+  // accessor is CURRENT at call time.
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+
   const putError = useCallback((next: RunError | null) => {
     errorRef.current = next;
     setErrorRecord(next);
@@ -121,13 +134,13 @@ export function useInterviewRun(args: {
     if (!runId) return;
     const genAtReadStart = genRef.current;
     try {
-      const s = await getInterviewState({ runId, scope, planId }, { session });
+      const s = await getInterviewState({ runId, scope, planId }, { session: sessionRef.current });
       ingest(s);
       if (readClearsError(errorRef.current, genAtReadStart, s)) putError(null);
     } catch (e) {
       raise(messageOf(e), "read", null);
     }
-  }, [session, runId, scope, planId, ingest, putError, raise]);
+  }, [runId, scope, planId, ingest, putError, raise]);
 
   // A newly selected run begins from a blank hydrated view; no state from a
   // prior run is allowed to bleed across the identity boundary.
@@ -160,7 +173,7 @@ export function useInterviewRun(args: {
     try {
       await answerInterview(
         { runId, scope, parkIndex: park.parkIndex, value: text, planId },
-        { session },
+        { session: sessionRef.current },
       );
       await refresh();
       return true;
@@ -170,7 +183,7 @@ export function useInterviewRun(args: {
     } finally {
       setBusy(false);
     }
-  }, [session, runId, scope, planId, refresh, putError, raise]);
+  }, [runId, scope, planId, refresh, putError, raise]);
 
   /** First half of the two-step client cancellation. A 409 is normalized by
    *  cancelInterview into alreadyResolved and does not block the DB door. */
@@ -178,9 +191,9 @@ export function useInterviewRun(args: {
     if (!runId) return { delivered: false, alreadyResolved: true };
     return cancelInterview(
       { runId, scope, parkIndex: park.parkIndex, planId },
-      { session },
+      { session: sessionRef.current },
     );
-  }, [session, runId, scope, planId]);
+  }, [runId, scope, planId]);
 
   return {
     state,

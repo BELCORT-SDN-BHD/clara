@@ -72,6 +72,15 @@ async function bodyOf(res: Response): Promise<Record<string, unknown>> {
   return (await res.json().catch(() => ({}))) as Record<string, unknown>;
 }
 
+// N2 (review round 1): this DOES quote `body.message` into the thrown error,
+// which is a deliberate, narrow exception to runtime-wire.ts's own
+// no-raw-body discipline ("RAW RUNTIME BODY TEXT IS NEVER SURFACED
+// UNCLASSIFIED"). That rule guards an arbitrary upstream body; this body is
+// a first-party typed envelope this same runtime mints on purpose
+// (`{error: <code>, message?: string}` — interviewRoutes.ts's own
+// `res.status(...).json({error, message})` calls), never third-party or
+// user-controlled text, so quoting it verbatim is safe and preferred over a
+// generic `kindForStatus`-only message.
 function errorFrom(status: number, body: Record<string, unknown>): RuntimeApiError {
   const code = typeof body.error === "string" ? body.error : `http_${status}`;
   const message = typeof body.message === "string" ? body.message : code;

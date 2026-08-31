@@ -208,3 +208,87 @@ test("the active-run controls and typed cancel door follow DOM tab order and con
     },
   );
 });
+
+test("MATERIAL-1 (review round 1): the sole cancel door survives a runtime that never answers /state after a successful start", async () => {
+  // The divergent scenario the fix exists for: runtime down, or a
+  // session-expired redirect — the run starts (so `runId` is set and
+  // `active` goes true), but /state never comes back with a body, so
+  // `run.state` stays null for the whole test. Before the fix,
+  // `runId && state === null` rendered NO cancel affordance anywhere: the
+  // checklist's own DB-only door was already suppressed by `active`, and the
+  // interview card's own door lived inside a `{state ? … : null}` wrapper
+  // that this shape never opens.
+  let dbCancelled = false;
+  let runtimeCancelCalls = 0;
+  const dbCancelBodies: unknown[] = [];
+
+  await withMockedEnv(
+    (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/rest/v1/onboarding_plans")) {
+        return jsonResponse([{ ...OPEN_PLAN, state: dbCancelled ? "cancelled" : "open", cancel_reason: dbCancelled ? "runtime unreachable" : null }]);
+      }
+      if (url.includes("/rest/v1/onboarding_plan_items")) return jsonResponse([ITEM]);
+      if (url.includes("/rest/v1/clients")) return jsonResponse([{ id: "c1", name: "Rome Public Advisory", status: dbCancelled ? "archived" : "onboarding" }]);
+      if (url.includes("/rest/v1/opening_seed_registry")) return jsonResponse([]);
+      if (url.includes("/rest/v1/chat_sessions")) return jsonResponse([]);
+      if (url === "/api/runtime/interview/client/start") return jsonResponse({ run_id: "run-1" }, 202);
+      // Permanently fails — never a 200, never a body `run.state` can adopt.
+      if (url.startsWith("/api/runtime/interview/state?")) return jsonResponse({ error: "unauthenticated" }, 401);
+      if (url === "/api/runtime/interview/cancel") {
+        runtimeCancelCalls += 1;
+        return jsonResponse({ ok: true });
+      }
+      if (url.includes("/rpc/cancel_client_onboarding")) {
+        dbCancelBodies.push(JSON.parse(String(init?.body)));
+        dbCancelled = true;
+        return jsonResponse({ client_id: "c1", plan_id: "plan-1", status: "archived" });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch,
+    async () => {
+      const h = await renderComponent(App());
+      const body = (globalThis as unknown as { document: { body: Node & { appendChild: (child: unknown) => void } } }).document.body;
+      body.appendChild(h.container);
+      try {
+        for (let i = 0; i < 6; i++) await h.settle();
+        const start = h.find((node) => node.tagName === "BUTTON" && textOf(node) === "Start / continue interview");
+        assert.ok(start, "the idempotent start/continue control must render");
+        await h.fireEvent(start!, "click");
+        for (let i = 0; i < 10; i++) await h.settle();
+
+        // Count, not find-first (N1's own point): this proves exactly one
+        // cancel door exists — not merely that `h.find` happened to see one.
+        assert.equal(
+          findAll(h.container as never, (node) => node.tagName === "BUTTON" && textOf(node as never) === "Cancel onboarding").length,
+          1,
+          "exactly one cancel affordance must exist even when /state never resolves",
+        );
+
+        const cancelTrigger = h.find((node) => node.tagName === "BUTTON" && textOf(node) === "Cancel onboarding");
+        assert.ok(cancelTrigger, "the sole cancel trigger must be reachable with no runtime state");
+        await h.fireEvent(cancelTrigger!, "click");
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        const reason = findIn(body, (node) => node.tagName === "TEXTAREA" && node.getAttribute?.("aria-label") === "Reason for cancelling");
+        assert.ok(reason, "the typed-reason field must render with no runtime state");
+        await h.act(() => setFieldValue(reason as never, "runtime unreachable"));
+
+        const confirm = findIn(
+          body,
+          (node) => node.tagName === "BUTTON" && textOf(node as never) === "Cancel onboarding" && node !== cancelTrigger,
+        );
+        assert.ok(confirm, "the dialog Confirm control must render with no runtime state");
+        await h.act(() => clickButton(confirm as never));
+        for (let i = 0; i < 18; i++) await h.settle();
+
+        assert.equal(runtimeCancelCalls, 0, "with no known park, the runtime-cancel leg must never be attempted");
+        assert.equal(dbCancelBodies.length, 1, "the DB door — the one door that does not need the runtime — still runs exactly once");
+        assert.equal((dbCancelBodies[0] as { p_reason: string }).p_reason, "runtime unreachable", "the typed reason reaches the governed DB door");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 5; i++) await h.settle();
+      }
+    },
+  );
+});
