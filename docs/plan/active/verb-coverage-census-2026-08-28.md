@@ -8,6 +8,11 @@ one coordinating lane + three domain lanes, every orphan claim spot-verified by 
 coordinator against law 2/3. Nothing here is derived from the prototype: the backend's
 granted surface IS the coverage authority.*
 
+> **TRUED 2026-08-31:** this census is pinned at `0138`; apps/web has grown through the port
+> wave. The 81 CUTOVER-OWED / 29 ORPHAN lists predate that work, and
+> `apps/web/components/close/FiscalYearOpener.tsx` refutes the historical "nothing can open a
+> fiscal year" headline. The exit gate is a fresh run against the live catalog; 裁-72 still governs.
+
 ## The verdict
 
 - **Direction 2 (frontend → backend): ZERO stale wiring, measured.** All 60 `callDoor`

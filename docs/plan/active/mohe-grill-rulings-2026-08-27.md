@@ -59,6 +59,9 @@ adversarially-verified alignment scan of `clarabook-frontend` PR #1 vs clara @ `
    scans riding the playwright e2es · keyboard-walk tests on the approve/review/close
    journeys. Manual screen-reader review once per major surface, deliberately NOT in CI. AAA
    declined (density trade-off).
+   **[TRUED 2026-08-31]** Gate (b) ships as the hand-written, WCAG-mapped rule engine in
+   `apps/web/test/a11yRules.ts`; gate (c) is `apps/web/test/keyboardWalk.ts`. No axe-core or
+   Playwright accessibility e2es exist.
 8. **Q8 — Card catalog: (a) workbench-first + ONE batched wire extension.** All new Wave-F
    surfaces (receipts, firm questions, close plan, freeform read, report archive) build first
    as workbench objects on direct RLS reads + governed doors — zero wire change. Chat wire

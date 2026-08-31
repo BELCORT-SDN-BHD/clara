@@ -105,8 +105,9 @@ that excludes `ring-0` drops it a second time, because that same line legitimate
 `in-data-[slot=combobox-content]:focus-within:ring-0` — the exclusion meant to remove
 non-carriers removed a real one.
 
-The robust query is the **colour token**, not the width or the variant:
-`grep -rl "ring-ring/50" components/` returns exactly ten. That is "spelling is not identity"
+The robust query is the **colour token**, not the width or the variant. **TRUED 2026-08-31:**
+`grep -rl "ring-ring/50" components/` returns eleven; the post-annex T10/#395 addition is
+`apps/web/components/firm/compliance-watch-affordance.tsx:140`. That is "spelling is not identity"
 three times over in a single census, and it is why the row's `source` names every file rather
 than describing them.
 

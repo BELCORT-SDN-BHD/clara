@@ -348,6 +348,8 @@ follow-ups that F-A3 and F-A4 each owe converge on this single ceremony instead 
 > the binding-expiry sweep, and **`tax_prep`**. Same ceremony, same door, same operator, same
 > precondition that each source's wake body is built and reviewed first.
 
+> **NARROWED 2026-08-30 by 裁-59 (`docs/plan/active/mohe-grill-rulings-2026-08-30.md`): THREE switches open at the G1 ceremony — `bank_agent`, `close_prep`, binding-expiry. `tax_prep` gets its own later sitting; 裁-40 itself is not amended.**
+
 ## 裁-41 · `client_identifiers` gains a uniqueness wall before beta
 
 **What the owner was asked.** Surfaced by the duplicate-open-wall lane: `clara.client_identifiers`

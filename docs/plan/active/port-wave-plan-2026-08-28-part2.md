@@ -304,7 +304,7 @@ cheapest and could ride as a single combined lane if worker supply is short.
 | Dependency | Blocks | State | Handling |
 |---|---|---|---|
 | **T0 seam PR merged** | every train | not started | hard gate; nothing forks first |
-| **web/stale-notes-truing** | T1 | in flight, per the census wiring 4 of T1's 9 doors | T1 re-censuses at that lane's merged tip and scopes to the remainder (OQ-1) |
+| **#375 needs-you-gap wiring** | T1 | merged; no overlap with T1's close doors | #375 wired firm needs-you-gap doors; T1 #406 built all nine close doors itself (OQ-1 trued) |
 | **F-A7b ruled playbook states** | T2 (design input) | `fa7b-gate-record.md` closed 2026-08-27 | already available; read as a design input, no code dependency |
 | **F-A7b build train** | T11 (hard) | gate closed BUILD-AUTHORIZED; train not built | T11 sequenced last; fallback in OQ-3 |
 | **P4 members page** | `users_visible` | P4 design in review on branch web/p4-design | routed out of this wave; T10 must not build a second surface |
@@ -368,13 +368,10 @@ readable beside the decision. Two carry a conductor annotation:
 *(These adoptions do not close §12. They convert it from a decision sheet into a record of
 what was decided and why — which is what a later reader actually needs.)*
 
-**OQ-1 — web/stale-notes-truing overlaps T1 by four doors.** The census records that lane
-as wiring the `0138` four (`hold_close_prep`, `release_close_prep`, `list_agent_act_receipts`,
-`settle_close_proposal`) and truing the close note, which is 4 of T1's 9.
-*Recommendation:* let it land on its own ladder first — it is smaller, in flight, and closes
-a STALE-NOT-BUILT finding. T1 forks from its merged tip and re-censuses; whatever it already
-wired, T1 verifies rather than rebuilds. **Do not** pause it to fold into T1: that would park
-a false claim on `main` for the length of a wave.
+**OQ-1 — TRUED 2026-08-31.** #375 wired the firm needs-you-gap doors, not the four close
+doors. T1 #406 built all nine T1 close doors itself, including `hold_close_prep`,
+`release_close_prep`, `list_agent_act_receipts`, and `settle_close_proposal`; there was no
+overlap to scope around.
 
 **OQ-2 — the 81-vs-87 arithmetic.** The census's headline count and its own domain lists
 differ by six names, most likely the seven double-tagged RULING adjustment reads.
