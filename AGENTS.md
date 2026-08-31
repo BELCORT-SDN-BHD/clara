@@ -98,7 +98,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Design direction: the two-pane Agentic OS and typed `parts[]`; the live card-reader catalog | `docs/design/`; `apps/web/lib/parts/catalog.ts` + `apps/web/lib/parts/types.ts` |
 | Live CODE structure — who calls what, where a route lives · **before you grep** | `docs/references/codebase-memory-graph.md` |
 | Path-scoped mechanical rules that bind edits under their own paths (migrations, db-tests, handoffs, runtime-workflows) | `.claude/rules/` |
-| Legal/compliance pack for owner review — OpenAI DPA brief, client authorization letter (en/ms/zh), PDPA s.129 cross-border basis | `docs/ops/legal/` |
+| Legal/compliance pack for owner review — OpenAI DPA brief, client authorization letter (en/ms/zh), PDPA s.129 cross-border basis, and the beta signup consent text + its byte-identity law (裁-90, [`docs/ops/legal/clara-beta-dpa.md`](docs/ops/legal/clara-beta-dpa.md)) | `docs/ops/legal/` |
 | Backup, restore, DR drill, readiness, SLO | `docs/ops/DR.md` |
 | Piping a live DSN through a ceremony — the CA-pinned TLS bridge, never `sslmode=no-verify` | `docs/ops/dsn-bridge.md` |
 | The CI runner: what it is, how to operate or decommission it | `docs/ops/ci-runner.md` (**private-repo only**) |
