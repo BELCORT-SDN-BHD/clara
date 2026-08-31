@@ -127,12 +127,21 @@ test("x42v.w6a an approve whose transaction began BEFORE a retirement committed 
 test("x42v.w6b the remedy is real in BOTH directions: retrying the approval posts the movement OUTSIDE the register (and the tie says so in out_of_window_cents), while re-enrolling first makes it a register act on the NEW generation", async (t) => {
   if (skipHere(t)) return;
 
+  // POSTING DATES ANCHOR OFF `today()`, NEVER OFF `dayIn(mon(0), N)`. staff_advance_tie's
+  // GL side filters `j.posting_date <= p_as_of` (p_as_of = today() below), so a fixed small
+  // day-of-month (2, 3, …) silently rolls into the FUTURE the instant the DB-clock anchor's
+  // day-of-month drops below it — exactly what happens at every month rollover (a rig running
+  // at 2026-09-01 turns "day 2 of mon(0)" into 2026-09-02, a date `today()` has not reached
+  // yet, so the entry falls out of the as-of window entirely and out_of_window_cents reads 0
+  // instead of the posted amount). `today(-n)` is genuinely n days in the past under ANY
+  // anchor — the same DATE LAW the header of x42-adv-helpers.mjs already states.
+  //
   // (a) THE PLAIN RETRY — the remedy the message leads with. A fresh transaction stamps
   // approved_at after retired_at, the watermark returns NULL, and the movement posts as an
   // ordinary entry on a retired code, which design §3.1 blesses and §3.4 reports.
   const c1 = await freshAdvClient("w6b1");
   const r1 = await approveRacingRetirement({
-    client: c1.client, enrolment: c1.enrolment, cents: 80_000, postingDate: dayIn(mon(0), 2),
+    client: c1.client, enrolment: c1.enrolment, cents: 80_000, postingDate: today(-1),
     maker: w.users.alice, checker: w.users.bob,
   });
   assertClosedUnder(r1.approveError, "x42v.w6b(a)", { client: c1.client, entry: r1.entry });
@@ -153,7 +162,7 @@ test("x42v.w6b the remedy is real in BOTH directions: retrying the approval post
   // out-of-window residue.
   const c2 = await freshAdvClient("w6b2");
   const r2 = await approveRacingRetirement({
-    client: c2.client, enrolment: c2.enrolment, cents: 90_000, postingDate: dayIn(mon(0), 3),
+    client: c2.client, enrolment: c2.enrolment, cents: 90_000, postingDate: today(-2),
     maker: w.users.alice, checker: w.users.bob,
   });
   assertClosedUnder(r2.approveError, "x42v.w6b(b)", { client: c2.client, entry: r2.entry });
@@ -258,7 +267,7 @@ test("x42v.w6d the gate covers EXACTLY the band: a retirement that committed BEF
   const c2 = await freshAdvClient("w6d2");
   let gen2 = null;
   const r = await approveRacingRetirement({
-    client: c2.client, enrolment: c2.enrolment, cents: 65_000, postingDate: dayIn(mon(0), 4),
+    client: c2.client, enrolment: c2.enrolment, cents: 65_000, postingDate: today(-3),
     maker: w.users.alice, checker: w.users.bob, reason: "x42 w6d2 the holder left mid-approval",
     then: async () => {
       gen2 = await enrolHere(w.users.alice, { client: c2.client, personLabel: "w6d2 successor" });
