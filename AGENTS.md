@@ -23,8 +23,8 @@ Nothing else in this repo outranks them.
 ```sh
 pnpm install
 pnpm typecheck   # tsc across the TS packages
-pnpm lint        # freeze-lint (workflows + evaluators) · leak-scan · wiki gates · harness-links · dsn-pipe selftests · pinned-ids · dispatch-model-guard · eslint (scripts + reporting-render)
-pnpm build       # nitro runtime + next dashboard
+pnpm lint        # full root lint chain from package.json (the source of truth, including recursive package lint)
+pnpm build       # nitro runtime + apps/web (production) + apps/dashboard (legacy, retiring at P6 cutover)
 pnpm test        # per-package tests
 ```
 
@@ -95,7 +95,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Why something is the way it is — decisions and the standing laws they minted | `docs/adr/README.md` (the digest + its dated log, `docs/adr/README-log.md`) — **read the digest first**; drill to the ADR only if the digest is thin |
 | Where the work stands: posture, lanes, next, backlog, known issues | `PROGRESS.md` |
 | A wave or slice plan, contract, design doc, or acceptance record | `docs/plan/index.md` and `docs/plan/` (keep new documents correctly filed under `docs/plan/active/`/`docs/plan/completed/` per the index's own path-stability convention) |
-| Design direction: the two-pane Agentic OS, typed `parts[]`, the card catalog | `docs/design/` |
+| Design direction: the two-pane Agentic OS and typed `parts[]`; the live card-reader catalog | `docs/design/`; `apps/web/lib/parts/catalog.ts` + `apps/web/lib/parts/types.ts` |
 | Live CODE structure — who calls what, where a route lives · **before you grep** | `docs/references/codebase-memory-graph.md` |
 | Path-scoped mechanical rules that bind edits under their own paths (migrations, db-tests, handoffs, runtime-workflows) | `.claude/rules/` |
 | Legal/compliance pack for owner review — OpenAI DPA brief, client authorization letter (en/ms/zh), PDPA s.129 cross-border basis | `docs/ops/legal/` |
@@ -104,6 +104,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | The CI runner: what it is, how to operate or decommission it | `docs/ops/ci-runner.md` (**private-repo only**) |
 | Migrations, seeds, the test rig, DR tooling | `packages/db/README.md` |
 | The durable runtime: workflows, pools, document intake, deploy | `packages/runtime/README.md` |
+| Building/porting the production frontend | `apps/web/README.md` + `apps/web/AGENTS.md`; `docs/plan/active/fe-train-plan-2026-08-30.md` + `docs/plan/active/fe-train-plan-2026-08-30-orders-p4.md` + `docs/plan/active/fe-train-plan-2026-08-30-orders-p6.md`; `docs/plan/active/port-wave-plan-2026-08-28.md` + `docs/plan/active/port-wave-plan-2026-08-28-part2.md` |
 | What the prior build got wrong (11 failure patterns) and what was salvaged from it | `docs/audit/` |
 | The ratified stack and the blueprint packet behind it | `docs/00-GATE-2-README.md` |
 | Prior research: Malaysian tax/standards dossiers, evidence packages | `docs/phase2-research/` · `docs/plan/research/` |
@@ -112,12 +113,13 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 
 **Run the `orchestrator-fable` skill first on any substantive task.** You are the
 orchestrator — plan, delegate, synthesize, verify, own the state. Workers are the hands:
-native subagent lanes for bounded work, Codex for heavy implementation, debugging and
-refactors. Delegate bounded work orders, inspect every result before accepting it, and run a
+native lanes perform independent fresh-context review only; every build — any package, any
+size, backend or frontend — dispatches to Codex through direct `codex exec`. Inspect every
+result before accepting it, and run a
 cross-model review before merging anything security-critical. *Codex lane, learned the hard
-way:* the `codex:codex-rescue` companion queue is unreliable (it has stalled for hours at
+way:* the `codex:rescue` companion queue is unreliable (it has stalled for hours at
 "starting") — prefer a direct `codex exec` via Bash, backgrounded with a file-watcher on the
-output, or a native subagent.
+output. This split was owner-ruled and recorded in `PROGRESS.md`'s 2026-08-31 dawn entry.
 
 **Ground before you build.** On a new or compacted session, and before answering any
 architecture question or changing code: query the graph for structure (the
