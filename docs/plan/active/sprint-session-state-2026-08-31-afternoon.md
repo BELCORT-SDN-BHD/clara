@@ -13,7 +13,7 @@ else.*
 | #469 | FS-0 verb census at `0155`; 裁-72's P6-C programme discharged | `docs/plan/active/verb-coverage-census-2026-08-31.md` |
 | #454 | `chatTurn_v16` — the four-card wire bump | opus review: AST-level transcription parity, 5-mutant panel |
 | #470 | The v16 deploy ceremony record | runtime **v70** live, `chatTurn: chatTurn_v16` bundle-proven; manifest fully deploy-locked (healed v69's missed v15 lock) |
-| #471 | The confirmation login-CSRF finding, deferred by ruling to FS-4 | R8 + ADR-0075 §6; reviewed twice |
+| #471 | The confirmation login-CSRF finding, deferred by ruling to FS-4 | R8 + ADR-0075 §6; two in-session review lanes (not recorded on the PR) |
 | #472 | The scope-census fourth-entrance gap, as a hard precondition on #455 | widened to bind a SHAPE, not one PR |
 
 ## 2 · IN FLIGHT at compaction — three fix rounds and two standing reviewers
@@ -74,7 +74,7 @@ check AND drop the index → must RED; (m2) delete the check alone → a **MUST-
 
 **BLOCKER-3 — PKCE silently breaks cross-device confirmation, and §3.4 forbids the escape.** The
 binding is genuinely sound (verified in `auth-js` source, not docs). But the mail must be opened on
-the device that signed up, and design.md:231-232 states *"no `token_hash` arm, not even a
+the device that signed up, and design.md:230-231 states *"no `token_hash` arm, not even a
 fallback"*. A mis-configured template, a wrong device and a stale verifier all render the identical
 `?status=invalid`. A second variant: with no explicit `flowId` the verifier resolves to the legacy
 fixed key, so a second pending PKCE flow in the same browser breaks the earlier link. *Fix:*
