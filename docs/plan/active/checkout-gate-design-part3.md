@@ -62,15 +62,17 @@ issues no redirect, and it is the only surface in this train not called by a bro
 
 ## 2 · The `apps/web` surfaces
 
-**Every server-side entry below is a route.ts HTTP-method export; none is a `"use server"` Server
-Action** — part 1 §1.1 has the reason (the census enumerates only `page.*`/`route.*` leaves, so an
-action file is invisible to it); cell W-R pins it.
+**This train adds exactly three server entries, and each is a route.ts HTTP-method export; none is
+a `"use server"` Server Action** — part 1 §1.1 names which steps are server-side and why (a route
+leaf is forced to declare itself in `SCOPE_UNSCOPED_SURFACES`; an action file is forced to declare
+nothing), and cell W-R §4.2 pins it. **Two rows below are client-side and W-R does not apply to
+them** — they are marked.
 
 | route | what changes |
 |---|---|
 | /auth/confirm + /auth/confirm/verify | `code` replaces `token_hash`; `exchangeCodeForSession` replaces `verifyOtp`; `proveSameOrigin` is kept **verbatim** (part 1 §3.2). **`Referrer-Policy` on this page must be `strict-origin`, never `no-referrer`** — FS-2's NEW-A: `no-referrer` makes real browsers send `Origin: null` on the form POST, which this wall 403s. **`Origin: null` is never accepted.** |
-| `/signup` step 2 | gains the DPA step: the text is fetched server-side from `dpa_documents` (body + sha), rendered, and `sign_dpa` is called with the sha the person was shown. The existing `NotBuiltNote` is **removed because the thing it names now exists**. **With zero `dpa_documents` rows** — the fail-closed default while gate question G5 is open — the step renders a `NotBuiltNote` saying the agreement is not yet published and checkout cannot open, and the checkout control is **absent, not disabled-looking**: nothing on the page may imply a signature was recorded when none was (NIT-8) |
-| `POST /checkout` (new, server-only) | reads the trusted client-IP header → digest → `open_checkout_intent` → creates the Stripe Checkout Session in **subscription mode** at the zero-amount price id the door returned, with `payment_method_collection: 'always'` (NIT-1 — 裁-58/裁-73's ruled "card collected, nothing charged" must be *stated*, not left resting on a Stripe default that differs for zero-amount sessions) and `metadata: {clara_registration_id, clara_applicant, clara_intent_id}` → `record_checkout_session` → 303 to Stripe |
+| `/signup` step 2 **(client door call)** | gains the DPA step. The text is **read** by a server component from `dpa_documents` (body + sha) and passed down as props; **`sign_dpa` is then called from the client over PostgREST, exactly as step ③ already calls `claim_identity` and `request_firm_registration`** — `signup-firm-form.tsx` is `"use client"` and uses `callDoor`. **This is a decision, not an omission:** an unnamed server-side step under a no-Server-Actions heading is where a build lane reaches for an action. `sign_dpa` is a governed door, the caller is the person, and the client-RPC pattern is already built and reviewed. If a later lane needs it server-side, it adds POST /signup/dpa as a route handler and registers it — never an action. The sha submitted is the one the person was shown. The existing `NotBuiltNote` is **removed because the thing it names now exists**. **With zero `dpa_documents` rows** — the fail-closed default while gate question G5 is open — the step renders a `NotBuiltNote` saying the agreement is not yet published and checkout cannot open, and the checkout control is **absent, not disabled-looking**: nothing on the page may imply a signature was recorded when none was (NIT-8) |
+| POST /checkout (new, server-only) | reads the trusted client-IP header → digest → `open_checkout_intent` → creates the Stripe Checkout Session in **subscription mode** at the zero-amount price id the door returned, with `payment_method_collection: 'always'` (NIT-1 — 裁-58/裁-73's ruled "card collected, nothing charged" must be *stated*, not left resting on a Stripe default that differs for zero-amount sessions) and `metadata: {clara_registration_id, clara_applicant, clara_intent_id}` → `record_checkout_session` → 303 to Stripe |
 | /checkout/success (new) | **Stripe's `success_url` is a top-level navigation, so this arrives as a GET.** The GET is therefore **paint-only** — it renders "your payment went through; open your firm" with an explicit button — and a sibling route.ts POST does the work: `claim_paid_admission` → `create_firm` → `close_paid_registration` → redirect to the firm home. **This is the same GET-is-inert discipline the confirm page already has, applied to the route that CREATES THE FIRM** (M9); the first draft applied it to the confirmation and not here. Every refusal renders verbatim; **no optimistic UI**. The firm name passed to `create_firm` is the one `claim_paid_admission` returned from `firm_registration_requests.firm_name` — **the registration is the authority, never a form field re-typed on the success page** (NIT-6) |
 | `/pending` | the three new arms of part 1 §2.1 |
 
@@ -138,7 +140,7 @@ G2** — `billing_plans` does not exist yet (survey §4).
 | **W-P** | registration closure | after ⑧ the registration carries `status='approved'` and the firm id | — | delete the `close_paid_registration` call. **Only the `status`/`firm_id` limb discriminates** — the holding page's redirect does NOT redden, because `holdingStateFrom` returns `{kind:"member"}` from `caller_context` before it reads any registration row (NIT-4). The redirect is therefore asserted as a control, not as a mutant limb |
 | **W-P2** | the closer is reachable by a principal that exists (M5) | kill the success route between `create_firm` and the close → the one-minute sweep's `reconcile_paid_registrations` closes it | a registration with no consumed admission is left alone | narrow the sweep's grant to the two webhook verbs |
 | **W-Q** | the intermediate page is not an open redirect | a confirmation-URL parameter whose origin is **not** the project's Supabase URL → `status=invalid` and **no link rendered** | the project's own URL → the button renders | compare only the path, or a suffix, instead of the origin |
-| **W-R** | the transport rule (part 1 §1.1) | a whole-tree read finds **zero** `"use server"` and **zero** `template.tsx` — a POSITIVE count, since the scope census sees neither | every server entry is a route.ts HTTP-method export the census **does** enumerate | add a `"use server"` file and watch this cell — not the 1253-test suite — go red |
+| **W-R** | the transport rule (part 1 §1.1) | **see the panel at §4.2** — the cell asserts the TRAIN's property, not a global count | | |
 | **W-S** | `record_checkout_session` ownership (M2) | caller B stamps caller A's unstamped intent → `CLR04 not your checkout intent`, **and the intent is still stampable by A afterwards** | A stamps it → recorded | delete the applicant comparison |
 | **W-T** | one paid session per registration (M7) | two Checkout Sessions for one registration both complete → the **first** writes a payment row; the second writes a `stripe_event_problems` row of kind `duplicate_payment` and **no second payment** | one session → one payment | drop `uq_frp_registration` |
 
@@ -159,6 +161,62 @@ its own mutant, so by this battery's own rule it was not evidence.
 
 m2 is the limb that carries the knowledge. A panel where every limb reddens proves only that
 *something* refuses; this one proves **which mechanism does**.
+
+### 4.2 · W-R — the transport cell, inverted (the addendum's six)
+
+**v1's W-R asserted the wrong proposition.** §1.1 states *"every server-side step OF THIS TRAIN is
+a route.ts HTTP-method export"*; the cell asserted a **whole-repo count** of two file kinds. Those
+come apart in both directions — **false GREEN** if a train step is implemented inside a `page.tsx`
+server-component body or a layout (neither an action nor a route handler: §1.1 violated, count
+untouched), and **false RED** on any unrelated special file a future train adds. The correct
+assertion was already sitting in v1's own positive-control column, in prose.
+
+**Home, so the cell cannot be quietly dropped (E).** It lives in
+apps/web/tests/checkout-transport.test.ts, its path is **required in
+`apps/web/test/manifest.txt`**, and **it may not be `.skip`-ed**. `check-test-manifest.mjs` rides
+`apps/web`'s own `lint` script — which runs on every PR, docs-only included — and fails when a
+real test file is missing from the manifest, so a named-and-manifested cell cannot vanish silently.
+
+**A · The primary assertion — train-scoped.** For each of §1.1's **three** server entries (the
+confirm verify POST, POST /checkout, the /checkout/success POST):
+
+| limb | assertion |
+|---|---|
+| **it is a route leaf** | the file's basename matches the census's **own** `LEAF` regex, imported from the census module rather than re-typed, and the module exports an HTTP method |
+| **it is declared** | its route path appears in `SCOPE_UNSCOPED_SURFACES` **with a non-empty reason** — the forced declaration §1.1 leans on |
+| **mutant** | re-implement any one of the three as a `"use server"` export → **RED on both limbs**: it is no longer a route leaf, and it cannot be registered as one |
+| **MUST-NOT-RED control** | adding an unrelated legitimate `page.tsx` or route.ts elsewhere in the app must **not** redden this cell — the assertion is about *this train's* entries, not the repo's shape |
+
+**B · The secondary tripwire — a ROSTER, derived, with its remedy in the message.** The global
+shape still deserves a tripwire, but v1's version would rot: `template.tsx` is Next's standard
+per-navigation remount file — for an animated two-pane route-group app that is a *when*, not an
+*if* — and `error.tsx` / `loading.tsx` are likelier still and v1 counted neither.
+
+- The watched family is **derived from the census's own `LEAF` regex** (every file under
+  `apps/web/app` whose basename does *not* match it), never a hard-coded pair, so the instrument
+  cannot drift from the thing it compensates for.
+- It is a **roster, not a count** (the estate's "roster MAPS not counts" rule). The seven current
+  members are named: app/layout.tsx · app/not-found.tsx · (entry)/layout.tsx ·
+  (firm)/layout.tsx · (firm)/clients/[clientId]/layout.tsx · (full)/layout.tsx ·
+  (full)/clients/[clientId]/layout.tsx. **The blind spot already has seven residents** — v1
+  counted the two members that happen to be zero and called the rule pinned.
+- **The assertion message carries the reason AND the remedy**, because the lane that adds an
+  `error.tsx` is by definition not working on checkout and has no reason to have read §1.1. It
+  says: *a non-LEAF file is invisible to the scope census; do NOT bump this roster, allowlist the
+  path, or narrow the glob to go green — each of those retires a security wall while looking like
+  housekeeping. Either register the file where it can be classified, or land the census fix that
+  widens `LEAF` and update this roster in the same PR.*
+
+**C · A directive is a parse fact, not a string (D — review law 3 again).** "Zero `"use server"`
+occurrences" matches the literal in a comment, a fixture or a Markdown file, and **misses
+`'use server'` in single quotes**, which is equally valid. The tripwire uses the census's own
+`stripComments(src, { blankStrings: true })` (imported, not reimplemented) and checks the module's
+**first statement**, not any occurrence.
+
+**The planting demonstration is re-run with four plants, and the instrument must get all four
+verdicts right:** a double-quoted directive → **RED** · a single-quoted directive → **RED** · the
+literal inside a comment → **NOT red** · the literal inside a string constant → **NOT red**. Two
+of those are the decoys that would have fooled v1's grep.
 
 ---
 

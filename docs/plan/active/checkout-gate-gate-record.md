@@ -262,16 +262,27 @@ design contains no refund path.
 
 ## Recorded constraints — not questions, but they bind the build lane
 
-**No `"use server"` Server Actions anywhere in this train.** Every server-side step is a route.ts
-HTTP-method export. The scope-spine census enumerates surface leaves with
-`/^(page|route)\.(ts|tsx|js|jsx)$/`, so a `"use server"` file — or a root `template.tsx` — can
-reach firm-scoped data with the full suite green; Next's own guidance is that page-level
-authentication does not protect Server Actions. The census fix is ordered and has not landed.
-Measured while folding this in: `apps/web` holds **zero** `"use server"` files and **no**
-`template.tsx` today, so this train is not repairing a hole — it is declining to open the first
-one, on the most dangerous door in the system, while the instrument is known blind. **If a build
-lane later wants an action, that is not a local call:** the census fix must land first, as a stated
-precondition on the build PR.
+**No `"use server"` Server Actions anywhere in this train.** This train adds exactly **three**
+server entries to `apps/web` — the confirmation verify POST, POST /checkout, and the
+/checkout/success POST — and each is a route.ts HTTP-method export. Steps ③ and ④ call their
+doors from the **client** over PostgREST, as the built signup form already does.
+
+**The reason, stated in the order that matters.** First: Next's own guidance is that page-level
+authentication does not protect Server Actions and that each action must re-verify authorization
+itself — and on this train those endpoints create a firm. Second: every route.ts leaf is
+enumerated by the scope census and **must be named in `SCOPE_UNSCOPED_SURFACES` with a written
+reason**, so `/checkout` and /checkout/success are forced to declare themselves; **a
+`"use server"` file is enumerated by nothing and declares nothing.** *(An earlier draft justified
+this by the census's firm-scope blindness. That was the weaker argument and not the operative one
+here — none of this train's surfaces are firm-scoped, since the customer has no firm until ⑧.)*
+
+Measured across `main` and all four open web branches: **zero** `"use server"` modules and **no**
+`template.tsx`. So this train is not repairing a hole — it is declining to open the first one, on
+the most dangerous door in the system, while the instrument is known blind. **The blind spot is
+not empty, though:** seven non-LEAF App Router files already live in it, so the acceptance cell
+watches that whole family as a named roster rather than two hand-picked names that happen to be
+zero. **If a build lane later wants an action, that is not a local call:** the census fix must
+land first, as a stated precondition on the build PR.
 
 **An amendment owed to owner-batch item 85, BEFORE you perform the Wave-G setup act.** Item 85
 tells you to set the Supabase "Confirm signup" template to the token-hash form, *not* the default

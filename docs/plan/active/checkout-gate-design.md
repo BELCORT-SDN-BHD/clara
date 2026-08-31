@@ -61,34 +61,61 @@ that carries values to a door and renders the door's verdict. No route is a wall
 The six new doors, their exact signatures and every refusal code are **part 2 §1**; the webhook
 route's contract is **part 3 §1**.
 
-### 1.1 · The transport is route handlers. NO Server Actions. This is a wall, not a preference.
+### 1.1 · The transport is route handlers. NO Server Actions.
 
-**Every server-side step above is an HTTP route handler — a route.ts exporting `POST` — and
-none of them is a `"use server"` Server Action.** The reason is a measured blind spot in the
-scope spine's own census, and it is recorded here so a build lane cannot later "simplify" a route
-into an action without meeting this paragraph:
+**Which steps this is even about.** The sentence needs its subject named, because two of the nine
+steps are client-side and one is not in this app at all:
 
-- The census in #461's apps/web/tests/firm-scope-surfaces.test.ts enumerates surface leaves with
-  `LEAF = /^(page|route)\.(ts|tsx|js|jsx)$/` (that file, line 46). **A `"use server"` export lives
-  in a file that regex never enumerates** — as does a root `template.tsx` — so such a file can
-  reach firm-scoped data with the whole suite green. This was demonstrated by planting one in an
-  isolated tree, not argued from reading. The census fix is ordered and **has not landed**.
-- Next's own guidance is that page-level authentication does not protect Server Actions and that
-  authentication and authorization must be re-verified inside each action. An action is a
-  POST endpoint wearing a function call's clothes, and this train's endpoints are the ones where
-  a missed re-verification creates a firm.
-- **Route handlers are covered**, as HTTP-method exports on a route.ts leaf the census does
-  enumerate.
+| step | where it runs |
+|---|---|
+| ① `signUp` | **client** — a client component calling Supabase directly |
+| ② confirm | the GET page is a **paint-only server component**; **the verify POST is a route handler** ← *server entry* |
+| ③ `claim_identity` + `request_firm_registration` | **client** — `signup-firm-form.tsx` opens `"use client"` and calls both doors through `callDoor`/PostgREST with the browser's own token |
+| ④ the DPA step | the text is **read** by a server component; **`sign_dpa` is called the same way ③ calls its doors — from the client, over PostgREST** (decided below) |
+| ⑤ POST /checkout | **route handler** ← *server entry*; it holds the Stripe secret and 303s |
+| ⑥ the webhook | `packages/runtime`, not this app |
+| ⑦ the applier | the database, on the runtime's sweep |
+| ⑧ success | the GET is a **paint-only server component**; **its POST is a route handler** ← *server entry* |
+| ⑨ redirect | — |
 
-**Measured, so the scope of this rule is honest:** `apps/web` today contains **zero** `"use
-server"` files and **no** `template.tsx` (whole-tree grep and find over the entry-group branch).
-This train is therefore not repairing an existing hole — it is declining to open the first one,
-on the most dangerous door in the system, while the instrument that would have caught it is
-known blind.
+**So this train adds exactly three server entries to `apps/web`**, and every one of them is a
+route.ts HTTP-method export. **④ is decided here rather than left unnamed** — an unnamed
+server-side step sitting under a "no Server Actions" heading is precisely where a build lane
+reaches for an action. `sign_dpa` is a governed door like ③'s two, the caller is the person, and
+the client-RPC pattern already exists and is already reviewed; adding a route for it would buy
+nothing. **If a later lane needs it server-side instead, that lane adds POST /signup/dpa as a
+route handler and registers it — never an action.**
 
-**If a later reader believes a Server Action is genuinely the right shape somewhere here, that is
-not a local call:** it requires the census fix to have landed first, as a stated precondition on
-the build PR. Gate record, "recorded constraints".
+**The primary reason, which needs no instrument at all.** Next's own guidance is that page-level
+authentication does not protect Server Actions, and that authentication and authorization must be
+re-verified **inside each action**. An action is a POST endpoint wearing a function call's
+clothes. On this train those endpoints are the ones that create a firm, so a missed
+re-verification is a tenant created by a stranger.
+
+**The second reason: a route leaf MUST CLASSIFY, and an action escapes that entirely.** Every
+route.ts leaf is enumerated by the scope census (`LEAF = /^(page|route)\.(ts|tsx|js|jsx)$/`,
+`apps/web/tests/firm-scope-surfaces.test.ts:46`) and has to appear in `SCOPE_ENTRANCES` or in
+`SCOPE_UNSCOPED_SURFACES` **with a written reason**. So `/checkout` and /checkout/success are
+forced to be named and justified. **A `"use server"` file is enumerated by nothing and therefore
+justifies nothing** — it is the declaration that never has to be made.
+
+> **A correction to how v1 argued this.** v1 said the census is blind to actions *for firm-scope
+> coverage*. That is true in general and **is not the reason here**: none of this train's new
+> surfaces are firm-scoped — the customer has no firm until ⑧ — so `requireFirmScope()` is not
+> what guards `/checkout` at all. The census's real value on this train is the **forced
+> declaration** above, and that is what cell W-R now asserts.
+
+**Measured, so the rule's scope is honest.** Across `main` and all four open web branches:
+**zero** `"use server"` modules and **no** `template.tsx`. This train is not repairing a hole — it
+is declining to open the first one, on the most dangerous door in the system, while the instrument
+that would catch it is known blind. **But the blind spot is not empty:** seven non-LEAF App Router
+special files already live there (app/layout.tsx, app/not-found.tsx, and the five route-group
+and client layouts). W-R therefore watches the **whole non-LEAF family as a roster**, not two
+hand-picked names that happen to be zero — see part 3 §4.2.
+
+**If a later reader believes a Server Action is right somewhere here, that is not a local call:**
+it requires the census fix to have landed first, as a stated precondition on the build PR. Gate
+record, "recorded constraints".
 
 ---
 
