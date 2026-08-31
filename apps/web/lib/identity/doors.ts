@@ -68,8 +68,8 @@ import type { SessionTokenAccessor } from "@/lib/session";
  * the door refuses `CLR10 "invalid invite token"` every time.
  *
  * **Declared here, in ONE file, so both ends import it rather than re-typing
- * the string.** The two ends are `app/invite/[token]/page.tsx` (reads it) and
- * P4-4's courier, `app/api/invite/route.ts` (builds the link). A courier that
+ * the string.** The two ends are `app/(entry)/invite/[token]/page.tsx` (reads it) and
+ * P4-4's invite courier (builds the link). A courier that
  * spelled it `?token=` would ship an invite nobody can accept, and nothing
  * would fail until a real employee clicked a real link.
  *
@@ -127,6 +127,177 @@ export async function acceptInvite(
     opts,
   );
   return (out ?? {}) as AcceptInviteReceipt;
+}
+
+// ===========================================================================
+// P4-3's TWO DOORS — the self-serve signup chain's second and third steps.
+//
+// RUNG-0 CENSUS, at the LIVE body (order §0.2 — never a migration's first
+// CREATE). Censused 2026-08-30 across every file in packages/db/migrations/
+// (0001 … 0155, the repo frontier): each of these two functions is created
+// EXACTLY ONCE and no later migration CREATE-OR-REPLACEs either, so the first
+// CREATE *is* the live body in both cases. That is a measured result, not an
+// assumption — `accept_invite` above needed 0145's replacement, and
+// `invite_member`/`create_firm` needed 0147's.
+//
+//   clara.claim_identity(p_display_name text, p_op_key text) -> jsonb
+//     live body 0141:250 · returns {user_id, display_name} (0141:247, built by
+//     _claim_identity_core) · security definer, search_path = clara, pg_temp
+//
+//   clara.request_firm_registration(p_firm_name text, p_note text,
+//                                   p_op_key text) -> jsonb
+//     live body 0145:370 · returns {request_id, status} (0145:402/424/428)
+//
+// ORDER IS LOAD-BEARING, and the DB is what makes it so.
+// `request_firm_registration` raises **CLR04 'unknown actor'** (0145:376-378)
+// for an actor with no `clara.users` row — and `claim_identity` is the only door
+// that mints one for a real person outside an invite. So step 2 must complete
+// before step 3 is attempted. This is not a UI convention that could be
+// reordered for a nicer form; reversing it refuses every time.
+//
+// *** SCOPE NOTE, reported to the lead rather than worked around (order §0.2).
+// The order's own refusal list for these two doors is INCOMPLETE — the census
+// found five refusals it does not name. They are listed in full below because
+// the census governs. No behaviour changes either way: every one of them is a
+// `DoorRefusal` that this surface renders VERBATIM, so an unnamed refusal
+// renders exactly as correctly as a named one. What would have been wrong is a
+// client-side copy of the list used to pre-empt any of them. ***
+//
+// claim_identity's refusals, in the order the bodies raise them:
+//   CLR04  'no authenticated actor'                                   (0141:255)
+//   CLR10  'op_key is required'                                       (0141:260)  <- not in the order's list
+//   CLR04  'a verified email claim is required'                       (0141:270)
+//   ...then _claim_identity_core (0141:219), which it tail-calls:
+//   CLR04  'the agent identity cannot claim a session'                (0141:224)
+//   CLR10  'display name is required'                                 (0141:227)
+//   CLR10  'identity already claimed with a different email'          (0141:237)
+//   CLR10  'that email is already claimed by a different identity'    (0141:244)
+//
+// request_firm_registration's refusals:
+//   CLR04  'no authenticated actor'                                   (0145:375)  <- not in the order's list
+//   CLR04  'unknown actor'                                            (0145:377)  <- not in the order's list
+//   CLR04  'the agent identity cannot request a firm registration'    (0145:384)  <- not in the order's list
+//   CLR10  'op_key is required'                                       (0145:386)
+//   CLR10  'firm name is required'                                    (0145:388)  <- not in the order's list
+//   CLR09  'actor already belongs to a firm'                          (0145:392)
+//   CLR10  'op_key reused with different args'                        (0145:400, 422)
+//   CLR09  'an open registration request already exists'              (0145:406, 426)
+//
+// THE CLR09 PAIR IS THE ONE THE JOURNEY EXISTS TO SHOW HONESTLY. "I am already
+// staff at another firm and want my own" (0145:391-393) and "you already have a
+// request open" (0145:405-407) both refuse at REQUEST time with a legible
+// message — never silently, and never discovered later. Design §4 A names this
+// as the reason the chain calls the door at signup rather than deferring it.
+//
+// THE EMAIL IS NEVER AN ARGUMENT — the same wall accept_invite carries, one door
+// over. `claim_identity` reads it from the verified JWT claim inside the door
+// (`clara._jwt_email()`, 0141:152/261) and refuses CLR04 if the JWT carries no
+// verified email at all (0141:270). Neither wrapper below accepts, forwards or
+// names an email, and neither does the form that calls them. A signature that
+// took one would let a caller claim another person's address.
+//
+// NO `_audit` AND NO DOMAIN EVENT ON EITHER DOOR, by structural necessity —
+// `audit_log.firm_id` and `domain_events.firm_id` are both NOT NULL (0002:278,
+// 0005:80) and these are the two doors that must work before any firm exists
+// (0141:210-217, 0145:350-354). Each door's own receipt is its row. Recorded
+// here so a later reader does not read the absence as an omission.
+// ===========================================================================
+
+/** What `claim_identity` resolves to — `_claim_identity_core`'s own return
+ *  (0141:247). Optional for the same hydrate-never-trust reason
+ *  `AcceptInviteReceipt` is: this is a REPORT of what the DB did, never state to
+ *  paint. The signup chain uses it as a SEQUENCING signal only (the call
+ *  resolved, so step 3 may run) and re-reads nothing from it. */
+export type ClaimIdentityReceipt = {
+  user_id?: string;
+  display_name?: string;
+};
+
+export type ClaimIdentityArgs = {
+  /** The person's own name, from the signup form. The ONLY thing this door
+   *  takes from the client — the email comes from the JWT (see the header). */
+  displayName: string;
+  /** Minted by the CALLER and held stable across a retry of the SAME attempt.
+   *  NOTE, from the body rather than from the estate's usual pattern: this
+   *  door's idempotency is STRUCTURAL, not `op_receipts`-backed — 0141:256-259
+   *  says so outright, because there is no firm to scope a receipt row under
+   *  before this call succeeds. `p_op_key` is still mandatory (CLR10 at
+   *  0141:260) and is validated for signature-shape consistency with every other
+   *  door, but a replay is deduped by the core's own select-then-branch
+   *  (0141:228-246), not by a stored key. So a retry with a DIFFERENT display
+   *  name does not refuse the way `accept_invite`'s arg-complete hash would — it
+   *  UPDATES the name (0141:239). That is the door's behaviour; the caller does
+   *  not paper over it. */
+  opKey: string;
+};
+
+/** `clara.claim_identity` — mints the caller's `clara.users` row from their own
+ *  verified JWT, the step that closes design §3's identity gap for a self-serve
+ *  applicant. A governed act: its `DoorRefusal` propagates untouched for the
+ *  caller to render verbatim, and this module offers no retry of its own. */
+export async function claimIdentity(
+  args: ClaimIdentityArgs,
+  opts: CallDoorOptions = {},
+): Promise<ClaimIdentityReceipt> {
+  const out = await callDoor(
+    "claim_identity",
+    { p_display_name: args.displayName, p_op_key: args.opKey },
+    opts,
+  );
+  return (out ?? {}) as ClaimIdentityReceipt;
+}
+
+/** What `request_firm_registration` resolves to (0145:402/424/428).
+ *
+ *  `status` IS THE DB's OWN WORD — 'open' | 'approved' | 'rejected', the base
+ *  table's CHECK (0145:330). It is NOT 'pending': that is the human name for the
+ *  SCREEN, and `lib/registration/reads.ts`'s header records the same distinction
+ *  from the read side. Nothing here translates it; the copy layer does.
+ *
+ *  A REPLAY RESOLVES HERE TOO, and can carry a status that is not 'open': an
+ *  identical (applicant, op_key, firm_name, note) replays the ORIGINAL request's
+ *  receipt whatever its current status (0145:396-403). So a caller must never
+ *  read `status === "open"` off this receipt as proof a fresh request was just
+ *  created — it may be reporting a request decided days ago. The holding page
+ *  re-reads `firm_registration_requests_visible` for the truth, which is the
+ *  same hydrate-never-trust rule every other door caller in this app obeys. */
+export type RegistrationRequestReceipt = {
+  request_id?: string;
+  status?: string;
+};
+
+export type RequestFirmRegistrationArgs = {
+  firmName: string;
+  /** Optional free text the applicant may add. `null` and `""` are the SAME
+   *  thing to the door — it `nullif(btrim(...), '')`s the argument (0145:389) —
+   *  so the caller does not need to normalise, and must not invent a note. */
+  note: string | null;
+  /** Minted by the CALLER, and — unlike `claim_identity`'s — genuinely dedupe-
+   *  bearing here: the door stores `op_key` ON the row (0145:329) and looks a
+   *  replay up by (applicant, op_key) across ALL statuses (0145:396-397). The
+   *  replay is ARG-COMPLETE: identical (firm_name, note) on the same key replays
+   *  the original receipt; a DIFFERENT arg on the same key refuses CLR10
+   *  'op_key reused with different args' rather than returning someone else's
+   *  receipt. A caller that edits the firm name after a failure must therefore
+   *  mint a FRESH key, and the form below does exactly that. */
+  opKey: string;
+};
+
+/** `clara.request_firm_registration` — records the applicant's request to have a
+ *  firm of their own. A governed act; refusals render verbatim.
+ *
+ *  REQUIRES `claimIdentity` TO HAVE SUCCEEDED FIRST (CLR04 'unknown actor',
+ *  0145:376-378) — see this section's header. */
+export async function requestFirmRegistration(
+  args: RequestFirmRegistrationArgs,
+  opts: CallDoorOptions = {},
+): Promise<RegistrationRequestReceipt> {
+  const out = await callDoor(
+    "request_firm_registration",
+    { p_firm_name: args.firmName, p_note: args.note, p_op_key: args.opKey },
+    opts,
+  );
+  return (out ?? {}) as RegistrationRequestReceipt;
 }
 
 // ---------------------------------------------------------------------------

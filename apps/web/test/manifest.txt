@@ -27,6 +27,8 @@
 components/invite-accept-a11y.test.tsx
 components/invite-accept-form.test.tsx
 components/invite-accept-keyboard.test.tsx
+components/login-a11y.test.tsx
+components/login-keyboard.test.tsx
 components/bank/bank-a11y.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
@@ -47,6 +49,12 @@ components/documents/documents-a11y.test.tsx
 components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
 components/documents/lint-finding-detail.test.tsx
+components/entry/entry-contracts.test.tsx
+components/entry/email-confirmation.test.tsx
+components/entry/pending-a11y.test.tsx
+components/entry/signup-a11y.test.tsx
+components/entry/signup-firm-form.test.tsx
+components/entry/signup-keyboard.test.tsx
 components/firm/agent-tasks-a11y.test.tsx
 components/firm/agent-tasks-keyboard.test.tsx
 components/firm/compliance-watch-affordance.test.tsx
@@ -137,6 +145,7 @@ lib/firm-admin/chat-sharing.test.ts
 lib/firm-admin/compliance.test.ts
 lib/firm-admin/vendor-bindings.test.ts
 lib/identity/doors.test.ts
+lib/identity/signup-doors.test.ts
 lib/journals/api-compose.test.ts
 lib/journals/api.test.ts
 lib/journals/balance.test.ts
@@ -174,6 +183,7 @@ tests/client-scope.test.ts
 tests/firm-scope-db-pins.test.ts
 tests/firm-scope-surfaces.test.ts
 tests/focusRailSubscription.test.mjs
+tests/holding-state.test.ts
 tests/invite-verification.test.ts
 tests/proxy-matcher.test.ts
 tests/public-key.test.ts
