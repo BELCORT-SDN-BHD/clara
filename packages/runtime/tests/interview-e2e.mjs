@@ -353,8 +353,15 @@ async function main() {
     assert.equal(items.filter((it) => it.item_key === "interview_run").length, 1, "the interview_run binding is present exactly once");
     assert.ok(keys.includes("first_year_zero_opening"), "the AMB-11 new-first-year opening item key is present");
     const business = items.filter((it) => it.item_key !== "interview_run");
-    assert.equal(business.length, 15, `15 business items persisted (one per answered segment); got ${business.length}`);
-    for (const it of business) assert.equal(it.state, "answered", `segment item ${it.item_key} is answered`);
+    assert.equal(business.length, 16, `16 business items persisted (one per answered segment, except coa_seed which emits TWO -- coa_seed_decision + the coa_chart_apply consumer, 裁-21 PR-c); got ${business.length}`);
+    for (const it of business) {
+      // coa_chart_apply is the ONE exception: the fixture answers coa_seed "yes" (firm_template),
+      // and coaSeedItemsV3 deliberately stamps that arm `state: "deferred"` -- a TODO the human
+      // clears from the onboarding checklist, never an auto-answered item (裁-23 Q5, no agent
+      // bulk-apply). Every other business item is genuinely answered.
+      const expected = it.item_key === "coa_chart_apply" ? "deferred" : "answered";
+      assert.equal(it.state, expected, `segment item ${it.item_key} is ${expected}`);
+    }
 
     // onboarding_plans.revision_n advanced monotonically — one update_onboarding_plan CAS per
     // confirmed segment (15) plus the interview_run binding write (1). No CLR04/CLR06 surfaced to
@@ -363,7 +370,7 @@ async function main() {
     assert.ok(Number(planF.revision_n) >= n0 + 16, `revision advanced ≥ +16 (bind + 15 answers); n0=${n0} nF=${planF.revision_n}`);
     assert.equal(planF.state, "open", "the plan stays open post-interview (commit_client_onboarding is the separate human ceremony)");
 
-    console.log("[interview-e2e] PASS (positive): full 15-segment v2 drive → interview_complete, 15 items, no dupes, revision advanced");
+    console.log("[interview-e2e] PASS (positive): full 15-segment v2 drive → interview_complete, 16 items, no dupes, revision advanced");
   }
 
   console.log("\nINTERVIEW E2E: ALL PASS");

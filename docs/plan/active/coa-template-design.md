@@ -446,6 +446,12 @@ gate over test data pretending to be a gate over the product.
 **What the file DOES:** four new tables + their RLS/ACL blocks, six new functions, one
 allowlist row, one interview-workflow `_vN` (§D-7, riding PR-c's v4), and the seed rows as DATA.
 
+**SPLIT 2026-08-31 (the beta pivot, 裁-79/裁-80).** Only the interview-workflow `_vN` shipped
+(#463) — the four tables, six functions and allowlist row above are `wake_propose_coa_template_trim`'s
+own infrastructure and are **PARKED, not scheduled**: 裁-77's admitted backend list for the
+pivot does not name this verb. `coa-template-annexes.md:344` carries the trued scope table;
+law 28's mandatory cross-model pass attaches to the trim WHEN it is built, not to #463.
+
 **The four shas above are the PR-0 prestate pins**, re-derived by `pg_get_functiondef` on a
 fresh rig at the then-frontier — **never trusted from this document**, because the frontier moves
 and because survey F2b is this design's own proof that a body can carry a rung no file shows.
