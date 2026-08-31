@@ -14,7 +14,6 @@ import {
   SCOPE_UNSCOPED_SURFACES,
 } from "../lib/require-firm-scope";
 import {
-  LEAF,
   defaultExportName,
   exportedHttpMethods,
   reachableFrom,
