@@ -40,6 +40,11 @@ counterparty-hygiene four, `open_question`, `promote_clarify_to_question`, `requ
   `decline_vendor_identity_binding` · `reset_binding_decline` · `eligible_binding_signer_count` ·
   `binding_identity_review` (the existing "Binding corrections/visibility" Backlog row). `0155`
   adds no verbs.
+- **Two Direction-2 traps a re-run must know** (the FS-10 exit gate re-runs this census; the
+  independent review reproduced 171 and 53 only after catching both): `lib/registers/aging.ts:76`
+  assigns its verb by ternary (`ar_aging`/`ap_aging`) — invisible to literal-string extraction —
+  and `journal_lines` is reached only through `lib/journals/api.ts:102`'s `fetchBounded(path, …)`
+  wrapper, never a direct `getRows("journal_lines", …)` literal.
 - "Wired" includes a named wrapper in `apps/web/lib/**` per the FS-0 order. One nuance recorded:
   `retire_counterparty_alias` is wrapper-wired (`lib/registers/counterparty-doors.ts:110`) but the
   affordance is unreachable until an aliases read exists — `messages/en.json:2045`'s honest note
@@ -54,6 +59,10 @@ counterparty-hygiene four, `open_question`, `promote_clarify_to_question`, `requ
 | #461 (branch web/p4-3-entry-group) | `claim_identity` · `request_firm_registration` |
 
 `create_firm` is in none of them by design — it arrives with the checkout train (FS-4, 裁-73).
+*Stack caveat (review NIT-2): the four P4 branches are a sequential stack over an unmerged common
+ancestor (`5ace35c9`), so a bare `git diff origin/main...<later-branch>` shows the stack's
+superset, not that PR's minimal delta — the per-PR attribution above was cross-checked against the
+classification recount (97 named + 171 wired = 268, no name double-counted).*
 
 ## The 64 deliberately non-UI (ruled/cited)
 
