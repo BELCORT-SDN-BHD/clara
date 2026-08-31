@@ -274,3 +274,38 @@ MCP of its own; the orders' §B stays as an optional recipe.
 **INFORM (fail-closed defaults under this sitting, overrule if wanted):** the native-built
 money-surface cross-model rule above; the handoff's reader is now "the next Claude Code session";
 the orchestrator-fable skill is the first act of every session on this repo.
+
+## The evening sitting (2026-08-31, ~19:50–20:10 MYT, in-terminal) — 裁-88 · 裁-89: the checkout gate's two shaping rulings
+
+### 裁-88 · G13 — beta runs the whole checkout journey on Stripe TEST mode; KYB moves to the launch sitting
+
+**Ruling (two acts in one sitting; the second supersedes the first's KYB timing).** First act: at RM0
+the signup journey still runs through Stripe rather than a bypass (option A of the G13 grill — no
+"free-plan skips checkout" wall is ever built; a bypass is a hole's shape). Second act, superseding
+the KYB timing: **beta serves that journey on the TEST-mode account** — "太麻烦了; pricing 定好并
+official launch 我再做这个" — so **KYB/live activation is NOT a beta precondition**; it becomes a
+**hard precondition of the pricing + official-launch sitting**, submitted early enough to absorb
+Stripe's external review days (consistent with 裁-87's "TEST first; LIVE at the launch sitting").
+Two costs recorded, both accepted: at RM0 a real customer must never be asked to type a test card —
+payment-method collection is **config-driven** (`if_required` while the plan amount is 0, `always`
+once priced; the billing brief's configurability law, not a hard-code) — and **every beta firm
+re-establishes payment on live mode at the launch sitting** (a standing row on that sitting's
+checklist, minted here).
+
+### 裁-89 · G1 = (B) — the admission door folds into ONE transaction; 裁-73's wording amended
+
+**Ruling.** claim → create-firm → close-registration is **one database transaction behind one
+door**; the two-step mint-then-spend shape (and with it the repaired rotation) is retired before it
+is ever built. 裁-73 is **amended in place**: the journey stays Checkout → signed idempotent
+webhook → firm — only the admission-token seam between webhook and firm collapses. Grounds, from
+the gate's three review rounds: the stranding class and M5's unreachable closer lived in the seam;
+the fold **deletes `reconcile_paid_registrations` unbuilt** ("firm exists but registration open"
+becomes unreachable, so the recovery door has no subject); a live bearer credential never enters
+the application tier — the app↔DB hop is the wire with observability attached, the estate having
+already been billed once for `token_hash` reaching ingress logs — continuing 裁-16b's direction
+(at rest → in flight). Honestly scoped: the fold does **NOT** remove M7/G12's double payment
+(settled at ⑦ before ⑧ runs; `uq_frp_registration` + the applier's duplicate-payment problem row
+handle it under either shape). Consequence: a redesign round on the merged #473 documents (the
+door, the battery cells W-D/W-K/W-P/W-P2 and W-E2's affected part, the gate record's G1/G13 rows)
+with a **fresh** independent review, then the build. The gate record's remaining questions stay
+open for the owner.
