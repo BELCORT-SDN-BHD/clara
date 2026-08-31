@@ -152,6 +152,30 @@ export default tseslint.config(
     },
   },
 
+  // apps/web's ROUTE TREE — the same two type-checked promise rules the runtime
+  // block above carries, for a reason P4-2's independent review made concrete
+  // (#451, FIND-1). A dropped `await` on `requireFirmScope()` in a layout does not
+  // fail to compile and does not fail the suite: `redirect()` throws NEXT_REDIRECT
+  // *inside the floating promise*, so the layout returns its markup and renders
+  // firm-scoped chrome for a caller with no firm, while the rejection surfaces
+  // later as an unhandled rejection nobody reads. One missing keyword silently
+  // disarms two of the three entrances. The suite asserts the `await` textually as
+  // well; this rule is the belt to that braces, and it generalises to every future
+  // guard in `app/**` rather than only the three the suite knows about.
+  {
+    files: ["apps/web/app/**/*.{ts,tsx}"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": "error",
+    },
+  },
+
   // apps/web, whole package — the window.open wall (see the const's own header).
   {
     files: ["apps/web/**/*.{ts,tsx}"],
