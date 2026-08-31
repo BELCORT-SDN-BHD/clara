@@ -56,6 +56,7 @@ import {
 import { isDoorRefusal } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 import type { OnboardingClientRow, OnboardingPlanItemRow, OnboardingPlanRow } from "@/lib/onboarding/types";
+import { InterviewRunCard } from "./InterviewRunCard";
 import { OnboardingDoorDialog } from "./OnboardingDoorDialog";
 import { OnboardingItemRow } from "./OnboardingItemRow";
 
@@ -156,9 +157,10 @@ function commitBlockReason(
 
 function ClientOnboardingCard({ clientId, session }: { clientId: string; session: SessionTokenAccessor }) {
   const t = useTranslations("ClientOnboarding.card");
-  const { data, busy, err, clr, act } = useHydratedPart(session, (s) => loadClientOnboarding(clientId, s));
+  const { data, busy, err, clr, reload, act } = useHydratedPart(session, (s) => loadClientOnboarding(clientId, s));
   const [cancelReason, setCancelReason] = useState("");
   const [attestation, setAttestation] = useState("");
+  const [interviewRunActive, setInterviewRunActive] = useState(false);
 
   if (!data) {
     return err ? <StateBanner tone="error" code={clr ? `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}` : undefined}>{err}</StateBanner> : <LoadingState>{t("loading")}</LoadingState>;
@@ -213,6 +215,8 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
         <span className="text-xs text-muted-foreground">· {t(`planState.${plan.state}`)}</span>
       </header>
 
+      <InterviewRunCard clientId={clientId} planId={plan.id} session={session} onActiveChange={setInterviewRunActive} onPlanChanged={reload} />
+
       {plan.opened_by_agent ? (
         <p className="text-xs text-muted-foreground">
           {plan.opener_model ? t("openedByAgentWithModel", { model: plan.opener_model }) : t("openedByAgent")}
@@ -253,12 +257,13 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
       )}
 
       {(() => {
-        // F2 fix (rev-t11) + N1 nit: BOTH doors now render UNCONDITIONALLY
-        // once a plan exists — gating SHAPES, never HIDES, matching
+        // F2 fix (rev-t11) + N1 nit: Commit renders unconditionally once a
+        // plan exists — gating SHAPES, never HIDES, matching
         // OnboardingItemRow's own resolve-door discipline (this file's own
         // header used to apply the house rule two different ways in one
-        // PR). Commit's Confirm is gated by the full, ordered
-        // `commitBlockReason`; Cancel's by the same single `plan.state`
+        // PR). The standalone Cancel door is hidden only while the interview
+        // card owns an active runtime run. Commit's Confirm is gated by the
+        // full, ordered `commitBlockReason`; Cancel's by `plan.state`
         // check cancel_client_onboarding's own body makes (0017:2862-2864:
         // `cl.status<>'onboarding' or p.state<>'open'`).
         const blockReason = commitBlockReason(data.client, plan, items, data.openingSeedFinalized);
@@ -304,29 +309,31 @@ function ClientOnboardingCard({ clientId, session }: { clientId: string; session
                 components/close/CloseDoors.tsx's abandon): a destructive-
                 styled confirm dialog requiring a typed reason, never a
                 silent one-click. */}
-            <OnboardingDoorDialog
-              triggerLabel={t("cancelTrigger")}
-              triggerVariant="destructive"
-              title={t("cancelTitle")}
-              description={t("cancelDescription", { client: data.client?.name ?? clientId })}
-              confirmLabel={t("cancelConfirm")}
-              busy={busy}
-              confirmDisabled={cancelBlocked || cancelReason.trim().length === 0}
-              onConfirm={() =>
-                act(async () => {
-                  await cancelClientOnboarding({ clientId, planId: plan.id, reason: cancelReason.trim() }, { session });
-                }, () => setCancelReason(""))
-              }
-            >
-              {cancelBlocked ? <p className="text-xs text-muted-foreground">{t("cancelBlockedNotOpen")}</p> : null}
-              <Textarea
-                aria-label={t("cancelReasonLabel")}
-                placeholder={t("cancelReasonPlaceholder")}
-                value={cancelReason}
-                onChange={(e) => setCancelReason(e.target.value)}
-                disabled={cancelBlocked}
-              />
-            </OnboardingDoorDialog>
+            {!interviewRunActive ? (
+              <OnboardingDoorDialog
+                triggerLabel={t("cancelTrigger")}
+                triggerVariant="destructive"
+                title={t("cancelTitle")}
+                description={t("cancelDescription", { client: data.client?.name ?? clientId })}
+                confirmLabel={t("cancelConfirm")}
+                busy={busy}
+                confirmDisabled={cancelBlocked || cancelReason.trim().length === 0}
+                onConfirm={() =>
+                  act(async () => {
+                    await cancelClientOnboarding({ clientId, planId: plan.id, reason: cancelReason.trim() }, { session });
+                  }, () => setCancelReason(""))
+                }
+              >
+                {cancelBlocked ? <p className="text-xs text-muted-foreground">{t("cancelBlockedNotOpen")}</p> : null}
+                <Textarea
+                  aria-label={t("cancelReasonLabel")}
+                  placeholder={t("cancelReasonPlaceholder")}
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  disabled={cancelBlocked}
+                />
+              </OnboardingDoorDialog>
+            ) : null}
           </div>
         );
       })()}

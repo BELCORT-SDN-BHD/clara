@@ -33,6 +33,8 @@ components/bank/bank-a11y.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx
+components/clara/interview-run-a11y.test.tsx
+components/clara/interview-run-keyboard.test.tsx
 components/clara/onboarding-begin-keyboard.test.tsx
 components/clara/onboarding-checklist-a11y.test.tsx
 components/clara/onboarding-checklist-keyboard.test.tsx
@@ -146,6 +148,10 @@ lib/firm-admin/compliance.test.ts
 lib/firm-admin/vendor-bindings.test.ts
 lib/identity/doors.test.ts
 lib/identity/signup-doors.test.ts
+lib/interview/api.test.ts
+lib/interview/contract.test.ts
+lib/interview/thread.test.ts
+lib/interview/useInterviewRun.test.ts
 lib/journals/api-compose.test.ts
 lib/journals/api.test.ts
 lib/journals/balance.test.ts
