@@ -463,5 +463,5 @@ lines of documentation on already-ruled exceptions.
 
 **Acceptance.** The 61-suite classification table in the PR body, every "superseded" naming its
 equivalent · the repoint proven route by route **before** the delete commit · the as-run record
-written · both exit gates' outputs attached · the interview runner has an apps/web home (FS-5, PR #<n>) · `PROGRESS.md`'s posture changed **only** after all of
+written · both exit gates' outputs attached · the interview runner has an apps/web home (FS-5, PR #483) · `PROGRESS.md`'s posture changed **only** after all of
 it (port-wave §9.4: that is what "the wave completes" means).
