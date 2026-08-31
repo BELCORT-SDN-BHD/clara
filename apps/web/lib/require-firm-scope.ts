@@ -62,9 +62,11 @@ import {
  *
  * ORDERING NOTE, recorded rather than papered over: `/pending` is built by P4-3
  * (the (entry) route group), which forks AFTER this train merges. Between the two
- * merges this redirect resolves to Next's not-found page. That is the fail-closed
- * outcome — a no-membership session reaches nothing firm-scoped either way — and
- * it is deliberately NOT softened into "redirect only once the page exists": a
+ * merges this redirect resolves to `app/not-found.tsx`. That is fail-closed for
+ * data, but it is a temporary navigation trap: both 404 links (`/` and
+ * `/needs-you`) re-enter `(firm)` and redirect to the still-missing `/pending`,
+ * while the scoped layout's LogoutButton never renders for this caller. The wall
+ * is deliberately NOT softened into "redirect only once the page exists": a
  * conditional wall is a wall with a hole in it, and the window is one train long.
  *
  * `/pending` is NOT public. `lib/supabase/proxy.ts`'s `PUBLIC_PATH_PREFIXES` is
@@ -271,9 +273,9 @@ export const SCOPE_ENTRANCES: ReadonlyArray<{
  * this spine's idea of "public" cannot drift apart — that cross-check is what will
  * make P4-3 register `/signup` here when it appends it there.
  *
- * Next's built-in `/_not-found` is deliberately ABSENT: this app ships no
- * `app/not-found.tsx`, so there is no file to register and registering a
- * non-existent path would be an exemption for something nobody can read.
+ * The root `app/not-found.tsx` exists and renders outside both scoped route
+ * groups. It carries no firm-scoped data and is registered explicitly below;
+ * the page/route-leaf walk does not discover this file by itself.
  */
 export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
   readonly path: string;
@@ -309,6 +311,14 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
       "send /pending to itself forever. Scope belongs to the two scoped groups and " +
       "the one API route, never above them.",
   },
+  {
+    path: "app/not-found.tsx",
+    reason:
+      "The root unmatched-URL surface renders outside both scoped route groups and " +
+      "returns no firm-scoped data. It has no single URL and is not proxy-public. " +
+      "During the P4-2/P4-3 window its two links re-enter the firm layout and loop " +
+      "through the missing /pending route; P4-3 closes that temporary navigation trap.",
+  },
 ];
 
 /**
@@ -340,10 +350,11 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
     reason:
       "EXEMPT BY NECESSITY. A session with no firm must still be able to log out. " +
       "Gating logout on membership would strand exactly the people the holding " +
-      "state exists for — the only way out of /pending is this route. It returns " +
-      "no firm-scoped data at all, and its own walls are the ones that matter " +
-      "there: an exact same-origin proof (Origin + Sec-Fetch-Site, both " +
-      "fail-closed) and POST-only.",
+      "state exists for. Once P4-3 renders /pending this route is the deliberate " +
+      "exit; in the missing-/pending window no logout control renders and the 404 " +
+      "links loop through the wall. It returns no firm-scoped data at all, and its " +
+      "own walls are the ones that matter there: an exact same-origin proof " +
+      "(Origin + Sec-Fetch-Site, both fail-closed) and POST-only.",
   },
   {
     path: "app/api/invite/route.ts",

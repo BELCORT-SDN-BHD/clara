@@ -5,6 +5,7 @@ import {
   bearerCapability,
   beginDocumentIntake,
   finalizeDocumentIntake,
+  IntakeError,
   mapIntakeError,
   uploadDocumentBytes,
 } from "../lib/intake.mjs";
@@ -29,6 +30,22 @@ function sendError(res: express.Response, err: unknown): void {
   }
   const mapped = mapIntakeError(err);
   res.status(mapped.status).json({ error: mapped.code, message: mapped.status === 404 ? "not found" : mapped.message });
+}
+
+function clientErrorStatus(err: unknown): number | null {
+  if (typeof err !== "object" || err === null) return null;
+  const candidate = err as { status?: unknown; statusCode?: unknown };
+  for (const value of [candidate.status, candidate.statusCode]) {
+    if (typeof value === "number" && Number.isInteger(value) && value >= 400 && value < 500) return value;
+  }
+  return null;
+}
+
+function sendSanitizedClientError(res: express.Response, status: number): void {
+  const payload = status === 413
+    ? { error: "payload_too_large", message: "payload too large" }
+    : { error: "bad_request", message: "bad request" };
+  res.status(status).json(payload);
 }
 
 function shuttingDown(): boolean {
@@ -130,12 +147,23 @@ export function intakeRoutes(): express.Router {
     }
   });
 
-  // Express 5 forwards a throw/rejection from an async handler to the next
-  // four-argument error middleware. Keep bearerCapability() outside each
-  // handler's local catch so a denied capability cannot be swallowed before
-  // protected work, while preserving the same response mapping here.
+  // Express 5 forwards parser errors and async throw/rejections to the next
+  // four-argument error middleware. Keep bearerCapability() outside each local
+  // catch so its typed IntakeError reaches the existing 404 mapping. Preserve
+  // typed auth/intake errors first; parser-produced 4xx status/statusCode values
+  // then keep their caller-fault status but receive only sanitized JSON. Unknown
+  // errors still use the intake mapping below.
   router.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     void _next;
+    if (err instanceof AuthError || err instanceof IntakeError) {
+      sendError(res, err);
+      return;
+    }
+    const status = clientErrorStatus(err);
+    if (status !== null) {
+      sendSanitizedClientError(res, status);
+      return;
+    }
     sendError(res, err);
   });
 
