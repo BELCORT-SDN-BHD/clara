@@ -8,7 +8,7 @@ import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import express from "express";
 import { register } from "tsx/esm/api";
-import { detectDocument, scanFile } from "../lib/scan.mjs";
+import { detectDocument, IntakeScanError, scanFile } from "../lib/scan.mjs";
 import { spoolRequest, tryEnterIngress, _resetIntakeGateForTest } from "../lib/spool.mjs";
 import { parseStructured } from "../lib/structured.mjs";
 import { putCanonical, verifyCanonical } from "../lib/storage.mjs";
@@ -25,9 +25,11 @@ async function requestThroughShippedIntakeRouter({
   method = "POST",
   headers = { "content-type": "application/json" },
   body,
+  configureApp,
 }) {
   const { intakeRoutes } = await (intakeRoutesPromise ??= import("../src/intakeRoutes.ts"));
   const app = express();
+  configureApp?.(app);
   // This is the production composition in src/index.ts: the exported router is
   // mounted whole, including its own parser and terminal error middleware.
   app.use(intakeRoutes());
@@ -369,4 +371,33 @@ test("MATERIAL-1 keeps missing and malformed upload Authorization on the typed i
   assert.equal(missing.text, malformed.text);
   assert.deepEqual(missing.json, { error: "not_found", message: "not found" });
   assert.doesNotMatch(missing.text, PRIVATE_DIAGNOSTIC_RE);
+});
+
+test("MATERIAL typed scan errors thrown before the local try keep their code and message", async () => {
+  const scanError = new IntakeScanError(
+    "bad_type",
+    "declared MIME does not match the file signature",
+    415,
+  );
+  const { response, json } = await requestThroughShippedIntakeRouter({
+    path: `/api/intake/documents/${randomUUID()}/bytes`,
+    method: "PUT",
+    headers: { "content-type": "application/octet-stream" },
+    body: "x",
+    configureApp(app) {
+      const originalHeader = app.request.header;
+      app.request.header = function header(name) {
+        if (String(name).toLowerCase() === "authorization") {
+          return { toString() { throw scanError; } };
+        }
+        return originalHeader.call(this, name);
+      };
+    },
+  });
+
+  assert.equal(response.status, 415);
+  assert.deepEqual(json, {
+    error: "bad_type",
+    message: "declared MIME does not match the file signature",
+  });
 });

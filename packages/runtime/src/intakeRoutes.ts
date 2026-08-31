@@ -5,7 +5,7 @@ import {
   bearerCapability,
   beginDocumentIntake,
   finalizeDocumentIntake,
-  IntakeError,
+  isTypedIntakeError,
   mapIntakeError,
   uploadDocumentBytes,
 } from "../lib/intake.mjs";
@@ -155,7 +155,7 @@ export function intakeRoutes(): express.Router {
   // errors still use the intake mapping below.
   router.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     void _next;
-    if (err instanceof AuthError || err instanceof IntakeError) {
+    if (err instanceof AuthError || isTypedIntakeError(err)) {
       sendError(res, err);
       return;
     }
