@@ -55,6 +55,7 @@ import {
   platformStarter, clientChartMap, expectedChartMap, coreFamilies, accountCount,
   eventCount, auditCount, rawAdoption,
   refusalLedgerCounts, withRolledBackTx, asHumanOn, raisedCode,
+  openRootTxn,
 } from "./coa-template-pr-b-helpers.mjs";
 import {
   forkTemplate, upsertFamily, upsertTemplateAccount, publishTemplate,
@@ -228,7 +229,7 @@ test("§1.2 every applied row is is_active + NOT is_bank_account (Annex C cell 1
     "the five special markers land once each, carrying their markers through the core");
 });
 
-test("§1.3 the core's own side-effects survive the loop: one _audit row + one account.upserted event per account, and exactly ONE account.chart_applied", async (t) => {
+test("§1.3 the plant's child side-effects survive the loop: one _audit row + one account.upserted event per account, and exactly ONE account.chart_applied", async (t) => {
   if (unready(t)) return;
   const client = await newInterviewClient(world.users.alice, world.firms.A, {
     tag: "events", answers: { entity_type: "sole_prop" } });
@@ -575,6 +576,119 @@ test("§2.9b concurrent apply on an EXISTING PROPOSED row: the loser gets chart_
   }
 });
 
+test("§2.9c apply-vs-human code race refuses and preserves the committed human name verbatim", async (t) => {
+  if (unready(t)) return;
+  const client = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "apply_human_race", answers: { entity_type: "sdn_bhd" },
+  });
+  const applyKey = opk("apply-human-race");
+  const humanKey = opk("human-race-winner");
+  const humanName = `Human edited ${opk("name")}`;
+  const first = (await rootQuery(
+    `select a.account_code, a.account_type, a.account_class, a.special_acc_type,
+            clara._coa_effective_account_name(a.template_id, a.account_code, a.name, 'sdn_bhd') as template_name
+       from clara.coa_template_families f
+       join clara.coa_template_accounts a
+         on a.template_id = f.template_id and a.family_key = f.family_key
+      where f.template_id = $1 and f.family_key = any($2::text[])
+        and clara._coa_effective_account_name(a.template_id, a.account_code, a.name, 'sdn_bhd') is not null
+      order by f.sort_ordinal, f.family_key, a.sort_ordinal, a.account_code
+      limit 1`,
+    [starter.id, core],
+  )).rows[0];
+  assert.ok(first, "premise: the explicit core-family apply has a first planted account");
+  assert.notEqual(humanName, first.template_name, "premise: the human name is distinguishable from the template name");
+
+  const watchedKeys = [applyKey, `${applyKey}:${first.account_code}`];
+  const beforeApplyReceipts = (await rootQuery(
+    "select count(*)::int as n from clara.op_receipts where op_key = any($1::text[])",
+    [watchedKeys],
+  )).rows[0].n;
+  const beforeApplyAudit = await auditCount(world.firms.A, "apply_coa_template");
+  const beforeChartEvents = await eventCount(world.firms.A, "account.chart_applied");
+  let blocker = null;
+  let applySession = null;
+  try {
+    // Hold the first child receipt key. The APPLY can pass its unlocked empty-chart read, but it
+    // cannot reach the account INSERT/UPSERT until this transaction releases the key. The observed
+    // pg_blocking_pids edge proves the intended interleave; no timing sleep stands in for it.
+    blocker = await openRootTxn();
+    await blocker.client.query(
+      "select clara._reserve_op($1, 'upsert_account', $2, decode(repeat('00', 32), 'hex'))",
+      [world.firms.A, `${applyKey}:${first.account_code}`],
+    );
+    applySession = await openHumanAutocommit(world.users.bob);
+    const applying = applySession.client.query(
+      "select clara.apply_coa_template($1,$2,$3::text[],$4) as r",
+      [client, starter.id, core, applyKey],
+    ).then((r) => ({ ok: true, r: r.rows[0].r }), (e) => ({ ok: false, e }));
+
+    await waitBlockedByOrThrow(applySession.pid, blocker.pid);
+    await humanQuery(
+      world.users.bob,
+      `select clara.upsert_account(
+         p_client => $1, p_code => $2, p_name => $3, p_type => $4,
+         p_special_acc_type => $5, p_op_key => $6, p_account_class => $7)`,
+      [client, first.account_code, humanName, first.account_type,
+        first.special_acc_type, humanKey, first.account_class],
+    );
+    const committed = (await rootQuery(
+      "select name from clara.coa_accounts where client_id = $1 and account_code = $2",
+      [client, first.account_code],
+    )).rows[0]?.name;
+    assert.equal(committed, humanName, "premise: the ordinary human door committed its distinct name before APPLY resumed");
+
+    await blocker.client.query("rollback");
+    const out = await applying;
+    assert.equal(out.ok, false, "APPLY silently succeeded after a human committed the same account code");
+    assert.equal(out.e.code, CLR.badRequest, "the collision is a typed CLR10 refusal");
+    assert.equal(JSON.parse(out.e.detail).reason, "chart_adoption_race",
+      "the collision names the same chart-adoption race family");
+
+    const survived = (await rootQuery(
+      "select name from clara.coa_accounts where client_id = $1 and account_code = $2",
+      [client, first.account_code],
+    )).rows[0]?.name;
+    assert.equal(survived, humanName, "the committed human name was overwritten by the template plant");
+    assert.equal((await rawAdoption(client)).length, 0, "the refused APPLY left an adoption row");
+    const afterApplyReceipts = (await rootQuery(
+      "select count(*)::int as n from clara.op_receipts where op_key = any($1::text[])",
+      [watchedKeys],
+    )).rows[0].n;
+    assert.equal(afterApplyReceipts, beforeApplyReceipts, "the refused APPLY left an outer or child receipt");
+    assert.equal(await auditCount(world.firms.A, "apply_coa_template"), beforeApplyAudit,
+      "the refused APPLY left an apply audit row");
+    assert.equal(await eventCount(world.firms.A, "account.chart_applied"), beforeChartEvents,
+      "the refused APPLY left a chart-level event");
+  } finally {
+    await releaseSession(blocker);
+    await releaseSession(applySession);
+  }
+});
+
+test("§2.9d CONTROL: APPLY plants with audited INSERT semantics and never recuts the shared upsert core", async (t) => {
+  if (unready(t)) return;
+  const r = await rootQuery(
+    `select
+       (select prosrc from pg_proc
+         where oid = 'clara._coa_plant_family(jsonb,uuid,uuid,text,text)'::regprocedure) as plant,
+       (select encode(sha256(convert_to(prosrc, 'UTF8')), 'hex') from pg_proc
+         where oid = 'clara._upsert_account_core(jsonb,uuid,text,text,text,text,text,text)'::regprocedure) as shared_sha`,
+  );
+  const { plant, shared_sha: sharedSha } = r.rows[0];
+  assert.match(plant, /insert\s+into\s+clara\.coa_accounts/i,
+    "the APPLY plant is not INSERT-based");
+  assert.doesNotMatch(plant, /on\s+conflict/i,
+    "the APPLY plant still carries conflict-overwriting semantics");
+  assert.doesNotMatch(plant, /_upsert_account_core/,
+    "the APPLY plant still delegates the collision to the shared upsert core");
+  for (const marker of ["_reserve_op", "_audit", "_append_event", "_finish_op"]) {
+    assert.ok(plant.includes(marker), `the insert-only plant lost its audited child-${marker} step`);
+  }
+  assert.equal(sharedSha, "5e0819f3b1e726b2cd5a6e05c3189992e9ac699910254324b6ba87022f1514e0",
+    "the shared upsert core moved; BLOCKER-2 must change APPLY, not the shared core");
+});
+
 // ===========================================================================
 // §3 -- ANNEX E's FIRST NON-GOAL: no agent path to the BULK apply.
 // ===========================================================================
@@ -918,6 +1032,66 @@ test("§6.2 concurrent family additions compose on the locked adoption row", asy
       "the first writer's family survives the blocked writer's later update");
     assert.ok(ad.families.includes(familyB),
       "the blocked writer's family is appended too -- no attribution is lost");
+  } finally {
+    await releaseSession(t1);
+    await releaseSession(t2);
+  }
+});
+
+test("§6.2b concurrent SAME-family additions lock before the check: loser refuses with one ledger set", async (t) => {
+  if (unready(t)) return;
+  const client = await newInterviewClient(world.users.alice, world.firms.A, {
+    tag: "add_same_race", answers: { entity_type: "sdn_bhd" },
+  });
+  const applied = await applyTemplate(world.users.bob, {
+    client, template: starter.id, opKey: opk("add-same-apply"),
+  });
+  const family = "motor_vehicles";
+  assert.ok(!applied.families.includes(family), "premise: the opt-in family starts outside the adoption");
+  const key1 = opk("add-same-a");
+  const key2 = opk("add-same-b");
+  const beforeReceipts = (await rootQuery(
+    "select count(*)::int as n from clara.op_receipts where fn = 'add_coa_template_family' and op_key = any($1::text[])",
+    [[key1, key2]],
+  )).rows[0].n;
+  const beforeAudit = await auditCount(world.firms.A, "add_coa_template_family");
+  const beforeEvents = await eventCount(world.firms.A, "account.chart_applied");
+  let t1 = null;
+  let t2 = null;
+  try {
+    t1 = await openHumanTxn(world.users.bob);
+    const first = (await t1.client.query(
+      "select clara.add_coa_template_family($1,$2,$3,$4) as r",
+      [client, starter.id, family, key1],
+    )).rows[0].r;
+    t2 = await openHumanAutocommit(world.users.bob);
+    const losing = t2.client.query(
+      "select clara.add_coa_template_family($1,$2,$3,$4) as r",
+      [client, starter.id, family, key2],
+    ).then((r) => ({ ok: true, r: r.rows[0].r }), (e) => ({ ok: false, e }));
+
+    await waitBlockedByOrThrow(t2.pid, t1.pid);
+    await t1.client.query("commit");
+    const out = await losing;
+    assert.equal(out.ok, false, "the stale pre-lock family check let both same-family calls succeed");
+    assert.equal(out.e.code, CLR.badRequest, "the loser is a typed CLR10 refusal");
+    assert.equal(JSON.parse(out.e.detail).reason, "family_already_applied",
+      "the loser re-checks families under the adoption-row lock");
+
+    const ad = await adoptionRead(world.users.bob, client);
+    assert.equal(ad.families.filter((x) => x === family).length, 1,
+      "the adoption carries the family exactly once");
+    assert.equal(await accountCount(client), applied.accounts + first.accounts,
+      "the loser did not re-upsert the winner's accounts");
+    const afterReceipts = (await rootQuery(
+      "select count(*)::int as n from clara.op_receipts where fn = 'add_coa_template_family' and op_key = any($1::text[])",
+      [[key1, key2]],
+    )).rows[0].n;
+    assert.equal(afterReceipts - beforeReceipts, 1, "exactly one outer additive receipt remains");
+    assert.equal(await auditCount(world.firms.A, "add_coa_template_family") - beforeAudit, 1,
+      "exactly one additive audit remains");
+    assert.equal(await eventCount(world.firms.A, "account.chart_applied") - beforeEvents, 1,
+      "exactly one additive chart event remains");
   } finally {
     await releaseSession(t1);
     await releaseSession(t2);

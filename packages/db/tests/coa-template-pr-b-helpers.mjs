@@ -289,6 +289,16 @@ export async function refusalLedgerCounts(client) {
   return r.rows[0];
 }
 
+/** A dedicated root session inside an OPEN transaction, used only to hold a proven lock window.
+ *  The caller must release it with `releaseSession`, which applies the shared rollback -> reset
+ *  role -> reset all teardown discipline. */
+export async function openRootTxn() {
+  const client = await getPool().connect();
+  await client.query("begin");
+  const pid = (await client.query("select pg_backend_pid() as pid")).rows[0].pid;
+  return { client, pid };
+}
+
 // ---------------------------------------------------------------------------
 // The mutant harness -- identical in shape to PR-a's, restated here so this file stands alone.
 // ---------------------------------------------------------------------------
