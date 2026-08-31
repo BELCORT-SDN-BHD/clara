@@ -27,13 +27,18 @@ says additions land as ADR entries and the digest is re-trued when one does).
    the interview runner's `apps/web` home (裁-78) — not for the P6-C1…C7 trains.
 6. **The G1 clocks are post-beta** (裁-76, amending 裁-59): Wave G's criterion is the interactive
    agentic product; the three-switch ceremony follows with real traffic.
-7. **Development leadership passes to Codex** (裁-82); Stripe is entirely Codex's, TEST mode first,
-   keys only in the Codex MCP env and server secrets (裁-81).
-8. **The independent review leg under Codex** (裁-84): a fresh, separate `codex exec` read-only
-   review + the owner's read. **Digest law 28's "cross-model" clause is amended in substance to
-   "cross-session"**; ADR-061's uniformity is unchanged. *Orchestrator's dissent on file in the
-   08-31 ledger: the two model families caught disjoint defect classes this fortnight; a Claude leg
-   on the four money/auth surfaces of the sprint was recommended and declined.*
+7. **The seat stays in the Claude Code session; lanes are chosen by fit** (裁-82 as amended the
+   same day by 裁-85 — the `orchestrator-fable` philosophy: the most effective, suitable and
+   economical model that does not sacrifice quality; a family that is out is substituted, builds
+   included). Stripe's account-level objects are created from DB rows through this session's
+   Stripe connector, TEST mode first; lanes build the code with keys env-to-env only (裁-81 →
+   裁-87).
+8. **The lean review ladder** (裁-84 as amended by 裁-86): ONE fresh-context opus read-only review
+   per code PR, the same reviewer re-verifying the fold; **law 28 is KEPT** — the Codex-build /
+   opus-review split is the cross-model pass, and a native-built money/auth/webhook/tenant-creation
+   surface adds a Codex read-only leg; **every frontend train walks its journey in a real browser
+   (Playwright) on the built app**, the axe scan riding the walk. ADR-061's uniformity is
+   unchanged. *(裁-84's cross-session reading and the orchestrator's dissent to it are moot.)*
 9. **A reduced Wave G stays in front of beta** (裁-83): factory reset · apply `0155` · the
    sixteen-step happy-path walk · as-run.
 
@@ -43,9 +48,10 @@ says additions land as ADR entries and the digest is re-trued when one does).
   "trial", never "RM0"; nothing invoices until `amounts_ruled`.
 - **Law 85 — Honest notes are a lawful permanent state for a paused lane**, swept against the
   lane's `PROGRESS.md` row (ADR-0075 §6), never against a merge that will not come.
-- **Law 28 amended**: cross-session under a single model family satisfies the money-touching
-  review requirement (裁-84). Law 83 (ADR-0076): the switch ceremony is one combined G1 ceremony
-  of three switches, post-beta (裁-40 · 44 · 59 · 76).
+- **Law 28 kept** (裁-86): the Codex-build / opus-review split is the cross-model pass; a
+  native-built money surface adds a Codex read-only leg. **The e2e leg**: a frontend train is
+  DONE only after a real-browser walk of its journey on the built app. Law 83 (ADR-0076): the
+  switch ceremony is one combined G1 ceremony of three switches, post-beta (裁-40 · 44 · 59 · 76).
 
 ## What this entry does NOT change
 
