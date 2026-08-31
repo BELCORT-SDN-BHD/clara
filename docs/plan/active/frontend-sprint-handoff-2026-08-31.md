@@ -165,7 +165,87 @@ full-suite gates.
 4. Sign ADR-0077 (the product-law rulings of 08-30/08-31) into the digest.
 5. The pricing sitting (the RM amounts, 裁-58) — before or after launch, the owner's date.
 
-## 8 · What "beta-ready" means (the definition of done)
+## 8 · Design law, and every resource you must consume (the owner's standing question)
+
+**The design authority is the repo github.com/BELCORT-SDN-BHD/clarabook-frontend** (PR #1 merged
+2026-08-26, `a7709883`; one open PR #2 on the brand guideline — re-fetch at FS-9). Owner rulings
+Q1/Q4 (`mohe-grill-rulings-2026-08-27.md`): its output is **DESIGN LAW + prototype evidence**; the
+production app is `apps/web` in THIS repo; the design system, brand, routing IA and screens are
+**PORTED, never redesigned** — "no redesign should be needed" is the standard you are held to, and a
+deviation exists only as an owner ruling (裁-N) recorded in a ledger, never absorbed. The prototype
+is a Vite/JS app with a fixture adapter: port its CONTRACTS and its look, not its code (Q1 grounds:
+no compile-time parts guard, a hand-rolled router, `createMutationIntent` never called).
+
+**Read these, in that repo, before the first line of any surface** (paths are that repo's):
+- **Founder decisions and gate status** — 01_FRONTEND_DECISION_LOG.md (the latest settled decision
+  wins; brand-foundation changes need founder approval) · 00_FRONTEND_DESIGN_PROGRAM.md (scope and
+  sequence) · 02_FRONTEND_GOVERNING_BRIEF.md · HANDOFF.md (the machine setup and the verification
+  receipt: 14 contract tests, bundle budgets, 42/42 brand checksums).
+- **Brand** — output/pdf/clarabook-brand-guideline-package-v1.0/public/ (the 25-page guideline PDF,
+  the Ledger Fold platform mark, the Clara mascot — Clara is the agent, ClaraBook the platform; the
+  identity canvas #F7F6F2 is for entry pages only; white-dominant product canvas) · g3-identity/ ·
+  07_G3_1_IDENTITY_DIRECTION_REVIEW.md · 08_G3_2_LEDGER_FOLD_IDENTITY_SYSTEM_REVIEW.md.
+- **Tokens and components** — g5-design-system/docs/01-TOKEN-CONTRACT.md (the contract
+  `apps/web/app/globals.css` cites section by section: shell #F7F7F5 vs surface-subtle #F5F6F4,
+  `--interaction` and `--focus` as separate roles, `--clara` reserved for Clara-actor attribution,
+  Source Sans 3 / Source Serif 4 as local fonts, the space/radius/motion scales) ·
+  02-COMPONENT-MATRIX.md · 03-PATTERN-CONTRACTS.md · 04-STATE-ACCESSIBILITY-CONTRACT.md ·
+  05-FRONTEND-HANDOFF-BOUNDARY.md · the executable reference g5-design-system/clarabook-design-system/
+  (**shadcn/Base UI first — never invent a competing primitive**).
+- **The prototype, the descriptive parity reference** — g6-high-fidelity/clarabook-prototype/
+  (every screen and component; the thread model; client switch as a security event) and its
+  handoff/FRONTEND_BACKEND_CONTRACT.md + frontend-backend-manifest.json + frontend-action-manifest.json
+  (the integration LAW: the browser never holds a service credential · a slug selects, UUID+RLS
+  authorises · no exact verb = no enabled action · the browser computes no cents · revision +
+  idempotency on every mutation · re-read after success AND failure · transport status before
+  business refusal · unknown parts fail closed). `docs/plan/active/codex-frontend-handoff-errata-2026-08-27.md`
+  trues seven stale rows of those manifests, and the verb census supersedes their journey table.
+- **Reference provenance** — mobbin-evidence/ + 03_G1_PRIMARY_SOURCE_RESEARCH.md ·
+  05_G2_MOBBIN_FOUNDATION_SAMPLE.md · 06_G2_COMPLETE_REFERENCE_REPORT.md · 09_G4_G6_REFERENCE_AND_PROCESS_BRIEF.md.
+  **Mobbin evidence FIRST for any new UI/flow pattern**; references inform hierarchy and behaviour,
+  never identity, scope or backend law. The in-repo grounding files
+  (`docs/plan/active/p4-mobbin-grounding-2026-08-28.md`, `docs/plan/active/mobbin-grounding-wave-2026-08-28.md`)
+  show the expected shape: cited screens → takeaways mapped to EXISTING components → named anti-patterns.
+- **Change control** (PR #1 §8) binds here too: **A** brand-foundation (founder approval + decision-log
+  entry + regenerate the package and checksums) · **B** design-system foundation (shadcn base; token,
+  doc and executable reference move together; founder approval if the visual language moves) ·
+  **C** product flow/page (manifest check, Mobbin first, preserve the firm/client boundary and
+  full-screen Clara resolution, reuse components, update manifests and tests, no fixture-only action
+  may look authoritative) · **D** adapter/integration (exact settled contracts only). PR #1 §9's
+  review checklist is part of every frontend PR's self-review.
+
+**Already ported into this repo — keep it that way:** `apps/web/app/globals.css` (tokens byte-verbatim
+from `a86e48a`) · `apps/web/components.json` base-nova · the root `eslint.config.mjs` (the raw-colour and
+default-palette ban scoped to `apps/web`'s app/ and components/ trees) · the three a11y gates (`apps/web/scripts/check-token-contrast.mjs`,
+`apps/web/test/a11yRules.ts`, `apps/web/test/keyboardWalk.ts`; the WCAG 2.2 target-size gate is
+owed at P6-3) · `apps/web/AGENTS.md` house laws · R4's StateBanner-over-toast and prose-state laws
+(`apps/web/components/common/state.tsx`) · the two dialog-testing laws · light theme only (a beta
+ruling) · desktop-first + the mobile corridor (Q6) · next-intl for every string. **Ruled deviations
+from the prototype — cite them, never "fix" them back:** Q2 rail-first with thread escalation (the
+prototype's Clara-as-modal Sheet rejected) · Q3 the two-level IA (its "data library" folds into
+documents/knowledge) · Q5 three-layer i18n (its English-only line superseded) · R7 onboarding as the
+in-thread interview (its wizard routes superseded) · R3/裁-1 the focus ring unified on shadcn at 70%
+· 裁-64③ the offset Button ring · 裁-2 4c the `--input` recut (origin: that repo, then re-port).
+
+**The vendored skills (plain markdown you can read; open the SKILL.md before building a surface of
+that kind):** `.claude/skills/emil-design-eng` (motion explains change · immediate feedback · visible
+focus · no decorative perpetual animation) · `.claude/skills/animate` · `.claude/skills/animation-vocabulary`
+· `.claude/skills/review-animations` · `.claude/skills/improve-animations` ·
+`.claude/skills/find-animation-opportunities` · `.claude/skills/apple-design` · `.claude/skills/ask-sonner`
+· `.claude/skills/shadcn` (+ its rules, CLI and registry notes) · `.claude/skills/design-an-interface`
+· `.claude/skills/codebase-design` · `.claude/skills/tdd` · `.claude/skills/prototype` · `.claude/skills/qa`.
+The Claude-only plugin skills `impeccable` and `frontend-design` are NOT readable by you; their
+role — the per-surface polish/acceptance lens of Q9's DONE rung 4 — is filled by `emil-design-eng` +
+`apple-design` + the prototype parity pass (FS-9).
+
+**The MCP servers you must mount yourself** (Claude's `.mcp.json` does not reach a Codex session;
+exact TOML in the orders' §B): **mobbin** (reference grounding) · **shadcn** (registry queries) ·
+**codebase-memory-mcp** (the code graph, constraint 7) · **context7** (already mounted — the
+newest official docs for Next 16 · `@opennextjs/cloudflare` · shadcn · `@supabase/ssr` · Stripe,
+before building against a remembered API) · **stripe** (裁-81). **Every PR body carries the line
+"Skills/MCP consumed: …"** — "none" is honest; a named-but-unused skill is a false claim.
+
+## 9 · What "beta-ready" means (the definition of done)
 
 All sixteen happy-path steps walk end to end on the reset estate with the desktop corpus —
 signup → checkout (test price, test card) → firm born → members invited → client onboarded through
