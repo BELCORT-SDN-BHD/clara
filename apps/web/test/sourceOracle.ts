@@ -968,7 +968,8 @@ function mutatedNames(file: ts.SourceFile): Set<string> {
     } else if (ts.isCallExpression(node)) {
       const access = memberAccess(node.expression);
       const name = access === null ? null : rootIdentifier(access.receiver);
-      if (name !== null && access !== null && access.member !== null && MUTATING_METHODS.has(access.member)) names.add(name);
+      if (name !== null && access !== null
+          && (access.member === null || MUTATING_METHODS.has(access.member))) names.add(name);
       const receiver = access === null ? null : unwrappedExpression(access.receiver);
       if (receiver !== null && ts.isIdentifier(receiver) && receiver.text === "Object"
           && access?.member === "assign" && node.arguments[0] !== undefined) {
@@ -1095,6 +1096,35 @@ const CAPABILITY_IMPORT = "../lib/intake.mjs";
 const RESPONSE_HELPER_NAMES = new Set(["sendError"]);
 const RESPONSE_TERMINAL_METHODS = new Set(["download", "end", "json", "redirect", "send", "sendFile", "sendStatus"]);
 const RESPONSE_CHAIN_METHODS = new Set(["attachment", "cookie", "header", "links", "location", "set", "setHeader", "status", "type", "vary"]);
+
+function responseValue(expression: ts.Expression): boolean {
+  const value = unwrappedExpression(expression);
+  if (ts.isIdentifier(value) || ts.isLiteralExpression(value)
+      || ts.isNoSubstitutionTemplateLiteral(value)
+      || value.kind === ts.SyntaxKind.TrueKeyword || value.kind === ts.SyntaxKind.FalseKeyword
+      || value.kind === ts.SyntaxKind.NullKeyword) return true;
+  const propertyRead = (candidate: ts.Expression): boolean => {
+    const target = unwrappedExpression(candidate);
+    if (ts.isIdentifier(target)) return true;
+    if (ts.isPropertyAccessExpression(target)) return propertyRead(target.expression);
+    return ts.isElementAccessExpression(target) && target.argumentExpression !== undefined
+      && (ts.isStringLiteralLike(target.argumentExpression) || ts.isNumericLiteral(target.argumentExpression))
+      && propertyRead(target.expression);
+  };
+  if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) return propertyRead(value);
+  if (ts.isArrayLiteralExpression(value)) {
+    return value.elements.every((element) => ts.isOmittedExpression(element)
+      || (!ts.isSpreadElement(element) && responseValue(element as ts.Expression)));
+  }
+  if (ts.isObjectLiteralExpression(value)) {
+    return value.properties.every((property) => {
+      if (ts.isShorthandPropertyAssignment(property)) return true;
+      return ts.isPropertyAssignment(property) && !ts.isComputedPropertyName(property.name)
+        && responseValue(property.initializer);
+    });
+  }
+  return false;
+}
 
 function flattenHandlers(nodes: readonly ts.Expression[], file: ts.SourceFile): ts.Expression[] {
   const handlers: ts.Expression[] = [];
@@ -1253,36 +1283,57 @@ function responseOnlyCatch(
   const checker = checkerFor(file);
   const responseSymbol = checker.getSymbolAtLocation(responseName);
   if (responseSymbol === undefined) return false;
-  const helperDeclarationRanges = new Set<string>();
-  for (const statement of file.statements) {
-    if (!ts.isFunctionDeclaration(statement) || statement.name === undefined
-        || !RESPONSE_HELPER_NAMES.has(statement.name.text)) continue;
-    helperDeclarationRanges.add(`${statement.getStart(file)}:${statement.end}`);
-  }
-  const directResponse = (expression: ts.Expression): boolean => {
+  const helperDeclarationRanges = new Set(file.statements
+    .filter((statement): statement is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(statement) && statement.name !== undefined
+        && RESPONSE_HELPER_NAMES.has(statement.name.text))
+    .map((declaration) => `${declaration.getStart(file)}:${declaration.end}`));
+  const directResponse = (expression: ts.Expression, symbol = responseSymbol): boolean => {
     const value = unwrappedExpression(expression);
-    return ts.isIdentifier(value) && checker.getSymbolAtLocation(value) === responseSymbol;
+    return ts.isIdentifier(value) && checker.getSymbolAtLocation(value) === symbol;
   };
-  const responseChain = (expression: ts.Expression): boolean => {
+  const responseChain = (expression: ts.Expression, symbol: ts.Symbol): boolean => {
     const value = unwrappedExpression(expression);
-    if (directResponse(value)) return true;
+    if (directResponse(value, symbol)) return true;
     if (!ts.isCallExpression(value)) return false;
     const access = memberAccess(value.expression);
     return access !== null && access.member !== null && RESPONSE_CHAIN_METHODS.has(access.member)
-      && responseChain(access.receiver);
+      && value.arguments.every(responseValue) && responseChain(access.receiver, symbol);
+  };
+  const terminalResponseCall = (call: ts.CallExpression, symbol: ts.Symbol): boolean => {
+    const access = memberAccess(unwrappedExpression(call.expression));
+    return access !== null && access.member !== null && RESPONSE_TERMINAL_METHODS.has(access.member)
+      && call.arguments.every(responseValue) && responseChain(access.receiver, symbol);
+  };
+  // Response helpers are intentionally one hop: their own body may contain only
+  // terminal response calls. A helper call from that body is active work.
+  const responseHelperBody = (declaration: ts.FunctionDeclaration): boolean => {
+    const helperResponse = declaration.parameters[0]?.name;
+    if (declaration.body === undefined || helperResponse === undefined || !ts.isIdentifier(helperResponse)
+        || declaration.body.statements.length === 0) return false;
+    const helperResponseSymbol = checker.getSymbolAtLocation(helperResponse);
+    if (helperResponseSymbol === undefined) return false;
+    return declaration.body.statements.every((statement) => {
+      const expression = ts.isExpressionStatement(statement)
+        ? statement.expression
+        : ts.isReturnStatement(statement) ? statement.expression : undefined;
+      const value = expression === undefined ? undefined : unwrappedExpression(expression);
+      return value !== undefined && ts.isCallExpression(value)
+        && terminalResponseCall(value, helperResponseSymbol);
+    });
   };
   const responseCall = (call: ts.CallExpression): boolean => {
     const callee = unwrappedExpression(call.expression);
     if (ts.isIdentifier(callee)) {
       const symbol = checker.getSymbolAtLocation(callee);
-      const knownHelper = (symbol?.declarations ?? []).some((declaration) => ts.isFunctionDeclaration(declaration)
-        && helperDeclarationRanges.has(`${declaration.getStart(declaration.getSourceFile())}:${declaration.end}`));
-      return knownHelper
-        && call.arguments[0] !== undefined && directResponse(call.arguments[0]);
+      const helper = (symbol?.declarations ?? []).find((declaration): declaration is ts.FunctionDeclaration =>
+        ts.isFunctionDeclaration(declaration)
+          && helperDeclarationRanges.has(`${declaration.getStart(declaration.getSourceFile())}:${declaration.end}`));
+      return helper !== undefined && call.arguments[0] !== undefined
+        && directResponse(call.arguments[0]) && call.arguments.every(responseValue)
+        && responseHelperBody(helper);
     }
-    const access = memberAccess(callee);
-    return access !== null && access.member !== null && RESPONSE_TERMINAL_METHODS.has(access.member)
-      && responseChain(access.receiver);
+    return terminalResponseCall(call, responseSymbol);
   };
   return catchClause.block.statements.every((statement) => ts.isExpressionStatement(statement)
     && ts.isCallExpression(unwrappedExpression(statement.expression))

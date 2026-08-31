@@ -97,8 +97,8 @@ export function intakeRoutes(): express.Router {
       res.status(415).json({ error: "bad_type", message: "content-type must be application/octet-stream" });
       return;
     }
+    const token = bearerCapability(req.header("authorization"));
     try {
-      const token = bearerCapability(req.header("authorization"));
       await uploadDocumentBytes({ withRuntime, intakeId, token, readable: req });
       res.status(204).end();
     } catch (err) {
@@ -116,8 +116,8 @@ export function intakeRoutes(): express.Router {
       res.status(404).json({ error: "not_found", message: "not found" });
       return;
     }
+    const token = bearerCapability(req.header("authorization"));
     try {
-      const token = bearerCapability(req.header("authorization"));
       const out = await finalizeDocumentIntake({
         withRuntime,
         intakeId,
@@ -128,6 +128,15 @@ export function intakeRoutes(): express.Router {
     } catch (err) {
       sendError(res, err);
     }
+  });
+
+  // Express 5 forwards a throw/rejection from an async handler to the next
+  // four-argument error middleware. Keep bearerCapability() outside each
+  // handler's local catch so a denied capability cannot be swallowed before
+  // protected work, while preserving the same response mapping here.
+  router.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    void _next;
+    sendError(res, err);
   });
 
   return router;

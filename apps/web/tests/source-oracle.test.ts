@@ -154,8 +154,15 @@ describe("the AST call graph and execution-dominance proof", () => {
       export default async function S() { await scope[key](); }`;
     const thirdExport = `import * as scope from "@/lib/require-firm-scope";
       export default async function S() { await scope.resolveFirmScope(); }`;
+    const secondExport = `import * as scope from "@/lib/require-firm-scope";
+      export default async function S() { await scope.firmScopeGuard(); }`;
+    const unrelated = `import * as other from "./other";
+      const key = "requireFirmScope";
+      export default async function S() { await other[key](); }`;
     assert.throws(() => spineGuardProof(computed, "S"), /unresolvable spine import identity/);
+    assert.throws(() => spineGuardProof(secondExport, "S"), /unresolvable spine import identity/);
     assert.throws(() => spineGuardProof(thirdExport, "S"), /unresolvable spine import identity/);
+    assert.equal(spineGuardProof(unrelated, "S").dominates, false);
   });
 
   it("only INVOKED local functions enter the reachable graph", () => {
@@ -321,6 +328,7 @@ describe("module-level state is scoped by the AST, not a whole-file regex", () =
       "const c = Object.freeze({ seen: 0 }); (c as { seen: number }).seen = 1;",
       "const c = [] as const; (c as unknown as string[]).push('value');",
       'const c = [] as const; (c as unknown as string[])["push"]("value");',
+      'const op = "push"; const c = [] as const; (c as unknown as string[])[op]("value");',
       "const c = { seen: 0 } as const; delete c.seen;",
       "const c = makeStore(); ((c satisfies { seen: number })!).seen = 1;",
       "const c = makeStore(); (<{ seen: number }>c).seen = 1;",

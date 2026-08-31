@@ -412,6 +412,70 @@ describe("NEW-1 — the leg registry is BOUND to the runtime's real routes", () 
     assert.deepEqual(runtimeRoutesFrom(shadowedHelper).map((route) => route.capability), [false]);
   });
 
+  it("PIN NEW-1g-h: response-only calls cannot evaluate denial-path work", () => {
+    const routeWith = (tail: string, helper = "") => `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      ${helper}
+      export function intakeRoutes() {
+        const router = express.Router();
+        router.put("/api/intake/caught", async (_req, res) => {
+          try { bearerCapability("x"); } ${tail}
+        });
+        return router;
+      }`;
+    const helper = "function sendError(response: express.Response, _err: unknown): void { response.end(); }";
+    const attacks = [
+      routeWith("catch { res.json(await mutateBooks()); }"),
+      routeWith('catch { res.status(await mutateBooks()).json({ error: "denied" }); }'),
+      routeWith("catch (err) { sendError(res, await mutateBooks()); }", helper),
+    ];
+    assert.deepEqual(
+      attacks.map((source) => runtimeRoutesFrom(source)[0]?.capability),
+      [false, false, false],
+    );
+
+    const passiveCalls = [
+      routeWith('catch { res.json({ error: "denied" }); }'),
+      routeWith("catch (err) { sendError(res, err); }", helper),
+    ];
+    assert.deepEqual(
+      passiveCalls.map((source) => runtimeRoutesFrom(source)[0]?.capability),
+      [true, true],
+    );
+  });
+
+  it("PIN NEW-1g-i: a named response helper must itself be response-only", () => {
+    const routeWith = (helper: string) => `import express from "express";
+      import { bearerCapability } from "../lib/intake.mjs";
+      ${helper}
+      export function intakeRoutes() {
+        const router = express.Router();
+        router.put("/api/intake/caught", async (_req, res) => {
+          try { bearerCapability("x"); } catch (err) { sendError(res, err); }
+        });
+        return router;
+      }`;
+    const mutating = routeWith(`function sendError(response: express.Response, _err: unknown): void {
+      mutateBooks();
+      response.end();
+    }`);
+    const clean = routeWith(
+      "function sendError(response: express.Response, _err: unknown): void { response.end(); }",
+    );
+    const chained = routeWith(`function finish(response: express.Response): void { response.end(); }
+      function sendError(response: express.Response, _err: unknown): void { finish(response); }`);
+    assert.deepEqual(
+      [mutating, clean, chained].map((source) => runtimeRoutesFrom(source)[0]?.capability),
+      [false, true, false],
+    );
+  });
+
+  it("PIN NEW-1g-j: an empty catch alone does not prove capability", () => {
+    const source = `import { bearerCapability } from "../lib/intake.mjs";
+      router.put("/api/intake/swallowed-only", (_req, _res) => { try { bearerCapability("x"); } catch {} });`;
+    assert.deepEqual(runtimeRoutesFrom(source).map((route) => route.capability), [false]);
+  });
+
   it("PIN NEW-1f-c: definite termination propagates through blocks and constant branches", () => {
     const blocked = `import express from "express";
       import { bearerCapability } from "../lib/intake.mjs";

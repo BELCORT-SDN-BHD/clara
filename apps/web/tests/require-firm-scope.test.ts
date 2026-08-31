@@ -60,6 +60,7 @@ import { scopeSpineModuleStateReport } from "../test/sourceOracle";
 
 const SUB = "11111111-1111-4111-8111-111111111111";
 const FIRM = "22222222-2222-4222-8222-222222222222";
+const SECOND_SUB = "33333333-3333-4333-8333-333333333333";
 
 /** A well-formed context row. Every field distinct and non-default, so a grant
  *  cell asserting `deepEqual` cannot pass against a fabricated blank. */
@@ -164,7 +165,7 @@ describe("resolveFirmScope — the one decision", () => {
     assert.equal(sawToken, SESSION.accessToken);
   });
 
-  it("NO SESSION denies — no_membership would be a different, wrong story", async () => {
+  it("N4 — an anonymous caller denies; no_membership would be a different, wrong story", async () => {
     await assertDenied(resolveFirmScope, noSession, "no_session");
     await assertMutantIsRed(noSession, "no_session");
   });
@@ -174,10 +175,75 @@ describe("resolveFirmScope — the one decision", () => {
     await assertMutantIsRed(sessionThrows, "no_session");
   });
 
-  it("an EMPTY read denies — no_membership", async () => {
+  it("N1 — a signed-in caller with no membership denies", async () => {
     await assertDenied(resolveFirmScope, withRows([]), "no_membership");
     await assertMutantIsRed(withRows([]), "no_membership");
   });
+
+  it("N2 — a removed member is denied by a fresh caller_context read", async () => {
+    let rows: CallerContextRow[] = [MEMBER];
+    let reads = 0;
+    const deps: ScopeDeps = {
+      resolveSession: async () => SESSION,
+      read: async () => {
+        reads += 1;
+        return rows;
+      },
+    };
+    assert.equal((await resolveFirmScope(deps)).granted, true, "control: membership was initially live");
+    rows = [];
+    await assertDenied(resolveFirmScope, deps, "no_membership");
+    assert.equal(reads, 2, "the second decision reused the prior membership instead of re-reading");
+  });
+
+  it("N3 — a second-firm session cannot inherit the first session's membership", async () => {
+    let session = SESSION;
+    let reads = 0;
+    const deps: ScopeDeps = {
+      resolveSession: async () => session,
+      read: async (resolved) => {
+        reads += 1;
+        return resolved.subject === SUB ? [MEMBER] : [];
+      },
+    };
+    assert.equal((await resolveFirmScope(deps)).granted, true, "control: the first firm session grants");
+    session = { accessToken: "token-B", subject: SECOND_SUB };
+    await assertDenied(resolveFirmScope, deps, "no_membership");
+    assert.equal(reads, 2, "the second firm session reused a cached membership object");
+  });
+
+  it("H10 — caller_context is re-read after accept_invite changes membership", async () => {
+    let rows: CallerContextRow[] = [];
+    let reads = 0;
+    const deps: ScopeDeps = {
+      resolveSession: async () => SESSION,
+      read: async () => {
+        reads += 1;
+        return rows;
+      },
+    };
+    await assertDenied(resolveFirmScope, deps, "no_membership");
+    // The governed accept_invite door has succeeded; its return is not authority.
+    // Only a new caller_context read may prove the membership it minted.
+    rows = [MEMBER];
+    const afterAccept = await resolveFirmScope(deps);
+    assert.equal(afterAccept.granted, true, "the post-accept caller_context row was not observed");
+    assert.equal(reads, 2, "accept_invite was trusted without a caller_context re-read");
+  });
+
+  for (const [probe, role, roleRank] of [
+    ["C1", "owner", 3],
+    ["C2", "admin", 2],
+    ["C3", "bookkeeper", 1],
+    ["C4", "viewer", 0],
+  ] as const) {
+    it(`${probe} — an active ${role} membership grants`, async () => {
+      const row = { ...MEMBER, role, role_rank: roleRank };
+      const outcome = await resolveFirmScope(withRows([row]));
+      assert.equal(outcome.granted, true);
+      assert.deepEqual((outcome as { context: CallerContextRow }).context, row);
+    });
+  }
 
   it("a FAILED read denies — read_failed, and never propagates the throw", async () => {
     await assertDenied(resolveFirmScope, readThrows, "read_failed");
