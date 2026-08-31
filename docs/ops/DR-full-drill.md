@@ -23,7 +23,7 @@ must reproduce (Lane A §1):
   `graphile_worker` (+ its `migrations` tracker) — captured as **one consistent unit**
   so the engine **resumes** rather than re-bootstraps.
 - **Roles (cluster-level — NOT in a `pg_dump`):** the 10 clara-custom roles, recreated
-  by `deploy/roles-bootstrap.sql` (§2).
+  by `packages/db/deploy/roles-bootstrap.sql` (§2).
 - **Ownership + the GRANT/REVOKE/RLS matrix:** the two-lane security model **is** the
   grants + `clara_fn_owner` object ownership. A `SECURITY DEFINER` writer executes as
   its owner, so a `--no-owner`/`--no-privileges` restore is a **privilege-escalation**,
@@ -37,10 +37,10 @@ must reproduce (Lane A §1):
 | Artifact | Role |
 |---|---|
 | `scripts/backup.mjs --profile full` (`pnpm db:backup:full`) | dumps the four authoritative schemas **WITH owners + privileges**; asserts the full inventory; writes a globals **evidence/diff** artifact (not restored). |
-| `deploy/roles-bootstrap.sql` | idempotent recreation of the 10 clara-custom roles with exact attributes/memberships/settings. **FRESH-TARGET-ONLY — never on a live project** (it fails closed if a login shell is already LOGIN unless `-v allow_relogin_reset=1`; re-running on live would NOLOGIN the pools). **Run FIRST** on a fresh target. |
-| `scripts/restore-full.mjs` (`pnpm db:restore:full`) | one destructive-guard; runs roles-bootstrap → single-transaction restore → prints the manual post-restore checklist. Does **not** auto-run ceremonies or touch Storage. |
-| `scripts/dr-verify.mjs` (`pnpm db:dr:verify`) | the §5 verification battery — diffs source↔target across every fidelity category, enforces a completeness floor, refuses a self-comparison; exits non-zero on any FAIL. `CLARA_DR_STRICT=1` for the live drill (canary + AP REQUIRED). |
-| `deploy/write-login-ceremony.sql` · `deploy/read-logins-ceremony.sql` · `deploy/storage-provision.sql` · `deploy/acl-baseline.sql` | the post-restore ceremonies a dump can't carry: the write-pool LOGIN password, the runtime + read-pool LOGIN passwords (`clara_runtime_login` / `clara_agent_read_login`), Storage, and the public-schema ACL baseline. |
+| `packages/db/deploy/roles-bootstrap.sql` | idempotent recreation of the 10 clara-custom roles with exact attributes/memberships/settings. **FRESH-TARGET-ONLY — never on a live project** (it fails closed if a login shell is already LOGIN unless `-v allow_relogin_reset=1`; re-running on live would NOLOGIN the pools). **Run FIRST** on a fresh target. |
+| `packages/db/scripts/restore-full.mjs` (`pnpm db:restore:full`) | one destructive-guard; runs roles-bootstrap → single-transaction restore → prints the manual post-restore checklist. Does **not** auto-run ceremonies or touch Storage. |
+| `packages/db/scripts/dr-verify.mjs` (`pnpm db:dr:verify`) | the §5 verification battery — diffs source↔target across every fidelity category, enforces a completeness floor, refuses a self-comparison; exits non-zero on any FAIL. `CLARA_DR_STRICT=1` for the live drill (canary + AP REQUIRED). |
+| `packages/db/deploy/write-login-ceremony.sql` · `packages/db/deploy/read-logins-ceremony.sql` · `packages/db/deploy/storage-provision.sql` · `packages/db/deploy/acl-baseline.sql` | the post-restore ceremonies a dump can't carry: the write-pool LOGIN password, the runtime + read-pool LOGIN passwords (`clara_runtime_login` / `clara_agent_read_login`), Storage, and the public-schema ACL baseline. |
 
 **Client version:** `pg_dump`/`pg_dumpall`/`psql` must be **v17** (the server is 17.6;
 a v16 `pg_dump` aborts on a 17 server). On Windows point `PG_DUMP`/`PG_DUMPALL`/`PSQL`
@@ -118,7 +118,7 @@ project. Copy the exact string out of the guard's refusal message rather than ty
    CLARA_DR_VERIFY_OUT=./dr-verify.json \
      node packages/db/scripts/dr-verify.mjs
    ```
-   All green ⇒ paste `dr-verify.json` evidence into `docs/ops/DR.md` §5b and close the gate.
+   All green ⇒ paste the generated dr-verify.json evidence into `docs/ops/DR.md` §5b and close the gate.
    **Teardown** the scratch project. (Set `CLARA_DR_AP_CLIENT_NAME_ILIKE` to the exact RPR
    client and confirm account `400-000`; the S6 AP figure is RM 1,350,938.21 = 135,093,821 cents.)
 
@@ -152,7 +152,7 @@ timestamps (compare version + checksum, not the timestamp).
   rows. Recovery = re-provision bucket → `storage-provision.sql` → re-upload the byte
   mirror → sha256-verify against `clara.documents.sha256` (dr-verify §4.10).
 
-## 5. Verification battery (`scripts/dr-verify.mjs`)
+## 5. Verification battery (`packages/db/scripts/dr-verify.mjs`)
 
 Two READ-ONLY connections (`CLARA_DR_SOURCE_URL`, `CLARA_DR_TARGET_URL`; never printed
 — only host:port/db labels). The verifying role must be BYPASSRLS (clara tables are

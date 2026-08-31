@@ -163,6 +163,25 @@ export async function forceAdoptionRow(firm, client, template, version, families
   return r.rows[0].id;
 }
 
+/**
+ * FIXTURE SURGERY, declared as such: a 'proposed' adoption row written directly as the table
+ * owner, so a cell can reach the UPDATE branch of apply_coa_template (an existing proposal for
+ * the SAME template/version, rung 6's "the thing being applied") -- this PR ships no door that
+ * writes a proposal, so there is no real path to that state yet. proposed_by/receipt_id/basis
+ * stay NULL together (ck_coa_adoption_receipted / ck_coa_adoption_basis_paired) -- this fixture
+ * proves the STATE-TRANSITION wall on the update path only, never a proposal's evidence trail.
+ * Never used as evidence that a proposal-writing door works, because there isn't one here.
+ */
+export async function forceProposedRow(firm, client, template, version, families) {
+  const r = await rootQuery(
+    `insert into clara.coa_template_adoptions
+       (firm_id, client_id, template_id, template_version, state, families)
+     values ($1, $2, $3, $4, 'proposed', $5::text[]) returning id`,
+    [firm, client, template, version, families],
+  );
+  return r.rows[0].id;
+}
+
 /** FIXTURE SURGERY: widen an existing adoption's families[] so a family that was never planted
  *  becomes an ADOPTED one -- the only way to construct the drift read's `missing` class. */
 export async function forgeAdoptedFamilies(adoptionId, families) {
@@ -251,6 +270,33 @@ export async function rawAdoption(client) {
   const r = await rootQuery(
     "select * from clara.coa_template_adoptions where client_id = $1 order by created_at desc", [client]);
   return r.rows;
+}
+
+/** Five-ledger refusal census. The two client-owned tables are scoped to the target client;
+ *  the three receipt/event ledgers are counted whole so a misattributed side effect cannot hide
+ *  behind the wrong firm or client id. The package runs serially, so before/after equality is a
+ *  stable refusal proof rather than a race with another cell. */
+export async function refusalLedgerCounts(client) {
+  const r = await rootQuery(
+    `select
+       (select count(*)::int from clara.coa_accounts where client_id = $1) as accounts,
+       (select count(*)::int from clara.coa_template_adoptions where client_id = $1) as adoptions,
+       (select count(*)::int from clara.op_receipts) as op_receipts,
+       (select count(*)::int from clara.audit_log) as audit_log,
+       (select count(*)::int from clara.domain_events) as domain_events`,
+    [client],
+  );
+  return r.rows[0];
+}
+
+/** A dedicated root session inside an OPEN transaction, used only to hold a proven lock window.
+ *  The caller must release it with `releaseSession`, which applies the shared rollback -> reset
+ *  role -> reset all teardown discipline. */
+export async function openRootTxn() {
+  const client = await getPool().connect();
+  await client.query("begin");
+  const pid = (await client.query("select pg_backend_pid() as pid")).rows[0].pid;
+  return { client, pid };
 }
 
 // ---------------------------------------------------------------------------

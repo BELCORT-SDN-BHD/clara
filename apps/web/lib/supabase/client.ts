@@ -4,8 +4,8 @@ import { AUTH_COOKIE_OPTIONS } from "@/lib/supabase/cookie-options";
 
 /**
  * The Supabase client for CODE THAT RUNS IN THE BROWSER (Client Components,
- * event handlers). Cookie-session auth, invite-only (no self-serve signup) —
- * docs/plan/active/frontend-handoff-2026-08-23.md §0.4.
+ * event handlers). Cookie-session auth supports both membership invites and
+ * the ruled tier-3 self-serve signup flow (裁-57).
  *
  * `createBrowserClient` is a singleton internally — safe to call this on
  * every render; it does not create a new connection each time (current

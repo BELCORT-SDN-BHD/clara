@@ -39,7 +39,13 @@ test("SweepStatusPanel: open_run true renders the OPEN message, never the closed
   }
 });
 
-test("SweepStatusPanel: open_run false with real timestamps renders the CLOSED message and the actual dates, and the acknowledge gap is named honestly", async () => {
+// TRUED (P6-2, 裁-20): the third cell used to pin the acknowledge GAP — "not
+// built yet here". The control now exists, on Clara's own sweep-receipt card
+// (components/parts/SweepReceiptCard.tsx), so this cell pins the POINTER
+// instead. It is not a relaxation: the panel must still say something honest
+// and specific about where acknowledging happens, and a silent omission or a
+// fake control on this panel still reds it.
+test("SweepStatusPanel: open_run false with real timestamps renders the CLOSED message and the actual dates, and names where acknowledging lives", async () => {
   const h = await renderComponent(
     App(createElement(SweepStatusPanel, {
       sweep: { open_run: false, last_finalized_at: "2026-04-01T18:00:00Z", last_ack_at: "2026-04-02T09:00:00Z" },
@@ -50,7 +56,9 @@ test("SweepStatusPanel: open_run false with real timestamps renders the CLOSED m
     assert.match(h.text(), /No sweep run is currently open/);
     assert.doesNotMatch(h.text(), /A sweep run is currently open/);
     assert.doesNotMatch(h.text(), /Never/, "real timestamps must render as real dates, not the 'Never' fallback");
-    assert.match(h.text(), /Acknowledging a finalized sweep run needs its run id/, "the acknowledge gap must be named, never a silent omission or a fake control");
+    assert.match(h.text(), /Acknowledging a finalized sweep run needs its run id/, "the panel must still explain why acknowledging is not a control HERE");
+    assert.match(h.text(), /acknowledge the run there/, "and must point at the surface that does hold the control");
+    assert.doesNotMatch(h.text(), /not built yet/, "裁-20 is discharged — a not-built claim here is now false, and the P6-X exit gate sweeps such notes");
   } finally {
     await h.unmount();
   }

@@ -67,6 +67,40 @@ export function loadFirmActivity(session: SessionTokenAccessor, limit = 100): Pr
   });
 }
 
+/** ONE receipt, addressed by the PAIR `(receipt_kind, receipt_id)` — the hydrate
+ *  behind the `agent_receipt` transcript card (P6-2).
+ *
+ *  THE PAIR IS THE ADDRESS, AND A SINGLE-COLUMN FILTER WOULD BE WRONG RATHER
+ *  THAN MERELY LOOSE. `agent_receipts_visible` is a UNION of per-item shim
+ *  views, and `clara.agent_receipt_contract` ordinal 2 (0103:260) defines
+ *  `receipt_id` as "the member row's own primary key rendered as text (member
+ *  PKs are uuid on some tables, bigint on others)". A primary key is unique
+ *  inside its member table and nowhere else, so `receipt_id=eq.<id>` alone does
+ *  not name a row of this view — two members can legitimately collide,
+ *  especially on the bigint-keyed ones. `receipt_kind` (ordinal 1, 0103:259) is
+ *  the discriminator that closes it, which is exactly why the wire part carries
+ *  both fields and not just the id.
+ *
+ *  `null` when RLS (or a wrong pair) admits no such row — the caller renders
+ *  that as "not visible", never as a fabricated receipt and never as a thrown
+ *  error the DB did not raise. `limit: 2` rather than 1 deliberately: it lets
+ *  the caller SEE a pair that somehow matched more than one row instead of
+ *  silently painting the first, which is the one case where picking a row would
+ *  be inventing a receipt. */
+export async function getAgentReceipt(
+  session: SessionTokenAccessor,
+  receiptKind: string,
+  receiptId: string,
+): Promise<AgentReceiptRow | null> {
+  const rows = await getRows<AgentReceiptRow>("agent_receipts_visible", {
+    select: AGENT_RECEIPT_COLS,
+    filters: { receipt_kind: `eq.${receiptKind}`, receipt_id: `eq.${receiptId}` },
+    limit: 2,
+    session,
+  });
+  return rows.length === 1 ? (rows[0] ?? null) : null;
+}
+
 // --- clara.clients (0003:34-40 / :514 / :522-525) ----------------------------
 
 export type ClientRow = {

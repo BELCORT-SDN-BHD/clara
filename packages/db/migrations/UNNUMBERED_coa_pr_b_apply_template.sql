@@ -55,7 +55,7 @@
 -- SS0 -- D1 WRITE-QUIESCE INVENTORY: EMPTY
 -- =====================================================================================
 -- No live PL/pgSQL body is replaced. Every function this file installs is NEW; the four bodies of
--- the upsert_account chain are CALLED, never recut. S0 snapshots EVERY function in schema clara
+-- the upsert_account chain are PINNED UNMOVED, never recut. S0 snapshots EVERY function in schema clara
 -- (oid, prosrc sha256, proacl, proowner) and the tail requires that every pre-existing function
 -- is byte-identical on all three and that the only additions are exactly this file's own names,
 -- pinned as a MAP of signatures rather than a count. A whole-catalog differential, not a roster
@@ -80,10 +80,12 @@
 -- deactivating the account", raised when clara.fa_account_profiles holds an ACTIVE profile naming
 -- the code. It cannot fire on this door's path -- rung 5 proves the client's chart is EMPTY, so no
 -- profile can name any code being planted -- and that is a consequence of the ladder, not luck.
--- The full live ladder the apply loop inherits, in body order: core-ctx present -> op_key
--- required -> _reserve_op dedupe -> client-in-firm (CLR11) -> type/class change on an account
--- with journal lines (CLR10) -> the CLR37 fixed-asset enrolment rung -> the upsert -> _audit ->
--- account.upserted -> _finish_op.
+-- Round-3 accounting-correctness amendment: the apply loop MUST NOT inherit that core's conflict-
+-- overwriting UPSERT. It repeats only the insert-side contract -- core-ctx -> op_key -> _reserve_op
+-- -> client-in-firm -> plain INSERT -> _audit -> account.upserted -> _finish_op -- inside the NEW,
+-- ungranted _coa_plant_family. The fixed-asset/type-change rungs are unreachable for an INSERT into
+-- the empty chart the outer door just witnessed; a concurrent code instead raises
+-- chart_adoption_race and rolls the whole apply back. The four shared bodies remain byte-identical.
 --
 -- =====================================================================================
 -- DEPARTURES REGISTER -- every place this file's built shape diverges from the design's sketch,
@@ -148,19 +150,31 @@
 --     requires) and 3040 is SUPPRESSED. It is migration-seeded, reviewed DATA with a `basis` on
 --     every row, no door writes it, and it is keyed on the RESOLVED entity_type -- so a client
 --     whose entity type is unknown gets the template's own names, fail-closed.
--- (8) add_coa_template_family REFUSES A CODE CONFLICT BY TYPE OR CLASS (D-4's `code_conflict`,
+-- (8) THE PLANT LOOP USES PLAIN INSERT, NOT THE SHARED UPSERT CORE. A two-session review schedule
+--     proved the unlocked empty-chart read could be followed by a human's committed account at the
+--     same code, after which ON CONFLICT DO UPDATE silently replaced the human's name. No serial
+--     ordering explains that result. The plant now reserves the same child op receipt and emits
+--     the same audit + account.upserted event, but a unique collision raises chart_adoption_race;
+--     the transaction rolls back and the human row survives verbatim. Accounting correctness
+--     outranks the original backend-contract sketch (hard constraint 1 / PRD invariant 15).
+--     add_coa_template_family shares this same insert-only plant and the CLR37 fixed-asset /
+--     type-change rungs it cannot reach are unreachable there TOO, but for a DIFFERENT reason:
+--     rung (9) below (code_conflict / code_already_present) already refuses any code the client
+--     carries at any type or class BEFORE the plant runs, so every code the plant reaches is
+--     provably new and can carry neither journal lines nor an fa_account_profiles row.
+-- (9) add_coa_template_family REFUSES A CODE CONFLICT BY TYPE OR CLASS (D-4's `code_conflict`,
 --     naming the code) BEFORE the loop starts, rather than letting the core's has-lines guard
 --     surface mid-loop. It also refuses a code the client already carries at the SAME type and
 --     class, as `code_already_present` -- an upsert that renames a live account under the human's
 --     feet is not what "add a family" means, and D-4's own promise is additive.
--- (9) ONE NEW EVENT TYPE, account.chart_applied, registered as the COUPLED PAIR the estate
+-- (10) ONE NEW EVENT TYPE, account.chart_applied, registered as the COUPLED PAIR the estate
 --     requires (clara.event_types + clara.trigger_taxonomy at the ACTIVE version) -- registering
 --     in one alone is the half-registration the coverage census refuses (0154's own words). The
---     per-account clara._append_event('account.upserted') the core already emits is unchanged and
+--     per-account clara._append_event('account.upserted') the audited plant emits is unchanged and
 --     unsuppressed; this is one additional chart-level event per apply, carrying the family list.
 
 set local statement_timeout = '5min'; -- PRECAUTIONARY, not load-bearing: one small table, two
-  -- seed rows, two catalog rows and eleven functions. Nothing here backfills.
+  -- seed rows, two catalog rows and twelve functions. Nothing here backfills.
 
 -- =====================================================================================
 -- S0 -- PRESTATE. Every claim this file makes about the frontier it lands on, MEASURED, with an
@@ -220,9 +234,9 @@ begin
     end if;
   end loop;
 
-  -- (c) THE FOUR CHAIN BODIES, at their EXACT signatures and their EXACT prosrc shas. Law 3:
-  --     prove the identifier IS its import. A sha mismatch means the body moved under this lane's
-  --     replay and the apply loop's inherited ladder is no longer the one SS0 documents.
+  -- (c) THE FOUR SHARED CHAIN BODIES, at their EXACT signatures and EXACT prosrc shas. Law 3:
+  --     prove the identifier IS its import. BLOCKER-2 changes APPLY, not this shared core; a sha
+  --     mismatch means the forbidden shared-body recut happened under this lane.
   for r in select * from (values
       ('clara._upsert_account_core(jsonb,uuid,text,text,text,text,text,text)',
        '5e0819f3b1e726b2cd5a6e05c3189992e9ac699910254324b6ba87022f1514e0'),
@@ -245,14 +259,14 @@ begin
   end loop;
 
   -- (d) THE CLR37 RUNG IS WHERE SS0 SAYS IT IS. Not a claim about the file it came from -- a
-  --     POSITIVE read of the live body, so the apply loop's documented inherited ladder is
-  --     measured rather than asserted (review law 2).
+  --     POSITIVE read of the unchanged live body, preserving Annex G's replay evidence even
+  --     though the collision-safe APPLY no longer delegates to its UPSERT.
   select p.prosrc into v_txt from pg_proc p
     where p.oid = 'clara._upsert_account_core(jsonb,uuid,text,text,text,text,text,text)'::regprocedure;
   if position('CLR37' in v_txt) = 0
      or position('fa_account_profiles' in v_txt) = 0
      or position('fa_enrolled_account_deactivation' in v_txt) = 0 then
-    raise exception 'S0: the live _upsert_account_core does not carry the CLR37 fixed-asset enrolment rung SS0 documents -- the ladder is not the one this file inherits'
+    raise exception 'S0: the live _upsert_account_core does not carry the CLR37 fixed-asset enrolment rung SS0 documents -- the pinned shared body is not the reviewed one'
       using errcode = 'CLR10';
   end if;
 
@@ -340,6 +354,21 @@ begin
     end if;
   end loop;
 
+  -- (j) PR-a could not name this wall before the apply door existed. This file adds it once,
+  --     but only after positively proving that deploy-onto-existing has no malformed row to
+  --     strand and no same-named constraint to overwrite.
+  if exists (select 1 from pg_constraint con
+              where con.conrelid = 'clara.coa_template_adoptions'::regclass
+                and con.conname = 'ck_coa_adoption_families_no_null') then
+    raise exception 'S0: ck_coa_adoption_families_no_null already exists -- refusing to replace an unknown wall'
+      using errcode = 'CLR10';
+  end if;
+  if exists (select 1 from clara.coa_template_adoptions ad
+              where array_position(ad.families, null) is not null) then
+    raise exception 'S0: coa_template_adoptions carries a NULL family key -- refusing to validate a false no-NULL wall'
+      using errcode = 'CLR10';
+  end if;
+
   select count(*) into v_n from _coa_prb_fn_snapshot;
   raise notice 'coa-template PR-b prestate: OK -- 1 relation name and 12 function names all clear; 0150''s four relations + the 9 helper signatures resolve; ALL FOUR upsert_account chain bodies pinned by prosrc sha256 at their exact signatures; the CLR37 fixed-asset enrolment rung READ POSITIVELY out of the live _upsert_account_core (Annex G PR-0 obligation 2 discharged); the platform starter my_sme_starter v1 is PUBLISHED and carries 3900 as the equity_common retained_earnings marker and 3040 inside a society-keyed family; society is a live entity_type in the client_fact_keys catalog; account.chart_applied is free in BOTH event_types and the active taxonomy version %, whose `notification` decision is an existing estate value; % clara function(s) snapshotted for the tail''s whole-catalog D1-EMPTY differential.', (select version from clara.taxonomy_active), v_n;
 end $s0$;
@@ -349,6 +378,12 @@ end $s0$;
 -- discharging the written obligation 0150's header hands forward. No door writes it.
 -- =====================================================================================
 set role clara_fn_owner;
+
+-- Defense in depth for every present and future writer. `array_position` compares with
+-- IS NOT DISTINCT FROM semantics, so unlike `x = null` it positively finds a NULL element.
+alter table clara.coa_template_adoptions
+  add constraint ck_coa_adoption_families_no_null
+  check (array_position(families, null) is null);
 
 create table clara.coa_template_entity_overrides (
   template_id   uuid not null,
@@ -553,7 +588,7 @@ begin
              (ff.inclusion = 'core'
               or (
                    (ff.entity_types <> '{}' or ff.trade_natures <> '{}'
-                    or ff.msic_sections <> '{}' or ff.msic_divisions <> '{}')
+                    or ff.msic_divisions <> '{}')
                    and (ff.entity_types  = '{}' or (v_entity is not null and v_entity = any (ff.entity_types)))
                    and (ff.trade_natures = '{}' or (v_nature is not null and v_nature = any (ff.trade_natures)))
                    and (ff.msic_divisions = '{}' or (v_div is not null and v_div = any (ff.msic_divisions)))
@@ -598,8 +633,8 @@ revoke all on function clara._coa_family_plan(uuid,uuid) from public;
 -- S4.4 -- THE PLANT LOOP, factored out so apply_coa_template and add_coa_template_family share
 -- ONE spelling of "put this family's accounts on this client". Returns the codes planted.
 --
--- THE OP-KEY MECHANIC (design D-3). The core _reserve_op()s on its OWN p_op_key under the verb
--- `upsert_account`, so the loop derives a deterministic CHILD key per account,
+-- THE OP-KEY MECHANIC (design D-3). The loop _reserve_op()s on its OWN child key under the verb
+-- `upsert_account`, so it derives a deterministic CHILD key per account,
 -- `<batch key>:<account_code>` -- the 0002_core_seed.sql:129 idiom, generalised. A replay of the
 -- batch short-circuits at the caller's own rung 2 and never reaches here; a replay that DID reach
 -- here would find every child key already reserved and take each stored result. The child keys
@@ -607,8 +642,22 @@ revoke all on function clara._coa_family_plan(uuid,uuid) from public;
 create function clara._coa_plant_family(p_ctx jsonb, p_client uuid, p_template uuid,
     p_family text, p_op_key text) returns text[]
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare r record; v_name text; v_entity text; v_planted text[] := '{}'::text[];
+declare
+  c record; r record; v_name text; v_entity text; v_child_key text; v_dedupe jsonb;
+  v_planted text[] := '{}'::text[];
 begin
+  select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
+  if c.actor is null or c.firm is null then
+    raise exception 'the coa plant requires an actor and a firm in its context'
+      using errcode = 'CLR10', detail = '{"reason":"core_ctx_missing"}';
+  end if;
+  if p_op_key is null or btrim(p_op_key) = '' then
+    raise exception 'op_key is required' using errcode = 'CLR10', detail = '{"reason":"op_key_required"}';
+  end if;
+  if not exists (select 1 from clara.clients cl where cl.id = p_client and cl.firm_id = c.firm) then
+    raise exception 'client not in your firm' using errcode = 'CLR11',
+      detail = '{"reason":"client_not_in_firm"}';
+  end if;
   v_entity := clara._coa_client_axis(p_client, 'entity_type');
   for r in select a.account_code, a.name, a.account_type, a.account_class, a.special_acc_type
              from clara.coa_template_accounts a
@@ -618,19 +667,31 @@ begin
     -- NULL means SUPPRESSED for this entity type (departures register (7)) -- not planted, and
     -- deliberately not an error.
     continue when v_name is null;
-    -- NAMED notation, not positional: the core's argument order is
-    -- (p_ctx, p_client, p_code, p_name, p_type, p_special_acc_type, p_op_key, p_account_class)
-    -- -- class AFTER op_key -- and a positional call here would silently pass the class as the
-    -- op key. Never a hand-written coa_accounts row: invariant 10.
-    perform clara._upsert_account_core(
-      p_ctx              => p_ctx,
-      p_client           => p_client,
-      p_code             => r.account_code,
-      p_name             => v_name,
-      p_type             => r.account_type,
-      p_special_acc_type => r.special_acc_type,
-      p_op_key           => p_op_key || ':' || r.account_code,
-      p_account_class    => r.account_class);
+    v_child_key := p_op_key || ':' || r.account_code;
+    v_dedupe := clara._reserve_op(c.firm, 'upsert_account', v_child_key,
+      clara._hash(jsonb_build_object('c', p_client, 'code', r.account_code, 'n', v_name,
+        't', r.account_type, 's', r.special_acc_type, 'account_class', r.account_class)));
+    if v_dedupe is null then
+      -- BLOCKER-2: INSERT is the concurrency wall. If a human committed this code after the
+      -- outer empty-chart read, a conflict is a named refusal; overwrite-on-conflict would erase
+      -- the human's committed name. This function is the named, audited Postgres writer required
+      -- by invariant 10; application roles retain zero direct DML on coa_accounts.
+      begin
+        insert into clara.coa_accounts(client_id, account_code, name, account_type,
+            special_acc_type, account_class)
+          values (p_client, r.account_code, v_name, r.account_type,
+            r.special_acc_type, r.account_class);
+      exception when unique_violation then
+        raise exception 'an account committed while this chart application was in flight'
+          using errcode = 'CLR10', detail = '{"reason":"chart_adoption_race"}';
+      end;
+      perform clara._audit(c.firm, c.actor, null, null, 'upsert_account', null,
+        jsonb_build_object('client', p_client, 'code', r.account_code));
+      perform clara._append_event(c.firm, 'account.upserted', p_client, c.actor, null, null,
+        null, null, null, '{}'::jsonb);
+      perform clara._finish_op(c.firm, 'upsert_account', v_child_key,
+        jsonb_build_object('client_id', p_client, 'account_code', r.account_code));
+    end if;
     v_planted := v_planted || r.account_code;
   end loop;
   return v_planted;
@@ -645,6 +706,7 @@ revoke all on function clara._coa_plant_family(jsonb,uuid,uuid,text,text) from p
 -- S5.1 -- apply_coa_template. D-3's ladder, every rung a NAMED refusal, all evaluated, never a
 -- silent no-op.
 --   1 op_key non-empty                          CLR10 op_key_required
+--  1b caller family array has no NULL element   CLR10 family_key_null
 --   2 _reserve_op -- a replay returns the stored result                    (dedupe, not a refusal)
 --   3 the client is in the caller's firm        CLR11 client_not_in_firm
 --   4 the template is published and visible     CLR11 template_not_found / CLR10 template_not_published
@@ -668,18 +730,24 @@ declare
   c record; v_dedupe jsonb; t clara.coa_templates; v_prop clara.coa_template_adoptions;
   v_plan jsonb; v_families text[]; v_source text; v_bad text;
   v_adoption uuid; v_planted text[] := '{}'::text[]; v_fam text; v_had_prop boolean := false;
+  v_constraint text;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key) = '' then
     raise exception 'op_key is required' using errcode = 'CLR10', detail = '{"reason":"op_key_required"}';
   end if;
-  -- The request hash covers the SORTED family list, so the same set in a different order is the
-  -- same request and a genuinely different set under a reused key raises rather than silently
-  -- returning the first call's result (_reserve_op's own CLR10).
+  if p_families is not null and array_position(p_families, null) is not null then
+    raise exception 'a family key cannot be null' using errcode = 'CLR10',
+      detail = '{"reason":"family_key_null"}';
+  end if;
+  -- The request hash distinguishes the database PLAN sentinel from every caller list, including
+  -- [], and covers the DISTINCT SORTED caller set. The same set in a different order is the same
+  -- request; a genuinely different source/set under a reused key raises rather than replaying.
   v_dedupe := clara._reserve_op(c.firm, 'apply_coa_template', p_op_key,
     clara._hash(jsonb_build_object('c', p_client, 't', p_template,
-      'f', case when p_families is null then null
-                else (select jsonb_agg(x order by x) from unnest(p_families) x) end)));
+      'f', case when p_families is null then '"plan"'::jsonb
+                else coalesce((select jsonb_agg(distinct x order by x)
+                                 from unnest(p_families) x), '[]'::jsonb) end)));
   if v_dedupe is not null then return v_dedupe; end if;
 
   -- Rung 3.
@@ -730,7 +798,8 @@ begin
     v_source := 'caller';
     -- Duplicates in the caller's array are collapsed: the same family twice is one family, and
     -- the adoption row's families[] must not carry it twice.
-    select coalesce(array_agg(distinct x), '{}'::text[]) into v_families from unnest(p_families) x;
+    select coalesce(array_agg(distinct x) filter (where x is not null), '{}'::text[])
+      into v_families from unnest(p_families) x;
   end if;
 
   -- Rung 6b -- THE RESOLVED SET IS NON-EMPTY. Rung 8 catches an empty list on any template that
@@ -773,16 +842,42 @@ begin
   if v_had_prop and v_prop.template_id = t.id and v_prop.template_version = t.version then
     -- Clara proposed this template version and the human applied it (possibly having edited the
     -- family list) -- ONE row, moved, so the proposal's receipt and basis stay attached to the
-    -- adoption they became.
-    update clara.coa_template_adoptions
-       set state = 'adopted', adopted_by = c.actor, adopted_at = now(), families = v_families
-     where id = v_prop.id
-     returning id into v_adoption;
+    -- adoption they became. The proposed-row TWIN of the INSERT branch's uq_coa_adoption_live
+    -- catch below: `and state = 'proposed'` re-checks at UPDATE time, not just at the SELECT
+    -- above, so a second caller racing the SAME proposed row blocks on the row lock and then --
+    -- once unblocked, re-evaluating against the winner's now-'adopted' row -- matches zero rows
+    -- instead of silently overwriting the winner's committed adoption.
+    begin
+      update clara.coa_template_adoptions
+         set state = 'adopted', adopted_by = c.actor, adopted_at = now(), families = v_families
+       where id = v_prop.id and state = 'proposed'
+       returning id into v_adoption;
+    exception when unique_violation then
+      get stacked diagnostics v_constraint = CONSTRAINT_NAME;
+      if v_constraint = 'uq_coa_adoption_live' then
+        raise exception 'another chart adoption committed while this apply was in flight'
+          using errcode = 'CLR10', detail = '{"reason":"chart_adoption_race"}';
+      end if;
+      raise;
+    end;
+    if v_adoption is null then
+      raise exception 'another chart adoption committed while this apply was in flight'
+        using errcode = 'CLR10', detail = '{"reason":"chart_adoption_race"}';
+    end if;
   else
-    insert into clara.coa_template_adoptions(firm_id, client_id, template_id, template_version,
-        state, families, adopted_by, adopted_at)
-      values (c.firm, p_client, t.id, t.version, 'adopted', v_families, c.actor, now())
-      returning id into v_adoption;
+    begin
+      insert into clara.coa_template_adoptions(firm_id, client_id, template_id, template_version,
+          state, families, adopted_by, adopted_at)
+        values (c.firm, p_client, t.id, t.version, 'adopted', v_families, c.actor, now())
+        returning id into v_adoption;
+    exception when unique_violation then
+      get stacked diagnostics v_constraint = CONSTRAINT_NAME;
+      if v_constraint = 'uq_coa_adoption_live' then
+        raise exception 'another chart adoption committed while this apply was in flight'
+          using errcode = 'CLR10', detail = '{"reason":"chart_adoption_race"}';
+      end if;
+      raise;
+    end;
     if v_had_prop then
       -- The human applied a DIFFERENT template than Clara proposed. Law 6: a state, never a
       -- delete -- and uq_coa_adoption_open would refuse a second open proposal anyway.
@@ -843,8 +938,13 @@ begin
   -- client is already ON, at the SAME template version. Without the version equality a v2 family
   -- could be appended to a v1 chart and the adoption row would then name a family set the version
   -- it records does not carry.
+  -- BLOCKER-1: acquire the adoption row lock BEFORE reading the family set. At READ COMMITTED a
+  -- waiter receives the winner's updated row after the lock releases, so BOTH the same-family
+  -- refusal and the later additive update are driven by the post-wait value. The UPDATE keeps the
+  -- round-2 self-reference as a second defense; the lock-first read is what closes the stale check.
   select * into ad from clara.coa_template_adoptions
-   where client_id = p_client and state = 'adopted';
+   where client_id = p_client and state = 'adopted'
+   for update;
   if not found then
     raise exception 'this client has not adopted a template; apply one first' using errcode = 'CLR10',
       detail = '{"reason":"not_adopted"}';
@@ -863,8 +963,8 @@ begin
       detail = '{"reason":"family_already_applied"}';
   end if;
 
-  -- D-4's code_conflict, named and raised BEFORE the loop starts rather than letting the core's
-  -- has-lines guard surface as a confusing mid-loop failure. Both directions are refusals:
+  -- D-4's code_conflict, named and raised BEFORE the loop starts rather than letting the
+  -- insert-only plant surface a confusing mid-loop chart_adoption_race. Both directions refuse:
   --   a code the client holds at a DIFFERENT type/class  -> code_conflict
   --   a code the client already holds at the SAME shape  -> code_already_present
   -- The second is not pedantry: this door's promise is ADDITIVE, and an upsert that renames a
@@ -893,7 +993,7 @@ begin
 
   update clara.coa_template_adoptions
      set families = (select array_agg(distinct x order by x)
-                       from unnest(ad.families || p_family) x)
+                       from unnest(coa_template_adoptions.families || p_family) x)
    where id = ad.id;
 
   perform clara._audit(c.firm, c.actor, null, null, 'add_coa_template_family', null,
@@ -924,8 +1024,8 @@ set role clara_fn_owner;
 
 -- S6.1 -- the deterministic plan, as a read. The checklist card's default checkbox state.
 -- INVOKER-rights, so a caller who cannot see the client or the template gets nothing -- but the
--- internals it calls are DEFINER, which is deliberate and narrow: the axes are a projection of
--- the client's own facts and the caller has already been RLS-filtered on the template.
+-- internals it calls are INVOKER and explicitly granted: the axes stay a projection of the
+-- caller's own RLS-visible facts, and the template has already been RLS-filtered too.
 create function clara.coa_template_family_plan(p_client uuid, p_template uuid) returns jsonb
   language sql stable set search_path = clara, pg_temp as $$
   select clara._coa_family_plan(p_client, t.id)
@@ -968,9 +1068,9 @@ $$;
 -- The six states, and none of them is derived from an absence alone:
 --   adopted      an 'adopted' adoption row exists                        (positive)
 --   pending      the decision says the firm template AND the chart is still empty AND no adoption
---   declined     the decision says `manual` AND no adoption row          (Q4's escape hatch)
---   off_standard no adoption row AND the chart is NOT empty              (the honest "off-standard"
---                                                                        listing Q4 promises)
+--   declined     the decision says `manual` AND no adoption AND the chart is empty
+--   off_standard no adoption row AND the chart is NOT empty              (including Q4's escape
+--                                                                        hatch after a chart is built)
 --   undecided    no committed decision, no adoption, empty chart
 --   no_client    the caller cannot see this client at all                (RLS, not a state claim)
 create function clara.coa_chart_state(p_client uuid) returns jsonb
@@ -1002,8 +1102,8 @@ create function clara.coa_chart_state(p_client uuid) returns jsonb
     'families', to_jsonb(ad.families), 'adopted_at', ad.adopted_at,
     'state', case
       when ad.state = 'adopted' then 'adopted'
-      when dec.seed = 'manual' then 'declined'
       when ch.accounts > 0 then 'off_standard'
+      when dec.seed = 'manual' then 'declined'
       when dec.seed in ('firm_template','lhdn_mpers_standard') then 'pending'
       else 'undecided' end)
     from cl cross join ch left join dec on true left join ad on true;
@@ -1249,6 +1349,13 @@ begin
     raise exception 'S8: expected 2 override rows, exactly 1 of them a suppression; found % / %', v_n, v_m
       using errcode = 'CLR10';
   end if;
+  if not exists (select 1 from pg_constraint con
+                  where con.conrelid = 'clara.coa_template_adoptions'::regclass
+                    and con.conname = 'ck_coa_adoption_families_no_null'
+                    and con.contype = 'c' and con.convalidated) then
+    raise exception 'S8: ck_coa_adoption_families_no_null is absent, not a CHECK, or not validated'
+      using errcode = 'CLR10';
+  end if;
 
   -- (4) THE EVENT-TYPE COUPLED PAIR, both halves, and the coverage law still WHOLE. Registering
   --     one half is the half-registration the estate's census refuses; proving only the two rows
@@ -1372,28 +1479,33 @@ begin
     end if;
   end loop;
 
-  -- (7) THE APPLY WRITES NO coa_accounts ROW DIRECTLY. A prosrc read of the two writers and the
-  --     plant loop: no INSERT/UPDATE/DELETE against coa_accounts appears in any of the three, so
-  --     every planted row went through the audited core (invariant 10). Text, and named as text:
-  --     it is a mistake-net over this file's own bodies, not a closed-world proof -- the ACL is
-  --     what binds a stranger, and coa_accounts carries no INSERT grant for clara_authenticated
-  --     that would let one try.
+  -- (7) ONLY THE UNGRANTED, AUDITED PLANT writes coa_accounts. The two doors themselves carry no
+  --     direct DML; the plant carries exactly the plain INSERT semantics BLOCKER-2 requires, no
+  --     ON CONFLICT/UPDATE/DELETE, plus the receipt/audit/event quartet. Text is only a mistake-
+  --     net over these new bodies; the zero-DML ACL on application roles is the structural wall.
   for r in select p.oid::regprocedure::text as sig, p.prosrc
              from pg_proc p join pg_namespace n on n.oid = p.pronamespace
             where n.nspname = 'clara'
               and p.oid::regprocedure::text = any (array[
                 'clara.apply_coa_template(uuid,uuid,text[],text)',
-                'clara.add_coa_template_family(uuid,uuid,text,text)',
-                'clara._coa_plant_family(jsonb,uuid,uuid,text,text)']) loop
+                'clara.add_coa_template_family(uuid,uuid,text,text)']) loop
     if r.prosrc ~* '(insert\s+into|update|delete\s+from)\s+clara\.coa_accounts' then
-      raise exception 'S8: % writes clara.coa_accounts directly -- every account must go through the audited core', r.sig
+      raise exception 'S8: % writes clara.coa_accounts directly -- only the ungranted audited plant may write it', r.sig
         using errcode = 'CLR10';
     end if;
   end loop;
-  if (select p.prosrc from pg_proc p
-       where p.oid = 'clara._coa_plant_family(jsonb,uuid,uuid,text,text)'::regprocedure)
-      !~ '_upsert_account_core' then
-    raise exception 'S8: the plant loop does not call _upsert_account_core' using errcode = 'CLR10';
+  select p.prosrc into v_txt from pg_proc p
+   where p.oid = 'clara._coa_plant_family(jsonb,uuid,uuid,text,text)'::regprocedure;
+  if v_txt !~* 'insert\s+into\s+clara\.coa_accounts'
+     or v_txt ~* 'on\s+conflict'
+     or v_txt ~* '(update|delete\s+from)\s+clara\.coa_accounts'
+     or position('_upsert_account_core' in v_txt) > 0
+     or position('_reserve_op' in v_txt) = 0
+     or position('_audit' in v_txt) = 0
+     or position('_append_event' in v_txt) = 0
+     or position('_finish_op' in v_txt) = 0 then
+    raise exception 'S8: the plant is not the reviewed audited INSERT-only body'
+      using errcode = 'CLR10';
   end if;
 
   -- (8) CONSTRAINT 15: the frozen schemas are unmoved and hold none of this file's names.
@@ -1413,5 +1525,5 @@ begin
   end if;
 
   select count(*) into v_n from clara.coa_template_adoptions;
-  raise notice 'coa-template PR-b tail: OK -- D1 INVENTORY EMPTY, PROVEN BY WHOLE-CATALOG DIFFERENTIAL: every pre-existing clara function byte-identical on prosrc + ACL + owner, none dropped, and the ADDED set an exact signature MAP of this file''s twelve (7 doors + 5 internals); the FOUR upsert_account chain bodies re-pinned by prosrc sha256 AFTER the work as well as before. ONE new relation, clara.coa_template_entity_overrides: clara_fn_owner-owned, ENABLE+FORCE RLS, EXACTLY 2 policies (owner ALL + the parent-derived human SELECT), ZERO INSERT/UPDATE/DELETE/TRUNCATE reach for any non-owner clara role (migration-seeded DATA, no door writes it), carrying exactly 2 reviewed rows -- society/3900 RELABELLED "Accumulated Fund" and society/3040 SUPPRESSED, discharging in full the written obligation 0150''s header handed to this PR. ONE new event type, account.chart_applied, registered as the COUPLED PAIR (clara.event_types client_scoped + clara.trigger_taxonomy `notification` at the ACTIVE version) with the whole-catalog coverage anti-join re-proved EMPTY and the taxonomy version count unmoved. ACL: the 7 doors AND the 4 INVOKER helpers reach clara_authenticated + clara_fn_owner and NO other clara role -- NO WAKE GRANT and NO allowlist row, Annex E''s first non-goal (no agent path to the BULK apply) held structurally; the one WRITING internal _coa_plant_family reaches NOBODY but its owner; PUBLIC reaches none of the twelve. POSTURE by property, and it is this file''s security decision: the 3 WRITERS (2 doors + the plant loop) are SECURITY DEFINER with search_path pinned to clara,pg_temp, while the 5 READS and the 4 granted helpers are INVOKER (0004:730-739''s trial_balance idiom, 0150''s own posture) so RLS decides who sees what -- a granted DEFINER helper answering for any client uuid would be a cross-tenant read oracle, which the first rig run surfaced as a 42501 and this census now drift-guards in both directions. Neither writer nor the plant loop contains any DML against clara.coa_accounts -- every planted account goes through clara._upsert_account_core and inherits its live ladder, its _audit row and its account.upserted event unchanged. % coa_template_adoptions row(s) live: this file plants no client chart. Constraint 15: workflow/graphile_worker/spike relation counts unmoved and none of this file''s names inside them.', v_n;
+  raise notice 'coa-template PR-b tail: OK -- D1 INVENTORY EMPTY, PROVEN BY WHOLE-CATALOG DIFFERENTIAL: every pre-existing clara function byte-identical on prosrc + ACL + owner, none dropped, and the ADDED set an exact signature MAP of this file''s twelve (7 doors + 5 internals); the FOUR upsert_account chain bodies re-pinned by prosrc sha256 AFTER the work as well as before, and APPLY does not call or recut the shared core. coa_template_adoptions now carries the validated ck_coa_adoption_families_no_null structural wall. ONE new relation, clara.coa_template_entity_overrides: clara_fn_owner-owned, ENABLE+FORCE RLS, EXACTLY 2 policies (owner ALL + the parent-derived human SELECT), ZERO INSERT/UPDATE/DELETE/TRUNCATE reach for any non-owner clara role (migration-seeded DATA, no door writes it), carrying exactly 2 reviewed rows -- society/3900 RELABELLED "Accumulated Fund" and society/3040 SUPPRESSED, discharging in full the written obligation 0150''s header handed to this PR. ONE new event type, account.chart_applied, registered as the COUPLED PAIR (clara.event_types client_scoped + clara.trigger_taxonomy `notification` at the ACTIVE version) with the whole-catalog coverage anti-join re-proved EMPTY and the taxonomy version count unmoved. ACL: the 7 doors AND the 4 INVOKER helpers reach clara_authenticated + clara_fn_owner and NO other clara role -- NO WAKE GRANT and NO allowlist row, Annex E''s first non-goal (no agent path to the BULK apply) held structurally; the one WRITING internal _coa_plant_family reaches NOBODY but its owner; PUBLIC reaches none of the twelve. POSTURE by property, and it is this file''s security decision: the 3 WRITERS (2 doors + the plant loop) are SECURITY DEFINER with search_path pinned to clara,pg_temp, while the 5 READS and the 4 granted helpers are INVOKER (0004:730-739''s trial_balance idiom, 0150''s own posture) so RLS decides who sees what -- a granted DEFINER helper answering for any client uuid would be a cross-tenant read oracle, which the first rig run surfaced as a 42501 and this census now drift-guards in both directions. The two doors contain no coa_accounts DML; the ungranted plant is the named audited writer and carries exactly plain INSERT + child receipt + audit + account.upserted event semantics, with no ON CONFLICT and no shared-core call, so a concurrent human code raises chart_adoption_race instead of being overwritten. % coa_template_adoptions row(s) live: this file plants no client chart. Constraint 15: workflow/graphile_worker/spike relation counts unmoved and none of this file''s names inside them.', v_n;
 end $tail$;

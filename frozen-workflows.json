@@ -18,7 +18,8 @@
     },
     "packages/reporting-render/lib/layout-sandbox.mjs": {
       "sha256": "42f9d9953a8b68b3101c30ae29aba61a2b5603e3e51697b6a0162a8cd3935351",
-      "note": "Wave F Track-A, F-A5b CARD 1 — the SANDBOX assembler: the substitution seam's render-time half, where a `placeholder` block's pinned cell id becomes bytes. A SIBLING of layout.mjs rather than an export added to it, and that is forced rather than stylistic: layout.mjs is deployed:true here, so check-frozen-workflows' REHASHED-VS-BASE rule makes its body immutable versus origin/main and an added export would be rejected — correctly. Marked @frozen for the same reason its sibling is (determinism-critical, walks DB-owned payload into typesetting source). UNDEPLOYED: the deploy-lock is the ceremony's act, exactly as every layout module's entry was before the zeta ceremony ran."
+      "note": "Wave F Track-A, F-A5b CARD 1 — the SANDBOX assembler: the substitution seam's render-time half, where a `placeholder` block's pinned cell id becomes bytes. A SIBLING of layout.mjs rather than an export added to it, and that is forced rather than stylistic: layout.mjs is deployed:true here, so check-frozen-workflows' REHASHED-VS-BASE rule makes its body immutable versus origin/main and an added export would be rejected — correctly. Marked @frozen for the same reason its sibling is (determinism-critical, walks DB-owned payload into typesetting source). UNDEPLOYED: the deploy-lock is the ceremony's act, exactly as every layout module's entry was before the zeta ceremony ran.",
+      "deployed": true
     },
     "packages/reporting-render/lib/layout.mjs": {
       "sha256": "bc416972436ef18ff6b2de137facc4f172fc597efbc4ff957ad12ea20be6377b",
@@ -282,83 +283,103 @@
     },
     "packages/runtime/workflows/autoDraft.v9.errors.ts": {
       "sha256": "931d66a2ba4e3809ef0574323ee6c699f02786345df3a4152e11880723810b12",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v9.impl.ts": {
       "sha256": "f68313b7f84635ab4def41b691c5bae593321becebe4bd7fd2c489cb78ff8b26",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v9.infra.ts": {
       "sha256": "8da2ef607eac4d47ca2fbadebc861336ead5e880d7ec549e689d70352993355f",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v9.post.ts": {
       "sha256": "3c248b9122b7ac9fc87700478c3e4807ae1947e37fc5a6f097a1e0b2d3d0b881",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v9.postcall.ts": {
       "sha256": "d1b27db984b8f73fd11e0eed85fa74a7af24f2f80ea1e14ec6704be304be157b",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v9.prompt.ts": {
       "sha256": "0e8b294a841dfcaa2e7a579f93d42203239f1a5b691a3709be6e4dec140cb859",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v9.settle.ts": {
       "sha256": "1ab18db5041362c8d714b6a4a993e0540b894a98c322f0c476591fce06ecd3ac",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v9.tools.ts": {
       "sha256": "938f76985136ee26ae102b995602fa6a3348880d813931eb241c4075ac2a02cf",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v9.toolset.ts": {
       "sha256": "4607488b12d7ea54037e97564ff8a212a2bd45106da539dbfbb7dbb4945845cf",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v9.ts": {
       "sha256": "1ff9377da2d7f52cbceaa419f370c5e0ed402071e7444bc39b481018d6bbd77e",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v9.usage.ts": {
       "sha256": "9dc60ac878516f144b60984c28975f07c945a5f171c54e6baa05e5c856f5a1dd",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/bankAgent.v1.alloc.ts": {
       "sha256": "c9d39172179016d71c459a808c503e56143d504833465dcec49341e2c7fbaa2f",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/bankAgent.v1.identity.ts": {
       "sha256": "47e14d7ed1b97d57031126099b0fab44f6d986f1f214eb42d633a202c1176ace",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/bankAgent.v1.impl.ts": {
       "sha256": "841972efc072921357eda02e8727473b1fdeeb61f0ca7bfd13bf6172783ae650",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/bankAgent.v1.infra.ts": {
       "sha256": "fc5d94e7bfa5ab0b4dff4cfbe49fa8ba2e3fd7c4f52fcdb5701490c5eb5ff060",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/bankAgent.v1.pack.ts": {
       "sha256": "72240d5794ff332d623b3c9c16b6e3ab03b1d82ac523fe716611949774ab6f0a",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/bankAgent.v1.prompt.ts": {
       "sha256": "18292c2c0cf4d47748a36317a0a4e6872b64a056a6e2c6b6bdf90e6c789f6084",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/bankAgent.v1.tools.ts": {
       "sha256": "a9631acb7e7b55236c4b3ce8493180fb30ae68fbf7cca9945d6a98ba3feca07b",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/bankAgent.v1.ts": {
       "sha256": "5fa509c71f51a8b18ded1cb8333bd915573dc230610b7c163c6cd63484bea8b9",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/bankAgent.v1.usage.ts": {
       "sha256": "2b545092f68108ece8d85c01701f2542814936707cf18216fd7173ad7af875df",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.impl.ts": {
       "sha256": "015cf3c0fc5181c6706dc6f5e4e86361f419e25faf8f27f585a08a1ee23e22b6",
@@ -442,99 +463,148 @@
     },
     "packages/runtime/workflows/chatTurn.v13.impl.ts": {
       "sha256": "8f24aa82353200171eebe4356dd253df00f69f369e610e5de4e7c1e85d747b88",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v13.infra.ts": {
       "sha256": "cce3d43f14aca235e4bd233e8ba3cd507971a1212e9fd170afe17cf767d6f2db",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v13.post.ts": {
       "sha256": "b928d5bf52920c9db02dbb5bfc035ebe3dc8e4620e20fd7b9fb8e34f602b5393",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v13.prompt.ts": {
       "sha256": "39c9bd7eb92e9db85a882df6c62c4a2845e75d4dd438c16358a8a0385d890b65",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v13.tools.ts": {
       "sha256": "62de09ff5f3177f06ac44e79a25979a8822a4be769bda668fc35b429ee12aff7",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v13.ts": {
       "sha256": "ab6ae0d48bae266291aeb737d54debd1a7449579c6fc2e48ba2dfea0985cd689",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v13.usage.ts": {
       "sha256": "b501a5480b8dcfe34d6dcf3955ab785939ae9cf9ab4f954bde6bbe64ba102773",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v14.bank.ts": {
       "sha256": "cba8da269ff3d135d8f23eb94670910c46c53df0672a4cce27a604349cf8cf2b",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v14.bankActs.ts": {
       "sha256": "73f60d9b7d4a7f01ab7850b6a5af920629d43d9fa9981c14fe3fa8d330dae193",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v14.bankActs2.ts": {
       "sha256": "b98ddc958ade29bfb38b01b826d6224d3c5d03bd38998af3b0fc91e56560e337",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v14.bankSchemas.ts": {
       "sha256": "fdae7fe91ebc4964cff094eacab17f9a76d604f717bb2db2f178434c66996434",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v14.impl.ts": {
       "sha256": "cac66e6e203c359decfb9a8d14f7d421059f154954e0725cd3ed823e003bce21",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v14.infra.ts": {
       "sha256": "7cd987eebf71658070a12a6520ac964e4d115cf87e38ff5f59d98012cac0706d",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v14.prompt.ts": {
       "sha256": "bffb1011559e2c7171166a9768c72bd8f5175d7b27c4fd23a202c726e36368f1",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v14.tools.ts": {
       "sha256": "a0b90588007dfffe0ae60d469f4f079151d7bd95a5e205e5c987a2c1c7774130",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v14.ts": {
       "sha256": "13a5238cce53621f8217ae6ec160f88eae1e6d0726604a9bfffc8eb9631c82e4",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v14.usage.ts": {
       "sha256": "b3930ae770e6495284cf11ca58271cedf735fcbc6b7e8a3dcc0d0db433a5ef2f",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v15.freeform.ts": {
       "sha256": "c796290c814d544d156b5f9523ae15e2b4ec1078ca2cc21afa46f861d80f3aec",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v15.impl.ts": {
       "sha256": "4d895e82072083bb45fd0ed2f48f1291e9ac83c98bddb8273a6659072eac9748",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v15.infra.ts": {
       "sha256": "221ae96223dfacdd2d1fee476774ef6f8a10c70d1a9bc3f01b97f2f1dfcabcac",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v15.prompt.ts": {
       "sha256": "202da537ed536980375760d3ba04b93556825724fbc32ffb5dec9f2c25fdffc3",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v15.tools.ts": {
       "sha256": "cede4ba40b15919669d496e3892516fcb5ae3eec6e72fb45ee6662e37f4cfa0a",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v15.ts": {
       "sha256": "151edd744c243914e5125de691b9aa75d0d363a3b4b7c8b12bfefe03fef87700",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v15.usage.ts": {
       "sha256": "2cb97562d37a2b144f17dff6e089f500a8d8cb7fd206f82ef2b25a37e0ccf282",
-      "note": ""
+      "note": "",
+      "deployed": true
+    },
+    "packages/runtime/workflows/chatTurn.v16.impl.ts": {
+      "sha256": "bff0e0ca13e4a3918f06b60503d6988e833e961f65c882517f99719f2872bd4e",
+      "note": "P6-1 (Q8's four-card wire bump) — the v16 segment step. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
+    },
+    "packages/runtime/workflows/chatTurn.v16.parts.ts": {
+      "sha256": "be7c199f2ea23ca9bea9ee11bde4b97a121bf251175df2627f12de2b81ca4a4c",
+      "note": "P6-1 — THE DECLARER of Q8's four part kinds; apps/web/lib/parts/types.ts transcribes it. A hash change here is a wire-contract change and must move the reader in the same wave. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
+    },
+    "packages/runtime/workflows/chatTurn.v16.prompt.ts": {
+      "sha256": "227d74b31876a88d6590b6291ea8447df30752dfdce1d43e0bdc879470258cf0",
+      "note": "P6-1 — ClaraPartV16 (22 + 4 = 26) and the one emitter this lane may lawfully carry (freeform_result). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
+    },
+    "packages/runtime/workflows/chatTurn.v16.ts": {
+      "sha256": "908e51723f422d5984c0fb3a7cc58bec4e10212726b5ea2d498601dbe75c141f",
+      "note": "P6-1 — the chatTurn_v16 workflow entry; registry.ts points chatTurn: here. The v15 body stays frozen and exported (policy (c)). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
+    },
+    "packages/runtime/workflows/chatTurn.v16.usage.ts": {
+      "sha256": "f2238cc437424138738888eb756b1c3a4f39cd17f8a13e8aed5a044003609088",
+      "note": "P6-1 — the chatturn-v16 engine stamp; the metering recorder itself is v15's, by import. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v2.errors.ts": {
       "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",
@@ -802,31 +872,38 @@
     },
     "packages/runtime/workflows/closePrep.v1.impl.ts": {
       "sha256": "b77ac74301a57f3602769015e60339bed0bedae6fe9ff6a74ff4d9d62587d544",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/closePrep.v1.infra.ts": {
       "sha256": "2993a6d6136742dcacba16e1b08287ee357806cf9a8bb01542abd96942bbb71a",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/closePrep.v1.prompt.ts": {
       "sha256": "8866818fd754c45f5d3459db8695eda2b7ff08adb091476e17051e0ab588fa13",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/closePrep.v1.reads.ts": {
       "sha256": "d4baeadb77b5e1a600487ee02d8b41266fc1b2aca64f1c2fb6f97175a5631f14",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/closePrep.v1.tools.ts": {
       "sha256": "3cae2cd2777b5d55125afbee7572c209375abf655ba46b7105dbab752336660a",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/closePrep.v1.ts": {
       "sha256": "e8077b07eabfeb11e044b403051a471f20fcc750d038ab7e3df740dcea645fab",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/closePrep.v1.usage.ts": {
       "sha256": "dcdc9f82b4df469bc52024802da36eb1c9d2679abc26ab1957bab0e008430d50",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/documentIngest.behavior.mjs": {
       "sha256": "7306c457c553ddc57c0b90871f444326c75b1ec1763ca2bd5063183d9d02f07f",
@@ -1039,23 +1116,28 @@
     },
     "packages/runtime/workflows/witnessFacts.v3.behavior.mjs": {
       "sha256": "2f48aa4590246c0699076d75857814d7121379048600c40949c2f377ef6ea707",
-      "note": "debt/prompts-v3 — the NEXT-ROUND QUEUE fold's behavioural closure: byte-for-byte v2's apart from the v3 prompt/envelope imports and no longer passing `pages` into witnessTextCoverage (finding 3). Reuses v2's own engine snapshot — no answer key added, so no provenance-guard change. UNDEPLOYED: the deploy-lock is the ceremony's act."
+      "note": "debt/prompts-v3 — the NEXT-ROUND QUEUE fold's behavioural closure: byte-for-byte v2's apart from the v3 prompt/envelope imports and no longer passing `pages` into witnessTextCoverage (finding 3). Reuses v2's own engine snapshot — no answer key added, so no provenance-guard change. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v3.envelope.mjs": {
       "sha256": "98451d06f4b6171acea806f6320a397e3fdd3ce28f307a039c9aa768e05c76a7",
-      "note": "debt/prompts-v3 — wire->writer normalization plus the coverage receipt, byte-for-byte v2's except witnessTextCoverage no longer accepts or emits `pages` (finding 3: emitted empty on every text row in the 2026-08-21 re-measure, no lock reads it). UNDEPLOYED: the deploy-lock is the ceremony's act."
+      "note": "debt/prompts-v3 — wire->writer normalization plus the coverage receipt, byte-for-byte v2's except witnessTextCoverage no longer accepts or emits `pages` (finding 3: emitted empty on every text row in the 2026-08-21 re-measure, no lock reads it). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v3.impl.ts": {
       "sha256": "95272f8271909d435b9e7931e7921b95761ee17612c10a5357d70bd804991ef6",
-      "note": "debt/prompts-v3 — the four steps. DELIBERATELY reads infrastructure from v2's OWN global slot (__claraWitnessFactsServicesV2) rather than minting a new one: no answer key or wire-schema change rides this version, so v2's engine snapshot is exactly right and no coupled DB migration is needed. UNDEPLOYED: the deploy-lock is the ceremony's act."
+      "note": "debt/prompts-v3 — the four steps. DELIBERATELY reads infrastructure from v2's OWN global slot (__claraWitnessFactsServicesV2) rather than minting a new one: no answer key or wire-schema change rides this version, so v2's engine snapshot is exactly right and no coupled DB migration is needed. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v3.prompts.mjs": {
       "sha256": "96f4999fbfaf55eabb5ea83bae8f61f0701607f96c01c2546ca631594f06f9cb",
-      "note": "debt/prompts-v3 — the prompt closure carrying the NEXT-ROUND QUEUE's five ruled fixes: the MYR currency-code carve-out, the dash-is-not-a-value rule, a vision-only SST-shape reinforcement, and the owner's 2026-08-24 discount-no-net ruling (the fifth, coverage.pages, lives in the envelope file). Wire schema byte-identical to v2's. FROZEN BY DECISION (design M8). UNDEPLOYED."
+      "note": "debt/prompts-v3 — the prompt closure carrying the NEXT-ROUND QUEUE's five ruled fixes: the MYR currency-code carve-out, the dash-is-not-a-value rule, a vision-only SST-shape reinforcement, and the owner's 2026-08-24 discount-no-net ruling (the fifth, coverage.pages, lives in the envelope file). Wire schema byte-identical to v2's. FROZEN BY DECISION (design M8). UNDEPLOYED.",
+      "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v3.ts": {
       "sha256": "75dc1b90912657ec5f37a8acefebcffa92e85f847645091dc75d909915ba8602",
-      "note": "debt/prompts-v3 — the successor version on the llm_witness lane; registry.ts points witnessFacts: here. The workflow body is v2's (and v1's), unchanged; everything that moved is inside the closure. No coupled DB migration. UNDEPLOYED: the deploy-lock is the ceremony's act."
+      "note": "debt/prompts-v3 — the successor version on the llm_witness lane; registry.ts points witnessFacts: here. The workflow body is v2's (and v1's), unchanged; everything that moved is inside the closure. No coupled DB migration. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "deployed": true
     }
   }
 }
