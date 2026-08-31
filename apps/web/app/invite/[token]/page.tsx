@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
 import { InviteAcceptForm } from "@/components/invite-accept-form";
+import { INVITE_CLARA_TOKEN_PARAM } from "@/lib/identity/doors";
 
 export async function generateMetadata() {
   const t = await getTranslations("Invite");
@@ -38,17 +39,42 @@ export async function generateMetadata() {
  * caller-controlled. A future OTP kind gets its OWN route with its own
  * verification, never a query parameter on this one.
  */
+/**
+ * THE INVITE LINK CARRIES TWO SECRETS — ruled 2026-08-30, option (a):
+ * `/invite/<supabase_token_hash>?ct=<clara_token>`.
+ *
+ * The PATH SEGMENT is Supabase's `token_hash`, consumed by `verifyOtp` — P2's
+ * shipped contract, byte-untouched by the ruling. The QUERY PARAM carries
+ * Clara's own invite token, which `clara.accept_invite` sha256's and looks the
+ * invite up by (`0145:702`). They are not interchangeable: the path segment
+ * fed to the door refuses `CLR10 "invalid invite token"` every time.
+ *
+ * The param NAME is `INVITE_CLARA_TOKEN_PARAM`, declared once in
+ * `lib/identity/doors.ts` and imported at both ends — here (reads it) and
+ * P4-4's courier (builds the link) — so neither end can drift by re-typing the
+ * string. See that declaration for the courier's plaintext-handling obligation.
+ */
+
 export default async function InvitePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { token } = await params;
+  const query = await searchParams;
+
+  // A repeated parameter arrives as an array. Take NO token rather than
+  // guessing which of two a caller meant — the form's own guard then refuses
+  // honestly and consumes nothing, which is the fail-closed answer.
+  const raw = query[INVITE_CLARA_TOKEN_PARAM];
+  const inviteToken = typeof raw === "string" && raw !== "" ? raw : null;
 
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-2 bg-shell p-6">
       <div className="w-full max-w-sm">
-        <InviteAcceptForm token={token} />
+        <InviteAcceptForm token={token} inviteToken={inviteToken} />
       </div>
     </main>
   );

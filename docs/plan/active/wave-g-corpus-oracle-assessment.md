@@ -21,7 +21,12 @@
 > registration number or a TIN at all**. Ingesting these invoices therefore cannot enrich an RS
 > customer with either forbidden field, even by accident.
 
-## 1 · The oracle verdicts, and the gaps that must close before the run
+> **TRUED 2026-08-31 by 裁-31/裁-63:** these gaps are recorded as **资料缺失**, never chased or
+> awaited; MBB-1 is CLOSED and the run proceeds on the desktop corpus as-is. The conductor/agent
+> selects the RPR series by measurement and records that choice in the as-run. See
+> `docs/plan/active/mohe-grill-rulings-2026-08-30.md` and `docs/ops/wave-g-setup-checklist.md`.
+
+## 1 · The oracle verdicts, and the gaps recorded for the run
 
 | Client | Verdict | §4 items MET | §4 items MISSING |
 |---|---|---|---|
@@ -29,7 +34,7 @@
 | **ROME SECRETARY** | **ACCEPTABLE-WITH-GAPS — one period only** | 2 GL (present, high quality — every posting dated, referenced, described) · 4 P&L · 6 raw corpus (**22/22 invoices tie to the GL**, 17 statements covering both accounts' full lives, 45 bills) · 7 n/a — **greenfield confirmed** | **1 trial balance** · **3 SOFP is DEGENERATE** · **5 no named producer — only the login `ADMIN`** |
 | **ROME PROPERTIES** | **INSUFFICIENT as an oracle** (excellent as a payroll/volume fixture) | 2 GL · 7 n/a — greenfield confirmed | **1 TB present but NOT FIT** (dated 8 Dec 2025 on its face, not a period end; omits every balance-sheet account but share capital) · **3 SOFP degenerate against RM 1,973,332.91 of revenue** · **4 P&L is for a partial period** · **5 no named producer** · **6 Feb + Mar 2025 bank statements MISSING** |
 
-**The gaps the owner must close** — the run cannot start on an oracle without them:
+**The gaps recorded here, then closed as 资料缺失 by 裁-63 — never a precondition to starting:**
 
 1. **BEE: a general ledger and a trial balance for FY2024 and FY2025.** Without the GL there is
    no account-by-account reconciliation (EC-1) and **invoice-set completeness is unprovable** —

@@ -8,6 +8,12 @@ one coordinating lane + three domain lanes, every orphan claim spot-verified by 
 coordinator against law 2/3. Nothing here is derived from the prototype: the backend's
 granted surface IS the coverage authority.*
 
+> **SUPERSEDED 2026-08-31 by [`verb-coverage-census-2026-08-31.md`](verb-coverage-census-2026-08-31.md)**
+> (the FS-0 re-measurement at the live `0155` catalog, 裁-75). This file is pinned at `0138`,
+> pre-port-wave; its 81 CUTOVER-OWED / 29 ORPHAN lists and the "nothing can open a fiscal year"
+> headline are historical. The STALE-NOT-BUILT law it minted stands. 裁-72 governs as amended by
+> 裁-75 (the amendment note sits under 裁-72 in `mohe-grill-rulings-2026-08-30.md`).
+
 ## The verdict
 
 - **Direction 2 (frontend → backend): ZERO stale wiring, measured.** All 60 `callDoor`
