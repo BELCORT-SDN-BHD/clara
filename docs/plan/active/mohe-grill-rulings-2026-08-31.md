@@ -317,7 +317,11 @@ reshapes below) with a **fresh** independent review, then the build.
 
 ### 裁-90 · G5 — the beta DPA text is delegated: the agent drafts, the owner pre-approves, the lawyer swaps at launch
 
-**Ruling (the owner's words kept).** The DPA is the onboarding consent text a customer confirms at
+**Ruling (against G5's recommendation (i); takes option (ii), the interim text — with the owner's
+words kept, which is exactly the "ruling in writing" the gate record asked for before it would
+carry (ii)).** The record's named cost is accepted: *a real agreement with real legal effect,
+drafted by an AI, signed by real customers* — mitigated by the three constraints below and by the
+lawyer's swap at the launch sitting. The DPA is the onboarding consent text a customer confirms at
 signup — "like terms and conditions". The agent **drafts the bilingual (en/ms) beta text** from the
 existing legal pack (`docs/ops/legal/`: the PDPA s.129 cross-border memo and the client
 authorization letter as inputs) and the owner pre-approves it sight-unseen for beta — "你起草然后
@@ -340,13 +344,17 @@ Cost accepted: dispute investigation reads the raw event in the Stripe dashboard
 
 **Ruling (against the recommendation — the owner weighs cross-device signup above the
 cryptographic binding).** The confirmation mail carries a **6-digit one-time code** typed into the
-originating browser (the estate already uses `verifyOtp` on the built invite-accept), so
+originating browser (the `verifyOtp` API is already in use in the estate — but on the built
+invite-accept's **`token_hash` link arm**, the very shape this ruling replaces; the
+`{email, token}` 6-digit arm is NEW, and a build lane must not copy the link arm), so
 laptop-signup + phone-mail works by transcription. Costs recorded and accepted: the binding is
 weaker (a guessable code space, not a cryptographic verifier), so the **rate wall is mandatory**
-(裁-36/裁-68) — the redesign must specify attempts-per-code, single-use, expiry and lockout as
-walls with RED-before cells; and B3's PKCE failure-card work is superseded for signup (wrong-code /
-expired / too-many-attempts cards replace it). The login-CSRF hole's link-click vector disappears
-with the link itself.
+(裁-36/裁-68) — the redesign must specify attempts-per-code, single-use, expiry, lockout, **and
+G10(ii)'s own load-bearing clause: the email the code verifies against comes from the browser's
+own signup state, never from a URL parameter** (sourced from a URL, the binding is to nothing and
+the CSRF vector returns through a crafted URL), all as walls with RED-before cells; and B3's PKCE
+failure-card work is superseded for signup (wrong-code / expired / too-many-attempts cards replace
+it). The login-CSRF hole's link-click vector disappears with the link itself.
 
 ### 裁-93 · The package — every remaining gate question per its recommendation; ADR-0077 signed; the CSRF deferral endorsed
 
