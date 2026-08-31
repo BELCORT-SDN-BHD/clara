@@ -130,8 +130,8 @@ fix or carry it.** FS-4's checkout is the live example — a payment form is exa
 would reach for a Server Action to build, and it is running in parallel; its design order has been
 told to design onto server-only ROUTE HANDLERS (which the census does classify) and to raise it as a
 gate question rather than choose an action silently.
- the scope-spine census's **fourth-entrance gap** must be
-closed first — the firm-scope-surfaces census (apps/web/tests, arriving with #451) has a `LEAF`
+
+**The gap itself:** the firm-scope-surfaces census (apps/web/tests, arriving with #451) has a `LEAF`
 regex that sees only `page|route` files, so a root template.tsx and a `"use server"` action both reach firm-scoped data, full suite green
 (demonstrated by #451's reviewer, not argued). #455 is the train that adds mutating member surfaces,
 so it must not merge over a census that cannot see them. Scope, and the trap in it: extend `LEAF` to
@@ -144,6 +144,10 @@ Full statement in `PROGRESS.md` Known issues.
 
 **This is the most dangerous door in a multi-tenant system** (R8, 2026-08-26: the self-serve
 tenant-creation door takes its OWN design gate + security review; never fold it into UI work).
+**Read FS-3's HARD PRECONDITION above before choosing a transport:** the scope-spine census is blind
+to Server Actions, so this train designs onto server-only ROUTE HANDLERS — a payment form is exactly
+where a lane would reach for a `"use server"` action, and that shape must not land before the census
+fix does.
 **Step 1 — the survey + design + gate record** (three new files, docs/plan/active/checkout-gate-survey.md ·
 -design.md · -gate-record.md — the estate's own shape): measure `create_firm` (`0147:497`), `firm_admissions` (hash-only since
 `0147`), `request_firm_registration`/`firm_registration_requests` (`0145:370, :911`),
