@@ -1,12 +1,12 @@
--- UNNUMBERED_coa_pr_b_apply_template.sql -- 裁-21 PR-b: THE APPLY HALF of the firm-level standard
+-- 0156_coa_apply_template.sql -- 裁-21 PR-b: THE APPLY HALF of the firm-level standard
 -- chart of accounts. apply_coa_template · add_coa_template_family · the deterministic family plan ·
 -- the chart-state read that finally CONSUMES coa_seed_decision · coa_template_drift ·
 -- firm_coa_drift · get_coa_template_adoption, plus the entity-variant override rows 0150 handed
 -- forward in writing.
 --
--- MIGRATION NUMBER: NOT CLAIMED. Authored UNNUMBERED per .claude/rules/db-migrations.md and
--- AGENTS.md constraint 10 -- the conductor claims the number at MERGE. Rig-validated against a
--- repo frontier of 150 files / 0155.
+-- MIGRATION NUMBER: 0156, CLAIMED AT MERGE (PR #462) per .claude/rules/db-migrations.md and
+-- AGENTS.md constraint 10 -- authored UNNUMBERED, rig-validated against a repo frontier of
+-- 150 files / 0155, renamed here in the owed follow-up PR that claims the number.
 --
 -- DESIGN OF RECORD: docs/plan/active/coa-template-design.md (D-3, D-4, D-8, D-10, D-11, D-12) ·
 -- docs/plan/active/coa-template-annexes.md Annex C (the battery), Annex D (the frontend homes),
