@@ -65,6 +65,15 @@ export function InterviewRunCard({
   const run = useInterviewRun({ session, scope: "client", runId, planId });
   const active = Boolean(runId && (!run.state || !TERMINAL_CHIPS.has(run.state.chip)));
 
+  // NIT-2 (review round 2, RULED SKIPPED — known and accepted, no product
+  // risk): a plain `useEffect` here (not `useLayoutEffect`) means the
+  // parent's `interviewRunActive` — and therefore whether its own standalone
+  // Cancel door is suppressed — updates one PAINTED FRAME after `active`
+  // itself flips, not synchronously in the same commit. The self-correcting
+  // window is at most one frame wide and resolves itself on the very next
+  // render; nothing user-observable can act inside it (no click can land in
+  // a single un-rendered frame), and it never produces the two-doors-at-once
+  // state this component exists to prevent — only, transiently, zero or one.
   useEffect(() => {
     onActiveChange?.(active);
   }, [active, onActiveChange]);

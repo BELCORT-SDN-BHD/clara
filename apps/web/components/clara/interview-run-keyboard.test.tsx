@@ -265,6 +265,22 @@ test("MATERIAL-1 (review round 1): the sole cancel door survives a runtime that 
           "exactly one cancel affordance must exist even when /state never resolves",
         );
 
+        // NIT-1 (review round 2): the total-count assertion above cannot
+        // tell WHICH door survived — a different broken shape (suppression
+        // regressed so the checklist's identical-labelled door renders
+        // instead, while this card's own door stays unrendered) passes it
+        // identically: same count, same DB body. Scope the count to a
+        // descendant of the interview card itself (its own `aria-label`,
+        // InterviewRunCard.tsx's `<Card aria-label={t("cardLabel")}>`) so a
+        // wrong-door survival is distinguishable from a right-door survival.
+        const interviewCard = findIn(h.container as never, (node) => node.getAttribute?.("aria-label") === "Client onboarding interview");
+        assert.ok(interviewCard, "the interview card itself must render with no runtime state");
+        assert.equal(
+          findAll(interviewCard as never, (node) => node.tagName === "BUTTON" && textOf(node as never) === "Cancel onboarding").length,
+          1,
+          "the surviving cancel door must belong to the interview card, not the checklist's suppressed one",
+        );
+
         const cancelTrigger = h.find((node) => node.tagName === "BUTTON" && textOf(node) === "Cancel onboarding");
         assert.ok(cancelTrigger, "the sole cancel trigger must be reachable with no runtime state");
         await h.fireEvent(cancelTrigger!, "click");
