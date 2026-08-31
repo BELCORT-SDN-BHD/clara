@@ -2,13 +2,54 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import http from "node:http";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
-import { detectDocument, scanFile } from "../lib/scan.mjs";
+import express from "express";
+import { register } from "tsx/esm/api";
+import { detectDocument, IntakeScanError, scanFile } from "../lib/scan.mjs";
 import { spoolRequest, tryEnterIngress, _resetIntakeGateForTest } from "../lib/spool.mjs";
 import { parseStructured } from "../lib/structured.mjs";
 import { putCanonical, verifyCanonical } from "../lib/storage.mjs";
+
+register();
+
+const PRIVATE_DIAGNOSTIC_RE =
+  /(?:SyntaxError|PayloadTooLargeError|node_modules|[A-Za-z]:[\\/]|\/(?:Users|home|workspace)\/|(?:^|\n)\s*at\s|\bstack\b)/i;
+
+let intakeRoutesPromise;
+
+async function requestThroughShippedIntakeRouter({
+  path = "/api/intake/documents",
+  method = "POST",
+  headers = { "content-type": "application/json" },
+  body,
+  configureApp,
+}) {
+  const { intakeRoutes } = await (intakeRoutesPromise ??= import("../src/intakeRoutes.ts"));
+  const app = express();
+  configureApp?.(app);
+  // This is the production composition in src/index.ts: the exported router is
+  // mounted whole, including its own parser and terminal error middleware.
+  app.use(intakeRoutes());
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
+      headers,
+      body,
+    });
+    const text = await response.text();
+    return { response, text, json: JSON.parse(text) };
+  } finally {
+    await new Promise((resolve, reject) =>
+      server.close((err) => (err ? reject(err) : resolve())),
+    );
+  }
+}
 
 let root;
 let previousSpool;
@@ -289,4 +330,74 @@ test("putCanonical reads Supabase's WRAPPED status: a 400/409 duplicate is 'exis
   // Best-effort: the leaked read handle may still hold it on Windows. Its own dir, so a
   // failure here cannot affect the rest of the suite.
   await rm(ownDir, { recursive: true, force: true }).catch(() => {});
+});
+
+test("MATERIAL-1 malformed JSON stays a sanitized 400 through the shipped intake router", async () => {
+  const { response, text, json } = await requestThroughShippedIntakeRouter({ body: '{"origin":' });
+
+  assert.equal(response.status, 400);
+  assert.match(response.headers.get("content-type") ?? "", /^application\/json\b/i);
+  assert.deepEqual(json, { error: "bad_request", message: "bad request" });
+  assert.doesNotMatch(text, PRIVATE_DIAGNOSTIC_RE);
+});
+
+test("MATERIAL-1 oversized JSON stays a sanitized 413 through the shipped intake router", async () => {
+  const { response, text, json } = await requestThroughShippedIntakeRouter({
+    body: JSON.stringify({ padding: "x".repeat(33 * 1024) }),
+  });
+
+  assert.equal(response.status, 413);
+  assert.match(response.headers.get("content-type") ?? "", /^application\/json\b/i);
+  assert.deepEqual(json, { error: "payload_too_large", message: "payload too large" });
+  assert.doesNotMatch(text, PRIVATE_DIAGNOSTIC_RE);
+});
+
+test("MATERIAL-1 keeps missing and malformed upload Authorization on the typed intake 404 mapping", async () => {
+  const path = `/api/intake/documents/${randomUUID()}/bytes`;
+  const request = (authorization) => requestThroughShippedIntakeRouter({
+    path,
+    method: "PUT",
+    headers: {
+      "content-type": "application/octet-stream",
+      ...(authorization ? { authorization } : {}),
+    },
+    body: "x",
+  });
+
+  const missing = await request(undefined);
+  const malformed = await request("garbage");
+  assert.equal(missing.response.status, 404);
+  assert.equal(malformed.response.status, 404);
+  assert.equal(missing.text, malformed.text);
+  assert.deepEqual(missing.json, { error: "not_found", message: "not found" });
+  assert.doesNotMatch(missing.text, PRIVATE_DIAGNOSTIC_RE);
+});
+
+test("MATERIAL typed scan errors thrown before the local try keep their code and message", async () => {
+  const scanError = new IntakeScanError(
+    "bad_type",
+    "declared MIME does not match the file signature",
+    415,
+  );
+  const { response, json } = await requestThroughShippedIntakeRouter({
+    path: `/api/intake/documents/${randomUUID()}/bytes`,
+    method: "PUT",
+    headers: { "content-type": "application/octet-stream" },
+    body: "x",
+    configureApp(app) {
+      const originalHeader = app.request.header;
+      app.request.header = function header(name) {
+        if (String(name).toLowerCase() === "authorization") {
+          return { toString() { throw scanError; } };
+        }
+        return originalHeader.call(this, name);
+      };
+    },
+  });
+
+  assert.equal(response.status, 415);
+  assert.deepEqual(json, {
+    error: "bad_type",
+    message: "declared MIME does not match the file signature",
+  });
 });
