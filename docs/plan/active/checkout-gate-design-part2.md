@@ -4,8 +4,7 @@
 Part 3 — the webhook contract, the surfaces, the environment, the acceptance battery: [`checkout-gate-design-part3.md`](checkout-gate-design-part3.md).
 Measurement: [`checkout-gate-survey.md`](checkout-gate-survey.md) · owner questions: [`checkout-gate-gate-record.md`](checkout-gate-gate-record.md).*
 
-**v2** — §1.3's door is rewritten. The version in v1 **stranded the paying customer**; the repair
-and what was wrong are stated there rather than quietly corrected.
+**v2** — §1.3's door is rewritten: v1 **stranded the paying customer**, and the repair states what was wrong rather than quietly correcting it.
 
 **This part carries the objects, the webhook route contract, the environment and the acceptance battery.** Section numbering restarts; part 1 cites these as "part 2 §N".
 
@@ -138,11 +137,29 @@ row and no unresolved `stripe_event_problems` row:
 2. read `metadata ->> 'clara_registration_id'`, `'clara_applicant'`, `'clara_intent_id'`;
 3. require all three to resolve, **and** require the intent's `session_id` to equal the event's
    session id **and** the intent's `(registration_id, applicant)` to equal the metadata's;
-4. `insert into clara.firm_registration_payments(…) … on conflict (stripe_event_id) do nothing`.
+4. `insert into clara.firm_registration_payments(…) … on conflict (stripe_event_id) do nothing`,
+   **inside a per-row subtransaction** (`begin … exception when unique_violation then …`).
 
-Any failure of 1–3 writes a `stripe_event_problems` row with a named `problem` and applies
-nothing; an event carrying an **unresolved** problem row is skipped on later sweeps. Returns
-`{examined, applied, problems}`.
+**The applier is per-row transactional, and that is load-bearing.** Each event is processed in
+its own subtransaction (a plpgsql `begin … exception` block), so one bad event can neither abort
+the sweep nor roll back the events already applied in it. That is the same mechanism that lets a
+step-1–3 failure write its problem row and carry on. Any failure of 1–3 writes a
+`stripe_event_problems` row with a named `problem` and applies nothing; an event carrying an
+**unresolved** problem row is skipped on later sweeps. Returns `{examined, applied, problems}`.
+
+> **BLOCKER-4 — the poison pill this repairs.** Step 4's `on conflict (stripe_event_id)` names one
+> index, but `uq_frp_registration` is a **different** one. A second completed session for the same
+> registration therefore raises `23505`, which — without the subtransaction — aborts the entire
+> sweep, writes **no** problem row (the step-1–3 handler does not cover step 4), and leaves the
+> poison event to be re-selected every minute forever. **No payment would apply for any customer,
+> indefinitely.** The `unique_violation` handler writes the `duplicate_payment` problem row and
+> continues.
+>
+> **The tempting narrow repair is forbidden, and the design says so here so nobody re-proposes
+> it:** widening the `on conflict` clause to swallow *both* indexes makes the second payment
+> disappear silently. That destroys G12's whole property — a double payment must be **visible**,
+> not silently accepted — and after 裁-28's amounts are ruled it would be a real double charge
+> with no record that it happened.
 
 **The problems must be watched by someone, so they have a surface (M4).**
 `clara.list_stripe_event_problems(p_include_resolved boolean default false) → setof` and
@@ -254,7 +271,7 @@ grant `clara_authenticated` only. **This is the governed door 裁-73 names.**
 | W5 | the registration exists | `unknown registration request` | `CLR10` |
 | W6 | **it is MINE** — `req.applicant = clara.jwt_sub()` | `not your registration request` | `CLR04` |
 | W7 | not already completed — `req.firm_id is null` and `req.status='open'` | `this registration is no longer open (status: %)` | `CLR09` |
-| W8 | a DPA signature at **the version pinned on this registration's intent** (M8) | `the data processing agreement is not signed` | `CLR09` |
+| W8 | a DPA signature at the version pinned on **the intent this payment came through** — resolved by the exact join `firm_registration_payments.stripe_session_id` → `checkout_intents.session_id` (UNIQUE) → that row's `dpa_version`, **never by "the newest intent"** (M8) | `the data processing agreement is not signed` | `CLR09` |
 | W9 | **a payment row exists for this registration** *(no consumption requirement — see below)* | `no completed payment for this registration` | `CLR09` |
 | W10 | the caller carries an email claim | `a verified email claim is required` | `CLR04` |
 
@@ -316,9 +333,13 @@ still refuses once `close_paid_registration` has stamped `firm_id`. In the windo
 that window gets a fresh token that `create_firm` refuses with
 `CLR10 actor already belongs to a firm` — the correct answer, because their firm already exists.
 
-**The fold removes this whole class.** BLOCKER-1's stranding, M5's unreachable closer and M7's
-double payment are three failure modes that exist *because* the journey is several doors across
-several transactions. One door doing claim → create → close in one transaction has none of them.
+**The fold removes this class — but not everything.** BLOCKER-1's stranding and M5's unreachable
+closer exist *because* the journey is several doors across several transactions; one door doing
+claim → create → close in a single transaction has neither, and it makes *"firm exists but
+registration still open"* unreachable, so **`reconcile_paid_registrations` becomes unnecessary —
+the fold deletes a door rather than adding one.** **It does NOT remove the double payment
+(M7/G12):** two sessions completing is settled at ⑦, before ⑧ runs at all, so `uq_frp_registration`
+and the applier's duplicate-payment row are what handle it under **either** option.
 **Gate question G1.**
 
 **`clara.close_paid_registration(p_registration uuid, p_firm uuid, p_op_key text) → jsonb`** ·
@@ -391,7 +412,7 @@ moment `_append_event` can be called at all, because `domain_events.firm_id` is 
 ### 1.4 · `UNNUMBERED_checkout_gate_d` — the one D1 item
 
 **`clara.create_firm` is re-cut.** Live tip `0147:497`; live `prosrc` sha12 `59fa533d9c03`
-(survey §7 prediction 1). Two conjuncts are added immediately after the admission row is
+(survey §7 prediction 1). **Three** conjuncts are added immediately after the admission row is
 selected `FOR UPDATE`; **nothing else in the body changes**, and the delta is proven by inverse
 re-substitution back to the pinned pre-image:
 
@@ -401,6 +422,12 @@ if a.bound_email is not null and a.bound_email is distinct from clara._jwt_email
   raise exception 'invalid or consumed admission token' using errcode = 'CLR04';
 end if;
 if a.expires_at is not null and a.expires_at < now() then
+  raise exception 'invalid or consumed admission token' using errcode = 'CLR04';
+end if;
+-- M-A: a SUPERSEDED token is refused HERE, with the same typed refusal. Without this conjunct a
+-- rotated token passes both walls above and dies on ck_firm_admissions_not_both instead -- a raw
+-- 23514 where the battery (cell W-E2) asserts a typed CLR04.
+if a.superseded_at is not null then
   raise exception 'invalid or consumed admission token' using errcode = 'CLR04';
 end if;
 ```
@@ -430,6 +457,7 @@ estate's measured idiom (survey F11). Its **entire** grant surface:
 |---|---|
 | `clara.record_stripe_event(text,text,jsonb)` | EXECUTE |
 | `clara.apply_stripe_events(integer)` | EXECUTE |
+| `clara.reconcile_paid_registrations(integer)` | EXECUTE — §1.3's closer-of-last-resort, on the same sweep |
 | **everything else** | **none** — no table grants, no other function, **no `BYPASSRLS`** |
 
 The connection executes `set role clara_stripe_webhook` on checkout, as the runtime's pools
@@ -468,8 +496,5 @@ first-class pre-firm audit relation is owed before beta.
 
 ## 2 · Everything else
 
-The webhook route contract, the `apps/web` surfaces and the environment moved to **part 3**
-([`checkout-gate-design-part3.md`](checkout-gate-design-part3.md)) when this file passed the
-estate's 500-line document gate; the acceptance battery lives there too, rewritten in the fix
-round after the independent review proved four of its mutants non-discriminating on a rig.
+The webhook contract, the surfaces, the environment and the acceptance battery are **part 3**: [`checkout-gate-design-part3.md`](checkout-gate-design-part3.md).
 

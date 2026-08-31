@@ -92,12 +92,20 @@ re-verified **inside each action**. An action is a POST endpoint wearing a funct
 clothes. On this train those endpoints are the ones that create a firm, so a missed
 re-verification is a tenant created by a stranger.
 
-**The second reason: a route leaf MUST CLASSIFY, and an action escapes that entirely.** Every
-route.ts leaf is enumerated by the scope census (`LEAF = /^(page|route)\.(ts|tsx|js|jsx)$/`,
-`apps/web/tests/firm-scope-surfaces.test.ts:46`) and has to appear in `SCOPE_ENTRANCES` or in
-`SCOPE_UNSCOPED_SURFACES` **with a written reason**. So `/checkout` and /checkout/success are
-forced to be named and justified. **A `"use server"` file is enumerated by nothing and therefore
-justifies nothing** — it is the declaration that never has to be made.
+**The second reason: a surface leaf MUST CLASSIFY, and an action escapes that entirely.** Every
+`page.*` / `route.*` leaf is enumerated by the scope census (`LEAF`,
+apps/web/tests/firm-scope-surfaces.test.ts:46) and has to be registered **with a written reason**
+— and **the registry depends on the file kind**: a route leaf goes in `SCOPE_EXEMPT_SURFACES`
+(or is an entrance), a page goes in `SCOPE_UNSCOPED_SURFACES`. Measured on the shipping tree:
+`SCOPE_UNSCOPED_SURFACES` holds **zero** route files, `SCOPE_EXEMPT_SURFACES` holds three, and
+this train's own confirm-verify route is **already** registered there
+(`apps/web/lib/require-firm-scope.ts:403`).
+
+**So this train adds four registry rows across two registries**, because /checkout/success is two
+files: a paint-only `page.tsx` (unscoped registry) and its POST route.ts (exempt registry), plus
+`POST /checkout`'s route and the already-present confirm route. **A `"use server"` file is
+enumerated by nothing and therefore justifies nothing** — it is the declaration that never has to
+be made.
 
 > **A correction to how v1 argued this.** v1 said the census is blind to actions *for firm-scope
 > coverage*. That is true in general and **is not the reason here**: none of this train's new
@@ -317,7 +325,10 @@ passes it as `options.flowId` when present, and otherwise accepts the fixed-key 
 the fallback is the live path, because the flag that appends the flow id is off; writing the
 `flowId` arm now means the design does not silently change behaviour on the day Supabase turns it
 on. The residual — one browser, two concurrent pending flows, the older link fails — is accepted
-at beta and is **rendered as its own message**, not as a generic invalid.
+at beta, and it **collapses into card 2 below**: that browser sends a *wrong* verifier rather than
+none, so the token endpoint returns the same error class a stale code does, and card 2's resend
+control is the fix. **It does not get a fourth card, because the error class cannot supply one** —
+promising a distinct message here would be promising something the instrument cannot distinguish.
 
 **Distinguished refusals (BLOCKER-3 fix 1), because three different failures previously rendered
 one indistinguishable `status=invalid`:**

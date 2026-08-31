@@ -32,7 +32,8 @@ questions are new (G10, G11, G12), all of them costs the owner had not been show
 | shape | `claim_paid_admission` mints a token → the server calls `create_firm` with it → `close_paid_registration` | one door does claim → create → close **in one transaction** |
 | where the token goes | DB → the app server → back to the DB | **never leaves the database** |
 | retry after a crash | works: the next call supersedes the stale token and mints a fresh one | nothing to retry — it either happened or it did not |
-| failure modes it removes | — | **three at once**: the stranding class, the unreachable-closer problem (M5), and the two-in-flight-payments window (M7) |
+| failure modes it removes | — | **the stranding class and M5's unreachable closer** — and under (B) the state *"firm exists but registration still open"* is **unreachable**, so `reconcile_paid_registrations` is not needed at all: **the fold deletes a door rather than adding one** |
+| what it does NOT remove | — | **the double payment (M7/G12).** Two sessions completing is settled at ⑦, before ⑧ runs; `uq_frp_registration` plus the applier's duplicate-payment problem row handle it identically under **either** option |
 | cost | matches 裁-73's written two-step shape exactly | **deviates from 裁-73's wording**; one door does two jobs |
 
 **Recommendation: (B), if you are willing to amend 裁-73's wording.** The reviewer agrees, and so
@@ -269,10 +270,11 @@ doors from the **client** over PostgREST, as the built signup form already does.
 
 **The reason, stated in the order that matters.** First: Next's own guidance is that page-level
 authentication does not protect Server Actions and that each action must re-verify authorization
-itself — and on this train those endpoints create a firm. Second: every route.ts leaf is
-enumerated by the scope census and **must be named in `SCOPE_UNSCOPED_SURFACES` with a written
-reason**, so `/checkout` and /checkout/success are forced to declare themselves; **a
-`"use server"` file is enumerated by nothing and declares nothing.** *(An earlier draft justified
+itself — and on this train those endpoints create a firm. Second: every `page.*` / `route.*` leaf
+is enumerated by the scope census and **must be registered with a written reason** — a route in
+`SCOPE_EXEMPT_SURFACES` (or as an entrance), a page in `SCOPE_UNSCOPED_SURFACES` — so this train's
+**four** new surface files are forced to declare themselves; **a `"use server"` file is enumerated
+by nothing and declares nothing.** *(An earlier draft justified
 this by the census's firm-scope blindness. That was the weaker argument and not the operative one
 here — none of this train's surfaces are firm-scoped, since the customer has no firm until ⑧.)*
 

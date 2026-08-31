@@ -155,7 +155,7 @@ its own mutant, so by this battery's own rule it was not evidence.
 
 | limb | mutant | required outcome |
 |---|---|---|
-| **m1** | delete the exists-check **AND** drop `uq_membership_active_user` | **MUST GO RED** — a second firm is created for a user who already holds an active membership |
+| **m1** | delete the exists-check **AND** drop `uq_membership_active_user` | **MUST GO RED** — a second firm is created for a user who already holds an active membership. **Operationally: `uq_membership_active_user` is a SHARED estate index.** m1 runs inside a savepoint that is rolled back, or on a dedicated throwaway rig — **never beside a live panel**, where dropping it would expose every other lane's fixtures to a real double-membership |
 | **m2** | delete the exists-check **alone** | **MUST NOT RED** — the refusal still comes, from the index. This is the positive assertion that *the index is the real wall*, not the procedural check |
 | **control** | unmutated | a person with no membership creates a firm; a person with one is refused `CLR10` |
 
@@ -177,15 +177,38 @@ apps/web/tests/checkout-transport.test.ts, its path is **required in
 `apps/web`'s own `lint` script — which runs on every PR, docs-only included — and fails when a
 real test file is missing from the manifest, so a named-and-manifested cell cannot vanish silently.
 
+**A precondition this cell needs, because `LEAF` is not importable (W-R-1).** It is
+`const LEAF = …` at apps/web/tests/firm-scope-surfaces.test.ts:46 — **not exported**, and living in
+a test module whose import would re-register the census suite as a side effect. **`LEAF` (and
+ideally a `routeLeaves` helper) moves into apps/web/test/sourceOracle.ts** — the dependency-free
+shared oracle the census already imports from at its own line 22 — and both suites import that one
+definition. B's derived roster inherits the same correction: it too reads `LEAF` from the oracle.
+
 **A · The primary assertion — train-scoped.** For each of §1.1's **three** server entries (the
-confirm verify POST, POST /checkout, the /checkout/success POST):
+confirm verify POST, `POST /checkout`, the /checkout/success POST):
 
 | limb | assertion |
 |---|---|
-| **it is a route leaf** | the file's basename matches the census's **own** `LEAF` regex, imported from the census module rather than re-typed, and the module exports an HTTP method |
-| **it is declared** | its route path appears in `SCOPE_UNSCOPED_SURFACES` **with a non-empty reason** — the forced declaration §1.1 leans on |
+| **it is a route leaf** | the file's basename matches `LEAF` **imported from the shared oracle**, and the module exports an HTTP method |
+| **it is declared, in the registry its FILE KIND belongs to** | a **route** leaf appears in `SCOPE_EXEMPT_SURFACES` or `SCOPE_ENTRANCES`; a **page** appears in `SCOPE_UNSCOPED_SURFACES` — each with a **non-empty reason**, and **the `pending?: true` flag is not acceptable for any of these entries** |
 | **mutant** | re-implement any one of the three as a `"use server"` export → **RED on both limbs**: it is no longer a route leaf, and it cannot be registered as one |
-| **MUST-NOT-RED control** | adding an unrelated legitimate `page.tsx` or route.ts elsewhere in the app must **not** redden this cell — the assertion is about *this train's* entries, not the repo's shape |
+| **MUST-NOT-RED control (N1)** | adding an unrelated legitimate `page.tsx` or route.ts elsewhere must **not** redden **cell A** — A is about *this train's* entries. **It says nothing about B, and must not be read as licence to silence B:** an unrelated `error.tsx` must not red A and **MUST** red B |
+
+> **W-R-2 — why limb (ii) is written by file kind.** An earlier draft said every entry must appear
+> in `SCOPE_UNSCOPED_SURFACES`. **Measured, that registry holds zero route files**, all three
+> route entries live in `SCOPE_EXEMPT_SURFACES`, and this train's own
+> `app/(entry)/auth/confirm/verify/route.ts` is **already registered there**
+> (`apps/web/lib/require-firm-scope.ts:403`). So the limb as written **failed on unmutated
+> shipping code** — a control red before any mutant — and a lane going green literally would have
+> moved a route into the pages registry and reddened the census's own cell 1. **This train adds
+> four registry rows across two registries**: /checkout/success is two files (a paint-only page →
+> unscoped registry; its POST route → exempt registry), plus `POST /checkout`'s route, beside the
+> confirm route already there.
+
+> **N3 — nothing else asserts ④ stays client-side.** The cell therefore also asserts that the
+> number of server entries this train adds is **exactly three**, **derived** from the registries
+> and the route-leaf walk rather than typed as a literal. A fourth appearing — a lane quietly
+> moving `sign_dpa` behind a route — reddens it.
 
 **B · The secondary tripwire — a ROSTER, derived, with its remedy in the message.** The global
 shape still deserves a tripwire, but v1's version would rot: `template.tsx` is Next's standard
@@ -209,14 +232,28 @@ per-navigation remount file — for an animated two-pane route-group app that is
 
 **C · A directive is a parse fact, not a string (D — review law 3 again).** "Zero `"use server"`
 occurrences" matches the literal in a comment, a fixture or a Markdown file, and **misses
-`'use server'` in single quotes**, which is equally valid. The tripwire uses the census's own
-`stripComments(src, { blankStrings: true })` (imported, not reimplemented) and checks the module's
-**first statement**, not any occurrence.
+`'use server'` in single quotes**, which is equally valid. The tripwire uses the oracle's own
+`stripComments(src)` — imported, not reimplemented — and checks the module's **first statement**,
+not any occurrence.
+
+> **W-R-3 — `{ blankStrings: true }` is NOT passed, and the four plants are why.** An earlier
+> draft specified that option. Run against the real import, **all four plants come back not-red
+> under it**: the option blanks the *contents* of string literals, and a `"use server"` directive
+> **is** a string literal, so it blanks precisely the thing being detected. Under plain
+> `stripComments(src)` the four verdicts are RED / RED / not-red / not-red — correct. *(Confirmed
+> on this machine against the shipping sourceOracle.ts, not reasoned from the docstring.)*
 
 **The planting demonstration is re-run with four plants, and the instrument must get all four
 verdicts right:** a double-quoted directive → **RED** · a single-quoted directive → **RED** · the
 literal inside a comment → **NOT red** · the literal inside a string constant → **NOT red**. Two
-of those are the decoys that would have fooled v1's grep.
+of those are the decoys that would have fooled v1's grep — and the pair of RED verdicts is what
+refutes `blankStrings`.
+
+**N2 · The no-`.skip` rule needs an enforcer, not a sentence.** The file carries a **count
+control** in the estate's own `VACUITY CONTROL` idiom: an assertion that the number of *executed*
+cells in this file equals the expected number. A `.skip` (or a cell quietly deleted) drops the
+count and reddens the control, so the prohibition is mechanical rather than a comment nobody
+re-reads.
 
 ---
 
