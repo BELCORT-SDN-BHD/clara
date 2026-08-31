@@ -1,12 +1,21 @@
 # The checkout / signup gate — design of record
 
-*Written 2026-08-31 for the FS-4 design gate (R8). Measurement:
-[`checkout-gate-survey.md`](checkout-gate-survey.md). The objects, the webhook contract, the
-environment and the acceptance battery are **part 2**:
-[`checkout-gate-design-part2.md`](checkout-gate-design-part2.md) (this file is split at the
-estate's 500-line document gate, the same way `fix-queue-design.md` and `sst-engine-design.md`
-are). Owner questions: [`checkout-gate-gate-record.md`](checkout-gate-gate-record.md) — **nine
-questions, and this design builds around none of them.***
+*Written 2026-08-31 for the FS-4 design gate (R8); **v2** after the independent review
+(FIX REQUIRED — 3 BLOCKER, 14 MATERIAL, 9 NIT; all folded). Measurement:
+[`checkout-gate-survey.md`](checkout-gate-survey.md). **Part 2** — the database objects:
+[`checkout-gate-design-part2.md`](checkout-gate-design-part2.md). **Part 3** — the webhook
+contract, the surfaces, the environment and the acceptance battery:
+[`checkout-gate-design-part3.md`](checkout-gate-design-part3.md). *(The split is the estate's
+500-line document gate, as in `fix-queue-design.md` and `sst-engine-design.md`.)* Owner questions:
+[`checkout-gate-gate-record.md`](checkout-gate-gate-record.md) — **ten questions and two
+declarations, and this design builds around none of them.***
+
+> **What v2 changed, in one line.** The review proved the door I specified **stranded the paying
+> customer** — it demanded an unconsumed payment while consuming it on the first call, so the
+> retry path I named "rotation" was unreachable. Part 2 §1.3 carries the repair and states plainly
+> what was wrong; the partial-failure table in §5 was re-walked against the repaired door; and
+> **PKCE's cross-device cost is now a question to the owner (G10) rather than an unstated
+> regression.**
 
 **Scope (裁-73 · 裁-74 · 裁-68 · 裁-26 · 裁-36 · 裁-64① · 裁-87).** A stranger's browser causes a
 new FIRM to exist, exactly once, after paying. **In scope:** the signup→confirm browser binding,
@@ -20,7 +29,7 @@ they are.
 browser computes no cents (hard constraint 2) — every amount on every surface is Stripe's own
 rendering of a DB-generated Price, and the UI renders "Beta 试用期 / trial", **never the string
 "RM0"** (裁-58, 裁-42's design wall). Keys are env-to-env only, never in the repo, never in argv
-(hard constraint 4) — part 2 §4 names the variables and never a value. Migration numbers are
+(hard constraint 4) — part 3 §3 names the variables and never a value. Migration numbers are
 claimed at MERGE, so every new migration is named `UNNUMBERED_*` (constraint 10). Every
 `DoorRefusal` renders verbatim; no optimistic UI; hydrate-never-trust.
 
@@ -39,7 +48,8 @@ claimed at MERGE, so every new migration is named `UNNUMBERED_*` (constraint 10)
   ⑥  Stripe ──► POST /webhooks/stripe   constructEvent(RAW body)  ← 400 and NO door on failure
                         └─► record_stripe_event(id, type, payload)   append-only, idempotent
   ⑦  the applier        apply_stripe_events()  ──►  firm_registration_payments row
-  ⑧  /checkout/success  claim_paid_admission(registration, op_key)  ──► admission token
+  ⑧  /checkout/success  GET paints; its POST does the work (M9)
+                        └─► claim_paid_admission(registration, op_key)  ──► admission token
                         └─► create_firm(name, token, op_key)         ──► the firm exists
                         └─► close_paid_registration(...)             ──► registration closed
   ⑨  redirect to the firm home
@@ -49,7 +59,7 @@ Steps ③–⑨ are refused by the database on its own authority. **Every route 
 that carries values to a door and renders the door's verdict. No route is a wall.
 
 The six new doors, their exact signatures and every refusal code are **part 2 §1**; the webhook
-route's contract is **part 2 §2**.
+route's contract is **part 3 §1**.
 
 ### 1.1 · The transport is route handlers. NO Server Actions. This is a wall, not a preference.
 
@@ -97,7 +107,7 @@ the build PR. Gate record, "recorded constraints".
 | `firm` | `firm_registration_requests.firm_id` is not null | — terminal |
 | `rejected` | `status='rejected'` | — terminal (the operator road only) |
 
-**Illegal by construction, not by procedure** — each is a database property, and part 2 §5 names
+**Illegal by construction, not by procedure** — each is a database property, and part 3 §4 names
 the mutant that must redden its cell:
 
 - *two firms from one person* — `uq_membership_active_user` (survey F5). `_create_firm_core`
@@ -233,7 +243,7 @@ by a runbook line:
 If the template is ever mis-configured back to `{{ .TokenHash }}`, confirmation breaks **loudly**
 for everybody — nobody can sign up — rather than silently reverting to an unbound flow that still
 appears to work. A fallback arm would be this failure mode wearing the costume of resilience.
-The e2e in part 2 §5 walks the real journey on the built app and is the standing detector.
+The e2e in part 3 §6 walks the real journey on the built app and is the standing detector.
 
 The intermediate page's own new wall (§3.2b step 2) is fail-closed in the same direction: a
 confirmation-URL parameter whose origin is not the project's Supabase URL renders
@@ -249,12 +259,51 @@ wrong browser, an admission minted for `victim@…` is refused by `create_firm` 
 DPA e-sign (part 2 §1.1), ② the rate wall (§4 below), ③ the email-bound token (part 2 §1.4) —
 plus payment, which **is** the approval (裁-73; no operator queue for tier-3).
 
-### 3.6 · What PKCE does not close, stated
+### 3.6 · What PKCE costs — the cross-device regression (BLOCKER-3)
 
-An attacker can still create an account **with an email they do not control**. They will never
-receive the confirmation link, so they never obtain a session, and `claim_identity` refuses any
-caller with no verified email claim. The residual is that the victim receives an unexpected
-confirmation mail — a nuisance, not an authorisation defect, and the rate wall bounds its volume.
+**This is a product regression the owner has not been shown, and it is the largest cost in this
+design.** 裁-68③ asked for a browser binding; it did not ask to lose cross-device signup.
+
+**The mechanism.** The verifier cookie lives in the browser that called `signUp`. A person who
+signs up on a laptop and opens the confirmation mail **on their phone** has no verifier in that
+browser, and the exchange fails hard. For Malaysian accounting firms — largely Microsoft 365,
+mail routinely read on a phone — that is a material fraction of real signups, not an edge case.
+And §3.4 removes the escape *on purpose*: there is no `token_hash` arm.
+
+**This cost belongs to the BINDING, not to PKCE.** Any browser-bound scheme has it, a hand-rolled
+nonce included: the nonce cookie would sit in the same laptop. The only designs without it are
+the ones with no binding — which is the hole. So the question for the owner is not "PKCE or
+nonce", it is **"what is cross-device signup worth against the login-CSRF hole"** — gate question
+**G10**, which carries a third option that keeps both.
+
+**A second, subtler variant, measured at the auth-js source by the review.**
+`_exchangeCodeForSession` resolves the verifier from `options.flowId`, else from
+`window.location.href`'s `sb_flow_id`, else null; on a server `isBrowser()` is false, and
+`_maybeAppendFlowIdToRedirect` is gated on an experimental flag that is **off by default**. So
+with no explicit `flowId` the library falls back to the legacy fixed key
+`<storageKey>-code-verifier`. **A browser holding a second, newer pending PKCE flow — a password
+reset, a second signup — keeps only the newest verifier at that fixed key, and confirming the
+earlier link then fails.**
+
+**Decided and specified (BLOCKER-3 fix 2).** The route **reads `sb_flow_id` from the redirect and
+passes it as `options.flowId` when present, and otherwise accepts the fixed-key fallback.** Today
+the fallback is the live path, because the flag that appends the flow id is off; writing the
+`flowId` arm now means the design does not silently change behaviour on the day Supabase turns it
+on. The residual — one browser, two concurrent pending flows, the older link fails — is accepted
+at beta and is **rendered as its own message**, not as a generic invalid.
+
+**Distinguished refusals (BLOCKER-3 fix 1), because three different failures previously rendered
+one indistinguishable `status=invalid`:**
+
+| what happened | what the person sees |
+|---|---|
+| no verifier in this browser | **"This link has to be opened on the device where you signed up"**, with a **send-me-a-new-link** control |
+| the code is stale, used, or expired | "this link has already been used or has expired", with the same resend control |
+| the template is mis-configured (no `code` at all) | the generic invalid card — **the loud failure §3.4 relies on**, now genuinely distinct from the other two |
+
+The exchange's own error class is what discriminates them; the card is chosen from it, never from
+the absence of a session. Cell **W-H2** pins that the cross-device case renders its own card, and
+the e2e's second browser context is what exercises it.
 
 ---
 
@@ -316,7 +365,7 @@ absent** — refusing checkout rather than waving it through — exactly the pos
 The wall counts registrations by **other** applicants from the digest. A person who abandons
 checkout and comes back must not be locked out of their own registration, or 裁-74's
 resume-checkout arm refuses on the second attempt and the wall becomes a self-denial-of-service
-against the paying customer. Both polarities of this are cells (part 2 §5, W-J).
+against the paying customer. Both polarities of this are cells (part 3 §4, W-J).
 
 ---
 
@@ -324,6 +373,11 @@ against the paying customer. Both polarities of this are cells (part 2 §5, W-J)
 
 Every row is an acceptance cell, not a narrative. **No path may strand a paying customer without
 a firm, and no path may mint two firms.**
+
+> **This guarantee did not hold in v1 and the review caught it.** W9 required an unconsumed
+> payment while the minter consumed it, so the rotation these rows depend on was unreachable —
+> the design had specified strict-refuse under rotation's name. Part 2 §1.3 carries the repair
+> and what was wrong. Every row below was re-walked against the repaired door.
 
 | the browser/network dies… | state on disk | what the customer sees | how it resolves | strand? | two firms? |
 |---|---|---|---|---|---|
@@ -337,8 +391,8 @@ a firm, and no path may mint two firms.**
 | **the webhook arrives while the DB is down** | nothing recorded | the success page cannot claim yet | Stripe **retries**, and the one-minute applier sweep re-applies whatever landed | no | no |
 | **the webhook is delivered twice** | one `stripe_events` row (PK), one payment row (UNIQUE) | — | the second `record_stripe_event` returns `recorded:false` | no | no |
 | **between ⑥ and ⑧** — the customer closes the tab after paying | a payment row, unconsumed | the holding page: **"payment received — finish opening your firm"** | they return and ⑧ runs | **no** | no |
-| **between `claim_paid_admission` and `create_firm`** | an unconsumed admission, a consumed payment | the success or holding page | ⑧ again: rotation (part 2 §1.3) mints a fresh token and the flow completes | **no** | no — `uq_membership_active_user` |
-| **between `create_firm` and `close_paid_registration`** | the firm exists, `status` still `open` | the holding page **redirects to the firm home** — the live `holdingStateFrom` consults `caller_context` membership *before* registration history | the success route retries `close_paid_registration`; the sweep may also close it | **no** | no |
+| **between `claim_paid_admission` and `create_firm`** | a live admission, the payment **still unconsumed** | the success or holding page | ⑧ again: W9 passes (it no longer reads the consumption stamp), rotation supersedes the stale token and mints a fresh one, and the flow completes | **no** | no — `uq_membership_active_user` |
+| **between `create_firm` and `close_paid_registration`** | the firm exists, `status` still `open` | the holding page **redirects to the firm home** — the live `holdingStateFrom` consults `caller_context` membership *before* registration history | the success route retries the close; **and `reconcile_paid_registrations` closes it on the next one-minute sweep** — the principal that can actually execute this is part 2 §1.3's reconciler, because the sweep's own role cannot call `close_paid_registration` | **no** | no |
 | ⑧ called twice concurrently | — | — | `for update` on the registration row serializes them; the loser sees W7 or rotates | no | no |
 | **`create_firm` succeeds and its response is lost** | the firm exists, the admission is consumed **with a receipt** | — | `create_firm`'s **own live** replay (`consumed_op_key = p_op_key` → return `consumed_result`) hands back the same `{firm_id, plan_id}` | no | no |
 
@@ -354,8 +408,8 @@ pretending the money is unspent.
 | PR | contents | D1 | gated on |
 |---|---|---|---|
 | **C-1** | `UNNUMBERED_checkout_gate_a` — `dpa_documents`, `dpa_signatures`, `registration_rate_events`, `sign_dpa`; the DPA row seeded from `docs/ops/legal/` **after the owner confirms the text once** (裁-68①) | no | the owner's confirmation (gate G5) |
-| **C-2** | `UNNUMBERED_checkout_gate_b` — `stripe_events`, `stripe_event_problems`, `stripe_object_map`, `record_stripe_event`, `apply_stripe_events`, the two roles and their two grants | no | — |
-| **C-3** | `UNNUMBERED_checkout_gate_c` — `uq_frr_id_applicant`, `checkout_intents`, `firm_registration_payments`, the three `firm_admissions` columns + index + CHECK, `open_checkout_intent`, `record_checkout_session`, `claim_paid_admission`, `close_paid_registration`, the two `event_types` rows | no | C-1, C-2 |
+| **C-2** | `UNNUMBERED_checkout_gate_b` — `stripe_events`, `stripe_event_problems` (with its resolution columns), `stripe_object_map`, `record_stripe_event`, `apply_stripe_events`, **`list_stripe_event_problems` + `resolve_stripe_event_problem`**, the two roles and their three grants | no | — |
+| **C-3** | `UNNUMBERED_checkout_gate_c` — `uq_frr_id_applicant`, `checkout_intents` (with its pinned `dpa_version`), `firm_registration_payments` + `uq_frp_registration`, the **five** `firm_admissions` columns + the two partial unique indexes + three CHECKs, `open_checkout_intent`, `record_checkout_session`, `claim_paid_admission`, `close_paid_registration`, **`reconcile_paid_registrations`**, the two `event_types` rows | no | C-1, C-2 |
 | **C-4** | `UNNUMBERED_checkout_gate_d` — **the `create_firm` recut** (part 2 §1.4) | **YES — the one window** | C-3 |
 | **C-5** | the runtime: the raw-body webhook router mounted **before** `src/index.ts:55`, the applier sweep, the trusted-IP courier | no | C-2 |
 | **C-6** | `apps/web`: the PKCE confirm route (§3.2b), the DPA step, the checkout and success routes (**route.ts handlers, never Server Actions — §1.1**), the holding page's three arms, the e2e | no | C-3, C-5 |

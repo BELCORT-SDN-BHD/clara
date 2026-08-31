@@ -1,304 +1,285 @@
 # The checkout / signup gate — gate record (questions for the owner)
 
-*2026-08-31. The design gate R8 reserved for the self-serve tenant-creation door. The
-measurement is [`checkout-gate-survey.md`](checkout-gate-survey.md); the design is
-[`checkout-gate-design.md`](checkout-gate-design.md) + [part 2](checkout-gate-design-part2.md).*
+*2026-08-31, **v2** after the independent review (FIX REQUIRED — 3 BLOCKER, 14 MATERIAL, 9 NIT;
+all folded). The design gate R8 reserved for the self-serve tenant-creation door. Measurement:
+[`checkout-gate-survey.md`](checkout-gate-survey.md). Design:
+[`checkout-gate-design.md`](checkout-gate-design.md) + [part 2](checkout-gate-design-part2.md) +
+[part 3](checkout-gate-design-part3.md).*
 
-**What this file is.** Nine things the rulings do not settle, each stated in plain language, each
-with a recommendation and what each option costs. **The design builds around none of them** — it
-carries the recommended answer and says so at the point of use, so a different ruling changes a
-named thing rather than the shape.
+**What this file is.** **Ten questions** the rulings do not settle, each with a recommendation and
+what every option costs — plus **two declarations** (things the orders already authorised me to
+decide, recorded rather than asked) and **two recorded constraints**. The design builds around
+none of the ten: it carries the recommended answer at the point of use, so a different ruling
+changes a named thing rather than the shape.
 
-**The one thing this gate is NOT asking.** Whether to build the checkout at all, or in what
-shape — 裁-73 ruled that and the design implements it. **G1 and G7 are the two places where the
-measurement met the ruling's words and found more than one faithful reading**; both are reported
-here rather than chosen silently.
+**What changed in v2, because it changes what G1 is asking.** The review proved that the door I
+specified **stranded the paying customer**: it required an unconsumed payment while consuming it
+on the first call, so the retry path I called "rotation" was unreachable. **The design's stated
+default was not a working option.** G1 is therefore no longer "which of three readings" — it is
+**a repaired rotation versus the fold**, and the fold is the safest thing on the table. Three
+questions are new (G10, G11, G12), all of them costs the owner had not been shown.
 
 ---
 
-## G1 · "mints exactly one admission and returns its plaintext once" — which of three?
+## G1 · The admission door — repaired rotation, or fold the two doors into one?
 
-**大白话.** 客人付了钱，系统给他一把"开公司的钥匙"，他拿这把钥匙去开公司。裁-73 说"只发一把，钥匙只
-给他看一次"。问题是：**如果他看了钥匙，但浏览器在下一秒死掉了呢？** 钱付了，钥匙没用上，也不能
-再看一次 —— 那这个人就卡在半路，有钱没公司。
+**大白话.** 客人付了钱，系统要给他"开公司的钥匙"。原本写的是"钥匙只发一次" —— 但**如果他拿到钥匙、
+浏览器下一秒死掉，就再也拿不到第二把了：钱付了，公司开不成，卡死**。这是审查抓到的最大问题，已经修好。
+现在真正要你选的是两种修法。
 
-Three readings of the ruling, and they behave differently:
-
-| | what it means | if the browser dies mid-way |
+| | **(A) repaired rotation** *(specified)* | **(B) fold the two doors into one** *(recommended)* |
 |---|---|---|
-| **(a) strict** | after the first call, always refuse | **the customer is stranded** — paid, no firm, no path forward |
-| **(b) receipt** | store the plaintext and hand it back on replay | fine for the customer, but **a live bearer credential sits at rest in the database** — exactly what 裁-16b removed from `firm_admissions` in `0147` |
-| **(c) rotation** *(the design's choice)* | each call mints a **fresh** key and kills the previous unused one | the customer retries and it just works; **no plaintext is ever stored**; "exactly one" is a database unique index, not a promise |
+| shape | `claim_paid_admission` mints a token → the server calls `create_firm` with it → `close_paid_registration` | one door does claim → create → close **in one transaction** |
+| where the token goes | DB → the app server → back to the DB | **never leaves the database** |
+| retry after a crash | works: the next call supersedes the stale token and mints a fresh one | nothing to retry — it either happened or it did not |
+| failure modes it removes | — | **three at once**: the stranding class, the unreachable-closer problem (M5), and the two-in-flight-payments window (M7) |
+| cost | matches 裁-73's written two-step shape exactly | **deviates from 裁-73's wording**; one door does two jobs |
 
-**Recommendation: (c).** "Exactly one" stays literally true — a UNIQUE index allows exactly one
-admission per registration — and "once" stays true, because each key is shown on the one call
-that made it and can never be read again. Two firms remain impossible whatever happens, because
-the database already refuses a second firm for a person who has one
-(`uq_membership_active_user`, measured).
+**Recommendation: (B), if you are willing to amend 裁-73's wording.** The reviewer agrees, and so
+do I. 裁-73 wrote the two-step shape before anyone had measured that the estate has no pre-firm
+transaction boundary; every failure mode above lives in the seam between the two calls, and the
+fold deletes the seam rather than defending it.
 
-**A fourth option, which is simpler still — fold the two doors into one.** Instead of "give me a
-key, then open the firm with it", one door does both inside a single transaction:
-`claim_paid_admission_and_create_firm(registration, firm_name, op_key)`. **The key would then
-never leave the database at all** — not to the server, not over the wire, not into a log.
-*Cost:* it deviates from 裁-73's written two-step shape, and it makes one door do two jobs. *Gain:*
-the entire class of "what if it dies between the two calls" disappears, and there is no plaintext
-token anywhere outside one transaction. **If the owner is willing to amend 裁-73's wording, this
-is the safest design on the table and I would take it.** The delta from (c) is small — the same
-walls, one fewer round trip.
+**One correction to my own earlier pitch for the fold** (the reviewer flagged it and is right that
+I overstated it, though not entirely): I said the token "never goes over the wire". In the
+two-door shape both calls are already made server-side, so the token never reaches the *browser* —
+that part was overstated. What it *does* do today is cross the application↔database connection
+twice and sit in the app server's memory, where it can reach a log or an error report. **The
+fold's real gain is that a live bearer credential never enters the application tier at all.** That
+is still material; it is just narrower than "over the wire".
+
+**If (A) is ruled**, the design as written is complete and correct — no further work.
 
 ---
 
-## G2 · Where do Stripe's Product and Price come from, when `billing_plans` does not exist?
+## G2 · DECLARATION, not a question — where Stripe's Product and Price come from
 
-**大白话.** 裁-42 定了铁律：Stripe 上的产品和价格必须从数据库的行生成，**绝不可以在 Stripe 后台
-手打**。但那张表（`billing_plans`）属于 billing PR-1，还没建 —— 我在活的目录里量过，它不存在。
+The FS-4 order already authorised this decision (*"or a minimal `billing_plans` seed if PR-1 is
+not built yet — **say which**"*), so it is recorded rather than asked (M13).
 
-| option | cost |
-|---|---|
-| **(i) land the minimal `billing_plans` table + the one beta plan row now** *(recommended)* | this train builds a slice of billing PR-1. PR-1 later *widens* the table rather than creating it — a small coordination cost, and PR-1's own gate must be told |
-| (ii) a beta-only table that PR-1 drops later | a throwaway object in the estate, and a migration whose whole job is to delete it |
-| (iii) hand-author the Price in the Stripe dashboard | **not an option — 裁-42 forbids it by name.** Recorded only so nobody re-proposes it |
-
-**Recommendation: (i).** Just `billing_plans` with the beta row and `amounts_ruled = false` —
-**not** the capacity walls, **not** the four lifecycle doors, **not** the D1 recuts that make
-PR-1 heavy. The law that objects come from DB rows then holds from the first Stripe object that
-ever exists, instead of being retrofitted.
+**Chosen: land the minimal `clara.billing_plans` table with the one beta plan row and
+`amounts_ruled = false`.** Not the capacity walls, not the four lifecycle doors, not the D1 recuts
+that make billing PR-1 heavy. **Why:** 裁-42's law — Stripe objects are generated FROM DB rows,
+never authored in the dashboard — then holds from the very first Stripe object that ever exists,
+instead of being retrofitted onto one that was hand-made. **Cost:** billing PR-1 later *widens*
+this table rather than creating it, and PR-1's own gate must be told. Overrule if you would rather
+PR-1 own it whole and this train wait.
 
 ---
 
 ## G3 · Which app owns the webhook — the runtime, or `apps/web`?
 
-**大白话.** Stripe 付款成功后会来敲一个门。这个门需要一把数据库钥匙。放在哪个程序里？
+**Recommendation: `packages/runtime`.**
 
-| | `packages/runtime` *(recommended)* | `apps/web` |
+| | `packages/runtime` *(rec.)* | `apps/web` |
 |---|---|---|
-| privileged DB credentials | **already holds them**, from the environment (`CLARA_RUNTIME_DATABASE_URL` etc.) | **holds none today**, and its own build proves the one public key is publishable-class |
-| raw-body handling | needs a router mounted before `express.json()` at `src/index.ts:55` — **the estate already does exactly this for `intakeRoutes()` at `:53`** | Next route handlers give the raw body naturally |
-| what a compromise costs | one more process that already had the keys | **a new class of secret in the browser-facing app** |
+| raw body for the signature check | needs a router mounted before `express.json()` at `src/index.ts:55` — **the estate already does exactly this** for `intakeRoutes()` at `:53` | Next route handlers give the raw body naturally |
+| database credential | already holds privileged DSNs from the environment | would be **the first database credential in the browser-facing app** |
+| cost of the choice | one more surface on a process that already had the keys | a new credential class in the app users' browsers talk to |
 
-**Recommendation: the runtime.** The deciding reason is the last row: `apps/web` currently
-references no service credential at all, and that is a property worth keeping. The raw-body
-constraint is real either way and is measured, not assumed — a webhook router mounted after line
-55 is *silently* broken, and the fix is one line's placement.
+**The reason is corrected from v1 (M3).** I had written that `apps/web` "references no service
+credential at all" — **the design's own environment table falsifies that**, since the checkout
+route needs `STRIPE_SECRET_KEY`. The honest reasons are the raw-body constraint and *not adding a
+DATABASE credential*, which is a sharper property and still decides it the same way.
 
 ---
 
 ## G4 · The rate wall (裁-36 · 裁-64①) — the short design sitting
 
-**大白话.** 裁-36 定了"一个 IP 一天只能开一间公司"。裁-64① 定了形状：网页那一层把看到的地址传给
-数据库的门，**墙还是数据库**。没定的是：**传过去的到底是地址本身，还是地址的指纹？**
+**大白话.** 裁-36 定了"一个 IP 一天只能开一间公司"，裁-64① 定了形状：网页把看到的地址传给数据库的
+门，**墙还是数据库**。没定的是：**传过去的是地址本身，还是地址的指纹？**
 
-| | **Option A — the address** | **Option B — a peppered digest** *(recommended)* |
+| | **(A) the address** | **(B) a peppered digest** *(recommended)* |
 |---|---|---|
 | the door's argument | `p_client_ip inet` | `p_origin_digest bytea` = `sha256(pepper ‖ address)` |
-| the wall | in the DB, counting per address | in the DB, counting per digest — **identical** |
-| what is stored | **an IP address — personal data** under the PDPA reasoning this repo already carries | a digest that is unlinkable to any address without the pepper |
+| the wall | in the DB, per address | in the DB, per digest — **identical strength** |
+| what is stored | **an IP address — personal data** under this repo's own PDPA memo | a digest unlinkable to an address without the pepper |
 | operator can ask "which IP?" | yes | no |
-| extra secret | none | one (`CLARA_RATE_WALL_PEPPER`), carried through DR |
+| cost | a new personal-data category, with its own retention question | one more secret, carried through DR |
 
-**Recommendation: Option B.** The wall is exactly as strong and exactly as much in the database.
-The estate simply does not take on a new category of personal data — with its own retention
-question — for an anti-abuse counter that never needs to read it back. Rotating the pepper resets
-the 24-hour window, which is the right blast radius for a rate wall.
+**Recommendation: (B).** Identical wall, identically in the database, and the estate does not take
+on personal-data retention for an anti-abuse counter that never reads it back. Rotating the pepper
+resets the 24-hour window — the right blast radius for a rate wall.
 
-### G4b · The sub-decision the ruling does not reach: shared offices
-
-**大白话.** 一间会计楼里两个人，同一条网线。第一个开公司成功，第二个当天被墙挡住 —— 他是真客户，
-不是滥用。
-
-The design already exempts a person's **own** retries (otherwise the resume-checkout arm of
-裁-74 refuses on the second attempt and the wall attacks the paying customer). The open question
-is the genuinely-second person behind one NAT:
-
-- **(i) refuse with a plain sentence and a contact route** *(recommended)* — "we can only open one
-  firm from this network each day; write to us and we will open yours" — an honest refusal with a
-  human door behind it.
-- (ii) raise the limit to N per day — weakens the wall for a case that is rare at beta.
-- (iii) refuse silently — **rejected**; it looks like a bug and the customer leaves.
-
-**Cost of (i):** an inbox to watch during beta. Given beta's size, that is the cheapest of the
-three and the only one that never loses a real customer.
+**G4b · the shared-office case.** Two people in one accounting office behind one connection: the
+second is a real customer, refused. The design already exempts a person's *own* retries (or 裁-74's
+resume-checkout arm would attack the paying customer). For the genuinely-second person:
+**(i) refuse with a plain sentence and a contact route** *(recommended — costs an inbox to watch
+during beta, and never loses a real customer)* · (ii) raise the limit to N/day (weakens the wall) ·
+(iii) refuse silently (**rejected** — reads as a bug and they leave).
 
 ---
 
-## G5 · The DPA text does not exist yet — and it is not one of the three drafts
+## G5 · The DPA text does not exist — and it is not one of the three drafts
 
-**This is the finding in this gate I most want the owner to see.** 裁-68① requires a DPA e-sign
-at signup, with "the `docs/ops/legal/` text, owner-confirmed once". That directory holds exactly
-three files, and **none of them is a data processing agreement between Clara and a signing
-firm**:
+**The finding I most want you to see.** 裁-68① requires a DPA e-sign at signup against "the
+`docs/ops/legal/` text, owner-confirmed once". That directory holds exactly three files and **none
+is an agreement between Clara and a signing firm**: an OpenAI-DPA compliance brief written *for
+you*; a letter a **firm sends its own clients**; and an internal PDPA cross-border memo. Each is
+headed "DRAFT FOR OWNER REVIEW AND SIGNATURE" and each was written by an agent, not a lawyer.
 
-| file | what it actually is |
-|---|---|
-| `openai-dpa-brief.md` | a brief about **OpenAI's** DPA — an upstream-processor analysis, for the owner |
-| `client-ai-authorization-letter-template.md` | a letter a **firm sends its own clients** |
-| `pdpa-cross-border-transfer-basis-memo.md` | an internal memo on the s.129 transfer basis |
+- **(i) commission or approve a real customer-facing DPA before C-1 lands** *(recommended)*.
+  **Cost:** a lawyer and some days. The mechanism ships inert meanwhile — `dpa_documents` empty,
+  `sign_dpa` refusing `unknown dpa version`, so **no firm can be created at all**, which is exactly
+  裁-36①'s "no signature, no firm" and is fail-closed by construction.
+- (ii) ship an interim text assembled from the three drafts. **Cost: a real agreement with real
+  legal effect, drafted by an AI, signed by real customers.** I do not recommend it and would want
+  the ruling in writing.
+- (iii) defer the DPA wall past beta — **contradicts 裁-68① and 裁-36①**; recorded so the option is
+  visible, not because it is advisable.
 
-Each is headed "DRAFT FOR OWNER REVIEW AND SIGNATURE" and each was written by an agent, not a
-lawyer. **So the thing the signup page must display and record a signature against has not been
-written.** Options:
-
-- **(i) the owner commissions or approves a real customer-facing DPA before C-1 lands**
-  *(recommended)*. The mechanism is built and inert until the text exists — `dpa_documents` is
-  empty and `sign_dpa` refuses `unknown dpa version`, so **no firm can be created**, which is
-  exactly 裁-36①'s "no signature, no firm" and is fail-closed by construction.
-- (ii) ship with a composed interim text assembled from the three drafts. **Cost: a real
-  agreement with real legal effect, drafted by an agent, signed by real customers.** I do not
-  recommend it and would want the ruling in writing.
-- (iii) defer the DPA wall past beta — **contradicts 裁-68① and 裁-36①**, and is recorded only so
-  the option is visible.
-
-**Note the sequencing this creates:** the checkout train can be built and reviewed in full while
-the text is pending. It cannot be *switched on* for a real customer until G5 is answered, because
-the door refuses. That is a feature of the design, not a blocker to building it.
+**Sequencing:** the train can be built and reviewed in full while the text is pending. It cannot be
+switched on for a real customer until this is answered. That is a property of the design, not a
+blocker on building it.
 
 ---
 
-## G6 · The pre-firm half of this journey cannot be audited — is that acceptable at beta?
+## G6 · The pre-firm half of this journey cannot be audited — acceptable at beta?
 
-**大白话.** Clara 的审计日志 (`audit_log`) 和事件流 (`domain_events`) 每一行都必须挂在一间公司
-底下 —— 我量过，两张表的 `firm_id` 都是 NOT NULL。可是**"公司还没出生"之前的每一步**（认领身份、
-提交注册、签 DPA、付款、领钥匙）根本挂不上去。今天 `claim_identity` 和
-`request_firm_registration` 就是一行审计都不写的。
+**大白话.** Clara 的审计日志和事件流每一行都必须挂在一间公司底下 —— 我量过，两张表的 `firm_id` 都是
+NOT NULL。可是**公司出生之前的每一步**（认领身份、提交注册、签 DPA、付款、领钥匙）根本挂不上去。今天
+`claim_identity` 和 `request_firm_registration` 就是一行审计都不写。
 
-The design's answer: **every new pre-firm table is append-only and timestamped and IS the
-record** — `dpa_signatures`, `registration_rate_events`, `checkout_intents`, `stripe_events`,
-`stripe_event_problems`, `firm_registration_payments`. From `create_firm` onward the ordinary
-spine takes over. So the *facts* are all durable; what is missing is a single place to read "what
-happened to this applicant, in order".
+- **(i) accept at beta; the six append-only tables ARE the record** *(recommended)* —
+  `dpa_signatures`, `registration_rate_events`, `checkout_intents`, `stripe_events`,
+  `stripe_event_problems`, `firm_registration_payments`. **Cost:** answering "what happened to this
+  applicant" means joining six tables. Fine at beta's volume.
+- (ii) add a `clara.pre_firm_audit` append-only relation now. **Cost:** one more table and one more
+  write on every pre-firm door; the read becomes trivial.
+- (iii) make `domain_events.firm_id` nullable — **rejected**: it is `PRIMARY KEY (firm_id, seq)`
+  with a per-firm sequence. That is a redesign of the event spine, not a column change.
 
-| option | cost |
-|---|---|
-| **(i) accept it at beta; the six tables are the record** *(recommended)* | an investigation means joining six tables by applicant. Acceptable at beta's volume |
-| (ii) add a `clara.pre_firm_audit` append-only relation now | one more table and one more write on every pre-firm door; the read gets easy |
-| (iii) make `domain_events.firm_id` nullable | **rejected** — it is `PRIMARY KEY (firm_id, seq)` with a per-firm sequence. This is a redesign of the event spine, not a column change |
-
-**Recommendation: (i)**, with (ii) named in the backlog with its trigger — *the first time anyone
-has to answer "what happened to this signup" and cannot*.
+**Backlog trigger for (ii):** the first time anyone has to answer "what happened to this signup"
+and cannot.
 
 ---
 
-## G7 · The applier "marks the registration PAID" — but there is no `paid` status
+## G7 · Three measured divergences from 裁-73's text — confirm each
 
-**Measured contradiction with the ruled shape, reported not resolved.**
-`firm_registration_requests.status` carries a live `CHECK (status = ANY (ARRAY['open',
-'approved','rejected']))`. 裁-73's wording implies a fourth value.
+The ruling was written before this measurement existed. Each of these is reported, not taken.
 
-| option | cost |
-|---|---|
-| **(i) record payment in `firm_registration_payments`; leave the CHECK alone** *(recommended, and what the design does)* | the status column no longer tells the whole story on its own — but the payments table holds the Stripe ids a status value could never carry, plus a composite FK binding the payment to its applicant |
-| (ii) widen the CHECK to admit `paid` | a named successor-constraint edit on a live table, **and** the payment row is still needed for the Stripe ids — so this adds a value without removing a table |
-
-**Recommendation: (i).** The two are not alternatives in practice: (ii) is (i) plus a widening.
-Raised because 裁-73 says "PAID" and a reader may expect to find it as a status.
+1. **"marks the registration PAID"** — `firm_registration_requests.status` carries a live CHECK
+   admitting exactly `open | approved | rejected`. **Chosen:** record payment in
+   `firm_registration_payments` and leave the CHECK alone. *Cost:* the status column no longer
+   tells the whole story alone. *Alternative:* widen the CHECK — a named successor-constraint edit
+   on a live table that **still needs the payment table anyway** for the Stripe ids, so it adds a
+   value without removing anything.
+2. **"the existing `create_firm` unchanged … no D1 window"** (M1) — **I re-cut it**, because
+   裁-26's email wall has nowhere else to live: the token is compared inside that body. It is the
+   train's one D1 item, on **the most dangerous live body in the estate**, with its `prosrc` sha
+   `59fa533d9c03` pinned before the edit and the delta proven by inverse re-substitution.
+   *Cost:* one write-quiesce window that 裁-73 priced at zero.
+3. **"a webhook that mints exactly one `firm_admissions` row"** (NIT-7) — minting moved to
+   `claim_paid_admission`, per the FS-4 order's own ruled shape. The webhook writes only to the
+   append-only event store and mints nothing. *Cost:* none that I can find; the order already
+   ruled it, and it is recorded here because G7 sets the precedent that divergences get named.
 
 ---
 
-## G8 · How long may an unused admission key live? (proposed: one hour)
-
-**大白话.** 领了钥匙没马上开公司 —— 钥匙多久过期？
+## G8 · How long may an unused admission token live? (proposed: one hour)
 
 裁-26 hashed the token and bound it to an email; **nothing rules an expiry**, and
-`firm_admissions` has no `expires_at` column today (measured). The design proposes **one hour**,
-on the reasoning that the key is minted on the success page and used in the next HTTP request —
-an hour is generous by three orders of magnitude, and G1(c)'s rotation means an expired key is
-never a dead end: the customer clicks again and gets a fresh one.
+`firm_admissions` had no `expires_at` column. **Recommendation: one hour.** The token is minted on
+the success page and used in the next request; an hour is generous by orders of magnitude, and
+rotation means an expired token is never a dead end — the customer clicks again and gets a fresh
+one. *Alternatives:* 24 hours (a live credential usable for a day, for no gain rotation does not
+already give) · no expiry (the legacy behaviour: a leaked token valid forever).
 
-| option | cost |
-|---|---|
-| **one hour** *(recommended)* | a customer who walks away mid-step for longer clicks once more |
-| 24 hours | a live credential sits usable for a day for no gain the rotation does not already give |
-| no expiry | the legacy behaviour; a leaked key is valid forever |
-
-**A related sub-question the owner may want to rule:** when rotation invalidates a
-still-valid key, should anything be recorded? **Recommendation: yes** — the superseded
-admission's deletion is worth an append-only note, because "this key stopped working" is the kind
-of thing a confused customer reports and nobody can otherwise explain.
+**Sub-question:** when rotation supersedes a still-valid token, record it? **Recommendation: yes** —
+the superseded row is marked `superseded_at`, never deleted (裁-74), because "my link stopped
+working" is exactly the report nobody can otherwise explain.
 
 ---
 
-## G9 · Stripe Tax at a zero-amount price (裁-54 / billing OQ-5)
+## G9 · CLOSED by 裁-54 — not a question
 
-**大白话.** 现在收 RM0，没有税可算。要不要现在就把 Stripe Tax 打开？
+I had asked whether Stripe Tax should be enabled at a zero-amount price. **裁-54 already answers
+it:** SST on Clara's invoices is computed by Stripe Tax, switched on when BELCORT's own SST
+registration status says so, and **"no tax line before registration"**. So: `automatic_tax` stays
+off until BELCORT is registered, and nothing here needs a ruling.
 
-| option | cost |
+---
+
+## G10 · NEW — PKCE costs cross-device signup. Is that acceptable? *(BLOCKER-3)*
+
+**大白话.** 为了堵住那个安全漏洞，确认邮件**必须在"当初注册的那台机器"上打开**。在笔电上注册、
+用手机点邮件里的链接 —— 会失败。会计师事务所大多用 Microsoft 365，手机看邮件是常态。
+
+**裁-68③ asked for a browser binding; it did not ask to lose cross-device signup, and you have not
+been shown this cost.** It is not a PKCE quirk — **any** browser-bound scheme has it, a hand-rolled
+nonce included, because the secret lives in the browser that started the flow.
+
+| | cost |
 |---|---|
-| **(i) do not enable `automatic_tax` at beta; carry it with billing OQ-5** *(recommended)* | when amounts arrive, the subscription objects need the setting added — a mirror re-run, not a rebuild |
-| (ii) enable it now on the zero-amount subscription | it computes nothing at RM0, so it proves nothing; and it makes an unruled tax decision (OQ-5) by default rather than by ruling |
+| **(i) accept it** | a real fraction of signups fail on the first attempt. Mitigated: the design now renders *"open this on the device where you signed up"* with a **resend** control, instead of a generic error (that mitigation ships regardless of this ruling) |
+| **(ii) email a 6-digit CODE instead of a link** *(recommended if cross-device matters to you)* | Supabase supports it (`{{ .Token }}` + `verifyOtp({email, token})`). The person reads the code on their phone and **types it into the tab where they signed up** — cross-device works, and the binding survives because the *original tab* supplies the email. **Cost:** a different signup UX, a small design of its own, and a **weaker binding than PKCE's** — it binds to "a browser that knows this email" rather than cryptographically to the flow. It also requires that the email come from the browser's own signup state, never from a URL parameter |
+| (iii) keep a `token_hash` fallback arm | **reopens the login-CSRF hole this entire gate exists to close. Not recommended at any price** |
 
-**Recommendation: (i).** 裁-58 says nothing charges until the pricing sitting, so there is no tax
-question to answer yet, and answering it by default is how an unruled decision becomes a fact
-nobody remembers making.
+**Recommendation:** ship (i) with its distinguishing message now, and rule (ii) in if the first
+week of beta shows cross-device failures. (ii) is a contained addition, not a redesign.
+
+---
+
+## G11 · NEW — PDPA retention and erasure for the Stripe event store
+
+**The inconsistency worth your attention.** G4 puts a whole sitting to you about storing an **IP
+address** because it is personal data under this repo's own PDPA memo. Meanwhile the design stores
+Stripe's **entire** `checkout.session.completed` payload — `customer_details` carries email, name,
+address, phone and tax ids — in a table whose BEFORE UPDATE, DELETE **and** TRUNCATE all raise.
+**There is by construction no erasure path at all.** I took the privacy-conservative option on the
+IP and the privacy-maximal one on the payload, and never showed you the second.
+
+| | cost |
+|---|---|
+| **(i) store a redacted subset** — ids, amounts, status, our own metadata; drop `customer_details` at the door *(recommended)* | the raw payload is no longer available for a dispute; Stripe still holds it and remains the system of record for what Stripe saw |
+| (ii) keep the full payload, add a retention/erasure door | an append-only table gains a deletion path — a real weakening of a wall, and it needs its own design |
+| (iii) accept and record the lawful basis | cheapest today; leaves an unbounded personal-data store with no erasure answer, which is the thing a PDPA request would land on |
+
+**Recommendation: (i).** It is the only option that keeps the table strictly append-only *and*
+keeps the personal-data surface small. The applier needs the ids and the metadata, nothing else.
+
+---
+
+## G12 · NEW — the double-payment residual
+
+Two Checkout Sessions can be in flight for one registration (the customer opens checkout twice).
+Both can complete, producing two distinct Stripe events. **The design now writes only one payment
+row** (`uq_frp_registration`) and records the second as a `duplicate_payment` problem — so it is
+**visible**, not silently accepted.
+
+**What is not decided is what happens next.** At RM0 it is two zero-amount subscriptions, which is
+untidy and harmless. **After 裁-28's amounts are ruled it is a genuine double charge**, and this
+design contains no refund path.
+
+- **(i) beta: leave it visible in the problems queue and handle it by hand** *(recommended)* —
+  cost: an operator watches the queue; at beta volume that is minutes.
+- (ii) build cancel-the-other-session into the applier now — cost: a Stripe write from the applier,
+  which is a new class of act for it, before anyone can be charged anything.
+- **(iii) whichever you pick, it is a named precondition on the pricing sitting**: no real money
+  may be taken until the duplicate path has an answer.
 
 ---
 
 ## Recorded constraints — not questions, but they bind the build lane
 
-**No `"use server"` Server Actions anywhere in this train.** Every server-side step is a
-route.ts HTTP-method export. The reason is in the design at part 1 §1.1 and is a measured
-instrument gap, not a style preference: the scope-spine census enumerates surface leaves with
+**No `"use server"` Server Actions anywhere in this train.** Every server-side step is a route.ts
+HTTP-method export. The scope-spine census enumerates surface leaves with
 `/^(page|route)\.(ts|tsx|js|jsx)$/`, so a `"use server"` file — or a root `template.tsx` — can
-reach firm-scoped data with the full suite green. Next's own guidance is that page-level
+reach firm-scoped data with the full suite green; Next's own guidance is that page-level
 authentication does not protect Server Actions. The census fix is ordered and has not landed.
+Measured while folding this in: `apps/web` holds **zero** `"use server"` files and **no**
+`template.tsx` today, so this train is not repairing a hole — it is declining to open the first
+one, on the most dangerous door in the system, while the instrument is known blind. **If a build
+lane later wants an action, that is not a local call:** the census fix must land first, as a stated
+precondition on the build PR.
 
-Measured while folding this in, so the rule's scope is honest: `apps/web` today holds **zero**
-`"use server"` files and **no** `template.tsx`. **This train is not repairing a hole — it is
-declining to open the first one, on the most dangerous door in the system, while the instrument
-that would catch it is known blind.** Cell W-R pins it as a positive count.
-
-**If a build lane later believes a Server Action is the right shape here, that is not a local
-call:** it needs the census fix landed first, stated as a precondition on the build PR. Raise it
-rather than taking it.
-
-## An amendment owed to owner-batch item 85 — BEFORE the owner performs the Wave-G setup act
-
-**Not a question; a correction with evidence, flagged because the owner is queued to act on the
-current wording.** Item 85 in `mohe-owner-batch-2026-08-31.md` (from #461's Codex leg, N1) tells
-the owner to set the Supabase "Confirm signup" template to the token-hash form, explicitly *not*
-the default ConfirmationURL, because that default is consumed by mail scanners. **The prefetch
-reason is correct and this gate does not overturn it.** What item 85 did not have is that the
-same protection is available *with* the browser binding.
-
-- The bare default ConfirmationURL points at Supabase's own verify endpoint → a scanner's GET
-  consumes it. Item 85 is right about that, and Supabase documents the limitation.
-- Supabase's **own documented mitigation** is an intermediate landing page carrying the
-  confirmation URL as a query parameter, with a button the human clicks — **which is exactly the
-  page P4-3 already built**. The link in the mail points at our page; a scanner consumes nothing;
-  the explicit click carries the PKCE flow; and the code that comes back is useless without the
-  verifier cookie.
-- The token-hash form, by contrast, is prefetch-safe **and has no browser binding at all** —
-  which is the hole this gate exists to close.
-
-**So item 85's line should be amended to the intermediate-page form before the owner sets the
-template**, not left as written and then contradicted by this train. If the owner prefers to keep
-the token-hash form, the binding has to be hand-rolled instead, and
-[the design's §3.3 table](checkout-gate-design.md) prices that — it is the more expensive answer
-and it leaves the ingress-log sibling finding open. **The three Wave-G setup lines that change:
-the template's form, /auth/confirm staying in the Redirect URLs allowlist (unchanged), and
-autoconfirm staying DISABLED (unchanged).**
-
-## What I am proceeding on if nothing is ruled
-
-Fail-closed defaults, so the train can be built and reviewed while these sit:
-
-| | default |
-|---|---|
-| G1 | rotation (c); the fold is **not** taken without a ruling |
-| G2 | the minimal `billing_plans` + one beta row, `amounts_ruled = false` |
-| G3 | the webhook lives in `packages/runtime` |
-| G4 | the peppered digest; the applicant's own retries exempt; a shared-NAT refusal with a contact route |
-| G5 | **`dpa_documents` ships EMPTY.** `sign_dpa` refuses, so **no self-serve firm can be created at all** until the owner confirms a text. This is the fail-closed default and it is deliberate |
-| G6 | the six append-only tables are the record; a `pre_firm_audit` relation goes to the backlog |
-| G7 | `firm_registration_payments`; the CHECK is untouched |
-| G8 | one hour, and the superseded admission is noted |
-| G9 | `automatic_tax` off; carried with billing OQ-5 |
-
-**And the one cutover line that does not wait for any of these.** "Self-serve signup is
-unreachable in a deployed build until this train closes the confirmation browser binding" is a
-hard FS-10 criterion already carried in `PROGRESS.md`. The design's answer to it is
-[part 1 §3](checkout-gate-design.md) — Supabase's native PKCE exchange, recommended over a
-hand-rolled nonce because @supabase/ssr 0.12.5 **already** runs PKCE in both of its clients
-(measured in the shipped `dist`) and the app simply never consults the verifier it is already
-writing. **That is a configuration and route change, not a new mechanism** — and it closes the
-recorded sibling finding (`token_hash` reaching ingress logs) as a side effect, which a nonce
-does not.
+**An amendment owed to owner-batch item 85, BEFORE you perform the Wave-G setup act.** Item 85
+tells you to set the Supabase "Confirm signup" template to the token-hash form, *not* the default
+ConfirmationURL, because mail scanners prefetch and consume it. **That reason is correct and this
+gate does not overturn it** — but the same protection is available *with* the browser binding:
+Supabase's own documented prefetch mitigation is an intermediate landing page carrying the
+confirmation URL as a query parameter, **which is exactly the page P4-3 already built**. The
+emailed link points at our page, a scanner consumes nothing, and the explicit click carries the
+PKCE flow. The token-hash form is prefetch-safe **and has no browser binding at all** — the hole
+this gate exists to close. So item 85's line should be amended to the intermediate-page form
+before you set the template.
