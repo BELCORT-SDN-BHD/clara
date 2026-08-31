@@ -122,6 +122,16 @@ confirmed-user predicate instead of a local copy; retarget to `main` after #451 
 at `b6359309`; retarget after #451. Neither is the tier-3 path (裁-68: no operator queue for
 self-serve); #453 is operator tooling and the same-day fallback if the checkout train slips.
 
+**HARD PRECONDITION on #455 (2026-08-31):** the scope-spine census's **fourth-entrance gap** must be
+closed first — the firm-scope-surfaces census (apps/web/tests, arriving with #451) has a `LEAF`
+regex that sees only `page|route` files, so a root template.tsx and a `"use server"` action both reach firm-scoped data, full suite green
+(demonstrated by #451's reviewer, not argued). #455 is the train that adds mutating member surfaces,
+so it must not merge over a census that cannot see them. Scope, and the trap in it: extend `LEAF` to
+`default|template|not-found|error|global-error|loading`, register the legitimately-unscoped files,
+and add the `"use server"` class over `app/**` + `lib/**` — **with a positive control**, because at
+zero actions in the tree that census passes vacuously and would ship as a green that proves nothing.
+Full statement in `PROGRESS.md` Known issues.
+
 ## FS-4 · The checkout / signup-gate train (裁-73 · 74 · 68 · 81 · 26 · 36 · 64①) — design gate FIRST
 
 **This is the most dangerous door in a multi-tenant system** (R8, 2026-08-26: the self-serve
