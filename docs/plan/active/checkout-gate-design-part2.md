@@ -497,5 +497,3 @@ is itself the record** — `dpa_signatures`, `registration_rate_events`, `checko
 the ordinary spine takes over. **Gate question G6** puts the residual to the owner: whether a
 first-class pre-firm audit relation is owed before beta.
 
----
-
