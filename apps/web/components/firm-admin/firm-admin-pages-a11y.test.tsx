@@ -1,6 +1,6 @@
 // GATE (b) — page-level a11y scan for T10's routes (N7, independent review,
 // 2026-08-28): the panels had a11y coverage; the PAGES (PageHeader's own h1 +
-// description) and the /admin nav (the two Link buttons to the new
+// description) and the /admin nav (the three Link buttons to the new
 // sub-routes) did not.
 //
 // WHY THIS DOES NOT IMPORT app/(firm)/admin/page.tsx DIRECTLY (a genuine
@@ -74,16 +74,18 @@ function AdminPageShadow() {
       { className: "flex flex-wrap gap-2", "aria-label": tFa("adminNavLabel") },
       createElement(Link, { href: "/admin/compliance", className: buttonVariants({ variant: "outline", size: "sm" }) }, tFa("compliance.heading")),
       createElement(Link, { href: "/admin/vendor-bindings", className: buttonVariants({ variant: "outline", size: "sm" }) }, tFa("vendorBindings.pageHeading")),
+      createElement(Link, { href: "/admin/registrations", className: buttonVariants({ variant: "outline", size: "sm" }) }, tFa("registrations.heading")),
     ),
   );
 }
 
-test("AdminPage's own composition (PageHeader + the two-link nav) has zero a11y violations", async () => {
+test("AdminPage's own composition (PageHeader + the three-link nav) has zero a11y violations", async () => {
   const h = await renderComponent(withMessages(createElement(AdminPageShadow)));
   try {
     const bodyText = textOf(h.container as never);
     assert.match(bodyText, /Compliance register/, "the nav link to /admin/compliance must render with its real label");
     assert.match(bodyText, /Vendor identity bindings/, "the nav link to /admin/vendor-bindings must render with its real label");
+    assert.match(bodyText, /Firm registrations/, "the nav link to /admin/registrations must render with its real label");
     const violations = checkAccessibility(h.container as never);
     assert.deepEqual(violations, [], JSON.stringify(violations));
   } finally {

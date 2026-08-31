@@ -11,10 +11,13 @@ import { buttonVariants } from "@/components/ui/button";
  * default-on with no per-firm dial (0074:40-43) — this page will surface
  * that state, not build a toggle, when it is built.
  *
- * T10 (port-wave plan §4 T10) adds the two links below to its own built
- * sub-pages — the compliance register and the vendor-bindings governance
- * panel — without touching the body text above, which stays P4's own honest
- * placeholder for the surfaces this train does not own.
+ * T10 (port-wave plan §4 T10) adds the compliance-register and
+ * vendor-bindings links below to its own built sub-pages, without touching
+ * the body text above, which stays P4's own honest placeholder for the
+ * surfaces this train does not own. P4-5 adds the third link, to the
+ * operator approval queue at /admin/registrations — a non-operator who
+ * clicks it lands on that page's own honest refusal panel (裁-90), so this
+ * nav carries no extra gating of its own.
  */
 export default async function AdminPage() {
   const t = await getTranslations("Admin");
@@ -29,6 +32,9 @@ export default async function AdminPage() {
         </Link>
         <Link href="/admin/vendor-bindings" className={buttonVariants({ variant: "outline", size: "sm" })}>
           {tFa("vendorBindings.pageHeading")}
+        </Link>
+        <Link href="/admin/registrations" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          {tFa("registrations.heading")}
         </Link>
       </nav>
     </PageShell>
