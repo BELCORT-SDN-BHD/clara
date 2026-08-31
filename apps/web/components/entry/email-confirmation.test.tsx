@@ -228,7 +228,11 @@ test("NEW-B: a proxied confirmation derives authority from CLARA_PUBLIC_ORIGINS 
       createClient,
     );
     assert.equal(allowed.status, 303, "the operator-named public origin must remain usable behind the proxy");
-    assert.equal(allowed.headers.get("location"), "https://internal.worker.local/signup");
+    assert.equal(
+      allowed.headers.get("location"),
+      "https://app.clarabook.example/signup",
+      "the redirect must be built from the PROVEN Origin, never request.url's authority (PR 455 MEDIUM-2)",
+    );
     assert.equal(clientCreations, 1, "the configured positive control must reach the auth client exactly once");
     assert.deepEqual(calls, [{ type: "email", token_hash: "token-hash-proxied" }]);
   });

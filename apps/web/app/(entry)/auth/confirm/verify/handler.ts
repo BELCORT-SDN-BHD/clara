@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { isSameOriginRequest } from "@/lib/same-origin";
+import { proveSameOrigin } from "@/lib/same-origin";
 import { createRouteClient } from "@/lib/supabase/server";
 
 type VerifyEmailResponse = {
@@ -28,8 +28,15 @@ export interface EmailConfirmationRouteClient {
 
 export type CreateEmailConfirmationRouteClient = () => Promise<EmailConfirmationRouteClient>;
 
-function fixedRedirect(request: Request, path: "/signup" | "/auth/confirm", invalid = false) {
-  const target = new URL(path, request.url);
+/**
+ * Both redirects are built from the WALL'S OWN PROVEN origin, never
+ * `request.url`'s authority — independent review of #455, MEDIUM-2:
+ * behind a proxy those two diverge, and `request.url` can read an internal,
+ * plain-HTTP hop (`lib/same-origin.ts`'s own header explains why the invite
+ * courier was fixed the same way). One validated value, both consumers.
+ */
+function fixedRedirect(origin: string, path: "/signup" | "/auth/confirm", invalid = false) {
+  const target = new URL(path, origin);
   target.search = "";
   target.hash = "";
   if (invalid) target.searchParams.set("status", "invalid");
@@ -65,7 +72,10 @@ export async function handleEmailConfirmationPost(
   // able to submit its own token into somebody else's browser and install the
   // attacker's session there. Refuse before reading the bearer or constructing
   // any auth client: a refused request has no cookie-writing capability at all.
-  if (!isSameOriginRequest(request.headers, request.url)) {
+  // `proof.origin` (present only on `ok: true`) is the ONE value both
+  // redirects below are built from — never `request.url`'s own authority.
+  const proof = proveSameOrigin(request.headers, request.url);
+  if (!proof.ok) {
     return NextResponse.json(
       { ok: false, error: "cross-origin" },
       { status: 403 },
@@ -81,7 +91,7 @@ export async function handleEmailConfirmationPost(
     typeof tokenValues[0] !== "string" ||
     tokenValues[0].length === 0
   ) {
-    return sealResponse(fixedRedirect(request, "/auth/confirm", true));
+    return sealResponse(fixedRedirect(proof.origin, "/auth/confirm", true));
   }
 
   const response = await supabase.auth.verifyOtp({
@@ -91,7 +101,7 @@ export async function handleEmailConfirmationPost(
 
   return sealResponse(
     hasVerifiedSession(response)
-      ? fixedRedirect(request, "/signup")
-      : fixedRedirect(request, "/auth/confirm", true),
+      ? fixedRedirect(proof.origin, "/signup")
+      : fixedRedirect(proof.origin, "/auth/confirm", true),
   );
 }
