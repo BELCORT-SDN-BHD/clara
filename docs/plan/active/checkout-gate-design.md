@@ -1,7 +1,9 @@
 # The checkout / signup gate — design of record
 
-*Written 2026-08-31 for the FS-4 design gate (R8); **v2** after the independent review
-(FIX REQUIRED — 3 BLOCKER, 14 MATERIAL, 9 NIT; all folded). Measurement:
+*Written 2026-08-31 for the FS-4 design gate (R8). **v3** — amended to 裁-89, the owner's ruling
+on G1: **the admission door is ONE transaction.** (v2 was the fold of the independent review's
+3 BLOCKER / 14 MATERIAL / 9 NIT; that work stands, and the gate record of the two-step gate is the
+record of the gate that ran.) Measurement:
 [`checkout-gate-survey.md`](checkout-gate-survey.md). **Part 2** — the database objects:
 [`checkout-gate-design-part2.md`](checkout-gate-design-part2.md). **Part 3** — the webhook
 contract, the surfaces, the environment and the acceptance battery:
@@ -10,12 +12,15 @@ contract, the surfaces, the environment and the acceptance battery:
 [`checkout-gate-gate-record.md`](checkout-gate-gate-record.md) — **ten questions and two
 declarations, and this design builds around none of them.***
 
-> **What v2 changed, in one line.** The review proved the door I specified **stranded the paying
-> customer** — it demanded an unconsumed payment while consuming it on the first call, so the
-> retry path I named "rotation" was unreachable. Part 2 §1.3 carries the repair and states plainly
-> what was wrong; the partial-failure table in §5 was re-walked against the repaired door; and
-> **PKCE's cross-device cost is now a question to the owner (G10) rather than an unstated
-> regression.**
+> **What v3 changed.** 裁-89 folded `claim_paid_admission` + `create_firm` +
+> `close_paid_registration` into **one door in one transaction** (part 2 §1.3). Working it out
+> produced a consequence the ruling did not have to promise: **the folded door needs no admission
+> token at all**, so `clara.firm_admissions` is untouched, **`create_firm` is not re-cut, and the
+> D1 write-quiesce window disappears** — restoring 裁-73's own "unchanged, no D1 window"
+> prediction. `reconcile_paid_registrations` retires unbuilt; seven acceptance cells retire with
+> their subjects and one (W-E3) is added to keep those retirements honest. 裁-26's email-bound
+> token is superseded rather than built (gate record G7 item 4). **What the fold does NOT remove:
+> the double payment** — that is settled at ⑦, before the door runs.
 
 **Scope (裁-73 · 裁-74 · 裁-68 · 裁-26 · 裁-36 · 裁-64① · 裁-87).** A stranger's browser causes a
 new FIRM to exist, exactly once, after paying. **In scope:** the signup→confirm browser binding,
@@ -49,17 +54,17 @@ claimed at MERGE, so every new migration is named `UNNUMBERED_*` (constraint 10)
                         └─► record_stripe_event(id, type, payload)   append-only, idempotent
   ⑦  the applier        apply_stripe_events()  ──►  firm_registration_payments row
   ⑧  /checkout/success  GET paints; its POST does the work (M9)
-                        └─► claim_paid_admission(registration, op_key)  ──► admission token
-                        └─► create_firm(name, token, op_key)         ──► the firm exists
-                        └─► close_paid_registration(...)             ──► registration closed
+                        └─► claim_paid_firm(registration, op_key)    ──► ONE transaction (裁-89):
+                              claim · _create_firm_core · close the registration · stamp the payment
   ⑨  redirect to the firm home
 ```
 
 Steps ③–⑨ are refused by the database on its own authority. **Every route here is a courier**
 that carries values to a door and renders the door's verdict. No route is a wall.
 
-The six new doors, their exact signatures and every refusal code are **part 2 §1**; the webhook
-route's contract is **part 3 §1**.
+The **five** new doors, their exact signatures and every refusal code are **part 2 §1**; the
+webhook route's contract is **part 3 §1**. *(v3: 裁-89 folded two doors into one and retired a
+third, `reconcile_paid_registrations`, unbuilt.)*
 
 ### 1.1 · The transport is route handlers. NO Server Actions.
 
@@ -148,10 +153,11 @@ the mutant that must redden its cell:
 - *two firms from one person* — `uq_membership_active_user` (survey F5). `_create_firm_core`
   refuses `CLR10 actor already belongs to a firm` before the insert **and** catches the
   `unique_violation` on the race.
-- *two firms from one registration* — a new UNIQUE index
-  `uq_firm_admissions_registration` on `firm_admissions(registration_id) WHERE registration_id
-  IS NOT NULL`, asserted BY PROPERTY from `pg_index` (unique + valid + ready + live + key columns
-  + predicate), never by name.
+- *two firms from one registration* — **the folded transaction itself.** The door reads the
+  registration `FOR UPDATE`, refuses unless `firm_id IS NULL`, and sets `firm_id` before it
+  commits, so a second caller either blocks and then sees a firm, or replays. Under 裁-89 this
+  needs no index at all: v2 spent two partial unique indexes and a rotation rule buying a property
+  the transaction boundary gives for free.
 - *two open registrations* — `uq_firm_registration_requests_open_applicant` (survey F4).
 - *two payment rows for one Stripe event* — `firm_registration_payments.stripe_event_id` UNIQUE,
   and the applier inserts `ON CONFLICT DO NOTHING`.
@@ -412,10 +418,11 @@ against the paying customer. Both polarities of this are cells (part 3 §4, W-J)
 Every row is an acceptance cell, not a narrative. **No path may strand a paying customer without
 a firm, and no path may mint two firms.**
 
-> **This guarantee did not hold in v1 and the review caught it.** W9 required an unconsumed
-> payment while the minter consumed it, so the rotation these rows depend on was unreachable —
-> the design had specified strict-refuse under rotation's name. Part 2 §1.3 carries the repair
-> and what was wrong. Every row below was re-walked against the repaired door.
+> **v1 broke this guarantee; v2 repaired it; 裁-89 deletes the shape that could break it.** v1
+> required an unconsumed payment while the minter consumed it, so the retry it called "rotation"
+> was unreachable. v2 fixed that across three objects and a rotation rule. **v3 folds the door**,
+> and the two rows that used to describe mid-journey states collapse into one that says *nothing
+> partial exists* — the repair that needs no repairing.
 
 | the browser/network dies… | state on disk | what the customer sees | how it resolves | strand? | two firms? |
 |---|---|---|---|---|---|
@@ -429,8 +436,7 @@ a firm, and no path may mint two firms.**
 | **the webhook arrives while the DB is down** | nothing recorded | the success page cannot claim yet | Stripe **retries**, and the one-minute applier sweep re-applies whatever landed | no | no |
 | **the webhook is delivered twice** | one `stripe_events` row (PK), one payment row (UNIQUE) | — | the second `record_stripe_event` returns `recorded:false` | no | no |
 | **between ⑥ and ⑧** — the customer closes the tab after paying | a payment row, unconsumed | the holding page: **"payment received — finish opening your firm"** | they return and ⑧ runs | **no** | no |
-| **between `claim_paid_admission` and `create_firm`** | a live admission, the payment **still unconsumed** | the success or holding page | ⑧ again: W9 passes (it no longer reads the consumption stamp), rotation supersedes the stale token and mints a fresh one, and the flow completes | **no** | no — `uq_membership_active_user` |
-| **between `create_firm` and `close_paid_registration`** | the firm exists, `status` still `open` | the holding page **redirects to the firm home** — the live `holdingStateFrom` consults `caller_context` membership *before* registration history | the success route retries the close; **and `reconcile_paid_registrations` closes it on the next one-minute sweep** — the principal that can actually execute this is part 2 §1.3's reconciler, because the sweep's own role cannot call `close_paid_registration` | **no** | no |
+| **anywhere inside ⑧** | **nothing partial exists.** The claim, the creation, the closure and the payment stamp are one transaction: it committed or it did not | the success or holding page | call ⑧ again. If it did not commit, W7 still passes and the whole thing runs; if it did, the registration carries `firm_id` and the door replays | **no** | no — the `FOR UPDATE` read plus `uq_membership_active_user` |
 | ⑧ called twice concurrently | — | — | `for update` on the registration row serializes them; the loser sees W7 or rotates | no | no |
 | **`create_firm` succeeds and its response is lost** | the firm exists, the admission is consumed **with a receipt** | — | `create_firm`'s **own live** replay (`consumed_op_key = p_op_key` → return `consumed_result`) hands back the same `{firm_id, plan_id}` | no | no |
 
@@ -446,17 +452,16 @@ pretending the money is unspent.
 | PR | contents | D1 | gated on |
 |---|---|---|---|
 | **C-1** | `UNNUMBERED_checkout_gate_a` — `dpa_documents`, `dpa_signatures`, `registration_rate_events`, `sign_dpa`; the DPA row seeded from `docs/ops/legal/` **after the owner confirms the text once** (裁-68①) | no | the owner's confirmation (gate G5) |
-| **C-2** | `UNNUMBERED_checkout_gate_b` — `stripe_events`, `stripe_event_problems` (with its resolution columns), `stripe_object_map`, `record_stripe_event`, `apply_stripe_events`, **`list_stripe_event_problems` + `resolve_stripe_event_problem`**, the two roles and their three grants | no | — |
-| **C-3** | `UNNUMBERED_checkout_gate_c` — `uq_frr_id_applicant`, `checkout_intents` (with its pinned `dpa_version`), `firm_registration_payments` + `uq_frp_registration`, the **five** `firm_admissions` columns + the two partial unique indexes + three CHECKs, `open_checkout_intent`, `record_checkout_session`, `claim_paid_admission`, `close_paid_registration`, **`reconcile_paid_registrations`**, the two `event_types` rows | no | C-1, C-2 |
-| **C-4** | `UNNUMBERED_checkout_gate_d` — **the `create_firm` recut** (part 2 §1.4) | **YES — the one window** | C-3 |
+| **C-2** | `UNNUMBERED_checkout_gate_b` — `stripe_events`, `stripe_event_problems` (with its resolution columns), `stripe_object_map`, `record_stripe_event`, `apply_stripe_events`, **`list_stripe_event_problems` + `resolve_stripe_event_problem`**, the two roles, and the sweep role's **two** grants (the operator verbs are `clara_authenticated`, walled to the operator firm) | no | — |
+| **C-3** | `UNNUMBERED_checkout_gate_c` — `uq_frr_id_applicant`, `checkout_intents` (with its pinned `dpa_version`), `firm_registration_payments` + `uq_frp_registration`, `open_checkout_intent`, `record_checkout_session`, **`claim_paid_firm`** (the folded door), the two `event_types` rows. **No `firm_admissions` change of any kind** | no | C-1, C-2 |
+| ~~C-4~~ | **RETIRED by 裁-89.** The `create_firm` recut was the train's only D1 item and the fold cancels it — part 2 §1.4 | **none — the D1 inventory is EMPTY** | — |
 | **C-5** | the runtime: the raw-body webhook router mounted **before** `src/index.ts:55`, the applier sweep, the trusted-IP courier | no | C-2 |
 | **C-6** | `apps/web`: the PKCE confirm route (§3.2b), the DPA step, the checkout and success routes (**route.ts handlers, never Server Actions — §1.1**), the holding page's three arms, the e2e | no | C-3, C-5 |
 
-**D1 write-quiesce list — exactly one live body:** `clara.create_firm(text,uuid,text)`, live tip
-`0147:497`, live `prosrc` sha12 **`59fa533d9c03`**. C-4 pins that sha **before** it re-cuts, and
-reconciles a divergence rather than overwriting it — the estate has been bitten by a cross-PR
-`CREATE OR REPLACE` silently reverting a live splice more than once. **Roster edits land in the
-same PR as the objects they name** (`rig-meta.mjs`'s function and table rosters).
+**D1 write-quiesce list: EMPTY.** No live body is replaced by this train. `clara.create_firm`
+stays at `0147:497`, `prosrc` sha12 `59fa533d9c03`, **unrecut** — the folded door calls
+`_create_firm_core` directly, exactly as `approve_firm_registration` already does. **Roster edits
+land in the same PR as the objects they name** (`rig-meta.mjs`'s function and table rosters).
 
 **Reviews.** Every PR here is judgement logic on its face (review law 1). C-2 · C-3 · C-4 · C-5
 are money / auth / webhook / tenant-creation surfaces, so §A step 4's security lens is mandatory,

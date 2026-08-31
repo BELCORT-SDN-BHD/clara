@@ -6,8 +6,9 @@ all folded). The design gate R8 reserved for the self-serve tenant-creation door
 [`checkout-gate-design.md`](checkout-gate-design.md) + [part 2](checkout-gate-design-part2.md) +
 [part 3](checkout-gate-design-part3.md).*
 
-**What this file is.** **Ten questions** the rulings do not settle, each with a recommendation and
-what every option costs — plus **two declarations** (things the orders already authorised me to
+**What this file is.** **Seven open questions** (G3 · G4 · G5 · G6 · G7 · G10 · G11 · G12 — G12
+is a recommendation to confirm rather than a fork), each with a recommendation and what every
+option costs — plus **two RULED cards** (G1 · G13), **one withdrawn** (G8), and **two declarations** (things the orders already authorised me to
 decide, recorded rather than asked) and **two recorded constraints**. The design builds around
 none of the ten: it carries the recommended answer at the point of use, so a different ruling
 changes a named thing rather than the shape.
@@ -21,7 +22,20 @@ questions are new (G10, G11, G12), all of them costs the owner had not been show
 
 ---
 
-## G1 · The admission door — repaired rotation, or fold the two doors into one?
+## G1 · **RULED (B) — 2026-08-31 evening, 裁-89.** Fold the two doors into one
+
+> **RULED: (B), the fold.** One door, one transaction — claim, create the firm, close the
+> registration. 裁-73's two-step wording is amended by the same ruling; the standard-SaaS journey
+> is unchanged, only the door collapses. The design is amended to the ruled shape; what follows is
+> the card as it was put, kept as the record of the choice.
+>
+> **What the fold turned out to buy, beyond what this card promised.** Working it out in the
+> design produced a consequence nobody had priced: **the folded door needs no admission token at
+> all**, because a single transaction has no gap to carry a credential across. So
+> `clara.firm_admissions` is untouched, **`create_firm` is not re-cut, and the train's D1
+> write-quiesce window disappears** — which restores 裁-73's own "the existing `create_firm`
+> unchanged … no D1 window" prediction that v2 had to report as a divergence. Seven acceptance
+> cells retire with their subjects, and 裁-26's email-bound token is superseded (INFORM under G7).
 
 **大白话.** 客人付了钱，系统要给他"开公司的钥匙"。原本写的是"钥匙只发一次" —— 但**如果他拿到钥匙、
 浏览器下一秒死掉，就再也拿不到第二把了：钱付了，公司开不成，卡死**。这是审查抓到的最大问题，已经修好。
@@ -155,9 +169,10 @@ and cannot.
 
 ---
 
-## G7 · Three measured divergences from 裁-73's text — confirm each
+## G7 · The measured divergences from 裁-73's text — confirm each
 
-The ruling was written before this measurement existed. Each of these is reported, not taken.
+The ruling was written before this measurement existed. Each is reported, not taken. **裁-89 retired
+the second one** — the fold restored 裁-73's own prediction — and added an INFORM at item 4.
 
 1. **"marks the registration PAID"** — `firm_registration_requests.status` carries a live CHECK
    admitting exactly `open | approved | rejected`. **Chosen:** record payment in
@@ -165,30 +180,38 @@ The ruling was written before this measurement existed. Each of these is reporte
    tells the whole story alone. *Alternative:* widen the CHECK — a named successor-constraint edit
    on a live table that **still needs the payment table anyway** for the Stripe ids, so it adds a
    value without removing anything.
-2. **"the existing `create_firm` unchanged … no D1 window"** (M1) — **I re-cut it**, because
-   裁-26's email wall has nowhere else to live: the token is compared inside that body. It is the
-   train's one D1 item, on **the most dangerous live body in the estate**, with its `prosrc` sha
-   `59fa533d9c03` pinned before the edit and the delta proven by inverse re-substitution.
-   *Cost:* one write-quiesce window that 裁-73 priced at zero.
-3. **"a webhook that mints exactly one `firm_admissions` row"** (NIT-7) — minting moved to
-   `claim_paid_admission`, per the FS-4 order's own ruled shape. The webhook writes only to the
-   append-only event store and mints nothing. *Cost:* none that I can find; the order already
-   ruled it, and it is recorded here because G7 sets the precedent that divergences get named.
+2. **"the existing `create_firm` unchanged … no D1 window"** (M1) — **RETIRED by 裁-89: no
+   longer a divergence.** v2 had to re-cut `create_firm` to carry 裁-26's email wall into the body
+   that redeemed the token. The folded door redeems no token and calls `_create_firm_core`
+   directly, so **`create_firm` is untouched and the D1 inventory is EMPTY** — 裁-73's own
+   prediction, restored. Nothing owed here.
+3. **"a webhook that mints exactly one `firm_admissions` row"** (NIT-7) — **under 裁-89 nothing
+   mints an admission row at all.** The webhook writes only to the append-only event store; the
+   folded door creates the firm directly. *Cost:* none; recorded because G7 is where divergences
+   get named.
+
+4. **INFORM, not a question — 裁-26's email-bound admission token is superseded.** 裁-26 ordered
+   that admission tokens be bound to an email at issue, because an unbound token is a bearer
+   credential anyone holding it can redeem. **Under 裁-89 the self-serve path issues no token**, so
+   there is nothing to bind and nothing to steal; the door's own `req.applicant = clara.jwt_sub()`
+   wall is a statement about identity rather than about a spelling of it. **The ruling's purpose is
+   served by deleting the credential rather than binding it.** 裁-26 still governs any *other*
+   admission token the estate mints (the seed and fixture path is unchanged). Overrule if you want
+   the binding built anyway on a path that no longer has a credential to bind.
 
 ---
 
-## G8 · How long may an unused admission token live? (proposed: one hour)
+## G8 · **WITHDRAWN by 裁-89** — there is no admission token to expire
 
-裁-26 hashed the token and bound it to an email; **nothing rules an expiry**, and
-`firm_admissions` had no `expires_at` column. **Recommendation: one hour.** The token is minted on
-the success page and used in the next request; an hour is generous by orders of magnitude, and
-rotation means an expired token is never a dead end — the customer clicks again and gets a fresh
-one. *Alternatives:* 24 hours (a live credential usable for a day, for no gain rotation does not
-already give) · no expiry (the legacy behaviour: a leaked token valid forever).
+This asked how long an unused admission token may live, and recommended one hour. **The fold
+removed the token itself**: a single transaction has no gap to carry a credential across, so the
+self-serve path mints nothing that could expire, rotate, leak or be superseded. The sub-question
+about recording a superseded token goes with it.
 
-**Sub-question:** when rotation supersedes a still-valid token, record it? **Recommendation: yes** —
-the superseded row is marked `superseded_at`, never deleted (裁-74), because "my link stopped
-working" is exactly the report nobody can otherwise explain.
+**Nothing is owed here and no answer is needed.** It is kept rather than deleted because the owner
+was shown it, and a question that vanishes without explanation is worse than one that is answered.
+*(The seed and fixture bootstrap still mints admission tokens; nothing about that path changes, and
+this gate never proposed an expiry for it.)*
 
 ---
 
@@ -258,6 +281,32 @@ design contains no refund path.
   which is a new class of act for it, before anyone can be charged anything.
 - **(iii) whichever you pick, it is a named precondition on the pricing sitting**: no real money
   may be taken until the duplicate path has an answer.
+
+---
+
+## G13 · **RULED — 2026-08-31 evening.** Beta runs the whole journey on Stripe TEST mode
+
+> **RULED.** Beta walks signup → checkout → webhook → firm entirely in **Stripe TEST mode**;
+> **KYB and live-mode activation are deferred to the pricing + official-launch sitting.**
+> Consistent with 裁-87 ("TEST first; LIVE at the launch sitting").
+
+**The design consequence, and it is a real one.** At RM0 a *real* beta customer must never be
+asked to type a test card. So **payment collection is config-driven from the plan row**, per the
+billing brief's configurability law — every configurable is a column, never a value baked into a
+body:
+
+| while | `payment_method_collection` | why |
+|---|---|---|
+| the plan's amount is **0** (裁-58's trial) | `'if_required'` | Stripe collects no card for a zero-amount subscription, so a beta customer completes checkout **without entering payment details at all** |
+| once the amounts are ruled (裁-28) | `'always'` | 裁-73's "card collected, nothing charged" becomes real the moment there is something to charge |
+
+**This corrects NIT-1 as it was folded in v2**, which pinned `'always'` unconditionally. That was
+right for the *ruled intent* and wrong for *RM0 beta*: it would have demanded a card — in test
+mode, a test card — from a real customer opening a real firm. The value is read from the plan row
+the Checkout Session is built from, so it flips with the pricing sitting and needs no code change.
+
+**Wave G still walks a non-zero test price with test cards** (裁-58's recorded mitigation), which
+is where the `'always'` arm is exercised before any real money exists.
 
 ---
 

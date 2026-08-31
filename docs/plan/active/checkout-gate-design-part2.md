@@ -185,7 +185,53 @@ tripwire and belongs in the pricing sitting's own act list.
 > independent one — that intent row was written by *our* door, from *our* session, before
 > Stripe was ever called.
 
-### 1.3 · `UNNUMBERED_checkout_gate_c` — the money → firm path
+### 1.3 · `UNNUMBERED_checkout_gate_c` — the money → firm path, **as one transaction** (裁-89)
+
+**裁-89 ruled G1 option (B): the claim and the creation are ONE door in ONE transaction.** The
+两步 shape 裁-73 wrote is amended by the same ruling; the standard-SaaS journey is unchanged, only
+the door collapses. What follows is that door and the objects it needs — and the first thing to
+say is what it *stops* needing.
+
+#### 1.3.0 · The open question the fold forced: does the admission row survive? **No.**
+
+Under the two-door shape the admission row existed for exactly one reason: it was the credential
+one door minted and the *other* door redeemed. **A single transaction has no gap to carry a
+credential across, so there is nothing for the credential to be.** The folded door calls
+`clara._create_firm_core(applicant, firm_name)` directly.
+
+**That is not a new mechanism — it is the estate's existing one.** `approve_firm_registration`
+already creates a firm this way: its body calls `_create_firm_core(req.applicant, req.firm_name)`
+and **never touches `clara.firm_admissions` at all** (measured in the live body; survey §2.5).
+The operator road and the self-serve road now differ only in what authorises them — an operator's
+decision there, a completed payment here.
+
+**Why not keep writing an admission row anyway, as an audit artifact?** Because it would be a
+**fake receipt**, and the schema says so: `firm_admissions.token_hash` is **NOT NULL and UNIQUE**
+(`0147:323-324`). A row for a credential that never existed would have to carry a hash of
+nothing — a manufactured value whose only purpose is to satisfy a column. The estate's own rule
+against exactly that shape is why `apps/web` was forbidden a checkbox that "recorded" a DPA it did
+not record. **And nothing is lost:** the chain "this firm came from this registration, bought by
+this payment, under this signature" is carried by `firm_registration_requests.firm_id`, by
+`firm_registration_payments.consumed_firm_id`, and by the two domain events — a complete,
+append-only record with no invented values in it.
+
+**What retires with the row, and what replaces each guarantee:**
+
+| the two-door shape needed | why it is gone | what holds the property now |
+|---|---|---|
+| a plaintext token | no gap to carry it across | — |
+| `token_hash`, `expires_at` | nothing to expire | — |
+| `superseded_at`, rotation | nothing to rotate | the transaction either happened or it did not |
+| `uq_firm_admissions_registration_live` / `_consumed` | no admission rows on this path | **`firm_registration_requests.firm_id`, set in the same transaction that reads it `FOR UPDATE`** |
+| `ck_firm_admissions_not_both` | both columns retire | — |
+| **裁-26's email-bound token** | **there is no bearer credential to bind** | the door's own `req.applicant = clara.jwt_sub()` wall — identity, not a spelling of it. 裁-26's purpose (a token holder who is not the applicant cannot become the owner) is served by deleting the credential rather than binding it. **Recorded for the owner as an INFORM under G7** |
+| `ck_firm_admissions_selfserve_dpa` (M14) | no row to carry it | **stronger:** the door that verifies the DPA *is* the door that creates the firm, in one transaction. There is no separate minter left to forget |
+| `reconcile_paid_registrations` | *"firm exists but registration open"* is unreachable | nothing — **it retires unbuilt** (§1.3.4) |
+
+**`clara.firm_admissions` is therefore untouched by this train.** It keeps serving the seed and
+fixture bootstrap exactly as today, and — see §1.4 — **`create_firm` is not re-cut at all.**
+
+#### 1.3.1 · The objects
 
 ```
 alter table clara.firm_registration_requests
@@ -201,7 +247,7 @@ clara.checkout_intents(
   opened_at       timestamptz not null default now(),
   foreign key (registration_id, applicant)
     references clara.firm_registration_requests(id, applicant))
--- append-only except the ONE session_id stamp: a BEFORE UPDATE trigger permits a NULL→value
+-- append-only except the ONE session_id stamp: a BEFORE UPDATE trigger permits a NULL->value
 -- transition on session_id alone and refuses every other column change and every re-stamp.
 
 clara.firm_registration_payments(
@@ -213,169 +259,104 @@ clara.firm_registration_payments(
   stripe_customer_id     text,
   stripe_subscription_id text,
   recorded_at            timestamptz not null default now(),
-  consumed_at            timestamptz,       -- stamped by close_paid_registration, NOT by the minter
-  consumed_admission     uuid references clara.firm_admissions(id),
+  consumed_at            timestamptz,
+  consumed_firm_id       uuid references clara.firms(id),          -- the firm this payment bought
+  consumed_dpa_signature uuid references clara.dpa_signatures(id), -- the signature it was sold under
   foreign key (registration_id, applicant)
     references clara.firm_registration_requests(id, applicant))
--- append-only except the consumption stamp, CHECKed the way
--- ck_firm_admissions_consumed_receipt_0017 guards its own: (consumed_at, consumed_admission) are
--- both null or both not null, and a consumed row is never un-consumed or re-pointed.
+-- Append-only except the consumption stamp, CHECKed the way ck_firm_admissions_consumed_receipt_0017
+-- guards its own: the three consumed_* columns are all null or all not null, and a consumed row is
+-- never un-consumed or re-pointed.
+-- `consumed_firm_id` REPLACES the two-door shape's `consumed_admission`: it names the thing the
+-- payment actually bought rather than the credential that used to stand for it.
 create unique index uq_frp_registration on clara.firm_registration_payments(registration_id);
 -- M7: ONE payment row per registration. A second completed Checkout Session for the same
 -- registration cannot be applied; the applier records it as a `duplicate_payment` problem row
 -- instead, so a double charge is VISIBLE and refundable rather than silently accepted.
-
-alter table clara.firm_admissions
-  add column registration_id   uuid references clara.firm_registration_requests(id),
-  add column bound_email       text,        -- 裁-26
-  add column expires_at        timestamptz,
-  add column superseded_at     timestamptz, -- rotation MARKS; nothing is ever deleted (裁-74)
-  add column dpa_signature_id  uuid references clara.dpa_signatures(id);   -- M14
--- ONE LIVE token per registration at a time...
-create unique index uq_firm_admissions_registration_live
-  on clara.firm_admissions(registration_id)
-  where registration_id is not null and consumed_at is null and superseded_at is null;
--- ...and only ONE can ever be consumed, which is what makes one firm per registration a
--- database property rather than a procedure.
-create unique index uq_firm_admissions_registration_consumed
-  on clara.firm_admissions(registration_id)
-  where registration_id is not null and consumed_at is not null;
-alter table clara.firm_admissions
-  add constraint ck_firm_admissions_selfserve_bound
-    check (registration_id is null or bound_email is not null),
-  add constraint ck_firm_admissions_selfserve_dpa
-    check (registration_id is null or dpa_signature_id is not null),
-  add constraint ck_firm_admissions_not_both
-    check (consumed_at is null or superseded_at is null);
+-- UNAFFECTED by the fold: two sessions completing is settled at step ⑦, before ⑧ runs at all.
 ```
-
-The seed's and the fixtures' legacy admission rows carry NULL in all five new columns and stay
-exactly as lawful as they are today (survey §3.1 measured 2 rows, 0 unconsumed): every new
-constraint is conditioned on `registration_id is not null`.
 
 **Why the composite foreign keys.** `(registration_id, applicant)` referencing `(id, applicant)`
 makes "this payment belongs to this applicant's registration" a **database** fact: a row naming
-registration A and applicant B cannot be written at all, so `claim_paid_admission`'s cross-caller
-wall compares a value the schema already guarantees congruent rather than being a second,
-independently-fallible check.
+registration A and applicant B cannot be written at all, so the door's cross-caller wall compares
+a value the schema already guarantees congruent rather than being a second, independently-fallible
+check.
 
-**`clara.claim_paid_admission(p_registration uuid, p_op_key text) → jsonb`** ·
-grant `clara_authenticated` only. **This is the governed door 裁-73 names.**
+#### 1.3.2 · The door
+
+**`clara.claim_paid_firm(p_registration uuid, p_op_key text) → jsonb`** · `SECURITY DEFINER`,
+grant `clara_authenticated` only. **This is the whole of 裁-89's ruled shape: claim, create and
+close in one transaction.**
 
 | # | wall | refusal | errcode |
 |---|---|---|---|
 | W1 | authenticated | `no authenticated actor` | `CLR04` |
 | W2 | known | `unknown actor` | `CLR04` |
-| W3 | not the agent | `the agent identity cannot claim an admission` | `CLR04` |
+| W3 | not the agent | `the agent identity cannot claim a firm` | `CLR04` |
 | W4 | op_key | `op_key is required` | `CLR10` |
 | W5 | the registration exists | `unknown registration request` | `CLR10` |
 | W6 | **it is MINE** — `req.applicant = clara.jwt_sub()` | `not your registration request` | `CLR04` |
-| W7 | not already completed — `req.firm_id is null` and `req.status='open'` | `this registration is no longer open (status: %)` | `CLR09` |
-| W8 | a DPA signature at the version pinned on **the intent this payment came through** — resolved by the exact join `firm_registration_payments.stripe_session_id` → `checkout_intents.session_id` (UNIQUE) → that row's `dpa_version`, **never by "the newest intent"** (M8) | `the data processing agreement is not signed` | `CLR09` |
-| W9 | **a payment row exists for this registration** *(no consumption requirement — see below)* | `no completed payment for this registration` | `CLR09` |
+| W7 | **not already a firm** — `req.firm_id is null` and `req.status='open'` | `this registration is no longer open (status: %)` | `CLR09` |
+| W8 | a DPA signature at the version pinned on **the intent this payment came through** — the exact join `firm_registration_payments.stripe_session_id` → `checkout_intents.session_id` (UNIQUE) → that row's `dpa_version`, **never "the newest intent"** (M8) | `the data processing agreement is not signed` | `CLR09` |
+| W9 | **a payment row exists for this registration, unconsumed** | `no completed payment for this registration` | `CLR09` |
 | W10 | the caller carries an email claim | `a verified email claim is required` | `CLR04` |
 
-Then, in one transaction, taking `select … from clara.firm_registration_requests where id =
-p_registration for update` **first** — serializing concurrent callers exactly as
-`approve_firm_registration` already does:
+Then, in **one** transaction, taking `select … from clara.firm_registration_requests where id =
+p_registration for update` **first** — which is what serializes concurrent callers:
 
 ```
--- Rotation SUPERSEDES; it never deletes (裁-74, and the payment row may already point here).
-update clara.firm_admissions set superseded_at = now()
-  where registration_id = p_registration and consumed_at is null and superseded_at is null;
-v_token := gen_random_uuid();
-insert into clara.firm_admissions(token_hash, note, registration_id, bound_email,
-                                  expires_at, dpa_signature_id)
-  values (sha256(convert_to(v_token::text,'UTF8')), 'self-serve checkout admission',
-          p_registration, clara._jwt_email(), now() + interval '1 hour', v_signature)
-  returning id into v_admission;
-return jsonb_build_object('admission_token', v_token, 'registration_id', p_registration,
-                          'firm_name', req.firm_name, 'expires_at', …);
+v_result := clara._create_firm_core(v_actor, req.firm_name);        -- the operator road's own call
+update clara.firm_registration_requests
+   set status = 'approved', decided_at = now(), firm_id = (v_result->>'firm_id')::uuid
+ where id = p_registration;
+update clara.firm_registration_payments
+   set consumed_at = now(),
+       consumed_firm_id = (v_result->>'firm_id')::uuid,
+       consumed_dpa_signature = v_signature
+ where registration_id = p_registration and consumed_at is null;
+perform clara._audit(…, 'claim_paid_firm', …);
+perform clara._append_event(…, 'firm.self_serve_created', …);
+perform clara._append_event(…, 'firm_registration.paid', …);
+return jsonb_build_object('firm_id', …, 'plan_id', …, 'registration_id', p_registration);
 ```
 
-**THE PAYMENT IS NOT CONSUMED HERE.** `consumed_at` / `consumed_admission` are stamped by
-`close_paid_registration`, when the firm demonstrably exists. This is the fix for the review's
-BLOCKER-1, and it is worth stating what was wrong, because the first version of this document
-inverted its own headline guarantee:
+**The firm name is `req.firm_name`, read from the registration** — never a value re-submitted by
+the success page (NIT-6). `decided_by` is left **NULL**: writing the applicant there would read as
+self-approval, the act `approve_firm_registration` refuses by name, and on the self-serve road
+*nobody decided* — **payment is the approval** (裁-73). The `firm_registration.paid` event carries
+the payment's identity, which is the honest record of what authorised it.
 
-> **What was specified before, and why it stranded the customer.** W9 required an *unconsumed*
-> payment while the body consumed it on the first call. The second call therefore refused
-> `CLR09 no completed payment` — **rotation was unreachable on exactly the state the
-> partial-failure table said rotation recovers.** What was written was option (a) wearing option
-> (c)'s label. Two further faults rode along: the rotation DELETE would have violated
-> `firm_registration_payments.consumed_admission`'s foreign key (NO ACTION — the reviewer probed
-> a faithful toy of the DDL on a rig and got the constraint error), and the consumed-row CHECK
-> forbids re-pointing, so even a repaired delete left the receipt pointing at a token nobody
-> could see. **The stated safety argument was also wrong:** it claimed W7 refuses once
-> `create_firm` has run, but between `create_firm` and `close_paid_registration` the registration
-> still has `firm_id IS NULL` and `status='open'`, so W7 does *not* refuse in that window. W9
-> did, which is the stranding.
+**Idempotency.** A second call finds `firm_id` already set and returns the same
+`{firm_id, plan_id, registration_id}` with `replay: true` — read from the registration row, not
+from a stored receipt, because the registration *is* the receipt. **There is no window in which a
+retry can do harm**, which is the property the two-door shape spent three indexes and a rotation
+rule failing to buy.
 
-**Rotation on replay, as now specified.** 裁-73 says the door "mints exactly one
-`firm_admissions` row and returns its plaintext once". **Two live options remain** — the first is
-recorded because it is what the previous specification accidentally implemented:
+#### 1.3.3 · What the fold removes, and what it does not
 
-- **(a) refuse after the first call** — **the customer is stranded**: paid, no firm, no path.
-- **(b) store the plaintext and return it on replay** — non-stranding, but it puts a live bearer
-  credential **at rest**, exactly what 裁-16b removed from `firm_admissions` in `0147`.
-- **(c) rotation, repaired** *(specified above)* — each call supersedes the live token and mints a
-  fresh one. **"Exactly one"** is `uq_firm_admissions_registration_live` (one live at a time) plus
-  `uq_firm_admissions_registration_consumed` (only one may ever be consumed, so only one firm can
-  ever be born from a registration). **"Once"** holds: each token is returned by the one call that
-  minted it and is never re-readable. **No plaintext is ever at rest, nothing is deleted, and the
-  customer can always retry.**
+**Removed.** The stranding class in full: there is no state in which a customer has paid, holds a
+consumed something, and cannot reach a firm — the transaction either committed or it did not, and
+if it did not, W7 still passes and the next call runs the whole thing again. **And M5's
+unreachable closer**, because closure is no longer a separate act by a separate principal.
 
-**Why rotation is now genuinely reachable.** W9 no longer reads the consumption stamp, and W7
-still refuses once `close_paid_registration` has stamped `firm_id`. In the window between
-`create_firm` and the close, W7 and W9 both pass — and rotation there is *harmless*: the
-`consumed_at is null` filter cannot touch the already-consumed admission, and
-`uq_firm_admissions_registration_consumed` forbids a second consumed row. A caller who retries in
-that window gets a fresh token that `create_firm` refuses with
-`CLR10 actor already belongs to a firm` — the correct answer, because their firm already exists.
+**NOT removed: the double payment (M7 / G12).** Two Checkout Sessions completing is settled at
+step ⑦, **before this door runs at all**. `uq_frp_registration` and the applier's
+`duplicate_payment` problem row handle it, identically to the two-door shape. Saying otherwise
+would be claiming a transaction boundary reaches backwards past its own inputs.
 
-**The fold removes this class — but not everything.** BLOCKER-1's stranding and M5's unreachable
-closer exist *because* the journey is several doors across several transactions; one door doing
-claim → create → close in a single transaction has neither, and it makes *"firm exists but
-registration still open"* unreachable, so **`reconcile_paid_registrations` becomes unnecessary —
-the fold deletes a door rather than adding one.** **It does NOT remove the double payment
-(M7/G12):** two sessions completing is settled at ⑦, before ⑧ runs at all, so `uq_frp_registration`
-and the applier's duplicate-payment row are what handle it under **either** option.
-**Gate question G1.**
+#### 1.3.4 · `reconcile_paid_registrations` retires **unbuilt**
 
-**`clara.close_paid_registration(p_registration uuid, p_firm uuid, p_op_key text) → jsonb`** ·
-grant `clara_authenticated`. Walls W1–W6 as above, plus: the firm exists; the caller is its
-**owner**, read from `clara.firm_memberships` (never from a claim); and the registration's
-consumed admission carries `consumed_result ->> 'firm_id' = p_firm`. It sets `status='approved'`,
-`decided_at = now()`, `firm_id = p_firm`, **stamps the payment row's `consumed_at` /
-`consumed_admission`**, and emits the two registered event types. Idempotent: a registration
-already carrying this `firm_id` returns `{replay:true}`.
+It existed to close a registration whose firm already existed — a state only reachable when
+creation and closure were separate transactions. Under 裁-89 that state cannot occur, so the verb
+is removed from this design rather than built and left dormant. Its grant retires with it (§1.6),
+and its acceptance cell (W-P2) retires with it (part 3 §4).
 
-`decided_by` is left **NULL** on this path. Writing the applicant there would read as
-self-approval — the act `approve_firm_registration` refuses by name — and on the self-serve road
-*nobody decided*: **payment is the approval** (裁-73). The `firm_registration.paid` event carries
-the payment's identity, which is the honest record of what authorised it. (NIT-5.)
-
-**`clara.reconcile_paid_registrations(p_limit integer default 100) → jsonb`** ·
-`SECURITY DEFINER`, granted to `clara_stripe_webhook`, run on the same one-minute sweep as the
-applier. **This is the answer to the review's M5**, which measured that the previously-stated
-recovery ("the sweep may also close it") could be executed by no principal at all: the sweep runs
-as `clara_stripe_webhook`, while `close_paid_registration` is `clara_authenticated`-only and reads
-`jwt_sub()`.
-
-It closes any registration that is *demonstrably already a firm*, from facts on disk only: a
-consumed admission whose `registration_id` is that registration and whose
-`consumed_result ->> 'firm_id'` names a `clara.firms` row in which the registration's applicant
-holds an **active owner** membership. It writes exactly what `close_paid_registration` writes.
-**It takes no caller identity and grants nothing** — it cannot create a firm, mint an admission,
-or close a registration whose firm does not already exist. It is a reconciler, not a second way
-in.
-
-> **Why this door exists.** Survey §2.1: `create_firm` does not touch
-> `firm_registration_requests`. Without this door a self-serve firm leaves its registration
-> `open` forever — the holding page keeps telling a firm owner their firm is not open, and
-> `uq_firm_registration_requests_open_applicant` blocks any future registration by a person who
-> legitimately leaves their firm. `approve_firm_registration` cannot be reused: it is
-> operator-firm-walled and calls `_create_firm_core` itself.
+**Two new `clara.event_types` rows** are registered in the same migration that emits them (survey
+F8 — `domain_events.event_type` is FK'd to that registry and a trigger raises `CLR10 unknown
+event_type %`): `firm.self_serve_created` and `firm_registration.paid`, both `client_scoped =
+false`. Both are emitted **inside the folded transaction**, after `_create_firm_core` returns —
+which is the earliest moment `_append_event` can be called at all, because
+`domain_events.firm_id` is NOT NULL.
 
 **`clara.open_checkout_intent(p_registration uuid, p_origin_digest bytea, p_op_key text)
 → jsonb`** · grant `clara_authenticated`. Part 1 §4 is the rate-wall reasoning.
@@ -388,10 +369,10 @@ in.
 | X9 | **the rate wall** — no *other* applicant's registration from this digest in 24 h | `too many firm registrations from this location today` | `CLR09` |
 | X10 | not already paid | `this registration is already paid` | `CLR09` |
 
-On success it appends the `registration_rate_events` row **and** the `checkout_intents` row in
-one transaction and returns `{intent_id, price_local_key, stripe_price_id}` — the price id read
-from `stripe_object_map`, **so the route never names a price** and hard constraint 2 holds: the
-browser computes no cents and Stripe renders its own Price.
+On success it appends the `registration_rate_events` row **and** the `checkout_intents` row in one
+transaction and returns `{intent_id, price_local_key, stripe_price_id}` — the price id read from
+`stripe_object_map`, **so the route never names a price** and hard constraint 2 holds: the browser
+computes no cents and Stripe renders its own Price.
 
 **`clara.record_checkout_session(p_intent uuid, p_session_id text, p_op_key text) → jsonb`** —
 stamps the one `session_id`; refuses `checkout session already recorded` (`CLR09`) on a re-stamp
@@ -400,53 +381,36 @@ other door here — `intent.applicant = clara.jwt_sub()`, else `CLR04 not your c
 (M2).** Without it any authenticated caller who guessed an unstamped intent's uuid could stamp it
 with an arbitrary session id and brick it, since `session_id` is UNIQUE and the real stamp would
 then refuse. A guessed uuid is a high bar, which is exactly why it is worth naming: *"the id is
-unguessable"* is the bearer-credential pattern 裁-16b removed from this estate in `0147`, and it
-is not a wall.
+unguessable"* is the bearer-credential pattern 裁-16b removed from this estate in `0147`, and it is
+not a wall.
 
-**Two new `clara.event_types` rows**, registered **in the same migration that emits them**
-(survey F8 — `domain_events.event_type` is foreign-keyed to that registry and a trigger raises
-`CLR10 unknown event_type %`): `firm.self_serve_created` and `firm_registration.paid`, both
-`client_scoped = false`. Both are emitted by `close_paid_registration`, which is the earliest
-moment `_append_event` can be called at all, because `domain_events.firm_id` is NOT NULL.
+### 1.4 · There is no D1 item — and that is 裁-73's own prediction restored
 
-### 1.4 · `UNNUMBERED_checkout_gate_d` — the one D1 item
+**The `create_firm` recut is CANCELLED by the fold.** It existed to carry 裁-26's email wall into
+the body that redeemed the admission token. The folded door redeems no token and calls
+`_create_firm_core` directly, so **`clara.create_firm` is not touched by this train at all** — its
+live body stays at `0147:497`, `prosrc` sha12 `59fa533d9c03`, unrecut.
 
-**`clara.create_firm` is re-cut.** Live tip `0147:497`; live `prosrc` sha12 `59fa533d9c03`
-(survey §7 prediction 1). **Three** conjuncts are added immediately after the admission row is
-selected `FOR UPDATE`; **nothing else in the body changes**, and the delta is proven by inverse
-re-substitution back to the pinned pre-image:
+**Consequences worth stating plainly, because they reverse things this design previously owed:**
 
-```
--- 裁-26: an admission carrying an email binding is not a bearer credential.
-if a.bound_email is not null and a.bound_email is distinct from clara._jwt_email() then
-  raise exception 'invalid or consumed admission token' using errcode = 'CLR04';
-end if;
-if a.expires_at is not null and a.expires_at < now() then
-  raise exception 'invalid or consumed admission token' using errcode = 'CLR04';
-end if;
--- M-A: a SUPERSEDED token is refused HERE, with the same typed refusal. Without this conjunct a
--- rotated token passes both walls above and dies on ck_firm_admissions_not_both instead -- a raw
--- 23514 where the battery (cell W-E2) asserts a typed CLR04.
-if a.superseded_at is not null then
-  raise exception 'invalid or consumed admission token' using errcode = 'CLR04';
-end if;
-```
-
-**The refusal text is deliberately identical to the existing one.** A distinct message would tell
-a token holder *why* they failed, which is a bounded oracle on whose email a token belongs to.
-The `audit_log` row records the discriminated reason; the caller does not.
-
-`bound_email is not null` is the conditional that keeps every legacy row lawful. And because a
-minter that *forgot* the binding would silently produce a bearer token this wall waves through,
-the binding is enforced as a CHECK — `ck_firm_admissions_selfserve_bound` (§1.3) — **not as a
-convention**.
+- **The D1 write-quiesce window disappears.** There is no longer any live body being replaced, so
+  the train's D1 inventory is **EMPTY**.
+- **裁-73's text is restored, not diverged from.** The ruling said *"the existing `create_firm`
+  unchanged"* and priced it *"no D1 window"*; v2 had to report both as divergences (G7 item 2).
+  **Under 裁-89 both are simply true again**, and G7 retires that item.
+- The three conjuncts (M-A), `ck_firm_admissions_selfserve_bound`, `ck_firm_admissions_selfserve_dpa`
+  and the two partial indexes all retire with the recut — none of them has a subject any more.
+- `firm_admissions` gains **no columns**. The seed's two rows and the fixtures' rows stay exactly
+  as lawful as they are today, because nothing about that table changes.
 
 ### 1.5 · `op_receipts` is not used, deliberately
 
 Survey F6: `op_receipts.firm_id` is NOT NULL with **no** FK onto `clara.firms`, so a sentinel
 firm id would technically insert. **No door here may do that.** Every new pre-firm door takes
-structural idempotency from its own table, as the three existing ones do; `close_paid_registration`
-*could* use `_reserve_op` and does not, so all six share one idempotency story.
+structural idempotency from its own table, as the three existing ones do. `claim_paid_firm`
+*could* use `_reserve_op` for the part of its work that runs after the firm exists, and does not:
+its idempotency is the registration row's own `firm_id`, read `FOR UPDATE`. So every door here
+shares one idempotency story.
 
 ### 1.6 · The webhook's principal
 
@@ -457,8 +421,11 @@ estate's measured idiom (survey F11). Its **entire** grant surface:
 |---|---|
 | `clara.record_stripe_event(text,text,jsonb)` | EXECUTE |
 | `clara.apply_stripe_events(integer)` | EXECUTE |
-| `clara.reconcile_paid_registrations(integer)` | EXECUTE — §1.3's closer-of-last-resort, on the same sweep |
 | **everything else** | **none** — no table grants, no other function, **no `BYPASSRLS`** |
+
+**Two functions, not three.** The v2 draft granted a third, `reconcile_paid_registrations`; under
+裁-89 that verb retires unbuilt (§1.3.4), so the sweep's role goes back to exactly the two verbs
+the webhook lane needs. Cell W-O asserts the count.
 
 The connection executes `set role clara_stripe_webhook` on checkout, as the runtime's pools
 already do (`docs/ops/DR-render.md:204-205`).
