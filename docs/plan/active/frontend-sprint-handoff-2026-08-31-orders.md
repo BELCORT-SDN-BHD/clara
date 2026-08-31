@@ -162,8 +162,13 @@ the token and installs the ATTACKER's session in the victim's browser — the vi
 firm's details into `claim_identity` / `request_firm_registration` under the attacker's identity, and
 the attacker signs in later with their known password. The same-origin wall cannot see this by
 construction: the forged page IS Clara's page. **This design MUST answer it** — a browser-bound,
-server-verified signup-initiation nonce (the natural home for 裁-26's email-bound admission token and
-裁-68①'s tier-3 gate), never a widened Origin check. **Fenced meanwhile:** the fix was NOT bolted onto
+server-verified binding between signup initiation and confirmation (the natural home for **裁-26 /
+裁-68③'s email-bound admission token**; 裁-68's tier-3 gate is ①DPA e-sign ②the rate wall ③the
+email-bound token), never a widened Origin check. **Weigh Supabase's native PKCE confirmation
+exchange first** (`code` + `exchangeCodeForSession`, whose `code_verifier` cookie IS a browser
+binding by construction) against a hand-rolled nonce: this app currently uses the legacy
+`token_hash` + `verifyOtp` style and never sets `flowType`, which is precisely why no binding
+exists — a platform-precedented fix beats an invented one (found by #471's review). **Fenced meanwhile:** the fix was NOT bolted onto
 #461 because R8 reserves this door for THIS gate; the exposure is zero while `apps/web` is
 undeployed, and **"self-serve signup is unreachable in a deployed build until this train closes the
 binding" is a hard FS-10 cutover criterion** (`PROGRESS.md` Known issues carries the row).
