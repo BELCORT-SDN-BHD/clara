@@ -1,12 +1,9 @@
 # The checkout / signup gate — design of record, part 2
 
-*Part 1 (the shape, the state machine, the CSRF-binding recommendation, the rate wall, the
-partial-failure analysis, the build sequence): [`checkout-gate-design.md`](checkout-gate-design.md).
-Measurement: [`checkout-gate-survey.md`](checkout-gate-survey.md). Owner questions:
-[`checkout-gate-gate-record.md`](checkout-gate-gate-record.md).*
+*Part 1 — the shape, the transport rule, the state machine, the CSRF-binding recommendation, the rate wall, the partial-failure analysis, the build sequence: [`checkout-gate-design.md`](checkout-gate-design.md).
+Measurement: [`checkout-gate-survey.md`](checkout-gate-survey.md) · owner questions: [`checkout-gate-gate-record.md`](checkout-gate-gate-record.md).*
 
-**This part carries the objects, the webhook route contract, the environment and the acceptance
-battery.** Section numbering restarts; part 1 cites these as "part 2 §N".
+**This part carries the objects, the webhook route contract, the environment and the acceptance battery.** Section numbering restarts; part 1 cites these as "part 2 §N".
 
 ## 1 · The new database objects
 
@@ -64,9 +61,8 @@ grant `clara_authenticated` only.
 | `the signed text does not match the current agreement` | `CLR10` — `p_body_sha256 <> dpa_documents.body_sha256` |
 
 That last wall is the one that matters: **it stops a UI that displayed one text and recorded a
-signature against another.** Idempotency is structural (survey F6 — no firm exists, so
-`_reserve_op` is unavailable): a second call for the same `(user_id, dpa_version)` returns the
-existing `{signature_id, signed_at, replay:true}` rather than refusing.
+signature against another.** Idempotency is structural (survey F6): a second call for the same
+`(user_id, dpa_version)` returns the existing `{signature_id, signed_at, replay:true}`.
 
 ### 1.2 · `UNNUMBERED_checkout_gate_b` — the event store and the object map
 
@@ -101,9 +97,8 @@ clara.stripe_object_map(
 
 **Why `stripe_events` has no `applied_at`.** Deriving "applied" from the existence of a
 `firm_registration_payments` row carrying that `stripe_event_id` means the applier needs no
-update path at all, so the append-only trigger can be **unconditional**. A table that is
-append-only *except for one column* is a table whose append-only claim has to be read carefully;
-this one does not.
+update path at all, so the append-only trigger can be **unconditional** — where a table that is
+append-only *except for one column* has an append-only claim that must be read carefully.
 
 **`clara.record_stripe_event(p_event_id text, p_type text, p_payload jsonb) → jsonb`** ·
 **granted to `clara_stripe_webhook` and to nothing else** — in particular **not** to
@@ -118,8 +113,8 @@ return jsonb_build_object('event_id', p_event_id, 'recorded', found);
 
 Refusals: `event id and type are required` (`CLR10`), `payload must be a json object` (`CLR10`).
 **It writes nothing else — no book, no capacity, no status, no firm** (billing design §3.11
-rule 2). A redelivery writes zero rows and returns `recorded:false`: **the idempotency is the
-primary key, not a procedure.**
+rule 2). A redelivery writes zero rows and returns `recorded:false`: the idempotency is the
+primary key, not a procedure.
 
 **`clara.apply_stripe_events(p_limit integer default 100) → jsonb`** — the separate audited
 applier, granted to `clara_stripe_webhook` only, re-runnable and idempotent. For each
@@ -138,9 +133,9 @@ Any failure of 1–3 writes a `stripe_event_problems` row with a named `problem`
 nothing. Returns `{examined, applied, problems}`.
 
 > **Metadata is attacker-influenced only if the webhook secret leaks.** The signature check is
-> what makes the metadata trustworthy; step 3's cross-check against `checkout_intents` is a
-> second, independent one — that intent row was written by *our* door, from *our* session,
-> before Stripe was ever called.
+> what makes it trustworthy; step 3's cross-check against `checkout_intents` is a second,
+> independent one — that intent row was written by *our* door, from *our* session, before
+> Stripe was ever called.
 
 ### 1.3 · `UNNUMBERED_checkout_gate_c` — the money → firm path
 
@@ -192,10 +187,10 @@ The seed's and the fixtures' legacy admission rows carry NULL in all three colum
 exactly as lawful as they are today (survey §3.1 measured 2 rows, 0 unconsumed).
 
 **Why the composite foreign keys.** `(registration_id, applicant)` referencing `(id, applicant)`
-makes "this payment belongs to this applicant's registration" a **database** fact. A row naming
-registration A and applicant B cannot be written at all, so the cross-caller wall in
-`claim_paid_admission` compares against a value the schema already guarantees is congruent
-rather than being a second, independently-fallible check.
+makes "this payment belongs to this applicant's registration" a **database** fact: a row naming
+registration A and applicant B cannot be written at all, so `claim_paid_admission`'s cross-caller
+wall compares a value the schema already guarantees congruent rather than being a second,
+independently-fallible check.
 
 **`clara.claim_paid_admission(p_registration uuid, p_op_key text) → jsonb`** ·
 grant `clara_authenticated` only. **This is the governed door 裁-73 names.**
@@ -321,11 +316,10 @@ convention**.
 
 ### 1.5 · `op_receipts` is not used, deliberately
 
-Survey F6: `op_receipts.firm_id` is NOT NULL and carries **no** foreign key onto `clara.firms`,
-so a sentinel firm id would technically insert. **No door in this design may do that.** Every new
-pre-firm door takes structural idempotency from its own table, as `create_firm`, `claim_identity`
-and `request_firm_registration` already do; `close_paid_registration` *could* use `_reserve_op`
-and does not, so all six share one idempotency story.
+Survey F6: `op_receipts.firm_id` is NOT NULL with **no** FK onto `clara.firms`, so a sentinel
+firm id would technically insert. **No door here may do that.** Every new pre-firm door takes
+structural idempotency from its own table, as the three existing ones do; `close_paid_registration`
+*could* use `_reserve_op` and does not, so all six share one idempotency story.
 
 ### 1.6 · The webhook's principal
 
@@ -403,6 +397,10 @@ issues no redirect, and it is the only surface in this train not called by a bro
 
 ## 3 · The `apps/web` surfaces
 
+**Every server-side entry below is a route.ts HTTP-method export; none is a `"use server"` Server
+Action** — part 1 §1.1 has the reason (the census enumerates only `page.*`/`route.*` leaves, so an
+action file is invisible to it); cell W-R pins it.
+
 | route | what changes |
 |---|---|
 | /auth/confirm + /auth/confirm/verify | `code` replaces `token_hash`; `exchangeCodeForSession` replaces `verifyOtp`; `proveSameOrigin` is kept **verbatim** (part 1 §3.2). **`Referrer-Policy` on this page must be `strict-origin`, never `no-referrer`** — FS-2's NEW-A: `no-referrer` makes real browsers send `Origin: null` on the form POST, which this wall 403s. **`Origin: null` is never accepted.** |
@@ -469,6 +467,7 @@ mechanism actually decides, not merely somewhere in the file.
 | **W-O** | the webhook role's blast radius | `clara_stripe_webhook` attempts `create_firm`, `claim_paid_admission` and `select … from clara.firms` → **permission denied** on all three | it may EXECUTE exactly the two functions in §1.6 | grant it `clara_authenticated` |
 | **W-P** | registration closure | after ⑧ the registration carries `status='approved'` and the firm id, and the holding page **redirects** instead of saying "not open yet" | — | delete the `close_paid_registration` call |
 | **W-Q** | the intermediate page is not an open redirect (part 1 §3.2b step 2) | a confirmation-URL parameter whose origin is **not** the project's Supabase URL → the page renders `status=invalid` and **no link to it** | the project's own confirmation URL → the button renders | compare only the path, or only a suffix, instead of the origin |
+| **W-R** | the transport rule (part 1 §1.1) | a whole-tree read of `apps/web` finds **zero** `"use server"` occurrences and **zero** `template.tsx` — a POSITIVE count assertion, since the scope census cannot see either | every server entry this train adds is reachable as a route.ts HTTP-method export the census **does** enumerate | add a `"use server"` file and watch this cell — not the 1253-test suite — go red |
 
 **Non-wall cells the battery also owes.**
 

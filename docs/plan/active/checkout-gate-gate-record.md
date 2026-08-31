@@ -232,6 +232,24 @@ nobody remembers making.
 
 ---
 
+## Recorded constraints — not questions, but they bind the build lane
+
+**No `"use server"` Server Actions anywhere in this train.** Every server-side step is a
+route.ts HTTP-method export. The reason is in the design at part 1 §1.1 and is a measured
+instrument gap, not a style preference: the scope-spine census enumerates surface leaves with
+`/^(page|route)\.(ts|tsx|js|jsx)$/`, so a `"use server"` file — or a root `template.tsx` — can
+reach firm-scoped data with the full suite green. Next's own guidance is that page-level
+authentication does not protect Server Actions. The census fix is ordered and has not landed.
+
+Measured while folding this in, so the rule's scope is honest: `apps/web` today holds **zero**
+`"use server"` files and **no** `template.tsx`. **This train is not repairing a hole — it is
+declining to open the first one, on the most dangerous door in the system, while the instrument
+that would catch it is known blind.** Cell W-R pins it as a positive count.
+
+**If a build lane later believes a Server Action is the right shape here, that is not a local
+call:** it needs the census fix landed first, stated as a precondition on the build PR. Raise it
+rather than taking it.
+
 ## An amendment owed to owner-batch item 85 — BEFORE the owner performs the Wave-G setup act
 
 **Not a question; a correction with evidence, flagged because the owner is queued to act on the

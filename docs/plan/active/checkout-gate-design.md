@@ -51,6 +51,35 @@ that carries values to a door and renders the door's verdict. No route is a wall
 The six new doors, their exact signatures and every refusal code are **part 2 §1**; the webhook
 route's contract is **part 2 §2**.
 
+### 1.1 · The transport is route handlers. NO Server Actions. This is a wall, not a preference.
+
+**Every server-side step above is an HTTP route handler — a route.ts exporting `POST` — and
+none of them is a `"use server"` Server Action.** The reason is a measured blind spot in the
+scope spine's own census, and it is recorded here so a build lane cannot later "simplify" a route
+into an action without meeting this paragraph:
+
+- The census in #461's apps/web/tests/firm-scope-surfaces.test.ts enumerates surface leaves with
+  `LEAF = /^(page|route)\.(ts|tsx|js|jsx)$/` (that file, line 46). **A `"use server"` export lives
+  in a file that regex never enumerates** — as does a root `template.tsx` — so such a file can
+  reach firm-scoped data with the whole suite green. This was demonstrated by planting one in an
+  isolated tree, not argued from reading. The census fix is ordered and **has not landed**.
+- Next's own guidance is that page-level authentication does not protect Server Actions and that
+  authentication and authorization must be re-verified inside each action. An action is a
+  POST endpoint wearing a function call's clothes, and this train's endpoints are the ones where
+  a missed re-verification creates a firm.
+- **Route handlers are covered**, as HTTP-method exports on a route.ts leaf the census does
+  enumerate.
+
+**Measured, so the scope of this rule is honest:** `apps/web` today contains **zero** `"use
+server"` files and **no** `template.tsx` (whole-tree grep and find over the entry-group branch).
+This train is therefore not repairing an existing hole — it is declining to open the first one,
+on the most dangerous door in the system, while the instrument that would have caught it is
+known blind.
+
+**If a later reader believes a Server Action is genuinely the right shape somewhere here, that is
+not a local call:** it requires the census fix to have landed first, as a stated precondition on
+the build PR. Gate record, "recorded constraints".
+
 ---
 
 ## 2 · The state machine
@@ -329,7 +358,7 @@ pretending the money is unspent.
 | **C-3** | `UNNUMBERED_checkout_gate_c` — `uq_frr_id_applicant`, `checkout_intents`, `firm_registration_payments`, the three `firm_admissions` columns + index + CHECK, `open_checkout_intent`, `record_checkout_session`, `claim_paid_admission`, `close_paid_registration`, the two `event_types` rows | no | C-1, C-2 |
 | **C-4** | `UNNUMBERED_checkout_gate_d` — **the `create_firm` recut** (part 2 §1.4) | **YES — the one window** | C-3 |
 | **C-5** | the runtime: the raw-body webhook router mounted **before** `src/index.ts:55`, the applier sweep, the trusted-IP courier | no | C-2 |
-| **C-6** | `apps/web`: the PKCE confirm route (§3.2), the DPA step, the checkout and success routes, the holding page's three arms, the e2e | no | C-3, C-5 |
+| **C-6** | `apps/web`: the PKCE confirm route (§3.2b), the DPA step, the checkout and success routes (**route.ts handlers, never Server Actions — §1.1**), the holding page's three arms, the e2e | no | C-3, C-5 |
 
 **D1 write-quiesce list — exactly one live body:** `clara.create_firm(text,uuid,text)`, live tip
 `0147:497`, live `prosrc` sha12 **`59fa533d9c03`**. C-4 pins that sha **before** it re-cuts, and
