@@ -333,7 +333,7 @@ async function main() {
       const itemsFinal = await rig.readOnboardingPlanItems(planId);
       const keysFinal = itemsFinal.map((it) => it.item_key);
       assert.equal(new Set(keysFinal).size, keysFinal.length, "each item_key appears EXACTLY once (exactly-once across the kill)");
-      assert.equal(itemsFinal.filter((it) => it.item_key !== "interview_run").length, 15, "15 business items total after the resumed drive");
+      assert.equal(itemsFinal.filter((it) => it.item_key !== "interview_run").length, 16, "16 business items total after the resumed drive (one per answered segment, except coa_seed which emits TWO -- coa_seed_decision + coa_chart_apply)");
       assert.equal(itemsFinal.filter((it) => it.item_key === "interview_run").length, 1, "the interview_run binding is still present exactly once");
 
       console.log("[kill-resume] PASS: SIGKILL mid-park → same-index re-park, byte-identical checkpoints, exactly-once drive to complete");

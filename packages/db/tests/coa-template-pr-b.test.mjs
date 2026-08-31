@@ -3,7 +3,7 @@
 // Design of record: docs/plan/active/coa-template-design.md (D-3, D-4, D-8, D-10, D-11, D-12) ·
 // docs/plan/active/coa-template-annexes.md Annex C (the battery), Annex D (the frontend homes),
 // Annex E (the non-goals) · docs/plan/active/coa-template-gate-record.md (CLOSED, RULED 裁-23).
-// Migration: packages/db/migrations/UNNUMBERED_coa_pr_b_apply_template.sql.
+// Migration: packages/db/migrations/0156_coa_apply_template.sql.
 //
 // JUDGEMENT LOGIC under review law 1: apply_coa_template's nine-rung ladder (rung 5 above all --
 // it is 裁-23 Q4's ruling made mechanical), add_coa_template_family's two collision refusals,
@@ -63,7 +63,7 @@ import {
 } from "./coa-template-pr-a-helpers.mjs";
 
 const APPLY_DOOR = "clara.apply_coa_template(uuid,uuid,text[],text)";
-const PR_B_MIGRATION = "UNNUMBERED_coa_pr_b_apply_template.sql";
+const PR_B_MIGRATION = "0156_coa_apply_template.sql";
 
 let world;
 let ready = false;
