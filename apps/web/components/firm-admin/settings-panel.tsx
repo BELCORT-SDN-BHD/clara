@@ -30,7 +30,8 @@ import { ThresholdChangeDialog } from "./threshold-dialog";
 export function SettingsPanel() {
   const t = useTranslations("FirmAdminCompliance.settings");
   const tCommon = useTranslations("Common");
-  const { data, err, clr, busy, act } = useHydratedPart(sessionTokenAccessor, (session) => loadFirmSettings(session));
+  const settingsState = useHydratedPart(sessionTokenAccessor, (session) => loadFirmSettings(session));
+  const { data, err, clr } = settingsState;
   const firm = data?.[0] ?? null;
 
   return (
@@ -51,24 +52,26 @@ export function SettingsPanel() {
           ) : !firm ? (
             <StateBanner tone="error">{t("firmNotFound")}</StateBanner>
           ) : (
-            <>
-              {/* THE PANEL'S OWN receipt of the DB's current value — never
-                  buried inside the (unopened, unmounted-until-open) confirm
-                  dialog below. A caller who never opens the dialog still
-                  sees what is in force today. */}
-              <p className="text-sm text-muted-foreground">
-                {t("currentValueLabel")}: <span className="font-medium text-foreground">{fmtCents(firm.high_stakes_amount_cents, tCommon("centsUnsafe"))}</span>
-              </p>
-              <div>
-                <ThresholdChangeDialog
-                  currentCents={firm.high_stakes_amount_cents}
-                  busy={busy}
-                  act={act}
-                  onSubmit={(cents) => setFirmHighStakesThreshold(sessionTokenAccessor, cents).then(() => undefined)}
-                />
-              </div>
-            </>
+            // THE PANEL'S OWN receipt of the DB's current value — never
+            // buried inside the (unopened, unmounted-until-open) confirm
+            // dialog below. A caller who never opens the dialog still sees
+            // what is in force today.
+            <p className="text-sm text-muted-foreground">
+              {t("currentValueLabel")}: <span className="font-medium text-foreground">{fmtCents(firm.high_stakes_amount_cents, tCommon("centsUnsafe"))}</span>
+            </p>
           )}
+          {/* M2 (independent review, PR #489, fix-required): the trigger
+              below is ALWAYS rendered, regardless of the read's own state —
+              see threshold-dialog.tsx's own header for the F3(b) precedent
+              this ports. A read failure must never read as "you are not
+              allowed to change this"; the dialog carries its own error+retry
+              internally when `firm` has not loaded. */}
+          <div>
+            <ThresholdChangeDialog
+              settingsState={settingsState}
+              onSubmit={(cents) => setFirmHighStakesThreshold(sessionTokenAccessor, cents).then(() => undefined)}
+            />
+          </div>
         </CardContent>
       </Card>
       <Card>

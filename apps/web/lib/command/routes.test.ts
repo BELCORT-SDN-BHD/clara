@@ -29,6 +29,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { CLIENT_ROUTES, FIRM_ROUTES, type CommandRoute } from "./routes";
+import messages from "../../messages/en.json";
 
 const APP_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "app");
 
@@ -115,6 +116,50 @@ test("the oracle actually read the app/ tree", () => {
   // everything would make all three assertions below vacuous.
   assert.equal(resolvesToPage("/definitely-not-a-route"), false);
   assert.equal(resolvesToPage("/clients"), true);
+});
+
+// --- The i18n label class (M1, independent review, PR #489) -----------------
+//
+// The Go manifest and messages/en.json are TWO checked-in files that must
+// agree by NAME, and nothing enforced it: `adminSettings` was added to
+// `FIRM_ROUTES` (FS-8 PR-2) without its matching `CommandPalette.go.routes.
+// adminSettings` key. next-intl never throws on a missing message — it falls
+// back to rendering the RAW DOTTED KEY PATH — so ⌘K silently showed
+// "CommandPalette.go.routes.adminSettings" as a row label on every firm page.
+// The estate already names this exact class (components/registers/
+// opening-i18n-keys.test.tsx's own header: "next-intl's default … renders the
+// RAW DOTTED KEY PATH … rather than throwing").
+//
+// A pure object-property read against `messages` (not a booted translator —
+// this file's own design law, stated in the header above, is "prove static
+// facts against real artifacts": next-intl's runtime is a second, unneeded
+// artifact for a question the checked-in JSON already answers by itself).
+// `!== undefined` is not enough: a value that is an OBJECT (someone nests a
+// sub-key under a route id) resolves to the SAME raw-key-path fallback as an
+// absent one and would pass a bare undefined check silently; an empty string
+// resolves to invisible-but-technically-defined label and raises nothing
+// either. Both are checked here explicitly, named, so a wrong shape reds with
+// a message pointing at the exact id and the exact dotted path to fix.
+//
+// Scope is ALL_ROUTES, not just FIRM_ROUTES: components/command/
+// command-palette.tsx calls the identical `tGoRoutes(route.id)` lookup for
+// CLIENT_ROUTES rows (the "This client" section) that it calls for
+// FIRM_ROUTES rows — same namespace, same lookup, same bug class either side.
+
+function goRouteLabel(id: string): unknown {
+  const go = (messages as { CommandPalette?: { go?: { routes?: Record<string, unknown> } } }).CommandPalette?.go?.routes;
+  return go?.[id];
+}
+
+test("every ⌘K route id resolves a real, non-empty CommandPalette.go.routes label — never the raw key path", () => {
+  const bad = ALL_ROUTES
+    .map((r) => ({ id: r.id, value: goRouteLabel(r.id) }))
+    .filter(({ value }) => typeof value !== "string" || value.trim() === "");
+  assert.deepEqual(
+    bad.map(({ id, value }) => `${id} -> CommandPalette.go.routes.${id} (${typeof value === "string" ? "empty string" : `${typeof value}, not a string`})`),
+    [],
+    "every route id must resolve a non-empty string label in messages/en.json's CommandPalette.go.routes — a missing/empty/nested key renders the raw dotted key path (or nothing at all) as the ⌘K row's own label",
+  );
 });
 
 // --- 1. built => a page exists ----------------------------------------------

@@ -342,4 +342,21 @@ test("the firm settings surface is reachable via the Admin nav, and the threshol
   await expect(page.getByRole("button", { name: "Change threshold", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Signing capabilities", exact: true })).toBeVisible();
   await expect(page.getByText("grant_firm_capability and revoke_firm_capability are live", { exact: false })).toBeVisible();
+
+  // N4 (independent review, PR #489): the arm above only proved the READ
+  // path. This walks the WRITE door for real, against the live stack:
+  // open -> type a genuinely new value -> confirm -> the panel's own
+  // re-read shows it. "RM 250,000.00" is deliberately distinct from the
+  // column's own default (1000000 cents = RM 10,000.00, clara.firms'
+  // `high_stakes_amount_cents` DEFAULT) — this fixture's firm has never had
+  // the threshold set explicitly, so any pre-existing value in the UI
+  // could only be that default, and a real write is the only way this
+  // exact string appears afterward.
+  await page.getByRole("button", { name: "Change threshold", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Change the high-stakes threshold" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("New threshold (RM)").fill("250000.00");
+  await dialog.getByRole("button", { name: "Change threshold", exact: true }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByText("RM 250,000.00", { exact: false })).toBeVisible();
 });

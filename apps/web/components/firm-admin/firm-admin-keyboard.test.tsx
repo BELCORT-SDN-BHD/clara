@@ -32,6 +32,15 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
   return null;
 }
 
+/** M5 (independent review, PR #489): counts non-overlapping occurrences of
+ *  `needle` in `haystack` — used to prove a SECOND rendering of a string
+ *  appeared (the panel's own line was ALREADY on the page before a dialog
+ *  opened; a plain `assert.match` after the click is true both before and
+ *  after it and proves nothing about the dialog itself having rendered). */
+function countOccurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -264,17 +273,27 @@ test("Share session dialog: opens on click, reaches Confirm/Cancel, and the trig
 // --- settings panel: the high-stakes threshold dialog (FS-8 PR-2, 裁-97) ----
 
 // Stateful mock (the counterparty-hygiene-a11y.test.tsx idiom): the panel's
-// `act()` ALWAYS re-reads after a write, and the discriminating post-
-// condition below is that the re-read reflects the DB's own new value, not
-// the input the user typed — so the GET after the RPC must return the
-// value the RPC itself just "wrote".
+// `act()` ALWAYS re-reads after a write (useHydratedPart's own contract:
+// "never assume the write's own response is the new truth") — and
+// settings-panel.tsx:67 THROWS AWAY the RPC's own response body
+// (`.then(() => undefined)`), so the panel's displayed value can only ever
+// come from that follow-up GET, never from the door's envelope.
+//
+// M3 (independent review, PR #489, fix-required): the RPC handler
+// deliberately returns/stores a value the TYPED INPUT CANNOT PRODUCE
+// (20000000 cents = RM 200,000.00) regardless of what `p_cents` the caller
+// actually sent (150000.00 = 15000000 cents) — proving the panel displays
+// what the GET says, not an echo of the input it was given. Before this
+// fix the mock stored exactly 15000000, the SAME number "150000.00"
+// parses to, so a panel that echoed the typed input instead of ever
+// reading the DB back would have passed identically.
 let currentHighStakesCents = 10000000;
 
 function mockSettingsFetch(u: string): Response {
   if (u.includes("/rest/v1/firms")) return jsonResponse([{ id: "f1", high_stakes_amount_cents: currentHighStakesCents }]);
   if (u.includes("/rpc/set_firm_high_stakes_threshold")) {
     const oldCents = currentHighStakesCents;
-    currentHighStakesCents = 15000000;
+    currentHighStakesCents = 20000000; // deliberately NOT what "150000.00" parses to
     return jsonResponse({ firm_id: "f1", old_cents: oldCents, new_cents: currentHighStakesCents });
   }
   throw new Error(`unexpected fetch: ${u}`);
@@ -300,11 +319,26 @@ test("Change threshold trigger is enabled from first render, regardless of role 
         (trigger as unknown as { focus: () => void }).focus();
         assert.equal(activeElement(), trigger, "keyboard focus must actually reach the trigger before activation");
 
+        // M5 (independent review, PR #489, fix-required): the panel's OWN
+        // "RM 100,000.00" line is already on the page before this click —
+        // settings-panel.tsx renders it unconditionally once the read has
+        // loaded. A plain `assert.match` for that string after the click is
+        // true whether or not the dialog rendered anything at all, so the
+        // discriminating check is an OCCURRENCE COUNT: one instance before
+        // the dialog opens (the panel's own line), two after (the panel's
+        // line PLUS the dialog's own copy of it).
+        const beforeCount = countOccurrences(textOf(body as never), "RM 100,000.00");
+        assert.equal(beforeCount, 1, "before opening, the CURRENT value must appear exactly once (the panel's own line)");
+
         await h.fireEvent(trigger as never, "click");
         for (let i = 0; i < 4; i++) await h.settle();
 
         const bodyText = textOf(body as never);
-        assert.match(bodyText, /RM 100,000\.00/, "the dialog must show the CURRENT value before asking for a new one");
+        assert.equal(
+          countOccurrences(bodyText, "RM 100,000.00"),
+          2,
+          "opening the dialog must add a SECOND rendering of the current value — the dialog's own copy, not just the panel's pre-existing one",
+        );
         assert.match(bodyText, /Cancel/, "opening the dialog must reveal its Cancel control");
         assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the dialog is open");
 
@@ -330,10 +364,14 @@ test("Change threshold trigger is enabled from first render, regardless of role 
 
         // Discriminating post-condition: the dialog genuinely closed on a
         // real confirm (a fabricated success would leave it open), and the
-        // re-read after the write shows the NEW value from the door's own
-        // envelope — never the value optimistically assumed from the input.
+        // re-read after the write shows the value the FOLLOW-UP GET
+        // returns — never the door's own response body (discarded at
+        // settings-panel.tsx:67) and never an echo of the typed input
+        // (150000.00 -> 15000000 cents; the mock deliberately stores
+        // 20000000 instead, so RM 200,000.00 can only appear here if the
+        // panel genuinely re-read rather than assumed).
         assert.doesNotMatch(textOf(body as never), /Change the high-stakes threshold/, "the dialog must actually close on a real confirm");
-        assert.match(textOf(body as never), /RM 150,000\.00/, "the panel must show the NEW value after the write, from a real re-read");
+        assert.match(textOf(body as never), /RM 200,000\.00/, "the panel must show the DB's re-read value, not an echo of the typed 150000.00");
       } finally {
         await h.unmount();
         for (let i = 0; i < 3; i++) await h.settle();
