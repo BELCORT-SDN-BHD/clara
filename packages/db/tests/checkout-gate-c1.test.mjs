@@ -9,7 +9,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { endPool, insertUser, rootQuery } from "./rig-fixtures.mjs";
+import { endPool, insertUser, rootQuery, seedAdmission } from "./rig-fixtures.mjs";
 import { truncateGuardError, withTxn } from "./rig-txn.mjs";
 
 const BETA_VERSION = "clara-beta-2026-08-a";
@@ -20,7 +20,7 @@ const EXPECTED_CELLS = 11;
 
 let live = false;
 let executed = 0;
-let admissionRowsBeforeBattery = null;
+let myAdmissionFixture = null;
 
 async function cohortApplied() {
   const rows = await rootQuery(
@@ -42,9 +42,29 @@ async function cohortApplied() {
 before(async () => {
   live = await cohortApplied();
   if (live) {
-    admissionRowsBeforeBattery = (await rootQuery(
-      "select count(*)::int as n from clara.firm_admissions",
-    )).rows[0].n;
+    // c1.10/W-E3 (reshaped 2026-09-01, #482-review CI run 33489361117): a bare `count(*)` with
+    // no predicate over clara.firm_admissions is unsound whenever db-estate runs packages
+    // concurrently against the shared container -- this is the #482 lesson's family, second
+    // member. db-estate's `pnpm -r` test step runs apps/web, apps/dashboard, packages/runtime
+    // and packages/db CONCURRENTLY against ONE shared postgres service container (proven live:
+    // the CI transcript interleaves `packages/db test:` and `packages/runtime test:` stdout
+    // millisecond-by-millisecond), and several of those OTHER suites legitimately mint and/or
+    // consume their OWN firm_admissions rows via this same rig-fixtures.seedAdmission helper
+    // during this file's run -- a lawful population change this file has no business asserting
+    // against. Scoping to "the exact row set observed here" is STILL unsound (that set can
+    // include a FOREIGN row a concurrent suite legitimately consumes mid-battery, via
+    // create_firm, between this hook and c1.10), so this cell owns a single, uniquely-tagged
+    // admission row that nothing else in the estate can address or touch, and c1.10 proves only
+    // THAT row -- plus the catalog-level DDL/index/trigger shape, which no concurrent suite's
+    // DML can move -- stays byte-unchanged and unconsumed.
+    const note = `c1.10_w-e3_${randomUUID()}`;
+    await seedAdmission(note);
+    const row = (await rootQuery(
+      `select id,token_hash,note,created_at,consumed_at,consumed_op_key,consumed_result
+         from clara.firm_admissions where note=$1`,
+      [note],
+    )).rows[0];
+    myAdmissionFixture = { note, row };
   }
 });
 after(async () => { await endPool(); });
@@ -426,12 +446,36 @@ cell("c1.10 W-E3 -- firm_admissions is byte-shape untouched and create_firm stay
        from pg_index where indrelid='clara.firm_admissions'::regclass`,
   );
   assert.deepEqual(indexes.rows[0].names, ["clara.firm_admissions_pkey", "clara.uq_firm_admissions_token_hash"]);
-  const rows = await rootQuery("select count(*)::int as n from clara.firm_admissions");
-  assert.equal(
-    rows.rows[0].n,
-    admissionRowsBeforeBattery,
-    "the admission row count observed before this checkout battery is untouched",
+
+  // Trigger census (independent review addition, 2026-09-01): cohort-scoping the population
+  // proof below opens exactly one path a bare row-set comparison cannot see -- a C-1-installed
+  // trigger on firm_admissions inserting rows OUTSIDE this cell's own cohort during the battery
+  // window. This is a pure catalog read, concurrency-immune the same way (i)/(ii) are: no
+  // concurrent suite's DML can create or drop a trigger.
+  const triggers = await rootQuery(
+    `select tgname from pg_trigger where tgrelid='clara.firm_admissions'::regclass
+        and not tgisinternal order by tgname`,
   );
+  assert.deepEqual(triggers.rows.map((r) => r.tgname), [], "firm_admissions carries no trigger, before or after C-1");
+
+  // W-E3 population proof, cohort-scoped (reshaped 2026-09-01 -- see before()'s comment for the
+  // full class/rationale: a bare count(*) with no predicate is unsound whenever db-estate runs
+  // packages concurrently against the shared container; this is the #482 lesson's family,
+  // second member). This proves only OUR OWN, uniquely-tagged fixture row -- nothing else in the
+  // estate can name or address it -- is still exactly one row, byte-unchanged, and unconsumed.
+  const mine = await rootQuery(
+    `select id,token_hash,note,created_at,consumed_at,consumed_op_key,consumed_result
+       from clara.firm_admissions where note=$1`,
+    [myAdmissionFixture.note],
+  );
+  assert.equal(mine.rowCount, 1, "exactly one admission row exists for this cell's own fixture cohort");
+  assert.deepEqual(
+    mine.rows[0],
+    myAdmissionFixture.row,
+    "this cell's own admission fixture is byte-unchanged since before()",
+  );
+  assert.equal(mine.rows[0].consumed_at, null, "this cell's own admission fixture was never consumed");
+
   const body = await rootQuery(
     `select left(encode(sha256(convert_to(prosrc,'UTF8')),'hex'),12) as sha12
        from pg_proc where oid='clara.create_firm(text,uuid,text)'::regprocedure`,
