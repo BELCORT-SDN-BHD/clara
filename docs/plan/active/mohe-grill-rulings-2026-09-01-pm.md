@@ -323,6 +323,59 @@ in #497 the control key contained no "test" and a hex slice could not produce on
 widening it was written to catch left it green. Work the mutation table before calling a control
 discriminating — 裁-112(b)'s corollary, applied to controls rather than pins.
 
+## 裁-113 · The C-2 wiki-gate question — owner rules REWRITE + CHECKED WAIVER
+
+**Owner ruling, 2026-09-01 evening, decided by a measurement.** #484's retarget gave the
+wiki-dynamic-sql gate its FIRST-EVER run on C-2 (the four review rounds never reached it — the
+`&&`-joined lint chain died earlier on a stacked-base freeze-lint artifact every time), and it
+refused `apply_stripe_events`'s `execute v_sql`. The lander EXECUTED the checker rather than reading
+it: a waiver on the code AS-IS is **trusted** (a fabricated table name was excused identically to the
+real one — kind `unprovable` short-circuits); a waiver after the literal-at-EXECUTE rewrite is
+**verified** (the fabricated declaration was rejected — kind `dynamic` compares declared targets to
+the reconstruction). The owner chose rewrite+waiver: the rewrite is what gives the checker something
+to check. Execution orders included: prove the accepted waiver reds on a wrong declaration
+(pin-must-red applied to waivers), fix the allowlist header's stale "TWO ENTRIES TODAY" count
+(12 entries, 13 with this one), and a scoped re-review of the behaviour-identical rewrite since it
+postdates the reviewed rounds.
+
+**The class banked alongside:** an `&&`-joined gate chain means an early red MASKS every gate after
+it — a stacked PR's "lint: FAILURE" can be one known artifact in front of gates that have never run.
+A retarget's first green-through-the-early-gates is the first time the later gates VOTE.
+
+## Evening state bridge — 2026-09-01 close (written before compaction)
+
+**Merged this day (12):** #478(0158) · #482(0157) · #483 · #486 · #487 · #490(0159) · #491 · #492 ·
+#494 · #496 · #488 (FS-4 Lane A) · #500 (裁-107(b)/111/112 family). Frontier: 0159 live.
+
+**Queue and what each waits on:**
+- **#484 (0160)** — EXECUTING 裁-113 (rewrite + checked waiver + stale-header fix + waiver-must-red
+  proof) → scoped re-review by pr484-reviewer of the behaviour-identical rewrite → CI → auto-merge
+  (armed). THE GATE for the rest of the C-chain.
+- **#493 (C-3, claims 0161)** — review gate CLEARED at 82a95cee (four rounds; the retry MAX+guard,
+  prosrc SHA12 pin 7de3df3152c7 by OID+signature, c3.30c/d kill DIFFERENT mutants — the pair covers,
+  neither alone). Owes: skip→pass attribution line (95→94, calendar-suspect), lexStatements comment
+  soften, then #484 merge → retarget → 0161 claim with the FULL 裁-108 four-step (60 cells LIVE by
+  name). Driver standing by in its worktree.
+- **#499 (N1/N3, 裁-109)** — both legs CONFIRMED at caea16c1; finisher pushed 86760779 (5 items) and
+  the Playwright leg FOUND A REAL DEFECT: Next 16.3.3 App Router REPLACES middleware's `Vary` (curl
+  cross-checked). Finisher is on a TIME-BOXED route-level fix (next.config headers()); if undeliverable,
+  pin observed reality + honest residual (primary control Cache-Control: private, no-store IS delivered
+  and e2e-pinned). Then CI → merge.
+- **#497** — CONFIRMED, auto armed, lands on green; #501's retarget precondition.
+- **#501** — round pushed at 981cc4c9 (shared claimOperatorFirm helper for ALL FOUR takers,
+  err.constraint match probed live, rowCount check, line ranges). Awaiting pr501-review's verdict.
+- **#498** — CONFIRMED at b1e61577, auto armed.
+- **#485 / #489 / #495** — ladders complete, auto armed, riding the cascade (update serially, senior
+  first, per the strict-protection lesson).
+
+**Standing owner items:** Stripe TEST key at C-5 (env-to-env) · vhdx compaction quiet window
+(~20-40 GB back to C:) after the cascade drains · beta-gating tasks #14 (float-hook silent-zero,
+widened to opening balances) / #15 (Clara rail inset) / #16 (P4-6 nav + reverse gate) unstarted.
+
+**Live infra:** owner preview at https://localhost:3100 (main@13bc5c03, supervisor attached) ·
+disk-cleaner done (C: 13.8→18.6 GB; 52.9 GB inside the vhdx awaiting compaction) · a corrupted
+worktree dir `agent-a13c9c7d877268370` needs manual removal · CI runners under heavy load all day.
+
 ## Session state bridge — 2026-09-01 afternoon
 *(PROGRESS.md truing rides the next clock-out PR. Where this disagrees with the repo, the repo wins.)*
 
