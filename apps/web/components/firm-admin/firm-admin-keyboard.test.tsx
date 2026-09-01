@@ -10,11 +10,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent, textOf } from "../../test/hookHarness";
+import { renderComponent, textOf, clickButton, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { VendorBindingsPanel } from "./vendor-bindings-panel";
+import { SettingsPanel } from "./settings-panel";
 import { ClaraFullScreenThread } from "../clara/ClaraFullScreenThread";
 import messages from "../../messages/en.json";
 
@@ -252,6 +253,87 @@ test("Share session dialog: opens on click, reaches Confirm/Cancel, and the trig
 
         assert.match(textOf(body as never), /Cancel/, "opening the dialog must reveal its Cancel control");
         assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the Share dialog is open");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
+// --- settings panel: the high-stakes threshold dialog (FS-8 PR-2, 裁-97) ----
+
+// Stateful mock (the counterparty-hygiene-a11y.test.tsx idiom): the panel's
+// `act()` ALWAYS re-reads after a write, and the discriminating post-
+// condition below is that the re-read reflects the DB's own new value, not
+// the input the user typed — so the GET after the RPC must return the
+// value the RPC itself just "wrote".
+let currentHighStakesCents = 10000000;
+
+function mockSettingsFetch(u: string): Response {
+  if (u.includes("/rest/v1/firms")) return jsonResponse([{ id: "f1", high_stakes_amount_cents: currentHighStakesCents }]);
+  if (u.includes("/rpc/set_firm_high_stakes_threshold")) {
+    const oldCents = currentHighStakesCents;
+    currentHighStakesCents = 15000000;
+    return jsonResponse({ firm_id: "f1", old_cents: oldCents, new_cents: currentHighStakesCents });
+  }
+  throw new Error(`unexpected fetch: ${u}`);
+}
+
+test("Change threshold trigger is enabled from first render, regardless of role — the DB's OWNER floor is the wall, never a client-side guess", async () => {
+  await withMockedEnv(
+    async (u) => mockSettingsFetch(String(u)),
+    async () => {
+      const h = await renderComponent(App(createElement(SettingsPanel), "Firm settings"));
+      const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+      body.appendChild(h.container);
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        const trigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold");
+        assert.ok(trigger, "the Change threshold trigger must render once the current value has loaded");
+        assert.equal(
+          (trigger as unknown as { disabled: boolean }).disabled,
+          false,
+          "the trigger is never gated on a client-side role guess — every viewer sees it, the DB's owner floor is the wall",
+        );
+
+        (trigger as unknown as { focus: () => void }).focus();
+        assert.equal(activeElement(), trigger, "keyboard focus must actually reach the trigger before activation");
+
+        await h.fireEvent(trigger as never, "click");
+        for (let i = 0; i < 4; i++) await h.settle();
+
+        const bodyText = textOf(body as never);
+        assert.match(bodyText, /RM 100,000\.00/, "the dialog must show the CURRENT value before asking for a new one");
+        assert.match(bodyText, /Cancel/, "opening the dialog must reveal its Cancel control");
+        assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the dialog is open");
+
+        const amountField = findIn(body as never, (n) => n.tagName === "INPUT" && n !== trigger);
+        assert.ok(amountField, "the new-threshold amount field must render as a real <input>");
+        const confirmButtonBeforeInput = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold" && n !== trigger);
+        assert.ok(confirmButtonBeforeInput, "the dialog's own Confirm control must render");
+        assert.equal(
+          (confirmButtonBeforeInput as unknown as { disabled: boolean }).disabled,
+          true,
+          "Confirm stays disabled until a valid amount is typed — an obviously-malformed-input guard, not a role gate",
+        );
+
+        await h.act(() => { setFieldValue(amountField as never, "150000.00"); });
+        for (let i = 0; i < 2; i++) await h.settle();
+
+        const confirmButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold" && n !== trigger);
+        assert.ok(confirmButton, "the Confirm control must still render after typing a valid amount");
+        assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, false, "Confirm must enable once a valid positive amount is present");
+
+        await clickButton(confirmButton as never);
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        // Discriminating post-condition: the dialog genuinely closed on a
+        // real confirm (a fabricated success would leave it open), and the
+        // re-read after the write shows the NEW value from the door's own
+        // envelope — never the value optimistically assumed from the input.
+        assert.doesNotMatch(textOf(body as never), /Change the high-stakes threshold/, "the dialog must actually close on a real confirm");
+        assert.match(textOf(body as never), /RM 150,000\.00/, "the panel must show the NEW value after the write, from a real re-read");
       } finally {
         await h.unmount();
         for (let i = 0; i < 3; i++) await h.settle();

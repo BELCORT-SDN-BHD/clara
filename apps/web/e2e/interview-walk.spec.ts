@@ -12,13 +12,21 @@ import { CLIENT_SEG_KEYS } from "../lib/interview/api";
  * client's same-park, two-browser-context race through the GH #152 409
  * disambiguation; and an axe WCAG 2.1 A/AA scan of the interview card.
  *
- * FS-8 (裁-86 e2e leg, P6-T IA shell) ADDS one more arm: a SEPARATE test()
- * that calls `establishSession(page)` itself (Playwright gives every test
- * its own fresh page/context — nothing is shared across `test()` blocks) on
- * the SAME COMPLETE fixture's client id, then walks nav-click and ⌘K to the
- * new Tax tab and asserts its three honest notes actually render. No
- * interview segment is answered by this arm — it only needs the fixture's
- * authenticated client, not its thread.
+ * FS-8 PR-1 (裁-86 e2e leg, P6-T IA shell) ADDS one more arm: a SEPARATE
+ * test() that calls `establishSession(page)` itself (Playwright gives every
+ * test its own fresh page/context — nothing is shared across `test()`
+ * blocks) on the SAME COMPLETE fixture's client id, then walks nav-click and
+ * ⌘K to the new Tax tab and asserts its three honest notes actually render.
+ * No interview segment is answered by this arm — it only needs the
+ * fixture's authenticated client, not its thread.
+ *
+ * FS-8 PR-2 (裁-97) ADDS a further arm, firm-altitude this time: nav-click
+ * through FirmNav's Admin link to the new /admin/settings surface, asserting
+ * the high-stakes-threshold control and the capabilities honest note both
+ * render. `establishSession` mints a JWT for the SAME sub `rig.buildFirm`
+ * creates as the fixture's OWNER, so this session genuinely holds owner
+ * rank — the control is asserted rendered and reachable, not merely visible-
+ * but-refused.
  *
  * DELIBERATELY DEFERRED: execution against the live runtime/DB estate. This
  * file consumes three isolated, already-open review fixtures supplied via the
@@ -311,4 +319,27 @@ test("the Tax tab is reachable by nav-click and by ⌘K, and its three honest no
   await dialog.getByPlaceholder("Search or ask Clara…").fill("tax");
   await dialog.getByText("Tax", { exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`${taxHref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+});
+
+test("the firm settings surface is reachable via the Admin nav, and the threshold control renders for the owner fixture (FS-8 PR-2, 裁-97)", async ({ page }) => {
+  const target = fixture("COMPLETE");
+  test.skip(!target, "review/merge supplies the isolated COMPLETE client/thread fixture");
+  await establishSession(page);
+
+  // Nav: firm home -> Admin (FirmNav) -> Firm settings (the /admin index's
+  // own link, added this PR) -> /admin/settings. `establishSession` mints a
+  // JWT for the SAME sub `rig.buildFirm` created as the fixture's OWNER
+  // (createFirm(owner, ...)), so this session genuinely holds owner rank —
+  // the threshold control is expected to render fully, not just be visible-
+  // but-refused.
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "Firm navigation" }).getByRole("link", { name: "Admin", exact: true }).click();
+  await expect(page).toHaveURL(/\/admin$/);
+  await page.getByRole("link", { name: "Firm settings", exact: true }).click();
+  await expect(page).toHaveURL(/\/admin\/settings$/);
+
+  await expect(page.getByRole("heading", { name: "High-stakes threshold", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Change threshold", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Signing capabilities", exact: true })).toBeVisible();
+  await expect(page.getByText("grant_firm_capability and revoke_firm_capability are live", { exact: false })).toBeVisible();
 });
