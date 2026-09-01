@@ -98,11 +98,13 @@ begin
   if exists (
     select 1 from pg_roles
      where rolname='clara_stripe_webhook'
-       and (rolcanlogin or rolsuper or rolbypassrls)
+       and (rolcanlogin or rolsuper or rolbypassrls or rolcreaterole or rolcreatedb
+            or rolreplication)
   ) or exists (
     select 1 from pg_roles
      where rolname='clara_stripe_webhook_login'
-       and (rolcanlogin or not rolinherit or rolsuper or rolbypassrls)
+       and (rolcanlogin or not rolinherit or rolsuper or rolbypassrls or rolcreaterole
+            or rolcreatedb or rolreplication)
   ) then
     raise exception 'checkout C-2 prestate: pre-existing webhook role posture is unsafe'
       using errcode = 'CLR10';
@@ -165,6 +167,12 @@ create table clara.stripe_events (
   subscription_id text,
   projection     jsonb       not null default '{}'::jsonb,
   received_at    timestamptz not null default now(),
+  constraint ck_stripe_events_event_id_shape check (event_id ~ '^evt_[A-Za-z0-9]+$'),
+  constraint ck_stripe_events_status_shape check (
+    (payment_status is null or (length(payment_status)<=64 and payment_status ~ '^[ -~]*$'))
+    and (mode is null or (length(mode)<=64 and mode ~ '^[ -~]*$'))
+    and (session_status is null or (length(session_status)<=64 and session_status ~ '^[ -~]*$'))
+  ),
   constraint ck_stripe_events_no_pii check (
     not (projection ?| array['customer_details','customer_email','billing_details',
                              'shipping_details','payment_method_details'])
@@ -204,6 +212,9 @@ create table clara.stripe_event_problems (
      and resolution is not null and btrim(resolution)<>'')
   )
 );
+
+create unique index uq_stripe_event_problems_event_open
+  on clara.stripe_event_problems(event_id,problem) where resolved_at is null;
 
 alter table clara.stripe_event_problems enable row level security;
 alter table clara.stripe_event_problems force row level security;
@@ -266,6 +277,7 @@ create function clara.record_stripe_event(
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   v_recorded boolean;
+  v_uuid_re text := '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
 begin
   if p_event_id is null or btrim(p_event_id)=''
      or p_type is null or btrim(p_type)='' then
@@ -273,6 +285,18 @@ begin
   end if;
   if jsonb_typeof(p_projection) is distinct from 'object' then
     raise exception 'projection must be a json object' using errcode='CLR10';
+  end if;
+  if p_projection ? 'intent_id' and p_projection->>'intent_id' is not null
+     and p_projection->>'intent_id' !~ v_uuid_re then
+    raise exception 'projection intent_id is not a valid uuid' using errcode='CLR10';
+  end if;
+  if p_projection ? 'registration_id' and p_projection->>'registration_id' is not null
+     and p_projection->>'registration_id' !~ v_uuid_re then
+    raise exception 'projection registration_id is not a valid uuid' using errcode='CLR10';
+  end if;
+  if p_projection ? 'applicant' and p_projection->>'applicant' is not null
+     and p_projection->>'applicant' !~ v_uuid_re then
+    raise exception 'projection applicant is not a valid uuid' using errcode='CLR10';
   end if;
 
   insert into clara.stripe_events(
@@ -309,47 +333,59 @@ declare
   v_examined integer := 0;
   v_applied integer := 0;
   v_problems integer := 0;
-  v_payment_exists boolean;
   v_constraint text;
+  v_sql text;
 begin
   if p_limit is null or p_limit<1 then
     raise exception 'limit must be positive' using errcode='CLR10';
   end if;
 
-  for e in
-    select se.*
-      from clara.stripe_events se
-     where se.type='checkout.session.completed'
-       and not exists (
-         select 1 from clara.stripe_event_problems sep
-          where sep.event_id=se.event_id and sep.resolved_at is null
-       )
-     order by se.received_at,se.event_id
-     limit p_limit
-  loop
-    -- Once C-3 exists, already-applied events are excluded before they count as examined. The
-    -- dynamic read keeps C-2's negative paths executable before that relation is born.
-    if to_regclass('clara.firm_registration_payments') is not null then
-      execute
-        'select exists (select 1 from clara.firm_registration_payments where stripe_event_id=$1)'
-        into v_payment_exists using e.event_id;
-      if v_payment_exists then
-        continue;
-      end if;
-    end if;
+  -- C-5 starvation fix: every skippable row is excluded inside the query, BEFORE LIMIT. Keeping
+  -- the consumed-payment check in the loop lets old rows occupy the whole window forever. The
+  -- two dynamic shapes preserve C-2's executable negative paths before C-3 creates its table.
+  if to_regclass('clara.firm_registration_payments') is not null then
+    v_sql := $q$
+      select se.* from clara.stripe_events se
+       where se.type='checkout.session.completed'
+         and not exists (
+           select 1 from clara.stripe_event_problems sep
+            where sep.event_id=se.event_id and sep.resolved_at is null
+         )
+         and not exists (
+           select 1 from clara.firm_registration_payments frp
+            where frp.stripe_event_id=se.event_id
+         )
+       order by se.received_at,se.event_id
+       limit $1
+    $q$;
+  else
+    v_sql := $q$
+      select se.* from clara.stripe_events se
+       where se.type='checkout.session.completed'
+         and not exists (
+           select 1 from clara.stripe_event_problems sep
+            where sep.event_id=se.event_id and sep.resolved_at is null
+         )
+       order by se.received_at,se.event_id
+       limit $1
+    $q$;
+  end if;
+
+  for e in execute v_sql using p_limit loop
 
     v_examined := v_examined+1;
 
     -- 裁-58/裁-28 tripwire: this second disjunct is an RM0-only relaxation. When amounts are
     -- ruled it MUST tighten to proof of settled payment; it is deliberately not a paid-price rule.
-    if not (
+    if (
       e.payment_status='paid'
       or (e.mode='subscription' and e.session_status='complete')
-    ) then
+    ) is not true then
       insert into clara.stripe_event_problems(event_id,problem,detail)
       values (e.event_id,'payment_not_settled',jsonb_build_object(
-        'payment_status',e.payment_status,'mode',e.mode,'session_status',e.session_status));
-      v_problems := v_problems+1;
+        'payment_status',e.payment_status,'mode',e.mode,'session_status',e.session_status))
+      on conflict (event_id,problem) where resolved_at is null do nothing;
+      if found then v_problems := v_problems+1; end if;
       continue;
     end if;
 
@@ -360,8 +396,9 @@ begin
         'registration_id_present',e.registration_id is not null,
         'applicant_present',e.applicant is not null,
         'intent_id_present',e.intent_id is not null,
-        'session_id_present',e.session_id is not null));
-      v_problems := v_problems+1;
+        'session_id_present',e.session_id is not null))
+      on conflict (event_id,problem) where resolved_at is null do nothing;
+      if found then v_problems := v_problems+1; end if;
       continue;
     end if;
 
@@ -370,8 +407,9 @@ begin
      where ci.id=e.intent_id;
     if not found then
       insert into clara.stripe_event_problems(event_id,problem,detail)
-      values (e.event_id,'intent_not_found',jsonb_build_object('intent_id',e.intent_id));
-      v_problems := v_problems+1;
+      values (e.event_id,'intent_not_found',jsonb_build_object('intent_id',e.intent_id))
+      on conflict (event_id,problem) where resolved_at is null do nothing;
+      if found then v_problems := v_problems+1; end if;
       continue;
     end if;
 
@@ -383,8 +421,9 @@ begin
         'intent_id',e.intent_id,
         'session_id_matches',i.session_id is not distinct from e.session_id,
         'registration_id_matches',i.registration_id is not distinct from e.registration_id,
-        'applicant_matches',i.applicant is not distinct from e.applicant));
-      v_problems := v_problems+1;
+        'applicant_matches',i.applicant is not distinct from e.applicant))
+      on conflict (event_id,problem) where resolved_at is null do nothing;
+      if found then v_problems := v_problems+1; end if;
       continue;
     end if;
 
@@ -408,8 +447,9 @@ begin
       end if;
       insert into clara.stripe_event_problems(event_id,problem,detail)
       values (e.event_id,'duplicate_payment',jsonb_build_object(
-        'registration_id',e.registration_id,'constraint',v_constraint));
-      v_problems := v_problems+1;
+        'registration_id',e.registration_id,'constraint',v_constraint))
+      on conflict (event_id,problem) where resolved_at is null do nothing;
+      if found then v_problems := v_problems+1; end if;
     end;
   end loop;
 
@@ -564,9 +604,25 @@ begin
 
   select count(*) into v_n from pg_constraint
    where conrelid='clara.stripe_events'::regclass
-     and conname='ck_stripe_events_no_pii' and contype='c' and convalidated;
+     and conname in ('ck_stripe_events_event_id_shape','ck_stripe_events_status_shape',
+                     'ck_stripe_events_no_pii')
+     and contype='c' and convalidated;
+  if v_n<>3 then
+    raise exception 'checkout C-2 tail: Stripe event mistake-net CHECK cohort is not exact'
+      using errcode='CLR10';
+  end if;
+
+  select count(*) into v_n
+    from pg_index i
+    join pg_attribute a1 on a1.attrelid=i.indrelid and a1.attnum=i.indkey[0]
+    join pg_attribute a2 on a2.attrelid=i.indrelid and a2.attnum=i.indkey[1]
+   where i.indexrelid='clara.uq_stripe_event_problems_event_open'::regclass
+     and i.indrelid='clara.stripe_event_problems'::regclass
+     and i.indisunique and i.indnkeyatts=2
+     and a1.attname='event_id' and a2.attname='problem'
+     and pg_get_expr(i.indpred,i.indrelid)='(resolved_at IS NULL)';
   if v_n<>1 then
-    raise exception 'checkout C-2 tail: ck_stripe_events_no_pii was not positively read'
+    raise exception 'checkout C-2 tail: open-problem partial unique index was not positively read'
       using errcode='CLR10';
   end if;
 
@@ -669,6 +725,16 @@ begin
       using errcode='CLR10';
   end if;
 
+  select count(*) into v_n
+    from pg_roles
+   where rolname in ('clara_stripe_webhook','clara_stripe_webhook_login')
+     and not rolcreaterole and not rolcreatedb and not rolreplication
+     and not rolsuper and not rolbypassrls;
+  if v_n<>2 then
+    raise exception 'checkout C-2 tail: webhook roles retain a cluster-creation/superuser/BYPASSRLS capability'
+      using errcode='CLR10';
+  end if;
+
   if exists (
     with recursive closure(oid,path) as (
       select oid,array[oid] from pg_roles
@@ -679,13 +745,15 @@ begin
       where not m.roleid=any(c.path)
     )
     select 1 from closure c join pg_roles r on r.oid=c.oid
-     where r.rolbypassrls or r.rolsuper
+     where r.rolbypassrls or r.rolsuper or r.rolcreaterole or r.rolcreatedb
+        or r.rolreplication
   ) or exists (
     select 1 from pg_roles
      where rolname in ('clara_stripe_webhook','clara_stripe_webhook_login')
-       and (rolcanlogin or rolbypassrls or rolsuper)
+       and (rolcanlogin or rolbypassrls or rolsuper or rolcreaterole or rolcreatedb
+            or rolreplication)
   ) then
-    raise exception 'checkout C-2 tail W-O: webhook role closure reaches superuser/BYPASSRLS/login'
+    raise exception 'checkout C-2 tail W-O: webhook role closure reaches cluster creation/superuser/BYPASSRLS/login'
       using errcode='CLR10';
   end if;
 
@@ -703,5 +771,5 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice 'checkout C-2 tail: OK -- three exact owner-only forced-RLS tables; redacted append-only Stripe projection; one-shot problem resolution; object-map PK/UNIQUE; webhook role has schema reachability, exactly two routine EXECUTEs, zero relation privileges and no BYPASSRLS closure; operator doors are owner+walled. C-3 payment-dependent cells remain named and deferred.';
+  raise notice 'checkout C-2 tail: OK -- three exact owner-only forced-RLS tables; bounded redacted append-only Stripe projection; one open problem per event/reason and one-shot resolution; object-map PK/UNIQUE; webhook role has schema reachability, exactly two routine EXECUTEs, zero relation privileges and no cluster-creation/superuser/BYPASSRLS closure; operator doors are owner+walled. C-3 payment-dependent cells remain named and deferred.';
 end $tail$;

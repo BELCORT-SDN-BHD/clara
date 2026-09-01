@@ -181,9 +181,6 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "_tf_agent_task_insert", "_tf_agent_task_update", "_tf_autodraft_attempt_update", "_tf_coding_task_update", "_tf_counterparty_update_0011",
   "_tf_document_intake_update", "_tf_fa_movement_belt", "_tf_filing_correction_update", "_tf_firm_document_limits_upsert", "_tf_fixed_assets_immutable_0017",
   "_tf_processing_call_reservation_update", "_tf_processing_task_update", "_tf_reservation_update", "_tf_rotate_token", "_tf_wake_intent_consume",
-  // FS-4 C-2: `now()` stamps a problem's audit resolution time. p_op_key remains an
-  // idempotency token; no session-clock-derived accounting date crosses this door.
-  "resolve_stripe_event_problem",
   // `begin_chat_turn` LEFT this base array at F-A9 PR-0 and is now a REVERSE-gated cohort
   // (CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES, below) — it is pushed back on any database that
   // has not applied the hotfix. Removed here rather than kept-and-subtracted so the base
@@ -844,6 +841,10 @@ const G1_WAKE_ENGINE_CLOCK_NAMES = ["set_wake_source_enabled"];
 // red every such leg on a two-name diff that says nothing about clock discipline.
 const COA_TEMPLATE_PR_A_CLOCK_NAMES = ["publish_coa_template", "retire_coa_template"];
 
+// FS-4 C-2 is UNNUMBERED until merge: gate on its stable migration stem so an earlier-frontier
+// database that does not have this function does not pick up a one-name bare-token roster drift.
+const CHECKOUT_GATE_C2_CLOCK_NAMES = ["resolve_stripe_event_problem"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -914,6 +915,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("fa7b_pr_a_client_onboarding_open$")) names.push(...ONBOARDING_OPEN_F_A7B_PR_A_CLOCK_NAMES);
   if (await appliedStem("p4_tranche2_registration_operator_alias$")) names.push(...P4T2_CLOCK_NAMES);
   if (await appliedStem("coa_template_pr_a$")) names.push(...COA_TEMPLATE_PR_A_CLOCK_NAMES);
+  if (await appliedStem("checkout_gate_c2_stripe_events$")) names.push(...CHECKOUT_GATE_C2_CLOCK_NAMES);
   return names.sort();
 }
 

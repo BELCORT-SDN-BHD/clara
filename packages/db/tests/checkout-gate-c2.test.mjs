@@ -27,7 +27,7 @@ import { clearOperator, markOperator } from "./p4t2-fixtures.mjs";
 import { truncateGuardError, withTxn } from "./rig-txn.mjs";
 
 const TABLES = ["stripe_events", "stripe_event_problems", "stripe_object_map"];
-const EXPECTED_CELLS = 11;
+const EXPECTED_CELLS = 17;
 const BETA_VERSION = "clara-beta-2026-08-a";
 
 let live = false;
@@ -84,6 +84,11 @@ async function recordEvent(eventId, type, projection) {
   return row.rows[0].result;
 }
 
+function stripeEventId(tag = "c2") {
+  const suffix = `${tag}${randomUUID().replaceAll("-", "")}`.replaceAll(/[^A-Za-z0-9]/g, "");
+  return `evt_${suffix}`;
+}
+
 async function insertRegistration(applicant, tag = "c2") {
   const row = await rootQuery(
     `insert into clara.firm_registration_requests(applicant,firm_name,note,op_key)
@@ -104,7 +109,7 @@ async function insertIntent({ registration, applicant, session }) {
 }
 
 async function createProblem(tag = "problem") {
-  const eventId = `evt_${tag}_${randomUUID().replaceAll("-", "")}`;
+  const eventId = stripeEventId(tag);
   await recordEvent(eventId, "unit.problem", { livemode: false });
   const row = await rootQuery(
     `insert into clara.stripe_event_problems(event_id,problem,detail)
@@ -209,10 +214,14 @@ cell("c2.3 ck_stripe_events_no_pii -- every named top-level denied key is reject
   ]) {
     await assertRaises(
       PG.checkViolation,
-      () => recordEvent(`evt_pii_${key}_${randomUUID()}`, "unit.pii", { livemode: false, [key]: { value: "denied" } }),
+      () => recordEvent(stripeEventId(`pii${key}`), "unit.pii", { livemode: false, [key]: { value: "denied" } }),
       `top-level ${key}`,
     );
   }
+  const eventId = stripeEventId("piicontrol");
+  assert.deepEqual(await recordEvent(eventId, "unit.pii_control", { livemode: false }), {
+    event_id: eventId, recorded: true,
+  }, "a projection with no denied top-level key is accepted normally");
 });
 
 cell("c2.4 stripe_events immutability -- update/delete and truncate all refuse CLR08", async () => {
@@ -224,7 +233,7 @@ cell("c2.4 stripe_events immutability -- update/delete and truncate all refuse C
     { tgname: "t_stripe_events_append_only", tgenabled: "O" },
     { tgname: "t_stripe_events_no_truncate", tgenabled: "O" },
   ], "both independent guards are present and enabled");
-  const eventId = `evt_immutable_${randomUUID().replaceAll("-", "")}`;
+  const eventId = stripeEventId("immutable");
   await recordEvent(eventId, "unit.immutable", { livemode: false });
   await withTxn(async (client) => {
     await assertRaises(CLR.immutable, () => client.query(
@@ -242,10 +251,10 @@ cell("c2.4 stripe_events immutability -- update/delete and truncate all refuse C
 
 cell("c2.5 W-B -- replay stores one event and returns recorded:false on the second call", async () => {
   await assertRaises(CLR.badRequest, () => recordEvent("", "unit.replay", { livemode: false }), "blank event id");
-  await assertRaises(CLR.badRequest, () => recordEvent("evt_blank_type", "", { livemode: false }), "blank type");
-  await assertRaises(CLR.badRequest, () => recordEvent("evt_bad_projection", "unit.replay", []), "array projection");
+  await assertRaises(CLR.badRequest, () => recordEvent("evt_blanktype", "", { livemode: false }), "blank type");
+  await assertRaises(CLR.badRequest, () => recordEvent("evt_badprojection", "unit.replay", []), "array projection");
 
-  const eventId = `evt_replay_${randomUUID().replaceAll("-", "")}`;
+  const eventId = stripeEventId("replay");
   const first = await recordEvent(eventId, "unit.replay", { livemode: false, session_id: "cs_replay" });
   const second = await recordEvent(eventId, "unit.replay", { livemode: false, session_id: "cs_replay" });
   assert.deepEqual(first, { event_id: eventId, recorded: true });
@@ -327,39 +336,44 @@ cell("c2.7 stripe_object_map -- composite local key and Stripe id are independen
 });
 
 cell("c2.8 W-O -- webhook role has exactly two executable routines, zero relation privileges, and no BYPASSRLS ancestry", async () => {
-  const routines = await rootQuery(
-    `select array_agg(p.oid::regprocedure::text order by p.oid::regprocedure::text) as names
-       from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-      where n.nspname='clara' and has_function_privilege('clara_stripe_webhook',p.oid,'EXECUTE')`,
-  );
-  assert.deepEqual(routines.rows[0].names, [
-    "clara.apply_stripe_events(integer)",
-    "clara.record_stripe_event(text,text,jsonb)",
-  ], "effective routine grants are an exact set equality");
+  for (const role of ["clara_stripe_webhook", "clara_stripe_webhook_login"]) {
+    const routines = await rootQuery(
+      `select array_agg(p.oid::regprocedure::text order by p.oid::regprocedure::text) as names
+         from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+        where n.nspname='clara' and has_function_privilege($1,p.oid,'EXECUTE')`,
+      [role],
+    );
+    assert.deepEqual(routines.rows[0].names, [
+      "clara.apply_stripe_events(integer)",
+      "clara.record_stripe_event(text,text,jsonb)",
+    ], `${role} effective routine grants are an exact set equality`);
 
-  const direct = await rootQuery(
-    `select routine_name,privilege_type from information_schema.role_routine_grants
-      where specific_schema='clara' and grantee='clara_stripe_webhook'
-      order by routine_name,privilege_type`,
-  );
-  assert.deepEqual(direct.rows, [
-    { routine_name: "apply_stripe_events", privilege_type: "EXECUTE" },
-    { routine_name: "record_stripe_event", privilege_type: "EXECUTE" },
-  ]);
+    const direct = await rootQuery(
+      `select routine_name,privilege_type from information_schema.role_routine_grants
+        where specific_schema='clara' and grantee=$1
+        order by routine_name,privilege_type`,
+      [role],
+    );
+    assert.deepEqual(direct.rows, role === "clara_stripe_webhook" ? [
+      { routine_name: "apply_stripe_events", privilege_type: "EXECUTE" },
+      { routine_name: "record_stripe_event", privilege_type: "EXECUTE" },
+    ] : [], `${role} has no unexpected direct routine grant`);
 
-  const tables = await rootQuery(
-    `select c.oid::regclass::text as relation
-       from pg_class c join pg_namespace n on n.oid=c.relnamespace
-      where n.nspname='clara' and c.relkind in ('r','p','v','m','f')
-        and (has_table_privilege('clara_stripe_webhook',c.oid,'SELECT')
-          or has_table_privilege('clara_stripe_webhook',c.oid,'INSERT')
-          or has_table_privilege('clara_stripe_webhook',c.oid,'UPDATE')
-          or has_table_privilege('clara_stripe_webhook',c.oid,'DELETE')
-          or has_table_privilege('clara_stripe_webhook',c.oid,'TRUNCATE')
-          or has_table_privilege('clara_stripe_webhook',c.oid,'REFERENCES')
-          or has_table_privilege('clara_stripe_webhook',c.oid,'TRIGGER'))`,
-  );
-  assert.deepEqual(tables.rows, [], "the webhook role has zero effective clara relation privileges");
+    const tables = await rootQuery(
+      `select c.oid::regclass::text as relation
+         from pg_class c join pg_namespace n on n.oid=c.relnamespace
+        where n.nspname='clara' and c.relkind in ('r','p','v','m','f')
+          and (has_table_privilege($1,c.oid,'SELECT')
+            or has_table_privilege($1,c.oid,'INSERT')
+            or has_table_privilege($1,c.oid,'UPDATE')
+            or has_table_privilege($1,c.oid,'DELETE')
+            or has_table_privilege($1,c.oid,'TRUNCATE')
+            or has_table_privilege($1,c.oid,'REFERENCES')
+            or has_table_privilege($1,c.oid,'TRIGGER'))`,
+      [role],
+    );
+    assert.deepEqual(tables.rows, [], `${role} has zero effective clara relation privileges`);
+  }
 
   const dangerous = await rootQuery(
     `with recursive closure(oid,path) as (
@@ -370,11 +384,13 @@ cell("c2.8 W-O -- webhook role has exactly two executable routines, zero relatio
         where not m.roleid=any(c.path)
      )
      select r.rolname from closure c join pg_roles r on r.oid=c.oid
-      where r.rolbypassrls or r.rolsuper or r.rolcanlogin order by r.rolname`,
+      where r.rolbypassrls or r.rolsuper or r.rolcanlogin or r.rolcreaterole
+         or r.rolcreatedb or r.rolreplication order by r.rolname`,
   );
-  assert.deepEqual(dangerous.rows, [], "neither webhook role reaches LOGIN, superuser, or BYPASSRLS");
+  assert.deepEqual(dangerous.rows, [],
+    "neither webhook role reaches LOGIN, cluster creation, replication, superuser, or BYPASSRLS");
 
-  const eventId = `evt_wo_${randomUUID().replaceAll("-", "")}`;
+  const eventId = stripeEventId("wo");
   assert.deepEqual(await recordEvent(eventId, "unit.w_o", { livemode: false }), {
     event_id: eventId, recorded: true,
   });
@@ -383,7 +399,7 @@ cell("c2.8 W-O -- webhook role has exactly two executable routines, zero relatio
 });
 
 cell("c2.9 W-M -- unresolvable metadata writes one named problem and applies nothing", async () => {
-  const eventId = `evt_wm_${randomUUID().replaceAll("-", "")}`;
+  const eventId = stripeEventId("wm");
   await recordEvent(eventId, "checkout.session.completed", {
     livemode: false,
     session_id: `cs_wm_${randomUUID()}`,
@@ -397,7 +413,7 @@ cell("c2.9 W-M -- unresolvable metadata writes one named problem and applies not
   const result = await roleQuery("clara_stripe_webhook", "select clara.apply_stripe_events(100) as result");
   assert.deepEqual(result.rows[0].result, { examined: 1, applied: 0, problems: 1 });
   const problem = await rootQuery(
-    "select problem,detail->>'intent_id' as intent_id from clara.stripe_event_problems where event_id=$1",
+    "select id,problem,detail->>'intent_id' as intent_id from clara.stripe_event_problems where event_id=$1",
     [eventId],
   );
   assert.equal(problem.rowCount, 1);
@@ -406,6 +422,26 @@ cell("c2.9 W-M -- unresolvable metadata writes one named problem and applies not
 
   const skipped = await roleQuery("clara_stripe_webhook", "select clara.apply_stripe_events(100) as result");
   assert.deepEqual(skipped.rows[0].result, { examined: 0, applied: 0, problems: 0 }, "an unresolved problem excludes the event");
+
+  const resolver = await insertUser("fs4c2", "wm_resolver");
+  await rootQuery(
+    `update clara.stripe_event_problems
+        set resolved_at=now(),resolved_by=$2,resolution='intent lookup retried'
+      where id=$1`,
+    [problem.rows[0].id, resolver],
+  );
+  const retried = await roleQuery("clara_stripe_webhook", "select clara.apply_stripe_events(100) as result");
+  assert.deepEqual(retried.rows[0].result, { examined: 1, applied: 0, problems: 1 },
+    "a resolved problem unblocks the event for the next sweep");
+  const retryProblems = await rootQuery(
+    `select count(*)::int as total,
+            count(*) filter (where resolved_at is not null)::int as resolved,
+            count(*) filter (where resolved_at is null)::int as unresolved
+       from clara.stripe_event_problems where event_id=$1`,
+    [eventId],
+  );
+  assert.deepEqual(retryProblems.rows[0], { total: 2, resolved: 1, unresolved: 1 },
+    "the retry leaves the resolved original and one new unresolved problem");
 });
 
 cell("c2.10 W-N -- intent/session disagreement writes intent_mismatch and applies nothing", async () => {
@@ -413,7 +449,7 @@ cell("c2.10 W-N -- intent/session disagreement writes intent_mismatch and applie
   const registration = await insertRegistration(applicant, "wn");
   const realSession = `cs_wn_real_${randomUUID()}`;
   const intent = await insertIntent({ registration, applicant, session: realSession });
-  const eventId = `evt_wn_${randomUUID().replaceAll("-", "")}`;
+  const eventId = stripeEventId("wn");
   await recordEvent(eventId, "checkout.session.completed", {
     livemode: false,
     session_id: `${realSession}_forged`,
@@ -524,6 +560,159 @@ cell("c2.11 operator problems -- owner+operator wall, list filter, one resolutio
     [target.problemId],
   );
   assert.deepEqual(included.rows, [{ id: target.problemId, resolution: "metadata corrected" }]);
+});
+
+cell("c2.12 settled-payment gate -- unsettled refuses before metadata; settled reaches metadata wall", async () => {
+  const unsettledEvent = stripeEventId("unsettled");
+  await recordEvent(unsettledEvent, "checkout.session.completed", {
+    livemode: false,
+    session_id: `cs_unsettled_${randomUUID()}`,
+    intent_id: randomUUID(),
+    registration_id: randomUUID(),
+    applicant: randomUUID(),
+    payment_status: "unpaid",
+    mode: "payment",
+    session_status: "open",
+  });
+  const unsettled = await roleQuery("clara_stripe_webhook", "select clara.apply_stripe_events(100) as result");
+  assert.deepEqual(unsettled.rows[0].result, { examined: 1, applied: 0, problems: 1 });
+  const unsettledProblem = await rootQuery(
+    "select problem from clara.stripe_event_problems where event_id=$1", [unsettledEvent],
+  );
+  assert.deepEqual(unsettledProblem.rows, [{ problem: "payment_not_settled" }]);
+
+  const missingEvent = stripeEventId("settledmissing");
+  await recordEvent(missingEvent, "checkout.session.completed", {
+    livemode: false,
+    session_id: `cs_settled_missing_${randomUUID()}`,
+    intent_id: randomUUID(),
+    payment_status: "paid",
+    mode: "payment",
+    session_status: "complete",
+  });
+  const missing = await roleQuery("clara_stripe_webhook", "select clara.apply_stripe_events(100) as result");
+  assert.deepEqual(missing.rows[0].result, { examined: 1, applied: 0, problems: 1 });
+  const missingProblem = await rootQuery(
+    "select problem from clara.stripe_event_problems where event_id=$1", [missingEvent],
+  );
+  assert.deepEqual(missingProblem.rows, [{ problem: "metadata_missing" }]);
+
+  const nullSettlementEvent = stripeEventId("nullsettlement");
+  await recordEvent(nullSettlementEvent, "checkout.session.completed", { livemode: false });
+  const nullSettlement = await roleQuery(
+    "clara_stripe_webhook", "select clara.apply_stripe_events(100) as result",
+  );
+  assert.deepEqual(nullSettlement.rows[0].result, { examined: 1, applied: 0, problems: 1 });
+  const nullSettlementProblem = await rootQuery(
+    "select problem from clara.stripe_event_problems where event_id=$1", [nullSettlementEvent],
+  );
+  assert.deepEqual(nullSettlementProblem.rows, [{ problem: "payment_not_settled" }],
+    "omitted settlement fields become SQL NULL and fail closed at step 1");
+});
+
+cell("c2.13 consumed rows are excluded before LIMIT and cannot starve a fresh event", async () => {
+  const appliedEvents = [stripeEventId("starvea"), stripeEventId("starveb")];
+  const freshEvent = stripeEventId("starvez");
+  const projection = () => ({
+    livemode: false,
+    session_id: `cs_starve_${randomUUID()}`,
+    intent_id: randomUUID(),
+    registration_id: randomUUID(),
+    applicant: randomUUID(),
+    payment_status: "paid",
+    mode: "payment",
+    session_status: "complete",
+  });
+  for (const eventId of appliedEvents) {
+    await recordEvent(eventId, "checkout.session.completed", projection());
+  }
+  await recordEvent(freshEvent, "checkout.session.completed", projection());
+
+  const ordered = await rootQuery(
+    `select event_id from clara.stripe_events
+      where event_id=any($1::text[]) order by received_at,event_id`,
+    [[...appliedEvents, freshEvent]],
+  );
+  assert.deepEqual(ordered.rows.map((row) => row.event_id), [...appliedEvents, freshEvent],
+    "the fresh event is behind a LIMIT-sized consumed prefix");
+
+  await rootQuery("create table clara.firm_registration_payments(stripe_event_id text primary key)");
+  try {
+    await rootQuery("alter table clara.firm_registration_payments owner to clara_fn_owner");
+    await rootQuery(
+      "insert into clara.firm_registration_payments(stripe_event_id) select unnest($1::text[])",
+      [appliedEvents],
+    );
+    const result = await roleQuery(
+      "clara_stripe_webhook", "select clara.apply_stripe_events(2) as result",
+    );
+    assert.deepEqual(result.rows[0].result, { examined: 1, applied: 0, problems: 1 },
+      "consumed rows do not occupy the LIMIT window");
+    const problem = await rootQuery(
+      "select problem from clara.stripe_event_problems where event_id=$1", [freshEvent],
+    );
+    assert.deepEqual(problem.rows, [{ problem: "intent_not_found" }]);
+  } finally {
+    await rootQuery("drop table if exists clara.firm_registration_payments");
+  }
+});
+
+cell("c2.14 open problem uniqueness -- one event/reason has at most one unresolved row", async () => {
+  const eventId = stripeEventId("openunique");
+  await recordEvent(eventId, "unit.open_unique", { livemode: false });
+  await rootQuery(
+    `insert into clara.stripe_event_problems(event_id,problem,detail)
+     values ($1,'intent_not_found','{}'::jsonb)`,
+    [eventId],
+  );
+  await assertRaises(PG.uniqueViolation, () => rootQuery(
+    `insert into clara.stripe_event_problems(event_id,problem,detail)
+     values ($1,'intent_not_found','{}'::jsonb)`,
+    [eventId],
+  ), "a second open row for the same event/reason");
+  const count = await rootQuery(
+    `select count(*)::int as n from clara.stripe_event_problems
+      where event_id=$1 and problem='intent_not_found' and resolved_at is null`,
+    [eventId],
+  );
+  assert.equal(count.rows[0].n, 1);
+});
+
+cell("c2.15 event-id shape mistake-net rejects non-Stripe ids and accepts a normal id", async () => {
+  await assertRaises(PG.checkViolation, () => recordEvent(
+    `not_evt_${randomUUID()}`, "unit.event_shape", { livemode: false },
+  ), "non-Stripe event id");
+  const eventId = stripeEventId("shapecontrol");
+  assert.deepEqual(await recordEvent(eventId, "unit.event_shape", { livemode: false }), {
+    event_id: eventId, recorded: true,
+  });
+});
+
+cell("c2.16 settlement-status mistake-net bounds untrusted text and admits normal values", async () => {
+  await assertRaises(PG.checkViolation, () => recordEvent(
+    stripeEventId("oversizedstatus"), "unit.status_shape",
+    { livemode: false, payment_status: "x".repeat(65) },
+  ), "oversized payment status");
+  const eventId = stripeEventId("statuscontrol");
+  assert.deepEqual(await recordEvent(eventId, "unit.status_shape", {
+    livemode: false,
+    payment_status: "paid",
+    mode: "payment",
+    session_status: "complete",
+  }), { event_id: eventId, recorded: true });
+  const stored = await rootQuery(
+    "select payment_status,mode,session_status from clara.stripe_events where event_id=$1", [eventId],
+  );
+  assert.deepEqual(stored.rows, [{ payment_status: "paid", mode: "payment", session_status: "complete" }]);
+});
+
+cell("c2.17 malformed projected UUID refuses by field name without echoing the input", async () => {
+  const hostile = "captured-person@example.com";
+  const error = await assertRaises(CLR.badRequest, () => recordEvent(
+    stripeEventId("baduuid"), "unit.uuid_shape", { livemode: false, intent_id: hostile },
+  ), "malformed intent uuid");
+  assert.match(error.message, /intent_id/);
+  assert.equal(error.message.includes(hostile), false, "the typed refusal never echoes the bad value");
 });
 
 test("c2.VACUITY CONTROL -- every declared C-2 cell executed", (t) => {
