@@ -270,6 +270,31 @@ not merely to exist. The same lane's own check on the prosrc pin is the pattern 
 one byte and require the pin to red, because a pin that names a neighbouring function is exactly the
 law-3 shape (a guard reading a NAME rather than proving identity).
 
+### 裁-112(c) · The DUPLICATED-PREDICATE trap — THREE instances in one day, all author-invisible
+
+The estate already banked "a review's own instrument is not a shipped gate" (2026-08-31). What
+2026-09-01 added is the recurrence count and the specific shape: **a guard that re-implements the
+thing it guards, so mutating the real thing reds nothing.** Three instances, all shipped by careful
+authors, all caught by a reviewer, all in one afternoon:
+
+1. **#499 FOLD 2** — the cache-header test drove `confirmCacheHeadersForPath` (the predicate) and
+   never a response. Delete the application block and every test stays green.
+2. **#493 c3.53** — the census matched a literal in `prosrc`, and the migration's own explanatory
+   COMMENT contained that literal. The evasion the census was widened to catch could be
+   reintroduced in executable code with the comment left in place, and the guard stays green.
+3. **#497 F4** — the negative control was asked to prove T1's predicate discriminates, and it
+   executed a SECOND string literal of its own. Editing T1's WHERE clause leaves the control blind;
+   it reds against exactly one mutation (emptying the constant) out of four plausible widenings.
+
+**LAW: a cell that exists to prove a gate discriminates must EXECUTE THE GATE, not a copy of it.**
+Hoist the gate's expression to one shared constant and have both the gate and its control run that
+exact string; where the gate is a shipped mechanism rather than an expression (a header applier, a
+migration body), drive the real thing — a real response, a real body — or pin its identity by hash.
+**And choose the control's input so the PLAUSIBLE widenings swallow it**, not merely the absurd ones:
+in #497 the control key contained no "test" and a hex slice could not produce one, so the exact
+widening it was written to catch left it green. Work the mutation table before calling a control
+discriminating — 裁-112(b)'s corollary, applied to controls rather than pins.
+
 ## Session state bridge — 2026-09-01 afternoon
 *(PROGRESS.md truing rides the next clock-out PR. Where this disagrees with the repo, the repo wins.)*
 
