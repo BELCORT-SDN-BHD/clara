@@ -69,11 +69,24 @@ async function cleanupPrivateDb() {
   }
   restoreEnv();
   await admin.query(`drop database if exists "${DBNAME}" with (force)`).catch(() => {});
-  await admin.end();
+  // R2 (review round 2): unguarded, this could REPLACE the real failure below with a
+  // connection-teardown error — the failure-path catch's own `await cleanupPrivateDb()`
+  // would reject HERE instead of reaching its `throw err`, masking whatever migrate() or
+  // the dynamic imports actually failed with. Best-effort, like the DROP just above.
+  await admin.end().catch(() => {});
 }
 // The NORMAL (success-path) cleanup — fires once every test in this file has run.
 after(cleanupPrivateDb);
 
+// `let`-declared above the try so the try can enclose EVERY statement that can reject
+// before this file's tests are registered (R1, review round 2): setDatabaseEnv/migrate()
+// were covered in round 1, but the three dynamic imports below were NOT, and
+// relay-testkit.mjs's own top-level `await fx.probeReady()` is a REAL query against the
+// private DB (probeReady -> rootQuery -> getPool -> makePool -> connConfig ->
+// assertNoTargetSplit) — a connection refusal, a pool error, a failing probe statement,
+// or a target split (the M2 class itself) all reject there exactly as a migrate() throw
+// does, and were previously OUTSIDE the try, orphaning the database the same way.
+let redrive, TaxonomyHaltError, CONSUMER, WAKE_ENGINE_CONSUMER, fx, skip, drainInProcess, assertExactlyOnce, runRedriveCli;
 try {
   restoreEnv = setDatabaseEnv(DBNAME);
   // No explicit `dir` — migrate()'s own default resolution (dir || CLARA_MIGRATIONS_DIR ||
@@ -81,22 +94,23 @@ try {
   // overriding it here would silently defeat a deliberate CLARA_MIGRATIONS_DIR override
   // (e.g. the deploy-onto-existing CI step's pattern) for this one file alone.
   await migrate({ log: () => {} });
+  // Deferred until the private database above is live — see the header note.
+  ({ redrive, TaxonomyHaltError, CONSUMER, WAKE_ENGINE_CONSUMER } = await import("../lib/relay.mjs"));
+  fx = await import("./relay-fixtures.mjs");
+  ({ skip, drainInProcess, assertExactlyOnce, runRedriveCli } = await import("./relay-testkit.mjs"));
 } catch (err) {
   // A root after() hook registered during module evaluation does NOT survive a
-  // top-level-await REJECTION: when migrate() throws here, this file fails to LOAD, and
-  // node:test never reaches the point of running root-suite hooks for a file that never
-  // finished loading — the after() above would NOT fire (verified against this repo's
-  // Node), silently orphaning the disposable database (the DROP's own .catch(()=>{})
-  // would otherwise hide exactly that). So cleanup rides this SAME synchronous failure
-  // path instead of relying on after() alone.
+  // top-level-await REJECTION: a throw ANYWHERE in this try — setDatabaseEnv, migrate(),
+  // or any of the three dynamic imports above (relay-testkit.mjs's own top-level
+  // probeReady() query included) — fails this file's module LOAD, and node:test never
+  // reaches the point of running root-suite hooks for a file that never finished loading:
+  // the after() above would NOT fire (verified against this repo's Node), silently
+  // orphaning the disposable database (the DROP's own .catch(()=>{}) would otherwise hide
+  // exactly that). So cleanup rides this SAME synchronous failure path — covering every
+  // statement in this try, and nothing past it — instead of relying on after() alone.
   await cleanupPrivateDb();
   throw err;
 }
-
-// Deferred until the private database above is live — see the header note.
-const { redrive, TaxonomyHaltError, CONSUMER, WAKE_ENGINE_CONSUMER } = await import("../lib/relay.mjs");
-const fx = await import("./relay-fixtures.mjs");
-const { skip, drainInProcess, assertExactlyOnce, runRedriveCli } = await import("./relay-testkit.mjs");
 
 // ===========================================================================
 // (c) ZERO-ACTIVE-POINTER — HALT loudly, checkpoint frozen, zero dead-letters

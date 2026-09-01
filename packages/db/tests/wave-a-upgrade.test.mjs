@@ -102,7 +102,11 @@ async function signature(baselineVersion) {
   // WAKE_EVENT_TYPE is the reserved `rig.relay.wake`, and no migration ever registers a
   // `rig.%` event type (checked against every migration file), so the exclusion is FREE:
   // it can only ever drop rows a shipped migration never produced, never weakening the
-  // fresh-vs-upgrade parity proof.
+  // fresh-vs-upgrade parity proof. The one construction path that COULD emit one is
+  // 0007_document_pipeline.sql's whole-table sweep (`insert into trigger_taxonomy(...)
+  // select 2, e.name, ... from clara.event_types e`, ~line 2695) — impossible here
+  // regardless, since both the fresh and upgrade paths start from reset(), so
+  // event_types at 0007 holds only 0005's literals, never a rig.% row.
   await q(
     "taxonomy",
     `select tt.version, tt.event_type, tt.decision from clara.trigger_taxonomy tt
