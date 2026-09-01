@@ -412,3 +412,89 @@ test("Change threshold trigger is enabled from first render, regardless of role 
     },
   );
 });
+
+// FINDING 2 (raised by pr489-codex-leg, law-28 leg): write-then-reread double
+// fault — the write succeeds, but act()'s own follow-up reread
+// (hooks.ts:229) fails, and hooks.ts's `reloadImpl` deliberately leaves the
+// OLD `data` standing on a failed reload (other consumers may lawfully render
+// stale-plus-banner; not touched here). Before this fix, threshold-dialog.tsx:75
+// gated its error/retry branch on `!firm` alone, so a stale-truthy `firm`
+// hid the reread failure and re-showed the stale figure + an editable field
+// on reopen. Fix: the dialog checks `settingsState.err` FIRST, before `firm`.
+let findFirmsCalls = 0;
+function mockSettingsWriteSucceedsRereadFails(u: string): Response {
+  if (u.includes("/rest/v1/firms")) {
+    findFirmsCalls += 1;
+    // 1st read (mount) succeeds; 2nd (act()'s post-write reread) fails.
+    if (findFirmsCalls === 1) return jsonResponse([{ id: "f1", high_stakes_amount_cents: 10000000 }]); // RM100,000.00
+    return jsonResponse({ message: "read failed" }, 500);
+  }
+  if (u.includes("/rpc/set_firm_high_stakes_threshold")) {
+    return jsonResponse({ firm_id: "f1", old_cents: 10000000, new_cents: 15000000 });
+  }
+  throw new Error(`unexpected fetch: ${u}`);
+}
+
+test("write-succeeds/reread-fails/reopen: the reopened dialog shows the reload error + retry, never the stale cached threshold (FINDING 2, raised by pr489-codex-leg, law-28 leg)", async () => {
+  await withMockedEnv(
+    async (u) => mockSettingsWriteSucceedsRereadFails(String(u)),
+    async () => {
+      const h = await renderComponent(App(createElement(SettingsPanel), "Firm settings"));
+      const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+      body.appendChild(h.container);
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        assert.match(textOf(body as never), /RM 100,000\.00/, "sanity: the initial read must have succeeded");
+
+        const trigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold");
+        assert.ok(trigger, "the Change threshold trigger must render");
+
+        await h.fireEvent(trigger as never, "click");
+        for (let i = 0; i < 4; i++) await h.settle();
+
+        const amountField = findIn(body as never, (n) => n.tagName === "INPUT" && n !== trigger);
+        assert.ok(amountField, "the amount field must render on the FIRST open — the read has not failed yet");
+        await h.act(() => { setFieldValue(amountField as never, "150000.00"); });
+        for (let i = 0; i < 2; i++) await h.settle();
+
+        const confirmButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold" && n !== trigger);
+        assert.ok(confirmButton, "the dialog's own Confirm control must render");
+        assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, false, "Confirm must enable once a valid amount is typed");
+
+        // The write succeeds; act()'s own follow-up reread then fails (see mock above).
+        await clickButton(confirmButton as never);
+        for (let i = 0; i < 8; i++) await h.settle();
+
+        // FirmAdminDoorDialog's Confirm handler always calls `setOpen(false)`
+        // once `onConfirm` resolves, regardless of outcome (its own header:
+        // "this component does not inspect the outcome") — `settingsState.act`
+        // never rethrows (hooks.ts's own catch swallows it into err/clr), so
+        // the dialog closes normally here exactly as the finding's trace says.
+        assert.doesNotMatch(textOf(body as never), /Change the high-stakes threshold/, "the dialog must have closed normally after the confirm attempt settled");
+
+        // The panel behind it honestly banners the reread failure.
+        assert.match(textOf(body as never), /read failed/, "the panel must show the follow-up reread's own error, honestly");
+
+        // Reopen the dialog — this is the finding's own reproduction step.
+        const triggerOnReopen = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold");
+        assert.ok(triggerOnReopen, "the trigger must still render after the dialog closes");
+        await h.fireEvent(triggerOnReopen as never, "click");
+        for (let i = 0; i < 4; i++) await h.settle();
+
+        const reopenedText = textOf(body as never);
+        // THE DISCRIMINATING ASSERTIONS: before this fix, `firm` was still
+        // stale-truthy (hooks.ts never clears `data` on a failed reload), so
+        // threshold-dialog.tsx's `!firm` gate rendered the stale-number
+        // edit form here instead of the error state.
+        assert.match(reopenedText, /read failed/, "the reopened dialog must show the reload error, not silently drop it");
+        const amountFieldOnReopen = findIn(body as never, (n) => n.tagName === "INPUT" && n !== triggerOnReopen);
+        assert.equal(amountFieldOnReopen, null, "the reopened dialog must NOT render the editable amount field while a reload error stands — that would mean the stale-number branch rendered instead of the error branch");
+        const retryButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Retry");
+        assert.ok(retryButton, "the reopened dialog must offer its own Retry control, matching the panel's honest error state");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});

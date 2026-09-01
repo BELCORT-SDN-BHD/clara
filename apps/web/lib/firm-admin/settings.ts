@@ -58,13 +58,36 @@ export function setFirmHighStakesThreshold(session: SessionTokenAccessor, cents:
  *  non-negative decimal amount — the caller must treat `null` as "not a
  *  number yet", never coerce it to 0. Negative amounts are rejected here
  *  (not merely stripped) because a negative threshold is nonsensical, not a
- *  sanitizable typo — the DB's own `p_cents > 0` check (0022 §B) agrees. */
+ *  sanitizable typo — the DB's own `p_cents > 0` check (0022 §B) agrees.
+ *
+ *  FINDING 1 (raised by pr489-codex-leg, law-28 leg): the pre-fix body
+ *  blanket-stripped every comma (`input.replace(/,/g, "")`) BEFORE
+ *  validating, so a European-style decimal-comma amount like "1234,56"
+ *  (meant as RM1,234.56) silently parsed as RM123,456.00 — a 100x error on
+ *  a DB-owned governance number, accepted with no rejection and no echo of
+ *  the interpreted amount. Fix shape: REFUSE ambiguity rather than guess. A
+ *  comma is accepted ONLY as a thousands separator in a strictly valid
+ *  position — groups of exactly three digits, and never the decimal mark;
+ *  any other placement (wrong grouping, leading, trailing, adjacent to the
+ *  decimal point) fails the match and returns `null`. Convention checked
+ *  first, per the mandate: `./money.ts` here is a formatter with no parser
+ *  of its own; the two ACTUAL sibling parsers this file's own header names —
+ *  `lib/registers/money.ts`'s `parseAmountToCents` and
+ *  `lib/bank/money.ts`'s `parseAmountToCents` — do NOT refuse commas
+ *  entirely; both still blanket-strip them (`input.replace(/,/g, "")`)
+ *  exactly as this function did before this fix, so they carry the SAME
+ *  latent 100x-on-decimal-comma bug. There is therefore no
+ *  "refuses-commas-entirely" convention to match on this codebase today, so
+ *  this function instead implements the strict-grouping rule the finding
+ *  mandates, scoped to this one governance-critical write surface — the
+ *  siblings are out of scope for this fix round. */
 export function parseThresholdAmountToCents(input: string): number | null {
-  const cleaned = input.trim().replace(/,/g, "");
-  if (cleaned === "") return null;
-  const m = /^(\d+)(?:\.(\d{1,2}))?$/.exec(cleaned);
+  const trimmed = input.trim();
+  if (trimmed === "") return null;
+  const m = /^(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?$/.exec(trimmed);
   if (!m) return null;
-  const [, whole = "0", frac = ""] = m;
+  const [, wholeRaw = "0", frac = ""] = m;
+  const whole = wholeRaw.replace(/,/g, "");
   const fracPadded = (frac + "00").slice(0, 2);
   const cents = BigInt(whole) * 100n + BigInt(fracPadded);
   if (cents <= 0n) return null;

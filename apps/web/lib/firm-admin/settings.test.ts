@@ -56,6 +56,29 @@ test("parseThresholdAmountToCents: rejects malformed input, never coerces to 0",
   }
 });
 
+test("parseThresholdAmountToCents: FINDING 1 (raised by pr489-codex-leg, law-28 leg) — a decimal-comma amount is REFUSED, never silently reparsed as a 100x-larger thousands amount", () => {
+  // RED-before proof: run against the pre-fix body (`input.replace(/,/g, "")`
+  // before validating) and "1234,56" returns 12345600 — an accepted, SILENT
+  // 100x threshold error (RM1,234.56 typed, RM123,456.00 stored) with no
+  // rejection and no echo of the interpreted amount. Captured verbatim in
+  // the PR body's fix-round section. Convention check: `./money.ts` in this
+  // domain is a formatter with no parser; the two ACTUAL sibling parsers
+  // this file's header names (lib/registers/money.ts, lib/bank/money.ts —
+  // both `parseAmountToCents`) do NOT refuse commas either, so there is no
+  // "refuses-commas-entirely" convention to match — this parser instead
+  // enforces strict thousands-grouping (a comma is accepted ONLY in a
+  // strictly valid grouping position, never as a decimal mark), refusing
+  // anything else rather than guessing.
+  assert.equal(parseThresholdAmountToCents("1234,56"), null, "European-style decimal comma must be REFUSED, not silently reinterpreted");
+  assert.equal(parseThresholdAmountToCents("12,34.56"), null, "a comma outside a strict 3-digit group is refused");
+  assert.equal(parseThresholdAmountToCents(",123"), null, "a leading comma is refused");
+  assert.equal(parseThresholdAmountToCents("123,"), null, "a trailing comma is refused");
+  assert.equal(parseThresholdAmountToCents("1,2345.00"), null, "a 4-digit group after a comma is refused, not truncated");
+  // The strictly-valid thousands-grouping convention itself still parses —
+  // this is a refusal of AMBIGUITY, not a refusal of every comma.
+  assert.equal(parseThresholdAmountToCents("1,234.56"), 123456, "a strictly-grouped thousands separator still parses");
+});
+
 test("parseThresholdAmountToCents: the Number()-precision bound on a giant value", () => {
   // BigInt arithmetic is exact up to this point, but the function's return
   // type is `number`, so the FINAL `Number(cents)` conversion is where

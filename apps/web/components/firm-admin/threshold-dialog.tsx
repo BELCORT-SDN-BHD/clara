@@ -72,24 +72,29 @@ export function ThresholdChangeDialog({
       confirmDisabled={parsed === null}
       onConfirm={() => settingsState.act(async () => { if (parsed !== null) await onSubmit(parsed); })}
     >
-      {!firm ? (
-        settingsState.err ? (
-          <div className="flex flex-col gap-2">
-            <StateBanner
-              tone="error"
-              className="text-xs"
-              code={settingsState.clr ? `${settingsState.clr.code}${settingsState.clr.reason ? ` · ${settingsState.clr.reason}` : ""}` : undefined}
-            >
-              {settingsState.err}
-            </StateBanner>
-            <Button type="button" size="sm" variant="outline" onClick={() => void settingsState.reload()}>
-              {tCommon("retry")}
-            </Button>
-          </div>
-        ) : (
-          <LoadingState className="text-xs">{t("loading")}</LoadingState>
-        )
-      ) : (
+      {/* FINDING 2 (raised by pr489-codex-leg, law-28 leg): `settingsState.err`
+          is now checked FIRST, before `firm` — not `!firm` alone. hooks.ts's
+          `reloadImpl` deliberately leaves the OLD `data` standing on a failed
+          reload (other consumers may lawfully render stale-plus-banner), so a
+          write-succeeds/reread-fails double fault left `firm` stale-truthy: the
+          old `!firm` gate then re-showed the STALE figure and an editable field
+          on reopen, with no hint of the reread failure the panel behind it was
+          honestly bannering. A standing reload error now always wins the
+          branch, even over cached data. */}
+      {settingsState.err ? (
+        <div className="flex flex-col gap-2">
+          <StateBanner
+            tone="error"
+            className="text-xs"
+            code={settingsState.clr ? `${settingsState.clr.code}${settingsState.clr.reason ? ` · ${settingsState.clr.reason}` : ""}` : undefined}
+          >
+            {settingsState.err}
+          </StateBanner>
+          <Button type="button" size="sm" variant="outline" onClick={() => void settingsState.reload()}>
+            {tCommon("retry")}
+          </Button>
+        </div>
+      ) : firm ? (
         <div className="flex flex-col gap-2">
           <p className="text-xs text-muted-foreground">
             {t("currentValueLabel")}: <span className="font-medium text-foreground">{fmtCents(firm.high_stakes_amount_cents, tCommon("centsUnsafe"))}</span>
@@ -105,6 +110,8 @@ export function ThresholdChangeDialog({
             />
           </div>
         </div>
+      ) : (
+        <LoadingState className="text-xs">{t("loading")}</LoadingState>
       )}
     </FirmAdminDoorDialog>
   );
