@@ -70,9 +70,10 @@ const skip = READY ? false : "P6-1: the Q8 hydrate surfaces (0103/0126/0131/0137
 
 const AGENT_ROLES = ["clara_agent_ro", "clara_wake_interactive", "clara_wake_proactive", "clara_wake_bank", "clara_wake_filing", "clara_freeform_ro", "clara_runtime"];
 
-test("p6-1.db.registry: the exact P6-1 pin is v16 while the live provenance instrument follows the registry", () => {
-  assert.equal(currentChatName, "chatTurn_v16", "P6-1's exact-version pin remains explicit");
-  assert.equal(currentPromote, prompt16.toTypedParts_v16, "at this tip the registry-coupled promoter IS v16's own export");
+test("p6-1.db.registry: v17 is the current pin and preserves v16's promotion behaviour", () => {
+  assert.equal(currentChatName, "chatTurn_v17", "FS-7 succeeded P6-1 without widening the wire");
+  const representative = [{ type: "text", text: "wire identity" }];
+  assert.deepEqual(currentPromote(representative), prompt16.toTypedParts_v16(representative));
 });
 
 test("p6-1.db.allowlist: freeform is OPEN to a chat credential; firm-question and close-proposal are NOT", { skip }, async () => {

@@ -41,6 +41,14 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/scripts/part-shapes.mjs": {
+      "sha256": "0a795c82b2b219864c5c8fa9197bea2dd1d2d0b57f677ab042cb43f577704ac7",
+      "note": ""
+    },
+    "packages/runtime/tests/fs7-v17-chatturn.test.mjs": {
+      "sha256": "e928100c9634aaa31b378a374aacf176e89fd9daef420b81cbd62adebca0d47a",
+      "note": ""
+    },
     "packages/runtime/workflows/autoDraft.v1.errors.ts": {
       "sha256": "382e1fc75eef8159ba1fc7465c6f7d7858c51a6bd533aaa750d99667a3c87187",
       "note": "",
@@ -606,6 +614,26 @@
       "note": "P6-1 — the chatturn-v16 engine stamp; the metering recorder itself is v15's, by import. UNDEPLOYED: the deploy-lock is the ceremony's act.",
       "deployed": true
     },
+    "packages/runtime/workflows/chatTurn.v17.impl.ts": {
+      "sha256": "ca1f82c0e53f76554d7697fad07b15ed960558d787414ef4acaaec14821f2ef2",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v17.prompt.ts": {
+      "sha256": "bce5651a3acae9593fce13dcfc44c7ff72d89c3cc6683c6489866f08fa0a0d49",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v17.tools.ts": {
+      "sha256": "d4ca4dba39c0d823dc4e8dfe539663b37473f3c9bb69e65532efdf38ee00c517",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v17.ts": {
+      "sha256": "849b471aab77c89c76d32bcd74bd9f13c7eadc984ba670190f1c917d57d31f11",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v17.usage.ts": {
+      "sha256": "cfdca600e5fd523e4acdd7f0f54d5d209096b85d032fd07dc486d0869e869a12",
+      "note": ""
+    },
     "packages/runtime/workflows/chatTurn.v2.errors.ts": {
       "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",
       "note": "",
@@ -1018,6 +1046,10 @@
       "sha256": "c7af91489397dbf0d64b55562edac5bf2ecd019ede5fab94871858f6b9b98334",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/registry.ts": {
+      "sha256": "7b6ad6b4f5f29dd3b500dd981903a4a33372f8f63a8d1805e0c7a341d1731939",
+      "note": ""
     },
     "packages/runtime/workflows/statementFacts.v1.behavior.mjs": {
       "sha256": "8dd5d812ade149778a9d65c67d456cbc1692a51b48c158ce0cc3cfa0528fed64",

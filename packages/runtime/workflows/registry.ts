@@ -23,6 +23,7 @@ import { chatTurn_v13 } from "./chatTurn.v13.js";
 import { chatTurn_v14 } from "./chatTurn.v14.js";
 import { chatTurn_v15 } from "./chatTurn.v15.js";
 import { chatTurn_v16 } from "./chatTurn.v16.js";
+import { chatTurn_v17 } from "./chatTurn.v17.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -71,7 +72,18 @@ export const workflows = {
   // The CI `build` job runs `check-parts-parity.mjs` and refuses while that reader trails the declarer.
   // A rollback to v15 still requires the standing parked-run preflight; it then stops minting the
   // new card without changing the database.
-  chatTurn: chatTurn_v16,
+  //
+  // FS-7 ECHELON-1 (裁-77's REPORT CHAT OPENER): REPOINTED v16 -> v17. v17 adds exactly THREE
+  // narrative report tools — `open_report_run`, `assess_report_claim`, `seal_report_dataset` —
+  // over the already-shipped F-A5 wake wrappers. It adds no wire kind: the wrappers' jsonb is
+  // narrated in prose, v16 remains the newest part declarer, and the C-19 book-act terminal set
+  // is byte-carried. The close-prep wrappers are deliberately absent: their task-bound
+  // credential wall cannot be crossed by a chat-originated mint.
+  // THE DEPLOY ORDER OWES NOTHING EITHER DIRECTION. Migration 0116 already grants and allowlists
+  // all three report wrappers for an interactive credential, so no migration, ceremony, reader
+  // change or new secret rides with this image. v16 stays frozen, built and exported for parked
+  // runs and rollback policy (c).
+  chatTurn: chatTurn_v17,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   // F-A2 WINDOW B (the statement ACTIVATION): REPOINTED. PR-4 shipped statementFacts_v2 built,
@@ -601,6 +613,12 @@ export { chatTurn_v15 };
 // that has to special-case "except the current pin" is an answer somebody gets wrong at 2am.
 // v15 carried its own export while it was the pin for the same reason.
 export { chatTurn_v16 };
+// FS-7 ECHELON-1 — THE REPORT CHAT OPENER repointed `chatTurn:` v16 -> v17. Exactly three
+// report-domain tools are added, and no part kind or database object moves. The F-A5 grants and
+// interactive allowlist rows have been live since migration 0116, so this image has no coupled
+// deploy dependency. v16 remains exported by policy (c); the pinned v17 body is exported too so
+// the rollback preflight can use the same uniform census for every version.
+export { chatTurn_v17 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
