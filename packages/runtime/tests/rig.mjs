@@ -24,6 +24,19 @@ export * from "./relay-fixtures.mjs";
 export const DEFAULT_MODEL = "gpt-5.6-terra";
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// THE ONE documented prefix EVERY synthetic clara.wake_engine_sources row this package's tests
+// ever register MUST carry (the #485/#490 class — CI's db-estate job runs packages/db and
+// packages/runtime CONCURRENTLY against ONE shared postgres, `pnpm -r --if-present test`, no
+// ordering exists between them). packages/db/tests/g1-wake-engine.test.mjs's T1 cell excludes
+// rows by exactly this literal so its own closed-world roster proof survives a run landing
+// mid-registration on this side. Both producers — wake-engine.test.mjs's own registerSource()
+// and g1-wake-bodies.fixtures.mjs's registerSource() — validate every caller's sourceKey
+// against this constant and THROW on a non-conforming key (opus review round on PR #497,
+// findings F1/F2): a SECOND producer had already drifted to its own hand-typed literal
+// (`g1b_test_`), silently past a single-literal carve-out — this constant plus the throw is the
+// structural fix, not a second hardcoded string left to drift out of sync by hand.
+export const WAKE_ENGINE_TEST_PREFIX = "g1_test_";
+
 /** SKIP the whole file cleanly when 0006 is absent (probe once per process). */
 export async function runtimeReady() {
   const r = await fx.rootQuery(
