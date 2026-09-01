@@ -5,16 +5,19 @@ import { expect, test } from "@playwright/test";
  * a real browser against the built app. This spec encodes the walk an
  * orchestrator ran manually via the session's Playwright MCP tools on
  * 2026-08-31 (login, signup, an incomplete invite link, an unknown route, the
- * holding page's anonymous-visitor redirect, the confirm face's honest
- * missing-token state, and a keyboard-only pass over both forms) — see
- * README.md in this directory for why the CI leg itself lands at FS-12, not
- * here.
+ * holding page's anonymous-visitor redirect, and a keyboard-only pass over
+ * both forms) — see README.md in this directory for why the CI leg itself
+ * lands at FS-12, not here.
+ *
+ * FS-4 C-6 (裁-92) UPDATE: the account step's DPA checkbox is gone (the real
+ * e-sign moved to a later step, `signup-dpa-form.tsx`) and the confirm face
+ * is now a six-digit code form, never a link — the cells below are trued to
+ * both, and W-H's own e2e leg (the address never comes from a URL) is added
+ * here since it is pure GET rendering, in scope for this file.
  *
  * SCOPE, DELIBERATELY: pre-auth rendering, client-side validation, and
- * routing/refusal faces only. The signup SUBMISSION arm (mail -> confirm) is
- * excluded — 裁-92 replaces the as-built confirm flow before beta, and
- * walking it now would need a Supabase email-template act that FS-4
- * immediately supersedes. That arm is FS-4's e2e to write.
+ * routing/refusal faces only. The signup SUBMISSION arm (mail -> confirm ->
+ * /signup) is excluded — that is `signup-confirm-pending.spec.ts`'s walk.
  */
 
 /**
@@ -70,7 +73,6 @@ test("POSITIVE CONTROL: a valid signup submission actually reaches the mock auth
   });
 
   await page.goto("/signup");
-  await page.getByRole("checkbox").check();
   await page.getByLabel("Email").fill(`e2e-positive-control-${Date.now()}@example.test`);
   await page.getByLabel("Password").fill("Clara-e2e-password-1!");
   await page.getByRole("button", { name: "Create account" }).click();
@@ -115,13 +117,17 @@ test("login keyboard pass: tab order is Email -> Password -> Sign in, with a vis
   expect(hasVisibleFocus).toBe(true);
 });
 
-test("the signup face renders on the identity canvas with Create account disabled until consent", async ({ page }) => {
+test("the signup face renders on the identity canvas with Create account open — no DPA gate on this step", async ({ page }) => {
+  // FS-4 C-6: the DPA e-sign moved OFF this step (checkout-gate-design.md
+  // §1.1) to a later one reached once a registration is open
+  // (`signup-dpa-form.tsx`); the account step gates on ordinary field
+  // validation only.
   const errors = collectConsoleErrors(page);
 
   await page.goto("/signup");
   await expect(page.getByRole("heading", { name: "Create your account" })).toBeVisible();
   await expect(page.locator("main.bg-identity-canvas")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Create account" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Create account" })).toBeEnabled();
   expect(errors).toEqual([]);
 });
 
@@ -133,7 +139,6 @@ test("signup client-side validation refuses an empty submit and an invalid email
   });
 
   await page.goto("/signup");
-  await page.getByRole("checkbox").check();
   const createButton = page.getByRole("button", { name: "Create account" });
   await expect(createButton).toBeEnabled();
   const emailField = page.getByLabel("Email");
@@ -151,7 +156,7 @@ test("signup client-side validation refuses an empty submit and an invalid email
   expect(signupCalls).toBe(0);
 });
 
-test("signup keyboard pass: tab order is Email -> Password -> consent -> Create account, Enter submits", async ({ page }) => {
+test("signup keyboard pass: tab order is Email -> Password -> Create account, Enter submits", async ({ page }) => {
   await page.goto("/signup");
   // Same OS-focus caveat as the login keyboard pass above.
   await page.bringToFront();
@@ -161,12 +166,6 @@ test("signup keyboard pass: tab order is Email -> Password -> consent -> Create 
 
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Password")).toBeFocused();
-
-  await page.keyboard.press("Tab");
-  const consentCheckbox = page.getByRole("checkbox");
-  await expect(consentCheckbox).toBeFocused();
-  await page.keyboard.press("Space");
-  await expect(consentCheckbox).toBeChecked();
 
   await page.keyboard.press("Tab");
   const createButton = page.getByRole("button", { name: "Create account" });
@@ -201,7 +200,11 @@ test("the holding page redirects an unauthenticated visitor to login with the re
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
 });
 
-test("the confirm face shows an honest missing-token state and makes no auth call", async ({ page }) => {
+test("the confirm face renders the six-digit code form (裁-92) and makes no auth call on GET", async ({ page }) => {
+  // FS-4 C-6 / 裁-92 superseded this file's own "missing-token" link-flow
+  // cell — there is no link and no token in the URL any more. The GET
+  // renders a plain email+code form; only the explicit POST (FS-4's own e2e)
+  // reaches `verifyOtp`.
   const errors = collectConsoleErrors(page);
   let verifyCalls = 0;
   await page.route("**/auth/v1/verify**", (route) => {
@@ -210,7 +213,18 @@ test("the confirm face shows an honest missing-token state and makes no auth cal
   });
 
   await page.goto("/auth/confirm");
-  await expect(page.getByRole("heading", { name: "This confirmation link is incomplete" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Enter your confirmation code" })).toBeVisible();
+  await expect(page.getByLabel("Email")).toBeVisible();
+  await expect(page.getByLabel("Six-digit code")).toBeVisible();
   expect(verifyCalls).toBe(0);
   expect(errors).toEqual([]);
+});
+
+test("W-H: a query-string email is never accepted or pre-filled on the confirm face", async ({ page }) => {
+  // checkout-gate-design.md §3.3 / cell W-H — the ONE caller-supplied value
+  // this code flow still has is the address, and it must never come from a
+  // URL. `page.tsx` never reads `email`/`token` from `searchParams` at all.
+  await page.goto("/auth/confirm?email=victim@example.test&token=999999");
+  await expect(page.getByRole("heading", { name: "Enter your confirmation code" })).toBeVisible();
+  await expect(page.getByLabel("Email")).toHaveValue("");
 });

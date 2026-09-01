@@ -206,6 +206,20 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
         "and independently testable. `firm-scope-surfaces.test.ts`'s own census still " +
         "governs the real entrance: route.ts's POST export, not this helper.",
     },
+    {
+      path: "app/(entry)/auth/confirm/verify/confirmation-wall.ts",
+      reason:
+        "NOT A ROUTER FILE. This is the FS-4 C-6 Lane-B seam for the C1/C2 " +
+        "confirmation-attempt wall (checkout-gate-design-part3.md §2.1) — a pair of " +
+        "typed function exports (`claimConfirmationAttempt`, " +
+        "`settleConfirmationAttempt`) that `handler.ts` calls before `verifyOtp`. It " +
+        "exports no page/route/HTTP-method surface, its basename matches no LEAF or " +
+        "SPECIAL_FILE pattern, and Next.js never routes to it, auto-imports it, or " +
+        "treats it as any kind of special file. Colocated with handler.ts for the " +
+        "same reason handler.ts is colocated with route.ts: the real entrance " +
+        "`firm-scope-surfaces.test.ts` governs is route.ts's POST export, which this " +
+        "seam sits two calls behind.",
+    },
   ];
 
   function classifyAppFile(file: string): "LEAF" | "SPECIAL_FILE" | "rostered colocated module" | "UNCLASSIFIED" {

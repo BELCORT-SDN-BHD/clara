@@ -5,18 +5,17 @@
 // firm out at the door with no second route in — the same argument the invite
 // journey's own keyboard file makes, for the other entrance.
 //
-// THE DPA GATE IS DRIVEN, NOT READ, and it is driven TWICE over. The live
-// `disabled` is asserted directly (what the harness's own `clickButton` header
-// prescribes for a gate), and then the form is submitted OUTRIGHT with the box
-// unticked — which is what Enter in a text field does, bypassing the disabled
-// button entirely. Nothing may be created either way. The second half is the one
-// that matters: a form relying on `disabled` alone passes the first and fails
-// the second.
+// FS-4 C-6 MOVED THE DPA GATE OFF THIS STEP. checkout-gate-design.md §1.1
+// places the real e-sign at a LATER step (`signup-dpa-form.tsx`, reached once
+// an open registration exists) rather than as a checkbox on account creation
+// — that file's own keyboard/a11y coverage lives beside it
+// (`signup-dpa-form.test.tsx`). The account step below now gates on nothing
+// but ordinary field validation.
 //
 // `clickButton` is deliberately absent from this file. It invokes an `onClick`
 // prop and THROWS when there is none, and every submit here is a `type="submit"`
 // button whose submission belongs to the form — so routing one through it would
-// throw for a reason that has nothing to do with the gate under test.
+// throw for a reason that has nothing to do with what is under test.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -24,7 +23,7 @@ import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 
-import { renderComponent, textOf, setFieldValue, setNativeValue } from "../../test/hookHarness";
+import { renderComponent, textOf, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
@@ -83,24 +82,23 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
   return null;
 }
 const byButtonText = (re: RegExp) => (n: Node) => n.tagName === "BUTTON" && re.test(textOf(n as never));
-const theCheckbox = (n: Node) => n.tagName === "INPUT" && n.type === "checkbox";
 const byLabelledField = (label: RegExp) => (n: Node) =>
   (n.tagName === "INPUT" || n.tagName === "TEXTAREA") && label.test(textOf((n.parentNode ?? {}) as never));
 
+/** FS-4 C-6: the account step no longer carries a DPA gate — the checkbox
+ *  click this helper used to drive is gone (checkout-gate-design.md §1.1
+ *  moved the real e-sign to a later step). */
 async function submitAcceptedAccount(
   h: Awaited<ReturnType<typeof renderComponent>>,
 ): Promise<void> {
   const email = findIn(h.container as never, byLabelledField(/Email/));
   const password = findIn(h.container as never, byLabelledField(/Password/));
-  const box = findIn(h.container as never, theCheckbox);
   const form = findIn(h.container as never, (n) => n.tagName === "FORM");
-  assert.ok(email && password && box && form, "the complete signup form must render");
+  assert.ok(email && password && form, "the complete signup form must render");
   await h.act(() => {
     setFieldValue(email as never, "aisyah@example.com");
     setFieldValue(password as never, "correct horse battery");
   });
-  await h.fireEvent(box as never, "click", (n) => setNativeValue(n as never, "checked", true));
-  for (let i = 0; i < 3; i++) await h.settle();
   await h.fireEvent(form as never, "submit");
   for (let i = 0; i < 6; i++) await h.settle();
 }
@@ -124,7 +122,12 @@ class BrowserCookieJar {
   }
 }
 
-test("THE ACCOUNT STEP IS KEYBOARD-OPERABLE, and the DPA gate is a REAL wall", async () => {
+test("THE ACCOUNT STEP IS KEYBOARD-OPERABLE, and a keyboard-only run creates the account", async () => {
+  // FS-4 C-6: the checkbox gate this cell used to prove is gone from THIS
+  // step (checkout-gate-design.md §1.1 moved the real DPA e-sign to
+  // `signup-dpa-form.tsx`, reached later once a registration is open). What
+  // remains to prove here is simpler and unchanged: every control reachable,
+  // no tabindex/focus-visible violations, and a keyboard-only submit works.
   let created = false;
   const router: Router = { replaced: [] };
   const client: () => SignupAuthClient = () => ({
@@ -146,52 +149,22 @@ test("THE ACCOUNT STEP IS KEYBOARD-OPERABLE, and the DPA gate is a REAL wall", a
 
       const email = findIn(h.container as never, byLabelledField(/Email/));
       const password = findIn(h.container as never, byLabelledField(/Password/));
-      const box = findIn(h.container as never, theCheckbox);
       const submit = findIn(h.container as never, byButtonText(/Create account/));
-      assert.ok(email && password && box && submit, "every control on the account step must render");
+      assert.ok(email && password && submit, "every control on the account step must render");
 
       const reachable = focusableElements(h.container as never);
-      for (const [name, node] of [["email", email], ["password", password], ["the DPA checkbox", box]] as const) {
+      for (const [name, node] of [["email", email], ["password", password], ["submit", submit]] as const) {
         assert.ok(reachable.includes(node as never), `${name} must be keyboard-reachable`);
       }
       assert.deepEqual(checkKeyboardWalk(h.container as never), [], "no tabindex-order/focus-visible violations");
+      assert.notEqual((submit as Node).disabled, true, "the submit must not be gated on this step");
 
-      // ===== THE WALL, CLOSED. =====
-      // The gate is asserted on the live `disabled` DIRECTLY, which is what the
-      // harness's own `clickButton` header instructs: "A test that means to
-      // prove a control is disabled asserts `.disabled` directly, never routes
-      // a click through it and hopes nothing happens."
-      assert.equal((submit as Node).disabled, true, "the submit is open before the DPA is accepted");
-      // And the wall is proved BEHAVIOURALLY too, not only by the attribute:
-      // submitting the form outright — which is what Enter in a text field
-      // does, bypassing the disabled button entirely — must still create
-      // nothing, because the handler re-checks the gate at the act. A form that
-      // relied on `disabled` alone would create an account here.
       const form = findIn(h.container as never, (n) => n.tagName === "FORM");
       assert.ok(form, "the account form must render");
       await h.act(() => {
         setFieldValue(email as never, "aisyah@example.com");
         setFieldValue(password as never, "correct horse battery");
       });
-      await h.fireEvent(form as never, "submit");
-      for (let i = 0; i < 6; i++) await h.settle();
-      assert.equal(created, false, "an account was created with the DPA unaccepted");
-      assert.doesNotMatch(textOf(h.container as never), /Confirm your email/, "the surface advanced anyway");
-
-      // ===== THE WALL, OPENED — on the real checkbox, through a real click
-      // event, the idiom components/bank/matching-section.test.tsx established:
-      // the native value is set INSIDE the dispatch so React's onChange sees a
-      // value that genuinely differs from its snapshot. A bare
-      // `setNativeValue` writes the DOM property and never reaches React, so
-      // the component's state would silently stay `false` — measured here. =====
-      await h.fireEvent(box as never, "click", (n) => setNativeValue(n as never, "checked", true));
-      for (let i = 0; i < 3; i++) await h.settle();
-      const liveSubmit = findIn(h.container as never, byButtonText(/Create account/));
-      assert.notEqual((liveSubmit as Node).disabled, true, "the submit stayed shut after the DPA was accepted");
-      assert.ok(
-        focusableElements(h.container as never).includes(liveSubmit as never),
-        "the submit must be keyboard-reachable once it is live",
-      );
       await h.fireEvent(form as never, "submit");
       for (let i = 0; i < 6; i++) await h.settle();
 

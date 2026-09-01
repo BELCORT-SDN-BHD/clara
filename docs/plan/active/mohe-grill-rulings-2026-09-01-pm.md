@@ -118,6 +118,34 @@ that field is **`replay`** — the moment a receipt surface exists, "you signed 
 bare "signed" becomes a real distinction, and `signature_id`/`signed_at` are the evidence this
 estate's receipt discipline will want.
 
+### 裁-107(b) · The seam↔door table is a DURABLE artifact in the PR body, and door claims CITE it
+
+**Amends 裁-107.** Raised by `fs4-pr488-review` against a countermeasure the orchestrator had just
+given it — a defect in the rule at mint, closed before it could fail.
+
+**The failure it fixes is RETRIEVAL, not LENS**, and the two need different medicine. A LENS failure
+is never having looked for a class at all; the fix is naming it in the brief. A RETRIEVAL failure is
+having looked, having RECORDED the fact, and failing to connect it when a contradicting claim arrives
+later. The day's sharpest instance: a lane's own seam↔door table carried the row
+`return ← (not in door prose)` for `claim_confirmation_attempt`, and that same lane later passed a
+code comment claiming "the real door C-3 ships returns `'email' | 'origin'` … the door wins" — for a
+door that does not exist in `packages/db` at all. It held the contradicting fact, in its own artifact,
+in its own scope, and the connection did not fire.
+
+**The orchestrator's first countermeasure was itself defective:** "re-read your own table's row for
+that door" bottoms out in remembering you once built a table and going to find it — a memory
+dependency moved one level up, not removed. Worse, it fails ENTIRELY for anyone who is not its
+author: 裁-107 tables have been living in SendMessage bodies, so a fresh lane reviewing a claim about
+a door has no path to the row that contradicts it. Under 裁-111's two-leg gate that retrieval is
+exactly what someone must be able to perform.
+
+**LAW: the bidirectional seam↔door table lives in the PR BODY as the canonical artifact — never only
+in a message — and any code comment that makes a claim about a door CITES its table row**, the way
+comments now cite a 裁-NN ledger entry rather than a lane name. That converts "remember your own
+artifact" into "follow the reference", which is the same upgrade the attribution rule made when it
+moved authority from lane names to the ledger. A lookup any lane can perform from the code itself
+beats a recall only a participant can have.
+
 ## 裁-108 · STANDING LAW — an UNNUMBERED migration merges silently and never applies
 I armed auto-merge on #490 while its migration was still `UNNUMBERED_…sql`. `migrate.mjs` matches
 only `/^\d+.*\.sql$/`, so the PR would have merged green with a migration that **never runs** — no
@@ -157,6 +185,143 @@ recorded OPEN in its body (they are pre-existing and un-worsened there — the f
 shape held). The fixes ship as their own PR(s) from main with the full ladder: fresh-context opus
 review + the law-28 Codex leg (a native lane building an auth surface). Provenance: found by the
 law-28 Codex leg on #488; verified by the orchestrator's own read; ruled by the owner.
+
+## 裁-111 · The cross-family Codex review leg is SUSPENDED until beta live
+
+**Owner ruling, 2026-09-01 (late afternoon).** "异族审判review 取消掉" — from now until beta live
+launch, no PR gets the cross-family Codex adversarial leg. **Law 28 is time-boxed, not repealed:**
+the ONE fresh-context opus read-only review becomes the complete review gate for the remainder of
+the sprint, and law 28 resumes at beta unless the owner rules otherwise. **Codex remains a BUILD
+lane throughout** — only the review leg is suspended.
+
+**Recorded honestly, because the ruling was made with it on the table:** the Codex leg found real
+defects the same day — #489's silent 100× threshold parse (a DB-owned governance number set 100×
+larger with no rejection), #488's governance defect (a review lane occupying the authority slot in
+shipped code, which minted the attribution rule), and confirmed findings on #495. The countervailing
+fact, also measured: the opus lane found the day's other blockers unaided — #493's permanent-lockout
+off-by-one, #497's F1 (the second writer the carve-out missed), #498's three claim-accuracy defects,
+#495's F1/F2. The gate is thinner, not toothless, and the owner owns the trade.
+
+**Executed the moment it was ruled:** two in-flight legs stood down mid-run (#499's auth surface,
+#493's money-surface driver delta), each ordered to surrender any concrete finding Codex had already
+produced so nothing measured was lost to the cancellation; `AGENTS.md`'s lean-ladder paragraph trued
+in the same PR so no lane reads a stale instruction.
+
+## 裁-112 · The OVERCLAIM class gets an explicit owner in both surviving briefs
+
+**Orchestrator ruling, 2026-09-01, immediately after 裁-111.** Raised by `fs4-pr488-review`, which
+censused what the cancelled cross-family leg had actually caught on the FS-4 train and found that all
+four findings were ONE class: **the code, or its framing, CLAIMS more than it closes.** Not
+correctness bugs — gaps between what something SAYS and what it DOES (the origin-digest name
+collision, the account-status differential, the four authority-attribution sites, the N1/N3 wording
+that overclaimed closure).
+
+**Why it needed a ruling:** neither surviving leg is naturally aimed at that class. A conformance
+pass asks "does the build match the checked design"; a fresh-context opus pass asks "is this code
+correct". The overclaim class sat BETWEEN them, and the third leg was what covered it. The lane that
+raised this also named it as its own weakest lens, with the receipts — which is the strongest reason
+to instruct it rather than hope.
+
+**RULED — both briefs, because option 1 alone leaves a hole:** a conformance leg exists only when
+there was a design gate. Most PRs have none, so the opus lane is the only lane; a class living solely
+in the conformance brief would be unowned on the majority of PRs.
+1. **Conformance brief — named PRIMARY lens:** *verify that no comment, PR-body line, completion
+   contract or test name claims more than the code actually closes; where a claim is conditional,
+   check the condition is ASSERTED rather than described.*
+2. **Opus brief — standing item, narrower and mechanical:** *does anything in this diff assert an
+   absolute where the code delivers a conditional?* Demonstrably effective from a fresh lane: that is
+   the shape which caught #499's FOLD-2 false premise the same hour.
+
+**Also ruled: the review threshold moves.** With the second family gone, an unpinned delivery or a
+claim-vs-behaviour gap is worth raising every time; the orchestrator says so plainly if it becomes
+noise rather than letting it accumulate. FOLD 2 is the evidence: the lane would have accepted
+pinned-values-only with a sweep behind it, did not without one, and the fresh lane then found half
+the fold was a no-op duplicate AND the other half was clobbering a stricter upstream header.
+
+### 裁-112(a) · The four transferable rules the FOLD-2 miss actually taught
+
+The lane that made the miss re-verified the correction AT SOURCE rather than accepting it on report
+("taking a correction unmeasured would be the same failure inverted"), and returned a sharper
+diagnosis than the one recorded above. Its rules supersede the loose "grep wider" reading:
+
+1. **The miss was SCOPE, not pattern.** A repo-wide search for the literal `cache-control` WOULD have
+   found `response-state.ts:44`. The instrument was scoped to three files — `next.config.ts`,
+   `middleware.ts`, `proxy.ts` — chosen from a mental model of where a route's cache header *ought*
+   to live. The mechanism lives two modules away in a shared applier the response passes through.
+   **LAW: when the question is whether a PROPERTY holds on a response, the instrument must follow the
+   response's CONSTRUCTION PATH, not the files you would have written it in.** Scoping the instrument
+   to your hypothesis instead of to the question is the absence-from-the-wrong-instrument family,
+   committed while holding the lantern.
+2. **A COMPOUND claim is only as strong as its weakest conjunct.** "There is no Cache-Control and no
+   Vary set on this route anywhere" bundled a TRUE, load-bearing conjunct (Vary) with a FALSE one
+   (Cache-Control), both asserted at one confidence level after one too-narrow check — and the false
+   half rode the true half's credibility all the way into an orchestrator's order.
+3. **Hedging a CONCLUSION does not hedge the ORDER that follows from it.** The lane wrote "I am NOT
+   claiming this leaks today — I did not measure it", which was honest, then built a firm
+   recommendation on the unmeasured conjunct, and work was ordered from it. **If a premise is
+   unmeasured, the recommendation carrying it needs the same hedge — or the measurement.**
+4. **An assertion of ABSENCE must name its instrument and that instrument's SCOPE.** "No
+   Cache-Control in next.config/middleware/proxy.ts" would have been caught before the order was
+   given; "nowhere on this route" was not checkable by the reader. This is now part of the
+   conformance brief's named lens.
+
+**One more shape worth keeping:** the cheap close the fresh lane found (two assertions on the real
+response the e2e already fetches, `signup-confirm-pending.spec.ts:74`) sat on a line the same lane had
+personally read, flagged when a round deleted it, and confirmed when a round restored it. It cited
+`referrerPolicyForPath` as the precedent for the pin in the same breath as arguing its function-only
+test was insufficient — reasoning about the precedent's WEAKNESS so attentively that it did not see
+the STRENGTH sitting beside it, then proposing the expensive path and pre-justifying its cost.
+
+**The orchestrator's own error, recorded:** FOLD 2 was ORDERED by me on a design-pass premise
+("nothing sets Cache-Control on this route") that was FALSE — `applyAuthState` sets the identical
+`private, no-store` on every proxied response. The instrument that missed it was a grep for a literal
+on the route, where the header is written by a shared applier the route passes through: absence from
+the wrong instrument, the estate's own recurring class, this time costing a wrong order from the
+orchestrator rather than a wrong verdict from a lane.
+
+### 裁-112(b) · The MODEL-AS-ORACLE trap — a prescription's test rig is not the shipped body
+
+Self-caught by `pr493-review` the moment it was told to treat prescriptions as claims rather than
+instructions. Having built model functions to TEST two ordered fixes (a guarded and a naive limb
+variant), it named the trap before walking into it: **diffing the next delta against its own model
+and calling agreement a confirmation would be the c3.30a self-agreement failure one level up** —
+the model would have become the oracle, and a shipped body that merely matched what the reviewer had
+already convinced itself was correct would pass.
+
+**LAW: when a reviewer builds a model to test a prescription, the model is evidence about the
+PRESCRIPTION, never about the SHIPPED BODY.** On the verification pass, rebuild from the shipped
+text and re-run the traced cases against THAT. **If the shipped body and the model disagree, the
+MODEL is the suspect first** — it is the artifact with no review of its own.
+
+The corollary that makes it operational: a pin or a census must be proved to name the RIGHT subject,
+not merely to exist. The same lane's own check on the prosrc pin is the pattern — mutate the body by
+one byte and require the pin to red, because a pin that names a neighbouring function is exactly the
+law-3 shape (a guard reading a NAME rather than proving identity).
+
+### 裁-112(c) · The DUPLICATED-PREDICATE trap — THREE instances in one day, all author-invisible
+
+The estate already banked "a review's own instrument is not a shipped gate" (2026-08-31). What
+2026-09-01 added is the recurrence count and the specific shape: **a guard that re-implements the
+thing it guards, so mutating the real thing reds nothing.** Three instances, all shipped by careful
+authors, all caught by a reviewer, all in one afternoon:
+
+1. **#499 FOLD 2** — the cache-header test drove `confirmCacheHeadersForPath` (the predicate) and
+   never a response. Delete the application block and every test stays green.
+2. **#493 c3.53** — the census matched a literal in `prosrc`, and the migration's own explanatory
+   COMMENT contained that literal. The evasion the census was widened to catch could be
+   reintroduced in executable code with the comment left in place, and the guard stays green.
+3. **#497 F4** — the negative control was asked to prove T1's predicate discriminates, and it
+   executed a SECOND string literal of its own. Editing T1's WHERE clause leaves the control blind;
+   it reds against exactly one mutation (emptying the constant) out of four plausible widenings.
+
+**LAW: a cell that exists to prove a gate discriminates must EXECUTE THE GATE, not a copy of it.**
+Hoist the gate's expression to one shared constant and have both the gate and its control run that
+exact string; where the gate is a shipped mechanism rather than an expression (a header applier, a
+migration body), drive the real thing — a real response, a real body — or pin its identity by hash.
+**And choose the control's input so the PLAUSIBLE widenings swallow it**, not merely the absurd ones:
+in #497 the control key contained no "test" and a hex slice could not produce one, so the exact
+widening it was written to catch left it green. Work the mutation table before calling a control
+discriminating — 裁-112(b)'s corollary, applied to controls rather than pins.
 
 ## Session state bridge — 2026-09-01 afternoon
 *(PROGRESS.md truing rides the next clock-out PR. Where this disagrees with the repo, the repo wins.)*
