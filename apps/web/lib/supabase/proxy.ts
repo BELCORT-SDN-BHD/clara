@@ -115,14 +115,31 @@ export type ConfirmCacheHeaders = { readonly cacheControl: string; readonly vary
  * to another was structurally impossible — there was nothing to key a cache
  * on besides the URL, and every outcome had its own. After the fix, every
  * outcome is the SAME URL (`/auth/confirm?flash=<nonce>`) differing only by
- * the REQUEST COOKIE, and this repo sets no `Cache-Control`/`Vary` on this
- * route today — the only thing preventing one person's rendered card from
- * being served to the next visitor would be an unasserted framework/CDN
- * default. Review law 2: absence of a cache header is not evidence there is
- * no caching. This function makes the posture explicit and pinned rather
- * than assumed — see `updateSession` below for where it is applied, and
- * `tests/proxy-matcher.test.ts` for the pin (the `referrerPolicyForPath`
- * idiom immediately above, applied to a second header pair).
+ * the REQUEST COOKIE.
+ *
+ * F2 CORRECTION (fresh opus review, 2026-09-01) — the original version of
+ * this comment claimed "this repo sets no Cache-Control … on this route
+ * today." FALSE: `applyAuthState` (`response-state.ts`) already sets
+ * `Cache-Control: private, no-store` UNCONDITIONALLY on every proxied
+ * response, confirm included — this function's `cacheControl` value is the
+ * IDENTICAL string, so on the Cache-Control half it is a pinned, EXPLICIT
+ * route-level floor layered on top of an already-real global one, not a
+ * fresh assertion filling an actual gap. What was genuinely missing —
+ * `Vary: Cookie` — is the half that matters: `applyAuthState` never touches
+ * `Vary`, so before this fix there really was nothing preventing one
+ * person's rendered card from being cache-served to the next visitor
+ * (review law 2: absence of a cache header is not evidence there is no
+ * caching). See `updateSession` below for WHERE this now applies — hoisted
+ * ABOVE `applyAuthState`'s call so a `@supabase/ssr`-queued, STRICTER
+ * `Cache-Control` (a cookie refresh's own `no-cache, must-revalidate,
+ * max-age=0`) still wins over this route's floor, per `response-state.ts`'s
+ * own documented ordering invariant — this block must never run after it.
+ * `tests/proxy-matcher.test.ts` pins the returned values (the
+ * `referrerPolicyForPath` idiom immediately above, applied to a second
+ * header pair); the DELIVERY (that this function's output is actually
+ * wired into a response) is pinned in the e2e instead
+ * (`e2e/signup-confirm-pending.spec.ts`), the same instrument that already
+ * asserts `referrer-policy` off a REAL `/auth/confirm` response.
  *
  * Segment boundaries match `isPublicPath`/`referrerPolicyForPath` above.
  */
@@ -202,6 +219,25 @@ export async function updateSession(request: NextRequest) {
     response = NextResponse.next({ request });
   }
 
+  // F2 CORRECTION (fresh opus review, 2026-09-01): this block MUST run
+  // BEFORE `applyAuthState` below, not after. `applyAuthState` sets its own
+  // `Cache-Control` floor and then, if `@supabase/ssr` queued a STRICTER
+  // one during a cookie refresh, overwrites the floor with it (`response-
+  // state.ts`'s own documented ordering invariant). Running this block
+  // AFTER `applyAuthState` would let this route's `Cache-Control` write
+  // clobber that stricter, later value right back down — inverting the
+  // invariant for confirm specifically. Hoisted here, the ordering holds:
+  // this sets an explicit route floor, and whatever `applyAuthState` does
+  // next (repeat the floor, or override with something stricter) still
+  // wins. `Vary` uses `append`, not `set` — this is the only writer of it
+  // today, but `append` is the safe idiom if Next ever adds its own RSC
+  // `Vary` value after the proxy runs.
+  const cacheHeaders = confirmCacheHeadersForPath(request.nextUrl.pathname);
+  if (cacheHeaders !== null) {
+    response.headers.set("Cache-Control", cacheHeaders.cacheControl);
+    response.headers.append("Vary", cacheHeaders.vary);
+  }
+
   // ONE application point, for BOTH branches — the pass-through and the
   // redirect (findings 1 and 12). lib/supabase/response-state.ts.
   applyAuthState(response, queued);
@@ -212,16 +248,6 @@ export async function updateSession(request: NextRequest) {
   const referrerPolicy = referrerPolicyForPath(request.nextUrl.pathname);
   if (referrerPolicy !== null) {
     response.headers.set("Referrer-Policy", referrerPolicy);
-  }
-
-  // FOLD 2 (N1 fix, 裁-109) — see `confirmCacheHeadersForPath`'s header for
-  // why this is asserted rather than left to an unnamed framework default,
-  // now that every confirm outcome shares one URL and differs only by the
-  // request cookie.
-  const cacheHeaders = confirmCacheHeadersForPath(request.nextUrl.pathname);
-  if (cacheHeaders !== null) {
-    response.headers.set("Cache-Control", cacheHeaders.cacheControl);
-    response.headers.set("Vary", cacheHeaders.vary);
   }
 
   return response;

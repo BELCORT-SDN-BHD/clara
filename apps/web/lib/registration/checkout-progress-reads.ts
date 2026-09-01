@@ -19,9 +19,28 @@
 // person has not opened checkout", because that is not what was observed;
 // it is honestly UNKNOWN. `holdingStateFrom` therefore never infers
 // `checkout_open`/`paid` from a missing read — it only renders them when this
-// probe positively saw a row. Until Lane B's C-3/C-2 doors and grants land,
-// every call here degrades to `NO_CHECKOUT_PROGRESS` and the mapper falls
-// through to the existing `pending` arm — never a guess, never a crash.
+// probe positively saw a row.
+//
+// CORRECTION (coordinator ruling, 2026-09-01, from #493's review) — this
+// used to say the degrade to `NO_CHECKOUT_PROGRESS` holds "UNTIL Lane B's
+// C-3/C-2 doors and grants land." That is wrong, not merely stale: C-3 ships
+// `checkout_intents`/`firm_registration_payments` with `force row level
+// security`, a single `clara_fn_owner`-only `USING (true)` policy, and ZERO
+// application-role grants — asserted as a CLOSED INVARIANT by the migration
+// tail and by cells c3.1/c3.55, and stated as blanket law for every new
+// table this design introduces (checkout-gate-design-part2.md §1: "Every
+// new table: RLS enabled AND forced, owner clara_fn_owner, one USING (true)
+// owner policy, and zero application-role table grants"). A browser read of
+// either relation over PostgREST as `clara_authenticated` is UNREACHABLE
+// BY DESIGN, PERMANENTLY — not a temporary gap this module's degrade is
+// waiting out. It will never start succeeding on its own once C-3 merges.
+//
+// THE FUTURE SHAPE, NAMED RATHER THAN PROMISED: a narrow `SECURITY DEFINER`
+// read door exposing the applicant's OWN registration progress (never a
+// general table grant), to be built when Lane B wires `/pending` for real.
+// This module's probe-and-degrade shape is correct either way — it just
+// never resolves itself by C-3 merging alone; a NEW read path has to be
+// built for these two facts to ever become observable from `apps/web`.
 //
 // EACH FACT IS PROBED INDEPENDENTLY (`Promise.all`, two separate try/catch).
 // A `checkout_intents` failure must not also blind the `firm_registration_
@@ -67,8 +86,10 @@ export type CheckoutProgress = {
 };
 
 /** The safe default: nothing was positively observed. This is what every
- *  caller gets today, honestly, until C-2/C-3 land and grant a read path —
- *  see this module's header. */
+ *  caller gets, honestly, over PostgREST as `clara_authenticated` — a state
+ *  this module's degrade does not grow out of once C-3 merges (the zero-
+ *  application-grant invariant is permanent, not a landing gap) — see this
+ *  module's header for the corrected reasoning and the future read shape. */
 export const NO_CHECKOUT_PROGRESS: CheckoutProgress = {
   checkoutOpen: false,
   paidUnconsumed: false,

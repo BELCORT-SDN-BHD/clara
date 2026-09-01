@@ -59,9 +59,23 @@
 // THE ACCEPTED DEPLOY-SKEW BLIP: build N sets the cookie; build N+1 (a
 // rolling deploy landed mid-flow) reads it and cannot parse a shape it does
 // not recognise → renders the same `invalid` card a genuine tamper would.
-// Bounded to the ≤120s cookie lifetime and accepted — a person who
+// Bounded to the cookie's own lifetime and accepted — a person who
 // resubmits gets a fresh, correctly-shaped flash from whichever build
-// answers next.
+// answers next. THAT BOUND IS NOT UNIFORMLY ≤120s (correction, fresh opus
+// review, 2026-09-01): FOLD 4 gives `locked` up to `900 + 60 = 960` seconds
+// — a ~16-minute window for that one variant, not the 120s every other
+// outcome gets. The reasoning is unchanged; only the number was wrong.
+//
+// SAME-ORIGIN XSS STILL FORGES THE CARD — NAMED, NOT LEFT TO BE INFERRED
+// (fresh opus review, 2026-09-01). `httpOnly` and the `__Host-` prefix
+// defend against a THIRD PARTY's link; they do nothing against script
+// already running on this origin, which can `fetch()` the confirm POST
+// itself and observe/replay whatever it wants regardless of any cookie
+// flag. This is not an incremental hole this fix opens: this estate's own
+// session cookie is deliberately `httpOnly: false` (a separate, standing
+// decision), so same-origin XSS is already terminal for reasons that have
+// nothing to do with this page. Stated here so a reader does not credit
+// this mechanism with XSS-resistance it was never designed to have.
 
 const PROD_COOKIE_NAME = "__Host-clara-confirm-flash";
 const DEV_COOKIE_NAME = "clara-confirm-flash";

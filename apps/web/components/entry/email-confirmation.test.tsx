@@ -258,7 +258,17 @@ test("a locked wall never reaches verifyOtp at all", async () => {
   assert.deepEqual(readFlashPayload(response), { nonce, kind: "locked", waitSeconds: 900 });
 });
 
-test("FOLD 4: a locked flash cookie survives at least as long as its own copy promises to wait", async () => {
+test("FOLD 4 + F1 (fresh opus review, 2026-09-01): the cookie's own SECURITY ATTRIBUTES are pinned, not just its lifetime", async () => {
+  // F1, MEDIUM — the ENTIRE N1 unforgeability claim rests on httpOnly +
+  // sameSite:"strict" + secure. Mutant-tested by the reviewer: delete
+  // httpOnly, or set secure:false, and every OTHER test in this file stays
+  // green (confirm-flash.test.ts tests pure functions; the page tests are
+  // DI'd past the real cookie jar; `.cookies.get(name)?.value` returns the
+  // value regardless of httpOnly). Without this cell, the forgery wall
+  // could be deleted in silence — and in production, secure:false with the
+  // __Host- name breaks FUNCTIONALLY too (the browser rejects the cookie
+  // outright, so every real redirect would fall to invalid) with nothing
+  // here going red to say why.
   const response = await handleEmailConfirmationPost(
     postRequest(confirmFields()),
     async () => fakeClient(validResponse(), [], []),
@@ -266,8 +276,11 @@ test("FOLD 4: a locked flash cookie survives at least as long as its own copy pr
   );
   const cookie = (response as NextResponse).cookies.get(confirmFlashCookie().name);
   assert.ok(cookie, "no flash cookie was set");
-  // min(300, 900) + 60 = 360 — see confirm-flash.ts's confirmFlashMaxAgeSeconds.
-  assert.equal(cookie.maxAge, 360);
+  assert.deepEqual(
+    { httpOnly: cookie.httpOnly, sameSite: cookie.sameSite, secure: cookie.secure, path: cookie.path, maxAge: cookie.maxAge },
+    // min(300, 900) + 60 = 360 — see confirm-flash.ts's confirmFlashMaxAgeSeconds.
+    { httpOnly: true, sameSite: "strict", secure: true, path: "/", maxAge: 360 },
+  );
 });
 
 test("a rejected verification is settled, not left dangling", async () => {

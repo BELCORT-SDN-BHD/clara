@@ -124,6 +124,18 @@ export type ConfirmationAttemptOutcome =
        * compute it. Lane B WIRES these two fields through from the door's
        * real response; it does not invent them at this seam.
        *
+       * WHAT `scope` MEANS (裁-103, amended by #493's third round,
+       * 2026-09-01) — NOT "which wall fired". The door is being fixed to
+       * advertise `retryAfterSeconds` as the MAX of both limbs' waits (a
+       * caller refused on the email limb, who obeyed that advertised wait
+       * exactly, could otherwise be refused again on the origin limb,
+       * because the very row the door just inserted counts against BOTH).
+       * With the wait now the max over both limbs, `scope` names THE LIMB
+       * THE CALLER MUST OUTLAST — the one that clears last — so the label
+       * and the number agree; it is not a report of which check happened
+       * to trip. Token set unchanged (`"email" | "origin"`); only the
+       * MEANING of the value moved.
+       *
        * RECONCILIATION OWED: `../confirm-flash.ts`'s `LOCKED_MAX_WAIT_
        * SECONDS` clamp (moved there from `page.tsx` by the N1 fix, 裁-109)
        * renders any `retryAfterSeconds` over 900 as the generic `invalid`
@@ -132,15 +144,26 @@ export type ConfirmationAttemptOutcome =
        * is not 900s, the clamp must be trued to match in the SAME/a
        * follow-up PR, or a genuine lockout longer than the guessed ceiling
        * renders as a mystery "invalid" instead of the honest wait it is.
-       * Not guessed here — flagged for whoever lands the real door next.
+       * THE SAME RECONCILIATION applies to `../confirm-flash.ts`'s
+       * `REMAINING_MAX = 5` — it rides the identical "C1's ceiling is 5"
+       * assumption (part 1 §3.4), and a legitimate `remaining` renders as
+       * `invalid` the same way if C-3 ships a different one. Neither
+       * guessed here — flagged for whoever lands the real door next.
        *
-       * TYPE TRUED (裁-107 direction-2, ledger entry 裁-103): `scope` was
-       * `"address" | "origin"` — the real door C-3 ships returns
-       * `'email' | 'origin'` (the seam↔door table's REVERSE direction,
-       * checking what the door actually returns against what the seam
-       * expects, per 裁-107's standing law). The door wins: trued to
-       * `"email" | "origin"` below. Type-only — this seam is still stubbed
-       * and returns neither today, so no behavior changes.
+       * SPELLING, NOT A MEASUREMENT (F4 correction, fresh opus review,
+       * 2026-09-01) — `scope` reads `"email" | "origin"`, not
+       * `"address" | "origin"`. An earlier version of this comment claimed
+       * "the real door C-3 ships returns `'email' | 'origin'`" — false at
+       * this sha: `claim_confirmation_attempt` does not exist anywhere in
+       * `packages/db` yet, and part 3 §2.1's own prose, quoted four lines
+       * above, returns NO `scope` field at all. There is no door to have
+       * measured. `"email"` is a CHOICE, made to align with the door's own
+       * planned column/param naming (`clara.confirmation_attempts.
+       * email_digest`, `claim_confirmation_attempt`'s `p_email_digest`,
+       * part 3 §2.1) — not a fact read off a shipped implementation. If
+       * C-3 ships a door that disagrees, THIS spelling is what gets trued,
+       * not the other way around. Type-only either way — this seam is
+       * still stubbed and returns neither today, so no behavior changes.
        */
       readonly kind: "rejected";
       readonly scope: "email" | "origin";

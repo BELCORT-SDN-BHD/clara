@@ -72,6 +72,13 @@ test("signup account step -> check-your-email, with the confirm code form reacha
   // reason to defer any of them to the gated skeleton.
   const confirmResponse = await page.goto("/auth/confirm");
   expect(confirmResponse?.headers()["referrer-policy"]).toBe("strict-origin");
+  // F3 (fresh opus review, 2026-09-01) — FOLD 2's DELIVERY pin. The unit
+  // test only proves `confirmCacheHeadersForPath` RETURNS the right pair;
+  // this is the instrument that proves it is actually WIRED into a real
+  // response, the same way this file already pins referrer-policy off a
+  // real `/auth/confirm` GET rather than a unit-level function call.
+  expect(confirmResponse?.headers()["cache-control"]).toBe("private, no-store");
+  expect(confirmResponse?.headers()["vary"]).toBe("Cookie");
   await expect(page.getByRole("heading", { name: "Enter your confirmation code" })).toBeVisible();
   await expectAccessible(page, "confirmation code form");
 
