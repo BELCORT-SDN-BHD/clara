@@ -108,7 +108,7 @@ The migration seeds the row and re-reads it in a fail-closed tail; the digest is
 database from the body it stored, never supplied by the caller:
 
 ```sql
--- packages/db/migrations/UNNUMBERED_checkout_gate_c1_dpa.sql (PR #478; number claimed at merge)
+-- packages/db/migrations/0158_checkout_gate_c1_dpa.sql (PR #478; number claimed at merge)
 insert into clara.dpa_documents(version,body,body_sha256,source_path,effective_from)
 values ('clara-beta-2026-08-a', '…the body above…',
         sha256(convert_to('…the body above…','UTF8')),
