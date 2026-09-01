@@ -503,11 +503,13 @@ begin
       using errcode='CLR10';
   end if;
 
-  -- T.7: INV-1 writer closure: exactly the two reviewed minters write agent_task_id.
+  -- T.7: INV-1 writer closure: exactly the two reviewed minters write agent_task_id. The schema
+  -- prefix is optional in the detection regex (a definer relying on search_path can write
+  -- `insert into wake_credentials` unqualified) even though every estate writer today qualifies it.
   select array_agg(p.oid order by p.oid) into v_writer_oids
     from pg_proc p join pg_namespace n on n.oid=p.pronamespace
     where n.nspname='clara'
-      and p.prosrc~*'insert[[:space:]]+into[[:space:]]+clara[.]wake_credentials'
+      and p.prosrc~*'insert[[:space:]]+into[[:space:]]+(clara[.])?wake_credentials'
       and p.prosrc~'\magent_task_id\M';
   select array_agg(x::oid order by x::oid) into v_expected_writer_oids
     from unnest(array[

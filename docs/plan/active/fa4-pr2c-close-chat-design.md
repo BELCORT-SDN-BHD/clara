@@ -167,6 +167,22 @@ wrong implementation); M3 relax the kind check → cell 5 reds; M4 drop the live
 completed-task arm reds; M5 hash only (verb,subject) in _close_expected_op_key → cell 1 reds while
 cells 2 and 8 MUST stay green.
 
+**M3 side effect (recorded so a future reader doesn't diagnose the wrong wall from this red):**
+with the kind check relaxed, cell 5's `wrongKind` arm still reds, but no longer through
+`wake_task_incongruent` — firm and client already match (the clocked task shares the credential's
+firm/client), so with kind dropped from the combined check nothing in the first `if` fires. The
+red now comes from the SECOND check instead: a clocked `close_prep` task's `created_by` is NULL
+(`mintClosePrepSession`, f-a4-pr1c-fixtures.mjs:58-62, stamps no `created_by`), so
+`NULL IS DISTINCT FROM bob` catches it as `wake_task_director_mismatch`. The panel is still sound
+— the mutant is still discriminated — the wall that catches it just moved.
+
+**Documented deviation (PR #490 review, owner-ruled):** the director wall (M2 fix) has no
+dedicated mutant, breaking this design's own mutant-per-new-wall convention. This is deliberate,
+not an omission: cell 10's negative arm is already self-discriminating — delete the wall and the
+mint succeeds, `mismatch?.code` goes `undefined`, and the cell itself reds without any separate
+mutant construction. A mutant that reproduces exactly what the cell already proves would be inert
+ceremony, not new coverage.
+
 **2026-09-01 correction (owner ruling, via the PR-A driver's second STOP):** cell 4's first arm
 originally read "plain interactive → wake_client_pin_mismatch." That refusal is UNREACHABLE under
 the rung order this design mandates stays unchanged: `_close_wake_ctx` calls
@@ -299,7 +315,13 @@ rather than silently editing it away. The corrected closed map is:
 - **admin, no capability** — `wake_open_fiscal_year` (裁-100①).
 - **bookkeeper, `close_and_attest`** — `wake_begin_close`, `wake_abandon_close`.
 - **bookkeeper, no capability** — `wake_propose_close`, `wake_run_depreciation_catchup`, and
-  `wake_mint_month_snapshot` — three verbs.
+  `wake_mint_month_snapshot` — three verbs. `wake_run_depreciation_catchup` takes
+  `propose_close`'s floor by the 裁-100② EXTENSION: a close-prep wrapper PROPOSES/STAGES work for
+  a human to settle, and catchup stages exactly as `propose_close` does — it executes an
+  already-signed authority and never signs one, per the G0 battery's own established language —
+  so no new floor is owed. Its measured human twin, `run_depreciation_manual` (`0041:3604`), opens
+  `_human_ctx(role_rank('bookkeeper'))` with no capability check, confirming the floor rather than
+  asserting it.
 
 Twelve verbs, four buckets (6/1/2/3), zero duplicates. The viewer arm is not behaviourally
 testable for an under-floor: mint-time M3 already forces every attended director to bookkeeper+.
