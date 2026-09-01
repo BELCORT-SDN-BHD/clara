@@ -15,7 +15,7 @@ import {
   rootQuery, endPool, printLaneNotes, noteLane, humanQuery, assertRaises, opk,
   seedFreshFirm, makeConsumableIntent, insertWakeTask, insertOutbox, driveTaskStatus, readRow,
   insertUser, addMember, cancelAgentTask,
-  ROLES, getPool,
+  ROLES, getPool, claimOperatorFirm,
 } from "./rig-runtime-fixtures.mjs";
 
 // Mirrors packages/runtime/tests/rig.mjs's exported `WAKE_ENGINE_TEST_PREFIX` BY VALUE — a
@@ -81,7 +81,16 @@ before(async () => {
   await rootQuery("update clara.firms set is_operator=false where is_operator and name like 'g1op\\_%'");
   W = await seedFreshFirm(`g1_${randomUUID().slice(0, 8)}`, "w");
   OP = await seedFreshFirm(`g1op_${randomUUID().slice(0, 8)}`, "op");
-  await rootQuery("update clara.firms set is_operator=true where id=$1", [OP.firm]);
+  // Bounded take-with-retry, never a bare UPDATE (opus review round on PR #501, new-MEDIUM):
+  // this file's own defensive clear just above only ever protects against a PRIOR run of THIS
+  // file, never a genuinely concurrent claimant — packages/db/tests/p4t2-approval.test.mjs,
+  // p4t2-reads.test.mjs, and packages/runtime/tests/g1-wake-bodies.test.mjs's G1B-C1 cell can
+  // all legitimately hold uq_firms_one_operator's one slot at the moment THIS before() runs,
+  // under CI's concurrent `pnpm -r --if-present test`. A bare UPDATE here would crash this
+  // WHOLE file (before() throwing aborts every cell) on a raw, uncaught unique_violation instead
+  // of waiting it out. claimOperatorFirm (rig-helpers.mjs) is the ONE shared implementation —
+  // p4t2-fixtures.mjs's markOperator uses the identical helper, never a second hand-written copy.
+  await claimOperatorFirm(OP.firm);
 });
 after(async () => {
   // Release OP's operator flag (the G1B-C1 instance — cross-package/cross-run collision on
@@ -143,7 +152,10 @@ test("T1 wake_engine_sources: forced RLS, exactly bank_agent+close_prep, both en
   // in its own `finally` before releasing the connection back to the pool — so nothing opened
   // inside one rootQuery/asRuntime call can ever survive un-committed into a later call, on
   // that file or any other. On top of that structural fact, several cells (the M1 skip-locked
-  // variant, wake-engine.test.mjs:258-320; `#1(a)`, :335-401; `#1` round-6, :586-671) explicitly
+  // variant, wake-engine.test.mjs:276-338; `#1(a)`, :353-419; `#1` round-6, :604-689 — cited by
+  // NAME as well as range: law 3, so a drifted number degrades to an inconvenience, never a dead
+  // pointer, the exact class this citation itself needed fixed once already, opus review round
+  // on PR #501) explicitly
   // open a SECOND, concurrent session specifically to hold a row lock the main flow's own
   // connection must NOT see, proving the interleave by a lock-acquired handshake (a promise that
   // resolves only once the locker's own `select ... for update` has genuinely returned), never a

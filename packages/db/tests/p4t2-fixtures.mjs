@@ -2,7 +2,7 @@
 // (does not end in `.test.mjs`). Wraps the three new doors + the operator-seeding helper this
 // tranche's battery needs, mirroring p4t1-fixtures.mjs's own conventions.
 
-import { humanQuery, namedCall, rootQuery } from "./rig-helpers.mjs";
+import { humanQuery, namedCall, rootQuery, claimOperatorFirm } from "./rig-helpers.mjs";
 
 export async function requestFirmRegistration(sub, { firmName, note = null, opKey }) {
   const r = await humanQuery(
@@ -54,12 +54,20 @@ const MARKED_OPERATOR_FIRMS = [];
  *  claim and its very next (operator-gated) statement, which would then be refused, not read as
  *  the collision it actually is. Only firms THIS module has itself marked (MARKED_OPERATOR_FIRMS
  *  above) are ever cleared -- an outside holder, in this package or the other, is never touched,
- *  mirroring g1-wake-engine.test.mjs's own OP-scoped release and G1B-C1's own poll-and-wait. */
+ *  mirroring g1-wake-engine.test.mjs's own OP-scoped release and G1B-C1's own poll-and-wait.
+ *
+ *  The CLAIM itself goes through claimOperatorFirm (rig-helpers.mjs), the ONE shared
+ *  bounded-take-with-retry implementation (opus review round on PR #501, new-MEDIUM): a bare
+ *  UPDATE here used to throw a raw, uncaught unique_violation the instant g1-wake-engine.test
+ *  .mjs's OP fixture, ANOTHER p4t2 scene's own prior firm, or G1B-C1 held the slot at this exact
+ *  moment -- now it waits, the same as every other taker. `MARKED_OPERATOR_FIRMS.push(firm)`
+ *  stays the LAST statement, strictly after the awaited claim resolves, so this list can never
+ *  record a firm this module failed to actually mark. */
 export async function markOperator(firm) {
   if (MARKED_OPERATOR_FIRMS.length) {
     await rootQuery("update clara.firms set is_operator = false where id = any($1) and is_operator", [MARKED_OPERATOR_FIRMS]);
   }
-  await rootQuery("update clara.firms set is_operator = true where id = $1", [firm]);
+  await claimOperatorFirm(firm);
   MARKED_OPERATOR_FIRMS.push(firm);
 }
 

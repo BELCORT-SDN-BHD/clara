@@ -262,34 +262,23 @@ test("G1B-C1 a DISABLED source claims nothing; enabling through set_wake_source_
   // needs to OBTAIN exclusive use of the one global slot before it proceeds, waiting out
   // whichever legitimate holder is currently live rather than assuming there is none.
   //
-  // THE OBSERVATION IS THE TAKE (opus review round on PR #501, finding F2): an earlier version
-  // read `select ... where is_operator`, branched on the row count, and only THEN issued the
-  // UPDATE as a separate statement — a genuine TOCTOU window between the two round-trips, where
-  // any of the four writers above taking the slot would surface as a raw, uncaught `23505
-  // unique_violation` (a Postgres error crashing the cell), not the loud, named assertion this
-  // comment promises. Fixed by attempting the claim directly, in a loop: uq_firms_one_operator
-  // itself is the only authority asked, exactly once per attempt, and its answer (success, or a
-  // 23505 naming a live holder) IS the observation — there is no separate read to go stale
-  // between it and the write. A bounded, generous poll (never a silent skip: an exhausted wait
-  // still fails loud, by name).
-  const OPERATOR_WAIT_TIMEOUT_MS = 90_000;
-  const OPERATOR_WAIT_POLL_MS = 250;
-  const operatorWaitDeadline = Date.now() + OPERATOR_WAIT_TIMEOUT_MS;
-  for (;;) {
-    try {
-      await rig.rootQuery("update clara.firms set is_operator = true where id = $1", [w.firm]);
-      break; // claimed — uq_firms_one_operator raised nothing, so no other row is true right now
-    } catch (err) {
-      if (err.code !== "23505") throw err; // a genuine failure, not the singleton conflict — surface it
-      if (Date.now() >= operatorWaitDeadline) {
-        const holder = await rig.rootQuery("select id from clara.firms where is_operator");
-        assert.fail(
-          `the rig still has an operator firm (id=${holder.rows[0]?.id ?? "unknown"}) after waiting ${OPERATOR_WAIT_TIMEOUT_MS}ms — this cell would otherwise collide with uq_firms_one_operator; a legitimate concurrent holder should have released it well within this window`,
-        );
-      }
-      await rig.sleep(OPERATOR_WAIT_POLL_MS);
-    }
-  }
+  // THE OBSERVATION IS THE TAKE, and ONE shared implementation (opus review round on PR #501,
+  // findings F2 and the new-MEDIUM): an earlier version of this cell read `select ... where
+  // is_operator`, branched on the row count, and only THEN issued the UPDATE as a separate
+  // statement — a genuine TOCTOU window where any of the four writers above taking the slot
+  // between the two round-trips would surface as a raw, uncaught `23505 unique_violation`
+  // crashing the cell, not the loud, named assertion this comment promises. Fixing it HERE
+  // alone was not enough either: p4t2-fixtures.mjs's own bare take had the identical exposure,
+  // just wider (its whole critical section, not one round-trip). rig.mjs's `claimOperatorFirm`
+  // is the ONE shared fix both sides route through — never a second hand-copied loop: the
+  // UPDATE itself is the only authority asked, its answer (success, or a NAMED constraint
+  // violation identifying a live holder) IS the observation, so there is no separate read to go
+  // stale between it and the write, and success is confirmed by rowCount, never merely "did not
+  // throw". A bounded, generous poll (never a silent skip: an exhausted wait still fails loud,
+  // by name). Not wrapped in a try/assert.fail here: claimOperatorFirm's own thrown Error
+  // already carries the loud, named message this cell needs — node:test fails the cell on any
+  // thrown error, and re-wrapping would only discard the original stack for no benefit.
+  await rig.claimOperatorFirm(w.firm);
   try {
     await rig.asHuman(w.owner, (c) =>
       c.query("select clara.set_wake_source_enabled($1, true, $2, $3)", [key, "g1-bodies battery: the positive control", `g1b:${key}:on`]),

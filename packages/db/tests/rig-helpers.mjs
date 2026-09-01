@@ -184,6 +184,71 @@ export const humanQuery = (sub, sql, params) => asHuman(sub, (c) => c.query(sql,
 export const roleQuery = (role, sql, params) => asRole(role, (c) => c.query(sql, params));
 export const wakeQuery = (role, secret, sql, params) => asWake(role, secret, (c) => c.query(sql, params));
 
+/**
+ * Claim `firm` as the estate's sole operator via uq_firms_one_operator (0133:274), waiting out
+ * any current holder rather than assuming there is none. The singleton has FOUR takers across
+ * three files and two packages with no ordering guarantee under CI's concurrent `pnpm -r
+ * --if-present test` -- g1-wake-engine.test.mjs's before(), p4t2-fixtures.mjs's markOperator
+ * (both db-side, both now route through this ONE shared helper — opus review round on PR #501,
+ * the new-MEDIUM fix: a bare, unprotected take here or in markOperator meant EVERY OTHER taker's
+ * critical section — tens to hundreds of ms each — was a chance to crash this one with a raw,
+ * uncaught unique_violation instead of a bounded wait), and packages/runtime/tests/g1-wake-bodies
+ * .test.mjs's G1B-C1 cell (a different package — mirrors this exact contract by value, its own
+ * rig.mjs export of the same name, never a cross-package import).
+ *
+ * Retries ONLY on uq_firms_one_operator's OWN violation, matched by NAME (`err.constraint`,
+ * MEASURED populated for this bare `CREATE UNIQUE INDEX ... WHERE` violation against a live rig
+ * — never assumed) rather than by `err.code` alone: `clara.firms` carries exactly one unique
+ * index today, so the two are equivalent NOW, but matching the bare code would silently start
+ * retrying a genuinely different bug — a future second unique index, or an audit trigger — as
+ * contention, all the way to the timeout, instead of surfacing it immediately.
+ *
+ * A successful claim is confirmed by `rowCount === 1`, never merely "the UPDATE did not throw"
+ * — an UPDATE matching zero rows (a vanished or mistyped firm id) does not raise
+ * uq_firms_one_operator either, and would otherwise exit the loop having silently claimed
+ * nothing (still fails closed downstream, at the next operator-gated call, but as a confusing
+ * refusal rather than a self-evidencing one here).
+ *
+ * Bounded: an exhausted wait throws loud, naming the current holder — never a silent skip.
+ *
+ * ACCEPTED CONSEQUENCE, by design, not a bug: a process that dies between claiming and its own
+ * release (a killed test run, an after() hook that never fires) leaks the flag until something
+ * scoped to what IT claimed clears it, or the rig resets — there is no lease/expiry. The
+ * estate-wide clear this replaced would have silently RECLAIMED a leaked flag instead, which is
+ * worse: it could just as easily steal a DIFFERENT, live claimant's flag out from under it. A
+ * stuck flag surfaces as a loud, later, NAMED failure (this same function, on the next caller,
+ * refusing to proceed); a stolen one surfaces as a silent, wrong-attribution failure, somewhere
+ * else entirely. This cannot persist on CI (a fresh container per job); on a reused local rig it
+ * can — the fix is `update clara.firms set is_operator=false where id='<the stuck id>'`, by hand,
+ * once.
+ *
+ * @param {string} firm
+ * @param {{timeoutMs?: number, pollMs?: number}} [opts]
+ */
+export async function claimOperatorFirm(firm, { timeoutMs = 90_000, pollMs = 250 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let result;
+    try {
+      result = await rootQuery("update clara.firms set is_operator = true where id = $1", [firm]);
+    } catch (err) {
+      if (err.constraint !== "uq_firms_one_operator") throw err; // a genuine failure — surface it
+      if (Date.now() >= deadline) {
+        const holder = await rootQuery("select id from clara.firms where is_operator");
+        throw new Error(
+          `claimOperatorFirm(${firm}): the rig still has an operator firm (id=${holder.rows[0]?.id ?? "unknown"}) after waiting ${timeoutMs}ms — this would otherwise collide with uq_firms_one_operator; a legitimate concurrent holder should have released it well within this window`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      continue;
+    }
+    if (result.rowCount !== 1) {
+      throw new Error(`claimOperatorFirm(${firm}): UPDATE matched ${result.rowCount} row(s), not 1 — no such firm id, or it matched more than expected`);
+    }
+    return; // claimed — self-evidenced by rowCount, not merely "did not throw"
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Personas + generic named-argument call builder
 // ---------------------------------------------------------------------------
