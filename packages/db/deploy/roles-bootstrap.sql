@@ -22,9 +22,14 @@
 -- a same-commit roles-bootstrap twin" law — 0160 was the first role-minting
 -- migration since this file was last synced), and deploy/storage-provision.sql
 -- (clara_storage_docs). Derived and cross-checked against a live-shaped rig (apply
--- 0001..0010 to a scratch DB → query pg_roles / pg_auth_members) — the census
--- pre-0160 reproduced exactly (12 clara_% roles + clara_storage_docs); 0160 adds two
--- more (14 + clara_storage_docs). CONVERGENCE SCOPE: on a FRESH target this produces the exact
+-- 0001..0010 to a scratch DB → query pg_roles / pg_auth_members) — as of 0160 the
+-- grp+logins arrays below hold 16 clara_% roles (matching migrate.mjs's own count at
+-- any post-0160 chain), plus clara_storage_docs (created by this script, never a
+-- migration) makes 17 total rows matching `rolname like 'clara%'`. THIS COUNT IS
+-- LOAD-BEARING AND MUST BE KEPT CURRENT, never left describing an earlier state of
+-- the arrays — the same class this file's own header comment was caught stale on
+-- once already (see the wiki-dynamic-sql allowlist header's identical fix, 2026-09-02).
+-- CONVERGENCE SCOPE: on a FRESH target this produces the exact
 -- census. It does NOT remove unexpected EXTRA memberships/settings on a pre-existing
 -- role and it does NOT normalize NOLOGIN over a pre-existing login shell — so it is
 -- NOT a general-purpose "converge a drifted live cluster" tool.
@@ -275,7 +280,7 @@ end $$;
 
 -- ---------------------------------------------------------------------------
 -- 3. VERIFY (evidence — the DR drill / dr-verify diffs this against the source
---    census). Expect: 10 clara_% roles, all rolcanlogin=f rolsuper=f rolbypassrls=f
+--    census). Expect: 17 clara_% roles, all rolcanlogin=f rolsuper=f rolbypassrls=f
 --    connlimit=-1; clara_agent_ro carries {default_transaction_read_only=on};
 --    clara_storage_docs is rolinherit=f, the rest rolinherit=t.
 -- ---------------------------------------------------------------------------

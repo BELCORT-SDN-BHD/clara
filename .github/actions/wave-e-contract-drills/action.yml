@@ -7,7 +7,12 @@ description: >-
   hazard each guards (the package sweep's preintegration gates setting
   CLARA_ALLOW_MISSING_WAVE_E_* for every file) is unchanged, as is every drill's
   fail-never-skip presence-guard polarity. Requires: workspace installed, PG17 client
-  present, libpq env pointing at the job's throwaway postgres:17 service.
+  present, libpq env pointing at the job's throwaway postgres:17 service. 2026-09-02
+  CI-shape fix: each of the four steps below now runs on its OWN pristine cluster
+  (PGDELTA_PORT/PGTHETA_PORT/PGEPSILON_PORT/PGETA_PORT) rather than sharing one — a
+  from-scratch migrate's role-count-pinning migration cannot tell a role its own chain
+  mints later from one a sibling drill's earlier, completed chain already left behind on
+  a shared cluster, so no two full-fresh migrates in this file may ever share a cluster.
 runs:
   using: composite
   steps:
@@ -43,10 +48,11 @@ runs:
           echo "no numbered wave_e_delta_metrics migration on disk (missing or misnumbered) -- δ is merged on main, so absence here is a regression; FAILING rather than skipping (guard-polarity ruling 2026-08-14)."
           exit 1
         fi
-        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_delta_contract_ci'
-        PGDATABASE=clara_delta_contract_ci pnpm migrate
-        PGDATABASE=clara_delta_contract_ci pnpm seed
+        PGPORT=$PGDELTA_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_delta_contract_ci'
+        PGPORT=$PGDELTA_PORT PGDATABASE=clara_delta_contract_ci pnpm migrate
+        PGPORT=$PGDELTA_PORT PGDATABASE=clara_delta_contract_ci pnpm seed
         unset CLARA_ALLOW_MISSING_WAVE_E_DELTA
+        PGPORT=$PGDELTA_PORT \
         PGDATABASE=clara_delta_contract_ci CLARA_RIG_DB=1 \
           node --test --test-concurrency=1 tests/delta-contract.test.mjs tests/delta-context-pack-residual.test.mjs
 
@@ -81,10 +87,11 @@ runs:
           echo "0064_wave_e_theta_close_plan.sql is not on disk (missing or misnumbered) -- theta merged in this PR, so absence here is a regression, not a pre-merge state; FAILING rather than skipping (the exit-0 anti-pattern ε's round-3 fix was caught on)."
           exit 1
         fi
-        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_theta_contract_ci'
-        PGDATABASE=clara_theta_contract_ci pnpm migrate
-        PGDATABASE=clara_theta_contract_ci pnpm seed
+        PGPORT=$PGTHETA_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_theta_contract_ci'
+        PGPORT=$PGTHETA_PORT PGDATABASE=clara_theta_contract_ci pnpm migrate
+        PGPORT=$PGTHETA_PORT PGDATABASE=clara_theta_contract_ci pnpm seed
         unset CLARA_ALLOW_MISSING_WAVE_E_THETA
+        PGPORT=$PGTHETA_PORT \
         PGDATABASE=clara_theta_contract_ci CLARA_RIG_DB=1 \
           node --test --test-concurrency=1 tests/theta-close-plan.test.mjs
 
@@ -121,10 +128,11 @@ runs:
           echo "numbering or merge accident, and skipping it green is the failure this drill exists to catch."
           exit 1
         fi
-        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_epsilon_contract_ci'
-        PGDATABASE=clara_epsilon_contract_ci pnpm migrate
-        PGDATABASE=clara_epsilon_contract_ci pnpm seed
+        PGPORT=$PGEPSILON_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_epsilon_contract_ci'
+        PGPORT=$PGEPSILON_PORT PGDATABASE=clara_epsilon_contract_ci pnpm migrate
+        PGPORT=$PGEPSILON_PORT PGDATABASE=clara_epsilon_contract_ci pnpm seed
         unset CLARA_ALLOW_MISSING_WAVE_E_EPSILON
+        PGPORT=$PGEPSILON_PORT \
         PGDATABASE=clara_epsilon_contract_ci CLARA_RIG_DB=1 \
           node --test --test-concurrency=1 tests/epsilon-contract.test.mjs
 
@@ -167,9 +175,10 @@ runs:
           echo "part2 is the GRANTED half: without it there are no wrappers, no EXECUTE grants and no allowlist rows."
           exit 1
         fi
-        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_eta_contract_ci'
-        PGDATABASE=clara_eta_contract_ci pnpm migrate
-        PGDATABASE=clara_eta_contract_ci pnpm seed
+        PGPORT=$PGETA_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_eta_contract_ci'
+        PGPORT=$PGETA_PORT PGDATABASE=clara_eta_contract_ci pnpm migrate
+        PGPORT=$PGETA_PORT PGDATABASE=clara_eta_contract_ci pnpm seed
         unset CLARA_ALLOW_MISSING_WAVE_E_ETA
+        PGPORT=$PGETA_PORT \
         PGDATABASE=clara_eta_contract_ci CLARA_RIG_DB=1 \
           node --test --test-concurrency=1 tests/eta-contract.test.mjs

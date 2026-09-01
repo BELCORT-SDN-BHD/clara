@@ -14,9 +14,9 @@ description: >-
   Roles are Postgres cluster-global; migration 0154 (merged, immutable) pins an absolute
   clara-role count at its position in the chain, which breaks the moment a SECOND
   from-scratch migrate shares a cluster with a first one that already minted a role a
-  later migration adds (measured: PR #484's 0160, reproduced in the exact job shape before
-  this fix; PR #493's C-3 mints two more on top of it, so this had to be generic, never a
-  hardcoded role-name reset).
+  later migration adds (measured directly: reproduced in the exact job shape before this
+  fix). The fix is generic by construction -- no role name appears anywhere in it, and it
+  needs zero maintenance whichever migration mints the next role.
 runs:
   using: composite
   steps:
@@ -67,7 +67,7 @@ runs:
         PGPORT=$PGC_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wave_b_ci'
         PGPORT=$PGC_PORT PGDATABASE=clara_wave_b_ci pnpm db:migrate
         PGPORT=$PGC_PORT PGDATABASE=clara_wave_b_ci pnpm db:seed
-        PGPORT=$PGC_PORT \
+        PGPORT=$PGC_PORT PGDATABASE=clara_wave_b_ci \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           pnpm --filter @clara/runtime exec bootstrap
         cd packages/runtime
@@ -124,7 +124,7 @@ runs:
         # re-verify NEW HIGH-2). All shells are NOLOGIN on a fresh migrate, so the
         # fresh-target-only preflight cannot abort here.
         PGPORT=$PGD_PORT PGDATABASE=drci_source psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
-        PGPORT=$PGD_PORT \
+        PGPORT=$PGD_PORT PGDATABASE=drci_source \
         WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGD_PORT/drci_source" \
           pnpm --filter @clara/runtime exec bootstrap
         PGPORT=$PGD_PORT PGDATABASE=drci_source node packages/db/scripts/backup.mjs --profile full --out $RUNNER_TEMP/drci-full.sql
