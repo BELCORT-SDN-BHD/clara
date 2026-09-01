@@ -75,7 +75,7 @@ test("p6-1.db.registry: the exact P6-1 pin is v16 while the live provenance inst
   assert.equal(currentPromote, prompt16.toTypedParts_v16, "at this tip the registry-coupled promoter IS v16's own export");
 });
 
-test("p6-1.db.allowlist: freeform is OPEN to a chat credential; firm-question and close-proposal are NOT", { skip }, async () => {
+test("p6-1.db.allowlist: freeform is OPEN to a chat credential; firm-question is NOT; close-proposal is open only to the task-bound close-chat lane", { skip }, async () => {
   const r = await rig.rootQuery(
     `select function_name, array_agg(wake_kind order by wake_kind) as kinds
        from clara.wake_fn_allowlist
@@ -91,7 +91,24 @@ test("p6-1.db.allowlist: freeform is OPEN to a chat credential; firm-question an
     "the verb chatTurn_v16 DOES call is admitted to exactly the two interactive kinds a chat turn mints",
   );
   assert.deepEqual(byVerb.get("wake_open_firm_question"), ["filing"], "a firm question is the FILING lane's to open — no interactive kind is admitted");
-  assert.deepEqual(byVerb.get("wake_propose_close"), ["close_prep"], "a close proposal is the close_prep lane's to make — no interactive kind is admitted");
+  // F-A4 PR-2c (裁-99/裁-100, migration 0159_f_a4_pr_2c_close_chat_lane.sql, design of record
+  // docs/plan/active/fa4-pr2c-close-chat-design.md) deliberately widens this row: `wake_propose_close`
+  // is one of the twelve wrappers reachable under `interactive_client`, but ONLY through the
+  // sibling minter `mint_chat_close_credential` (clara_runtime-only granted, task-bound to a live
+  // `chat_turn` whose `created_by` matches `on_behalf_of`) — never through THIS file's own
+  // `mintWakeCredentialClientObo` / the generic `mint_wake_credential` every other interactive_client
+  // consumer (chatTurn_v16 included) uses, which never binds `agent_task_id`.
+  // PROVEN LIVE, not assumed: a credential shaped exactly like chatTurn_v16's own (real
+  // on_behalf_of, real client pin, minted through the generic `mint_wake_credential`) clears this
+  // allowlist row and A8's floor, then fails closed at `_close_wake_ctx`'s task-binding wall —
+  // CLR03 `wake_task_unbound` — a rung this migration did not touch and that predates PR-2c
+  // entirely (0138_f_a4_pr_1c_close_agent_limb.sql). The allowlist was never the wall for this verb
+  // (see p6-1.db.close below, same file); it remains true that no credential which chatTurn_v16
+  // (or any other generic interactive_client caller) can mint ever completes a close proposal —
+  // a credential built that way still names no agent task and dies at the same wall.
+  assert.deepEqual(byVerb.get("wake_propose_close"), ["close_prep", "interactive_client"],
+    "close-prep chat (F-A4 PR-2c) is the one other lane admitted; task-binding, not the "
+      + "allowlist, is what still refuses chatTurn_v16's own credential shape");
 });
 
 test("p6-1.db.close: the ALLOWLIST is the wall, not the grant — the grant is genuinely permissive", { skip }, async () => {
