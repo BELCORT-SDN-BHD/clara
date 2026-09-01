@@ -46,6 +46,7 @@ import { firmInterview_v3 } from "./firmInterview.v3.js";
 import { clientOnboarding_v1 } from "./clientOnboarding.v1.js";
 import { clientOnboarding_v2 } from "./clientOnboarding.v2.js";
 import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";
+import { clientOnboarding_v4 } from "./clientOnboarding.v4.js";
 import { bankAgent_v1 } from "./bankAgent.v1.js";
 import { closePrep_v1 } from "./closePrep.v1.js";
 
@@ -106,7 +107,14 @@ export const workflows = {
   // F-A2 (the agentic posting lane): REPOINTED v8 -> v9. Same note, same deploy order.
   autoDraft: autoDraft_v9,
   firmInterview: firmInterview_v3,
-  clientOnboarding: clientOnboarding_v3,
+  // 裁-21 PR-c: REPOINTED v3 -> v4. The ONLY difference is the question inventory
+  // (CLIENT_SEGMENTS_V3 = V2 with `coa_seed` swapped): 裁-23 Q9's re-wording, D-13 item 4's
+  // widened answer vocabulary, and the second plan item that finally CONSUMES coa_seed_decision.
+  // Driver, persistence and v3's arm-before-announce fix are carried unchanged.
+  // DEPLOY ORDER: none owed in either direction. v4 calls no new database verb — it writes one
+  // extra plan item — and PR-b's clara.coa_chart_state accepts the LEGACY answer value, so a v3
+  // image against a post-PR-b database and a v4 image against a pre-PR-b one both behave.
+  clientOnboarding: clientOnboarding_v4,
   // GATE G1's TWO WAKE BODIES — NEW CLASSES, never repoints. These two keys are what
   // clara.wake_engine_sources' own `workflow_export` column already names: migration 0133 §G
   // seeded ('bank_agent', ..., workflow_export 'bankAgent', ...) and ('close_prep', ...,
@@ -485,6 +493,12 @@ export { firmInterview_v1 };
 export { firmInterview_v2 };
 export { clientOnboarding_v1 };
 export { clientOnboarding_v2 };
+// 裁-21 PR-c: clientOnboarding_v3 stops being the `clientOnboarding:` pointer and must stay
+// EXPORTED — policy (c). The parks in this class are the >=48h kind (that is the whole point of
+// the durable interview), so a run still resuming into v3's body at cutover is the EXPECTED case,
+// not a corner one: the engine resumes it by run id and it must find its own body, and its own
+// CLIENT_SEGMENTS_V2 inventory, unchanged.
+export { clientOnboarding_v3 };
 // F-A2 — THE AGENTIC POSTING LANE (PR-2, the runtime half) repointed `chatTurn:` v12->v13 and
 // `autoDraft:` v8->v9. Design: docs/plan/active/f-a2-agentic-posting-design.md §3/§5, its four
 // annexes, and the PR-0 gate record. Owner rulings OQ-1/OQ-4/OQ-6 and D34-D37; orchestrator

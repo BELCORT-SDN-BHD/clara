@@ -7,6 +7,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
+import ts from "typescript";
 
 import {
   SCOPE_ENTRANCES,
@@ -18,6 +19,7 @@ import {
   exportedHttpMethods,
   reachableFrom,
   reachableCallsFrom,
+  routeLeaves,
   spineGuardProof,
   spineGuardResponseIsReturned,
   stripComments,
@@ -46,8 +48,96 @@ import {
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const APP_DIR = join(WEB_ROOT, "app");
 
-const LEAF = /^(page|route)\.(ts|tsx|js|jsx)$/;
 const SOURCE_EXT = /\.(ts|tsx)$/;
+
+type CourierRefusal = { readonly code: string; readonly start: number; readonly end: number };
+
+/** Every courierError return the handler can take before its first governed door
+ * call. This is the executable refusal surface, not a list of expected spellings. */
+function preDoorCourierRefusals(source: string): CourierRefusal[] {
+  const fileName = "/courier.ts";
+  const parsed = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const host: ts.CompilerHost = {
+    fileExists: (candidate) => candidate === fileName,
+    readFile: (candidate) => candidate === fileName ? source : undefined,
+    getSourceFile: (candidate) => candidate === fileName ? parsed : undefined,
+    getDefaultLibFileName: () => "/lib.d.ts",
+    writeFile: () => undefined,
+    getCurrentDirectory: () => "/",
+    getDirectories: () => [],
+    getCanonicalFileName: (candidate) => candidate,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+  };
+  const program = ts.createProgram([fileName], { noLib: true, noResolve: true, target: ts.ScriptTarget.Latest }, host);
+  const file = program.getSourceFile(fileName);
+  assert.ok(file, "courier source file was not bound");
+  const checker = program.getTypeChecker();
+  const handler = file.statements.find(
+    (statement): statement is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(statement) && statement.name?.text === "handleInviteRequest",
+  );
+  assert.ok(handler?.body, "handleInviteRequest body was not found");
+  const courierError = file.statements.find(
+    (statement): statement is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(statement) && statement.name?.text === "courierError",
+  );
+  assert.ok(courierError?.name, "courierError declaration was not found");
+  const courierErrorSymbol = checker.getSymbolAtLocation(courierError.name);
+  assert.ok(courierErrorSymbol, "courierError declaration was not bound");
+  let doorAt = Number.POSITIVE_INFINITY;
+  const locateDoor = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "call"
+    ) doorAt = Math.min(doorAt, node.getStart(file));
+    ts.forEachChild(node, locateDoor);
+  };
+  ts.forEachChild(handler.body, locateDoor);
+  assert.ok(Number.isFinite(doorAt), "the governed door call was not found");
+
+  const refusals: CourierRefusal[] = [];
+  const visited = new Set<ts.FunctionDeclaration>();
+  const visitFunction = (fn: ts.FunctionDeclaration, cutoff: number): void => {
+    if (visited.has(fn) || fn.body === undefined) return;
+    visited.add(fn);
+    const visit = (node: ts.Node): void => {
+      if (node.getStart(file) >= cutoff) return;
+      if (node !== fn.body && ts.isFunctionLike(node)) return;
+      if (ts.isReturnStatement(node) && node.expression !== undefined && ts.isCallExpression(node.expression)) {
+        const call = node.expression;
+        const callee = call.expression;
+        const symbol = ts.isIdentifier(callee) ? checker.getSymbolAtLocation(callee) : undefined;
+        if (symbol === courierErrorSymbol) {
+          const code = call.arguments[1];
+          assert.ok(code !== undefined && ts.isStringLiteralLike(code), "pre-door courierError has no literal code");
+          refusals.push({ code: code.text, start: node.getStart(file), end: node.end });
+          return;
+        }
+
+        // Review law 3: a matching spelling is not a helper identity. Follow only
+        // the declaration the checker bound this exact call to, in this file.
+        const declaration = symbol?.valueDeclaration;
+        if (
+          declaration !== undefined &&
+          ts.isFunctionDeclaration(declaration) &&
+          declaration.getSourceFile() === file &&
+          declaration.body !== undefined
+        ) {
+          visitFunction(declaration, Number.POSITIVE_INFINITY);
+          return;
+        }
+        const rendered = callee.getText(file).replace(/\s+/g, " ");
+        throw new Error(`courier_refusal_return_call_unresolved:${rendered}`);
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(fn.body, visit);
+  };
+  visitFunction(handler, doorAt);
+  return refusals.sort((a, b) => a.start - b.start);
+}
 
 function webRelative(abs: string): string {
   return relative(WEB_ROOT, abs).split(sep).join("/");
@@ -111,25 +201,6 @@ function walkSources(dir: string, out: string[] = []): string[] {
     const abs = join(dir, entry.name);
     if (entry.isDirectory()) walkSources(abs, out);
     else if (entry.isFile() && SOURCE_EXT.test(entry.name)) out.push(abs);
-  }
-  return out;
-}
-
-/** Every route leaf the App Router serves, with the URL path it answers on.
- *  Route groups `(x)`, parallel slots `@x` and private folders `_x` contribute no
- *  URL segment — that is what makes a group a group, and it is exactly why a check
- *  in one group's layout does not cover a sibling's. */
-function routeLeaves(dir: string = APP_DIR, segments: string[] = [], out: { file: string; url: string }[] = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const abs = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name.startsWith("_")) continue;
-      const isGroup =
-        (entry.name.startsWith("(") && entry.name.endsWith(")")) || entry.name.startsWith("@");
-      routeLeaves(abs, isGroup ? segments : [...segments, entry.name], out);
-    } else if (entry.isFile() && LEAF.test(entry.name)) {
-      out.push({ file: webRelative(abs), url: `/${segments.join("/")}` });
-    }
   }
   return out;
 }
@@ -202,13 +273,17 @@ function assertGuardBeforeCall(unit: SourceUnit, root: string, targetName: strin
 }
 
 describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () => {
-  const leaves = routeLeaves();
+  const leaves = routeLeaves(WEB_ROOT, APP_DIR);
 
   it("VACUITY CONTROL: the walk found the real tree", () => {
     assert.ok(leaves.length > 15, `only ${leaves.length} route leaves found under ${APP_DIR}`);
     const files = leaves.map((l) => l.file);
     for (const expected of [
-      "app/login/page.tsx",
+      "app/(entry)/login/page.tsx",
+      "app/(entry)/signup/page.tsx",
+      "app/(entry)/auth/confirm/page.tsx",
+      "app/(entry)/pending/page.tsx",
+      "app/(entry)/invite/[token]/page.tsx",
       "app/logout/route.ts",
       "app/api/runtime/[...path]/route.ts",
       "app/(firm)/page.tsx",
@@ -221,7 +296,101 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     const byFile = new Map(leaves.map((l) => [l.file, l.url]));
     assert.equal(byFile.get("app/(firm)/page.tsx"), "/");
     assert.equal(byFile.get("app/(full)/clara/[threadId]/page.tsx"), "/clara/[threadId]");
-    assert.equal(byFile.get("app/login/page.tsx"), "/login");
+    assert.equal(byFile.get("app/(entry)/login/page.tsx"), "/login");
+  });
+
+  it("P4-3's MOVE kept every entry URL BYTE-IDENTICAL — resolved from the tree", () => {
+    // THE ACCEPTANCE THIS TRAIN IS JUDGED ON, asserted by ROUTE and not by
+    // claim (P4-3's order: "every URL byte-identical after the moves (assert by
+    // route, not by claim)"). /login and /invite/:token moved from `app/` into
+    // `app/(entry)/`; a route group contributes no URL segment, so both must
+    // still answer on exactly the paths they answered on before — every invite
+    // link already sitting in an inbox, every `?next=` value proxy.ts writes,
+    // and every internal link depends on it.
+    //
+    // The instrument is `routeLeaves()`, the same walk the classification cells
+    // use: it derives the URL from the directory chain, skipping `(group)`,
+    // `@slot` and `_private` folders. So this reads the real tree rather than a
+    // list somebody kept in step by hand.
+    const byFile = new Map(leaves.map((l) => [l.file, l.url]));
+    assert.equal(byFile.get("app/(entry)/login/page.tsx"), "/login");
+    assert.equal(byFile.get("app/(entry)/invite/[token]/page.tsx"), "/invite/[token]");
+    assert.equal(byFile.get("app/(entry)/signup/page.tsx"), "/signup");
+    assert.equal(byFile.get("app/(entry)/auth/confirm/page.tsx"), "/auth/confirm");
+    assert.equal(byFile.get("app/(entry)/pending/page.tsx"), "/pending");
+
+    // And the pre-move paths are GONE — a leftover copy at the old path would
+    // serve the same URL from two files, which is a Next build error in
+    // production but silently invisible to the assertions above.
+    const files = leaves.map((l) => l.file);
+    assert.equal(files.includes("app/login/page.tsx"), false, "the pre-move login page is still on disk");
+    assert.equal(files.includes("app/invite/[token]/page.tsx"), false, "the pre-move invite page is still on disk");
+
+    // VACUITY CONTROL for this cell: the walk genuinely resolves a group to no
+    // segment, rather than these four passing because it returns "" for
+    // everything. `(firm)/page.tsx` → "/" is the same mechanism, and the
+    // deep dynamic route below proves segments DO accumulate when they are not
+    // groups — so a walker that dropped every segment would red here.
+    assert.equal(byFile.get("app/(firm)/page.tsx"), "/");
+    assert.equal(
+      byFile.get("app/(full)/clients/[clientId]/clara/[threadId]/page.tsx"),
+      "/clients/[clientId]/clara/[threadId]",
+    );
+  });
+
+  it("the five (entry) pages classify, and /pending is NOT public", () => {
+    // The census's "EVERY leaf classifies" cell would also pass if all five were
+    // registered wrongly-but-consistently, so the CLASS of each is pinned by
+    // name here. All five are pages under a group whose layout is not an
+    // entrance, so none can be ancestor-covered: each needs its own registry
+    // row, and each has one.
+    for (const file of [
+      "app/(entry)/login/page.tsx",
+      "app/(entry)/signup/page.tsx",
+      "app/(entry)/auth/confirm/page.tsx",
+      "app/(entry)/pending/page.tsx",
+      "app/(entry)/invite/[token]/page.tsx",
+    ]) {
+      assert.equal(classify({ file, url: "" }), "registered unscoped", `${file} is not registered unscoped`);
+      assert.equal(ancestorCovered(file), false, `${file} claims an entrance ancestor it does not have`);
+    }
+
+    // THE ONE ASYMMETRY THAT MATTERS. Four of the five are public — they run
+    // with no session at all. /pending is NOT: it requires a session and merely
+    // does not require a firm (design §4 E). If it ever gained `public: true`
+    // the cross-check against PUBLIC_PATH_PREFIXES would force /pending into
+    // proxy.ts's allowlist, and an unauthenticated stranger could load a page
+    // whose entire content is a report on the caller's own registration.
+    const entry = (p: string) => SCOPE_UNSCOPED_SURFACES.find((s) => s.path === p);
+    assert.equal(entry("app/(entry)/login/page.tsx")?.public, true);
+    assert.equal(entry("app/(entry)/signup/page.tsx")?.public, true);
+    assert.equal(entry("app/(entry)/auth/confirm/page.tsx")?.public, true);
+    assert.equal(entry("app/(entry)/invite/[token]/page.tsx")?.public, true);
+    assert.equal(
+      entry("app/(entry)/pending/page.tsx")?.public,
+      undefined,
+      "the holding route is marked public — it requires a session",
+    );
+  });
+
+  it("no (entry) surface calls the spine — the self-redirect loop /pending would be", () => {
+    // requireFirmScope() sends a no-firm caller to HOLDING_ROUTE, which IS
+    // /pending. A check on that page redirects it to itself forever, and a check
+    // in the group's layout does the same to all five faces while also refusing
+    // every caller who has no session yet — which is four of the five by
+    // design. The registry says these are unscoped; this cell proves the files
+    // agree with the registry.
+    for (const file of [
+      "app/(entry)/layout.tsx",
+      "app/(entry)/login/page.tsx",
+      "app/(entry)/signup/page.tsx",
+      "app/(entry)/auth/confirm/page.tsx",
+      "app/(entry)/auth/confirm/verify/route.ts",
+      "app/(entry)/pending/page.tsx",
+      "app/(entry)/invite/[token]/page.tsx",
+    ]) {
+      assert.equal(callsSpine(file), false, `${file} calls the scope spine`);
+    }
   });
 
   it("EVERY leaf classifies — an unclassified authenticated surface is a hole", () => {
@@ -291,7 +460,7 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     );
     assert.equal(ancestorCovered("app/(firm)/scratch/route.ts"), false);
     assert.equal(ancestorCovered("app/(firm)/clients/page.tsx"), true);
-    assert.equal(classify({ file: "app/login/page.tsx", url: "/login" }), "registered unscoped");
+    assert.equal(classify({ file: "app/(entry)/login/page.tsx", url: "/login" }), "registered unscoped");
   });
 
   it("VACUITY CONTROL: the three registries are non-empty and their files exist", () => {
@@ -486,9 +655,13 @@ describe("HIGH-1 — the guard dominates the proxy, and owns the outbound identi
 });
 
 describe("the deliberate exemptions stay exempt", () => {
-  it("the registry names both, each with a substantial reason", () => {
+  it("the registry names every exemption, each with a substantial reason", () => {
     const paths = SCOPE_EXEMPT_SURFACES.map((e) => e.path).sort();
-    assert.deepEqual(paths, ["app/api/invite/route.ts", "app/logout/route.ts"]);
+    assert.deepEqual(paths, [
+      "app/(entry)/auth/confirm/verify/route.ts",
+      "app/api/invite/route.ts",
+      "app/logout/route.ts",
+    ]);
     for (const entry of SCOPE_EXEMPT_SURFACES) {
       assert.ok(entry.reason.length >= 120, `${entry.path}'s reason is too thin to survive a later lane`);
       assert.match(entry.reason, /EXEMPT (BY NECESSITY|ON PRINCIPLE)/);
@@ -523,6 +696,102 @@ describe("the deliberate exemptions stay exempt", () => {
     assert.match(src, /DELIBERATELY EXEMPT FROM THE SCOPE SPINE/);
     assert.match(src, /do not "fix"/);
     assert.match(src, /SCOPE_EXEMPT_SURFACES/);
+  });
+
+  it("the invite courier carries its exemption in its OWN source too (P4-4)", () => {
+    const src = readSource("app/api/invite/route.ts");
+    assert.match(src, /DELIBERATELY EXEMPT FROM THE SCOPE SPINE/);
+    assert.match(src, /do not "fix"/);
+    assert.match(src, /SCOPE_EXEMPT_SURFACES/);
+    // The reason, not just the label: the registry's own words are "THE DB IS
+    // THE WALL", and a courier whose source stopped saying why is one round of
+    // "tidying" from acquiring a scope check.
+    assert.match(src, /THE DB IS THE WALL/);
+  });
+
+  it("the invite exemption's pre-door refusal count comes from handleInviteRequest's control flow", () => {
+    const source = readSource("lib/members/courier.ts");
+    const refusals = preDoorCourierRefusals(source);
+    assert.equal(refusals.length, 8, "seven conceptual gates currently expose eight refusal sites");
+    assert.deepEqual(refusals.map((r) => r.code), [
+      "cross_origin",
+      "invalid_request",
+      "unsupported_address",
+      "no_session",
+      "not_permitted",
+      "mail_not_configured",
+      "mail_unavailable",
+      "recipient_has_account",
+    ]);
+
+    for (const refusal of refusals) {
+      const mutant = source.slice(0, refusal.start) + source.slice(refusal.end);
+      assert.equal(
+        preDoorCourierRefusals(mutant).length,
+        refusals.length - 1,
+        `removing ${refusal.code} did not change the AST-derived census`,
+      );
+    }
+    const insertion = source.indexOf("  const call = deps.callDoor ?? realCallDoor;");
+    assert.ok(insertion >= 0, "the mutant insertion point before the door was not found");
+    const added = source.slice(0, insertion) +
+      '  if (request.headers.has("x-added-refusal")) return courierError(418, "added_refusal", "added");\n' +
+      source.slice(insertion);
+    const addedRefusals = preDoorCourierRefusals(added);
+    assert.equal(addedRefusals.length, refusals.length + 1, "a ninth pre-door refusal escaped the control-flow census");
+    assert.equal(addedRefusals.at(-1)?.code, "added_refusal");
+
+    const exemption = SCOPE_EXEMPT_SURFACES.find((entry) => entry.path === "app/api/invite/route.ts");
+    assert.ok(exemption);
+    const countWord = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"][refusals.length];
+    assert.ok(countWord);
+    assert.match(exemption.reason, new RegExp(`${countWord} pre-door refusal sites`));
+    assert.match(exemption.reason, /seven conceptual gates/);
+  });
+
+  it("RED-BEFORE N6: a refusal returned by a reachable same-file helper enters the census", () => {
+    const source = readSource("lib/members/courier.ts");
+    const baseline = preDoorCourierRefusals(source);
+    const insertion = source.indexOf("  const call = deps.callDoor ?? realCallDoor;");
+    assert.ok(insertion >= 0, "the helper mutant insertion point before the door was not found");
+    const mutant =
+      source.slice(0, insertion) +
+      '  if (request.headers.has("x-helper-refusal")) return addedHelperRefusal();\n' +
+      source.slice(insertion) +
+      '\nfunction addedHelperRefusal(): Response {\n  return courierError(418, "added_helper_refusal", "added");\n}\n';
+    const refusals = preDoorCourierRefusals(mutant);
+    assert.equal(refusals.length, baseline.length + 1, "a ninth refusal inside a reachable helper escaped");
+    assert.ok(refusals.some((refusal) => refusal.code === "added_helper_refusal"));
+  });
+
+  it("N6: a helper throw converted by one catch is one response exit, not two", () => {
+    const source = readSource("lib/members/courier.ts");
+    const baseline = preDoorCourierRefusals(source);
+    const insertion = source.indexOf("  const call = deps.callDoor ?? realCallDoor;");
+    assert.ok(insertion >= 0, "the caught-throw mutant insertion point before the door was not found");
+    const mutant =
+      source.slice(0, insertion) +
+      '  try { await addedThrow(); } catch { return courierError(418, "caught_helper_throw", "caught"); }\n' +
+      source.slice(insertion) +
+      '\nasync function addedThrow(): Promise<void> { throw new Error("added"); }\n';
+    const refusals = preDoorCourierRefusals(mutant);
+    assert.equal(refusals.length, baseline.length + 1);
+    assert.equal(refusals.filter((refusal) => refusal.code === "caught_helper_throw").length, 1);
+  });
+
+  it("N6: an unresolved return-call helper fails closed by name", () => {
+    const source = readSource("lib/members/courier.ts");
+    const insertion = source.indexOf("  const call = deps.callDoor ?? realCallDoor;");
+    assert.ok(insertion >= 0, "the unresolved-helper mutant insertion point before the door was not found");
+    const mutant =
+      'import { unresolvedHelper } from "./unresolved-helper";\n' +
+      source.slice(0, insertion) +
+      '  if (request.headers.has("x-unresolved-helper")) return unresolvedHelper();\n' +
+      source.slice(insertion);
+    assert.throws(
+      () => preDoorCourierRefusals(mutant),
+      /courier_refusal_return_call_unresolved:unresolvedHelper/,
+    );
   });
 
   it("logout keeps the two walls that DO matter there", () => {

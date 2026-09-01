@@ -214,7 +214,8 @@ the ids in `stripe_object_map`; the lane's code reads them, never authors them. 
 `GET /api/interview/state` (:376); bookkeeper+ floor at the routes; Bearer = the session JWT.
 `POST /api/interview/firm/start` is the firm-side interview — NOT this order. **The old client:**
 `apps/dashboard/app/shared/interviewApi.ts` (`runtimeFetch` at :313/:322/:348/:486),
-`apps/dashboard/app/onboarding/client/page.tsx`, `InterviewPanel.tsx`, `useInterviewRun.ts` (a
+`apps/dashboard/app/onboarding/client/page.tsx`, `InterviewPanel.tsx`,
+`apps/dashboard/app/onboarding/useInterviewRun.ts` (a
 `GET /state` poller) — port the contract, not the code. **Transport:** the same-origin proxy
 `apps/web/app/api/runtime/[...path]/route.ts` (already generic, allow-lists three headers, reads
 `CLARA_RUNTIME_URL` at request time). **Shape (fa7b-onboarding-design.md §3.3, R7):** the interview

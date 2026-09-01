@@ -99,7 +99,12 @@ describe("client-importable modules never drag next/headers into the bundle", ()
   // next/headers, so a client component that imported one constant broke. The
   // server-only half moved to lib/registration/server-reads.ts; this walk is what
   // keeps the split honest instead of trusting a comment.
-  const ISOMORPHIC = ["lib/registration/reads.ts", "lib/firm/caller-context.ts", "lib/read.ts"];
+  const ISOMORPHIC = [
+    "lib/registration/reads.ts",
+    "lib/registration/doors.ts",
+    "lib/firm/caller-context.ts",
+    "lib/read.ts",
+  ];
 
   for (const entry of ISOMORPHIC) {
     it(`${entry} reaches no server-only module`, () => {
@@ -506,8 +511,23 @@ describe("what the two reads actually put on the wire", () => {
   it("LOW-4: a verified caller with zero rows is a SUCCESSFUL empty result", async () => {
     const result = await loadOwnRegistrationRequests({ resolveSession: async () => SESSION });
     assert.equal(result.ok, true);
-    assert.deepEqual((result as { rows: unknown[] }).rows, []);
-    assert.equal(new URL(onlyCall()).searchParams.get("applicant"), `eq.${APPLICANT}`);
+    assert.deepEqual((result as { rows: readonly unknown[] }).rows, []);
+    assert.equal(
+      (result as { subject: string }).subject,
+      SESSION.subject,
+      "the mapper cannot bind hydrated rows unless the verified subject survives the read seam",
+    );
+    assert.deepEqual(
+      result.ok ? result.context : null,
+      { ok: false, reason: "no_membership" },
+      "zero registration rows were treated as membership evidence",
+    );
+    assert.equal(calls.length, 2, "the holding read did not positively ask both relations");
+    const urls = calls.map((call) => new URL(call));
+    const registrations = urls.find((url) => url.pathname.endsWith("/firm_registration_requests_visible"));
+    const context = urls.find((url) => url.pathname.endsWith("/caller_context"));
+    assert.equal(registrations?.searchParams.get("applicant"), `eq.${APPLICANT}`);
+    assert.equal(context?.searchParams.get("limit"), "2");
   });
 
   it("RED-before: collapsing both into [] makes the two indistinguishable", async () => {

@@ -1,9 +1,21 @@
+import { realpathSync } from "node:fs";
+import { resolve } from "node:path";
+
 import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // pnpm dependencies can be junctioned into a nested worktree. Turbopack 16
+  // refuses a linked dependency outside its inferred root, so anchor the root
+  // at the physical workspace that contains both this app and node_modules.
+  turbopack: {
+    root: resolve(
+      realpathSync(resolve(__dirname, "node_modules")),
+      "../../..",
+    ),
+  },
   // DELIBERATELY no `rewrites()` for the runtime proxy (independent review
   // 2026-08-27, F1/F2): a `rewrites()` destination is baked into
   // `.next/routes-manifest.json` at BUILD time, so `process.env` is read once at

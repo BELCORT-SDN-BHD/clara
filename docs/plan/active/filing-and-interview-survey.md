@@ -386,8 +386,9 @@ it** — the parity gap F-A7a closes, in **train ε** after F-A2 PR-2 lands `cha
 
 ### 5.3 Dashboard
 
-- `apps/dashboard/app/onboarding/` — `page.tsx`, `InterviewPanel.tsx`, `useInterviewRun.ts`,
-  `thread.ts`; `apps/dashboard/app/onboarding/client/` — `ClientStarter.tsx`, `page.tsx`,
+- `apps/dashboard/app/onboarding/` — `page.tsx`, `InterviewPanel.tsx`,
+  `apps/dashboard/app/onboarding/useInterviewRun.ts`,
+  `apps/dashboard/app/onboarding/thread.ts`; `apps/dashboard/app/onboarding/client/` — `ClientStarter.tsx`, `page.tsx`,
   `InterviewAttachments.tsx`.
 - **`InterviewAttachments.tsx:16-24` records a provenance limit F-A7b must discharge**: every
   interview attachment is tagged `origin='documents_tab'` because the intake origin is a closed
