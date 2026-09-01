@@ -118,6 +118,34 @@ that field is **`replay`** — the moment a receipt surface exists, "you signed 
 bare "signed" becomes a real distinction, and `signature_id`/`signed_at` are the evidence this
 estate's receipt discipline will want.
 
+### 裁-107(b) · The seam↔door table is a DURABLE artifact in the PR body, and door claims CITE it
+
+**Amends 裁-107.** Raised by `fs4-pr488-review` against a countermeasure the orchestrator had just
+given it — a defect in the rule at mint, closed before it could fail.
+
+**The failure it fixes is RETRIEVAL, not LENS**, and the two need different medicine. A LENS failure
+is never having looked for a class at all; the fix is naming it in the brief. A RETRIEVAL failure is
+having looked, having RECORDED the fact, and failing to connect it when a contradicting claim arrives
+later. The day's sharpest instance: a lane's own seam↔door table carried the row
+`return ← (not in door prose)` for `claim_confirmation_attempt`, and that same lane later passed a
+code comment claiming "the real door C-3 ships returns `'email' | 'origin'` … the door wins" — for a
+door that does not exist in `packages/db` at all. It held the contradicting fact, in its own artifact,
+in its own scope, and the connection did not fire.
+
+**The orchestrator's first countermeasure was itself defective:** "re-read your own table's row for
+that door" bottoms out in remembering you once built a table and going to find it — a memory
+dependency moved one level up, not removed. Worse, it fails ENTIRELY for anyone who is not its
+author: 裁-107 tables have been living in SendMessage bodies, so a fresh lane reviewing a claim about
+a door has no path to the row that contradicts it. Under 裁-111's two-leg gate that retrieval is
+exactly what someone must be able to perform.
+
+**LAW: the bidirectional seam↔door table lives in the PR BODY as the canonical artifact — never only
+in a message — and any code comment that makes a claim about a door CITES its table row**, the way
+comments now cite a 裁-NN ledger entry rather than a lane name. That converts "remember your own
+artifact" into "follow the reference", which is the same upgrade the attribution rule made when it
+moved authority from lane names to the ledger. A lookup any lane can perform from the code itself
+beats a recall only a participant can have.
+
 ## 裁-108 · STANDING LAW — an UNNUMBERED migration merges silently and never applies
 I armed auto-merge on #490 while its migration was still `UNNUMBERED_…sql`. `migrate.mjs` matches
 only `/^\d+.*\.sql$/`, so the PR would have merged green with a migration that **never runs** — no
