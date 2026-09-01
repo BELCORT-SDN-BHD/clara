@@ -781,6 +781,8 @@ cell("c3.27 confirmation digest wall -- both inputs are real 32-byte SHA-256 val
   assert.equal(origin.byteLength, 32);
   const accepted = await claimConfirmation(email, origin);
   assert.equal(accepted.allowed, true);
+  assert.equal(accepted.scope, null, "the allowed path names no scope -- #488 seam ruling");
+  assert.equal(accepted.retry_after_seconds, null, "the allowed path names no wait -- #488 seam ruling");
   await expectRefusal(CLR.badRequest, () => claimConfirmation(Buffer.alloc(16), origin),
     /a digest is required/, "short email digest");
   await expectRefusal(CLR.badRequest, () => claimConfirmation(email, Buffer.alloc(16)),
@@ -798,6 +800,10 @@ cell("c3.28 W-H3 -- sixth rejected attempt is persisted but not allowed", async 
   const sixth = await claimConfirmation(email, origin);
   assert.equal(sixth.allowed, false);
   assert.equal(sixth.remaining, 0);
+  assert.equal(sixth.scope, "email", "#488 seam ruling: the refused arm names the email/C1 wall");
+  assert.ok(Number.isInteger(sixth.retry_after_seconds)
+    && sixth.retry_after_seconds > 0 && sixth.retry_after_seconds <= 900,
+    `retry_after_seconds must be a positive integer within the 900s/15min window (got ${sixth.retry_after_seconds})`);
   const persisted = await rootQuery(
     "select outcome from clara.confirmation_attempts where id=$1", [sixth.attempt_id],
   );
@@ -825,6 +831,9 @@ cell("c3.28 W-H3 -- sixth rejected attempt is persisted but not allowed", async 
     const lost = await losingCall;
     assert.equal(lost.rows[0].result.allowed, false,
       "the serialized email limb sees the winner as the fifth prior attempt");
+    assert.equal(lost.rows[0].result.scope, "email", "#488 seam ruling on the concurrent loser too");
+    assert.ok(Number.isInteger(lost.rows[0].result.retry_after_seconds)
+      && lost.rows[0].result.retry_after_seconds > 0 && lost.rows[0].result.retry_after_seconds <= 900);
     await loser.query("commit");
   });
 });
@@ -839,6 +848,10 @@ cell("c3.29 W-H4 -- six addresses at one origin trip the independent origin limb
   const sixthEmail = digest("h4-email-6");
   const sixth = await claimConfirmation(sixthEmail, origin);
   assert.equal(sixth.allowed, false, "origin C2 refuses although this email has no prior guess");
+  assert.equal(sixth.scope, "origin", "#488 seam ruling: a fresh email digest cannot fire the email limb");
+  assert.ok(Number.isInteger(sixth.retry_after_seconds)
+    && sixth.retry_after_seconds > 0 && sixth.retry_after_seconds <= 900,
+    `retry_after_seconds must be a positive integer within the 900s/15min window (got ${sixth.retry_after_seconds})`);
   const ownCount = await rootQuery(
     "select count(*)::int as n from clara.confirmation_attempts where email_digest=$1", [sixthEmail],
   );
@@ -866,6 +879,9 @@ cell("c3.29 W-H4 -- six addresses at one origin trip the independent origin limb
     const lost = await losingCall;
     assert.equal(lost.rows[0].result.allowed, false,
       "the serialized origin limb sees the winner although the email digest is new");
+    assert.equal(lost.rows[0].result.scope, "origin", "#488 seam ruling on the concurrent loser too");
+    assert.ok(Number.isInteger(lost.rows[0].result.retry_after_seconds)
+      && lost.rows[0].result.retry_after_seconds > 0 && lost.rows[0].result.retry_after_seconds <= 900);
     await loser.query("commit");
   });
 });
@@ -881,6 +897,9 @@ cell("c3.30 W-H5 -- an unsettled attempt counts fail-closed against the next win
   assert.equal(unsettled.allowed, true);
   const sixth = await claimConfirmation(email, origin);
   assert.equal(sixth.allowed, false, "four rejected + one still-unsettled consume all five prior slots");
+  assert.equal(sixth.scope, "email", "#488 seam ruling: same-pair digests take the email/C1 precedence");
+  assert.ok(Number.isInteger(sixth.retry_after_seconds)
+    && sixth.retry_after_seconds > 0 && sixth.retry_after_seconds <= 900);
   const row = await rootQuery(
     "select outcome,settled_at from clara.confirmation_attempts where id=$1", [unsettled.attempt_id],
   );
