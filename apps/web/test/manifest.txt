@@ -20,17 +20,35 @@
 # wave each appending 2-5 lines lands them in different alphabetical
 # neighborhoods, so a merge conflict is between the FEW trains that share a
 # directory, never a whole-line collision across all eleven (port-wave plan
-# §3.1's own reasoning for moving off the single line).
+# §3.1's own reasoning for moving off the single line). FOLD (Codex round-3,
+# LOW manifest ordering drift): "alphabetical" means a PLAIN STRING COMPARE
+# (`Array.prototype.sort()`'s own default — the same comparator
+# `listTestFilesOnDisk` below already uses), not a directory-first human
+# reading — `firm/` sorts AFTER `firm-admin/` this way (`/` is U+002F,
+# `-` is U+002D, and `-` < `/`), and an uppercase-leading name like
+# `EnrolAccountDialog.test.ts` sorts before every lowercase-leading name in
+# the same directory. `check-test-manifest.mjs` now enforces this
+# mechanically (an out-of-order adjacent pair fails the build), so this
+# comment describes an enforced invariant, not merely a convention.
 #
 # Blank lines and lines starting with # are ignored by both scripts above.
 
-components/invite-accept-a11y.test.tsx
-components/invite-accept-form.test.tsx
-components/invite-accept-keyboard.test.tsx
+components/admin/invite-dialog-a11y.test.tsx
+components/admin/invite-dialog-keyboard.test.tsx
+components/admin/members-a11y.test.tsx
+components/admin/members-keyboard.test.tsx
+components/admin/members-single-fire.test.tsx
+components/admin/members-walls.test.tsx
+components/admin/registrations-a11y.test.tsx
+components/admin/registrations-keyboard-round2.test.tsx
+components/admin/registrations-keyboard-round5.test.tsx
+components/admin/registrations-keyboard.test.tsx
 components/bank/bank-a11y.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx
+components/clara/interview-run-a11y.test.tsx
+components/clara/interview-run-keyboard.test.tsx
 components/clara/onboarding-begin-keyboard.test.tsx
 components/clara/onboarding-checklist-a11y.test.tsx
 components/clara/onboarding-checklist-keyboard.test.tsx
@@ -47,6 +65,16 @@ components/documents/documents-a11y.test.tsx
 components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
 components/documents/lint-finding-detail.test.tsx
+components/entry/email-confirmation.test.tsx
+components/entry/entry-contracts.test.tsx
+components/entry/pending-a11y.test.tsx
+components/entry/signup-a11y.test.tsx
+components/entry/signup-firm-form.test.tsx
+components/entry/signup-keyboard.test.tsx
+components/firm-admin/firm-admin-a11y.test.tsx
+components/firm-admin/firm-admin-keyboard.test.tsx
+components/firm-admin/firm-admin-pages-a11y.test.tsx
+components/firm-admin/vendor-binding-ceremony.test.tsx
 components/firm/agent-tasks-a11y.test.tsx
 components/firm/agent-tasks-keyboard.test.tsx
 components/firm/compliance-watch-affordance.test.tsx
@@ -56,21 +84,23 @@ components/firm/needs-you-gaps.test.tsx
 components/firm/open-question-detail.test.tsx
 components/firm/staff-advance-incomplete-affordance.test.tsx
 components/firm/sweep-status-panel.test.tsx
-components/firm-admin/firm-admin-a11y.test.tsx
-components/firm-admin/firm-admin-keyboard.test.tsx
-components/firm-admin/firm-admin-pages-a11y.test.tsx
-components/firm-admin/vendor-binding-ceremony.test.tsx
+components/invite-accept-a11y.test.tsx
+components/invite-accept-form.test.tsx
+components/invite-accept-keyboard.test.tsx
 components/journals/journals-a11y.test.tsx
 components/journals/journals-governance-a11y.test.tsx
 components/journals/journals-governance-keyboard.test.tsx
 components/journals/journals-keyboard.test.tsx
 components/journals/use-amount-input.test.ts
-components/parts/v14-receipt-cards.test.tsx
-components/parts/v16-read-cards.test.tsx
-components/parts/v16-act-cards.test.tsx
+components/login-a11y.test.tsx
+components/login-keyboard.test.tsx
 components/parts/sweep-receipt-card.test.tsx
+components/parts/v14-receipt-cards.test.tsx
+components/parts/v16-act-cards.test.tsx
 components/parts/v16-action-round2.test.tsx
 components/parts/v16-cards-a11y.test.tsx
+components/parts/v16-read-cards.test.tsx
+components/registers/EnrolAccountDialog.test.ts
 components/registers/accounts-a11y.test.tsx
 components/registers/accounts-keyboard.test.tsx
 components/registers/accounts-render-states.test.tsx
@@ -78,7 +108,6 @@ components/registers/adjustment-lines-editor.test.tsx
 components/registers/adjustments-a11y.test.tsx
 components/registers/adjustments-keyboard.test.tsx
 components/registers/adjustments-render-states.test.tsx
-components/registers/EnrolAccountDialog.test.ts
 components/registers/counterparty-hygiene-a11y.test.tsx
 components/registers/counterparty-hygiene-keyboard.test.tsx
 components/registers/fa-particulars-fields.test.tsx
@@ -100,6 +129,7 @@ components/registers/staff-advances-keyboard.test.tsx
 components/reports/reports-components.test.tsx
 components/reports/reports-snapshots-seeding-a11y.test.tsx
 components/reports/reports-snapshots-seeding-keyboard.test.tsx
+components/tax/tax-a11y.test.tsx
 lib/bank/agency-doors.test.ts
 lib/bank/doors.test.ts
 lib/bank/error-kind.test.ts
@@ -113,10 +143,10 @@ lib/bank/recon-reads.test.ts
 lib/bank/reload-on-change.test.ts
 lib/bank/table-reads.test.ts
 lib/business-date.test.ts
+lib/close/api.test.ts
 lib/coding/doors.test.ts
 lib/coding/loaders.test.ts
 lib/coding/reads.test.ts
-lib/close/api.test.ts
 lib/command/routes.test.ts
 lib/documents/bytes.test.ts
 lib/documents/copy.test.ts
@@ -128,21 +158,27 @@ lib/documents/reads.test.ts
 lib/documents/runtime-wire.test.ts
 lib/documents/useUploadQueue.test.ts
 lib/doors.test.ts
+lib/firm-admin/chat-sharing.test.ts
+lib/firm-admin/compliance.test.ts
+lib/firm-admin/vendor-bindings.test.ts
 lib/firm/needs-you-gaps.test.ts
 lib/firm/needs-you.test.ts
 lib/firm/reads.test.ts
 lib/firm/use-async-read.test.ts
 lib/firm/use-review-queue.test.ts
-lib/firm-admin/chat-sharing.test.ts
-lib/firm-admin/compliance.test.ts
-lib/firm-admin/vendor-bindings.test.ts
 lib/identity/doors.test.ts
+lib/identity/signup-doors.test.ts
+lib/interview/api.test.ts
+lib/interview/contract.test.ts
+lib/interview/thread.test.ts
+lib/interview/useInterviewRun.test.ts
 lib/journals/api-compose.test.ts
 lib/journals/api.test.ts
 lib/journals/balance.test.ts
 lib/journals/diff-reads.test.ts
 lib/journals/governance-doors.test.ts
 lib/journals/use-journals-workbench.test.ts
+lib/members/members-doors.test.ts
 lib/onboarding/api.test.ts
 lib/parts/catalog.test.tsx
 lib/parts/hooks.test.ts
@@ -164,6 +200,7 @@ lib/registers/opening-item-doors.test.ts
 lib/registers/opening.test.ts
 lib/registers/staff-advances-doors.test.ts
 lib/registers/staff-advances.test.ts
+lib/registration/doors.test.ts
 lib/reports/api.test.ts
 lib/session-accessor.test.ts
 lib/wire.test.ts
@@ -172,8 +209,14 @@ test/keyboardWalk.test.ts
 tests/apiLimitBanner.test.mjs
 tests/client-scope.test.ts
 tests/firm-scope-db-pins.test.ts
+tests/firm-scope-fourth-entrance.test.ts
 tests/firm-scope-surfaces.test.ts
 tests/focusRailSubscription.test.mjs
+tests/holding-state.test.ts
+tests/invite-courier-authority.test.ts
+tests/invite-courier-egress.test.ts
+tests/invite-courier.test.ts
+tests/invite-mail-transport.test.ts
 tests/invite-verification.test.ts
 tests/proxy-matcher.test.ts
 tests/public-key.test.ts
@@ -182,6 +225,7 @@ tests/response-state.test.ts
 tests/runtime-outbound.test.ts
 tests/safe-redirect.test.ts
 tests/same-origin.test.ts
+tests/server-boundary.test.ts
 tests/source-oracle.test.ts
 tests/sql-oracle.test.ts
 tests/streamAuthority.test.mjs

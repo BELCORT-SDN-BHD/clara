@@ -1,0 +1,33 @@
+import { spawnSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = resolve(webRoot, "../..");
+const appOrigin = "https://127.0.0.1:3100";
+const env = {
+  ...process.env,
+  CLARA_E2E_APP_ORIGIN: appOrigin,
+  CLARA_PUBLIC_ORIGINS: appOrigin,
+  NEXT_PUBLIC_SUPABASE_URL: `${appOrigin}/e2e-supabase`,
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_clara_e2e_only",
+};
+const pnpmCli = process.env.npm_execpath;
+if (!pnpmCli) {
+  throw new Error("pnpm CLI path is absent; run this harness through the package e2e script");
+}
+
+function run(args) {
+  const result = spawnSync(process.execPath, [pnpmCli, ...args], {
+    cwd: repoRoot,
+    env,
+    stdio: "inherit",
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+console.log("[e2e] building @clara/web before starting the browser walk");
+run(["--filter", "@clara/web", "build"]);
+console.log("[e2e] starting next start and Playwright against the built app");
+run(["--filter", "@clara/web", "exec", "playwright", "test"]);

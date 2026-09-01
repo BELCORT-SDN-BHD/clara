@@ -604,6 +604,24 @@ export function analyzeParkOrdering(workflowsDir = WORKFLOWS) {
   });
 }
 
+// THE TWO SELF-TESTS BELOW AIM AT WHATEVER THE REGISTRY CURRENTLY RUNS, never at a spelled
+// version (裁-21 PR-c). Both used to name `clientOnboarding_v3` / `clientOnboarding.v3.ts` as
+// literals; the first `_vN` repoint of the class then left them measuring a body the table no
+// longer points at — one died on `undefined.ok`, the other stopped provoking the refusal it
+// asserts. Deriving from the resolver re-aims them at every future repoint, and the assertions
+// below prove the derivation itself is not vacuous.
+const REGISTERED_CO = registeredInterviewBodies().find((b) => b.cls === "clientOnboarding");
+if (!REGISTERED_CO) throw new Error("registry.ts resolves no clientOnboarding body — the self-tests below have nothing to aim at");
+const REGISTERED_FILE = REGISTERED_CO.file;
+const REGISTERED_IDENT = REGISTERED_CO.ident;
+
+test("GH #152: the registry pointer this file aims at is the one that would run", () => {
+  assert.match(REGISTERED_FILE, /^clientOnboarding\.v\d+\.ts$/, "the resolved file is a clientOnboarding version");
+  assert.match(REGISTERED_IDENT, /^clientOnboarding_v\d+$/, "and the identifier is its export");
+  assert.equal(REGISTERED_FILE, `${REGISTERED_IDENT.replace("clientOnboarding_v", "clientOnboarding.v")}.ts`,
+    "the file and the export agree — a mismatch would mean the museum below mutates one body while the guard reads another");
+});
+
 test("GH #152: every REGISTERED interview body arms its hook BEFORE it announces the park", () => {
   const findings = analyzeParkOrdering();
   assert.equal(findings.length, 2, "both interview classes are registered");
@@ -629,7 +647,15 @@ test("GH #152: the guard REFUSES every shape whose written position is not its e
   // The false-green museum. Every entry was MEASURED green against an earlier cut of this guard
   // across three review rounds; each is an inversion or a non-arm, and each must now be refused.
   // They live here so the armour is checked by CI rather than by memory.
-  const src = readFileSync(join(WORKFLOWS, "clientOnboarding.v3.ts"), "utf8");
+  //
+  // THE TARGET FOLLOWS THE POINTER (裁-21 PR-c). This block used to name `clientOnboarding.v3.ts`
+  // as a literal, so the first `_vN` repoint of the class turned the museum into a cell measuring
+  // a body the registry no longer runs — `analyzeParkOrdering(...).find(f => f.file === "…v3.ts")`
+  // returned undefined and the whole self-test died on `undefined.ok`, which is how PR-c found it.
+  // Deriving the file from `registeredInterviewBodies` means every future repoint re-aims the
+  // museum automatically, at the body that would actually run.
+  const TARGET = REGISTERED_FILE;
+  const src = readFileSync(join(WORKFLOWS, TARGET), "utf8");
   const armRe = /^.*const hook = createHook<Resolution>\(.*$/m;
   const annRe = /^.*await streamPromptStep\(.*$/m;
   const armExpr = src.match(armRe)[0].trim().replace(/^const hook = /, "").replace(/;$/, "");
@@ -724,8 +750,8 @@ test("GH #152: the guard REFUSES every shape whose written position is not its e
       cpSync(WORKFLOWS, dir, { recursive: true });
       const mutated = mutate(src);
       assert.notEqual(mutated, src, `the "${label}" mutation did not apply — this self-test would be VACUOUS`);
-      writeFileSync(join(dir, "clientOnboarding.v3.ts"), mutated);
-      const finding = analyzeParkOrdering(dir).find((f) => f.file === "clientOnboarding.v3.ts");
+      writeFileSync(join(dir, TARGET), mutated);
+      const finding = analyzeParkOrdering(dir).find((f) => f.file === TARGET);
       assert.equal(finding.ok, false, `the guard must REFUSE ${label}, but it certified it: ${finding.detail}`);
       assert.match(finding.detail, reason, `${label} was refused, but for the WRONG reason: ${finding.detail}`);
     } finally {
@@ -735,18 +761,32 @@ test("GH #152: the guard REFUSES every shape whose written position is not its e
 });
 
 test("GH #152: the guard REFUSES a registry that does not resolve to the body it certifies", () => {
-  // The registry half of the same lesson: certifying clientOnboarding.v3.ts is worthless if the
+  // The registry half of the same lesson: certifying the registered body is worthless if the
   // table would not actually run it. Each of these makes the resolver refuse, loudly.
+  //
+  // THE POINTER IS DERIVED, NOT SPELLED (裁-21 PR-c, same fix as the museum above). These three
+  // mutations used to name `clientOnboarding_v3` as a literal; after the v3->v4 repoint the
+  // alias mutation still APPLIED (the v3 import line survives, because a superseded body stays
+  // exported for its parked runs) but no longer touched the pointer, so the resolver correctly
+  // did not refuse and the cell failed with "Missing expected exception". Deriving both the
+  // current pointer and a DIFFERENT registered export keeps every future repoint honest.
   const registry = readFileSync(join(WORKFLOWS, "registry.ts"), "utf8");
+  const IDENT = REGISTERED_IDENT;                       // e.g. clientOnboarding_v4
+  const SPEC = `./${REGISTERED_FILE.replace(/\.ts$/, ".js")}`;
+  // A decoy that is a REAL, exported workflow of the same class but NOT the pointer — v1 is the
+  // one version that can never itself become the pointer again.
+  const DECOY = "clientOnboarding_v1";
+  const POINTER_LINE = `  clientOnboarding: ${IDENT},`;
+  assert.ok(registry.includes(POINTER_LINE), `registry.ts must carry the derived pointer line ${POINTER_LINE.trim()}`);
   const mutations = [
     ["an ALIASED import binding a different export to the registry name",
-      (s) => s.replace('import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";', 'import { clientOnboarding_v2 as clientOnboarding_v3 } from "./clientOnboarding.v2.js";'),
+      (s) => s.replace(`import { ${IDENT} } from "${SPEC}";`, `import { ${DECOY} as ${IDENT} } from "./clientOnboarding.v1.js";`),
       /DIFFERENT export/],
     ["a later SPREAD silently overriding the guarded entry",
-      (s) => s.replace("  clientOnboarding: clientOnboarding_v3,", "  clientOnboarding: clientOnboarding_v3,\n  ...{ clientOnboarding: clientOnboarding_v2 },"),
+      (s) => s.replace(POINTER_LINE, `${POINTER_LINE}\n  ...{ clientOnboarding: ${DECOY} },`),
       /SPREAD/],
     ["the class declared TWICE, where the last one wins at runtime",
-      (s) => s.replace("  clientOnboarding: clientOnboarding_v3,", "  clientOnboarding: clientOnboarding_v3,\n  clientOnboarding: clientOnboarding_v2,"),
+      (s) => s.replace(POINTER_LINE, `${POINTER_LINE}\n  clientOnboarding: ${DECOY},`),
       /2 times/],
   ];
 

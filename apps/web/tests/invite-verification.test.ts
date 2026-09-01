@@ -117,7 +117,12 @@ function source(relative: string): string {
 
 describe("the OTP purpose is not caller-controlled", () => {
   const form = source("../components/invite-accept-form.tsx");
-  const page = source("../app/invite/[token]/page.tsx");
+  // P4-3 MOVED this page into the `(entry)` route group. The URL it answers on
+  // is unchanged (a group adds no URL segment — proved from the tree by
+  // `tests/firm-scope-surfaces.test.ts`); only the file path moved, so only
+  // this line changes. Every assertion below is P4-1's, byte-untouched, and
+  // still reads the same source it always read.
+  const page = source("../app/(entry)/invite/[token]/page.tsx");
   const doors = source("../lib/identity/doors.ts");
 
   it("verifyOtp is called with a hard-coded type: \"invite\"", () => {

@@ -47,6 +47,10 @@
   --color-ring: var(--ring);
 
   --color-canvas: var(--canvas);
+  /* THE R2 / 裁-2 BRIDGE — see the `--identity-canvas` note in :root below for
+     why this line did not exist until P4-3 and what ruling put it here. It is
+     what makes `bg-identity-canvas` reachable by app/(entry)/layout.tsx. */
+  --color-identity-canvas: var(--identity-canvas);
   --color-shell: var(--shell);
   --color-surface: var(--surface);
   --color-surface-subtle: var(--surface-subtle);
@@ -143,11 +147,13 @@
   /* Founder-approved core palette (docs/01-TOKEN-CONTRACT.md §3.1) */
 
   /*
-   * `--identity-canvas` is DEFINED AND DELIBERATELY UNBRIDGED — it has no
-   * `--color-*` entry in @theme above, so no utility can reach it, and that is
-   * correct. The token contract of record (clarabook-frontend
-   * g5-design-system/docs/01-TOKEN-CONTRACT.md, read at `main` 2026-08-27)
-   * says so twice:
+   * `--identity-canvas` IS NOW BRIDGED — `--color-identity-canvas` in @theme
+   * above, reachable as `bg-identity-canvas`, consumed by exactly one file:
+   * `app/(entry)/layout.tsx`, the (entry) route group's ground.
+   *
+   * THE CONTRACT CITATIONS STAND, UNCHANGED. The token contract of record
+   * (clarabook-frontend g5-design-system/docs/01-TOKEN-CONTRACT.md, read at
+   * `main` 2026-08-27) still says both of these, and neither has been amended:
    *
    *   §3.1  `--ref-identity-canvas` | #F7F6F2 | "Approved Brand Guideline
    *         canvas; NOT the primary product canvas"
@@ -155,13 +161,39 @@
    *         restore it as the product page canvas without a new
    *         founder-approved impact note."
    *
-   * /login and /invite are product pages. Grounding them on this value is
-   * therefore a founder-approval item under §3.3 and §9, not a change-control
-   * note — recorded here so the next reader does not re-litigate it. Those two
-   * pages sit on `--shell`, which §3.1 defines as "Navigation and APPLICATION
-   * SHELL": an auth gate is the application's shell, and carries no content
-   * canvas at all. Bridging was also measured worse in the browser at 1440px —
-   * the card loses its edge on white — so both the contract and the eye agree.
+   * ONLY THE CONCLUSION INVERTS, AND IT INVERTS BY RULING — dated 2026-08-30
+   * (P4-3), on **R2 + 裁-2 4a** (`docs/plan/active/mohe-grill-rulings-2026-08-28.md`,
+   * demonstrated live against these real token values and ruled "yeah可以，没问
+   *题，听你的"). What this comment used to conclude was that grounding the entry
+   * faces on cream is a founder-approval item under §3.3 and §9. That reading of
+   * §3.3 was right, and **R2 + 裁-2 ARE that approval** — the entry faces are an
+   * "approved identity application", ruled as such, and §3.3's condition is
+   * satisfied rather than waived. This is deliberately NOT a restoration of
+   * cream as "the product page canvas": every product surface inside a firm
+   * still grounds on `--background`/`--shell`, and this token reaches exactly
+   * one layout serving four pre-firm faces.
+   *
+   * WHAT THE EARLIER NOTE GOT WRONG, recorded so the reasoning is auditable and
+   * not just overwritten: it argued the entry pages "sit on `--shell`, which
+   * §3.1 defines as 'Navigation and APPLICATION SHELL' — an auth gate is the
+   * application's shell". 裁-2 ruled the other way, on the design's own case:
+   * these entry faces are the product's identity moment, not its chrome. Its
+   * second argument — that bridging "was measured worse in the browser at
+   * 1440px, the card loses its edge on white" — was measuring a card with NO
+   * shadow. 裁-2 4a supplies the missing half: **card edge by shadow,
+   * decorative border only**, which is what `app/(entry)/layout.tsx` applies.
+   * The measurement that mattered is annex 1 §C.4: cream vs shell is a 3/255
+   * max-channel change (ratio 1.0082) — imperceptible — while cream vs white is
+   * 13/255. Cream reads only against the white card, which is precisely the
+   * composition the ruling approved.
+   *
+   * CONTRAST, MEASURED WITH THE PRODUCTION INSTRUMENT, NOT ASSUMED. Ten text
+   * pairs on this ground are pinned in `scripts/check-token-contrast.mjs` at a
+   * 4.5 bar (annex 1 §C.2 — tightest is `muted-foreground` at 4.636). No
+   * composited FOCUS row is pinned against it: the halo is still `/50` on this
+   * tip and fails 3:1 on every ground including white (§C.1), so a cream focus
+   * row would assert a composition that does not ship. P6-3 lands the 70% recut
+   * and those six rows together (裁-64 ④).
    */
   --identity-canvas: #f7f6f2;
   --canvas: #ffffff;

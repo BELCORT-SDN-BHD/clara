@@ -51,10 +51,12 @@
   the chart is the frame every number later lands in**, and invariant 10's *"refuse to code to a
   non-existent COA account"* makes a MISSING account a posting failure. That asymmetry governs
   D-8's trim posture: an unused account is tidy-able, a missing one blocks work.
-- **Book writes go only through named, audited Postgres functions** (invariant 10). Every
-  account this feature plants goes through `clara._upsert_account_core` — **never a hand-written
-  row, never a bulk INSERT** — inheriting the live ladder, the audit row, the `account.upserted`
-  event and `t_coa_stamp`'s firm stamping unchanged.
+- **Book writes go only through named, audited Postgres functions** (invariant 10). The APPLY
+  plant is the new, ungranted `clara._coa_plant_family`: one plain INSERT per account, carrying
+  the established child op receipt, audit row, `account.upserted` event and `t_coa_stamp` firm
+  stamping. It deliberately does **not** call the conflict-overwriting shared upsert core: a
+  concurrent human code collision refuses `chart_adoption_race` and rolls back the whole apply.
+  *(Round-3 accounting-correctness amendment, 2026-08-31; hard constraint 1.)*
 - **New authority arrives as sibling verbs** (TA-P1 C's rider). **No live body is rewritten**:
   §7's D1 inventory is EMPTY, and that is a design property, not luck.
 - **The agent proposes; a human applies.** Clara may already write one account unattended
@@ -180,17 +182,22 @@ onto a chart already holding a carried-down predecessor's accounts sprinkles the
 codes alongside the client's real ones: **two accounts for one meaning, and an error nowhere.**
 Refusing forces a human to decide which chart the client is on. Constraint 1.
 
-**The apply loop, and the op-key mechanic.** The door calls `clara._upsert_account_core` once per
-account of the kept families, ordered by `(sort_ordinal, account_code)`, with
-`p_ctx = jsonb_build_object('actor', c.actor, 'firm', c.firm)` — the same two keys the extracted
-core reads (`0119:707`). **The core `_reserve_op`s on its own `p_op_key`**, so the loop derives a
-deterministic child key per account: `p_op_key || ':' || account_code` — the
+**The apply loop, and the op-key mechanic.** The ungranted `clara._coa_plant_family` writes one
+account of the kept families at a time, ordered by `(sort_ordinal, account_code)`, with
+`p_ctx = jsonb_build_object('actor', c.actor, 'firm', c.firm)`. It `_reserve_op`s under the
+established `upsert_account` receipt namespace and derives a deterministic child key per account:
+`p_op_key || ':' || account_code` — the
 `0002_core_seed.sql:129` idiom, generalised. A replay with the same batch key short-circuits at
 rung 2; a replay that reached the loop finds every child key already reserved and returns each
 stored result. **A DIFFERENT batch key on the same client refuses at rung 5** — the cell that
 proves idempotence is the op-key path and not a silent no-op (Annex C cell 3). Then: the
 `coa_template_adoptions` row at `'adopted'` (or the client's `'proposed'` row moved there), one
 `_audit` row, one `account.chart_applied` event, `_finish_op`.
+
+The INSERT-only plant is load-bearing concurrency control. An unlocked empty-chart read can race
+an ordinary human `upsert_account` at the same code; delegating to `ON CONFLICT DO UPDATE` silently
+discarded the human's committed name. Plain INSERT linearizes the two possible orders: APPLY wins
+and the later human rename stands, or the human wins and APPLY refuses without durable side effects.
 
 ### D-4 · `add_coa_template_family(p_client, p_template, p_family, p_op_key)` — **NEEDS-VERB**
 
@@ -204,6 +211,20 @@ row's `families[]`.
 and without a named verb the recovery path is *"call `upsert_account` eleven times by hand"* —
 which loses the family attribution and makes §6's drift read show a phantom off-template block.
 The strict bulk door plus a narrow additive door beats one permissive door.
+
+**BLOCKER-1 (round-3, the lost-update wall on the SAME family).** The door takes the adoption
+row's lock FIRST — `select ... for update`
+(`0156_coa_apply_template.sql:945`) — and drives both the `family_already_applied`
+check and the additive `families[]` update from that locked read, never from a pre-lock record.
+Two arms, closed for two different reasons, exactly as the round-3 archaeology measured it: a
+caller-supplied `families[]` composed from the live `coa_template_adoptions.families` column
+(the round-2 self-reference) already serializes the DIFFERENT-families arm on its own —
+Postgres's own per-statement row lock on `UPDATE` re-evaluates that subquery against the
+post-commit row, so two callers adding two different families both land with no explicit prior
+lock needed. The explicit `for update` is what closes the SAME-family, different-op_key arm:
+without it, two callers naming the same family both read it absent, both pass the check, and the
+loser's plant re-inserts the winner's accounts. For the different-families arm the lock is
+defense-in-depth, not the sole cause of the fix.
 
 ---
 
@@ -413,7 +434,7 @@ gate over test data pretending to be a gate over the product.
 
 | Live body | Disposition |
 |---|---|
-| `clara._upsert_account_core(jsonb,…)` sha `5e0819f3…` | **CALLED, not replaced.** It is already an ungranted extracted core taking `p_ctx jsonb` (`0119:687-731`) — the seam this design needs already exists and F-A3 PR-1a built it |
+| `clara._upsert_account_core(jsonb,…)` sha `5e0819f3…` | **UNCHANGED and no longer called by APPLY.** Round-3 proved its `ON CONFLICT DO UPDATE` can overwrite a concurrently committed human name; APPLY changes its new plant, never this shared core |
 | `clara.upsert_account(…)` sha `45dc1f86…` | UNCHANGED — signature, floor, ACL, body |
 | `clara._agent_upsert_account_core(…)` sha `10a7e6ed…` | UNCHANGED |
 | `clara.wake_upsert_account(…)` sha `6a2809f9…` | UNCHANGED |
@@ -424,6 +445,12 @@ gate over test data pretending to be a gate over the product.
 
 **What the file DOES:** four new tables + their RLS/ACL blocks, six new functions, one
 allowlist row, one interview-workflow `_vN` (§D-7, riding PR-c's v4), and the seed rows as DATA.
+
+**SPLIT 2026-08-31 (the beta pivot, 裁-79/裁-80).** Only the interview-workflow `_vN` shipped
+(#463) — the four tables, six functions and allowlist row above are `wake_propose_coa_template_trim`'s
+own infrastructure and are **PARKED, not scheduled**: 裁-77's admitted backend list for the
+pivot does not name this verb. `coa-template-annexes.md:344` carries the trued scope table;
+law 28's mandatory cross-model pass attaches to the trim WHEN it is built, not to #463.
 
 **The four shas above are the PR-0 prestate pins**, re-derived by `pg_get_functiondef` on a
 fresh rig at the then-frontier — **never trusted from this document**, because the frontier moves
@@ -505,8 +532,8 @@ later**, and it costs nothing to cut the families that way today. Gate **Q8**.
 
 **F-T3's keying is not fought.** Treatments key on `coa_accounts(account_id, firm_id, client_id)`
 via `uq_coa_account_id_tenant` (`0058:56`; `tax-computation-gate-record.md:257-258`); every
-account this design plants goes through `_upsert_account_core` and gets a real `account_id` under
-that unique. **No second account identity, no parallel key.**
+account this design plants is a real `coa_accounts` row and gets a real `account_id` under that
+unique. **No second account identity, no parallel key.**
 
 ### What this design deliberately does NOT build
 

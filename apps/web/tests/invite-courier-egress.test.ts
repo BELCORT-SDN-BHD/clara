@@ -1,0 +1,899 @@
+// THE INVITE COURIER — WHAT MAY LEAVE THE PROCESS. P4-4, folding the independent
+// review of #455.
+//
+// Its sibling `tests/invite-courier.test.ts` is about ORDERING (which gate runs
+// before which door). This file is about EGRESS, and it has four subjects:
+//
+//   MEDIUM-2  THE LINK IS BUILT FROM THE ORIGIN THE WALL PROVED, never from
+//             `request.url`'s authority — which behind a proxy is a different,
+//             possibly internal and plain-HTTP value, in an email nobody can
+//             un-send.
+//   MEDIUM-3  NO UPSTREAM TEXT reaches a browser OR a log line. Resend was handed
+//             the full secret URL, so a provider's error string is a string that
+//             has been in the same process as both bearer factors.
+//   FIND-5(b) THE DOOR IS CALLED AS THE CALLER — asserted on the `opts.session`
+//             the courier actually passed, not on the mere fact of a call.
+//   FIND-5(a) THE ROUTE IS A WRAPPER AND NOTHING ELSE — pinned mechanically off
+//             comment-stripped source, so a body-replaced/comments-kept mutant
+//             cannot pass.
+
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
+
+import { handleInviteRequest, type InviteCourierLogEntry } from "../lib/members/courier";
+import { InviteMailFailure } from "../lib/members/invite-mail";
+import {
+  exportedHttpMethods,
+  moduleLevelDeclarations,
+  readCode,
+  reachableFrom,
+  stripComments,
+} from "../test/sourceOracle";
+import {
+  CALLER_BYTES,
+  deadSession,
+  deps,
+  FULL_ENV,
+  HASHED,
+  json,
+  observer,
+  OK_RECEIPT,
+  PLAINTEXT,
+  post,
+} from "./invite-courier-fixtures";
+import type { ServerSession } from "../lib/supabase/server-session";
+
+const WEB_ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..");
+
+// ---------------------------------------------------------------------------
+// MEDIUM-2 — THE PROVEN ORIGIN, AND ONLY IT
+// ---------------------------------------------------------------------------
+
+describe("the invitation link is built from the origin the wall PROVED", () => {
+  test("behind a proxy the mail carries the public origin, never request.url's internal authority", async () => {
+    // The exact deployment shape that makes the two diverge: the browser
+    // addressed `https://app.clara.example`, the proxy forwarded it under that
+    // name, and the worker sees its OWN internal, plain-HTTP URL. The wall passes
+    // on `x-forwarded-host`; the old code then built the link from `request.url`.
+    // THE ALLOWLIST IS WHAT LICENSES IT NOW (N3), not the forwarded header. The
+    // header is still present and still ignored; what makes this request pass is
+    // that the operator named `https://app.clara.example` in
+    // `CLARA_PUBLIC_ORIGINS`.
+    const obs = observer();
+    const { deps: d } = deps(
+      obs,
+      { resolve: OK_RECEIPT },
+      { env: { ...FULL_ENV, CLARA_PUBLIC_ORIGINS: "https://app.clara.example" } },
+    );
+    const request = new Request("http://internal.worker.local/api/invite", {
+      method: "POST",
+      headers: {
+        origin: "https://app.clara.example",
+        "x-forwarded-host": "app.clara.example",
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ email: "new@example.test", role: "bookkeeper" }),
+    });
+
+    const res = await handleInviteRequest(request, d);
+    assert.equal(res.status, 200);
+    assert.equal(obs.sends.length, 1);
+
+    const href = /href="([^"]+)"/.exec(obs.sends[0]!.html)?.[1];
+    assert.ok(href, "the mail must carry a link");
+    const url = new URL(href);
+    assert.equal(
+      url.origin,
+      "https://app.clara.example",
+      "THE LINK MUST CARRY THE ORIGIN THE WALL VALIDATED — not the authority the worker happens to see",
+    );
+    assert.ok(
+      !obs.sends[0]!.html.includes("internal.worker.local"),
+      "an internal authority must never appear anywhere in an email nobody can un-send",
+    );
+    assert.ok(!obs.sends[0]!.html.includes("http://"), "…and the link must not be downgraded to plain HTTP");
+  });
+
+  test("VACUITY CONTROL: the same request WOULD have yielded the internal authority", async () => {
+    // Without this, the cell above is equally green on a fixture where
+    // `request.url` and the Origin header happen to agree — which is every other
+    // cell in this suite. This measures the divergence itself.
+    const derivedFromRequestUrl = new URL("http://internal.worker.local/api/invite").origin;
+    assert.notEqual(
+      derivedFromRequestUrl,
+      "https://app.clara.example",
+      "the fixture no longer makes the two derivations differ — this control has stopped controlling",
+    );
+  });
+
+  test("N3: A SPOOFED FORWARDED HOST cannot make the courier mail both secrets to the attacker", async () => {
+    // CODEX ROUND 2, N3, END TO END. The wall used to treat `x-forwarded-host` as
+    // an independent peer of `Host`, so an attacker supplied BOTH it and the
+    // matching `Origin` and the proof came back carrying `attacker.example` — and
+    // this courier then built the invite URL from the proven origin and mailed it.
+    // The real Host here is Clara's; only the two attacker-controlled headers
+    // agree with each other.
+    const spoof = new Request("https://app.clara.example/api/invite", {
+      method: "POST",
+      headers: {
+        origin: "https://attacker.example",
+        host: "app.clara.example",
+        "x-forwarded-host": "attacker.example",
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ email: "victim@example.test", role: "admin" }),
+    });
+
+    for (const allowlist of ["", "https://app.clara.example"]) {
+      const obs = observer();
+      const { deps: d, calls } = deps(
+        obs,
+        { resolve: OK_RECEIPT },
+        { env: { ...FULL_ENV, CLARA_PUBLIC_ORIGINS: allowlist } },
+      );
+      const res = await handleInviteRequest(spoof.clone(), d);
+      assert.equal(res.status, 403, `accepted with CLARA_PUBLIC_ORIGINS=${JSON.stringify(allowlist)}`);
+      assert.equal((await json(res)).code, "cross_origin");
+      assert.equal(calls.length, 0, "nothing minted");
+      assert.equal(obs.sends.length, 0, "AND NOTHING MAILED — the link would have carried both bearer factors");
+    }
+  });
+
+  test("N3: an EXPLICITLY ALLOWED alias origin works — the allowlist is the licence", async () => {
+    // The positive control for the wall above, and the reason the allowlist
+    // exists at all: a deployment that genuinely answers on a second origin says
+    // so in configuration, and that origin then works even though the request URL
+    // reads as the internal hop.
+    const obs = observer();
+    const { deps: d } = deps(
+      obs,
+      { resolve: OK_RECEIPT },
+      { env: { ...FULL_ENV, CLARA_PUBLIC_ORIGINS: "https://app.clara.example, https://alias.clara.example" } },
+    );
+    const res = await handleInviteRequest(
+      new Request("http://internal.worker.local/api/invite", {
+        method: "POST",
+        headers: {
+          origin: "https://alias.clara.example",
+          "sec-fetch-site": "same-origin",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ email: "new@example.test", role: "bookkeeper" }),
+      }),
+      d,
+    );
+    assert.equal(res.status, 200);
+    const href = /href="([^"]+)"/.exec(obs.sends[0]!.html)?.[1];
+    assert.equal(new URL(href as string).origin, "https://alias.clara.example");
+  });
+
+  test("N3: a configured URL carrying a path is not an origin and cannot license the courier", async () => {
+    const obs = observer();
+    const { deps: d, calls, callerReads } = deps(
+      obs,
+      { resolve: OK_RECEIPT },
+      { env: { ...FULL_ENV, CLARA_PUBLIC_ORIGINS: "https://app.clara.example/invite" } },
+    );
+    const request = new Request("https://internal.worker.local/api/invite", {
+      method: "POST",
+      headers: {
+        origin: "https://app.clara.example",
+        "sec-fetch-site": "same-origin",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ email: "new@example.test", role: "bookkeeper" }),
+    });
+
+    const res = await handleInviteRequest(request, d);
+    assert.equal(res.status, 403);
+    assert.equal((await json(res)).code, "cross_origin");
+    assert.equal(callerReads.length, 0, "the refusal happens before the authority preflight");
+    assert.equal(obs.mintChecks.length, 0, "no directory read");
+    assert.equal(calls.length, 0, "no door call");
+    assert.equal(obs.mints.length, 0, "no provider mint");
+    assert.equal(obs.sends.length, 0, "no send");
+  });
+
+  test("a request whose Origin matches nothing addressed is still refused, and mails nothing", async () => {
+    const obs = observer();
+    const { deps: d, calls } = deps(obs, { resolve: OK_RECEIPT });
+    const request = new Request("http://internal.worker.local/api/invite", {
+      method: "POST",
+      headers: {
+        origin: "https://evil.example",
+        "x-forwarded-host": "app.clara.example",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ email: "a@b.test", role: "admin" }),
+    });
+    const res = await handleInviteRequest(request, d);
+    assert.equal(res.status, 403);
+    assert.equal(calls.length, 0);
+    assert.equal(obs.sends.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MEDIUM-3 — NO UPSTREAM TEXT IN A RESPONSE OR A LOG LINE
+// ---------------------------------------------------------------------------
+
+/** Every secret and near-secret this process holds during one invite. A thrown
+ *  value that carried ANY of them must not put it in a response or a log. */
+const SECRETS = [
+  PLAINTEXT,
+  HASHED,
+  FULL_ENV.SUPABASE_SERVICE_ROLE_KEY,
+  FULL_ENV.RESEND_API_KEY,
+  FULL_ENV.NEXT_PUBLIC_SUPABASE_URL,
+];
+
+function assertNoSecret(haystack: string, where: string): void {
+  for (const secret of SECRETS) {
+    assert.ok(!haystack.includes(secret), `${where} carried a secret-bearing value (${secret.slice(0, 12)}…)`);
+  }
+  assert.ok(!haystack.includes("api.resend.com"), `${where} carried the provider endpoint`);
+  assert.ok(!haystack.includes("PROVIDER-SAID"), `${where} relayed the provider's own words`);
+}
+
+describe("a provider's words never reach the browser or the log", () => {
+  /** A thrown value as hostile as a real one: it carries BOTH bearer factors, the
+   *  whole mail body, both keys and the provider's own sentence. Built from the
+   *  message the transport was actually handed, so nothing here is a lookalike. */
+  const hostileFromMessage = (m: { to: string; subject: string; html: string }): Error =>
+    new Error(
+      `PROVIDER-SAID 422 rejecting POST ${"https://api.resend.com/emails"} ` +
+        `auth=Bearer ${FULL_ENV.RESEND_API_KEY} service=${FULL_ENV.SUPABASE_SERVICE_ROLE_KEY} ` +
+        `project=${FULL_ENV.NEXT_PUBLIC_SUPABASE_URL} to=${m.to} body=${m.html}`,
+    );
+
+  test("A SEND THAT THROWS EVERYTHING: the response carries a code, a sentence and an id — nothing else", async () => {
+    const logs: InviteCourierLogEntry[] = [];
+    const obs = observer({ sendThrowsFrom: hostileFromMessage });
+    const { deps: d } = deps(obs, { resolve: OK_RECEIPT }, { logFailure: (e) => logs.push(e) });
+    const res = await handleInviteRequest(post({ email: "new@example.test", role: "admin" }), d);
+
+    assert.equal(res.status, 502);
+    const text = await res.clone().text();
+    const body = await json(res);
+    assert.equal(body.code, "mail_failed");
+    assert.equal(body.correlation_id, "corr-pinned");
+    assert.equal(body.detail, null, "the detail channel carries CLARA'S OWN text or nothing — never an upstream string");
+    assertNoSecret(text, "the response body");
+
+    // …AND THE LOG IS THE SAME PROMISE, kept by SHAPE. The entry has no free-text
+    // field at all, so there is nowhere for a provider's sentence to sit.
+    assert.equal(logs.length, 1, "exactly one line is logged — the seam fired");
+    assertNoSecret(JSON.stringify(logs[0]), "the log line");
+    assert.deepEqual(Object.keys(logs[0]!).sort(), ["code", "correlationId", "event", "failure", "providerStatus"]);
+    assert.equal(logs[0]!.correlationId, "corr-pinned", "the browser's id and the log's id are the SAME id");
+    assert.equal(logs[0]!.failure, "unclassified", "a thrown value this file does not recognise is classified, not quoted");
+  });
+
+  test("a CLASSIFIED transport failure logs its code and the provider's STATUS NUMBER", async () => {
+    // The positive control for the line above: when the transport threw its own
+    // typed failure, the log gets something genuinely useful — and still no text.
+    const logs: InviteCourierLogEntry[] = [];
+    const obs = observer({ sendThrows: new InviteMailFailure("provider_unauthorized", 401) });
+    const { deps: d } = deps(obs, { resolve: OK_RECEIPT }, { logFailure: (e) => logs.push(e) });
+    await handleInviteRequest(post({ email: "new@example.test", role: "admin" }), d);
+
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0]!.failure, "provider_unauthorized");
+    assert.equal(logs[0]!.providerStatus, 401);
+    assert.equal(logs[0]!.code, "mail_failed", "…alongside what the browser was told, so the two can be joined");
+  });
+
+  test("A MINT THAT THROWS EVERYTHING leaks nothing either", async () => {
+    const logs: InviteCourierLogEntry[] = [];
+    const obs = observer({
+      mintThrows: new Error(
+        `PROVIDER-SAID 500 at ${FULL_ENV.NEXT_PUBLIC_SUPABASE_URL} key=${FULL_ENV.SUPABASE_SERVICE_ROLE_KEY}`,
+      ),
+    });
+    const { deps: d } = deps(obs, { resolve: OK_RECEIPT }, { logFailure: (e) => logs.push(e) });
+    const res = await handleInviteRequest(post({ email: "new@example.test", role: "admin" }), d);
+
+    assert.equal(res.status, 502);
+    assertNoSecret(await res.clone().text(), "the mint-failure response");
+    assert.equal(logs.length, 1);
+    assertNoSecret(JSON.stringify(logs[0]), "the mint-failure log line");
+  });
+
+  test("A WIRE FAILURE FROM THE DOOR is not relayed either — its text carries the PostgREST URL", async () => {
+    const logs: InviteCourierLogEntry[] = [];
+    const obs = observer();
+    const { deps: d } = deps(
+      obs,
+      { reject: new Error(`PROVIDER-SAID fetch failed for ${FULL_ENV.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/rpc/invite_member`) },
+      { logFailure: (e) => logs.push(e) },
+    );
+    const res = await handleInviteRequest(post({ email: "a@b.test", role: "admin" }), d);
+
+    assert.equal(res.status, 502);
+    const text = await res.clone().text();
+    const body = await json(res);
+    assert.equal(body.code, "transport");
+    assert.equal(
+      body.message,
+      "the invite door could not be reached — nothing was created",
+      "CLARA'S OWN sentence, fixed — a governed REFUSAL is the only thing relayed verbatim",
+    );
+    assertNoSecret(text, "the door-transport response");
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0]!.code, "transport");
+  });
+
+  test("a capability check that throws logs and refuses without a word of it", async () => {
+    const logs: InviteCourierLogEntry[] = [];
+    const obs = observer({
+      canMintThrows: new Error(`PROVIDER-SAID 503 key=${FULL_ENV.SUPABASE_SERVICE_ROLE_KEY}`),
+    });
+    const { deps: d, calls } = deps(obs, { resolve: OK_RECEIPT }, { logFailure: (e) => logs.push(e) });
+    const res = await handleInviteRequest(post({ email: "a@b.test", role: "admin" }), d);
+
+    assert.equal(res.status, 503);
+    const text = await res.clone().text();
+    assert.equal((await json(res)).code, "mail_unavailable");
+    assertNoSecret(text, "the capability-check response");
+    assert.equal(calls.length, 0);
+    assert.equal(logs.length, 1);
+    assertNoSecret(JSON.stringify(logs[0]), "the capability-check log line");
+  });
+
+  test("VACUITY CONTROL: the hostile fixture really does carry every secret", async () => {
+    // If the thrown value stopped containing them, every assertion above would be
+    // trivially true — the classic absence-from-the-wrong-instrument green.
+    const obs = observer({ sendThrowsFrom: hostileFromMessage });
+    const { deps: d } = deps(obs, { resolve: OK_RECEIPT });
+    await handleInviteRequest(post({ email: "new@example.test", role: "admin" }), d);
+    assert.equal(obs.sends.length, 1, "the send half must have fired for a message to have been built");
+    const thrown = hostileFromMessage(obs.sends[0]!).message;
+    for (const secret of SECRETS) {
+      assert.ok(thrown.includes(secret), `the hostile fixture no longer carries ${secret.slice(0, 12)}…`);
+    }
+    assert.ok(thrown.includes("PROVIDER-SAID"), "the fixture no longer carries the provider's own words");
+  });
+
+  test("the GOVERNED refusal is still relayed VERBATIM — the wall is on upstream text, not on the DB's voice", async () => {
+    const { DoorRefusal } = await import("../lib/members/doors");
+    const obs = observer();
+    const { deps: d } = deps(obs, {
+      reject: new DoorRefusal("CLR10", "an invite is already pending for this email", {
+        reason: null,
+        status: 400,
+        pgCode: "CLR10",
+        codeSource: "sqlstate",
+      }),
+    });
+    const res = await handleInviteRequest(post({ email: "a@b.test", role: "admin" }), d);
+    const body = await json(res);
+    assert.equal(res.status, 400);
+    assert.equal(
+      (body.refusal as Record<string, unknown>).message,
+      "an invite is already pending for this email",
+      "the DB writes its refusals to be read — that text is Clara's, and it is relayed unchanged",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIND-5(b) — THE DOOR IS CALLED AS THE CALLER
+// ---------------------------------------------------------------------------
+
+describe("the door and the firm read run on the CALLER'S OWN session", () => {
+  test("the door's opts.session yields exactly the bytes step 3 resolved", async () => {
+    const obs = observer();
+    const { deps: d, calls, firmReads } = deps(obs, { resolve: OK_RECEIPT });
+    await handleInviteRequest(post({ email: "a@b.test", role: "admin" }), d);
+
+    assert.equal(calls.length, 1);
+    const passed = await calls[0]!.opts.session.getAccessToken();
+    assert.equal(
+      passed,
+      CALLER_BYTES,
+      "THE DOOR MUST RUN AS THE CALLER — `_human_ctx` performs the authority check against whoever these bytes are",
+    );
+    assert.equal(firmReads[0], CALLER_BYTES, "…and the courtesy read is the same principal, not a service identity");
+  });
+
+  test("THE SESSION IS RESOLVED EXACTLY ONCE, and every seam gets THAT resolution", async () => {
+    // A-THEN-B (Codex round 2's requested cell). The resolver hands back session
+    // A on its first call and session B on any later one. If the courier resolved
+    // more than once — a second `resolveServerSession()`, or an accessor that
+    // re-reads the cookie inside `pgrestRpc` — some seam would receive B, and the
+    // token the session check inspected would not be the token the door ran on.
+    // That is the very drift P4-2's `fixedTokenAccessor` fold closed, and it
+    // matters most here because what follows is a governed write and an
+    // irreversible email.
+    let resolutions = 0;
+    const A = "session-A-bytes";
+    const B = "session-B-bytes";
+    const obs = observer();
+    const { deps: d, calls, firmReads, callerReads } = deps(
+      obs,
+      { resolve: OK_RECEIPT },
+      {
+        resolveSession: async (): Promise<ServerSession | null> => {
+          resolutions += 1;
+          return { accessToken: resolutions === 1 ? A : B, subject: "s-1" };
+        },
+      },
+    );
+    const res = await handleInviteRequest(post({ email: "new@example.test", role: "bookkeeper" }), d);
+
+    assert.equal(res.status, 200, "the request must SUCCEED, or the seams below were never reached");
+    assert.equal(resolutions, 1, "the session was resolved more than once — the seams can now disagree");
+    assert.equal(callerReads[0], A, "the AUTHORITY PREFLIGHT ran on A");
+    assert.equal(await calls[0]!.opts.session.getAccessToken(), A, "…the DOOR ran on A");
+    assert.equal(firmReads[0], A, "…and the courtesy read ran on A too");
+    assert.notEqual(A, B, "VACUITY GUARD: the two sessions must actually differ");
+  });
+
+  test("ALTERNATE PRINCIPAL: a different resolved session reaches the door as THAT one", async () => {
+    // The control that makes the pin above non-vacuous: it tracks the session
+    // rather than asserting a constant that happens to match. A courier that
+    // handed the door a second, differently-resolved accessor — a service key, a
+    // re-read cookie — would fail one of the two.
+    const other = "a-different-caller-entirely";
+    const obs = observer();
+    const { deps: d, calls, firmReads } = deps(
+      obs,
+      { resolve: OK_RECEIPT },
+      { resolveSession: async (): Promise<ServerSession | null> => ({ accessToken: other, subject: "s-2" }) },
+    );
+    await handleInviteRequest(post({ email: "a@b.test", role: "admin" }), d);
+
+    assert.equal(await calls[0]!.opts.session.getAccessToken(), other);
+    assert.equal(firmReads[0], other);
+    assert.notEqual(other, CALLER_BYTES, "VACUITY GUARD: the two fixtures must actually differ");
+  });
+
+  test("COMBINED: no session AND no config → 401, no env names, and zero calls of any kind", async () => {
+    // The session gate is FIRST, so an unauthenticated prober cannot learn
+    // whether this deployment has mail configured — the whole reason step 4 sits
+    // after step 3. Asserted together because the ordering is the claim.
+    const obs = observer();
+    const { deps: d, calls, firmReads } = deps(
+      obs,
+      { resolve: OK_RECEIPT },
+      { resolveSession: deadSession, env: { CLARA_ALLOW_INSECURE_LOOPBACK: "1" } },
+    );
+    const res = await handleInviteRequest(post({ email: "a@b.test", role: "admin" }), d);
+
+    assert.equal(res.status, 401);
+    const text = await res.clone().text();
+    assert.equal((await json(res)).code, "no_session");
+    for (const name of ["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "RESEND_API_KEY", "INVITE_MAIL_FROM"]) {
+      assert.ok(!text.includes(name), `an unauthenticated caller was told about ${name}`);
+    }
+    assert.equal(calls.length, 0, "no door call");
+    assert.equal(obs.mintChecks.length, 0, "no directory read");
+    assert.equal(obs.mints.length, 0, "no mint");
+    assert.equal(obs.sends.length, 0, "no send");
+    assert.equal(firmReads.length, 0, "no courtesy read");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIND-5(a) — THE ROUTE IS A WRAPPER, PINNED MECHANICALLY
+//
+// The scope-exemption evidence in `tests/firm-scope-surfaces.test.ts` is about
+// what the route does NOT call. This pins what it DOES: the shipped POST really
+// is `handleInviteRequest`, so every cell above is testing production's own path
+// rather than a library the route might have stopped using.
+// ---------------------------------------------------------------------------
+
+/**
+ * THE IMPORTED BINDING'S LOCAL NAME, or null. Codex round 2, N4.
+ *
+ * `import { handleInviteRequest } from "…"` and
+ * `import { handleInviteRequest as courier } from "…"` both bring the real
+ * function in, but under DIFFERENT local names — and it is the LOCAL name that a
+ * call site must use to be calling the import. Matching the EXPORTED name against
+ * the callee is the review-law-3 mistake: it reads a spelling that the two ends
+ * are not obliged to share, so `import { handleInviteRequest as x }` plus a local
+ * `function handleInviteRequest()` decoy satisfies both halves while the shipped
+ * POST calls the decoy.
+ */
+const COURIER_MODULE = "@/lib/members/courier";
+
+function sourceFile(code: string): ts.SourceFile {
+  return ts.createSourceFile("route.ts", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+}
+
+function importedLocalName(code: string, exported: string, moduleSpecifier = COURIER_MODULE): string | null {
+  for (const statement of sourceFile(code).statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (statement.moduleSpecifier.text !== moduleSpecifier || statement.importClause?.isTypeOnly) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const specifier of bindings.elements) {
+      if (specifier.isTypeOnly) continue;
+      const imported = specifier.propertyName?.text ?? specifier.name.text;
+      if (imported === exported) return specifier.name.text;
+    }
+  }
+  return null;
+}
+
+function hasExportModifier(node: ts.Node): boolean {
+  return ts.canHaveModifiers(node) && ts.getModifiers(node)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) === true;
+}
+
+function bindingNames(name: ts.BindingName): string[] {
+  if (ts.isIdentifier(name)) return [name.text];
+  return name.elements.flatMap((element) => ts.isOmittedExpression(element) ? [] : bindingNames(element.name));
+}
+
+/** Named structural reasons why the route is not the one-call courier wrapper. */
+function routeDelegationIssues(code: string): string[] {
+  const file = sourceFile(code);
+  const issues: string[] = [];
+  const local = importedLocalName(code, "handleInviteRequest");
+  if (local === null) issues.push("missing_exact_courier_import");
+
+  const post = file.statements.find(
+    (statement): statement is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(statement) && statement.name?.text === "POST" && hasExportModifier(statement),
+  );
+  if (!post?.body) return [...issues, "missing_direct_post_body"];
+
+  const routeConfigDomains = new Map<string, ReadonlySet<string>>([
+    ["runtime", new Set(["nodejs"])],
+    ["dynamic", new Set(["auto", "force-dynamic", "error", "force-static"])],
+  ]);
+  const runtimeValueImports = (statement: ts.ImportDeclaration): ts.ImportSpecifier[] | null => {
+    const clause = statement.importClause;
+    if (clause === undefined) return null;
+    if (clause.isTypeOnly) return [];
+    if (clause.name !== undefined) return null;
+    const bindings = clause.namedBindings;
+    if (bindings === undefined) return null;
+    if (!ts.isNamedImports(bindings)) return null;
+    // `import {} from "./x"` still evaluates ./x. Only a non-empty named list
+    // whose every specifier is type-only may join a whole-clause `import type`.
+    if (bindings.elements.length === 0) return null;
+    return bindings.elements.filter((element) => !element.isTypeOnly);
+  };
+  let sawExactCourierValueImport = false;
+  for (const statement of file.statements) {
+    if (statement === post) continue;
+    if (ts.isImportDeclaration(statement)) {
+      const values = runtimeValueImports(statement);
+      const exactCourierValueImport =
+        values !== null &&
+        values.length === 1 &&
+        ts.isStringLiteral(statement.moduleSpecifier) &&
+        statement.moduleSpecifier.text === COURIER_MODULE &&
+        (values[0]?.propertyName?.text ?? values[0]?.name.text) === "handleInviteRequest";
+      if (values !== null && values.length === 0) continue;
+      if (exactCourierValueImport && !sawExactCourierValueImport) {
+        sawExactCourierValueImport = true;
+        continue;
+      }
+      issues.push("unexpected_top_level_statement");
+      continue;
+    }
+    if (
+      ts.isVariableStatement(statement) &&
+      hasExportModifier(statement) &&
+      (statement.declarationList.flags & ts.NodeFlags.Const) !== 0 &&
+      statement.declarationList.declarations.length === 1
+    ) {
+      const declaration = statement.declarationList.declarations[0];
+      if (declaration !== undefined && ts.isIdentifier(declaration.name)) {
+        const domain = routeConfigDomains.get(declaration.name.text);
+        const initializer = declaration.initializer;
+        // Intentionally stricter than a recursive initializer walk: only a ROOT
+        // StringLiteral can be configuration, so every call/new/await/template
+        // expression fails closed without needing an effect classifier.
+        if (
+          domain !== undefined &&
+          initializer !== undefined &&
+          ts.isStringLiteral(initializer) &&
+          domain.has(initializer.text)
+        ) continue;
+      }
+    }
+    issues.push("unexpected_top_level_statement");
+  }
+
+  const parameter = post.parameters[0];
+  if (post.parameters.length !== 1 || parameter === undefined || !ts.isIdentifier(parameter.name) || parameter.name.text !== "request") {
+    issues.push("post_does_not_take_request");
+  }
+
+  if (local !== null) {
+    let shadowsImport = false;
+    const visitDeclaration = (node: ts.Node): void => {
+      if (
+        (ts.isVariableDeclaration(node) || ts.isParameter(node)) && bindingNames(node.name).includes(local)
+      ) {
+        shadowsImport = true;
+      } else if (
+        (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name?.text === local
+      ) {
+        shadowsImport = true;
+      }
+      ts.forEachChild(node, visitDeclaration);
+    };
+    ts.forEachChild(post.body, visitDeclaration);
+    if (shadowsImport) issues.push("post_shadows_courier_import");
+  }
+
+  const calls: ts.CallExpression[] = [];
+  const visitCall = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) calls.push(node);
+    ts.forEachChild(node, visitCall);
+  };
+  ts.forEachChild(post.body, visitCall);
+
+  const onlyStatement = post.body.statements.length === 1 ? post.body.statements[0] : undefined;
+  const expression = onlyStatement && ts.isReturnStatement(onlyStatement) ? onlyStatement.expression : undefined;
+  let exactDelegation = false;
+  if (local !== null && expression !== undefined && ts.isCallExpression(expression)) {
+    const argument = expression.arguments[0];
+    exactDelegation =
+      ts.isIdentifier(expression.expression) &&
+      expression.expression.text === local &&
+      expression.arguments.length === 1 &&
+      argument !== undefined &&
+      ts.isIdentifier(argument) &&
+      argument.text === "request";
+  }
+  if (!exactDelegation) issues.push("post_is_not_one_exact_delegation");
+  if (calls.length !== 1 || !exactDelegation) issues.push("post_has_additional_call_side_effect");
+  return issues;
+}
+
+describe("app/api/invite/route.ts is a wrapper around handleInviteRequest and nothing else", () => {
+  const ROUTE = "app/api/invite/route.ts";
+  const code = readCode(join(WEB_ROOT, ROUTE)).code;
+  // STRINGS BLANKED AS WELL AS COMMENTS (N4). `readCode`'s default keeps string
+  // literals, so a reachable `const decoy = "handleInviteRequest(request)"` in the
+  // POST body satisfied the delegation regex without calling anything. Blanking
+  // is length-preserving, so offsets and reachability are unaffected.
+  const executable = readCode(join(WEB_ROOT, ROUTE), { blankStrings: true }).code;
+
+  test("it VALUE-imports handleInviteRequest from the EXACT courier module", () => {
+    assert.ok(importedLocalName(code, "handleInviteRequest") !== null, `${ROUTE} does not value-import handleInviteRequest`);
+  });
+
+  test("the EXECUTABLE POST calls THE IMPORTED BINDING ITSELF — not a name that merely matches", () => {
+    // THREE THINGS, and the third is the one review law 3 demands: the callee is
+    // the local name the import introduced, AND nothing in this module declares
+    // that name itself, so the identifier the call resolves to can only be the
+    // import.
+    const local = importedLocalName(code, "handleInviteRequest");
+    assert.ok(local !== null, "no value import to bind to");
+    const reachable = reachableFrom({ path: ROUTE, code: executable }, "POST");
+    assert.ok(reachable !== null, `${ROUTE} exports no POST at all`);
+    assert.match(
+      reachable,
+      new RegExp(`\\b${local}\\s*\\(\\s*request\\s*\\)`),
+      "POST must hand the REQUEST to the imported courier — not a rebuilt one, and not nothing",
+    );
+    assert.equal(
+      moduleLevelDeclarations({ path: ROUTE, code }).some((d) => d.name === local),
+      false,
+      `${ROUTE} declares its own ${local}, which would SHADOW the import the assertion above just matched`,
+    );
+  });
+
+  test("POST is the ONLY verb exported — a second handler is a second, unguarded path", () => {
+    assert.deepEqual(exportedHttpMethods({ path: ROUTE, code }), ["POST"]);
+  });
+
+  test("POST is structurally one exact delegation, with no shadow and no additional call side effect", () => {
+    assert.deepEqual(routeDelegationIssues(readFileSync(join(WEB_ROOT, ROUTE), "utf8")), []);
+  });
+
+  test("RED-BEFORE: module-load side effects are outside POST and still fail the wrapper allowlist", () => {
+    const raw = readFileSync(join(WEB_ROOT, ROUTE), "utf8");
+    const mutants: Record<string, string> = {
+      "top-level fetch": `${raw}\nvoid fetch("https://attacker.example/observe");\n`,
+      "top-level console call": `${raw}\nconsole.log("route loaded");\n`,
+      "side-effect-only import": `import "@/lib/observe-route-load";\n${raw}`,
+    };
+    for (const [shape, mutant] of Object.entries(mutants)) {
+      assert.ok(
+        routeDelegationIssues(mutant).includes("unexpected_top_level_statement"),
+        `${shape} ran outside POST but the route wrapper pin did not refuse it`,
+      );
+    }
+  });
+
+  test("RED-BEFORE N7: runtime and dynamic are independent literal configs, while effectful initializers fail closed", () => {
+    const wrapper =
+      'import { handleInviteRequest } from "@/lib/members/courier";\n' +
+      "export async function POST(request: Request): Promise<Response> {\n" +
+      "  return handleInviteRequest(request);\n" +
+      "}\n";
+    const bothApproved =
+      'export const runtime = "nodejs";\n' +
+      'export const dynamic = "force-dynamic";\n' +
+      wrapper;
+    assert.deepEqual(
+      routeDelegationIssues(bothApproved),
+      [],
+      "runtime and dynamic are two independent approved config exports, not a one-config total",
+    );
+    assert.deepEqual(
+      routeDelegationIssues('import type { X } from "./x";\n' + wrapper),
+      [],
+      "a genuinely type-only import does not evaluate its module at runtime",
+    );
+
+    const mutants: Record<string, string> = {
+      "call initializer": "export const runtime = sideEffect();\n" + wrapper,
+      "new initializer": "export const runtime = new RuntimeChoice();\n" + wrapper,
+      "await initializer": "export const runtime = await runtimeChoice;\n" + wrapper,
+      "template-expression initializer": "export const runtime = `${runtimeChoice}`;\n" + wrapper,
+      "JSON value import": 'import data from "./x.json" with { type: "json" };\n' + wrapper,
+      "bare side-effect import": 'import "./x";\n' + wrapper,
+      "empty named side-effect import": 'import {} from "./x";\n' + wrapper,
+      "duplicate exact courier import":
+        'import { handleInviteRequest } from "@/lib/members/courier";\n' + wrapper,
+    };
+    for (const [shape, mutant] of Object.entries(mutants)) {
+      assert.ok(
+        routeDelegationIssues(mutant).includes("unexpected_top_level_statement"),
+        `${shape} escaped the route-file allowlist`,
+      );
+    }
+  });
+
+  test("RED-BEFORE: an import from the WRONG MODULE fails identity even when every spelling matches", () => {
+    const mutant = readFileSync(join(WEB_ROOT, ROUTE), "utf8").replace(COURIER_MODULE, "@/lib/members/decoy-courier");
+    assert.equal(importedLocalName(mutant, "handleInviteRequest"), null);
+    assert.ok(routeDelegationIssues(mutant).includes("missing_exact_courier_import"));
+  });
+
+  test("RED-BEFORE: a POST-local shadow fails before its matching call can impersonate the import", () => {
+    const mutant =
+      'import { handleInviteRequest } from "@/lib/members/courier";\n' +
+      "export async function POST(request: Request): Promise<Response> {\n" +
+      "  const handleInviteRequest = async (_request: Request) => new Response(null);\n" +
+      "  return handleInviteRequest(request);\n}\n";
+    assert.ok(routeDelegationIssues(mutant).includes("post_shadows_courier_import"));
+  });
+
+  test("RED-BEFORE: an extra fetch before delegation fails the no-additional-side-effects pin", () => {
+    const mutant = readFileSync(join(WEB_ROOT, ROUTE), "utf8").replace(
+      "  return handleInviteRequest(request);",
+      '  await fetch("https://attacker.example/observe");\n  return handleInviteRequest(request);',
+    );
+    assert.ok(routeDelegationIssues(mutant).includes("post_has_additional_call_side_effect"));
+  });
+
+  test("RED-BEFORE: a reachable STRING decoy no longer satisfies the delegation pin", () => {
+    // The decoy is a real, reachable statement in the POST body whose TEXT is the
+    // call the pin looks for. Against comment-stripped-but-string-keeping source
+    // it passes; against string-blanked source it does not.
+    //
+    // TRUED for #477's oracle: `reachableFrom` now blanks strings UNCONDITIONALLY
+    // inside its own implementation — the caller-supplied `blankStrings` option no
+    // longer exists as a lever on ITS output, so there is no "naive" `reachableFrom`
+    // call left to demonstrate. The naive arm below reads `stripComments` directly
+    // (comments stripped, strings kept — the raw, pre-reachability view an older,
+    // cruder text search would have used) to keep proving the SAME point: a decoy
+    // sitting inside a string literal is visible under that naive view and would
+    // fool a search that never separates "string contents" from "code".
+    const raw = readFileSync(join(WEB_ROOT, ROUTE), "utf8");
+    const mutant = raw.replace(
+      /export async function POST\([\s\S]*$/,
+      'export async function POST(request: Request): Promise<Response> {\n' +
+        '  const note = "handleInviteRequest(request)";\n' +
+        '  return new Response(note, { status: 204 });\n}\n',
+    );
+    assert.notEqual(mutant, raw, "the mutation did not apply");
+
+    const naive = stripComments({ path: ROUTE, code: mutant }).code;
+    assert.match(
+      naive,
+      /handleInviteRequest\s*\(\s*request\s*\)/,
+      "THE OLD INSTRUMENT PASSES THE DECOY — which is why the pin reads string-blanked source",
+    );
+
+    const sound = reachableFrom(stripComments({ path: ROUTE, code: mutant }), "POST");
+    assert.ok(sound !== null);
+    assert.ok(
+      !/handleInviteRequest\s*\(\s*request\s*\)/.test(sound),
+      "THE PIN IS VACUOUS: a POST whose only mention of the courier is inside a string still satisfies it",
+    );
+  });
+
+  test("RED-BEFORE: an ALIASED import plus a local decoy of the same name is caught", () => {
+    // The substitution N4 names: the module still imports the real function (so
+    // the value-import assertion passes) and still contains a call spelled
+    // `handleInviteRequest(request)` (so a name-matching delegation assertion
+    // passes) — but that call resolves to a LOCAL decoy, and the import is bound
+    // to `courier`, which nothing invokes.
+    const mutant =
+      'import { handleInviteRequest as courier } from "@/lib/members/courier";\n' +
+      "async function handleInviteRequest(request: Request): Promise<Response> {\n" +
+      "  return new Response(null, { status: 204 });\n}\n" +
+      "export async function POST(request: Request): Promise<Response> {\n" +
+      "  return handleInviteRequest(request);\n}\n";
+
+    const local = importedLocalName(mutant, "handleInviteRequest");
+    assert.equal(local, "courier", "the import's LOCAL name is what a call must use");
+
+    const reachable = reachableFrom({ path: ROUTE, code: mutant }, "POST");
+    assert.ok(reachable !== null);
+    assert.ok(
+      !new RegExp(`\\b${local}\\s*\\(\\s*request\\s*\\)`).test(reachable),
+      "THE PIN IS VACUOUS: the aliased import is never called and the pin did not notice",
+    );
+    assert.equal(
+      moduleLevelDeclarations({ path: ROUTE, code: mutant }).some((d) => d.name === "handleInviteRequest"),
+      true,
+      "…and the shadowing local decoy is visible to the declaration walk that backs the assertion",
+    );
+  });
+
+  test("RED-BEFORE: every EXPORT SHAPE of a second verb is seen (P4-2's oracle, extended here)", () => {
+    // `export { x as GET }`, `export let GET` and `export var GET` were invisible
+    // to the census before P4-2's round-3 fix; this branch now sits on it, so the
+    // repair is exercised from this route's own pin rather than trusted.
+    const raw = readFileSync(join(WEB_ROOT, ROUTE), "utf8");
+    const shapes: Record<string, string> = {
+      "aliased export clause": "\nasync function rawGet(): Promise<Response> { return new Response(null); }\nexport { rawGet as GET };\n",
+      "quoted aliased export clause": '\nasync function rawGet(): Promise<Response> { return new Response(null); }\nexport { rawGet as "GET" };\n',
+      "escaped quoted aliased export clause": '\nasync function rawGet(): Promise<Response> { return new Response(null); }\nexport { rawGet as "G\\u0045T" };\n',
+      "export let": "\nexport let GET = async (): Promise<Response> => new Response(null);\n",
+      "export var": "\nexport var GET = async (): Promise<Response> => new Response(null);\n",
+      "plain function": "\nexport async function GET(): Promise<Response> { return new Response(null); }\n",
+    };
+    for (const [shape, addition] of Object.entries(shapes)) {
+      assert.deepEqual(
+        exportedHttpMethods(stripComments({ path: ROUTE, code: raw + addition })).sort(),
+        ["GET", "POST"],
+        `a second verb added as a ${shape} was invisible to the census`,
+      );
+    }
+  });
+
+  test("RED-BEFORE: a body-replaced, comments-KEPT mutant fails the delegation pin", () => {
+    // THE MUTANT THIS PIN EXISTS TO CATCH, and the reason the oracle strips
+    // comments before looking: the route file's long header NAMES
+    // `handleInviteRequest` in prose, so a POST that no longer calls it still
+    // satisfies a raw-text search of the file. Both halves are measured here —
+    // the naive instrument passes the mutant, this pin REDs it.
+    const raw = readFileSync(join(WEB_ROOT, ROUTE), "utf8");
+    const mutant = raw.replace(
+      /export async function POST\([\s\S]*$/,
+      "export async function POST(request: Request): Promise<Response> {\n  return new Response(null, { status: 204 });\n}\n",
+    );
+    assert.notEqual(mutant, raw, "the mutation did not apply — this control proves nothing");
+    assert.ok(
+      mutant.includes("handleInviteRequest"),
+      "THE NAIVE INSTRUMENT PASSES THE MUTANT: the header still names the courier, which is exactly why raw text is not evidence",
+    );
+
+    const mutantReachable = reachableFrom(stripComments({ path: ROUTE, code: mutant }), "POST");
+    assert.ok(mutantReachable !== null, "the mutant still exports POST");
+    assert.ok(
+      !/handleInviteRequest\s*\(\s*request\s*\)/.test(mutantReachable),
+      "THE PIN IS VACUOUS: a POST that returns 204 without calling the courier still satisfies it",
+    );
+  });
+
+  test("RED-BEFORE: a mutant that adds a SECOND verb fails the exported-methods pin", () => {
+    // A GET on a mutation route is link-prefetchable and crawlable — the route's
+    // own header names that as the reason it exports POST only.
+    const raw = readFileSync(join(WEB_ROOT, ROUTE), "utf8");
+    const mutant = `${raw}\nexport async function GET(): Promise<Response> {\n  return new Response(null);\n}\n`;
+    assert.deepEqual(
+      exportedHttpMethods(stripComments({ path: ROUTE, code: mutant })).sort(),
+      ["GET", "POST"],
+      "the methods pin cannot see a second exported verb",
+    );
+  });
+});

@@ -166,6 +166,65 @@ console.log("checkTestManifest — duplicate line:");
 }
 
 // ---------------------------------------------------------------------------
+// (5b) FOLD (Codex round-3, LOW manifest ordering drift) — THE POSITIVE
+//      CONTROL for ordering: a deliberately out-of-order fixture must make
+//      the gate RED, proven by actually calling checkTestManifest() rather
+//      than merely asserting the code compiles — the same discipline (3)
+//      above already applies to the missing-file check.
+// ---------------------------------------------------------------------------
+console.log("checkTestManifest — ORDERING positive control:");
+{
+  const root = freshFixture();
+  write(root, "lib/b.test.ts", "// t");
+  write(root, "lib/a.test.ts", "// t");
+  // Listed in the WRONG order — "b" before "a".
+  const manifestText = "lib/b.test.ts\nlib/a.test.ts\n";
+
+  const { outOfOrder } = checkTestManifest(root, manifestText);
+  rm(root);
+
+  testCase("an out-of-order adjacent pair is caught by name (RED)", () => {
+    if (outOfOrder.length !== 1 || outOfOrder[0].before !== "lib/b.test.ts" || outOfOrder[0].after !== "lib/a.test.ts") {
+      throw new Error(`expected one pair {before: "lib/b.test.ts", after: "lib/a.test.ts"}, got ${JSON.stringify(outOfOrder)}`);
+    }
+  });
+}
+{
+  const root = freshFixture();
+  write(root, "lib/a.test.ts", "// t");
+  write(root, "lib/b.test.ts", "// t");
+  // The SAME two files, correctly ordered this time.
+  const manifestText = "lib/a.test.ts\nlib/b.test.ts\n";
+
+  const { outOfOrder } = checkTestManifest(root, manifestText);
+  rm(root);
+
+  testCase("restoring alphabetical order clears the finding", () => {
+    if (outOfOrder.length !== 0) throw new Error(`expected zero out-of-order pairs, got ${JSON.stringify(outOfOrder)}`);
+  });
+}
+{
+  // A directory-name PREFIX collision — the exact real-world shape this
+  // fold exists for (`firm/` vs `firm-admin/`, `/` = U+002F > `-` = U+002D).
+  const root = freshFixture();
+  write(root, "components/firm/x.test.ts", "// t");
+  write(root, "components/firm-admin/y.test.ts", "// t");
+  const wrongOrder = "components/firm/x.test.ts\ncomponents/firm-admin/y.test.ts\n";
+  const rightOrder = "components/firm-admin/y.test.ts\ncomponents/firm/x.test.ts\n";
+
+  const wrong = checkTestManifest(root, wrongOrder);
+  const right = checkTestManifest(root, rightOrder);
+  rm(root);
+
+  testCase("a directory-name prefix collision (firm/ after firm-admin/) is caught", () => {
+    if (wrong.outOfOrder.length !== 1) throw new Error(`expected one out-of-order pair, got ${JSON.stringify(wrong.outOfOrder)}`);
+  });
+  testCase("the correctly-ordered prefix-collision fixture is clean", () => {
+    if (right.outOfOrder.length !== 0) throw new Error(`expected zero out-of-order pairs, got ${JSON.stringify(right.outOfOrder)}`);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // (6) THE REAL GATE, THE REAL CLI, THE REAL TREE — spawns
 //     check-test-manifest.mjs exactly as `pnpm lint` does (not the pure
 //     function) against apps/web's actual test/manifest.txt and actual test

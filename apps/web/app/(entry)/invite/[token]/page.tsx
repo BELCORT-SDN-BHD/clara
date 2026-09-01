@@ -16,10 +16,27 @@ export async function generateMetadata() {
 }
 
 /**
- * "/invite/[token]" — the invite-accept flow, and the ONLY account-creation
- * surface in this app (no self-serve signup route exists anywhere;
- * docs/plan/active/frontend-handoff-2026-08-23.md §0.4). Public
- * (proxy.ts allowlists "/invite").
+ * "/invite/[token]" — the invite-accept flow: how a person joins an EXISTING
+ * firm. Public (proxy.ts allowlists "/invite").
+ *
+ * MOVED into the `(entry)` route group by P4-3. A route group adds no URL
+ * segment, so this page still answers on `/invite/:token` — every invite link
+ * already sitting in someone's inbox, and the Supabase email template that
+ * builds them, are byte-untouched by the move.
+ * `tests/firm-scope-surfaces.test.ts` asserts that URL from the tree.
+ * The `<main>`, the ground and the card shadow moved up to
+ * `app/(entry)/layout.tsx`; nothing about this journey's behaviour changed, and
+ * P4-1's own suites still drive it end to end.
+ *
+ * *** WHAT "ONLY" USED TO SAY HERE, AND WHY IT NO LONGER DOES. This comment read
+ * "the ONLY account-creation surface in this app (no self-serve signup route
+ * exists anywhere; docs/plan/active/frontend-handoff-2026-08-23.md §0.4)". The
+ * handoff citation stands and is unchanged; only its conclusion inverts, by
+ * ruling. **裁-57 (2026-08-30 evening)** — beta is a PAID launch, and signup is
+ * tier-3 self-serve: sign up, pay through Stripe, start your own firm. "Invite"
+ * now means exactly what THIS page does: an RBAC membership invite INTO a firm
+ * that already exists. There are two account-creation surfaces now — this one
+ * and `app/(entry)/signup/page.tsx` — and they are for two different people. ***
  *
  * `token` is the Supabase `token_hash` from the invite email link. This
  * app's invite email template (owner-configured in the Supabase dashboard,
@@ -71,11 +88,5 @@ export default async function InvitePage({
   const raw = query[INVITE_CLARA_TOKEN_PARAM];
   const inviteToken = typeof raw === "string" && raw !== "" ? raw : null;
 
-  return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-2 bg-shell p-6">
-      <div className="w-full max-w-sm">
-        <InviteAcceptForm token={token} inviteToken={inviteToken} />
-      </div>
-    </main>
-  );
+  return <InviteAcceptForm token={token} inviteToken={inviteToken} />;
 }
