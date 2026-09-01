@@ -269,6 +269,10 @@ test("FOLD 4 + F1 (fresh opus review, 2026-09-01): the cookie's own SECURITY ATT
   // __Host- name breaks FUNCTIONALLY too (the browser rejects the cookie
   // outright, so every real redirect would fall to invalid) with nothing
   // here going red to say why.
+  // 裁-109 (2026-09-01): `secure: true` below is a deliberate literal, not
+  // `confirmFlashCookie().secure` (tautological) — true only because this
+  // process resolves it to the PROD branch under `NODE_ENV=test`; run under
+  // `NODE_ENV=development` or `CLARA_ALLOW_INSECURE_LOOPBACK=1` and the name follows the env to dev while this stays `secure: true` — red reads "secure mismatch", not "wrong env".
   const response = await handleEmailConfirmationPost(
     postRequest(confirmFields()),
     async () => fakeClient(validResponse(), [], []),

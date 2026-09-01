@@ -113,6 +113,9 @@ export type ConfirmationAttemptOutcome =
        * fs4-pr488-review; the finding is theirs, the ruling is the
        * owner's — a review lane is never the ruling authority on a
        * design-vs-contract call, AGENTS.md hard constraint 1.)
+       * (superseded — see below: this paragraph only establishes that
+       * `scope` must be supplied explicitly, not what it MEANS; #493's
+       * third round amended the meaning after this was written.)
        *
        * KEEP THIS SHAPE — do NOT shrink it to match the design text
        * literally: part 3 §2.1's `claim_confirmation_attempt` prose only

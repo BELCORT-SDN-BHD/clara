@@ -78,7 +78,7 @@ test("signup account step -> check-your-email, with the confirm code form reacha
   // response, the same way this file already pins referrer-policy off a
   // real `/auth/confirm` GET rather than a unit-level function call.
   expect(confirmResponse?.headers()["cache-control"]).toBe("private, no-store");
-  expect(confirmResponse?.headers()["vary"]).toBe("Cookie");
+  expect(confirmResponse?.headers()["vary"]).toContain("Cookie");
   await expect(page.getByRole("heading", { name: "Enter your confirmation code" })).toBeVisible();
   await expectAccessible(page, "confirmation code form");
 

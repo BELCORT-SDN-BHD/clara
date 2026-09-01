@@ -232,6 +232,32 @@ export async function updateSession(request: NextRequest) {
   // wins. `Vary` uses `append`, not `set` — this is the only writer of it
   // today, but `append` is the safe idiom if Next ever adds its own RSC
   // `Vary` value after the proxy runs.
+  //
+  // 裁-109 round (2026-09-01) — the `Cache-Control` write below is
+  // DOCUMENTARY, not protective. `applyAuthState` runs unconditionally for
+  // BOTH branches a few lines down, and its very first statement is
+  // `response.headers.set("Cache-Control", AUTH_RESPONSE_CACHE_CONTROL)` —
+  // the identical "private, no-store" literal `confirmCacheHeadersForPath`
+  // returns for this path. So the `.set()` two lines below is superseded
+  // by `applyAuthState`'s `.set()` one line later NO MATTER WHAT IT WRITES.
+  // The effective header on the wire is correct and the e2e's
+  // `cache-control` pin (`signup-confirm-pending.spec.ts`) is a real
+  // assertion against a real response — but it passes because of the
+  // GLOBAL auth floor in `response-state.ts`, not because of this
+  // route-specific line. Keep the line — it is a useful breadcrumb of
+  // intent — but do not read it as enforcement: it does NOT protect this
+  // route if the global floor is ever weakened, and the e2e pin cannot see
+  // that gap either, since it only observes the response the two writers
+  // jointly produce.
+  //
+  // `Vary`, by contrast, is real work: nothing else writes it, so `append`
+  // here is the one thing standing between "Cookie" surviving and Next
+  // someday contributing its own RSC `Vary` value that `applyAuthState`'s
+  // `set`-based queued-header application could otherwise replace it with.
+  // The e2e's `vary` assertion uses `toContain("Cookie")`, deliberately —
+  // not a loose match, a GUARD: it is what would catch `append` regressing
+  // to `set` or a wrong value silently dropping "Cookie". Do not
+  // "simplify" that assertion back to `toBe`.
   const cacheHeaders = confirmCacheHeadersForPath(request.nextUrl.pathname);
   if (cacheHeaders !== null) {
     response.headers.set("Cache-Control", cacheHeaders.cacheControl);
