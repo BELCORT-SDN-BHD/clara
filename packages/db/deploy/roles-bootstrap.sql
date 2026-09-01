@@ -17,10 +17,14 @@
 -- the deploy-role SET grants), 0006 (the 2 login shells), 0009 (the write-login
 -- shell), 0121 (clara_wake_bank + its clara_wake_bank_login shell — F-A3/PR-1b's
 -- bank wake lane), 0126 (clara_wake_filing — F-A7 β's filing wake kind, group only),
--- and deploy/storage-provision.sql (clara_storage_docs). Derived and
--- cross-checked against a live-shaped rig (apply 0001..0010 to a scratch DB → query
--- pg_roles / pg_auth_members) — the census is reproduced exactly (12 clara_% roles +
--- clara_storage_docs). CONVERGENCE SCOPE: on a FRESH target this produces the exact
+-- 0160 (clara_stripe_webhook + its clara_stripe_webhook_login shell — FS-4 C-2's
+-- Stripe webhook sweep lane, PR #484, added 2026-09-02 per the estate's "role mints
+-- a same-commit roles-bootstrap twin" law — 0160 was the first role-minting
+-- migration since this file was last synced), and deploy/storage-provision.sql
+-- (clara_storage_docs). Derived and cross-checked against a live-shaped rig (apply
+-- 0001..0010 to a scratch DB → query pg_roles / pg_auth_members) — the census
+-- pre-0160 reproduced exactly (12 clara_% roles + clara_storage_docs); 0160 adds two
+-- more (14 + clara_storage_docs). CONVERGENCE SCOPE: on a FRESH target this produces the exact
 -- census. It does NOT remove unexpected EXTRA memberships/settings on a pre-existing
 -- role and it does NOT normalize NOLOGIN over a pre-existing login shell — so it is
 -- NOT a general-purpose "converge a drifted live cluster" tool.
@@ -87,13 +91,18 @@ declare
     'clara_wake_interactive', 'clara_wake_proactive', 'clara_runtime',
     'clara_freeform_ro',
     'clara_wake_bank',  -- 0121 (F-A3/PR-1b): the bank wake lane's own group role
-    'clara_wake_filing' -- 0126 (F-A7 β): the filing wake kind's role — group only, no login
+    'clara_wake_filing', -- 0126 (F-A7 β): the filing wake kind's role — group only, no login
                         -- shell and no postgres membership (reached via wake_credentials rows)
+    'clara_stripe_webhook' -- 0160 (FS-4 C-2, PR #484): the Stripe webhook sweep's own
+                        -- NOLOGIN group role, holding exactly the record/apply EXECUTE
+                        -- surface and no table grants
   ];
   -- Login SHELLS: created NOLOGIN here; a LIVE project flips them to LOGIN out of band.
   logins text[] := array['clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login',
                          'clara_freeform_login',
-    'clara_wake_bank_login'];  -- 0121: nologin shell until PR-2's DSN/pool ceremony
+    'clara_wake_bank_login',  -- 0121: nologin shell until PR-2's DSN/pool ceremony
+    'clara_stripe_webhook_login'];  -- 0160: INHERIT test-login-member shell for
+                        -- clara_stripe_webhook, itself NOLOGIN and without BYPASSRLS
 begin
   -- Fail closed: never run on a live project (a login shell already LOGIN) w/o override.
   foreach r in array logins loop
@@ -181,6 +190,9 @@ grant clara_freeform_ro      to clara_freeform_login   with inherit false, set t
 -- 0121's own membership is INHERIT-style, deliberately unlike the trio above — the plain
 -- grant mirrors the migration's exact statement (clara_wake_bank_login is created `inherit`).
 grant clara_wake_bank       to clara_wake_bank_login;
+-- 0160's own membership is the SAME INHERIT-style plain grant, mirroring 0121's idiom exactly
+-- (clara_stripe_webhook_login is created `inherit` too).
+grant clara_stripe_webhook  to clara_stripe_webhook_login;
 
 -- 2b. Deploy-role membership. The restoring role must be a member of clara_fn_owner
 --     WITH INHERIT + SET so it can restore object ownership — the full dump emits
@@ -208,6 +220,8 @@ begin
     -- 0121's own postgres membership is a plain grant (rig-testability parity with the
     -- wake_write_login precedent) — mirrored exactly, not restyled.
     grant clara_wake_bank_login  to postgres;
+    -- 0160's own postgres membership is the SAME plain grant, mirroring 0121's idiom exactly.
+    grant clara_stripe_webhook_login to postgres;
   else
     raise notice 'postgres role absent — skipping the deploy-role SET grants (bare throwaway); the restoring role gets clara_fn_owner below';
   end if;

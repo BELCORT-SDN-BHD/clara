@@ -157,6 +157,20 @@ export const CLARA_ROLE_ROSTER = [
       + "clara_wake_bank alone.",
   },
   {
+    role: "clara_stripe_webhook",
+    stem: "checkout_gate_c2_stripe_events",
+    applied: fnExists("clara.record_stripe_event(text,text,jsonb)"),
+    why: "FS-4 checkout-gate design part 2 §1.6: the Stripe sweep's NOLOGIN group role, "
+      + "holding exactly the record/apply EXECUTE surface and no table grants.",
+  },
+  {
+    role: "clara_stripe_webhook_login",
+    stem: "checkout_gate_c2_stripe_events",
+    applied: roleExists("clara_stripe_webhook"),
+    why: "FS-4 checkout-gate design part 2 §1.6: the INHERIT test login-member shell for "
+      + "clara_stripe_webhook, itself NOLOGIN and without BYPASSRLS.",
+  },
+  {
     role: "clara_wake_filing",
     stem: "f_a7_beta_filing_verb",
     applied: fnExists("clara.wake_file_document(uuid,uuid,jsonb,text,jsonb,uuid,text)"),

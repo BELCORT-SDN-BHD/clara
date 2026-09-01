@@ -95,9 +95,11 @@ export const WIKI_WHITELIST = new Set([
  * suppress it. An UNPROVABLE statement (targets unknowable) is excused by a declared, wiki-free
  * waiver as a reviewed human attestation — its `why` is printed so the entry cannot rot silently.
  *
- * TWO ENTRIES TODAY (it was empty until 0055; F-A6 PR-1 added the second). Adding an entry is a
- * contract-level decision, exactly like widening WIKI_WHITELIST — each entry rides a reviewed PR
- * with its why printed.
+ * THIRTEEN ENTRIES as of 2026-09-02 (it was empty until 0055; growth since: F-A3 PR-1a/0119 added
+ * nine, F-A3 PR-3/0129 one, F-A6 PR-1/0131 one, FS-4 C-2/0160 (PR #484) the newest — the count
+ * above is load-bearing and must be kept current, never left to describe an earlier state of this
+ * list). Adding an entry is a contract-level decision, exactly like widening WIKI_WHITELIST — each
+ * entry rides a reviewed PR with its why printed.
  */
 export const DYNAMIC_SQL_ALLOWLIST = new Map([
   // F-A3 PR-1a (0119_f_a3_pr1a_core_extractions.sql, full ADR-061 ladder). Nine CoR
@@ -244,6 +246,36 @@ export const DYNAMIC_SQL_ALLOWLIST = new Map([
       + "against a live wiki payload — the wake-credential/task path a live exercise needs is "
       + "PR-2's, not built in this DB-only PR.",
     relations: [],
+    calls: [],
+  }],
+  // FS-4 C-2 (0160_checkout_gate_c2_stripe_events.sql, PR #484 -- number claimed at merge prep
+  // 2026-09-01). apply_stripe_events(integer) picks between TWO STRING LITERALS depending on
+  // whether clara.firm_registration_payments exists yet (C-3 is not built), reads either
+  // literal directly at its own EXECUTE site (never through a variable), so `staticSqlOf`
+  // reconstructs BOTH statements verbatim -- kind:'dynamic', not 'unprovable'. THIS WAIVER IS
+  // MECHANICALLY CHECKED, not a bare attestation: because both statements are reconstructible,
+  // `waiverExcuses` runs its 'dynamic' arm (every target `claraTargets()` finds in the
+  // reconstructed SQL must be in this entry's declared set) rather than its 'unprovable' arm
+  // (which returns true for ANY non-wiki declaration once the waiver merely exists, verifying
+  // nothing -- the wake_freeform_read entry above is that case, and unavoidably so: its
+  // statement is unprovable BY CONSTRUCTION, composed at runtime with no literal in the file's
+  // own text). apply_stripe_events's statement is NOT unprovable by necessity -- it was made
+  // reconstructible on purpose (a mechanical, behaviour-identical control-flow rewrite; the SQL
+  // text in each branch is byte-identical to the reviewed body, only the EXECUTE's literal
+  // placement moved) precisely so this waiver would be checked rather than trusted. Declared
+  // set is the union of both branches' `clara.*` references, MEASURED by direct reading of both
+  // literals in the migration file: `stripe_events` and `stripe_event_problems` (both branches)
+  // plus `firm_registration_payments` (the branch that joins it). `clara.checkout_intents` is
+  // deliberately OMITTED: it is read elsewhere in this same function by an ORDINARY (non-
+  // EXECUTE) SELECT, which this gate's `executeExpressions()` never scans -- it is outside this
+  // declaration's scope, not an oversight. Neither literal calls any clara.* function.
+  ["apply_stripe_events(integer)", {
+    why: "FS-4 C-2, PR #484 -- see the family note above. Verified checked, not trusted: fed the "
+      + "real dynamicSqlFindings()/waiverExcuses() a fabricated relation in place of a real one "
+      + "and confirmed the gate REDS on the mismatch (recorded in the PR); a wake_freeform_read- "
+      + "style empty-set waiver would have passed a wrong declaration identically to a right one, "
+      + "which is exactly what this rewrite exists to avoid.",
+    relations: ["stripe_events", "stripe_event_problems", "firm_registration_payments"],
     calls: [],
   }],
 ]);
