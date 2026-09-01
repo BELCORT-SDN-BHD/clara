@@ -96,6 +96,21 @@ against the seam's return type — before judging the seam sound. A seam with no
 as such explicitly, never omitted.** Reference instance: PR #488's completion table (7 doors × 4
 seam functions in 3 modules).
 
+### 裁-107(a) · The two directions are NOT symmetric — the rule that tells a defect from a decision
+Added at the second review pass, because "is this a decision or a fifth defect wearing a decision's
+clothes?" needed an answer that generalises. **A dropped PARAMETER is a defect by default:** the
+door REFUSES without it (`sign_dpa` raises CLR10 "op_key is required"), the call simply cannot work,
+nothing in the type system says so, and the failure is silent until someone runs it. **A dropped
+RETURN FIELD is a decision by default:** the call still succeeds, a narrower outcome like
+`{kind:"signed"}` **fabricates nothing** (it is true whether the door minted or replayed), and
+widening the return later is additive and compile-checked at every consumer the moment one exists —
+recoverable and non-silent. All four defects this train produced were param-direction.
+**How to apply:** param-direction gaps get fixed; return-direction gaps get RECORDED in the
+completion contract as known widenings, with the field that will matter first named. For `sign_dpa`
+that field is **`replay`** — the moment a receipt surface exists, "you signed this on \<date\>" versus a
+bare "signed" becomes a real distinction, and `signature_id`/`signed_at` are the evidence this
+estate's receipt discipline will want.
+
 ## 裁-108 · STANDING LAW — an UNNUMBERED migration merges silently and never applies
 I armed auto-merge on #490 while its migration was still `UNNUMBERED_…sql`. `migrate.mjs` matches
 only `/^\d+.*\.sql$/`, so the PR would have merged green with a migration that **never runs** — no
