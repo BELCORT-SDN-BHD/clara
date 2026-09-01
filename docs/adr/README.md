@@ -132,8 +132,8 @@ governs.
 > current standing set at the ADR-0069 harness refactor. Additions or supersessions land
 > as new ADR entries; this digest is re-trued whenever one does.
 > **Dated re-truing minutes live in [`README-log.md`](README-log.md)** — split out 2026-08-23 at this file's
-> 500-line ceiling, verbatim and append-only. Eight minutes so far (2026-08-16 · 08-18 · 08-20 · 08-21 · 08-22 ·
-> 08-23 ×2 · 08-27). **The laws below govern; the log records when each was re-read and what the reading found.**
+> 500-line ceiling, verbatim and append-only. Nine minutes so far (2026-08-16 · 08-18 · 08-20 · 08-21 · 08-22 ·
+> 08-23 ×2 · 08-27 · 09-02). **The laws below govern; the log records when each was re-read and what the reading found.**
 
 ## 1 · Product law (the cardinal invariants)
 
@@ -250,7 +250,10 @@ governs.
     identity** — a guard that reads a NAME reads a projection; prove an identifier IS its
     import. *(minted in the open register; live exhibits at 0064/F1 and 0066)*
 28. **Cross-model adversarial review before merging money-touching code** *(0026)*, and
-    for the DESIGN of anything touching the approval path *(0028)*.
+    for the DESIGN of anything touching the approval path *(0028)*. **TIME-BOXED SUSPENDED
+    until beta live (裁-111, owner, 2026-09-01)** — not repealed: the opus lane is the complete
+    review gate for the sprint, Codex stays a BUILD lane, law 28 resumes at beta unless the
+    owner rules otherwise. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md`.
 29. **The live eval is the standing acceptance gate for every wave.** A wave is not done
     at merged-and-reviewed; it is done when its gates close on live books. *(0027;
     re-earned at 0053, 0064)*
@@ -493,4 +496,4 @@ governs.
 > `docs/plan/active/mohe-grill-rulings-2026-08-30.md:159`; minuted by ADR-0077 (signed 2026-08-31, 裁-93).
 
 ## 14 · The beta-pivot supplement (source ADR-0077, 2026-08-31 — **SIGNED at the evening sitting, 裁-93**; law)
-84. **The paid-beta gate** — three walls + Stripe checkout success; RM0/"trial" until the pricing sitting; nothing invoices until `amounts_ruled`. *(裁-57 · 58 · 68 · 73)* **85. Honest notes for a paused lane are a lawful permanent state**, swept against the lane's `PROGRESS.md` row. *(the 2026-08-31 direction)* **Law 28 KEPT** — the Codex-build/opus-review split is the cross-model pass; a native-built money surface adds a Codex read-only leg *(裁-84 → 裁-86)*; **every frontend train walks its journey in a real browser on the built app** *(裁-86)*; **law 83's ceremony is post-beta** *(裁-76)*.
+84. **The paid-beta gate** — three walls + Stripe checkout success; RM0/"trial" until the pricing sitting; nothing invoices until `amounts_ruled`. *(裁-57 · 58 · 68 · 73)* **85. Honest notes for a paused lane are a lawful permanent state**, swept against the lane's `PROGRESS.md` row. *(the 2026-08-31 direction)* **Law 28 KEPT** — the Codex-build/opus-review split is the cross-model pass; a native-built money surface adds a Codex read-only leg *(裁-84 → 裁-86)* — **the read-only leg then TIME-BOXED SUSPENDED until beta live by 裁-111 (owner, 2026-09-01; see law 28's own note)**; **every frontend train walks its journey in a real browser on the built app** *(裁-86)*; **law 83's ceremony is post-beta** *(裁-76)*.
