@@ -344,7 +344,7 @@ A retarget's first green-through-the-early-gates is the first time the later gat
 
 ## Evening state bridge — 2026-09-01 close (written before compaction)
 
-**Merged this day (12):** #478(0158) · #482(0157) · #483 · #486 · #487 · #490(0159) · #491 · #492 ·
+**Merged this day (12 — trued 2026-09-02: the day CLOSED at 15, this list predates #455's count-in, #497 and #502):** #478(0158) · #482(0157) · #483 · #486 · #487 · #490(0159) · #491 · #492 ·
 #494 · #496 · #488 (FS-4 Lane A) · #500 (裁-107(b)/111/112 family). Frontier: 0159 live.
 
 **Queue and what each waits on:**

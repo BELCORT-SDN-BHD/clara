@@ -128,8 +128,8 @@ resumes at beta unless the owner rules otherwise. Codex remains a BUILD lane thr
 review leg is suspended. Inspect every result before accepting it. *Codex lane,
 learned the hard way:* the `codex:rescue` companion queue is unreliable (it has stalled for hours
 at "starting") — prefer a direct `codex exec` via Bash, backgrounded with a file-watcher on the
-output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md` (newest; the chain runs
-`-08-31` → `-09-01` → `-09-01-pm`, each carrying its own session state bridges).
+output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-02.md` (newest; the chain runs
+`-08-31` → `-09-01` → `-09-01-pm` → `-09-02`, the earlier files carrying the session state bridges).
 
 **Ground before you build.** On a new or compacted session, and before answering any
 architecture question or changing code: query the graph for structure (the
@@ -195,7 +195,8 @@ deploy-onto-existing check + the estate suite (migrate → seed → every packag
 against a throwaway `postgres:17` service container), the live-behavior e2es + the DR
 round-trip (a second, independent `postgres:17` pair), the render drill (no database
 of its own), and the `db-split-partition-total` gate (the x41/x42 test-corpus partition is
-total; database-free) — nine jobs in all under the meta-gate.
+total; database-free) — nine jobs in all sit under the meta-gate, including the two
+sweep-only legs below.
 **The closed-wave upgrade/contract drills and the D-b frontier matrix run on the weekly
 sweep + manual dispatch only** (ADR-0073; after merging a PR that touches a closed drill or
 the pipeline itself, run `gh workflow run ci.yml` by hand). A docs-only diff skips the code

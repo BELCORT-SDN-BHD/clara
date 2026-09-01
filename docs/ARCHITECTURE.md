@@ -231,7 +231,8 @@ A **`classify` lane** resolves each document's type after layout/structured extr
 leaves Clara only under the typed, purpose-scoped consent subsystem —
 `client_egress_consents` / `client_egress_purpose_consents` / `firm_egress_purpose_consents`,
 the `*_purpose_activations` tables, and `egress_dispatch_authorizations` with the
-activate/deactivate/consume doors (`0020_typed_consent.sql`; ADR-0040/0041; digest law 58).
+activate/deactivate/consume doors (`0020_typed_consent.sql`, with `0011_daily_loop.sql`'s client consents and
+`0123_f_a7_gamma_egress.sql`'s firm-level half; ADR-0040/0041; digest law 58).
 Consent is re-checked at the dispatch boundary; a grant alone never authorizes. Admin surface:
 `apps/web/app/(firm)/admin/vendor-bindings/`.
 

@@ -254,7 +254,7 @@ governs.
     until beta live (裁-111, owner, 2026-09-01)** — not repealed: the opus lane is the complete
     review gate for the sprint, Codex builds on, law 28 resumes at beta. Same-sitting standing
     review laws await ADR folds — 裁-107(a/b) seam↔door tables · 裁-108 unnumbered-migration arming ·
-    裁-112 overclaim ownership · 裁-113 `&&`-chain masking — the ledger IS law meanwhile: `docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md`.
+    裁-112 overclaim ownership · 裁-113 checked-not-trusted waivers (the `&&`-chain masking class banked alongside) — the ledger IS law meanwhile: `docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md`.
 29. **The live eval is the standing acceptance gate for every wave.** A wave is not done
     at merged-and-reviewed; it is done when its gates close on live books. *(0027;
     re-earned at 0053, 0064)*
