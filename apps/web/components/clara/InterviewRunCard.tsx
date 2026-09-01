@@ -265,7 +265,19 @@ function InterviewThread({ thread }: { thread: ReturnType<typeof useInterviewRun
             entry.role === "you" ? "bg-muted" : "bg-clara-muted",
           )}
         >
-          <p className="mb-1 text-xs font-medium text-muted-foreground">
+          {/* Fix round (裁-86 axe catch, live-stack walk): text-muted-foreground
+              on bg-clara-muted measures 4.49:1 — short of the 4.5:1 AA floor
+              (muted-foreground/#687171 is the design system's own known
+              tightest-margin token, globals.css's :root comment; clara-muted
+              is a marginally lighter/more-saturated ground than the ones it
+              was tuned against). text-secondary-ink (#4b5353, an existing,
+              already-cataloged "secondary prose role" token — globals.css,
+              PAIR_SPECS's secondary-ink-on-identity-canvas) is strictly
+              darker on every channel, so it clears clara-muted at 7.08:1
+              while only ever IMPROVING the "you" bubble's existing
+              muted-foreground-on-muted margin — conditioned per role anyway,
+              to touch only the pairing that actually broke. */}
+          <p className={cn("mb-1 text-xs font-medium", entry.role === "you" ? "text-muted-foreground" : "text-secondary-ink")}>
             {t(`role.${entry.role}`)}{entry.seg ? ` · ${entry.seg}` : ""}
           </p>
           <p className="whitespace-pre-wrap">{entry.text}</p>
