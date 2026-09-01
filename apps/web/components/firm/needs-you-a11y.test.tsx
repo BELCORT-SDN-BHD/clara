@@ -144,6 +144,12 @@ test("firm needs-you inbox (queue + the two 0137 gap lists) has zero violations"
         // M5, independent review: OpenQuestionDetail is genuinely mounted
         // inside the open_question row's own OpenQuestionAffordance.
         assert.match(h.text(), /View details/, "OpenQuestionDetail's reveal trigger must actually be mounted on the open_question row");
+        // FS-8 (P6-T honest-note sweep): the two new static notes actually
+        // render — the F-T2 statutory-deadlines gap (needs-you-inbox.tsx)
+        // and the client-alias hygiene gap beside the identifier-promotion
+        // list (needs-you-gaps.tsx).
+        assert.match(h.text(), /This feed is F-T2's, paused/, "the F-T2 statutory-deadlines note must render in the inbox");
+        assert.match(h.text(), /add_client_alias and retire_client_alias are live doors/, "the client-alias hygiene note must render beside the identifier-promotion list");
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {

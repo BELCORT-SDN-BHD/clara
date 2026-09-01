@@ -9,6 +9,10 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
 
 - `signup-confirm-pending.spec.ts` — the full signup -> explicit email confirmation -> holding
   page walk, with axe scans on each face (PR #461, round 6).
+- `live-stack/` — `interview-walk.spec.ts` also carries FS-8's Tax tab arm (P6-T IA shell,
+  裁-86): nav-click and ⌘K both reach `/clients/:id/tax` on the SAME COMPLETE fixture used by the
+  interview walk, and the three honest notes render. No interview segment is answered by this
+  arm — it only needs the fixture's authenticated client.
 - `entry-faces-walk.spec.ts` — the entry group's pre-auth faces: login, signup (rendering,
   client-side validation, keyboard pass), an incomplete invite link, an unknown route, the
   holding page's anonymous-visitor redirect, and the confirm face's honest missing-token state

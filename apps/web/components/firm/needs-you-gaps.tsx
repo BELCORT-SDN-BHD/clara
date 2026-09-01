@@ -24,6 +24,7 @@ import {
 import { loadClientRegister } from "@/lib/firm/reads";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { SectionHeader } from "@/components/common/section-header";
+import { NotBuiltNote } from "@/components/common/not-built-note";
 import { DataState, ErrorMessage } from "./data-state";
 import { FirmQuestionRow } from "./firm-question-row";
 import { IdentifierPromotionRow } from "./identifier-promotion-row";
@@ -119,6 +120,12 @@ export function NeedsYouGaps() {
             ))}
           </ul>
         </DataState>
+        {/* FS-0 residual (2026-08-31 census): add_client_alias/
+            retire_client_alias are LIVE doors (0007/0016) with no UI —
+            distinct from the promotion list above, which only shows
+            aliases Clara proposes promoting. Named beside it so a reader
+            sees both the automated and the by-hand path in one place. */}
+        <NotBuiltNote>{t("clientAliasNotBuilt")}</NotBuiltNote>
       </div>
     </div>
   );

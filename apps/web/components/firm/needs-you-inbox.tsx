@@ -40,6 +40,7 @@ import { useTranslations } from "next-intl";
 import { useReviewQueue } from "@/lib/firm/use-review-queue";
 import { reviewQueueRowKey, shouldShowQueueErrorBanner } from "@/lib/firm/needs-you";
 import { Button } from "@/components/ui/button";
+import { NotBuiltNote } from "@/components/common/not-built-note";
 import { DataState, ErrorMessage } from "./data-state";
 import { NeedsYouCounts } from "./needs-you-counts";
 import { NeedsYouRow } from "./needs-you-row";
@@ -76,6 +77,11 @@ export function NeedsYouInbox() {
       {/* T7 (port-wave plan §4/§5) — the sweep-runs state, from the SAME
           envelope `counts`/`rows` above already read; zero extra call. */}
       <SweepStatusPanel sweep={sweep} />
+      {/* P6-T (FS-8, 裁-80): a STATIC honest note, not a row_kind and not a
+          page — clara.statutory_deadlines has been live-empty since
+          migration 0139 (no grant, no verb). F-T2's feed lands here once
+          built; Track B is paused. */}
+      <NotBuiltNote className="text-xs">{t("statutoryDeadlinesNotBuilt")}</NotBuiltNote>
       {showBanner ? <ErrorMessage error={error} /> : null}
       <DataState
         loading={loading}

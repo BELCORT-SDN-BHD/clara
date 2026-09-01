@@ -192,6 +192,17 @@ export const CLIENT_ROUTES: ClientCommandRoute[] = [
     keywords: ["close", "period", "fiscal year"],
   },
   {
+    // P6-T (裁-34): the Tax tab IA shell — three honest NotBuiltNotes on
+    // this tip (Track B paused, 裁-80). "built" is correct per this file's
+    // own contract: the row asserts a page.tsx exists at the href, not that
+    // every panel inside it has a live backend door.
+    id: "clientTax",
+    scope: "client",
+    href: (clientId) => `/clients/${clientId}/tax`,
+    status: "built",
+    keywords: ["tax", "sst", "cp204", "income tax", "computation"],
+  },
+  {
     id: "reports",
     scope: "client",
     href: (clientId) => `/clients/${clientId}/reports`,
