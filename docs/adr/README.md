@@ -252,8 +252,9 @@ governs.
 28. **Cross-model adversarial review before merging money-touching code** *(0026)*, and
     for the DESIGN of anything touching the approval path *(0028)*. **TIME-BOXED SUSPENDED
     until beta live (裁-111, owner, 2026-09-01)** — not repealed: the opus lane is the complete
-    review gate for the sprint, Codex stays a BUILD lane, law 28 resumes at beta unless the
-    owner rules otherwise. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md`.
+    review gate for the sprint, Codex builds on, law 28 resumes at beta. Same-sitting standing
+    review laws await ADR folds — 裁-107(a/b) seam↔door tables · 裁-108 unnumbered-migration arming ·
+    裁-112 overclaim ownership · 裁-113 `&&`-chain masking — the ledger IS law meanwhile: `docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md`.
 29. **The live eval is the standing acceptance gate for every wave.** A wave is not done
     at merged-and-reviewed; it is done when its gates close on live books. *(0027;
     re-earned at 0053, 0064)*
