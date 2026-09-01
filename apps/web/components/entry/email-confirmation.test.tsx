@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { NextResponse } from "next/server";
+
 import {
   handleEmailConfirmationPost,
   type EmailConfirmationRouteClient,
@@ -11,14 +13,15 @@ import type {
   ConfirmationAttemptSettlement,
   SettleConfirmationAttempt,
 } from "../../app/(entry)/auth/confirm/verify/confirmation-wall";
+import { confirmFlashCookie } from "../../app/(entry)/auth/confirm/confirm-flash";
 
 // This file stays scoped to the confirm POST handler's own walls —
-// `proveSameOrigin`, the C1/C2 attempt seam, and the three refusal cards.
-// Three SIBLING files split off the estate's 500-line document gate (applied
-// to a test file, first at the original rewrite and again in the M1/NIT-3
-// fix round): `email-confirmation-page.test.tsx` (the GET page /
-// `confirmCodeState` itself — W-H, NIT-3's numeric bounds), `email-
-// confirmation-signup-route.test.tsx` (the confirm→cookie→/signup
+// `proveSameOrigin`, the C1/C2 attempt seam, and the refusal-flash mechanism
+// (N1 CLOSED, 裁-109). Three SIBLING files split off the estate's 500-line
+// document gate (applied to a test file, first at the original rewrite and
+// again in the M1/NIT-3 fix round): `email-confirmation-page.test.tsx` (the
+// GET page / `confirmCodeState` itself — W-H, the flash-marker bounds),
+// `email-confirmation-signup-route.test.tsx` (the confirm→cookie→/signup
 // integration and the confirmed-user gate `SignupStep` enforces).
 
 const SUBJECT = "11111111-1111-1111-1111-111111111111";
@@ -118,6 +121,36 @@ function fakeClient(
   };
 }
 
+/**
+ * N1, fix round 2026-09-01 (裁-109) — every refusal now redirects to
+ * `/auth/confirm?flash=<nonce>` with the real outcome in an httpOnly
+ * cookie, not the URL. These two helpers are the ONLY way this file reads
+ * either half, so every test below asserts against the SAME instrument
+ * `page.tsx` itself uses (`confirmFlashCookie`'s name), never a re-typed
+ * guess at the cookie's shape (review law 3).
+ */
+function locationFlashNonce(response: Response): string {
+  const location = response.headers.get("location");
+  assert.ok(location, "no redirect Location header");
+  const url = new URL(location);
+  assert.equal(url.origin, "https://app.clarabook.example");
+  assert.equal(url.pathname, "/auth/confirm");
+  assert.deepEqual(
+    [...url.searchParams.keys()],
+    ["flash"],
+    "the redirect URL must carry ONLY the flash marker — no status, remaining, or wait",
+  );
+  const nonce = url.searchParams.get("flash");
+  assert.ok(typeof nonce === "string" && nonce.length > 0, "the flash marker must be non-empty");
+  return nonce;
+}
+
+function readFlashPayload(response: Response): unknown {
+  const raw = (response as NextResponse).cookies.get(confirmFlashCookie().name)?.value;
+  assert.ok(raw, "no flash cookie was set on the redirect");
+  return JSON.parse(raw);
+}
+
 test("THE WALL RUNS BEFORE verifyOtp, and the production seam REFUSES rather than fakes success", async () => {
   const calls: Array<{ type: "signup"; email: string; token: string }> = [];
   const response = await handleEmailConfirmationPost(
@@ -128,10 +161,8 @@ test("THE WALL RUNS BEFORE verifyOtp, and the production seam REFUSES rather tha
   );
   assert.deepEqual(calls, [], "verifyOtp was reached despite the wall being unwired");
   assert.equal(response.status, 303);
-  assert.equal(
-    response.headers.get("location"),
-    "https://app.clarabook.example/auth/confirm?status=unavailable",
-  );
+  const nonce = locationFlashNonce(response);
+  assert.deepEqual(readFlashPayload(response), { nonce, kind: "unavailable" });
 });
 
 test("confirmation-wall.ts's own production default always answers unavailable", async () => {
@@ -152,7 +183,7 @@ test("confirmation-wall.ts's own production default always answers unavailable",
   await settleConfirmationAttempt("attempt-fixture-1", "rejected");
 });
 
-test("N1: an ALLOWED wall makes exactly one hard-coded signup verification and ignores extra fields", async () => {
+test("N1 (originDigest): an ALLOWED wall makes exactly one hard-coded signup verification and ignores extra fields", async () => {
   const calls: Array<{ type: "signup"; email: string; token: string }> = [];
   const sealed: Response[] = [];
   const settled: ConfirmationAttemptSettlement[] = [];
@@ -179,49 +210,40 @@ test("N1: an ALLOWED wall makes exactly one hard-coded signup verification and i
   assert.equal(response.headers.get("cache-control"), "private, no-store");
 });
 
-test("W-H2: wrong code, expired, and locked render as three DISTINCT redirects", async () => {
-  const wrong = await handleEmailConfirmationPost(
-    postRequest(confirmFields()),
-    async () => fakeClient(
-      { data: { user: null, session: null }, error: { message: "Token has expired or is invalid" } },
-      [],
-      [],
-    ),
-    allowWall(3),
-  );
-  assert.equal(
-    wrong.headers.get("location"),
-    "https://app.clarabook.example/auth/confirm?status=wrong&remaining=3",
-  );
+test("N3 CLOSED (裁-109): wrong code, otp_expired, AND a banned account's own error all render the IDENTICAL wrong-code flash", async () => {
+  // The whole point of flattening: the wall must never surface a
+  // difference an attacker could use to learn WHY verification failed —
+  // neither "your code merely expired" (the round-4 split this closes) nor
+  // "this account is banned" (the narrower oracle `user_banned` opened,
+  // confirmed against the live `supabase/auth` error registry).
+  async function wrongFlashFor(error: { message: string; code?: string }) {
+    const response = await handleEmailConfirmationPost(
+      postRequest(confirmFields()),
+      async () => fakeClient({ data: { user: null, session: null }, error }, [], []),
+      allowWall(3),
+    );
+    locationFlashNonce(response); // asserts the URL shape too
+    return readFlashPayload(response) as { kind: string; remaining: number };
+  }
 
-  const expired = await handleEmailConfirmationPost(
-    postRequest(confirmFields()),
-    async () => fakeClient(
-      { data: { user: null, session: null }, error: { message: "Token has expired", code: "otp_expired" } },
-      [],
-      [],
-    ),
-    allowWall(2),
-  );
-  assert.equal(
-    expired.headers.get("location"),
-    // NIT-2, fix round 2026-09-01: `expired` now carries `remaining` too.
-    "https://app.clarabook.example/auth/confirm?status=expired&remaining=2",
-    "an otp_expired error must not render as a plain wrong code",
-  );
+  const plainWrong = await wrongFlashFor({ message: "Token has expired or is invalid" });
+  const expired = await wrongFlashFor({ message: "Token has expired", code: "otp_expired" });
+  const banned = await wrongFlashFor({ message: "User is banned", code: "user_banned" });
 
+  for (const flash of [plainWrong, expired, banned]) {
+    assert.equal(flash.kind, "wrong");
+    assert.equal(flash.remaining, 3);
+  }
+});
+
+test("locked renders its own distinct flash, keyed on the door's scope ('email' | 'origin' — 裁-107 direction-2 truing)", async () => {
   const locked = await handleEmailConfirmationPost(
     postRequest(confirmFields()),
     async () => fakeClient(validResponse(), [], []),
-    async () => ({ kind: "rejected", scope: "address", retryAfterSeconds: 300 }),
+    async () => ({ kind: "rejected", scope: "email", retryAfterSeconds: 300 }),
   );
-  assert.equal(
-    locked.headers.get("location"),
-    "https://app.clarabook.example/auth/confirm?status=locked&wait=300",
-  );
-
-  const redirects = [wrong, expired, locked].map((r) => r.headers.get("location"));
-  assert.equal(new Set(redirects).size, 3, "the three refusals must not collapse onto one redirect");
+  const nonce = locationFlashNonce(locked);
+  assert.deepEqual(readFlashPayload(locked), { nonce, kind: "locked", waitSeconds: 300 });
 });
 
 test("a locked wall never reaches verifyOtp at all", async () => {
@@ -232,7 +254,37 @@ test("a locked wall never reaches verifyOtp at all", async () => {
     async () => ({ kind: "rejected", scope: "origin", retryAfterSeconds: 900 }),
   );
   assert.deepEqual(calls, [], "the C1/C2 wall did not gate verifyOtp");
-  assert.match(response.headers.get("location") ?? "", /status=locked/);
+  const nonce = locationFlashNonce(response);
+  assert.deepEqual(readFlashPayload(response), { nonce, kind: "locked", waitSeconds: 900 });
+});
+
+test("FOLD 4 + F1 (fresh opus review, 2026-09-01): the cookie's own SECURITY ATTRIBUTES are pinned, not just its lifetime", async () => {
+  // F1, MEDIUM — the ENTIRE N1 unforgeability claim rests on httpOnly +
+  // sameSite:"strict" + secure. Mutant-tested by the reviewer: delete
+  // httpOnly, or set secure:false, and every OTHER test in this file stays
+  // green (confirm-flash.test.ts tests pure functions; the page tests are
+  // DI'd past the real cookie jar; `.cookies.get(name)?.value` returns the
+  // value regardless of httpOnly). Without this cell, the forgery wall
+  // could be deleted in silence — and in production, secure:false with the
+  // __Host- name breaks FUNCTIONALLY too (the browser rejects the cookie
+  // outright, so every real redirect would fall to invalid) with nothing
+  // here going red to say why.
+  // 裁-109 (2026-09-01): `secure: true` below is a deliberate literal, not
+  // `confirmFlashCookie().secure` (tautological) — true only because this
+  // process resolves it to the PROD branch under `NODE_ENV=test`; run under
+  // `NODE_ENV=development` or `CLARA_ALLOW_INSECURE_LOOPBACK=1` and the name follows the env to dev while this stays `secure: true` — red reads "secure mismatch", not "wrong env".
+  const response = await handleEmailConfirmationPost(
+    postRequest(confirmFields()),
+    async () => fakeClient(validResponse(), [], []),
+    async () => ({ kind: "rejected", scope: "origin", retryAfterSeconds: 300 }),
+  );
+  const cookie = (response as NextResponse).cookies.get(confirmFlashCookie().name);
+  assert.ok(cookie, "no flash cookie was set");
+  assert.deepEqual(
+    { httpOnly: cookie.httpOnly, sameSite: cookie.sameSite, secure: cookie.secure, path: cookie.path, maxAge: cookie.maxAge },
+    // min(300, 900) + 60 = 360 — see confirm-flash.ts's confirmFlashMaxAgeSeconds.
+    { httpOnly: true, sameSite: "strict", secure: true, path: "/", maxAge: 360 },
+  );
 });
 
 test("a rejected verification is settled, not left dangling", async () => {
@@ -421,7 +473,7 @@ for (const refusal of refusalCases) {
   });
 }
 
-test("N1: a malformed submission (missing/duplicated field) redirects to a clean URL and never reaches the wall", async () => {
+test("N1: a malformed submission (missing/duplicated field) redirects to the invalid flash and never reaches the wall", async () => {
   let wallCalls = 0;
   const wall: ClaimConfirmationAttempt = async () => {
     wallCalls += 1;
@@ -433,20 +485,16 @@ test("N1: a malformed submission (missing/duplicated field) redirects to a clean
     async () => fakeClient(validResponse(), [], []),
     wall,
   );
-  assert.equal(
-    missing.headers.get("location"),
-    "https://app.clarabook.example/auth/confirm?status=invalid",
-  );
+  const missingNonce = locationFlashNonce(missing);
+  assert.deepEqual(readFlashPayload(missing), { nonce: missingNonce, kind: "invalid" });
 
   const duplicated = await handleEmailConfirmationPost(
     postRequest([...confirmFields(), ["token", "999999"]]),
     async () => fakeClient(validResponse(), [], []),
     wall,
   );
-  assert.equal(
-    duplicated.headers.get("location"),
-    "https://app.clarabook.example/auth/confirm?status=invalid",
-  );
+  const duplicatedNonce = locationFlashNonce(duplicated);
+  assert.deepEqual(readFlashPayload(duplicated), { nonce: duplicatedNonce, kind: "invalid" });
 
   assert.equal(wallCalls, 0, "a malformed submission must not consume a wall attempt");
 });

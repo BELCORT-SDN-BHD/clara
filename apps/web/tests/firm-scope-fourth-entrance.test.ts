@@ -220,6 +220,21 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
         "`firm-scope-surfaces.test.ts` governs is route.ts's POST export, which this " +
         "seam sits two calls behind.",
     },
+    {
+      path: "app/(entry)/auth/confirm/confirm-flash.ts",
+      reason:
+        "NOT A ROUTER FILE. This is the N1 fix's (裁-109) shared flash-cookie " +
+        "module — typed exports (`confirmFlashCookie`, `confirmFlashMaxAgeSeconds`, " +
+        "`parseConfirmFlash`) that both `verify/handler.ts` (the writer, on the POST " +
+        "redirect) and the sibling `page.tsx` (the reader, on the GET) import. It " +
+        "exports no page/route/HTTP-method surface, its basename matches no LEAF or " +
+        "SPECIAL_FILE pattern, and Next.js never routes to it, auto-imports it, or " +
+        "treats it as any kind of special file. Colocated one level above `verify/` " +
+        "specifically so neither the POST writer nor the GET reader imports \"down\" " +
+        "into the other's own directory — the real entrance `firm-scope-surfaces." +
+        "test.ts` governs is `page.tsx`'s default export and route.ts's POST export, " +
+        "neither of which this module is.",
+    },
   ];
 
   function classifyAppFile(file: string): "LEAF" | "SPECIAL_FILE" | "rostered colocated module" | "UNCLASSIFIED" {

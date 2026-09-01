@@ -113,6 +113,9 @@ export type ConfirmationAttemptOutcome =
        * fs4-pr488-review; the finding is theirs, the ruling is the
        * owner's — a review lane is never the ruling authority on a
        * design-vs-contract call, AGENTS.md hard constraint 1.)
+       * (superseded — see below: this paragraph only establishes that
+       * `scope` must be supplied explicitly, not what it MEANS; #493's
+       * third round amended the meaning after this was written.)
        *
        * KEEP THIS SHAPE — do NOT shrink it to match the design text
        * literally: part 3 §2.1's `claim_confirmation_attempt` prose only
@@ -124,17 +127,49 @@ export type ConfirmationAttemptOutcome =
        * compute it. Lane B WIRES these two fields through from the door's
        * real response; it does not invent them at this seam.
        *
-       * RECONCILIATION OWED: `page.tsx`'s R4/NIT-3 clamp renders any
-       * `retryAfterSeconds` over 900 as the generic `invalid` card, on the
-       * assumption C1/C2's window is 15 minutes (part 1 §3.4). C-3 names
-       * the real window when it builds the door; if that window is not
-       * 900s, the clamp must be trued to match in the SAME/a follow-up PR,
-       * or a genuine lockout longer than the guessed ceiling renders as a
-       * mystery "invalid" instead of the honest wait it is. Not guessed
-       * here — flagged for whoever lands the real door next.
+       * WHAT `scope` MEANS (裁-103, amended by #493's third round,
+       * 2026-09-01) — NOT "which wall fired". The door is being fixed to
+       * advertise `retryAfterSeconds` as the MAX of both limbs' waits (a
+       * caller refused on the email limb, who obeyed that advertised wait
+       * exactly, could otherwise be refused again on the origin limb,
+       * because the very row the door just inserted counts against BOTH).
+       * With the wait now the max over both limbs, `scope` names THE LIMB
+       * THE CALLER MUST OUTLAST — the one that clears last — so the label
+       * and the number agree; it is not a report of which check happened
+       * to trip. Token set unchanged (`"email" | "origin"`); only the
+       * MEANING of the value moved.
+       *
+       * RECONCILIATION OWED: `../confirm-flash.ts`'s `LOCKED_MAX_WAIT_
+       * SECONDS` clamp (moved there from `page.tsx` by the N1 fix, 裁-109)
+       * renders any `retryAfterSeconds` over 900 as the generic `invalid`
+       * card, on the assumption C1/C2's window is 15 minutes (part 1 §3.4).
+       * C-3 names the real window when it builds the door; if that window
+       * is not 900s, the clamp must be trued to match in the SAME/a
+       * follow-up PR, or a genuine lockout longer than the guessed ceiling
+       * renders as a mystery "invalid" instead of the honest wait it is.
+       * THE SAME RECONCILIATION applies to `../confirm-flash.ts`'s
+       * `REMAINING_MAX = 5` — it rides the identical "C1's ceiling is 5"
+       * assumption (part 1 §3.4), and a legitimate `remaining` renders as
+       * `invalid` the same way if C-3 ships a different one. Neither
+       * guessed here — flagged for whoever lands the real door next.
+       *
+       * SPELLING, NOT A MEASUREMENT (F4 correction, fresh opus review,
+       * 2026-09-01) — `scope` reads `"email" | "origin"`, not
+       * `"address" | "origin"`. An earlier version of this comment claimed
+       * "the real door C-3 ships returns `'email' | 'origin'`" — false at
+       * this sha: `claim_confirmation_attempt` does not exist anywhere in
+       * `packages/db` yet, and part 3 §2.1's own prose, quoted four lines
+       * above, returns NO `scope` field at all. There is no door to have
+       * measured. `"email"` is a CHOICE, made to align with the door's own
+       * planned column/param naming (`clara.confirmation_attempts.
+       * email_digest`, `claim_confirmation_attempt`'s `p_email_digest`,
+       * part 3 §2.1) — not a fact read off a shipped implementation. If
+       * C-3 ships a door that disagrees, THIS spelling is what gets trued,
+       * not the other way around. Type-only either way — this seam is
+       * still stubbed and returns neither today, so no behavior changes.
        */
       readonly kind: "rejected";
-      readonly scope: "address" | "origin";
+      readonly scope: "email" | "origin";
       readonly retryAfterSeconds: number;
     }
   | { readonly kind: "unavailable" };
