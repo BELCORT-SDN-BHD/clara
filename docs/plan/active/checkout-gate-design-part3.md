@@ -132,18 +132,30 @@ exactly the law-3 trap, and gave no DB-owned wait at all).
   already been spent, so the last allowed attempt (the 5th) reports `0`, never `1` (F5, #493 opus
   review: an earlier build reported "attempts remaining before this one," which showed a nonzero
   count to a caller who in fact had none left).
-- **`scope`** is `null` on the allowed path; `'email'` or `'origin'` on refusal, naming which wall
-  fired. `'email'` takes precedence when both limbs are simultaneously over threshold, matching
-  this table's own C1-then-C2 ordering. (F2, #493 opus review: the door's token is `'email'`, not
-  `'address'` as an earlier seam draft assumed — `'email'` matches this table's own column and the
-  `email_digest` name; the seam's union is trued to match the door, not the reverse.)
-- **`retry_after_seconds`** is `null` on the allowed path; on refusal, the whole seconds until
-  enough of the counted attempts age out of the 15-minute window to admit a retry — derived from
-  attempt timestamps the DB already owns (hard constraint 2). The rounding rounds a fractional
-  wait UP to the next whole second (so a retry at the exact advertised second, under the window's
-  inclusive `>=` boundary, still finds the target row expired) — which, on its own, MEASURABLY
-  overshoots to 901 when a counted prior shares the exact microsecond of the current attempt (a
-  same-transaction `now()`; opus review on #493, NEW-1). **The door therefore clamps explicitly**
+- **`scope`** is `null` on the allowed path; `'email'` or `'origin'` on refusal. **Redefined by
+  the BLOCKER-1 fix below (opus cross-family leg, RULED): `scope` names the limb the caller must
+  actually outlast — whichever of the two independently-computed waits is longer — not
+  necessarily the wall whose own threshold triggered today's specific refusal.** The two can
+  differ: a caller can be refused today because their EMAIL count crossed 5, while their ORIGIN
+  count (below 5 today, but already carrying its own aging priors plus this new attempt) is what
+  is still blocking at the moment email would have cleared. Naming the limb that actually
+  constrains the retry is the only label that helps the caller, which is why the redefinition is
+  taken rather than treated as a regression. `'email'` takes precedence on an exact tie between
+  the two computed waits, matching this table's own C1-then-C2 ordering. (F2, #493 opus review:
+  the door's token is `'email'`, not `'address'` as an earlier seam draft assumed — `'email'`
+  matches this table's own column and the `email_digest` name; the seam's union is trued to match
+  the door, not the reverse. Unaffected by the redefinition — the token set is unchanged.)
+- **`retry_after_seconds`** is `null` on the allowed path; on refusal, **the MAX of the two limbs'
+  independently-computed waits** (BLOCKER 1, above) — each limb's own whole-second wait until
+  enough of ITS counted attempts age out of the 15-minute window, **computed only for a limb whose
+  own prior count is already >=4** (a limb with fewer priors can never be the reason a future call
+  is refused, and computing a wait for it anyway manufactures a number from a row that constrains
+  nothing — MEASURED to over-advertise by many minutes). Derived entirely from attempt timestamps
+  the DB already owns (hard constraint 2). The rounding rounds a fractional wait UP to the next
+  whole second (so a retry at the exact advertised second, under the window's inclusive `>=`
+  boundary, still finds the target row expired) — which, on its own, MEASURABLY overshoots to 901
+  when a counted prior shares the exact microsecond of the current attempt (a same-transaction
+  `now()`; opus review on #493, NEW-1). **The door therefore clamps explicitly**
   (`least(900, ...)`), so its range is `(0, 900]` **by construction, not by the rounding's own
   arithmetic** — a UI clamp on the displayed wait must treat `900` as a real, reachable value, not
   an overflow, but must never need to protect against anything past it either.

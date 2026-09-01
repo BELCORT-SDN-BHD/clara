@@ -25,7 +25,11 @@ import { truncateGuardError, withTxn } from "./rig-txn.mjs";
 import { twoSessions, waitBlockedByOrThrow } from "./binding-proposal-pr-1-helpers.mjs";
 
 const TABLES = ["billing_plans", "firm_registration_payments", "confirmation_attempts"];
-const EXPECTED_CELLS = 57; // +2 (c3.30a, c3.30b) from the #493 opus review's F1 fix round
+const EXPECTED_CELLS = 60; // +2 (c3.30a, c3.30b) F1 round; +3 (c3.30c/d/e) BLOCKER-1 + ADD-1 round
+// BLOCKER 2 (opus cross-family leg on #493): open_checkout_intent's body is frozen from here,
+// same idiom as create_firm's W-E3 pin (59fa533d9c03) elsewhere in this same migration. Computed
+// against the shipped 84861afc-era body via a throwaway rig; update deliberately on any real edit.
+const OPEN_CHECKOUT_INTENT_PROSRC_SHA12 = "7de3df3152c7";
 
 let live = false;
 let executed = 0;
@@ -980,6 +984,15 @@ cell("c3.30a W-H3 exact value -- retry_after_seconds matches the DB-computed for
 // round trips total before the wait, not six) and the backdate eased to 14m55s (~5s of margin) --
 // kept as small as the margin allows, so the added real wait stays bounded (~6s) rather than
 // padded defensively.
+// ADD-2 (opus review on #493, folded so nobody later "fixes" this cell by weakening the
+// mechanism): the reviewer tried, and MEASURED, a zero-sleep alternative -- shift the fixture
+// rows BACK by retry_after instead of sleeping, provably equivalent since the window is purely
+// relative to attempted_at. It is REFUSED by the shipped `_tf_confirmation_attempt_settle_stamp`
+// trigger ("confirmation_attempts permits only the first complete settlement stamp") -- rows are
+// append-only except the one settle transition, and `attempted_at` is not it. The only way to get
+// a zero-sleep version would be disabling that trigger for the test, which hard constraint 14
+// forbids (the product's own append-only mechanism is never weakened for testing convenience).
+// The real setTimeout below is therefore FORCED by that trigger, not a lazy shortcut.
 cell("c3.30b W-H3 the loop actually closes -- waiting the advertised time yields a real ALLOW", async () => {
   const email = digest("loop-email");
   const origin = digest("loop-origin");
@@ -993,10 +1006,158 @@ cell("c3.30b W-H3 the loop actually closes -- waiting the advertised time yields
   assert.ok(Number.isInteger(sixth.retry_after_seconds)
     && sixth.retry_after_seconds > 0 && sixth.retry_after_seconds <= 10,
     `fixture expects a short, test-waitable advertised wait (got ${sixth.retry_after_seconds}s)`);
-  await new Promise((resolve) => { setTimeout(resolve, (sixth.retry_after_seconds + 1) * 1000); });
+  // "also fold" (opus review on #493): sleeping retry_after+1 masks a 1-second UNDER-
+  // advertisement mutant (an off-by-one that shaved a second off the formula would still pass,
+  // since the extra second of slack absorbs it). Sleep EXACTLY the advertised wait -- any real
+  // execution overhead between reading retry_after and this timer starting only ADDS margin
+  // relative to v_attempted_at, it never subtracts, so this is not a flakiness trade.
+  await new Promise((resolve) => { setTimeout(resolve, sixth.retry_after_seconds * 1000); });
   const seventh = await claimConfirmation(email, origin);
   assert.equal(seventh.allowed, true,
     "waiting exactly the advertised time must unblock a genuinely compliant retry -- the F1 close, executed for real");
+});
+
+// BLOCKER 1 (opus cross-family leg on #493, final run before 裁-111 suspended that leg): the row
+// this call just inserted counts toward BOTH limbs' future windows, so the advertised wait must
+// be the MAX of each limb's own independently-computed wait, not merely the limb that fired
+// today. c3.30a/c3.30b both use ONE fixed email+origin pair (their two limbs are always tied or
+// trivially one-sided), so neither could have caught this -- both cells below use INDEPENDENT,
+// interleaved schedules (distinct emails sharing the caller's origin; distinct origins sharing
+// the caller's email) and assert the exact computed value, pure injection, no sleep.
+cell("c3.30c BLOCKER-1 dense -- both limbs contribute; the advertised wait is the MAX, scope names the slower one", async () => {
+  const email = digest("blocker1-email");
+  const origin = digest("blocker1-origin");
+  // Five EMAIL priors (this caller's real email, five unrelated/independent origins) -- N=5>=4,
+  // contributes. Backdated to a near-boundary spread so the 2nd-oldest (F1's own offset) expires
+  // a few seconds after "now".
+  for (const secs of [899, 898, 897, 896, 895]) {
+    await rootQuery(
+      `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
+       values ($1,$2,now()-make_interval(secs=>$3))`,
+      [email, digest(`blocker1-unrelated-origin-${secs}`), secs],
+    );
+  }
+  // Four ORIGIN priors (this caller's real origin, four unrelated/independent emails) -- N=4,
+  // exactly at the guard boundary, contributes. Backdated LESS far back than the email group, so
+  // its oldest-of-4 (offset 0) expires LATER -- the limb that will still be blocking.
+  for (const secs of [890, 889, 888, 887]) {
+    await rootQuery(
+      `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
+       values ($1,$2,now()-make_interval(secs=>$3))`,
+      [digest(`blocker1-unrelated-email-${secs}`), origin, secs],
+    );
+  }
+  const sixth = await claimConfirmation(email, origin);
+  assert.equal(sixth.allowed, false);
+  const expected = await rootQuery(
+    `select
+       least(900,greatest(0,floor(extract(epoch from
+         ((e.attempted_at+interval '15 minutes')-s.attempted_at)))+1))::int as email_wait,
+       least(900,greatest(0,floor(extract(epoch from
+         ((o.attempted_at+interval '15 minutes')-s.attempted_at)))+1))::int as origin_wait
+     from clara.confirmation_attempts s,
+       (select attempted_at from clara.confirmation_attempts
+         where email_digest=$1 and id<>$3 order by attempted_at asc offset 1 limit 1) e,
+       (select attempted_at from clara.confirmation_attempts
+         where origin_digest=$2 and id<>$3 order by attempted_at asc offset 0 limit 1) o
+     where s.id=$3`,
+    [email, origin, sixth.attempt_id],
+  );
+  const { email_wait: emailWait, origin_wait: originWait } = expected.rows[0];
+  assert.ok(originWait > emailWait,
+    `fixture must make origin the slower limb for this cell to discriminate the single-limb bug (email=${emailWait}, origin=${originWait})`);
+  assert.equal(sixth.retry_after_seconds, Math.max(emailWait, originWait),
+    `retry_after_seconds must be the MAX of both limbs (email=${emailWait}, origin=${originWait}, got ${sixth.retry_after_seconds})`);
+  assert.equal(sixth.scope, "origin",
+    "scope must name the SLOWER limb -- the one the caller must actually outlast -- even though email fired today");
+});
+
+cell("c3.30d BLOCKER-1 sparse-limb guard -- a limb below N=4 contributes nothing, never a manufactured wait", async () => {
+  const email = digest("blocker1-sparse-email");
+  const origin = digest("blocker1-sparse-origin");
+  // Five EMAIL priors as above -- N=5, contributes, and is the ONLY real constraint here.
+  for (const secs of [899, 898, 897, 896, 895]) {
+    await rootQuery(
+      `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
+       values ($1,$2,now()-make_interval(secs=>$3))`,
+      [email, digest(`blocker1-sparse-unrelated-origin-${secs}`), secs],
+    );
+  }
+  // ONE origin prior only -- N=1<4. Backdated far enough (5 minutes) that the UNGUARDED formula
+  // (offset=greatest(1-4,0)=0, picking this single row as if it were a real target) would
+  // manufacture a ~10-minute wait; the guard must report this limb as contributing NOTHING.
+  await rootQuery(
+    `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
+     values ($1,$2,now()-interval '5 minutes')`,
+    [digest("blocker1-sparse-unrelated-email"), origin],
+  );
+  const sixth = await claimConfirmation(email, origin);
+  assert.equal(sixth.allowed, false);
+  const rows = await rootQuery(
+    `select
+       least(900,greatest(0,floor(extract(epoch from
+         ((e.attempted_at+interval '15 minutes')-s.attempted_at)))+1))::int as email_wait,
+       least(900,greatest(0,floor(extract(epoch from
+         ((o.attempted_at+interval '15 minutes')-s.attempted_at)))+1))::int as naive_origin_wait
+     from clara.confirmation_attempts s,
+       (select attempted_at from clara.confirmation_attempts
+         where email_digest=$1 and id<>$3 order by attempted_at asc offset 1 limit 1) e,
+       (select attempted_at from clara.confirmation_attempts
+         where origin_digest=$2 and id<>$3 order by attempted_at asc offset 0 limit 1) o
+     where s.id=$3`,
+    [email, origin, sixth.attempt_id],
+  );
+  const { email_wait: emailWait, naive_origin_wait: naiveOriginWait } = rows.rows[0];
+  assert.ok(naiveOriginWait > emailWait,
+    `fixture must make the UNGUARDED origin figure larger than email for this cell to discriminate the guard (email=${emailWait}, naive origin=${naiveOriginWait})`);
+  assert.equal(sixth.retry_after_seconds, emailWait,
+    `a sparse limb (N<4) must contribute nothing -- retry_after_seconds must equal email's own wait alone, not the manufactured naive origin figure ${naiveOriginWait} (got ${sixth.retry_after_seconds})`);
+  assert.equal(sixth.scope, "email",
+    "scope must name email -- origin's single prior never binds anything");
+});
+
+// ADD-1 (opus review on #493): c3.30a's fixture yields ~120s, nowhere near the 900-second
+// ceiling, so nothing in the whole battery exercised least(900, ...) -- removing the clamp would
+// leave every cell green. Same transaction, same statement-level now() for five priors and the
+// claim itself: the true duration is EXACTLY 900.0, and floor(900.0)+1=901 without the clamp.
+cell("c3.30e retry_after_seconds clamps to exactly 900 on the exact-microsecond tie (NEW-1, both scopes)", async () => {
+  await withTxn(async (c) => {
+    const email = digest("clamp-email");
+    const origin = digest("clamp-origin");
+    await c.query(
+      `insert into clara.confirmation_attempts(email_digest,origin_digest)
+       select $1,$2 from generate_series(1,5)`,
+      [email, origin],
+    );
+    await c.query(`set role clara_auth_wall`);
+    const sixth = await c.query(
+      "select clara.claim_confirmation_attempt($1,$2) as result", [email, origin],
+    );
+    assert.equal(sixth.rows[0].result.allowed, false);
+    assert.equal(sixth.rows[0].result.retry_after_seconds, 900,
+      `an exact-microsecond tie must clamp to 900, never 901 (got ${sixth.rows[0].result.retry_after_seconds})`);
+  }, { commit: false });
+  await withTxn(async (c) => {
+    const email2 = digest("clamp-email2");
+    const origin2 = digest("clamp-origin2");
+    // Five priors sharing the caller's ORIGIN with unrelated emails -- N=5>=4 for origin,
+    // contributes; email2 has ZERO priors (N=0<4, contributes nothing) -- forces scope=origin so
+    // this same-transaction tie is proven on the ORIGIN branch of the clamp too, not only email's.
+    for (let i = 0; i < 5; i += 1) {
+      await c.query(
+        `insert into clara.confirmation_attempts(email_digest,origin_digest) values ($1,$2)`,
+        [digest(`clamp-unrelated-email-${i}`), origin2],
+      );
+    }
+    await c.query(`set role clara_auth_wall`);
+    const sixth = await c.query(
+      "select clara.claim_confirmation_attempt($1,$2) as result", [email2, origin2],
+    );
+    assert.equal(sixth.rows[0].result.allowed, false);
+    assert.equal(sixth.rows[0].result.scope, "origin");
+    assert.equal(sixth.rows[0].result.retry_after_seconds, 900,
+      `the origin scope's exact-microsecond tie must also clamp to 900 (got ${sixth.rows[0].result.retry_after_seconds})`);
+  }, { commit: false });
 });
 
 cell("c3.31 settle wall -- outcome is typed and a completed attempt cannot re-settle", async () => {
@@ -1392,28 +1553,42 @@ cell("c3.52 W-M2 positive -- resolved intent-not-found event produces a real pay
   assert.deepEqual(applied.rows, [{ registration_id: req.id }]);
 });
 
-cell("c3.53 folded set equality -- exactly four money-store bodies; reconciler remains unbuilt", async () => {
-  // Design part3 §5's non-wall cell 2 was written in the two-door era and pins "three, not
-  // five" -- record_stripe_event, apply_stripe_events, claim_paid_firm. X10 (open_checkout_intent
-  // refusing "this registration is already paid") is a genuinely new wall that door did not carry
-  // under the two-door design, and it needs a real, honest read of firm_registration_payments to
-  // enforce it -- there is no other source of that fact. The set is therefore FOUR here, not
-  // three, and this cell says so plainly rather than the door's body hiding the reference from
-  // this exact census (a prior draft split the literal 'firm_registration_payments' identifier
-  // via string concatenation specifically so this count would stay at three -- that is gaming
-  // the instrument, not satisfying it, and was reverted). The retirement half below (no
-  // reconcile_paid_registrations) still holds unchanged.
-  // F3 (opus review on #493): the guard above caught a code-level evasion, but a bare
-  // `position(... in p.prosrc)` is itself comment-blind -- the very explanatory comment this
-  // cell's own PR left in open_checkout_intent's body (naming "firm_registration_payments" in
-  // prose) is enough to satisfy this exact query even if the executable string-split evasion
-  // were reintroduced verbatim beside it. Strip comments before matching, the same idiom
-  // x42b2-s5c-clock.test.mjs's arm (D) already uses, so only a genuine EXECUTABLE reference
-  // counts.
+// BLOCKER 2 (opus cross-family leg on #493, final run before 裁-111 suspended that leg): a
+// text-level census, however carefully comment-stripped, is the WRONG tool for an anti-regression
+// job on a money surface -- three bypasses were built and RUN against a scratch PG confirming
+// each defeats it: (a) CASE -- an unquoted `Firm_Registration_Payments` executes correctly
+// (Postgres folds unquoted identifiers to lowercase) but never matches a case-sensitive
+// `position()`; (b) COMMENT-MARKER STRING-LITERAL POISONING -- `t := '--'; select ... from
+// cb.firm_registration_payments ...` on one line: the stripper has no string-literal awareness,
+// eats from the `--` inside the STRING to end-of-line, and deletes a real reference along with
+// it; (c) fully dynamic SQL / quoted or Unicode-escape identifiers -- constructed at runtime,
+// invisible to ANY static instrument, lexer included. A dynamic-SQL-construct refusal (EXECUTE/
+// format(/quote_ident() closes NONE of these three -- none of the three bypasses contains those
+// words at all.
+// RULED: the right question for open_checkout_intent specifically is "was this body altered",
+// which a prosrc SHA answers completely (case tricks, comment poisoning, Unicode escapes, and
+// anything not yet invented all change the hash) -- the SAME idiom this migration already uses
+// twice for create_firm's W-E3 pin (UNNUMBERED_checkout_gate_c3_folded_door.sql, the prestate/tail
+// pair pinning it to sha12 59fa533d9c03). Pinning accepts the same cost the estate already pays
+// there: every legitimate future edit to this body must update the pinned hash, deliberately --
+// correct for a body that should be frozen from here.
+// The set-equality census below is KEPT, lower-cased (closing bypass (a) only), for the WEAKER,
+// still-useful question it CAN honestly answer: "did some NEW function start touching the money
+// store" -- a real signal worth having, but not an anti-regression guard for THIS body, and not
+// a defense against (b) or (c). Named, not implied covered (R15's fail-loud-or-list-it rule).
+cell("c3.53 folded set equality -- exactly four money-store bodies; open_checkout_intent's body is SHA-pinned", async () => {
+  const pinned = await rootQuery(
+    `select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha
+       from pg_proc p where p.oid='clara.open_checkout_intent(uuid,bytea,text)'::regprocedure`,
+  );
+  assert.equal(pinned.rows[0].sha.slice(0, 12), OPEN_CHECKOUT_INTENT_PROSRC_SHA12,
+    "open_checkout_intent's body moved -- case tricks, comment poisoning, Unicode-escape "
+    + "identifiers, and any future evasion class all change this hash; if this edit is a real, "
+    + "reviewed change to the door, update OPEN_CHECKOUT_INTENT_PROSRC_SHA12 deliberately");
   const refs = await rootQuery(
     `with stripped as (
        select p.proname,
-              regexp_replace(regexp_replace(p.prosrc, '/\\*[\\s\\S]*?\\*/', '', 'g'), '--[^\\n]*', '', 'g') as code
+              lower(regexp_replace(regexp_replace(p.prosrc, '/\\*[\\s\\S]*?\\*/', '', 'g'), '--[^\\n]*', '', 'g')) as code
          from pg_proc p join pg_namespace n on n.oid=p.pronamespace
         where n.nspname='clara'
      )
@@ -1423,7 +1598,8 @@ cell("c3.53 folded set equality -- exactly four money-store bodies; reconciler r
   );
   assert.deepEqual(refs.rows.map((r) => r.proname), [
     "apply_stripe_events", "claim_paid_firm", "open_checkout_intent", "record_stripe_event",
-  ]);
+  ], "this text census only answers whether a NEW function started mentioning the money tables "
+    + "-- it is not the anti-regression guard for open_checkout_intent (the SHA pin above is)");
   const retired = await rootQuery(
     `select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='clara' and p.proname='reconcile_paid_registrations'`,

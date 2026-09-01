@@ -642,6 +642,8 @@ declare
   v_origin_lock bigint;
   v_scope text;
   v_retry_after integer;
+  v_retry_email integer;
+  v_retry_origin integer;
 begin
   if p_email_digest is null or octet_length(p_email_digest)<>32
      or p_origin_digest is null or octet_length(p_origin_digest)<>32 then
@@ -684,60 +686,74 @@ begin
   -- included, i.e. prior+1); remaining = 5-(prior+1) = 4-prior.
   v_remaining:=greatest(0,4-greatest(v_email_count,v_origin_count));
 
-  -- 裁-[#488 seam review]: the refused arm names WHICH wall fired (never left for the caller to
-  -- infer from an errcode or message string -- law 3, "spelling is not identity") and how long
-  -- until the caller may retry (derived from DB-owned attempt timestamps + the fixed 15-minute
-  -- window -- hard constraint 2: the DB owns the number). C1 (email) takes precedence when both
-  -- limbs are simultaneously over threshold, matching the design's own C1-then-C2 ordering.
-  -- F1 (opus review on #493, BLOCKER, off-by-one that locked a compliant retry out forever):
-  -- the row THIS call just inserted (v_attempt) also persists and counts against every FUTURE
-  -- call's own window -- it is not a spectator, it is prior-count-plus-one members strong once
-  -- committed. For a future call to be allowed, the surviving (non-expired) members of {the N
-  -- priors PLUS v_attempt} must drop to <=4, i.e. at least (N+1)-4 = N-3 of the N+1 must expire.
-  -- v_attempt is the newest of the N+1 (just inserted), so the oldest N-3 are exactly the oldest
-  -- N-3 of the N priors -- the (N-3)th-oldest prior, 1-indexed, is OFFSET (N-3)-1 = N-4 in the
-  -- priors-only ordered set the query below selects from (v_attempt itself is excluded by
-  -- `a.id<>v_attempt`, so it can never be picked as the target -- correct, since it is not one of
-  -- the rows we are waiting to expire away FROM the priors' side of the ledger).
-  -- Rounding: the window predicate below is `>=` (inclusive), so a row is still counted AT THE
-  -- EXACT INSTANT `now = attempted_at + 15min`, not only before it -- retrying at the advertised
-  -- wait, to the exact second, must still find the target expired. ceil() of an exact integer
-  -- duration returns that same integer, which is exactly the boundary that still counts; floor()+1
-  -- always advances one full second PAST the true fractional value, closing that boundary case
-  -- while matching ceil() on every non-integer duration.
-  -- Both fields are null on the allowed path -- there is nothing to name or wait for.
+  -- 裁-[#488 seam review]: the refused arm names a wall (never left for the caller to infer from
+  -- an errcode or message string -- law 3, "spelling is not identity") and how long until the
+  -- caller may retry (derived from DB-owned attempt timestamps + the fixed 15-minute window --
+  -- hard constraint 2: the DB owns the number).
+  -- BLOCKER 1 (opus cross-family leg on #493, final run before 裁-111 suspended that leg, HAND-
+  -- TRACED and reproduced): the row THIS call just inserted counts toward BOTH limbs' future
+  -- windows, not only the limb that fired TODAY. Computing the wait from only the firing limb
+  -- (the shape F1 originally shipped) can advertise a wait that clears THAT limb while the OTHER
+  -- limb -- which never triggered today's refusal but is carrying its own N>=4 priors plus this
+  -- new row -- is still over threshold at the advertised moment: refused a second time, having
+  -- complied exactly. Concretely traced: 5 email priors + 4 origin priors (independent,
+  -- unrelated partners) refuse on email advertising 52s; retrying at +52s clears email (now 4)
+  -- but origin has climbed to 5 (its 4 priors plus the just-refused row, all still in-window) --
+  -- refused again, this time on origin, whose OWN correctly-computed wait was 837s all along.
+  -- Not an infinite loop (each hop's own offset math, from F1, is individually correct, so the
+  -- SECOND hop's advertised wait genuinely clears it) -- but a wrong DB-owned number on the FIRST
+  -- hop, and a caller refused twice having obeyed the door both times.
+  -- FIX: compute EACH limb's own wait, independently, and advertise the MAX -- the caller must
+  -- outlast BOTH, not merely the one that happened to fire today. `scope` is REDEFINED to match:
+  -- it now names the limb the caller must actually outlast (whichever produces the longer wait),
+  -- not necessarily the wall whose own threshold triggered today's specific refusal (裁-103,
+  -- restated for this shape; part 3 §2.1 trued in the same PR). Email keeps precedence on an
+  -- exact tie between the two computed waits, matching every other email-first convention here.
+  -- GUARD (opus review's own correction to this fix, MEASURED): a limb only owes a wait when its
+  -- OWN prior count N>=4 -- at N+1<=4 members (this row included) that limb can never be the
+  -- reason a future call is refused, and running the SAME offset formula unguarded at N<4
+  -- collapses to OFFSET 0 and manufactures a wait from a prior that constrains nothing (measured:
+  -- 5 email + 1 origin prior, unguarded gives scope=origin/retry=841 -- over-advertising by
+  -- ~9 minutes and naming a wall that isn't binding). A non-contributing limb's wait is 0, which
+  -- can never win the MAX against the limb that actually fired (least one limb is always >=5,
+  -- hence >=4, whenever this branch runs at all).
   if v_allowed then
     v_scope:=null;
     v_retry_after:=null;
-  elsif v_email_count>=5 then
-    v_scope:='email';
-    -- NEW-1 (opus review on 99e7573e, MEASURED): floor(...)+1 advances one full second past the
-    -- true fractional value, which is exactly right when the true value is fractional -- but when
-    -- a counted prior shares the exact microsecond of v_attempted_at (a same-transaction now(),
-    -- measured reproducible), the true value is EXACTLY 900.0 and floor()+1 overshoots to 901.
-    -- 901 would fail #488's inclusive 900 clamp and render the generic invalid card instead of
-    -- the honest lockout -- the exact reconciliation failure 裁-103 exists to prevent. Clamp here,
-    -- at the source, so the door itself never promises what the clamp cannot render.
-    select least(900,greatest(0,floor(extract(epoch from
-             ((a.attempted_at+interval '15 minutes')-v_attempted_at)))+1))::int
-      into v_retry_after
-      from clara.confirmation_attempts a
-     where a.id<>v_attempt and a.email_digest=p_email_digest
-       and a.attempted_at>=v_attempted_at-interval '15 minutes'
-       and a.outcome is distinct from 'accepted'
-     order by a.attempted_at asc
-     offset greatest(v_email_count-4,0) limit 1;
   else
-    v_scope:='origin';
-    select least(900,greatest(0,floor(extract(epoch from
-             ((a.attempted_at+interval '15 minutes')-v_attempted_at)))+1))::int
-      into v_retry_after
-      from clara.confirmation_attempts a
-     where a.id<>v_attempt and a.origin_digest=p_origin_digest
-       and a.attempted_at>=v_attempted_at-interval '15 minutes'
-       and a.outcome is distinct from 'accepted'
-     order by a.attempted_at asc
-     offset greatest(v_origin_count-4,0) limit 1;
+    if v_email_count>=4 then
+      select least(900,greatest(0,floor(extract(epoch from
+               ((a.attempted_at+interval '15 minutes')-v_attempted_at)))+1))::int
+        into v_retry_email
+        from clara.confirmation_attempts a
+       where a.id<>v_attempt and a.email_digest=p_email_digest
+         and a.attempted_at>=v_attempted_at-interval '15 minutes'
+         and a.outcome is distinct from 'accepted'
+       order by a.attempted_at asc
+       offset v_email_count-4 limit 1;
+    else
+      v_retry_email:=0;
+    end if;
+    if v_origin_count>=4 then
+      select least(900,greatest(0,floor(extract(epoch from
+               ((a.attempted_at+interval '15 minutes')-v_attempted_at)))+1))::int
+        into v_retry_origin
+        from clara.confirmation_attempts a
+       where a.id<>v_attempt and a.origin_digest=p_origin_digest
+         and a.attempted_at>=v_attempted_at-interval '15 minutes'
+         and a.outcome is distinct from 'accepted'
+       order by a.attempted_at asc
+       offset v_origin_count-4 limit 1;
+    else
+      v_retry_origin:=0;
+    end if;
+    if v_retry_email>=v_retry_origin then
+      v_scope:='email';
+      v_retry_after:=v_retry_email;
+    else
+      v_scope:='origin';
+      v_retry_after:=v_retry_origin;
+    end if;
   end if;
 
   return jsonb_build_object(
