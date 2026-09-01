@@ -85,8 +85,31 @@ test("T1 wake_engine_sources: forced RLS, exactly bank_agent+close_prep, both en
   )).rows[0];
   assert.equal(rls.relrowsecurity, true, "T1: RLS enabled");
   assert.equal(rls.relforcerowsecurity, true, "T1: RLS FORCED (binds even the owner's own writes)");
-  const rows = (await rootQuery("select source_key, carrier, enabled from clara.wake_engine_sources order by source_key")).rows;
-  assert.deepEqual(rows.map((r) => r.source_key), ["bank_agent", "close_prep"], "T1: exactly these two source keys, closed-world");
+  // Cross-package concurrency carve-out (the #485/#490 class — committed estate-global writes vs
+  // an unscoped roster read; both halves must hold): CI's db-estate job runs `pnpm -r
+  // --if-present test`, so this package and packages/runtime run CONCURRENTLY against ONE
+  // shared postgres — no ordering exists between them. packages/runtime/tests/wake-engine.test.mjs
+  // registers its own synthetic rows into this SAME estate-global table (COMMITTED — its
+  // registerSource() helper at wake-engine.test.mjs:66-72 inserts via rig.rootQuery, one
+  // connection per call, autocommitting immediately) and several of that file's own cells
+  // depend on OTHER connections seeing those committed rows (the loadEnabledSources reads at
+  // wake-engine.test.mjs:115/118, and the concurrent-session lock cells at
+  // wake-engine.test.mjs:258-320/335-401/586-671, which open a SEPARATE session specifically to
+  // hold a row lock while the main flow claims/reads) — so those writes cannot be
+  // transaction-scoped/rolled back without breaking that file's own assertions; this table's
+  // own writer stays a plain autocommitting INSERT by necessity, not oversight. That file's own
+  // header commits to a closed, documented shape for every row it ever registers: source_key
+  // ALWAYS starts with the literal prefix `g1_test_` (wake-engine.test.mjs:8), and every such row
+  // is deleted again in its own after() (wake-engine.test.mjs:88-91) — so a run that lands
+  // between a registration and that cleanup is the only way one is ever visible here. T1's
+  // birth-roster proof stays a real closed-world assertion for every OTHER source key: it
+  // excludes ONLY that documented runtime-fixture prefix, by exact substring — never widened to
+  // a "contains" check, so a genuine THIRD real source (any key not carrying that literal
+  // prefix) still reds this assertion exactly as before.
+  const rows = (await rootQuery(
+    "select source_key, carrier, enabled from clara.wake_engine_sources where left(source_key, 8) <> 'g1_test_' order by source_key",
+  )).rows;
+  assert.deepEqual(rows.map((r) => r.source_key), ["bank_agent", "close_prep"], "T1: exactly these two source keys, closed-world (excluding the documented packages/runtime/tests/wake-engine.test.mjs 'g1_test_' concurrency fixture prefix — see comment above)");
   for (const r of rows) assert.equal(r.enabled, false, `T1: ${r.source_key} must ship disabled`);
 });
 
