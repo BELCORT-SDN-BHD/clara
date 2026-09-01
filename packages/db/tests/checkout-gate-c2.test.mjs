@@ -63,7 +63,7 @@ function gate(t) {
     return true;
   }
   assert.fail(
-    "checkout-gate C-2 is required for a focused run: apply a numbered suite copy of UNNUMBERED_checkout_gate_c2_stripe_events.sql",
+    "checkout-gate C-2 is required for a focused run: apply 0160_checkout_gate_c2_stripe_events.sql (or a numbered suite copy of it)",
   );
 }
 

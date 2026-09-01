@@ -1,6 +1,8 @@
 -- FS-4 checkout gate, PR C-2: the redacted Stripe projection, reconciliation-problem queue,
 -- object map, webhook-only recorder/applier, and operator-only problem controls.
--- This file is deliberately UNNUMBERED; its migration number is claimed only at merge.
+-- Number CLAIMED at merge prep 2026-09-01: 0160, one past the live frontier 0158 (standing
+-- law, AGENTS.md + .claude/rules/db-migrations.md); 0159 claimed concurrently by another
+-- lane's PR -- the number is comment-only, the body is byte-identical to the reviewed file.
 --
 -- C-3 forward-reference boundary. The applier intentionally names the future
 -- clara.firm_registration_payments relation and uq_frp_registration index, but C-2 does not
