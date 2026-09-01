@@ -1065,6 +1065,10 @@ const F_A4_PR1C_WAKE_FNS = [
 //   B.1: "the wake roles never ask" — she learns a year is due by being WOKEN); the sibling
 //   minter mirrors mint_wake_credential's own grant (0011:1196-1197).
 const F_A4_PR1C_RUNTIME_FNS = ["close_prep_due", "mint_wake_credential_for_task"];
+// F-A4 PR-2c is its own bimodal cohort: a PR-1c-only estate must remain wholly valid.
+const F_A4_PR2C_RUNTIME_FNS = ["mint_chat_close_credential"];
+const F_A4_PR2C_UNGRANTED_FNS = ["_assert_wake_task_congruent", "_assert_attended_close_floor"];
+export const F_A4_PR2C_COHORT = [...F_A4_PR2C_RUNTIME_FNS, ...F_A4_PR2C_UNGRANTED_FNS];
 //   the three human doors — clara_authenticated ONLY, floors body-enforced (bookkeeper+). The
 //   agent identity and BOTH wake roles gain ZERO: a brake the agent lane could lift off itself
 //   is not a brake, and a receipt panel is a human audit control.
@@ -1520,6 +1524,7 @@ export const ALLOWED = {
     // mint_wake_credential_for_task (the F14 sibling minter, mirroring mint_wake_credential's own
     // grant above). clara._wake_task_id() stays UNGRANTED, deliberately — see the block above.
     ...F_A4_PR1C_RUNTIME_FNS,
+    ...F_A4_PR2C_RUNTIME_FNS, // F-A4 PR-2c's attended chat-close credential minter.
     ...RENDER_ZETA_RUNTIME_FNS, // 0079-0083 [Wave E lane ζ] the render queue's whole
     // reachable API — the array is the enumeration; the block where it is declared names each
     // verb and its consumer. clara_runtime holds NO table privilege on clara.render_jobs, so
@@ -1743,6 +1748,10 @@ export async function grantMatrixFailures() {
   const prepayLive = F_A4_PR2A_COHORT.filter((n) => liveNames.has(n));
   if (prepayLive.length !== 0) {
     failures.push(...cohortFailures("F-A4/PR-2a prepayment limb", F_A4_PR2A_COHORT, liveNames));
+  }
+  const chatCloseLive = F_A4_PR2C_COHORT.filter((n) => liveNames.has(n));
+  if (chatCloseLive.length !== 0) {
+    failures.push(...cohortFailures("F-A4/PR-2c close-prep chat lane", F_A4_PR2C_COHORT, liveNames));
   }
   failures.push(...cohortFailures("P4 tranche 1 invite/RBAC first", P4T1_COHORT, liveNames));
   // Native review C7: cohortFailures() above is proname-only (law 3, "spelling is not

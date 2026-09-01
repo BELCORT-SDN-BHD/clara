@@ -28,6 +28,9 @@ named as its fix, (3) Lane B named as the wiring owner, (4) recorded in C-3's PR
 will actually read it. **It must be closed before beta.**
 
 ## 裁-103 · The claim door must return `scope` and `retry_after_seconds`
+
+**OWNER CONFIRMED, 2026-09-01 (the checkpoint-3 grill).** No longer orchestrator-only; the
+owner-pending markers in code retire at the next touch of each file.
 The seam↔door table (see 裁-107) found two gaps in the REVERSE direction — the seam was right and
 the **door's design signature was short**. `claim_confirmation_attempt` (design part3:110) returns
 `{attempt_id, allowed, remaining}`, but the UI needs two more facts:
@@ -97,6 +100,10 @@ as such explicitly, never omitted.** Reference instance: PR #488's completion ta
 seam functions in 3 modules).
 
 ### 裁-107(a) · The two directions are NOT symmetric — the rule that tells a defect from a decision
+
+**OWNER CONFIRMED, 2026-09-01 (the checkpoint-3 grill), after a plain-language re-briefing**
+(the bank-counter framing: materials handed in vs receipt fields read). The burden-of-proof
+allocation is now owner law.
 Added at the second review pass, because "is this a decision or a fifth defect wearing a decision's
 clothes?" needed an answer that generalises. **A dropped PARAMETER is a defect by default:** the
 door REFUSES without it (`sign_dpa` raises CLR10 "op_key is required"), the call simply cannot work,
