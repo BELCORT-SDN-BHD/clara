@@ -212,9 +212,9 @@ tests/firm-scope-fourth-entrance.test.ts
 tests/firm-scope-surfaces.test.ts
 tests/focusRailSubscription.test.mjs
 tests/holding-state.test.ts
-tests/invite-courier.test.ts
 tests/invite-courier-authority.test.ts
 tests/invite-courier-egress.test.ts
+tests/invite-courier.test.ts
 tests/invite-mail-transport.test.ts
 tests/invite-verification.test.ts
 tests/proxy-matcher.test.ts

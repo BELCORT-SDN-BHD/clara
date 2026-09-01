@@ -11,9 +11,11 @@
 // plain-CREATE half of that census so it re-runs on every `pnpm test`.
 //
 //   clara.invite_member(text,text,text)         LIVE 0147:372  (NOT 0141:348, NOT 0145:622)
-//   clara.revoke_invite(uuid,text)              LIVE 0141:466  (created once)
-//   clara.set_member_role(uuid,text,text)       LIVE 0145:592  (over 0004:428, 0005:707)
-//   clara.remove_member(uuid,text)              LIVE 0005:732  (over 0004:457)
+//   clara.revoke_invite(uuid,text)              LIVE 0157:420  (over 0141:466 -- #482, 裁-94 rank wall)
+//   clara.set_member_role(uuid,text,text)       LIVE 0157:248  (over 0004:428, 0005:707, 0145:592 --
+//                                                #482, 裁-94 rank + self-act walls)
+//   clara.remove_member(uuid,text)              LIVE 0157:346  (over 0004:457, 0005:732 -- #482,
+//                                                裁-94 rank + self-act walls)
 //   clara.add_member(uuid,uuid,text,text)       LIVE 0145:671  (over 0004:400, 0005:677, 0141:325)
 //
 // ALL FIVE FLOOR AT admin+ through `clara._human_ctx(clara.role_rank('admin'))`,
@@ -65,15 +67,29 @@ function opKey(): string {
 }
 
 /**
- * `clara.set_member_role` — LIVE BODY `0145:592`. admin+.
+ * `clara.set_member_role` — LIVE BODY `0157:248` (over `0145:592`, `0005:707`,
+ * `0004:428` — #482, 裁-94: adds the target-rank and self-act walls). admin+.
  *
  * Refusals, in the order the body raises them:
- *   CLR04  `_human_ctx` — no active membership, or below admin        (:596)
- *   CLR10  'op_key is required'                                       (:597)
- *   CLR10  'bad role'                                                 (:598)
- *   CLR04  'cannot assign a role above your own rank'                 (:603)
- *   CLR11  'membership not in your firm'                              (:610)
- *   CLR11  'membership is not active'                                 (:611)
+ *   CLR04  `_human_ctx` — no active membership, or below admin        (:252)
+ *   CLR10  'op_key is required'                                       (:253)
+ *   CLR10  'bad role'                                                 (:254)
+ *   CLR04  'you no longer meet the required rank for this action'
+ *          detail.reason=actor_rank_changed — F-C1 fresh, firm-qualified
+ *          re-validation of the ACTOR, taken post-lock                (:274)
+ *   CLR04  'cannot assign a role above your own rank' — the F2 ceiling,
+ *          on the ASSIGNED role                                       (:279)
+ *   CLR11  'membership not in your firm'                              (:296)
+ *   CLR04  'cannot change your own role'
+ *          detail.reason=cannot_act_on_self — M2 self-act wall, ruled 裁-94
+ *          (carved out when the sole owner would hit CLR09 below instead)
+ *                                                                      (:314)
+ *   CLR04  'cannot act on a member ranked above you'
+ *          detail.reason=cannot_act_on_superior — the TARGET-rank wall,
+ *          strictly-greater only, ruled 裁-94                          (:321)
+ *   CLR11  'membership is not active' (deferred past `_reserve_op`,
+ *          #482 review MATERIAL-1: a same-op_key retry must not re-fail
+ *          on state a prior successful call itself produced)           (:330)
  *   CLR09  'cannot demote/remove the last active owner'  (the trigger, 0003:423)
  *
  * SIDE EFFECT WORTH KNOWING AT THE SURFACE (`0145:613-616`): demoting a member
@@ -97,13 +113,27 @@ export function setMemberRole(
 }
 
 /**
- * `clara.remove_member` — LIVE BODY `0005:732`. admin+.
+ * `clara.remove_member` — LIVE BODY `0157:346` (over `0005:732`, `0004:457` —
+ * #482, 裁-94: adds the target-rank and self-act walls). admin+.
  *
- * Refusals:
- *   CLR04  `_human_ctx`                                               (:736)
- *   CLR10  'op_key is required'                                       (:737)
- *   CLR11  'membership not in your firm'                              (:742)
- *   CLR11  'membership is not active'                                 (:743)
+ * Refusals, in the order the body raises them:
+ *   CLR04  `_human_ctx`                                               (:350)
+ *   CLR10  'op_key is required'                                       (:351)
+ *   CLR04  'you no longer meet the required rank for this action'
+ *          detail.reason=actor_rank_changed — F-C1 fresh, firm-qualified
+ *          re-validation of the ACTOR, taken post-lock                (:366)
+ *   CLR11  'membership not in your firm'                              (:376)
+ *   CLR04  'cannot remove your own membership'
+ *          detail.reason=cannot_act_on_self — M2 self-act wall, ruled 裁-94
+ *          (carved out when the sole owner would hit CLR09 below instead)
+ *                                                                      (:390)
+ *   CLR04  'cannot act on a member ranked above you'
+ *          detail.reason=cannot_act_on_superior — the TARGET-rank wall,
+ *          strictly-greater only, ruled 裁-94                          (:396)
+ *   CLR11  'membership is not active' (deferred past `_reserve_op`,
+ *          #482 review MATERIAL-1: this door's own mutation flips status,
+ *          so a same-op_key retry must not re-fail on state it produced)
+ *                                                                      (:404)
  *   CLR09  'cannot demote/remove the last active owner'  (the trigger, 0003:423)
  *
  * NOT A DELETE, and NOT REVERSIBLE BY A COUNTERPART VERB. It sets
@@ -124,13 +154,24 @@ export function removeMember(
 }
 
 /**
- * `clara.revoke_invite` — LIVE BODY `0141:466`. admin+.
+ * `clara.revoke_invite` — LIVE BODY `0157:420` (over `0141:466` — #482, 裁-94:
+ * adds the target-rank wall; NO self-act wall on this door, by design — an
+ * invite has no actor-in-place to self-act on). admin+.
  *
- * Refusals:
- *   CLR04  `_human_ctx`                                               (:470)
- *   CLR10  'op_key is required'                                       (:471)
- *   CLR11  'invite not in your firm'                                  (:475)
- *   CLR09  'this invite is no longer open (status: %)'                (:477)
+ * Refusals, in the order the body raises them:
+ *   CLR04  `_human_ctx`                                               (:424)
+ *   CLR10  'op_key is required'                                       (:425)
+ *   CLR11  'invite not in your firm' (the row lock scopes firm_id IN the
+ *          locking WHERE itself — #482 review F-C3 — so a cross-firm id
+ *          matches zero rows and never contends for a foreign lock)    (:435)
+ *   CLR04  'you no longer meet the required rank for this action'
+ *          detail.reason=actor_rank_changed — F-C2 fresh, firm-qualified
+ *          re-validation of the ACTOR, taken post-lock                (:450)
+ *   CLR04  'cannot act on an invite ranked above you'
+ *          detail.reason=cannot_act_on_superior — the TARGET-rank wall
+ *          (the invite's own `role` column stands in for a not-yet-real
+ *          membership's rank), strictly-greater only, ruled 裁-94       (:455)
+ *   CLR09  'this invite is no longer open (status: %)'                (:464)
  *
  * THE CLR09 IS WHY THE SURFACE OFFERS REVOKE ON EVERY ROW, not only pending ones.
  * The view's `status` is EFFECTIVE — an invite past `expires_at` reads `expired`
