@@ -195,6 +195,7 @@ lib/registers/depreciation.test.ts
 lib/registers/fa-account-profiles.test.ts
 lib/registers/fixed-assets.test.ts
 lib/registers/knowledge.test.ts
+lib/registers/money.test.ts
 lib/registers/opening-doors.test.ts
 lib/registers/opening-item-doors.test.ts
 lib/registers/opening.test.ts
