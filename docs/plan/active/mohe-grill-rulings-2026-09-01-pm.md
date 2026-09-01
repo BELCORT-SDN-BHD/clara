@@ -179,6 +179,44 @@ off-by-one, #497's F1 (the second writer the carve-out missed), #498's three cla
 produced so nothing measured was lost to the cancellation; `AGENTS.md`'s lean-ladder paragraph trued
 in the same PR so no lane reads a stale instruction.
 
+## 裁-112 · The OVERCLAIM class gets an explicit owner in both surviving briefs
+
+**Orchestrator ruling, 2026-09-01, immediately after 裁-111.** Raised by `fs4-pr488-review`, which
+censused what the cancelled cross-family leg had actually caught on the FS-4 train and found that all
+four findings were ONE class: **the code, or its framing, CLAIMS more than it closes.** Not
+correctness bugs — gaps between what something SAYS and what it DOES (the origin-digest name
+collision, the account-status differential, the four authority-attribution sites, the N1/N3 wording
+that overclaimed closure).
+
+**Why it needed a ruling:** neither surviving leg is naturally aimed at that class. A conformance
+pass asks "does the build match the checked design"; a fresh-context opus pass asks "is this code
+correct". The overclaim class sat BETWEEN them, and the third leg was what covered it. The lane that
+raised this also named it as its own weakest lens, with the receipts — which is the strongest reason
+to instruct it rather than hope.
+
+**RULED — both briefs, because option 1 alone leaves a hole:** a conformance leg exists only when
+there was a design gate. Most PRs have none, so the opus lane is the only lane; a class living solely
+in the conformance brief would be unowned on the majority of PRs.
+1. **Conformance brief — named PRIMARY lens:** *verify that no comment, PR-body line, completion
+   contract or test name claims more than the code actually closes; where a claim is conditional,
+   check the condition is ASSERTED rather than described.*
+2. **Opus brief — standing item, narrower and mechanical:** *does anything in this diff assert an
+   absolute where the code delivers a conditional?* Demonstrably effective from a fresh lane: that is
+   the shape which caught #499's FOLD-2 false premise the same hour.
+
+**Also ruled: the review threshold moves.** With the second family gone, an unpinned delivery or a
+claim-vs-behaviour gap is worth raising every time; the orchestrator says so plainly if it becomes
+noise rather than letting it accumulate. FOLD 2 is the evidence: the lane would have accepted
+pinned-values-only with a sweep behind it, did not without one, and the fresh lane then found half
+the fold was a no-op duplicate AND the other half was clobbering a stricter upstream header.
+
+**The orchestrator's own error, recorded:** FOLD 2 was ORDERED by me on a design-pass premise
+("nothing sets Cache-Control on this route") that was FALSE — `applyAuthState` sets the identical
+`private, no-store` on every proxied response. The instrument that missed it was a grep for a literal
+on the route, where the header is written by a shared applier the route passes through: absence from
+the wrong instrument, the estate's own recurring class, this time costing a wrong order from the
+orchestrator rather than a wrong verdict from a lane.
+
 ## Session state bridge — 2026-09-01 afternoon
 *(PROGRESS.md truing rides the next clock-out PR. Where this disagrees with the repo, the repo wins.)*
 
