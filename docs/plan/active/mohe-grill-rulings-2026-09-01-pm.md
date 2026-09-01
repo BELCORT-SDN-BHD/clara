@@ -158,6 +158,27 @@ shape held). The fixes ship as their own PR(s) from main with the full ladder: f
 review + the law-28 Codex leg (a native lane building an auth surface). Provenance: found by the
 law-28 Codex leg on #488; verified by the orchestrator's own read; ruled by the owner.
 
+## 裁-111 · The cross-family Codex review leg is SUSPENDED until beta live
+
+**Owner ruling, 2026-09-01 (late afternoon).** "异族审判review 取消掉" — from now until beta live
+launch, no PR gets the cross-family Codex adversarial leg. **Law 28 is time-boxed, not repealed:**
+the ONE fresh-context opus read-only review becomes the complete review gate for the remainder of
+the sprint, and law 28 resumes at beta unless the owner rules otherwise. **Codex remains a BUILD
+lane throughout** — only the review leg is suspended.
+
+**Recorded honestly, because the ruling was made with it on the table:** the Codex leg found real
+defects the same day — #489's silent 100× threshold parse (a DB-owned governance number set 100×
+larger with no rejection), #488's governance defect (a review lane occupying the authority slot in
+shipped code, which minted the attribution rule), and confirmed findings on #495. The countervailing
+fact, also measured: the opus lane found the day's other blockers unaided — #493's permanent-lockout
+off-by-one, #497's F1 (the second writer the carve-out missed), #498's three claim-accuracy defects,
+#495's F1/F2. The gate is thinner, not toothless, and the owner owns the trade.
+
+**Executed the moment it was ruled:** two in-flight legs stood down mid-run (#499's auth surface,
+#493's money-surface driver delta), each ordered to surrender any concrete finding Codex had already
+produced so nothing measured was lost to the cancellation; `AGENTS.md`'s lean-ladder paragraph trued
+in the same PR so no lane reads a stale instruction.
+
 ## Session state bridge — 2026-09-01 afternoon
 *(PROGRESS.md truing rides the next clock-out PR. Where this disagrees with the repo, the repo wins.)*
 
