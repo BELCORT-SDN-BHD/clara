@@ -4,6 +4,14 @@
 // so the LIFECYCLE cells and the WALL cells could each be read on their own. Every helper here
 // encodes a producer-side contract that was MEASURED against the rig, not assumed — each one is
 // commented with the red that found it, because those reds are the actual findings.
+//
+// Any caller that registers a clara.wake_engine_sources row through registerSource() below MUST
+// key it under rig.mjs's exported WAKE_ENGINE_TEST_PREFIX (registerSource() throws otherwise) —
+// packages/db/tests/g1-wake-engine.test.mjs's T1 cell excludes rows by exactly that literal,
+// because CI's db-estate job runs packages/db and packages/runtime CONCURRENTLY against one
+// shared postgres (the #485/#490 class). This file previously hand-typed its own `g1b_test_`
+// literal, undetected by T1's single-literal carve-out until an opus review round (PR #497,
+// finding F1) — the throw is the structural fix.
 
 import { after } from "node:test";
 import * as rig from "./rig.mjs";
@@ -29,6 +37,19 @@ export const skip0138 = skip || (HAS_0138 ? false : "F-A4 PR-1c (0138) not appli
 const REGISTERED = [];
 
 export async function registerSource(row) {
+  // The shared cross-package contract (rig.mjs's WAKE_ENGINE_TEST_PREFIX) — enforced HERE, at
+  // registration, not merely documented: a caller's sourceKey that does not carry this exact
+  // prefix throws immediately instead of silently landing a row that escapes
+  // packages/db/tests/g1-wake-engine.test.mjs's T1 exclusion (the #485/#490 class; this file
+  // itself drifted to a different hand-typed literal once — opus review round on PR #497,
+  // finding F1 — which is exactly what this check now catches at the source).
+  if (!row.sourceKey || !row.sourceKey.startsWith(rig.WAKE_ENGINE_TEST_PREFIX)) {
+    throw new Error(
+      `registerSource(${row.sourceKey}): source_key must start with '${rig.WAKE_ENGINE_TEST_PREFIX}' ` +
+        `(rig.mjs's WAKE_ENGINE_TEST_PREFIX) — packages/db/tests/g1-wake-engine.test.mjs's T1 cell ` +
+        `excludes rows by exactly this literal`,
+    );
+  }
   const on = row.enabled ?? false;
   if (on && row.carrier === "wake_outbox" && row.eventType) {
     // The same estate invariant wake-engine.test.mjs enforces at registration: AT MOST ONE
