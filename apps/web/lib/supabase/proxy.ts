@@ -105,6 +105,34 @@ export function referrerPolicyForPath(
   return null;
 }
 
+export type ConfirmCacheHeaders = { readonly cacheControl: string; readonly vary: string };
+
+/**
+ * FOLD 2 (N1 design review, 裁-109's fix) — pinning what used to be
+ * structural for free. Before the flash-cookie fix, `/auth/confirm`
+ * rendered a DIFFERENT URL per outcome (`?status=locked&wait=900` vs
+ * `?status=wrong&remaining=3`, …), so one person's card being cache-served
+ * to another was structurally impossible — there was nothing to key a cache
+ * on besides the URL, and every outcome had its own. After the fix, every
+ * outcome is the SAME URL (`/auth/confirm?flash=<nonce>`) differing only by
+ * the REQUEST COOKIE, and this repo sets no `Cache-Control`/`Vary` on this
+ * route today — the only thing preventing one person's rendered card from
+ * being served to the next visitor would be an unasserted framework/CDN
+ * default. Review law 2: absence of a cache header is not evidence there is
+ * no caching. This function makes the posture explicit and pinned rather
+ * than assumed — see `updateSession` below for where it is applied, and
+ * `tests/proxy-matcher.test.ts` for the pin (the `referrerPolicyForPath`
+ * idiom immediately above, applied to a second header pair).
+ *
+ * Segment boundaries match `isPublicPath`/`referrerPolicyForPath` above.
+ */
+export function confirmCacheHeadersForPath(pathname: string): ConfirmCacheHeaders | null {
+  if (pathname === "/auth/confirm" || pathname.startsWith("/auth/confirm/")) {
+    return { cacheControl: "private, no-store", vary: "Cookie" };
+  }
+  return null;
+}
+
 export async function updateSession(request: NextRequest) {
   // Queued, never applied to a response inside the callback: the response
   // this function returns is not chosen until the gate decision below.
@@ -184,6 +212,16 @@ export async function updateSession(request: NextRequest) {
   const referrerPolicy = referrerPolicyForPath(request.nextUrl.pathname);
   if (referrerPolicy !== null) {
     response.headers.set("Referrer-Policy", referrerPolicy);
+  }
+
+  // FOLD 2 (N1 fix, 裁-109) — see `confirmCacheHeadersForPath`'s header for
+  // why this is asserted rather than left to an unnamed framework default,
+  // now that every confirm outcome shares one URL and differs only by the
+  // request cookie.
+  const cacheHeaders = confirmCacheHeadersForPath(request.nextUrl.pathname);
+  if (cacheHeaders !== null) {
+    response.headers.set("Cache-Control", cacheHeaders.cacheControl);
+    response.headers.set("Vary", cacheHeaders.vary);
   }
 
   return response;

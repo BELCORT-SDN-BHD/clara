@@ -214,6 +214,7 @@ test/a11yRules.test.ts
 test/keyboardWalk.test.ts
 tests/apiLimitBanner.test.mjs
 tests/client-scope.test.ts
+tests/confirm-flash.test.ts
 tests/firm-scope-db-pins.test.ts
 tests/firm-scope-fourth-entrance.test.ts
 tests/firm-scope-surfaces.test.ts

@@ -108,7 +108,11 @@ test("submitting an attempt while the wall is unwired renders the honest not-ava
   if (CONFIRM_WALL_WIRED) {
     test.skip(true, "the wall is wired; the SKELETON below covers this arm instead");
   }
-  await expect(page).toHaveURL(`${APP_ORIGIN}/auth/confirm?status=unavailable`);
+  // N1, fix round 2026-09-01 (裁-109): the URL no longer names the outcome —
+  // only a bare, non-authoritative `flash` marker; the real answer lives in
+  // an httpOnly cookie this test cannot (and need not) inspect directly.
+  // The visible-text assertion below is the real behavioural proof.
+  await expect(page).toHaveURL(new RegExp(`^${APP_ORIGIN}/auth/confirm\\?flash=`));
   await expect(page.getByText(/isn't available yet/i)).toBeVisible();
   await expectAccessible(page, "confirmation unavailable");
 });

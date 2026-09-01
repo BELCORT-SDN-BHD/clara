@@ -124,17 +124,26 @@ export type ConfirmationAttemptOutcome =
        * compute it. Lane B WIRES these two fields through from the door's
        * real response; it does not invent them at this seam.
        *
-       * RECONCILIATION OWED: `page.tsx`'s R4/NIT-3 clamp renders any
-       * `retryAfterSeconds` over 900 as the generic `invalid` card, on the
-       * assumption C1/C2's window is 15 minutes (part 1 §3.4). C-3 names
-       * the real window when it builds the door; if that window is not
-       * 900s, the clamp must be trued to match in the SAME/a follow-up PR,
-       * or a genuine lockout longer than the guessed ceiling renders as a
-       * mystery "invalid" instead of the honest wait it is. Not guessed
-       * here — flagged for whoever lands the real door next.
+       * RECONCILIATION OWED: `../confirm-flash.ts`'s `LOCKED_MAX_WAIT_
+       * SECONDS` clamp (moved there from `page.tsx` by the N1 fix, 裁-109)
+       * renders any `retryAfterSeconds` over 900 as the generic `invalid`
+       * card, on the assumption C1/C2's window is 15 minutes (part 1 §3.4).
+       * C-3 names the real window when it builds the door; if that window
+       * is not 900s, the clamp must be trued to match in the SAME/a
+       * follow-up PR, or a genuine lockout longer than the guessed ceiling
+       * renders as a mystery "invalid" instead of the honest wait it is.
+       * Not guessed here — flagged for whoever lands the real door next.
+       *
+       * TYPE TRUED (裁-107 direction-2, ledger entry 裁-103): `scope` was
+       * `"address" | "origin"` — the real door C-3 ships returns
+       * `'email' | 'origin'` (the seam↔door table's REVERSE direction,
+       * checking what the door actually returns against what the seam
+       * expects, per 裁-107's standing law). The door wins: trued to
+       * `"email" | "origin"` below. Type-only — this seam is still stubbed
+       * and returns neither today, so no behavior changes.
        */
       readonly kind: "rejected";
-      readonly scope: "address" | "origin";
+      readonly scope: "email" | "origin";
       readonly retryAfterSeconds: number;
     }
   | { readonly kind: "unavailable" };
