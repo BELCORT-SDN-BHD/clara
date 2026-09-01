@@ -36,8 +36,8 @@ test("parseAmountToCents: rejects malformed input, never coerces to 0", () => {
 // law-28 leg): the pre-fix body blanket-stripped every comma before validating, so
 // "1234,56" (European-style RM1,234.56) returned 12345600 — a silent 100x error on a
 // live, day-one fixed-asset money field, with no rejection and no echo of the
-// interpreted amount. Mirrors lib/firm-admin/settings.test.ts's own FINDING 1
-// test-case table exactly (same regex shape, ported here).
+// interpreted amount. Mirrors PR #489's FINDING 1 table (merges ahead of this
+// PR in the queue) exactly (same regex shape, ported here).
 test("parseAmountToCents: FINDING 1 (raised by pr489-codex-leg, law-28 leg) — a decimal-comma amount is REFUSED, never silently reparsed as a 100x-larger thousands amount", () => {
   assert.equal(parseAmountToCents("1234,56"), null, "European-style decimal comma must be REFUSED, not silently reinterpreted");
   assert.equal(parseAmountToCents("12,34.56"), null, "a comma outside a strict 3-digit group is refused");
