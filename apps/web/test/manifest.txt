@@ -129,6 +129,7 @@ components/registers/staff-advances-keyboard.test.tsx
 components/reports/reports-components.test.tsx
 components/reports/reports-snapshots-seeding-a11y.test.tsx
 components/reports/reports-snapshots-seeding-keyboard.test.tsx
+components/tax/tax-a11y.test.tsx
 lib/bank/agency-doors.test.ts
 lib/bank/doors.test.ts
 lib/bank/error-kind.test.ts

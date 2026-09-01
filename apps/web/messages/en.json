@@ -106,7 +106,9 @@
     "citationsDetailsHeading": "Resolved citations ({count})",
     "modelLabel": "model",
     "confirm": "Confirm",
-    "decline": "Decline"
+    "decline": "Decline",
+    "statutoryDeadlinesNotBuilt": "Payroll and SST statutory deadlines do not yet remind you here — clara.statutory_deadlines has been live-empty since migration 0139, with no grant and no verb. This feed is F-T2's, paused (裁-80); until it lands, deadlines are not tracked automatically anywhere in the product.",
+    "clientAliasNotBuilt": "Adding or retiring a client's own alias by hand has no surface here yet — add_client_alias and retire_client_alias are live doors (bookkeeper+) with no UI. This list only shows aliases Clara proposes promoting to a formal identifier."
   },
   "ClientsRegister": {
     "heading": "Clients",
@@ -469,6 +471,7 @@
         "documents": "Documents",
         "bank": "Bank",
         "close": "Close",
+        "clientTax": "Tax",
         "reports": "Reports",
         "registers": "Registers",
         "knowledge": "Knowledge"
@@ -493,9 +496,29 @@
     "documents": "Documents",
     "bank": "Bank",
     "close": "Close",
+    "tax": "Tax",
     "reports": "Reports",
     "registers": "Registers",
     "knowledge": "Knowledge"
+  },
+  "ClientTax": {
+    "heading": "Tax",
+    "body": "Malaysia's SST and income-tax lifecycle for this client. Once a close seals, Clara drafts every rung — its statutory citation and her own reasoning included — and a professional reviews and signs. Nothing here files or posts on its own.",
+    "sst": {
+      "heading": "SST",
+      "subheading": "Registration status, the period's output tax, and the SST-02 return draft (F-T1).",
+      "notBuilt": "Clara will show this client's SST registration status, the period's output tax, and draft the SST-02 return here once F-T1 builds the registration and return tables. Today only the SST rate and threshold reference tables are live — the rate table since F-T1 PR-1 (migration 0153), the threshold table since migration 0016 — no governed door exists for either. The rest is F-T1 PR-2 onward, paused (裁-80)."
+    },
+    "computation": {
+      "heading": "Income tax computation",
+      "subheading": "The R1–R10 computation and the CP204 estimate, draft only (F-T3).",
+      "notBuilt": "Once a close seals, Clara will draft the R1–R10 computation and the CP204 estimate (clara.evaluate_tax_computation_v1) here, every rung carrying its statutory citation and her own explanation, for a professional to sign. Today only the tax law and platform reference tables are live (F-T3 PR-1, migration 0152) — the computation itself is F-T3 PR-2…9, paused (裁-80). It stays draft-only even once built: nothing on this tab is ever filed."
+    },
+    "turnoverClassification": {
+      "heading": "Turnover classification",
+      "subheading": "Classify each account's SST turnover treatment.",
+      "notBuilt": "Clara will let a bookkeeper classify each account's SST turnover treatment here (clara.set_turnover_classification, live since migration 0016) once Track B's Tax tab UI resumes — paused, 裁-80."
+    }
   },
   "JournalsWorkbench": {
     "heading": "Journals",
@@ -2456,6 +2479,7 @@
     "compliance": {
       "heading": "Compliance register",
       "pageDescription": "Every SST-registration watch across the firm that has not yet been resolved.",
+      "taxTabPointer": "This register tracks the threshold crossing only — once one is confirmed, the client's own Tax tab is where Clara will draft the SST-02 return that follows it.",
       "staleEvaluator": "The compliance evaluator has not completed a run in the last 48 hours — these figures may be out of date.",
       "loading": "Loading the compliance register…",
       "empty": "No open compliance watches for this firm.",

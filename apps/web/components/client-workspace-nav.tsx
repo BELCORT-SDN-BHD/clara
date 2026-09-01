@@ -12,6 +12,7 @@ const CLIENT_TABS = [
   { segment: "documents", messageKey: "documents" },
   { segment: "bank", messageKey: "bank" },
   { segment: "close", messageKey: "close" },
+  { segment: "tax", messageKey: "tax" },
   { segment: "reports", messageKey: "reports" },
   { segment: "registers", messageKey: "registers" },
   { segment: "knowledge", messageKey: "knowledge" },
