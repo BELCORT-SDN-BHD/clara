@@ -95,6 +95,11 @@ test("NIT-3: an out-of-range remaining/wait falls to the generic invalid card, n
     { status: "locked", wait: "86400" },
     { status: "locked", wait: "-1" },
     { status: "locked" },
+    // NIT-2, fix round 2026-09-01: `expired` now carries `remaining` too,
+    // and takes the SAME clamp as `wrong` (handler.ts's confirmRedirect).
+    { status: "expired", remaining: "6" },
+    { status: "expired", remaining: "-1" },
+    { status: "expired" },
   ];
   for (const search of outOfRangeCases) {
     const state = await ConfirmEmailPage({ searchParams: Promise.resolve(search) });
@@ -121,4 +126,15 @@ test("NIT-3: an in-range remaining/wait, at and inside the ceiling, renders exac
     searchParams: Promise.resolve({ status: "locked", wait: "900" }),
   });
   assert.deepEqual(waitAtCeiling.props.state, { kind: "locked", waitSeconds: 900 });
+
+  // NIT-2, fix round 2026-09-01: `expired` renders its own `remaining` too.
+  const expiredAtCeiling = await ConfirmEmailPage({
+    searchParams: Promise.resolve({ status: "expired", remaining: "5" }),
+  });
+  assert.deepEqual(expiredAtCeiling.props.state, { kind: "expired", remaining: 5 });
+
+  const expiredZero = await ConfirmEmailPage({
+    searchParams: Promise.resolve({ status: "expired", remaining: "0" }),
+  });
+  assert.deepEqual(expiredZero.props.state, { kind: "expired", remaining: 0 });
 });

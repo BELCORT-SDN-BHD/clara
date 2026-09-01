@@ -91,7 +91,7 @@ const inviteClient = (): InviteAuthClient => ({
 const CONFIRM_CODE_STATES: ConfirmCodeState[] = [
   { kind: "form" },
   { kind: "wrong-code", remaining: 3 },
-  { kind: "expired" },
+  { kind: "expired", remaining: 3 },
   { kind: "locked", waitSeconds: 300 },
   { kind: "unavailable" },
   { kind: "invalid" },

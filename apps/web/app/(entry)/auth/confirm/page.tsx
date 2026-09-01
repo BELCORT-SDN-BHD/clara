@@ -83,8 +83,12 @@ function confirmCodeState(query: SearchParams): ConfirmCodeState {
       const remaining = boundedInt(query.remaining, REMAINING_MAX);
       return remaining === null ? { kind: "invalid" } : { kind: "wrong-code", remaining };
     }
-    case "expired":
-      return { kind: "expired" };
+    // NIT-2, fix round 2026-09-01: `expired` now carries `remaining`, same
+    // clamp as `wrong` — see handler.ts's confirmRedirect for why.
+    case "expired": {
+      const remaining = boundedInt(query.remaining, REMAINING_MAX);
+      return remaining === null ? { kind: "invalid" } : { kind: "expired", remaining };
+    }
     case "locked": {
       const waitSeconds = boundedInt(query.wait, WAIT_SECONDS_MAX);
       return waitSeconds === null ? { kind: "invalid" } : { kind: "locked", waitSeconds };

@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 
 import { signDpa as defaultSignDpa, type SignDpa } from "@/lib/registration/dpa-doors";
 import type { DpaDocumentState } from "@/lib/registration/dpa-server-reads";
+import { newOpKey } from "@/lib/registration/op-key";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -47,11 +48,6 @@ import { NotBuiltNote } from "@/components/common/not-built-note";
  * stranded with no way forward at all; `/pending`'s own "registered" arm is
  * where the next real action (once Lane B lands) will live.
  */
-/** Same one-liner every other door caller in this codebase mints its own
- *  copy of (`signup-firm-form.tsx:105`, `lib/bank/doors.ts`, …) — the estate
- *  keeps this local rather than shared. */
-const newOpKey = (): string => crypto.randomUUID();
-
 export function SignupDpaForm({
   document,
   sign = defaultSignDpa,

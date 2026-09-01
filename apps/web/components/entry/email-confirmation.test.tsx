@@ -205,7 +205,8 @@ test("W-H2: wrong code, expired, and locked render as three DISTINCT redirects",
   );
   assert.equal(
     expired.headers.get("location"),
-    "https://app.clarabook.example/auth/confirm?status=expired",
+    // NIT-2, fix round 2026-09-01: `expired` now carries `remaining` too.
+    "https://app.clarabook.example/auth/confirm?status=expired&remaining=2",
     "an otp_expired error must not render as a plain wrong code",
   );
 

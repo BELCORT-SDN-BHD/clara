@@ -88,7 +88,7 @@ function isExpiredOtpError(error: VerifyOtpError | null): boolean {
  */
 function confirmRedirect(
   origin: string,
-  outcome: { status: "wrong"; remaining: number } | { status: "expired" }
+  outcome: { status: "wrong"; remaining: number } | { status: "expired"; remaining: number }
     | { status: "locked"; wait: number } | { status: "unavailable" }
     | { status: "invalid" },
 ): NextResponse {
@@ -96,7 +96,16 @@ function confirmRedirect(
   target.search = "";
   target.hash = "";
   target.searchParams.set("status", outcome.status);
-  if (outcome.status === "wrong") target.searchParams.set("remaining", String(outcome.remaining));
+  // NIT-2, fix round 2026-09-01 (fs4-pr488-review): `expired` now carries
+  // `remaining` too, same as `wrong` — the attempt is consumed either way
+  // (settleAttempt below runs before this branches on the error shape), and
+  // after N3's honest rewording "expired" is precisely the AMBIGUOUS bucket
+  // ("may be wrong, may have expired, or no pending signup") where a person
+  // most needs to see they're walking toward lockout, not the one card that
+  // gets to hide the count.
+  if (outcome.status === "wrong" || outcome.status === "expired") {
+    target.searchParams.set("remaining", String(outcome.remaining));
+  }
   if (outcome.status === "locked") target.searchParams.set("wait", String(outcome.wait));
   return NextResponse.redirect(target, { status: 303 });
 }
@@ -205,7 +214,9 @@ export async function handleEmailConfirmationPost(
 
   await settleAttempt(attempt.attemptId, "rejected");
   if (isExpiredOtpError(response.error)) {
-    return sealResponse(confirmRedirect(proof.origin, { status: "expired" }));
+    return sealResponse(
+      confirmRedirect(proof.origin, { status: "expired", remaining: attempt.remaining }),
+    );
   }
   return sealResponse(
     confirmRedirect(proof.origin, { status: "wrong", remaining: attempt.remaining }),

@@ -77,11 +77,26 @@ export type SignDpaParams = {
 
 // NOTE FOR THE SEAM↔DOOR COMPLETION TABLE (PR #488): `sign_dpa`'s real
 // success/replay carries `{signature_id, signed_at, replay}` (survey F6);
-// the bare `"signed"` below drops all three. Not treated as a live defect
-// in THIS round — `signup-dpa-form.tsx` has no next step to route a real
-// signature to yet (its own header: "there is no built checkout to send
-// anyone to"), so inventing fields nothing here reads would be shape ahead
-// of need. Lane B widens this arm when the success flow it feeds exists.
+// the bare `"signed"` below drops all three. THIS IS A LAWFUL DECISION
+// TODAY, NOT A DEFECT (fs4-pr488-review, round 3) — the rule that tells
+// this case apart from M1/M2/A: a dropped PARAM is a defect by default
+// (the door refuses without it, silently and unrecoverably — sign_dpa's own
+// `op_key is required` -> CLR10 is exactly that shape, which is why A was a
+// fix); a dropped RETURN FIELD is a decision by default (the call still
+// succeeds, `{kind:"signed"}` is true whether the door minted a fresh
+// signature or replayed one, so nothing is fabricated, and widening the
+// return later is additive and compile-checked at every consumer the
+// moment one exists). `signup-dpa-form.tsx` has no next step to route a
+// real signature to yet (its own header: "there is no built checkout to
+// send anyone to"), so inventing fields nothing here reads would be shape
+// ahead of need.
+//
+// THE KNOWN WIDENING, named so it is not rediscovered: `replay` is the
+// field that will matter FIRST. The moment a receipt surface exists,
+// "you signed this on <date>" versus a bare "signed" becomes a real
+// distinction, and `signature_id`/`signed_at` are the evidence this
+// estate's receipt discipline will want. Lane B widens this arm when that
+// receipt surface is built — not before.
 export type SignDpaOutcome =
   | { readonly kind: "signed" }
   | { readonly kind: "unavailable" };

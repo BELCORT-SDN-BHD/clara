@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { claimIdentity, requestFirmRegistration } from "@/lib/identity/doors";
 import { isDoorRefusal } from "@/lib/doors";
 import { forgetSignupEmail } from "@/lib/registration/signup-email-storage";
+import { newOpKey } from "@/lib/registration/op-key";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -101,8 +102,6 @@ import { StateBanner } from "@/components/common/state";
  *  message, both VERBATIM. `code` is null for an ordinary failure (transport,
  *  no session) — there is no DB verdict to show a chip for. */
 type Refusal = { code: string | null; message: string };
-
-const newOpKey = (): string => crypto.randomUUID();
 
 export function SignupFirmForm() {
   const t = useTranslations("Signup");

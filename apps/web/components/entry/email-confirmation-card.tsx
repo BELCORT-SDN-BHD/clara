@@ -48,7 +48,10 @@ import { Label } from "@/components/ui/label";
  *                 one, AND an unknown address alike, so the copy this state
  *                 renders says "that code didn't work", never "expired" —
  *                 see `verify/handler.ts`'s `isExpiredOtpError` for why
- *                 that's honest rather than a downgrade
+ *                 that's honest rather than a downgrade. NIT-2, same round:
+ *                 carries the wall's OWN remaining-attempt count too — the
+ *                 attempt is consumed either way, and this is the AMBIGUOUS
+ *                 bucket where a person most needs to see the countdown
  *   locked        C1/C2 refused — carries the wall's OWN wait
  *   unavailable   the Lane-B seam (`confirmation-wall.ts`) has not been wired
  *                 up yet — an honest `NotBuiltNote`, never mistaken for a
@@ -66,7 +69,7 @@ import { Label } from "@/components/ui/label";
 export type ConfirmCodeState =
   | { readonly kind: "form" }
   | { readonly kind: "wrong-code"; readonly remaining: number }
-  | { readonly kind: "expired" }
+  | { readonly kind: "expired"; readonly remaining: number }
   | { readonly kind: "locked"; readonly waitSeconds: number }
   | { readonly kind: "unavailable" }
   | { readonly kind: "invalid" };
@@ -129,7 +132,7 @@ export function EmailConfirmationCard({
         )}
         {state.kind === "expired" && (
           <StateBanner tone="warning" title={t("expiredTitle")}>
-            {t("expiredDescription")}
+            {t("expiredDescription", { remaining: state.remaining })}
           </StateBanner>
         )}
         {state.kind === "locked" && (
