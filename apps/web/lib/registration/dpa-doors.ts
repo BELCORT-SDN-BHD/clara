@@ -79,11 +79,9 @@ export type SignDpaParams = {
 // success/replay carries `{signature_id, signed_at, replay}` (survey F6);
 // the bare `"signed"` below drops all three.
 //
-// 裁-107(a) (orchestrator ruling, 2026-09-01,
-// docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md). ORCHESTRATOR-RULED,
-// NOT OWNER-RULED — surfaced to the owner as a design-vs-contract call under
-// hard constraint 1; if the owner rules otherwise this shape changes.
-// (Raised by fs4-pr488-review; the finding is theirs, the ruling is not.)
+// 裁-107(a) — OWNER-CONFIRMED 2026-09-01, see the pm ledger
+// (docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md). (Raised by
+// fs4-pr488-review; the finding is theirs, the ruling is the owner's.)
 //
 // THIS IS A LAWFUL DECISION TODAY, NOT A DEFECT — the rule that tells this
 // case apart from M1/M2/A: a dropped PARAM is a defect by default (the door
