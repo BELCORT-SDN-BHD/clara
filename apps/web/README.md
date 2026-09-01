@@ -339,34 +339,38 @@ leaks; the third is what stops Resend's own retained copy of the message from ho
 bearer factors for 30 days; the fourth bounds who inside the team can read what is retained
 anyway.
 
-### 4. Signup confirmation round trip and enumeration posture (round-3 review, HIGH)
+### 4. Signup confirmation round trip and enumeration posture (round-3 review, HIGH;
+    superseded by 裁-92's CODE flow, checkout-gate-design.md §3.6 — this section now
+    describes what actually ships)
 
-`components/entry/signup-account-form.tsx` pins `emailRedirectTo` to the current origin's
-`/auth/confirm` leaf. A GET there only paints the **Confirm Email** face with a
-**Confirm my email** button; the explicit button POSTs
-the token hash to `/auth/confirm/verify`, whose handler hard-codes `type: "email"`, ignores
-caller `type`/`next`, and redirects only to `/signup` after a matching session is present.
-This prevents mail scanners from confirming an attacker-chosen password merely by fetching
-the email link, and avoids the implicit-flow fragment that a server cannot read. It preserves
-PRD §8's server-verified-session requirement at the transition into the firm step.
+`/auth/confirm` is a **six-digit code form** (email + code), never a link. The GET paints
+that form only — no `.auth.` call anywhere in that execution root, so a mail scanner that
+fetches nothing (there is no link left to fetch) consumes nothing either way. The explicit
+POST to `/auth/confirm/verify` runs `proveSameOrigin` (CSRF wall, kept verbatim from the
+link-flow handler this replaced), then the C1/C2 confirmation-attempt wall
+(`app/(entry)/auth/confirm/verify/confirmation-wall.ts` — **a Lane-B seam, not wired on this
+tip**: its production default honestly refuses `{kind:"unavailable"}` rather than letting a
+guess through unchecked), then `verifyOtp({email, token, type:"signup"})`, and redirects to
+`/signup` only after a matching session is present. **Cross-device now works**: the person
+can read the code on a phone and type it into any tab, alongside their own address — the
+binding is "the address is the person's own", not a link tied to one browser (§3.1/§3.2).
 
 - **Configure:** Supabase Dashboard → Authentication → Providers → Email: *Allow new users
   to sign up* ON and *Confirm Email* ON (autoconfirm disabled). Under Authentication → Email
-  Templates → *Confirm signup*, replace the default `ConfirmationURL` link with exactly
-  `{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email`. Here `.RedirectTo` is the exact
-  `emailRedirectTo` value passed by this app — `<origin>/auth/confirm` — whereas `.SiteURL`
-  is the project's single configured Site URL. Under URL
-  Configuration → *Redirect URLs*, add the exact `<origin>/auth/confirm` URL for every
-  deployed origin, with no wildcard.
+  Templates → *Confirm signup*, the body must emit the code and **nothing to click**:
+  `{{ .Token }}` — never `{{ .ConfirmationURL }}` and never a `{{ .RedirectTo }}?token_hash=…`
+  link (that shape is 裁-92's own retired vector: a link is a value an attacker can construct
+  and mail to a victim; a bare code, checked against the victim's OWN typed address, is not).
+  Under Authentication → Auth Providers → Email, shorten the OTP expiry from the 24-hour
+  default to **10 minutes** (裁-36/§3.4's C4 — a named setup act with an owner receipt; no
+  route or migration can read or enforce this project setting from the repository).
 - **Verify (receipt):** with the project's Management API token, positively read
   `GET /v1/projects/{ref}/config/auth` and retain the JSON showing `disable_signup` is
-  `false`, `mailer_autoconfirm` is `false`, and `uri_allow_list` contains every exact
-  `<origin>/auth/confirm` entry. Retain a delivered *Confirm signup* message showing the
-  exact `.RedirectTo` + `TokenHash` template URL above; open it twice before clicking and record that both
-  visits paint the button without consuming the token. Re-run these reads after any project
-  restore or auth-configuration change. This positive Management API read is a blocking
-  **deploy gate**: repository code cannot read hosted project settings and no UI assertion
-  substitutes for the retained response.
+  `false`, `mailer_autoconfirm` is `false`, and the OTP expiry is the configured 10 minutes.
+  Retain a delivered *Confirm signup* message showing the bare six-digit code with no link at
+  all. Re-run these reads after any project restore or auth-configuration change. This
+  positive Management API read is a blocking **deploy gate**: repository code cannot read
+  hosted project settings and no UI assertion substitutes for the retained response.
 - **Residual:** the existing-account response remains controlled by hosted Auth. With the
   required posture, Supabase returns the non-enumerating `user`/no-session shape and this app
   renders the same “Confirm your email” copy for a new user, an `identities: []` user, and
@@ -378,13 +382,28 @@ PRD §8's server-verified-session requirement at the transition into the firm st
   receipt above, not this code, is the control against that drift. P4 follow-up: require the
   signup fork to consume a same-subject server receipt minted by the explicit
   `/auth/confirm/verify` POST (signed httpOnly cookie or DB row).
-- **Blocking log-control receipt:** the initial signup confirmation GET carries `token_hash`
-  in its query string, so edge/server **access logs** can capture the bearer despite
-  `Referrer-Policy: no-referrer`. Deployment is blocked until an instrument makes a
-  **positive read** of the effective edge/server logging configuration and retains the
-  response proving either query-string redaction or short retention plus restricted ACLs.
-  A policy statement or intended setting is not evidence. The delivered-message sample and
-  this retained log-control response are both required at deployment.
+- **The GET-query log-control residual is RESOLVED, not merely re-scoped.** The link-flow
+  handler this replaced carried `token_hash` in the GET's own query string, which edge/server
+  access logs could capture. The code form has NO caller-supplied value in its GET at all —
+  `page.tsx` never reads `email`/`token` from `searchParams`, by construction (part 1 §3.3 /
+  cell W-H) — so there is nothing left for an access log to leak on that leg. The code itself
+  travels only in the POST's form body, which this deployment's `Referrer-Policy:
+  strict-origin` and the same-origin wall govern, not a query-string redaction policy.
+- **C1/C2's own residual, stated plainly (checkout-gate-design.md §3.4).** The attempt wall
+  bounds the exposure of a guessable six-digit code; it is not built on this tip
+  (`confirmation-wall.ts`'s seam always answers "unavailable" until a later train wires the
+  runtime call). Deploying this build live means EVERY confirmation attempt is honestly
+  refused until that lands — recorded here so the gap is visible, never assumed closed.
+- **The "send me a new code" resend control is walled the same way, deliberately (M3, fix
+  round 2026-09-01).** An earlier cut of this card called `supabase.auth.resend` directly
+  from the browser — reachable by an unauthenticated visitor simply by loading
+  `/auth/confirm?status=expired`, with no session and no rate limit, against Supabase's own
+  project-wide hourly email-send budget shared with every legitimate signup. The design names
+  only the COPY for this control ("or request a new code", checkout-gate-design.md:314), not
+  its transport, so `lib/registration/confirmation-resend.ts` gives it the same shape as every
+  other wall on this surface: a Lane-B seam whose production default honestly refuses
+  `{kind:"unavailable"}` today, to be wired through the SAME C1/C2 attempt wall the verify
+  path uses before Lane B ever lets it reach Supabase.
 
 ### 5. `CLARA_PUBLIC_ORIGINS` must be set on any proxied deployment (Codex round 2, N3)
 

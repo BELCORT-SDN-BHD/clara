@@ -1348,11 +1348,9 @@
     "submitting": "Creating your account…",
     "haveAccount": "Already have an account? <link>Sign in</link>.",
     "noAccountReturned": "The sign-up didn't complete. No account was created, so nothing was sent to your inbox. Please try again.",
-    "dpaLabel": "I agree to Clara's data processing terms, including that client documents are sent to an AI processor outside Malaysia.",
-    "dpaNotBuilt": "Not built yet: your agreement is not recorded anywhere. The door that stores it — and the owner-confirmed final wording — land with P4-D. The terms this refers to are the drafts in docs/ops/legal/, which have not been through owner review.",
     "checkEmailTitle": "Confirm your email",
     "checkEmailDescription": "Your account exists, but it isn't active until you confirm it.",
-    "checkEmailBanner": "We've sent you a confirmation link. Open it and you'll come straight back here to name your firm.",
+    "checkEmailBanner": "We've sent you a six-digit code. Enter it on the next screen and you'll come straight back here to name your firm.",
     "checkEmailSignIn": "Already confirmed? <link>Sign in</link>.",
     "configurationErrorTitle": "Sign-up is not configured safely",
     "configurationErrorDescription": "Your account was created without the required email-confirmation step.",
@@ -1366,25 +1364,60 @@
     "firmSubmit": "Register my firm",
     "firmSubmitting": "Registering…",
     "refusalTitle": "This registration was refused",
-    "unknownFailure": "The registration didn't complete, and no reason came back. Nothing was saved."
+    "unknownFailure": "The registration didn't complete, and no reason came back. Nothing was saved.",
+    "dpaStepTitle": "One more thing before checkout",
+    "dpaStepDescription": "Read the agreement below, then continue.",
+    "dpaStepSign": "I have read this and agree",
+    "dpaStepSigning": "Recording your agreement…",
+    "dpaStepSignedUnavailable": "Not built yet: the door that records your signature (`sign_dpa`) isn't wired up in this build. Nothing was recorded just now — your click did nothing but tell you that.",
+    "dpaStepDocumentUnavailable": "Not built yet: the current agreement couldn't be read. Nothing can be signed until it can, so checkout stays unreachable from here — nothing is charged and nothing is recorded.",
+    "dpaStepBackToStatus": "Back to your registration status"
   },
   "ConfirmEmail": {
     "metaTitle": "Confirm your email",
-    "title": "Confirm your email",
-    "description": "This confirmation changes your account, so Clara waits for your explicit click.",
+    "title": "Enter your confirmation code",
+    "description": "Type the six-digit code we emailed you, beside your own address.",
+    "emailLabel": "Email",
+    "codeLabel": "Six-digit code",
     "submit": "Confirm my email",
-    "missingTitle": "This confirmation link is incomplete",
-    "missingDescription": "No confirmation token was present, so nothing was changed.",
-    "invalidTitle": "This email could not be confirmed",
-    "invalidDescription": "The confirmation token was invalid, expired, or already used. No firm-registration step was opened."
+    "submitting": "Checking your code…",
+    "invalidTitle": "That wasn't a valid submission",
+    "invalidDescription": "Check your email and the code, then try again.",
+    "wrongCodeTitle": "That code is not right",
+    "wrongCodeDescription": "{remaining, plural, =0 {No attempts are left for this address right now.} =1 {One attempt is left for this address.} other {# attempts are left for this address.}}",
+    "expiredTitle": "That code didn't work",
+    "expiredDescription": "It may be wrong, it may have expired, or the address may not have a pending signup — we can't tell which from here. {remaining, plural, =0 {No attempts are left for this address right now.} =1 {One attempt is left for this address.} other {# attempts are left for this address.}} Request a new one below.",
+    "lockedTitle": "Too many attempts",
+    "lockedDescription": "{wait, plural, =1 {Wait about a minute, or request a new code.} other {Wait about # minutes, or request a new code.}}",
+    "unavailableTitle": "Confirmation isn't available yet",
+    "unavailableDescription": "Not built yet: the attempt wall this form calls (`claim_confirmation_attempt`) isn't wired up in this build, so no code can be checked from here yet. Nothing was recorded just now.",
+    "resend": "Send me a new code",
+    "resending": "Sending a new code…",
+    "resent": "A new code is on its way.",
+    "resendUnavailable": "Not built yet: resending isn't wired up in this build. Nothing was sent just now — start a new signup instead."
   },
   "Pending": {
     "metaTitle": "Your registration",
-    "checkoutNotBuilt": "Not built yet: the payment step. Clara's beta is a trial — nothing is charged while pricing is being set — but the checkout that starts it, and the plan it activates, ship with the billing train. Nothing is owed from you right now.",
+    "checkoutNotBuilt": "Not built yet: signing your data-processing agreement and paying are not wired up. Clara's beta is a trial — nothing is charged while pricing is being set — but the doors that record your signature and start checkout ship with a later train. Continuing below takes you to that step; nothing is recorded and nothing is owed from you right now.",
     "pending": {
       "title": "Your registration is with us",
       "description": "We have your request. There's nothing more for you to do yet.",
-      "banner": "This registration is open. You'll be able to sign in to your firm once it's live."
+      "banner": "This registration is open. You'll be able to sign in to your firm once it's live.",
+      "continueToCheckout": "Continue to checkout"
+    },
+    "checkout_open": {
+      "title": "Your firm is not open yet",
+      "description": "You started checkout. There's nothing more for you to do yet.",
+      "banner": "A checkout session is open for this registration. You'll be able to sign in to your firm once payment completes.",
+      "resume": "Resume checkout",
+      "notBuilt": "Not built yet: the checkout resume route. Your open checkout session is recorded; the page that lets you return to it ships with a later train."
+    },
+    "paid": {
+      "title": "Payment received — finish opening your firm",
+      "description": "Your payment landed. One step is left, and it isn't wired up yet.",
+      "banner": "We recorded your payment. Your firm has not been created yet.",
+      "finish": "Finish opening your firm",
+      "notBuilt": "Not built yet: the door that opens your firm from a completed payment. Your payment is recorded and nothing is lost; this page ships with a later train."
     },
     "rejected": {
       "title": "This registration wasn't accepted",

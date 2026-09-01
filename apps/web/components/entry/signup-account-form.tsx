@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
+import { rememberSignupEmail } from "@/lib/registration/signup-email-storage";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -14,7 +15,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { NotBuiltNote } from "@/components/common/not-built-note";
 import { StateBanner } from "@/components/common/state";
 
 /**
@@ -60,28 +60,39 @@ import { StateBanner } from "@/components/common/state";
  * person).
  *
  * ===========================================================================
- * 裁-68 ① — THE DPA GATE, AND EXACTLY HOW MUCH OF IT IS BUILT
+ * 裁-68 ① — THE DPA GATE MOVED. IT NO LONGER LIVES ON THIS FORM.
  * ===========================================================================
- * The tier-3 gate is three walls plus payment: DPA e-sign at signup, 裁-36's
- * rate wall, and 裁-26's email-bound admission token. THIS FORM BUILDS THE
- * ACCEPTANCE UI AND NOTHING MORE, and says so on the page rather than in a
- * comment nobody reads.
+ * v1 of this file carried a checkbox here, gating THIS submit on DPA
+ * acceptance and naming the missing durable half in a `NotBuiltNote`. The
+ * checkout-gate design (`docs/plan/active/checkout-gate-design.md` §1.1)
+ * places the real DPA step LATER — at "/signup" step 2, AFTER `claim_identity`
+ * and `request_firm_registration`, once a `clara.users` row and an open
+ * registration exist to sign against — and the delegated beta text is read
+ * from `clara.dpa_documents` there, not authored as a checkbox label here
+ * (`signup-dpa-form.tsx`, rendered by `signup-step.tsx`'s third fork). A
+ * checkbox on THIS screen that recorded nothing was already the fake receipt
+ * `apps/web/AGENTS.md` forbids; moving the gate to where a real signature can
+ * eventually be recorded is the fix, not a smaller version of the same
+ * checkbox. This form now gates on nothing but the ordinary field validation
+ * every signup form has.
  *
- * The checkbox genuinely gates the submit — an unaccepted box means no account
- * is created, and the keyboard suite drives that gate rather than reading it off
- * the source. What does NOT exist today is the durable half: there is no door in
- * the estate that records an acceptance, so nothing here may claim one was
- * recorded. `NotBuiltNote` below names P4-D as its owner, on the page, in the
- * person's own words. A checkbox that quietly recorded nothing while looking
- * like a signature is precisely the fake receipt `apps/web/AGENTS.md` forbids.
- *
- * The legal text itself is `docs/ops/legal/` — three drafts (the OpenAI DPA
+ * The legal text itself is `docs/ops/legal/` — the beta placeholder body
+ * (`clara-beta-dpa.md`, 裁-90) plus three research drafts (the OpenAI DPA
  * brief, the client authorization letter, the PDPA s.129 cross-border basis
- * memo), each headed "DRAFT FOR OWNER REVIEW AND SIGNATURE" and each written by
- * an agent rather than a lawyer. 裁-68 says the text is "owner-confirmed once";
- * that confirmation has not happened on this tip. So the note states both
- * missing halves — the record and the confirmation — instead of presenting a
- * draft as a binding agreement.
+ * memo). `signup-dpa-form.tsx`'s own header carries the up-to-date account of
+ * what is and is not durably recorded today.
+ *
+ * ===========================================================================
+ * THE CONFIRM PAGE NEEDS THE ADDRESS, AND MAY NEVER READ IT FROM A URL (裁-92)
+ * ===========================================================================
+ * `/auth/confirm` is now a six-digit CODE form (裁-92), not a link — see that
+ * page's own header. The email field on the code form is either typed by the
+ * person or read from THIS BROWSER's own signup state; it is never
+ * accepted from a query parameter (the W-H wall, checkout-gate-design.md
+ * §3.3). `rememberSignupEmail` below is the ONLY way that browser state gets
+ * written: best-effort `sessionStorage`, guarded so a private-mode browser
+ * that throws on the write degrades to "the person types it themselves"
+ * rather than crashing the signup step.
  *
  * ===========================================================================
  * THE SEAM
@@ -89,9 +100,8 @@ import { StateBanner } from "@/components/common/state";
  * `createSupabaseClient` mirrors `InviteAcceptForm`'s `InviteAuthClient` seam,
  * for the same measured reason: the real browser client cannot be constructed
  * under the Node 20 test runner (`@supabase/realtime-js` throws without a native
- * `WebSocket`). It is a TRANSPORT seam only — the DPA gate, the confirmation
- * requirement and every refusal below run identically whichever client is
- * supplied, and nothing injectable can make an unaccepted DPA create an account.
+ * `WebSocket`). It is a TRANSPORT seam only — the confirmation requirement and
+ * every refusal below run identically whichever client is supplied.
  *
  * REVIEW LAW 3 — the proof this interface still describes the REAL client is the
  * default parameter itself (`createSupabaseClient = createClient`): `tsc` must
@@ -145,19 +155,11 @@ export function SignupAccountForm({
   const t = useTranslations("Signup");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [dpaAccepted, setDpaAccepted] = useState(false);
   const [stage, setStage] = useState<Stage>("form");
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    // The DPA gate, re-checked at the act and not only in the disabled
-    // attribute. `disabled` is a rendering; this is the client-side gate. They
-    // agree today, and this branch keeps them agreeing if a later lane restyles
-    // the control into something that can be clicked while it looks disabled.
-    // It is not an Auth wall: the public anon key can call signUp directly.
-    if (!dpaAccepted) return;
-
     setStage("submitting");
     setError(null);
 
@@ -202,6 +204,11 @@ export function SignupAccountForm({
     // both values exist, proving the project is misconfigured; fail closed
     // instead of opening the firm step under an unenforced confirmation policy.
     if (data?.user && !data.session) {
+      // W-H's other half: the ONE point this browser has just seen the
+      // person type their own address. Best-effort only — see
+      // signup-email-storage.ts's header for why a write failure here must
+      // never block the transition it is merely a convenience for.
+      rememberSignupEmail(email);
       setStage("check-email");
       return;
     }
@@ -306,29 +313,9 @@ export function SignupAccountForm({
             />
           </div>
 
-          {/* 裁-68 ① — the DPA acceptance gate. A native checkbox with a real
-              <label>: the same idiom Bank's acknowledgement controls use, and
-              the one the a11y `label` rule and the keyboard walk both read
-              without a portal in the way. */}
-          <div className="flex flex-col gap-2">
-            <div className="flex items-start gap-2">
-              <input
-                id="signup-dpa"
-                type="checkbox"
-                className="mt-1"
-                checked={dpaAccepted}
-                onChange={(event) => setDpaAccepted(event.target.checked)}
-              />
-              <Label htmlFor="signup-dpa" className="text-sm font-normal">
-                {t("dpaLabel")}
-              </Label>
-            </div>
-            <NotBuiltNote>{t("dpaNotBuilt")}</NotBuiltNote>
-          </div>
-
           {error && <StateBanner tone="error">{error}</StateBanner>}
 
-          <Button type="submit" className="w-full" disabled={busy || !dpaAccepted}>
+          <Button type="submit" className="w-full" disabled={busy}>
             {busy ? t("submitting") : t("submit")}
           </Button>
 
