@@ -19,6 +19,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import pg from "pg";
 import * as rig from "./rig.mjs";
 import {
   mintWakeCredentialObo,
@@ -48,11 +49,114 @@ globalThis.__claraPools = {
 
 let fixture;
 
+// ---------------------------------------------------------------------------
+// This file's OWN throwaway database (PR #485 review round 2).
+//
+// CI's db-estate job runs every workspace package's tests CONCURRENTLY
+// (`pnpm -r --if-present test`) against ONE shared Postgres target -- there is
+// NO ordering between packages/db's and packages/runtime's test PROCESSES, and
+// no "earlier ceremony" a sibling suite can be relied on to have already run
+// before this one starts (the prior comment here claimed the estate suite's
+// epsilon ceremony runs first; that is false -- the job provides no such
+// ordering, concurrent packages race). This file's fixture needs
+// `evaluate_metric@1` DEPLOYED to build an evaluated report run through the
+// real audited path (buildPr2World's epsilon helpers). Flipping that row
+// in-place used to happen on the SHARED estate database -- a platform-scoped
+// row (firm_id is null) that packages/db's delta suite is concurrently
+// exercising through evaluatorCeremonyUnwitnessed() (an any-of-five witness
+// over five ceremony-covered evaluators). The witness stayed "fresh" (the
+// other four evaluators were still undeployed) while the ONE evaluator the
+// delta suite's own pre-ceremony refusal proofs call had, mid-run, already
+// gone live -- turning a dozen-plus `assert.ok(error, ...)` proofs (packages/db
+// cells 11,16-19,29,30,35-40,42,45-47,50,51,59) into false passes that then
+// read as failures once the refusal never came.
+//
+// So this file stands up ITS OWN database on the SAME Postgres server (same
+// host/port/user as whatever target the environment names, a different
+// DATABASE name), migrates it fully, and points every pool this file's
+// dependency chain can create at it BEFORE any of those pools does its first
+// real checkout: relay-fixtures.mjs (rig.mjs) / lib/relay.mjs / lib/pools.mjs
+// all resolve PGDATABASE / DATABASE_URL / WORKFLOW_POSTGRES_URL LIVE per
+// connection (never cached at import), and so does packages/db/tests' own
+// rig-helpers.mjs (which pr2Ready()/buildPr2World() use underneath) -- so
+// redirecting those three env vars here, before before() does anything else,
+// is sufficient to make EVERY connection this file opens land on the private
+// database. The shared estate DB is never written by this file again.
+let privateDbName = null;
+let restoreDbEnv = null;
+
+function disposableDbName() {
+  const name = `fs7v17_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
+  if (!/^[a-z][a-z0-9_]*$/.test(name)) throw new Error(`refusing a non-bare disposable db name: ${name}`);
+  return name;
+}
+
+/** A one-off connection to the CURRENT (ambient) target -- for CREATE/DROP DATABASE only, never schema work. */
+function adminClientConfig() {
+  const raw = process.env.DATABASE_URL || process.env.WORKFLOW_POSTGRES_URL;
+  return raw ? { connectionString: raw } : {};
+}
+
+async function createPrivateDatabase() {
+  const name = disposableDbName();
+  const client = new pg.Client(adminClientConfig());
+  await client.connect();
+  try {
+    await client.query(`create database ${name}`);
+  } finally {
+    await client.end();
+  }
+  return name;
+}
+
+/** Point every env var this file's pool chain reads at `name`; returns the restorer. */
+function pointDbEnvAt(name) {
+  const saved = {
+    DATABASE_URL: process.env.DATABASE_URL,
+    WORKFLOW_POSTGRES_URL: process.env.WORKFLOW_POSTGRES_URL,
+    PGDATABASE: process.env.PGDATABASE,
+  };
+  if (process.env.DATABASE_URL) {
+    const url = new URL(process.env.DATABASE_URL);
+    url.pathname = `/${name}`;
+    process.env.DATABASE_URL = url.toString();
+  }
+  if (process.env.WORKFLOW_POSTGRES_URL) {
+    const url = new URL(process.env.WORKFLOW_POSTGRES_URL);
+    url.pathname = `/${name}`;
+    process.env.WORKFLOW_POSTGRES_URL = url.toString();
+  }
+  process.env.PGDATABASE = name;
+  return () => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+}
+
+async function dropPrivateDatabase(name) {
+  const client = new pg.Client(adminClientConfig());
+  await client.connect();
+  try {
+    await client.query(`drop database if exists ${name} with (force)`);
+  } finally {
+    await client.end();
+  }
+}
+
 before(async () => {
+  privateDbName = await createPrivateDatabase();
+  restoreDbEnv = pointDbEnvAt(privateDbName);
+  const { migrate } = await import("../../db/scripts/migrate.mjs");
+  await migrate({ log: () => {} });
+
   assert.equal(await pr2Ready(), true, "F-A5 PR-2 wrappers, grants and interactive allowlist rows must be present");
-  // A fresh rig registers evaluate_metric v1 DARK by design. The estate suite's earlier epsilon
-  // ceremony normally flips it; a focused run has no such predecessor, so establish that lawful
-  // one-way premise here exactly as the F-A5 batteries do before building evaluated cells.
+  // A fresh database registers evaluate_metric v1 DARK by design (0060's one-way
+  // ceremony). This file's fixture needs it deployed to build an evaluated report
+  // run -- establish that lawful one-way premise here, exactly as the F-A5
+  // batteries do, on THIS PRIVATE database (see the file-header note above for why
+  // it must never be done on the shared estate DB).
   await rig.asRoot(async (client) => {
     await client.query(
       `update clara.evaluator_versions set deployed=true
@@ -72,6 +176,21 @@ after(async () => {
   await endPools();
   await rig.endPool();
   await endDbFixturePool();
+  // Restore the ambient target BEFORE dropping -- DROP DATABASE must run from a
+  // connection to a DIFFERENT database than the one being dropped, and every pool
+  // above must already be closed or the drop refuses (WITH (FORCE) covers a
+  // straggler, but restoring first keeps this from ever needing to rely on that).
+  restoreDbEnv?.();
+  if (privateDbName) {
+    try {
+      await dropPrivateDatabase(privateDbName);
+    } catch (error) {
+      // Best-effort only: CI's Postgres service container is itself thrown away at
+      // the end of the job, so a leaked private database here costs nothing beyond
+      // this one run -- never fail the suite over teardown.
+      console.error(`fs7-v17-chatturn-db: could not drop ${privateDbName}: ${error?.message ?? error}`);
+    }
+  }
 });
 
 async function execute(tool, input, toolCallId) {
