@@ -272,18 +272,34 @@ export async function rawAdoption(client) {
   return r.rows;
 }
 
-/** Five-ledger refusal census. The two client-owned tables are scoped to the target client;
- *  the three receipt/event ledgers are counted whole so a misattributed side effect cannot hide
- *  behind the wrong firm or client id. The package runs serially, so before/after equality is a
- *  stable refusal proof rather than a race with another cell. */
+/** Five-ledger refusal census. The two client-owned tables are scoped to the target client; the
+ *  three receipt/event ledgers are scoped to the client's OWN FIRM (op_receipts/audit_log/
+ *  domain_events all carry a not-null firm_id -- op_receipts even keys its PK on it).
+ *
+ *  #482/#479 first-chain-meeting incident (2026-09-01): this helper used to count all three
+ *  ledgers SCHEMA-WIDE, on the stated premise that "the package runs serially, so before/after
+ *  equality is a stable refusal proof" -- true for packages/db's OWN internal
+ *  --test-concurrency=1 run, but CI's db-estate job runs packages/db and packages/runtime
+ *  CONCURRENTLY against ONE shared database (db-tests.md's own documented shape). The assertion's
+ *  actual claim is "the REFUSED CALL wrote nothing" -- the schema-wide count additionally
+ *  asserted "nobody else in the whole estate wrote anything during this window", which is a
+ *  claim this cell never needed and which cross-package concurrency makes false. Confirmed by a
+ *  live CI log (db-estate job 99694883260): an unrelated packages/runtime workflow-redrive test
+ *  wrote to audit_log/domain_events/op_receipts between the before/after snapshot of the two
+ *  cells whose window is widest (§9.2, §9.3 -- each wraps a withRolledBackTx mutation between
+ *  snapshots), red-ing them on an otherwise-correct refusal. Firm-scoping tightens the assertion
+ *  to its true meaning (this call, this firm, wrote nothing) while still catching a
+ *  misattributed write to the WRONG CLIENT inside the SAME firm -- only a write to a genuinely
+ *  unrelated firm (this cell's own claim was never about) stops being counted. */
 export async function refusalLedgerCounts(client) {
   const r = await rootQuery(
-    `select
+    `with fc as (select firm_id from clara.clients where id = $1)
+     select
        (select count(*)::int from clara.coa_accounts where client_id = $1) as accounts,
        (select count(*)::int from clara.coa_template_adoptions where client_id = $1) as adoptions,
-       (select count(*)::int from clara.op_receipts) as op_receipts,
-       (select count(*)::int from clara.audit_log) as audit_log,
-       (select count(*)::int from clara.domain_events) as domain_events`,
+       (select count(*)::int from clara.op_receipts where firm_id = (select firm_id from fc)) as op_receipts,
+       (select count(*)::int from clara.audit_log where firm_id = (select firm_id from fc)) as audit_log,
+       (select count(*)::int from clara.domain_events where firm_id = (select firm_id from fc)) as domain_events`,
     [client],
   );
   return r.rows[0];

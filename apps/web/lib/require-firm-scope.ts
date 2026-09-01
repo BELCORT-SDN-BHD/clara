@@ -409,17 +409,69 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
   },
   {
     path: "app/api/invite/route.ts",
-    pending: true,
+    // `pending` CLEARED BY P4-4, 2026-08-30, in the same PR that wrote the body —
+    // which is the step MEDIUM-3 exists to force. What the capability-check of the
+    // real body found, so a later reader can re-run it rather than trust it:
+    //   · It calls `clara.invite_member` through `lib/members/courier.ts` with the
+    //     CALLER'S OWN session accessor — not a service-role client — so
+    //     `_human_ctx(role_rank('admin'))` (`0147:376`) judges the real person, and
+    //     the role-ceiling wall (`0147:386`) judges their real rank.
+    //   · WHAT IT ACTUALLY READS, stated in full because the previous version of
+    //     this entry got it wrong. TWO reads, not one: (a) `caller_context`,
+    //     self-scoped by the view itself, on the CALLER'S OWN token — used twice,
+    //     once as the admin+ preflight and once for the mail's courtesy subject
+    //     line; and (b) THE AUTH DIRECTORY, `listUsers` under the SERVICE-ROLE
+    //     key, which is ESTATE-WIDE and answers about accounts in no firm at all.
+    //     (b) is the reason (a) exists: it is an account-existence oracle, and it
+    //     now sits BEHIND the preflight. Neither is a firm-scoped product
+    //     relation, which is what this registry is about.
+    //   · TRUED 2026-08-30 BY CODEX ROUND 2 (M5/N1). The two bullets here used to
+    //     say the route made no pre-door authority-sensitive read and that "none
+    //     [of its gates] reads a role". BOTH ARE NOW FALSE, and saying so is the
+    //     point of this comment existing: the courier runs an ADMIN+ PREFLIGHT
+    //     before the door (`lib/members/courier.ts` step 3b). It had to. Step 4b
+    //     asks the auth provider whether an arbitrary address already has an
+    //     account, and that question answers differently for an existing and a
+    //     free address — an ACCOUNT-EXISTENCE ORACLE that, without the preflight,
+    //     any signed-in viewer or membership-less account could walk. The owner's
+    //     acceptance of that enumeration (裁-65) is explicitly bounded to admin+,
+    //     and a bound enforced only by the door is no bound at all, because the
+    //     disclosure happens before the door.
+    //   · SO WHY IS THIS STILL EXEMPT? Because the preflight is FAIL-CLOSED AND
+    //     CANNOT GRANT. It refuses six ways and admits exactly one shape, and
+    //     `_human_ctx(role_rank('admin'))` still judges the request independently
+    //     at the door. Two fail-closed checks in series cannot admit anything
+    //     either would refuse — which is precisely NOT the "second, drifting copy
+    //     of an authority decision" this list exists to keep out. What the spine
+    //     would add here is different in kind: `requireFirmScope()` REDIRECTS a
+    //     caller to the holding page, which is a page-render decision with no
+    //     meaning for a POST-only JSON courier.
+    //   · THE CONTROL-FLOW CENSUS FINDS EIGHT PRE-DOOR REFUSAL SITES across
+    //     seven conceptual gates, not the five gates this entry used to claim:
+    //     (1) same-origin — CSRF; (2) body shape; (3) raw-address ASCII support;
+    //     (4) "is there a token at all"; (5) THE ADMIN+ PREFLIGHT, which reads a
+    //     role; (6) a SERVER-CONFIG capability check; (7) the estate-wide
+    //     directory/mintability check. Only (5) reads authority, and only to
+    //     refuse. A wrong explanation the next lane trusts is precisely the
+    //     hazard this registry exists to prevent, so the source census in
+    //     `tests/firm-scope-surfaces.test.ts` pins the number and order.
+    //   · The service-role key it holds never authorises the DB act — it mints the
+    //     Supabase half of the invite link AFTER the door has already said yes.
     reason:
-      "EXEMPT ON PRINCIPLE, PENDING ITS BODY. P4-4's mail courier will call " +
-      "clara.invite_member AS THE CALLER, and clara._human_ctx(role_rank('admin')) " +
-      "already raises CLR04 for a caller with no active membership — so THE DB IS " +
-      "THE WALL. Adding a scope check in front would be the courier pretending to " +
-      "be a guard, and would put a second, drifting copy of an authority decision " +
-      "in front of the real one. This entry does NOT pre-approve the file: it does " +
-      "not exist yet, and the suite refuses to let it inherit the exemption — P4-4 " +
-      "must clear `pending` in the same PR that writes the body, which is the step " +
-      "where someone reads what it actually does.",
+      "EXEMPT ON PRINCIPLE. P4-4's mail courier calls clara.invite_member AS THE " +
+      "CALLER, and clara._human_ctx(role_rank('admin')) already raises CLR04 for a " +
+      "caller with no active membership — so THE DB IS THE WALL. Adding a scope " +
+      "check in front would be the courier pretending to be a guard, and would put " +
+      "a second, drifting copy of an authority decision in front of the real one. " +
+      "Verified against the landed body, not the plan: it returns no firm-scoped " +
+      "data on its own authority. It DOES run its own admin+ preflight before the " +
+      "door (round 3, N1 / native MEDIUM-1) — it reads the CALLER'S OWN rank from " +
+      "caller_context, because the step behind it reads the ESTATE-WIDE auth " +
+      "directory under the service-role key and that is an account-existence " +
+      "oracle whose accepted audience is admin+. Eight pre-door refusal sites " +
+      "across seven conceptual gates; one gate reads a role, and only ever to " +
+      "REFUSE: it is not a second copy of the authority decision — " +
+      "_human_ctx still judges the act independently.",
   },
   {
     path: "app/(entry)/auth/confirm/verify/route.ts",

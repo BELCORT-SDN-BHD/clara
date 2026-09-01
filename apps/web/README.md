@@ -114,6 +114,13 @@ app/(full)/    — the Clara full-screen escalation routes (/clara/:threadId and
 app/(entry)/ — the pre-firm faces: login · signup · invite/[token] · pending ·
                auth/confirm (route groups add no URL segment).
 app/logout — the POST-only sign-out route (proxy-gated).
+app/api/runtime/[...path] · app/api/invite — the two SERVER-ONLY Route Handlers.
+                 The runtime proxy is a scope-spine entrance (403, never a redirect);
+                 the invite courier is a REGISTERED EXEMPTION from that spine
+                 (`lib/require-firm-scope.ts`'s `SCOPE_EXEMPT_SURFACES`) because it
+                 calls `clara.invite_member` as the caller and the DB is the wall.
+                 It is also the ONLY place in this app that reads a service-role key
+                 — server-side, never NEXT_PUBLIC_ (see `.env.example`).
 ```
 
 Every workbench tab page mounts a real workbench: hydrate-never-trust reads through
@@ -223,9 +230,13 @@ obligation. Ten were fixed in code on this branch and are
 covered by `tests/` (the redirect wall, the proxy matcher, the OTP hardening, the scope
 epoch, the key-class gate, the cookie hardening, the anti-cache headers, the logout wall).
 
-**Four are not code.** They are hosted-Supabase or deployment configuration that this
+**Five are not code.** They are hosted-Supabase or deployment configuration that this
 repository cannot enforce or prove, and they are the owner's to set and to re-verify after
 any Supabase project change. Each is stated with what must be true and how to check it.
+*(§4 was added by the round-three review of P4-3's signup confirmation; §5 by P4-4's round
+3 — the invite courier put a second bearer factor and a service-role key behind this
+surface, which is what made the deployment's own public origin something the app must be
+told rather than infer.)*
 
 ### 1. Password policy must be set in Supabase Auth (review finding 10, LOW)
 
@@ -269,25 +280,64 @@ would NOT close this: it protects one page render, not the browser's direct Post
   every data path — a Wave-P3 decision, not a P2 one, because it must cover the runtime
   and PostgREST, not just this app.
 
-### 3. Invite-email template and its bearer token (review finding 9, MEDIUM)
+### 3. The invite mail, and the TWO bearer factors it carries (review finding 9, MEDIUM)
 
-The invite link carries a single-use `token_hash` in the URL path. **Auto-consumption is
-fixed in code** — `components/invite-accept-form.tsx` no longer verifies on mount; the
-person has to press "Accept invitation", the proxy sends `Referrer-Policy: no-referrer` on
-`/invite/*`, and the flow ends with `router.replace("/")` so the token-bearing URL leaves
-the history stack. What remains is template and log hygiene:
+**Read this before assuming the invite link is a one-secret link — it is not, and this
+section used to say it was.** The wording here described a link carrying "a single-use
+`token_hash`". That stopped being true on 2026-08-30, when the owner ruled option (a) and
+P4-1 put Clara's own invite token in the same URL:
 
-- **Configure:** Supabase Dashboard → Authentication → Email Templates → *Invite user*.
-  The link must be `{{ .SiteURL }}/invite/{{ .TokenHash }}` (this app's route shape), never
-  Supabase's default `/auth/v1/verify?token=…`. Keep the invite expiry short (≤ 24h):
-  Authentication → Sessions/Email → *Email OTP expiry*.
-- **Verify:** send an invite to a mailbox you control and confirm the delivered URL matches
-  that shape and that opening it shows the confirmation card **without** consuming the
-  token (the second open must still work until you press the button).
-- **Residual, accepted:** the token still appears in the request URL, so it lands in edge
-  and server access logs. Anyone with log access has a race window until the invitee
-  accepts. Keep access-log retention short and restricted, and prefer re-inviting over
-  re-sending a leaked link.
+```
+/invite/<supabase_token_hash>?ct=<clara_token>
+```
+
+The path segment is Supabase's OTP hash, consumed by `verifyOtp`. The query parameter is
+Clara's own token, which `clara.accept_invite` sha256s and looks the invite up by. They are
+not interchangeable and **both are required** — which is precisely why the pair matters:
+anyone holding the whole URL holds everything needed to accept.
+
+**Who sends it.** Not Supabase. `lib/members/courier.ts` calls `generateLink` (which mints
+the hash and sends nothing), builds the two-secret URL itself, and posts the message through
+Resend — because no Supabase email template has a variable for Clara's half, and smuggling
+it through `data`/`user_metadata` would PERSIST the plaintext in `auth.users`. So the
+*Invite user* template is no longer the delivery path for this flow; the link shape is
+composed in code and pinned by `tests/invite-courier.test.ts`.
+
+**Auto-consumption is fixed in code** — `components/invite-accept-form.tsx` does not verify
+on mount; the person presses "Accept invitation", the proxy sends `Referrer-Policy:
+no-referrer` on `/invite/*`, and the flow ends with `router.replace("/")` so the
+secret-bearing URL leaves the history stack.
+
+- **Configure:** the four server-only variables in `lib/members/invite-mail.ts`'s
+  `INVITE_MAIL_ENV_NAMES` — `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+  `RESEND_API_KEY`, `INVITE_MAIL_FROM`. All four must be present and non-blank or the
+  courier refuses 503 **before minting anything**, naming the unset variables (an invite
+  whose mail cannot go out is permanently unusable AND blocks that address for seven days).
+  Keep the invite expiry short (≤ 24h): Authentication → Sessions/Email → *Email OTP expiry*.
+- **Verify:** send an invite to a mailbox you control, confirm the delivered URL carries both
+  the `/invite/<hash>` path and the `?ct=` parameter, and confirm opening it shows the
+  confirmation card **without** consuming anything (the second open must still work until
+  you press the button).
+- **Residual, accepted — BOTH FACTORS TRAVEL IN ONE MESSAGE.** There is no second channel.
+  Consequently the whole secret sits wherever that message and that request are recorded:
+  Resend's own message logs (retained by default for 30 days), any mail relay in the path,
+  the recipient's mailbox, and this app's edge/server access logs — the query string lands
+  in access logs exactly as the path segment does. Anyone with access to any of those has a
+  race window until the invitee accepts. **This is P4-1's accepted two-token contract, not
+  an oversight**; splitting the factors across channels, or adding a magiclink accept arm for
+  existing accounts, is an owner P4-D decision and is recorded as an open question on
+  PR #455. Mitigations that are in force today: the courier never returns either factor to a
+  browser, never logs one (`lib/members/courier.ts`'s log entry type has no free-text field
+  at all), and never relays a mail provider's error text — so the one process that handled
+  both secrets cannot quote itself into a response or a log line. Operationally: keep
+  access-log retention short and restricted, and prefer revoke-and-re-invite over re-sending
+  a link you believe leaked.
+
+**Wave-G checklist — the Resend API key.** `sending_access`, domain-restricted, message
+storage OFF, team log access restricted. The first two bound what the key can do if it
+leaks; the third is what stops Resend's own retained copy of the message from holding both
+bearer factors for 30 days; the fourth bounds who inside the team can read what is retained
+anyway.
 
 ### 4. Signup confirmation round trip and enumeration posture (round-3 review, HIGH)
 
@@ -335,6 +385,33 @@ PRD §8's server-verified-session requirement at the transition into the firm st
   response proving either query-string redaction or short retention plus restricted ACLs.
   A policy statement or intended setting is not evidence. The delivered-message sample and
   this retained log-control response are both required at deployment.
+
+### 5. `CLARA_PUBLIC_ORIGINS` must be set on any proxied deployment (Codex round 2, N3)
+
+The same-origin wall (`lib/same-origin.ts`) proves a request came from this app's own origin
+before any mutation route acts. Behind a proxy the request URL's authority is rewritten, so
+the wall used to accept `X-Forwarded-Host` as an independent second source of truth. **That
+header is written by whoever spoke to us.** An attacker could send `Origin:
+https://attacker.example` together with `X-Forwarded-Host: attacker.example`, satisfy the
+match against their own input, and have the invite courier mail a link carrying **both**
+bearer factors under their origin.
+
+The header is no longer consulted. What replaces it is configuration, because what a
+deployment's public origins are is a fact about the deployment:
+
+- **Configure:** `CLARA_PUBLIC_ORIGINS`, comma-separated canonical exact origins (scheme +
+  host + non-default port, optional trailing slash; no path, credentials, query or fragment)
+  — every hostname this app is reachable on, aliases included. Noncanonical URL spellings are
+  dropped rather than repaired.
+- **Verify:** POST from the real app (an invite, a logout, the signup confirmation) and
+  confirm it succeeds; then replay it with an `Origin` you did not list and confirm a 403.
+- **Unset is fail-closed, not permissive.** The wall falls back to the `Host` header and the
+  request URL. Local dev works unset; a proxied deployment will refuse its own same-origin
+  POSTs until this is set — which is the visible failure, not a silent downgrade.
+- **Loopback HTTP is explicit** (N5): `http://localhost` and `http://127.0.0.1` are accepted
+  only when `NODE_ENV` is exactly `development` or `CLARA_ALLOW_INSECURE_LOOPBACK=1`. Absent,
+  test, staging and malformed modes refuse; the override is for a controlled local harness and
+  must not be set on a deployment.
 
 ### Also configuration, not code
 

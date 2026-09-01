@@ -157,6 +157,99 @@
     "heading": "Admin",
     "body": "P2 shell — users, capabilities and the metering rollup are built in P4. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
   },
+  "Members": {
+    "pageHeading": "Members",
+    "pageDescription": "Everyone with access to this firm, and the invitations nobody has accepted yet.",
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
+    "roles": {
+      "viewer": "Viewer",
+      "bookkeeper": "Bookkeeper",
+      "admin": "Admin",
+      "owner": "Owner"
+    },
+    "roleOptions": {
+      "viewer": "Viewer — reads the books and changes nothing",
+      "bookkeeper": "Bookkeeper — prepares and posts the day-to-day work",
+      "admin": "Admin — manages people and invitations as well",
+      "owner": "Owner — signs for the firm; a firm always keeps one"
+    },
+    "roster": {
+      "heading": "Members",
+      "description": "The roster is published to bookkeeper and above.",
+      "loading": "Loading the member roster…",
+      "empty": "No roster rows are visible here.",
+      "colName": "Name",
+      "colEmail": "Email",
+      "colRole": "Role",
+      "colStatus": "Status",
+      "colJoined": "Joined",
+      "colActions": "Actions",
+      "emailWithheld": "Not shown",
+      "emailNote": "A withheld email has two causes and this screen does not guess between them: the column is published to admin and owner only, and a member can also have no email on record.",
+      "statusActive": "Active",
+      "statusRemoved": "Removed",
+      "removedOn": "Removed {date}",
+      "rowMenuLabel": "Actions for {name}",
+      "roleGroupLabel": "Role",
+      "remove": "Remove from firm"
+    },
+    "invites": {
+      "heading": "Pending invites",
+      "description": "Invitations are published to admin and owner only, so this list reads empty below that rank.",
+      "loading": "Loading the invitations…",
+      "empty": "No invitation rows are visible here.",
+      "colEmail": "Email",
+      "colRole": "Role",
+      "colStatus": "Status",
+      "colSent": "Sent",
+      "colExpires": "Expires",
+      "colActions": "Actions",
+      "statusPending": "Pending",
+      "statusExpired": "Expired",
+      "statusAccepted": "Accepted",
+      "statusRevoked": "Revoked",
+      "revoke": "Revoke",
+      "issue": "Invite someone",
+      "issueBlocked": "Admin or owner can invite someone",
+      "issued": "The invitation to {email} was sent."
+    },
+    "inviteDialog": {
+      "title": "Invite someone to this firm",
+      "description": "Clara emails them a single-use link. The address is how they will sign in, and it is how the invitation is checked when they accept.",
+      "emailLabel": "Email address",
+      "emailPlaceholder": "name@example.com",
+      "roleLabel": "Role",
+      "confirm": "Send invitation",
+      "ceilingNote": "You can invite someone at your own rank or below. The firm refuses anything higher."
+    },
+    "removeDialog": {
+      "title": "Remove {name} from this firm?",
+      "description": "They lose access immediately and any agent credentials they hold for this firm are revoked. There is no undo verb: inviting them again creates a fresh membership.",
+      "confirm": "Remove"
+    },
+    "revokeDialog": {
+      "title": "Revoke the invitation for {email}?",
+      "description": "The link stops working. Revoking is also how you free this address for a fresh invitation before the current one expires.",
+      "confirm": "Revoke"
+    },
+    "courier": {
+      "title": "The invitation was not sent",
+      "reference": "Reference {id} — quote it if you ask for help.",
+      "no_session": "You are not signed in any more. Sign in and try again.",
+      "cross_origin": "That request did not come from this app, so it was refused.",
+      "invalid_request": "The invitation form sent something this server could not read.",
+      "unsupported_address": "This invitation service can only send to plain-ASCII email addresses, so nothing was created.",
+      "not_permitted": "Only an admin or owner can issue an invitation. Nothing was created.",
+      "mail_not_configured": "This deployment has no invitation mail set up, so nothing was created. Ask whoever runs it to configure the mail transport.",
+      "recipient_has_account": "This address already has a Clara account — ask them to sign in with it. Nothing was created.",
+      "mail_unavailable": "The invitation service could not be reached, so nothing was created. Try again in a moment.",
+      "mail_failed": "The invitation was created but the email did not go out, and its link cannot be recovered. Revoke it below and invite again.",
+      "transport": "The invitation server could not be reached."
+    }
+  },
   "ClientWorkspace": {
     "heading": "Client workspace",
     "body": "One workspace per client. The accounting objects are tabs — journals, documents, bank, close, reports, registers and knowledge.",
