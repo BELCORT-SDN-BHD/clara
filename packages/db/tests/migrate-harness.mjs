@@ -42,12 +42,27 @@ export function setDatabaseEnv(dbname) {
     const url = new URL(process.env.DATABASE_URL);
     url.pathname = `/${dbname}`;
     process.env.DATABASE_URL = url.toString();
+    // A URL is authoritative here — for migrate.mjs's own connConfig() AND for every
+    // other consumer that checks DATABASE_URL first. Leaving PGDATABASE set too (even to
+    // this SAME dbname) manufactures a phantom PG* source for a STRICTER consumer: e.g.
+    // packages/runtime/lib/relay.mjs's own assertNoTargetSplit treats "PGDATABASE is
+    // set" as an independent target, invents localhost:5432 defaults for the unset
+    // PGHOST/PGPORT, and then throws a false target-split against the URL's REAL
+    // host/port on any DSN-configured dev machine (127.0.0.1, the dsn-bridge port, a
+    // remote pooler — anything that isn't literally localhost:5432). Deleting it removes
+    // that phantom source; nothing needs it once a URL is authoritative (pg_dump/psql
+    // get PGDATABASE rebuilt fresh FROM the url by lib/pg.mjs's own
+    // childEnvForExternalTools()).
+    delete process.env.PGDATABASE;
   } else if (process.env.WORKFLOW_POSTGRES_URL) {
     const url = new URL(process.env.WORKFLOW_POSTGRES_URL);
     url.pathname = `/${dbname}`;
     process.env.WORKFLOW_POSTGRES_URL = url.toString();
-  } else process.env.PGUSER ||= "postgres";
-  process.env.PGDATABASE = dbname;
+    delete process.env.PGDATABASE; // same reasoning as the DATABASE_URL branch above.
+  } else {
+    process.env.PGUSER ||= "postgres";
+    process.env.PGDATABASE = dbname;
+  }
   return () => {
     for (const key of ENV_KEYS) delete process.env[key];
     for (const [key, value] of Object.entries(saved)) if (value !== undefined) process.env[key] = value;

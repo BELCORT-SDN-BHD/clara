@@ -54,13 +54,13 @@ const admin = new pg.Client(connectionConfig());
 await admin.connect();
 await admin.query(`create database "${DBNAME}"`);
 
-// Registered as early as possible (right after the database exists) so a THROW from
-// migrate() below still leaves the disposable database cleaned up — never reference the
-// `fx`/`restoreEnv` bindings declared further down from inside this closure without a
-// fallback, since a failure before they are assigned would otherwise leave this hook
-// throwing a TDZ ReferenceError instead of actually cleaning up.
 let restoreEnv = () => {};
-after(async () => {
+let cleaned = false;
+/** Idempotent teardown — shared by the setup-failure catch below AND the normal after()
+ *  hook, so it is safe to call from both without a double-drop. */
+async function cleanupPrivateDb() {
+  if (cleaned) return;
+  cleaned = true;
   try {
     const mod = await import("./relay-fixtures.mjs"); // side-effect-free at import time
     await mod.endPool();
@@ -70,14 +70,28 @@ after(async () => {
   restoreEnv();
   await admin.query(`drop database if exists "${DBNAME}" with (force)`).catch(() => {});
   await admin.end();
-});
+}
+// The NORMAL (success-path) cleanup — fires once every test in this file has run.
+after(cleanupPrivateDb);
 
-restoreEnv = setDatabaseEnv(DBNAME);
-// No explicit `dir` — migrate()'s own default resolution (dir || CLARA_MIGRATIONS_DIR ||
-// its file-relative packages/db/migrations) is what every other rig entrypoint honors;
-// overriding it here would silently defeat a deliberate CLARA_MIGRATIONS_DIR override
-// (e.g. the deploy-onto-existing CI step's pattern) for this one file alone.
-await migrate({ log: () => {} });
+try {
+  restoreEnv = setDatabaseEnv(DBNAME);
+  // No explicit `dir` — migrate()'s own default resolution (dir || CLARA_MIGRATIONS_DIR ||
+  // its file-relative packages/db/migrations) is what every other rig entrypoint honors;
+  // overriding it here would silently defeat a deliberate CLARA_MIGRATIONS_DIR override
+  // (e.g. the deploy-onto-existing CI step's pattern) for this one file alone.
+  await migrate({ log: () => {} });
+} catch (err) {
+  // A root after() hook registered during module evaluation does NOT survive a
+  // top-level-await REJECTION: when migrate() throws here, this file fails to LOAD, and
+  // node:test never reaches the point of running root-suite hooks for a file that never
+  // finished loading — the after() above would NOT fire (verified against this repo's
+  // Node), silently orphaning the disposable database (the DROP's own .catch(()=>{})
+  // would otherwise hide exactly that). So cleanup rides this SAME synchronous failure
+  // path instead of relying on after() alone.
+  await cleanupPrivateDb();
+  throw err;
+}
 
 // Deferred until the private database above is live — see the header note.
 const { redrive, TaxonomyHaltError, CONSUMER, WAKE_ENGINE_CONSUMER } = await import("../lib/relay.mjs");

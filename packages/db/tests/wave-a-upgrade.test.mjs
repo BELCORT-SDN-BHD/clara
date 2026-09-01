@@ -91,10 +91,23 @@ async function signature(baselineVersion) {
   // caller observed immediately after ITS OWN migrate() returned — `baselineVersion`,
   // threaded in as `$1` — so anything a concurrent writer commits AFTER that observation,
   // no matter how many round-trips later this query actually runs, is excluded.
+  //
+  // `<= $1` alone covers only a NEW-VERSION writer (relay-taxonomy's own pre-fix (f)
+  // flip). It does NOT cover a writer that inserts an ADDITIVE row under the CURRENTLY
+  // ACTIVE version — relay-fixtures.mjs's ensureWakeType() does exactly this (called by
+  // every emit/pump helper, so relay-drain/runner/redrive/unit still fire it against the
+  // shared clara_ci; Part A's private database only covers relay-taxonomy.test.mjs
+  // itself). The estate's own precedent for THAT shape is AB-7's `not like 'rig.%'`
+  // (s6-tasks.test.mjs:93, wave-a-shape.test.mjs:182) — ensureWakeType's own
+  // WAKE_EVENT_TYPE is the reserved `rig.relay.wake`, and no migration ever registers a
+  // `rig.%` event type (checked against every migration file), so the exclusion is FREE:
+  // it can only ever drop rows a shipped migration never produced, never weakening the
+  // fresh-vs-upgrade parity proof.
   await q(
     "taxonomy",
     `select tt.version, tt.event_type, tt.decision from clara.trigger_taxonomy tt
        where tt.version <= $1
+         and tt.event_type not like 'rig.%'
        order by tt.version, tt.event_type`,
     [baselineVersion],
   );
