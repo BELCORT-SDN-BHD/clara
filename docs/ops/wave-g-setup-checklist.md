@@ -42,8 +42,8 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
       (sign up → pay through Stripe → start; no approval queue, 裁-43/裁-68).
 - [ ] Auth → Redirect URLs contains exactly `<origin>/signup` and `<origin>/auth/confirm`; **no
       wildcard** entry.
-- [ ] Email confirmation is **ON** and autoconfirm is **OFF**. The "Confirm signup" template uses
-      `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`, not `ConfirmationURL`.
+- [ ] Email confirmation is **ON** and autoconfirm is **OFF**. The "Confirm signup" template emits
+      `{{ .Token }}` as a 6-digit code with no link. The invite-accept template is unaffected.
 - [ ] Password policy is minimum **12 characters** with HIBP leaked-password protection enabled.
 - [ ] Access-token JWT expiry is **900 seconds**; refresh-token rotation remains on.
 - [ ] The invite template uses `{{ .SiteURL }}/invite/{{ .TokenHash }}` and Email OTP expiry is

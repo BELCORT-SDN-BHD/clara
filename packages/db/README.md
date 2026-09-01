@@ -63,7 +63,7 @@ scripts/restore-full.mjs   full DR restore: roles-bootstrap -> restore -> ceremo
 scripts/dr-selftest.mjs    real dump+restore round-trip in a throwaway schema
 scripts/dr-verify.mjs      full-profile restore verification battery (source<->target)
 scripts/dr-verify-util.mjs · dr-verify-checks.mjs   the battery's helpers + §4 probes
-deploy/roles-bootstrap.sql idempotent recreation of the 10 clara-custom roles (DR step 1; FRESH-TARGET-ONLY)
+deploy/roles-bootstrap.sql idempotent recreation of 18 schema-lane roles + the Storage role (DR step 1; FRESH-TARGET-ONLY)
 deploy/read-logins-ceremony.sql  runtime + read-pool LOGIN ceremony (post-restore; mirrors write-login)
 deploy/acl-baseline.sql    HIGH-10 public-schema ACL baseline (ceremony; post-restore re-apply)
 tests/pipeline.test.mjs    migrate -> seed -> assert (node --test)
