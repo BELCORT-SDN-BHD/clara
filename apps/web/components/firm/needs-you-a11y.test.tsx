@@ -144,6 +144,22 @@ test("firm needs-you inbox (queue + the two 0137 gap lists) has zero violations"
         // M5, independent review: OpenQuestionDetail is genuinely mounted
         // inside the open_question row's own OpenQuestionAffordance.
         assert.match(h.text(), /View details/, "OpenQuestionDetail's reveal trigger must actually be mounted on the open_question row");
+        // FS-8 (P6-T honest-note sweep): the two new static notes actually
+        // render — both now live in the GAPS section at the bottom
+        // (needs-you-gaps.tsx), beside each other: the F-T2 statutory-
+        // deadlines gap and the client-alias hygiene gap beside the
+        // identifier-promotion list. Moved off the top of NeedsYouInbox
+        // (independent review, PR #487, N4): a not-built note must never
+        // outrank the user's actual work on the flagship inbox.
+        assert.match(h.text(), /This feed is F-T2's, paused/, "the F-T2 statutory-deadlines note must render in the gaps section");
+        assert.match(h.text(), /add_client_alias and retire_client_alias are live doors/, "the client-alias hygiene note must render beside the identifier-promotion list");
+        // Discriminating post-condition (N4): the F-T2 note sits AFTER the
+        // live queue's own content, not above it — the exact defect this
+        // fix corrects. A regression that puts it back above the queue
+        // would still pass the plain presence check above but fail this one.
+        const queueRowIndex = h.text().indexOf("Which account should this fee post to");
+        const ftTwoNoteIndex = h.text().indexOf("This feed is F-T2's, paused");
+        assert.ok(queueRowIndex >= 0 && ftTwoNoteIndex > queueRowIndex, "the F-T2 note must render AFTER the live queue's content, never above it");
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {

@@ -60,6 +60,9 @@ export function ComplianceRegisterPanel() {
 
   return (
     <div className="flex flex-col gap-3">
+      {/* P6-T (FS-8): one sentence linking this firm-wide threshold watch to
+          the client-scoped Tax tab's own draft story (裁-34). */}
+      <p className="text-xs text-muted-foreground">{t("taxTabPointer")}</p>
       {register?.staleEvaluator ? <StateBanner tone="warning">{t("staleEvaluator")}</StateBanner> : null}
       {/* F3(a) (independent review, fix-required, 2026-08-28): before this
           fix, a failed client-names read was silently swallowed — the

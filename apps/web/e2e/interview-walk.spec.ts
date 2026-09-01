@@ -12,6 +12,14 @@ import { CLIENT_SEG_KEYS } from "../lib/interview/api";
  * client's same-park, two-browser-context race through the GH #152 409
  * disambiguation; and an axe WCAG 2.1 A/AA scan of the interview card.
  *
+ * FS-8 (裁-86 e2e leg, P6-T IA shell) ADDS one more arm: a SEPARATE test()
+ * that calls `establishSession(page)` itself (Playwright gives every test
+ * its own fresh page/context — nothing is shared across `test()` blocks) on
+ * the SAME COMPLETE fixture's client id, then walks nav-click and ⌘K to the
+ * new Tax tab and asserts its three honest notes actually render. No
+ * interview segment is answered by this arm — it only needs the fixture's
+ * authenticated client, not its thread.
+ *
  * DELIBERATELY DEFERRED: execution against the live runtime/DB estate. This
  * file consumes three isolated, already-open review fixtures supplied via the
  * environment below. Per the FS-5 order, that run happens in the review/merge
@@ -269,4 +277,38 @@ test("two browser contexts answering the same park converge on confirmed state w
   } finally {
     await secondContext.close();
   }
+});
+
+test("the Tax tab is reachable by nav-click and by ⌘K, and its three honest notes render (FS-8, P6-T IA shell)", async ({ page }) => {
+  const target = fixture("COMPLETE");
+  test.skip(!target, "review/merge supplies the isolated COMPLETE client/thread fixture");
+  await establishSession(page);
+  const workspaceHref = `/clients/${encodeURIComponent(target!.clientId)}`;
+  const taxHref = `${workspaceHref}/tax`;
+
+  // Arm 1 — nav-click. The workspace home is enough; the interview segments
+  // above are never touched by this arm.
+  await page.goto(workspaceHref);
+  await page
+    .getByRole("navigation", { name: "Client workspace navigation" })
+    .getByRole("link", { name: "Tax", exact: true })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`${taxHref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
+  await expect(page.getByRole("heading", { name: "SST", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Income tax computation", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Turnover classification", exact: true })).toBeVisible();
+  await expect(page.getByText("F-T1 PR-2 onward, paused", { exact: false })).toBeVisible();
+  await expect(page.getByText("F-T3 PR-2…9, paused", { exact: false })).toBeVisible();
+  await expect(page.getByText("Track B's Tax tab UI resumes", { exact: false })).toBeVisible();
+
+  // Arm 2 — ⌘K, from the workspace home (not the tax tab itself), proving
+  // the palette's OWN client-scoped route also reaches it, independent of
+  // the nav strip walked above.
+  await page.goto(workspaceHref);
+  await page.keyboard.press("Control+k");
+  const dialog = page.getByRole("dialog", { name: "Command palette" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByPlaceholder("Search or ask Clara…").fill("tax");
+  await dialog.getByText("Tax", { exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`${taxHref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
 });

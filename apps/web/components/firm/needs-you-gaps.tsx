@@ -24,6 +24,7 @@ import {
 import { loadClientRegister } from "@/lib/firm/reads";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { SectionHeader } from "@/components/common/section-header";
+import { NotBuiltNote } from "@/components/common/not-built-note";
 import { DataState, ErrorMessage } from "./data-state";
 import { FirmQuestionRow } from "./firm-question-row";
 import { IdentifierPromotionRow } from "./identifier-promotion-row";
@@ -119,6 +120,21 @@ export function NeedsYouGaps() {
             ))}
           </ul>
         </DataState>
+        {/* FS-0 residual (2026-08-31 census): add_client_alias/
+            retire_client_alias are LIVE doors (0007/0016) with no UI —
+            distinct from the promotion list above, which only shows
+            aliases Clara proposes promoting. Named beside it so a reader
+            sees both the automated and the by-hand path in one place. */}
+        <NotBuiltNote>{t("clientAliasNotBuilt")}</NotBuiltNote>
+        {/* P6-T (FS-8, 裁-80) — moved here from the top of NeedsYouInbox
+            (independent review, PR #487, N4/orchestrator ruling): a
+            not-built note must never outrank the user's actual work on the
+            flagship inbox, so it lives at the bottom, beside this file's
+            other honest notes, not above the live queue. clara.
+            statutory_deadlines has been live-empty since migration 0139
+            (no grant, no verb); F-T2's feed lands here once built — not a
+            new row_kind, not a new page. */}
+        <NotBuiltNote>{t("statutoryDeadlinesNotBuilt")}</NotBuiltNote>
       </div>
     </div>
   );
