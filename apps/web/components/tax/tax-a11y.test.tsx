@@ -4,10 +4,16 @@
 // measured backend state), so unlike most a11y suites in this repo there is
 // no RPC to mock: nothing here fetches.
 //
-// Wrapped in a synthetic <h1> — the same idiom as components/firm/
-// needs-you-a11y.test.tsx and components/documents/documents-a11y.test.tsx:
-// on the real page (app/(firm)/clients/[clientId]/tax/page.tsx)
-// TaxWorkbenchPage always renders under that page's own <h1> (PageHeader).
+// NO synthetic <h1> wrapper here — unlike needs-you-a11y.test.tsx/
+// documents-a11y.test.tsx, whose target components mount under an AMBIENT
+// h1 the real page supplies elsewhere. TaxWorkbenchPage renders its OWN
+// `PageHeader` h1 internally (the route's page.tsx supplies none — see
+// app/(firm)/clients/[clientId]/tax/page.tsx), so this fixture renders the
+// component bare and lets the REAL h1/h2/h2/h2 tree stand — the only tree
+// this file could scan and still have heading-order (the axe rule that
+// actually applies here) mean anything. A synthetic h1 on top of the
+// component's own real h1 would have hidden a heading-order violation
+// rather than proving its absence (independent review, PR #487, M2).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -27,12 +33,7 @@ function renderTaxTab() {
     createElement(NextIntlClientProvider, {
       locale: "en",
       messages,
-      children: createElement(
-        "div",
-        null,
-        createElement("h1", null, "Tax"),
-        createElement(TaxWorkbenchPage, { clientId: "client-1111" }),
-      ),
+      children: createElement(TaxWorkbenchPage, { clientId: "client-1111" }),
     }),
   );
 }
@@ -60,6 +61,11 @@ test("the Tax tab keyboard walk: zero focusable controls today — a proposal/re
   const h = await renderTaxTab();
   try {
     await h.settle();
+    // Positive control (N2, independent review): prove the fixture actually
+    // rendered real content BEFORE trusting the zero-focusable count below —
+    // an empty/broken render would ALSO show 0 focusable elements, which
+    // would make that assertion vacuously green for the wrong reason.
+    assert.match(h.text(), /SST/, "the fixture must have rendered real content before the zero-focusable count below means anything");
     // The discriminating assertion this file exists for: Track B is paused,
     // so every panel is a static note with NOTHING to act on. If a future
     // ride-along PR adds a real control without updating this count, THIS

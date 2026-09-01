@@ -414,7 +414,7 @@
     "sst": {
       "heading": "SST",
       "subheading": "Registration status, the period's output tax, and the SST-02 return draft (F-T1).",
-      "notBuilt": "Clara will show this client's SST registration status, the period's output tax, and draft the SST-02 return here once F-T1 builds the registration and return tables. Today only the SST rate and threshold reference tables are live (F-T1 PR-1, migration 0153) — the rest is F-T1 PR-2 onward, paused (裁-80)."
+      "notBuilt": "Clara will show this client's SST registration status, the period's output tax, and draft the SST-02 return here once F-T1 builds the registration and return tables. Today only the SST rate and threshold reference tables are live — the rate table since F-T1 PR-1 (migration 0153), the threshold table since migration 0016 — no governed door exists for either. The rest is F-T1 PR-2 onward, paused (裁-80)."
     },
     "computation": {
       "heading": "Income tax computation",

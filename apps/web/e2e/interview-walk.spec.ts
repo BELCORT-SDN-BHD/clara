@@ -12,11 +12,13 @@ import { CLIENT_SEG_KEYS } from "../lib/interview/api";
  * client's same-park, two-browser-context race through the GH #152 409
  * disambiguation; and an axe WCAG 2.1 A/AA scan of the interview card.
  *
- * FS-8 (裁-86 e2e leg, P6-T IA shell) ADDS one more arm on the SAME COMPLETE
- * fixture's client, once the interview walk above has already established
- * that session in the same test: nav-click and ⌘K both reach the new Tax
- * tab, and its three honest notes actually render — no interview segments
- * are answered by this arm, it only needs a real authenticated client.
+ * FS-8 (裁-86 e2e leg, P6-T IA shell) ADDS one more arm: a SEPARATE test()
+ * that calls `establishSession(page)` itself (Playwright gives every test
+ * its own fresh page/context — nothing is shared across `test()` blocks) on
+ * the SAME COMPLETE fixture's client id, then walks nav-click and ⌘K to the
+ * new Tax tab and asserts its three honest notes actually render. No
+ * interview segment is answered by this arm — it only needs the fixture's
+ * authenticated client, not its thread.
  *
  * DELIBERATELY DEFERRED: execution against the live runtime/DB estate. This
  * file consumes three isolated, already-open review fixtures supplied via the
