@@ -2,11 +2,12 @@
 
 **Status: P1–P3 and the whole port wave (T0–T11, 11/11) are merged on `main`.** The shell
 (Supabase SSR cookie auth, the two-level workspace chrome, the Clara rail + full-screen
-thread escalation, the 22-part catalog renderer, `⌘K`) and the full P3 product workbench
+thread escalation, the 26-part catalog renderer (24 render branches + 2 status resolvers
+since the `chatTurn_v16` bump, 2026-08-30), `⌘K`) and the full P3 product workbench
 (journals, documents, bank, close, reports, registers, knowledge) are landed, and the port
-wave has since filled those workbenches with the ported door/read surface. Still ahead: the
-**P4** firm-admin UI tranche (design of record merged, build not started) and the **P6**
-polish + cutover wave. It replaces `apps/dashboard` **at cutover**, not before — see
+wave has since filled those workbenches with the ported door/read surface. The **P4**
+firm-admin UI tranche is MERGED (P4-1…P4-5: #450 · #451 · #461 · #455 · #453,
+2026-08-31…09-01 — nav wiring P4-6 still owed). Still ahead: P4-6 and the **P6** polish + cutover wave. It replaces `apps/dashboard` **at cutover**, not before — see
 `docs/plan/active/port-wave-plan-2026-08-28.md` for the current cutover plan
 (`docs/plan/active/frontend-handoff-2026-08-23.md` §0.1 is the original at-cutover ruling).
 
@@ -161,6 +162,12 @@ pnpm --filter @clara/web lint       # walks up to the root eslint.config.mjs, sa
 pnpm --filter @clara/web test       # node --test + tsx — the auth-boundary suite (tests/)
 pnpm --filter @clara/web build      # public-key class gate, then `next build`
 pnpm --filter @clara/web dev        # local dev server
+pnpm --filter @clara/web e2e        # the Playwright rig (node e2e/run.mjs) — REAL browser
+                                    # walks on the BUILT app: entry-faces, interview,
+                                    # signup-confirm-pending specs + the live-stack harness
+                                    # (e2e/live-stack/, its own README) every frontend train
+                                    # reuses per the 裁-86 browser-leg law; serve-built.mjs
+                                    # serves the production build locally. See e2e/README.md.
 ```
 
 `build` runs `scripts/check-public-key.mjs` first and **refuses to bundle** unless
@@ -457,13 +464,15 @@ registers, knowledge.
 **Still absent** (trued 2026-08-29, P-3 — this section previously listed the whole P3
 workbench here, contradicting the real workbenches those routes mount):
 
-- The **P4 firm-admin UI tranche** — firm creation, staff invite/roster, capabilities and
-  the metering rollup. The design of record is merged (#376) and the DB half is live
-  (`0141`, `0145`); the web build has not started.
+- **P4-6 nav wiring** — the P4 tranche itself is BUILT AND MERGED (trued 2026-09-02:
+  #450 invite repair · #451 scope spine · #461 entry group · #453 operator queue ·
+  #455 members/roles/invites), but
+  the new screens still lack their navigation/⌘K/admin-home doors (the reverse-nav gate
+  rides the same train).
 - The **P6 polish + cutover wave** — the `chatTurn_v16` wire bump's four Q8 part kinds
-  (裁-20; TRUED 2026-08-30, was `v15` — `v15` shipped 2026-08-29 for the unrelated F-A6 PR-2
-  and is consumed+frozen), the WCAG 2.2 SC 2.5.8 target-size gate (裁-13), the Clara mascot
-  (裁-14), the R3 focus-ring recut, and the cutover PR that retires `apps/dashboard`.
+  SHIPPED (v16 live on Fly v70 since 2026-08-31); still ahead: the WCAG 2.2 SC 2.5.8
+  target-size gate (裁-13), the Clara mascot (裁-14), the R3 focus-ring recut, and the
+  cutover PR that retires `apps/dashboard`.
 - **⌘K "Do"** — still a statically disabled row (see `lib/command/routes.ts` for Go, which
   is live and mechanically checked by `lib/command/routes.test.ts`).
 
