@@ -11,7 +11,10 @@
 - **Stable UI expectations per surface** — for each shipped object surface (the review queue,
   `je_review`, `clarify`, `doc_review`, `/bank`, `/aging`, `/assets`, `/clients/plan`, and
   whatever Wave G adds), the contract a caller/tester can rely on not changing without a
-  deliberate decision.
+  deliberate decision. *(Trued 2026-09-02: this route list is the DASHBOARD era's — in
+  `apps/web` the equivalents live under `(firm)/clients/[clientId]/…` (bank/registers/close)
+  and `/aging`, `/assets`, `/clients/plan` have no apps/web route; per the Pointer section,
+  apps/web's actual route tree governs.)*
 - **States** — for each surface: loading, empty, error/refused (honest-state lints already
   require no success toast without a confirmed outcome and inert terminal cards — this file
   would be where that convention is written down and enumerated per surface, not just enforced
@@ -19,7 +22,7 @@
   token forcing a re-fetch).
 - **Verification** — how each contract above actually gets checked: the card-catalog parity
   test (live-render vs hydrate-render extractors must agree — currently enforced as a CI gate
-  per `docs/ARCHITECTURE.md` §3 build-time enforcement, not documented here yet), the a11y floor
+  per `docs/design/PRODUCT_DESIGN.md` §3 build-time enforcement, not documented here yet), the a11y floor
   checks, and whatever visual/e2e verification Wave G adds. This file is where "verified" gets
   defined precisely enough to test against, rather than asserted in prose.
 

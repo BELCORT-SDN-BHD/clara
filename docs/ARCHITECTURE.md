@@ -40,14 +40,31 @@ Postgres (fresh Supabase project)  ── THE SINGLE SOURCE OF TRUTH
   forced RLS per firm_id · EXECUTE-only audited SECURITY DEFINER writers · structural read-only agent role
   · durable event log + outbox · durable agent-runtime tables · the two-layer knowledge store
   ▲
-Agent runtime (Clara) on Fly  ── long-lived Node service; durable runs/tasks/checkpoints; the ONLY holder of service credentials
+Agent runtime (Clara) on Fly  ── long-lived Node service; durable runs/tasks/checkpoints; holder of the standing service credentials
+  (裁-114: no service credential ever reaches a browser; apps/web's SERVER-ONLY Route Handlers are a second, browser-isolated holder
+   where a flow requires it — the invite mailer's service_role use, FS-4's Stripe webhook signing secret)
 ```
 
 - **Fresh Supabase project** + the **`packages/db` migration rig** for day-to-day dev — migrations are validated on a throwaway Postgres (CI's `postgres:17` service, or a scratch schema), never hand-applied to a live project. *(A local Supabase CLI stack was the original intent; it needs Docker, which is unavailable here, so the rig is the as-built target — see `PROGRESS.md`.)* Every schema change is a versioned migration in the repo from day one; seed scripts produce synthetic data. The old project stays frozen (read-only) until Phase-5 decommission sign-off.
-- Isolation is **RLS on `firm_id`**, not project-per-firm — the proven model from the old build (frozen-repo ADR-029, cited as salvage evidence — not an ADR in this repo's decision log), which is PORT. What changes is everything *above* the isolation boundary.
+- Isolation is **RLS on `firm_id`** for every firm-scoped table, not project-per-firm — the proven model from the old build (frozen-repo ADR-029, cited as salvage evidence — not an ADR in this repo's decision log), which is PORT. What changes is everything *above* the isolation boundary. **The one deliberate exception is the pre-firm admission cohort** (FS-4: `dpa_documents` / `dpa_signatures` / `registration_rate_events` / `checkout_intents`, `0158`+): those rows exist BEFORE a firm does, so they carry no `firm_id` and are isolated by **zero application grants** instead — every policy is owner-role-only, and the only doors are SECURITY DEFINER functions. A builder extending that cohort must NOT reach for a firm-scoped policy; there is no firm to scope to yet.
 - **Hosts:** the runtime is a long-lived process on **Fly** (region `sin`, co-located with Supabase `ap-southeast-1`) — the WDK world needs an always-on worker, not a serverless function; `apps/web` targets **Cloudflare Workers** through `@opennextjs/cloudflare`, while the retiring dashboard remains on **Cloudflare Pages** at `app.clarabook.com` until P6-X cutover; the DB is **Supabase**. The runtime host is ratified in `docs/adr/` (ADR-014) (Fly is also the frozen prior plane's host, so the ADR marks it a deliberate greenfield choice, not a carryover).
 
 ---
+
+## 1a. The pre-firm admission plane (FS-4, 裁-73/88/89/91/92 — added at the 2026-09-02 truing)
+
+A fourth subsystem sits BEFORE the three planes above, because a paying customer exists before
+their firm does: **Stripe Checkout (TEST mode at beta, 裁-88) → the signed webhook → the
+redacted `stripe_events` projection (裁-91 — allow-listed reconciliation fields only, no
+`customer_details` PII at rest, Stripe stays the system of record for what Stripe saw) →
+the one-transaction folded admission door (裁-89: no admission token survives; it calls
+`_create_firm_core` directly) → a born firm.** Around it: the versioned DPA store +
+append-only signatures, the registration rate wall, `checkout_intents`, and the 6-digit
+emailed confirmation code (裁-92) behind four rate walls. Objects land in `0158`+ (C-1) and
+the C-2/C-3 migrations; the design packet is `docs/plan/active/checkout-gate-design*.md`.
+**Isolation here is NOT `firm_id` RLS** — see §1's exception note: zero application grants,
+owner-role-only policies, SECURITY DEFINER doors. The webhook's principal is its own
+NOLOGIN + `_login` role pair granted EXECUTE on exactly its two functions.
 
 ## 2. The event-driven accounting state layer (the North-Star spine)
 
@@ -210,6 +227,14 @@ A **`classify` lane** resolves each document's type after layout/structured extr
 
 **The extraction estate after ADR-0071 (shipped/ceremonied 2026-08-20, F-A1; `docs/plan/active/wave-f-contract.md`):** the semantic readers — Azure `prebuilt-invoice`, Azure `prebuilt-bankStatement`, and the deterministic layout-reader family — RETIRED. Facts are witnessed by the **LLM witness pair** (one read of the stored OCR raw text, one of the original image bytes; same provider, two channels), agreeing to the sen under a versioned deterministic DB predicate, every witnessed amount server-snapped to a layout region (so the polygon/evidence walls and `doc_review` keep their fuel), the document's arithmetic identity and the bank running-balance chain retained as mechanical checks, and both reads persisted whole with model+version stamps. OCR itself is demoted to a coordinates-and-text-fidelity supplier — zero semantics — and is vendor-swappable behind the existing normalized envelope/regions shape. Digest law 72 is the binding statement.
 
+**Egress consent (the governor PRD §6 invariant 16(a) names, 裁-114):** a client document
+leaves Clara only under the typed, purpose-scoped consent subsystem —
+`client_egress_consents` / `client_egress_purpose_consents` / `firm_egress_purpose_consents`,
+the `*_purpose_activations` tables, and `egress_dispatch_authorizations` with the
+activate/deactivate/consume doors (`0020_typed_consent.sql`; ADR-0040/0041; digest law 58).
+Consent is re-checked at the dispatch boundary; a grant alone never authorizes. Admin surface:
+`apps/web/app/(firm)/admin/vendor-bindings/`.
+
 ## 7a. Retention (fixes GAP3-4/3-5)
 The 7-year statutory clock anchors at **period-end + filing date** (ITA s.82/82A, CA2016 s.245), not row-creation, and is recomputed on close; `legal_hold` gets a real audited writer.
 
@@ -274,7 +299,7 @@ The Slice-0 spike ran against the fresh hosted Supabase project (`spike/RESULTS.
 3. **No run pinning on self-hosted WDK** (T6, the hazard): an in-place edit to a workflow body **silently changes the semantics of the un-executed remainder of every in-flight run** — no error, no old-semantics preservation. A silent-correctness hazard for accounting workflows. **Mitigation proven:** name-versioned workflows — old parked runs completed on pure V1 semantics while new enqueues rode V2.
 4. **BINDING VERSIONING POLICY (from T6):** (a) a deployed workflow body is immutable once any run can be in flight; every behavioral change ships as a new exported workflow (`_v2`, `_v3`, …), the old export retained until zero non-terminal runs reference it; (b) enqueue sites always target the newest version; a CI freeze-lint (golden-hash per frozen workflow) forbids editing frozen bodies; (c) renaming/deleting an export with in-flight runs is forbidden (workflowName derives from path+export — a rename strands parked runs); (d) in-place hotfixes only for provably pre-park-idempotent step-body bugs.
 
-**Freeze-lint coverage (as built, finding 11):** the CI freeze-lint golden-hashes each `@frozen` workflow **and its transitive relative-import closure**, requires every `"use workflow"` file to be frozen + registered, compares append-only vs `origin/main` (fail-closed if the base ref is missing under CI), and **rejects a workspace-package / path-alias import inside a frozen closure** (such a first-party import would escape the closure and change a frozen body while its hash stayed green). **No longer deferred — both are BUILT and enforced** (verified 2026-08-06 in `scripts/check-frozen-workflows.mjs`, which delegates to `freeze-lint-checks.mjs`): **registry-version monotonicity** — the lint parses `packages/runtime/workflows/registry.ts` at HEAD and at the base ref, so a class may only keep or *increase* its version and a class removed vs base is a hard reject — and **enqueue-site provenance** — every WDK enqueue in `packages/runtime` (tests and the registry itself excluded) must receive a workflow reference whose import provenance traces to the registry. Policy (b) is therefore machine-checked, not convention. Handles: `scripts/check-frozen-workflows.mjs`, the manifest `frozen-workflows.json` (**130** entries at the F6–F9 close, ADR-066 — the count grows with every frozen closure; read the file, not this line), regenerated only via `pnpm freeze:update` (refused under CI).
+**Freeze-lint coverage (as built, finding 11):** the CI freeze-lint golden-hashes each `@frozen` workflow **and its transitive relative-import closure**, requires every `"use workflow"` file to be frozen + registered, compares append-only vs `origin/main` (fail-closed if the base ref is missing under CI), and **rejects a workspace-package / path-alias import inside a frozen closure** (such a first-party import would escape the closure and change a frozen body while its hash stayed green). **No longer deferred — both are BUILT and enforced** (verified 2026-08-06 in `scripts/check-frozen-workflows.mjs`, which delegates to `freeze-lint-checks.mjs`): **registry-version monotonicity** — the lint parses `packages/runtime/workflows/registry.ts` at HEAD and at the base ref, so a class may only keep or *increase* its version and a class removed vs base is a hard reject — and **enqueue-site provenance** — every WDK enqueue in `packages/runtime` (tests and the registry itself excluded) must receive a workflow reference whose import provenance traces to the registry. Policy (b) is therefore machine-checked, not convention. Handles: `scripts/check-frozen-workflows.mjs`, the manifest `frozen-workflows.json` (**228** entries at the 2026-09-02 truing — the count grows with every frozen closure; read the file, not this line), regenerated only via `pnpm freeze:update` (refused under CI).
 4a. **The parallel EVALUATOR freeze (invariant 1's enforcement machinery, mirroring the
 workflow freeze above):** `frozen-evaluators.json` is the manifest; `scripts/check-frozen-
 evaluators.mjs` is its lint (with its own `--lock-deployed` ceremony flag, refused under CI);
