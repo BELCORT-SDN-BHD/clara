@@ -1280,7 +1280,17 @@ cell("c3.52 W-M2 positive -- resolved intent-not-found event produces a real pay
   assert.deepEqual(applied.rows, [{ registration_id: req.id }]);
 });
 
-cell("c3.53 folded set equality -- exactly three money-store bodies; reconciler remains unbuilt", async () => {
+cell("c3.53 folded set equality -- exactly four money-store bodies; reconciler remains unbuilt", async () => {
+  // Design part3 §5's non-wall cell 2 was written in the two-door era and pins "three, not
+  // five" -- record_stripe_event, apply_stripe_events, claim_paid_firm. X10 (open_checkout_intent
+  // refusing "this registration is already paid") is a genuinely new wall that door did not carry
+  // under the two-door design, and it needs a real, honest read of firm_registration_payments to
+  // enforce it -- there is no other source of that fact. The set is therefore FOUR here, not
+  // three, and this cell says so plainly rather than the door's body hiding the reference from
+  // this exact census (a prior draft split the literal 'firm_registration_payments' identifier
+  // via string concatenation specifically so this count would stay at three -- that is gaming
+  // the instrument, not satisfying it, and was reverted). The retirement half below (no
+  // reconcile_paid_registrations) still holds unchanged.
   const refs = await rootQuery(
     `select distinct p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='clara'
@@ -1288,7 +1298,7 @@ cell("c3.53 folded set equality -- exactly three money-store bodies; reconciler 
       order by p.proname`,
   );
   assert.deepEqual(refs.rows.map((r) => r.proname), [
-    "apply_stripe_events", "claim_paid_firm", "record_stripe_event",
+    "apply_stripe_events", "claim_paid_firm", "open_checkout_intent", "record_stripe_event",
   ]);
   const retired = await rootQuery(
     `select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace

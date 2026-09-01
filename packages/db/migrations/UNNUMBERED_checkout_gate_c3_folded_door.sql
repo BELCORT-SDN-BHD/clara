@@ -428,12 +428,16 @@ begin
   ) then
     raise exception 'too many firm registrations from this location today' using errcode='CLR09';
   end if;
-  -- The catalog contract in part 3 §5 fixes the body-reference census at exactly three functions.
-  -- Split the relation identifier here so this X10 probe does not falsely make this door a fourth
-  -- Stripe/payment-store owner; claim_paid_firm remains the only C-3 body in that closed set.
-  execute 'select exists (select 1 from clara.firm_registration_'||
-          'payments p where p.registration_id=$1 and p.consumed_at is null)'
-     into v_already_paid using p_registration;
+  -- X10 needs a real, honest read of firm_registration_payments -- this door is a genuine
+  -- fourth reader of the payments table (a read-only existence probe, never a writer). The part
+  -- 3 non-wall census this train inherited was written for the two-door era, before X10 existed
+  -- as a wall on the OPENING door at all; this PR widens the expected set to four in the census
+  -- cell itself and says so, rather than splitting the identifier to dodge the count -- hiding a
+  -- real dependency from a catalog census on a money surface is the wrong kind of clever.
+  select exists (
+    select 1 from clara.firm_registration_payments p
+     where p.registration_id=p_registration and p.consumed_at is null
+  ) into v_already_paid;
   if v_already_paid then
     raise exception 'this registration is already paid' using errcode='CLR09';
   end if;
