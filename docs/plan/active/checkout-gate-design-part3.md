@@ -110,14 +110,40 @@ clara.confirmation_attempts(
 **`clara.claim_confirmation_attempt(p_email_digest bytea, p_origin_digest bytea) → jsonb`** —
 appends the attempt row **first**, then evaluates C1 and C2 over the preceding window.
 
-| # | wall | refusal | errcode |
-|---|---|---|---|
-| C1 | ≤ 5 rejected attempts per **email digest** per 15 minutes | `too many confirmation attempts` | `CLR09` |
-| C2 | ≤ 5 rejected attempts per **origin digest** per 15 minutes | `too many confirmation attempts from this location` | `CLR09` |
-| — | both digests are exactly 32 bytes | `a digest is required` | `CLR10` |
+**As-built correction (NIT8, #493 opus review): C1/C2 do not `raise` — they return.** The digest
+CHECK below is the only limb of this door that raises an exception; C1 and C2 are read from the
+attempt row's own evidence and reported back as data (`allowed:false`, plus `scope` and
+`retry_after_seconds` below), never thrown, because the caller still needs a live `attempt_id` and
+a wait to render even on refusal — an exception would have nothing to attach either to. The table
+below names which wall a given refusal came from, not a literal error the door raises for it:
 
-Returns `{attempt_id, allowed, remaining}` — `remaining` is what the "that code is not right" card
-renders, because a person near lockout deserves to know.
+| # | wall | as-reported when it fires | (only the digest-shape limb raises) |
+|---|---|---|---|
+| C1 | ≤ 5 rejected attempts per **email digest** per 15 minutes | `allowed:false, scope:'email'` | — |
+| C2 | ≤ 5 rejected attempts per **origin digest** per 15 minutes | `allowed:false, scope:'origin'` | — |
+| — | both digests are exactly 32 bytes | — | `a digest is required`, `CLR10` |
+
+**Returns `{attempt_id, allowed, remaining, scope, retry_after_seconds}`** (`scope`/
+`retry_after_seconds` folded in at 裁-103, #488's seam review — the original `{attempt_id,
+allowed, remaining}` left the caller to infer WHICH wall fired from an errcode or message string,
+exactly the law-3 trap, and gave no DB-owned wait at all).
+
+- **`remaining`** is attempts remaining **after this one** — the card renders once this guess has
+  already been spent, so the last allowed attempt (the 5th) reports `0`, never `1` (F5, #493 opus
+  review: an earlier build reported "attempts remaining before this one," which showed a nonzero
+  count to a caller who in fact had none left).
+- **`scope`** is `null` on the allowed path; `'email'` or `'origin'` on refusal, naming which wall
+  fired. `'email'` takes precedence when both limbs are simultaneously over threshold, matching
+  this table's own C1-then-C2 ordering. (F2, #493 opus review: the door's token is `'email'`, not
+  `'address'` as an earlier seam draft assumed — `'email'` matches this table's own column and the
+  `email_digest` name; the seam's union is trued to match the door, not the reverse.)
+- **`retry_after_seconds`** is `null` on the allowed path; on refusal, the whole seconds until
+  enough of the counted attempts age out of the 15-minute window to admit a retry — derived from
+  attempt timestamps the DB already owns (hard constraint 2). Its range is `(0, 900]` — **inclusive
+  of exactly 900**, not strictly less: the value rounds a fractional wait UP to the next whole
+  second, and when the true wait is already an exact 900-second boundary that rounds to 900 itself,
+  never higher. A UI clamp on the displayed wait must therefore treat `900` as a real, reachable
+  value, not an overflow.
 
 **The row is written BEFORE the verification, not after, and that ordering is the wall.** If the
 attempt were recorded on the way back, an attacker would abort the request after each failed guess

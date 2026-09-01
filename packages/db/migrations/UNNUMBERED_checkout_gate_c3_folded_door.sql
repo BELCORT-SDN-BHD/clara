@@ -568,6 +568,15 @@ begin
     from clara.firm_registration_requests r
    where r.id=p_registration
    for update;
+  -- NIT7 (opus review on #493): without this, a vanished row leaves v_req an all-NULL record
+  -- (plpgsql's documented INTO behavior on zero rows) and the wall below reads
+  -- `NULL is not null or NULL<>'open'` = `false or NULL` = NULL -- three-valued logic reads a
+  -- bare NULL condition as FALSE in an IF, so the wall silently does not fire and execution falls
+  -- through into the folded door's write path on a phantom row. Fail closed, explicitly, on the
+  -- highest-stakes read in this file.
+  if not found then
+    raise exception 'unknown registration request' using errcode='CLR10';
+  end if;
   if v_req.firm_id is not null or v_req.status<>'open' then
     raise exception 'this registration is no longer open (status: %)',v_req.status using errcode='CLR09';
   end if;
@@ -669,42 +678,59 @@ begin
      and a.attempted_at>=v_attempted_at-interval '15 minutes'
      and a.outcome is distinct from 'accepted';
   v_allowed:=(v_email_count<5 and v_origin_count<5);
-  v_remaining:=greatest(0,5-greatest(v_email_count,v_origin_count));
+  -- F5 (opus review on #493): "remaining" is attempts remaining AFTER this one, not before it --
+  -- the card renders once this guess has already been spent, so on the 5th (last allowed) guess
+  -- (prior count 4) it must read 0, never "1". Budget is 5 total; N already spent (this one
+  -- included, i.e. prior+1); remaining = 5-(prior+1) = 4-prior.
+  v_remaining:=greatest(0,4-greatest(v_email_count,v_origin_count));
 
   -- 裁-[#488 seam review]: the refused arm names WHICH wall fired (never left for the caller to
   -- infer from an errcode or message string -- law 3, "spelling is not identity") and how long
   -- until the caller may retry (derived from DB-owned attempt timestamps + the fixed 15-minute
   -- window -- hard constraint 2: the DB owns the number). C1 (email) takes precedence when both
   -- limbs are simultaneously over threshold, matching the design's own C1-then-C2 ordering.
-  -- retry_after_seconds is the wait until enough of the counted attempts age out of the window to
-  -- drop the count back under 5 -- the (count-4)th-oldest counted attempt's own window expiry,
-  -- which generalizes past the exact-5 case to a burst that momentarily counted higher. Both
-  -- fields are null on the allowed path -- there is nothing to name or wait for.
+  -- F1 (opus review on #493, BLOCKER, off-by-one that locked a compliant retry out forever):
+  -- the row THIS call just inserted (v_attempt) also persists and counts against every FUTURE
+  -- call's own window -- it is not a spectator, it is prior-count-plus-one members strong once
+  -- committed. For a future call to be allowed, the surviving (non-expired) members of {the N
+  -- priors PLUS v_attempt} must drop to <=4, i.e. at least (N+1)-4 = N-3 of the N+1 must expire.
+  -- v_attempt is the newest of the N+1 (just inserted), so the oldest N-3 are exactly the oldest
+  -- N-3 of the N priors -- the (N-3)th-oldest prior, 1-indexed, is OFFSET (N-3)-1 = N-4 in the
+  -- priors-only ordered set the query below selects from (v_attempt itself is excluded by
+  -- `a.id<>v_attempt`, so it can never be picked as the target -- correct, since it is not one of
+  -- the rows we are waiting to expire away FROM the priors' side of the ledger).
+  -- Rounding: the window predicate below is `>=` (inclusive), so a row is still counted AT THE
+  -- EXACT INSTANT `now = attempted_at + 15min`, not only before it -- retrying at the advertised
+  -- wait, to the exact second, must still find the target expired. ceil() of an exact integer
+  -- duration returns that same integer, which is exactly the boundary that still counts; floor()+1
+  -- always advances one full second PAST the true fractional value, closing that boundary case
+  -- while matching ceil() on every non-integer duration.
+  -- Both fields are null on the allowed path -- there is nothing to name or wait for.
   if v_allowed then
     v_scope:=null;
     v_retry_after:=null;
   elsif v_email_count>=5 then
     v_scope:='email';
-    select greatest(0,ceil(extract(epoch from
-             ((a.attempted_at+interval '15 minutes')-v_attempted_at))))::int
+    select greatest(0,floor(extract(epoch from
+             ((a.attempted_at+interval '15 minutes')-v_attempted_at)))+1)::int
       into v_retry_after
       from clara.confirmation_attempts a
      where a.id<>v_attempt and a.email_digest=p_email_digest
        and a.attempted_at>=v_attempted_at-interval '15 minutes'
        and a.outcome is distinct from 'accepted'
      order by a.attempted_at asc
-     offset greatest(v_email_count-5,0) limit 1;
+     offset greatest(v_email_count-4,0) limit 1;
   else
     v_scope:='origin';
-    select greatest(0,ceil(extract(epoch from
-             ((a.attempted_at+interval '15 minutes')-v_attempted_at))))::int
+    select greatest(0,floor(extract(epoch from
+             ((a.attempted_at+interval '15 minutes')-v_attempted_at)))+1)::int
       into v_retry_after
       from clara.confirmation_attempts a
      where a.id<>v_attempt and a.origin_digest=p_origin_digest
        and a.attempted_at>=v_attempted_at-interval '15 minutes'
        and a.outcome is distinct from 'accepted'
      order by a.attempted_at asc
-     offset greatest(v_origin_count-5,0) limit 1;
+     offset greatest(v_origin_count-4,0) limit 1;
   end if;
 
   return jsonb_build_object(

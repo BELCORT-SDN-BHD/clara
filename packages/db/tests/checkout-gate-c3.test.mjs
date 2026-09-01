@@ -25,7 +25,7 @@ import { truncateGuardError, withTxn } from "./rig-txn.mjs";
 import { twoSessions, waitBlockedByOrThrow } from "./binding-proposal-pr-1-helpers.mjs";
 
 const TABLES = ["billing_plans", "firm_registration_payments", "confirmation_attempts"];
-const EXPECTED_CELLS = 55;
+const EXPECTED_CELLS = 57; // +2 (c3.30a, c3.30b) from the #493 opus review's F1 fix round
 
 let live = false;
 let executed = 0;
@@ -795,6 +795,10 @@ cell("c3.28 W-H3 -- sixth rejected attempt is persisted but not allowed", async 
   for (let i = 0; i < 5; i += 1) {
     const attempt = await claimConfirmation(email, origin);
     assert.equal(attempt.allowed, true, `attempt ${i + 1} remains inside the window`);
+    // F5 (opus review on #493): "remaining" is attempts remaining AFTER this one -- prior count
+    // is i (0..4), so remaining must count down 4,3,2,1,0 across the five allowed attempts, never
+    // showing "1" on the attempt that was in fact the last one this caller had.
+    assert.equal(attempt.remaining, 4 - i, `attempt ${i + 1} (prior=${i}) must report ${4 - i} remaining`);
     await settleConfirmation(attempt.attempt_id, "rejected");
   }
   const sixth = await claimConfirmation(email, origin);
@@ -904,6 +908,75 @@ cell("c3.30 W-H5 -- an unsettled attempt counts fail-closed against the next win
     "select outcome,settled_at from clara.confirmation_attempts where id=$1", [unsettled.attempt_id],
   );
   assert.deepEqual(row.rows, [{ outcome: null, settled_at: null }]);
+});
+
+// F1 (opus review on #493, BLOCKER): c3.28/c3.29 asserted only that retry_after_seconds falls in
+// (0, 900] -- exactly the range that let the original off-by-one offset (N-5, targeting the
+// OLDEST prior) survive the whole battery, because a wrong-but-plausible value is still inside
+// that range. This cell pins the DB-COMPUTED value against independently-derived, injected
+// attempted_at rows, discriminating the fixed offset (N-4, the SECOND-oldest of five identical
+// N=5 priors) from the pre-fix one by construction (five DISTINCT backdated timestamps, so the
+// two candidate targets have different, checkable expiries).
+cell("c3.30a W-H3 exact value -- retry_after_seconds matches the DB-computed formula, not merely a range", async () => {
+  const email = digest("value-email");
+  const origin = digest("value-origin");
+  const minutesAgo = [14, 13, 12, 11, 10]; // oldest first; five DISTINCT timestamps
+  for (const mins of minutesAgo) {
+    await rootQuery(
+      `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
+       values ($1,$2,now()-interval '1 minute'*$3::int)`,
+      [email, origin, mins],
+    );
+  }
+  const sixth = await claimConfirmation(email, origin);
+  assert.equal(sixth.allowed, false);
+  assert.equal(sixth.scope, "email");
+  const sixthRow = await rootQuery(
+    "select attempted_at from clara.confirmation_attempts where id=$1", [sixth.attempt_id],
+  );
+  const ordered = await rootQuery(
+    `select attempted_at from clara.confirmation_attempts
+      where email_digest=$1 and id<>$2 order by attempted_at asc`,
+    [email, sixth.attempt_id],
+  );
+  assert.equal(ordered.rowCount, 5);
+  const oldest = ordered.rows[0].attempted_at;
+  const target = ordered.rows[1].attempted_at; // N=5 -> offset N-4=1 -> the SECOND-oldest
+  assert.notEqual(new Date(oldest).getTime(), new Date(target).getTime(),
+    "the fixture's five backdated rows must be distinct for this cell to discriminate the offset fix");
+  const sixthAt = sixthRow.rows[0].attempted_at;
+  const expected = Math.max(0, Math.floor(
+    (new Date(target).getTime() + 15 * 60 * 1000 - new Date(sixthAt).getTime()) / 1000,
+  ) + 1);
+  assert.equal(sixth.retry_after_seconds, expected,
+    `retry_after_seconds must equal the DB-computed formula exactly (expected ${expected}, got ${sixth.retry_after_seconds})`);
+});
+
+// F1 (opus review on #493, BLOCKER): the review traced the concrete failure loop under the old
+// offset -- a compliant caller who waits exactly the advertised time is STILL refused, forever,
+// because the wait was computed against the wrong (too-early-expiring) row. This cell proves the
+// loop actually closes: backdate five rows to just under the window's edge so the real advertised
+// wait is a few seconds (achievable in a test), wait that long for real, and confirm the retry is
+// genuinely ALLOWED -- not merely that a number was returned.
+cell("c3.30b W-H3 the loop actually closes -- waiting the advertised time yields a real ALLOW", async () => {
+  const email = digest("loop-email");
+  const origin = digest("loop-origin");
+  for (let i = 0; i < 5; i += 1) {
+    await rootQuery(
+      `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
+       values ($1,$2,now()-interval '14 minutes 58 seconds')`,
+      [email, origin],
+    );
+  }
+  const sixth = await claimConfirmation(email, origin);
+  assert.equal(sixth.allowed, false);
+  assert.ok(Number.isInteger(sixth.retry_after_seconds)
+    && sixth.retry_after_seconds > 0 && sixth.retry_after_seconds <= 5,
+    `fixture expects a short, test-waitable advertised wait (got ${sixth.retry_after_seconds}s)`);
+  await new Promise((resolve) => { setTimeout(resolve, (sixth.retry_after_seconds + 1) * 1000); });
+  const seventh = await claimConfirmation(email, origin);
+  assert.equal(seventh.allowed, true,
+    "waiting exactly the advertised time must unblock a genuinely compliant retry -- the F1 close, executed for real");
 });
 
 cell("c3.31 settle wall -- outcome is typed and a completed attempt cannot re-settle", async () => {
@@ -1310,11 +1383,23 @@ cell("c3.53 folded set equality -- exactly four money-store bodies; reconciler r
   // via string concatenation specifically so this count would stay at three -- that is gaming
   // the instrument, not satisfying it, and was reverted). The retirement half below (no
   // reconcile_paid_registrations) still holds unchanged.
+  // F3 (opus review on #493): the guard above caught a code-level evasion, but a bare
+  // `position(... in p.prosrc)` is itself comment-blind -- the very explanatory comment this
+  // cell's own PR left in open_checkout_intent's body (naming "firm_registration_payments" in
+  // prose) is enough to satisfy this exact query even if the executable string-split evasion
+  // were reintroduced verbatim beside it. Strip comments before matching, the same idiom
+  // x42b2-s5c-clock.test.mjs's arm (D) already uses, so only a genuine EXECUTABLE reference
+  // counts.
   const refs = await rootQuery(
-    `select distinct p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-      where n.nspname='clara'
-        and (position('stripe_events' in p.prosrc)>0 or position('firm_registration_payments' in p.prosrc)>0)
-      order by p.proname`,
+    `with stripped as (
+       select p.proname,
+              regexp_replace(regexp_replace(p.prosrc, '/\\*[\\s\\S]*?\\*/', '', 'g'), '--[^\\n]*', '', 'g') as code
+         from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+        where n.nspname='clara'
+     )
+     select distinct proname from stripped
+      where position('stripe_events' in code)>0 or position('firm_registration_payments' in code)>0
+      order by proname`,
   );
   assert.deepEqual(refs.rows.map((r) => r.proname), [
     "apply_stripe_events", "claim_paid_firm", "open_checkout_intent", "record_stripe_event",
