@@ -19,11 +19,13 @@ const TRANSACTION_CONTROL = [
   ["ABORT"], ["SAVEPOINT"], ["RELEASE"],
 ];
 
-// Exported for reuse by catalog-facing censuses that need the SAME general-purpose SQL
-// tokenizer this migration gate trusts (comments stripped, dollar-quoted blocks collapsed to
-// their tag, string/identifier literals correctly typed) rather than a hand-rolled regex --
-// e.g. packages/db/tests/checkout-gate-c3.test.mjs's c3.53 body-reference census. Behavior is
-// UNCHANGED; this is an export-only edit.
+// Exported for reuse by a FUTURE tokenizer-based catalog census that needs the SAME
+// general-purpose SQL tokenizer this migration gate trusts (comments stripped, dollar-quoted
+// blocks collapsed to their tag, string/identifier literals correctly typed) rather than a
+// hand-rolled regex. NOT YET CONSUMED anywhere as of this export (checkout-gate-c3.test.mjs's
+// c3.53 still uses a regex-based census, deliberately not widened to a lexer in that PR to avoid
+// growing it further) -- do not read this comment as a claim that a consumer exists yet.
+// Behavior is UNCHANGED; this is an export-only edit.
 export function lexStatements(sql) {
   const statements = [];
   let tokens = [];
