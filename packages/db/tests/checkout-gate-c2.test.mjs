@@ -218,6 +218,13 @@ cell("c2.3 ck_stripe_events_no_pii -- every named top-level denied key is reject
       `top-level ${key}`,
     );
   }
+  const directEventId = stripeEventId("piidirect");
+  await assertRaises(PG.checkViolation, () => rootQuery(
+    `insert into clara.stripe_events(event_id,type,livemode,projection)
+     values ($1,$2,$3,$4::jsonb)`,
+    [directEventId, "unit.pii_direct", false, JSON.stringify({ customer_email: "denied@example.com" })],
+  ), "direct INSERT with a denied key bypasses the door but not the table CHECK");
+
   const eventId = stripeEventId("piicontrol");
   assert.deepEqual(await recordEvent(eventId, "unit.pii_control", { livemode: false }), {
     event_id: eventId, recorded: true,
