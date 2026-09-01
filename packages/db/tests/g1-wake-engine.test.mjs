@@ -25,6 +25,15 @@ import {
 // own comment for the full cross-package concurrency class this constant exists to carve out.
 const WAKE_ENGINE_TEST_PREFIX = "g1_test_";
 
+// T1's own live-roster predicate, hoisted to ONE module-level string (opus review round on PR
+// #497, finding D2(i)): T1 and T1-negative-control below both execute THIS EXACT string — never
+// two independently-typed copies. Two copies is how a negative control silently stops
+// discriminating the moment either one drifts: widen/typo T1's own WHERE clause and a SEPARATE
+// literal in the control would still test its own untouched copy, catching nothing.
+const T1_LIVE_ROSTER_SQL = `select source_key, carrier, enabled from clara.wake_engine_sources
+      where left(source_key, char_length($1)) <> $1
+      order by source_key`;
+
 let ready = false;
 let SKIPPED = 0;
 function skip(t, why) {
@@ -111,60 +120,73 @@ test("T1 wake_engine_sources: forced RLS, exactly bank_agent+close_prep, both en
   // wake-engine.test.mjs cells need a row committed by ONE registerSource() call to be visible
   // to a DIFFERENT, later connection. This is not an assumption about connection reuse — the
   // rig's own persona helper (packages/runtime/tests/relay-fixtures.mjs's `withActor`, lines
-  // ~34-65) does a fresh `pool.connect()` on EVERY call and unconditionally issues `rollback`
+  // 41-70) does a fresh `pool.connect()` on EVERY call and unconditionally issues `rollback`
   // in its own `finally` before releasing the connection back to the pool — so nothing opened
   // inside one rootQuery/asRuntime call can ever survive un-committed into a later call, on
   // that file or any other. On top of that structural fact, several cells (the M1 skip-locked
   // variant, wake-engine.test.mjs:258-320; `#1(a)`, :335-401; `#1` round-6, :586-671) explicitly
   // open a SECOND, concurrent session specifically to hold a row lock the main flow's own
-  // connection must NOT see, and assert on real lock visibility (`pg_blocking_pids`) — genuinely
-  // multi-session by construction, which a rolled-back fixture would defeat outright.
+  // connection must NOT see, proving the interleave by a lock-acquired handshake (a promise that
+  // resolves only once the locker's own `select ... for update` has genuinely returned), never a
+  // sleep — genuinely multi-session by construction, which a rolled-back fixture would defeat
+  // outright.
   //
   // T1's birth-roster proof stays a real closed-world assertion for every OTHER source key: it
   // excludes ONLY the documented, enforced prefix, by exact substring — never widened to a
-  // "contains" check (a durable negative control follows this cell, proving an unprefixed third
-  // source is NOT swallowed). This file's own S3 cell below also inserts one row under this same
-  // prefix shape (`g1_test_s3_legit_...`) but deletes it immediately after asserting — so this
-  // file leaves no residue of its own under the prefix it excludes here, even on a reused DB.
-  const rows = (await rootQuery(
-    `select source_key, carrier, enabled from clara.wake_engine_sources
-      where left(source_key, char_length($1)) <> $1
-      order by source_key`,
-    [WAKE_ENGINE_TEST_PREFIX],
-  )).rows;
+  // "contains" check (a durable negative control follows this cell, executing this SAME query —
+  // T1_LIVE_ROSTER_SQL, hoisted above — to prove two independently-shaped unprefixed third
+  // sources are NOT swallowed). This file's own S3 cell below also inserts one row under this
+  // same prefix shape (`g1_test_s3_legit_...`) but deletes it immediately after asserting — so
+  // this file leaves no residue of its own under the prefix it excludes here, even on a reused DB.
+  const rows = (await rootQuery(T1_LIVE_ROSTER_SQL, [WAKE_ENGINE_TEST_PREFIX])).rows;
   assert.deepEqual(rows.map((r) => r.source_key), ["bank_agent", "close_prep"], "T1: exactly these two source keys, closed-world (excluding the documented, enforced runtime concurrency fixture prefix — see comment above)");
   for (const r of rows) assert.equal(r.enabled, false, `T1: ${r.source_key} must ship disabled`);
 });
 
 // =====================================================================================
-// T1-negative-control (opus review round on PR #497, finding F4) — a DURABLE proof, not PR-body
-// prose, that T1's exclusion above is narrow: an unprefixed row (a genuine THIRD real source, by
-// construction) is NOT swallowed by the prefix carve-out. Runs inside its own transaction,
-// rolled back — this cell's own synthetic row must never itself become residue.
+// T1-negative-control (opus review round on PR #497, finding F4; hardened at D2) — a DURABLE
+// proof, not PR-body prose, that T1's exclusion above is narrow. Runs T1_LIVE_ROSTER_SQL itself
+// — the EXACT same string T1 executes, never a second hand-typed copy (D2(i): two copies is how
+// a control stops discriminating the instant either one drifts) — on the SAME client that holds
+// the INSERT's own open transaction (D2, coordinator note: a rootQuery read here would go out on
+// a DIFFERENT pooled connection and never see the uncommitted rows at all — this would fail
+// LOUD, not silently, but only because it happens to be wrong in the discriminating direction).
+//
+// TWO unprefixed keys, not one (D2(ii)): the reviewer's own mutation table showed a single
+// `genuinely_third_source_...` key stays GREEN under several widened (wrong) exclusion
+// predicates that would still be dangerous in production — `not like '%test%'` (no "test"
+// substring; a hex slice can't produce one), `not like 'g1%'` (doesn't start with "g1"), and a
+// shortened constant `'g1'` (same reason). `g1_third_source_test_${uuid}` closes all three:
+// `left(key,8)` is `'g1_third'`, distinct from the real prefix `'g1_test_'` so it survives the
+// CURRENT correct predicate — but it contains "test", starts with "g1", and starts with the
+// shortened `'g1'` too, so any of those three widenings would wrongly swallow it, discriminating
+// where the first key alone stayed blind. Both keys are asserted independently; either missing
+// is a red naming which mutation shape it caught. Runs inside its own transaction, rolled back —
+// neither of this cell's own synthetic rows may ever become residue.
 // =====================================================================================
 test("T1-negative-control: an UNPREFIXED third source is never excluded by T1's carve-out — the closed-world proof stays narrow", async (t) => {
   if (gate(t)) return;
   const client = await getPool().connect();
   try {
     await client.query("begin");
-    const key = `genuinely_third_source_${randomUUID().slice(0, 8)}`;
-    await client.query(
-      `insert into clara.wake_engine_sources
-         (source_key, carrier, event_type, task_kind, wake_kind, workflow_export, login_pool)
-       values ($1,'wake_outbox','g1.negative.control','wake','proactive','g1TestWorkflow','runtime')`,
-      [key],
-    );
-    const rows = (
+    const keyA = `genuinely_third_source_${randomUUID().slice(0, 8)}`;
+    const keyB = `g1_third_source_test_${randomUUID().slice(0, 8)}`;
+    for (const key of [keyA, keyB]) {
       await client.query(
-        `select source_key from clara.wake_engine_sources
-          where left(source_key, char_length($1)) <> $1
-          order by source_key`,
-        [WAKE_ENGINE_TEST_PREFIX],
-      )
-    ).rows;
+        `insert into clara.wake_engine_sources
+           (source_key, carrier, event_type, task_kind, wake_kind, workflow_export, login_pool)
+         values ($1,'wake_outbox','g1.negative.control','wake','proactive','g1TestWorkflow','runtime')`,
+        [key],
+      );
+    }
+    const rows = (await client.query(T1_LIVE_ROSTER_SQL, [WAKE_ENGINE_TEST_PREFIX])).rows;
     assert.ok(
-      rows.some((r) => r.source_key === key),
-      "T1-negative-control: an unprefixed third source row is NOT excluded by T1's own predicate — proves the carve-out is narrow, not a widened 'contains' check that would also swallow a real, undocumented third source",
+      rows.some((r) => r.source_key === keyA),
+      "T1-negative-control: the plain unprefixed key is not excluded by T1's own predicate",
+    );
+    assert.ok(
+      rows.some((r) => r.source_key === keyB),
+      "T1-negative-control: a key containing 'test' and starting with 'g1' (but NOT the real 'g1_test_' prefix) is not excluded either — catches a widened 'contains test', 'starts with g1', or shortened-constant predicate that the plain key alone would miss",
     );
   } finally {
     await client.query("rollback").catch(() => {});
