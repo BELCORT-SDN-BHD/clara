@@ -363,3 +363,31 @@ recommendation written on the sheet**; **ADR-0077 is SIGNED** (the lean ladder, 
 the R8 login-CSRF **deferral is ENDORSED** (its four fence pieces stand; 裁-92 changes the door the
 fix lands in). One guard on the wholesale: the redesign round re-reads each recommendation and
 **flags any invalidated by the fold or the OTP switch** rather than applying it stale.
+
+## The 2026-09-01 morning ruling — 裁-94: the member-door rank walls (G14)
+
+### 裁-94 · G14 — keep the wall: a subordinate never acts on a strict superior
+
+**The finding (#455's fresh review, DB PR db/member-door-rank-walls).** `set_member_role`
+(0145:592-620) compared only the ASSIGNED role to the caller, never the TARGET's current rank —
+the existing F2 ceiling only stops an admin ASSIGNING 'owner', it says nothing about the rank of
+who is being acted on; `remove_member` (0005:732-751) carried no rank comparison at all, never
+re-cut since 0005; `revoke_invite` (0141:466-484) carried the identical two defects
+(no rank wall, and reserved the op before its walls) one door over. Net (M1): an admin could
+demote or remove any owner but the last in two clicks on #455's new surface, or revoke an
+owner-issued invite an admin has no business touching. M2 sat alongside it: neither door refused
+an actor acting on their own membership, a self-demotion/self-removal lockout foot-gun with no
+recovery path but another owner.
+
+**Ruling (per the recommendation — KEEP THE WALL).** A subordinate never acts on a strict
+superior: all three doors now refuse when the target's CURRENT rank (the invite's own `role`
+column, for `revoke_invite`, since there is no membership yet) is STRICTLY greater than the
+caller's — equal rank stays allowed (owner-on-owner, admin-on-admin), mirroring the existing
+assigned-role ceiling's own `>`. No self-demotion or self-removal on `set_member_role`/
+`remove_member` (invites have no self case — there is no actor-in-place to self-act on). This is
+the FAIL-CLOSED shape the DB PR shipped as its own default pending this ruling; it is now the
+RULED shape, not a default awaiting confirmation, and the migration/battery are worded
+accordingly. Cost accepted: an admin who genuinely needs to act on an owner — demote them,
+remove them, or revoke that owner's pending invite — must ask another owner to do it; there is
+no admin-side override, and the last-owner trigger (untouched by this PR) remains the separate,
+final backstop underneath.
