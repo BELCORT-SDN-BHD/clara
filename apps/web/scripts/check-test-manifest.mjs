@@ -25,6 +25,18 @@
  * a bad 3-way merge across two trains produces, so it is surfaced rather than
  * silently tolerated.
  *
+ * FOLD (Codex round-3, LOW manifest ordering drift): also flags an ADJACENT
+ * pair that violates the manifest's own documented contract (the file's own
+ * header: "One path per line, alphabetical by directory then name"). Before
+ * this fold the header was prose only — a directory-name PREFIX collision
+ * (`firm/` sorting after `firm-admin/`, since `/` is U+002F and `-` is
+ * U+002D) or an uppercase-leading filename (`EnrolAccountDialog.test.ts`
+ * sorting before every lowercase name in its directory) could silently drift
+ * the file out of order with nothing catching it — this check makes that
+ * mechanical. Comparison is a PLAIN STRING COMPARE, the same default
+ * `Array.prototype.sort()` semantics `listTestFilesOnDisk` above already
+ * uses, not a "directory first, then name" human reading.
+ *
  * Does NOT check the reverse direction (a manifest line naming a file that no
  * longer exists on disk) — verified empirically (2026-08-28) that `node --test`
  * itself exits 1 and prints "Could not find '<path>'" for a missing listed
@@ -74,9 +86,11 @@ export function parseManifest(text) {
 /**
  * @param {string} rootAbs directory the manifest's paths are relative to
  * @param {string} manifestText raw contents of test/manifest.txt
- * @returns {{ missing: string[], duplicates: string[] }}
+ * @returns {{ missing: string[], duplicates: string[], outOfOrder: Array<{before: string, after: string}> }}
  *   `missing` — on disk, absent from the manifest (the gate's core job, sorted).
  *   `duplicates` — listed more than once in the manifest (sorted).
+ *   `outOfOrder` — adjacent LISTED pairs (in file order) where the later line
+ *   sorts BEFORE the earlier one — each entry names both lines involved.
  */
 export function checkTestManifest(rootAbs, manifestText) {
   const onDisk = listTestFilesOnDisk(rootAbs);
@@ -91,7 +105,15 @@ export function checkTestManifest(rootAbs, manifestText) {
 
   const missing = onDisk.filter((p) => !listedSet.has(p)).sort();
   const duplicates = [...duplicateSet].sort();
-  return { missing, duplicates };
+
+  const outOfOrder = [];
+  for (let i = 1; i < listed.length; i++) {
+    if (listed[i] < listed[i - 1]) {
+      outOfOrder.push({ before: listed[i - 1], after: listed[i] });
+    }
+  }
+
+  return { missing, duplicates, outOfOrder };
 }
 
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -99,11 +121,11 @@ const MANIFEST_PATH = join(WEB_ROOT, "test", "manifest.txt");
 
 export function main() {
   const manifestText = readFileSync(MANIFEST_PATH, "utf8");
-  const { missing, duplicates } = checkTestManifest(WEB_ROOT, manifestText);
+  const { missing, duplicates, outOfOrder } = checkTestManifest(WEB_ROOT, manifestText);
 
-  if (missing.length === 0 && duplicates.length === 0) {
+  if (missing.length === 0 && duplicates.length === 0 && outOfOrder.length === 0) {
     const listedCount = parseManifest(manifestText).length;
-    console.log(`[check-test-manifest] ${listedCount} test file(s) listed in test/manifest.txt — every real test file on disk is present, exactly once.`);
+    console.log(`[check-test-manifest] ${listedCount} test file(s) listed in test/manifest.txt — every real test file on disk is present, exactly once, in alphabetical order.`);
     return 0;
   }
 
@@ -115,8 +137,12 @@ export function main() {
     console.log(`[check-test-manifest] ${duplicates.length} path(s) listed more than once in test/manifest.txt (a likely bad-merge artifact):`);
     for (const p of duplicates) console.log(`  - ${p}`);
   }
+  if (outOfOrder.length > 0) {
+    console.log(`[check-test-manifest] ${outOfOrder.length} adjacent pair(s) out of alphabetical order in test/manifest.txt:`);
+    for (const { before, after } of outOfOrder) console.log(`  - "${after}" is listed AFTER "${before}" but sorts before it`);
+  }
   console.log("");
-  console.log("[check-test-manifest] failing the build. Add the missing line(s) to apps/web/test/manifest.txt (one path per line, alphabetical), or remove the duplicate(s).");
+  console.log("[check-test-manifest] failing the build. Add the missing line(s), remove the duplicate(s), and/or reorder the listed line(s) in apps/web/test/manifest.txt (one path per line, alphabetical — a plain string compare, not a directory-first human reading).");
   return 1;
 }
 

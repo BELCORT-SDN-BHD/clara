@@ -135,6 +135,14 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
     status: "built",
     keywords: ["vendor", "binding", "identity", "propose", "sign", "revoke"],
   },
+  {
+    // P4-5: the operator approval queue, under /admin.
+    id: "adminRegistrations",
+    scope: "firm",
+    href: "/admin/registrations",
+    status: "built",
+    keywords: ["registrations", "approvals", "operator", "queue"],
+  },
 ];
 
 /**

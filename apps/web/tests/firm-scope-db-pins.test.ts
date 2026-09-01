@@ -99,7 +99,12 @@ describe("client-importable modules never drag next/headers into the bundle", ()
   // next/headers, so a client component that imported one constant broke. The
   // server-only half moved to lib/registration/server-reads.ts; this walk is what
   // keeps the split honest instead of trusting a comment.
-  const ISOMORPHIC = ["lib/registration/reads.ts", "lib/firm/caller-context.ts", "lib/read.ts"];
+  const ISOMORPHIC = [
+    "lib/registration/reads.ts",
+    "lib/registration/doors.ts",
+    "lib/firm/caller-context.ts",
+    "lib/read.ts",
+  ];
 
   for (const entry of ISOMORPHIC) {
     it(`${entry} reaches no server-only module`, () => {
