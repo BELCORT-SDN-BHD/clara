@@ -363,6 +363,11 @@ const F_A4_PR1C_CLOCK_NAMES = [
   "mint_wake_credential_for_task", "release_close_prep", "settle_close_proposal",
 ];
 
+// F-A4 PR-2c: mint_chat_close_credential computes `statement_timestamp() + p_ttl` for a
+// TIMESTAMPTZ credential expiry, mirroring mint_wake_credential_for_task. It never derives a
+// book DATE. The two new authority helpers read no clock and therefore owe no roster entry.
+const F_A4_PR2C_CLOCK_NAMES = ["mint_chat_close_credential"];
+
 // F-A4 PR-2a: ONE new lawful bare-clock reader, gated on its own migration STEM like PR-1c's --
 // never on a NUMBER, which is claimed at merge.
 //
@@ -867,6 +872,12 @@ const COA_TEMPLATE_PR_A_CLOCK_NAMES = ["publish_coa_template", "retire_coa_templ
 // roster tautological for it, so neither arm may be apply_coa_template itself.
 const COA_TEMPLATE_PR_B_CLOCK_NAMES = ["apply_coa_template"];
 
+// FS-4 C-2, `0160_checkout_gate_c2_stripe_events` -- number CLAIMED at merge prep 2026-09-01,
+// one past the live frontier 0158 (0159 concurrently claimed by another lane's PR): gate on the
+// migration's stable stem so an earlier-frontier database that does not have this function does
+// not pick up a one-name bare-token roster drift.
+const CHECKOUT_GATE_C2_CLOCK_NAMES = ["resolve_stripe_event_problem"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -939,6 +950,7 @@ export async function s5BareTokenRoster(query) {
   if (await appliedStem("g1_wake_engine$")) names.push(...G1_WAKE_ENGINE_CLOCK_NAMES);
   if (await appliedStem("f_a4_pr_1c_close_agent_limb$")) names.push(...F_A4_PR1C_CLOCK_NAMES);
   if (await appliedStem("f_a4_pr_2a_prepayment_limb$")) names.push(...F_A4_PR2A_CLOCK_NAMES);
+  if (await appliedStem("f_a4_pr_2c_close_chat_lane$")) names.push(...F_A4_PR2C_CLOCK_NAMES);
   if (await appliedStem("p4_tranche1_invite_rbac$")) names.push(...P4T1_CLOCK_NAMES);
   if (await appliedStem("fa7b_pr_a_client_onboarding_open$")) names.push(...ONBOARDING_OPEN_F_A7B_PR_A_CLOCK_NAMES);
   if (await appliedStem("p4_tranche2_registration_operator_alias$")) names.push(...P4T2_CLOCK_NAMES);
@@ -947,6 +959,7 @@ export async function s5BareTokenRoster(query) {
       || await relationExists("clara.coa_template_entity_overrides")) {
     names.push(...COA_TEMPLATE_PR_B_CLOCK_NAMES);
   }
+  if (await appliedStem("checkout_gate_c2_stripe_events$")) names.push(...CHECKOUT_GATE_C2_CLOCK_NAMES);
   return names.sort();
 }
 

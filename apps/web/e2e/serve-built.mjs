@@ -49,6 +49,9 @@ if (openssl.status !== 0) {
 
 const SUBJECT = "11111111-1111-1111-1111-111111111111";
 const REQUEST_ID = "22222222-2222-2222-2222-222222222222";
+// The fixed "delivered" code the SKELETON journey (signup-confirm-pending.
+// spec.ts) types once Lane B wires the real attempt wall.
+const E2E_SIGNUP_CODE = "654321";
 const state = {
   email: "owner@example.test",
   firmName: "E2E Accounting",
@@ -158,9 +161,14 @@ async function handleSupabase(request, response, url) {
   }
 
   if (request.method === "POST" && path === "/auth/v1/verify") {
+    // FS-4 C-6 (裁-92): verifyOtp is now called {type:"signup", email, token}
+    // — a code, never a token_hash link. The confirming caller's own
+    // C1/C2 attempt wall (a Lane-B seam) still runs INSIDE the app before
+    // this mock is ever reached, so this shape only matters once that seam
+    // is wired for real (`CLARA_E2E_CONFIRM_WALL_WIRED=1`).
     const body = await readJson(request);
-    if (body.type !== "email" || body.token_hash !== "e2e-token-hash") {
-      sendJson(response, 400, { code: "otp_expired", message: "invalid e2e token" }, cors);
+    if (body.type !== "signup" || body.token !== E2E_SIGNUP_CODE || body.email !== state.email) {
+      sendJson(response, 400, { code: "otp_expired", message: "invalid e2e code" }, cors);
       return;
     }
     sendJson(response, 200, {

@@ -12,16 +12,17 @@ truth (`docs/ARCHITECTURE.md` §3).
 > structural invariants, the balance/immutability/append-only triggers, and
 > money-as-cents. See `docs/plan/completed/rebuild-plan-history.md`.
 >
-> **Migration ledger — TRUED 2026-08-30 (counted, not remembered).** The repo carries **150
-> migration files, `0001`–`0155`** (the sequence skips `0032` and `0073`–`0076`, none of which
+> **Migration ledger — TRUED 2026-09-02 (counted, not remembered).** The repo carries **154
+> migration files, `0001`–`0159`** (the sequence skips `0032` and `0073`–`0076`, none of which
 > ever existed as files — `0073`-`0076` were claimed by the Wave-E ζ render/DR train and then
 > re-claimed at `0079`-`0083` when the frontier moved before it merged; only its OWN squash
 > subject still says "0073-0076", stale pre-renumber testimony, immutable, while the migrations
 > DIRECTORY stays the numbering authority), and **live is applied through the frontier
-> `0153_f_t1_sst_reference_tables`, 148 migrations** — matching `PROGRESS.md`'s noon posture
-> line (`0154`/`0155` are on `main`, merged but NOT yet applied). *(Was: "131 migration files,
-> `0001`–`0136`, frontier `0136_fix_freeform_basis_types`, as of 2026-08-26" — stale by 19 files
-> and 19 numbers.)* The paragraph below is the **2026-08-09 arrivals note**, kept as the record
+> `0153_f_t1_sst_reference_tables`, 148 migrations** (`0154`–`0159` are on `main`, merged but
+> NOT yet applied — each applies in its own ceremony window; re-verify the live number with
+> `select count(*), max(version) from clara.schema_migrations` before trusting this snapshot).
+> *(Was: "150 files through `0155`, trued 2026-08-30" — the FS-4/FS-7 trains claimed
+> `0156`–`0159` since.)* The paragraph below is the **2026-08-09 arrivals note**, kept as the record
 > of that batch rather than rewritten:
 >
 > The most recent arrivals
@@ -126,6 +127,11 @@ just loudly, rather than silently).
 ## The migration runner contract
 
 - Migrations apply in numeric filename order, each in its **own transaction**.
+- **`CLARA_MIGRATIONS_DIR`** (env, optional) points the runner at an alternate
+  migrations directory (`scripts/migrate.mjs` reads it). It is **BINDING for the
+  split-rig CI sweeps** — every `packages/db/tests/split-lists/test-list-d-b*.txt`
+  run sets it to the SUITE's directory; forgetting it on a split rig yields ~300
+  phantom reds. Unset, the runner uses this package's `migrations/`.
 - Each applied migration's `sha256` is recorded in `clara.schema_migrations`.
 - **Migrations are immutable**: editing an already-applied file trips a checksum
   drift error — add a new migration instead.

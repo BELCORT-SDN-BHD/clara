@@ -89,6 +89,27 @@ export const WAKE_ALLOWLIST_ROSTER = {
         + "no posting/drafting verb is among the thirteen, and the posting-verb literal in "
         + "the census cell still walls that axis independently of this roster.",
     })),
+    // F-A4 PR-2c (裁-99/裁-100): the attended close-prep chat lane. Twelve wrappers land in one
+    // migration statement, admitted under the SAME shared interactive_client kind exactly as the
+    // bank-verb mirror above (F-A3 PR-3) and the freeform read (F-A6 PR-1) — this kind was never
+    // exclusive to any one domain. None is a posting/drafting verb (the literal check below still
+    // walls that axis independently). A8 (`_assert_attended_close_floor`, this PR) narrows what an
+    // ATTENDED session may actually DO once it reaches a wrapper; this roster only says which
+    // wrappers the KIND may reach at all — the two are different walls, on purpose.
+    ...[
+      "wake_list_fiscal_years", "wake_get_close_plan", "wake_get_close_readiness",
+      "wake_verify_close", "wake_snapshot_state", "wake_dry_run_close_readiness",
+      "wake_open_fiscal_year", "wake_begin_close", "wake_abandon_close", "wake_propose_close",
+      "wake_run_depreciation_catchup", "wake_mint_month_snapshot",
+    ].map((fn) => ({
+      fn,
+      stem: "f_a4_pr_2c_close_chat_lane",
+      // The new minter is this migration's own, unshared creation — a clean presence probe.
+      applied: fnExists("clara.mint_chat_close_credential(uuid,uuid,uuid,uuid,interval)"),
+      why: "F-A4 PR-2c: the twelve close-prep wrappers, admitted under interactive_client so an "
+        + "attended chat session can drive them; the attended-authority floor (A8) is a separate, "
+        + "per-verb wall inside the wrapper, not a fact this allowlist roster carries.",
+    })),
   ],
 };
 
@@ -134,6 +155,20 @@ export const CLARA_ROLE_ROSTER = [
     applied: roleExists("clara_wake_bank"),
     why: "F-A3/PR-1b DDL 7 completion: the login shell PR-2's DSN/pool wiring reaches, member of "
       + "clara_wake_bank alone.",
+  },
+  {
+    role: "clara_stripe_webhook",
+    stem: "checkout_gate_c2_stripe_events",
+    applied: fnExists("clara.record_stripe_event(text,text,jsonb)"),
+    why: "FS-4 checkout-gate design part 2 §1.6: the Stripe sweep's NOLOGIN group role, "
+      + "holding exactly the record/apply EXECUTE surface and no table grants.",
+  },
+  {
+    role: "clara_stripe_webhook_login",
+    stem: "checkout_gate_c2_stripe_events",
+    applied: roleExists("clara_stripe_webhook"),
+    why: "FS-4 checkout-gate design part 2 §1.6: the INHERIT test login-member shell for "
+      + "clara_stripe_webhook, itself NOLOGIN and without BYPASSRLS.",
   },
   {
     role: "clara_wake_filing",

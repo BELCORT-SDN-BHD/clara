@@ -1065,6 +1065,10 @@ const F_A4_PR1C_WAKE_FNS = [
 //   B.1: "the wake roles never ask" — she learns a year is due by being WOKEN); the sibling
 //   minter mirrors mint_wake_credential's own grant (0011:1196-1197).
 const F_A4_PR1C_RUNTIME_FNS = ["close_prep_due", "mint_wake_credential_for_task"];
+// F-A4 PR-2c is its own bimodal cohort: a PR-1c-only estate must remain wholly valid.
+const F_A4_PR2C_RUNTIME_FNS = ["mint_chat_close_credential"];
+const F_A4_PR2C_UNGRANTED_FNS = ["_assert_wake_task_congruent", "_assert_attended_close_floor"];
+export const F_A4_PR2C_COHORT = [...F_A4_PR2C_RUNTIME_FNS, ...F_A4_PR2C_UNGRANTED_FNS];
 //   the three human doors — clara_authenticated ONLY, floors body-enforced (bookkeeper+). The
 //   agent identity and BOTH wake roles gain ZERO: a brake the agent lane could lift off itself
 //   is not a brake, and a receipt panel is a human audit control.
@@ -1147,6 +1151,15 @@ export const P4T1_COHORT = [...P4T1_HUMAN_FNS, ...P4T1_UNGRANTED_FNS];
 const P4T2_HUMAN_FNS = ["request_firm_registration", "approve_firm_registration", "reject_firm_registration"];
 const P4T2_UNGRANTED_FNS = ["_create_firm_core"];
 export const P4T2_COHORT = [...P4T2_HUMAN_FNS, ...P4T2_UNGRANTED_FNS];
+
+// FS-4 C-2 (checkout-gate design part 2 §1.2/§1.6): two operator-only human doors and
+// the Stripe webhook lane's exact two-verb surface. The human doors are owner+operator walled
+// in-body; the webhook role holds no table grants and reaches only record/apply.
+const CHECKOUT_GATE_C2_HUMAN_FNS = ["list_stripe_event_problems", "resolve_stripe_event_problem"];
+const CHECKOUT_GATE_C2_WEBHOOK_FNS = ["record_stripe_event", "apply_stripe_events"];
+export const CHECKOUT_GATE_C2_COHORT = [
+  ...CHECKOUT_GATE_C2_HUMAN_FNS, ...CHECKOUT_GATE_C2_WEBHOOK_FNS,
+];
 
 // 裁-21 PR-a (`coa_template_pr_a` — number claimed at merge prep): the firm-level standard
 // chart of accounts, TEMPLATE half. NINE human doors, clara_authenticated ONLY — agent + both
@@ -1412,6 +1425,9 @@ export const ALLOWED = {
     // P4 tranche 2 [registration + operator approval, 裁-11] the three human doors — see the
     // block above.
     ...P4T2_HUMAN_FNS,
+    // FS-4 C-2: the operator firm's Stripe-problem reconciliation queue; owner+operator wall
+    // body-enforced. The webhook ingest/sweep verbs live on their dedicated role below.
+    ...CHECKOUT_GATE_C2_HUMAN_FNS,
     // 裁-18b PR-1 the four human binding doors — see the block above.
     ...BINDING_PROPOSAL_PR1_HUMAN_FNS,
     // 裁-21 PR-a [the firm-level standard chart of accounts, TEMPLATE half] the seven admin
@@ -1476,6 +1492,10 @@ export const ALLOWED = {
   // function in schema clara, the fourth login's ambient EXECUTE surface is ZERO — the S4-AB1
   // property, asserted over the whole catalog instead of over one probe.
   "clara_freeform_login": new Set([]),
+  // FS-4 C-2's isolated Stripe lane. The member shell inherits this exact set; naming both
+  // roles makes the catalog-wide effective-EXECUTE census cover both sides of that membership.
+  "clara_stripe_webhook": new Set(CHECKOUT_GATE_C2_WEBHOOK_FNS),
+  "clara_stripe_webhook_login": new Set(CHECKOUT_GATE_C2_WEBHOOK_FNS),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
     "mint_wake_credential", "revoke_wake_credential",
@@ -1504,6 +1524,7 @@ export const ALLOWED = {
     // mint_wake_credential_for_task (the F14 sibling minter, mirroring mint_wake_credential's own
     // grant above). clara._wake_task_id() stays UNGRANTED, deliberately — see the block above.
     ...F_A4_PR1C_RUNTIME_FNS,
+    ...F_A4_PR2C_RUNTIME_FNS, // F-A4 PR-2c's attended chat-close credential minter.
     ...RENDER_ZETA_RUNTIME_FNS, // 0079-0083 [Wave E lane ζ] the render queue's whole
     // reachable API — the array is the enumeration; the block where it is declared names each
     // verb and its consumer. clara_runtime holds NO table privilege on clara.render_jobs, so
@@ -1578,6 +1599,12 @@ export const GOVERNED_TABLES = [
 // branch (b) has nothing to look at either. And a PARTIAL cohort (one table present, one
 // absent) is itself reported — that shape can only mean a half-applied 0037.
 export const SUBLEDGER_0037_TABLES = ["open_items", "open_item_allocations"];
+
+// FS-4 C-2's projected Stripe store. Kept as one gated cohort so pre-C-2 frontier rigs remain
+// green while a partially applied C-2 migration is itself a named failure.
+export const CHECKOUT_GATE_C2_TABLES = [
+  "stripe_events", "stripe_event_problems", "stripe_object_map",
+];
 
 // The ONLY clara base tables that legitimately carry no RLS (migration bookkeeping + the
 // Slice-1 placeholder). Everything else in the schema MUST be RLS-enabled AND forced.
@@ -1655,7 +1682,7 @@ export async function grantMatrixFailures() {
   const roles = live.rows.filter((r) => r.ok).map((r) => r.rolname);
   const absent = live.rows.filter((r) => !r.ok).map((r) => r.rolname);
   const failures = [];
-  if (absent.length && absent.some((r) => !r.startsWith("clara_freeform"))) {
+  if (absent.length && absent.some((r) => !r.startsWith("clara_freeform") && !r.startsWith("clara_stripe_webhook"))) {
     failures.push(`ALLOWED names role(s) that do not exist on this database: ${absent.join(", ")}`);
   }
   for (const f of fns.rows) {
@@ -1722,6 +1749,10 @@ export async function grantMatrixFailures() {
   if (prepayLive.length !== 0) {
     failures.push(...cohortFailures("F-A4/PR-2a prepayment limb", F_A4_PR2A_COHORT, liveNames));
   }
+  const chatCloseLive = F_A4_PR2C_COHORT.filter((n) => liveNames.has(n));
+  if (chatCloseLive.length !== 0) {
+    failures.push(...cohortFailures("F-A4/PR-2c close-prep chat lane", F_A4_PR2C_COHORT, liveNames));
+  }
   failures.push(...cohortFailures("P4 tranche 1 invite/RBAC first", P4T1_COHORT, liveNames));
   // Native review C7: cohortFailures() above is proname-only (law 3, "spelling is not
   // identity") -- it would still read GREEN if a same-named but DIFFERENT-signature overload
@@ -1748,6 +1779,7 @@ export async function grantMatrixFailures() {
     );
   }
   failures.push(...cohortFailures("P4 tranche 2 registration + operator approval", P4T2_COHORT, liveNames));
+  failures.push(...cohortFailures("FS-4 C-2 projected Stripe store", CHECKOUT_GATE_C2_COHORT, liveNames));
   // 裁-21 PR-a — frontier-tolerant by cohortFailures' own rule: a cohort that is entirely
   // absent (every pre-PR-a chain) returns no failure, while a PARTIAL cohort — one of the
   // thirteen retired or renamed without truing this roster — is caught by name.
@@ -1810,7 +1842,19 @@ export async function governedRlsFailures() {
       + "A closed roster must not accumulate dead entries: either 0037 applied (both tables) or it did not.",
     );
   }
-  const roster = [...GOVERNED_TABLES, ...(cohortLive.length === SUBLEDGER_0037_TABLES.length ? SUBLEDGER_0037_TABLES : [])];
+  const c2Live = CHECKOUT_GATE_C2_TABLES.filter((t) => present.has(t));
+  if (c2Live.length !== 0 && c2Live.length !== CHECKOUT_GATE_C2_TABLES.length) {
+    problems.push(
+      `FS-4 C-2 projected Stripe store table cohort is PARTIAL — present: ${c2Live.join(", ") || "(none)"}; `
+      + `missing: ${CHECKOUT_GATE_C2_TABLES.filter((t) => !present.has(t)).join(", ")}. `
+      + "A closed roster must not accumulate dead entries: either C-2 applied (all three tables) or it did not.",
+    );
+  }
+  const roster = [
+    ...GOVERNED_TABLES,
+    ...(cohortLive.length === SUBLEDGER_0037_TABLES.length ? SUBLEDGER_0037_TABLES : []),
+    ...(c2Live.length === CHECKOUT_GATE_C2_TABLES.length ? CHECKOUT_GATE_C2_TABLES : []),
+  ];
   // (a) every governed table must EXIST and be RLS-forced.
   for (const tbl of roster) {
     const r = present.get(tbl);

@@ -12,10 +12,11 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
 - **Durable substrate**: the Workflow DevKit Postgres world (`workflow` +
   `@workflow/world-postgres`, `ai@7.0.77`), built by Nitro with the
   `workflow/nitro` compiler module (Appendix A).
-- **The chat loop** (`workflows/chatTurn.v11.ts` + its FROZEN closure
-  `chatTurn.v11.impl.ts` / `chatTurn.v11.prompt.ts` / `chatTurn.v11.tools.ts`;
-  the v1→v11 history follows Appendix A — v1–v10 stay frozen + reachable for
-  parked runs): a coding-capable advisor with the `draft_journal_entry` write
+- **The chat loop** (versioned `workflows/chatTurn.vN.ts` files, each with its
+  FROZEN closure `chatTurn.vN.impl.ts` / `.prompt.ts` / `.tools.ts`; the registry
+  in `workflows/registry.ts` pins the LIVE version — **`chatTurn_v16` since
+  2026-08-31, serving on Fly machine version 70**; earlier versions stay frozen +
+  reachable for parked runs per Appendix A): a coding-capable advisor with the `draft_journal_entry` write
   tool plus the four Wave-E authoring tools (metric preview/draft, report-spec
   draft, report preview — the last a named structural refusal until the OBO
   evaluator lane), streaming the model to the run's writable, reading the
@@ -105,7 +106,9 @@ Storage, and Azure behavior. The real production adapters have no dev bypass.
 
 The connection ceiling is **≈27 sessions** (F-A2 PR-3 retired the rule_post consumer
 lane; **F-A6 PR-2 adds the freeform pool, +2**; integrator must confirm Supavisor
-headroom before deploy — the ceiling itself is still unmeasured, F-A6 R-4 / P-8): runtime pool 5 + read
+headroom before deploy — the ceiling itself is still unmeasured, F-A6 R-4 / P-8;
+**pool census UNVERIFIED since the F-A4/FS-4 trains landed (noted 2026-09-02) — re-count
+against the live pool constructors before trusting ≈27**): runtime pool 5 + read
 pool 5 + WDK engine 5 + control/router LISTEN 2 + the six consumer-lane leader
 sessions (matcher, autodraft, local_facts, sst_watch, facts_gate,
 classify) 6 + the write pool 2 + **the freeform pool 2**
@@ -117,14 +120,16 @@ Azure.
 
 ## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
 
-`chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-08-29 (F-A6 PR-2): the
-registry pins `chatTurn: chatTurn_v15` and `autoDraft: autoDraft_v9`** — repo frontier is 142
-migration files, live through `0147_db_hardening_b_hash_only_bearer_tokens` (0147 is the highest
-NUMBER, not a count — the numbering has gaps). **The SERVING
-Fly bundle, measured 2026-08-26 in-VM, still carries `chatTurn_v13` + `autoDraft_v9`** —
-`chatTurn_v14` was registered and never deployed, and **v15 supersedes it before either ships**,
-so the next deploy moves the serving bundle v13 → v15 in one step (`PROGRESS.md`'s pre-flight
-note; the freeform ceremony above is a hard precondition of that deploy). **v15 = F-A6's audited
+`chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-09-02: the
+registry pins `chatTurn: chatTurn_v16`** (the P6-1/裁-9 repoint, registry.ts's own inline
+comment records v15→v16) — repo frontier is 154 migration files through `0159`
+(a NUMBER, not a count — the numbering has gaps), live DB applied through `0153`. **The
+SERVING Fly bundle is machine version 70, deployed 2026-08-31 08:21Z, carrying
+`chatTurn_v16` — bundle-proven by grep on the served container** (`PROGRESS.md`'s deploy
+record). *(The 2026-08-29 truing this replaces read v15 pinned / v13 serving / frontier 0147 —
+three pins stale at once; version claims here rot fast, so trust the registry + the served
+bundle over this snapshot.)* The freeform ceremony above remains a hard precondition of any
+redeploy. **v15 = F-A6's audited
 freeform read** — one read-only SELECT the model composes and the database runs as
 `clara_freeform_ro`, on the fifth login and its own pool. v1–v14
 stay frozen + reachable for parked runs; v7 = Wave B's
