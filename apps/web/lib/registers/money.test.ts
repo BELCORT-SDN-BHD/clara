@@ -48,3 +48,13 @@ test("parseAmountToCents: FINDING 1 (raised by pr489-codex-leg, law-28 leg) — 
   // refusal of AMBIGUITY, not a refusal of every comma.
   assert.equal(parseAmountToCents("1,234.56"), 123456, "a strictly-grouped thousands separator still parses");
 });
+
+// F2 (independent review, PR #495 fix round): mutant-proven — deleting the bare `|\d+`
+// alternative from the whole-part regex leaves every assertion above still passing
+// (each fails via the comma-grouped arm or fails to match at all) while silently making
+// an ordinary comma-less amount unparseable. These two lines fail under that mutant and
+// pass under the real fix — the discriminating proof the `|\d+` arm is load-bearing.
+test("parseAmountToCents: plain multi-digit amounts with NO comma still parse (the non-comma alternation arm)", () => {
+  assert.equal(parseAmountToCents("1234"), 123400);
+  assert.equal(parseAmountToCents("10000.50"), 1000050);
+});
