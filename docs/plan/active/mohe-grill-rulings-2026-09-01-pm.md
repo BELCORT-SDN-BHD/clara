@@ -125,6 +125,32 @@ No auto-merge on a DB PR before its claim.
 
 ---
 
+## 裁-109 · N1 + N3 are BETA-GATING — the owner chose the most conservative option
+
+**Ruled by the OWNER, 2026-09-01, after a plain-language briefing.** Two pre-existing security
+residuals on the confirm surface were surfaced with three options (defer both to public launch ·
+fix N3 only · fix both before beta live). The owner ruled: **最保守 — 两个都修完再上线.** Both
+fixes are now beta-gating work items.
+
+- **N1 — the forgeable status card.** The confirm page paints its card from unauthenticated URL
+  params; `?status=locked&wait=900` on the real domain renders a fully authoritative-looking
+  lockout card. Touches no data and no money — it is a phishing prop. Fix: remove URL-borne
+  authority (an unforgeable server-side signal; the mechanism is the fix lane's design proposal,
+  reviewed before build). Pre-existing from the #461-era handler idiom; measured NOT worsened
+  by #488.
+- **N3 — the banned-account oracle.** A wrong-code attempt against a banned account is observably
+  different from one against an unknown account (Supabase `verify.go` upstream behaviour;
+  `user_banned` confirmed in the live error-code registry). Fix: flatten the classification so
+  the three cases are indistinguishable — **accepting the loss of round 4's wrong/expired
+  presentational split**, a cost stated to and accepted by the owner. Pre-existing;
+  `isExpiredOtpError` byte-unchanged by #488.
+
+**What this ruling does NOT do:** it does not reopen #488, which merges with both residuals
+recorded OPEN in its body (they are pre-existing and un-worsened there — the four-piece deferral
+shape held). The fixes ship as their own PR(s) from main with the full ladder: fresh-context opus
+review + the law-28 Codex leg (a native lane building an auth surface). Provenance: found by the
+law-28 Codex leg on #488; verified by the orchestrator's own read; ruled by the owner.
+
 ## Session state bridge — 2026-09-01 afternoon
 *(PROGRESS.md truing rides the next clock-out PR. Where this disagrees with the repo, the repo wins.)*
 
