@@ -181,6 +181,9 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "_tf_agent_task_insert", "_tf_agent_task_update", "_tf_autodraft_attempt_update", "_tf_coding_task_update", "_tf_counterparty_update_0011",
   "_tf_document_intake_update", "_tf_fa_movement_belt", "_tf_filing_correction_update", "_tf_firm_document_limits_upsert", "_tf_fixed_assets_immutable_0017",
   "_tf_processing_call_reservation_update", "_tf_processing_task_update", "_tf_reservation_update", "_tf_rotate_token", "_tf_wake_intent_consume",
+  // FS-4 C-2: `now()` stamps a problem's audit resolution time. p_op_key remains an
+  // idempotency token; no session-clock-derived accounting date crosses this door.
+  "resolve_stripe_event_problem",
   // `begin_chat_turn` LEFT this base array at F-A9 PR-0 and is now a REVERSE-gated cohort
   // (CHAT_TOKEN_CAP_PRE_F_A9_CLOCK_NAMES, below) — it is pushed back on any database that
   // has not applied the hotfix. Removed here rather than kept-and-subtracted so the base
