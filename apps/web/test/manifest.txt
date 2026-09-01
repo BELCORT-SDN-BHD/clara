@@ -33,6 +33,12 @@
 #
 # Blank lines and lines starting with # are ignored by both scripts above.
 
+components/admin/invite-dialog-a11y.test.tsx
+components/admin/invite-dialog-keyboard.test.tsx
+components/admin/members-a11y.test.tsx
+components/admin/members-keyboard.test.tsx
+components/admin/members-single-fire.test.tsx
+components/admin/members-walls.test.tsx
 components/admin/registrations-a11y.test.tsx
 components/admin/registrations-keyboard-round2.test.tsx
 components/admin/registrations-keyboard-round5.test.tsx
@@ -41,6 +47,8 @@ components/bank/bank-a11y.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx
+components/clara/interview-run-a11y.test.tsx
+components/clara/interview-run-keyboard.test.tsx
 components/clara/onboarding-begin-keyboard.test.tsx
 components/clara/onboarding-checklist-a11y.test.tsx
 components/clara/onboarding-checklist-keyboard.test.tsx
@@ -121,6 +129,7 @@ components/registers/staff-advances-keyboard.test.tsx
 components/reports/reports-components.test.tsx
 components/reports/reports-snapshots-seeding-a11y.test.tsx
 components/reports/reports-snapshots-seeding-keyboard.test.tsx
+components/tax/tax-a11y.test.tsx
 lib/bank/agency-doors.test.ts
 lib/bank/doors.test.ts
 lib/bank/error-kind.test.ts
@@ -159,12 +168,17 @@ lib/firm/use-async-read.test.ts
 lib/firm/use-review-queue.test.ts
 lib/identity/doors.test.ts
 lib/identity/signup-doors.test.ts
+lib/interview/api.test.ts
+lib/interview/contract.test.ts
+lib/interview/thread.test.ts
+lib/interview/useInterviewRun.test.ts
 lib/journals/api-compose.test.ts
 lib/journals/api.test.ts
 lib/journals/balance.test.ts
 lib/journals/diff-reads.test.ts
 lib/journals/governance-doors.test.ts
 lib/journals/use-journals-workbench.test.ts
+lib/members/members-doors.test.ts
 lib/onboarding/api.test.ts
 lib/parts/catalog.test.tsx
 lib/parts/hooks.test.ts
@@ -199,6 +213,10 @@ tests/firm-scope-fourth-entrance.test.ts
 tests/firm-scope-surfaces.test.ts
 tests/focusRailSubscription.test.mjs
 tests/holding-state.test.ts
+tests/invite-courier-authority.test.ts
+tests/invite-courier-egress.test.ts
+tests/invite-courier.test.ts
+tests/invite-mail-transport.test.ts
 tests/invite-verification.test.ts
 tests/proxy-matcher.test.ts
 tests/public-key.test.ts
@@ -207,6 +225,7 @@ tests/response-state.test.ts
 tests/runtime-outbound.test.ts
 tests/safe-redirect.test.ts
 tests/same-origin.test.ts
+tests/server-boundary.test.ts
 tests/source-oracle.test.ts
 tests/sql-oracle.test.ts
 tests/streamAuthority.test.mjs

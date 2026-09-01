@@ -97,6 +97,27 @@ const rpcCall = (seen: Seen, fn: string) => seen.calls.find((c) => c.url.include
 /** The single input a card reveals when a mode is selected. */
 const anyInput = (n: Stub) => n.tagName === "INPUT";
 
+/** Poll `h.settle()` (one real macrotask hop) until `condition()` is true,
+ *  instead of a FIXED hop count — a guess that only held under whatever load
+ *  existed when it was picked (PR #488: 2/2 branch CI runs red, drifting
+ *  failure set, `main`/local always green). Bounded by a real wall-clock
+ *  timeout so a genuine regression still reds, named rather than hung.
+ *  Assertions stay byte-identical; only the WAITING strategy changes. */
+async function settleUntil(
+  h: { settle: () => Promise<void> },
+  condition: () => boolean,
+  description: string,
+  timeoutMs = 5000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`settleUntil: timed out after ${timeoutMs}ms waiting for: ${description}`);
+    }
+    await h.settle();
+  }
+}
+
 // --- firm_question -----------------------------------------------------------
 
 const FQ: FirmQuestionPart = { type: "firm_question", question_id: "fq-4e21" };
@@ -145,7 +166,7 @@ test("firm_question renders the DB's own question verbatim, and NEVER a numeral 
   await withMockedEnv(fqRouter(FQ_OPEN), async () => {
     const h = await renderComponent(App(FQ));
     try {
-      for (let i = 0; i < 5; i++) await h.settle();
+      await settleUntil(h, () => h.text().includes(FQ_OPEN.question_text), "the firm_question hydrate to land the question text");
       const text = h.text();
       assert.doesNotMatch(text, new RegExp(FALLBACK_UNSUPPORTED_PREFIX), "firm_question must never reach the unsupported-part chip");
       assert.match(text, /Firm question/);
@@ -179,10 +200,10 @@ test("firm_question: the Submit gate is CLOSED on empty text, and resolving post
     async (seen) => {
       const h = await renderComponent(App(FQ));
       try {
-        for (let i = 0; i < 5; i++) await h.settle();
+        await settleUntil(h, () => h.find(buttonNamed("Answer")) !== null, "the firm_question hydrate to reveal the Answer trigger");
 
         await clickButton(h.find(buttonNamed("Answer"))!);
-        for (let i = 0; i < 2; i++) await h.settle();
+        await settleUntil(h, () => h.find(buttonNamed("Submit")) !== null, "the Answer click to open the resolve form");
 
         // THE GATE, asserted directly — never by routing a click through it.
         const submitClosed = h.find(buttonNamed("Submit"));
@@ -203,7 +224,7 @@ test("firm_question: the Submit gate is CLOSED on empty text, and resolving post
         await h.settle();
 
         await clickButton(h.find(buttonNamed("Submit"))!);
-        for (let i = 0; i < 6; i++) await h.settle();
+        await settleUntil(h, () => /Resolved/.test(h.text()), "resolve_firm_question's write AND its follow-up re-read to land");
 
         // THE DOOR'S OWN ARGUMENTS, read off the request body.
         const call = rpcCall(seen, "resolve_firm_question");
@@ -248,7 +269,7 @@ test("firm_question surfaces a governed refusal VERBATIM and keeps what the huma
     async () => {
       const h = await renderComponent(App(FQ));
       try {
-        for (let i = 0; i < 5; i++) await h.settle();
+        await settleUntil(h, () => h.find(buttonNamed("Dismiss")) !== null, "the firm_question hydrate to reveal the Dismiss trigger");
         await clickButton(h.find(buttonNamed("Dismiss"))!);
         await h.settle();
 
@@ -257,7 +278,7 @@ test("firm_question surfaces a governed refusal VERBATIM and keeps what the huma
         });
         await h.settle();
         await clickButton(h.find(buttonNamed("Submit"))!);
-        for (let i = 0; i < 6; i++) await h.settle();
+        await settleUntil(h, () => /CLR10/.test(h.text()), "the dismiss_firm_question refusal to render");
 
         const after = h.text();
         // The refusal is the DB's own bytes — never re-worded, never retried.
@@ -283,7 +304,7 @@ test("firm_question with a BLANK question_id fails closed: a visible notice, and
     async (seen) => {
       const h = await renderComponent(App({ ...FQ, question_id: "" }));
       try {
-        for (let i = 0; i < 4; i++) await h.settle();
+        await settleUntil(h, () => /could not be opened/.test(h.text()), "the malformed-part fallback to render");
         assert.deepEqual(seen.calls.filter((call) => !call.url.includes("/caller_context")), [], "an unaddressable part must never issue an object request");
         assert.match(h.text(), /could not be opened/);
         assert.match(h.text(), /question_id/);
@@ -304,7 +325,7 @@ test("firm_question still answers when the client register cannot be read — th
     async () => {
       const h = await renderComponent(App(FQ));
       try {
-        for (let i = 0; i < 5; i++) await h.settle();
+        await settleUntil(h, () => h.text().includes(FQ_OPEN.question_text), "the firm_question hydrate to land the question text");
         assert.ok(h.text().includes(FQ_OPEN.question_text), "the question read is what this card IS — it must survive the register read failing");
         await clickButton(h.find(buttonNamed("Answer"))!);
         await h.settle();
@@ -366,7 +387,7 @@ test("close_proposal renders Clara's reasoning and the drafted gate items, and N
     async () => {
       const h = await renderComponent(App(CP));
       try {
-        for (let i = 0; i < 5; i++) await h.settle();
+        await settleUntil(h, () => h.text().includes(CP_OPEN.narrative), "the close_proposal hydrate to land the narrative");
         const text = h.text();
         assert.doesNotMatch(text, new RegExp(FALLBACK_UNSUPPORTED_PREFIX), "close_proposal must never reach the unsupported-part chip");
         assert.match(text, /Close proposal/);
@@ -401,7 +422,7 @@ test("close_proposal: Withdraw's confirm is CLOSED without a reason, and withdra
     async (seen) => {
       const h = await renderComponent(App(CP));
       try {
-        for (let i = 0; i < 5; i++) await h.settle();
+        await settleUntil(h, () => h.find(buttonNamed("Withdraw")) !== null, "the close_proposal hydrate to reveal the Withdraw trigger");
 
         await clickButton(h.find(buttonNamed("Withdraw"))!);
         await h.settle();
@@ -417,7 +438,7 @@ test("close_proposal: Withdraw's confirm is CLOSED without a reason, and withdra
         });
         await h.settle();
         await clickButton(h.find(buttonNamed("Withdraw this proposal"))!);
-        for (let i = 0; i < 6; i++) await h.settle();
+        await settleUntil(h, () => /withdrawn/.test(h.text()), "settle_close_proposal's write AND its follow-up re-read to land");
 
         const call = rpcCall(seen, "settle_close_proposal");
         assert.ok(call, "settle_close_proposal must have been called");
@@ -451,7 +472,7 @@ test("close_proposal: adopting shows what it approves BEFORE the confirm, then p
     async (seen) => {
       const h = await renderComponent(App(CP));
       try {
-        for (let i = 0; i < 5; i++) await h.settle();
+        await settleUntil(h, () => h.find(buttonNamed("Adopt")) !== null, "the close_proposal hydrate to reveal the Adopt trigger");
         await clickButton(h.find(buttonNamed("Adopt"))!);
         await h.settle();
 
@@ -464,7 +485,7 @@ test("close_proposal: adopting shows what it approves BEFORE the confirm, then p
         assert.match(consent, /bank_reconciled · acct-1/, "the covered gate items stay on screen at the consent step");
 
         await clickButton(h.find(buttonNamed("Adopt this proposal"))!);
-        for (let i = 0; i < 6; i++) await h.settle();
+        await settleUntil(h, () => /adopted/.test(h.text()), "settle_close_proposal's write AND its follow-up re-read to land");
 
         const body = rpcCall(seen, "settle_close_proposal")!.body as Record<string, unknown>;
         assert.equal(body.p_state, "adopted");
@@ -484,7 +505,7 @@ test("close_proposal renders 'not visible' when the run's list carries no such p
     async () => {
       const h = await renderComponent(App(CP));
       try {
-        for (let i = 0; i < 5; i++) await h.settle();
+        await settleUntil(h, () => /not visible to your session/.test(h.text()), "the close_proposal hydrate to resolve the missing-row case");
         const text = h.text();
         assert.match(text, /not visible to your session/, "picking the wrong row from the list would be inventing a proposal");
         assert.doesNotMatch(text, /Every gate item for FY2025/, "another proposal's narrative must never render under this card's id");
@@ -503,7 +524,7 @@ test("close_proposal with a BLANK close_run_id fails closed: a visible notice, a
     async (seen) => {
       const h = await renderComponent(App({ ...CP, close_run_id: "" }));
       try {
-        for (let i = 0; i < 4; i++) await h.settle();
+        await settleUntil(h, () => /could not be opened/.test(h.text()), "the malformed-part fallback to render");
         assert.deepEqual(seen.calls.filter((call) => !call.url.includes("/caller_context")), [], "an unaddressable part must never issue an object request");
         assert.match(h.text(), /could not be opened/);
         assert.match(h.text(), /proposal_id, close_run_id, client_id/);
