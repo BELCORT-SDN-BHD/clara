@@ -72,6 +72,45 @@ test("signup account step -> check-your-email, with the confirm code form reacha
   // reason to defer any of them to the gated skeleton.
   const confirmResponse = await page.goto("/auth/confirm");
   expect(confirmResponse?.headers()["referrer-policy"]).toBe("strict-origin");
+  // F3 (fresh opus review, 2026-09-01) — FOLD 2's DELIVERY pin. The unit
+  // test only proves `confirmCacheHeadersForPath` RETURNS the right pair;
+  // this is the instrument that proves it is actually WIRED into a real
+  // response, the same way this file already pins referrer-policy off a
+  // real `/auth/confirm` GET rather than a unit-level function call.
+  expect(confirmResponse?.headers()["cache-control"]).toBe("private, no-store");
+  // PR #499 round 2 (2026-09-02) — CONFIRMED, not hypothetical: Next
+  // 16.3.3's App Router REPLACES `Vary` for this dynamic route with its
+  // own RSC content-negotiation tokens rather than merging with whatever
+  // `lib/supabase/proxy.ts`'s middleware appended (documented Next
+  // behaviour, `node_modules/next/dist/docs/01-app/02-guides/
+  // cdn-caching.md` — "Next.js sets a Vary header on responses to signal
+  // this to CDNs"). Proven two ways: this e2e AND a bare `curl` against
+  // the built app with no browser involved at all, both returning
+  // `vary: rsc, next-router-state-tree, next-router-prefetch,
+  // next-router-segment-prefetch, Accept-Encoding` — "Cookie" absent, not
+  // merely diluted. Two follow-up fix attempts also lost to the same
+  // clobbering: `next.config.ts`'s `headers()` (framework-level, still
+  // overwritten) and there is no route-segment-level header hook for a
+  // plain Server Component page in the App Router (only Route Handlers
+  // can set response headers) — converting this page to one is a real
+  // architecture change, out of scope for this close-out round.
+  //
+  // `Vary: Cookie` was DEFENSE IN DEPTH, never the primary control — the
+  // primary control is `Cache-Control: private, no-store` above, which
+  // Next does NOT clobber and which alone is sufficient to forbid a
+  // shared cache from storing this response at all. This is not a
+  // regression: `Vary: Cookie` never reached a real client before someone
+  // finally pointed a real browser (and a bare curl) at a real response.
+  //
+  // This assertion now deliberately pins the CURRENT (undesired) reality
+  // rather than the desired one, so it acts as an early-warning trip
+  // wire: if a future Next version stops overwriting `Vary` and "Cookie"
+  // starts surviving again, THIS LINE GOES RED — that is the signal to
+  // come back and tighten it to `toContain`, not a false alarm to
+  // silence by reverting it. `lib/supabase/proxy.ts` keeps `append`
+  // regardless (never `set`) — it costs nothing today and is exactly
+  // right the moment Next stops clobbering it.
+  expect(confirmResponse?.headers()["vary"]).not.toContain("Cookie");
   await expect(page.getByRole("heading", { name: "Enter your confirmation code" })).toBeVisible();
   await expectAccessible(page, "confirmation code form");
 
@@ -108,7 +147,11 @@ test("submitting an attempt while the wall is unwired renders the honest not-ava
   if (CONFIRM_WALL_WIRED) {
     test.skip(true, "the wall is wired; the SKELETON below covers this arm instead");
   }
-  await expect(page).toHaveURL(`${APP_ORIGIN}/auth/confirm?status=unavailable`);
+  // N1, fix round 2026-09-01 (裁-109): the URL no longer names the outcome —
+  // only a bare, non-authoritative `flash` marker; the real answer lives in
+  // an httpOnly cookie this test cannot (and need not) inspect directly.
+  // The visible-text assertion below is the real behavioural proof.
+  await expect(page).toHaveURL(new RegExp(`^${APP_ORIGIN}/auth/confirm\\?flash=`));
   await expect(page.getByText(/isn't available yet/i)).toBeVisible();
   await expectAccessible(page, "confirmation unavailable");
 });

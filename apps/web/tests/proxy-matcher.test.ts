@@ -8,6 +8,7 @@ import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 
 import { config } from "../proxy";
 import {
+  confirmCacheHeadersForPath,
   isPublicPath,
   referrerPolicyForPath,
 } from "../lib/supabase/proxy";
@@ -194,5 +195,24 @@ describe("NEW-A: token-bearing entry routes send only the referrer data their PO
   it("keeps invite bearer URLs at no-referrer and leaves ordinary pages unchanged", () => {
     assert.equal(referrerPolicyForPath("/invite/token-hash"), "no-referrer");
     assert.equal(referrerPolicyForPath("/signup"), null);
+  });
+});
+
+describe("FOLD 2 (N1 fix, 裁-109): /auth/confirm asserts private, no-store + Vary: Cookie", () => {
+  it("pins the exact cache headers on /auth/confirm and its subpaths", () => {
+    assert.deepEqual(confirmCacheHeadersForPath("/auth/confirm"), {
+      cacheControl: "private, no-store",
+      vary: "Cookie",
+    });
+    assert.deepEqual(confirmCacheHeadersForPath("/auth/confirm/verify"), {
+      cacheControl: "private, no-store",
+      vary: "Cookie",
+    });
+  });
+
+  it("asserts nothing on unrelated paths — a future change that widens this must widen the pin too", () => {
+    assert.equal(confirmCacheHeadersForPath("/signup"), null);
+    assert.equal(confirmCacheHeadersForPath("/invite/token-hash"), null);
+    assert.equal(confirmCacheHeadersForPath("/pending"), null);
   });
 });
