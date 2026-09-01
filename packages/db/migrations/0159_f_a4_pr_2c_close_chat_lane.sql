@@ -1,3 +1,10 @@
+-- 0159_f_a4_pr_2c_close_chat_lane.sql -- Number CLAIMED at merge prep 2026-09-01: 0159, one
+-- past the live frontier 0158 (standing law, AGENTS.md + .claude/rules/db-migrations.md); the
+-- body was rig-replayed under scratch numbers throughout the build and PR #490's fix round
+-- (most recently 0158, before #478 claimed that number for real) and by the opus review against
+-- the pinned baseline blob hashes at commit 8697e634 -- the number is comment-only, the body is
+-- byte-identical to the reviewed file except for the review's own MATERIAL/NIT fixes.
+--
 -- =================================================================================================
 -- F-A4 PR-2c · CLOSE-PREP CHAT LANE (FS-7 echelon 1.5, 裁-99/裁-100) — PR A, DB ONLY.
 -- Design: docs/plan/active/fa4-pr2c-close-chat-design.md, especially §1-§4 and both
