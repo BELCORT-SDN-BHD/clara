@@ -109,18 +109,11 @@ export async function chatTurn_v17(input: { taskId: string }): Promise<{ taskId:
       const parkCall = (seg.assistantContent as Array<{ type: string; toolCallId?: string; toolName?: string; input?: unknown }>).find(
         (p) => p.type === "tool-call" && p.toolCallId === seg.clarify?.toolCallId,
       );
-      const parkCallContent: Record<string, unknown> | null = parkCall ? {} : null;
-      if (parkCallContent && parkCall) {
-        parkCallContent.type = "tool-call";
-        parkCallContent.toolCallId = String(parkCall.toolCallId);
-        parkCallContent.toolName = String(parkCall.toolName);
-        parkCallContent.input = JSON.parse(JSON.stringify(parkCall.input ?? {}));
-      }
       messages.push({
         role: "assistant",
         content: [
           ...parkText,
-          ...(parkCallContent ? [parkCallContent] : []),
+          ...(parkCall ? [{ type: "tool-call" as const, toolCallId: String(parkCall.toolCallId), toolName: String(parkCall.toolName), input: JSON.parse(JSON.stringify(parkCall.input ?? {})) }] : []),
         ],
       } as unknown as ModelMessage);
       const hookToken = await mintHookTokenStep();
@@ -131,17 +124,9 @@ export async function chatTurn_v17(input: { taskId: string }): Promise<{ taskId:
 
       if (resolution.kind === "answer") {
         await markRunningStep(taskId);
-        const toolResultOutput: Record<string, unknown> = {};
-        toolResultOutput.type = "json";
-        toolResultOutput.value = resolution.answer ?? null;
-        const toolResultContent: Record<string, unknown> = {};
-        toolResultContent.type = "tool-result";
-        toolResultContent.toolCallId = seg.clarify.toolCallId;
-        toolResultContent.toolName = "clarify";
-        toolResultContent.output = toolResultOutput;
         messages.push({
           role: "tool",
-          content: [toolResultContent],
+          content: [{ type: "tool-result", toolCallId: seg.clarify.toolCallId, toolName: "clarify", output: { type: "json", value: resolution.answer ?? null } }],
         } as unknown as ModelMessage);
         continue;
       }

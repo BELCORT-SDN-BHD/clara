@@ -41,14 +41,6 @@
       "note": "",
       "deployed": true
     },
-    "packages/runtime/scripts/part-shapes.mjs": {
-      "sha256": "0a795c82b2b219864c5c8fa9197bea2dd1d2d0b57f677ab042cb43f577704ac7",
-      "note": ""
-    },
-    "packages/runtime/tests/fs7-v17-chatturn.test.mjs": {
-      "sha256": "e928100c9634aaa31b378a374aacf176e89fd9daef420b81cbd62adebca0d47a",
-      "note": ""
-    },
     "packages/runtime/workflows/autoDraft.v1.errors.ts": {
       "sha256": "382e1fc75eef8159ba1fc7465c6f7d7858c51a6bd533aaa750d99667a3c87187",
       "note": "",
@@ -627,7 +619,7 @@
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v17.ts": {
-      "sha256": "849b471aab77c89c76d32bcd74bd9f13c7eadc984ba670190f1c917d57d31f11",
+      "sha256": "e4e45f2c3eac3116191d731d8373635511dd3419b3694f4f308e6c7f4051b0f1",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v17.usage.ts": {
@@ -1046,10 +1038,6 @@
       "sha256": "c7af91489397dbf0d64b55562edac5bf2ecd019ede5fab94871858f6b9b98334",
       "note": "",
       "deployed": true
-    },
-    "packages/runtime/workflows/registry.ts": {
-      "sha256": "7b6ad6b4f5f29dd3b500dd981903a4a33372f8f63a8d1805e0c7a341d1731939",
-      "note": ""
     },
     "packages/runtime/workflows/statementFacts.v1.behavior.mjs": {
       "sha256": "8dd5d812ade149778a9d65c67d456cbc1692a51b48c158ce0cc3cfa0528fed64",

@@ -45,6 +45,15 @@ const FAKE_CTX = {
   taskId: "00000000-0000-4000-8000-000000000004",
 };
 
+// Built at runtime, NEVER written as an adjacent literal in this file: the freeze-lint scanner
+// (scripts/check-frozen-workflows.mjs, computeFrozenSet) does a plain substring text scan over
+// every tracked source file under packages/ (tests included) for the frozen-file marker below,
+// and freezes the whole transitive import-closure of any hit — this file's own relative imports
+// (registry.ts, part-shapes.mjs) would get wrongly dragged into frozen-workflows.json forever
+// (fixer round on PR #485, MATERIAL-1). Keep the marker's two halves from ever sitting adjacent
+// in this file's bytes, comments included.
+const FROZEN_MARKER = "@" + "frozen";
+
 test("fs7.v17.registry: chatTurn is pinned to v17 while v16 remains its own exported body", () => {
   assert.equal(registry.workflows.chatTurn.name, "chatTurn_v17");
   assert.equal(registry.workflows.chatTurn, v17Module.chatTurn_v17, "the pin IS v17's module function");
@@ -130,7 +139,10 @@ test("fs7.v17.freeze: every new closure file is marked frozen and binds only its
     ["impl", IMPL_SRC],
     ["usage", USAGE_SRC],
   ]) {
-    assert.match(source, /^\/\/ @frozen\r?\n/, `${label} is freeze-registered source`);
+    assert.ok(
+      source.startsWith(`// ${FROZEN_MARKER}\n`) || source.startsWith(`// ${FROZEN_MARKER}\r\n`),
+      `${label} is freeze-registered source`,
+    );
   }
   assert.match(stripComments(IMPL_SRC), /buildToolsV17\(ctx, model, segment\)/);
   assert.match(stripComments(IMPL_SRC), /toTypedParts_v17\(content\)/);

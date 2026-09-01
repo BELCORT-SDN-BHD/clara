@@ -72,7 +72,26 @@ const AGENT_ROLES = ["clara_agent_ro", "clara_wake_interactive", "clara_wake_pro
 
 test("p6-1.db.registry: v17 is the current pin and preserves v16's promotion behaviour", () => {
   assert.equal(currentChatName, "chatTurn_v17", "FS-7 succeeded P6-1 without widening the wire");
-  const representative = [{ type: "text", text: "wire identity" }];
+  // A bare text part exercises no promotion arm at all (both sides would agree on ANY promoter,
+  // including a broken one), so this discriminates nothing — MATERIAL-3, PR #485 fix round. Use
+  // the same three-shape content fs7-v17-chatturn.test.mjs proves v17-vs-v16 identical over: a
+  // text part, a freeform read tool-result, and a refused tool-result — so a successor promoter
+  // that drops the `freeform_result` arm, adds an `agent_receipt` arm, or mangles `refusal` reds.
+  const representative = [
+    { type: "text", text: "I found the report context." },
+    {
+      type: "tool-result",
+      toolCallId: "t-read",
+      toolName: "read_books_freeform",
+      output: { ok: true, read: { ok: true, outcome: "ok", read_id: 31 } },
+    },
+    {
+      type: "tool-result",
+      toolCallId: "t-refusal",
+      toolName: "post_journal_entry",
+      output: { ok: false, refusal: { type: "refusal", code: "CLR11", reason: "stale", message: "Refresh." } },
+    },
+  ];
   assert.deepEqual(currentPromote(representative), prompt16.toTypedParts_v16(representative));
 });
 
