@@ -2,13 +2,87 @@
 // (X5) redrive edge cases, and (f) redrive-after-coverage + the (D4) taxonomy
 // flip. These mutate GLOBAL state (the singleton pointer) and each RESTORES it in
 // a finally. Contract: docs/plan/completed/slice3-event-spine-contract.md §2.9 / D3 / D4.
+//
+// PRIVATE DISPOSABLE DATABASE — the #485/#490 class (committed estate-global writes vs
+// pointer-resolving/unscoped-roster reads under `pnpm -r` concurrency; both halves must
+// hold — packages/db/tests/wave-a-upgrade.test.mjs's own hardening at its taxonomy
+// snapshot is the other half). Under CI's `pnpm -r --if-present test`, this file and
+// packages/db's own tests run CONCURRENTLY against the SAME shared clara_ci Postgres.
+// Every cell below COMMITS its taxonomy mutations — never a rolled-back transaction: (c)'s
+// trigger-disable + delete dance and (f)'s version flip both need CROSS-STATEMENT
+// visibility of what they just committed (drainInProcess/runRedriveCli run in separate
+// connections/processes), which a savepoint- or transaction-scoped fixture cannot give
+// them. So the `clara.taxonomy_active` SINGLETON gets emptied then restored, and (c)
+// additionally disables a USER TRIGGER on that shared table for a committed window in
+// which the singleton DOES NOT EXIST. Ten packages/db readers resolve `taxonomy_active`
+// mid-flight (nine "version-pinned" reads that are actually reading $1 off the very
+// pointer this file mutates, plus one unscoped `trigger_taxonomy` snapshot) and would see
+// that window, or an unexpected extra version, if this file shared their database.
+// Transaction-scoping the fixture would silence the exact cross-statement-commit
+// behaviour these cells exist to prove (FORBIDDEN — the test bodies below are otherwise
+// unchanged), so the fix is the OTHER side: give this file its OWN disposable database,
+// migrated fresh, so its estate-global writes never reach the shared clara_ci at all.
+//
+// Built directly on packages/db's own migration runner + its existing
+// disposable-database harness (packages/db/tests/migrate-harness.mjs, already reused
+// across a package boundary by packages/runtime/tests/correction-adjudication.test.mjs) —
+// no shared helper for a PRIVATE FULL-SCHEMA database existed for a runtime test file at
+// the time this was written, so this duplicates the minimal CREATE DATABASE / migrate /
+// DROP DATABASE pattern already proven by packages/db/tests/migrate-lock-serialization.test.mjs
+// et al. (idempotent role creation — `if not exists (select 1 from pg_roles ...)` in
+// 0002/0006/0131 — makes a from-scratch full migrate safe on a cluster that already has
+// clara_ci's roles).
+//
+// ORDERING IS LOAD-BEARING: the private-DB setup below runs as plain top-level `await`
+// code, NOT inside a node:test `before()` hook — a `before()` callback would run too
+// late. relay-testkit.mjs (imported by every other relay-*.test.mjs) opens its own pool
+// and probes the schema via a top-level `await fx.probeReady()`, and a STATIC import of
+// it is hoisted ahead of everything else in this file, hook registrations included. So
+// relay.mjs / relay-fixtures.mjs / relay-testkit.mjs are imported DYNAMICALLY here,
+// deferred until AFTER `process.env` points at the private, migrated database — never as
+// static imports at the top of the file.
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import pg from "pg";
+import { migrate } from "../../db/scripts/migrate.mjs";
+import { connectionConfig, disposableDatabaseName, setDatabaseEnv } from "../../db/tests/migrate-harness.mjs";
 
-import { redrive, TaxonomyHaltError, CONSUMER, WAKE_ENGINE_CONSUMER } from "../lib/relay.mjs";
-import * as fx from "./relay-fixtures.mjs";
-import { skip, drainInProcess, assertExactlyOnce, runRedriveCli } from "./relay-testkit.mjs";
+const DBNAME = disposableDatabaseName("clara_relay_taxonomy");
+
+const admin = new pg.Client(connectionConfig());
+await admin.connect();
+await admin.query(`create database "${DBNAME}"`);
+
+// Registered as early as possible (right after the database exists) so a THROW from
+// migrate() below still leaves the disposable database cleaned up — never reference the
+// `fx`/`restoreEnv` bindings declared further down from inside this closure without a
+// fallback, since a failure before they are assigned would otherwise leave this hook
+// throwing a TDZ ReferenceError instead of actually cleaning up.
+let restoreEnv = () => {};
+after(async () => {
+  try {
+    const mod = await import("./relay-fixtures.mjs"); // side-effect-free at import time
+    await mod.endPool();
+  } catch {
+    /* best-effort — the pool may never have been created */
+  }
+  restoreEnv();
+  await admin.query(`drop database if exists "${DBNAME}" with (force)`).catch(() => {});
+  await admin.end();
+});
+
+restoreEnv = setDatabaseEnv(DBNAME);
+// No explicit `dir` — migrate()'s own default resolution (dir || CLARA_MIGRATIONS_DIR ||
+// its file-relative packages/db/migrations) is what every other rig entrypoint honors;
+// overriding it here would silently defeat a deliberate CLARA_MIGRATIONS_DIR override
+// (e.g. the deploy-onto-existing CI step's pattern) for this one file alone.
+await migrate({ log: () => {} });
+
+// Deferred until the private database above is live — see the header note.
+const { redrive, TaxonomyHaltError, CONSUMER, WAKE_ENGINE_CONSUMER } = await import("../lib/relay.mjs");
+const fx = await import("./relay-fixtures.mjs");
+const { skip, drainInProcess, assertExactlyOnce, runRedriveCli } = await import("./relay-testkit.mjs");
 
 // ===========================================================================
 // (c) ZERO-ACTIVE-POINTER — HALT loudly, checkpoint frozen, zero dead-letters
