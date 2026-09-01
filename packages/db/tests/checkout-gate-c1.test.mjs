@@ -57,7 +57,7 @@ function gate(t) {
     return true;
   }
   assert.fail(
-    "checkout-gate C-1 is required for a focused run: apply a numbered suite copy of UNNUMBERED_checkout_gate_c1_dpa.sql",
+    "checkout-gate C-1 is required for a focused run: apply 0158_checkout_gate_c1_dpa.sql (or a numbered suite copy of it)",
   );
 }
 

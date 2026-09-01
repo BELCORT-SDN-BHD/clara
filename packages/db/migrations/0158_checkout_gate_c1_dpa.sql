@@ -1,6 +1,8 @@
 -- FS-4 checkout gate, PR C-1: durable DPA documents/signatures and the checkout-intent
--- version pin. This file is deliberately UNNUMBERED; its migration number is claimed only at
--- merge. C-1 creates no human door and grants no application role direct table access.
+-- version pin. Number CLAIMED at merge prep 2026-09-01: 0158, one past the live frontier
+-- 0157 (standing law, AGENTS.md + .claude/rules/db-migrations.md) -- the number is
+-- comment-only, the body is byte-identical to the reviewed file (PR #478). C-1 creates no
+-- human door and grants no application role direct table access.
 --
 -- Design reconciliation (2026-08-31): the build order deliberately moves checkout_intents and
 -- uq_frr_id_applicant from the design packet's original C-3 split into C-1. It also requires the
