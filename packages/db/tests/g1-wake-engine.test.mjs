@@ -94,9 +94,12 @@ after(async () => {
   // singleton genuinely free to test set_wake_source_enabled's real door end-to-end
   // (uq_firms_one_operator permits at most one true, system-wide) — measured firing even
   // WITHOUT concurrency, on a reused database, once this file had run and left OP set. Mirrors
-  // this file's own wake_engine_sources cleanup discipline (registerSource's after()): release
-  // what you claimed. Scoped to OP's own id, never an unscoped clear (constraint 13 — a
-  // genuinely-set BELCORT operator flag on a shared/persistent rig must never be touched).
+  // the SAME release-what-you-claimed discipline packages/runtime/tests/wake-engine.test.mjs's
+  // own registerSource() applies in ITS after() (delete every row it registered) — that helper
+  // does not live in this file (opus review round on PR #501, finding F3: the earlier wording
+  // pointed at "this file's own registerSource", which does not exist here). Scoped to OP's own
+  // id, never an unscoped clear (constraint 13 — a genuinely-set BELCORT operator flag on a
+  // shared/persistent rig must never be touched).
   if (OP) {
     await rootQuery("update clara.firms set is_operator=false where id=$1 and is_operator", [OP.firm]);
   }
