@@ -1,11 +1,6 @@
-// F-A4 PR-1c -- THE CLOSE-DOMAIN AGENT LIMB battery, part 2: law 71's wall, Tier C, the two
-// oracles + the parity reads, and the roster/census surfaces. Part 1 (the ladder, the freeze and
-// the proposal round trip) is f-a4-pr1c-close-agent-limb.test.mjs; both share
-// f-a4-pr1c-fixtures.mjs.
-//
-// CONTRACT-BLIND: every claim is proved against the LIVE catalog or a behavioural run, never
-// against the migration's own text.
-
+// F-A4 PR-1c close-domain agent limb, part 2: law 71, Tier C, oracles, parity and census.
+// Part 1 is f-a4-pr1c-close-agent-limb.test.mjs; both share f-a4-pr1c-fixtures.mjs.
+// CONTRACT-BLIND: every claim reads the LIVE catalog or behaviour, never migration text.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -18,31 +13,23 @@ import {
   WRAPPERS, PARKED_WRAPPER, RATIONALE, MODEL, caught, derivedOpKey, callWake,
   mintClosePrepSession, VERBS, receiptById, tokens, ensureLimb, limbGate, scene,
 } from "./f-a4-pr1c-fixtures.mjs";
-
+import { assertPR2CWallCensus } from "./f-a4-pr2c-fixtures.mjs";
 const gate = (t) => limbGate(t, markSkip);
-
 before(async () => { await ensureLimb(noteLane); });
 after(async () => {
   printLaneNotes("f-a4-pr1c-walls");
   printSkipCount("f-a4-pr1c-walls");
   await endPool();
 });
-
-// =====================================================================================
-// D -- LAW 71's WALL. begin/abandon/open-year/snapshot-mint are hers; finalize, reopen and
-// attest are the human's FOREVER, and the limb must be structurally incapable of reaching them.
-// Four independent instruments, because one of them agreeing with the design proves nothing.
-// =====================================================================================
-
+// D -- LAW 71. begin/abandon/open-year/snapshot-mint are hers; finalize/reopen/attest remain
+// human forever. Four instruments prove structural unreachability independently.
 test("fa4c.D1 law 71: no wake verb can finalize, reopen or attest -- not by allowlist, not by grant, not by call graph, not by capability", async (t) => {
   if (gate(t)) return;
-
   // (a) NO allowlist row admits a reserved act under ANY wake kind.
   const rows = await rootQuery(
     `select wake_kind, function_name from clara.wake_fn_allowlist
       where function_name ~ 'finaliz|reopen|attest'`);
   assert.deepEqual(rows.rows, [], "the allowlist names no reserved act, for any kind");
-
   // (b) NO wake or agent role holds EXECUTE on a reserved human door, nor on the human close verbs.
   const acl = await rootQuery(
     `select p.proname, a.grantee::regrole::text as grantee
@@ -92,6 +79,16 @@ test("fa4c.D1 law 71: no wake verb can finalize, reopen or attest -- not by allo
     `select 1 from clara.firm_capability_grants
       where user_id = clara.agent_user_id() and revoked_at is null`);
   assert.equal(cap.rows.length, 0, "and no capability row exists for the agent identity");
+});
+
+test("fa4c.D1.pr2c additive census: chat minter ACL, exact rows, shared grant, and every wake role's wall", async (t) => {
+  if (gate(t)) return;
+  const live = await rootQuery(`select to_regprocedure(
+    'clara.mint_chat_close_credential(uuid,uuid,uuid,uuid,interval)') is not null as live`);
+  if (!live.rows[0].live) {
+    markSkip(); t.skip("F-A4 PR-2c is wholly absent; the PR-1c-only census remains valid"); return;
+  }
+  await assertPR2CWallCensus();
 });
 
 test("fa4c.D2 the entrance seam holds for HUMANS too: a bookkeeper without close_and_attest is still refused CLR04, while the agent path succeeds on the same firm", async (t) => {
