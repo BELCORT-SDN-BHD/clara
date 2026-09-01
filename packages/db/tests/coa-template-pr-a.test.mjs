@@ -1154,7 +1154,10 @@ test("I-M8 · uq_coa_adoption_live: dropping it lets one client carry two adopte
     await adopt(c);
     assert.equal(await raisedCode(() => adopt(c)), null, "MUTANT: with the index dropped the second adoption must be ACCEPTED");
   });
-  const left = await rootQuery("select count(*)::int n from clara.coa_template_adoptions");
+  const left = await rootQuery(
+    "select count(*)::int n from clara.coa_template_adoptions where client_id = $1",
+    [world.clients.A1],
+  );
   assert.equal(left.rows[0].n, 0, "the mutant left adoption rows behind");
 });
 
