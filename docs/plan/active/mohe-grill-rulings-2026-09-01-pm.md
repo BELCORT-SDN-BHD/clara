@@ -251,6 +251,25 @@ on the route, where the header is written by a shared applier the route passes t
 the wrong instrument, the estate's own recurring class, this time costing a wrong order from the
 orchestrator rather than a wrong verdict from a lane.
 
+### 裁-112(b) · The MODEL-AS-ORACLE trap — a prescription's test rig is not the shipped body
+
+Self-caught by `pr493-review` the moment it was told to treat prescriptions as claims rather than
+instructions. Having built model functions to TEST two ordered fixes (a guarded and a naive limb
+variant), it named the trap before walking into it: **diffing the next delta against its own model
+and calling agreement a confirmation would be the c3.30a self-agreement failure one level up** —
+the model would have become the oracle, and a shipped body that merely matched what the reviewer had
+already convinced itself was correct would pass.
+
+**LAW: when a reviewer builds a model to test a prescription, the model is evidence about the
+PRESCRIPTION, never about the SHIPPED BODY.** On the verification pass, rebuild from the shipped
+text and re-run the traced cases against THAT. **If the shipped body and the model disagree, the
+MODEL is the suspect first** — it is the artifact with no review of its own.
+
+The corollary that makes it operational: a pin or a census must be proved to name the RIGHT subject,
+not merely to exist. The same lane's own check on the prosrc pin is the pattern — mutate the body by
+one byte and require the pin to red, because a pin that names a neighbouring function is exactly the
+law-3 shape (a guard reading a NAME rather than proving identity).
+
 ## Session state bridge — 2026-09-01 afternoon
 *(PROGRESS.md truing rides the next clock-out PR. Where this disagrees with the repo, the repo wins.)*
 
