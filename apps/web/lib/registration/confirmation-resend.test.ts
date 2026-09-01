@@ -31,7 +31,20 @@ test("the card that calls this seam holds no reachable path to supabase.auth.res
     join(WEB_ROOT, "components/entry/email-confirmation-card.tsx"),
     "utf8",
   );
+  // R2, fix round 2026-09-01: widened off the `@/` alias anchor — a relative
+  // import (`../../lib/supabase/client`) would have slipped past
+  // `/@\/lib\/supabase\/client/` while still importing the exact same
+  // module. Verified against the live card source: no legitimate mention of
+  // `lib/supabase/client` exists there today (only `lib/registration/
+  // confirmation-resend`), so this widening carries no false positive.
+  assert.doesNotMatch(cardSource, /lib\/supabase\/client/, "the card still imports the browser Supabase client");
+  // The `.auth.resend(` scan below is intentionally left variable-name-
+  // dependent (it would miss `const sb = createClient(); sb.auth.resend(…)`
+  // under a different local name) — that is NOT the wall. THE WALL is the
+  // assertion above: with no Supabase client import reachable in this
+  // module's closure at all, there is no client value ANY name could bind to
+  // call `.auth.resend` on in the first place. This scan is defense-in-depth
+  // on top of that structural fact, not a substitute for it.
   assert.doesNotMatch(cardSource, /supabase\.auth\.resend/, "the card calls resend directly");
-  assert.doesNotMatch(cardSource, /@\/lib\/supabase\/client/, "the card still imports the browser Supabase client");
   assert.match(cardSource, /requestConfirmationResend/, "the card no longer calls the seam at all");
 });

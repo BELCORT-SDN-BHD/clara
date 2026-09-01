@@ -24,6 +24,7 @@ import {
 } from "../../lib/supabase/server";
 import { resolveServerSession } from "../../lib/supabase/server-session";
 import { SignupAccountForm } from "./signup-account-form";
+import { SignupDpaForm } from "./signup-dpa-form";
 import {
   renderSignupRoute,
   type LoadSignupDpaDocument,
@@ -262,6 +263,37 @@ test("NEW-2 RESIDUAL: a direct hosted-Auth caller under autoconfirm drift reache
     SignupFirmForm,
     "the residual changed: update the deploy-gate claim and the booked server-receipt follow-up",
   );
+});
+
+test("R3, fix round 2026-09-01: a confirmed session with hasOpenRegistration:true renders SignupDpaForm, not the firm form again", () => {
+  // The one line wiring the PR's central new routing predicate to its
+  // component (signup-step.tsx: `if (hasOpenRegistration) return
+  // <SignupDpaForm .../>`) had zero direct coverage before this cell — every
+  // existing test either omitted the prop (defaulting to false) or exercised
+  // it only indirectly through a full renderSignupRoute() integration that
+  // never actually set it true. This is the POSITIVE arm.
+  const session = { subject: SUBJECT, accessToken: "confirmed-token" };
+  const user = { id: SUBJECT, email_confirmed_at: "2026-08-31T01:02:03Z" };
+
+  const step = SignupStep({
+    session,
+    user,
+    hasOpenRegistration: true,
+    dpaDocument: { kind: "ready", version: "clara-beta-2026-08-a", body: "Beta text.", bodySha256: "\\xabc" },
+  });
+  assert.equal(step.type, SignupDpaForm, "hasOpenRegistration:true did not route to the DPA step");
+  // The document prop itself must reach the component unmodified — never
+  // swapped for a default, and never dropped.
+  assert.deepEqual(
+    (step.props as { document: unknown }).document,
+    { kind: "ready", version: "clara-beta-2026-08-a", body: "Beta text.", bodySha256: "\\xabc" },
+  );
+
+  // The discriminating negative, same session/user, only the flag differs:
+  // false (or omitted) must still land on the firm form, exactly as the
+  // cell above already proves — restated here so the two are read together.
+  const stepWithoutRegistration = SignupStep({ session, user, hasOpenRegistration: false });
+  assert.equal(stepWithoutRegistration.type, SignupFirmForm);
 });
 
 test("NEW: confirmed-user accepts strict timestamps and refuses malformed clock/calendar values", () => {

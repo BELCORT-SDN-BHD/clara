@@ -149,12 +149,46 @@ test("clicking sign reaches the Lane-B seam and renders its answer honestly — 
   }
 });
 
-test("MUTANT: an empty bodySha256 sent to the seam is RED against the shipped answer", () => {
-  // RED-before proof for the cell above: a naive `bodySha256: ""` (the exact
-  // pre-fix defect) must NOT satisfy the assertion the previous test makes.
-  const shipped = { version: "clara-beta-2026-08-a", bodySha256: bodyHash("Beta text.") };
-  const mutant = { version: "clara-beta-2026-08-a", bodySha256: "" };
-  assert.notDeepEqual(mutant, shipped);
+test("MUTANT: an empty bodySha256 sent to the seam is RED against the shipped answer", async () => {
+  // R1, fix round 2026-09-01: the first cut of this cell compared two
+  // hand-typed literals and never touched `signup-dpa-form.tsx` at all — it
+  // would have passed unchanged even if the component's own `handleSign`
+  // reverted to the pre-fix `bodySha256: ""` defect, because "shipped" was
+  // computed by calling `bodyHash()` a second time on the test's own side,
+  // never by asking the component what it actually sends. This version
+  // drives the SAME render+click path the cell above does, so "shipped" is
+  // the component's REAL output, and asserts that output is provably
+  // different from the historical defect's own literal value.
+  const body = "Beta text.";
+  const hash = bodyHash(body);
+  const calls: Array<{ bodySha256: string }> = [];
+  const sign: SignDpa = async (params) => {
+    calls.push({ bodySha256: params.bodySha256 });
+    return { kind: "unavailable" };
+  };
+  const h = await renderComponent(
+    App(createElement(SignupDpaForm, {
+      document: { kind: "ready", version: "clara-beta-2026-08-a", body, bodySha256: hash },
+      sign,
+    })),
+  );
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const signButton = findIn(h.container as never, byButtonText(/agree/i));
+    await clickButton(signButton as never);
+    for (let i = 0; i < 4; i++) await h.settle();
+
+    const shipped = calls[0]?.bodySha256;
+    const preFixDefect = ""; // the exact literal `handleSign` used to send, unconditionally
+    assert.notEqual(
+      shipped,
+      preFixDefect,
+      "the component's REAL output no longer differs from the historical empty-hash defect",
+    );
+    assert.equal(shipped, hash, "the component's real output is not the rendered body's own hash");
+  } finally {
+    await h.unmount();
+  }
 });
 
 test("a document that WOULD sign (kind:'signed') is never fabricated by this seam's production default", async () => {

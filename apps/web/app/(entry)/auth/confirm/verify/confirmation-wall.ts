@@ -27,6 +27,15 @@
 // function can genuinely return the first two, real evidence flows through
 // the exact same call sites. Do not widen the return type without updating
 // `handler.ts`'s switch — TypeScript will refuse a non-exhaustive one.
+//
+// R4, fix round 2026-09-01 — ONE DISPLAY-BOUND TO HONOUR: `remaining` must
+// stay within [0, 5] and `retryAfterSeconds` within [0, 900] (part 1 §3.4's
+// own C1/C2 ceilings) — `app/(entry)/auth/confirm/page.tsx`'s NIT-3 clamp
+// renders anything outside those bounds as the generic `invalid` card
+// instead of the real wrong-code/locked one. A real wall that ever needs a
+// longer lockout window than 900s must widen that clamp in the SAME PR, or
+// a genuine, non-malicious lockout will render as a mystery "invalid"
+// state instead of the honest wait it actually is.
 
 /** What the wall decided, told apart from "the wall isn't reachable at all". */
 export type ConfirmationAttemptOutcome =
