@@ -52,13 +52,17 @@ export function ThresholdChangeDialog({
 
   return (
     <FirmAdminDoorDialog
-      // N3 (independent review, PR #489): reset the typed amount on every
-      // CLOSE transition — the SnapshotRegistryPanel.tsx:118,128 precedent
-      // (MintDialog re-mints its op_key the same way, via this identical
-      // additive onOpenChange callback, never a locally-owned `open` state).
-      // A stale pre-filled amount left over from a cancelled edit is one
-      // stray click away from a spurious re-affirmation of a number the
-      // caller never actually reviewed this time.
+      // N3 (independent review, PR #489): reset the typed amount on every OPEN
+      // transition — the SnapshotRegistryPanel.tsx:118,128 precedent (MintDialog
+      // re-mints its op_key the same way, via this identical additive
+      // onOpenChange callback, never a locally-owned `open` state). It must be
+      // OPEN, not close: FirmAdminDoorDialog's Confirm closes via a plain
+      // `setOpen(false)`, a controlled-prop change Base UI never routes through
+      // onOpenChange (DialogStore.js:48 invokes it only from real interaction
+      // handlers), so a close-gated reset would silently skip the confirm path.
+      // A stale amount left over from a cancelled OR CONFIRMED edit is one stray
+      // click away from a spurious re-affirmation of a number the caller never
+      // reviewed this time.
       onOpenChange={(isOpen) => { if (isOpen) setRaw(""); }}
       triggerLabel={t("changeTrigger")}
       title={t("changeTitle")}
