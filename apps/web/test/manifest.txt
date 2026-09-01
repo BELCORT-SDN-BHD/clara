@@ -59,10 +59,12 @@ components/documents/documents-a11y.test.tsx
 components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
 components/documents/lint-finding-detail.test.tsx
+components/entry/email-confirmation-signup-route.test.tsx
 components/entry/email-confirmation.test.tsx
 components/entry/entry-contracts.test.tsx
 components/entry/pending-a11y.test.tsx
 components/entry/signup-a11y.test.tsx
+components/entry/signup-dpa-form.test.tsx
 components/entry/signup-firm-form.test.tsx
 components/entry/signup-keyboard.test.tsx
 components/firm-admin/firm-admin-a11y.test.tsx
@@ -192,7 +194,9 @@ lib/registers/opening-item-doors.test.ts
 lib/registers/opening.test.ts
 lib/registers/staff-advances-doors.test.ts
 lib/registers/staff-advances.test.ts
+lib/registration/checkout-progress-reads.test.ts
 lib/registration/doors.test.ts
+lib/registration/dpa-reads.test.ts
 lib/reports/api.test.ts
 lib/session-accessor.test.ts
 lib/wire.test.ts

@@ -1,7 +1,28 @@
 import { NextResponse } from "next/server";
 
+import {
+  claimConfirmationAttempt as defaultClaimConfirmationAttempt,
+  settleConfirmationAttempt as defaultSettleConfirmationAttempt,
+  type ClaimConfirmationAttempt,
+  type SettleConfirmationAttempt,
+} from "./confirmation-wall";
 import { proveSameOrigin } from "@/lib/same-origin";
 import { createRouteClient } from "@/lib/supabase/server";
+
+/**
+ * 裁-92 — the CODE flow. §3.6 of checkout-gate-design.md is the exact table
+ * this file implements: `proveSameOrigin` survives VERBATIM (it was never the
+ * binding — it is the CSRF wall on a state-changing route, and stays one
+ * regardless of what the route verifies); what changed is everything after
+ * it — the C1/C2 attempt wall runs BEFORE `verifyOtp`, and `verifyOtp` itself
+ * now takes `{email, token, type:'signup'}` instead of a token hash.
+ *
+ * THE ATTEMPT WALL IS A LANE-B SEAM (`./confirmation-wall.ts`). Its default
+ * production behaviour is to REFUSE with `{kind:"unavailable"}` — never to
+ * let a caller through unchecked. See that module's header for why.
+ */
+
+type VerifyOtpError = { message?: string; code?: string };
 
 type VerifyEmailResponse = {
   data: {
@@ -11,15 +32,16 @@ type VerifyEmailResponse = {
       user: { id: string };
     } | null;
   };
-  error: { message?: string } | null;
+  error: VerifyOtpError | null;
 };
 
 export interface EmailConfirmationRouteClient {
   supabase: {
     auth: {
       verifyOtp(params: {
-        type: "email";
-        token_hash: string;
+        type: "signup";
+        email: string;
+        token: string;
       }): Promise<VerifyEmailResponse>;
     };
   };
@@ -28,18 +50,47 @@ export interface EmailConfirmationRouteClient {
 
 export type CreateEmailConfirmationRouteClient = () => Promise<EmailConfirmationRouteClient>;
 
+/** Supabase Auth's own stable error code for an expired OTP (verified against
+ *  the current `supabase/auth` source via context7, 2026-09-01:
+ *  `ErrorCodeOTPExpired = "otp_expired"`). Anything else failing verification
+ *  — including a code that simply does not match — renders as "wrong code",
+ *  never as "expired": absence of the expired code is not evidence of
+ *  expiry (review law 2). */
+function isExpiredOtpError(error: VerifyOtpError | null): boolean {
+  return error?.code === "otp_expired";
+}
+
 /**
  * Both redirects are built from the WALL'S OWN PROVEN origin, never
- * `request.url`'s authority — independent review of #455, MEDIUM-2:
- * behind a proxy those two diverge, and `request.url` can read an internal,
- * plain-HTTP hop (`lib/same-origin.ts`'s own header explains why the invite
- * courier was fixed the same way). One validated value, both consumers.
+ * `request.url`'s authority — independent review of #455, MEDIUM-2 (kept
+ * verbatim from the link-flow handler this file replaces): behind a proxy
+ * those two diverge, and `request.url` can read an internal, plain-HTTP hop.
+ * One validated value, every consumer.
+ *
+ * The query values this redirect ever carries are RESULT METADATA, never the
+ * address — `status`, and the two numeric slots `remaining`/`wait`. This is
+ * the SAME idiom the prior handler used for `status=invalid`; it does not
+ * reopen W-H, which walls the ADDRESS specifically (part 1 §3.3).
  */
-function fixedRedirect(origin: string, path: "/signup" | "/auth/confirm", invalid = false) {
-  const target = new URL(path, origin);
+function confirmRedirect(
+  origin: string,
+  outcome: { status: "wrong"; remaining: number } | { status: "expired" }
+    | { status: "locked"; wait: number } | { status: "unavailable" }
+    | { status: "invalid" },
+): NextResponse {
+  const target = new URL("/auth/confirm", origin);
   target.search = "";
   target.hash = "";
-  if (invalid) target.searchParams.set("status", "invalid");
+  target.searchParams.set("status", outcome.status);
+  if (outcome.status === "wrong") target.searchParams.set("remaining", String(outcome.remaining));
+  if (outcome.status === "locked") target.searchParams.set("wait", String(outcome.wait));
+  return NextResponse.redirect(target, { status: 303 });
+}
+
+function fixedSignupRedirect(origin: string): NextResponse {
+  const target = new URL("/signup", origin);
+  target.search = "";
+  target.hash = "";
   return NextResponse.redirect(target, { status: 303 });
 }
 
@@ -59,21 +110,31 @@ function hasVerifiedSession(response: VerifyEmailResponse): boolean {
   );
 }
 
+/** Exactly one non-empty string field, or `null` — the same "reject a
+ *  duplicated or blank field outright" discipline the prior token_hash
+ *  handler used, extended to two fields instead of one. */
+function singleNonEmptyField(form: FormData, name: string): string | null {
+  const values = form.getAll(name);
+  return values.length === 1 && typeof values[0] === "string" && values[0].length > 0
+    ? values[0]
+    : null;
+}
+
 /**
- * POST is the sole token-consuming execution root. It reads exactly one
- * `token_hash`; hostile `type` and `next` fields are ignored because the OTP
- * purpose and both redirects are literals below.
+ * POST is the sole token-consuming execution root. `proveSameOrigin` runs
+ * first and unconditionally — before the body is even read — exactly as the
+ * link-flow handler did.
  */
 export async function handleEmailConfirmationPost(
   request: Request,
   createClient: CreateEmailConfirmationRouteClient = createRouteClient,
+  claimAttempt: ClaimConfirmationAttempt = defaultClaimConfirmationAttempt,
+  settleAttempt: SettleConfirmationAttempt = defaultSettleConfirmationAttempt,
 ): Promise<Response> {
   // This is a login/session-creating mutation. A cross-origin page must not be
-  // able to submit its own token into somebody else's browser and install the
-  // attacker's session there. Refuse before reading the bearer or constructing
-  // any auth client: a refused request has no cookie-writing capability at all.
-  // `proof.origin` (present only on `ok: true`) is the ONE value both
-  // redirects below are built from — never `request.url`'s own authority.
+  // able to submit its own guess into somebody else's browser. Refused before
+  // reading the body or constructing any auth client — a refused request has
+  // no cookie-writing capability at all.
   const proof = proveSameOrigin(request.headers, request.url);
   if (!proof.ok) {
     return NextResponse.json(
@@ -83,25 +144,40 @@ export async function handleEmailConfirmationPost(
   }
 
   const form = await request.formData();
-  const tokenValues = form.getAll("token_hash");
   const { supabase, sealResponse } = await createClient();
 
-  if (
-    tokenValues.length !== 1 ||
-    typeof tokenValues[0] !== "string" ||
-    tokenValues[0].length === 0
-  ) {
-    return sealResponse(fixedRedirect(proof.origin, "/auth/confirm", true));
+  const email = singleNonEmptyField(form, "email");
+  const token = singleNonEmptyField(form, "token");
+  if (email === null || token === null) {
+    return sealResponse(confirmRedirect(proof.origin, { status: "invalid" }));
   }
 
-  const response = await supabase.auth.verifyOtp({
-    type: "email",
-    token_hash: tokenValues[0],
-  });
+  // THE C1/C2 WALL — before verifyOtp, always. §3.4: "the attempt is recorded
+  // BEFORE the verification, never after," so a killed connection still
+  // costs an attempt. The Lane-B seam's production default refuses with
+  // `"unavailable"` — see confirmation-wall.ts's header.
+  const attempt = await claimAttempt({ email, origin: proof.origin });
+  if (attempt.kind === "unavailable") {
+    return sealResponse(confirmRedirect(proof.origin, { status: "unavailable" }));
+  }
+  if (attempt.kind === "rejected") {
+    return sealResponse(
+      confirmRedirect(proof.origin, { status: "locked", wait: attempt.retryAfterSeconds }),
+    );
+  }
 
+  const response = await supabase.auth.verifyOtp({ type: "signup", email, token });
+
+  if (hasVerifiedSession(response)) {
+    await settleAttempt("accepted");
+    return sealResponse(fixedSignupRedirect(proof.origin));
+  }
+
+  await settleAttempt("rejected");
+  if (isExpiredOtpError(response.error)) {
+    return sealResponse(confirmRedirect(proof.origin, { status: "expired" }));
+  }
   return sealResponse(
-    hasVerifiedSession(response)
-      ? fixedRedirect(proof.origin, "/signup")
-      : fixedRedirect(proof.origin, "/auth/confirm", true),
+    confirmRedirect(proof.origin, { status: "wrong", remaining: attempt.remaining }),
   );
 }

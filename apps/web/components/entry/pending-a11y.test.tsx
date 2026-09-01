@@ -1,4 +1,4 @@
-// GATE (b) — structural a11y scan of the holding page, ALL SIX states.
+// GATE (b) — structural a11y scan of the holding page, ALL EIGHT states.
 //
 // The fourth entry face (裁-2 4b). Every state is scanned, not the happy one:
 // this is the screen a person lands on when nothing else in the product is
@@ -9,9 +9,10 @@
 // wrapper is used and nothing here can be masked by one.
 //
 // GATE (c) IS FOLDED IN at the bottom rather than living in a `pending-keyboard`
-// file of its own: this surface has exactly ONE control in every state — the
-// logout button — so a separate file would be one assertion repeated six times
-// with a different import. The walk still runs on every state.
+// file of its own: the logout button is the ONE control every state shares —
+// three states (`pending`, `checkout_open`, `paid`, FS-4 C-6's §2.1 arms) add
+// their own checkout-progress control beside it, and the walk below still
+// covers all of them generically rather than asserting a fixed control count.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -58,9 +59,13 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
 const byButtonText = (re: RegExp) => (n: Node) => n.tagName === "BUTTON" && re.test(textOf(n as never));
 
 /** Every state the decision can produce, each with a phrase that is true ONLY
- *  of that rendering — so each cell's "it rendered" check discriminates. */
+ *  of that rendering — so each cell's "it rendered" check discriminates.
+ *  FS-4 C-6 widened six states to eight: `checkout_open` and `paid` are the
+ *  two new §2.1 arms (holding-state.ts's header). */
 const STATES: { state: HoldingState; distinctive: RegExp }[] = [
   { state: { kind: "pending", firmName: "ROME PROPERTIES" }, distinctive: /Your registration is with us/ },
+  { state: { kind: "checkout_open", firmName: "ROME PROPERTIES" }, distinctive: /Your firm is not open yet/ },
+  { state: { kind: "paid", firmName: "ROME PROPERTIES" }, distinctive: /finish opening your firm/i },
   { state: { kind: "rejected", firmName: "ROME PROPERTIES", reason: "the firm name matches an existing member firm" }, distinctive: /the firm name matches an existing member firm/ },
   { state: { kind: "rejected", firmName: "ROME PROPERTIES", reason: null }, distinctive: /No reason was recorded/ },
   { state: { kind: "approved", firmName: "ROME PROPERTIES" }, distinctive: /Your registration was accepted/ },
@@ -116,11 +121,11 @@ test("THE HEADING IS REAL — no synthetic h1 is propping these scans up", async
   }
 });
 
-test("THE SIX STATES ARE MUTUALLY DISTINGUISHABLE — no two render the same words", async () => {
+test("THE EIGHT STATES ARE MUTUALLY DISTINGUISHABLE — no two render the same words", async () => {
   // The order's own requirement, and the one a per-state scan cannot give: each
   // state must be told apart from the others by what it SAYS, not merely be
   // free of violations. Without this cell, a card that rendered identical copy
-  // for all six would pass every scan above.
+  // for all eight would pass every scan above.
   const rendered: string[] = [];
   for (const { state } of STATES) {
     const h = await renderComponent(App(createElement(HoldingCard, { state })));

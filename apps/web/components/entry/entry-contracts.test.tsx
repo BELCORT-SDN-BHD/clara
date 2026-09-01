@@ -15,7 +15,7 @@ import messages from "../../messages/en.json";
 import { enableDomInspection } from "../../test/domInspect";
 import { renderComponent } from "../../test/hookHarness";
 import type { HoldingState } from "../../lib/registration/holding-state";
-import { EmailConfirmationCard } from "./email-confirmation-card";
+import { EmailConfirmationCard, type ConfirmCodeState } from "./email-confirmation-card";
 import { HoldingCard } from "./holding-card";
 import { SignupAccountForm, type SignupAuthClient } from "./signup-account-form";
 import { SignupFirmForm } from "./signup-firm-form";
@@ -88,8 +88,20 @@ const inviteClient = (): InviteAuthClient => ({
   },
 });
 
+const CONFIRM_CODE_STATES: ConfirmCodeState[] = [
+  { kind: "form" },
+  { kind: "wrong-code", remaining: 3 },
+  { kind: "expired" },
+  { kind: "locked", waitSeconds: 300 },
+  { kind: "unavailable" },
+  { kind: "invalid" },
+];
+
 const HOLDING_STATES: HoldingState[] = [
   { kind: "pending", firmName: "ROME PROPERTIES" },
+  // FS-4 C-6, §2.1's two new arms (holding-state.ts's header).
+  { kind: "checkout_open", firmName: "ROME PROPERTIES" },
+  { kind: "paid", firmName: "ROME PROPERTIES" },
   { kind: "rejected", firmName: "ROME PROPERTIES", reason: "Not admitted" },
   { kind: "approved", firmName: "ROME PROPERTIES" },
   { kind: "invite-expected" },
@@ -116,12 +128,10 @@ test("MED-1: none of the five entry faces renders a literal i18n key", async () 
       node: createElement(SignupAccountForm, { createSupabaseClient: signupClient }),
     },
     { name: "signup firm step", node: createElement(SignupFirmForm) },
-    {
-      name: "email confirmation",
-      node: createElement(EmailConfirmationCard, {
-        state: { kind: "ready", tokenHash: "token-hash" },
-      }),
-    },
+    ...CONFIRM_CODE_STATES.map((state) => ({
+      name: `confirm/${state.kind}`,
+      node: createElement(EmailConfirmationCard, { state }),
+    })),
     ...HOLDING_STATES.map((state) => ({
       name: `pending/${state.kind}`,
       node: createElement(HoldingCard, { state }),
@@ -156,6 +166,7 @@ const TRANSLATION_SOURCES = {
   Signup: [
     "components/entry/signup-account-form.tsx",
     "components/entry/signup-firm-form.tsx",
+    "components/entry/signup-dpa-form.tsx",
     "app/(entry)/signup/page.tsx",
   ],
   Pending: [
@@ -164,8 +175,11 @@ const TRANSLATION_SOURCES = {
   ],
 } as const;
 
+// FS-4 C-6, §2.1's two new arms (holding-state.ts's header).
 const HOLDING_KINDS = [
   "pending",
+  "checkout_open",
+  "paid",
   "rejected",
   "approved",
   "invite-expected",
@@ -255,30 +269,30 @@ test("LOW-2: every backticked source path cited by an entry module resolves", ()
   assert.equal(existsSync(join(WEB_ROOT, fake)), false, "the review's dangling-path mutant now exists");
 });
 
-test("MED-3/LOW-3: the deploy obligations cover signup redirect and both password surfaces", () => {
+test("MED-3/LOW-3 (superseded by FS-4 C-6 / 裁-92): the deploy obligations cover the CODE flow, not the retired link", () => {
   const readme = readFileSync(join(WEB_ROOT, "README.md"), "utf8");
-  const signupSource = readFileSync(
-    join(WEB_ROOT, "components/entry/signup-account-form.tsx"),
-    "utf8",
-  );
-  assert.match(readme, /### 4\.[\s\S]*<origin>\/auth\/confirm[\s\S]*no wildcard/i);
   assert.match(readme, /### 4\.[\s\S]*\*\*Configure:\*\*[\s\S]*\*\*Verify \(receipt\):\*\*[\s\S]*\*\*Residual/i);
-  assert.match(readme, /### 4\.[\s\S]*Confirm\s+Email[\s\S]*PRD (?:§\s*|Section\s+)8/i);
-  assert.match(signupSource, /emailRedirectTo:[\s\S]*\/auth\/confirm/);
-  assert.match(readme, /\{\{ \.RedirectTo \}\}\?token_hash=\{\{ \.TokenHash \}\}&type=email/);
-  assert.doesNotMatch(
-    readme,
-    /\{\{ \.SiteURL \}\}\/auth\/confirm\?token_hash=\{\{ \.TokenHash \}\}&type=email/,
-  );
+  assert.match(readme, /### 4\.[\s\S]*six-digit code[\s\S]*\{\{ \.Token \}\}/i);
+  // The retired link-flow template must not survive as LIVE SETUP GUIDANCE —
+  // 裁-92 deleted the vector by deleting the link, not by walling it. The old
+  // full template string is gone; the section may still NAME the retired
+  // shape in prose (it does, deliberately, so a deployer knows what NOT to
+  // configure) but must not instruct configuring it.
+  assert.doesNotMatch(readme, /\{\{ \.RedirectTo \}\}\?token_hash=\{\{ \.TokenHash \}\}&type=email/);
+  assert.doesNotMatch(readme, /replace the default `ConfirmationURL` link with exactly/i);
   assert.match(readme, /disable_signup[\s\S]*false[\s\S]*mailer_autoconfirm[\s\S]*false/i);
   assert.match(readme, /components\/invite-accept-form\.tsx[\s\S]*components\/entry\/signup-account-form\.tsx/);
 });
 
-test("NEW-4: signup confirmation records its access-log residual and deploy receipt", () => {
+test("NEW-4 (superseded by 裁-92): the GET-query log-control residual is recorded as RESOLVED, and C1/C2's own gap is named", () => {
   const readme = readFileSync(join(WEB_ROOT, "README.md"), "utf8");
   assert.match(
     readme,
-    /### 4\.[\s\S]*signup confirmation[\s\S]*blocking log-control receipt[\s\S]*access logs[\s\S]*positive read/i,
+    /### 4\.[\s\S]*RESOLVED, not merely re-scoped[\s\S]*never reads.*searchParams/i,
+  );
+  assert.match(
+    readme,
+    /### 4\.[\s\S]*C1\/C2's own residual[\s\S]*not built on this tip/i,
   );
 });
 
@@ -305,8 +319,30 @@ test("N6: live entry prose names only the moved route-group paths", () => {
   }
 });
 
-test("LOW-4: the DPA checkbox is described as a client gate, never as the security wall", () => {
-  const source = readFileSync(join(WEB_ROOT, "components/entry/signup-account-form.tsx"), "utf8");
-  assert.match(source, /client(?:-side)? gate/i);
-  assert.doesNotMatch(source, /this is the wall/i);
+test("LOW-4 (superseded by FS-4 C-6): the DPA gate moved off the account step, and the seam is honest about not being wired", () => {
+  // v1 carried a checkbox on THIS form; checkout-gate-design.md §1.1 moved
+  // the real DPA e-sign to /signup step 2 (signup-dpa-form.tsx), once an
+  // open registration exists to sign against. This form must no longer
+  // claim any DPA gate of its own.
+  const accountSource = readFileSync(
+    join(WEB_ROOT, "components/entry/signup-account-form.tsx"),
+    "utf8",
+  );
+  assert.doesNotMatch(
+    accountSource,
+    /dpaAccepted|id="signup-dpa"|dpaLabel|dpaNotBuilt/,
+    "a DPA checkbox reappeared on the account step",
+  );
+
+  // The new home describes its click as an honest not-wired seam, never a
+  // fabricated signature.
+  const dpaFormSource = readFileSync(
+    join(WEB_ROOT, "components/entry/signup-dpa-form.tsx"),
+    "utf8",
+  );
+  assert.match(dpaFormSource, /Lane-B seam/i);
+  assert.doesNotMatch(dpaFormSource, /this is the wall/i);
+
+  const dpaDoorSource = readFileSync(join(WEB_ROOT, "lib/registration/dpa-doors.ts"), "utf8");
+  assert.match(dpaDoorSource, /never a fabricated success/i);
 });

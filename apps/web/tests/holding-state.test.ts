@@ -6,6 +6,7 @@ import {
   type HoldingDecision,
   type HoldingState,
 } from "../lib/registration/holding-state";
+import { NO_CHECKOUT_PROGRESS, type CheckoutProgress } from "../lib/registration/checkout-progress-reads";
 import type { RegistrationRequestRow } from "../lib/registration/reads";
 import type { OwnRegistrationResult } from "../lib/registration/server-reads";
 import type { CallerContextOutcome } from "../lib/identity/doors";
@@ -47,12 +48,14 @@ const NO_MEMBERSHIP: CallerContextOutcome = { ok: false, reason: "no_membership"
 const ok = (
   rows: RegistrationRequestRow[],
   context: CallerContextOutcome = NO_MEMBERSHIP,
+  checkoutProgress: CheckoutProgress = NO_CHECKOUT_PROGRESS,
 ): OwnRegistrationResult =>
   ({
     ok: true,
     subject: SUBJECT,
     rows,
     context,
+    checkoutProgress,
   }) as unknown as OwnRegistrationResult;
 
 const MEMBER_CONTEXT: CallerContextOutcome = {
@@ -130,12 +133,17 @@ describe("holdingStateFrom — the six renderings, one per observable fact", () 
     assert.deepEqual(holdingStateFrom(ok([ROW({ status: "" })])), { kind: "read-failed" });
   });
 
-  it("all six kinds are reachable — no branch is dead", () => {
+  it("all eight kinds are reachable — no branch is dead", () => {
     // Absence is not evidence: without this cell, a mapper that could never
     // produce (say) `approved` would still pass every cell above that does not
     // exercise it. This enumerates the reachable set and pins its size.
+    // FS-4 C-6 widened six to eight: `checkout_open` and `paid` are new
+    // SIBLING kinds of an open registration (holding-state.ts's header), each
+    // reached only via a POSITIVE `checkoutProgress` read.
     const reached = new Set([
       holdingStateFrom(ok([ROW({ status: "open" })])).kind,
+      holdingStateFrom(ok([ROW({ status: "open" })], NO_MEMBERSHIP, { checkoutOpen: true, paidUnconsumed: false })).kind,
+      holdingStateFrom(ok([ROW({ status: "open" })], NO_MEMBERSHIP, { checkoutOpen: false, paidUnconsumed: true })).kind,
       holdingStateFrom(ok([ROW({ status: "rejected" })])).kind,
       holdingStateFrom(ok([ROW({ status: "approved" })])).kind,
       holdingStateFrom(ok([])).kind,
@@ -144,8 +152,80 @@ describe("holdingStateFrom — the six renderings, one per observable fact", () 
     ]);
     assert.deepEqual(
       [...reached].sort(),
-      ["approved", "invite-expected", "pending", "read-failed", "rejected", "unidentified"],
+      [
+        "approved",
+        "checkout_open",
+        "invite-expected",
+        "paid",
+        "pending",
+        "read-failed",
+        "rejected",
+        "unidentified",
+      ],
     );
+  });
+});
+
+describe("FS-4 C-6, §2.1: checkout_open and paid — POSITIVELY read, never guessed", () => {
+  const OPEN_ROW = ROW({ status: "open", firm_name: "BEE CREATIVE SOLUTION" });
+
+  it("no checkout progress observed → the DEFAULT pending arm (backward compatible)", () => {
+    assert.deepEqual(holdingStateFrom(ok([OPEN_ROW])), {
+      kind: "pending",
+      firmName: "BEE CREATIVE SOLUTION",
+    });
+    // The explicit NO_CHECKOUT_PROGRESS value must answer identically to
+    // omitting the argument entirely — the two must never drift apart.
+    assert.deepEqual(
+      holdingStateFrom(ok([OPEN_ROW], NO_MEMBERSHIP, NO_CHECKOUT_PROGRESS)),
+      { kind: "pending", firmName: "BEE CREATIVE SOLUTION" },
+    );
+  });
+
+  it("checkoutOpen observed → checkout_open, carrying the DB's own firm name", () => {
+    const state = holdingStateFrom(
+      ok([OPEN_ROW], NO_MEMBERSHIP, { checkoutOpen: true, paidUnconsumed: false }),
+    );
+    assert.deepEqual(state, { kind: "checkout_open", firmName: "BEE CREATIVE SOLUTION" });
+  });
+
+  it("paidUnconsumed observed → paid", () => {
+    const state = holdingStateFrom(
+      ok([OPEN_ROW], NO_MEMBERSHIP, { checkoutOpen: false, paidUnconsumed: true }),
+    );
+    assert.deepEqual(state, { kind: "paid", firmName: "BEE CREATIVE SOLUTION" });
+  });
+
+  it("PAID OUTRANKS checkout_open when (implausibly) both were observed", () => {
+    const state = holdingStateFrom(
+      ok([OPEN_ROW], NO_MEMBERSHIP, { checkoutOpen: true, paidUnconsumed: true }),
+    );
+    assert.equal(state.kind, "paid", "the more-advanced fact must win, never the earlier one");
+  });
+
+  it("checkout progress is IGNORED for every non-open status — a decided registration owes no checkout read", () => {
+    const rejected = holdingStateFrom(
+      ok([ROW({ status: "rejected", reason: "no" })], NO_MEMBERSHIP, { checkoutOpen: true, paidUnconsumed: true }),
+    );
+    assert.equal(rejected.kind, "rejected", "checkout progress leaked into a decided registration's rendering");
+
+    const approved = holdingStateFrom(
+      ok([ROW({ status: "approved" })], NO_MEMBERSHIP, { checkoutOpen: true, paidUnconsumed: true }),
+    );
+    assert.equal(approved.kind, "approved");
+  });
+
+  it("MUTANT: inferring checkout_open from EMPTY checkoutProgress (absence as evidence) is RED against the shipped answer", () => {
+    // The mutant a careless "positive read" refactor could introduce: treating
+    // an EMPTY/omitted read as if it POSITIVELY observed progress, rather than
+    // as "nothing observed". Absence is not evidence (review law 2).
+    const guessOpenFromAbsence = (r: OwnRegistrationResult): HoldingDecision => {
+      const real = holdingStateFrom(r);
+      return real.kind === "pending" ? { kind: "checkout_open", firmName: real.firmName } : real;
+    };
+    const shipped = holdingStateFrom(ok([OPEN_ROW]));
+    assert.notDeepEqual(guessOpenFromAbsence(ok([OPEN_ROW])), shipped);
+    assert.equal(shipped.kind, "pending");
   });
 });
 

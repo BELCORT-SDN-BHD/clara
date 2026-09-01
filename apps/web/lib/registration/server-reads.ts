@@ -25,6 +25,12 @@ import {
   loadRegistrationRequestsForApplicant,
 } from "./reads";
 import {
+  NO_CHECKOUT_PROGRESS,
+  probeCheckoutProgress,
+  type CheckoutProgress,
+} from "./checkout-progress-reads";
+import { isRegistrationRequestRow } from "./holding-state";
+import {
   readCallerContextForSubject,
   type CallerContextOutcome,
 } from "@/lib/identity/doors";
@@ -65,6 +71,12 @@ export type OwnRegistrationResult =
       /** A separate, positive read of `clara.caller_context`. Zero registration
        * rows never stand in for this membership evidence. */
       readonly context: CallerContextOutcome;
+      /** §2.1's checkout-progress probe (checkout-progress-reads.ts), gated on
+       *  the newest row being a validated, subject-bound, OPEN registration —
+       *  every other status owes no checkout read. `NO_CHECKOUT_PROGRESS`
+       *  otherwise, honestly: "not probed" and "probed and saw nothing" render
+       *  identically, on purpose (holding-state.ts never distinguishes them). */
+      readonly checkoutProgress: CheckoutProgress;
     }
   | { readonly ok: false; readonly reason: "no_session" };
 
@@ -99,5 +111,23 @@ export async function loadOwnRegistrationRequests(
       signal: deps.signal,
     }),
   ]);
-  return { ok: true, subject: session.subject, rows, context };
+
+  // Gate the checkout-progress probe on a VALIDATED, subject-bound, OPEN
+  // newest row — the same predicate holding-state.ts's own switch uses for
+  // this arm. `rows` is still `unknown[]` here (holding-state.ts's own
+  // validator owns the runtime decode); reusing that exact validator rather
+  // than re-deriving a second "is this an open row for me" check keeps the
+  // gate and the decision agreeing by construction (review law 3).
+  const newest = rows[0];
+  const openRegistrationId =
+    isRegistrationRequestRow(newest) &&
+    newest.applicant === session.subject &&
+    newest.status === "open"
+      ? newest.id
+      : null;
+  const checkoutProgress = openRegistrationId
+    ? await probeCheckoutProgress(accessor, openRegistrationId, session.subject, deps.signal)
+    : NO_CHECKOUT_PROGRESS;
+
+  return { ok: true, subject: session.subject, rows, context, checkoutProgress };
 }
