@@ -84,6 +84,22 @@ before(async () => {
   await rootQuery("update clara.firms set is_operator=true where id=$1", [OP.firm]);
 });
 after(async () => {
+  // Release OP's operator flag (the G1B-C1 instance — cross-package/cross-run collision on
+  // uq_firms_one_operator, a genuine database-wide partial UNIQUE INDEX, not a roster a reader
+  // can narrow by identity, so T1's own prefix-exclusion trick does not apply to it): before()
+  // above only ever DEFENSIVELY cleared a PRIOR run's stale `g1op_%` firm at its own start —
+  // nothing released THIS run's own OP at the end, so it stayed is_operator=true in the database
+  // indefinitely (until this file's NEXT run, or a fresh rig), long after this file's own
+  // process exits. packages/runtime/tests/g1-wake-bodies.test.mjs's G1B-C1 cell needs the
+  // singleton genuinely free to test set_wake_source_enabled's real door end-to-end
+  // (uq_firms_one_operator permits at most one true, system-wide) — measured firing even
+  // WITHOUT concurrency, on a reused database, once this file had run and left OP set. Mirrors
+  // this file's own wake_engine_sources cleanup discipline (registerSource's after()): release
+  // what you claimed. Scoped to OP's own id, never an unscoped clear (constraint 13 — a
+  // genuinely-set BELCORT operator flag on a shared/persistent rig must never be touched).
+  if (OP) {
+    await rootQuery("update clara.firms set is_operator=false where id=$1 and is_operator", [OP.firm]);
+  }
   printLaneNotes("g1-wake-engine");
   console.log(`[g1-wake-engine] skipped: ${SKIPPED}`);
   await endPool();

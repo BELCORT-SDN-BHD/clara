@@ -242,8 +242,42 @@ test("G1B-C1 a DISABLED source claims nothing; enabling through set_wake_source_
   // ceremony's own raw act (docs/ops/g1-operator-firm-ceremony.md) sets firms.is_operator; this
   // cell walks that same door rather than UPDATEing the registry behind its back, then puts the
   // flag back so the estate is left exactly as found (uq_firms_one_operator admits only one).
-  const priorOperator = await rig.rootQuery("select id from clara.firms where is_operator");
-  assert.equal(priorOperator.rows.length, 0, "the rig starts with NO operator firm — this cell would otherwise collide");
+  //
+  // uq_firms_one_operator is a genuine database-wide partial UNIQUE INDEX, not a roster this
+  // cell can narrow by identity (T1's prefix-exclusion trick, packages/db/tests/g1-wake-engine
+  // .test.mjs, does not apply here — that fixes an unscoped READ against a table of many rows;
+  // this is a WRITE-WRITE conflict on a real singleton, and no read-side filter can make a
+  // second `is_operator=true` row legal). packages/db/tests/g1-wake-engine.test.mjs's own OP
+  // fixture legitimately holds that singleton for its ENTIRE file's run (many of its own
+  // cells — T2z, MUST D, M3, N1 — need OP to stay live throughout, so it cannot release
+  // between cells the way this cell's own critical section can) — a real, long-lived,
+  // entirely legitimate claim with no ordering guarantee against this file under CI's
+  // concurrent `pnpm -r --if-present test` (the G1B-C1 instance of the #485/#490 class:
+  // measured firing even WITHOUT concurrency, on a reused database, once that file had run and
+  // left OP set — its own after() now releases it, packages/db/tests/g1-wake-engine.test.mjs's
+  // own after() comment). A single hard "the rig starts empty" assertion is a FALSE premise
+  // whenever that other file's fixture is live, so it is RESTATED here: this cell does not need
+  // the estate to have STARTED empty — it needs to OBTAIN exclusive use of the one global slot
+  // before it proceeds, waiting out any other legitimate holder rather than assuming there is
+  // none. A bounded, generous poll (never a silent skip: an exhausted wait still fails loud, by
+  // name, exactly as before) — paired with the db-side after()-cleanup above, which bounds the
+  // realistic wait to roughly that OTHER file's own run length, not "forever".
+  const OPERATOR_WAIT_TIMEOUT_MS = 90_000;
+  const OPERATOR_WAIT_POLL_MS = 250;
+  const operatorWaitDeadline = Date.now() + OPERATOR_WAIT_TIMEOUT_MS;
+  let priorOperator;
+  for (;;) {
+    priorOperator = await rig.rootQuery("select id from clara.firms where is_operator");
+    if (priorOperator.rows.length === 0) break;
+    if (Date.now() >= operatorWaitDeadline) {
+      assert.equal(
+        priorOperator.rows.length,
+        0,
+        `the rig still has an operator firm (id=${priorOperator.rows[0].id}) after waiting ${OPERATOR_WAIT_TIMEOUT_MS}ms — this cell would otherwise collide with uq_firms_one_operator; a legitimate concurrent holder should have released it well within this window`,
+      );
+    }
+    await rig.sleep(OPERATOR_WAIT_POLL_MS);
+  }
   await rig.rootQuery("update clara.firms set is_operator = true where id = $1", [w.firm]);
   try {
     await rig.asHuman(w.owner, (c) =>
