@@ -9,7 +9,7 @@ FS-4 Lane A (#488) shipped an explicit "resend the code" control that called
 `supabase.auth.resend` **directly from the browser**, reachable with NO session by crafting
 `/auth/confirm?status=expired`. It bypassed the C1/C2 attempt wall entirely and consumed the
 project-wide email budget shared with every real signup. **Ruled: the direct call is REMOVED**;
-the button stays and calls a new Lane-B seam (`lib/registration/confirmation-resend.ts`) that
+the button stays and calls a new Lane-B seam (`apps/web/lib/registration/confirmation-resend.ts`) that
 refuses honestly today and gets walled when Lane B wires it. Rationale: it inverted this very
 PR's own thesis — the walled path refused honestly while a second, unwalled door to the same
 auth infrastructure stood open. Verification recorded at review: the card no longer imports the
@@ -246,7 +246,7 @@ diagnosis than the one recorded above. Its rules supersede the loose "grep wider
 
 1. **The miss was SCOPE, not pattern.** A repo-wide search for the literal `cache-control` WOULD have
    found `response-state.ts:44`. The instrument was scoped to three files — `next.config.ts`,
-   `middleware.ts`, `proxy.ts` — chosen from a mental model of where a route's cache header *ought*
+   the middleware, `apps/web/proxy.ts` — chosen from a mental model of where a route's cache header *ought*
    to live. The mechanism lives two modules away in a shared applier the response passes through.
    **LAW: when the question is whether a PROPERTY holds on a response, the instrument must follow the
    response's CONSTRUCTION PATH, not the files you would have written it in.** Scoping the instrument
@@ -407,8 +407,8 @@ verification, holds 裁-102 and 裁-103) · `pr488-contract-fixer` · `fs4-pr488
 `pr490-review` (closed) · `fs8-pr489-review` (closed).
 
 **Standing follow-up ledger (none blocks beta):** the 756-site / 88-file `settleUntil` sweep with
-the helper hoisted to `test/hookHarness.ts` first (#491's corrected census — the original estimate
-was 20× low) · freeze-lint drift guard refusing `tests/`-path registrations · p4t2's actor-scoped
+the helper hoisted to a shared test/hookHarness.ts (future file) first (#491's corrected census — the original estimate
+was 20× low) · freeze-lint drift guard refusing tests/-path registrations · p4t2's actor-scoped
 audit count · a gate binding a11y shadows to their real pages + a tree→registry ⌘K cell ·
 `components/reports/DoorDialog.tsx:90`'s identical close-polarity bypass · C-5's order items (the
 projector's nested-PII wall, loud webhook rejects, C-2's `constraint_name` re-raise hazard) ·

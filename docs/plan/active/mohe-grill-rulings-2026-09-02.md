@@ -5,7 +5,7 @@
 > Code update — the session and every lane terminate, so state must be 100% in-repo), preceded
 > by a full harness truing sweep (seven read-only drift-scan lanes over PROGRESS, the product
 > law, AGENTS, the ADR digest, the plan index, the deferral census, and the ops READMEs). The
-> sweep's corrections ship as the `docs/harness-truing-2026-09-02` PR (docs-only, ADR-0069
+> sweep's corrections ship as the docs/harness-truing-2026-09-02 branch's PR (ADR-0069
 > single lane). Resume map for the next session: `PROGRESS.md`'s 2026-09-02 posture + the
 > evening state bridge in the `-09-01-pm` ledger.
 
