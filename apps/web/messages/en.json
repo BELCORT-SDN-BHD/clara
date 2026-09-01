@@ -2500,6 +2500,9 @@
       "cancelConfirm": "Cancel onboarding",
       "cancelReasonLabel": "Reason for cancelling",
       "cancelReasonPlaceholder": "Why is this onboarding being cancelled?",
+      "interviewStartTrigger": "Start / continue interview",
+      "interviewStartDescription": "Answer Clara's onboarding questions inside this thread. Starting again safely returns the run already bound to this plan.",
+      "interviewStarting": "Starting interview...",
       "cancelBlockedNotOpen": "This plan is no longer open — there is nothing left to cancel.",
       "beginHeading": "Start a new client's onboarding",
       "beginTrigger": "Begin client onboarding",
@@ -2510,6 +2513,73 @@
       "namePlaceholder": "Legal or trading name",
       "beginResult": "Client {clientId} and plan {planId} were created.",
       "beginResultLink": "Open this client's workspace"
+    }
+  },
+  "Interview": {
+    "cardLabel": "Client onboarding interview",
+    "heading": "Onboarding interview",
+    "progress": "step {index} · {seg}",
+    "loading": "Reading the interview's confirmed state...",
+    "working": "Clara is preparing the next question.",
+    "noOpenQuestion": "There is no open interview question right now.",
+    "threadLabel": "Interview activity",
+    "threadEmpty": "No confirmed interview activity yet.",
+    "chip": {
+      "awaiting_you": "Awaiting you",
+      "working": "Working",
+      "complete": "Complete",
+      "cancelled": "Cancelled",
+      "expired": "Expired",
+      "ended": "Ended",
+      "unknown": "Status unavailable"
+    },
+    "role": {
+      "clara": "Clara",
+      "you": "You"
+    },
+    "answer": {
+      "label": "Your answer",
+      "placeholder": "Type your answer",
+      "confirmPlaceholder": "Confirm or correct this answer",
+      "send": "Send",
+      "sending": "Sending..."
+    },
+    "cancel": {
+      "trigger": "Cancel onboarding",
+      "title": "Cancel this client's onboarding",
+      "description": "Clara first stops the open interview park, then archives the onboarding plan. The client record is not deleted.",
+      "confirm": "Cancel onboarding",
+      "reasonLabel": "Reason for cancelling",
+      "reasonPlaceholder": "Why is this onboarding being cancelled?"
+    },
+    "terminal": {
+      "interview_complete": "The interview is complete. Review the plan, then commit onboarding when ready.",
+      "cancelled": "This interview was cancelled.",
+      "expired": "This interview park expired. Start again or cancel onboarding.",
+      "plan_gone": "The onboarding plan is no longer open — nothing further to answer here.",
+      "superseded_by_existing_run": "Another interview run already owns this plan.",
+      "fallback": "Interview ended: {outcome}."
+    },
+    "attach": {
+      "heading": "Sample invoices",
+      "inputLabel": "Attach sample invoices",
+      "hint": "Attach samples here, then still answer the interview with 'attached' or 'skip'.",
+      "tooLarge": "{filename} is larger than the {limitMb} MB upload limit.",
+      "duplicate": "{filename} is already in this upload queue.",
+      "clear": "Clear finished uploads",
+      "queueQueued": "Queued",
+      "queueStarting": "Starting",
+      "queueUploading": "Uploading",
+      "queueVerifying": "Verifying",
+      "queueFiling": "Filing to this client",
+      "queueReady": "Filed to this client",
+      "queueFailed": "Processing failed",
+      "queueStopped": "Tracking stopped",
+      "queueErrorFiling": "Could not file to this client",
+      "queueErrorTimeout": "Verification timed out",
+      "queueErrorUpload": "Upload failed",
+      "retry": "Retry",
+      "remove": "Remove"
     }
   },
   "Registrations": {

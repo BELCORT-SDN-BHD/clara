@@ -261,6 +261,8 @@ export const PAIR_SPECS = [
     source: "the active-tab state — components/client-workspace-nav.tsx (bg-muted text-foreground); the P3-polished components/ui/command.tsx CommandItem's own selected state (data-selected:bg-muted data-selected:text-foreground, moved off accent tokens). registers-workbench.tsx's former copy of the active-tab pattern moved onto the shared components/common/section-tabs.tsx (a border-primary indicator, not a muted fill), which does not render this pair." },
   { id: "foreground-on-clara-muted", fg: (h) => h("foreground"), bg: (h) => h("clara-muted"), threshold: 4.5,
     source: "components/clara/ClaraThreadView.tsx assistant chat bubble (bg-clara-muted, default/inherited text colour)" },
+  { id: "secondary-ink-on-clara-muted", fg: (h) => h("secondary-ink"), bg: (h) => h("clara-muted"), threshold: 4.5,
+    source: "components/clara/InterviewRunCard.tsx's per-turn thread role label (\"Clara · <seg>\") on the clara-role bubble — the live 裁-86 browser walk's axe scan caught the PRIOR text-muted-foreground choice at 4.49:1 on this ground (a blind spot: no PAIR_SPECS row had ever paired muted-foreground with clara-muted specifically), so this pairing is now pinned rather than left to a live-DOM-only gate." },
 
   // --- Brand/Clara accent text ---
   { id: "clara-on-card", fg: (h) => h("clara"), bg: (h) => h("card"), threshold: 4.5,
