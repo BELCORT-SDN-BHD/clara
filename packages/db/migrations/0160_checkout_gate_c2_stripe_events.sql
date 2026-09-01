@@ -347,7 +347,6 @@ declare
   v_applied integer := 0;
   v_problems integer := 0;
   v_constraint text;
-  v_sql text;
 begin
   if p_limit is null or p_limit<1 then
     raise exception 'limit must be positive' using errcode='CLR10';
@@ -356,8 +355,17 @@ begin
   -- C-5 starvation fix: every skippable row is excluded inside the query, BEFORE LIMIT. Keeping
   -- the consumed-payment check in the loop lets old rows occupy the whole window forever. The
   -- two dynamic shapes preserve C-2's executable negative paths before C-3 creates its table.
+  -- The branch picks between two STRING LITERALS, so the EXECUTE itself carries the literal
+  -- directly (never a variable): the wiki dynamic-SQL gate's static prover only reconstructs a
+  -- literal used AT the EXECUTE site, so `v_sql := <literal>; ... execute v_sql` was unprovable
+  -- even though both branches are pure literals naming no wiki relation. The loop body is
+  -- duplicated rather than hoisted into a helper so no new function/grant surface is added (c2.8
+  -- pins the webhook role at exactly two executable routines). Byte-identical SQL text in both
+  -- branches; only the control flow moved. (裁-112: this rewrite postdates C-2's four review
+  -- rounds, which reviewed the pre-rewrite v_sql-variable body; a scoped re-check covers exactly
+  -- this control-flow change and nothing else in the migration.)
   if to_regclass('clara.firm_registration_payments') is not null then
-    v_sql := $q$
+    for e in execute $q$
       select se.* from clara.stripe_events se
        where se.type='checkout.session.completed'
          and not exists (
@@ -370,21 +378,7 @@ begin
          )
        order by se.received_at,se.event_id
        limit $1
-    $q$;
-  else
-    v_sql := $q$
-      select se.* from clara.stripe_events se
-       where se.type='checkout.session.completed'
-         and not exists (
-           select 1 from clara.stripe_event_problems sep
-            where sep.event_id=se.event_id and sep.resolved_at is null
-         )
-       order by se.received_at,se.event_id
-       limit $1
-    $q$;
-  end if;
-
-  for e in execute v_sql using p_limit loop
+    $q$ using p_limit loop
 
     v_examined := v_examined+1;
 
@@ -464,7 +458,99 @@ begin
       on conflict (event_id,problem) where resolved_at is null do nothing;
       if found then v_problems := v_problems+1; end if;
     end;
-  end loop;
+    end loop;
+  else
+    for e in execute $q$
+      select se.* from clara.stripe_events se
+       where se.type='checkout.session.completed'
+         and not exists (
+           select 1 from clara.stripe_event_problems sep
+            where sep.event_id=se.event_id and sep.resolved_at is null
+         )
+       order by se.received_at,se.event_id
+       limit $1
+    $q$ using p_limit loop
+
+    v_examined := v_examined+1;
+
+    -- 裁-58/裁-28 tripwire: this second disjunct is an RM0-only relaxation. When amounts are
+    -- ruled it MUST tighten to proof of settled payment; it is deliberately not a paid-price rule.
+    if (
+      e.payment_status='paid'
+      or (e.mode='subscription' and e.session_status='complete')
+    ) is not true then
+      insert into clara.stripe_event_problems(event_id,problem,detail)
+      values (e.event_id,'payment_not_settled',jsonb_build_object(
+        'payment_status',e.payment_status,'mode',e.mode,'session_status',e.session_status))
+      on conflict (event_id,problem) where resolved_at is null do nothing;
+      if found then v_problems := v_problems+1; end if;
+      continue;
+    end if;
+
+    if e.registration_id is null or e.applicant is null or e.intent_id is null
+       or e.session_id is null then
+      insert into clara.stripe_event_problems(event_id,problem,detail)
+      values (e.event_id,'metadata_missing',jsonb_build_object(
+        'registration_id_present',e.registration_id is not null,
+        'applicant_present',e.applicant is not null,
+        'intent_id_present',e.intent_id is not null,
+        'session_id_present',e.session_id is not null))
+      on conflict (event_id,problem) where resolved_at is null do nothing;
+      if found then v_problems := v_problems+1; end if;
+      continue;
+    end if;
+
+    select ci.id,ci.registration_id,ci.applicant,ci.session_id into i
+      from clara.checkout_intents ci
+     where ci.id=e.intent_id;
+    if not found then
+      insert into clara.stripe_event_problems(event_id,problem,detail)
+      values (e.event_id,'intent_not_found',jsonb_build_object('intent_id',e.intent_id))
+      on conflict (event_id,problem) where resolved_at is null do nothing;
+      if found then v_problems := v_problems+1; end if;
+      continue;
+    end if;
+
+    if i.session_id is distinct from e.session_id
+       or i.registration_id is distinct from e.registration_id
+       or i.applicant is distinct from e.applicant then
+      insert into clara.stripe_event_problems(event_id,problem,detail)
+      values (e.event_id,'intent_mismatch',jsonb_build_object(
+        'intent_id',e.intent_id,
+        'session_id_matches',i.session_id is not distinct from e.session_id,
+        'registration_id_matches',i.registration_id is not distinct from e.registration_id,
+        'applicant_matches',i.applicant is not distinct from e.applicant))
+      on conflict (event_id,problem) where resolved_at is null do nothing;
+      if found then v_problems := v_problems+1; end if;
+      continue;
+    end if;
+
+    -- BLOCKER-4: this BEGIN/EXCEPTION block is a per-row subtransaction. Do not widen the
+    -- stripe_event_id conflict target: uq_frp_registration must surface as duplicate_payment.
+    begin
+      insert into clara.firm_registration_payments(
+        registration_id,applicant,stripe_event_id,stripe_session_id,
+        stripe_customer_id,stripe_subscription_id
+      ) values (
+        e.registration_id,e.applicant,e.event_id,e.session_id,e.customer_id,e.subscription_id
+      )
+      on conflict (stripe_event_id) do nothing;
+      if found then
+        v_applied := v_applied+1;
+      end if;
+    exception when unique_violation then
+      get stacked diagnostics v_constraint=constraint_name;
+      if v_constraint is distinct from 'uq_frp_registration' then
+        raise;
+      end if;
+      insert into clara.stripe_event_problems(event_id,problem,detail)
+      values (e.event_id,'duplicate_payment',jsonb_build_object(
+        'registration_id',e.registration_id,'constraint',v_constraint))
+      on conflict (event_id,problem) where resolved_at is null do nothing;
+      if found then v_problems := v_problems+1; end if;
+    end;
+    end loop;
+  end if;
 
   return jsonb_build_object('examined',v_examined,'applied',v_applied,'problems',v_problems);
 end $$;
