@@ -246,7 +246,7 @@ diagnosis than the one recorded above. Its rules supersede the loose "grep wider
 
 1. **The miss was SCOPE, not pattern.** A repo-wide search for the literal `cache-control` WOULD have
    found `response-state.ts:44`. The instrument was scoped to three files — `next.config.ts`,
-   the middleware, `apps/web/proxy.ts` — chosen from a mental model of where a route's cache header *ought*
+   middleware.ts (a file that does not exist in this repo — the Next-16 rename made it `apps/web/proxy.ts`), `apps/web/proxy.ts` — chosen from a mental model of where a route's cache header *ought*
    to live. The mechanism lives two modules away in a shared applier the response passes through.
    **LAW: when the question is whether a PROPERTY holds on a response, the instrument must follow the
    response's CONSTRUCTION PATH, not the files you would have written it in.** Scoping the instrument

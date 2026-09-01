@@ -5,8 +5,11 @@
 > Code update — the session and every lane terminate, so state must be 100% in-repo), preceded
 > by a full harness truing sweep (seven read-only drift-scan lanes over PROGRESS, the product
 > law, AGENTS, the ADR digest, the plan index, the deferral census, and the ops READMEs). The
-> sweep's corrections ship as the docs/harness-truing-2026-09-02 branch's PR (ADR-0069
-> single lane). Resume map for the next session: `PROGRESS.md`'s 2026-09-02 posture + the
+> sweep's corrections ship as the docs/harness-truing-2026-09-02 branch's PR — zero code
+> lines, but the CI classifier scores it CODE (three README paths sit outside the docs path
+> set), so it does NOT ride ADR-0069's docs-only lane: it takes the standing code ladder,
+> which under 裁-111 is ONE fresh-context opus read-only review (no frontend surface, so no
+> browser leg is owed) — and has had it. Resume map for the next session: `PROGRESS.md`'s 2026-09-02 posture + the
 > evening state bridge in the `-09-01-pm` ledger.
 
 ## 裁-110 · RESERVED (recorded 2026-09-02 to close a silent numbering gap)
@@ -46,5 +49,6 @@ The drift-scan's product-law lane found two §6 texts contradicting ruled-and-sh
    (typed consent + separate owner activation, re-checked at dispatch) and 16(b) trace export
    (the existing ADR-011 text); ARCHITECTURE gains the matching subsection.**
 
-Cost stated at the ask: docs-only, rides the truing PR's single lane. Both texts are truings of
+Cost stated at the ask: zero code lines, riding the truing PR's one-opus-review ladder (the
+classifier scores that PR CODE — see the header note; not ADR-0069's lane). Both texts are truings of
 already-ruled decisions, not new policy — the DECISION here is that the law documents say so.
