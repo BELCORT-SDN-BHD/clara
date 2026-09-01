@@ -711,8 +711,15 @@ begin
     v_retry_after:=null;
   elsif v_email_count>=5 then
     v_scope:='email';
-    select greatest(0,floor(extract(epoch from
-             ((a.attempted_at+interval '15 minutes')-v_attempted_at)))+1)::int
+    -- NEW-1 (opus review on 99e7573e, MEASURED): floor(...)+1 advances one full second past the
+    -- true fractional value, which is exactly right when the true value is fractional -- but when
+    -- a counted prior shares the exact microsecond of v_attempted_at (a same-transaction now(),
+    -- measured reproducible), the true value is EXACTLY 900.0 and floor()+1 overshoots to 901.
+    -- 901 would fail #488's inclusive 900 clamp and render the generic invalid card instead of
+    -- the honest lockout -- the exact reconciliation failure 裁-103 exists to prevent. Clamp here,
+    -- at the source, so the door itself never promises what the clamp cannot render.
+    select least(900,greatest(0,floor(extract(epoch from
+             ((a.attempted_at+interval '15 minutes')-v_attempted_at)))+1))::int
       into v_retry_after
       from clara.confirmation_attempts a
      where a.id<>v_attempt and a.email_digest=p_email_digest
@@ -722,8 +729,8 @@ begin
      offset greatest(v_email_count-4,0) limit 1;
   else
     v_scope:='origin';
-    select greatest(0,floor(extract(epoch from
-             ((a.attempted_at+interval '15 minutes')-v_attempted_at)))+1)::int
+    select least(900,greatest(0,floor(extract(epoch from
+             ((a.attempted_at+interval '15 minutes')-v_attempted_at)))+1))::int
       into v_retry_after
       from clara.confirmation_attempts a
      where a.id<>v_attempt and a.origin_digest=p_origin_digest

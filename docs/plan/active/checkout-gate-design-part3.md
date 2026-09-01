@@ -139,11 +139,14 @@ exactly the law-3 trap, and gave no DB-owned wait at all).
   `email_digest` name; the seam's union is trued to match the door, not the reverse.)
 - **`retry_after_seconds`** is `null` on the allowed path; on refusal, the whole seconds until
   enough of the counted attempts age out of the 15-minute window to admit a retry — derived from
-  attempt timestamps the DB already owns (hard constraint 2). Its range is `(0, 900]` — **inclusive
-  of exactly 900**, not strictly less: the value rounds a fractional wait UP to the next whole
-  second, and when the true wait is already an exact 900-second boundary that rounds to 900 itself,
-  never higher. A UI clamp on the displayed wait must therefore treat `900` as a real, reachable
-  value, not an overflow.
+  attempt timestamps the DB already owns (hard constraint 2). The rounding rounds a fractional
+  wait UP to the next whole second (so a retry at the exact advertised second, under the window's
+  inclusive `>=` boundary, still finds the target row expired) — which, on its own, MEASURABLY
+  overshoots to 901 when a counted prior shares the exact microsecond of the current attempt (a
+  same-transaction `now()`; opus review on #493, NEW-1). **The door therefore clamps explicitly**
+  (`least(900, ...)`), so its range is `(0, 900]` **by construction, not by the rounding's own
+  arithmetic** — a UI clamp on the displayed wait must treat `900` as a real, reachable value, not
+  an overflow, but must never need to protect against anything past it either.
 
 **The row is written BEFORE the verification, not after, and that ordering is the wall.** If the
 attempt were recorded on the way back, an attacker would abort the request after each failed guess

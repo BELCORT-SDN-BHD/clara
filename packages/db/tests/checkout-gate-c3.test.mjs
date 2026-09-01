@@ -916,7 +916,16 @@ cell("c3.30 W-H5 -- an unsettled attempt counts fail-closed against the next win
 // that range. This cell pins the DB-COMPUTED value against independently-derived, injected
 // attempted_at rows, discriminating the fixed offset (N-4, the SECOND-oldest of five identical
 // N=5 priors) from the pre-fix one by construction (five DISTINCT backdated timestamps, so the
-// two candidate targets have different, checkable expiries).
+// two candidate targets have different, checkable expiries). THIS IS THE DISCRIMINATING CELL for
+// the offset half of F1 -- c3.30b below is a positive control, not a discriminator (see its own
+// header note).
+// NOTE-3 (opus review on 99e7573e, MEASURED ~0.2%/run spurious mismatch): `expected` is computed
+// IN SQL, mirroring the door's own clamp+rounding expression against the SAME persisted
+// attempted_at values the door read, rather than through a JS `Date` (millisecond-truncated,
+// while the door computes at microsecond precision) -- eliminating the cross-precision boundary
+// entirely while keeping the cell's discriminating power (the target row is still the
+// explicitly-selected, hardcoded 2nd-oldest; a reverted offset would select a different row and
+// this comparison would redden).
 cell("c3.30a W-H3 exact value -- retry_after_seconds matches the DB-computed formula, not merely a range", async () => {
   const email = digest("value-email");
   const origin = digest("value-origin");
@@ -931,25 +940,25 @@ cell("c3.30a W-H3 exact value -- retry_after_seconds matches the DB-computed for
   const sixth = await claimConfirmation(email, origin);
   assert.equal(sixth.allowed, false);
   assert.equal(sixth.scope, "email");
-  const sixthRow = await rootQuery(
-    "select attempted_at from clara.confirmation_attempts where id=$1", [sixth.attempt_id],
-  );
   const ordered = await rootQuery(
-    `select attempted_at from clara.confirmation_attempts
+    `select id,attempted_at from clara.confirmation_attempts
       where email_digest=$1 and id<>$2 order by attempted_at asc`,
     [email, sixth.attempt_id],
   );
   assert.equal(ordered.rowCount, 5);
-  const oldest = ordered.rows[0].attempted_at;
-  const target = ordered.rows[1].attempted_at; // N=5 -> offset N-4=1 -> the SECOND-oldest
-  assert.notEqual(new Date(oldest).getTime(), new Date(target).getTime(),
+  const oldest = ordered.rows[0];
+  const target = ordered.rows[1]; // N=5 -> offset N-4=1 -> the SECOND-oldest
+  assert.notEqual(new Date(oldest.attempted_at).getTime(), new Date(target.attempted_at).getTime(),
     "the fixture's five backdated rows must be distinct for this cell to discriminate the offset fix");
-  const sixthAt = sixthRow.rows[0].attempted_at;
-  const expected = Math.max(0, Math.floor(
-    (new Date(target).getTime() + 15 * 60 * 1000 - new Date(sixthAt).getTime()) / 1000,
-  ) + 1);
-  assert.equal(sixth.retry_after_seconds, expected,
-    `retry_after_seconds must equal the DB-computed formula exactly (expected ${expected}, got ${sixth.retry_after_seconds})`);
+  const expectedRow = await rootQuery(
+    `select least(900,greatest(0,floor(extract(epoch from
+         ((a2.attempted_at+interval '15 minutes')-a6.attempted_at)))+1))::int as expected
+       from clara.confirmation_attempts a2, clara.confirmation_attempts a6
+      where a2.id=$1 and a6.id=$2`,
+    [target.id, sixth.attempt_id],
+  );
+  assert.equal(sixth.retry_after_seconds, expectedRow.rows[0].expected,
+    `retry_after_seconds must equal the DB-computed formula exactly (expected ${expectedRow.rows[0].expected}, got ${sixth.retry_after_seconds})`);
 });
 
 // F1 (opus review on #493, BLOCKER): the review traced the concrete failure loop under the old
@@ -958,20 +967,31 @@ cell("c3.30a W-H3 exact value -- retry_after_seconds matches the DB-computed for
 // loop actually closes: backdate five rows to just under the window's edge so the real advertised
 // wait is a few seconds (achievable in a test), wait that long for real, and confirm the retry is
 // genuinely ALLOWED -- not merely that a number was returned.
+// IMPORTANT, per the opus review's own clarification (folded in so nobody later prunes c3.30a
+// believing this cell already covers its ground): this is a POSITIVE loop-closure CONTROL, not a
+// discriminator. The PRE-FIX body also eventually passes this cell -- the bug was an undercounted
+// ADVERTISED wait, never a wait that fails to end at all. c3.30a above is the cell that actually
+// discriminates the fixed offset from the bug.
+// NEW-2 (opus review on 99e7573e, MEASURED load-dependent flake): the original fixture (five
+// SEQUENTIAL inserts backdated 14m58s, a 2-second total margin) reds under real host load once
+// setup exceeds ~2.5s wall-time (measured table: 0-2s PASS, 2.5s+ RED) -- six round trips cannot
+// be assumed to fit a 2-second budget on this estate's own hardware (the 0xC0000142 host-
+// exhaustion night is exactly this class). Fixed: ONE insert statement off a single now() (two
+// round trips total before the wait, not six) and the backdate eased to 14m55s (~5s of margin) --
+// kept as small as the margin allows, so the added real wait stays bounded (~6s) rather than
+// padded defensively.
 cell("c3.30b W-H3 the loop actually closes -- waiting the advertised time yields a real ALLOW", async () => {
   const email = digest("loop-email");
   const origin = digest("loop-origin");
-  for (let i = 0; i < 5; i += 1) {
-    await rootQuery(
-      `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
-       values ($1,$2,now()-interval '14 minutes 58 seconds')`,
-      [email, origin],
-    );
-  }
+  await rootQuery(
+    `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
+     select $1,$2,now()-interval '14 minutes 55 seconds' from generate_series(1,5)`,
+    [email, origin],
+  );
   const sixth = await claimConfirmation(email, origin);
   assert.equal(sixth.allowed, false);
   assert.ok(Number.isInteger(sixth.retry_after_seconds)
-    && sixth.retry_after_seconds > 0 && sixth.retry_after_seconds <= 5,
+    && sixth.retry_after_seconds > 0 && sixth.retry_after_seconds <= 10,
     `fixture expects a short, test-waitable advertised wait (got ${sixth.retry_after_seconds}s)`);
   await new Promise((resolve) => { setTimeout(resolve, (sixth.retry_after_seconds + 1) * 1000); });
   const seventh = await claimConfirmation(email, origin);
