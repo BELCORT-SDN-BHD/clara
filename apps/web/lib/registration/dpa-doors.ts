@@ -77,19 +77,25 @@ export type SignDpaParams = {
 
 // NOTE FOR THE SEAM↔DOOR COMPLETION TABLE (PR #488): `sign_dpa`'s real
 // success/replay carries `{signature_id, signed_at, replay}` (survey F6);
-// the bare `"signed"` below drops all three. THIS IS A LAWFUL DECISION
-// TODAY, NOT A DEFECT (fs4-pr488-review, round 3) — the rule that tells
-// this case apart from M1/M2/A: a dropped PARAM is a defect by default
-// (the door refuses without it, silently and unrecoverably — sign_dpa's own
-// `op_key is required` -> CLR10 is exactly that shape, which is why A was a
-// fix); a dropped RETURN FIELD is a decision by default (the call still
-// succeeds, `{kind:"signed"}` is true whether the door minted a fresh
-// signature or replayed one, so nothing is fabricated, and widening the
-// return later is additive and compile-checked at every consumer the
-// moment one exists). `signup-dpa-form.tsx` has no next step to route a
-// real signature to yet (its own header: "there is no built checkout to
-// send anyone to"), so inventing fields nothing here reads would be shape
-// ahead of need.
+// the bare `"signed"` below drops all three.
+//
+// 裁-107(a) (orchestrator ruling, 2026-09-01,
+// docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md). ORCHESTRATOR-RULED,
+// NOT OWNER-RULED — surfaced to the owner as a design-vs-contract call under
+// hard constraint 1; if the owner rules otherwise this shape changes.
+// (Raised by fs4-pr488-review; the finding is theirs, the ruling is not.)
+//
+// THIS IS A LAWFUL DECISION TODAY, NOT A DEFECT — the rule that tells this
+// case apart from M1/M2/A: a dropped PARAM is a defect by default (the door
+// refuses without it, silently and unrecoverably — sign_dpa's own `op_key
+// is required` -> CLR10 is exactly that shape, which is why A was a fix); a
+// dropped RETURN FIELD is a decision by default (the call still succeeds,
+// `{kind:"signed"}` is true whether the door minted a fresh signature or
+// replayed one, so nothing is fabricated, and widening the return later is
+// additive and compile-checked at every consumer the moment one exists).
+// `signup-dpa-form.tsx` has no next step to route a real signature to yet
+// (its own header: "there is no built checkout to send anyone to"), so
+// inventing fields nothing here reads would be shape ahead of need.
 //
 // THE KNOWN WIDENING, named so it is not rediscovered: `replay` is the
 // field that will matter FIRST. The moment a receipt surface exists,

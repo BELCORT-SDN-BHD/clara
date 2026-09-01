@@ -69,7 +69,31 @@ export type CreateEmailConfirmationRouteClient = () => Promise<EmailConfirmation
  * `verifyOtp` even ran and settles it `"rejected"` on every one of these
  * three causes uniformly (`settleAttempt` below), so the wall's own
  * counting is what actually discriminates a real lockout from a rendering
- * choice — the copy does not have to. */
+ * choice — the copy does not have to.
+ *
+ * TWO GAPS THIS FUNCTION DOES NOT CLOSE, NAMED SO THEY ARE NOT MISTAKEN FOR
+ * FIXED (round 5, fs4-pr488-review / pr488-codex-leg). Both are inherited
+ * from Supabase's own `verify.go` and this line — `error?.code ===
+ * "otp_expired"` — is byte-unchanged since it was first written; round 4's
+ * `remaining` on the expired card reduced the practical harm of the first
+ * one but closed neither:
+ * (1) THE MISCLASSIFICATION ITSELF. An ordinary wrong guess that happens to
+ *     come back as anything other than the literal string `"otp_expired"`
+ *     renders as "wrong"; one that happens to trigger `otp_expired` renders
+ *     as "expired" — the three-way conflation the paragraph above accepts
+ *     for the COPY is still live in the underlying CLASSIFICATION, not only
+ *     in what the person reads.
+ * (2) A NARROW ACCOUNT-STATUS ORACLE. Supabase's real error-code registry
+ *     also has `user_banned` (`ErrorCodeUserBanned`, verified via context7
+ *     against the live `supabase/auth` source, 2026-09-01) — a distinct
+ *     code a banned account's own verification attempt can surface,
+ *     observably different from the code an unknown/normal account's wrong
+ *     guess produces. That differential is not manufactured by this
+ *     function, but it is not closed by it either.
+ * NEITHER is fixed here: whether to special-case `user_banned`, and whether
+ * the wrong/expired conflation needs closing at all, are open design
+ * questions going to the owner (see the PR body's open-items section), not
+ * something this fix round decides unilaterally. */
 function isExpiredOtpError(error: VerifyOtpError | null): boolean {
   return error?.code === "otp_expired";
 }

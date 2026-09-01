@@ -56,11 +56,25 @@ function boundedInt(value: string | string[] | undefined, max: number): number |
 // set this function accepts is one place, not "whatever the switch
 // currently happens to match" — a future case added to `confirmRedirect`
 // (`verify/handler.ts`) without a matching entry here now fails to compile,
-// instead of silently falling through to `default`. This does not by
-// itself authenticate a redirect (nothing on this GET is signed — that
-// residual is unchanged and accepted, part 1 §3.3/W-H); it only closes the
-// gap between "the switch's default happens to be safe" and "the accepted
-// set is a named fact checked before any branch runs."
+// instead of silently falling through to `default`.
+//
+// WHAT THIS DOES NOT DO (round 5 correction — the previous wording here
+// overclaimed, the exact governance mistake AGENTS.md hard constraint 1
+// exists to catch, and is fixed the same way in this file's own history):
+// this allowlist narrows the VOCABULARY — an out-of-vocabulary string
+// (`?status=nonsense`) — which the pre-existing `default` arm already
+// handled safely before this round (measured against 9dc226ef); it does
+// NOT authenticate a real status's VALUE. `?status=locked&wait=900` or
+// `?status=expired&remaining=0` still paint a fully authoritative-looking
+// card for anyone who can hand a victim that URL, because nothing on this
+// GET is signed or otherwise tied to a real server-side event (fs4-pr488-
+// review / pr488-codex-leg, round 5). This residual is PRE-EXISTING — the
+// same idiom the prior `token_hash` handler used for `status=invalid` — not
+// introduced or worsened by this PR, and NOT fixed here: a real fix (a
+// signed/HMAC'd redirect, or moving `remaining`/`wait` into a server-held
+// flash instead of the URL) is a new surface, out of scope at this round,
+// and is going to the owner as an open design-vs-contract question rather
+// than a unilateral call (see the PR body's open-items section).
 const KNOWN_STATUSES = ["wrong", "expired", "locked", "unavailable", "invalid"] as const;
 type KnownStatus = (typeof KNOWN_STATUSES)[number];
 

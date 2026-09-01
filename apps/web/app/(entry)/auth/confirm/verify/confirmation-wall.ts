@@ -108,17 +108,24 @@ export type ConfirmationAttemptOutcome =
     }
   | {
       /**
-       * fs4-pr488-review ruling, 2026-09-01 (keep this shape — do NOT
-       * shrink it to match the design text literally): part 3 §2.1's
-       * `claim_confirmation_attempt` prose only names
-       * `{attempt_id, allowed, remaining}`, no `scope`/`wait`. The reviewer
-       * has RULED the real door must supply BOTH anyway — `scope`
-       * explicitly (parsing it back out of an errcode/message would be the
-       * law-3 "spelling is not identity" trap) and `retryAfterSeconds`
-       * because it is derived from DB-owned window state and this UI must
-       * never compute it — and has sent that ruling to the C-3 driver
-       * building the door now. Lane B WIRES these two fields through from
-       * the door's real response; it does not invent them at this seam.
+       * 裁-103 (orchestrator ruling, 2026-09-01,
+       * docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md). ORCHESTRATOR-
+       * RULED, NOT OWNER-RULED — surfaced to the owner as a design-vs-
+       * contract call under hard constraint 1; if the owner rules otherwise
+       * this shape changes. (Raised by fs4-pr488-review; the finding is
+       * theirs, the ruling is not — a review lane does not get to be the
+       * ruling authority on a design-vs-contract call, AGENTS.md hard
+       * constraint 1.)
+       *
+       * KEEP THIS SHAPE — do NOT shrink it to match the design text
+       * literally: part 3 §2.1's `claim_confirmation_attempt` prose only
+       * names `{attempt_id, allowed, remaining}`, no `scope`/`wait`. 裁-103
+       * is that the real door must supply BOTH anyway — `scope` explicitly
+       * (parsing it back out of an errcode/message would be the law-3
+       * "spelling is not identity" trap) and `retryAfterSeconds` because it
+       * is derived from DB-owned window state and this UI must never
+       * compute it. Lane B WIRES these two fields through from the door's
+       * real response; it does not invent them at this seam.
        *
        * RECONCILIATION OWED: `page.tsx`'s R4/NIT-3 clamp renders any
        * `retryAfterSeconds` over 900 as the generic `invalid` card, on the
