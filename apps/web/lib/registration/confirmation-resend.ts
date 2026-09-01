@@ -31,6 +31,14 @@
 // budget as a guess spree would; (2) only then calls `supabase.auth.resend`
 // server-side. Until that lands, this function is the ONLY path the UI has
 // to a resend, and it always refuses.
+//
+// NOTE FOR THE SEAM↔DOOR COMPLETION TABLE (PR #488, 2026-09-01): unlike
+// every other Lane-B seam in this train, `requestConfirmationResend` has NO
+// design-specified door to diff against — `checkout-gate-design.md`/`-part2`
+// /`-part3` name no resend door at all. Lane B INVENTS the route above
+// (and, if it needs one, a door) rather than implementing one already
+// specified. Recorded explicitly so a reader of that table can tell
+// "no design door exists" apart from "the table forgot this seam".
 
 export type ConfirmationResendOutcome =
   | { readonly kind: "sent" }

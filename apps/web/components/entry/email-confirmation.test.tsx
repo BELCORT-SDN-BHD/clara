@@ -38,11 +38,14 @@ const validResponse = (): VerifyResponse => ({
 /** The wall's own "allowed" answer — every test that must REACH `verifyOtp`
  *  passes this explicitly, because the production default
  *  (`confirmation-wall.ts`) always refuses `{kind:"unavailable"}` (this
- *  module's own dedicated section below proves that default). */
-const allowWall = (remaining = 5): ClaimConfirmationAttempt => async () => ({
-  kind: "allowed",
-  remaining,
-});
+ *  module's own dedicated section below proves that default).
+ *
+ *  M2, fix round 2026-09-01: `attemptId` is now part of the "allowed" shape
+ *  — every test using this helper implicitly exercises the id being carried
+ *  through unchanged to `settleAttempt` (this file's own M2 test below makes
+ *  that threading an explicit assertion, not just an implicit one). */
+const allowWall = (remaining = 5, attemptId = "attempt-fixture-1"): ClaimConfirmationAttempt =>
+  async () => ({ kind: "allowed", attemptId, remaining });
 
 function postRequest(fields: Array<[string, string]>): Request {
   const form = new FormData();
@@ -137,19 +140,27 @@ test("confirmation-wall.ts's own production default always answers unavailable",
   );
   const outcome: ConfirmationAttemptOutcome = await claimConfirmationAttempt({
     email: "aisyah@example.com",
-    origin: "https://app.clarabook.example",
+    // M1, fix round 2026-09-01: NOT `origin` — that field no longer exists.
+    // `originDigest` is the real C2 client-address digest, honestly
+    // `undefined` today (see confirmation-wall.ts's own header for why).
+    originDigest: undefined,
   });
   assert.deepEqual(outcome, { kind: "unavailable" });
-  // Informational only; must not throw.
-  await settleConfirmationAttempt("accepted");
-  await settleConfirmationAttempt("rejected");
+  // Informational only; must not throw. M2: settle now takes the attempt id
+  // first — the stub ignores both arguments regardless.
+  await settleConfirmationAttempt("attempt-fixture-1", "accepted");
+  await settleConfirmationAttempt("attempt-fixture-1", "rejected");
 });
 
 test("N1: an ALLOWED wall makes exactly one hard-coded signup verification and ignores extra fields", async () => {
   const calls: Array<{ type: "signup"; email: string; token: string }> = [];
   const sealed: Response[] = [];
   const settled: ConfirmationAttemptSettlement[] = [];
-  const settle: SettleConfirmationAttempt = async (outcome) => { settled.push(outcome); };
+  const settledAttemptIds: string[] = [];
+  const settle: SettleConfirmationAttempt = async (attemptId, outcome) => {
+    settledAttemptIds.push(attemptId);
+    settled.push(outcome);
+  };
   const response = await handleEmailConfirmationPost(
     postRequest([...confirmFields(), ["extra", "hostile-value"]]),
     async () => fakeClient(validResponse(), calls, sealed),
@@ -159,6 +170,9 @@ test("N1: an ALLOWED wall makes exactly one hard-coded signup verification and i
 
   assert.deepEqual(calls, [{ type: "signup", email: "aisyah@example.com", token: "123456" }]);
   assert.deepEqual(settled, ["accepted"]);
+  // M2: the exact id `allowWall()`'s claim returned must ride through to
+  // settle unchanged — not a fresh value, not the outcome string alone.
+  assert.deepEqual(settledAttemptIds, ["attempt-fixture-1"]);
   assert.equal(sealed.length, 1, "the cookie-writing response was not sealed against caching");
   assert.equal(response.status, 303);
   assert.equal(response.headers.get("location"), "https://app.clarabook.example/signup");
@@ -230,7 +244,7 @@ test("a rejected verification is settled, not left dangling", async () => {
       [],
     ),
     allowWall(1),
-    async (outcome) => { settled.push(outcome); },
+    async (_attemptId, outcome) => { settled.push(outcome); },
   );
   assert.deepEqual(settled, ["rejected"]);
 });
@@ -387,7 +401,7 @@ for (const refusal of refusalCases) {
         },
         async () => {
           wallCalls += 1;
-          return { kind: "allowed", remaining: 5 };
+          return { kind: "allowed", attemptId: "attempt-fixture-refusal", remaining: 5 };
         },
       );
 
@@ -410,7 +424,7 @@ test("N1: a malformed submission (missing/duplicated field) redirects to a clean
   let wallCalls = 0;
   const wall: ClaimConfirmationAttempt = async () => {
     wallCalls += 1;
-    return { kind: "allowed", remaining: 5 };
+    return { kind: "allowed", attemptId: "attempt-fixture-malformed", remaining: 5 };
   };
 
   const missing = await handleEmailConfirmationPost(

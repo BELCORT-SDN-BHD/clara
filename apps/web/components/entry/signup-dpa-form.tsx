@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { signDpa as defaultSignDpa, type SignDpa } from "@/lib/registration/dpa-doors";
 import type { DpaDocumentState } from "@/lib/registration/dpa-server-reads";
@@ -47,6 +47,11 @@ import { NotBuiltNote } from "@/components/common/not-built-note";
  * stranded with no way forward at all; `/pending`'s own "registered" arm is
  * where the next real action (once Lane B lands) will live.
  */
+/** Same one-liner every other door caller in this codebase mints its own
+ *  copy of (`signup-firm-form.tsx:105`, `lib/bank/doors.ts`, …) — the estate
+ *  keeps this local rather than shared. */
+const newOpKey = (): string => crypto.randomUUID();
+
 export function SignupDpaForm({
   document,
   sign = defaultSignDpa,
@@ -57,6 +62,15 @@ export function SignupDpaForm({
   const t = useTranslations("Signup");
   const [signing, setSigning] = useState(false);
   const [signedOutcome, setSignedOutcome] = useState<"unavailable" | null>(null);
+  // A, fix round 2026-09-01: minted ONCE and held for the component's
+  // lifetime — `sign_dpa` takes a required `p_op_key` (checkout-gate-design-
+  // part2.md:51) and this seam's caller owns that key, per the identical
+  // idiom `signup-firm-form.tsx` already uses for `claim_identity` /
+  // `request_firm_registration`. There is no editable field on this step to
+  // re-mint on (unlike the firm form), so unlike that file's `onEdit`, this
+  // key never changes for the life of the mount: every click — including a
+  // retry after an "unavailable" answer — is the SAME attempt.
+  const opKey = useRef(newOpKey());
 
   if (document.kind === "unavailable") {
     return (
@@ -87,7 +101,11 @@ export function SignupDpaForm({
     // narrowing paperwork only — this function is never reachable except from
     // the "ready" render below (see the "unavailable" early return above).
     const outcome = document.kind === "ready"
-      ? await sign({ version: document.version, bodySha256: document.bodySha256 })
+      ? await sign({
+          version: document.version,
+          bodySha256: document.bodySha256,
+          opKey: opKey.current,
+        })
       : { kind: "unavailable" as const };
     setSigning(false);
     // `outcome.kind` is exhaustively either "signed" or "unavailable" today;

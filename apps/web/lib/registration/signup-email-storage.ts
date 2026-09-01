@@ -19,6 +19,16 @@
 // that failure and returns the "nothing to prefill" answer. Losing the
 // prefill degrades to "the person types their address again" — annoying,
 // never unsafe, and never a crash of the signup step itself.
+//
+// N2, fix round 2026-09-01 (PR #488 Codex adversarial leg) — RECORDED, NOT
+// FIXED HERE: a shared browser/kiosk that leaves this tab open lets the next
+// person at the keyboard see the prior applicant's prefilled address on
+// `/auth/confirm`. This needs physical access to that same tab and no
+// remote vector exists (the value never leaves this origin, this tab —
+// `sessionStorage`, not `localStorage`). `forgetSignupEmail` already clears
+// it once the code verifies; the residual is the window BEFORE that, on a
+// tab someone else can physically reach. No code change proposed for this
+// round.
 
 const STORAGE_KEY = "clara-signup-email";
 

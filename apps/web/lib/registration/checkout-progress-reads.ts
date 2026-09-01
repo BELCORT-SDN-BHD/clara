@@ -47,7 +47,19 @@ export const FIRM_REGISTRATION_PAYMENTS_RELATION = "firm_registration_payments";
 export type CheckoutProgress = {
   /** A `checkout_intents` row for this registration carries a non-null
    *  `session_id` (Stripe Checkout was opened) — read positively, never
-   *  inferred from the absence of a payment. */
+   *  inferred from the absence of a payment.
+   *
+   *  N4, fix round 2026-09-01 (PR #488 Codex adversarial leg) — LANE B
+   *  COMPLETION CONTRACT: `probeCheckoutOpen` below treats ANY historical
+   *  non-null `session_id` as "checkout open", with no freshness or Stripe-
+   *  status check. A Checkout Session that already expired, was abandoned,
+   *  or completed through a path this probe doesn't also check would still
+   *  read `checkoutOpen: true` here. This is contract-only today — the
+   *  `/pending` "resume checkout" control this flag drives is already
+   *  rendered disabled (`Pending.checkout_open.notBuilt`), so nothing acts
+   *  on a stale positive yet. Lane B must add the Stripe-status/expiry
+   *  check (session status = `open`, not past `expires_at`) before wiring
+   *  that control live. */
   readonly checkoutOpen: boolean;
   /** A `firm_registration_payments` row for this registration exists with
    *  `consumed_at IS NULL` — money landed, `claim_paid_firm` has not run. */

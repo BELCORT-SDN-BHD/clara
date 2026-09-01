@@ -50,12 +50,26 @@ export interface EmailConfirmationRouteClient {
 
 export type CreateEmailConfirmationRouteClient = () => Promise<EmailConfirmationRouteClient>;
 
-/** Supabase Auth's own stable error code for an expired OTP (verified against
- *  the current `supabase/auth` source via context7, 2026-09-01:
- *  `ErrorCodeOTPExpired = "otp_expired"`). Anything else failing verification
- *  — including a code that simply does not match — renders as "wrong code",
- *  never as "expired": absence of the expired code is not evidence of
- *  expiry (review law 2). */
+/**
+ * N3, fix round 2026-09-01 (PR #488 Codex adversarial leg) — `otp_expired`
+ * (verified against the current `supabase/auth` source via context7:
+ * `ErrorCodeOTPExpired = "otp_expired"`) is Supabase's STABLE error code for
+ * this branch, but it is NOT proof the code's window actually passed:
+ * upstream returns the identical `otp_expired` for a wrong code, a
+ * genuinely expired code, AND an email with no pending signup at all — one
+ * code, three real causes this response cannot tell apart (very plausibly
+ * deliberate on Supabase's side: distinguishing "unknown address" from
+ * "wrong/expired code" here would be an email-enumeration oracle). This
+ * function still names the `status=expired` branch — internal naming is
+ * unaffected — but the CARD IT RENDERS must not claim certainty it doesn't
+ * have (`messages/en.json`'s `ConfirmEmail.expiredTitle/Description`: "that
+ * code didn't work", never "your code expired"). The security-relevant
+ * distinction — does this failure count as a strike — does not need this
+ * disambiguation either: the C1/C2 wall claimed the attempt BEFORE
+ * `verifyOtp` even ran and settles it `"rejected"` on every one of these
+ * three causes uniformly (`settleAttempt` below), so the wall's own
+ * counting is what actually discriminates a real lockout from a rendering
+ * choice — the copy does not have to. */
 function isExpiredOtpError(error: VerifyOtpError | null): boolean {
   return error?.code === "otp_expired";
 }
@@ -156,7 +170,19 @@ export async function handleEmailConfirmationPost(
   // BEFORE the verification, never after," so a killed connection still
   // costs an attempt. The Lane-B seam's production default refuses with
   // `"unavailable"` — see confirmation-wall.ts's header.
-  const attempt = await claimAttempt({ email, origin: proof.origin });
+  //
+  // M1, fix round 2026-09-01 (PR #488 Codex adversarial leg): `originDigest`
+  // is deliberately `undefined` here, NOT `proof.origin`. `proof.origin` is
+  // `proveSameOrigin`'s CSRF proof — the `Origin` request header, identical
+  // for every visitor to this deployment — never the C2 client-address
+  // digest (`confirmation-wall.ts`'s `OriginDigest`: sha256(pepper ||
+  // proxy-observed client IP), part 1 §4 option B). Feeding the header in
+  // under the digest's name would key C2 on one shared value for the whole
+  // deployment. Nothing upstream of this handler reads a trusted proxy-IP
+  // header today, so there is no honest value to supply yet; Lane B adds it
+  // when it wires the real runtime call (see confirmation-wall.ts's header
+  // for why this is the chosen shape over minting a second refusal reason).
+  const attempt = await claimAttempt({ email, originDigest: undefined });
   if (attempt.kind === "unavailable") {
     return sealResponse(confirmRedirect(proof.origin, { status: "unavailable" }));
   }
@@ -168,12 +194,16 @@ export async function handleEmailConfirmationPost(
 
   const response = await supabase.auth.verifyOtp({ type: "signup", email, token });
 
+  // M2, fix round 2026-09-01: `attempt.attemptId` — the exact row this guess
+  // was claimed against (part 3 §2.1) — rides both settlement calls below,
+  // never a bare outcome string. Settling without it let a wrong-code and a
+  // valid-code request in flight together stamp each other's attempt row.
   if (hasVerifiedSession(response)) {
-    await settleAttempt("accepted");
+    await settleAttempt(attempt.attemptId, "accepted");
     return sealResponse(fixedSignupRedirect(proof.origin));
   }
 
-  await settleAttempt("rejected");
+  await settleAttempt(attempt.attemptId, "rejected");
   if (isExpiredOtpError(response.error)) {
     return sealResponse(confirmRedirect(proof.origin, { status: "expired" }));
   }

@@ -42,7 +42,13 @@ import { Label } from "@/components/ui/label";
  *
  *   wrong-code    the code did not match — carries the wall's OWN remaining-
  *                 attempt count (never guessed here)
- *   expired       the code's window passed (Supabase's `otp_expired`)
+ *   expired       Supabase answered `otp_expired` — N3, fix round 2026-09-01:
+ *                 this does NOT mean the window definitely passed. Upstream
+ *                 returns the same code for a wrong code, a truly expired
+ *                 one, AND an unknown address alike, so the copy this state
+ *                 renders says "that code didn't work", never "expired" —
+ *                 see `verify/handler.ts`'s `isExpiredOtpError` for why
+ *                 that's honest rather than a downgrade
  *   locked        C1/C2 refused — carries the wall's OWN wait
  *   unavailable   the Lane-B seam (`confirmation-wall.ts`) has not been wired
  *                 up yet — an honest `NotBuiltNote`, never mistaken for a

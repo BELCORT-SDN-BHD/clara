@@ -107,9 +107,9 @@ test("a READY document renders the exact body and a real h1", async () => {
 test("clicking sign reaches the Lane-B seam and renders its answer honestly — never a fabricated success", async () => {
   const body = "Beta text.";
   const hash = bodyHash(body);
-  const calls: Array<{ version: string; bodySha256: string }> = [];
+  const calls: Array<{ version: string; bodySha256: string; opKey: string }> = [];
   const sign: SignDpa = async (params) => {
-    calls.push({ version: params.version, bodySha256: params.bodySha256 });
+    calls.push({ version: params.version, bodySha256: params.bodySha256, opKey: params.opKey });
     return { kind: "unavailable" };
   };
   const h = await renderComponent(
@@ -134,16 +134,32 @@ test("clicking sign reaches the Lane-B seam and renders its answer honestly — 
     // value. This is the whole point of the wall (checkout-gate-design-
     // part2.md §1.1) — a signature must bind the bytes the signer saw.
     assert.deepEqual(
-      calls,
+      calls.map((c) => ({ version: c.version, bodySha256: c.bodySha256 })),
       [{ version: "clara-beta-2026-08-a", bodySha256: hash }],
       "the click did not reach the seam with the rendered body's own hash",
     );
     assert.notEqual(calls[0]?.bodySha256, "", "the hash sent to the seam must never be empty");
+    assert.ok(calls[0]?.opKey, "sign_dpa's required p_op_key must not be sent empty");
     // THE DISCRIMINATING POST-CONDITION: an honest "not wired" note appears,
     // and it is NOT the same text as a success would render.
     assert.match(textOf(h.container as never), /door that records your signature.*isn't wired up/i);
     assert.doesNotMatch(textOf(h.container as never), /signature recorded|agreement signed/i);
     assert.deepEqual(checkAccessibility(h.container as never), []);
+
+    // A, fix round 2026-09-01 — THE IDEMPOTENCY THE KEY EXISTS FOR: a retry
+    // of the SAME attempt (a second click after the first came back
+    // "unavailable") must carry the IDENTICAL op_key, never a fresh one —
+    // `sign_dpa`'s idempotency contract is exactly `request_firm_
+    // registration`'s (`signup-firm-form.tsx`'s header), and minting a new
+    // key per call would defeat it even though it type-checks.
+    await clickButton(signButton as never);
+    for (let i = 0; i < 4; i++) await h.settle();
+    assert.equal(calls.length, 2, "the retry did not reach the seam a second time");
+    assert.equal(
+      calls[1]?.opKey,
+      calls[0]?.opKey,
+      "a retry of the same attempt minted a NEW op_key instead of reusing the held one",
+    );
   } finally {
     await h.unmount();
   }
@@ -193,6 +209,8 @@ test("MUTANT: an empty bodySha256 sent to the seam is RED against the shipped an
 
 test("a document that WOULD sign (kind:'signed') is never fabricated by this seam's production default", async () => {
   const { signDpa } = await import("../../lib/registration/dpa-doors");
-  const outcome = await signDpa({ version: "any", bodySha256: bodyHash("any") });
+  // A, fix round 2026-09-01: opKey is now a required field of the params —
+  // the stub still ignores it, same as every other Lane-B production default.
+  const outcome = await signDpa({ version: "any", bodySha256: bodyHash("any"), opKey: "any-key" });
   assert.deepEqual(outcome, { kind: "unavailable" });
 });

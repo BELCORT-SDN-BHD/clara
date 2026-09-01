@@ -22,9 +22,29 @@
 //
 // LANE B'S COMPLETION CONTRACT — read this before touching `signDpa`.
 // Replace the body below with a real `callDoor("sign_dpa", { p_version:
-// params.version, p_body_sha256: params.bodySha256, p_op_key })` once the
-// door exists and is granted, exactly as `lib/identity/doors.ts`'s
+// params.version, p_body_sha256: params.bodySha256, p_op_key: params.opKey })`
+// once the door exists and is granted, exactly as `lib/identity/doors.ts`'s
 // `claimIdentity` calls `claim_identity`.
+//
+// A — fix round 2026-09-01 (PR #488, fs4-pr488-review's mid-round addition):
+// `clara.sign_dpa(p_version text, p_body_sha256 bytea, p_op_key text)`
+// (checkout-gate-design-part2.md:51) is THREE required params and refuses
+// `op_key is required` -> CLR10 on a missing one. This seam's params were
+// missing the third — a literal implementation of the seam would have hit
+// CLR10 on every real call. `opKey` is now part of `SignDpaParams`, and the
+// CALLER MINTS AND HOLDS IT — never this function. `signup-dpa-form.tsx`
+// mints one with `crypto.randomUUID()` and keeps it in a `useRef` for the
+// lifetime of the component (`signup-firm-form.tsx`'s own op_key idiom,
+// that file's header), so a transport failure after the door already
+// committed replays the receipt on retry instead of colliding with it.
+// Minting a fresh key per call here (inside `signDpa`, on every invocation)
+// would be the wrong fix even though it satisfies the type: it hands every
+// retry of the SAME click a NEW key, defeating the idempotency the key
+// exists for. (The blast radius is bounded regardless — `sign_dpa` is also
+// structurally idempotent on `dpa_signatures`' `unique (user_id,
+// dpa_version)`, survey F6, so a double-click replays rather than double-
+// signs — but the op_key contract is still worth getting right before Lane
+// B builds the real call on top of it.)
 //
 // THE ONE THING THIS REPLACEMENT MUST NOT DO (M2, fix round 2026-09-01):
 // `params.bodySha256` MUST be forwarded to `p_body_sha256` VERBATIM, exactly
@@ -49,8 +69,19 @@
 export type SignDpaParams = {
   readonly version: string;
   readonly bodySha256: string;
+  /** Minted and held by the CALLER (`signup-dpa-form.tsx`'s `useRef`), never
+   *  by this function — see the header's item A for why re-minting per call
+   *  would be the wrong fix even though it type-checks. */
+  readonly opKey: string;
 };
 
+// NOTE FOR THE SEAM↔DOOR COMPLETION TABLE (PR #488): `sign_dpa`'s real
+// success/replay carries `{signature_id, signed_at, replay}` (survey F6);
+// the bare `"signed"` below drops all three. Not treated as a live defect
+// in THIS round — `signup-dpa-form.tsx` has no next step to route a real
+// signature to yet (its own header: "there is no built checkout to send
+// anyone to"), so inventing fields nothing here reads would be shape ahead
+// of need. Lane B widens this arm when the success flow it feeds exists.
 export type SignDpaOutcome =
   | { readonly kind: "signed" }
   | { readonly kind: "unavailable" };

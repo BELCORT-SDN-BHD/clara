@@ -38,6 +38,9 @@ const SUBJECT = "11111111-1111-1111-1111-111111111111";
 
 const allowWall = (remaining = 5): ClaimConfirmationAttempt => async () => ({
   kind: "allowed",
+  // M2, fix round 2026-09-01: "allowed" now carries the wall's own attempt
+  // id — a fixed fixture value here since this file never asserts on it.
+  attemptId: "attempt-fixture-1",
   remaining,
 });
 
