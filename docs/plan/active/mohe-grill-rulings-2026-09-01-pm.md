@@ -210,6 +210,40 @@ noise rather than letting it accumulate. FOLD 2 is the evidence: the lane would 
 pinned-values-only with a sweep behind it, did not without one, and the fresh lane then found half
 the fold was a no-op duplicate AND the other half was clobbering a stricter upstream header.
 
+### 裁-112(a) · The four transferable rules the FOLD-2 miss actually taught
+
+The lane that made the miss re-verified the correction AT SOURCE rather than accepting it on report
+("taking a correction unmeasured would be the same failure inverted"), and returned a sharper
+diagnosis than the one recorded above. Its rules supersede the loose "grep wider" reading:
+
+1. **The miss was SCOPE, not pattern.** A repo-wide search for the literal `cache-control` WOULD have
+   found `response-state.ts:44`. The instrument was scoped to three files — `next.config.ts`,
+   `middleware.ts`, `proxy.ts` — chosen from a mental model of where a route's cache header *ought*
+   to live. The mechanism lives two modules away in a shared applier the response passes through.
+   **LAW: when the question is whether a PROPERTY holds on a response, the instrument must follow the
+   response's CONSTRUCTION PATH, not the files you would have written it in.** Scoping the instrument
+   to your hypothesis instead of to the question is the absence-from-the-wrong-instrument family,
+   committed while holding the lantern.
+2. **A COMPOUND claim is only as strong as its weakest conjunct.** "There is no Cache-Control and no
+   Vary set on this route anywhere" bundled a TRUE, load-bearing conjunct (Vary) with a FALSE one
+   (Cache-Control), both asserted at one confidence level after one too-narrow check — and the false
+   half rode the true half's credibility all the way into an orchestrator's order.
+3. **Hedging a CONCLUSION does not hedge the ORDER that follows from it.** The lane wrote "I am NOT
+   claiming this leaks today — I did not measure it", which was honest, then built a firm
+   recommendation on the unmeasured conjunct, and work was ordered from it. **If a premise is
+   unmeasured, the recommendation carrying it needs the same hedge — or the measurement.**
+4. **An assertion of ABSENCE must name its instrument and that instrument's SCOPE.** "No
+   Cache-Control in next.config/middleware/proxy.ts" would have been caught before the order was
+   given; "nowhere on this route" was not checkable by the reader. This is now part of the
+   conformance brief's named lens.
+
+**One more shape worth keeping:** the cheap close the fresh lane found (two assertions on the real
+response the e2e already fetches, `signup-confirm-pending.spec.ts:74`) sat on a line the same lane had
+personally read, flagged when a round deleted it, and confirmed when a round restored it. It cited
+`referrerPolicyForPath` as the precedent for the pin in the same breath as arguing its function-only
+test was insufficient — reasoning about the precedent's WEAKNESS so attentively that it did not see
+the STRENGTH sitting beside it, then proposing the expensive path and pre-justifying its cost.
+
 **The orchestrator's own error, recorded:** FOLD 2 was ORDERED by me on a design-pass premise
 ("nothing sets Cache-Control on this route") that was FALSE — `applyAuthState` sets the identical
 `private, no-store` on every proxied response. The instrument that missed it was a grep for a literal
