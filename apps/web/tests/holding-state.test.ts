@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  hasOpenRegistrationFor,
   holdingStateFrom,
   type HoldingDecision,
   type HoldingState,
@@ -226,6 +227,63 @@ describe("FS-4 C-6, §2.1: checkout_open and paid — POSITIVELY read, never gue
     const shipped = holdingStateFrom(ok([OPEN_ROW]));
     assert.notDeepEqual(guessOpenFromAbsence(ok([OPEN_ROW])), shipped);
     assert.equal(shipped.kind, "pending");
+  });
+});
+
+describe("M5, fix round 2026-09-01: hasOpenRegistrationFor — signup-route.tsx's third-fork gate", () => {
+  // Had ZERO direct coverage before this round (grepped: only source refs) —
+  // this is the PR's central new routing decision, and it needed its own
+  // test file entry rather than living only as inference from
+  // `renderSignupRoute` integration tests.
+  const OPEN_ROW = ROW({ status: "open" });
+
+  it("a validated OPEN row bound to the verified subject → true", () => {
+    assert.equal(hasOpenRegistrationFor(ok([OPEN_ROW]), SUBJECT), true);
+  });
+
+  it("a REJECTED row → false — only 'open' reroutes to the DPA step", () => {
+    assert.equal(hasOpenRegistrationFor(ok([ROW({ status: "rejected" })]), SUBJECT), false);
+  });
+
+  it("an APPROVED row → false", () => {
+    assert.equal(hasOpenRegistrationFor(ok([ROW({ status: "approved" })]), SUBJECT), false);
+  });
+
+  it("zero rows → false — the ordinary case for a caller with no registration yet", () => {
+    assert.equal(hasOpenRegistrationFor(ok([]), SUBJECT), false);
+  });
+
+  it("an OPEN row for a DIFFERENT subject → false, never trusted cross-subject", () => {
+    assert.equal(
+      hasOpenRegistrationFor(ok([OPEN_ROW]), "99999999-9999-9999-9999-999999999999"),
+      false,
+    );
+  });
+
+  it("an unverified read (!ok) → false, never inferred", () => {
+    assert.equal(hasOpenRegistrationFor({ ok: false, reason: "no_session" }), false);
+  });
+
+  it("a malformed row → false, the same validator holdingStateFrom itself trusts", () => {
+    const malformed = { ok: true, subject: SUBJECT, rows: [{ status: "open" }] } as unknown as OwnRegistrationResult;
+    assert.equal(hasOpenRegistrationFor(malformed, SUBJECT), false);
+  });
+
+  it("only the NEWEST row decides, matching holdingStateFrom's own ordering", () => {
+    const newestOpen = ROW({ id: "aaaaaaaa-0000-0000-0000-000000000003", status: "open", created_at: "2026-08-30T10:00:00Z" });
+    const olderRejected = ROW({ id: "aaaaaaaa-0000-0000-0000-000000000004", status: "rejected", created_at: "2026-08-01T10:00:00Z" });
+    assert.equal(hasOpenRegistrationFor(ok([newestOpen, olderRejected]), SUBJECT), true);
+    assert.equal(hasOpenRegistrationFor(ok([olderRejected, newestOpen]), SUBJECT), false);
+  });
+
+  it("MUTANT: scanning for ANY open row (instead of only the newest) is RED against the shipped answer", () => {
+    const newestRejected = ROW({ id: "aaaaaaaa-0000-0000-0000-000000000005", status: "rejected", created_at: "2026-08-30T10:00:00Z" });
+    const olderOpen = ROW({ id: "aaaaaaaa-0000-0000-0000-000000000006", status: "open", created_at: "2026-08-01T10:00:00Z" });
+    const result = ok([newestRejected, olderOpen]);
+    const scanAnyOpen = (r: OwnRegistrationResult): boolean =>
+      r.ok && (r.rows as RegistrationRequestRow[]).some((row) => row.status === "open");
+    assert.notEqual(scanAnyOpen(result), hasOpenRegistrationFor(result, SUBJECT));
+    assert.equal(hasOpenRegistrationFor(result, SUBJECT), false);
   });
 });
 

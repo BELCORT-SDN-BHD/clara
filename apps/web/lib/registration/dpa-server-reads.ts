@@ -26,7 +26,15 @@ import {
 import { loadCurrentDpaDocument } from "./dpa-reads";
 
 export type DpaDocumentState =
-  | { readonly kind: "ready"; readonly version: string; readonly body: string }
+  // M2 fix round: `body_sha256` MUST travel with `body` -- it is the exact
+  // wall design part 2 §1.1 calls out ("that last wall is the one that
+  // matters"): `sign_dpa` refuses CLR10 when the submitted hash disagrees
+  // with the CURRENT row's own, which is what stops a UI that displayed one
+  // text from recording a signature against another. Dropping this field
+  // here is what let `signup-dpa-form.tsx` call `sign()` with an empty
+  // hash -- see that file's own header for the completion contract this
+  // type now makes impossible to get wrong by construction.
+  | { readonly kind: "ready"; readonly version: string; readonly body: string; readonly bodySha256: string }
   | { readonly kind: "unavailable" };
 
 export type DpaDocumentDeps = {
@@ -44,7 +52,7 @@ export async function loadCurrentDpaDocumentState(
     const accessor = fixedTokenAccessor(session.accessToken);
     const row = await loadCurrentDpaDocument(accessor, deps.signal);
     if (row === null) return { kind: "unavailable" };
-    return { kind: "ready", version: row.version, body: row.body };
+    return { kind: "ready", version: row.version, body: row.body, bodySha256: row.body_sha256 };
   } catch {
     return { kind: "unavailable" };
   }

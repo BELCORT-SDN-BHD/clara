@@ -344,6 +344,16 @@ binding is "the address is the person's own", not a link tied to one browser (§
   (`confirmation-wall.ts`'s seam always answers "unavailable" until a later train wires the
   runtime call). Deploying this build live means EVERY confirmation attempt is honestly
   refused until that lands — recorded here so the gap is visible, never assumed closed.
+- **The "send me a new code" resend control is walled the same way, deliberately (M3, fix
+  round 2026-09-01).** An earlier cut of this card called `supabase.auth.resend` directly
+  from the browser — reachable by an unauthenticated visitor simply by loading
+  `/auth/confirm?status=expired`, with no session and no rate limit, against Supabase's own
+  project-wide hourly email-send budget shared with every legitimate signup. The design names
+  only the COPY for this control ("or request a new code", checkout-gate-design.md:314), not
+  its transport, so `lib/registration/confirmation-resend.ts` gives it the same shape as every
+  other wall on this surface: a Lane-B seam whose production default honestly refuses
+  `{kind:"unavailable"}` today, to be wired through the SAME C1/C2 attempt wall the verify
+  path uses before Lane B ever lets it reach Supabase.
 
 ### Also configuration, not code
 

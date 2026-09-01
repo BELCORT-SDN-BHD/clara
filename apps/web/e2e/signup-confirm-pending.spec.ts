@@ -27,6 +27,25 @@ const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
  * `CLARA_E2E_CONFIRM_WALL_WIRED=1` flips the gate once Lane B's runtime call
  * replaces the seam's `"unavailable"` default. No other change to this file
  * should be needed at that point.
+ *
+ * M1, fix round 2026-09-01 — THE SKIP-SCOPING BUG AND WHAT IT COST. An
+ * earlier cut called `test.skip(!CONFIRM_WALL_WIRED, ...)` at FILE SCOPE,
+ * between two tests. Playwright 1.62.1 treats a non-function first argument
+ * at file scope as a STATIC ANNOTATION ON THE ENCLOSING SUITE — the whole
+ * FILE, when there is no `test.describe()` — not on "whatever test follows
+ * it" (verified empirically: unwired gave "3 skipped", not "2 passed, 1
+ * skipped"). So EVERY test in this file was skipped, always, including the
+ * two meant to run today, and `e2e/run.mjs` asserts no floor count, so
+ * Playwright still exited 0. THE FIX: the gate now lives INSIDE the
+ * skeleton's own test body (`test.skip(condition, reason)` called from
+ * within an async test callback skips only that one test — the same idiom
+ * the second test below already used correctly). Restored alongside it: the
+ * referrer-policy header assertion (belongs in a RUNNABLE test — the GET
+ * needs no wall) and, inside the skeleton, the firm-registration and
+ * holding-page axe scans, the firm-name echo on /pending, and the optional
+ * notes field — all five were on `main`'s original spec and silently
+ * dropped by the rewrite (a diff read alone would have shown them "moved to
+ * the skeleton"; they were not there either).
  */
 const CONFIRM_WALL_WIRED = process.env.CLARA_E2E_CONFIRM_WALL_WIRED === "1";
 
@@ -48,9 +67,11 @@ test("signup account step -> check-your-email, with the confirm code form reacha
   await expectAccessible(page, "check email");
 
   // The GET is paint-only regardless of the wall's own wiring: rendering the
-  // code form, and W-H's own address wall, are pure client/paint concerns
-  // that this Lane-A train DOES ship in full.
-  await page.goto("/auth/confirm");
+  // code form, W-H's own address wall, and the Referrer-Policy header are
+  // pure paint/middleware concerns this Lane-A train DOES ship in full — no
+  // reason to defer any of them to the gated skeleton.
+  const confirmResponse = await page.goto("/auth/confirm");
+  expect(confirmResponse?.headers()["referrer-policy"]).toBe("strict-origin");
   await expect(page.getByRole("heading", { name: "Enter your confirmation code" })).toBeVisible();
   await expectAccessible(page, "confirmation code form");
 
@@ -67,7 +88,8 @@ test("signup account step -> check-your-email, with the confirm code form reacha
   await expect(page.getByRole("heading", { name: "Enter your confirmation code" })).toBeVisible();
   await expect(page.getByLabel("Email")).not.toHaveValue("victim@example.test");
 
-  console.log(`E2E WALK (Lane A scope): signup -> check-your-email -> confirm code form, W-H honoured`);
+  console.log("E2E WALK (Lane A scope): signup -> check-your-email -> confirm code form (referrer-policy + W-H honoured)");
+  console.log("AXE: 3 journey faces scanned, 0 WCAG 2.1 A/AA violations");
 });
 
 test("submitting an attempt while the wall is unwired renders the honest not-available card, never a fake success", async ({ page }) => {
@@ -91,12 +113,14 @@ test("submitting an attempt while the wall is unwired renders the honest not-ava
   await expectAccessible(page, "confirmation unavailable");
 });
 
-test.skip(
-  !CONFIRM_WALL_WIRED,
-  "SKELETON — the C1/C2 attempt wall (Lane B) is not wired on this tip; " +
-  "set CLARA_E2E_CONFIRM_WALL_WIRED=1 once the runtime call replaces the seam's default",
-);
 test("SKELETON: signup -> confirm by code, in a SECOND browser context -> firm step -> DPA step -> /pending", async ({ browser }) => {
+  // M1: the skip is IN-BODY, scoped to only this test — never file-scope.
+  test.skip(
+    !CONFIRM_WALL_WIRED,
+    "the C1/C2 attempt wall (Lane B) is not wired on this tip; set " +
+    "CLARA_E2E_CONFIRM_WALL_WIRED=1 once the runtime call replaces the seam's default",
+  );
+
   // The cross-device journey 裁-92 bought (design §3.2): the code is read
   // "on a phone" and typed into a FRESH context, alongside the person's own
   // address — never the same browser the link flow required.
@@ -122,16 +146,24 @@ test("SKELETON: signup -> confirm by code, in a SECOND browser context -> firm s
 
   await expect(confirmPage).toHaveURL(`${APP_ORIGIN}/signup`);
   await expect(confirmPage.getByRole("heading", { name: "Tell us about your firm" })).toBeVisible();
+  await expectAccessible(confirmPage, "firm registration");
 
   await confirmPage.getByLabel("Your name").fill("E2E Owner");
   await confirmPage.getByLabel("Firm name").fill("E2E Accounting");
+  await confirmPage.getByLabel("Anything we should know (optional)").fill("Playwright built-app walk");
   await confirmPage.getByRole("button", { name: "Register my firm" }).click();
 
   await expect(confirmPage).toHaveURL(`${APP_ORIGIN}/pending`);
   await expect(confirmPage.getByRole("heading", { name: "Your registration is with us" })).toBeVisible();
+  // The DB's own firm_name reaching the holding card verbatim — not merely
+  // that SOME registration exists.
+  await expect(confirmPage.getByText("E2E Accounting", { exact: true })).toBeVisible();
+  await expectAccessible(confirmPage, "holding page");
 
   await confirmPage.getByRole("link", { name: "Continue to checkout" }).click();
   await expect(confirmPage.getByRole("heading", { name: "One more thing before checkout" })).toBeVisible();
+
+  console.log("AXE (SKELETON): 2 further journey faces scanned, 0 WCAG 2.1 A/AA violations");
 
   await signupContext.close();
   await confirmContext.close();

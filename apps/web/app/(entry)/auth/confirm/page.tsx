@@ -12,14 +12,34 @@ export async function generateMetadata() {
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-const WAIT_SECONDS_DEFAULT = 900; // §3.4 C1/C2's own 15-minute window, as a floor
-                                   // when the query carries no (or a malformed) value.
-const REMAINING_DEFAULT = 0;
+// NIT-3, fix round 2026-09-01: `remaining` and `wait` are CLIENT-CONTROLLABLE
+// (this redirect's own idiom — confirmRedirect() in verify/handler.ts sets
+// them, but nothing stops a hand-crafted URL from setting them to anything).
+// A mailable link reading "wait 1440 minutes" or "0 attempts left" is a mild
+// social-engineering surface — it renders authoritative-looking numbers this
+// build never actually computed. So each is bound to the widest value the
+// REAL wall could ever produce, per §3.4: C1/C2's ceiling is 5 rejected
+// attempts (so `remaining` is never more than 5) inside a 15-minute window
+// (so `wait` is never more than that window's own 900 seconds). A value
+// outside its bound is not "clamped" to the edge — clamping would still
+// render an attacker-chosen number, just capped. It falls through to the
+// generic `invalid` card instead, the same way a missing/duplicated form
+// field already does, because a value the real wall could never have emitted
+// is exactly as untrustworthy as a missing one.
+const REMAINING_MAX = 5;
+const WAIT_SECONDS_MAX = 900;
 
-function positiveInt(value: string | string[] | undefined, fallback: number): number {
-  if (typeof value !== "string") return fallback;
+/** `null` for anything that is not a plausible, in-range integer — absent,
+ *  non-numeric, negative, or above the wall's own ceiling. The caller must
+ *  treat `null` as "this value came from nowhere real", never substitute a
+ *  default that would still paint an unverified number. */
+function boundedInt(value: string | string[] | undefined, max: number): number | null {
+  if (typeof value !== "string" || value.trim() === "") return null;
   const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  if (!Number.isFinite(parsed) || String(parsed) !== value.trim() || parsed < 0 || parsed > max) {
+    return null;
+  }
+  return parsed;
 }
 
 /**
@@ -32,12 +52,16 @@ function positiveInt(value: string | string[] | undefined, fallback: number): nu
  */
 function confirmCodeState(query: SearchParams): ConfirmCodeState {
   switch (query.status) {
-    case "wrong":
-      return { kind: "wrong-code", remaining: positiveInt(query.remaining, REMAINING_DEFAULT) };
+    case "wrong": {
+      const remaining = boundedInt(query.remaining, REMAINING_MAX);
+      return remaining === null ? { kind: "invalid" } : { kind: "wrong-code", remaining };
+    }
     case "expired":
       return { kind: "expired" };
-    case "locked":
-      return { kind: "locked", waitSeconds: positiveInt(query.wait, WAIT_SECONDS_DEFAULT) };
+    case "locked": {
+      const waitSeconds = boundedInt(query.wait, WAIT_SECONDS_MAX);
+      return waitSeconds === null ? { kind: "invalid" } : { kind: "locked", waitSeconds };
+    }
     case "unavailable":
       return { kind: "unavailable" };
     case "invalid":

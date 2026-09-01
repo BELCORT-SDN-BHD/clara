@@ -24,7 +24,11 @@ import {
 } from "../../lib/supabase/server";
 import { resolveServerSession } from "../../lib/supabase/server-session";
 import { SignupAccountForm } from "./signup-account-form";
-import { renderSignupRoute } from "./signup-route";
+import {
+  renderSignupRoute,
+  type LoadSignupDpaDocument,
+  type LoadSignupRegistration,
+} from "./signup-route";
 import { SignupStep } from "./signup-step";
 import { SignupFirmForm } from "./signup-firm-form";
 
@@ -162,11 +166,38 @@ test("NEW-5: the confirmation response cookie drives the next /signup request", 
       error: jwt === accessToken ? null : { message: "wrong token" },
     })) as typeof serverClient.auth.getUser;
 
+    // M5, fix round 2026-09-01: the 3rd/4th args are STUBBED EXPLICITLY.
+    // Before this fix they were omitted, so this cell passed only because
+    // the REAL default loaders (`loadOwnRegistrationRequests` /
+    // `loadCurrentDpaDocumentState`) throw under this test's stubbed
+    // `fetch` (no live request scope for `next/headers`), get caught by
+    // `renderSignupRoute`'s own try/catch, and degrade to `hasOpenRegistration
+    // = false` — the SAME answer this stub gives, but for an unstated reason
+    // that would have flipped this assertion's meaning silently if either
+    // real loader ever started succeeding under a stubbed `fetch`. `dpaCalls`
+    // proves the second read is never reached when the first says "no open
+    // registration" — the two-step short-circuit `renderSignupRoute` itself
+    // implements.
+    let registrationCalls = 0;
+    let dpaCalls = 0;
+    const noOpenRegistration: LoadSignupRegistration = async () => {
+      registrationCalls += 1;
+      return { ok: false, reason: "no_session" };
+    };
+    const unreachableDpaDocument: LoadSignupDpaDocument = async () => {
+      dpaCalls += 1;
+      return { kind: "unavailable" };
+    };
+
     const step = await renderSignupRoute(
       async () => resolveServerSession(async () => serverClient),
       async () => serverClient,
+      noOpenRegistration,
+      unreachableDpaDocument,
     );
     assert.equal(step.type, SignupFirmForm, "the cookie-backed /signup visit did not render the firm step");
+    assert.equal(registrationCalls, 1, "the registration read was not reached exactly once");
+    assert.equal(dpaCalls, 0, "the DPA read ran despite no open registration");
 
     const noCookieClient = await createServerClient({
       cookieStore: new MemoryCookieStore() as unknown as ServerCookieStore,
@@ -174,8 +205,14 @@ test("NEW-5: the confirmation response cookie drives the next /signup request", 
     const noCookieStep = await renderSignupRoute(
       async () => resolveServerSession(async () => noCookieClient),
       async () => noCookieClient,
+      noOpenRegistration,
+      unreachableDpaDocument,
     );
     assert.equal(noCookieStep.type, SignupAccountForm, "a cookieless /signup request reached the firm step");
+    // An unconfirmed/no-session caller must not even REACH the registration
+    // read (M5's own header fix — the gate is `isUsableConfirmedSession`,
+    // checked before either read runs).
+    assert.equal(registrationCalls, 1, "an unconfirmed caller triggered the registration read");
   } finally {
     testGlobal.window = originalWindow;
     globalThis.WebSocket = originalWebSocket;

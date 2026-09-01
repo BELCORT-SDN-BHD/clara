@@ -1277,7 +1277,8 @@
     "unavailableDescription": "Not built yet: the attempt wall this form calls (`claim_confirmation_attempt`) isn't wired up in this build, so no code can be checked from here yet. Nothing was recorded just now.",
     "resend": "Send me a new code",
     "resending": "Sending a new code…",
-    "resent": "A new code is on its way."
+    "resent": "A new code is on its way.",
+    "resendUnavailable": "Not built yet: resending isn't wired up in this build. Nothing was sent just now — start a new signup instead."
   },
   "Pending": {
     "metaTitle": "Your registration",

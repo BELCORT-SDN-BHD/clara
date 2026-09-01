@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { createElement } from "react";
-import { NextIntlClientProvider } from "next-intl";
 
-import ConfirmEmailPage from "../../app/(entry)/auth/confirm/page";
 import {
   handleEmailConfirmationPost,
   type EmailConfirmationRouteClient,
@@ -17,21 +11,16 @@ import type {
   ConfirmationAttemptSettlement,
   SettleConfirmationAttempt,
 } from "../../app/(entry)/auth/confirm/verify/confirmation-wall";
-import EntryLayout from "../../app/(entry)/layout";
-import messages from "../../messages/en.json";
-import { enableDomInspection } from "../../test/domInspect";
-import { renderComponent, textOf } from "../../test/hookHarness";
 
-// The confirm→cookie→/signup integration (NEW-5) and the confirmed-user gate
-// `SignupStep` itself enforces (NEW-2, NEW-2 RESIDUAL, the confirmed-user
-// timestamp cell) live in the SIBLING file `email-confirmation-signup-
-// route.test.tsx` — the estate's 500-line document gate, applied to a test
-// file. This file stays scoped to the confirm handler's own walls:
+// This file stays scoped to the confirm POST handler's own walls —
 // `proveSameOrigin`, the C1/C2 attempt seam, and the three refusal cards.
+// Three SIBLING files split off the estate's 500-line document gate (applied
+// to a test file, first at the original rewrite and again in the M1/NIT-3
+// fix round): `email-confirmation-page.test.tsx` (the GET page /
+// `confirmCodeState` itself — W-H, NIT-3's numeric bounds), `email-
+// confirmation-signup-route.test.tsx` (the confirm→cookie→/signup
+// integration and the confirmed-user gate `SignupStep` enforces).
 
-enableDomInspection();
-
-const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const SUBJECT = "11111111-1111-1111-1111-111111111111";
 
 type VerifyResponse = Awaited<
@@ -125,55 +114,6 @@ function fakeClient(
     },
   };
 }
-
-test("N1: the GET page renders the code form and makes zero verifyOtp calls", async () => {
-  // W-H, positively: page.tsx never reads an email from the URL AT ALL — a
-  // hostile query string carries no email field to ignore in the first
-  // place.
-  const search = { email: "victim@example.com", token: "999999" };
-  const first = await ConfirmEmailPage({ searchParams: Promise.resolve(search) });
-  const second = await ConfirmEmailPage({ searchParams: Promise.resolve(search) });
-
-  assert.deepEqual(first.props.state, { kind: "form" });
-  assert.deepEqual(second.props.state, { kind: "form" });
-
-  const pageSource = readFileSync(
-    join(WEB_ROOT, "app/(entry)/auth/confirm/page.tsx"),
-    "utf8",
-  );
-  assert.doesNotMatch(pageSource, /\.auth\.|verifyOtp\s*\(/, "GET contains a token-consuming call");
-  assert.doesNotMatch(pageSource, /searchParams\)\.email|query\.email/, "GET reads the address from the URL");
-
-  const h = await renderComponent(
-    createElement(NextIntlClientProvider, {
-      locale: "en",
-      messages,
-      children: createElement(EntryLayout, null, first),
-    }),
-  );
-  try {
-    for (let i = 0; i < 3; i++) await h.settle();
-    assert.match(textOf(h.container as never), /Enter your confirmation code/);
-    // The hostile query values are nowhere on the page — not pre-filled, not
-    // echoed anywhere.
-    assert.doesNotMatch(textOf(h.container as never), /victim@example\.com|999999/);
-    const headings = (h.container as unknown as { querySelectorAll(selector: string): unknown[] })
-      .querySelectorAll("h1");
-    assert.equal(headings.length, 1, "the confirmation face must own exactly one h1");
-  } finally {
-    await h.unmount();
-  }
-});
-
-test("W-H: a query-string email is never accepted — the status vocabulary is closed", async () => {
-  // Every unrecognised `status` value, including one that smuggles an email
-  // shape, falls to the plain form — never a distinct rendering keyed on
-  // caller-supplied content.
-  const state = await ConfirmEmailPage({
-    searchParams: Promise.resolve({ status: "victim@example.com" }),
-  });
-  assert.deepEqual(state.props.state, { kind: "form" });
-});
 
 test("THE WALL RUNS BEFORE verifyOtp, and the production seam REFUSES rather than fakes success", async () => {
   const calls: Array<{ type: "signup"; email: string; token: string }> = [];

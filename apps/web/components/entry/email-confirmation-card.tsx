@@ -3,8 +3,11 @@
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
+import {
+  requestConfirmationResend as defaultRequestConfirmationResend,
+  type RequestConfirmationResend,
+} from "@/lib/registration/confirmation-resend";
 import { recalledSignupEmail } from "@/lib/registration/signup-email-storage";
-import { createClient } from "@/lib/supabase/client";
 import { StateBanner } from "@/components/common/state";
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import { Button } from "@/components/ui/button";
@@ -62,34 +65,28 @@ export type ConfirmCodeState =
   | { readonly kind: "unavailable" }
   | { readonly kind: "invalid" };
 
-/** `auth.resend` is real Supabase Auth client machinery (the same category as
- *  `verifyOtp` — "call it for real"), not a Lane-B door. Seamed only for the
- *  Node test runner's `@supabase/realtime-js` constraint, exactly as
- *  `SignupAccountForm`'s `SignupAuthClient` is. */
-export interface ConfirmResendAuthClient {
-  auth: {
-    resend(params: { type: "signup"; email: string }): Promise<{
-      error: { message: string } | null;
-    }>;
-  };
-}
-
-type ResendStage = "idle" | "sending" | "sent" | "error";
+// M3, fix round 2026-09-01: the resend control no longer calls the browser
+// Supabase client's resend method AT ALL — see `lib/registration/
+// confirmation-resend.ts`'s header for the ORCHESTRATOR RULING and why.
+// `resendStage` narrows accordingly: there is no longer a provider error
+// MESSAGE to show (that required a real network call this component no
+// longer makes) — only the seam's own two honest outcomes, "sent" or
+// "unavailable".
+type ResendStage = "idle" | "sending" | "sent" | "unavailable";
 
 const WAIT_MINUTES = (seconds: number) => Math.max(1, Math.round(seconds / 60));
 
 export function EmailConfirmationCard({
   state,
-  createSupabaseClient = createClient,
+  requestResend = defaultRequestConfirmationResend,
 }: {
   state: ConfirmCodeState;
-  createSupabaseClient?: () => ConfirmResendAuthClient;
+  requestResend?: RequestConfirmationResend;
 }) {
   const t = useTranslations("ConfirmEmail");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [resendStage, setResendStage] = useState<ResendStage>("idle");
-  const [resendError, setResendError] = useState<string | null>(null);
 
   // Client-only prefill (§3.3): the initial render — server AND client, before
   // this effect runs — is identical and empty, so there is no hydration
@@ -103,20 +100,11 @@ export function EmailConfirmationCard({
   async function handleResend() {
     if (email.trim() === "") return;
     setResendStage("sending");
-    setResendError(null);
-    try {
-      const supabase = createSupabaseClient();
-      const { error } = await supabase.auth.resend({ type: "signup", email });
-      if (error) {
-        setResendError(error.message);
-        setResendStage("error");
-        return;
-      }
-      setResendStage("sent");
-    } catch (e) {
-      setResendError(e instanceof Error ? e.message : t("unavailableDescription"));
-      setResendStage("error");
-    }
+    // No direct Supabase resend call anywhere in this function — M3's whole
+    // point. See `lib/registration/confirmation-resend.ts`'s header for what
+    // "Lane B wires this through the wall" means in practice.
+    const outcome = await requestResend(email);
+    setResendStage(outcome.kind === "sent" ? "sent" : "unavailable");
   }
 
   const showResend = state.kind === "expired" || state.kind === "locked";
@@ -149,7 +137,10 @@ export function EmailConfirmationCard({
           </StateBanner>
         )}
         {state.kind === "unavailable" && (
-          <NotBuiltNote>{t("unavailableDescription")}</NotBuiltNote>
+          <NotBuiltNote>
+            <p className="font-medium">{t("unavailableTitle")}</p>
+            <p>{t("unavailableDescription")}</p>
+          </NotBuiltNote>
         )}
 
         <form method="post" action="/auth/confirm/verify" className="flex flex-col gap-4">
@@ -199,8 +190,8 @@ export function EmailConfirmationCard({
             {resendStage === "sent" && (
               <StateBanner tone="info">{t("resent")}</StateBanner>
             )}
-            {resendStage === "error" && resendError && (
-              <StateBanner tone="error">{resendError}</StateBanner>
+            {resendStage === "unavailable" && (
+              <NotBuiltNote>{t("resendUnavailable")}</NotBuiltNote>
             )}
           </div>
         )}

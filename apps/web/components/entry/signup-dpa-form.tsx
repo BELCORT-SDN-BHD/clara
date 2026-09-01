@@ -78,10 +78,17 @@ export function SignupDpaForm({
   async function handleSign() {
     setSigning(true);
     setSignedOutcome(null);
-    const outcome = await sign({
-      version: document.kind === "ready" ? document.version : "",
-      bodySha256: "",
-    });
+    // M2 fix round: the hash sent here MUST be the hash of the body THIS
+    // RENDER shows — never re-derived, never re-read. `document` is the exact
+    // prop the CardContent below prints `document.body` from, so
+    // `document.bodySha256` is provably the hash of what the person is
+    // looking at right now, not of whatever the row happens to say if it is
+    // re-read later. The `document.kind === "ready"` guard is closure-
+    // narrowing paperwork only — this function is never reachable except from
+    // the "ready" render below (see the "unavailable" early return above).
+    const outcome = document.kind === "ready"
+      ? await sign({ version: document.version, bodySha256: document.bodySha256 })
+      : { kind: "unavailable" as const };
     setSigning(false);
     // `outcome.kind` is exhaustively either "signed" or "unavailable" today;
     // the production seam only ever answers the latter. Either way this

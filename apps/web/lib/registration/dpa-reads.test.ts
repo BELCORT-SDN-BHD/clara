@@ -4,10 +4,18 @@
 // own migration text).
 
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { isDpaDocumentRow } from "./dpa-reads";
+import { DPA_DOCUMENT_COLUMNS, isDpaDocumentRow } from "./dpa-reads";
 import { loadCurrentDpaDocumentState } from "./dpa-server-reads";
+
+const MIGRATIONS_DIR = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../../packages/db/migrations",
+);
 
 test("isDpaDocumentRow validates every declared field's shape", () => {
   const valid = {
@@ -53,6 +61,48 @@ test("loadCurrentDpaDocumentState: ANY throw from the read degrades to unavailab
     },
   });
   assert.deepEqual(state, { kind: "unavailable" });
+});
+
+test("NIT-5: DPA_DOCUMENT_COLUMNS drift tripwire against C-1's real `create table`, once it lands", () => {
+  // Verified 2026-09-01 against `UNNUMBERED_checkout_gate_c1_dpa.sql`
+  // (branch coa/fs4-c1-dpa, PR #478): `create table clara.dpa_documents(
+  // version text primary key, body text not null, body_sha256 bytea not
+  // null, source_path text not null, effective_from timestamptz not null,
+  // effective_to timestamptz, created_at timestamptz not null default
+  // now(), ...)`. That file is NOT on `main` yet, and migration numbers are
+  // claimed only at merge (constraint 10) — its filename on `main` will
+  // differ from the unnumbered one on the open branch. So this searches
+  // every migration file's CONTENT for the live `create table` rather than
+  // one fixed path, and is a documented no-op until one matches: "the door
+  // isn't built yet" stays honest, but the day it lands with a renamed or
+  // reordered column, this reds instead of silently degrading to
+  // "unavailable forever" (dpa-server-reads.ts's own catch-all).
+  let liveColumns: string[] | null = null;
+  for (const entry of readdirSync(MIGRATIONS_DIR)) {
+    if (!entry.endsWith(".sql")) continue;
+    const source = readFileSync(join(MIGRATIONS_DIR, entry), "utf8");
+    const match = /create\s+table\s+clara\.dpa_documents\s*\(([\s\S]*?)\n\);/i.exec(source);
+    if (!match) continue;
+    liveColumns = (match[1] ?? "")
+      .split(",")
+      .map((line) => line.trim().split(/\s+/)[0] ?? "")
+      .filter((name) => name.length > 0 && !name.startsWith("constraint"));
+    break;
+  }
+
+  if (liveColumns === null) {
+    // C-1 has not merged onto this branch's tree yet — nothing to check
+    // against. Not a pass in disguise: the cell above (`isDpaDocumentRow`)
+    // is what actually exercises this shape's runtime handling today.
+    return;
+  }
+
+  for (const column of DPA_DOCUMENT_COLUMNS) {
+    assert.ok(
+      liveColumns.includes(column),
+      `DPA_DOCUMENT_COLUMNS reads "${column}", which C-1's live migration no longer declares`,
+    );
+  }
 });
 
 test("VACUITY CONTROL: a resolved session with no dpa read override still degrades (no live table on this tip)", async () => {

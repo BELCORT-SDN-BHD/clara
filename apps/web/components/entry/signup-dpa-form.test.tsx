@@ -11,6 +11,7 @@
 // fabricated signature.
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
@@ -55,6 +56,16 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
 const byButtonText = (re: RegExp) => (n: Node) => n.tagName === "BUTTON" && re.test(textOf(n as never));
 const byLinkText = (re: RegExp) => (n: Node) => n.tagName === "A" && re.test(textOf(n as never));
 
+/** The DB's own posture (`ck_dpa_documents_body_sha`, PR #478's migration):
+ *  `body_sha256 = sha256(convert_to(body,'UTF8'))`, rendered by PostgREST as
+ *  `\x`-prefixed hex. Computed here rather than hand-typed so the fixture
+ *  itself is a REAL hash of the body it accompanies — a hand-typed placeholder
+ *  hash would let a "just forwards whatever's in the fixture" bug pass this
+ *  file's own M2 cell just as easily as a correct implementation. */
+function bodyHash(body: string): string {
+  return `\\x${createHash("sha256").update(body, "utf8").digest("hex")}`;
+}
+
 test("the UNAVAILABLE document renders an honest NotBuiltNote, zero violations, and a live way out", async () => {
   const h = await renderComponent(
     App(createElement(SignupDpaForm, { document: { kind: "unavailable" } })),
@@ -76,9 +87,10 @@ test("the UNAVAILABLE document renders an honest NotBuiltNote, zero violations, 
 });
 
 test("a READY document renders the exact body and a real h1", async () => {
+  const body = "This is Clara's beta data-processing agreement.";
   const h = await renderComponent(
     App(createElement(SignupDpaForm, {
-      document: { kind: "ready", version: "clara-beta-2026-08-a", body: "This is Clara's beta data-processing agreement." },
+      document: { kind: "ready", version: "clara-beta-2026-08-a", body, bodySha256: bodyHash(body) },
     })),
   );
   try {
@@ -93,14 +105,16 @@ test("a READY document renders the exact body and a real h1", async () => {
 });
 
 test("clicking sign reaches the Lane-B seam and renders its answer honestly — never a fabricated success", async () => {
-  const calls: Array<{ version: string }> = [];
+  const body = "Beta text.";
+  const hash = bodyHash(body);
+  const calls: Array<{ version: string; bodySha256: string }> = [];
   const sign: SignDpa = async (params) => {
-    calls.push({ version: params.version });
+    calls.push({ version: params.version, bodySha256: params.bodySha256 });
     return { kind: "unavailable" };
   };
   const h = await renderComponent(
     App(createElement(SignupDpaForm, {
-      document: { kind: "ready", version: "clara-beta-2026-08-a", body: "Beta text." },
+      document: { kind: "ready", version: "clara-beta-2026-08-a", body, bodySha256: hash },
       sign,
     })),
   );
@@ -115,7 +129,16 @@ test("clicking sign reaches the Lane-B seam and renders its answer honestly — 
     await clickButton(signButton as never);
     for (let i = 0; i < 4; i++) await h.settle();
 
-    assert.deepEqual(calls, [{ version: "clara-beta-2026-08-a" }], "the click did not reach the seam with the right version");
+    // M2 — THE BINDING ITSELF: the hash the seam received is EXACTLY the
+    // hash of the body this render showed, never empty, never a different
+    // value. This is the whole point of the wall (checkout-gate-design-
+    // part2.md §1.1) — a signature must bind the bytes the signer saw.
+    assert.deepEqual(
+      calls,
+      [{ version: "clara-beta-2026-08-a", bodySha256: hash }],
+      "the click did not reach the seam with the rendered body's own hash",
+    );
+    assert.notEqual(calls[0]?.bodySha256, "", "the hash sent to the seam must never be empty");
     // THE DISCRIMINATING POST-CONDITION: an honest "not wired" note appears,
     // and it is NOT the same text as a success would render.
     assert.match(textOf(h.container as never), /door that records your signature.*isn't wired up/i);
@@ -126,8 +149,16 @@ test("clicking sign reaches the Lane-B seam and renders its answer honestly — 
   }
 });
 
+test("MUTANT: an empty bodySha256 sent to the seam is RED against the shipped answer", () => {
+  // RED-before proof for the cell above: a naive `bodySha256: ""` (the exact
+  // pre-fix defect) must NOT satisfy the assertion the previous test makes.
+  const shipped = { version: "clara-beta-2026-08-a", bodySha256: bodyHash("Beta text.") };
+  const mutant = { version: "clara-beta-2026-08-a", bodySha256: "" };
+  assert.notDeepEqual(mutant, shipped);
+});
+
 test("a document that WOULD sign (kind:'signed') is never fabricated by this seam's production default", async () => {
   const { signDpa } = await import("../../lib/registration/dpa-doors");
-  const outcome = await signDpa({ version: "any", bodySha256: "" });
+  const outcome = await signDpa({ version: "any", bodySha256: bodyHash("any") });
   assert.deepEqual(outcome, { kind: "unavailable" });
 });

@@ -2,10 +2,11 @@
 
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { claimIdentity, requestFirmRegistration } from "@/lib/identity/doors";
 import { isDoorRefusal } from "@/lib/doors";
+import { forgetSignupEmail } from "@/lib/registration/signup-email-storage";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -116,6 +117,16 @@ export function SignupFirmForm() {
   // must not re-render, and they must survive a re-render that does happen.
   const identityKey = useRef(newOpKey());
   const registrationKey = useRef(newOpKey());
+
+  // NIT-1, fix round 2026-09-01: `signup-email-storage.ts`'s own doc promised
+  // "cleared once the code is verified and the person has moved on" — this is
+  // that point. Reaching THIS step means the confirmation code was already
+  // verified (SignupStep's own gate); the stashed address's one job — pre-
+  // filling `/auth/confirm`'s email field — is done, so it is forgotten
+  // rather than left to sit in sessionStorage for the rest of the tab's life.
+  useEffect(() => {
+    forgetSignupEmail();
+  }, []);
 
   /** Any field edit starts a NEW attempt — see the op_key note in the header. */
   function onEdit<T>(set: (v: T) => void) {
