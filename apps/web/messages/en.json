@@ -370,6 +370,7 @@
         "admin": "Admin",
         "adminCompliance": "Compliance register",
         "adminVendorBindings": "Vendor identity bindings",
+        "adminRegistrations": "Firm registrations",
         "clientWorkspaceHome": "Workspace overview",
         "journals": "Journals",
         "documents": "Documents",
@@ -2434,6 +2435,9 @@
       "shareTrigger": "Share with firm",
       "shareTitle": "Share this conversation with the firm",
       "shareDescription": "Every member of your firm will be able to read this conversation. This cannot be undone from here."
+    },
+    "registrations": {
+      "heading": "Firm registrations"
     }
   },
   "ClientOnboarding": {
@@ -2577,5 +2581,33 @@
       "retry": "Retry",
       "remove": "Remove"
     }
+  },
+  "Registrations": {
+    "heading": "Firm registrations",
+    "pageDescription": "Requests to create a new firm on Clara — approve to create the firm and its owner membership, or reject with a reason.",
+    "loading": "Loading your operator context…",
+    "notOperator": "This console is for BELCORT's own operator firm, at owner rank. Your account does not carry that authority.",
+    "queueLoading": "Loading pending registrations…",
+    "empty": "No pending registrations.",
+    "columnFirm": "Requested firm",
+    "columnApplicant": "Applicant",
+    "columnNote": "Note",
+    "columnRequested": "Requested",
+    "columnStatus": "Status",
+    "columnActions": "Actions",
+    "statusOpen": "Open",
+    "approveTrigger": "Approve",
+    "approveReceipt": "Firm {firmId} was created, with onboarding plan {planId} opened.",
+    "rejectTrigger": "Reject",
+    "rejectTitle": "Reject the registration for {firm}?",
+    "rejectDescription": "This request will not be re-opened. The applicant sees your reason on their own pending screen.",
+    "reasonLabel": "Reason for rejecting",
+    "reasonPlaceholder": "Why is this registration being rejected?",
+    "reasonCounter": "{count}/{max} characters",
+    "reasonTooLong": "The reason must be {max} characters or fewer.",
+    "noteUnavailable": "—",
+    "cancel": "Cancel",
+    "working": "Working…",
+    "rejectConfirm": "Reject registration"
   }
 }
