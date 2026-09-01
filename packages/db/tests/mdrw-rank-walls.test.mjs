@@ -1,5 +1,5 @@
 // Member-door rank walls -- #455 review's BLOCKER + M1 + M2, closed by
-// migrations/UNNUMBERED_member_door_rank_walls.sql. Direct battery cells on the three doors
+// migrations/0157_member_door_rank_walls.sql. Direct battery cells on the three doors
 // (set_member_role, remove_member, revoke_invite): none of them compared the TARGET's current
 // rank to the caller's, and set_member_role/remove_member had no self-act refusal either, so an
 // admin could demote or remove any owner but the last in two clicks, or an admin could revoke an
@@ -61,7 +61,7 @@ import {
 import { inviteMember, revokeInvite } from "./p4t1-fixtures.mjs";
 
 const WALL_MARKER_DOOR = "clara.set_member_role(uuid,text,text)";
-const MDRW_MIGRATION = "UNNUMBERED_member_door_rank_walls.sql";
+const MDRW_MIGRATION = "0157_member_door_rank_walls.sql";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
