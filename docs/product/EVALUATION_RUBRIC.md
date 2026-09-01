@@ -83,14 +83,19 @@ derived state is not evidence**; (3) **spelling is not identity**.
   succeeded: a guard, a disambiguation, a refusal branch.*
 - **IN-3 — Review intensity is UNIFORM.** The full ladder applies to every substantive change;
   tiering it by blast radius was proposed and **DECLINED** (**ADR-061**). Assurance is a standing
-  posture, not a per-case calculation.
+  posture, not a per-case calculation. *(The ladder's current INSTANTIATION: ADR-0069's
+  mechanically-fenced single lane for zero-code docs-only PRs, and ADR-0077's lean ladder —
+  ONE fresh-context opus review + a Playwright browser leg per frontend train. Uniformity is
+  about no per-case tiering, not about which ladder is in force.)*
 - **IN-4 — Contract-blind batteries never read the implementation.** A lane that has seen the code
   grades the code's intentions rather than its behaviour.
 - **IN-5 — A different angle, not merely a different reader.** An independent verifier queries a
   DIFFERENT table or instrument than the one that produced the claim, and when prediction and
   measurement diverge it re-derives the gap instead of editing the prediction away.
 - **IN-6 — Every review lane carries an explicit model override**, and cross-model gating is used
-  where the ladder calls for it.
+  where the ladder calls for it. *(裁-111, owner, 2026-09-01: the cross-family review leg is
+  TIME-BOXED SUSPENDED until beta live — the opus lane is the complete gate meanwhile, and the
+  suspension expires at beta unless re-ruled.)*
 
 ## 4. VERDICT VOCABULARY
 

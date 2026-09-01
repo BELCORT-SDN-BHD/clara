@@ -333,6 +333,47 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
+      # 2026-09-02 CI-shape ruling: TWO MORE pristine clusters, one per full-fresh-migrate
+      # invocation this job makes (never reused across steps). postgres/5432 above stays
+      # intake_ci-only. WHY: roles are Postgres CLUSTER-global while schema_migrations is
+      # per-DATABASE. 0154's own tail assertion (immutable, merged) pins an ABSOLUTE clara
+      # role count at its position in the chain; it cannot tell a role minted by ITS OWN
+      # cluster's later migrations (fine -- 0154 always runs before any higher-numbered
+      # file, migrate.mjs sorts strictly ascending) apart from a role that ALREADY EXISTS
+      # because a DIFFERENT database's earlier, completed full chain on the SAME cluster
+      # left it behind. Giving every full-fresh-migrate invocation its own cluster matches
+      # 0154's stated assumption everywhere and needs ZERO maintenance when the next
+      # role-minting migration lands (measured: PR #493's C-3 mints clara_auth_wall/_login
+      # on top of this PR's pair) -- the rejected alternative was a hardcoded role-name
+      # reset, which reds again at the next mint. postgres_b stays drci_target-ONLY (DR
+      # round-trip target, genuinely empty pg_authid until roles-bootstrap+restore run
+      # there -- an existing invariant); do not add a fourth full-migrate consumer onto it.
+      postgres_c:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      postgres_d:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
       PGHOST: localhost
       PGUSER: postgres
@@ -344,6 +385,8 @@ jobs:
         run: |
           echo "PGPORT=${{ job.services.postgres.ports['5432'] }}" >> "$GITHUB_ENV"
           echo "PGB_PORT=${{ job.services.postgres_b.ports['5432'] }}" >> "$GITHUB_ENV"
+          echo "PGC_PORT=${{ job.services.postgres_c.ports['5432'] }}" >> "$GITHUB_ENV"
+          echo "PGD_PORT=${{ job.services.postgres_d.ports['5432'] }}" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: ./.github/actions/setup-workspace
       - uses: ./.github/actions/pg17-client
