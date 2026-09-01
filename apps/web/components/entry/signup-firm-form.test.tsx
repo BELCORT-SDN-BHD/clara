@@ -24,6 +24,17 @@ import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/
 import messages from "../../messages/en.json";
 import { SignupFirmForm } from "./signup-firm-form";
 
+/** NIT-1's own minimal in-memory `Storage`: the test harness's stubbed
+ *  `window` (test/hookHarness.ts) carries no `sessionStorage` property at
+ *  all, so this is installed directly onto it for the one cell that needs
+ *  to observe `forgetSignupEmail()` actually firing. */
+class MemorySessionStorage {
+  private readonly values = new Map<string, string>();
+  getItem(key: string): string | null { return this.values.get(key) ?? null; }
+  setItem(key: string, value: string): void { this.values.set(key, value); }
+  removeItem(key: string): void { this.values.delete(key); }
+}
+
 enableDomInspection();
 
 type Node = { tagName?: string; childNodes?: Node[]; parentNode?: Node; disabled?: boolean };
@@ -345,4 +356,32 @@ test("N5: a lost registration response replays the SAME second-door op_key befor
       }
     },
   );
+});
+
+test("NIT-1: mounting the firm step forgets the stashed signup email — its one job is done", async () => {
+  enableDomInspection();
+  const storage = new MemorySessionStorage();
+  const testWindow = (globalThis as unknown as { window: { sessionStorage?: unknown } }).window;
+  const original = testWindow.sessionStorage;
+  testWindow.sessionStorage = storage;
+  storage.setItem("clara-signup-email", "aisyah@example.com");
+
+  await withEstate(
+    () => new Response("null", { status: 200 }),
+    async () => {
+      const h = await renderComponent(App(createElement(SignupFirmForm), { replaced: [] }));
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        assert.equal(
+          storage.getItem("clara-signup-email"),
+          null,
+          "signup-email-storage.ts's own documented contract was not honoured on this step",
+        );
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+
+  testWindow.sessionStorage = original;
 });

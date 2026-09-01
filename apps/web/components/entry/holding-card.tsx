@@ -1,12 +1,15 @@
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 
 import type { HoldingState } from "@/lib/registration/holding-state";
+import { cn } from "@/lib/utils";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
 } from "@/components/ui/card";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { NotBuiltNote } from "@/components/common/not-built-note";
 import { StateBanner } from "@/components/common/state";
 import { LogoutButton } from "@/components/logout-button";
@@ -64,6 +67,31 @@ import { LogoutButton } from "@/components/logout-button";
  * implements today. This screen tells the truth about both: the row's real
  * status, and the fact that the payment step that will supersede that queue is
  * not built. Reporting only one of the two would be a half-truth either way.
+ *
+ * ===========================================================================
+ * FS-4 C-6 (裁-92, checkout-gate-design.md §2.1) — THE THREE NEW ARMS, AND
+ * WHAT LANE A COULD AND COULD NOT WIRE
+ * ===========================================================================
+ * `pending` NOW CARRIES A REAL CONTROL: "continue to checkout" links to
+ * `/signup`, which — once an open registration exists — renders the DPA step
+ * (`signup-dpa-form.tsx`) instead of the firm form again. That link WORKS
+ * today; nothing about it is stubbed. What the `NotBuiltNote` beside it names
+ * is narrowed accordingly: it used to say checkout did not exist AT ALL (no
+ * route, no plan flag, no webhook); now it names only what Lane A did not
+ * wire — the DPA signature is not durably recorded (`sign_dpa` is a Lane-B
+ * seam) and there is no `/checkout` route yet (Lane B / C-5).
+ *
+ * `checkout_open` and `paid` are new SIBLING kinds, not a field on `pending`
+ * — see holding-state.ts's header for why. Their controls ("resume
+ * checkout", "finish opening your firm") point at routes this train does not
+ * add (`/checkout`, `/checkout/success` — Lane B / C-6 completion), so they
+ * render as a DISABLED button beside its own `NotBuiltNote` rather than a
+ * `<Link>` that would 404: "an honest disabled/coming state on the action,
+ * never a dead link" (the C-6 Lane-A/B split's own words). Today neither kind
+ * is reachable from a live read — `checkout-progress-reads.ts` cannot see a
+ * `checkout_intents` or `firm_registration_payments` row until C-2/C-3 land
+ * and grant one — but the rendering is real and tested now, so the day those
+ * reads start succeeding this card needs no further change.
  */
 export function HoldingCard({ state }: { state: HoldingState }) {
   const t = useTranslations("Pending");
@@ -80,7 +108,45 @@ export function HoldingCard({ state }: { state: HoldingState }) {
             <StateBanner tone="info" title={state.firmName}>
               {t("pending.banner")}
             </StateBanner>
+            {/* A REAL link — /signup renders the DPA step for an open
+                registration (signup-step.tsx's third fork). Not a Button:
+                this is navigation and must work as a link (§ header). */}
+            <Link
+              href="/signup"
+              className={cn(buttonVariants({ variant: "outline" }), "w-full")}
+            >
+              {t("pending.continueToCheckout")}
+            </Link>
             <NotBuiltNote>{t("checkoutNotBuilt")}</NotBuiltNote>
+          </>
+        )}
+
+        {state.kind === "checkout_open" && (
+          <>
+            <StateBanner tone="info" title={state.firmName}>
+              {t("checkout_open.banner")}
+            </StateBanner>
+            {/* /checkout does not exist on this tip (Lane B / C-5). A disabled
+                button, never a <Link>: a dead link is worse than an honest
+                "not yet". */}
+            <Button variant="outline" className="w-full" disabled>
+              {t("checkout_open.resume")}
+            </Button>
+            <NotBuiltNote>{t("checkout_open.notBuilt")}</NotBuiltNote>
+          </>
+        )}
+
+        {state.kind === "paid" && (
+          <>
+            <StateBanner tone="info" title={state.firmName}>
+              {t("paid.banner")}
+            </StateBanner>
+            {/* /checkout/success does not exist on this tip either (Lane B /
+                C-6 completion, `claim_paid_firm`). Same discipline as above. */}
+            <Button variant="outline" className="w-full" disabled>
+              {t("paid.finish")}
+            </Button>
+            <NotBuiltNote>{t("paid.notBuilt")}</NotBuiltNote>
           </>
         )}
 
