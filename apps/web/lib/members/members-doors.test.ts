@@ -90,6 +90,15 @@ function declaredContract(sql: string, relation: string): { count: number; colum
 const M0141 = "0141_p4_tranche1_invite_rbac.sql";
 const M0145 = "0145_p4_tranche2_registration_operator_alias.sql";
 const M0147 = "0147_db_hardening_b_hash_only_bearer_tokens.sql";
+// FOLD (2026-09-01, web/p4-4-members onto main after #482): #482's
+// 0157_member_door_rank_walls.sql closes #455's own review BLOCKER + M1 + M2
+// (裁-94, "KEEP THE WALL") by `CREATE OR REPLACE`-ing exactly these three
+// bodies — set_member_role, remove_member, revoke_invite — to add the
+// target-rank wall (CLR04 'cannot act on a member/invite ranked above you')
+// and, on the first two, the self-act wall (CLR04 'cannot change your own
+// role' / 'cannot remove your own membership'). Verified against 0157's own
+// §K tail census before pinning here, not assumed. re-census if this moves.
+const M0157 = "0157_member_door_rank_walls.sql";
 
 function pinnedRoleRankBody(dir = MIGRATIONS_DIR): string {
   const operations = semanticFunctionOperations(dir, "role_rank");
@@ -116,17 +125,19 @@ describe("rung 0 — the live bodies this module cites are still the live bodies
     assert.equal(definers.at(-1), M0147, "lib/members/doors.ts cites 0147:372 — re-census if this moved");
   });
 
-  it("revoke_invite is created exactly once, at 0141", () => {
-    assert.deepEqual(functionDefiners("revoke_invite"), [M0141]);
+  it("revoke_invite's live body is 0157, over the 0141 that first created it", () => {
+    const definers = functionDefiners("revoke_invite");
+    assert.deepEqual(definers, [M0141, M0157]);
+    assert.equal(definers.at(-1), M0157, "lib/members/doors.ts cites 0141:466 — re-census if this moved");
   });
 
-  it("set_member_role's live body is 0145, over 0004 and 0005", () => {
+  it("set_member_role's live body is 0157, over 0004, 0005 and 0145", () => {
     const definers = functionDefiners("set_member_role");
-    assert.deepEqual(definers, ["0004_governed_fns.sql", "0005_event_spine.sql", M0145]);
+    assert.deepEqual(definers, ["0004_governed_fns.sql", "0005_event_spine.sql", M0145, M0157]);
   });
 
-  it("remove_member's live body is 0005, over 0004 — and nothing later touches it", () => {
-    assert.deepEqual(functionDefiners("remove_member"), ["0004_governed_fns.sql", "0005_event_spine.sql"]);
+  it("remove_member's live body is 0157, over 0004 and 0005", () => {
+    assert.deepEqual(functionDefiners("remove_member"), ["0004_governed_fns.sql", "0005_event_spine.sql", M0157]);
   });
 
   it("add_member's live body is 0145, over 0004/0005/0141", () => {
