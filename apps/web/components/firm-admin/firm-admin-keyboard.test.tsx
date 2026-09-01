@@ -372,6 +372,39 @@ test("Change threshold trigger is enabled from first render, regardless of role 
         // panel genuinely re-read rather than assumed).
         assert.doesNotMatch(textOf(body as never), /Change the high-stakes threshold/, "the dialog must actually close on a real confirm");
         assert.match(textOf(body as never), /RM 200,000\.00/, "the panel must show the DB's re-read value, not an echo of the typed 150000.00");
+
+        // N3 discriminating test (independent review, PR #489, fix-required):
+        // reopening the dialog must not resurrect the amount just confirmed.
+        // FirmAdminDoorDialog's Confirm handler closes via a plain
+        // `setOpen(false)` — a controlled-prop change Base UI does not treat
+        // as an interaction (DialogStore.js:48 only invokes onOpenChange from
+        // real interaction handlers), so a reset gated on the CLOSE
+        // transition never runs on a successful confirm. The reset must
+        // instead fire on OPEN, which a real trigger press always reaches.
+        const triggerOnReopen = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold");
+        assert.ok(triggerOnReopen, "the trigger must still render after the dialog closes on confirm");
+
+        await h.fireEvent(triggerOnReopen as never, "click");
+        for (let i = 0; i < 4; i++) await h.settle();
+
+        const amountFieldOnReopen = findIn(body as never, (n) => n.tagName === "INPUT" && n !== triggerOnReopen);
+        assert.ok(amountFieldOnReopen, "the amount field must render again on reopen");
+        assert.equal(
+          (amountFieldOnReopen as unknown as { value: string }).value,
+          "",
+          "reopening must show an EMPTY amount field — a stale confirmed value would mean the reset never fired, and the fix moves it to fire on OPEN instead of the CLOSE that a confirm never reaches",
+        );
+
+        const confirmButtonOnReopen = findIn(
+          body as never,
+          (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold" && n !== triggerOnReopen,
+        );
+        assert.ok(confirmButtonOnReopen, "the dialog's own Confirm control must render again on reopen");
+        assert.equal(
+          (confirmButtonOnReopen as unknown as { disabled: boolean }).disabled,
+          true,
+          "Confirm must be disabled again on reopen — a stale non-empty amount would otherwise leave it wrongly enabled",
+        );
       } finally {
         await h.unmount();
         for (let i = 0; i < 3; i++) await h.settle();

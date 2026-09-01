@@ -5,7 +5,7 @@
 // own header names). Owner-only floor is the DB's own wall
 // (`clara.set_firm_high_stakes_threshold`, 0022 §B): this dialog's TRIGGER is
 // rendered for EVERY viewer regardless of role and regardless of whether the
-// firm-settings read has loaded — vendor-binding-ceremony.tsx:18-22's own
+// firm-settings read has loaded — vendor-binding-ceremony.tsx:16-21's own
 // standing convention ("no client-side proposer≠signer gate — the DB's own
 // wall is the wall … The Sign trigger is NEVER pre-hidden on a client-side
 // role OR identity guess; every viewer sees it, and a caller who clicks it
@@ -59,7 +59,7 @@ export function ThresholdChangeDialog({
       // A stale pre-filled amount left over from a cancelled edit is one
       // stray click away from a spurious re-affirmation of a number the
       // caller never actually reviewed this time.
-      onOpenChange={(isOpen) => { if (!isOpen) setRaw(""); }}
+      onOpenChange={(isOpen) => { if (isOpen) setRaw(""); }}
       triggerLabel={t("changeTrigger")}
       title={t("changeTitle")}
       description={t("changeDescription")}
