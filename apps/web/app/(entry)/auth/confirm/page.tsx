@@ -27,12 +27,16 @@ type SearchParams = Record<string, string | string[] | undefined>;
 // field already does, because a value the real wall could never have emitted
 // is exactly as untrustworthy as a missing one.
 //
-// RECONCILIATION OWED (fs4-pr488-review ruling, 2026-09-01, recorded in full
-// at `confirmation-wall.ts`'s `ConfirmationAttemptOutcome.rejected` arm):
-// `WAIT_SECONDS_MAX` assumes C1/C2's real window is 900s. The C-3 driver
-// building `clara.claim_confirmation_attempt` names the actual window;
-// if it differs, THIS constant must be trued to it in the same/a follow-up
-// change, not left guessed.
+// RECONCILIATION OWED — 裁-103 (orchestrator ruling, 2026-09-01,
+// docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md). NOT OWNER-RULED —
+// surfaced to the owner as a design-vs-contract call under hard constraint
+// 1; if the owner rules otherwise this shape changes. (Raised by
+// fs4-pr488-review; the finding is theirs, the ruling is not.) Recorded in
+// full at `confirmation-wall.ts`'s `ConfirmationAttemptOutcome.rejected`
+// arm, which this hangs off of: `WAIT_SECONDS_MAX` assumes C1/C2's real
+// window is 900s. The C-3 driver building `clara.claim_confirmation_
+// attempt` names the actual window; if it differs, THIS constant must be
+// trued to it in the same/a follow-up change, not left guessed.
 const REMAINING_MAX = 5;
 const WAIT_SECONDS_MAX = 900;
 
