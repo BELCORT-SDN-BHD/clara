@@ -167,7 +167,9 @@ create table clara.stripe_events (
   subscription_id text,
   projection     jsonb       not null default '{}'::jsonb,
   received_at    timestamptz not null default now(),
-  constraint ck_stripe_events_event_id_shape check (event_id ~ '^evt_[A-Za-z0-9]+$'),
+  constraint ck_stripe_events_event_id_shape check (
+    event_id ~ '^evt_[A-Za-z0-9_]+$' and length(event_id)<=255
+  ),
   constraint ck_stripe_events_status_shape check (
     (payment_status is null or (length(payment_status)<=64 and payment_status ~ '^[ -~]*$'))
     and (mode is null or (length(mode)<=64 and mode ~ '^[ -~]*$'))
@@ -277,6 +279,7 @@ create function clara.record_stripe_event(
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   v_recorded boolean;
+  v_denied_key text;
   v_uuid_re text := '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
 begin
   if p_event_id is null or btrim(p_event_id)=''
@@ -286,6 +289,14 @@ begin
   if jsonb_typeof(p_projection) is distinct from 'object' then
     raise exception 'projection must be a json object' using errcode='CLR10';
   end if;
+  foreach v_denied_key in array array[
+    'customer_details','customer_email','billing_details','shipping_details',
+    'payment_method_details'
+  ] loop
+    if p_projection ? v_denied_key then
+      raise exception 'projection carries a denied field: %',v_denied_key using errcode='CLR10';
+    end if;
+  end loop;
   if p_projection ? 'intent_id' and p_projection->>'intent_id' is not null
      and p_projection->>'intent_id' !~ v_uuid_re then
     raise exception 'projection intent_id is not a valid uuid' using errcode='CLR10';
@@ -553,6 +564,7 @@ declare
   v_table text;
   v_pre jsonb;
   v_post jsonb;
+  v_role text;
   v_sig regprocedure;
   v_acl text[];
   v_effective text[];
@@ -651,17 +663,19 @@ begin
     end if;
   end loop;
 
-  select array_agg(p.oid::regprocedure::text order by p.oid::regprocedure::text) into v_effective
-    from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-   where n.nspname='clara'
-     and has_function_privilege('clara_stripe_webhook',p.oid,'EXECUTE');
-  if v_effective is distinct from array[
-    'clara.apply_stripe_events(integer)',
-    'clara.record_stripe_event(text,text,jsonb)'
-  ] then
-    raise exception 'checkout C-2 tail W-O: webhook effective routine set is %, expected exactly two',v_effective
-      using errcode='CLR10';
-  end if;
+  foreach v_role in array array['clara_stripe_webhook','clara_stripe_webhook_login'] loop
+    select array_agg(p.oid::regprocedure::text order by p.oid::regprocedure::text) into v_effective
+      from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+     where n.nspname='clara'
+       and has_function_privilege(v_role,p.oid,'EXECUTE');
+    if v_effective is distinct from array[
+      'clara.apply_stripe_events(integer)',
+      'clara.record_stripe_event(text,text,jsonb)'
+    ] then
+      raise exception 'checkout C-2 tail W-O: webhook effective routine set for % is %, expected exactly two',v_role,v_effective
+        using errcode='CLR10';
+    end if;
+  end loop;
 
   foreach v_sig in array array[
     'clara.record_stripe_event(text,text,jsonb)'::regprocedure,
@@ -693,24 +707,26 @@ begin
     end if;
   end loop;
 
-  if not has_schema_privilege('clara_stripe_webhook','clara','USAGE') then
-    raise exception 'checkout C-2 tail: webhook role cannot reach schema clara'
-      using errcode='CLR10';
-  end if;
-  if exists (
-    select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
-     where n.nspname='clara' and c.relkind in ('r','p','v','m','f')
-       and (has_table_privilege('clara_stripe_webhook',c.oid,'SELECT')
-         or has_table_privilege('clara_stripe_webhook',c.oid,'INSERT')
-         or has_table_privilege('clara_stripe_webhook',c.oid,'UPDATE')
-         or has_table_privilege('clara_stripe_webhook',c.oid,'DELETE')
-         or has_table_privilege('clara_stripe_webhook',c.oid,'TRUNCATE')
-         or has_table_privilege('clara_stripe_webhook',c.oid,'REFERENCES')
-         or has_table_privilege('clara_stripe_webhook',c.oid,'TRIGGER'))
-  ) then
-    raise exception 'checkout C-2 tail W-O: webhook role has an effective clara relation privilege'
-      using errcode='CLR10';
-  end if;
+  foreach v_role in array array['clara_stripe_webhook','clara_stripe_webhook_login'] loop
+    if not has_schema_privilege(v_role,'clara','USAGE') then
+      raise exception 'checkout C-2 tail: webhook role % cannot reach schema clara',v_role
+        using errcode='CLR10';
+    end if;
+    if exists (
+      select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
+       where n.nspname='clara' and c.relkind in ('r','p','v','m','f')
+         and (has_table_privilege(v_role,c.oid,'SELECT')
+           or has_table_privilege(v_role,c.oid,'INSERT')
+           or has_table_privilege(v_role,c.oid,'UPDATE')
+           or has_table_privilege(v_role,c.oid,'DELETE')
+           or has_table_privilege(v_role,c.oid,'TRUNCATE')
+           or has_table_privilege(v_role,c.oid,'REFERENCES')
+           or has_table_privilege(v_role,c.oid,'TRIGGER'))
+    ) then
+      raise exception 'checkout C-2 tail W-O: webhook role % has an effective clara relation privilege',v_role
+        using errcode='CLR10';
+    end if;
+  end loop;
 
   if not exists (
     select 1 from pg_roles r join pg_auth_members m on m.member=r.oid

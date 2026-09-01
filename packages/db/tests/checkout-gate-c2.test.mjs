@@ -213,7 +213,7 @@ cell("c2.3 ck_stripe_events_no_pii -- every named top-level denied key is reject
     "customer_details", "customer_email", "billing_details", "shipping_details", "payment_method_details",
   ]) {
     await assertRaises(
-      PG.checkViolation,
+      CLR.badRequest,
       () => recordEvent(stripeEventId(`pii${key}`), "unit.pii", { livemode: false, [key]: { value: "denied" } }),
       `top-level ${key}`,
     );
@@ -636,9 +636,17 @@ cell("c2.13 consumed rows are excluded before LIMIT and cannot starve a fresh ev
   assert.deepEqual(ordered.rows.map((row) => row.event_id), [...appliedEvents, freshEvent],
     "the fresh event is behind a LIMIT-sized consumed prefix");
 
+  // 42703 coupling: this stub proves only that stripe_event_id exists BY NAME. If C-3 renames
+  // that column, the dynamic applier query fails at runtime; this is not full schema compatibility.
   await rootQuery("create table clara.firm_registration_payments(stripe_event_id text primary key)");
   try {
     await rootQuery("alter table clara.firm_registration_payments owner to clara_fn_owner");
+    await rootQuery("alter table clara.firm_registration_payments enable row level security");
+    await rootQuery("alter table clara.firm_registration_payments force row level security");
+    await rootQuery(
+      `create policy p_frp_stub_owner on clara.firm_registration_payments for all to clara_fn_owner
+       using (true) with check (true)`,
+    );
     await rootQuery(
       "insert into clara.firm_registration_payments(stripe_event_id) select unnest($1::text[])",
       [appliedEvents],
@@ -681,7 +689,13 @@ cell("c2.14 open problem uniqueness -- one event/reason has at most one unresolv
 cell("c2.15 event-id shape mistake-net rejects non-Stripe ids and accepts a normal id", async () => {
   await assertRaises(PG.checkViolation, () => recordEvent(
     `not_evt_${randomUUID()}`, "unit.event_shape", { livemode: false },
-  ), "non-Stripe event id");
+  ), "event id without the Stripe prefix");
+  await assertRaises(PG.checkViolation, () => recordEvent(
+    `evt_café${randomUUID().replaceAll("-", "")}`, "unit.event_shape", { livemode: false },
+  ), "event id with a non-ASCII suffix character");
+  await assertRaises(PG.checkViolation, () => recordEvent(
+    `evt_${"a".repeat(300)}`, "unit.event_shape", { livemode: false },
+  ), "event id beyond the 255-character ceiling");
   const eventId = stripeEventId("shapecontrol");
   assert.deepEqual(await recordEvent(eventId, "unit.event_shape", { livemode: false }), {
     event_id: eventId, recorded: true,
@@ -693,6 +707,10 @@ cell("c2.16 settlement-status mistake-net bounds untrusted text and admits norma
     stripeEventId("oversizedstatus"), "unit.status_shape",
     { livemode: false, payment_status: "x".repeat(65) },
   ), "oversized payment status");
+  await assertRaises(PG.checkViolation, () => recordEvent(
+    stripeEventId("nonasciistatus"), "unit.status_shape",
+    { livemode: false, payment_status: "paîd" },
+  ), "non-ASCII payment status");
   const eventId = stripeEventId("statuscontrol");
   assert.deepEqual(await recordEvent(eventId, "unit.status_shape", {
     livemode: false,
