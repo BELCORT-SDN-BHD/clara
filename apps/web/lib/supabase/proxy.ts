@@ -250,14 +250,24 @@ export async function updateSession(request: NextRequest) {
   // that gap either, since it only observes the response the two writers
   // jointly produce.
   //
-  // `Vary`, by contrast, is real work: nothing else writes it, so `append`
-  // here is the one thing standing between "Cookie" surviving and Next
-  // someday contributing its own RSC `Vary` value that `applyAuthState`'s
-  // `set`-based queued-header application could otherwise replace it with.
-  // The e2e's `vary` assertion uses `toContain("Cookie")`, deliberately —
-  // not a loose match, a GUARD: it is what would catch `append` regressing
-  // to `set` or a wrong value silently dropping "Cookie". Do not
-  // "simplify" that assertion back to `toBe`.
+  // `Vary`'s `append` (not `set`) is still the right idiom here, but round
+  // 2 (2026-09-02) CONFIRMED the risk this comment used to only warn
+  // about: Next 16.3.3's own App Router OVERWRITES `Vary` for this
+  // dynamic route with its own RSC negotiation tokens regardless of what
+  // this `append` call, or `applyAuthState`, put there — proven by the
+  // e2e AND a bare `curl` against the built app (see
+  // `signup-confirm-pending.spec.ts`'s own comment at its `vary`
+  // assertion for the full evidence and the two follow-up fixes that
+  // ALSO lost to this: `next.config.ts`'s `headers()`, and there being no
+  // route-segment header hook for a plain page). `Vary: Cookie` therefore
+  // does not reach a real client today — `append` is kept anyway because
+  // it costs nothing and becomes correct the moment a future Next
+  // version stops clobbering it; the e2e's assertion is written to go
+  // red exactly when that day comes, so this is not a "fix it later and
+  // forget" situation. The primary control against cross-user response
+  // caching is `Cache-Control: private, no-store` above, which Next does
+  // NOT touch and which alone forbids a shared cache from storing this
+  // response.
   const cacheHeaders = confirmCacheHeadersForPath(request.nextUrl.pathname);
   if (cacheHeaders !== null) {
     response.headers.set("Cache-Control", cacheHeaders.cacheControl);
