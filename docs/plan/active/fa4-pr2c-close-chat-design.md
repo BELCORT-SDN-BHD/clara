@@ -35,7 +35,8 @@ create function clara.mint_chat_close_credential(
 ```
 - Kind HARDCODED `'interactive_client'` (law 68 — structural, never caller's choice; mirrors
   mintBankAgentCredential's reasoning, wake-mints.mjs:22-30).
-- `p_on_behalf_of` MANDATORY (CLR10 if null), active bookkeeper+ of the firm. A NULL-obo
+- `p_on_behalf_of` MANDATORY (CLR10 if null), active bookkeeper+ of the firm, and byte-bound to
+  the chat task's own `created_by` director. A NULL-obo
   interactive_client credential from chat would be unattended authority — `wake_context()`'s
   liveness predicate (0011:1146-1152) passes NULL obo trivially. Forbidding NULL is a wall.
 - `p_client` mandatory, firm-congruent, status='active' (byte-mirrors 0133:735-745).
@@ -45,7 +46,8 @@ create function clara.mint_chat_close_credential(
 - Grant: clara_runtime only (mirrors 0138:2557).
 
 **(2) Shared congruence helper** `clara._assert_wake_task_congruent(p_task, p_firm, p_client,
-p_task_kind) returns void` — ungranted, definer, CLR11 `wake_task_incongruent`. Do NOT CoR
+p_task_kind, p_on_behalf_of) returns void` — ungranted, definer, CLR11 `wake_task_incongruent`,
+plus the separate CLR11 `wake_task_director_mismatch` binding to `agent_tasks.created_by`. Do NOT CoR
 mint_wake_credential_for_task to adopt it in this PR (live-writer body, D1 argument, zero gain);
 pin non-drift with the two-door drift CELL instead (battery cell 7).
 
@@ -113,8 +115,10 @@ clara_wake_interactive (0138:2539-2551) and withWriteWakeScoped SET ROLEs to exa
 (pools.mjs:476); prove with a positive-control cell, not an assumption. All twelve are VOLATILE and
 write receipts (the six reads included) ⇒ every close tool rides withWriteWakeScoped, never
 readScoped. Open all twelve; A8 does the narrowing (law-71 verbatim, fa4-pr1c-fix-order:11-24 —
-human-reserved acts are exactly finalize/reopen/attest/settle). Wrapper 13
-(wake_establish_prepayment_schedule) stays parked, no row.
+human-reserved acts are exactly finalize/reopen/attest/settle). `wake_establish_prepayment_schedule`
+is absent only from this new `interactive_client` roster: 0140 ended its `close_prep` park
+(`0140:4531`) and inserted that kind's row at `0140:3685`. A8's closed-map `else` still fails
+`attended_close_verb_unmapped` if an attended row appears without a ruling.
 
 ## 3. The card (Q3)
 
@@ -155,7 +159,8 @@ wake_client_pin_mismatch; (7) two-door drift: both minters driven through the sa
 facts, identical refusal tokens; (8) the law-71 census re-run UNCHANGED + new arms: interactive_client
 reaches ZERO of finalize/reopen/attest/settle/hold/release; (9) card emission: acted + refused each
 emit exactly one part with the returned receipt_id; web card hydrates a planted row; client mismatch
-→ MalformedPart.
+→ MalformedPart. (10) task-director binding: a Bob-authored turn minted on behalf of Alice (both
+bookkeeper+) → CLR11 `wake_task_director_mismatch`; Bob/Bob succeeds.
 Mutant panel (each OUTSIDE any walked list; MUST-NOT-RED controls named): M1 drop A8's obo-condition
 → cell 2 reds; M2 A8 checks agent_user_id() instead of the director → cell 3 reds (the plausible
 wrong implementation); M3 relax the kind check → cell 5 reds; M4 drop the liveness rung → cell 5's
@@ -179,6 +184,12 @@ makes a future regression that adds an `interactive` allowlist row (pushing the 
 client-pin wall, now WITH a detail) RED on this cell instead of sliding through on the shared
 SQLSTATE. The other two arms of the trio are unaffected — both involve credentials that DO pass the
 allowlist check, so they reach the rungs the design always intended.
+
+**Behaviour change on a live lane (2026-09-01, PR #490 review):** the shipped v16 chat lane's
+legacy `interactive_client` credential has non-NULL `on_behalf_of` but no `agent_task_id`. Before
+these twelve rows it stopped uniformly at W2/CLR03; now it can expose the director's A8 result as
+CLR04 before still failing closed at W5/CLR03 `wake_task_unbound`. No authority opens, but the
+refusal code can reveal the directing human's rank/capability bucket, so the shape change is explicit.
 
 **Amendment #3 (2026-09-01, owner-ratified batch rung-order audit, via the PR-A driver).** STOPs 2
 and 3 both traced to the same root cause: a cell's expected refusal token was written without
@@ -210,9 +221,10 @@ p_ttl)`, this PR, new:**
 | M3 | `on_behalf_of` active bookkeeper+ of the firm | CLR10 | `on_behalf_of_incongruent` |
 | M4 | client firm-congruent + active | CLR10 | `interactive_client_client_incongruent` |
 | M5 | `agent_task` not null | CLR10 | `wake_task_unbound` |
-| M6 | `_assert_wake_task_congruent(task, firm, client, 'chat_turn')` | CLR11 | `wake_task_incongruent` |
-| M7 | task `status in ('queued','running','awaiting_input')` | CLR13 | `wake_task_not_live` (precedent: `0006_runtime_core.sql:161`'s own note that the ingress maps the one-live-turn 23505 to CLR13 — the task-lifecycle-conflict code) |
-| M8 | mint succeeds | — | — |
+| M6 | `_assert_wake_task_congruent`: task firm/client/kind | CLR11 | `wake_task_incongruent` |
+| M7 | `_assert_wake_task_congruent`: task `created_by` equals `on_behalf_of` (`IS DISTINCT FROM`, never nullable `<>`) | CLR11 | `wake_task_director_mismatch` |
+| M8 | task `status in ('queued','running','awaiting_input')` | CLR13 | `wake_task_not_live` (precedent: `0006_runtime_core.sql:161`'s own note that the ingress maps the one-live-turn 23505 to CLR13 — the task-lifecycle-conflict code) |
+| M9 | mint succeeds | — | — |
 
 **NORMATIVE BATTERY CONSTRAINTS (fixture MUST, not prose advice — a fixture that stalls at an
 earlier wall than the one it means to exercise is the false-confidence class: it still goes green,
@@ -220,7 +232,7 @@ having proved nothing about the wall it names).**
 
 - **CONSTRAINT A (cells 1, 4 arm 2, 6 both arms):** any cell whose target wall is W4 or later on an
   ATTENDED credential MUST either (i) drive the call through a verb in W3's viewer/no-op bucket (the
-  six reads or `wake_mint_month_snapshot`, corrected below), so A8 passes trivially regardless of the
+  six reads only, corrected below), so A8 passes trivially regardless of the
   director's rank, or (ii) mint the test credential with an `on_behalf_of` whose rank/capability is
   independently verified to satisfy A8 for the exact verb under test. Skipping this check is exactly
   how cell 6 became a STOP: a plausible fixture reaches W3 first and the intended wall is never
@@ -271,30 +283,28 @@ having proved nothing about the wall it names).**
   keyed on the real `on_behalf_of`, which M2 does not touch); M3/M4 leave every cell but 5 untouched;
   M5 leaves cells 2 and 8 green.
 
-**THE TWELFTH ROW + THE `mint_month_snapshot` BUCKET FIX (owner-ruled).** §1(3)'s original text
-already stated "mint_month_snapshot and the six reads have no gap" — that clause was always correct;
-the corrected `_assert_attended_close_floor` implementation is what must match it, made explicit here
-because an implementer bundled `mint_month_snapshot` with `propose_close`/`run_depreciation_catchup`
-instead (a discipline breach caught in review, not a design error). The complete, unambiguous
-twelve-verb mapping, stated as the case-arm grouping itself so there is no bucket left to
-misassign:
+**2026-09-01 SECOND CORRECTION WITHIN AMENDMENT #3 (PR #490 opus review, owner-ruled):** the prior
+paragraph moved `wake_mint_month_snapshot` from the implementation's original bookkeeper/no-capability
+arm into the viewer arm. That ruling was wrong; the original placement was correct. §1(3)'s
+"mint_month_snapshot and the six reads have no gap" premise was a false measurement: the human twin
+`mint_month_snapshot` opens `_human_ctx(role_rank('bookkeeper'))` at `0120:1439`, while the agent
+path converges at `0138:2451` from `_agent_mint_month_snapshot_core` onto the SAME
+`_mint_month_snapshot_core` writer used by that human door. The A8 path therefore cannot gate the
+identical write lighter than bookkeeper. This reversal preserves the wrong ruling in the record
+rather than silently editing it away. The corrected closed map is:
 
-- **viewer, no capability** (no gap; A8 always passes trivially for any active member) — the six
-  reads (`wake_list_fiscal_years`, `wake_get_close_plan`, `wake_get_close_readiness`,
-  `wake_verify_close`, `wake_snapshot_state`, `wake_dry_run_close_readiness`) **AND
-  `wake_mint_month_snapshot`** — seven verbs, one bucket.
+- **viewer, no capability** — the six reads only: `wake_list_fiscal_years`,
+  `wake_get_close_plan`, `wake_get_close_readiness`, `wake_verify_close`, `wake_snapshot_state`,
+  `wake_dry_run_close_readiness`.
 - **admin, no capability** — `wake_open_fiscal_year` (裁-100①).
-- **bookkeeper, `close_and_attest`** — `wake_begin_close`, `wake_abandon_close` (mirrors the human
-  doors' own floor).
-- **bookkeeper, no capability** — `wake_propose_close` (裁-100②: the settle door is the wall, not a
-  capability on the propose act) **AND `wake_run_depreciation_catchup`**, by the SAME reasoning
-  extended: a close-prep wake wrapper PROPOSES/STAGES work for a human to settle, and depreciation
-  catchup stages exactly as `propose_close` does (it executes an EXISTING signed authority and never
-  signs one, per the G0 battery's own established language) — so it takes `propose_close`'s floor,
-  not a new one. This is the twelfth row's owner ruling, closing the omission §1(3)'s original
-  "measured gaps" enumeration left silent (11 of 12 verbs were named; this rules the twelfth).
+- **bookkeeper, `close_and_attest`** — `wake_begin_close`, `wake_abandon_close`.
+- **bookkeeper, no capability** — `wake_propose_close`, `wake_run_depreciation_catchup`, and
+  `wake_mint_month_snapshot` — three verbs.
 
-Twelve verbs, four buckets, zero left to an implementer's judgment.
+Twelve verbs, four buckets (6/1/2/3), zero duplicates. The viewer arm is not behaviourally
+testable for an under-floor: mint-time M3 already forces every attended director to bookkeeper+.
+The migration tail therefore censuses every verb exactly once and pins the complete grouping;
+no battery cell is claimed as coverage for this specific floor.
 
 ## 5. PR topology (Q5) + file list
 

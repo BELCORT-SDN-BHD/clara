@@ -1,4 +1,4 @@
-// F-A4 PR-2c close-prep chat lane: nine DB cells. Cell 9 is the owner-ruled PR-A boundary,
+// F-A4 PR-2c close-prep chat lane: ten DB cells. Cell 9 is the owner-ruled PR-A boundary,
 // not PR-B's card-emission assertion. CONTRACT-BLIND: all claims hit the live catalog/behaviour.
 
 import { test, before, after } from "node:test";
@@ -211,9 +211,12 @@ test("fa4pr2c.6 foreign fiscal year and wrong client are byte-indistinguishable 
   const attended = await mintChatCloseSession(sc.firm, sc.client, sc.bob);
   // Constraint A: get-plan and list-fiscal-years are both viewer/no-gap verbs, so W3 passes.
   const foreignFy = await caught(() => getPlan(attended, foreign.fy));
+  const missingFy = await caught(() => getPlan(attended, freshUuid()));
   const wrongClient = await caught(() => listFy(attended, foreign.client));
   assert.deepEqual(caughtShape(foreignFy), caughtShape(wrongClient),
     "an existing foreign FY and a wrong client disclose the exact same code/detail/message bytes");
+  assert.deepEqual(caughtShape(foreignFy), caughtShape(missingFy),
+    "an existing foreign FY and a nonexistent FY disclose the exact same refusal bytes");
   assert.equal(foreignFy?.code, CLR.wake);
   assert.equal(detailReason(foreignFy), "wake_client_pin_mismatch");
 });
@@ -269,4 +272,24 @@ test("fa4pr2c.9 PR-A boundary: Tier-A raises write no receipt and therefore emit
     "select count(*)::int as n from clara.agent_act_receipts where wake_task_id=$1", [attended.task]);
   assert.equal(afterRows.rows[0].n, beforeRows.rows[0].n,
     "Tier A raises before reserve/receipt; PR-B must test cards only for receipted Tier-B/C outcomes");
+});
+
+test("fa4pr2c.10 task created_by, not a caller-chosen qualified human, directs A8 authority", async (t) => {
+  if (gate(t)) return;
+  const sc = await scene("pr2c_c10");
+  const qualified = await rootQuery(
+    `select count(*)::int as n from clara.firm_memberships m
+      where m.firm_id=$1 and m.user_id=any($2::uuid[]) and m.status='active'
+        and clara.role_rank(m.role)>=clara.role_rank('bookkeeper')`,
+    [sc.firm, [sc.bob, sc.alice]]);
+  assert.equal(qualified.rows[0].n, 2, "both Bob and Alice independently pass the earlier M3 floor");
+  const bobTask = await createChatTask(sc.firm, sc.client, sc.bob);
+  const mismatch = await caught(() => rootQuery(
+    "select * from clara.mint_chat_close_credential($1,$2,$3,$4,'00:15:00'::interval)",
+    [sc.firm, sc.client, bobTask.task, sc.alice]));
+  assert.equal(mismatch?.code, CLR.notFound);
+  assert.equal(detailReason(mismatch), "wake_task_director_mismatch",
+    "the new director wall fires after M3, never on_behalf_of_incongruent");
+  const matching = await mintChatCloseSession(sc.firm, sc.client, sc.bob);
+  assert.ok(matching.credentialId, "created_by = on_behalf_of remains the admitted control");
 });

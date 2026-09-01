@@ -23,7 +23,7 @@ export async function hasPR2C() {
     `select to_regprocedure(
               'clara.mint_chat_close_credential(uuid,uuid,uuid,uuid,interval)') is not null as mint,
             to_regprocedure(
-              'clara._assert_wake_task_congruent(uuid,uuid,uuid,text)') is not null as task_floor,
+              'clara._assert_wake_task_congruent(uuid,uuid,uuid,text,uuid)') is not null as task_floor,
             to_regprocedure(
               'clara._assert_attended_close_floor(text,uuid,uuid)') is not null as human_floor,
             (select count(*)::int from clara.wake_fn_allowlist
@@ -33,17 +33,17 @@ export async function hasPR2C() {
   return Object.values(r.rows[0]).every(Boolean);
 }
 
-/** A real chat session and queued chat_turn task. The task trigger derives firm/client from the
- * session, exactly as the production begin_chat_turn path does. */
+/** A real chat session and queued chat_turn task. Like begin_chat_turn, it stamps created_by;
+ * the task trigger independently derives firm/client from the session. */
 export async function createChatTask(firm, client, onBehalfOf) {
   const q = await rootQuery(
     `insert into clara.chat_sessions(firm_id,client_id,created_by,visibility)
        values($1,$2,$3,'private') returning id`,
     [firm, client, onBehalfOf]);
   const t = await rootQuery(
-    `insert into clara.agent_tasks(session_id,kind,status,model_snapshot)
-       values($1,'chat_turn','queued',$2) returning id,firm_id,client_id`,
-    [q.rows[0].id, JSON.stringify(MODEL)]);
+    `insert into clara.agent_tasks(session_id,kind,status,created_by,model_snapshot)
+       values($1,'chat_turn','queued',$2,$3) returning id,firm_id,client_id`,
+    [q.rows[0].id, onBehalfOf, JSON.stringify(MODEL)]);
   const row = t.rows[0];
   if (row.firm_id !== firm || row.client_id !== client) {
     throw new Error("chat task trigger did not derive the session's exact firm/client");

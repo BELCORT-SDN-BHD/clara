@@ -81,7 +81,7 @@ begin
     end if;
   end loop;
   foreach v_sig in array array[
-    'clara._assert_wake_task_congruent(uuid,uuid,uuid,text)',
+    'clara._assert_wake_task_congruent(uuid,uuid,uuid,text,uuid)',
     'clara._assert_attended_close_floor(text,uuid,uuid)',
     'clara.mint_chat_close_credential(uuid,uuid,uuid,uuid,interval)'] loop
     if to_regprocedure(v_sig) is not null then
@@ -144,19 +144,27 @@ set role clara_fn_owner;
 -- §A · TASK CONGRUENCE + THE CHAT-CLOSE CREDENTIAL MINTER.
 -- =================================================================================================
 create function clara._assert_wake_task_congruent(
-    p_task uuid, p_firm uuid, p_client uuid, p_task_kind text) returns void
+    p_task uuid, p_firm uuid, p_client uuid, p_task_kind text, p_on_behalf_of uuid) returns void
   language plpgsql stable security definer set search_path=clara,pg_temp as $$
 declare v_task record;
 begin
-  select t.id,t.firm_id,t.client_id,t.kind into v_task
+  select t.id,t.firm_id,t.client_id,t.kind,t.created_by into v_task
     from clara.agent_tasks t where t.id=p_task;
   if v_task.id is null or v_task.firm_id is distinct from p_firm
      or v_task.client_id is distinct from p_client or v_task.kind is distinct from p_task_kind then
     raise exception 'the named agent task is not a % task for this firm and client', p_task_kind
       using errcode='CLR11', detail='{"reason":"wake_task_incongruent"}';
   end if;
+  if v_task.created_by is distinct from p_on_behalf_of then
+    raise exception 'the named agent task was not directed by this on_behalf_of human'
+      using errcode='CLR11', detail='{"reason":"wake_task_director_mismatch"}';
+  end if;
 end $$;
-revoke all on function clara._assert_wake_task_congruent(uuid,uuid,uuid,text) from public;
+revoke all on function clara._assert_wake_task_congruent(uuid,uuid,uuid,text,uuid) from public;
+comment on function clara._assert_wake_task_congruent(uuid,uuid,uuid,text,uuid) is
+  'F-A4 PR-2c (law 68): the ungranted task wall for an attended chat-close credential. Reads the '
+  'named task positively and requires its firm, client, kind, and created_by director to match the '
+  'credential request; a caller cannot choose another human''s authority for an existing turn.';
 
 create function clara.mint_chat_close_credential(
     p_firm uuid, p_client uuid, p_agent_task uuid, p_on_behalf_of uuid,
@@ -187,7 +195,8 @@ begin
     raise exception 'a task-bound wake credential requires its agent task'
       using errcode='CLR10', detail='{"reason":"wake_task_unbound"}';
   end if;
-  perform clara._assert_wake_task_congruent(p_agent_task,p_firm,p_client,'chat_turn');
+  perform clara._assert_wake_task_congruent(
+    p_agent_task,p_firm,p_client,'chat_turn',p_on_behalf_of);
   if not exists(select 1 from clara.agent_tasks t where t.id=p_agent_task
       and t.status in ('queued','running','awaiting_input')) then
     raise exception 'the chat turn is not live enough to mint fresh close authority'
@@ -202,6 +211,10 @@ begin
   return query select v_id,v_secret;
 end $$;
 revoke all on function clara.mint_chat_close_credential(uuid,uuid,uuid,uuid,interval) from public;
+comment on function clara.mint_chat_close_credential(uuid,uuid,uuid,uuid,interval) is
+  'F-A4 PR-2c: the clara_runtime-only minter for attended close work in a chat turn. Hardcodes '
+  'interactive_client and binds the credential to a live, firm/client-congruent chat_turn and '
+  'that task''s created_by director before recording wake_credentials.agent_task_id.';
 
 -- =================================================================================================
 -- §B · A8 — ATTENDED AUTHORITY MAY NEVER EXCEED THE DIRECTING HUMAN.
@@ -214,22 +227,23 @@ create function clara._assert_attended_close_floor(
 declare v_min_role text; v_capability text; v_rank int;
 begin
   case p_verb
+    -- Behaviour cannot distinguish an under-floored verb in this bucket: mint-time M3 already
+    -- requires every attended director to be bookkeeper+. The tail therefore censuses this map.
     when 'wake_list_fiscal_years','wake_get_close_plan','wake_get_close_readiness',
-         'wake_verify_close','wake_snapshot_state','wake_dry_run_close_readiness',
-         'wake_mint_month_snapshot'
+         'wake_verify_close','wake_snapshot_state','wake_dry_run_close_readiness'
       then v_min_role:='viewer'; v_capability:=null;
     when 'wake_open_fiscal_year'
       then v_min_role:='admin'; v_capability:=null;
     when 'wake_begin_close','wake_abandon_close'
       then v_min_role:='bookkeeper'; v_capability:='close_and_attest';
-    when 'wake_propose_close','wake_run_depreciation_catchup'
+    when 'wake_propose_close','wake_run_depreciation_catchup','wake_mint_month_snapshot'
       then v_min_role:='bookkeeper'; v_capability:=null;
     else
       raise exception 'no attended close authority mapping exists for %', coalesce(p_verb,'null')
         using errcode='CLR10', detail='{"reason":"attended_close_verb_unmapped"}';
   end case;
   select clara.role_rank(m.role) into v_rank from clara.firm_memberships m
-    where m.user_id=p_on_behalf_of and m.firm_id=p_firm and m.status='active';
+    where m.user_id=p_on_behalf_of and m.firm_id=p_firm and m.status='active' limit 1;
   if v_rank is null or v_rank<clara.role_rank(v_min_role) then
     raise exception 'insufficient role for attended close verb %', p_verb
       using errcode='CLR04', detail=jsonb_build_object(
@@ -243,6 +257,10 @@ begin
   end if;
 end $$;
 revoke all on function clara._assert_attended_close_floor(text,uuid,uuid) from public;
+comment on function clara._assert_attended_close_floor(text,uuid,uuid) is
+  'F-A4 PR-2c (裁-99/裁-100): the ungranted A8 wall. An attended close wrapper may exercise no '
+  'more rank or capability than its task-bound directing human could exercise through the human '
+  'door; the twelve-verb mapping is closed and any unknown verb fails CLR10.';
 
 create or replace function clara._close_wake_ctx(p_verb text,p_subject_kind text,p_subject_id uuid,p_op_key text)
   returns jsonb language plpgsql stable security definer set search_path=clara,pg_temp as $$
@@ -257,11 +275,17 @@ begin
   if w.on_behalf_of is not null then
     perform clara._assert_attended_close_floor(p_verb,w.firm_id,w.on_behalf_of);
   end if;
+  -- THE CLIENT PIN. A close_prep credential is client-bound by its own CHECK; the subject must
+  -- resolve to THAT client or the call is refused. This is why the READS are wrappers and not a
+  -- one-line grant on get_close_plan (D-04): a firm-scoped grant would let a client-pinned lane
+  -- read every client's plan in the firm.
   v_client:=clara._close_subject_client(p_subject_kind,p_subject_id);
   if w.client_id is null or v_client is null or w.client_id is distinct from v_client then
     raise exception 'wake close authority is not pinned to this subject' using errcode='CLR03',
       detail='{"reason":"wake_client_pin_mismatch"}';
   end if;
+  -- THE MECHANICAL BINDING (TA-P4 (2), F14). Never a wrapper argument: a caller-supplied task id
+  -- is the model asserting its own provenance.
   v_task:=clara._wake_task_id();
   if v_task is null then
     raise exception 'this wake credential names no agent task' using errcode='CLR03',
@@ -313,6 +337,7 @@ reset role;
 do $tail$
 declare
   v_sig text; v_role text; v_n int; v_src text; v_grantees text[];
+  v_writer_oids oid[]; v_expected_writer_oids oid[];
   k_names text[]:=array[
     'wake_list_fiscal_years','wake_get_close_plan','wake_get_close_readiness','wake_verify_close',
     'wake_snapshot_state','wake_dry_run_close_readiness','wake_open_fiscal_year','wake_begin_close',
@@ -343,7 +368,7 @@ begin
 
   -- T.1 · Exact new function postures and grants.
   foreach v_sig in array array[
-    'clara._assert_wake_task_congruent(uuid,uuid,uuid,text)',
+    'clara._assert_wake_task_congruent(uuid,uuid,uuid,text,uuid)',
     'clara._assert_attended_close_floor(text,uuid,uuid)',
     'clara.mint_chat_close_credential(uuid,uuid,uuid,uuid,interval)'] loop
     if to_regprocedure(v_sig) is null or not exists(select 1 from pg_proc p
@@ -368,7 +393,7 @@ begin
       coalesce(array_to_string(v_grantees,','),'(none)') using errcode='CLR10';
   end if;
   foreach v_sig in array array[
-    'clara._assert_wake_task_congruent(uuid,uuid,uuid,text)',
+    'clara._assert_wake_task_congruent(uuid,uuid,uuid,text,uuid)',
     'clara._assert_attended_close_floor(text,uuid,uuid)'] loop
     if exists(select 1 from pg_proc p
         cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
@@ -423,8 +448,16 @@ begin
      or position('perform clara.assert_wake_allowed(w.wake_kind,p_verb);' in v_src)
         > position('perform clara._assert_attended_close_floor' in v_src)
      or position('perform clara._assert_attended_close_floor' in v_src)
-        > position('v_client:=clara._close_subject_client' in v_src) then
-    raise exception 'F-A4 PR-2c tail: _close_wake_ctx A8 is absent or out of rung order'
+        > position('v_client:=clara._close_subject_client' in v_src)
+     or position('raise exception ''this wake credential names no agent task'' using errcode=''CLR03'',' in v_src)=0
+     or position('detail=''{"reason":"wake_task_unbound"}'';' in v_src)=0
+     or position('if nullif(btrim(coalesce(p_op_key,'''')),'''') is null then' in v_src)=0
+     or position('detail=''{"reason":"invalid_request","class":"op_key","constraint":"nonempty"}'';' in v_src)=0
+     or position('if p_op_key is distinct from clara._close_expected_op_key(v_task,p_verb,p_subject_id) then' in v_src)=0
+     or position('detail=''{"reason":"op_key_not_derived"}'';' in v_src)=0
+     or position('raise exception ''the subject is not in this credential''''s firm'' using errcode=''CLR11'',' in v_src)=0
+     or position('detail=''{"reason":"fiscal_year_not_in_firm"}'';' in v_src)=0 then
+    raise exception 'F-A4 PR-2c tail: _close_wake_ctx A8/order or inherited W5-W8 literals drifted'
       using errcode='CLR10';
   end if;
   foreach v_sig in array (k_wrappers||array[
@@ -438,7 +471,7 @@ begin
 
   -- T.5 · Only the minter reads a lawful bare clock; both authority helpers are clock-free.
   foreach v_sig in array array[
-    'clara._assert_wake_task_congruent(uuid,uuid,uuid,text)',
+    'clara._assert_wake_task_congruent(uuid,uuid,uuid,text,uuid)',
     'clara._assert_attended_close_floor(text,uuid,uuid)'] loop
     select p.prosrc into v_src from pg_proc p where p.oid=v_sig::regprocedure;
     if v_src~* '\m(now|statement_timestamp|clock_timestamp|current_date)\M' then
@@ -447,11 +480,49 @@ begin
     end if;
   end loop;
 
+  -- T.6: closed twelve-verb A8 map: every name occurs once, in the reviewed 6/1/2/3 buckets.
+  select p.prosrc into v_src from pg_proc p
+    where p.oid='clara._assert_attended_close_floor(text,uuid,uuid)'::regprocedure;
+  foreach v_sig in array k_names loop
+    v_n:=(length(v_src)-length(replace(v_src,v_sig,'')))/length(v_sig);
+    if v_n<>1 then
+      raise exception 'F-A4 PR-2c tail: attended-floor verb % occurs % times, expected exactly one',
+        v_sig,v_n using errcode='CLR10';
+    end if;
+  end loop;
+  if position($map$when 'wake_list_fiscal_years','wake_get_close_plan','wake_get_close_readiness',
+         'wake_verify_close','wake_snapshot_state','wake_dry_run_close_readiness'
+      then v_min_role:='viewer'; v_capability:=null;$map$ in v_src)=0
+     or position($map$when 'wake_open_fiscal_year'
+      then v_min_role:='admin'; v_capability:=null;$map$ in v_src)=0
+     or position($map$when 'wake_begin_close','wake_abandon_close'
+      then v_min_role:='bookkeeper'; v_capability:='close_and_attest';$map$ in v_src)=0
+     or position($map$when 'wake_propose_close','wake_run_depreciation_catchup','wake_mint_month_snapshot'
+      then v_min_role:='bookkeeper'; v_capability:=null;$map$ in v_src)=0 then
+    raise exception 'F-A4 PR-2c tail: attended-floor case buckets drifted from reviewed 6/1/2/3 map'
+      using errcode='CLR10';
+  end if;
+
+  -- T.7: INV-1 writer closure: exactly the two reviewed minters write agent_task_id.
+  select array_agg(p.oid order by p.oid) into v_writer_oids
+    from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname='clara'
+      and p.prosrc~*'insert[[:space:]]+into[[:space:]]+clara[.]wake_credentials'
+      and p.prosrc~'\magent_task_id\M';
+  select array_agg(x::oid order by x::oid) into v_expected_writer_oids
+    from unnest(array[
+      'clara.mint_wake_credential_for_task(text,uuid,uuid,uuid,interval)'::regprocedure,
+      'clara.mint_chat_close_credential(uuid,uuid,uuid,uuid,interval)'::regprocedure]) x;
+  if v_writer_oids is distinct from v_expected_writer_oids then
+    raise exception 'F-A4 PR-2c tail: wake_credentials.agent_task_id writer closure is %, expected the two exact minters',
+      coalesce(v_writer_oids::text,'(none)') using errcode='CLR10';
+  end if;
+
   if not exists(select 1 from clara.wake_engine_sources
       where source_key='close_prep' and enabled=false) then
     raise exception 'F-A4 PR-2c tail: close_prep source moved from disabled during apply'
       using errcode='CLR10';
   end if;
 
-  raise notice 'F-A4 PR-2c tail: OK — apply-time D1 tripwire observed close_prep enabled=false; 3 exact definer functions landed; mint_chat_close_credential is clara_runtime-only and both authority helpers are ungranted/PUBLIC-refused/clock-free; exactly 12 interactive_client allowlist rows match the existing wrapper roster and every wrapper remains executable by clara_wake_interactive; finalize/reopen/attest/settle remain unreachable from EVERY extant clara_wake_* role; A8 is positioned allowlist -> attended floor -> client pin; mint_wake_credential_for_task, wake_context and all 12 wrappers are byte-identical to prestate; close_prep remains disabled.';
+  raise notice 'F-A4 PR-2c tail: OK — apply-time D1 tripwire observed close_prep enabled=false; 3 exact definer functions landed; mint_chat_close_credential is clara_runtime-only and both authority helpers are ungranted/PUBLIC-refused/clock-free; exactly 12 interactive_client allowlist rows match the existing wrapper roster and every wrapper remains executable by clara_wake_interactive; finalize/reopen/attest/settle remain unreachable from EVERY extant clara_wake_* role; A8 is positioned allowlist -> attended floor -> client pin with W5-W8 literals intact, its 12 verbs occur exactly once in the reviewed 6/1/2/3 buckets, and exactly two function signatures write wake_credentials.agent_task_id; mint_wake_credential_for_task, wake_context and all 12 wrappers are byte-identical to prestate; close_prep remains disabled.';
 end $tail$;

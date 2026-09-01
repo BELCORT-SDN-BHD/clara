@@ -1,6 +1,10 @@
-// F-A4 PR-1c close-domain agent limb, part 2: law 71, Tier C, oracles, parity and census.
-// Part 1 is f-a4-pr1c-close-agent-limb.test.mjs; both share f-a4-pr1c-fixtures.mjs.
-// CONTRACT-BLIND: every claim reads the LIVE catalog or behaviour, never migration text.
+// F-A4 PR-1c -- THE CLOSE-DOMAIN AGENT LIMB battery, part 2: law 71's wall, Tier C, the two
+// oracles + the parity reads, and the roster/census surfaces. Part 1 (the ladder, the freeze and
+// the proposal round trip) is f-a4-pr1c-close-agent-limb.test.mjs; both share
+// f-a4-pr1c-fixtures.mjs.
+//
+// CONTRACT-BLIND: every claim is proved against the LIVE catalog or a behavioural run, never
+// against the migration's own text.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -21,8 +25,11 @@ after(async () => {
   printSkipCount("f-a4-pr1c-walls");
   await endPool();
 });
-// D -- LAW 71. begin/abandon/open-year/snapshot-mint are hers; finalize/reopen/attest remain
-// human forever. Four instruments prove structural unreachability independently.
+// =====================================================================================
+// D -- LAW 71's WALL. begin/abandon/open-year/snapshot-mint are hers; finalize, reopen and
+// attest are the human's FOREVER, and the limb must be structurally incapable of reaching them.
+// Four independent instruments, because one of them agreeing with the design proves nothing.
+// =====================================================================================
 test("fa4c.D1 law 71: no wake verb can finalize, reopen or attest -- not by allowlist, not by grant, not by call graph, not by capability", async (t) => {
   if (gate(t)) return;
   // (a) NO allowlist row admits a reserved act under ANY wake kind.
