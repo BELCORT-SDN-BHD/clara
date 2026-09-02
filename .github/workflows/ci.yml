@@ -22,10 +22,44 @@ name: CI
 #      regression surfaces at the next sweep — after a PR touching a closed drill or
 #      this pipeline, run the sweep by hand: `gh workflow run ci.yml`.
 #   2. THE MONOLITH SPLITS into parallel jobs (lever 2): build · db-estate ·
-#      db-live-gates · render-drill run 2-wide across the runner instances.
+#      db-live-gates · render-drill run in parallel (2-wide across the WSL fleet then;
+#      fully parallel on hosted runners since 裁-135 — one fresh VM per job).
 #   3. THE REQUIRED CHECK `ci` BECOMES A FAIL-CLOSED META-GATE (terminal job below),
 #      closing two pre-existing fail-open shapes: lint was never a required check,
 #      and a failed classifier's skip satisfied protection.
+#
+# THE HOSTED-RUNNER MIGRATION (2026-09-02, owner-ruled — 裁-135, superseding the
+# 裁-134 self-hosted concurrency cap). Every job moves from the four self-hosted WSL2
+# runner instances to GitHub-hosted `ubuntu-latest` (Ubuntu 24.04). ZERO gate-content
+# changes: the same nine jobs, the same fail-closed `ci` meta-gate, the same docs-only
+# classifier, the same sweep-only cadence, the same step bodies. What changed is the
+# HOST and the three things that were only ever self-hosted hardening:
+#   a. `runs-on` — `[self-hosted, linux, clara]` -> `ubuntu-latest` on all TEN job
+#      definitions (the nine gates plus this file's own meta-gate). The four runners
+#      stay REGISTERED but no event routes to them any more; the owner decommissions
+#      them by `docs/ops/ci-runner.md`'s own procedure.
+#   b. HOST-WIDE `flock` SERIALISATION IS GONE (the pg17 client and the drill font):
+#      a hosted runner is a single-tenant, single-job, throwaway VM, so there is no
+#      second job on the host to race. The IDEMPOTENCE GUARD in each install is KEPT
+#      — it is what makes the step safe to re-read, not the lock.
+#   c. `timeout-minutes` ON EVERY JOB — a BACKSTOP against a hung leg, not a target.
+#      Self-hosted minutes were free and a hung leg only blocked a runner; hosted
+#      minutes are billed, and GitHub's own default is SIX HOURS. Sized against the
+#      last full code run of main on the WSL fleet (run 33592223941: changes 18s ·
+#      lint 1m49s · build 1m27s · render-drill 30s · db-live-gates 9m45s ·
+#      db-estate 22m24s) and then widened for CORE COUNT: that host had 24 vCPUs,
+#      while a standard hosted runner has 2 (private repo) or 4 (public). The
+#      parallel-heavy legs — `node --test` fans out to CPU count — are therefore
+#      expected to run several times longer, so a ceiling that merely doubled the
+#      WSL timing would false-red honest work. Every value here is deliberately
+#      loose; a leg that APPROACHES its ceiling is the signal to investigate.
+# ONE MEASURED LOSS, named rather than discovered later: the shared Docker daemon's
+# BuildKit cache does not survive between runs, so the render drill rebuilds its image
+# cold (19s here against 8s warm on the fleet). The pnpm store was called a second loss
+# in an earlier draft and is NOT one — setup-workspace's `cache: pnpm` is warm across
+# jobs ("Cache hit … Cache restored successfully" in lint and build, run 33631065480);
+# what moved is where the store lives, not whether it is populated.
+# CONCURRENCY: no slot cap — a hosted runner has no fleet to contend for; see below.
 on:
   pull_request:
   push:
@@ -37,14 +71,56 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # THE WEEKLY SWEEP GETS ITS OWN GROUP (review R2 MAJOR): cancel-in-progress is read
-  # from the NEWLY-QUEUED run, so only group isolation delivers "a scheduled run is
-  # never cancelled" — a merge landing mid-sweep would otherwise silently cancel the one
-  # compensating control every skip leans on. workflow_dispatch gets a PER-RUN group
-  # (5-lens review, 2026-08-21): ADR-0073 makes manual dispatch the closed-wave proof
-  # path, and in the ref group the next push-to-main would cancel it mid-drill.
-  group: ci-${{ github.event_name == 'schedule' && 'weekly-sweep' || github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
-  cancel-in-progress: true
+  # ONE AXIS, TWO REGIMES (裁-135 re-cut; no slot cap — hosted runners have no fleet
+  # contention, which is exactly what makes the 裁-134 cap moot).
+  #
+  #   pull_request  -> a PER-BRANCH group keyed on github.ref (refs/pull/<n>/merge is
+  #                    stable across that PR's pushes and distinct from every other
+  #                    PR's), WITH cancel-in-progress: a superseded push's run is dead
+  #                    weight and, on billed minutes, dead spend.
+  #   everything else (push to main · workflow_dispatch · schedule)
+  #                 -> a RUN-ID-KEYED group, so each run is alone in its own group and
+  #                    cancellation is a structural no-op. This is the property the old
+  #                    shape only half had: 'weekly-sweep' was one shared literal, so a
+  #                    second sweep cancelled the first, and every push to main shared
+  #                    ci-refs/heads/main, so a merge landing while an earlier merge's
+  #                    CI was still running cancelled it — the opposite of "a scheduled
+  #                    run is never cancelled" and of "main's CI always completes".
+  #
+  # cancel-in-progress is ALSO gated on the event: it is read from the newly-queued run,
+  # so belt (the expression) and braces (the unique group) both point the same way.
+  #
+  # THE COST OF "MAIN IS NEVER CANCELLED", PRICED RATHER THAN DISCOVERED (#513 review, F3).
+  # Removing main from the cancelling group removes the only bound there was on concurrent
+  # main pipelines: N merges landing inside one CI duration now produce N complete,
+  # uncancelled, concurrently-running pipelines. That is INTENDED. Hosted runners have no
+  # fleet to contend for, so those N runs are genuinely parallel rather than queued; on a
+  # public repository they are also free of charge. The reason to keep them is not the
+  # price, though — it is that each merge's run verifies a DIFFERENT tree, and per-commit
+  # granularity is exactly what lets a bisect say WHICH merge broke main. Cancelling the
+  # older run buys a few minutes and throws that away. 裁-134's "pushes to main are never
+  # cancelled" clause was ruled against a zero-spend fleet; it is RE-RULED here on a metered
+  # one, on the bisect argument.
+  #
+  # `queue` (GitHub's documented concurrency option: `single` — the default — cancels and
+  # REPLACES an older pending run when a newer one arrives; `max` lets up to 100 pend).
+  # `queue: max` with `cancel-in-progress: true` is a documented workflow VALIDATION ERROR,
+  # which is why this is an expression and not a constant — the PR arm must stay `single`.
+  #
+  # READ THIS BEFORE YOU RELY ON IT. `max` is DECORATIVE in the shape above: every non-PR
+  # group is keyed on github.run_id, so it is a group of ONE and there is never a pending run
+  # to displace. And the value is set by an EXPRESSION, which the docs do NOT document as
+  # supported for this key — what the runs prove is that GitHub PARSES the expression and
+  # DISPATCHES the jobs (33630834296, 33631065480), NOT that `max` is honoured. It cannot be
+  # proven here, because nothing in this shape gives it anything to do.
+  # So the tripwire is deliberately conditional: if you ever give a non-PR event a SHARED
+  # group key, `queue: max` becomes the only thing standing between a pending run and silent
+  # replacement — and at that moment you must PROVE it is honoured (queue two runs into the
+  # shared group and confirm the older one still runs) rather than trusting this line. A
+  # protection whose first real use is its first test is not a protection.
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.ref) || format('ci-{0}-{1}', github.event_name, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  queue: ${{ github.event_name == 'pull_request' && 'single' || 'max' }}
 
 jobs:
   # =========================================================================
@@ -70,9 +146,11 @@ jobs:
   # $GITHUB_* values are read as shell env, never spliced via ${{ }}; EV_BEFORE is a SHA.
   # =========================================================================
   changes:
-    # Self-hosted (owner-ruled 2026-08-11; docs/ops/ci-runner.md): the 'clara' label pins
-    # jobs to our runners; an offline runner makes jobs QUEUE visibly, never pass.
-    runs-on: [self-hosted, linux, clara]
+    # GitHub-hosted (owner-ruled 2026-09-02, 裁-135; docs/ops/ci-runner.md "Hosted from
+    # 2026-09-02"): a fresh single-tenant ubuntu-24.04 VM per job. The four self-hosted
+    # WSL runners stay registered but no event routes to them.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       code: ${{ steps.classify.outputs.code }}
       db: ${{ steps.classify.outputs.db }}
@@ -80,6 +158,20 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      # DIAGNOSTIC ONLY — no gate reads it, nothing branches on it. It exists so the
+      # hosted fleet's real shape (cores, memory, free disk, docker, the image's own
+      # psql) is a MEASUREMENT in every run's log rather than a claim in a PR body.
+      # GitHub's docs quote 4-core/16 GB for public repos and 2-core/8 GB for private;
+      # this prints what the runner actually gave us.
+      - name: Runner facts (diagnostic — nothing gates on this)
+        run: |
+          echo "runner:  $RUNNER_OS $RUNNER_ARCH  image=${ImageOS:-?} ${ImageVersion:-?}"
+          echo "cores:   $(nproc)"
+          free -h || true
+          df -h / /home/runner /mnt 2>/dev/null || true
+          docker --version || echo "docker: ABSENT"
+          psql --version || echo "psql: ABSENT"
+          node --version
       - id: classify
         env:
           EV_BEFORE: ${{ github.event.before }}
@@ -123,7 +215,8 @@ jobs:
   # here now BLOCKS merge — which the old required-check wiring never enforced.
   # =========================================================================
   lint:
-    runs-on: [self-hosted, linux, clara]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -146,7 +239,8 @@ jobs:
   render-drill:
     needs: changes
     if: needs.changes.outputs.code != 'false'
-    runs-on: [self-hosted, linux, clara]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -171,19 +265,35 @@ jobs:
         run: node --test packages/reporting-render/tests/
       # The fixture is typeset with a content-addressed font MOUNTED at run time, exactly
       # as production supplies them — the image ships no font directory, so a drill that
-      # found one would not test what ships. HOST-LOCKED like the PG17 client install
-      # (Codex review 2026-08-21): an unlocked apt-get races the locked install on the
-      # other runner instance — same lock, same idempotence guard.
+      # found one would not test what ships.
+      #
+      # DEFENCE, NOT A MEASURED REQUIREMENT — and the correction matters more than the
+      # step. An earlier draft of this comment claimed the install was REQUIRED because
+      # the runner image "ships NO DejaVu", citing the image's own Ubuntu2404-Readme apt
+      # manifest. That manifest is a CURATED subset, so reading it answered a question it
+      # cannot answer: `fonts-dejavu-core` arrives TRANSITIVELY and is present. Measured on
+      # image 20260823.283.1, hosted runs 33622887117 and 33631065480: this step emits no
+      # apt output and takes 0-1 s, i.e. the `dpkg -s` guard short-circuits and nothing is
+      # installed. Absence from the wrong instrument is not absence (house law 2).
+      # The step STAYS: the image can stop shipping it transitively at any refresh, and
+      # double-render-drill.mjs FAILS rather than skips with no DejaVuSans.ttf, so a cheap
+      # guard is the right shape — it is just not doing anything today.
+      # The host-wide flock retired with the self-hosted fleet (裁-135) — one job owns
+      # this VM, so nothing races the dpkg lock. The IDEMPOTENCE GUARD is kept: it is
+      # what makes a re-run cheap, and it is the half that was never about the lock.
       - name: Ensure a drill font is present
         run: |
-          sudo flock /var/lock/clara-pgdg.lock bash -ec '
+          sudo bash -ec '
             if dpkg -s fonts-dejavu-core >/dev/null 2>&1; then exit 0; fi
             apt-get update -o DPkg::Lock::Timeout=180
             apt-get install -y --no-install-recommends -o DPkg::Lock::Timeout=180 fonts-dejavu-core'
-      # RUN-SCOPED image tag (Codex review 2026-08-21, HIGH): the runner instances share
-      # ONE Docker daemon — a fixed tag lets a concurrent run RETAG between this run's
-      # build and its drill (a broken commit passing on another commit's image). Env vars,
-      # never ${{ }} splicing; BuildKit's cache is tag-independent, so cleanup is free.
+      # RUN-SCOPED image tag, KEPT (Codex review 2026-08-21, HIGH). Its original reason —
+      # the four runner instances shared ONE Docker daemon, so a fixed tag let a concurrent
+      # run RETAG between this run's build and its drill — retired with the fleet, but the
+      # tag stays: it costs nothing, it keeps the drill's --image argument honest about
+      # WHICH build it graded, and it survives any future move back to a shared daemon.
+      # MEASURED LOSS (裁-135): the shared daemon's BuildKit cache did NOT come along —
+      # each hosted run builds this image cold. Env vars, never ${{ }} splicing.
       - name: Build the renderer image (pinned engine + pinned extractor)
         run: docker build -f packages/reporting-render/Dockerfile -t "clara-render:ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" .
       - name: Double-render drill — determinism, the control arm, and the real preamble
@@ -200,7 +310,8 @@ jobs:
   build:
     needs: changes
     if: needs.changes.outputs.code != 'false'
-    runs-on: [self-hosted, linux, clara]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       # apps/web's build runs `scripts/check-public-key.mjs` BEFORE bundling: it
@@ -252,7 +363,8 @@ jobs:
     # FAIL-CLOSED AT THIS LAYER TOO (review R1 MAJOR): != 'false', never == 'true' --
     # an absent/garbled output must RUN the job, not skip it green.
     if: needs.changes.outputs.code != 'false'
-    runs-on: [self-hosted, linux, clara]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
     services:
       postgres:
         image: postgres:17
@@ -261,8 +373,11 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: clara_ci
         ports:
-          # EPHEMERAL host port (self-hosted hardening): a FIXED host port collides when
-          # two jobs share one Docker host. Steps read the mapped port via wire-ports.
+          # EPHEMERAL host port, KEPT. Its original reason (a FIXED host port collides
+          # when two jobs share one Docker host) retired with the self-hosted fleet, but
+          # this job declares only one service here while db-live-gates declares FOUR on
+          # one VM — ephemeral mapping is what lets four postgres:17 containers coexist
+          # without hand-assigned ports. Steps read the mapped port via wire-ports.
           - 5432
         options: >-
           --health-cmd "pg_isready -U postgres"
@@ -305,7 +420,8 @@ jobs:
   db-live-gates:
     needs: changes
     if: needs.changes.outputs.code != 'false'
-    runs-on: [self-hosted, linux, clara]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     services:
       postgres:
         image: postgres:17
@@ -401,7 +517,8 @@ jobs:
   # =========================================================================
   closed-wave-drills:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: [self-hosted, linux, clara]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
     services:
       postgres:
         image: postgres:17
@@ -437,11 +554,12 @@ jobs:
   # (ADR-0073 lever 1: a closed wave's four frontier legs, the same growing cost). The
   # leg logic — presence gate, NONE-OR-ALL, name-not-number, E17, cell floors, the
   # contracts roster, the isolated drill — is unchanged in .github/actions/frontier-leg.
-  # Each matrix leg gets its OWN runner and its OWN ephemeral postgres:17 service.
+  # Each matrix leg gets its OWN hosted runner VM and its OWN ephemeral postgres:17.
   # ===========================================================================
   db-slice-frontiers:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: [self-hosted, linux, clara]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -499,7 +617,8 @@ jobs:
   db-split-partition-total:
     needs: changes
     if: needs.changes.outputs.db != 'false'
-    runs-on: [self-hosted, linux, clara]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: ./.github/actions/partition-total
@@ -527,7 +646,8 @@ jobs:
       - db-slice-frontiers
       - db-split-partition-total
     if: always()
-    runs-on: [self-hosted, linux, clara]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Gate — every leg green or lawfully skipped
         env:
