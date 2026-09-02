@@ -14,35 +14,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { NativeSelect } from "@/components/common/native-select";
+import { MoneyInput } from "@/components/common/money-input";
 import { Money } from "@/components/journals/money";
-import { useAmountInput } from "@/components/journals/use-amount-input";
 import { sumLines } from "@/lib/journals/balance";
 import type { CoaAccountRow, EntryLineInput } from "@/lib/journals/types";
-
-/** FIX-3 (independent review) — see use-amount-input.ts's header for the bug
- *  and the fix; this is only the thin DOM-event wrapper around it. */
-function AmountInput({
-  cents,
-  onChange,
-  ariaLabel,
-}: {
-  cents: number;
-  onChange: (cents: number) => void;
-  ariaLabel: string;
-}) {
-  const { raw, handleChange } = useAmountInput(cents, onChange);
-  return (
-    <Input
-      aria-label={ariaLabel}
-      type="number"
-      step="0.01"
-      min="0"
-      className="text-right"
-      value={raw}
-      onChange={(e) => handleChange(e.target.value)}
-    />
-  );
-}
 
 export function EntryLinesEditor({
   lines,
@@ -114,17 +89,25 @@ export function EntryLinesEditor({
                 />
               </TableCell>
               <TableCell>
-                <AmountInput
-                  ariaLabel={t("debit")}
+                <MoneyInput
+                  aria-label={t("debit")}
                   cents={line.debit_cents}
-                  onChange={(debit_cents) => updateLine(i, { debit_cents, credit_cents: 0 })}
+                  mode="unsigned"
+                  className="text-right"
+                  onValueChange={(change) => {
+                    if (change.ok) updateLine(i, { debit_cents: change.cents ?? 0, credit_cents: 0 });
+                  }}
                 />
               </TableCell>
               <TableCell>
-                <AmountInput
-                  ariaLabel={t("credit")}
+                <MoneyInput
+                  aria-label={t("credit")}
                   cents={line.credit_cents}
-                  onChange={(credit_cents) => updateLine(i, { credit_cents, debit_cents: 0 })}
+                  mode="unsigned"
+                  className="text-right"
+                  onValueChange={(change) => {
+                    if (change.ok) updateLine(i, { credit_cents: change.cents ?? 0, debit_cents: 0 });
+                  }}
                 />
               </TableCell>
               <TableCell>

@@ -14,8 +14,8 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { NativeSelect } from "@/components/common/native-select";
+import { MoneyInput } from "@/components/common/money-input";
 import { fmtCents } from "@/lib/registers/money";
-import { CentsInput } from "./staff-advance-money-input";
 import type { StaffAdvanceAllocationInput, StaffAdvanceSummaryRow } from "@/lib/registers/staff-advances-doors";
 
 export function StaffAdvanceAllocationsEditor({
@@ -90,10 +90,13 @@ export function StaffAdvanceAllocationsEditor({
                 </NativeSelect>
               </TableCell>
               <TableCell>
-                <CentsInput
-                  ariaLabel={t("amount")}
+                <MoneyInput
+                  aria-label={t("amount")}
                   cents={a.amount_cents}
-                  onChange={(amount_cents) => updateAllocation(i, { amount_cents })}
+                  mode="unsigned"
+                  onValueChange={(change) => {
+                    if (change.ok) updateAllocation(i, { amount_cents: change.cents ?? 0 });
+                  }}
                 />
               </TableCell>
               <TableCell>
