@@ -31,6 +31,11 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
   destinations admitted by the mock fixture rank. It proves built-app scope propagation and
   navigation shaping, not a DB rank, RLS policy, or live `caller_context` response.
 - `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers.
+- `helpers.ts` — shared spec-level instruments, ONE spelling each. Today: `ensureRealFocus(page)`
+  (PR #510), the positive precondition every keyboard-first walk anchors on instead of a bare
+  `bringToFront()` or a sleep — see its own header for the race it closes. Both
+  `entry-faces-walk.spec.ts` keyboard-pass cells (login, signup) call it; any new keyboard-driven
+  walk (a fresh `page.goto()` immediately followed by a `page.keyboard.press(...)`) should too.
 
 ## Why these specs are NOT in `apps/web/test/manifest.txt`
 
