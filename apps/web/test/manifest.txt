@@ -82,6 +82,7 @@ components/entry/signup-keyboard.test.tsx
 components/firm-admin/firm-admin-a11y.test.tsx
 components/firm-admin/firm-admin-keyboard.test.tsx
 components/firm-admin/firm-admin-pages-a11y.test.tsx
+components/firm-admin/threshold-money-door.test.tsx
 components/firm-admin/vendor-binding-ceremony.test.tsx
 components/firm-nav.test.tsx
 components/firm/agent-tasks-a11y.test.tsx

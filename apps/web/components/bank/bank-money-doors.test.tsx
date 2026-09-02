@@ -260,3 +260,56 @@ test("WriteOffForm sends exact debit and credit cents through the composite door
     p_attestation: null,
   });
 });
+
+// The pin above types only well-formed amounts, so it cannot see the refusal
+// branch at all: deleting the `!l.debitValid || !l.creditValid` guard leaves it
+// green. This cell is the discriminating half — a refused amount must stop the
+// submit, never fall through to the `?? 0` default and post a line the human
+// never entered. The empty field on the same form stays a legitimate 0, so the
+// two states have to be told apart rather than lumped together.
+test("WriteOffForm refuses a malformed amount at the form, never coercing it to zero at the door", async () => {
+  const writeOffBodies: Record<string, unknown>[] = [];
+  let bodyText = "";
+  await withMockedEnv(
+    (async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(request);
+      if (url.includes("/rpc/resolve_and_book_bank_line")) {
+        writeOffBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+        return jsonResponse({ status: "resolved" });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }) as typeof fetch,
+    async () => {
+      const h = await renderComponent(App(createElement(WriteOffForm, { clientId: "c1", exceptionId: "ex1", onDone: () => undefined })));
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        const root = h.container as unknown as Node;
+        await h.act(() => {
+          setFieldValue(byId(root, "wo-date-ex1") as never, "2026-01-31");
+          setFieldValue(byId(root, "wo-memo-ex1") as never, "write off fee");
+          setFieldValue(byId(root, "wo-account-ex1-1") as never, "6100");
+          setFieldValue(byId(root, "wo-debit-ex1-1") as never, "123.45");
+          setFieldValue(byId(root, "wo-account-ex1-2") as never, "1100");
+          setFieldValue(byId(root, "wo-note-ex1") as never, "approved adjustment");
+        });
+        // Line 2's credit is typed as ambiguous text: the canonical parser
+        // refuses it, so `creditCents` is never updated and stays null.
+        await h.act(() => { setFieldValue(byId(root, "wo-credit-ex1-2") as never, "1234,56"); });
+        for (let i = 0; i < 2; i++) await h.settle();
+        await h.fireEvent(button(root, "Write off") as never, "click");
+        for (let i = 0; i < 5; i++) await h.settle();
+        bodyText = textOf(root as never);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+
+  assert.deepEqual(writeOffBodies, [], "a refused amount must never cross the door as an implicit zero");
+  assert.match(bodyText, /Debit\/credit amounts must be valid\./, "the form states why it stopped");
+  assert.match(
+    bodyText,
+    /Enter an amount like 1,234\.56\. Exponents and decimal commas aren't accepted\./,
+    "the field itself carries the shared parser's typed refusal",
+  );
+});

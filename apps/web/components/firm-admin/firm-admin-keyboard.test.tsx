@@ -419,47 +419,6 @@ test("Change threshold trigger is enabled from first render, regardless of role 
   );
 });
 
-test("Change threshold refuses an out-of-range amount before the door", async () => {
-  currentHighStakesCents = 10000000;
-  thresholdWriteBodies = [];
-  await withMockedEnv(
-    async (u, init) => mockSettingsFetch(String(u), init),
-    async () => {
-      const h = await renderComponent(App(createElement(SettingsPanel), "Firm settings"));
-      const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
-      body.appendChild(h.container);
-      try {
-        for (let i = 0; i < 3; i++) await h.settle();
-        const trigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold");
-        assert.ok(trigger);
-        await h.fireEvent(trigger as never, "click");
-        for (let i = 0; i < 4; i++) await h.settle();
-
-        const amountField = findIn(body as never, (n) => n.tagName === "INPUT");
-        assert.ok(amountField);
-        await h.act(() => { setFieldValue(amountField as never, "90071992547409.92"); });
-        for (let i = 0; i < 2; i++) await h.settle();
-
-        assert.match(
-          textOf(body as never),
-          /Enter a smaller amount that can be represented exactly in cents\./,
-          "the shared parser's typed out_of_range refusal must be visible",
-        );
-        const confirm = findIn(
-          body as never,
-          (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold" && n !== trigger,
-        );
-        assert.ok(confirm);
-        assert.equal((confirm as unknown as { disabled: boolean }).disabled, true);
-        assert.deepEqual(thresholdWriteBodies, [], "an out-of-range amount never reaches the governance door");
-      } finally {
-        await h.unmount();
-        for (let i = 0; i < 3; i++) await h.settle();
-      }
-    },
-  );
-});
-
 // FINDING 2 (raised by pr489-codex-leg, law-28 leg): write-then-reread double
 // fault — the write succeeds, but act()'s own follow-up reread
 // (hooks.ts:229) fails, and hooks.ts's `reloadImpl` deliberately leaves the
