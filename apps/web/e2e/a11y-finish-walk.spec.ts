@@ -174,13 +174,34 @@ test("裁-1 / 裁-2 4c: the recut ring and the recut control edge reach the brow
   expect(tokens.input.toLowerCase()).toBe("#8b8981");
   expect(tokens.targetMin).toBe("24px");
 
-  // And the ring actually PAINTS. Reached by keyboard, deliberately: Chrome
-  // matches `:focus-visible` on a keyboard-initiated focus, and a programmatic
-  // `.focus()` on a <button> does not match it at all — reading box-shadow
-  // after `.focus()` returns "none" and would look like the ring was missing.
-  const button = page.getByRole("button", { name: /^Actions for / }).first();
+  // M-2's fix, read as computed style: the ⌘K search field's EDGE is the full
+  // token (3.504:1 on the popover), not the `/30` tint (1.374:1) it shipped as
+  // before the fold. `border-input` resolves to `--input`, so an exact rgb
+  // match is the discriminating read — a `/30` regression composites instead.
+  await page.keyboard.press("Control+K");
+  const searchEdge = page.locator("[data-slot=input-group]").first();
+  await expect(searchEdge).toBeVisible();
+  expect(await searchEdge.evaluate((el) => getComputedStyle(el).borderTopColor)).toBe("rgb(139, 137, 129)");
+  await page.keyboard.press("Escape");
+
+  // And the ring actually PAINTS — on the DESTRUCTIVE variant specifically.
+  //
+  // FOLD (review M-1): this cell used to read the `Actions for …` row-menu
+  // trigger, which is `variant="outline"` (components/admin/member-row-menu.tsx).
+  // No destructive Button rendered on any of the four e2e faces, so the one
+  // variant that has ever carried its own focus override — the one this train
+  // removed — was the one variant no instrument looked at. The remove-confirm
+  // dialog's Confirm button is `variant="destructive"`
+  // (components/admin/members-confirm-dialog.tsx), and it is two clicks away.
+  await page.getByRole("button", { name: /^Actions for / }).first().click();
+  await page.getByRole("menuitem", { name: "Remove from firm" }).click();
+  const button = page.getByRole("button", { name: "Remove", exact: true });
   await expect(button).toBeVisible();
-  await page.keyboard.press("Tab");
+
+  // Reached by keyboard, deliberately: Chrome matches `:focus-visible` on a
+  // keyboard-initiated focus, and a programmatic `.focus()` on a <button> does
+  // not match it at all — reading box-shadow after `.focus()` returns "none"
+  // and would look like the ring was missing.
   await button.evaluate((el) => (el as HTMLElement).focus());
   await page.keyboard.press("Shift+Tab");
   await page.keyboard.press("Tab");

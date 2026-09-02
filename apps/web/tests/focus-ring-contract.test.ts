@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { PAIR_SPECS, parseRootTokens, resolveTokenHex, alphaBlend, contrastRatio } from "../scripts/check-token-contrast.mjs";
 import { buttonVariants } from "../components/ui/button";
+import { cn } from "../lib/utils";
 
 /**
  * R3 ARM (b) · 裁-1 — THE FOCUS-RING CONTRACT, HELD MECHANICALLY.
@@ -65,12 +66,28 @@ function declaredAlphaPct(): number {
   return Math.round(n * 100);
 }
 
-/** Every `ring-ring/NN` occurrence in product source, with its file and alpha. */
+/**
+ * Every `ring-ring/NN` occurrence in product source that is a REAL CLASS
+ * STRING, with its file and alpha.
+ *
+ * FOLD (review N-5): comments are stripped first. The first cut counted a prose
+ * mention inside `components/common/section-tabs.tsx`'s own explanatory comment
+ * as a thirteenth "carrier" — so the completeness control below pinned a
+ * SPELLING as though it were an identity (law 3), and deleting that sentence
+ * would have reddened the gate while changing nothing that renders. A comment
+ * is not a carrier, and it is not drift either: an author who writes `/50` in
+ * prose has not changed the product.
+ */
 function ringCarrierHits(): { file: string; alpha: number; line: number }[] {
   const hits: { file: string; alpha: number; line: number }[] = [];
   for (const file of sourceFiles()) {
-    const lines = readFileSync(join(WEB_ROOT, file), "utf8").split(/\r?\n/);
-    lines.forEach((text, i) => {
+    const raw = readFileSync(join(WEB_ROOT, file), "utf8");
+    // Blank comment payloads while preserving newlines, so reported line
+    // numbers still point at the real line in the real file.
+    const code = raw
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+      .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + " ".repeat(m.length - p1.length));
+    code.split(/\r?\n/).forEach((text, i) => {
       for (const m of text.matchAll(/ring-ring\/(\d+)/g)) {
         hits.push({ file, alpha: Number(m[1]), line: i + 1 });
       }
@@ -96,16 +113,16 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     );
   });
 
-  it("VACUITY CONTROL: the scan actually finds the carriers — twelve component files, thirteen occurrences", () => {
+  it("VACUITY CONTROL: the scan actually finds the carriers — twelve component files, twelve class strings", () => {
     // Without this arm the assertion above passes trivially the day the scan
     // walks the wrong directory or the regex stops matching. The count is the
     // 2026-09-02 re-census (the P6-3 order's list of eleven was one file stale:
-    // components/admin/admin-hub.tsx had joined it). One file carries two
-    // occurrences — components/common/section-tabs.tsx, whose own comment names
-    // the idiom above the class string that uses it.
+    // components/admin/admin-hub.tsx had joined it). Exactly one class string
+    // per file, now that comments are stripped — see ringCarrierHits's header
+    // for why the thirteenth "occurrence" was never a carrier.
     const hits = ringCarrierHits();
     const files = [...new Set(hits.map((h) => h.file))].sort();
-    assert.equal(hits.length, 13, JSON.stringify(hits, null, 2));
+    assert.equal(hits.length, 12, JSON.stringify(hits, null, 2));
     assert.deepEqual(files, [
       "components/admin/admin-hub.tsx",
       "components/clara/ClaraThreadView.tsx",
@@ -162,22 +179,48 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     // The premise first — if these ever diverge, the offset ring stops being
     // required and this whole treatment should be re-argued, not silently kept.
     assert.equal(resolveTokenHex(tokens, "ring"), resolveTokenHex(tokens, "primary"));
-    // Read the SHIPPED cva output, never the source text: this file's own
-    // comments name the removed `focus-visible:ring-destructive/20` utility in
-    // prose, and a regex over the file would read that mention as the class
-    // still being there (law 3 — spelling is not identity). `buttonVariants` is
-    // the real thing every Button renders through, `cn`'s tailwind-merge
-    // included, which is also what makes the LAST-write-wins claim below real.
+    // Read the SHIPPED class string — `cn(buttonVariants({variant}))`, which is
+    // exactly what `Button` renders (components/ui/button.tsx:93) — and never
+    // the source text: this file's own comments name the removed
+    // `focus-visible:ring-destructive/20` utility in prose, and a regex over
+    // button.tsx would read that mention as the class still being there
+    // (law 3 — spelling is not identity).
+    //
+    // FOLD (review M-1): the `cn()` here is load-bearing and its absence was a
+    // real hole. `buttonVariants` is a BARE `cva()`; tailwind-merge runs only
+    // inside `cn`. Reading the pre-merge concatenation meant the LAST-write-wins
+    // behaviour this cell appeals to never ran in the instrument, so a
+    // variant-level override of the ring-offset WIDTH, the ring-offset COLOUR or
+    // the ring WIDTH was invisible to it. Measured on this branch: adding
+    // `focus-visible:ring-offset-0` to the destructive variant leaves the raw
+    // string carrying `ring-offset-2` and the merged string carrying only
+    // `ring-offset-0` — 裁-64③'s 2px gap gone on the shipped control, whole
+    // suite green. The ring-COLOUR axis was already safe (the doesNotMatch below
+    // matches anywhere in the raw string); these three were not. Panel mutant
+    // M18 is that exact override.
     for (const variant of ["default", "destructive", "ghost", "outline", "secondary", "link"] as const) {
-      const cls = buttonVariants({ variant });
+      const cls = cn(buttonVariants({ variant }));
       assert.match(cls, /(?:^|\s)focus-visible:ring-offset-2(?:\s|$)/, variant);
       assert.match(cls, /(?:^|\s)focus-visible:ring-offset-background(?:\s|$)/, variant);
+      assert.match(cls, /(?:^|\s)focus-visible:ring-3(?:\s|$)/, variant);
       assert.match(cls, /(?:^|\s)focus-visible:ring-ring\/70(?:\s|$)/, variant);
       // The destructive variant used to override the base ring colour at 20%
-      // alpha (#f0d3d1 on white, 1.28:1). tailwind-merge keeps the LAST
-      // ring-colour utility, so that override WON — the assertion above is
-      // what proves it no longer exists, on every variant including that one.
+      // alpha — #f0d3d1, which measures 1.405:1 on #ffffff (and 1.192:1 against
+      // the button's own bg-destructive/10 fill). tailwind-merge keeps the LAST
+      // ring-colour utility, so that override WON; this is what proves it no
+      // longer exists, on every variant including that one.
       assert.doesNotMatch(cls, /focus-visible:ring-destructive/, variant);
     }
+  });
+
+  it("M-1's premise, asserted rather than assumed: cn() is what applies tailwind-merge here", () => {
+    // The cell above is only worth anything if `cn` really does collapse a
+    // later same-axis utility while the bare cva output does not. If a future
+    // `buttonVariants` gains its own merge, or `cn` loses it, this reds and the
+    // cell above stops being a guard without anyone noticing.
+    const withOverride = `${buttonVariants({ variant: "destructive" })} focus-visible:ring-offset-0`;
+    assert.match(withOverride, /focus-visible:ring-offset-2/, "the RAW string keeps both — this is the blindness");
+    assert.doesNotMatch(cn(withOverride), /focus-visible:ring-offset-2/, "cn must collapse it to the last one");
+    assert.match(cn(withOverride), /focus-visible:ring-offset-0/);
   });
 });

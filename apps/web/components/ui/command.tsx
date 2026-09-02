@@ -63,7 +63,21 @@ function CommandInput({
 }: React.ComponentProps<typeof CommandPrimitive.Input>) {
   return (
     <div data-slot="command-input-wrapper" className="p-1 pb-0">
-      <InputGroup className="h-8! rounded-lg! border-input/30 bg-input/30 shadow-none! *:data-[slot=input-group-addon]:pl-2!">
+      {/* P6-3 fold (review M-2). The EDGE is now the full `--input` token; only
+          the FILL keeps the `/30` tint. It was `border-input/30`, which under
+          裁-2 4c's recut composites to #dcdcd9 on the popover ground and
+          measures 1.374:1 — so the one control that every ⌘K user opens was the
+          single surface where the ruled recut did not reach, and
+          `input-on-popover` in the contrast gate named this call site while
+          measuring the token at full opacity (3.504:1). A row that passes while
+          the site it names fails is the P6-3 order's own warning in its sharper
+          form, so the fix is to make the site match the row rather than to
+          quietly drop the citation: `border-input` here measures 3.504:1
+          against the popover, which is the SC 1.4.11 boundary this field owes.
+          The tinted fill stays — it is the search-bar look, and it is not what
+          identifies the control once the edge does. `command-a11y.test.tsx`
+          reds if the `/30` comes back to the border. */}
+      <InputGroup className="h-8! rounded-lg! border-input bg-input/30 shadow-none! *:data-[slot=input-group-addon]:pl-2!">
         <CommandPrimitive.Input
           data-slot="command-input"
           className={cn(

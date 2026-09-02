@@ -80,7 +80,16 @@ export default async function FirmLayout({
           </aside>
           {/* `id`/`tabIndex` are the SkipLink's anchor — the column exists for
               every route in this group by construction, which the page-level
-              `<main>` does not. See skip-link.tsx's header. */}
+              `<main>` does not. See skip-link.tsx's header.
+              `outline-none` here is deliberate and is the W3C WAI skip-link
+              tutorial's own pattern: a `tabindex="-1"` container is a scroll
+              and announce target, not a control in the tab order, and ringing
+              a full-viewport column on every skip would be louder than the
+              journey it serves. Chrome does not match `:focus-visible` on
+              programmatic focus of a div either, so nothing paints regardless.
+              What confirms the jump to a sighted keyboard user is the scroll
+              plus the next Tab landing past the nav — which the browser leg
+              asserts (review N-6, recorded rather than changed). */}
           <div
             data-firm-workbench
             id="main-content"

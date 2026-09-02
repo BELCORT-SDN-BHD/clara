@@ -179,11 +179,16 @@ function DropdownMenuSubContent({
     <DropdownMenuContent
       data-slot="dropdown-menu-sub-content"
       // Same DS-01 treatment as DropdownMenuContent above. This submenu shell
-      // is UNREACHABLE today (`grep -rn "DropdownMenuSub" components/ app/`,
-      // excluding this file, returns 0 — re-run 2026-09-02), so it ships no
-      // live defect; it is corrected anyway because the day a submenu is used
-      // it would ship the defect fully formed, and a conformant file with one
-      // non-conformant export is exactly how the next lane inherits a trap.
+      // renders on no PRODUCT surface: `grep -rn "DropdownMenuSub" components/
+      // app/`, excluding this file and `*.test.*`, returns 0 (re-run at the
+      // P6-3 fold; the unmodified grep returns 2, both of them this train's own
+      // `components/common/p6-3-a11y.test.tsx` importing DropdownMenuSubContent
+      // to assert exactly the treatment below — review N-2 caught the first
+      // wording, which this PR's own test file had invalidated the moment it
+      // landed). So it ships no live defect; it is corrected anyway because the
+      // day a submenu is used it would ship the defect fully formed, and a
+      // conformant file with one non-conformant export is how the next lane
+      // inherits a trap.
       className={cn("motion-standard w-auto min-w-[96px] rounded-lg bg-popover p-1 text-popover-foreground shadow-lg ring-1 ring-foreground/10 motion-safe:data-[side=bottom]:slide-in-from-top-2 motion-safe:data-[side=left]:slide-in-from-right-2 motion-safe:data-[side=right]:slide-in-from-left-2 motion-safe:data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 motion-safe:data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 motion-safe:data-closed:zoom-out-95", className )}
       align={align}
       alignOffset={alignOffset}

@@ -360,6 +360,14 @@
    * offset. Consumed by the `:focus-visible` rule in `@layer base` below. */
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
+  /* THE NEXT TWO TOKENS ARE ANCHORS, NOT PAINT (review N-7, said plainly).
+   * No CSS rule in this file reads `var(--focus-ring-alpha)` or
+   * `var(--target-min)` — Tailwind's `/NN` opacity modifier and its size
+   * utilities are compile-time, so neither can be driven from a custom
+   * property. They are the DECLARED value that the gates read and hold the
+   * component class strings to. Editing one alone changes nothing on screen;
+   * it makes a gate red, which is the point. */
+
   /* 裁-1, THE ONE DECLARATION OF THE RING'S ALPHA. Carriers spell it
    * `focus-visible:ring-ring/70`; tests/focus-ring-contract.test.ts reds if a
    * carrier drifts from this number, so the two can never disagree silently. */

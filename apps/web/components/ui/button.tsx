@@ -47,8 +47,9 @@ const buttonVariants = cva(
         // treatment with `focus-visible:border-destructive/40 focus-visible:
         // ring-destructive/20`, and `cn`'s tailwind-merge keeps the LAST
         // ring-colour utility — so a destructive Button's focus indicator was
-        // #b42318 at 20% alpha, which composites to #f0d3d1 on white and
-        // measures 1.28:1. That is not a focus indicator; it is a tint. Both
+        // #b42318 at 20% alpha, which composites to #f0d3d1 and measures
+        // 1.405:1 on #ffffff (1.192:1 against the button's own
+        // bg-destructive/10 fill). That is not a focus indicator; it is a tint. Both
         // overrides are removed rather than re-tuned, so this variant inherits
         // the base ring exactly like every other one — which is what R3 ("ALL
         // focus indicators unify on the shadcn ring") ruled in the first place.

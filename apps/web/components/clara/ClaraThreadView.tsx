@@ -158,14 +158,22 @@ export function ClaraThreadView({
             <div className="rounded-lg bg-muted p-2 text-sm opacity-70">
               {/* The same role label, so the same token — a transcript that
                   spelled its own speaker line two ways would be the drift this
-                  file keeps closing. RESIDUAL, RECORDED NOT ABSORBED: this
-                  bubble carries `opacity-70` as its "not yet confirmed"
-                  affordance, which composites EVERY colour in it, label
-                  included, to roughly 4.1:1. That is the opacity affordance's
-                  cost, not this token's, and trading it away is a design call
-                  for the owner rather than a fix to make here; it is also
-                  invisible to the axe leg because the bubble exists only while
-                  a send is in flight. Named in the P6-3 PR body. */}
+                  file keeps closing.
+
+                  RESIDUAL, RECORDED NOT ABSORBED, WITH THE REAL NUMBERS (fold,
+                  review M-5 — the first cut of this note said "roughly 4.1:1",
+                  which no rendering model produces). `opacity-70` renders this
+                  subtree to a LAYER and composites the whole layer over the
+                  ground, so both the label and the bubble ground move: the
+                  label to #818787 on a #f8f9f7 ground, which measures 3.459:1
+                  against a 4.5 floor. Before this train the same label was
+                  `text-muted-foreground` and composited to 2.647:1, so the
+                  token move is a real 0.8-point improvement and the residual is
+                  the opacity affordance itself, not this colour. Trading that
+                  affordance away is a design call for the owner; the bubble is
+                  also invisible to the axe leg because it exists only while a
+                  send is in flight. Both figures are in the P6-3 PR body so the
+                  owner rules on the real gap. */}
               <p className="mb-1 text-xs font-medium text-secondary-ink">{t("role.user")}</p>
               <p className="whitespace-pre-wrap">{state.pendingUserText}</p>
             </div>
