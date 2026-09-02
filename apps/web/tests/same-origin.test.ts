@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { isSameOriginRequest, proveSameOrigin, readSameOriginConfig } from "../lib/same-origin";
+import {
+  addressedPublicOrigin,
+  isSameOriginRequest,
+  proveSameOrigin,
+  readSameOriginConfig,
+} from "../lib/same-origin";
 
 /**
  * Finding 11 (LOW) — same-site logout CSRF. `SameSite=Lax` blocks cross-SITE
@@ -371,5 +376,104 @@ describe("isSameOriginRequest — scheme check (reviewer note 2)", () => {
       ),
       false,
     );
+  });
+});
+
+/**
+ * F1 of the independent review of #507. The password-recovery callback is a
+ * top-level navigation out of a mail client — no `Origin` header exists to
+ * judge — so it asks a different question of the same allowlist, through the
+ * same module. These cells drive `addressedPublicOrigin` directly; the handler's
+ * own cells (`tests/password-recovery-handler.test.ts`) prove the route uses it.
+ */
+describe("addressedPublicOrigin — which of our own origins did this request address", () => {
+  const TWO = {
+    publicOrigins: ["https://first.clara.example", "https://second.clara.example"],
+    allowInsecureLoopback: false,
+  } as const;
+
+  it("returns the request URL's own origin when it is an allowlist member", () => {
+    assert.equal(
+      addressedPublicOrigin(
+        headers({ host: "second.clara.example" }),
+        "https://second.clara.example/auth/recover?code=x",
+        TWO,
+      ),
+      "https://second.clara.example",
+    );
+  });
+
+  it("NEVER answers with the first entry when the request addressed the second", () => {
+    // The defect itself: `publicOrigins[0]` sealed the recovery cookie on one
+    // origin and bounced the browser to another. Both directions are pinned so
+    // an implementation that simply reverses the index cannot pass.
+    for (const addressed of TWO.publicOrigins) {
+      assert.equal(
+        addressedPublicOrigin(headers({ host: new URL(addressed).host }), "http://internal.hop/x", TWO),
+        addressed,
+      );
+    }
+  });
+
+  it("takes the SCHEME from the matched allowlist entry, never from x-forwarded-proto", () => {
+    // Deliberately the SECOND member, so a `publicOrigins[0]` implementation
+    // cannot pass this cell by coincidence.
+    assert.equal(
+      addressedPublicOrigin(
+        headers({ host: "second.clara.example", "x-forwarded-proto": "http" }),
+        "http://internal.hop/auth/recover",
+        TWO,
+      ),
+      "https://second.clara.example",
+    );
+  });
+
+  it("refuses a Host that names no member, whatever the forwarded headers say", () => {
+    assert.equal(
+      addressedPublicOrigin(
+        headers({
+          host: "attacker.example",
+          "x-forwarded-host": "first.clara.example",
+          "x-forwarded-proto": "https",
+        }),
+        "http://internal.hop/auth/recover",
+        TWO,
+      ),
+      null,
+    );
+  });
+
+  it("refuses when there is no Host header at all — absence is not evidence", () => {
+    assert.equal(addressedPublicOrigin(headers({}), "http://internal.hop/auth/recover", TWO), null);
+  });
+
+  it("refuses an AMBIGUOUS host — one authority named under two schemes is not an answer", () => {
+    assert.equal(
+      addressedPublicOrigin(headers({ host: "both.clara.example" }), "http://internal.hop/x", {
+        publicOrigins: ["http://both.clara.example", "https://both.clara.example"],
+        allowInsecureLoopback: false,
+      }),
+      null,
+    );
+  });
+
+  it("matches the Host case-insensitively, and a duplicated Host header refuses", () => {
+    assert.equal(
+      addressedPublicOrigin(headers({ host: "First.Clara.Example" }), "http://internal.hop/x", TWO),
+      "https://first.clara.example",
+    );
+    const duplicated = new Headers();
+    duplicated.append("host", "first.clara.example");
+    duplicated.append("host", "second.clara.example");
+    assert.equal(addressedPublicOrigin(duplicated, "http://internal.hop/x", TWO), null);
+  });
+
+  it("UNCONFIGURED: with no allowlist the request URL's own origin is the answer", () => {
+    const unconfigured = { publicOrigins: [], allowInsecureLoopback: false };
+    assert.equal(
+      addressedPublicOrigin(headers({ host: "anything.example" }), "https://internal.example/x", unconfigured),
+      "https://internal.example",
+    );
+    assert.equal(addressedPublicOrigin(headers({}), "not a url", unconfigured), null);
   });
 });
