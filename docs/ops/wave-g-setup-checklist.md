@@ -56,8 +56,10 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
       `apps/web/README.md` §3 asks only "≤ 24h" for invites — a 10-minute invite link would be dead
       for most invitees. **裁-131 (owner, 2026-09-02) sets the single value to 60 minutes for both
       arms and amends C4**: the rate wall (five attempts per fifteen minutes per address, 裁-107) is
-      the brute-force defence, a 60-minute window is 20 guesses in a million. Receipt: the Management
-      API read shows `mailer_otp_exp = 3600`.
+      the brute-force defence, a 60-minute window is 20 guesses in a million — **so this box is ticked
+      only after C-5's attempt wall is LIVE** (on this tip the confirmation seam is the honest-refusing
+      stub; the 60-minute code without the wall would be 3,600 s of unwalled guessing). Receipt: the
+      Management API read shows `mailer_otp_exp = 3600` AND the C-5 deploy's as-run naming the wall.
 - [ ] Proof: dated settings screenshots plus Management API reads for the redirect allowlist,
       confirmation/autoconfirm settings, template bodies, password policy/HIBP, `jwt_exp=900` and
       OTP expiry, attached to the Wave-G as-run. Cross-check `apps/web/README.md` §Security posture.

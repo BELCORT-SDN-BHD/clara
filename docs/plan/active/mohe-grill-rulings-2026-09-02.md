@@ -307,4 +307,6 @@ minutes + build a "resend invite" door (≈0.3 unit); keep 10 minutes and accept
 collision; `apps/web/README.md` §4's "10 minutes" becomes 60 (and §3's "≤ 24h" cites this ruling);
 `checkout-gate-design.md` C4 gains a dated amendment (the 10-minute figure stands as the design's
 genesis, superseded here); the FS-11 Management-API receipt reads `mailer_otp_exp = 3600`. No code,
-no migration.
+no migration. **Sequencing clause (from the #506 review's note):** the wall this ruling leans on is
+C-5's attempt wall — on the 2026-09-02 tip the confirmation seam is still the honest-refusing stub —
+so the 60-minute value is set only after C-5 is live; the checklist line says so.
