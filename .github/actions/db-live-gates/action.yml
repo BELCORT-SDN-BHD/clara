@@ -7,7 +7,16 @@ description: >-
   (ADR-012/0020). Step bodies moved verbatim from ci.yml's former monolithic `ci` job
   (lever 5), plus ONE new step documented inline: the runtime-only build the e2es load.
   Requires: workspace installed, PG17 client present, libpq env pointing at the primary
-  postgres:17 service, PGB_PORT naming the second cluster's port.
+  postgres:17 service, PGB_PORT/PGC_PORT/PGD_PORT naming three more clusters' ports.
+  2026-09-02 CI-shape ruling: every full-fresh-migrate invocation in this file gets its
+  OWN pristine cluster — postgres (primary) for intake_ci, postgres_c for Wave-B, postgres_d
+  for the DR round-trip's SOURCE, postgres_b reserved for the DR round-trip's TARGET only.
+  Roles are Postgres cluster-global; migration 0154 (merged, immutable) pins an absolute
+  clara-role count at its position in the chain, which breaks the moment a SECOND
+  from-scratch migrate shares a cluster with a first one that already minted a role a
+  later migration adds (measured: PR #484's 0160, reproduced in the exact job shape before
+  this fix; PR #493's C-3 mints two more on top of it, so this had to be generic, never a
+  hardcoded role-name reset).
 runs:
   using: composite
   steps:
@@ -53,20 +62,26 @@ runs:
     - name: Wave-B rig-confined fault-gate e2es (Gate 3 + Gate 7, isolated DB + world bootstrap)
       shell: bash -e {0}
       run: |
-        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wave_b_ci'
-        PGDATABASE=clara_wave_b_ci pnpm db:migrate
-        PGDATABASE=clara_wave_b_ci pnpm db:seed
-        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
+        # 2026-09-02 CI-shape ruling: this step's own PRISTINE cluster (postgres_c/PGC_PORT),
+        # never the primary — see the services block's own comment for the why.
+        PGPORT=$PGC_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wave_b_ci'
+        PGPORT=$PGC_PORT PGDATABASE=clara_wave_b_ci pnpm db:migrate
+        PGPORT=$PGC_PORT PGDATABASE=clara_wave_b_ci pnpm db:seed
+        PGPORT=$PGC_PORT \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           pnpm --filter @clara/runtime exec bootstrap
         cd packages/runtime
+        PGPORT=$PGC_PORT \
         PGDATABASE=clara_wave_b_ci \
-        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/interview-e2e.mjs
+        PGPORT=$PGC_PORT \
         PGDATABASE=clara_wave_b_ci \
-        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/interview-kill-resume-e2e.mjs
+        PGPORT=$PGC_PORT \
         PGDATABASE=clara_wave_b_ci \
-        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/clara_wave_b_ci" \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGC_PORT/clara_wave_b_ci" \
           node tests/version-cutover-e2e.mjs
 
     - name: DR backup/restore self-test (ephemeral postgres:17)
@@ -91,25 +106,33 @@ runs:
     - name: DR full-profile round-trip (two clusters, backup->restore->verify)
       shell: bash -e {0}
       run: |
-        # SOURCE on cluster A (5432)
-        PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_source'
-        PGDATABASE=drci_source pnpm db:migrate
-        PGDATABASE=drci_source pnpm db:seed
-        # roles-bootstrap the SOURCE too: the migrations create only the 12 clara group/login
-        # roles (9 through 0009, + clara_wake_bank/_login from 0121, + clara_wake_filing from 0126) —
-        # clara_storage_docs comes from storage-provision.sql / roles-bootstrap, NOT a
-        # migration. Running it here gives cluster A the SAME 13-role census cluster B gets, so
-        # role/membership parity is genuine and not a deterministic clara_storage_docs mismatch
-        # (Codex re-verify NEW HIGH-2). All shells are NOLOGIN on a fresh migrate, so the
+        # SOURCE on its own PRISTINE cluster (postgres_d/PGD_PORT, 2026-09-02 CI-shape ruling)
+        # — NOT the primary "postgres" cluster intake_ci already ran a full chain on: 0154's
+        # immutable absolute clara-role-count tail assertion cannot distinguish "this cluster's
+        # own later migrations" from "a role a DIFFERENT database's earlier completed chain on
+        # this SAME cluster already minted", so a from-scratch migrate here must never share a
+        # cluster with another from-scratch migrate. See the services block's own comment.
+        PGPORT=$PGD_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_source'
+        PGPORT=$PGD_PORT PGDATABASE=drci_source pnpm db:migrate
+        PGPORT=$PGD_PORT PGDATABASE=drci_source pnpm db:seed
+        # roles-bootstrap the SOURCE too: the migrations create only the clara group/login
+        # roles (9 through 0009, + clara_wake_bank/_login from 0121, + clara_wake_filing from
+        # 0126, + clara_stripe_webhook/_login from 0160) — clara_storage_docs comes from
+        # storage-provision.sql / roles-bootstrap, NOT a migration. Running it here gives the
+        # SOURCE cluster the SAME role census the TARGET cluster gets, so role/membership
+        # parity is genuine and not a deterministic clara_storage_docs mismatch (Codex
+        # re-verify NEW HIGH-2). All shells are NOLOGIN on a fresh migrate, so the
         # fresh-target-only preflight cannot abort here.
-        PGDATABASE=drci_source psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
-        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGPORT/drci_source" \
+        PGPORT=$PGD_PORT PGDATABASE=drci_source psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
+        PGPORT=$PGD_PORT \
+        WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:$PGD_PORT/drci_source" \
           pnpm --filter @clara/runtime exec bootstrap
-        PGDATABASE=drci_source node packages/db/scripts/backup.mjs --profile full --out $RUNNER_TEMP/drci-full.sql
-        # TARGET on cluster B (5433) — a fresh cluster with an EMPTY pg_authid
+        PGPORT=$PGD_PORT PGDATABASE=drci_source node packages/db/scripts/backup.mjs --profile full --out $RUNNER_TEMP/drci-full.sql
+        # TARGET on cluster B (5433) — a fresh cluster with an EMPTY pg_authid, dedicated to
+        # this restore ONLY (never a from-scratch migrate target — see the services comment)
         PGPORT=$PGB_PORT PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_target'
         PGPORT=$PGB_PORT PGDATABASE=drci_target psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
         PGPORT=$PGB_PORT PGDATABASE=drci_target node packages/db/scripts/restore-full.mjs --file $RUNNER_TEMP/drci-full.sql
-        CLARA_DR_SOURCE_URL="postgres://postgres@localhost:$PGPORT/drci_source" \
+        CLARA_DR_SOURCE_URL="postgres://postgres@localhost:$PGD_PORT/drci_source" \
         CLARA_DR_TARGET_URL="postgres://postgres@localhost:$PGB_PORT/drci_target" \
           node packages/db/scripts/dr-verify.mjs

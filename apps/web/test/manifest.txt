@@ -199,6 +199,7 @@ lib/registers/depreciation.test.ts
 lib/registers/fa-account-profiles.test.ts
 lib/registers/fixed-assets.test.ts
 lib/registers/knowledge.test.ts
+lib/registers/money.test.ts
 lib/registers/opening-doors.test.ts
 lib/registers/opening-item-doors.test.ts
 lib/registers/opening.test.ts
@@ -215,6 +216,7 @@ test/a11yRules.test.ts
 test/keyboardWalk.test.ts
 tests/apiLimitBanner.test.mjs
 tests/client-scope.test.ts
+tests/confirm-flash.test.ts
 tests/firm-scope-db-pins.test.ts
 tests/firm-scope-fourth-entrance.test.ts
 tests/firm-scope-surfaces.test.ts

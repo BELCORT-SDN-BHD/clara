@@ -263,13 +263,27 @@ testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a prov
   // in wiki-lint-checks.mjs. F-A4 PR-1b's attest_close_exception arm does NOT add an entry:
   // MEASURED (gate B3), plpgsql does not resolve an embedded relation at CREATE time even with
   // check_function_bodies=on, so that arm ships as plain static SQL and never needed a waiver
-  // at all — a dynamic-SQL entry proposed, tested, and correctly NOT taken. Twelve pinned keys
-  // total: the eleven CoR-idiom cores plus the one ACL-walled composed statement. The NEXT
-  // entry must trip this pin and earn its own reviewed justification, exactly as these
-  // twelve did.
+  // at all — a dynamic-SQL entry proposed, tested, and correctly NOT taken. FS-4 C-2's
+  // `apply_stripe_events` (0160_checkout_gate_c2_stripe_events.sql, PR #484) is DIFFERENT IN
+  // KIND from all twelve before it: every prior entry excuses an `unprovable` finding (a
+  // human attestation `waiverExcuses` accepts once it exists and names no wiki token, with
+  // NOTHING to check the declared set against — proven on this estate's own instruments: a
+  // fabricated relation was excused identically to a real one until this entry existed).
+  // apply_stripe_events was deliberately REWRITTEN so its EXECUTE carries a literal directly
+  // (never a variable) — behaviour-identical, control-flow-only — making its statement
+  // RECONSTRUCTIBLE, so its finding is `kind:'dynamic'` and this waiver is MECHANICALLY
+  // CHECKED: `waiverExcuses` requires every target `claraTargets()` finds in the reconstructed
+  // SQL to be in the declared set below, and a wrong declaration REDS this same gate (proven
+  // by temporarily corrupting the entry and reverting, recorded on the PR). Do not copy this
+  // entry's SHAPE as a precedent for an `unprovable` waiver — copy the REWRITE that made it
+  // possible instead; only `wake_freeform_read` above is unprovable BY NECESSITY. Thirteen
+  // pinned keys total: the eleven CoR-idiom cores, the one ACL-walled composed statement, and
+  // the one checked reconstruction. The NEXT entry must trip this pin and earn its own
+  // reviewed justification, exactly as these thirteen did.
   const expectedKeys = [
     "add_bank_account(uuid,text,text,text,text,uuid,text)",
     "apply_open_items(uuid,jsonb,text,text)",
+    "apply_stripe_events(integer)",
     "book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text)",
     "complete_bank_reconciliation(uuid,uuid[],text)",
     "match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text)",
