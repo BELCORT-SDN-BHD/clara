@@ -32,11 +32,27 @@ export const LEDGER_FOLD_MARK_SRC = "/brand/logo/clarabook-ledger-fold-brand-ink
  * TOWARD it: `font-sans font-semibold` resolves to Source Sans 3 Semibold
  * (`app/layout.tsx` loads that exact face at weight 600).
  *
- * ONE RESIDUAL, SURFACED RATHER THAN ABSORBED: §8 says *lowercase*; owner
- * ruling R1 says the user-facing name is "**ClaraBook**". Case is a naming
- * decision the owner already made, and a lane does not re-decide it against a
- * typographic spec — so the ruling's capitalisation ships and the divergence
- * is named in the PR body for the owner, per constraint 1.
+ * THE CASE QUESTION IS RULED — 裁-137 (owner, 2026-09-02). §8's "lowercase"
+ * clause and R1's "ClaraBook" do NOT collide: **§8 governs the wordmark's
+ * GLYPHS, R1 governs the product NAME**, and the design authority ships both
+ * at once (its own prototype sets the lockup lowercase letter-by-letter in
+ * `src/components/brand-lockup.jsx:15-32` while writing "ClaraBook" in prose
+ * throughout, e.g. `src/screens/system-access.jsx:54`). So every prose
+ * occurrence is "ClaraBook", and the shared `Brand.productName` string stays
+ * consolidated — the ruling explicitly does not cost the one-string-two-
+ * consumers arrangement.
+ *
+ * WHAT THIS COMPONENT RENDERS TODAY, stated because the ruling's first half
+ * is about glyphs and this is the only lockup in the repo: the `<span>` below
+ * prints `Brand.productName` with NO case transform, so its glyphs are the
+ * string's own — "ClaraBook", title-case. If 裁-137's glyph clause is meant to
+ * bind HERE and not only the design authority's own artwork, the change is one
+ * utility class on that span (`lowercase`), which keeps the shared string and
+ * the accessible text intact because `text-transform` does not alter the DOM
+ * text — `getByText("ClaraBook", { exact: true })` in
+ * `e2e/identity-finish.spec.ts` keeps matching either way. That question is
+ * with the owner; a lane does not restyle the front door on its own reading of
+ * a one-line ruling (constraint 1).
  *
  * DELIBERATELY NOT A HEADING (unchanged). The same lockup renders on all six
  * entry faces, so making it the `<h1>` would give login, signup,
