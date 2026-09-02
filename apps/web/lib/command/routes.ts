@@ -116,7 +116,7 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
     scope: "firm",
     href: "/admin",
     status: "built",
-    keywords: ["admin", "members", "rbac", "tiers", "metering"],
+    keywords: ["admin", "firm controls", "tiers", "metering"],
   },
   {
     // T10 (port-wave plan §4 T10): the compliance register, under /admin.

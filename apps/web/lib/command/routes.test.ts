@@ -289,6 +289,15 @@ test("/admin/members is present in ⌘K by its own stable row", () => {
   assert.ok(members, "removing adminMembers strands the flagship RBAC page from ⌘K");
   assert.equal(members.href, "/admin/members");
   assert.equal(resolvesToPage(members.href), true);
+
+  const admin = FIRM_ROUTES.find((route) => route.id === "admin");
+  assert.ok(admin);
+  assert.equal(
+    admin.keywords?.some((keyword) => keyword === "members" || keyword === "rbac"),
+    false,
+    "the generic Admin row must not win a Members search before the specific destination",
+  );
+  assert.equal(members.keywords?.includes("members"), true);
 });
 // --- 1. built => a page exists ----------------------------------------------
 

@@ -28,6 +28,14 @@ test("operator owner sees the full sidebar and reaches Members in two navigation
   await nav.getByRole("link", { name: "Members", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/members$/);
   await expect(page.getByRole("heading", { name: "Members", level: 1 })).toBeVisible();
+
+  await nav.getByRole("link", { name: "Home", exact: true }).click();
+  await page.keyboard.press("Control+K");
+  await page.getByPlaceholder("Search or ask Clara…").fill("members");
+  await expect(page.getByRole("option", { name: "Members", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Admin", exact: true })).toHaveCount(0);
+  await page.getByRole("option", { name: "Members", exact: true }).click();
+  await expect(page).toHaveURL(/\/admin\/members$/);
 });
 
 test("bookkeeper sidebar hides admin- and owner-only destinations", async ({ page }) => {
