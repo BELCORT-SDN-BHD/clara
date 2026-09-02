@@ -73,19 +73,9 @@ const ITEM = {
   answered_by: "u1", answered_at: "2026-08-01T00:00:00Z", created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
 };
 
-/** The ONE pre-existing violation rev-t11 attributed to `ClaraThreadView`'s
- *  own composer textarea (`ClaraThreadView.tsx:134-147` — a `placeholder`
- *  but no `aria-label`), measured present with or without T11's card
- *  mounted. NOT this train's finding, NOT fixed here — asserted present
- *  (never silently allow-listed away) so a NEW violation this train
- *  introduces still reds this test. */
-const PRE_EXISTING_COMPOSER_FINDING = {
-  rule: "label",
-  wcag: "1.3.1 Info and Relationships / 4.1.2 Name, Role, Value",
-  element: "textarea",
-  message: "Form elements must have an accessible name (aria-label, aria-labelledby, or an associated <label>).",
-};
-
+/** The rail parity train gave ClaraThreadView's composer a translated
+ *  accessible name. Both collapsed and open-dialog states therefore expect
+ *  no structural violations, rather than preserving the former exception. */
 function App() {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -122,7 +112,7 @@ test("the REAL full-screen thread route (card + Commit door dialog OPEN) has zer
         const collapsedViolations = checkAccessibility(body as never);
         assert.deepEqual(
           collapsedViolations,
-          [PRE_EXISTING_COMPOSER_FINDING],
+          [],
           `collapsed — expected EXACTLY the one pre-existing, attributed composer finding and NOTHING from T11 (in particular no heading-order): ${JSON.stringify(collapsedViolations)}`,
         );
 
@@ -139,7 +129,7 @@ test("the REAL full-screen thread route (card + Commit door dialog OPEN) has zer
         const openViolations = checkAccessibility(body as never);
         assert.deepEqual(
           openViolations,
-          [PRE_EXISTING_COMPOSER_FINDING],
+          [],
           `open dialog — must be the SAME single pre-existing finding, no NEW violation introduced by the open Commit dialog: ${JSON.stringify(openViolations)}`,
         );
       } finally {

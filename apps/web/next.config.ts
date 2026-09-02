@@ -6,6 +6,7 @@ import createNextIntlPlugin from "next-intl/plugin";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 const moneyInputHarnessEnabled = process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1";
+const routeErrorProbeEnabled = process.env.CLARA_E2E_ROUTE_ERROR_PROBE === "1";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -22,16 +23,26 @@ const nextConfig: NextConfig = {
       realpathSync(resolve(__dirname, "node_modules")),
       "../../..",
     ),
-    // The filesystem route always resolves to a 404 stub for ordinary builds.
-    // The e2e runner opts in at BUILD time, replacing only this module with
-    // the real harness so production never compiles the journal editor into a
-    // public entry route's client graph.
-    resolveAlias: moneyInputHarnessEnabled
-      ? {
-          "@/components/e2e/money-input-harness-route":
-            "@/components/e2e/money-input-harness-route-enabled",
-        }
-      : {},
+    // Two independent e2e opt-ins, each swapping ONE module and each decided at
+    // BUILD time so no production request can turn either on through env.
+    // Ordinary builds compile the inert stub in both cases: the money-input
+    // route resolves to a 404 stub, so production never compiles the journal
+    // editor into a public entry route's client graph, and the route-error
+    // probe resolves to a module that does not throw.
+    resolveAlias: {
+      ...(moneyInputHarnessEnabled
+        ? {
+            "@/components/e2e/money-input-harness-route":
+              "@/components/e2e/money-input-harness-route-enabled",
+          }
+        : {}),
+      ...(routeErrorProbeEnabled
+        ? {
+            "@/components/e2e/route-error-probe":
+              "@/components/e2e/route-error-probe-enabled",
+          }
+        : {}),
+    },
   },
   // DELIBERATELY no `rewrites()` for the runtime proxy (independent review
   // 2026-08-27, F1/F2): a `rewrites()` destination is baked into

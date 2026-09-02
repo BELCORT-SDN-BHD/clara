@@ -12,6 +12,7 @@ const env = {
   CLARA_E2E_MONEY_INPUT_HARNESS: "1",
   NEXT_PUBLIC_SUPABASE_URL: `${appOrigin}/e2e-supabase`,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_clara_e2e_only",
+  CLARA_E2E_ROUTE_ERROR_PROBE: "1",
 };
 const pnpmCli = process.env.npm_execpath;
 if (!pnpmCli) {
