@@ -48,12 +48,15 @@ if (openssl.status !== 0) {
 }
 
 const SUBJECT = "11111111-1111-1111-1111-111111111111";
+const FIRM_ID = "33333333-3333-3333-3333-333333333333";
 const REQUEST_ID = "22222222-2222-2222-2222-222222222222";
 // The fixed "delivered" code the SKELETON journey (signup-confirm-pending.
 // spec.ts) types once Lane B wires the real attempt wall.
 const E2E_SIGNUP_CODE = "654321";
 const state = {
-  email: "owner@example.test",
+  // Default to the membership-less holding-state persona. Navigation specs
+  // opt into their fixture rank explicitly through the sign-in email prefix.
+  email: "holding@example.test",
   firmName: "E2E Accounting",
   note: null,
   registrationOpen: false,
@@ -140,6 +143,20 @@ async function handleSupabase(request, response, url) {
     "access-control-allow-credentials": "true",
   };
 
+  if (request.method === "POST" && path === "/auth/v1/token") {
+    const body = await readJson(request);
+    if (typeof body.email === "string") state.email = body.email;
+    sendJson(response, 200, {
+      access_token: accessToken(),
+      token_type: "bearer",
+      expires_in: 7_200,
+      expires_at: 4_102_444_800,
+      refresh_token: "e2e-refresh-token",
+      user: confirmedUser(),
+    }, cors);
+    return;
+  }
+
   if (request.method === "POST" && path === "/auth/v1/signup") {
     const body = await readJson(request);
     if (typeof body.email === "string") state.email = body.email;
@@ -222,6 +239,40 @@ async function handleSupabase(request, response, url) {
   }
 
   if (request.method === "GET" && path === "/rest/v1/caller_context") {
+    const bookkeeper = state.email.startsWith("bookkeeper@");
+    const owner = state.email.startsWith("owner@");
+    if (!bookkeeper && !owner) {
+      // Every non-navigation persona remains membership-less by default.
+      sendJson(response, 200, [], cors);
+      return;
+    }
+    sendJson(response, 200, [{
+      user_id: SUBJECT,
+      firm_id: FIRM_ID,
+      firm_name: "E2E Accounting",
+      role: bookkeeper ? "bookkeeper" : "owner",
+      role_rank: bookkeeper ? 1 : 3,
+      is_operator: owner,
+    }], cors);
+    return;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/firm_members_visible") {
+    sendJson(response, 200, [{
+      membership_id: "44444444-4444-4444-4444-444444444444",
+      user_id: SUBJECT,
+      display_name: state.email.startsWith("bookkeeper@") ? "E2E Bookkeeper" : "E2E Owner",
+      email: state.email,
+      role: state.email.startsWith("bookkeeper@") ? "bookkeeper" : "owner",
+      role_rank: state.email.startsWith("bookkeeper@") ? 1 : 3,
+      status: "active",
+      created_at: "2026-09-02T00:00:00.000Z",
+      removed_at: null,
+    }], cors);
+    return;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/firm_invites_visible") {
     sendJson(response, 200, [], cors);
     return;
   }

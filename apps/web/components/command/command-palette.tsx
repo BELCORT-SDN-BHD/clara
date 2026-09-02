@@ -30,7 +30,7 @@ function normalize(value: string): string {
  * simple and predictable over "clever" fuzzy scoring — a command palette's
  * search has to be legible, not impressive.
  */
-function matchesQuery(haystacks: string[], rawQuery: string): boolean {
+export function matchesQuery(haystacks: string[], rawQuery: string): boolean {
   const query = normalize(rawQuery);
   if (!query) {
     return true;
