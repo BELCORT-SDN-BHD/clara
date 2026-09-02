@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { readSameOriginConfig } from "@/lib/same-origin";
+import { addressedPublicOrigin, readSameOriginConfig } from "@/lib/same-origin";
 import { createRouteClient } from "@/lib/supabase/server";
 
 type ExchangeResult = {
@@ -17,8 +17,31 @@ export interface PasswordRecoveryRouteClient {
 
 export type CreatePasswordRecoveryRouteClient = () => Promise<PasswordRecoveryRouteClient>;
 
-function callbackOrigin(request: Request): string {
-  return readSameOriginConfig(process.env).publicOrigins[0] ?? new URL(request.url).origin;
+/**
+ * The origin this 303 lands on. NOT derived here — `lib/same-origin.ts` owns
+ * both the allowlist parser and the "which of our origins did this request
+ * address" ruling, so this handler and the invite courier can never drift onto
+ * two different answers (that file's own MEDIUM-2 header). `null` is a refusal,
+ * never a fallback to an origin nobody addressed.
+ */
+function callbackOrigin(
+  request: Request,
+  env: Record<string, string | undefined>,
+): string | null {
+  return addressedPublicOrigin(request.headers, request.url, readSameOriginConfig(env));
+}
+
+/**
+ * A request this deployment cannot place on one of its own public origins is
+ * refused BEFORE the one-time code is spent — a redirect to a guessed origin
+ * would burn the code and strand the person with no session, and there is no
+ * safe third choice. Typed, no provider prose, and never cached.
+ */
+function originRefusal(): Response {
+  return Response.json(
+    { error: "recovery_origin_not_allowed" },
+    { status: 403, headers: { "Cache-Control": "private, no-store" } },
+  );
 }
 
 function redirect(origin: string, path: string): NextResponse {
@@ -30,8 +53,10 @@ function redirect(origin: string, path: string): NextResponse {
 export async function handlePasswordRecovery(
   request: Request,
   createClient: CreatePasswordRecoveryRouteClient = createRouteClient,
+  env: Record<string, string | undefined> = process.env,
 ): Promise<Response> {
-  const origin = callbackOrigin(request);
+  const origin = callbackOrigin(request, env);
+  if (origin === null) return originRefusal();
   const code = new URL(request.url).searchParams.get("code");
   const { supabase, sealResponse } = await createClient();
   if (!code) return sealResponse(redirect(origin, "/forgot-password?status=invalid"));
