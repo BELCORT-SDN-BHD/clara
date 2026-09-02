@@ -8,7 +8,7 @@
 // write the exact same per-thread state.
 
 import { applyClaraStreamEvent, initialClaraStreamState, type ClaraStreamState, type SseEvent } from "./stream";
-import type { MessageRow } from "./api";
+import type { ClaraPart, MessageRow } from "./api";
 
 export type ClaraSendStatus = "idle" | "sending" | "sent" | "error";
 
@@ -22,7 +22,7 @@ export interface ClaraThreadUiState {
   /** The text just sent, shown as a distinct pending bubble from the moment the stream
    *  opens (never before — no optimistic rendering of turn success) until the next
    *  authoritative `hydrateMessages` replaces it with the DB's own row. */
-  pendingUserText: string | null;
+  pendingUserParts: ClaraPart[] | null;
   sendStatus: ClaraSendStatus;
   sendError: string | null;
   activeTaskId: string | null;
@@ -33,7 +33,7 @@ const emptyThreadState: ClaraThreadUiState = {
   messages: [],
   messagesLoaded: false,
   loadError: null,
-  pendingUserText: null,
+  pendingUserParts: null,
   sendStatus: "idle",
   sendError: null,
   activeTaskId: null,
@@ -102,9 +102,9 @@ export const claraThreadStore = {
   },
 
   /** Authoritative — replaces the whole message list from a fresh `getMessages` read,
-   *  never merges. Clears `pendingUserText` (the DB row now stands in for it). */
+   *  never merges. Clears `pendingUserParts` (the DB row now stands in for it). */
   hydrateMessages(threadId: string, messages: MessageRow[]): void {
-    setThread(threadId, { messages, messagesLoaded: true, loadError: null, pendingUserText: null });
+    setThread(threadId, { messages, messagesLoaded: true, loadError: null, pendingUserParts: null });
   },
 
   hydrateFailed(threadId: string, message: string): void {
@@ -112,7 +112,7 @@ export const claraThreadStore = {
   },
 
   beginSend(threadId: string): void {
-    setThread(threadId, { sendStatus: "sending", sendError: null, pendingUserText: null });
+    setThread(threadId, { sendStatus: "sending", sendError: null, pendingUserParts: null });
   },
 
   markAccepted(threadId: string, taskId: string): void {
@@ -121,8 +121,8 @@ export const claraThreadStore = {
 
   /** The ONE place a turn becomes "sent" — call this only once the stream has actually
    *  opened (`openTaskStream`'s promise resolving), never on `postTurn`'s 202 alone. */
-  markSent(threadId: string, text: string): void {
-    setThread(threadId, { sendStatus: "sent", pendingUserText: text });
+  markSent(threadId: string, parts: ClaraPart[]): void {
+    setThread(threadId, { sendStatus: "sent", pendingUserParts: parts });
   },
 
   markSendFailed(threadId: string, message: string): void {

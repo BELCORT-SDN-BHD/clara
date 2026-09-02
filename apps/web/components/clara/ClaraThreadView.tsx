@@ -5,17 +5,19 @@
 // never a separate universe"). All state comes from `useClaraThread` /
 // `lib/clara/threadStore.ts`, the one source of truth both mount points read.
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { LoadingState, StateBanner } from "@/components/common/state";
 import { PartSlot } from "@/components/clara/PartSlot";
 import { OnboardingChecklistCard } from "@/components/clara/OnboardingChecklistCard";
+import { ComposerAttachmentControl, type ComposerAttachmentState } from "@/components/clara/ComposerAttachmentControl";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { ClaraThreadUiState } from "@/lib/clara/threadStore";
 import { useClaraThread, useComposerFocusRequest } from "@/lib/clara/useClaraThread";
+import { foldLiveClarifyParts } from "@/lib/clara/liveClarify";
 import { ThreadActionCoordinatorProvider } from "@/lib/parts/thread-action-coordinator";
 import { cn } from "@/lib/utils";
 
@@ -42,8 +44,11 @@ export function ClaraThreadView({
 }) {
   const t = useTranslations("Clara.thread");
   const [draft, setDraft] = useState("");
+  const [attachments, setAttachments] = useState<ComposerAttachmentState>({ parts: [], blocked: false });
+  const [attachmentClearToken, setAttachmentClearToken] = useState(0);
   const { state, sendMessage, retryConnection } = useClaraThread(auth, threadId ?? "");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const handleAttachmentState = useCallback((next: ComposerAttachmentState) => setAttachments(next), []);
 
   // P2 FOLD SEAM C: the ⌘K "Ask" -> composer handoff (ClaraRail's event subscriber
   // requests this; see lib/command/bus.ts's CLARA_FOCUS_RAIL_EVENT contract). A new
@@ -61,12 +66,29 @@ export function ClaraThreadView({
   const notSignedIn = state.loadError === "not signed in";
   const busy = state.sendStatus === "sending";
 
+  // The parked question, live. It cannot come from `state.messages`: the assistant row
+  // is inserted by `clara.settle_chat_turn`, which cancels every still-pending
+  // interruption in the same statement sequence — so a clarify that reached the
+  // persisted transcript is never answerable. See lib/clara/liveClarify.ts's header.
+  // Only the LAST one is answerable (the dashboard's `lastClarifyIndex` precedent):
+  // an earlier clarify in the same run was already answered to get here, and at most
+  // one interruption per task is ever pending (`clara.open_interruption`'s CLR13
+  // linearization), so handing an earlier card a control would hand it the LATER
+  // question's row.
+  const liveClarifyParts = useMemo(
+    () => foldLiveClarifyParts(state.stream.provisionalChunks),
+    [state.stream.provisionalChunks],
+  );
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!threadId || !draft.trim() || busy) return;
+    if (!threadId || !draft.trim() || busy || attachments.blocked) return;
     const text = draft;
-    setDraft("");
-    await sendMessage(text);
+    const opened = await sendMessage(text, attachments.parts);
+    if (opened) {
+      setDraft("");
+      setAttachmentClearToken((token) => token + 1);
+    }
   }
 
   return (
@@ -104,16 +126,45 @@ export function ClaraThreadView({
           // assistant turn keeps its key, so the text grows without the
           // bubble ever re-animating.
           <div key={msg.id} className={cn("enter-content rounded-lg p-2 text-sm", msg.role === "user" ? "bg-muted" : "bg-clara-muted")}>
-            <p className="mb-1 text-xs font-medium text-muted-foreground">{t(`role.${msg.role}`)}</p>
+            {/* `text-secondary-ink` on the Clara-role ground, not `text-muted-
+                foreground`: the live axe scan measures the latter at 4.49:1 on
+                `--clara-muted` — the exact blind spot `secondary-ink-on-clara-muted`
+                was pinned for after InterviewRunCard hit it (check-token-contrast.mjs
+                PAIR_SPECS). The user bubble keeps the muted ink it passes on. */}
+            <p className={cn("mb-1 text-xs font-medium", msg.role === "user" ? "text-muted-foreground" : "text-secondary-ink")}>
+              {t(`role.${msg.role}`)}
+            </p>
             {msg.parts.map((part, i) => (
-              <PartSlot key={i} part={part} />
+              <PartSlot key={i} part={part} taskId={msg.task_id} session={auth} />
             ))}
           </div>
         ))}
-        {state.pendingUserText && (
-          <div className="rounded-lg bg-muted p-2 text-sm opacity-70">
+        {/* The pending bubble is PROVISIONAL, spelled with a dashed edge rather than
+            `opacity-70`. The live axe scan measured that opacity at 2.64:1 on this
+            ground — an opacity multiplier is invisible to the token-contrast gate,
+            which reads declared token pairs and not composited pixels, so a real WCAG
+            AA failure sat here behind a green lint. The border says "not yet the DB's
+            row" without touching the ink. */}
+        {state.pendingUserParts && (
+          <div className="rounded-lg border border-dashed border-border bg-muted p-2 text-sm">
             <p className="mb-1 text-xs font-medium text-muted-foreground">{t("role.user")}</p>
-            <p className="whitespace-pre-wrap">{state.pendingUserText}</p>
+            {state.pendingUserParts.map((part, index) => (
+              <PartSlot key={index} part={part} session={auth} />
+            ))}
+          </div>
+        )}
+        {liveClarifyParts.length > 0 && (
+          <div className="enter-content rounded-lg bg-clara-muted p-2 text-sm">
+            <p className="mb-1 text-xs font-medium text-secondary-ink">{t("role.assistant")}</p>
+            {liveClarifyParts.map((part, index) => (
+              <PartSlot
+                key={part.tool_call_id}
+                part={part}
+                taskId={state.activeTaskId}
+                session={auth}
+                clarifyAnswerable={index === liveClarifyParts.length - 1}
+              />
+            ))}
           </div>
         )}
         {streamStatusLabel(state, t) && <p className="text-xs text-muted-foreground italic">{streamStatusLabel(state, t)}</p>}
@@ -135,12 +186,40 @@ export function ClaraThreadView({
           <StateBanner tone="error">{t("sendError", { message: state.sendError })}</StateBanner>
         )}
       </div>
-      <form onSubmit={handleSubmit} className="flex gap-2 border-t border-border p-2">
+      {/* The honest note the firm altitude gets INSTEAD of the affordance. The intake
+          wall itself would allow a firm-altitude chat intake (origin "chat" is
+          authorised against the SESSION, never a client — intakeRoutes.ts:94), and the
+          attachment-admission trigger is firm+author scoped with no client_id at all.
+          What genuinely needs a client is the act this product performs after adoption:
+          `fileToClient`, so the document lands in a client's own workspace rather than
+          in a firm-wide unassigned lane no client surface would ever show it in. So the
+          control is hidden here and SAYS SO, rather than being silently absent. */}
+      <form
+        onSubmit={handleSubmit}
+        className={cn(
+          "grid items-end gap-2 border-t border-border p-2",
+          clientId && threadId ? "grid-cols-[auto_1fr_auto]" : "grid-cols-[1fr_auto]",
+        )}
+      >
+        {!clientId && threadId && !notSignedIn ? (
+          <p className="col-span-full text-xs text-muted-foreground">{t("attachments.firmAltitudeNote")}</p>
+        ) : null}
+        {clientId && threadId ? (
+          <ComposerAttachmentControl
+            clientId={clientId}
+            threadId={threadId}
+            session={auth}
+            clearToken={attachmentClearToken}
+            disabled={notSignedIn || busy}
+            onStateChange={handleAttachmentState}
+          />
+        ) : null}
         <textarea
           ref={textareaRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={t("composerPlaceholder")}
+          aria-label={t("composerLabel")}
           disabled={!threadId || notSignedIn || busy}
           rows={variant === "rail" ? 2 : 3}
           // Stays a raw <textarea>: the Textarea primitive is `field-sizing-
@@ -148,9 +227,9 @@ export function ClaraThreadView({
           // fixed 2/3 rows. What was drifting was only the border token —
           // `border-border` (a divider) where every other field in the product
           // uses `border-input` (a control edge).
-          className="motion-fast flex-1 resize-none rounded-lg border border-input bg-background p-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="motion-fast min-w-0 flex-1 resize-none rounded-lg border border-input bg-background p-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
         />
-        <Button type="submit" disabled={!threadId || notSignedIn || busy || !draft.trim()}>
+        <Button type="submit" disabled={!threadId || notSignedIn || busy || attachments.blocked || !draft.trim()}>
           {busy ? t("sending") : t("send")}
         </Button>
       </form>

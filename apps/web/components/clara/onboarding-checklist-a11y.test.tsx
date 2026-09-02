@@ -73,18 +73,13 @@ const ITEM = {
   answered_by: "u1", answered_at: "2026-08-01T00:00:00Z", created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
 };
 
-/** The ONE pre-existing violation rev-t11 attributed to `ClaraThreadView`'s
- *  own composer textarea (`ClaraThreadView.tsx:134-147` — a `placeholder`
- *  but no `aria-label`), measured present with or without T11's card
- *  mounted. NOT this train's finding, NOT fixed here — asserted present
- *  (never silently allow-listed away) so a NEW violation this train
- *  introduces still reds this test. */
-const PRE_EXISTING_COMPOSER_FINDING = {
-  rule: "label",
-  wcag: "1.3.1 Info and Relationships / 4.1.2 Name, Role, Value",
-  element: "textarea",
-  message: "Form elements must have an accessible name (aria-label, aria-labelledby, or an associated <label>).",
-};
+/** RETIRED 2026-09-02 (the chat-parity train). rev-t11 attributed ONE pre-existing
+ *  violation to `ClaraThreadView`'s own composer textarea (a `placeholder` but no
+ *  `aria-label`) and pinned it here, present, so a NEW violation would still red this
+ *  test. The chat-parity train FIXED it — the textarea now carries
+ *  `aria-label={t("composerLabel")}` — so the expectation is ZERO violations, which is
+ *  a strictly stronger pin than the one it replaces. */
+const NO_VIOLATIONS: never[] = [];
 
 function App() {
   return createElement(NextIntlClientProvider, {
@@ -122,7 +117,7 @@ test("the REAL full-screen thread route (card + Commit door dialog OPEN) has zer
         const collapsedViolations = checkAccessibility(body as never);
         assert.deepEqual(
           collapsedViolations,
-          [PRE_EXISTING_COMPOSER_FINDING],
+          NO_VIOLATIONS,
           `collapsed — expected EXACTLY the one pre-existing, attributed composer finding and NOTHING from T11 (in particular no heading-order): ${JSON.stringify(collapsedViolations)}`,
         );
 
@@ -139,7 +134,7 @@ test("the REAL full-screen thread route (card + Commit door dialog OPEN) has zer
         const openViolations = checkAccessibility(body as never);
         assert.deepEqual(
           openViolations,
-          [PRE_EXISTING_COMPOSER_FINDING],
+          NO_VIOLATIONS,
           `open dialog — must be the SAME single pre-existing finding, no NEW violation introduced by the open Commit dialog: ${JSON.stringify(openViolations)}`,
         );
       } finally {

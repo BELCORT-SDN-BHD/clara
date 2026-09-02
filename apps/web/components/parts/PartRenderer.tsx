@@ -9,6 +9,8 @@ import { BankActCard, BankPackCard, EntryPostedCard, QuestionOpenedCard } from "
 import { AgentReceiptCard, FreeformResultCard } from "./V16Cards";
 import { CloseProposalCard, FirmQuestionCard } from "./V16ActCards";
 import { SweepReceiptCard } from "./SweepReceiptCard";
+import { ClarifyCard } from "./ClarifyCard";
+import type { SessionTokenAccessor } from "@/lib/session";
 
 // The fail-closed part renderer (contract §3.1 / frontend-handoff-2026-08-23 §3.1,
 // apps/dashboard/app/chat/parts.tsx's TranscriptParts precedent). MECHANISM ported,
@@ -102,11 +104,29 @@ function summaryOf(
   }
 }
 
-export function PartRenderer({ part }: { part: ClaraPart }) {
+export function PartRenderer({
+  part,
+  taskId,
+  session,
+  clarifyAnswerable = false,
+}: {
+  part: ClaraPart;
+  /** The task that emitted this part (`MessageRow.task_id`, or the live stream's
+   *  `activeTaskId`) — the only firm-visible identity joining a rendered clarify to its
+   *  `agent_interruptions` row. */
+  taskId?: string | null;
+  session?: SessionTokenAccessor | null;
+  /** Set by ClaraThreadView for the LAST clarify part of the LIVE stream fold, and
+   *  nothing else — see ClarifyCard's own header for why every other clarify is
+   *  read-only rather than merely un-styled. */
+  clarifyAnswerable?: boolean;
+}) {
   // Called unconditionally, before any branch: a hook cannot sit behind an early
   // return. The nine summary branches are its only consumer — every rich card
   // below calls `useTranslations` in its own component, under its own namespace.
   const tSummary = useTranslations("Clara.parts.summary");
+  const tAttachment = useTranslations("Clara.parts.attachment");
+  const tClarify = useTranslations("Clara.parts.clarify");
 
   if (part.type === "text") {
     return part.text.trim() ? <p className="max-w-prose text-sm text-foreground">{part.text}</p> : null;
@@ -121,12 +141,12 @@ export function PartRenderer({ part }: { part: ClaraPart }) {
       <div className="flex flex-col gap-1 rounded-lg border border-border bg-card p-3 text-sm">
         <div className="flex items-center gap-2">
           <span aria-hidden>📎</span>
-          <span className="font-medium text-card-foreground">Attached document</span>
+          <span className="font-medium text-card-foreground">{tAttachment("title")}</span>
         </div>
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-          <dt className="text-muted-foreground">document</dt>
+          <dt className="text-muted-foreground">{tAttachment("documentLabel")}</dt>
           <dd className="truncate text-card-foreground">{part.document_id}</dd>
-          <dt className="text-muted-foreground">intake</dt>
+          <dt className="text-muted-foreground">{tAttachment("intakeLabel")}</dt>
           <dd className="truncate text-card-foreground">{part.intake_id}</dd>
         </dl>
       </div>
@@ -142,22 +162,15 @@ export function PartRenderer({ part }: { part: ClaraPart }) {
   }
 
   if (part.type === "clarify") {
-    return (
-      <div className="flex flex-col gap-1 rounded-lg border border-border bg-card p-3 text-sm">
-        <Badge tone="info">Visible to your firm</Badge>
-        <p className="text-card-foreground">{part.question}</p>
-        {part.context ? <p className="text-xs text-muted-foreground">{part.context}</p> : null}
-        <p className="text-xs text-muted-foreground">{part.framing}</p>
-      </div>
-    );
+    return <ClarifyCard part={part} taskId={taskId} session={session} answerable={clarifyAnswerable} />;
   }
 
   if (part.type === "clarify_closed") {
     return (
       <div className="flex flex-col gap-1 rounded-lg border border-border bg-card p-3 text-sm">
-        <Badge tone="info">Visible to your firm</Badge>
+        <Badge tone="info">{tClarify("firmVisible")}</Badge>
         <p className="text-card-foreground">
-          Clarify {part.reason}. {part.framing}
+          {tClarify("closedPart", { status: part.reason, framing: part.framing })}
         </p>
       </div>
     );

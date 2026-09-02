@@ -83,12 +83,15 @@ const OPEN_STATE = {
   items: [],
 };
 
-const PRE_EXISTING_COMPOSER_FINDING = {
-  rule: "label",
-  wcag: "1.3.1 Info and Relationships / 4.1.2 Name, Role, Value",
-  element: "textarea",
-  message: "Form elements must have an accessible name (aria-label, aria-labelledby, or an associated <label>).",
-};
+/** RETIRED 2026-09-02 (the chat-parity train). This file used to pin ONE attributed
+ *  pre-existing violation here — `ClaraThreadView`'s composer textarea carried a
+ *  `placeholder` but no accessible name. The chat-parity train gave that textarea a
+ *  real `aria-label` (`Clara.thread.composerLabel`) while adding the attach affordance
+ *  beside it, so the finding is gone and the expectation is now ZERO. The pin is
+ *  DELETED rather than left asserting a violation that no longer exists: a pin that
+ *  expects a fixed defect fails the moment it is fixed, which is exactly how this one
+ *  surfaced. */
+const NO_VIOLATIONS: never[] = [];
 
 function App() {
   return createElement(NextIntlClientProvider, {
@@ -123,7 +126,7 @@ test("the real thread route stays accessible before start, at an open park, and 
         for (let i = 0; i < 6; i++) await h.settle();
 
         const beforeStart = checkAccessibility(body as never);
-        assert.deepEqual(beforeStart, [PRE_EXISTING_COMPOSER_FINDING], `before start: ${JSON.stringify(beforeStart)}`);
+        assert.deepEqual(beforeStart, NO_VIOLATIONS, `before start: ${JSON.stringify(beforeStart)}`);
 
         const start = h.find((node) => node.tagName === "BUTTON" && textOf(node) === "Start / continue interview");
         assert.ok(start, "the idempotent start/continue control must render inside the real thread");
@@ -132,7 +135,7 @@ test("the real thread route stays accessible before start, at an open park, and 
 
         assert.match(h.text(), /What is the client's legal name\?/, "the runtime-hydrated open park must render");
         const openPark = checkAccessibility(body as never);
-        assert.deepEqual(openPark, [PRE_EXISTING_COMPOSER_FINDING], `open park: ${JSON.stringify(openPark)}`);
+        assert.deepEqual(openPark, NO_VIOLATIONS, `open park: ${JSON.stringify(openPark)}`);
 
         const cancelTrigger = h.find((node) => node.tagName === "BUTTON" && textOf(node) === "Cancel onboarding");
         // N1 (review round 1): `h.find` only proves a FIRST match exists — it
@@ -146,7 +149,7 @@ test("the real thread route stays accessible before start, at an open park, and 
         const reason = findIn(body, (node) => node.tagName === "TEXTAREA" && node.getAttribute?.("aria-label") === "Reason for cancelling");
         assert.ok(reason, "opening the interview cancel door must reveal its typed-reason field");
         const openDialog = checkAccessibility(body as never);
-        assert.deepEqual(openDialog, [PRE_EXISTING_COMPOSER_FINDING], `open cancel dialog: ${JSON.stringify(openDialog)}`);
+        assert.deepEqual(openDialog, NO_VIOLATIONS, `open cancel dialog: ${JSON.stringify(openDialog)}`);
       } finally {
         await h.unmount();
         for (let i = 0; i < 5; i++) await h.settle();
