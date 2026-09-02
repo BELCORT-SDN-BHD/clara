@@ -27,7 +27,7 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
       just confirm it is set, confirm the fail-closed behaviour under a deliberately-unset probe
       first.
 - [ ] Flip `clara_auth_wall_login` to `LOGIN` out of band and set
-      `CLARA_AUTH_WALL_DATABASE_URL` in the runtime environment only; migration `0161` deliberately
+      `CLARA_AUTH_WALL_DATABASE_URL` in the runtime environment only; migration `0163` deliberately
       ships and tail-proves the role as `NOLOGIN`, so this is a deploy ceremony, never repo-held DDL.
 - [ ] Proof: `vercel env ls` / the deploy platform's env listing (values redacted), each of the
       required names present, no value ever pasted into chat, a PR, or a log.
