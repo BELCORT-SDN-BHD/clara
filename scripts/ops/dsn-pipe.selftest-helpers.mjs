@@ -7,7 +7,8 @@
 // No dependencies beyond Node built-ins.
 
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { X509Certificate } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -140,22 +141,90 @@ export function reportOpensslMissing(harness, label, count) {
   }
 }
 
-/** Mint a throwaway self-signed cert. basicConstraints is ALWAYS explicit (this openssl version
- * defaults to CA:TRUE even with no -addext at all, so "omit it" is not a way to get CA:FALSE):
- * `ca:true` -> CA:TRUE (critical); `ca:false` (default) -> CA:FALSE (critical), a genuine leaf. */
+const SAN_EXT = "subjectAltName=DNS:127.0.0.1,IP:127.0.0.1";
+
+/** Mint a throwaway self-signed cert. basicConstraints is ALWAYS explicit (openssl defaults to
+ * CA:TRUE even with no -addext at all, so "omit it" is not a way to get CA:FALSE):
+ * `ca:true` -> CA:TRUE (critical); `ca:false` (default) -> CA:FALSE (critical), a genuine leaf.
+ *
+ * An EXPLICIT validity window (notBefore/notAfter) takes a different openssl route — see
+ * mintDatedCert. Same cert shape either way: fresh random key, /CN=<cn>, the SAN above, and
+ * critical basicConstraints. */
 export function mintCert(dir, cn, { ca = false, notBefore, notAfter } = {}) {
   const keyPath = join(dir, `${cn}.key`);
   const crtPath = join(dir, `${cn}.crt`);
-  const args = ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", keyPath, "-out", crtPath, "-subj", `/CN=${cn}`];
+  const bcExt = `basicConstraints=critical,CA:${ca ? "TRUE" : "FALSE"}`;
   if (notBefore && notAfter) {
-    args.push("-not_before", notBefore, "-not_after", notAfter);
-  } else {
-    args.push("-days", "1");
+    mintDatedCert({ dir, cn, keyPath, crtPath, bcExt, notBefore, notAfter });
+    return { keyPath, crtPath };
   }
-  const exts = ["subjectAltName=DNS:127.0.0.1,IP:127.0.0.1", `basicConstraints=critical,CA:${ca ? "TRUE" : "FALSE"}`];
-  for (const e of exts) args.push("-addext", e);
+  const args = ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", keyPath, "-out", crtPath,
+    "-subj", `/CN=${cn}`, "-days", "1", "-addext", SAN_EXT, "-addext", bcExt];
   execFileSync("openssl", args, { stdio: "pipe" });
   return { keyPath, crtPath };
+}
+
+/** A self-signed cert with an ARBITRARY validity window — the only way to mint the expired-CA
+ * fixture, since a window in the past cannot be expressed as `-days N` (openssl rejects a
+ * non-positive N: "Non-positive number \"-1\" for option -days", measured on both 3.0.13 and
+ * 3.5.5).
+ *
+ * WHY NOT `openssl req -x509 -not_before/-not_after`, which this helper used until 2026-09-02:
+ * those two options only exist from OpenSSL 3.5. The self-hosted WSL runner was Ubuntu 26.04
+ * (OpenSSL 3.5.5) so they worked there, and GitHub's ubuntu-24.04 hosted image ships OpenSSL
+ * 3.0.13, where `openssl req` rejects them outright — the whole lint job died on this one
+ * fixture at the hosted-runner migration (裁-135). `openssl ca -selfsign` with
+ * `-startdate`/`-enddate` is the portable route: MEASURED to produce a byte-equivalent cert
+ * shape on BOTH 3.0.13 and 3.5.5 (same window, critical CA:TRUE, same SAN), so there is ONE
+ * code path here and no version branch to rot.
+ *
+ * `openssl ca` needs a tiny scratch CA state directory (a config, an empty index, a serial); it
+ * is created inside the caller's already-throwaway fixture dir and dies with it. Paths go into
+ * the config with forward slashes because a backslash is an ESCAPE character in an openssl
+ * config file — a Windows dev box would otherwise write an unparseable path. */
+function mintDatedCert({ dir, cn, keyPath, crtPath, bcExt, notBefore, notAfter }) {
+  const caDir = join(dir, `${cn}-castate`);
+  const newCerts = join(caDir, "newcerts");
+  mkdirSync(newCerts, { recursive: true });
+  const cfgPath = join(caDir, "openssl.cnf");
+  const indexPath = join(caDir, "index.txt");
+  const serialPath = join(caDir, "serial");
+  writeFileSync(indexPath, "");
+  writeFileSync(serialPath, "01\n");
+  const fwd = (p) => p.split("\\").join("/");
+  writeFileSync(cfgPath, [
+    "[ ca ]", "default_ca = CA_default", "",
+    "[ CA_default ]",
+    `database = ${fwd(indexPath)}`,
+    `new_certs_dir = ${fwd(newCerts)}`,
+    `serial = ${fwd(serialPath)}`,
+    "default_md = sha256", "policy = policy_any", "email_in_dn = no",
+    "rand_serial = no", "unique_subject = no", "",
+    "[ policy_any ]", "commonName = supplied", "",
+    // The extension set is written EXACTLY as the -addext route above writes it, so the two
+    // routes differ only in the validity window they can express.
+    "[ v3_dated ]",
+    bcExt.replace("=", " = "),
+    SAN_EXT.replace("=", " = "), "",
+  ].join("\n"));
+
+  const csrPath = join(caDir, `${cn}.csr`);
+  execFileSync("openssl", ["req", "-new", "-newkey", "rsa:2048", "-nodes",
+    "-keyout", keyPath, "-out", csrPath, "-subj", `/CN=${cn}`], { stdio: "pipe" });
+  execFileSync("openssl", ["ca", "-batch", "-selfsign", "-notext",
+    "-config", cfgPath, "-keyfile", keyPath, "-in", csrPath, "-out", crtPath,
+    "-startdate", notBefore, "-enddate", notAfter, "-extensions", "v3_dated"], { stdio: "pipe" });
+
+  // PROVE THE FIXTURE IS WHAT IT CLAIMS. A cert minted with the wrong window would still make
+  // the expired-CA cell throw — on the FINGERPRINT branch — and the cell would read green for
+  // the wrong reason. Cheap, and it states the property instead of assuming it.
+  const minted = new X509Certificate(readFileSync(crtPath, "utf8"));
+  const want = (stamp) => Date.parse(`${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6, 8)}`
+    + `T${stamp.slice(8, 10)}:${stamp.slice(10, 12)}:${stamp.slice(12, 14)}Z`);
+  if (Date.parse(minted.validFrom) !== want(notBefore) || Date.parse(minted.validTo) !== want(notAfter)) {
+    throw new Error(`mintDatedCert asked for ${notBefore}..${notAfter} but openssl produced `
+      + `${minted.validFrom}..${minted.validTo} — the fixture would test the wrong thing`);
+  }
 }
 
 // A marker unlikely to occur by accident, standing in for "the secret" in every leak cell.
