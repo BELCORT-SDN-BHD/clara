@@ -242,9 +242,48 @@ test("G1B-C1 a DISABLED source claims nothing; enabling through set_wake_source_
   // ceremony's own raw act (docs/ops/g1-operator-firm-ceremony.md) sets firms.is_operator; this
   // cell walks that same door rather than UPDATEing the registry behind its back, then puts the
   // flag back so the estate is left exactly as found (uq_firms_one_operator admits only one).
-  const priorOperator = await rig.rootQuery("select id from clara.firms where is_operator");
-  assert.equal(priorOperator.rows.length, 0, "the rig starts with NO operator firm — this cell would otherwise collide");
-  await rig.rootQuery("update clara.firms set is_operator = true where id = $1", [w.firm]);
+  //
+  // uq_firms_one_operator is a genuine database-wide partial UNIQUE INDEX, not a roster this
+  // cell can narrow by identity (T1's prefix-exclusion trick, packages/db/tests/g1-wake-engine
+  // .test.mjs, does not apply here — that fixes an unscoped READ against a table of many rows;
+  // this is a WRITE-WRITE conflict on a real singleton, and no read-side filter can make a
+  // second `is_operator=true` row legal). The contention set is FOUR writers across THREE other
+  // files, not just one: packages/db/tests/g1-wake-engine.test.mjs's own OP fixture (legitimately
+  // live for that file's ENTIRE run — T2z, MUST D, M3, N1 need it throughout, so it cannot
+  // release between cells the way this cell's own critical section can; its own after() now
+  // releases it, see that file's own after() comment) plus packages/db/tests/p4t2-approval
+  // .test.mjs and p4t2-reads.test.mjs's own operator scenes (packages/db/tests/p4t2-fixtures.mjs's
+  // markOperator/clearOperator, scoped to what THEY marked — PR #501 finding F1) — none holding
+  // any ordering guarantee against this file under CI's concurrent `pnpm -r --if-present test`
+  // (the G1B-C1 instance of the #485/#490 class: measured firing even WITHOUT concurrency, on a
+  // reused database, once g1-wake-engine.test.mjs alone had run and left OP set). A single hard
+  // "the rig starts empty" assertion is a FALSE premise whenever any one of those fixtures is
+  // live, so it is RESTATED here: this cell does not need the estate to have STARTED empty — it
+  // needs to OBTAIN exclusive use of the one global slot before it proceeds, waiting out
+  // whichever legitimate holder is currently live rather than assuming there is none.
+  //
+  // THE OBSERVATION IS THE TAKE, and ONE shared implementation (opus review round on PR #501,
+  // findings F2 and the new-MEDIUM): an earlier version of this cell read `select ... where
+  // is_operator`, branched on the row count, and only THEN issued the UPDATE as a separate
+  // statement — a genuine TOCTOU window where any of the four writers above taking the slot
+  // between the two round-trips would surface as a raw, uncaught `23505 unique_violation`
+  // crashing the cell, not the loud, named assertion this comment promises. Fixing it HERE
+  // alone was not enough either: p4t2-fixtures.mjs's own bare take had the identical exposure,
+  // just wider (its whole critical section, not one round-trip). rig.mjs's `claimOperatorFirm`
+  // is the fix the RUNTIME-side takers route through; it mirrors packages/db/tests/
+  // rig-helpers.mjs's export of the SAME name BY VALUE (different package, no cross-package
+  // import), and the db-side takers route through THAT copy. The mirror has no fail-closed
+  // divergence detector (unlike WAKE_ENGINE_TEST_PREFIX's T1), so a fix applied to one copy
+  // leaves the other exposed — the exact asymmetry behind round 2's MEDIUM; any change to
+  // either body MUST be applied to both (opus review round 3, the wording LOW). Here: the
+  // UPDATE itself is the only authority asked, its answer (success, or a NAMED constraint
+  // violation identifying a live holder) IS the observation, so there is no separate read to go
+  // stale between it and the write, and success is confirmed by rowCount, never merely "did not
+  // throw". A bounded, generous poll (never a silent skip: an exhausted wait still fails loud,
+  // by name). Not wrapped in a try/assert.fail here: claimOperatorFirm's own thrown Error
+  // already carries the loud, named message this cell needs — node:test fails the cell on any
+  // thrown error, and re-wrapping would only discard the original stack for no benefit.
+  await rig.claimOperatorFirm(w.firm);
   try {
     await rig.asHuman(w.owner, (c) =>
       c.query("select clara.set_wake_source_enabled($1, true, $2, $3)", [key, "g1-bodies battery: the positive control", `g1b:${key}:on`]),
