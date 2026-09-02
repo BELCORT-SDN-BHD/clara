@@ -21,11 +21,13 @@
 //
 // Serial discipline: --test-concurrency=1 (shared rig convention).
 //
-// TWO-ARMED AUTHORING GATE. The package-wide sweep preloads
+// THREE-ARMED AUTHORING GATE. The package-wide sweep preloads
 // unique-violation-constraint-name-preintegration-gate.mjs because the migration remains
 // UNNUMBERED until merge and is therefore absent from HEAD's numbered replay. That shape skips
 // these cells loudly. A focused run does not preload it, so a missing migration still fails;
-// once the migration is applied, both behavioural cells execute in either shape.
+// once the migration is applied, both behavioural cells execute in either shape. A body that
+// matches neither the migration-owned pre-image nor the gate's post-image executes the file but
+// prefixes both testCodeFailure outcomes with the same re-derive-the-pins diagnostic.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -39,6 +41,7 @@ import { readUniqueViolationConstraintNameGate } from "./unique-violation-constr
 let ready = false;
 let w = null;
 let missingReason = null;
+let unknownBodyDiagnostic = null;
 
 before(async () => {
   const gate = await readUniqueViolationConstraintNameGate(
@@ -52,6 +55,11 @@ before(async () => {
       `${missingReason}. Focused/post-migration runs fail loudly; only the explicit ` +
       "package-wide preintegration sweep may skip.",
     );
+  }
+  if (gate.unknownBodyDiagnostic) {
+    unknownBodyDiagnostic = gate.unknownBodyDiagnostic;
+    console.warn(`UNKNOWN unique-violation-constraint-name: ${unknownBodyDiagnostic}`);
+    return;
   }
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
@@ -69,11 +77,16 @@ function unready(t) {
   return false;
 }
 
+function failUnknownBody() {
+  if (unknownBodyDiagnostic) throw new Error(unknownBodyDiagnostic);
+}
+
 // ===========================================================================
 // PART A -- a REAL collision on the ROSTERED constraint still binds correctly
 // ===========================================================================
 
 test("unique_violation constraint_name: a REAL collision on uq_vib_one_active_binding (the rostered constraint) still refuses binding_conflict, unchanged from before this migration", async (t) => {
+  failUnknownBody();
   if (unready(t)) return;
   const cp = await seedWindow(w, `uvc-A-${Date.now()}`, { dates: DATES_OK, client: w.clients.A1 });
   const first = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id, opKey: opk("uvc-a1") });
@@ -99,6 +112,7 @@ test("unique_violation constraint_name: a REAL collision on uq_vib_one_active_bi
 // ===========================================================================
 
 test("unique_violation constraint_name NARROWNESS: a REAL collision on an UNROSTERED unique index surfaces as a raw 23505, naming the probe index -- never relabelled binding_conflict", async (t) => {
+  failUnknownBody();
   if (unready(t)) return;
   const sharedPrefix = `UVCB${Date.now()}${Math.random().toString(36).slice(2, 6).toUpperCase()}-`;
   const cpA = await seedWindow(w, `uvc-B-a-${Date.now()}`, { dates: DATES_OK, client: w.clients.A1, invoicePrefix: sharedPrefix });
