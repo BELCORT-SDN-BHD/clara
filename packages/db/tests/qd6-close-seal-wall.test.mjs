@@ -214,6 +214,13 @@ test("qd6.W1 THE WALL: a client activated on the deferred-opening arm CANNOT fin
   const err = await caught(() => finalizeClose(world.users.alice, { fy: walled.fy }));
   assert.ok(err, "finalize must REFUSE while the opening is uncaptured");
   assert.equal(err.code, "CLR41", `expected CLR41 (got ${err.code} — ${err.message})`);
+  // THE PROSE, pinned as well as the code: this is what a human actually reads, and
+  // finalize_close's drawer-1 arm (0128:189-190) states the absoluteness in the message
+  // itself. A refusal that stopped saying "no attestation path exists" would be a different
+  // promise even if the errcode were unchanged.
+  assert.equal(err.message,
+    `drawer-1 identity ${KEY} FAILED -- no attestation path exists, for anybody`,
+    `the refusal prose is the shipped drawer-1 sentence, naming this gate (got: ${err.message})`);
   const d = detailOf(err);
   assert.equal(d.reason, "drawer1_identity_failed",
     "a drawer-1 identity failure, which is the arm that has no attestation branch anywhere");
