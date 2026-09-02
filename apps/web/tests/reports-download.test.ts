@@ -139,7 +139,7 @@ test("the runtime proxy forwards content-disposition (without it, an attachment 
   const src = readFileSync(PROXY, "utf8");
   const block = /const RESPONSE_HEADERS = \[([\s\S]*?)\] as const;/.exec(src);
   assert.ok(block, "the proxy must carry a named RESPONSE_HEADERS allow-list");
-  const names = [...block[1].matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
+  const names = [...(block[1] ?? "").matchAll(/"([a-z-]+)"/g)].map((m) => m[1]);
   for (const required of ["content-type", "content-length", "content-disposition",
     "cache-control", "x-content-type-options"]) {
     assert.ok(names.includes(required), `the proxy drops ${required}`);
