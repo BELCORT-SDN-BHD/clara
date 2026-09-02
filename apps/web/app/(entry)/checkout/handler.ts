@@ -186,6 +186,23 @@ export async function handleCheckoutPost(
   // flash kind and a unit cell proving zero Stripe calls and zero door calls.
   // A-M4's operator read door (shipped in `0161`) is untouched by this; the
   // refusal is additive and turns nobody away that the folded door could serve.
+  // SYMMETRY NOTE (#517 review r2, NIT 4 — a note, not a hole). This predicate
+  // and `holdingStateFrom` agree exactly on the POSITIVE case: `context.ok ===
+  // true` means member, in both. They diverge on a MALFORMED context — an
+  // object with no `ok`, or `ok` neither true nor false. The page fails CLOSED
+  // there (`read-failed`, reason `malformed`); this route falls THROUGH and
+  // carries on to checkout.
+  //
+  // Unreachable as the code stands: `context` is a typed union whose every arm
+  // carries a boolean `ok`, so "malformed" describes a shape the door cannot
+  // return. It is recorded rather than fixed because inventing a third refusal
+  // arm for an unreachable state would be a guess about which refusal is right,
+  // and 裁-139's arm is the one the owner ruled on.
+  //
+  // THE TRIPWIRE, so this does not rot: if that union ever gains an untyped or
+  // optional-`ok` arm, this route must take the page's fail-closed shape rather
+  // than proceeding — the money hop is the wrong place to be the more permissive
+  // of two readers of the same fact.
   if (result.ok && result.context !== null && typeof result.context === "object"
     && (result.context as { ok?: unknown }).ok === true) {
     return checkoutRefusal(proof.origin, { kind: "already_member" });

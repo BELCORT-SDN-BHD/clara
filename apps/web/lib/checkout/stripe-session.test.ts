@@ -19,6 +19,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  CHECKOUT_TIMEOUT_MS,
   STRIPE_API_VERSION,
   STRIPE_SECRET_KEY_VAR,
   StripeSessionError,
@@ -177,6 +178,86 @@ test("a well-formed 200 resolves with exactly the id and url Stripe returned", a
     fetchImpl: async () => ok(),
   });
   assert.deepEqual(created, { id: "cs_test_123", url: "https://checkout.stripe.com/c/pay/cs_test_123" });
+});
+
+test("NIT 5 — A HANGING STRIPE IS BOUNDED: the deadline refuses, it never hangs", async () => {
+  // #517 review r2, NIT 5. `confirmation-wall.ts` bounded its runtime call and
+  // this module — the MONEY hop — did not, so a hanging Stripe would have held
+  // POST /checkout open to the platform's ceiling. No money moves on that path
+  // (the Session is never created, the intent stays unstamped), which is why it
+  // was a NIT; the bound is what makes the honest refusal reachable in finite
+  // time.
+  //
+  // The fetch NEVER settles. Only the deadline can end this call, so the cell
+  // cannot pass for any other reason: no status to read, no body to parse, no
+  // error to catch. A real timer at a small injected bound, not a faked clock —
+  // the abort has to travel through `fetch`'s own `signal` plumbing for this to
+  // mean anything, and a fake clock would let a build that ignores the signal
+  // pass.
+  // THE STUB HONOURS THE SIGNAL, exactly as a real `fetch` does — and that is
+  // what makes this cell discriminate rather than merely hang. A stub that
+  // ignored the signal would leave a promise pending forever, which Node's
+  // runner reports as "resolution is still pending" and cancels every sibling
+  // cell in the file: a red, but an uninformative one that says nothing about
+  // whether the signal was WIRED. So:
+  //   · shipped code → `signal` reaches the stub → abort at the bound →
+  //     `AbortError` → the typed transport refusal below.
+  //   · mutant (`signal:` deleted) → no signal ever arrives → the FUSE fires
+  //     instead, with a different error name, and the identity assertion reds
+  //     CLEANLY without stranding the rest of the file.
+  const hangingStripe = (_url: unknown, init?: { signal?: AbortSignal }) =>
+    new Promise<Response>((_resolve, reject) => {
+      const fuse = setTimeout(
+        () => reject(Object.assign(new Error("no signal was ever passed to fetch"), { name: "NoSignalError" })),
+        2_000,
+      );
+      const fail = () => {
+        clearTimeout(fuse);
+        reject(Object.assign(new Error("the deadline aborted the call"), { name: "AbortError" }));
+      };
+      if (init?.signal === undefined) return; // the mutant's fate: only the fuse can end this
+      if (init.signal.aborted) return fail();
+      init.signal.addEventListener("abort", fail, { once: true });
+    });
+
+  await assert.rejects(
+    () =>
+      createCheckoutSession(REQUEST, {
+        env: { [STRIPE_SECRET_KEY_VAR]: FIXTURE_KEY },
+        fetchImpl: hangingStripe as unknown as typeof fetch,
+        timeoutMs: 40,
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof StripeSessionError, "the deadline produced something other than a StripeSessionError");
+      // NEVER AN ACCEPTANCE: the same class a dead socket produces, which
+      // `handler.ts` renders as the `stripe_unavailable` card.
+      assert.equal(err.reason, "transport");
+      // The refusal came from THE ABORT, not from the fuse — this is the line
+      // the `signal:` mutant reds.
+      assert.match(err.message, /AbortError/, `the refusal did not come from the abort: ${err.message}`);
+      assert.doesNotMatch(err.message, /NoSignalError/, "no AbortSignal was passed to fetch at all");
+      return true;
+    },
+  );
+
+  // MUST-NOT-RED CONTROL: the same module, unbounded in practice, still
+  // resolves a fast answer. A bound that refused everything would pass the
+  // assertions above and break checkout entirely.
+  const created = await createCheckoutSession(REQUEST, {
+    env: { [STRIPE_SECRET_KEY_VAR]: FIXTURE_KEY },
+    fetchImpl: async () => ok(),
+    timeoutMs: 40,
+  });
+  assert.equal(created.id, "cs_test_123");
+});
+
+test("NIT 5 — the SHIPPED bound is the module's own constant, not a test's value", () => {
+  // The injectable bound exists for the cell above; the value that ships is the
+  // exported constant, so no test can quietly weaken production by passing a
+  // smaller one. Pinned beside the confirm hop's 10 s, the discipline this
+  // matches.
+  assert.equal(CHECKOUT_TIMEOUT_MS, 10_000);
+  assert.ok(Number.isInteger(CHECKOUT_TIMEOUT_MS) && CHECKOUT_TIMEOUT_MS > 0);
 });
 
 test("the pinned API version is a real dated Stripe release train", () => {

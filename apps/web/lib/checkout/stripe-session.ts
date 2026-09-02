@@ -141,9 +141,38 @@ export class StripeSessionError extends Error {
   }
 }
 
+/**
+ * THE MONEY HOP IS BOUNDED (#517 review r2, NIT 5).
+ *
+ * The review measured an asymmetry inside this one PR: `confirmation-wall.ts`
+ * bounds its runtime call with `CONFIRM_TIMEOUT_MS` and an `AbortController`
+ * ("exceeded means unavailable, never an acceptance and never a hang"), while
+ * this module — the hop that touches MONEY — had no bound at all. A hanging
+ * Stripe would have hung `POST /checkout` until the platform's own ceiling.
+ *
+ * It was a NIT rather than a blocker for a real reason worth keeping: no money
+ * moves on that path. The Session is never created, so the intent stays
+ * unstamped and the celled retry-is-safe property holds. But the stricter of
+ * two disciplines in one PR belongs on the money hop, not the looser one.
+ *
+ * EXCEEDED MEANS UNAVAILABLE, NEVER AN ACCEPTANCE. An abort lands in the
+ * `catch` around the fetch below as `StripeSessionError("transport", …)`, and
+ * `app/(entry)/checkout/handler.ts` maps every `StripeSessionError` to the
+ * `stripe_unavailable` card. So the honest refusal already existed; the bound
+ * is what makes it reachable in finite time.
+ */
+export const CHECKOUT_TIMEOUT_MS = 10_000;
+
 export type StripeSessionDeps = {
   readonly fetchImpl?: typeof fetch;
   readonly env?: Record<string, string | undefined>;
+  /**
+   * The bound, injectable so a cell can drive a never-resolving fetch to
+   * `unavailable` on a REAL timer in milliseconds instead of faking the clock.
+   * Defaults to the exported constant, so the shipped value is never the value
+   * under test and no test can silently weaken it.
+   */
+  readonly timeoutMs?: number;
 };
 
 /** The form body, built by key so every field is legible and nothing is
@@ -188,6 +217,11 @@ export async function createCheckoutSession(
     );
   }
 
+  // The bound. `clearTimeout` in `finally` so a fast answer does not leave a
+  // pending timer holding the request open — the same shape, deliberately,
+  // that `confirmation-wall.ts` uses for the confirm hop.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), deps.timeoutMs ?? CHECKOUT_TIMEOUT_MS);
   let response: Response;
   try {
     response = await doFetch(`${STRIPE_API_BASE}/checkout/sessions`, {
@@ -201,12 +235,17 @@ export async function createCheckoutSession(
       body: checkoutSessionForm(request).toString(),
       redirect: "manual",
       cache: "no-store",
+      signal: controller.signal,
     });
   } catch (err) {
+    // An abort arrives here as `AbortError`, so the deadline produces the same
+    // typed refusal as a dead socket — unavailable, never an acceptance.
     throw new StripeSessionError(
       "transport",
       `the Stripe Checkout Sessions call did not complete: ${(err as Error)?.name ?? "fetch_failed"}`,
     );
+  } finally {
+    clearTimeout(timer);
   }
 
   if (!response.ok) {
