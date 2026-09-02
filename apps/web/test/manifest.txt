@@ -47,6 +47,7 @@ components/bank/bank-a11y.test.tsx
 components/bank/bank-money-doors.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
+components/brand-identity.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx
 components/clara/composer-attachment-scope.test.tsx
 components/clara/composer-attachment.test.tsx
@@ -83,6 +84,7 @@ components/entry/email-confirmation.test.tsx
 components/entry/entry-contracts.test.tsx
 components/entry/password-recovery.test.tsx
 components/entry/pending-a11y.test.tsx
+components/entry/recovery-faces-a11y.test.tsx
 components/entry/signup-a11y.test.tsx
 components/entry/signup-dpa-form.test.tsx
 components/entry/signup-firm-form.test.tsx
@@ -161,6 +163,7 @@ lib/bank/table-reads.test.ts
 lib/business-date.test.ts
 lib/clara/liveClarify.test.ts
 lib/clara/useActiveThread.test.ts
+lib/clara/welcomeState.test.ts
 lib/close/api.test.ts
 lib/coding/doors.test.ts
 lib/coding/loaders.test.ts

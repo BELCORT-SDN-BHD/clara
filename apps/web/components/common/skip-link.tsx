@@ -40,7 +40,14 @@ import { useTranslations } from "next-intl";
  * globals.css's base `:focus-visible` outline at the solid --focus token.
  */
 export function SkipLink() {
-  const t = useTranslations("FirmShell");
+  // `Brand`, not `FirmShell`: #514 (P6-6, the identity finish) renamed the
+  // namespace and moved `productName` "Clara" -> "ClaraBook". It did not carry
+  // `skipToContent` across, because that key arrived on this branch, so the
+  // merge owed the move. This cell is what caught it: `skip-link.test.tsx`
+  // renders through NextIntlClientProvider with the REAL catalogue, so a
+  // namespace that does not resolve reds with the raw key path instead of
+  // silently rendering nothing.
+  const t = useTranslations("Brand");
   return (
     <a
       href="#main-content"

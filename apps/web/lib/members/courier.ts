@@ -450,7 +450,7 @@ export async function handleInviteRequest(request: Request, deps: CourierDeps = 
     return courierError(
       409,
       "recipient_has_account",
-      "This address already has a Clara account — ask them to sign in with it.",
+      "This address already has a ClaraBook account — ask them to sign in with it.",
     );
   }
 

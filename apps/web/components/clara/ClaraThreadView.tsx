@@ -11,8 +11,10 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { LoadingState, StateBanner } from "@/components/common/state";
 import { PartSlot } from "@/components/clara/PartSlot";
+import { ClaraWelcome } from "@/components/clara/ClaraWelcome";
 import { OnboardingChecklistCard } from "@/components/clara/OnboardingChecklistCard";
 import { ComposerAttachmentControl, type ComposerAttachmentState } from "@/components/clara/ComposerAttachmentControl";
+import { claraWelcomeVisible } from "@/lib/clara/welcomeState";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { ClaraThreadUiState } from "@/lib/clara/threadStore";
@@ -190,6 +192,17 @@ export function ClaraThreadView({
           aria-live="polite"
           aria-busy={Boolean(threadId) && !notSignedIn && !state.messagesLoaded}
         >
+          {/* 裁-14 · the Clara welcome moment (#514). The gate is a pure function in
+              `lib/clara/welcomeState.ts`, NOT an inline conjunction, because
+              "NEVER a loader" is a refusal branch and belongs somewhere every
+              branch can be driven with its own RED-before mutant (review law 1).
+              It reads the same `state` this component renders from, so nothing
+              here can drift out from under it.
+              MERGE (P6-3 x #514): INSIDE the log, unlike the clarify group — it
+              is the transcript's own empty state, it renders where the first
+              message will, and `ClaraWelcome` declares no live region of its own
+              (checked, not assumed), so nothing nests. */}
+          {claraWelcomeVisible({ threadId, notSignedIn, state }) && <ClaraWelcome />}
           {state.messages.map((msg) => (
             // `enter-content`: a message ARRIVING is the archetypal "prevent a
             // jarring change". It fires per new message only — a streaming
