@@ -1,9 +1,13 @@
 // GATE (b) — structural a11y scan of BOTH signup steps, all six states.
 //
 // A NEW SURFACE, so every state it can render is scanned rather than the happy
-// one: the account form, its DPA-unaccepted resting state, its verbatim
-// auth-error banner, the check-your-email confirmation, the firm form, and the
-// firm form carrying a governed refusal.
+// one: the account form, its verbatim auth-error banner, the check-your-email
+// confirmation, the firm form, and the firm form carrying a governed refusal.
+//
+// FS-4 C-6: the DPA checkbox this file used to drive on the ACCOUNT step is
+// gone (checkout-gate-design.md §1.1 moved the real DPA e-sign to a later
+// step — `signup-dpa-form.test.tsx` covers that surface's own a11y instead).
+// This form now gates on ordinary field validation only.
 //
 // NO SYNTHETIC <h1> WRAPPER, deliberately — and this is the one thing worth
 // reading before copying the invite-accept a11y file's idiom. That file wraps
@@ -19,7 +23,7 @@ import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 
-import { renderComponent, textOf, setFieldValue, setNativeValue } from "../../test/hookHarness";
+import { renderComponent, textOf, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
@@ -81,20 +85,15 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
   }
   return null;
 }
-const theCheckbox = (n: Node) => n.tagName === "INPUT" && n.type === "checkbox";
 const byLabelledField = (label: RegExp) => (n: Node) =>
   (n.tagName === "INPUT" || n.tagName === "TEXTAREA") && label.test(textOf((n.parentNode ?? {}) as never));
 
-test("the account step has zero a11y violations — DPA checkbox and all", async () => {
+test("the account step has zero a11y violations", async () => {
   await withEnv(async () => jsonResponse({}), async () => {
     const h = await renderComponent(App(createElement(SignupAccountForm, { createSupabaseClient: authClient() })));
     try {
       for (let i = 0; i < 3; i++) await h.settle();
       assert.match(textOf(h.container as never), /Create your account/, "the account step must have rendered");
-      // DISCRIMINATING: the checkbox is genuinely present, so a missing-label
-      // violation would have somewhere to come from. A native checkbox with no
-      // associated <label> is the single most likely a11y defect on this form.
-      assert.ok(findIn(h.container as never, theCheckbox), "the DPA checkbox must render");
       assert.deepEqual(checkAccessibility(h.container as never), []);
     } finally {
       await h.unmount();
@@ -133,9 +132,6 @@ test("a non-enumerating AUTH-ERROR state keeps the provider message and has zero
     );
     try {
       for (let i = 0; i < 3; i++) await h.settle();
-      const box = findIn(h.container as never, theCheckbox);
-      await h.fireEvent(box as never, "click", (n) => setNativeValue(n as never, "checked", true));
-      for (let i = 0; i < 3; i++) await h.settle();
       const form = findIn(h.container as never, (n) => n.tagName === "FORM");
       await h.fireEvent(form as never, "submit");
       for (let i = 0; i < 6; i++) await h.settle();
@@ -173,10 +169,6 @@ test("NEW: fresh, identities-empty, and duplicate responses have indistinguishab
       );
       try {
         for (let i = 0; i < 3; i++) await h.settle();
-        const box = findIn(h.container as never, theCheckbox);
-        await h.fireEvent(box as never, "click", (node) =>
-          setNativeValue(node as never, "checked", true));
-        for (let i = 0; i < 3; i++) await h.settle();
         const form = findIn(h.container as never, (node) => node.tagName === "FORM");
         await h.fireEvent(form as never, "submit");
         // Every shape crosses one awaited signUp and the same six settlement
@@ -199,13 +191,6 @@ test("the CHECK-YOUR-EMAIL state has zero a11y violations", async () => {
   await withEnv(async () => jsonResponse({}), async () => {
     const h = await renderComponent(App(createElement(SignupAccountForm, { createSupabaseClient: authClient() })));
     try {
-      for (let i = 0; i < 3; i++) await h.settle();
-      const box = findIn(h.container as never, theCheckbox);
-      // The checkbox idiom components/bank/matching-section.test.tsx
-      // established: the native value is set INSIDE a real click dispatch, so
-      // React's onChange sees a value that differs from its snapshot. A bare
-      // `setNativeValue` writes the DOM property and never reaches React.
-      await h.fireEvent(box as never, "click", (n) => setNativeValue(n as never, "checked", true));
       for (let i = 0; i < 3; i++) await h.settle();
       const form = findIn(h.container as never, (n) => n.tagName === "FORM");
       await h.fireEvent(form as never, "submit");

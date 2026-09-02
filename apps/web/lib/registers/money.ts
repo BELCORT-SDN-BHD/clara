@@ -49,13 +49,25 @@ export function shortId(id: string | null | undefined): string {
  *  "one door dialog per domain" reasoning DoorDialog.tsx's header states, now
  *  applied to this domain's money parser). `null` for anything that is not a
  *  valid decimal amount — the caller must treat `null` as "not a number yet",
- *  never coerce it to 0. */
+ *  never coerce it to 0.
+ *
+ *  COMMA HARDENING (sibling census off PR #489/FINDING 1, raised by
+ *  pr489-codex-leg's law-28 leg): the body used to blanket-strip every
+ *  comma (`input.replace(/,/g, "")`) BEFORE validating, so a European-style
+ *  decimal-comma amount ("1234,56", meant as RM1,234.56 — a live, day-one
+ *  fixed-asset proceeds/cost-portion input) silently parsed as
+ *  RM123,456.00, a 100x error with no rejection and no echo of the
+ *  interpreted amount. A comma is now accepted ONLY as a thousands
+ *  separator in a strictly valid position — groups of exactly three
+ *  digits, never the decimal mark; any other placement returns `null`. A
+ *  strictly-grouped amount ("1,234.56") still parses exactly as before. */
 export function parseAmountToCents(input: string): number | null {
-  const cleaned = input.trim().replace(/,/g, "");
-  if (cleaned === "") return null;
-  const m = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(cleaned);
+  const trimmed = input.trim();
+  if (trimmed === "") return null;
+  const m = /^(-?)(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?$/.exec(trimmed);
   if (!m) return null;
-  const [, sign = "", whole = "0", frac = ""] = m;
+  const [, sign = "", wholeRaw = "0", frac = ""] = m;
+  const whole = wholeRaw.replace(/,/g, "");
   const fracPadded = (frac + "00").slice(0, 2);
   const cents = BigInt(whole) * 100n + BigInt(fracPadded);
   const signed = sign === "-" ? -cents : cents;

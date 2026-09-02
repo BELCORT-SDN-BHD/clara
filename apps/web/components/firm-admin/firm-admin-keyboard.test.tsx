@@ -10,11 +10,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent, textOf } from "../../test/hookHarness";
+import { renderComponent, textOf, clickButton, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
 import { VendorBindingsPanel } from "./vendor-bindings-panel";
+import { SettingsPanel } from "./settings-panel";
 import { ClaraFullScreenThread } from "../clara/ClaraFullScreenThread";
 import messages from "../../messages/en.json";
 
@@ -29,6 +30,15 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
     if (found) return found;
   }
   return null;
+}
+
+/** M5 (independent review, PR #489): counts non-overlapping occurrences of
+ *  `needle` in `haystack` — used to prove a SECOND rendering of a string
+ *  appeared (the panel's own line was ALREADY on the page before a dialog
+ *  opened; a plain `assert.match` after the click is true both before and
+ *  after it and proves nothing about the dialog itself having rendered). */
+function countOccurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -252,6 +262,235 @@ test("Share session dialog: opens on click, reaches Confirm/Cancel, and the trig
 
         assert.match(textOf(body as never), /Cancel/, "opening the dialog must reveal its Cancel control");
         assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the Share dialog is open");
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
+// --- settings panel: the high-stakes threshold dialog (FS-8 PR-2, 裁-97) ----
+
+// Stateful mock (the counterparty-hygiene-a11y.test.tsx idiom): the panel's
+// `act()` ALWAYS re-reads after a write (useHydratedPart's own contract:
+// "never assume the write's own response is the new truth") — and
+// settings-panel.tsx:67 THROWS AWAY the RPC's own response body
+// (`.then(() => undefined)`), so the panel's displayed value can only ever
+// come from that follow-up GET, never from the door's envelope.
+//
+// M3 (independent review, PR #489, fix-required): the RPC handler
+// deliberately returns/stores a value the TYPED INPUT CANNOT PRODUCE
+// (20000000 cents = RM 200,000.00) regardless of what `p_cents` the caller
+// actually sent (150000.00 = 15000000 cents) — proving the panel displays
+// what the GET says, not an echo of the input it was given. Before this
+// fix the mock stored exactly 15000000, the SAME number "150000.00"
+// parses to, so a panel that echoed the typed input instead of ever
+// reading the DB back would have passed identically.
+let currentHighStakesCents = 10000000;
+
+function mockSettingsFetch(u: string): Response {
+  if (u.includes("/rest/v1/firms")) return jsonResponse([{ id: "f1", high_stakes_amount_cents: currentHighStakesCents }]);
+  if (u.includes("/rpc/set_firm_high_stakes_threshold")) {
+    const oldCents = currentHighStakesCents;
+    currentHighStakesCents = 20000000; // deliberately NOT what "150000.00" parses to
+    return jsonResponse({ firm_id: "f1", old_cents: oldCents, new_cents: currentHighStakesCents });
+  }
+  throw new Error(`unexpected fetch: ${u}`);
+}
+
+test("Change threshold trigger is enabled from first render, regardless of role — the DB's OWNER floor is the wall, never a client-side guess", async () => {
+  await withMockedEnv(
+    async (u) => mockSettingsFetch(String(u)),
+    async () => {
+      const h = await renderComponent(App(createElement(SettingsPanel), "Firm settings"));
+      const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+      body.appendChild(h.container);
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        const trigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold");
+        assert.ok(trigger, "the Change threshold trigger must render once the current value has loaded");
+        assert.equal(
+          (trigger as unknown as { disabled: boolean }).disabled,
+          false,
+          "the trigger is never gated on a client-side role guess — every viewer sees it, the DB's owner floor is the wall",
+        );
+
+        (trigger as unknown as { focus: () => void }).focus();
+        assert.equal(activeElement(), trigger, "keyboard focus must actually reach the trigger before activation");
+
+        // M5 (independent review, PR #489, fix-required): the panel's OWN
+        // "RM 100,000.00" line is already on the page before this click —
+        // settings-panel.tsx renders it unconditionally once the read has
+        // loaded. A plain `assert.match` for that string after the click is
+        // true whether or not the dialog rendered anything at all, so the
+        // discriminating check is an OCCURRENCE COUNT: one instance before
+        // the dialog opens (the panel's own line), two after (the panel's
+        // line PLUS the dialog's own copy of it).
+        const beforeCount = countOccurrences(textOf(body as never), "RM 100,000.00");
+        assert.equal(beforeCount, 1, "before opening, the CURRENT value must appear exactly once (the panel's own line)");
+
+        await h.fireEvent(trigger as never, "click");
+        for (let i = 0; i < 4; i++) await h.settle();
+
+        const bodyText = textOf(body as never);
+        assert.equal(
+          countOccurrences(bodyText, "RM 100,000.00"),
+          2,
+          "opening the dialog must add a SECOND rendering of the current value — the dialog's own copy, not just the panel's pre-existing one",
+        );
+        assert.match(bodyText, /Cancel/, "opening the dialog must reveal its Cancel control");
+        assert.deepEqual(checkKeyboardWalk(body as never), [], "no tabindex-order/focus-visible violations while the dialog is open");
+
+        const amountField = findIn(body as never, (n) => n.tagName === "INPUT" && n !== trigger);
+        assert.ok(amountField, "the new-threshold amount field must render as a real <input>");
+        const confirmButtonBeforeInput = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold" && n !== trigger);
+        assert.ok(confirmButtonBeforeInput, "the dialog's own Confirm control must render");
+        assert.equal(
+          (confirmButtonBeforeInput as unknown as { disabled: boolean }).disabled,
+          true,
+          "Confirm stays disabled until a valid amount is typed — an obviously-malformed-input guard, not a role gate",
+        );
+
+        await h.act(() => { setFieldValue(amountField as never, "150000.00"); });
+        for (let i = 0; i < 2; i++) await h.settle();
+
+        const confirmButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold" && n !== trigger);
+        assert.ok(confirmButton, "the Confirm control must still render after typing a valid amount");
+        assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, false, "Confirm must enable once a valid positive amount is present");
+
+        await clickButton(confirmButton as never);
+        for (let i = 0; i < 6; i++) await h.settle();
+
+        // Discriminating post-condition: the dialog genuinely closed on a
+        // real confirm (a fabricated success would leave it open), and the
+        // re-read after the write shows the value the FOLLOW-UP GET
+        // returns — never the door's own response body (discarded at
+        // settings-panel.tsx:67) and never an echo of the typed input
+        // (150000.00 -> 15000000 cents; the mock deliberately stores
+        // 20000000 instead, so RM 200,000.00 can only appear here if the
+        // panel genuinely re-read rather than assumed).
+        assert.doesNotMatch(textOf(body as never), /Change the high-stakes threshold/, "the dialog must actually close on a real confirm");
+        assert.match(textOf(body as never), /RM 200,000\.00/, "the panel must show the DB's re-read value, not an echo of the typed 150000.00");
+
+        // N3 discriminating test (independent review, PR #489, fix-required):
+        // reopening the dialog must not resurrect the amount just confirmed.
+        // FirmAdminDoorDialog's Confirm handler closes via a plain
+        // `setOpen(false)` — a controlled-prop change Base UI does not treat
+        // as an interaction (DialogStore.js:48 only invokes onOpenChange from
+        // real interaction handlers), so a reset gated on the CLOSE
+        // transition never runs on a successful confirm. The reset must
+        // instead fire on OPEN, which a real trigger press always reaches.
+        const triggerOnReopen = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold");
+        assert.ok(triggerOnReopen, "the trigger must still render after the dialog closes on confirm");
+
+        await h.fireEvent(triggerOnReopen as never, "click");
+        for (let i = 0; i < 4; i++) await h.settle();
+
+        const amountFieldOnReopen = findIn(body as never, (n) => n.tagName === "INPUT" && n !== triggerOnReopen);
+        assert.ok(amountFieldOnReopen, "the amount field must render again on reopen");
+        assert.equal(
+          (amountFieldOnReopen as unknown as { value: string }).value,
+          "",
+          "reopening must show an EMPTY amount field — a stale confirmed value would mean the reset never fired, and the fix moves it to fire on OPEN instead of the CLOSE that a confirm never reaches",
+        );
+
+        const confirmButtonOnReopen = findIn(
+          body as never,
+          (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold" && n !== triggerOnReopen,
+        );
+        assert.ok(confirmButtonOnReopen, "the dialog's own Confirm control must render again on reopen");
+        assert.equal(
+          (confirmButtonOnReopen as unknown as { disabled: boolean }).disabled,
+          true,
+          "Confirm must be disabled again on reopen — a stale non-empty amount would otherwise leave it wrongly enabled",
+        );
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
+// FINDING 2 (raised by pr489-codex-leg, law-28 leg): write-then-reread double
+// fault — the write succeeds, but act()'s own follow-up reread
+// (hooks.ts:229) fails, and hooks.ts's `reloadImpl` deliberately leaves the
+// OLD `data` standing on a failed reload (other consumers may lawfully render
+// stale-plus-banner; not touched here). Before this fix, threshold-dialog.tsx:75
+// gated its error/retry branch on `!firm` alone, so a stale-truthy `firm`
+// hid the reread failure and re-showed the stale figure + an editable field
+// on reopen. Fix: the dialog checks `settingsState.err` FIRST, before `firm`.
+let findFirmsCalls = 0;
+function mockSettingsWriteSucceedsRereadFails(u: string): Response {
+  if (u.includes("/rest/v1/firms")) {
+    findFirmsCalls += 1;
+    // 1st read (mount) succeeds; 2nd (act()'s post-write reread) fails.
+    if (findFirmsCalls === 1) return jsonResponse([{ id: "f1", high_stakes_amount_cents: 10000000 }]); // RM100,000.00
+    return jsonResponse({ message: "read failed" }, 500);
+  }
+  if (u.includes("/rpc/set_firm_high_stakes_threshold")) {
+    return jsonResponse({ firm_id: "f1", old_cents: 10000000, new_cents: 15000000 });
+  }
+  throw new Error(`unexpected fetch: ${u}`);
+}
+
+test("write-succeeds/reread-fails/reopen: the reopened dialog shows the reload error + retry, never the stale cached threshold (FINDING 2, raised by pr489-codex-leg, law-28 leg)", async () => {
+  await withMockedEnv(
+    async (u) => mockSettingsWriteSucceedsRereadFails(String(u)),
+    async () => {
+      const h = await renderComponent(App(createElement(SettingsPanel), "Firm settings"));
+      const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+      body.appendChild(h.container);
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        assert.match(textOf(body as never), /RM 100,000\.00/, "sanity: the initial read must have succeeded");
+
+        const trigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold");
+        assert.ok(trigger, "the Change threshold trigger must render");
+
+        await h.fireEvent(trigger as never, "click");
+        for (let i = 0; i < 4; i++) await h.settle();
+
+        const amountField = findIn(body as never, (n) => n.tagName === "INPUT" && n !== trigger);
+        assert.ok(amountField, "the amount field must render on the FIRST open — the read has not failed yet");
+        await h.act(() => { setFieldValue(amountField as never, "150000.00"); });
+        for (let i = 0; i < 2; i++) await h.settle();
+
+        const confirmButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold" && n !== trigger);
+        assert.ok(confirmButton, "the dialog's own Confirm control must render");
+        assert.equal((confirmButton as unknown as { disabled: boolean }).disabled, false, "Confirm must enable once a valid amount is typed");
+
+        // The write succeeds; act()'s own follow-up reread then fails (see mock above).
+        await clickButton(confirmButton as never);
+        for (let i = 0; i < 8; i++) await h.settle();
+
+        // FirmAdminDoorDialog's Confirm handler always calls `setOpen(false)`
+        // once `onConfirm` resolves, regardless of outcome (its own header:
+        // "this component does not inspect the outcome") — `settingsState.act`
+        // never rethrows (hooks.ts's own catch swallows it into err/clr), so
+        // the dialog closes normally here exactly as the finding's trace says.
+        assert.doesNotMatch(textOf(body as never), /Change the high-stakes threshold/, "the dialog must have closed normally after the confirm attempt settled");
+
+        // The panel behind it honestly banners the reread failure.
+        assert.match(textOf(body as never), /read failed/, "the panel must show the follow-up reread's own error, honestly");
+
+        // Reopen the dialog — this is the finding's own reproduction step.
+        const triggerOnReopen = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold");
+        assert.ok(triggerOnReopen, "the trigger must still render after the dialog closes");
+        await h.fireEvent(triggerOnReopen as never, "click");
+        for (let i = 0; i < 4; i++) await h.settle();
+
+        const reopenedText = textOf(body as never);
+        // THE DISCRIMINATING ASSERTIONS: before this fix, `firm` was still
+        // stale-truthy (hooks.ts never clears `data` on a failed reload), so
+        // threshold-dialog.tsx's `!firm` gate rendered the stale-number
+        // edit form here instead of the error state.
+        assert.match(reopenedText, /read failed/, "the reopened dialog must show the reload error, not silently drop it");
+        const amountFieldOnReopen = findIn(body as never, (n) => n.tagName === "INPUT" && n !== triggerOnReopen);
+        assert.equal(amountFieldOnReopen, null, "the reopened dialog must NOT render the editable amount field while a reload error stands — that would mean the stale-number branch rendered instead of the error branch");
+        const retryButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Retry");
+        assert.ok(retryButton, "the reopened dialog must offer its own Retry control, matching the panel's honest error state");
       } finally {
         await h.unmount();
         for (let i = 0; i < 3; i++) await h.settle();

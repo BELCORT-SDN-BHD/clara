@@ -5,9 +5,16 @@
 // pure-logic unit-test file this design does not need, since wake-engine.mjs's own logic is
 // thin glue over real SQL, not a fan-out worth mocking).
 //
-// EVERY synthetic source this file registers is its OWN row (source_key prefixed `g1_test_`),
-// deleted in `after()` — the REAL bank_agent/close_prep rows are NEVER touched, so this file can
-// never pollute another suite sharing the same rig.
+// EVERY synthetic source this file registers is its OWN row (source_key prefixed by
+// rig.mjs's exported `WAKE_ENGINE_TEST_PREFIX`), deleted in `after()` — the REAL
+// bank_agent/close_prep rows are NEVER touched, so this file can never pollute another suite
+// sharing the same rig. THE DEPENDENT READER: packages/db/tests/g1-wake-engine.test.mjs's T1
+// cell excludes rows carrying this exact prefix from its own closed-world roster proof, because
+// CI's db-estate job runs this package and packages/db CONCURRENTLY against one shared postgres
+// (`pnpm -r --if-present test`) — a run landing mid-registration on this side would otherwise
+// red T1 (the #485/#490 class). registerSource() below THROWS if a caller ever passes a
+// sourceKey that does not carry the prefix, so a drift from this contract fails loud, at
+// registration time, in THIS file — never silently past T1's own exclusion on the other side.
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -37,6 +44,17 @@ const skipG1 = G1_READY ? false : "Gate G1 (clara.wake_engine_sources) not appli
 
 const REGISTERED = [];
 async function registerSource(row) {
+  // The shared cross-package contract (rig.mjs's WAKE_ENGINE_TEST_PREFIX; see this file's own
+  // header) — enforced HERE, at registration, not merely documented, so a future drift (the
+  // exact class PR #497's review round found in g1-wake-bodies.fixtures.mjs) fails loud on the
+  // producing side instead of silently escaping db's T1 exclusion on the other side.
+  if (!row.sourceKey || !row.sourceKey.startsWith(rig.WAKE_ENGINE_TEST_PREFIX)) {
+    throw new Error(
+      `registerSource(${row.sourceKey}): source_key must start with '${rig.WAKE_ENGINE_TEST_PREFIX}' ` +
+        `(rig.mjs's WAKE_ENGINE_TEST_PREFIX) — packages/db/tests/g1-wake-engine.test.mjs's T1 cell ` +
+        `excludes rows by exactly this literal`,
+    );
+  }
   // ck_wes_enabled_audit requires enabled_by/enabled_at NON-NULL whenever enabled=true — an
   // `enabled:true` row needs a real actor (any users.id); the caller supplies one whenever it
   // registers pre-enabled (every enabled:false registration — the common case — needs none).

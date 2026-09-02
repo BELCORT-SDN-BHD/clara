@@ -55,12 +55,32 @@
 import type {
   RegistrationRequestRow,
 } from "./reads";
+import type { CheckoutProgress } from "./checkout-progress-reads";
+import { NO_CHECKOUT_PROGRESS } from "./checkout-progress-reads";
 import type { OwnRegistrationResult } from "./server-reads";
 import type { CallerContextDenial } from "@/lib/identity/doors";
 
+// FS-4 C-6, §2.1's three new arms (checkout-gate-design.md §2.1). An OPEN
+// registration used to render exactly one way ("pending"); it now renders one
+// of three ways depending on what `checkoutProgress` POSITIVELY observed —
+// see checkout-progress-reads.ts's header for why that observation degrades
+// honestly to "nothing yet" rather than ever guessing. `pending` KEEPS its
+// name and shape (no field added) for backward compatibility with every
+// caller that never supplies `checkoutProgress`: the DEFAULT reading of an
+// open registration is exactly what it always was — §2.1's own "registered,
+// no signature" arm, since nothing today can positively read past it.
+
 export type HoldingState =
-  /** An open request. `firmName` is the DB's, verbatim. */
+  /** An open request with no positively-observed checkout progress —
+   *  §2.1's "registered, no signature" arm. `firmName` is the DB's,
+   *  verbatim. */
   | { readonly kind: "pending"; readonly firmName: string }
+  /** §2.1's "checkout_open, no payment" arm: a `checkout_intents` row for
+   *  this registration carries a Stripe session id. */
+  | { readonly kind: "checkout_open"; readonly firmName: string }
+  /** §2.1's "paid, unconsumed" arm: a `firm_registration_payments` row
+   *  landed and `claim_paid_firm` has not yet run. */
+  | { readonly kind: "paid"; readonly firmName: string }
   /** Decided against, carrying the DB's OWN reason — or honestly reporting that
    *  no reason was recorded, which is a different thing from an empty one. */
   | { readonly kind: "rejected"; readonly firmName: string; readonly reason: string | null }
@@ -105,6 +125,29 @@ export function isRegistrationRequestRow(
 }
 
 /**
+ * WHETHER `/signup` OWES THE DPA STEP INSTEAD OF THE FIRM FORM
+ * (`signup-step.tsx`'s third fork, FS-4 C-6). The SAME validation the holding
+ * mapper itself uses — a validated row, bound to the verified subject, whose
+ * status is `open` — reused rather than re-derived, so the gate and the
+ * decision can never quietly disagree (review law 3). A read that failed, or
+ * whose newest row cannot be validated, answers `false`: the safe default
+ * falls through to `SignupFirmForm`, which is where a caller with no
+ * evidence of an open registration belongs.
+ */
+export function hasOpenRegistrationFor(
+  result: OwnRegistrationResult,
+  verifiedSubject: string | null = result.ok ? result.subject : null,
+): boolean {
+  if (!result.ok) return false;
+  const newest = result.rows[0];
+  return (
+    isRegistrationRequestRow(newest) &&
+    newest.applicant === verifiedSubject &&
+    newest.status === "open"
+  );
+}
+
+/**
  * NEWEST FIRST, AND ONLY THE NEWEST DECIDES.
  *
  * `loadRegistrationRequestsForApplicant` orders `created_at.desc` and returns a
@@ -143,8 +186,21 @@ export function holdingStateFrom(
   }
 
   switch (newest.status) {
-    case "open":
+    case "open": {
+      // `result.checkoutProgress` is undefined only for a hand-built test
+      // fixture that predates this field (every real caller — server-reads.ts
+      // — always supplies it). Defaulting to NO_CHECKOUT_PROGRESS rather than
+      // widening the type keeps every existing `{ok:true, rows, context}`
+      // fixture producing the exact same `pending` answer it always did.
+      const progress: CheckoutProgress = result.checkoutProgress ?? NO_CHECKOUT_PROGRESS;
+      // PAID outranks CHECKOUT_OPEN: a payment can only exist once a session
+      // was opened, so if both were somehow observed the more-advanced fact
+      // is the true one. Neither is ever inferred from the other's absence —
+      // each is its own positive read (checkout-progress-reads.ts).
+      if (progress.paidUnconsumed) return { kind: "paid", firmName: newest.firm_name };
+      if (progress.checkoutOpen) return { kind: "checkout_open", firmName: newest.firm_name };
       return { kind: "pending", firmName: newest.firm_name };
+    }
     case "rejected":
       // `reason` is nullable on the base table (0145:333). Passed through as
       // null rather than defaulted to a sentence: "no reason was recorded" and

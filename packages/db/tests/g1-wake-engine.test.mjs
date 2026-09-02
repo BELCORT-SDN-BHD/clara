@@ -18,6 +18,22 @@ import {
   ROLES, getPool,
 } from "./rig-runtime-fixtures.mjs";
 
+// Mirrors packages/runtime/tests/rig.mjs's exported `WAKE_ENGINE_TEST_PREFIX` BY VALUE — a
+// literal, not a cross-package import (this package has no dependency edge on @clara/runtime,
+// and none is warranted for one shared test string). If the two ever diverge, T1 below reds
+// against a genuine runtime fixture row, which is the correct fail-closed direction — see T1's
+// own comment for the full cross-package concurrency class this constant exists to carve out.
+const WAKE_ENGINE_TEST_PREFIX = "g1_test_";
+
+// T1's own live-roster predicate, hoisted to ONE module-level string (opus review round on PR
+// #497, finding D2(i)): T1 and T1-negative-control below both execute THIS EXACT string — never
+// two independently-typed copies. Two copies is how a negative control silently stops
+// discriminating the moment either one drifts: widen/typo T1's own WHERE clause and a SEPARATE
+// literal in the control would still test its own untouched copy, catching nothing.
+const T1_LIVE_ROSTER_SQL = `select source_key, carrier, enabled from clara.wake_engine_sources
+      where left(source_key, char_length($1)) <> $1
+      order by source_key`;
+
 let ready = false;
 let SKIPPED = 0;
 function skip(t, why) {
@@ -85,9 +101,97 @@ test("T1 wake_engine_sources: forced RLS, exactly bank_agent+close_prep, both en
   )).rows[0];
   assert.equal(rls.relrowsecurity, true, "T1: RLS enabled");
   assert.equal(rls.relforcerowsecurity, true, "T1: RLS FORCED (binds even the owner's own writes)");
-  const rows = (await rootQuery("select source_key, carrier, enabled from clara.wake_engine_sources order by source_key")).rows;
-  assert.deepEqual(rows.map((r) => r.source_key), ["bank_agent", "close_prep"], "T1: exactly these two source keys, closed-world");
+  // Cross-package concurrency carve-out (the #485/#490 class — committed estate-global writes vs
+  // an unscoped roster read; both halves must hold): CI's db-estate job runs `pnpm -r
+  // --if-present test`, so this package and packages/runtime run CONCURRENTLY against ONE
+  // shared postgres — no ordering exists between them. TWO runtime producers register their own
+  // synthetic rows into this SAME estate-global table (COMMITTED, never rolled back — see below
+  // for why): packages/runtime/tests/wake-engine.test.mjs's own registerSource() (29 call sites)
+  // and packages/runtime/tests/g1-wake-bodies.fixtures.mjs's registerSource() (used by
+  // g1-wake-bodies.test.mjs's G1B-C1 cell) — a SECOND producer this exclusion originally missed
+  // (opus review round on PR #497, finding F1: that file had hand-typed its own `g1b_test_`
+  // literal, a silent drift from the first producer's `g1_test_`). Both now key EVERY row under
+  // ONE shared, enforced constant — `WAKE_ENGINE_TEST_PREFIX` exported from
+  // packages/runtime/tests/rig.mjs — and both registerSource() implementations THROW at
+  // registration if a caller's sourceKey does not carry it, so a future drift fails loud on the
+  // producing side rather than silently escaping this exclusion again.
+  //
+  // Why the writes stay committed (never transaction-scoped/rolled back): several
+  // wake-engine.test.mjs cells need a row committed by ONE registerSource() call to be visible
+  // to a DIFFERENT, later connection. This is not an assumption about connection reuse — the
+  // rig's own persona helper (packages/runtime/tests/relay-fixtures.mjs's `withActor`, lines
+  // 41-70) does a fresh `pool.connect()` on EVERY call and unconditionally issues `rollback`
+  // in its own `finally` before releasing the connection back to the pool — so nothing opened
+  // inside one rootQuery/asRuntime call can ever survive un-committed into a later call, on
+  // that file or any other. On top of that structural fact, several cells (the M1 skip-locked
+  // variant, wake-engine.test.mjs:258-320; `#1(a)`, :335-401; `#1` round-6, :586-671) explicitly
+  // open a SECOND, concurrent session specifically to hold a row lock the main flow's own
+  // connection must NOT see, proving the interleave by a lock-acquired handshake (a promise that
+  // resolves only once the locker's own `select ... for update` has genuinely returned), never a
+  // sleep — genuinely multi-session by construction, which a rolled-back fixture would defeat
+  // outright.
+  //
+  // T1's birth-roster proof stays a real closed-world assertion for every OTHER source key: it
+  // excludes ONLY the documented, enforced prefix, by exact substring — never widened to a
+  // "contains" check (a durable negative control follows this cell, executing this SAME query —
+  // T1_LIVE_ROSTER_SQL, hoisted above — to prove two independently-shaped unprefixed third
+  // sources are NOT swallowed). This file's own S3 cell below also inserts one row under this
+  // same prefix shape (`g1_test_s3_legit_...`) but deletes it immediately after asserting — so
+  // this file leaves no residue of its own under the prefix it excludes here, even on a reused DB.
+  const rows = (await rootQuery(T1_LIVE_ROSTER_SQL, [WAKE_ENGINE_TEST_PREFIX])).rows;
+  assert.deepEqual(rows.map((r) => r.source_key), ["bank_agent", "close_prep"], "T1: exactly these two source keys, closed-world (excluding the documented, enforced runtime concurrency fixture prefix — see comment above)");
   for (const r of rows) assert.equal(r.enabled, false, `T1: ${r.source_key} must ship disabled`);
+});
+
+// =====================================================================================
+// T1-negative-control (opus review round on PR #497, finding F4; hardened at D2) — a DURABLE
+// proof, not PR-body prose, that T1's exclusion above is narrow. Runs T1_LIVE_ROSTER_SQL itself
+// — the EXACT same string T1 executes, never a second hand-typed copy (D2(i): two copies is how
+// a control stops discriminating the instant either one drifts) — on the SAME client that holds
+// the INSERT's own open transaction (D2, coordinator note: a rootQuery read here would go out on
+// a DIFFERENT pooled connection and never see the uncommitted rows at all — this would fail
+// LOUD, not silently, but only because it happens to be wrong in the discriminating direction).
+//
+// TWO unprefixed keys, not one (D2(ii)): the reviewer's own mutation table showed a single
+// `genuinely_third_source_...` key stays GREEN under several widened (wrong) exclusion
+// predicates that would still be dangerous in production — `not like '%test%'` (no "test"
+// substring; a hex slice can't produce one), `not like 'g1%'` (doesn't start with "g1"), and a
+// shortened constant `'g1'` (same reason). `g1_third_source_test_${uuid}` closes all three:
+// `left(key,8)` is `'g1_third'`, distinct from the real prefix `'g1_test_'` so it survives the
+// CURRENT correct predicate — but it contains "test", starts with "g1", and starts with the
+// shortened `'g1'` too, so any of those three widenings would wrongly swallow it, discriminating
+// where the first key alone stayed blind. Both keys are asserted independently; either missing
+// is a red naming which mutation shape it caught. Runs inside its own transaction, rolled back —
+// neither of this cell's own synthetic rows may ever become residue.
+// =====================================================================================
+test("T1-negative-control: an UNPREFIXED third source is never excluded by T1's carve-out — the closed-world proof stays narrow", async (t) => {
+  if (gate(t)) return;
+  const client = await getPool().connect();
+  try {
+    await client.query("begin");
+    const keyA = `genuinely_third_source_${randomUUID().slice(0, 8)}`;
+    const keyB = `g1_third_source_test_${randomUUID().slice(0, 8)}`;
+    for (const key of [keyA, keyB]) {
+      await client.query(
+        `insert into clara.wake_engine_sources
+           (source_key, carrier, event_type, task_kind, wake_kind, workflow_export, login_pool)
+         values ($1,'wake_outbox','g1.negative.control','wake','proactive','g1TestWorkflow','runtime')`,
+        [key],
+      );
+    }
+    const rows = (await client.query(T1_LIVE_ROSTER_SQL, [WAKE_ENGINE_TEST_PREFIX])).rows;
+    assert.ok(
+      rows.some((r) => r.source_key === keyA),
+      "T1-negative-control: the plain unprefixed key is not excluded by T1's own predicate",
+    );
+    assert.ok(
+      rows.some((r) => r.source_key === keyB),
+      "T1-negative-control: a key containing 'test' and starting with 'g1' (but NOT the real 'g1_test_' prefix) is not excluded either — catches a widened 'contains test', 'starts with g1', or shortened-constant predicate that the plain key alone would miss",
+    );
+  } finally {
+    await client.query("rollback").catch(() => {});
+    client.release();
+  }
 });
 
 // =====================================================================================
@@ -566,19 +670,32 @@ test("S3: wake_engine_sources.task_kind refuses an out-of-domain value (e.g. 'au
     () => rootQuery(
       `insert into clara.wake_engine_sources (source_key, carrier, event_type, task_kind, wake_kind, workflow_export, login_pool)
          values ($1,'direct_queue',null,'autodraft','proactive','g1TestWorkflow','runtime')`,
-      [`g1_test_s3_${randomUUID().slice(0, 8)}`],
+      [`${WAKE_ENGINE_TEST_PREFIX}s3_${randomUUID().slice(0, 8)}`],
     ),
     "registering a wake_engine_sources row with task_kind='autodraft' (out of the wake-owned domain)",
   );
   assert.match(err.message ?? "", /ck_wes_task_kind_wake_owned/i, "S3: the refusal names the S3 wall specifically");
+  // (the refused INSERT above never commits a row — Postgres rolls back the whole statement on
+  // the CHECK violation — so there is nothing of ITS OWN to clean up here.)
 
   // The two LEGITIMATE values are unaffected.
-  const legit = await rootQuery(
-    `insert into clara.wake_engine_sources (source_key, carrier, event_type, task_kind, wake_kind, workflow_export, login_pool)
-       values ($1,'direct_queue',null,'close_prep','close_prep','g1TestWorkflow','runtime') returning task_kind`,
-    [`g1_test_s3_legit_${randomUUID().slice(0, 8)}`],
-  );
-  assert.equal(legit.rows[0].task_kind, "close_prep", "S3: the wall admits the real, legitimate direct_queue kind without friction");
+  const legitKey = `${WAKE_ENGINE_TEST_PREFIX}s3_legit_${randomUUID().slice(0, 8)}`;
+  try {
+    const legit = await rootQuery(
+      `insert into clara.wake_engine_sources (source_key, carrier, event_type, task_kind, wake_kind, workflow_export, login_pool)
+         values ($1,'direct_queue',null,'close_prep','close_prep','g1TestWorkflow','runtime') returning task_kind`,
+      [legitKey],
+    );
+    assert.equal(legit.rows[0].task_kind, "close_prep", "S3: the wall admits the real, legitimate direct_queue kind without friction");
+  } finally {
+    // Cleanup (opus review round on PR #497, finding F3): this row DOES commit (unlike the
+    // refused one above), and it happens to carry the same documented prefix T1 excludes — left
+    // uncleaned, it is residue this file's OWN test leaves behind on a reused DB, silently
+    // swallowed by T1's carve-out along with the genuine runtime fixture rows the carve-out
+    // exists for. Delete it here, immediately, the same discipline wake-engine.test.mjs's own
+    // after() applies to its rows — this cell is the only writer of this exact key.
+    await rootQuery("delete from clara.wake_engine_sources where source_key=$1", [legitKey]);
+  }
 });
 
 // =====================================================================================

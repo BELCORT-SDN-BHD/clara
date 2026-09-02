@@ -1,38 +1,29 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { createElement } from "react";
-import { NextIntlClientProvider } from "next-intl";
 
-import ConfirmEmailPage from "../../app/(entry)/auth/confirm/page";
+import { NextResponse } from "next/server";
+
 import {
   handleEmailConfirmationPost,
   type EmailConfirmationRouteClient,
 } from "../../app/(entry)/auth/confirm/verify/handler";
-import EntryLayout from "../../app/(entry)/layout";
-import messages from "../../messages/en.json";
-import { enableDomInspection } from "../../test/domInspect";
-import { renderComponent, textOf } from "../../test/hookHarness";
-import {
-  isConfirmedUser,
-  UnreadableAuthUserError,
-} from "../../lib/auth/confirmed-user";
-import {
-  createClient as createServerClient,
-  createRouteClient,
-  type ServerCookieStore,
-} from "../../lib/supabase/server";
-import { resolveServerSession } from "../../lib/supabase/server-session";
-import { SignupAccountForm } from "./signup-account-form";
-import { renderSignupRoute } from "./signup-route";
-import { SignupStep } from "./signup-step";
-import { SignupFirmForm } from "./signup-firm-form";
+import type {
+  ClaimConfirmationAttempt,
+  ConfirmationAttemptOutcome,
+  ConfirmationAttemptSettlement,
+  SettleConfirmationAttempt,
+} from "../../app/(entry)/auth/confirm/verify/confirmation-wall";
+import { confirmFlashCookie } from "../../app/(entry)/auth/confirm/confirm-flash";
 
-enableDomInspection();
+// This file stays scoped to the confirm POST handler's own walls —
+// `proveSameOrigin`, the C1/C2 attempt seam, and the refusal-flash mechanism
+// (N1 CLOSED, 裁-109). Three SIBLING files split off the estate's 500-line
+// document gate (applied to a test file, first at the original rewrite and
+// again in the M1/NIT-3 fix round): `email-confirmation-page.test.tsx` (the
+// GET page / `confirmCodeState` itself — W-H, the flash-marker bounds),
+// `email-confirmation-signup-route.test.tsx` (the confirm→cookie→/signup
+// integration and the confirmed-user gate `SignupStep` enforces).
 
-const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const SUBJECT = "11111111-1111-1111-1111-111111111111";
 
 type VerifyResponse = Awaited<
@@ -46,6 +37,18 @@ const validResponse = (): VerifyResponse => ({
   },
   error: null,
 });
+
+/** The wall's own "allowed" answer — every test that must REACH `verifyOtp`
+ *  passes this explicitly, because the production default
+ *  (`confirmation-wall.ts`) always refuses `{kind:"unavailable"}` (this
+ *  module's own dedicated section below proves that default).
+ *
+ *  M2, fix round 2026-09-01: `attemptId` is now part of the "allowed" shape
+ *  — every test using this helper implicitly exercises the id being carried
+ *  through unchanged to `settleAttempt` (this file's own M2 test below makes
+ *  that threading an explicit assertion, not just an implicit one). */
+const allowWall = (remaining = 5, attemptId = "attempt-fixture-1"): ClaimConfirmationAttempt =>
+  async () => ({ kind: "allowed", attemptId, remaining });
 
 function postRequest(fields: Array<[string, string]>): Request {
   const form = new FormData();
@@ -61,9 +64,14 @@ function postRequest(fields: Array<[string, string]>): Request {
   });
 }
 
+function confirmFields(email = "aisyah@example.com", token = "123456"): Array<[string, string]> {
+  return [["email", email], ["token", token]];
+}
+
 function proxiedPostRequest(origin: string): Request {
   const form = new FormData();
-  form.set("token_hash", "token-hash-proxied");
+  form.set("email", "aisyah@example.com");
+  form.set("token", "123456");
   return new Request("https://internal.worker.local/auth/confirm/verify", {
     method: "POST",
     headers: {
@@ -93,7 +101,7 @@ async function withPublicOrigins<T>(
 
 function fakeClient(
   response: VerifyResponse,
-  calls: Array<{ type: "email"; token_hash: string }>,
+  calls: Array<{ type: "signup"; email: string; token: string }>,
   sealed: Response[],
 ): EmailConfirmationRouteClient {
   return {
@@ -113,99 +121,189 @@ function fakeClient(
   };
 }
 
-class MemoryCookieStore {
-  readonly values = new Map<string, string>();
-
-  static fromRequest(request: Request): MemoryCookieStore {
-    const store = new MemoryCookieStore();
-    for (const part of (request.headers.get("cookie") ?? "").split(";")) {
-      const separator = part.indexOf("=");
-      if (separator < 1) continue;
-      store.values.set(part.slice(0, separator).trim(), part.slice(separator + 1).trim());
-    }
-    return store;
-  }
-
-  getAll(): Array<{ name: string; value: string }> {
-    return [...this.values].map(([name, value]) => ({ name, value }));
-  }
-
-  set(name: string, value: string): void {
-    if (value === "") this.values.delete(name);
-    else this.values.set(name, value);
-  }
+/**
+ * N1, fix round 2026-09-01 (裁-109) — every refusal now redirects to
+ * `/auth/confirm?flash=<nonce>` with the real outcome in an httpOnly
+ * cookie, not the URL. These two helpers are the ONLY way this file reads
+ * either half, so every test below asserts against the SAME instrument
+ * `page.tsx` itself uses (`confirmFlashCookie`'s name), never a re-typed
+ * guess at the cookie's shape (review law 3).
+ */
+function locationFlashNonce(response: Response): string {
+  const location = response.headers.get("location");
+  assert.ok(location, "no redirect Location header");
+  const url = new URL(location);
+  assert.equal(url.origin, "https://app.clarabook.example");
+  assert.equal(url.pathname, "/auth/confirm");
+  assert.deepEqual(
+    [...url.searchParams.keys()],
+    ["flash"],
+    "the redirect URL must carry ONLY the flash marker — no status, remaining, or wait",
+  );
+  const nonce = url.searchParams.get("flash");
+  assert.ok(typeof nonce === "string" && nonce.length > 0, "the flash marker must be non-empty");
+  return nonce;
 }
 
-function testJwt(subject: string): string {
-  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
-  const payload = Buffer.from(JSON.stringify({
-    sub: subject,
-    aud: "authenticated",
-    role: "authenticated",
-    exp: 4_102_444_800,
-    iat: 1_788_112_800,
-  })).toString("base64url");
-  return `${header}.${payload}.test-signature`;
+function readFlashPayload(response: Response): unknown {
+  const raw = (response as NextResponse).cookies.get(confirmFlashCookie().name)?.value;
+  assert.ok(raw, "no flash cookie was set on the redirect");
+  return JSON.parse(raw);
 }
 
-test("N1: two scanner GETs paint the explicit button and make zero verifyOtp calls", async () => {
-  const search = {
-    token_hash: "token-hash-1",
-    type: "recovery",
-    next: "https://evil.example/take-session",
-  };
-  const first = await ConfirmEmailPage({ searchParams: Promise.resolve(search) });
-  const second = await ConfirmEmailPage({ searchParams: Promise.resolve(search) });
-
-  assert.deepEqual(first.props.state, { kind: "ready", tokenHash: "token-hash-1" });
-  assert.deepEqual(second.props.state, { kind: "ready", tokenHash: "token-hash-1" });
-
-  const pageSource = readFileSync(
-    join(WEB_ROOT, "app/(entry)/auth/confirm/page.tsx"),
-    "utf8",
+test("THE WALL RUNS BEFORE verifyOtp, and the production seam REFUSES rather than fakes success", async () => {
+  const calls: Array<{ type: "signup"; email: string; token: string }> = [];
+  const response = await handleEmailConfirmationPost(
+    postRequest(confirmFields()),
+    async () => fakeClient(validResponse(), calls, []),
+    // No third argument: exercises the REAL production default from
+    // confirmation-wall.ts.
   );
-  assert.doesNotMatch(pageSource, /\.auth\.|verifyOtp\s*\(/, "GET contains a token-consuming call");
-
-  const h = await renderComponent(
-    createElement(NextIntlClientProvider, {
-      locale: "en",
-      messages,
-      children: createElement(EntryLayout, null, first),
-    }),
-  );
-  try {
-    for (let i = 0; i < 3; i++) await h.settle();
-    assert.match(textOf(h.container as never), /Confirm my email/);
-    const headings = (h.container as unknown as { querySelectorAll(selector: string): unknown[] })
-      .querySelectorAll("h1");
-    assert.equal(headings.length, 1, "the confirmation face must own exactly one h1");
-  } finally {
-    await h.unmount();
-  }
+  assert.deepEqual(calls, [], "verifyOtp was reached despite the wall being unwired");
+  assert.equal(response.status, 303);
+  const nonce = locationFlashNonce(response);
+  assert.deepEqual(readFlashPayload(response), { nonce, kind: "unavailable" });
 });
 
-test("N1: one click makes exactly one hard-coded email verification and ignores hostile fields", async () => {
-  const calls: Array<{ type: "email"; token_hash: string }> = [];
+test("confirmation-wall.ts's own production default always answers unavailable", async () => {
+  const { claimConfirmationAttempt, settleConfirmationAttempt } = await import(
+    "../../app/(entry)/auth/confirm/verify/confirmation-wall"
+  );
+  const outcome: ConfirmationAttemptOutcome = await claimConfirmationAttempt({
+    email: "aisyah@example.com",
+    // M1, fix round 2026-09-01: NOT `origin` — that field no longer exists.
+    // `originDigest` is the real C2 client-address digest, honestly
+    // `undefined` today (see confirmation-wall.ts's own header for why).
+    originDigest: undefined,
+  });
+  assert.deepEqual(outcome, { kind: "unavailable" });
+  // Informational only; must not throw. M2: settle now takes the attempt id
+  // first — the stub ignores both arguments regardless.
+  await settleConfirmationAttempt("attempt-fixture-1", "accepted");
+  await settleConfirmationAttempt("attempt-fixture-1", "rejected");
+});
+
+test("N1 (originDigest): an ALLOWED wall makes exactly one hard-coded signup verification and ignores extra fields", async () => {
+  const calls: Array<{ type: "signup"; email: string; token: string }> = [];
   const sealed: Response[] = [];
+  const settled: ConfirmationAttemptSettlement[] = [];
+  const settledAttemptIds: string[] = [];
+  const settle: SettleConfirmationAttempt = async (attemptId, outcome) => {
+    settledAttemptIds.push(attemptId);
+    settled.push(outcome);
+  };
   const response = await handleEmailConfirmationPost(
-    postRequest([
-      ["token_hash", "token-hash-1"],
-      ["type", "recovery"],
-      ["next", "https://evil.example/take-session"],
-    ]),
+    postRequest([...confirmFields(), ["extra", "hostile-value"]]),
     async () => fakeClient(validResponse(), calls, sealed),
+    allowWall(),
+    settle,
   );
 
-  assert.deepEqual(calls, [{ type: "email", token_hash: "token-hash-1" }]);
+  assert.deepEqual(calls, [{ type: "signup", email: "aisyah@example.com", token: "123456" }]);
+  assert.deepEqual(settled, ["accepted"]);
+  // M2: the exact id `allowWall()`'s claim returned must ride through to
+  // settle unchanged — not a fresh value, not the outcome string alone.
+  assert.deepEqual(settledAttemptIds, ["attempt-fixture-1"]);
   assert.equal(sealed.length, 1, "the cookie-writing response was not sealed against caching");
   assert.equal(response.status, 303);
   assert.equal(response.headers.get("location"), "https://app.clarabook.example/signup");
-  assert.doesNotMatch(response.headers.get("location") ?? "", /token_hash|evil\.example/);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
 });
 
+test("N3 CLOSED (裁-109): wrong code, otp_expired, AND a banned account's own error all render the IDENTICAL wrong-code flash", async () => {
+  // The whole point of flattening: the wall must never surface a
+  // difference an attacker could use to learn WHY verification failed —
+  // neither "your code merely expired" (the round-4 split this closes) nor
+  // "this account is banned" (the narrower oracle `user_banned` opened,
+  // confirmed against the live `supabase/auth` error registry).
+  async function wrongFlashFor(error: { message: string; code?: string }) {
+    const response = await handleEmailConfirmationPost(
+      postRequest(confirmFields()),
+      async () => fakeClient({ data: { user: null, session: null }, error }, [], []),
+      allowWall(3),
+    );
+    locationFlashNonce(response); // asserts the URL shape too
+    return readFlashPayload(response) as { kind: string; remaining: number };
+  }
+
+  const plainWrong = await wrongFlashFor({ message: "Token has expired or is invalid" });
+  const expired = await wrongFlashFor({ message: "Token has expired", code: "otp_expired" });
+  const banned = await wrongFlashFor({ message: "User is banned", code: "user_banned" });
+
+  for (const flash of [plainWrong, expired, banned]) {
+    assert.equal(flash.kind, "wrong");
+    assert.equal(flash.remaining, 3);
+  }
+});
+
+test("locked renders its own distinct flash, keyed on the door's scope ('email' | 'origin' — 裁-107 direction-2 truing)", async () => {
+  const locked = await handleEmailConfirmationPost(
+    postRequest(confirmFields()),
+    async () => fakeClient(validResponse(), [], []),
+    async () => ({ kind: "rejected", scope: "email", retryAfterSeconds: 300 }),
+  );
+  const nonce = locationFlashNonce(locked);
+  assert.deepEqual(readFlashPayload(locked), { nonce, kind: "locked", waitSeconds: 300 });
+});
+
+test("a locked wall never reaches verifyOtp at all", async () => {
+  const calls: Array<{ type: "signup"; email: string; token: string }> = [];
+  const response = await handleEmailConfirmationPost(
+    postRequest(confirmFields()),
+    async () => fakeClient(validResponse(), calls, []),
+    async () => ({ kind: "rejected", scope: "origin", retryAfterSeconds: 900 }),
+  );
+  assert.deepEqual(calls, [], "the C1/C2 wall did not gate verifyOtp");
+  const nonce = locationFlashNonce(response);
+  assert.deepEqual(readFlashPayload(response), { nonce, kind: "locked", waitSeconds: 900 });
+});
+
+test("FOLD 4 + F1 (fresh opus review, 2026-09-01): the cookie's own SECURITY ATTRIBUTES are pinned, not just its lifetime", async () => {
+  // F1, MEDIUM — the ENTIRE N1 unforgeability claim rests on httpOnly +
+  // sameSite:"strict" + secure. Mutant-tested by the reviewer: delete
+  // httpOnly, or set secure:false, and every OTHER test in this file stays
+  // green (confirm-flash.test.ts tests pure functions; the page tests are
+  // DI'd past the real cookie jar; `.cookies.get(name)?.value` returns the
+  // value regardless of httpOnly). Without this cell, the forgery wall
+  // could be deleted in silence — and in production, secure:false with the
+  // __Host- name breaks FUNCTIONALLY too (the browser rejects the cookie
+  // outright, so every real redirect would fall to invalid) with nothing
+  // here going red to say why.
+  // 裁-109 (2026-09-01): `secure: true` below is a deliberate literal, not
+  // `confirmFlashCookie().secure` (tautological) — true only because this
+  // process resolves it to the PROD branch under `NODE_ENV=test`; run under
+  // `NODE_ENV=development` or `CLARA_ALLOW_INSECURE_LOOPBACK=1` and the name follows the env to dev while this stays `secure: true` — red reads "secure mismatch", not "wrong env".
+  const response = await handleEmailConfirmationPost(
+    postRequest(confirmFields()),
+    async () => fakeClient(validResponse(), [], []),
+    async () => ({ kind: "rejected", scope: "origin", retryAfterSeconds: 300 }),
+  );
+  const cookie = (response as NextResponse).cookies.get(confirmFlashCookie().name);
+  assert.ok(cookie, "no flash cookie was set");
+  assert.deepEqual(
+    { httpOnly: cookie.httpOnly, sameSite: cookie.sameSite, secure: cookie.secure, path: cookie.path, maxAge: cookie.maxAge },
+    // min(300, 900) + 60 = 360 — see confirm-flash.ts's confirmFlashMaxAgeSeconds.
+    { httpOnly: true, sameSite: "strict", secure: true, path: "/", maxAge: 360 },
+  );
+});
+
+test("a rejected verification is settled, not left dangling", async () => {
+  const settled: ConfirmationAttemptSettlement[] = [];
+  await handleEmailConfirmationPost(
+    postRequest(confirmFields()),
+    async () => fakeClient(
+      { data: { user: null, session: null }, error: { message: "invalid" } },
+      [],
+      [],
+    ),
+    allowWall(1),
+    async (_attemptId, outcome) => { settled.push(outcome); },
+  );
+  assert.deepEqual(settled, ["rejected"]);
+});
+
 test("NEW-B: a proxied confirmation derives authority from CLARA_PUBLIC_ORIGINS and fails closed when unset", async () => {
-  const calls: Array<{ type: "email"; token_hash: string }> = [];
+  const calls: Array<{ type: "signup"; email: string; token: string }> = [];
   let clientCreations = 0;
   const createClient = async () => {
     clientCreations += 1;
@@ -216,6 +314,7 @@ test("NEW-B: a proxied confirmation derives authority from CLARA_PUBLIC_ORIGINS 
     const refused = await handleEmailConfirmationPost(
       proxiedPostRequest("https://app.clarabook.example"),
       createClient,
+      allowWall(),
     );
     assert.equal(refused.status, 403, "unset must refuse instead of trusting the rewritten hop");
     assert.equal(clientCreations, 0, "the fail-closed arm must refuse before constructing the auth client");
@@ -226,6 +325,7 @@ test("NEW-B: a proxied confirmation derives authority from CLARA_PUBLIC_ORIGINS 
     const allowed = await handleEmailConfirmationPost(
       proxiedPostRequest("https://app.clarabook.example"),
       createClient,
+      allowWall(),
     );
     assert.equal(allowed.status, 303, "the operator-named public origin must remain usable behind the proxy");
     assert.equal(
@@ -234,12 +334,12 @@ test("NEW-B: a proxied confirmation derives authority from CLARA_PUBLIC_ORIGINS 
       "the redirect must be built from the PROVEN Origin, never request.url's authority (PR 455 MEDIUM-2)",
     );
     assert.equal(clientCreations, 1, "the configured positive control must reach the auth client exactly once");
-    assert.deepEqual(calls, [{ type: "email", token_hash: "token-hash-proxied" }]);
+    assert.deepEqual(calls, [{ type: "signup", email: "aisyah@example.com", token: "123456" }]);
   });
 });
 
 test("NEW-B: Origin null is 403 while a real allowlisted Origin succeeds", async () => {
-  const calls: Array<{ type: "email"; token_hash: string }> = [];
+  const calls: Array<{ type: "signup"; email: string; token: string }> = [];
   let clientCreations = 0;
   const createClient = async () => {
     clientCreations += 1;
@@ -250,6 +350,7 @@ test("NEW-B: Origin null is 403 while a real allowlisted Origin succeeds", async
     const refused = await handleEmailConfirmationPost(
       proxiedPostRequest("null"),
       createClient,
+      allowWall(),
     );
     assert.equal(refused.status, 403, "an opaque Origin must never enter the token-consuming route");
     assert.equal(clientCreations, 0, "Origin null must refuse before constructing the auth client");
@@ -258,10 +359,11 @@ test("NEW-B: Origin null is 403 while a real allowlisted Origin succeeds", async
     const allowed = await handleEmailConfirmationPost(
       proxiedPostRequest("https://app.clarabook.example"),
       createClient,
+      allowWall(),
     );
     assert.equal(allowed.status, 303, "the same configured wall must admit a real public Origin");
     assert.equal(clientCreations, 1, "the positive control must prove the observer can fire");
-    assert.deepEqual(calls, [{ type: "email", token_hash: "token-hash-proxied" }]);
+    assert.deepEqual(calls, [{ type: "signup", email: "aisyah@example.com", token: "123456" }]);
   });
 });
 
@@ -323,33 +425,43 @@ const refusalCases: Array<{
 ];
 
 for (const refusal of refusalCases) {
-  test(`NEW-1: ${refusal.name} refuses before body parsing or auth`, async () => {
+  test(`NEW-1: ${refusal.name} refuses before body parsing, the wall, or auth`, async () => {
     const mutableEnv = process.env as Record<string, string | undefined>;
     const originalNodeEnv = process.env.NODE_ENV;
     if (refusal.nodeEnv) mutableEnv.NODE_ENV = refusal.nodeEnv;
     let bodyReads = 0;
     let clientCreations = 0;
-    const calls: Array<{ type: "email"; token_hash: string }> = [];
+    let wallCalls = 0;
+    const calls: Array<{ type: "signup"; email: string; token: string }> = [];
     const request = {
       headers: new Headers(refusal.headers),
       url: refusal.requestUrl ?? "https://app.clarabook.example/auth/confirm/verify",
       async formData() {
         bodyReads += 1;
         const form = new FormData();
-        form.set("token_hash", "attacker-token");
+        form.set("email", "attacker@example.com");
+        form.set("token", "000000");
         return form;
       },
     } as unknown as Request;
 
     try {
-      const response = await handleEmailConfirmationPost(request, async () => {
-        clientCreations += 1;
-        return fakeClient(validResponse(), calls, []);
-      });
+      const response = await handleEmailConfirmationPost(
+        request,
+        async () => {
+          clientCreations += 1;
+          return fakeClient(validResponse(), calls, []);
+        },
+        async () => {
+          wallCalls += 1;
+          return { kind: "allowed", attemptId: "attempt-fixture-refusal", remaining: 5 };
+        },
+      );
 
       assert.equal(response.status, 403, `${refusal.name} was not refused`);
       assert.deepEqual(await response.json(), { ok: false, error: "cross-origin" });
       assert.equal(bodyReads, 0, `${refusal.name} was parsed before the wall`);
+      assert.equal(wallCalls, 0, `${refusal.name} reached the attempt wall`);
       assert.equal(clientCreations, 0, `${refusal.name} created an auth client`);
       assert.deepEqual(calls, [], `${refusal.name} reached verifyOtp`);
       assert.equal(response.headers.get("set-cookie"), null, `${refusal.name} wrote a cookie`);
@@ -361,205 +473,28 @@ for (const refusal of refusalCases) {
   });
 }
 
-test("NEW-5: the confirmation response cookie drives the next /signup request", async () => {
-  const originalFetch = globalThis.fetch;
-  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const originalKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const testGlobal = globalThis as unknown as { window: unknown };
-  const originalWindow = testGlobal.window;
-  const originalWebSocket = globalThis.WebSocket;
-  const accessToken = testJwt(SUBJECT);
-  const routeCookies = new MemoryCookieStore();
-  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "publishable-test-key";
-  // This cell drives the SERVER client. The shared React harness installs a
-  // minimal `window`, which would otherwise make auth-js choose its browser
-  // navigator-lock path even though this request is server-side.
-  testGlobal.window = undefined;
-  // Node 20 has no native WebSocket. Supabase constructs its dormant realtime
-  // client eagerly even though this Auth-only cell never connects it; provide
-  // the constructor check only, and let any accidental use fail immediately.
-  globalThis.WebSocket = class AuthOnlyWebSocket {
-    constructor() {
-      throw new Error("the Auth-only SSR adapter must not open a WebSocket");
-    }
-  } as unknown as typeof WebSocket;
-  globalThis.fetch = async (input) => {
-    const url = input instanceof Request ? input.url : String(input);
-    assert.match(url, /\/auth\/v1\/verify$/);
-    return new Response(JSON.stringify({
-      access_token: accessToken,
-      refresh_token: "refresh-token",
-      token_type: "bearer",
-      expires_in: 3_600,
-      expires_at: 4_102_444_800,
-      user: { id: SUBJECT, email_confirmed_at: "2026-08-31T01:02:03Z" },
-    }), { status: 200, headers: { "content-type": "application/json" } });
+test("N1: a malformed submission (missing/duplicated field) redirects to the invalid flash and never reaches the wall", async () => {
+  let wallCalls = 0;
+  const wall: ClaimConfirmationAttempt = async () => {
+    wallCalls += 1;
+    return { kind: "allowed", attemptId: "attempt-fixture-malformed", remaining: 5 };
   };
 
-  try {
-    const response = await handleEmailConfirmationPost(
-      postRequest([["token_hash", "token-hash-2"]]),
-      async () => createRouteClient({
-        cookieStore: routeCookies as unknown as ServerCookieStore,
-      }),
-    );
-    assert.equal(response.headers.get("location"), "https://app.clarabook.example/signup");
-    const getSetCookie = (response.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie;
-    const setCookies = getSetCookie?.call(response.headers) ?? [response.headers.get("set-cookie") ?? ""];
-    assert.ok(setCookies.some((value) => value.startsWith("__Host-clara-auth=")));
-
-    const rawCookie = setCookies
-      .filter(Boolean)
-      .map((value) => value.split(";", 1)[0] as string)
-      .join("; ");
-    const signupRequest = new Request("https://app.clarabook.example/signup", {
-      headers: { cookie: rawCookie },
-    });
-    const requestCookies = MemoryCookieStore.fromRequest(signupRequest);
-    const serverClient = await createServerClient({
-      cookieStore: requestCookies as unknown as ServerCookieStore,
-    });
-    serverClient.auth.getClaims = (async (jwt?: string) => ({
-      data: { claims: jwt === accessToken ? { sub: SUBJECT } : null },
-      error: jwt === accessToken ? null : { message: "wrong token" },
-    })) as typeof serverClient.auth.getClaims;
-    serverClient.auth.getUser = (async (jwt?: string) => ({
-      data: {
-        user: jwt === accessToken
-          ? { id: SUBJECT, email_confirmed_at: "2026-08-31T01:02:03Z" }
-          : null,
-      },
-      error: jwt === accessToken ? null : { message: "wrong token" },
-    })) as typeof serverClient.auth.getUser;
-
-    const step = await renderSignupRoute(
-      async () => resolveServerSession(async () => serverClient),
-      async () => serverClient,
-    );
-    assert.equal(step.type, SignupFirmForm, "the cookie-backed /signup visit did not render the firm step");
-
-    const noCookieClient = await createServerClient({
-      cookieStore: new MemoryCookieStore() as unknown as ServerCookieStore,
-    });
-    const noCookieStep = await renderSignupRoute(
-      async () => resolveServerSession(async () => noCookieClient),
-      async () => noCookieClient,
-    );
-    assert.equal(noCookieStep.type, SignupAccountForm, "a cookieless /signup request reached the firm step");
-  } finally {
-    testGlobal.window = originalWindow;
-    globalThis.WebSocket = originalWebSocket;
-    globalThis.fetch = originalFetch;
-    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
-    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
-    if (originalKey === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = originalKey;
-  }
-
-  // Production must use the request-cookie SSR client. The injected route
-  // boundary above drives that exact adapter; this source pin makes replacing
-  // that production wiring with the browser client red instead of invisible.
-  const handlerSource = readFileSync(
-    join(WEB_ROOT, "app/(entry)/auth/confirm/verify/handler.ts"),
-    "utf8",
+  const missing = await handleEmailConfirmationPost(
+    postRequest([["email", "aisyah@example.com"]]),
+    async () => fakeClient(validResponse(), [], []),
+    wall,
   );
-  assert.match(handlerSource, /createRouteClient[\s\S]*from "@\/lib\/supabase\/server"/);
-  assert.doesNotMatch(handlerSource, /@\/lib\/supabase\/client/);
-});
+  const missingNonce = locationFlashNonce(missing);
+  assert.deepEqual(readFlashPayload(missing), { nonce: missingNonce, kind: "invalid" });
 
-test("NEW-2: a fresh /signup render refuses persisted unconfirmed or unreadable users", () => {
-  const session = { subject: SUBJECT, accessToken: "placeholder" };
-  const refusedUsers: unknown[] = [
-    { id: SUBJECT, email_confirmed_at: null },
-    { id: SUBJECT, email_confirmed_at: "not-a-timestamp" },
-    { id: SUBJECT, email_confirmed_at: "2026-02-30T01:02:03Z" },
-  ];
-
-  for (const user of refusedUsers) {
-    const step = SignupStep({ session, user } as Parameters<typeof SignupStep>[0]);
-    assert.equal(step.type, SignupAccountForm, "an unconfirmed persisted session reached the firm step");
-  }
-});
-
-test("NEW-2 RESIDUAL: a direct hosted-Auth caller under autoconfirm drift reaches the firm step — held by the deploy gate, not by code", () => {
-  const session = { subject: SUBJECT, accessToken: "autoconfirmed-token" };
-  const step = SignupStep({
-    session,
-    user: {
-      id: SUBJECT,
-      email_confirmed_at: "2026-08-31T01:02:03Z",
-    },
-  });
-  assert.equal(
-    step.type,
-    SignupFirmForm,
-    "the residual changed: update the deploy-gate claim and the booked server-receipt follow-up",
+  const duplicated = await handleEmailConfirmationPost(
+    postRequest([...confirmFields(), ["token", "999999"]]),
+    async () => fakeClient(validResponse(), [], []),
+    wall,
   );
-});
+  const duplicatedNonce = locationFlashNonce(duplicated);
+  assert.deepEqual(readFlashPayload(duplicated), { nonce: duplicatedNonce, kind: "invalid" });
 
-test("NEW: confirmed-user accepts strict timestamps and refuses malformed clock/calendar values", () => {
-  for (const timestamp of [
-    "2024-02-29T23:59:59Z",
-    "2026-08-31T01:02:03.123456789+08:00",
-  ]) {
-    assert.equal(
-      isConfirmedUser({ email_confirmed_at: timestamp }),
-      true,
-      `${timestamp} should be accepted`,
-    );
-  }
-
-  for (const timestamp of [
-    "2026-02-30T01:02:03Z",
-    "2025-02-29T01:02:03Z",
-    "2026-08-31",
-    "2026",
-    "2026-08-31T24:00:00Z",
-    "2026-08-31T23:60:00Z",
-    "2026-08-31T23:59:60Z",
-  ]) {
-    assert.throws(
-      () => isConfirmedUser({ email_confirmed_at: timestamp }),
-      UnreadableAuthUserError,
-      `${timestamp} should be refused`,
-    );
-  }
-});
-
-test("N1: invalid, replayed, and sessionless tokens refuse on a clean URL", async () => {
-  const failures: VerifyResponse[] = [
-    { data: { user: null, session: null }, error: { message: "Token has expired or is invalid" } },
-    { data: { user: { id: SUBJECT }, session: null }, error: null },
-  ];
-
-  for (const failure of failures) {
-    const calls: Array<{ type: "email"; token_hash: string }> = [];
-    const response = await handleEmailConfirmationPost(
-      postRequest([["token_hash", "spent-token"]]),
-      async () => fakeClient(failure, calls, []),
-    );
-    assert.equal(calls.length, 1);
-    assert.equal(
-      response.headers.get("location"),
-      "https://app.clarabook.example/auth/confirm?status=invalid",
-    );
-    assert.doesNotMatch(response.headers.get("location") ?? "", /token_hash|spent-token/);
-  }
-});
-
-test("N1: repeated token_hash fields fail closed without choosing one", async () => {
-  const calls: Array<{ type: "email"; token_hash: string }> = [];
-  const response = await handleEmailConfirmationPost(
-    postRequest([
-      ["token_hash", "first"],
-      ["token_hash", "second"],
-    ]),
-    async () => fakeClient(validResponse(), calls, []),
-  );
-  assert.deepEqual(calls, []);
-  assert.equal(
-    response.headers.get("location"),
-    "https://app.clarabook.example/auth/confirm?status=invalid",
-  );
+  assert.equal(wallCalls, 0, "a malformed submission must not consume a wall attempt");
 });
