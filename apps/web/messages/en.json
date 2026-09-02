@@ -1235,7 +1235,7 @@
       "claimRemoved": "claim removed",
       "uncertified": "uncertified",
       "sealedBy": "sealed",
-      "noDownload": "No byte-download door exists yet — copy the storage key and retrieve the file through ops tooling. A signed-URL download route is a named follow-up, not built in this pass.",
+      "downloadNote": "Downloads are fetched through Clara's own server-side door — the browser never holds a storage credential and never mints a link.",
       "copyKey": "Copy storage key",
       "copied": "Copied",
       "runLabel": "run",
@@ -1269,6 +1269,12 @@
         "heading": "Agent receipts",
         "empty": "No agent-act receipts yet for this client.",
         "directedBy": "directed by"
+      },
+      "download": {
+        "trigger": "Download",
+        "working": "Downloading…",
+        "unavailable": "Not downloadable — {reason}",
+        "failed": "Download failed: {message}"
       }
     },
     "sandbox": {
@@ -1293,6 +1299,12 @@
           "displayNamePlaceholder": "Display name",
           "basisPlaceholder": "Basis for receiving exports"
         }
+      },
+      "download": {
+        "trigger": "Download",
+        "working": "Downloading…",
+        "unavailable": "Not downloadable — {reason}",
+        "failed": "Download failed: {message}"
       }
     },
     "freeform": {

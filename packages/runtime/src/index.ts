@@ -6,6 +6,7 @@ import { chatRoutes } from "./chatRoutes.js";
 import { intakeRoutes } from "./intakeRoutes.js";
 import { streamRoutes } from "./streamRoute.js";
 import { documentRoutes } from "./documentRoutes.js";
+import { reportRoutes } from "./reportRoutes.js";
 import { interviewRoutes } from "./interviewRoutes.js";
 import { openingRoutes } from "./openingRoutes.js";
 import { seedingRoutes } from "./seedingRoutes.js";
@@ -92,5 +93,10 @@ app.use(seedingRoutes());
 // Document bytes for the doc_review split-view (PIN-DELTA-4) — human JWT -> definer read ->
 // Storage stream with the runtime custody credential; the browser never holds a credential.
 app.use(documentRoutes());
+// Sealed-artifact bytes for the Reports tab (FS-7 echelon 2, 裁-96②) — the SAME trusted-ingress
+// shape over the OTHER two relations: human JWT -> clara.get_artifact_for_human_read -> Storage
+// stream, content address re-verified en route, served as an attachment. No signed URL is ever
+// minted, and no agent role can reach the door behind it.
+app.use(reportRoutes());
 
 export default app;
