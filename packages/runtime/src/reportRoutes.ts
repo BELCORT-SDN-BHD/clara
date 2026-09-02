@@ -150,11 +150,17 @@ export function reportRoutes(): express.Router {
       // byte-identical: a malformed id, an unknown id and a foreign-firm id must not be tellable
       // apart, and a body that carried a reason on some 404s and not others would tell them apart.
       const reason = m.status === 404 ? null : refusalReason(err);
-      res.status(m.status).json({
+      // BUILT BY ASSIGNMENT, NEVER BY A CONDITIONAL SPREAD. `...(reason ? { reason } : {})` reads
+      // fine and is refused by the parts-parity gate (`unclassifiable object spread`), which walks
+      // object literals in this package's source to prove the web reader covers every emittable
+      // part kind — a spread it cannot evaluate is a hole in that proof, so it fails closed rather
+      // than guessing. Measured, not assumed: the gate reds on the spread and greens on this.
+      const body: { error: string; message: string; reason?: string } = {
         error: m.code,
         message: m.status === 404 ? "not found" : "artifact unavailable",
-        ...(reason ? { reason } : {}),
-      });
+      };
+      if (reason) body.reason = reason;
+      res.status(m.status).json(body);
       return;
     }
 
