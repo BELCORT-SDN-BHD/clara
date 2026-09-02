@@ -5,6 +5,8 @@ import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
+const routeErrorProbeEnabled = process.env.CLARA_E2E_ROUTE_ERROR_PROBE === "1";
+
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   // pnpm dependencies can be junctioned into a nested worktree. Turbopack 16
@@ -15,6 +17,14 @@ const nextConfig: NextConfig = {
       realpathSync(resolve(__dirname, "node_modules")),
       "../../..",
     ),
+    // Ordinary builds compile the inert stub. The browser harness opts in at
+    // BUILD time so no production request can turn this throw on through env.
+    resolveAlias: routeErrorProbeEnabled
+      ? {
+          "@/components/e2e/route-error-probe":
+            "@/components/e2e/route-error-probe-enabled",
+        }
+      : {},
   },
   // DELIBERATELY no `rewrites()` for the runtime proxy (independent review
   // 2026-08-27, F1/F2): a `rewrites()` destination is baked into

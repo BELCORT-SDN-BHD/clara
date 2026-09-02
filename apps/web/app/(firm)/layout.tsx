@@ -71,9 +71,9 @@ export default async function FirmLayout({
               <LogoutButton />
             </div>
           </aside>
-          <div className="min-w-0 flex-1 bg-background">{children}</div>
+          <div data-firm-workbench className="min-w-0 flex-1 bg-background">{children}</div>
+          <RailMount />
         </div>
-        <RailMount />
       </FirmScopeProvider>
     </CommandKProvider>
   );

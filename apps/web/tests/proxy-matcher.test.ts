@@ -63,6 +63,9 @@ describe("the proxy gate runs on every protected route", () => {
     "/signup",
     "/auth/confirm?token_hash=example",
     "/auth/confirm/verify",
+    "/forgot-password",
+    "/auth/recover?code=example",
+    "/auth/recover/password",
     // NOT public — it needs a session — but still MATCHED, so the proxy runs
     // and redirects an unauthenticated caller to /login.
     "/pending",
@@ -128,6 +131,9 @@ describe("P4-3 — signup confirmation is public, and the holding route delibera
       "/signup",
       "/auth/confirm",
       "/auth/confirm/verify",
+      "/forgot-password",
+      "/auth/recover",
+      "/auth/recover/password",
     ]) {
       assert.equal(isPublicPath(pathname), true, `${pathname} must be public`);
     }
@@ -165,6 +171,8 @@ describe("P4-3 — signup confirmation is public, and the holding route delibera
       "/loginx",
       "/invitees",
       "/auth/confirmation",
+      "/forgot-passwords",
+      "/auth/recovery",
       "/pendingx",
     ]) {
       assert.equal(isPublicPath(pathname), false, `${pathname} must NOT be public`);
@@ -172,6 +180,7 @@ describe("P4-3 — signup confirmation is public, and the holding route delibera
     // …while a genuine child segment IS public.
     assert.equal(isPublicPath("/signup/step-2"), true);
     assert.equal(isPublicPath("/auth/confirm/verify"), true);
+    assert.equal(isPublicPath("/auth/recover/password"), true);
   });
 
   it("VACUITY CONTROL: the predicate is a real function that can answer BOTH ways", () => {
@@ -195,6 +204,11 @@ describe("NEW-A: token-bearing entry routes send only the referrer data their PO
   it("keeps invite bearer URLs at no-referrer and leaves ordinary pages unchanged", () => {
     assert.equal(referrerPolicyForPath("/invite/token-hash"), "no-referrer");
     assert.equal(referrerPolicyForPath("/signup"), null);
+  });
+
+  it("uses strict-origin throughout recovery so the one-time code never enters a referrer", () => {
+    assert.equal(referrerPolicyForPath("/auth/recover"), "strict-origin");
+    assert.equal(referrerPolicyForPath("/auth/recover/password"), "strict-origin");
   });
 });
 
