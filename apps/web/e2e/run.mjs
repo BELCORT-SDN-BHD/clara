@@ -4,10 +4,18 @@ import { fileURLToPath } from "node:url";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(webRoot, "../..");
-const appOrigin = "https://127.0.0.1:3100";
+// Both ports are overridable so two lanes can run this harness at once — the
+// sprint assigns each lane its own range, and the literals below were what made
+// the second one fail to bind. Defaults are the historical values, so a plain
+// `pnpm --filter @clara/web e2e` is byte-for-byte the run it always was.
+// `serve-built.mjs` reads CLARA_E2E_NEXT_PORT itself; it is passed through here
+// only so an explicit setting survives this script's own env rebuild.
+const appOrigin = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
+const nextPort = process.env.CLARA_E2E_NEXT_PORT ?? "3101";
 const env = {
   ...process.env,
   CLARA_E2E_APP_ORIGIN: appOrigin,
+  CLARA_E2E_NEXT_PORT: nextPort,
   CLARA_PUBLIC_ORIGINS: appOrigin,
   NEXT_PUBLIC_SUPABASE_URL: `${appOrigin}/e2e-supabase`,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_clara_e2e_only",

@@ -12,6 +12,12 @@ import { fileURLToPath } from "node:url";
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
 const appOrigin = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
+// The port `next start` listens on behind the HTTPS proxy above. It was a bare
+// literal in three places, which made the whole harness single-instance: the
+// sprint's lanes are each assigned their own port range, and a second lane
+// running `pnpm --filter @clara/web e2e` would fail to bind rather than run.
+// The default is unchanged, so a plain invocation behaves exactly as before.
+const nextPort = process.env.CLARA_E2E_NEXT_PORT ?? "3101";
 const appUrl = new URL(appOrigin);
 const supabaseUrl = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? `${appOrigin}/e2e-supabase`);
 const supabasePrefix = supabaseUrl.pathname.replace(/\/$/, "");
@@ -123,7 +129,7 @@ function publicLocation(location) {
   try {
     const target = new URL(location);
     if (
-      target.port === "3101" &&
+      target.port === nextPort &&
       (target.hostname === "127.0.0.1" || target.hostname === "localhost")
     ) {
       return new URL(`${target.pathname}${target.search}${target.hash}`, appOrigin).toString();
@@ -414,7 +420,7 @@ const httpsServer = createHttpsServer(
     const upstream = httpRequest(
       {
         hostname: "127.0.0.1",
-        port: 3101,
+        port: Number(nextPort),
         method: request.method,
         path: request.url,
         headers,
@@ -445,7 +451,7 @@ await new Promise((resolveListen, rejectListen) => {
 const nextBin = join(webRoot, "node_modules", "next", "dist", "bin", "next");
 const next = spawn(
   process.execPath,
-  [nextBin, "start", "--hostname", "127.0.0.1", "--port", "3101"],
+  [nextBin, "start", "--hostname", "127.0.0.1", "--port", nextPort],
   {
     cwd: webRoot,
     env: {

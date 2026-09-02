@@ -1,7 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-const APP_ORIGIN = "https://127.0.0.1:3100";
+// Reads the harness's own origin rather than re-typing it: the port is now
+// overridable so two lanes can run this suite at once (`e2e/run.mjs`), and a
+// literal here turned that into four false reds about a same-origin wall that
+// was working perfectly.
+const APP_ORIGIN = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 /**
