@@ -38,7 +38,7 @@ export async function hasB3() {
   return r.rows[0].n === 1;
 }
 
-/** Q-D6's close-seal wall (`migrations/UNNUMBERED_qd6_close_seal_wall.sql`) — the FIFTEENTH
+/** Q-D6's close-seal wall (`migrations/0161_qd6_close_seal_wall.sql`) — the FIFTEENTH
  *  gate-catalog row, drawer 1. Read from the LIVE CATALOG, never a filename and never a
  *  schema_migrations row, so a renumber cannot move it.
  *

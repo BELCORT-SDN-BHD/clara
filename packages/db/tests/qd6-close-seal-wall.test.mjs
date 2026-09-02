@@ -1,18 +1,24 @@
 // Q-D6 — THE CLOSE-SEAL WALL WHILE THE DEFERRED-OPENING BANNER IS UP.
-// Behavioural battery for `migrations/UNNUMBERED_qd6_close_seal_wall.sql`.
+// Behavioural battery for `migrations/0161_qd6_close_seal_wall.sql` (number claimed at
+// merge prep, 2026-09-03 — 裁-108 step 1; the arming witness below is the live catalog,
+// never this filename).
 // NEVER LIVE: this file drives writes and runs only against a disposable rig.
 //
 // THE RULING (owner's own, constraint 1 — `docs/plan/active/fa7b-gate-record.md:44-46`):
 //   "Q-D6 — RULED: a close may NOT SEAL while the deferred-opening banner is up, and NO
 //    owner-override door ships. Drawer-1 (absolute, no attestation path) is the mechanism."
 //
-// THE 裁-108 SKIP, stated so nobody mistakes it for coverage: the migration ships
-// UNNUMBERED, and `scripts/migrate.mjs`'s own file filter (`MIGRATION_LIKE = /^\d+.*\.sql$/`,
-// migrate.mjs:59) SILENTLY SKIPS any file that does not start with four digits. So on CI,
-// and on any rig migrated before the number is claimed, the gate does not exist and every
-// cell below skips LOUDLY through `qd6Gate()`. The number claim at merge prep is what ARMS
-// this file — that is 裁-108's whole point, and the merge-prep re-verify is the step that
-// proves these cells then run for real rather than skipping.
+// THE 裁-108 SKIP, and why it is now HISTORY on this branch. While the migration shipped
+// UNNUMBERED, `scripts/migrate.mjs`'s file filter (`MIGRATION_LIKE = /^\d+.*\.sql$/`,
+// migrate.mjs:59) SILENTLY SKIPPED it — so on CI every cell below skipped LOUDLY through
+// `qd6Gate()`, and a green `db-estate` said nothing at all about the wall. **The number claim
+// (0161, merge prep 2026-09-03) is what ARMED this file**, and the fresh-rig re-verify that
+// prints `# skipped 0` here is the proof it stopped skipping — that is 裁-108 step 4, and it
+// is load-bearing rather than ceremonial precisely because of the paragraph above.
+//
+// The gate below is KEPT, not deleted: it still fires correctly for anyone running this file
+// against a rig migrated before 0161, and it arms off the live catalog rather than the
+// filename, so a future renumber cannot move it.
 //
 // CONTRACT-BLIND: every claim is proved against the LIVE CATALOG and through the SHIPPED
 // doors. No cell re-implements the gate's predicate and asserts against its own copy
