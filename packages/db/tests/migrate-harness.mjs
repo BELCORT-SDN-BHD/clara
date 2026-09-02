@@ -123,7 +123,6 @@ export function cloneAmbientDatabase(sourceEnv, targetDb) {
     const dump = spawnSync(pgDumpBin, ["--no-comments", "--file", dumpFile], {
       env: sourceEnv,
       stdio: ["ignore", "inherit", "inherit"],
-      shell: !!process.env.PG_DUMP, // TEMP-LOCAL-VERIFY-ONLY -- reverted before commit, see fix-498 report
     });
     if (dump.error) throw new Error(`pg_dump failed to start (${dump.error.message})`);
     if (dump.status !== 0) throw new Error(`pg_dump exited ${dump.status} cloning the ambient database`);
@@ -133,7 +132,7 @@ export function cloneAmbientDatabase(sourceEnv, targetDb) {
     const restore = spawnSync(
       psqlBin,
       ["-X", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", dumpFile, "--dbname", targetDb],
-      { env: targetEnv, stdio: ["ignore", "inherit", "inherit"], shell: !!process.env.PSQL }, // TEMP-LOCAL-VERIFY-ONLY
+      { env: targetEnv, stdio: ["ignore", "inherit", "inherit"] },
     );
     if (restore.error) throw new Error(`psql failed to start (${restore.error.message})`);
     if (restore.status !== 0) throw new Error(`psql exited ${restore.status} restoring into ${targetDb}`);
