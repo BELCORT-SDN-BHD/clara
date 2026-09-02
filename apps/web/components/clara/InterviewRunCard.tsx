@@ -168,10 +168,13 @@ export function InterviewRunCard({
           <Button type="button" size="sm" onClick={() => void startOrContinue()} disabled={starting}>
             {starting ? tCard("interviewStarting") : tCard("interviewStartTrigger")}
           </Button>
-        ) : !state ? (
-          <p className="text-xs text-muted-foreground">{t("loading")}</p>
         ) : (
-          <InterviewThread thread={run.thread} />
+          // DS-03 (P6-3): the loading sentence moved INSIDE the thread log
+          // rather than standing beside it, so the log is one PERSISTENT region
+          // that is busy and then not — which is what lets `aria-busy` do its
+          // job (a placeholder that is swapped for a sibling can never flip the
+          // flag false). Visual output is unchanged in both states.
+          <InterviewThread thread={run.thread} loading={!state} />
         )}
 
         {state?.pendingPark?.seg === "sample_invoices" ? (
@@ -251,11 +254,43 @@ export function InterviewRunCard({
   );
 }
 
-function InterviewThread({ thread }: { thread: ReturnType<typeof useInterviewRun>["thread"] }) {
+/**
+ * DS-04 (FS-9 §3, P6-3) — this log is no longer NESTED inside another one.
+ * Nothing changed here to achieve it: ClaraThreadView's own scroll region used
+ * to carry `role="log" aria-live="polite"`, and this card reaches that region
+ * through OnboardingChecklistCard, so this element was a `log` inside a `log`.
+ * That outer live region has been narrowed to wrap only its transcript, which
+ * makes this card a SIBLING of it. This log keeps its role and its label: it is
+ * a genuine, separately-announced conversation and it is the correct owner of
+ * that role — the defect was the containment, not this declaration.
+ *
+ * DS-03: `aria-busy` is real here because the region persists across the read
+ * (see the call site's comment).
+ */
+function InterviewThread({
+  thread,
+  loading,
+}: {
+  thread: ReturnType<typeof useInterviewRun>["thread"];
+  loading: boolean;
+}) {
   const t = useTranslations("Interview");
   return (
-    <div className="flex flex-col gap-2" role="log" aria-label={t("threadLabel")} aria-live="polite">
-      {thread.length === 0 ? (
+    <div
+      className="flex flex-col gap-2"
+      role="log"
+      aria-label={t("threadLabel")}
+      aria-live="polite"
+      aria-busy={loading}
+    >
+      {loading ? (
+        // Deliberately a plain <p>, not the LoadingState primitive: that
+        // primitive computes `role="status"`, and a status inside this log
+        // would re-create exactly the nested-live-region defect DS-04 exists to
+        // remove. The log's own `aria-busy` is what carries the loading
+        // semantics; the sentence only has to be visible.
+        <p className="text-xs text-muted-foreground">{t("loading")}</p>
+      ) : thread.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t("threadEmpty")}</p>
       ) : thread.map((entry) => (
         <div

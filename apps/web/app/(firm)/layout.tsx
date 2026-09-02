@@ -6,6 +6,7 @@ import { FirmNav } from "@/components/firm-nav";
 import { FirmScopeProvider } from "@/components/firm-scope-provider";
 import { LogoutButton } from "@/components/logout-button";
 import { RailMount } from "@/components/clara/rail-mount";
+import { SkipLink } from "@/components/common/skip-link";
 import { requireFirmScope } from "@/lib/require-firm-scope";
 
 /**
@@ -47,7 +48,11 @@ export default async function FirmLayout({
   // caller_context merely to shape an affordance.
   const scope = await requireFirmScope();
 
-  const t = await getTranslations("FirmShell");
+  // `Brand`, not the old `FirmShell` namespace: P6-6's ClaraBook copy pass
+  // (R1) made the platform name ONE string with two consumers — this shell and
+  // the entry lockup (`components/entry/brand-lockup.tsx`) — rather than two
+  // copies free to drift into disagreeing about what the product is called.
+  const t = await getTranslations("Brand");
 
   return (
     <CommandKProvider>
@@ -61,7 +66,13 @@ export default async function FirmLayout({
         sidebar, via `--sidebar`, and the client-workspace tab header one level
         down); the content column is `--background`, the canvas.
         */}
-        <div className="flex min-h-dvh bg-background">
+        <div className="relative flex min-h-dvh bg-background">
+          {/* DS-02 (P6-3): the bypass-blocks affordance. FIRST in DOM order, so
+              it is the first thing Tab reaches on every firm route; `relative`
+              on this wrapper is what its `focus:absolute` positions against.
+              See components/common/skip-link.tsx for why it is mounted here and
+              deliberately not in the (entry) or (full) groups. */}
+          <SkipLink />
           <aside className="flex w-56 shrink-0 flex-col gap-4 border-r border-sidebar-border bg-sidebar p-4">
             <span className="px-2.5 text-sm font-semibold text-sidebar-foreground">
               {t("productName")}
@@ -71,7 +82,26 @@ export default async function FirmLayout({
               <LogoutButton />
             </div>
           </aside>
-          <div data-firm-workbench className="min-w-0 flex-1 bg-background">{children}</div>
+          {/* `id`/`tabIndex` are the SkipLink's anchor — the column exists for
+              every route in this group by construction, which the page-level
+              `<main>` does not. See skip-link.tsx's header.
+              `outline-none` here is deliberate and is the W3C WAI skip-link
+              tutorial's own pattern: a `tabindex="-1"` container is a scroll
+              and announce target, not a control in the tab order, and ringing
+              a full-viewport column on every skip would be louder than the
+              journey it serves. Chrome does not match `:focus-visible` on
+              programmatic focus of a div either, so nothing paints regardless.
+              What confirms the jump to a sighted keyboard user is the scroll
+              plus the next Tab landing past the nav — which the browser leg
+              asserts (review N-6, recorded rather than changed). */}
+          <div
+            data-firm-workbench
+            id="main-content"
+            tabIndex={-1}
+            className="min-w-0 flex-1 bg-background outline-none"
+          >
+            {children}
+          </div>
           <RailMount />
         </div>
       </FirmScopeProvider>
