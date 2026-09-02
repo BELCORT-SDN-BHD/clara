@@ -229,3 +229,57 @@ with NO control (`OnboardingItemRow` offers only `resolve_onboarding_plan_item`,
 non-pending item) — a shipped promise on happy-path step 5. Ruled IN: one dialog on the row
 calling `apply_coa_template` with the keep/drop family fieldset the door already takes, refusals
 verbatim, a receipt on the row; folds into P6-5 (≈0.2 units).
+
+
+### 裁-129 — the beta terms of service: a separate document kind, a fixed RM 5,000 liability floor, the courts of Kuala Lumpur (owner, 2026-09-02 ~12:10 MYT)
+
+**Context.** 裁-125 made every user-facing legal text an agent template for beta. The terms
+template lane (opus) delivered `docs/ops/legal/clara-beta-terms.md` (844 lines, 27 `[LAWYER]`
+markers, 34 `[verify]` placeholders) and surfaced three positions only the owner can take.
+
+**Recommendation put (followed):** adopt all three as drafted — (1) the terms are a SEPARATE
+document kind from the DPA, never a combined body: combining would bundle a withdrawable PDPA
+s.129(3)(a) consent with a non-withdrawable contract under one signature and would break the
+byte-identity law's meaning (one digest over a mixture means a commercial edit invalidates every
+firm's data-protection signature); cost = one additive migration (a `kind` column on the DPA
+document store, the partial unique index becoming `(kind) where effective_to is null`) plus one
+Lane-B surface line; (2) the liability cap is a fixed RM floor, not "fees paid" — beta fees are
+RM0, so a fees-paid cap is a total exclusion in substance, void under s.29 Contracts Act 1950
+(*CIMB Bank Bhd v Anthony Lawrence Bourke*, Federal Court); (3) disputes go to the courts of Kuala
+Lumpur, not arbitration (both parties Malaysian, small disputes, arbitration cost > amount at stake).
+
+**Ruling:** *"Adopt all three, floor RM 5,000 (Recommended)"* — separate kind + the additive
+migration; **RM 5,000** as the liability floor placeholder for the lawyer; KL courts. Nothing is
+darkened; the lawyer refines figure and wording at official launch (裁-125).
+
+**Alignment:** the migration rides the next DB train that touches the DPA store (Lane B's own PR or
+C-5's, whichever opens first — it is additive, UNNUMBERED until merge prep per 裁-108, and carries
+its own RED-before cell: a terms row and the current DPA row must coexist under the per-kind index);
+`sign_dpa`'s signature carrier gains the `kind` discriminator; the signup step presents BOTH
+documents, each with its own byte-identity hash (裁-90 extends to the terms verbatim). The
+`[LAWYER]`/`[verify]` markers stay in the template until the launch sitting; the RM 5,000 figure is
+written into §10.3 as the placeholder value.
+
+
+### 裁-130 — chat parity for beta: inline clarify answering + composer attachment are IN (owner, 2026-09-02 ~12:15 MYT)
+
+**Context.** The dashboard→web capability diff (裁-121①, `docs/plan/active/dashboard-web-capability-diff-2026-09-02.md`)
+found seven DROPPED-UNRECORDED capabilities. Five are post-beta with Backlog rows (the
+`remap_bank_account_coa` control · adjustment templates' `p_replaces`/`p_schedule` hardcoded null ·
+the onboarding plan's revision-history read · the document-tied deterministic opening-balance
+parse path, every seed hardcoded to skip it — manual opening balances still work · the chat
+session list, which 裁-117 already disposes of). Two sit beside the 16-step demo path: (a) answering
+Clara's mid-turn `clarify` question INLINE — `PartRenderer.tsx` renders the part read-only and the
+only answer control is the Journals tab's `InterruptionsPane`, so the conversation breaks in two;
+(b) attaching a document from the chat composer — no affordance at all, though the wire type and
+the runtime plumbing survive and the Documents upload works.
+
+**Recommendation put (followed):** BOTH IN as one small Codex lane (≈1 unit, folded into P6-6):
+inline answering is the agent's body language (PRD §5a); "这是发票" dropped into the composer is
+the first thing every accountant will try.
+
+**Ruling:** *"Both IN (Recommended)."* One Codex lane: the inline answer control on the clarify
+card calling `answer_interruption` (the Journals-tab pane stays as the second door), the composer
+attach control through the surviving runtime plumbing (same intake wall, same typed refusals as the
+Documents upload — no new mechanism), a Playwright leg on both. The five post-beta items get their
+Backlog row in this PR.
