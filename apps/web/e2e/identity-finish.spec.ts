@@ -81,6 +81,24 @@ test("the mark is fetched eagerly, never deferred below the entry card", async (
   await expect(page.locator(`img[src*="${LEDGER_FOLD}"]`)).toHaveAttribute("loading", "eager");
 });
 
+test("裁-137: the wordmark is COMPOSITED lowercase, and its text is still ClaraBook", async ({ page }) => {
+  // The node cell asserts the class is on the span. This asserts the browser
+  // actually applied it — the difference matters, because a class name that
+  // Tailwind failed to emit a rule for (a typo, a purge, a renamed utility)
+  // would keep that cell green and leave the wordmark title-case on screen.
+  await page.goto("/login");
+  const wordmark = page.getByText("ClaraBook", { exact: true });
+  await expect(wordmark).toBeVisible();
+
+  const transform = await wordmark.evaluate((el) => getComputedStyle(el).textTransform);
+  expect(transform, "裁-137's glyph half, measured on the live element").toBe("lowercase");
+
+  // R1's half, and the whole reason a transform was used instead of a second
+  // string: the accessible name is unchanged, so nothing that reads the page
+  // by text — a screen reader, this matcher, the firm shell's prose — moves.
+  await expect(wordmark).toHaveText("ClaraBook");
+});
+
 test("§7's welcome motion resolves to real token values, and reduced motion drops the movement", async ({ page }) => {
   // MOTION ON: the composited transition must name both properties at the
   // ratified 220ms. Reading `transitionProperty`/`Duration` off the live

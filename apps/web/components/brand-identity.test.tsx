@@ -137,6 +137,35 @@ test("the entry lockup renders the Ledger Fold mark: right file, decorative, int
   }
 });
 
+test("裁-137: the wordmark is SET lowercase while its text stays ClaraBook", async () => {
+  // The ruling has two halves and they pull in opposite directions: §8 wants
+  // lowercase GLYPHS, R1 wants the NAME to be "ClaraBook". `lowercase` is what
+  // satisfies both from ONE string — `text-transform` repaints the glyphs and
+  // leaves the DOM text alone — so this cell asserts BOTH sides of that, not
+  // just the class. Drop the class and the first assertion reds; swap the
+  // shared string for a hardcoded lowercase literal and the second does.
+  const h = await renderComponent(App(createElement(BrandLockup)));
+  try {
+    const wordmark = h.find(
+      (n) => (n as { tagName?: string }).tagName === "SPAN"
+        && typeof (n as { className?: unknown }).className === "string"
+        && ((n as { className: string }).className).includes("text-brand"),
+    ) as { className?: string } | null;
+    assert.ok(wordmark, "the wordmark span must render");
+    assert.match(
+      wordmark!.className ?? "",
+      /(^|\s)lowercase(\s|$)/,
+      "裁-137's glyph half: the wordmark span carries `lowercase`",
+    );
+    // R1's half, and the reason the shared string survives the ruling: the
+    // TEXT is still the product's name, so the accessible name, the firm
+    // shell's prose and the browser leg's exact-text matcher are all unmoved.
+    assert.match(h.text(), /^\s*ClaraBook\s*$/, "the rendered TEXT is untouched — only the glyphs are transformed");
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("the Clara welcome renders the mascot with an honest empty alt beside a literal Clara label", async () => {
   const h = await renderComponent(App(createElement(ClaraWelcome)));
   try {

@@ -42,17 +42,27 @@ export const LEDGER_FOLD_MARK_SRC = "/brand/logo/clarabook-ledger-fold-brand-ink
  * consolidated — the ruling explicitly does not cost the one-string-two-
  * consumers arrangement.
  *
- * WHAT THIS COMPONENT RENDERS TODAY, stated because the ruling's first half
- * is about glyphs and this is the only lockup in the repo: the `<span>` below
- * prints `Brand.productName` with NO case transform, so its glyphs are the
- * string's own — "ClaraBook", title-case. If 裁-137's glyph clause is meant to
- * bind HERE and not only the design authority's own artwork, the change is one
- * utility class on that span (`lowercase`), which keeps the shared string and
- * the accessible text intact because `text-transform` does not alter the DOM
- * text — `getByText("ClaraBook", { exact: true })` in
- * `e2e/identity-finish.spec.ts` keeps matching either way. That question is
- * with the owner; a lane does not restyle the front door on its own reading of
- * a one-line ruling (constraint 1).
+ * APPLIED — 裁-137's glyph clause binds THIS component, not only the design
+ * authority's artwork (owner, confirmed 2026-09-02: 字标小写 for the product's
+ * wordmark, which is the `<span>` below). The span carries `lowercase`.
+ *
+ * THE RECORD OF WHY IT IS A TRANSFORM AND NOT A SECOND STRING. Before the
+ * ruling this span printed `Brand.productName` with no case transform, so its
+ * glyphs were the string's own — "ClaraBook", title-case. The obvious fix
+ * would have been a second, lowercase string; `lowercase` is better because
+ * `text-transform` changes only the RENDERED glyphs. The DOM text and the
+ * accessible name stay "ClaraBook", which is what lets ONE shared
+ * `Brand.productName` serve both this lockup and the firm shell's prose —
+ * exactly the consolidation 裁-137 said the ruling must not cost. It is also
+ * why `getByText("ClaraBook", { exact: true })` in `e2e/identity-finish.spec.ts`
+ * and the firm-shell prose assertion both keep matching unchanged.
+ *
+ * The class is PINNED by two cells, because a utility class is the easiest
+ * thing in this file to drop by accident: `brand-identity.test.tsx` asserts it
+ * is on the wordmark span, and the browser leg measures the COMPOSITED
+ * `text-transform` on the live element plus the DOM text beside it — the
+ * class-name cell would survive Tailwind failing to emit the rule, and the
+ * computed-style cell would not.
  *
  * DELIBERATELY NOT A HEADING (unchanged). The same lockup renders on all six
  * entry faces, so making it the `<h1>` would give login, signup,
@@ -116,7 +126,11 @@ export function BrandLockup({ className }: { className?: string }) {
         unoptimized
         width={32}
       />
-      <span className="font-sans text-2xl font-semibold tracking-tight text-brand">
+      {/* `lowercase` is 裁-137's glyph half — see this file's header. It is a
+          text-transform, so the DOM text and the accessible name stay
+          "ClaraBook" while the wordmark SETS lowercase, which is what lets one
+          shared string serve both the lockup and the firm shell's prose. */}
+      <span className="font-sans text-2xl font-semibold tracking-tight text-brand lowercase">
         {t("productName")}
       </span>
     </p>
