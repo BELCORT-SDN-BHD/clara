@@ -140,3 +140,14 @@ re-reading find?"
 > a slot cap rations a fixed fleet, and hosted runners have no fleet; its one genuinely
 > load-bearing half, exempting `push`-to-main from cancellation, is carried forward in the
 > re-cut workflow-level concurrency block.
+>
+> One clause is carried forward on a NEW basis rather than by inheritance, and the change of
+> basis is the point. 裁-134's alignment clause (b) — *"pushes to main are never cancelled or
+> capped"* — was ruled against a **zero-spend** fleet, where the cost of N concurrent main
+> pipelines was runner contention. On hosted runners that cost becomes billed minutes while the
+> repo is private, and nothing at all once it is public. The clause therefore does not survive
+> automatically; it is **re-ruled on the bisect argument**: each merge's run verifies a
+> DIFFERENT tree, and per-commit granularity is what lets a bisect say which merge broke main,
+> so cancelling a superseded main run buys minutes and throws that away. Recorded in `ci.yml`
+> and `docs/ops/ci-runner.md` rather than left implied — the #513 review's finding that the fix
+> shipped there with its cost unstated.
