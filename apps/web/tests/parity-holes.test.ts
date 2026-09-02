@@ -47,6 +47,18 @@ describe("裁-117 prototype-parity wiring", () => {
     assert.match(read("components/entry/password-recovery-form.tsx"), /resetPasswordForEmail/);
   });
 
+  it("RED-BEFORE F3: selects the route-error probe at build time, never from a page request", () => {
+    const page = read("app/(entry)/forgot-password/page.tsx");
+    const config = read("next.config.ts");
+    const runner = read("e2e/run.mjs");
+    assert.doesNotMatch(page, /process\.env|CLARA_E2E_TRIGGER_ROUTE_ERROR/);
+    assert.match(page, /RouteErrorProbe/);
+    assert.match(config, /CLARA_E2E_ROUTE_ERROR_PROBE/);
+    assert.match(config, /resolveAlias/);
+    assert.match(runner, /CLARA_E2E_ROUTE_ERROR_PROBE/);
+    assert.doesNotMatch(runner, /CLARA_E2E_TRIGGER_ROUTE_ERROR/);
+  });
+
   it("mounts the open rail as a width-owning sibling instead of a fixed overlay", () => {
     const layout = read("app/(firm)/layout.tsx");
     const rail = read("components/clara/ClaraRail.tsx");

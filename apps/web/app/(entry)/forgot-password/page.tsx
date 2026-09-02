@@ -1,5 +1,6 @@
 import { getTranslations } from "next-intl/server";
 
+import { RouteErrorProbe } from "@/components/e2e/route-error-probe";
 import { PasswordRecoveryForm } from "@/components/entry/password-recovery-form";
 
 export async function generateMetadata() {
@@ -13,8 +14,10 @@ export default async function ForgotPasswordPage({
   searchParams: Promise<{ status?: string }>;
 }) {
   const { status } = await searchParams;
-  if (process.env.CLARA_E2E_TRIGGER_ROUTE_ERROR === "1" && status === "trigger-error") {
-    throw new Error("intentional e2e route-boundary probe");
-  }
-  return <PasswordRecoveryForm invalidLink={status === "invalid"} />;
+  return (
+    <>
+      <RouteErrorProbe trigger={status === "trigger-error"} />
+      <PasswordRecoveryForm invalidLink={status === "invalid"} />
+    </>
+  );
 }

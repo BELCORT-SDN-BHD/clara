@@ -275,6 +275,35 @@ function assertGuardBeforeCall(unit: SourceUnit, root: string, targetName: strin
 describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () => {
   const leaves = routeLeaves(WEB_ROOT, APP_DIR);
 
+  it("RED-BEFORE F4: no registry reason carries a hand-maintained leaf fraction", () => {
+    // The finding was one stale sentence — "four of its five leaves", written
+    // when (entry) had five and left behind when it grew to nine. The GENERAL
+    // rule is what stops the next one: a reason may describe the group, but a
+    // COUNT of it belongs in a cell that reds when the tree moves, not in prose
+    // nothing checks. Pinning the one old spelling would have caught the one old
+    // sentence; this catches the shape.
+    const entryLeaves = leaves.filter((leaf) => leaf.file.startsWith("app/(entry)/"));
+    assert.equal(entryLeaves.length, 9, "the current entry route-leaf census changed");
+    const layout = SCOPE_UNSCOPED_SURFACES.find((surface) => surface.path === "app/(entry)/layout.tsx");
+    assert.ok(layout, "the entry layout is absent from the unscoped registry");
+
+    const count = "(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\\d+)";
+    const noun = "(?:leaves|leafs|pages|faces|surfaces|routes|entrances)";
+    const handMaintainedFraction = new RegExp(`\\b${count}\\s+of\\s+(?:its|the|these|those)\\s+${count}\\s+${noun}\\b`, "i");
+
+    // POSITIVE CONTROL: the detector must actually see the sentence the finding
+    // was about, or its silence below means nothing (absence is not evidence).
+    assert.match("four of its five leaves can run", handMaintainedFraction);
+
+    for (const surface of [...SCOPE_UNSCOPED_SURFACES, ...SCOPE_EXEMPT_SURFACES]) {
+      assert.doesNotMatch(
+        surface.reason,
+        handMaintainedFraction,
+        `${surface.path}'s reason states a leaf count prose cannot keep true`,
+      );
+    }
+  });
+
   it("VACUITY CONTROL: the walk found the real tree", () => {
     assert.ok(leaves.length > 15, `only ${leaves.length} route leaves found under ${APP_DIR}`);
     const files = leaves.map((l) => l.file);
@@ -338,26 +367,26 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     );
   });
 
-  it("the five (entry) pages classify, and /pending is NOT public", () => {
-    // The census's "EVERY leaf classifies" cell would also pass if all five were
-    // registered wrongly-but-consistently, so the CLASS of each is pinned by
-    // name here. All five are pages under a group whose layout is not an
-    // entrance, so none can be ancestor-covered: each needs its own registry
-    // row, and each has one.
-    for (const file of [
-      "app/(entry)/login/page.tsx",
-      "app/(entry)/signup/page.tsx",
-      "app/(entry)/auth/confirm/page.tsx",
-      "app/(entry)/pending/page.tsx",
-      "app/(entry)/invite/[token]/page.tsx",
-    ]) {
+  it("the seven (entry) pages classify, and /pending is NOT public", () => {
+    // The census's "EVERY leaf classifies" cell would also pass if every page
+    // were registered wrongly-but-consistently, so this derives the page set
+    // from the route tree and pins the CLASS of each. These pages sit under a
+    // group whose layout is not an entrance, so none can be ancestor-covered:
+    // each needs its own registry row, and each has one.
+    const entryPages = leaves
+      .filter((leaf) => leaf.file.startsWith("app/(entry)/") && leaf.file.endsWith("/page.tsx"))
+      .map((leaf) => leaf.file);
+    assert.equal(entryPages.length, 7, "the current entry page census changed");
+    for (const file of entryPages) {
       assert.equal(classify({ file, url: "" }), "registered unscoped", `${file} is not registered unscoped`);
       assert.equal(ancestorCovered(file), false, `${file} claims an entrance ancestor it does not have`);
     }
 
-    // THE ONE ASYMMETRY THAT MATTERS. Four of the five are public — they run
-    // with no session at all. /pending is NOT: it requires a session and merely
-    // does not require a firm (design §4 E). If it ever gained `public: true`
+    // THE ONE ASYMMETRY THAT MATTERS. /pending is NOT public: it requires a
+    // session and merely does not require a firm (design §4 E). The recovery
+    // password page remains public at the proxy only so its own server-side
+    // session fork can render the typed invalid-link face instead of redirecting
+    // or leaking a provider error. If /pending ever gained `public: true`
     // the cross-check against PUBLIC_PATH_PREFIXES would force /pending into
     // proxy.ts's allowlist, and an unauthenticated stranger could load a page
     // whose entire content is a report on the caller's own registration.
@@ -366,6 +395,8 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     assert.equal(entry("app/(entry)/signup/page.tsx")?.public, true);
     assert.equal(entry("app/(entry)/auth/confirm/page.tsx")?.public, true);
     assert.equal(entry("app/(entry)/invite/[token]/page.tsx")?.public, true);
+    assert.equal(entry("app/(entry)/forgot-password/page.tsx")?.public, true);
+    assert.equal(entry("app/(entry)/auth/recover/password/page.tsx")?.public, true);
     assert.equal(
       entry("app/(entry)/pending/page.tsx")?.public,
       undefined,
@@ -376,18 +407,13 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
   it("no (entry) surface calls the spine — the self-redirect loop /pending would be", () => {
     // requireFirmScope() sends a no-firm caller to HOLDING_ROUTE, which IS
     // /pending. A check on that page redirects it to itself forever, and a check
-    // in the group's layout does the same to all five faces while also refusing
-    // every caller who has no session yet — which is four of the five by
-    // design. The registry says these are unscoped; this cell proves the files
-    // agree with the registry.
+    // in the group's layout would also refuse every pre-session face and the
+    // recovery page's typed invalid-link arm. The registry says these are
+    // unscoped or deliberately exempt; derive the complete leaf list so this
+    // proof cannot silently keep an old hand-maintained count.
     for (const file of [
       "app/(entry)/layout.tsx",
-      "app/(entry)/login/page.tsx",
-      "app/(entry)/signup/page.tsx",
-      "app/(entry)/auth/confirm/page.tsx",
-      "app/(entry)/auth/confirm/verify/route.ts",
-      "app/(entry)/pending/page.tsx",
-      "app/(entry)/invite/[token]/page.tsx",
+      ...leaves.filter((leaf) => leaf.file.startsWith("app/(entry)/")).map((leaf) => leaf.file),
     ]) {
       assert.equal(callsSpine(file), false, `${file} calls the scope spine`);
     }

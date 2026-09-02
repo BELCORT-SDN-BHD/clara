@@ -362,15 +362,22 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
       "The recovery callback prefix and its new-password descendant begin with " +
       "a one-time email code before a cookie session exists. The GET Route " +
       "Handler exchanges that code through Supabase Auth; this page then uses " +
-      "only the resulting recovery session and reads no firm-scoped relation.",
+      "only the resulting recovery session and reads no firm-scoped relation. " +
+      "It is proxy-public and STILL has a precondition of its own (independent " +
+      "review of #507, F2): it resolves the session server-side and renders the " +
+      "typed invalid-link face when there is none, so a bookmarked or expired " +
+      "URL refuses in Clara's own words instead of offering a password field " +
+      "that can only fail. That fork is a session read, never a firm read — the " +
+      "spine would refuse or loop exactly the caller this page exists to serve.",
   },
   {
     path: "app/(entry)/layout.tsx",
     reason:
       "The (entry) group's own layout, wrapping the login, signup, email-confirmation, " +
       "password-recovery, invite-acceptance and holding faces. It is a THIRD sibling group to " +
-      "(firm) and (full), deliberately outside the spine — four of its five leaves " +
-      "can run with no session at all and the holding state has no firm, so a check " +
+      "(firm) and (full), deliberately outside the spine — its route-leaf census is " +
+      "derived by the registry test, and every pre-session face plus the typed invalid-link " +
+      "face must render outside the spine. The holding state has no firm, so a check " +
       "here would refuse or loop every caller the group exists to serve. It renders " +
       "chrome only: the identity-canvas ground, the brand lockup and the 裁-2 4a " +
       "card shadow. It reads nothing and calls no door.",
