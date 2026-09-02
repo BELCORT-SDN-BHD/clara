@@ -24,7 +24,7 @@ import {
   pepperedDigestHex,
   proxyObservedClientIp,
   trustedClientIpHeaderName,
-} from "./courier";
+} from "./rate-wall-courier";
 
 const PEPPER = "lane-b-fixed-test-pepper";
 const ENV = { [TRUSTED_HEADER_VAR]: "CF-Connecting-IP", [PEPPER_VAR]: PEPPER };

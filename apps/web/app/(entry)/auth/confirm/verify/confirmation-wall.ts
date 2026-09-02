@@ -51,7 +51,7 @@
 // The branded `OriginDigest` type Lane A minted has no subject any more —
 // nothing on this side of the wall handles a digest for the confirm limb — so
 // it is gone rather than kept as a type nobody can construct. The digest type
-// that DOES exist now lives with its computation, in `lib/rate-wall/courier.ts`,
+// that DOES exist now lives with its computation, in `lib/rate-wall-courier.ts`,
 // which the checkout route uses because `open_checkout_intent` is a
 // `clara_authenticated` door only `apps/web` can call.
 //
@@ -80,7 +80,7 @@
 // a guess about the door and become what they should be: a fail-closed check
 // on a value that crossed two process boundaries.
 
-import { AUTH_WALL_CLIENT_IP_HEADER } from "@/lib/rate-wall/courier";
+import { AUTH_WALL_CLIENT_IP_HEADER } from "@/lib/rate-wall-courier";
 
 /** What the wall decided, told apart from "the wall was not reachable". */
 export type ConfirmationOutcome =

@@ -10,7 +10,7 @@ import {
   type ConfirmFlashOutcome,
   type ConfirmFlashPayload,
 } from "../confirm-flash";
-import { proxyObservedClientIp } from "@/lib/rate-wall/courier";
+import { proxyObservedClientIp } from "@/lib/rate-wall-courier";
 import { proveSameOrigin } from "@/lib/same-origin";
 import { createRouteClient } from "@/lib/supabase/server";
 

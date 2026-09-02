@@ -7,18 +7,13 @@ import {
   handleEmailConfirmationPost,
   type EmailConfirmationRouteClient,
 } from "../../app/(entry)/auth/confirm/verify/handler";
-import {
-  confirmEmailCodeWith,
-  type ConfirmEmailCode,
-  type ConfirmEmailCodeParams,
-  type ConfirmationOutcome,
+import type {
+  ConfirmEmailCode,
+  ConfirmEmailCodeParams,
+  ConfirmationOutcome,
 } from "../../app/(entry)/auth/confirm/verify/confirmation-wall";
 import { confirmFlashCookie } from "../../app/(entry)/auth/confirm/confirm-flash";
-import {
-  AUTH_WALL_CLIENT_IP_HEADER,
-  PEPPER_VAR,
-  TRUSTED_HEADER_VAR,
-} from "../../lib/rate-wall/courier";
+import { PEPPER_VAR, TRUSTED_HEADER_VAR } from "../../lib/rate-wall-courier";
 
 // This file stays scoped to the confirm POST handler's own walls —
 // `proveSameOrigin`, the C1/C2 wall seam, and the refusal-flash mechanism

@@ -34,6 +34,27 @@
 // authoritative number (design §6's named non-goals, billing Annex A D12).
 
 export const STRIPE_SECRET_KEY_VAR = "STRIPE_SECRET_KEY";
+/**
+ * THE ONE BASE, AND IT IS NOT OVERRIDABLE — a decision this lane made,
+ * reversed, and is recording because the reversal is the interesting part.
+ *
+ * An earlier cut added a `CLARA_E2E_STRIPE_API_BASE` override so 裁-86's
+ * browser leg could walk the Stripe hop (the call is server-side, so
+ * Playwright's `page.route` cannot see it), fenced behind the estate's own
+ * dev/loopback carve-out. The fence worked exactly as written, and that is
+ * what killed the idea: `next start` sets `NODE_ENV=production`, so the
+ * browser leg runs against a build where the override is — correctly —
+ * ignored.
+ *
+ * The only way to make the walk reach the stand-in would have been to loosen
+ * the fence, and hard constraint 14's operative clause forbids exactly that:
+ * "the product's security mechanisms are the thing under test and are NEVER
+ * weakened or bypassed for testing convenience". So the override is GONE
+ * rather than relaxed. The walk covers ⑤'s refusal arm and the return leg for
+ * real, and the Stripe request's own wire shape is pinned field by field in
+ * `./stripe-session.test.ts` against the shipped body. The PR body says
+ * which is which.
+ */
 export const STRIPE_API_BASE = "https://api.stripe.com/v1";
 
 /**

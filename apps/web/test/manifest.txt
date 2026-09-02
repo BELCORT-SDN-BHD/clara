@@ -196,7 +196,7 @@ lib/parts/catalog.test.tsx
 lib/parts/hooks.test.ts
 lib/parts/single-fire-guard.test.ts
 lib/parts/thread-action-coordinator.test.ts
-lib/rate-wall/courier.test.ts
+lib/rate-wall-courier.test.ts
 lib/read.test.ts
 lib/registers/accounts.test.ts
 lib/registers/adjustments-workbench.test.ts

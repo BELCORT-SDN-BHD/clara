@@ -4,7 +4,7 @@ import { test } from "node:test";
 import {
   confirmEmailCodeWith,
 } from "../../app/(entry)/auth/confirm/verify/confirmation-wall";
-import { AUTH_WALL_CLIENT_IP_HEADER } from "../../lib/rate-wall/courier";
+import { AUTH_WALL_CLIENT_IP_HEADER } from "../../lib/rate-wall-courier";
 
 // THE CONFIRM WALL SEAM ITSELF — `confirmEmailCodeWith`, driven directly
 // against C-5's `POST /api/auth-wall/confirm` contract with a substituted

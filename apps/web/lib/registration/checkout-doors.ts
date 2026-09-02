@@ -71,7 +71,7 @@ function requireString(value: unknown, field: string, fn: string): string {
 /**
  * ⑤a — open (or replay) the applicant's checkout intent, and learn which
  * Stripe price the DB says this plan is. `originDigest` is the `\x`-prefixed
- * bytea spelling from `lib/rate-wall/courier.ts`; the door raises
+ * bytea spelling from `lib/rate-wall-courier.ts`; the door raises
  * `CLR10 an origin digest is required` for anything that is not 32 bytes, so
  * a mangled round trip refuses rather than keying the wall on a short value.
  *

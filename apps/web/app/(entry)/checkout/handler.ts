@@ -18,7 +18,7 @@ import {
   openCheckoutIntent,
   recordCheckoutSession,
 } from "@/lib/registration/checkout-doors";
-import { originDigestArgFrom } from "@/lib/rate-wall/courier";
+import { originDigestArgFrom } from "@/lib/rate-wall-courier";
 import { isRegistrationRequestRow } from "@/lib/registration/holding-state";
 import {
   loadOwnRegistrationRequests,

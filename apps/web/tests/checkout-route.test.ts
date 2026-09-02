@@ -15,7 +15,7 @@ import { NextResponse } from "next/server";
 import { handleCheckoutPost, openRegistrationFrom } from "../app/(entry)/checkout/handler";
 import { checkoutFlashCookie } from "@/lib/checkout/checkout-flash";
 import { StripeSessionError, type CheckoutSessionRequest } from "@/lib/checkout/stripe-session";
-import { PEPPER_VAR, TRUSTED_HEADER_VAR } from "@/lib/rate-wall/courier";
+import { PEPPER_VAR, TRUSTED_HEADER_VAR } from "@/lib/rate-wall-courier";
 import type { OwnRegistrationResult } from "@/lib/registration/server-reads";
 
 const SUBJECT = "22222222-2222-2222-2222-222222222222";
