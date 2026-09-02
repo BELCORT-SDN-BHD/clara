@@ -1,5 +1,5 @@
 // FS-7 echelon 2 -- THE ONE GENERIC ARTIFACT DOWNLOAD DOOR, for
-// migrations/UNNUMBERED_fs7_e2_artifact_download_door.sql.
+// migrations/0162_fs7_e2_artifact_download_door.sql.
 //
 // Design of record: 裁-96② (docs/plan/active/mohe-grill-rulings-2026-09-01.md) -- ONE generic door
 // over BOTH artifact families, server-side gate only, client-side signed-URL minting FORBIDDEN --

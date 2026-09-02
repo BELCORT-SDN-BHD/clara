@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const MIG = join(HERE, "..", "migrations", "UNNUMBERED_fs7_e2_artifact_download_door.sql");
+const MIG = join(HERE, "..", "migrations", "0162_fs7_e2_artifact_download_door.sql");
 const src = readFileSync(MIG, "utf8");
 
 function body(createLine, endMarker) {
