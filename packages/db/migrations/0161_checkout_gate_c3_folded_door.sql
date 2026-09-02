@@ -1,6 +1,6 @@
 -- FS-4 checkout gate, PR C-3: the folded paid-registration -> firm transaction, its payment
--- and OTP evidence, the minimal beta billing declaration, and the two tightly confined doors.
--- This file is deliberately UNNUMBERED; its migration number is claimed only at merge.
+-- and OTP evidence, the minimal beta billing declaration, five human doors, and the confined
+-- two-verb auth-wall lane. Number 0161 was claimed at merge prep under 裁-108.
 --
 -- C-1 deliberately shipped the DPA storage but deferred its application doors to this cohort.
 -- C-3 heals that acknowledged build-order drift. C-2's apply_stripe_events body is not recut here: the

@@ -116,12 +116,12 @@ after(async () => {
 function gate(t) {
   if (live) return false;
   if (process.env.CLARA_ALLOW_MISSING_CHECKOUT_GATE_C3 === "1") {
-    console.warn("SKIP checkout-gate-c3: the C-3 cohort is not applied (explicit unnumbered/pre-integration run).");
-    t.skip("checkout-gate C-3 cohort absent -- explicit pre-integration run");
+    console.warn("SKIP checkout-gate-c3: the 0161 C-3 cohort is not applied (explicit pre-integration run).");
+    t.skip("checkout-gate C-3 cohort absent -- explicit pre-0161 run");
     return true;
   }
   assert.fail(
-    "checkout-gate C-3 is required for a focused run: apply a numbered suite copy of UNNUMBERED_checkout_gate_c3_folded_door.sql",
+    "checkout-gate C-3 is required for a focused run: apply 0161_checkout_gate_c3_folded_door.sql",
   );
 }
 
@@ -1620,7 +1620,7 @@ cell("c3.52 W-M2 positive -- resolved intent-not-found event produces a real pay
 // RULED: the right question for open_checkout_intent specifically is "was this body altered",
 // which a prosrc SHA answers completely (case tricks, comment poisoning, Unicode escapes, and
 // anything not yet invented all change the hash) -- the SAME idiom this migration already uses
-// twice for create_firm's W-E3 pin (UNNUMBERED_checkout_gate_c3_folded_door.sql, the prestate/tail
+// twice for create_firm's W-E3 pin (0161_checkout_gate_c3_folded_door.sql, the prestate/tail
 // pair pinning it to sha12 59fa533d9c03). Pinning accepts the same cost the estate already pays
 // there: every legitimate future edit to this body must update the pinned hash, deliberately --
 // correct for a body that should be frozen from here.

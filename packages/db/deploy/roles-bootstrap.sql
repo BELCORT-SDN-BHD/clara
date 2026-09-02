@@ -20,7 +20,7 @@
 -- 0160 (clara_stripe_webhook + its clara_stripe_webhook_login shell — FS-4 C-2's
 -- Stripe webhook sweep lane, PR #484, added 2026-09-02 per the estate's "role mints
 -- a same-commit roles-bootstrap twin" law — 0160 was the first role-minting
--- migration since this file was last synced), checkout_gate_c3_folded_door
+-- migration since this file was last synced), 0161_checkout_gate_c3_folded_door
 -- (clara_auth_wall + its clara_auth_wall_login shell — FS-4 C-3's pre-session
 -- confirmation-attempt wall), and deploy/storage-provision.sql
 -- (clara_storage_docs). Derived and cross-checked against a live-shaped rig (apply
