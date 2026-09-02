@@ -14,8 +14,10 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   `workflow/nitro` compiler module (Appendix A).
 - **The chat loop** (versioned `workflows/chatTurn.vN.ts` files, each with its
   FROZEN closure `chatTurn.vN.impl.ts` / `.prompt.ts` / `.tools.ts`; the registry
-  in `workflows/registry.ts` pins the LIVE version — **`chatTurn_v16` since
-  2026-08-31, serving on Fly machine version 70**; earlier versions stay frozen +
+  in `workflows/registry.ts` pins **`chatTurn_v17`** since #485 (`60ffbfb0`, 2026-09-02
+  18:18 +0800; `registry.ts:616` records v16→v17). **The registry pin is not the serving
+  bundle**: the SERVING Fly bundle is still machine version 70 (deployed 2026-08-31), carrying
+  v16, until the next deploy; earlier versions stay frozen +
   reachable for parked runs per Appendix A): a coding-capable advisor with the `draft_journal_entry` write
   tool plus the four Wave-E authoring tools (metric preview/draft, report-spec
   draft, report preview — the last a named structural refusal until the OBO
@@ -30,8 +32,12 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   principal + own-OR-firm-shared session predicate (indistinguishable 404).
 - **Control listener** (`lib/control.mjs`): leased clarify delivery + cancel
   settlement. **Leader loop** (`lib/leader.mjs`): routing + drain (`lib/drain.mjs`)
-  + reconcile (`lib/reconciler.mjs`; the daily `clara.reconcile_autopost_rules()`
-  sweep RETIRED with F-A2 PR-3, along with the rest of the rules-execution tier).
+  + reconcile (`lib/reconciler.mjs`; the DB function `clara.reconcile_autopost_rules()`
+  and the rest of the rules-execution tier RETIRED with F-A2 PR-3 at `0118`, but the
+  reconciler's belt caller was never unwired — `reconciler.mjs:673` still fires it every
+  cycle behind a bare try/catch with no `to_regprocedure` feature-detect, so the call fails
+  and retries every poll in the deployed path; unwire per
+  `docs/plan/active/f-a2-annexes-1-estate.md:95`).
   **Consumer lanes**, each on its OWN dedicated connection + advisory lock:
   matcher (`lib/matcher.mjs`),
   autodraft (`lib/autodraft.mjs`), local_facts (`lib/local-facts.mjs`),
@@ -41,7 +47,13 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   retired with F-A2 PR-3.) **Supervisor** (`scripts/serve.mjs`):
   one crash-only process group.
 - **HTTP** (`src/index.ts`): chat sessions/messages/turns, an SSE stream that
-  survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7).
+  survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7). Nine more routes are
+  mounted unconditionally alongside these (`src/index.ts:53-94`, 19 total): `GET /workflows`,
+  the five `/api/interview/*` verbs (firm/start, client/start, answer, cancel, state),
+  `POST /api/opening/parse-targets`, `POST /api/seeding/prepare`, and the authenticated
+  bytes-**EGRESS** door `GET /api/documents/:id/bytes` — the last is not in the Slice-5 intake
+  table below, which documents only the inbound (upload) half of "the complete evidence-byte
+  path".
 - **Workflow-versioning**: `registry.ts` names the newest version enqueue sites
   target; the CI freeze-lint golden-hashes every frozen body + its import
   closure. Prompt + tools live INSIDE the frozen closure by design (§4.9).
@@ -120,9 +132,10 @@ Azure.
 
 ## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
 
-`chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-09-02: the
-registry pins `chatTurn: chatTurn_v16`** (the P6-1/裁-9 repoint, registry.ts's own inline
-comment records v15→v16) — repo frontier is 155 migration files through `0160`
+`chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-09-03: the
+registry pins `chatTurn: chatTurn_v17`** (#485, `60ffbfb0`, 2026-09-02 18:18 +0800;
+`registry.ts:616` records v16→v17 — superseding the prior "TRUED 2026-09-02" v16 stamp,
+which was itself written hours before this repoint) — repo frontier is 155 migration files through `0160`
 (a NUMBER, not a count — the numbering has gaps), live DB applied through `0153`. **The
 SERVING Fly bundle is machine version 70, deployed 2026-08-31 08:21Z, carrying
 `chatTurn_v16` — bundle-proven by grep on the served container** (`PROGRESS.md`'s deploy

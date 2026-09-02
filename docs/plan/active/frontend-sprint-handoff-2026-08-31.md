@@ -75,7 +75,9 @@ honest not-built-yet flows and lives in `PROGRESS.md` rows. Nothing in this file
   DB rows (TEST first); lanes build the code; keys env-to-env only.
 - **裁-82 → 裁-85** the seat stays in the Claude Code session; lanes by fit (Codex for heavy
   execution, sonnet for bounded work, opus for judgement); a family that is out is substituted, builds
-  included, recorded in the PR body. **裁-83** a reduced Wave G precedes beta.
+  included, recorded in the PR body. **裁-83** a reduced Wave G precedes beta. *(native only until
+  beta live — 裁-133, 2026-09-02: no Codex lane of any kind, builds included; sonnet-5 xhigh
+  bounded, opus-5 xhigh judgement/security/review; effort stays xhigh.)*
 - **裁-84 → 裁-86** the lean ladder: ONE fresh-context opus review leg **+ a real-browser Playwright
   e2e leg on every frontend train**, the axe scan riding it. **裁-111 (2026-09-01):** the
   cross-family Codex adversarial leg is SUSPENDED until beta live — the opus lane is the complete
@@ -85,6 +87,11 @@ honest not-built-yet flows and lives in `PROGRESS.md` rows. Nothing in this file
   裁-64①②③④ · 裁-65 P4-7 · Q1–Q9 + Q-A…F (08-27) · R1–R7 · 裁-1…裁-56.
 
 ## 4 · The thirteen open PRs — disposition
+
+**SUPERSEDED BY EVENTS 2026-09-02 — all thirteen concluded: seven merged (08-31…09-01), six
+ARCHIVED and CLOSED at 03:23Z under 裁-123, rounds WIP-committed to pushed refs and every
+worktree removed. Resume from the PR comment + `archive-parked-lanes-2026-09-02.md` — NEVER from
+a worktree.** The table below is the dated snapshot this sprint opened from, kept for the record.
 
 | PR | What | Disposition | Where the bar lives |
 |---|---|---|---|
@@ -137,7 +144,9 @@ full-suite gates.
   OUTSIDE the list.
 - **Absence is not evidence; spelling is not identity** (review laws 2 and 3). A grep miss is a
   not-found-by-pattern.
-- **Every dispatch pins a model** (`gpt-5.6-sol`, `model_reasoning_effort=xhigh`); every lane in
+- **Every dispatch pins a model** (`gpt-5.6-sol`, `model_reasoning_effort=xhigh`) *(native only
+  until beta live — 裁-133, 2026-09-02: no Codex lane of any kind, builds included; sonnet-5 xhigh
+  for bounded work, opus-5 xhigh for judgement/security/review; effort stays xhigh)*; every lane in
   its own worktree; never `pnpm install` inside a lane (junction the main checkout's
   `node_modules`); rigs are instance-unique throwaway `postgres:17` containers; **DSNs and keys come
   from the environment only, never argv, never a file in the repo.**

@@ -42,6 +42,19 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
 - `chat-parity-mock.mjs` — that walk's own mock lane, a file-disjoint sibling of
   `serve-built.mjs` (the same shape `live-stack/serve-live.mjs` takes), reached through three
   small hooks so no other spec's surface changes.
+- `parity-holes.spec.ts` — closes the prototype parity holes (#507, 裁-117): client A-to-B
+  clears the draft and never paints A under B, the docked rail owns its width without
+  covering the workbench, a client/thread mismatch is indistinguishable from not-found, the
+  full password-recovery keyboard/refusal/success/callback/policy walk, the reset face's
+  sessionless refusal, and a thrown entry page's route error boundary with a safe digest.
+- `identity-finish.spec.ts` — P6-6's 裁-86 browser leg (#514): the Ledger Fold mark on every
+  entry face (R1), the Clara mascot in the docked rail's welcome state (裁-14), the §7
+  reduced-motion arm, and axe over every face touched — proving what only a browser can (the
+  asset bytes actually arrived, the composited CSS resolves real values).
+- `a11y-finish-walk.spec.ts` — P6-3's 裁-86 browser leg (#515): axe-core's real `target-size`
+  rule (裁-13) with its spacing exception, the skip link reaching focus past the sidebar
+  (DS-02), the dropdown genuinely stopping under reduced motion (DS-01), and the recut ring +
+  `--input` reaching the browser as computed style rather than class strings (裁-1).
 - `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers. The two
   INTERNAL ports are overridable — `CLARA_E2E_NEXT_PORT` (default 3101) and
   `CLARA_E2E_RUNTIME_PORT` (default 3102), alongside the public `CLARA_E2E_APP_ORIGIN` — so a

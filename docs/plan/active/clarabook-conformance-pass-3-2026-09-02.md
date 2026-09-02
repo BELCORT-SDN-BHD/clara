@@ -43,7 +43,7 @@ grep/read evidence, not as adversarially-confirmed claims.
 | Brand fonts | byte-identical to reference (`sha256sum` match on all 3 `.ttf`) | DS-20 |
 | Light-theme-only / desktop-first | 0 real `dark:` variants (3 hits are all inside one strip-comment); no distinct mobile layout, graceful `sm:` stacking only | `apps/web/components/ui/dropdown-menu.tsx:14`; DS-20 |
 | Zero perpetual animation | 0 animate-spin/pulse/bounce/ping/infinite hits | DS-20 |
-| Token contrast gate | 38 pairs, all PASS, tightest 4.64:1 (muted-foreground on identity-canvas) | `apps/web/scripts/check-token-contrast.mjs`; DS-17 |
+| Token contrast gate | 38 pairs at filing, all PASS, tightest 4.64:1 (muted-foreground on identity-canvas). **Re-measured 2026-09-03: 55 pairs** (`grep -c '^  { id: "' apps/web/scripts/check-token-contrast.mjs`) — count the file, not this line; the P6-3/P6-6 trains added pairs, not removed any | `apps/web/scripts/check-token-contrast.mjs`; DS-17 |
 | next-intl coverage | 185 of 221 non-test `.tsx` under components/ import next-intl | DS-08 instrument |
 | Two-level IA (Q3) | firm altitude / client altitude skeleton built and correctly cited | `mohe-grill-rulings-2026-08-27.md:29-31`; IA-13 (CONFIRMED) |
 | Client switch as a security event, at the PAGE level | `<div key={clientId}>` unmount/remount in `ClientScopeProvider` genuinely clears page-scoped state on a client-to-client navigation | `apps/web/components/client-scope-provider.tsx:10-14,66`; IA-02 (CONFIRMED) — **the Clara rail does NOT inherit this; see §3** |
@@ -92,22 +92,27 @@ authority, marked at its own site, not silently absorbed):
 | R3 — focus ring, shadcn ring supersedes contract §9's outline | Mechanism ruled; **the specific alpha value (70%) is NOT the ruling's own target yet — see §3, this is a mechanism-only divergence** | `mohe-grill-rulings-2026-08-27-evening.md:25-33`; 裁-1, `mohe-grill-rulings-2026-08-28.md:12-18` |
 | 裁-64③ — ring-offset mechanism ruled | Superseding treatment ruled; build still owed (§3) | `mohe-grill-rulings-2026-08-30.md:206` |
 | 裁-2 4c — `--input` recut ruled | Superseding value ruled; build still owed (§3) | `mohe-grill-rulings-2026-08-28.md` (裁-2 4c) |
-| **裁-117 — one-thread-per-altitude ruled as the beta shape** | If this ruling exists, it disposes of IA-06's open question (the reduction from HANDOFF §2's "persistent, parallel threads" to one thread per altitude). At scan time IA-06 explicitly found this an **unrecorded narrowing**, not a ruled one, and flagged a sharper mechanism than the original finding stated: `listSessions` resolves to the NEWEST VISIBLE session (own + every firm-shared thread), so a colleague sharing a newer thread silently re-points the rail and the user's own scrollback becomes unreachable — a confidentiality-flavoured surprise, not just a missing switcher. **If 裁-117 rules one-thread-per-altitude, that re-point hazard still needs a fix regardless of the ruling** (scope `find` to `created_by === self`). | Cited by brief only; not found in `mohe-grill-rulings-2026-09-02.md` as of this pass |
+| **裁-117 — one-thread-per-altitude ruled as the beta shape** | **RE-MEASURED 2026-09-03: 裁-117 now resolves** at `mohe-grill-rulings-2026-09-02.md:91`, disposing of IA-06's open question (the reduction from HANDOFF §2's "persistent, parallel threads" to one thread per altitude). At scan time IA-06 explicitly found this an **unrecorded narrowing**, not a ruled one, and flagged a sharper mechanism than the original finding stated: `listSessions` resolves to the NEWEST VISIBLE session (own + every firm-shared thread), so a colleague sharing a newer thread silently re-points the rail and the user's own scrollback becomes unreachable — a confidentiality-flavoured surprise, not just a missing switcher. **The re-point hazard still needs a fix regardless of the ruling** (scope `find` to `created_by === self`) — this truing did not re-verify whether that fix has landed. | `mohe-grill-rulings-2026-09-02.md:91` |
+| **裁-137 — the wordmark renders lowercase glyphs (contract §8); the name in prose is ClaraBook (R1)** | The design authority's own lockup renders lowercase glyphs ("clarabook") while its prose says "ClaraBook" — contract §8 governs the WORDMARK (the glyphs), R1 (the ClaraBook brand adoption) governs the NAME (text). Ruled: both — wordmark lowercase per §8, every prose occurrence ClaraBook per R1. Zero code change; recorded in #514's PR body as diverged-by-ruling-resolved — this record did not carry its half until now. Live: `apps/web/components/entry/brand-lockup.tsx:133` applies `lowercase` as a CSS text-transform (DOM text and accessible name stay "ClaraBook") against the authority's `g5-design-system/docs/README.md:47` ("use the exact lowercase brand name `clarabook` in user-facing copy") | mohe-grill-rulings-2026-09-02-pm.md (裁-137, landing in #520); `apps/web/components/entry/brand-lockup.tsx:133` |
 
 ---
 
 ## §3 · OWED
 
+**RE-MEASURED 2026-09-03 @ `dfe9406c` (repo tip at truing time).** Every row below was filed
+2026-09-02 against the tip of that day; several are now DONE. Marks added inline; unmarked rows
+are unchanged and still open.
+
 Each row: file:line · the contract row it fails · the train that owns it · the gating ruling.
 
-### P6-3 — the four ruled-but-unbuilt token/a11y debts (all four re-measured, all still open)
+### P6-3 — the four ruled-but-unbuilt token/a11y debts — **DONE, #515**
 
 | Item | File:line | Contract row | Gating ruling |
 |---|---|---|---|
-| Focus ring still 50% alpha, not the ruled 70% | `apps/web/app/globals.css` (ring utilities); 12 ring-ring/50 hits across 11 files | R3/裁-1 target alpha | `mohe-grill-rulings-2026-08-28.md:12-18` (裁-1) |
-| `ring-offset` unbuilt | 0 hits anywhere in `apps/web/{components,app}` | 裁-64③ | `mohe-grill-rulings-2026-08-30.md:206` |
-| `--input` unchanged | `apps/web/app/globals.css:279` (`--input: #c7c5bd;`) | 裁-2 4c | `mohe-grill-rulings-2026-08-28.md` |
-| WCAG 2.2 target-size (2.5.8) gate unbuilt | 0 hits in `apps/web/test/` | 裁-13 | `mohe-grill-rulings-2026-08-28.md:190-196` |
+| Focus ring still 50% alpha, not the ruled 70% | **DONE #515** — the class ring-ring/50 is 0 in production source (the one remaining hit, `apps/web/test/keyboardWalk.test.ts:87`, is a planted DS-05 fixture, not a live class); ring-ring/70 is live across the ring utilities (`apps/web/app/globals.css`) | R3/裁-1 target alpha | `mohe-grill-rulings-2026-08-28.md:12-18` (裁-1) |
+| `ring-offset` unbuilt | **DONE #515** — the classes ring-offset-2/ring-offset-background are live at `apps/web/components/ui/button.tsx:35`, asserted by `apps/web/tests/focus-ring-contract.test.ts` and the `a11y-finish-walk.spec.ts` browser leg | 裁-64③ | `mohe-grill-rulings-2026-08-30.md:206` |
+| `--input` unchanged | **DONE #515** — `apps/web/app/globals.css:304` now `--input: #8b8981;` | 裁-2 4c | `mohe-grill-rulings-2026-08-28.md` |
+| WCAG 2.2 target-size (2.5.8) gate unbuilt | **DONE #515** — `apps/web/test/a11yRules.ts` enforces the floor read from `--target-min` (`globals.css:382`, 24px), reasoned `data-target-size-exception` escape, mutant panel at `a11yRules.test.ts:158-276`; built-app leg `apps/web/e2e/a11y-finish-walk.spec.ts` | 裁-13 | `mohe-grill-rulings-2026-08-28.md:190-196` |
 
 All four: `docs/plan/active/fe-train-plan-2026-08-30-orders-p6.md:136-215` (P6-3 ②); DS-17.
 
@@ -115,14 +120,21 @@ All four: `docs/plan/active/fe-train-plan-2026-08-30-orders-p6.md:136-215` (P6-3
 
 | Item | File:line | Severity/status | Gating |
 |---|---|---|---|
-| Dropdown menu animates under `prefers-reduced-motion` | `apps/web/components/ui/dropdown-menu.tsx:69,163` — `motion-safe:` missing on the `:69` popup (only reachable site; `:163`'s submenu is dead code, `grep -rn "DropdownMenuSub"` excl. primitive → 0 hits); hardcodes `duration-100` at both | CONFIRMED, live blast radius = one dropdown on /admin/members | candidate (DS-01) |
-| No skip link | `apps/web/components/common/page-shell.tsx:23`, `apps/web/app/(entry)/layout.tsx:40` — neither `<main>` carries an `id`; landmark half (nav/aside/header) IS built | CONFIRMED but downgraded — belongs beside 裁-13 as P6-polish, not gating | no (DS-02) |
-| `aria-busy` never rendered | 0 hits across `apps/web`; 55 `<LoadingState` sites, sole loading primitive; only StateBanner has `role=` computed, LoadingState has none | CONFIRMED, dropped port (the authority's own screens implement it) | candidate (DS-03) |
-| Nested live regions | `ClaraThreadView.tsx:75` (`role="log" aria-live="polite"`) contains 6 StateBanner sites, not 8; **sharper instance found**: `InterviewRunCard.tsx:257` is its own `role="log" aria-live="polite"`, nested INSIDE ClaraThreadView's log via `OnboardingChecklistCard.tsx:218` — role="log" inside role="log", which the lane's own suggested fix (drop aria-live from the outer container) would not fix | CONFIRMED, corrected and strengthened | candidate (DS-04) |
-| `drafts-queue-panel.tsx:114`'s focus halo | Sole 50%-alpha ring carrier of 11 with no `border-ring` companion AND `outline-none` set — entire focus indicator is the halo at 2.363:1 (white ground) to 2.245:1 (worst gated ground), below WCAG 1.4.11's 3:1. `apps/web/test/keyboardWalk.ts:100-103` + `keyboardWalk.test.ts:87` affirmatively PASS this exact class string | CONFIRMED, and the gate that should catch it blesses it instead | yes-by-ruling (DS-05, R3/裁-1) |
-| Per-field validation association unbuilt | Exactly 1 rendered `aria-invalid` in the whole app (`apps/web/components/reports/ArtifactRow.tsx:174`), its own error text neither associated nor announced; `data-invalid` = 0; 1 real `aria-describedby` and it labels a character counter, not an error; `@base-ui/react` ships `field`/`fieldset`/`form`, none imported. **Dominant unaddressed pattern is a silent disabled Confirm button** across 12 near-duplicate door dialogs (63 `confirmDisabled=` sites), not a styled-but-unannounced field — form-level errors DO announce correctly via `StateBanner`'s `role="alert"` | CONFIRMED and corrected | candidate (DS-09) |
+| Dropdown menu animates under `prefers-reduced-motion` | **DONE #515** — every `data-[side=…]`/zoom transform on `dropdown-menu.tsx` now gated `motion-safe:` | CONFIRMED, live blast radius = one dropdown on /admin/members | candidate (DS-01) |
+| No skip link | **DONE #515** — `apps/web/components/common/skip-link.tsx` now exists, wired into `app/(firm)/layout.tsx` | CONFIRMED but downgraded — belongs beside 裁-13 as P6-polish, not gating | no (DS-02) |
+| `aria-busy` never rendered | **DONE #515** — `role="status"` on `LoadingState` (deliberately WITHOUT `aria-busy`, reasoned in its own header) + real `aria-busy` on the two PERSISTENT regions, `ClaraThreadView.tsx:193` and `InterviewRunCard.tsx:284` | CONFIRMED, dropped port (the authority's own screens implement it) | candidate (DS-03) |
+| Nested live regions | **DONE #515** — the live region moved DOWN off the scroll container (`ClaraThreadView.tsx:126-140,189-193`): it now wraps only the transcript, so `OnboardingChecklistCard`/`InterviewRunCard`'s own `role="log"` are siblings, not descendants | CONFIRMED, corrected and strengthened | candidate (DS-04) |
+| `drafts-queue-panel.tsx:114`'s focus halo | **DONE #515** — the ring is `focus-visible:ring-ring/70` now (part of the global R3 alpha recut), not the 50%-alpha halo the gate blessed | CONFIRMED, and the gate that should catch it blesses it instead | yes-by-ruling (DS-05, R3/裁-1) |
+| Per-field validation association unbuilt | **PARTIALLY DONE — re-measured 2026-09-03: 2 rendered `aria-invalid={…}` sites, not 1 or 12** (`money-input.tsx:113`, `ArtifactRow.tsx:174`; the 12 the raw grep found includes `has-[…aria-invalid=true…]` CSS variant selectors in `input-group.tsx`, not renders). **Dominant unaddressed pattern is still the silent disabled Confirm button** — 68 `confirmDisabled=` sites as of this measurement (was ~63) — not a styled-but-unannounced field; form-level errors DO announce correctly via `StateBanner`'s `role="alert"` | CONFIRMED and corrected | candidate (DS-09) |
 
-### P6-4 / task #14 — the float-hook money parsers, corrected and narrowed
+### P6-4 / task #14 — the float-hook money parsers, corrected and narrowed — **the three named files GONE, #505**
+
+**Re-measured 2026-09-03:** the three files named below no longer exist (`git ls-files` = 0 hits for
+all three paths); the consolidation shipped as `apps/web/components/common/money-input.tsx`,
+which delegates parsing to a shared `parseMoneyInput` helper rather than each field's own
+`Math.round(Number(sanitized) * 100)`. This truing does not re-verify whether the exponent-notation
+and 3-decimal-truncation edge cases below are closed by the new parser — only that the named
+files and their ad hoc parsing are gone. The original finding follows, for the record:
 
 `apps/web/components/journals/use-amount-input.ts:42`, `staff-advance-money-input.tsx:37`,
 `close-money-input.tsx:37` — `Math.round(Number(sanitized) * 100)`. **Refuted at BLOCKER severity**
@@ -137,9 +149,10 @@ silently, where the house parser returns `null`). Feeds 9 live consumer files. `
 
 No finding in the three scanned lanes (`design-tokens-components`, `design-ia-prototype-parity`,
 `integration-contract-law`) covers the COA checklist apply button — it is outside this pass's
-scanned surface. cites 裁-128 as gating it into beta;
-that ruling number does not resolve in `mohe-grill-rulings-2026-09-02.md`. Flag for the lane that
-scanned this surface directly (not one of the three read for this document) to confirm the citation.
+scanned surface, which cites 裁-128 as gating it into beta. **Re-measured 2026-09-03: 裁-128 now
+resolves** at `mohe-grill-rulings-2026-09-02.md:225` (the AUTHORING NOTE above already covers
+this — the ruling landed in the same PR as this record, on branch harness/checkpoint-truing-2026-09-02,
+after this section's citation was first written).
 
 Separately confirmed for P6-5: **⌘K cannot reach a client from firm altitude** — `CLIENT_ROUTES`
 render only when the URL already resolves a `clientId`; no row indexes client names, so ⌘K is not
@@ -147,7 +160,15 @@ render only when the URL already resolves a `clientId`; no row indexes client na
 the firm-altitude client-reachability half is unordered anywhere. `apps/web/lib/command/routes.ts:150`;
 `mohe-grill-rulings-2026-08-29.md:256`; IA-15.
 
-### P6-6 — identity, 4/4 owed (not 3/4)
+### P6-6 — identity, 4/4 owed (not 3/4) — **DONE, #514**
+
+**Re-measured 2026-09-03: all four items shipped.** `apps/web/public` now holds 7 tracked files
+including both brand PNGs (`apps/web/public/brand/clara/clara-quiet-clerk-neutral-v1.0.png`,
+`apps/web/public/brand/logo/clarabook-ledger-fold-brand-ink-v1.0.png`); `apps/web/messages/en.json` carries 13 `ClaraBook`
+strings (`git grep -c`); `invite-mail.ts:154-158` now reads "on ClaraBook"/"invited to ClaraBook"
+(no more "on Clara"); and item ④'s entry-face finish is complete — `app/(entry)/layout.tsx`
+renders `<BrandLockup />` (`apps/web/components/entry/brand-lockup.tsx`), not just the structural scope.
+The original finding follows, for the record:
 
 `apps/web` ships **zero** Ledger Fold or mascot implementation by construction-path measurement (0
 `<svg>`, 0 tracked image files under `apps/`, no next/image component use, public/ holds only
@@ -163,7 +184,12 @@ order reads "taken from structural (P4-3) to **finished**" and only the structur
 
 ### task #15 — the Clara rail inset, rail state bleed, and thread re-point (all confirmed, all strengthened)
 
-- **Rail inset.** `ClaraRail.tsx:61` is `fixed … w-80` with no responsive prefix, `railOpen: true`
+- **Rail inset — DONE, #507.** Re-measured 2026-09-03: `ClaraRail.tsx:62` is now
+  `sticky top-0 flex h-dvh w-80 shrink-0` (not `fixed`), and `<RailMount />`
+  (`apps/web/app/(firm)/layout.tsx:105`) is now INSIDE the layout's flex row
+  (`className="relative flex min-h-dvh bg-background"`, opened at `:69`) as a sibling of the main
+  content div — flex reflow is now structurally possible. The original finding follows, for the
+  record: `ClaraRail.tsx:61` is `fixed … w-80` with no responsive prefix, `railOpen: true`
   by default, occluding 320px of every firm-altitude page on first paint — and it is structurally
   deeper than "no gutter": `<RailMount />` (`apps/web/app/(firm)/layout.tsx:75`) sits OUTSIDE the
   layout's flex row entirely (opened at `:63`), so no flex reflow is possible even in principle, and
@@ -212,7 +238,11 @@ client's name inside a confirm-dialog description, but only for an onboarding-st
 open plan. `apps/web/components/firm/client-workspace-overview.tsx:53-58`; `apps/web/lib/firm/reads.ts:128`;
 HANDOFF.md:223 (clarabook-frontend); IA-05.
 
-### Error boundaries
+### Error boundaries — **DONE, #507**
+
+**Re-measured 2026-09-03:** `error.tsx` now exists at three route-group roots —
+`app/(entry)/error.tsx`, `app/(firm)/error.tsx`, `app/(full)/error.tsx`. The original finding
+follows, for the record:
 
 No `error.tsx`, `global-error.tsx`, or `loading.tsx` at any level, and no hand-rolled React error
 boundary anywhere in the package either (0 hits for `componentDidCatch`/`getDerivedStateFromError`/
@@ -223,7 +253,12 @@ corroborates the roster (5 layouts + not-found, no error/loading). HANDOFF.md §
 ("Empty, loading, error, permission, offline, and stale-revision states remain visible") is the
 cleanest binding text. IA-07.
 
-### Password recovery
+### Password recovery — **DONE, #507**
+
+**Re-measured 2026-09-03:** the full flow now exists — `apps/web/components/entry/password-recovery-form.tsx`
+(`resetPasswordForEmail` → the /auth/recover route), `password-reset-form.tsx` + `password-reset-route.tsx`,
+`app/(entry)/forgot-password/page.tsx`, and `login-form.tsx:167` links `/forgot-password`. The
+original finding follows, for the record:
 
 No `resetPasswordForEmail` call anywhere in the repo's history across all 377 refs; no recovery arm
 in the confirm route (hardcodes `verifyOtp({ type: "signup" })`); no entry in the proxy's
@@ -276,11 +311,14 @@ sees what this pass added on top of the two prior audits.)*
 
 ## §5 · FS-9 acceptance lines
 
+**DONE, #514 — re-measured 2026-09-03.** All three lines below were "NOT DONE" at filing
+(2026-09-02); #514 shipped all three the same day. Status column left as filed, for the record.
+
 | Line | Status |
 |---|---|
-| Ledger Fold ported | **NOT DONE.** 0 `<svg>`, 0 tracked image assets under `apps/`, public/ holds fonts only. |
-| Mascot ported | **NOT DONE.** Same construction-path measurement as Ledger Fold; 0 hits. |
-| ClaraBook copy pass | **NOT DONE.** 0 commits ever touching `"ClaraBook"` in `apps/web/messages/`; the platform-slot census (7 en.json strings + the invite-email subject/body) has never been swept. |
+| Ledger Fold ported | **DONE #514.** `apps/web/public/brand/logo/clarabook-ledger-fold-brand-ink-v1.0.png` is tracked. ~~NOT DONE. 0 `<svg>`, 0 tracked image assets under `apps/`, public/ holds fonts only.~~ |
+| Mascot ported | **DONE #514.** `apps/web/public/brand/clara/clara-quiet-clerk-neutral-v1.0.png` is tracked. ~~NOT DONE. Same construction-path measurement as Ledger Fold; 0 hits.~~ |
+| ClaraBook copy pass | **DONE #514.** 13 `"ClaraBook"` strings in `apps/web/messages/en.json`; `invite-mail.ts:154-158` reads "on ClaraBook"/"invited to ClaraBook". ~~NOT DONE. 0 commits ever touching "ClaraBook" in apps/web/messages/; the platform-slot census (7 en.json strings + the invite-email subject/body) has never been swept.~~ |
 
 All three: IA-08 (CONFIRMED, corrected to 4/4 owed including item ④'s finish).
 
@@ -347,5 +385,8 @@ All three: IA-08 (CONFIRMED, corrected to 4/4 owed including item ④'s finish).
   the `check-public-key.mjs` wiring were verified; `next build` was not run in this lane.
 - Whether `share_chat_session`'s SQL predicates behave as read against a live DB for the IA-06
   re-point hazard — the two predicates were read, not executed.
-- Whether 裁-116, 裁-117, and 裁-128 exist anywhere outside the ledger files this pass could reach
-  (see the Authoring Note) — this is the single largest unresolved item in this document.
+- ~~Whether 裁-116, 裁-117, and 裁-128 exist anywhere outside the ledger files this pass could reach
+  (see the Authoring Note) — this is the single largest unresolved item in this document.~~
+  **RESOLVED, per the Authoring Note: all three now resolve** in
+  `mohe-grill-rulings-2026-09-02.md` (裁-116 `:77`, 裁-117 `:91`, 裁-128 `:225`) — the ledger
+  section landed in the same PR as this record, as the Authoring Note anticipated.
