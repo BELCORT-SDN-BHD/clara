@@ -50,7 +50,7 @@ This suite runs today only when a human or an agent invokes `pnpm --filter @clar
 directly (or drives the same faces manually through the Playwright MCP tools, as the
 `entry-faces-walk` spec's own header describes). Landing it as a required, always-green GitHub
 Actions job — the render-drill-style CI leg described in `AGENTS.md`'s CI/CD section — is
-tracked as **FS-12** in `docs/plan/active/frontend-sprint-handoff-2026-08-31-orders.md`, not
-this train. Wiring it in early, ad hoc, on one PR would give this one train's browser leg a
-different CI shape than every other frontend train's, and FS-12 exists specifically to land
-that wiring once, uniformly, for all of them.
+**not owned by any order: 裁-86 makes the Playwright walk a per-train ACCEPTANCE instrument, not
+a CI gate; FS-11 (the reduced Wave G) first walks steps 2–4 and 6–11 in a browser.** Wiring it
+in early, ad hoc, on one PR would give this one train's browser leg a different CI shape than
+every other frontend train's, and no order carries this wiring uniformly for all of them.

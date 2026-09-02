@@ -1,7 +1,7 @@
 # apps/web — agent notes
 
-The P3 client workbench: Next.js App Router on Cloudflare Workers, replacing apps/dashboard at
-cutover. Full reference: `README.md` here.
+The production Agentic OS frontend (P1–P6 through the beta runway): Next.js App Router on
+Cloudflare Workers, replacing apps/dashboard at cutover. Full reference: `README.md` here.
 
 - Reads ride `lib/read.ts`'s `getRows` against RLS-scoped views/tables or masked `_visible`
   views — never a hand-rolled query. Governed writes ride `lib/doors.ts`'s `callDoor`; a

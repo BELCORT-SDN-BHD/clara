@@ -31,9 +31,12 @@ is the rebuild from the Gate-1 audit + Gate-2 blueprint. **Product law → `docs
   host is ratified in `docs/adr/` (ADR-014). `packages/runtime` is the full
   durable runtime — the chat loop, the coding floor, document intake, the
   consumer lanes and daily belts (`packages/runtime/README.md`).
+- **Web (`apps/web`)** — **Next.js 16.3.3** + **`@opennextjs/cloudflare`** on
+  Cloudflare **Workers** — the production frontend, replacing `apps/dashboard`
+  at the FS-10 cutover.
 - **Dashboard** — **Next.js 15** on **Cloudflare Pages** (`app.clarabook.com`;
   Vercel dropped, ADR-024), dashboard-direct on the Supabase session JWT
-  (`apps/dashboard`).
+  (`apps/dashboard`) — **legacy, retiring at the P6/FS-10 cutover.**
 
 ## Monorepo map
 
@@ -42,7 +45,8 @@ packages/db/          versioned SQL migrations + seeds + DR tooling + test rig
 packages/runtime/     the Clara durable runtime (WDK substrate; chat + coding lanes; intake)
 packages/reporting-render/  the sealed-render worker (pinned Typst; the clara-render Fly app)
 packages/backup/      the clara-backup Fly service (daily DR bundle to R2; docs/ops/DR.md)
-apps/dashboard/       Next.js 15 dashboard (plumbing-grade pages; the OS surface lands at Wave G)
+apps/web/             Next.js 16.3.3 + @opennextjs/cloudflare on Workers — the production frontend
+apps/dashboard/       Next.js 15 dashboard — legacy, retiring at the P6/FS-10 cutover
 scripts/              repo governance gates (freeze-lint, leak-scan, harness-links, …) + hooks/
 docs/                 PRD, architecture, plan, design, audit (source of truth)
 spike/                the frozen Slice-0 runtime spike (NOT a workspace member)
@@ -71,13 +75,14 @@ export PGHOST=... PGPORT=5432 PGUSER=... PGPASSWORD=... PGDATABASE=postgres
 
 pnpm typecheck                       # tsc across TS packages
 pnpm lint                            # freeze-lint · leak-scan · wiki · binding · harness-links · pinned-ids · eslint
-pnpm build                           # nitro (runtime) + next (dashboard)
+pnpm build                           # nitro (runtime) + apps/web (production) + apps/dashboard (legacy)
 
 pnpm db:migrate && pnpm db:seed      # apply migrations + synthetic seed
 pnpm --filter @clara/db test         # migrate -> seed -> assert
 pnpm db:reset                        # drop the clara schema (scoped, safe)
 
-pnpm --filter @clara/dashboard dev   # dashboard at http://localhost:3000
+pnpm --filter @clara/web dev         # apps/web (production frontend) at http://localhost:3000
+pnpm --filter @clara/dashboard dev   # dashboard (legacy) at http://localhost:3000
 ```
 
 ## How CI works (the anti-"misleading-green" gate)
@@ -95,7 +100,7 @@ PR and:
    smoke test** and runs the **DR dump/restore self-test** against it.
 
 CI touches only a disposable container. It never connects to the real project.
-It runs on **two self-hosted WSL2 runner instances** (private-repo only —
+It runs on **four self-hosted WSL2 runner instances** (private-repo only —
 `docs/ops/ci-runner.md`); a **docs-only diff** (`docs/**`, `AGENTS.md`,
 `CLAUDE.md`, `PROGRESS.md`, matched literally) runs the lint leg only, and a
 weekly scheduled sweep re-proves every leg regardless.

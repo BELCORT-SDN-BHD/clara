@@ -120,13 +120,7 @@ export const NON_PATH_ALLOWLIST = new Set([
   // --- Instruments and packages the ACTIVE design docs specify but that are not built yet. They
   // are named in future tense in docs/plan/active/; they become real paths when their lane lands,
   // and the entry then comes back out of this list.
-  "scripts/check-frozen-evaluators.mjs", // wave-e-design-reporting.md §: the evaluator freeze instrument (lane δ, unbuilt)
-  "check-frozen-evaluators.mjs", // the same instrument named by basename
   "frozen-evaluators.json", // its manifest (unbuilt)
-  "packages/reporting-render", // the render package the reporting design specifies (unbuilt)
-  "packages/reporting-render/", // the same, written as a directory
-  "packages/runtime/lib/wake-engine.mjs", // g1-wake-engine-design.md's fourth spine consumer (gate G1, unbuilt)
-  "packages/runtime/lib/reconciler-wake.mjs", // g1-wake-engine-design.md's split-out reconciler belt (gate G1, unbuilt)
 
   // --- Produced or remote directories, and working dirs, that are gitignored by design.
   "packages/db/backups/", // where a dump lands; gitignored ("dumps may hold data" — DR.md)
