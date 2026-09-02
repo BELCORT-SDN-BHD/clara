@@ -230,6 +230,7 @@ tests/invite-mail-transport.test.ts
 tests/invite-verification.test.ts
 tests/proxy-matcher.test.ts
 tests/public-key.test.ts
+tests/reports-download.test.ts
 tests/require-firm-scope.test.ts
 tests/response-state.test.ts
 tests/runtime-outbound.test.ts

@@ -8,6 +8,7 @@
 import { useTranslations } from "next-intl";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { listReportArtifacts } from "@/lib/reports/api";
+import { useDownloadOffers } from "@/lib/reports/offers";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { SectionHeader } from "@/components/common/section-header";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
@@ -18,6 +19,9 @@ import type { SessionTokenAccessor } from "@/lib/session";
 export function StatutoryReportsPanel({ clientId, session }: { clientId: string; session: SessionTokenAccessor }) {
   const t = useTranslations("ClientReports.statutory");
   const { data: read, busy, err, clr, act } = useHydratedPart(session, (s) => listReportArtifacts(clientId, { session: s }));
+  // The download OFFER, read once for the whole panel: whether each artifact is downloadable is
+  // the DOOR's verdict, never something this panel derives from a row it already has.
+  const offers = useDownloadOffers(clientId, session);
 
   return (
     // P3 polish: the bespoke `rounded-xl border bg-surface p-4` <section> became
@@ -54,7 +58,14 @@ export function StatutoryReportsPanel({ clientId, session }: { clientId: string;
         ) : (
           <div className="flex flex-col gap-2">
             {read.rows.map((artifact) => (
-              <ArtifactRow key={artifact.id} artifact={artifact} session={session} busy={busy} act={act} />
+              <ArtifactRow
+                key={artifact.id}
+                artifact={artifact}
+                offer={offers.offerFor(artifact.id)}
+                session={session}
+                busy={busy}
+                act={act}
+              />
             ))}
           </div>
         )}

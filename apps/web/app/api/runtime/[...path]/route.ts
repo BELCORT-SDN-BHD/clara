@@ -92,11 +92,26 @@ async function proxy(req: NextRequest, path: string[], accessToken: string): Pro
     return NextResponse.json({ error: "runtime_redirected" }, { status: 502 });
   }
 
+  // THE RESPONSE HEADER ALLOW-LIST, and it is an allow-list for the same reason the outbound one
+  // is: what the runtime sets is forwarded by NAME, never by wholesale copy.
+  //
+  // `content-disposition` joins it for FS-7 echelon 2 (裁-96②). It is the header that makes an
+  // artifact download a download: the runtime sets `attachment; filename="clara-report-…"`, and
+  // without it here the browser receives a PDF with no disposition and renders it INLINE, inside
+  // this app's own origin — which is precisely where a hostile PDF would like to be, and it also
+  // loses the derived filename the door built from the content address.
+  //
+  // `cache-control` and `x-content-type-options` join it for the same download: both are set
+  // DELIBERATELY by the runtime (`private, no-store` so an artifact is never held in a shared
+  // cache; `nosniff` so a mistyped body is never re-interpreted), and a security header that the
+  // proxy silently drops is a security header that does not exist.
+  const RESPONSE_HEADERS = ["content-type", "content-length", "content-disposition",
+    "cache-control", "x-content-type-options"] as const;
   const outHeaders = new Headers();
-  const outContentType = res.headers.get("content-type");
-  if (outContentType) outHeaders.set("content-type", outContentType);
-  const outContentLength = res.headers.get("content-length");
-  if (outContentLength) outHeaders.set("content-length", outContentLength);
+  for (const name of RESPONSE_HEADERS) {
+    const value = res.headers.get(name);
+    if (value) outHeaders.set(name, value);
+  }
 
   return new Response(res.body, { status: res.status, headers: outHeaders });
 }

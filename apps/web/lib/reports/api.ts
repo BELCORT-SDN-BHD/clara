@@ -15,6 +15,7 @@ import type {
   FreeformReadLogRow,
   PeriodSnapshotRow,
   ReportAgentReceiptRow,
+  DownloadableArtifact,
   ReportArtifactRow,
   RenderJobRow,
   SandboxExportRow,
@@ -130,6 +131,24 @@ export async function retrieveSignedOriginal(reportRunId: string, opts: Opts = {
 export async function listSandboxExports(limit = 50, opts: Opts = {}): Promise<SandboxExportRow[]> {
   const out = await callDoor<unknown>("list_sandbox_exports", { p_view: null, p_limit: limit }, opts);
   return Array.isArray(out) ? (out as SandboxExportRow[]) : [];
+}
+
+/** clara.list_downloadable_artifacts — the OFFER door (FS-7 echelon 2, 裁-96②).
+ *
+ *  WHAT IT IS FOR: a Download control must never be a dead link, so the control appears
+ *  only where the DOOR says the artifact is downloadable. The door reaches that verdict
+ *  by CALLING the byte door's own gate per row rather than by re-implementing it, which
+ *  is why this surface can trust the flag instead of second-guessing it.
+ *
+ *  A refusal from the door itself (no client, below the read floor) is thrown for the
+ *  caller to render verbatim, exactly as every other door in this module behaves. */
+export async function listDownloadableArtifacts(
+  clientId: string,
+  limit = 200,
+  opts: Opts = {},
+): Promise<DownloadableArtifact[]> {
+  const out = await callDoor<unknown>("list_downloadable_artifacts", { p_client: clientId, p_limit: limit }, opts);
+  return Array.isArray(out) ? (out as DownloadableArtifact[]) : [];
 }
 
 /** clara.export_recipients — direct RLS read (getRows), for the admin recipient

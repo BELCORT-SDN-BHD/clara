@@ -24,14 +24,23 @@
 //   never from a human RPC — so this build renders no watermark-refusal UI path,
 //   and the request affordance is copy pointing at the Clara rail, not a button.
 //
-// NO BYTE-DOWNLOAD MECHANISM EXISTS ANYWHERE IN THIS CATALOG (coordinator ruling,
-// re-confirmed against apps/dashboard/app/reports/reportsApi.ts's own header: "this
-// build ships no signed-download door — do not fabricate a link", still true past
-// 0127). `retrieve_signed_original` and `list_sandbox_exports` both return METADATA
-// (storage_key/sha256/byte_size/…), never a fetchable URL — minting a Supabase
-// Storage signed URL client-side would be new, unreviewed security-sensitive
-// infrastructure this build does not add. This module and its UI render custody
-// metadata + a copy-to-clipboard affordance, exactly like the dashboard precedent.
+// THE BYTE-DOWNLOAD DOOR NOW EXISTS, AND IT IS SERVER-SIDE ONLY (FS-7 echelon 2,
+// 裁-96②; the note this paragraph replaces said no such mechanism existed anywhere
+// in this catalog, which was true through 0127 and is no longer). ONE generic door
+// covers BOTH artifact families:
+//
+//   · `clara.list_downloadable_artifacts(p_client, p_limit)` — clara_authenticated.
+//     Says WHETHER each artifact is downloadable and what the file will be called.
+//     It returns NO storage_key and no URL, ever; a non-downloadable row carries the
+//     gate's own typed refusal reason instead.
+//   · `GET /api/runtime/artifacts/:id/bytes` — the runtime route, which calls
+//     `clara.get_artifact_for_human_read` (granted to clara_runtime and to nothing
+//     else) and streams the object with the runtime's storage custody credential.
+//
+// CLIENT-SIDE SIGNED-URL MINTING REMAINS FORBIDDEN and is now structurally out of
+// reach rather than merely declined: no storage host, bucket, key or path reaches
+// this side at all. `retrieve_signed_original` and `list_sandbox_exports` still
+// return METADATA only — they are custody reads, not download doors.
 
 export type ReportArtifactKind = "draft_watermarked" | "pre_sign" | "signed_original";
 
@@ -329,4 +338,31 @@ export type WikiPageRow = {
   retire_reason: string | null;
   created_at: string;
   updated_at: string;
+};
+
+/** clara.list_downloadable_artifacts — ONE row per artifact of EITHER family for one
+ *  client, carrying the gate's own verdict (FS-7 echelon 2, 裁-96②).
+ *
+ *  `downloadable` is `clara._artifact_download_core`'s verdict, caught per row inside
+ *  the door — never a predicate this catalog re-derives, which is what 裁-112 is about.
+ *  When it is false, `refusal_reason` is the database's OWN typed reason and the four
+ *  file facts are null: there is nothing to offer, so nothing is described.
+ *
+ *  There is deliberately no `storage_key` field, and there never will be. */
+export type DownloadableArtifactFamily = "report_artifact" | "sandbox_export";
+
+export type DownloadableArtifact = {
+  artifact_id: string;
+  family: DownloadableArtifactFamily;
+  /** The row's own state word: a `report_artifacts.kind`, or a `sandbox_exports.state`. */
+  label: string;
+  produced_at: string | null;
+  downloadable: boolean;
+  /** The gate's typed reason when `downloadable` is false — rendered verbatim, never
+   *  translated into UI prose about a decision this surface did not make. */
+  refusal_reason: string | null;
+  sha256: string | null;
+  byte_size: number | null;
+  content_type: string | null;
+  filename: string | null;
 };
