@@ -460,28 +460,6 @@ begin
     raise exception 'this registration is already paid' using errcode='CLR09';
   end if;
 
-  -- Structural retry: an unstamped intent is still usable, so return it without appending a
-  -- second rate event or opening a second Stripe-session carrier. `p_op_key` is validated above
-  -- for the shared door contract, but is deliberately not reserved: the durable identity here
-  -- is the applicant's one locked, unstamped intent. Once session_id is stamped it is consumed,
-  -- and a later call falls through to a genuinely fresh intent.
-  select i.id,i.price_local_key into v_intent,v_price_local_key
-    from clara.checkout_intents i
-   where i.registration_id=p_registration and i.applicant=v_actor and i.session_id is null
-   order by i.opened_at,i.id
-   limit 1
-   for update;
-  if found then
-    select m.stripe_id into v_stripe_price_id
-      from clara.stripe_object_map m
-     where m.object_kind='price' and m.local_key=v_price_local_key;
-    if not found then
-      raise exception 'no stripe price is mapped for this plan' using errcode='CLR10';
-    end if;
-    return jsonb_build_object(
-      'intent_id',v_intent,'price_local_key',v_price_local_key,'stripe_price_id',v_stripe_price_id);
-  end if;
-
   select b.local_key into v_price_local_key
     from clara.billing_plans b where b.is_current;
   if not found then
@@ -492,6 +470,22 @@ begin
    where m.object_kind='price' and m.local_key=v_price_local_key;
   if not found then
     raise exception 'no stripe price is mapped for this plan' using errcode='CLR10';
+  end if;
+
+  -- Money-surface rule: reuse only an unstamped intent whose plan is still the current plan.
+  -- A stale-plan intent stays unstamped and untouched while this call takes the fresh-intent path.
+  -- `p_op_key` is validated above but deliberately not reserved: the durable retry identity is
+  -- the applicant's one locked, unstamped CURRENT-plan intent. A session stamp consumes it.
+  select i.id into v_intent
+    from clara.checkout_intents i
+   where i.registration_id=p_registration and i.applicant=v_actor and i.session_id is null
+     and i.price_local_key=v_price_local_key
+   order by i.opened_at,i.id
+   limit 1
+   for update;
+  if found then
+    return jsonb_build_object(
+      'intent_id',v_intent,'price_local_key',v_price_local_key,'stripe_price_id',v_stripe_price_id);
   end if;
 
   insert into clara.registration_rate_events(applicant,origin_digest)

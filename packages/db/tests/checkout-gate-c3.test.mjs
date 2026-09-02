@@ -25,11 +25,11 @@ import { truncateGuardError, withTxn } from "./rig-txn.mjs";
 import { twoSessions, waitBlockedByOrThrow } from "./binding-proposal-pr-1-helpers.mjs";
 
 const TABLES = ["billing_plans", "firm_registration_payments", "confirmation_attempts"];
-const EXPECTED_CELLS = 66; // +6 fold cells: c3.23a/b, c3.30f and c3.52a/b/c
+const EXPECTED_CELLS = 68; // +8 fold cells: c3.23a-d, c3.30f and c3.52a/b/c
 // BLOCKER 2 (opus cross-family leg on #493): open_checkout_intent's body is frozen from here,
 // same idiom as create_firm's W-E3 pin (59fa533d9c03) elsewhere in this same migration. Computed
-// against the shipped 84861afc-era body via a throwaway rig; update deliberately on any real edit.
-const OPEN_CHECKOUT_INTENT_PROSRC_SHA12 = "aa227c22bb7f";
+// from the plan-current reuse body on this round's throwaway rig; update deliberately on real edits.
+const OPEN_CHECKOUT_INTENT_PROSRC_SHA12 = "4b89b80d4710";
 
 let live = false;
 let executed = 0;
@@ -734,7 +734,9 @@ cell("c3.23a open idempotency -- same op_key reuses one unstamped intent and one
   assert.deepEqual(counts.rows[0], { intents: 1, rate_events: 1 });
 });
 
-cell("c3.23b open idempotency -- a stamped intent is consumed and a later call opens a fresh one", async () => {
+// POSITIVE CONTROL (same class as c3.30b): every pre-fold call already minted a new intent, so
+// c3.23a (+ c3.53) discriminates A-M1 while this cell proves reuse stops after a session stamp.
+cell("c3.23b positive control -- a stamped intent is consumed and a later call opens a fresh one", async () => {
   const user = await insertUser("c3", "open_after_stamp");
   const email = (await rootQuery("select email from clara.users where id=$1", [user])).rows[0].email;
   const req = await insertRegistration(user, "open_after_stamp");
@@ -761,6 +763,113 @@ cell("c3.23b open idempotency -- a stamped intent is consumed and a later call o
     [req.id, user, origin],
   );
   assert.deepEqual(counts.rows[0], { intents: 2, rate_events: 2 });
+});
+
+cell("c3.23c plan rotation -- a stale unstamped intent is untouched and a current-plan intent is minted", async () => {
+  const user = await insertUser("c3", "open_after_rotation");
+  const email = (await rootQuery("select email from clara.users where id=$1", [user])).rows[0].email;
+  const req = await insertRegistration(user, "open_after_rotation");
+  const origin = digest("open-after-rotation");
+  const opKey = opk("open-after-rotation");
+  await signDpa(user, email);
+  await ensurePriceMap();
+  const first = (await authenticatedQuery(
+    user, email,
+    "select clara.open_checkout_intent($1,$2,$3) as result", [req.id, origin, opKey],
+  )).rows[0].result;
+
+  await withTxn(async (c) => {
+    await c.query("savepoint rotated_plan");
+    await c.query("update clara.billing_plans set is_current=false where is_current");
+    const newLocalKey = `c3-rotated-${randomUUID()}`;
+    const newStripeId = `price_${randomUUID().replaceAll("-", "")}`;
+    await c.query(
+      `insert into clara.billing_plans(local_key,name,amount_cents,currency,amounts_ruled,is_current)
+       values ($1,'C-3 rotated plan',0,'MYR',false,true)`,
+      [newLocalKey],
+    );
+    await c.query(
+      `insert into clara.stripe_object_map(object_kind,local_key,stripe_id)
+       values ('price',$1,$2)`,
+      [newLocalKey, newStripeId],
+    );
+    await c.query(`set role ${ROLES.authenticated}`);
+    await c.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: user, role: "authenticated", email }),
+    ]);
+    const second = (await c.query(
+      "select clara.open_checkout_intent($1,$2,$3) as result", [req.id, origin, opKey],
+    )).rows[0].result;
+    assert.notEqual(second.intent_id, first.intent_id,
+      "an intent from a superseded plan is not reusable");
+    assert.equal(second.price_local_key, newLocalKey);
+    assert.equal(second.stripe_price_id, newStripeId);
+
+    await c.query("reset role");
+    const state = await c.query(
+      `select id,price_local_key,session_id from clara.checkout_intents
+        where registration_id=$1 order by opened_at,id`,
+      [req.id],
+    );
+    assert.equal(state.rowCount, 2);
+    assert.deepEqual(state.rows.find((row) => row.id === first.intent_id), {
+      id: first.intent_id, price_local_key: first.price_local_key, session_id: null,
+    }, "the superseded-plan intent remains unstamped and byte-shape untouched");
+    assert.deepEqual(state.rows.find((row) => row.id === second.intent_id), {
+      id: second.intent_id, price_local_key: newLocalKey, session_id: null,
+    });
+    const events = await c.query(
+      `select count(*)::int as n from clara.registration_rate_events
+        where applicant=$1 and origin_digest=$2`,
+      [user, origin],
+    );
+    assert.equal(events.rows[0].n, 2, "the fresh current-plan intent follows the first-call path");
+    await c.query("rollback to savepoint rotated_plan");
+  });
+});
+
+cell("c3.23d missing current plan -- a stale unstamped intent cannot bypass the typed refusal", async () => {
+  const user = await insertUser("c3", "open_without_current_plan");
+  const email = (await rootQuery("select email from clara.users where id=$1", [user])).rows[0].email;
+  const req = await insertRegistration(user, "open_without_current_plan");
+  const origin = digest("open-without-current-plan");
+  const opKey = opk("open-without-current-plan");
+  await signDpa(user, email);
+  await ensurePriceMap();
+  const first = (await authenticatedQuery(
+    user, email,
+    "select clara.open_checkout_intent($1,$2,$3) as result", [req.id, origin, opKey],
+  )).rows[0].result;
+
+  await withTxn(async (c) => {
+    await c.query("savepoint no_current_plan");
+    await c.query("update clara.billing_plans set is_current=false where is_current");
+    await c.query(`set role ${ROLES.authenticated}`);
+    await c.query("select set_config('request.jwt.claims',$1,true)", [
+      JSON.stringify({ sub: user, role: "authenticated", email }),
+    ]);
+    await c.query("savepoint refused_open");
+    await expectRefusal(CLR.badRequest, () => c.query(
+      "select clara.open_checkout_intent($1,$2,$3)", [req.id, origin, opKey],
+    ), /no current billing plan is configured/, "stale intent with no current plan");
+    await c.query("rollback to savepoint refused_open");
+    await c.query("reset role");
+
+    const state = await c.query(
+      `select id,price_local_key,session_id from clara.checkout_intents where registration_id=$1`,
+      [req.id],
+    );
+    assert.deepEqual(state.rows, [{
+      id: first.intent_id, price_local_key: first.price_local_key, session_id: null,
+    }], "the stale intent remains the only carrier and stays unstamped after refusal");
+    const events = await c.query(
+      `select count(*)::int as n from clara.registration_rate_events
+        where applicant=$1 and origin_digest=$2`,
+      [user, origin],
+    );
+    assert.equal(events.rows[0].n, 1, "the refusal never appends a second rate event");
+    await c.query("rollback to savepoint no_current_plan");
+  });
 });
 
 // ------------------------------------------------------------------------------------------------
