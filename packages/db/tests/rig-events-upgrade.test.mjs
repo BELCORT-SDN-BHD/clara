@@ -60,9 +60,18 @@ test("§4.11 upgrade/cutover: 0001–0004 + data → 0005 lands one books.baseli
   }
   const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
+  const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
 
-  // 1. Fresh DB with ONLY 0001–0004 (no event spine).
+  // 1. Fresh DB with ONLY 0001–0004 (no event spine). This file's own `migrate()`
+  //    below (no `dir` override) runs the WHOLE 0001->frontier chain, which
+  //    includes 0154's exact cluster-wide role-census wall. This is the FIRST
+  //    closed-wave drill step in the CI job (action.yml), so on a genuinely fresh
+  //    job it starts at zero roles — but the sweep here makes THIS file's own
+  //    reset+migrate robust regardless of what ran before it (review-518 D1/D2;
+  //    see tests/rig-cluster-reset.mjs's header). Requires
+  //    CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step).
   await reset({ log: () => {} });
+  await sweepChainMintedRoles({ log: () => {} });
   const preDir = exportPre0005();
   await migrate({ dir: preDir, log: () => {} });
 

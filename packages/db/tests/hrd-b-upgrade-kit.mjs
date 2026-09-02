@@ -87,7 +87,15 @@ export function placeSuccessors(dir, successors) {
 export async function freshBaseline() {
   const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
+  const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
+  // Cluster-wide role survival: this file calls freshBaseline() once per test cell (8
+  // cells, one process), and each successful replay reaches the real frontier via the
+  // successors copied in by placeMigration() — roles are cluster-wide, so a role a
+  // PRIOR cell's replay minted survives into the NEXT cell's reset() (review-518-r2
+  // F1; see tests/rig-cluster-reset.mjs's header). Requires CLARA_RIG_ALLOW_ROLE_SWEEP=1
+  // (set by the action on this step).
   await reset({ log: () => {} });
+  await sweepChainMintedRoles({ log: () => {} });
   const { dir, version } = exportBaseline();
   await migrate({ dir, log: () => {} });
   return { migrate, dir, version };

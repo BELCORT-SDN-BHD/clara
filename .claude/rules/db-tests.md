@@ -40,6 +40,15 @@ plus either a localhost / `*_ci` / `*_test` / `*_tmp` database name, or an exact
 because a managed pooler shares one host and one `postgres` database across projects
 (`packages/db/lib/guard.mjs`). Reset gates key on `CLARA_RIG_ALLOW_RESET`, never on this one.
 
+**A cluster-wide role sweep needs a THIRD, separate gate: `CLARA_RIG_ALLOW_ROLE_SWEEP=1`**
+(`tests/rig-cluster-reset.mjs`'s `sweepChainMintedRoles()`). `DROP ROLE` is cluster-wide —
+every database sees it — one level broader than what `CLARA_RIG_ALLOW_RESET` (a single
+database's schema) or `CLARA_ALLOW_DESTRUCTIVE` alone authorize, so it is never implied by
+either. Absent the flag the sweep refuses with a named `RoleSweepRefused`, never a silent
+skip. The drill files that replay to the frontier more than once (in one file, or across a CI
+job's shared cluster) call this after every `reset()` that precedes a `migrate()` reaching
+migration `0154`'s exact cluster-wide role census.
+
 **Only `*.test.mjs` is collected.** The suite runs `node --test --test-concurrency=1` with the
 wave-gate preloads (`--import ./tests/*-preintegration-gate.mjs` — read `packages/db/package.json`
 for the live command; each gate sets its wave's `CLARA_ALLOW_MISSING_*` variable so a pre-wave
