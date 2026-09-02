@@ -466,6 +466,7 @@
         "adminCompliance": "Compliance register",
         "adminVendorBindings": "Vendor identity bindings",
         "adminRegistrations": "Firm registrations",
+        "adminSettings": "Firm settings",
         "clientWorkspaceHome": "Workspace overview",
         "journals": "Journals",
         "documents": "Documents",
@@ -2586,6 +2587,23 @@
     },
     "registrations": {
       "heading": "Firm registrations"
+    },
+    "settings": {
+      "pageHeading": "Firm settings",
+      "pageDescription": "Firm-wide risk and authority controls. Every one below is owner-only — the door itself is the wall.",
+      "thresholdHeading": "High-stakes threshold",
+      "thresholdSubheading": "The amount above which a posting needs a second person's approval (clara.set_firm_high_stakes_threshold).",
+      "loading": "Loading the current threshold…",
+      "firmNotFound": "Your firm record could not be read.",
+      "changeTrigger": "Change threshold",
+      "changeTitle": "Change the high-stakes threshold",
+      "changeDescription": "Raising or lowering this changes what may be approved by one person firm-wide. Only the firm owner may confirm this — anyone else will see the DB's own refusal after Change.",
+      "currentValueLabel": "Current threshold",
+      "newValueLabel": "New threshold (RM)",
+      "amountPlaceholder": "e.g. 100000.00",
+      "capabilitiesHeading": "Signing capabilities",
+      "capabilitiesSubheading": "Per-member close-and-attest and reopen authority.",
+      "capabilitiesNotBuilt": "Granting or revoking a member's close-and-attest or reopen capability has no surface here yet — grant_firm_capability and revoke_firm_capability are live, firm-owner-only doors (migration 0056) with no UI."
     }
   },
   "ClientOnboarding": {

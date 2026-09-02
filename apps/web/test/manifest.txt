@@ -163,6 +163,7 @@ lib/documents/useUploadQueue.test.ts
 lib/doors.test.ts
 lib/firm-admin/chat-sharing.test.ts
 lib/firm-admin/compliance.test.ts
+lib/firm-admin/settings.test.ts
 lib/firm-admin/vendor-bindings.test.ts
 lib/firm/needs-you-gaps.test.ts
 lib/firm/needs-you.test.ts
