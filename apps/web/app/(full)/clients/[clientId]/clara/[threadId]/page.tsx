@@ -1,4 +1,9 @@
 import { ClaraFullScreenThread } from "@/components/clara/ClaraFullScreenThread";
+import { notFound } from "next/navigation";
+
+import { loadChatSession } from "@/lib/firm-admin/chat-sharing";
+import { sessionBelongsToClient } from "@/lib/clara/thread-scope";
+import { fixedTokenAccessor, resolveServerSession } from "@/lib/supabase/server-session";
 
 /**
  * Client-workspace Clara thread escalation ("/clients/:clientId/clara/:threadId") —
@@ -18,6 +23,10 @@ export default async function ClientClaraThreadPage({
 }) {
   const { clientId, threadId } = await params;
   const { from } = await searchParams;
+  const caller = await resolveServerSession();
+  if (caller === null) notFound();
+  const session = await loadChatSession(fixedTokenAccessor(caller.accessToken), threadId);
+  if (!sessionBelongsToClient(session, clientId)) notFound();
 
   return <ClaraFullScreenThread threadId={threadId} returnHref={from || `/clients/${clientId}`} clientId={clientId} />;
 }

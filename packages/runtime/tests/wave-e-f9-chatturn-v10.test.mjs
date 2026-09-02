@@ -376,8 +376,9 @@ test("…and the chat lane settles on that transcript, not on a derived outcome 
 // the part union by four kinds and rebinds the prompt/impl/usage triple, adds NO tool, and
 // still reaches v10's byte-untouched body through the same import chain. Only the pin assertion
 // moves, and v15 joins the policy (c) roster.
-test("registry.ts pins chatTurn_v16 and still exports superseded v15/v14/v13/v12/v11/v10/v9/v8 (policy (c))", () => {
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v16");
+test("registry.ts pins chatTurn_v17 and still exports superseded v16/v15/v14/v13/v12/v11/v10/v9/v8 (policy (c))", () => {
+  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v17");
+  assert.equal(typeof registryMod.chatTurn_v16, "function");
   assert.equal(typeof registryMod.chatTurn_v15, "function");
   assert.equal(typeof registryMod.chatTurn_v14, "function");
   assert.equal(typeof registryMod.chatTurn_v13, "function");
