@@ -47,13 +47,17 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
   retired with F-A2 PR-3.) **Supervisor** (`scripts/serve.mjs`):
   one crash-only process group.
 - **HTTP** (`src/index.ts`): chat sessions/messages/turns, an SSE stream that
-  survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7). Nine more routes are
-  mounted unconditionally alongside these (`src/index.ts:53-94`, 19 total): `GET /workflows`,
-  the five `/api/interview/*` verbs (firm/start, client/start, answer, cancel, state),
-  `POST /api/opening/parse-targets`, `POST /api/seeding/prepare`, and the authenticated
-  bytes-**EGRESS** door `GET /api/documents/:id/bytes` — the last is not in the Slice-5 intake
-  table below, which documents only the inbound (upload) half of "the complete evidence-byte
-  path".
+  survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7). Ten more routes are
+  mounted unconditionally alongside these — **20 at `08de89f6` (2026-09-03); count
+  `src/index.ts` + its sub-routers, not this line, since a merge can add one (#512's
+  `reportRoutes.ts` just did)**: `GET /workflows`, the five `/api/interview/*` verbs
+  (firm/start, client/start, answer, cancel, state), `POST /api/opening/parse-targets`,
+  `POST /api/seeding/prepare`, and the two authenticated bytes-**EGRESS** doors,
+  `GET /api/documents/:id/bytes` and `GET /api/artifacts/:id/bytes` — both now documented
+  in their own "The two human BYTE-READ routes" table below (#512 closed the gap this line
+  used to flag: they were missing from the Slice-5 write-up, which documents only the
+  inbound (upload) half of "the complete evidence-byte
+  path").
 - **Workflow-versioning**: `registry.ts` names the newest version enqueue sites
   target; the CI freeze-lint golden-hashes every frozen body + its import
   closure. Prompt + tools live INSIDE the frozen closure by design (§4.9).
