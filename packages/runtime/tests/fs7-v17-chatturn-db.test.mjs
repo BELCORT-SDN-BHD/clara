@@ -19,6 +19,10 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import pg from "pg";
 import * as rig from "./rig.mjs";
 import {
@@ -33,6 +37,7 @@ import {
   buildPr2World,
   endPool as endDbFixturePool,
 } from "../../db/tests/f-a5-reporting-agency-pr2-fixtures.mjs";
+import { childEnvForExternalTools } from "../../db/lib/pg.mjs";
 
 const { register } = await import("tsx/esm/api");
 register();
@@ -73,15 +78,65 @@ let fixture;
 //
 // So this file stands up ITS OWN database on the SAME Postgres server (same
 // host/port/user as whatever target the environment names, a different
-// DATABASE name), migrates it fully, and points every pool this file's
-// dependency chain can create at it BEFORE any of those pools does its first
-// real checkout: relay-fixtures.mjs (rig.mjs) / lib/relay.mjs / lib/pools.mjs
-// all resolve PGDATABASE / DATABASE_URL / WORKFLOW_POSTGRES_URL LIVE per
-// connection (never cached at import), and so does packages/db/tests' own
+// DATABASE name) and points every pool this file's dependency chain can
+// create at it BEFORE any of those pools does its first real checkout:
+// relay-fixtures.mjs (rig.mjs) / lib/relay.mjs / lib/pools.mjs all resolve
+// PGDATABASE / DATABASE_URL / WORKFLOW_POSTGRES_URL LIVE per connection
+// (never cached at import), and so does packages/db/tests' own
 // rig-helpers.mjs (which pr2Ready()/buildPr2World() use underneath) -- so
 // redirecting those three env vars here, before before() does anything else,
 // is sufficient to make EVERY connection this file opens land on the private
 // database. The shared estate DB is never written by this file again.
+//
+// CI FIX 2026-09-02 (this file's SECOND isolation defect, not the same one):
+// the private database used to be populated by literally REPLAYING migrate()
+// -- every one of the real migration files, from 0001, a second time on this
+// SAME Postgres SERVER. That stopped being safe the moment ANY migration
+// numbered above 0154 minted a cluster-wide role: 0154's own tail assertion
+// hard-codes `(select count(*) from pg_roles where rolname like 'clara%') =
+// 14` ("this file mints no role and owes no roles-bootstrap twin") --
+// correct on a cluster no full migrate has ever touched, but ROLES ARE
+// CLUSTER-WIDE, not per-database. The estate suite's OWN `pnpm db:migrate`
+// step (AGENTS.md: "the estate suite (migrate -> seed -> every package's
+// tests)") always completes a FULL pass through every migration -- including
+// 0160 (`db: FS-4 C-2: add the projected stripe_events store`, #484), which
+// mints clara_stripe_webhook + clara_stripe_webhook_login -- BEFORE this
+// file's before() hook ever runs. So by the time this file's OWN from-#1
+// replay reaches 0154 (position 154 in ITS OWN sequence, well before IT
+// reaches 160), the cluster already carries those two roles from the
+// estate's earlier, separate, already-complete pass: pg_roles reports 16,
+// not 14, and 0154 -- merged, numbered, and out of this file's authority to
+// edit -- refuses with CLR03 `migration 0154_binding_proposal_pr_1 failed`.
+// Reproduced deterministically (same "14 to 16" text, same two roles) on a
+// throwaway rig by running any two full migrate() cycles back to back on one
+// Postgres server; confirmed byte-identical to CI run 33585826277's own
+// hookFailed error for both cells in this file (they share this before()).
+//
+// This is not the 09-01 data race (a shared ROW another suite was reading);
+// it is a structural mismatch between "a Postgres SERVER can only ever be
+// fully migrated from empty once" and "give this file another private
+// database." The fix is to stop asking migrate() to prove 0154's premise a
+// second time at all: clone the AMBIENT database -- the estate's own,
+// already fully migrated (and therefore already 0154-clean) state -- via
+// pg_dump/psql instead of replaying migration SQL. No migration body runs a
+// second time, so no migration-internal cluster-wide census can misfire, on
+// this defect or the next migration that mints a role after 0154. pg_dump
+// does not capture roles (they are cluster-wide already, and correct); it
+// carries over schema, data, OWNERS and PRIVILEGES faithfully, which is the
+// exact security envelope (SECURITY DEFINER ownership, GRANT/REVOKE, RLS)
+// this file's tests exercise. pg_dump's own MVCC snapshot makes this safe
+// under the estate's concurrent packages/db suite too -- it only ever READS
+// the shared database, never writes it, so the 09-01 fix's guarantee holds.
+//
+// KNOWN WIDER ISSUE (out of this file's scope, flagged for the owner/lead):
+// packages/db/tests/rig-docs-upgrade.test.mjs replays the REAL migrations
+// dir into a fresh/reset target multiple times within one file (the gated,
+// CLARA_RIG_ALLOW_RESET=1 closed-wave upgrade drill, weekly-sweep/manual-
+// dispatch only per ADR-0073). Once its OWN first full pass reaches 0160,
+// every later reset()+migrate() cycle in that SAME file will hit this exact
+// 0154 collision too -- it does not share this file's clone-based fix. Left
+// untouched here: a different file, a different (closed-wave) CI leg, and a
+// bigger redesign than this PR's own CI-red scope covers.
 let privateDbName = null;
 let restoreDbEnv = null;
 
@@ -107,6 +162,41 @@ async function createPrivateDatabase() {
     await client.end();
   }
   return name;
+}
+
+/**
+ * Clone the AMBIENT (already fully-migrated) database into `targetDb` via
+ * pg_dump | psql -- see the file-header "CI FIX 2026-09-02" note above for why
+ * this replaces a second migrate() replay. `sourceEnv` must be captured BEFORE
+ * `pointDbEnvAt` redirects this process's DATABASE_URL / WORKFLOW_POSTGRES_URL
+ * / PGDATABASE, or it would clone the private database from itself. Credentials
+ * travel only via env (never argv), matching packages/db/lib/pg.mjs's
+ * childEnvForExternalTools() convention (constraint 4).
+ */
+function cloneAmbientDatabase(sourceEnv, targetDb) {
+  const dumpDir = mkdtempSync(join(tmpdir(), "fs7v17-clone-"));
+  const dumpFile = join(dumpDir, "estate.sql");
+  try {
+    const pgDumpBin = process.env.PG_DUMP || "pg_dump";
+    const dump = spawnSync(pgDumpBin, ["--no-comments", "--file", dumpFile], {
+      env: sourceEnv,
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    if (dump.error) throw new Error(`pg_dump failed to start (${dump.error.message})`);
+    if (dump.status !== 0) throw new Error(`pg_dump exited ${dump.status} cloning the ambient database`);
+
+    const psqlBin = process.env.PSQL || "psql";
+    const targetEnv = { ...sourceEnv, PGDATABASE: targetDb };
+    const restore = spawnSync(
+      psqlBin,
+      ["-X", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", dumpFile, "--dbname", targetDb],
+      { env: targetEnv, stdio: ["ignore", "inherit", "inherit"] },
+    );
+    if (restore.error) throw new Error(`psql failed to start (${restore.error.message})`);
+    if (restore.status !== 0) throw new Error(`psql exited ${restore.status} restoring into ${targetDb}`);
+  } finally {
+    rmSync(dumpDir, { recursive: true, force: true });
+  }
 }
 
 /** Point every env var this file's pool chain reads at `name`; returns the restorer. */
@@ -146,17 +236,20 @@ async function dropPrivateDatabase(name) {
 }
 
 before(async () => {
+  // Captured BEFORE createPrivateDatabase()/pointDbEnvAt() touch anything -- this
+  // is the ambient (estate) target's pg_dump/psql env, the clone SOURCE.
+  const sourceChildEnv = childEnvForExternalTools();
   privateDbName = await createPrivateDatabase();
+  cloneAmbientDatabase(sourceChildEnv, privateDbName);
   restoreDbEnv = pointDbEnvAt(privateDbName);
-  const { migrate } = await import("../../db/scripts/migrate.mjs");
-  await migrate({ log: () => {} });
 
   assert.equal(await pr2Ready(), true, "F-A5 PR-2 wrappers, grants and interactive allowlist rows must be present");
-  // A fresh database registers evaluate_metric v1 DARK by design (0060's one-way
-  // ceremony). This file's fixture needs it deployed to build an evaluated report
-  // run -- establish that lawful one-way premise here, exactly as the F-A5
-  // batteries do, on THIS PRIVATE database (see the file-header note above for why
-  // it must never be done on the shared estate DB).
+  // The estate's own migrate+seed leaves evaluate_metric v1 DARK by design (0060's
+  // one-way ceremony), and the clone above carries that state over verbatim. This
+  // file's fixture needs it deployed to build an evaluated report run -- establish
+  // that lawful one-way premise here, exactly as the F-A5 batteries do, on THIS
+  // PRIVATE database (see the file-header note above for why it must never be
+  // done on the shared estate DB).
   await rig.asRoot(async (client) => {
     await client.query(
       `update clara.evaluator_versions set deployed=true
