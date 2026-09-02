@@ -37,8 +37,17 @@
 //     `clara.get_artifact_for_human_read` (granted to clara_runtime and to nothing
 //     else) and streams the object with the runtime's storage custody credential.
 //
-// CLIENT-SIDE SIGNED-URL MINTING REMAINS FORBIDDEN and is now structurally out of
-// reach rather than merely declined: no storage host, bucket, key or path reaches
+// CLIENT-SIDE SIGNED-URL MINTING IS DECLINED AND INSTRUMENTED — not structurally
+// impossible, and the difference is worth the extra clause (independent review of
+// #512). `createSignedUrl`, `createSignedUrls` and `getPublicUrl` ARE in the built
+// client bundle, as minified `@supabase/storage-js` vendored inside
+// `@supabase/supabase-js`, which ships to the browser for AUTH; the browser holds
+// the anon key too. None of that is Clara code and none of it arrived with this
+// door. What keeps the decline true is the INSTRUMENT, not an absence of API:
+// `tests/reports-download.test.ts` scans every file under `lib/reports` and
+// `components/reports` for the minting calls, the storage REST path and a
+// storage-path template, carries a positive control so it cannot go vacuous, and
+// finds zero Clara-side call sites. No storage host, bucket, key or path reaches
 // this side at all. `retrieve_signed_original` and `list_sandbox_exports` still
 // return METADATA only — they are custody reads, not download doors.
 
