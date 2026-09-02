@@ -39,11 +39,12 @@ import {
   wakeActor, runAs, namedCall, ensureReady, buildWorld, mintWake, endPool, getPool,
 } from "./rig-fixtures.mjs";
 import { seedVerifiedDocument, ensureFirmNarrowAttribution, seedExtraction, seedRegion } from "./rig-docs-fixtures.mjs";
-import { readWakeOpenFirmQuestionKindWallState } from "./wake-open-firm-question-kind-wall-gate-state.mjs";
+import { classifyWakeOpenFirmQuestionKindWall } from "./wake-open-firm-question-kind-wall-gate-state.mjs";
 
 let world;
 let ready = false;
-let kindWallOldBody = false;
+let kindWallClassification;
+let kindWallDiagnostic;
 
 const D1_INDEX = "uq_client_identifier_promotions_open_subject";
 const D2_INDEX = "uq_firm_open_questions_onboarding_open";
@@ -68,12 +69,11 @@ before(async () => {
     ready = false;
     return;
   }
-  // This sibling carries two cells whose expected refusal moved from 0148's index to the kind
-  // wall. Both genuinely execute on either body; the exact old SHA selects the old, still-valid
-  // index outcome. The preload only admits that known authoring state. Unknown bodies take the
-  // reviewed-body arm and must satisfy the behavioural assertions rather than being skipped.
-  const kindWallState = await readWakeOpenFirmQuestionKindWallState(rootQuery);
-  kindWallOldBody = kindWallState.oldBody;
+  // Identity classification is shared; skip/fail policy is not. MBB proves the 0148 wall on
+  // both known bodies and must never inherit the kind-wall battery's focused-run hook failure.
+  const kindWallState = await classifyWakeOpenFirmQuestionKindWall(rootQuery);
+  kindWallClassification = kindWallState.classification;
+  kindWallDiagnostic = kindWallState.diagnostic;
   world = await buildWorld();
 });
 
@@ -401,6 +401,11 @@ test("MBB-7(a) D2: a second wake_propose_client_onboarding on the same document 
 // left asserting a reason (already_open/onboarding_proposed) the verb can no longer produce.
 test("MBB-7(a) D2 THE SECOND WRITER, TRUED: wake_open_firm_question(kind='onboarding_proposed') on a document that already has one refuses typed -- by 0148's index on the exact old body, or by the kind wall on the reviewed body", async (t) => {
   if (unready(t)) return;
+  if (kindWallClassification === "unknown" || kindWallClassification === "absent") {
+    assert.fail(
+      `${kindWallDiagnostic}; MBB cannot label an unrecognised identity as the reviewed post-image`,
+    );
+  }
   const { secret } = await mintFiling();
   const doc = await freshDoc();
   const { citation } = await seedOneRegion(doc.documentId);
@@ -411,8 +416,14 @@ test("MBB-7(a) D2 THE SECOND WRITER, TRUED: wake_open_firm_question(kind='onboar
   const err = await assertRaises(CLR.badRequest,
     () => openFirmQuestion(secret, { document: doc.documentId }),
     "wake_open_firm_question opening a SECOND onboarding_proposed question on the same document");
-  assert.equal(detailReason(err), kindWallOldBody ? "already_open" : "door_owned_kind");
-  assert.equal(detailClass(err), kindWallOldBody ? "onboarding_proposed" : "kind");
+  if (kindWallClassification === "preimage") {
+    assert.equal(detailReason(err), "already_open", "the exact pre-image reaches 0148's index map");
+    assert.equal(detailClass(err), "onboarding_proposed", "the exact pre-image reports the index class");
+  } else {
+    assert.equal(kindWallClassification, "postimage", "the kind-wall expectation belongs only to the reviewed post-image");
+    assert.equal(detailReason(err), "door_owned_kind", "the reviewed post-image refuses at the kind wall");
+    assert.equal(detailClass(err), "kind", "the reviewed post-image reports the kind-wall class");
+  }
   assert.equal(await openOnboardingQuestions(doc.documentId), 1, "still exactly the one Door 2 opened");
 });
 
@@ -512,6 +523,11 @@ test("MBB-7(a) D2: the wall is KIND-scoped -- a second open question of a differ
 // new invariant instead: two CONCURRENT callers both refuse, independently and identically.
 test("MBB-7(a) D2 RACE, TRUED BY THE KIND WALL: concurrent generic onboarding calls execute on both bodies -- old body admits one and index-refuses one; reviewed body kind-refuses both", async (t) => {
   if (unready(t)) return;
+  if (kindWallClassification === "unknown" || kindWallClassification === "absent") {
+    assert.fail(
+      `${kindWallDiagnostic}; MBB cannot label an unrecognised identity as the reviewed post-image`,
+    );
+  }
   const { secret: s1 } = await mintFiling();
   const { secret: s2 } = await mintFiling();
   const doc = await freshDoc();
@@ -521,7 +537,7 @@ test("MBB-7(a) D2 RACE, TRUED BY THE KIND WALL: concurrent generic onboarding ca
     runAs(wakeActor("clara_wake_filing", s1), call, ofqVals({ document: doc.documentId, opKey: opk("mbb7d2race-a") })),
     runAs(wakeActor("clara_wake_filing", s2), call, ofqVals({ document: doc.documentId, opKey: opk("mbb7d2race-b") })),
   ]);
-  if (kindWallOldBody) {
+  if (kindWallClassification === "preimage") {
     const fulfilled = [r1, r2].filter((r) => r.status === "fulfilled");
     const rejected = [r1, r2].filter((r) => r.status === "rejected");
     assert.equal(fulfilled.length, 1, "the exact old body admits one winner through the generic writer");
@@ -531,6 +547,7 @@ test("MBB-7(a) D2 RACE, TRUED BY THE KIND WALL: concurrent generic onboarding ca
     assert.equal(await openOnboardingQuestions(doc.documentId), 1, "the exact old body leaves exactly one winner");
     return;
   }
+  assert.equal(kindWallClassification, "postimage", "the two-refusal expectation belongs only to the reviewed post-image");
   for (const [label, r] of [["session 1", r1], ["session 2", r2]]) {
     assert.equal(r.status, "rejected", `${label} must refuse -- neither reviewed-body call can succeed`);
     assert.equal(r.reason.code, CLR.badRequest, `${label} refuses typed CLR10, not a raw ${PG.uniqueViolation}`);

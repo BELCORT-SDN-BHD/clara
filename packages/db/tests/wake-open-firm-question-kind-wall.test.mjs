@@ -36,7 +36,7 @@
 //
 // Serial discipline: --test-concurrency=1 (shared rig convention).
 
-import { test, before, after } from "node:test";
+import { test as nodeTest, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -44,14 +44,30 @@ import {
   wakeActor, runAs, namedCall, ensureReady, buildWorld, mintWake, endPool,
 } from "./rig-fixtures.mjs";
 import { seedVerifiedDocument, ensureFirmNarrowAttribution, seedExtraction, seedRegion } from "./rig-docs-fixtures.mjs";
-import { readWakeOpenFirmQuestionKindWallState } from "./wake-open-firm-question-kind-wall-gate-state.mjs";
+import {
+  prefixWakeOpenFirmQuestionKindWallFailure,
+  readWakeOpenFirmQuestionKindWallState,
+} from "./wake-open-firm-question-kind-wall-gate-state.mjs";
 
 let world;
 let ready = false;
 let missingReason = null;
+let gateDiagnosticPrefix = null;
+
+// Unknown and absent identities still execute the behavioural battery. Prefix any resulting
+// assertion with the classifier's exact diagnosis so a future recut cannot produce 17 generic,
+// context-free failures that look as though the reviewed post-image were under test.
+const test = (name, fn) => nodeTest(name, async (t) => {
+  try {
+    return await fn(t);
+  } catch (error) {
+    throw prefixWakeOpenFirmQuestionKindWallFailure(error, gateDiagnosticPrefix);
+  }
+});
 
 before(async () => {
   const gateState = await readWakeOpenFirmQuestionKindWallState(rootQuery);
+  gateDiagnosticPrefix = gateState.diagnostic;
   if (gateState.oldBody) {
     missingReason = gateState.skipReason;
     return;
