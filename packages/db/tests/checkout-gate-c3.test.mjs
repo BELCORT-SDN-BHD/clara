@@ -765,6 +765,13 @@ cell("c3.23b positive control -- a stamped intent is consumed and a later call o
   assert.deepEqual(counts.rows[0], { intents: 2, rate_events: 2 });
 });
 
+// RED-before for the two cells below is the FOLD-2 body, NOT the pre-fold body. Measured: against
+// `8d3902ae`'s open_checkout_intent -- which had no reuse path and minted a fresh current-plan
+// intent every call -- c3.23c and c3.23d both PASS (61 pass / 8 fail of 69, the same eight cells
+// the pre-fold control reds). Their discriminator is `5c7986ac`'s reuse body (prosrc sha12
+// aa227c22bb7f), which reused an unstamped intent AS-IS: installed as the only mutant it reds
+// exactly c3.23c, c3.23d and c3.53 (66 pass / 3 fail of 69). Named rather than implied, the class
+// the round-2 review taught on c3.23b/c3.30b.
 cell("c3.23c plan rotation -- a stale unstamped intent is untouched and a current-plan intent is minted", async () => {
   const user = await insertUser("c3", "open_after_rotation");
   const email = (await rootQuery("select email from clara.users where id=$1", [user])).rows[0].email;
