@@ -20,12 +20,23 @@
 //
 // THE RESPONSE CONTRACT (design part 3 §1 steps 3-6, reconciled with the work order's
 // "never 200-and-drop"):
-//   * 400 — bad or absent signature, malformed JSON, a malformed envelope. NO door is called.
+//   * 400 — bad or absent signature, malformed JSON, a malformed envelope, or a door refusal
+//           the projector did not pre-empt (`event_refused_by_door`). NO row is written.
 //   * 403 — the livemode gate refused (A-M5). NO door is called.
-//   * 413 — over the 1 MB raw-body limit.
+//   * 413 — over the 1 MB raw-body limit, as a TYPED `{"error":"payload_too_large"}` from this
+//           router's own terminal error middleware at the bottom of this file. It is not
+//           Express's default HTML page, and the cell that pins that runs WITHOUT
+//           `NODE_ENV=production` because that is the arm that used to carry a stack trace.
 //   * 503 — the webhook lane has no credential yet (the ceremony follows the migration), or the
 //           deployment has not stated its Stripe mode. NO door is called.
-//   * 500 — the door itself failed. Stripe retries; nothing was recorded.
+//   * 500 — something we do not recognise. Stripe retries; nothing was recorded.
+//
+// A MALFORMED METADATA UUID IS NOT A REFUSAL — it is a RECORDED PROBLEM (the #511 review's M-1).
+// The projector nulls the field, names it in the stored projection, and the event is answered
+// 200; `apply_stripe_events` then files a `metadata_missing` problem row an operator can see.
+// The alternative — the door's own CLR10, which used to surface as a permanent 500 — stored
+// nothing at all and left Stripe retrying for days. See `lib/stripe-projection.mjs`'s
+// `metadataUuid`.
 //   * 200 — and ONLY 200 — once `record_stripe_event` has returned. Every non-2xx above means
 //           the event was NOT recorded, so Stripe's retry is the recovery path and answering
 //           2xx would drop it for good.
@@ -43,6 +54,7 @@ import { recordStripeEvent, applyStripeEvents, stripeWebhookLaneConfigured } fro
 import { verifyStripeSignature, StripeSignatureError } from "../lib/stripe-signature.mjs";
 import { projectStripeEvent, StripeProjectionError, APPLIED_EVENT_TYPE } from "../lib/stripe-projection.mjs";
 import { assertLivemodeMatches, StripeLivemodeError } from "../lib/stripe-livemode.mjs";
+import { logSafe } from "../lib/log-safe.mjs";
 
 /** The two paths (see the header). `/api/stripe/webhook` is the registered one. Typed as a
  *  plain `string[]` rather than `as const` so the router can take it without a spread —
@@ -92,6 +104,24 @@ export function webhookRefusal(err: unknown): WebhookOutcome {
     return err.code === "livemode_not_configured"
       ? { status: 503, body: { error: "livemode_not_configured" } }
       : { status: 403, body: { error: "livemode_mismatch" } };
+  }
+  // THE DOOR'S OWN REFUSALS, AS A BELT (the #511 review's M-1). `record_stripe_event` raises six
+  // CLR10 arms; the projector now pre-empts every one of them that is reachable through this
+  // route (censused in `tests/c5-stripe-clr-census-db.test.mjs`, both directions, against the
+  // live catalog). A CLR10 arriving here therefore means the projector has a hole or a migration
+  // added an arm — and the honest answer is a NAMED 400, not `{"error":"internal"}` with a 500.
+  //
+  // 400 RATHER THAN 500, DELIBERATELY, AND IT IS THE LESSER OF TWO IMPERFECT ANSWERS. Nothing is
+  // recorded on this path either way, so neither code is fully honest. A 500 says "we are
+  // broken" and makes Stripe retry an event that will fail identically for days, which is how
+  // this arm produced a permanent retry loop that reads like an outage. A 400 says "this event
+  // is not one we can store", stops the loop, and surfaces in the Stripe dashboard as a failed
+  // delivery an operator can see. A problem ROW is not available on this path: `event_id` is
+  // `not null references clara.stripe_events(event_id)`, so no problem row can exist for an
+  // event the door refused, and the webhook role holds no relation privilege to write one. That
+  // gap is recorded in the PR body as a DB follow-up, not papered over here.
+  if ((err as { code?: string })?.code === "CLR10") {
+    return { status: 400, body: { error: "event_refused_by_door" } };
   }
   return { status: 500, body: { error: "internal" } };
 }
@@ -145,11 +175,17 @@ export function stripeWebhookRoutes(): express.Router {
         // Name the event for the log BEFORE the next two gates can refuse it. These two reads
         // are UNVALIDATED — the projector is what decides whether they are well formed — and
         // they exist so a livemode refusal says WHICH event it refused rather than
-        // "(unparsed)". They are clamped and never used for anything but the log line.
+        // "(unparsed)". They are never used for anything but the log line.
+        //
+        // N-7: SANITISED, not merely clamped. The first cut sliced to 255 characters and applied
+        // no character class, so an event whose `type` carried a newline could forge a log line —
+        // and in the catch arm `type` is the RAW value, read before the projector runs. Reaching
+        // it needs the signing secret, so the exposure is log integrity AFTER a compromise
+        // rather than a way in; it is still the cheapest possible fix.
         const rawId = (event as { id?: unknown }).id;
         const rawType = (event as { type?: unknown }).type;
-        if (typeof rawId === "string") eventId = rawId.slice(0, 255);
-        if (typeof rawType === "string") type = rawType.slice(0, 255);
+        if (typeof rawId === "string") eventId = logSafe(rawId);
+        if (typeof rawType === "string") type = logSafe(rawType);
 
         // 3. THE LIVEMODE GATE (A-M5) — before the projector and before the door, so a
         //    mode-mismatched event never reaches the store.
@@ -162,6 +198,16 @@ export function stripeWebhookRoutes(): express.Router {
         if (!projected.recognised) {
           console.warn(
             `[clara-runtime] stripe webhook: UNRECOGNISED type ${type} (${eventId}) — recorded as envelope only, applied by nothing`,
+          );
+        }
+        if (projected.malformed.length > 0) {
+          // M-1. The event IS recorded — with these fields NULL, which makes the applier file a
+          // `metadata_missing` problem row on its next sweep. This line is the only place the
+          // field NAMES appear before then, so it is an error, not a warning: a live checkout
+          // whose metadata does not round-trip is a customer who cannot open their firm.
+          console.error(
+            `[clara-runtime] stripe webhook: ${eventId} (${type}) carries MALFORMED metadata uuid(s): ` +
+              `${projected.malformed.join(", ")} — recorded with those fields NULL; the applier will file metadata_missing`,
           );
         }
         if (projected.dropped.length > 0) {
@@ -200,6 +246,36 @@ export function stripeWebhookRoutes(): express.Router {
         res.status(outcome.status).json(outcome.body);
         return;
       }
+    },
+  );
+
+  // N-1 — THE TERMINAL ERROR MIDDLEWARE, and it closes a real leak rather than tidying a status.
+  //
+  // `express.raw`'s limit error is `next(err)`'d PAST the handler above, and
+  // `packages/runtime/src/index.ts` mounts no error middleware, so an over-limit body used to
+  // fall through to Express's default handler: a 413 carrying an HTML page. Under
+  // `NODE_ENV=production` — which `packages/runtime/Dockerfile` sets — that page is a bare
+  // "Payload Too Large" and harmless. WITHOUT it, the same page carries a full stack trace with
+  // absolute filesystem paths and pinned dependency versions, on an unauthenticated,
+  // internet-facing endpoint. This route must not depend on an env var being set correctly for
+  // that not to happen, and the documented response contract must be the one that ships.
+  //
+  // The intake router's own terminal middleware is the precedent (`intakeRoutes.ts:156`).
+  router.use(
+    (err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+      void _next;
+      if (res.headersSent) return;
+      const status = (err as { status?: number; statusCode?: number })?.status
+        ?? (err as { statusCode?: number })?.statusCode;
+      if (status === 413) {
+        console.error("[clara-runtime] stripe webhook REFUSED 413: the request body exceeded the raw-body limit");
+        res.status(413).json({ error: "payload_too_large" });
+        return;
+      }
+      // Anything else reaching here is ours and is not described to the caller — the same
+      // no-diagnostics posture every other refusal on this route takes.
+      console.error(`[clara-runtime] stripe webhook middleware error: ${(err as Error)?.message ?? err}`);
+      res.status(500).json({ error: "internal" });
     },
   );
 

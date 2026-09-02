@@ -54,7 +54,14 @@ const IDLE_IN_TXN_TIMEOUT_MS = Number(process.env.CLARA_IDLE_IN_TXN_TIMEOUT_MS |
 const CONNECT_TIMEOUT_MS = Number(process.env.CLARA_CONNECT_TIMEOUT_MS || 5000);
 
 /** Small on purpose. The webhook lane is one insert per delivery plus a periodic sweep; the
- *  auth-wall lane is two calls per confirmation attempt. Both sit inside the §4.1 budget. */
+ *  auth-wall lane is two calls per confirmation attempt.
+ *
+ *  THE BUDGET THEY COUNT AGAINST IS `packages/runtime/README.md`'s connection-ceiling paragraph,
+ *  which these two pools take from ≈27 to ≈31. An earlier version of this comment cited "the
+ *  §4.1 budget" — there is no connection budget at §4.1 in the checkout pack, or anywhere in it
+ *  (the #511 review checked; part 1 §4.1 is the rate wall's trap, part 3 §4.1 is a mutant panel).
+ *  The README's own count carries a standing warning that it is UNVERIFIED since the F-A4/FS-4
+ *  trains landed, so Supavisor headroom stays an open cutover item rather than a settled one. */
 export const STRIPE_WEBHOOK_POOL_MAX = Number(process.env.CLARA_STRIPE_WEBHOOK_POOL_MAX || 2);
 export const AUTH_WALL_POOL_MAX = Number(process.env.CLARA_AUTH_WALL_POOL_MAX || 2);
 

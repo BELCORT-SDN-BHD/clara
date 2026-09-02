@@ -410,6 +410,56 @@ test("c5db.6 W-O — the webhook role reaches EXACTLY two routines and no relati
   }
 });
 
+test("c5db.10 M-1 — a malformed metadata uuid is RECORDED, not a permanent 500", { skip }, async () => {
+  // The review measured this arm as `500 {"error":"internal"}` twice, zero `stripe_events` rows,
+  // zero problem rows, and Stripe retrying for days. Both polarities, over HTTP, through the
+  // shipped router.
+  const id = eventId("mal");
+  const session = sessionId("mal");
+  const res = await deliver(
+    completedEvent({
+      id,
+      session,
+      intent: "11111111-1111-4111-8111-111111111111",
+      registration: "not-a-uuid",
+      applicant: "person@example.test",
+    }),
+  );
+  assert.equal(res.status, 200, "the malformed-metadata event must be accepted and stored");
+  assert.equal(res.json.recorded, true);
+
+  const row = await storedEvent(id);
+  assert.ok(row, "the store is the record — the row must exist");
+  assert.equal(row.registration_id, null);
+  assert.equal(row.applicant, null);
+  assert.equal(row.intent_id, "11111111-1111-4111-8111-111111111111", "the WELL-FORMED sibling survives");
+  assert.deepEqual([...row.projection.metadata_malformed].sort(), ["clara_applicant", "clara_registration_id"]);
+  // The malformed VALUES never land: an address typed into a metadata slot must not reach an
+  // append-only table through the back door.
+  assert.equal(JSON.stringify(row).includes("person@example.test"), false);
+  assert.equal(JSON.stringify(row).includes("not-a-uuid"), false);
+
+  // …and it becomes a problem an operator can see, which is the half a 400 would not deliver.
+  await applyStripeEvents(100);
+  const problem = await rig.rootQuery(
+    "select problem from clara.stripe_event_problems where event_id=$1 and resolved_at is null",
+    [id],
+  );
+  assert.equal(problem.rowCount, 1);
+  assert.equal(problem.rows[0].problem, "metadata_missing");
+
+  // THE CONTROL: an event with NO clara_* metadata at all still records cleanly (the review's
+  // own refutation — the door's uuid guards are `is not null`-gated), so this cell is measuring
+  // the malformed case and not "everything is accepted".
+  const bare = eventId("bare");
+  const bareRes = await deliver(
+    completedEvent({ id: bare, session: sessionId("bare"), intent: null, registration: null, applicant: null }),
+  );
+  assert.equal(bareRes.status, 200);
+  const bareRow = await storedEvent(bare);
+  assert.equal(Object.hasOwn(bareRow.projection, "metadata_malformed"), false, "absent is not malformed");
+});
+
 test("c5db.9 both registered paths reach the same handler", { skip }, async () => {
   // Design part 3 §1 names `POST /webhooks/stripe`; the work order names
   // `POST /api/stripe/webhook` (and that is the URL the owner registers). Both are served so

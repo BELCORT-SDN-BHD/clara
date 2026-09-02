@@ -112,7 +112,15 @@ against the live pool constructors before trusting ≈27**): runtime pool 5 + re
 pool 5 + WDK engine 5 + control/router LISTEN 2 + the six consumer-lane leader
 sessions (matcher, autodraft, local_facts, sst_watch, facts_gate,
 classify) 6 + the write pool 2 + **the freeform pool 2**
-(`CLARA_FREEFORM_POOL_MAX`, default 2). The Gate-G1 bank pool's 2 sit outside this
+(`CLARA_FREEFORM_POOL_MAX`, default 2) + **FS-4 C-5's two checkout-gate pools, +4**:
+the Stripe webhook pool 2 (`CLARA_STRIPE_WEBHOOK_POOL_MAX`, default 2,
+`clara_stripe_webhook_login`) and the pre-session auth-wall pool 2
+(`CLARA_AUTH_WALL_POOL_MAX`, default 2, `clara_auth_wall_login`) — so the arithmetic
+above now reads **≈31**, and it is still the UNMEASURED ceiling the paragraph opens
+with. **Both C-5 pools are LAZY** (their logins ship NOLOGIN and gain a DSN at a
+ceremony that follows the migration), so they hold zero sessions until that ceremony —
+the same carve-out the bank pool has, counted here rather than omitted because they
+WILL be live at the Wave-G reset. The Gate-G1 bank pool's 2 sit outside this
 count until its own ceremony gives `clara_wake_bank_login` a password. Document
 intake and extraction reuse short checkouts from the existing runtime pool; no DB
 connection is held while streaming, scanning, uploading, downloading, or calling

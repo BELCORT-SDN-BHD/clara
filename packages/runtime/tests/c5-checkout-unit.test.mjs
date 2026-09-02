@@ -36,8 +36,17 @@ import {
   proxyObservedClientIp,
   trustedClientIpHeaderName,
 } from "../lib/rate-wall-courier.mjs";
-import { STRIPE_APPLY_MS, stripeApplyDue } from "../lib/stripe-applier.mjs";
+import {
+  BELT_VAR,
+  STRIPE_APPLY_MS,
+  reconcileStripeEvents,
+  stripeApplierBeltEnabled,
+  stripeApplyDue,
+  _resetStripeApplierProbeForTest,
+} from "../lib/stripe-applier.mjs";
+import { STRIPE_WEBHOOK_DSN_VAR } from "../lib/checkout-pools.mjs";
 import { CHECKOUT_POOL_SQL_TEXTS } from "../lib/checkout-pools.mjs";
+import { logSafe } from "../lib/log-safe.mjs";
 
 // Locally minted fixtures shaped like a Stripe endpoint secret. Deliberately NOT read from the
 // environment and deliberately not real: this file must be readable by anyone and runnable with
@@ -277,16 +286,22 @@ test("c5.proj.5 malformed envelopes refuse by name, before any door could be cal
 });
 
 test("c5.proj.6 non-string metadata is stripped rather than coerced", () => {
-  const { projection, dropped } = projectStripeEvent(
+  // The three metadata fields are uuid-typed at the door, so the surviving arm must carry a real
+  // uuid — a bare `"ok"` is now nulled and NAMED by the M-1 wall, which is the point of it.
+  const good = "44444444-4444-4444-8444-444444444444";
+  const { projection, dropped, malformed } = projectStripeEvent(
     event(
       {},
-      { metadata: { clara_registration_id: { nested: "object" }, clara_applicant: "ok", clara_intent_id: null } },
+      { metadata: { clara_registration_id: { nested: "object" }, clara_applicant: good, clara_intent_id: null } },
     ),
   );
   assert.equal(projection.registration_id, null);
-  assert.equal(projection.applicant, "ok");
+  assert.equal(projection.applicant, good);
   assert.equal(projection.intent_id, null);
   assert.ok(dropped.includes("metadata.clara_registration_id"));
+  // An OBJECT is dropped by the strip wall, not named as malformed: it never became a string to
+  // be a bad uuid. Absent (`null`) is likewise neither. The two lists mean different things.
+  assert.deepEqual(malformed, []);
   // A metadata bag that is itself an array is dropped whole.
   assert.equal(projectStripeEvent(event({}, { metadata: ["x"] })).projection.applicant, null);
 });
@@ -412,13 +427,72 @@ test("c5.courier.5 the email limb is case- and whitespace-insensitive", () => {
 
 test("c5.belt.1 the applier sweep is due on the first cycle after boot, then every minute", () => {
   assert.equal(STRIPE_APPLY_MS, 60_000, "design part 3 §1 step 6 says every minute");
-  // `lastRunMs = 0` against a REAL wall clock — the sentinel the leader initialises with, and
-  // the reason the first cycle after boot sweeps at all (it is what recovers a webhook that
-  // arrived while this process was down). Asserted against `Date.now()` rather than a toy
-  // number because zero-versus-one is not the case the loop ever presents.
-  assert.equal(stripeApplyDue(0, Date.now()), true, "lastRun=0 ⇒ the first cycle sweeps (webhook recovery)");
+  // The predicate itself is pure and unchanged; what changed at the B-2 fold is what the LEADER
+  // seeds it with (see c5.belt.3). A `0` still reads as due — this is the arithmetic, not the
+  // policy.
+  assert.equal(stripeApplyDue(0, Date.now()), true);
   assert.equal(stripeApplyDue(1_000_000, 1_000_000 + STRIPE_APPLY_MS - 1), false);
   assert.equal(stripeApplyDue(1_000_000, 1_000_000 + STRIPE_APPLY_MS), true);
+});
+
+test("c5.log.1 N-7 — an attacker-shaped event type cannot forge a log line", () => {
+  // The whole finding: `type` is read RAW in the catch arm, before the projector runs, and used
+  // to be sliced without a character class.
+  const forged = "checkout.session.completed\n[clara-runtime] stripe webhook: evt_fake ACCEPTED";
+  const safe = logSafe(forged);
+  assert.equal(safe.includes("\n"), false, "a newline must never survive into a log line");
+  assert.equal(safe.includes("\r"), false);
+  assert.match(safe, /^checkout\.session\.completed\.\[clara-runtime\]/);
+  // Every other non-printable goes the same way, and the clamp still clamps.
+  assert.equal(logSafe("a\u0000b\u001Bc\u0007"), "a.b.c.");
+  assert.equal(logSafe("x".repeat(400)).length, 255);
+  // An ordinary value is untouched — the fix must not mangle the 99.99% case.
+  assert.equal(logSafe("checkout.session.completed"), "checkout.session.completed");
+});
+
+test("c5.belt.2 B-2 — the belt reads a CREDENTIAL, never RELAY_TEST_MODE", async () => {
+  // The exact environment `tests/intake-e2e.mjs` builds at its line 30: test mode, no DSN. The
+  // first cut of the belt gated on `stripeWebhookLaneConfigured()`, which is true here, so a
+  // seventh pool connected and two queries ran inside a cell that times a chat round trip.
+  const e2eEnv = { RELAY_TEST_MODE: "1" };
+  assert.equal(stripeApplierBeltEnabled(e2eEnv), false, "a test-mode process with no DSN must NOT run the belt");
+
+  // A real credential turns it on…
+  assert.equal(stripeApplierBeltEnabled({ [STRIPE_WEBHOOK_DSN_VAR]: "postgres://x/y" }), true);
+  // …and an explicit override decides either way, for a rig that means to exercise it.
+  assert.equal(stripeApplierBeltEnabled({ RELAY_TEST_MODE: "1", [BELT_VAR]: "1" }), true);
+  assert.equal(stripeApplierBeltEnabled({ [STRIPE_WEBHOOK_DSN_VAR]: "postgres://x/y", [BELT_VAR]: "0" }), false);
+  assert.equal(stripeApplierBeltEnabled({}), false, "nothing configured ⇒ no belt");
+
+  // AND IT ISSUES NO QUERY. The predicate could be right while the belt still probed the
+  // catalog before consulting it, which is the whole cost this fix removes — so the client is a
+  // spy that THROWS if touched, rather than one that counts.
+  _resetStripeApplierProbeForTest();
+  const refuseAnyQuery = {
+    query() {
+      throw new Error("the dormant belt must issue NO query at all");
+    },
+  };
+  const out = await reconcileStripeEvents(refuseAnyQuery, { log: () => {}, env: e2eEnv });
+  assert.deepEqual(out, { stripeApplyOk: true, receipt: null });
+  // `true`, so the leader STAMPS and the dormant belt costs one evaluation per interval rather
+  // than a `to_regprocedure` every ~2 s forever (the review's N-4).
+});
+
+test("c5.belt.3 B-2 — the leader does not sweep on its first cycle after boot", async () => {
+  // The sentinel changed from `0` to `Date.now()` at loop entry. Read the SHIPPED source rather
+  // than re-implementing the arithmetic: a cell that recomputed `stripeApplyDue(Date.now(), …)`
+  // would pass even if the leader still declared `0`.
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("../lib/leader.mjs", import.meta.url), "utf8");
+  assert.match(src, /let lastStripeApplyRun = Date\.now\(\);/, "the leader must stamp at loop entry, not use a 0 sentinel");
+  assert.equal(src.includes("let lastStripeApplyRun = 0"), false, "the 0 sentinel must be gone");
+  // And the arithmetic that follows from it: a belt stamped at boot is not due until an interval
+  // has passed.
+  const boot = Date.now();
+  assert.equal(stripeApplyDue(boot, boot), false, "the first cycle must NOT sweep");
+  assert.equal(stripeApplyDue(boot, boot + STRIPE_APPLY_MS - 1), false);
+  assert.equal(stripeApplyDue(boot, boot + STRIPE_APPLY_MS), true, "…and the next interval must");
 });
 
 test("c5.pool.1 the checkout lanes can issue exactly four statements, all of them door calls", () => {

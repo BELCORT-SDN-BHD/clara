@@ -168,7 +168,17 @@ export function startLeaderLoop(deps) {
     let lastFaRun = 0; // 0 ⇒ first cycle after boot runs the depreciation sweep (reconciler-fa.mjs feature-detects 0041 itself, so a pre-0041 boot is a cheap no-op)
     let lastAdjRun = 0; // 0 ⇒ first cycle after boot runs the adjustment-occurrence sweep (reconciler-adjustments.mjs feature-detects 0045 itself, so a pre-0045 boot is a cheap no-op)
     let lastRenderEnqueueRun = 0; // 0 ⇒ first cycle after boot runs the ζ render-enqueue fallback (reconciler-render.mjs feature-detects the ζ migration itself, so a pre-ζ boot is a cheap no-op)
-    let lastStripeApplyRun = 0; // 0 ⇒ first cycle after boot sweeps the Stripe applier, which is exactly what recovers a webhook delivered while this process was down (stripe-applier.mjs feature-detects 0160 and stays dormant without a lane DSN)
+    // STAMPED AT LOOP ENTRY, NOT 0, AND UNLIKE EVERY SIBLING ABOVE — the #511 review's B-2.
+    // A `0` sentinel makes the FIRST leader cycle after boot sweep immediately, which put a
+    // seventh pool's connect plus two queries inside the window `tests/intake-e2e.mjs:254`
+    // measures (that cell asserts four concurrent 20,001-row parses have NOT finished by the
+    // time a chat POST returns, so any new boot-time latency in the same process tips it). The
+    // recovery this sentinel was for — a webhook delivered while the process was down — is not
+    // lost, only deferred by one interval, and the live path never waits on this belt at all:
+    // the webhook route fires its own best-effort `apply_stripe_events` on every accepted event.
+    // Sixty seconds on an event that is already minutes old is the right trade for not racing
+    // boot in a latency-sensitive process.
+    let lastStripeApplyRun = Date.now();
     while (!stopRef.stop) {
       const client = makeRuntimeClient();
       let connErr = null;

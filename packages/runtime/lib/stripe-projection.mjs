@@ -109,6 +109,15 @@ function scalarOrNull(value, key, dropped) {
   return null;
 }
 
+/** `record_stripe_event`'s own uuid guard, copied from the door (0160:301-318) so this module
+ *  refuses exactly what the door would refuse rather than something nearby. */
+const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/** The key under which a malformed metadata field is NAMED in the stored projection. Not a
+ *  denied key, and it can carry no personal data: its values come from `METADATA_KEYS`, a fixed
+ *  three-name set of OUR OWN keys, never from the event's key names or values. */
+export const MALFORMED_METADATA_KEY = "metadata_malformed";
+
 /** Read `object.metadata[key]` as a scalar. Metadata values are always strings in Stripe; a
  *  non-string is dropped by the same wall rather than coerced. */
 function metadataValue(object, key, dropped) {
@@ -120,6 +129,38 @@ function metadataValue(object, key, dropped) {
   }
   const v = scalarOrNull(md[key], `metadata.${key}`, dropped);
   return typeof v === "string" ? v : v === null ? null : String(v);
+}
+
+/**
+ * A metadata field the door will cast to `uuid`. PRESENT-BUT-MALFORMED becomes NULL and is
+ * NAMED; absent stays absent.
+ *
+ * WHY NULL AND NOT A THROW — the #511 review's M-1, and the shape matters more than the fix.
+ * `record_stripe_event` raises `CLR10 projection <field> is not a valid uuid` on a bad cast, and
+ * the route's `default: 500` turned that into a PERMANENT 500: no `stripe_events` row, no
+ * `stripe_event_problems` row, and Stripe re-delivering for days against something that reads
+ * like an outage. "The store is the record" failed for exactly the events that are malformed.
+ *
+ * Throwing a 400 here would stop the retry loop but still store nothing. Nulling stores the
+ * event AND produces a problem row, through machinery that already exists: with these three
+ * fields NULL, `apply_stripe_events` files `metadata_missing` with a detail naming which fields
+ * were absent (0160:400-410), and `list_stripe_event_problems` shows it to an operator. That is
+ * the design's "recorded as a problem" outcome reached with no DB change and no new grant — and
+ * a problem row is not otherwise reachable from this lane at all: `stripe_event_problems.event_id`
+ * is `not null references clara.stripe_events(event_id)`, so no problem row can exist for an
+ * event the door refused, and `clara_stripe_webhook` holds zero relation privileges besides.
+ *
+ * The lost information is the malformed VALUE, and it is not lost silently: the field name lands
+ * in `metadata_malformed` inside the stored projection, and the route logs it. The value itself
+ * is Stripe's to keep — the raw event is answerable by `event_id` in their dashboard, which is
+ * the same division of labour 裁-91 already relies on.
+ */
+function metadataUuid(object, key, dropped, malformed) {
+  const raw = metadataValue(object, key, dropped);
+  if (raw === null) return null;
+  if (UUID_RE.test(raw)) return raw;
+  malformed.push(key);
+  return null;
 }
 
 /**
@@ -149,7 +190,7 @@ function envelope(event, dropped) {
 }
 
 /** The `checkout.session.completed` cell — the ONLY type whose `data.object` is read. */
-function projectCheckoutSession(event, dropped) {
+function projectCheckoutSession(event, dropped, malformed) {
   const object = event?.data?.object;
   if (object === null || typeof object !== "object" || Array.isArray(object)) {
     throw new StripeProjectionError("object_absent", `${APPLIED_EVENT_TYPE} carries no data.object`);
@@ -172,9 +213,12 @@ function projectCheckoutSession(event, dropped) {
   // letting a Customer's name, email, address and phone ride into an append-only table.
   projection.customer_id = scalarOrNull(object.customer, "customer", dropped);
   projection.subscription_id = scalarOrNull(object.subscription, "subscription", dropped);
-  projection.registration_id = metadataValue(object, METADATA_KEYS.registration, dropped);
-  projection.applicant = metadataValue(object, METADATA_KEYS.applicant, dropped);
-  projection.intent_id = metadataValue(object, METADATA_KEYS.intent, dropped);
+  // The three the door casts to `uuid`. A present-but-malformed value becomes NULL and is named
+  // — see `metadataUuid` for why that, and not a throw.
+  projection.registration_id = metadataUuid(object, METADATA_KEYS.registration, dropped, malformed);
+  projection.applicant = metadataUuid(object, METADATA_KEYS.applicant, dropped, malformed);
+  projection.intent_id = metadataUuid(object, METADATA_KEYS.intent, dropped, malformed);
+  if (malformed.length > 0) projection[MALFORMED_METADATA_KEY] = [...malformed];
   return projection;
 }
 
@@ -183,7 +227,7 @@ function projectCheckoutSession(event, dropped) {
  *
  * @param {Record<string, unknown>} event the parsed event — already signature-verified
  * @returns {{eventId: string, eventType: string, projection: Record<string, unknown>,
- *            recognised: boolean, dropped: string[]}}
+ *            recognised: boolean, dropped: string[], malformed: string[]}}
  */
 export function projectStripeEvent(event) {
   if (event === null || typeof event !== "object" || Array.isArray(event)) {
@@ -201,8 +245,9 @@ export function projectStripeEvent(event) {
   }
 
   const dropped = [];
+  const malformed = [];
   const recognised = eventType === APPLIED_EVENT_TYPE;
-  const projection = recognised ? projectCheckoutSession(event, dropped) : envelope(event, dropped);
+  const projection = recognised ? projectCheckoutSession(event, dropped, malformed) : envelope(event, dropped);
 
   // THE MISTAKE-NET, RUN HERE TOO, AND ON PURPOSE. The allow-list above already makes a denied
   // key unreachable — there is no code path that writes one. This re-reads the produced object
@@ -219,5 +264,5 @@ export function projectStripeEvent(event) {
   // this used to be — because `{ type: "<kind>", … }` is the shape of a typed `parts[]` member.
   // Renaming the field costs one word and keeps a fail-closed gate meaningful instead of
   // teaching it an exemption for a value that is not a part kind at all.
-  return { eventId, eventType, projection, recognised, dropped };
+  return { eventId, eventType, projection, recognised, dropped, malformed };
 }

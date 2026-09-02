@@ -119,6 +119,11 @@ export function authWallRoutes(): express.Router {
       res.status(401).json({ error: "unauthorized" });
       return;
     }
+    // N-3: BOTH configuration probes sit BELOW the bearer check, deliberately. They answer
+    // distinct 503s, so before the reorder an anonymous caller could learn whether each lane was
+    // wired by reading which one came back. Harmless in itself, but this endpoint is public and
+    // a configuration oracle is free to remove. The `SERVICE_TOKEN` check above is the one probe
+    // that cannot move below the bearer — it IS the bearer.
     if (!authWallLaneConfigured()) {
       console.error("[clara-runtime] auth wall REFUSED: the auth-wall lane DSN is not configured");
       res.status(503).json({ error: "auth_wall_lane_unconfigured" });
