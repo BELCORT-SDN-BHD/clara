@@ -173,14 +173,17 @@ export function ClaraThreadView({
             primitive's own header for why marking a transient placeholder busy
             would suppress its own announcement.)
 
-            MERGE (P6-3 x #508): this wrapper is P6-3's; everything inside it is
-            #508's. The two trains changed the same block for unrelated reasons —
-            P6-3 narrowed the live region off the scroll container (DS-04, nested
-            live regions), #508 added task/session threading, the provisional
-            bubble and the live-clarify group. Both intents are kept: the log now
-            wraps #508's three content groups instead of P6-3's two, so a clarify
-            turn arriving mid-stream is announced by the same region as a message
-            rather than by nothing. */}
+            MERGE (P6-3 x #508): this wrapper is P6-3's; what it wraps is #508's.
+            The two trains changed the same block for unrelated reasons — P6-3
+            narrowed the live region off the scroll container (DS-04, nested live
+            regions), #508 added task/session threading, the provisional bubble
+            and the live-clarify group.
+
+            THE LOG WRAPS THE TRANSCRIPT AND ONLY THE TRANSCRIPT: the message map
+            and the provisional bubble. The live-clarify group and the
+            stream-status line are its SIBLINGS below — see the comment at the
+            closing tag for why, and do not move them back in: #508's own
+            parked-clarify cell reds naming `nested-live-region` if you do. */}
         <div
           className="space-y-3"
           role="log"
