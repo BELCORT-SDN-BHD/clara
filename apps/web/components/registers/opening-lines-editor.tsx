@@ -15,7 +15,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { NativeSelect } from "@/components/common/native-select";
-import { CentsInput } from "./staff-advance-money-input";
+import { MoneyInput } from "@/components/common/money-input";
 import type { OpeningLineInput } from "@/lib/registers/opening-types";
 import type { AccountRow } from "@/lib/registers/accounts";
 
@@ -73,10 +73,14 @@ export function OpeningLinesEditor({
                 </NativeSelect>
               </TableCell>
               <TableCell>
-                <CentsInput ariaLabel={t("debit")} cents={l.debit_cents} onChange={(debit_cents) => updateLine(i, { debit_cents, credit_cents: 0 })} />
+                <MoneyInput aria-label={t("debit")} cents={l.debit_cents} mode="unsigned" className="text-right" onValueChange={(change) => {
+                  if (change.ok) updateLine(i, { debit_cents: change.cents ?? 0, credit_cents: 0 });
+                }} />
               </TableCell>
               <TableCell>
-                <CentsInput ariaLabel={t("credit")} cents={l.credit_cents} onChange={(credit_cents) => updateLine(i, { credit_cents, debit_cents: 0 })} />
+                <MoneyInput aria-label={t("credit")} cents={l.credit_cents} mode="unsigned" className="text-right" onValueChange={(change) => {
+                  if (change.ok) updateLine(i, { credit_cents: change.cents ?? 0, debit_cents: 0 });
+                }} />
               </TableCell>
               <TableCell>
                 <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeLine(i)} aria-label={t("removeLine")}>×</Button>
