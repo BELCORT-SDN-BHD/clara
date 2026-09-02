@@ -15,7 +15,7 @@
 -- Ruled IN for beta 2026-09-02 (裁-119). The posture it walls is design D-6
 -- (`docs/plan/active/fa7b-onboarding-design.md:402-411`): playbooks (3) bank-only and
 -- (4) shoebox take NO opening seed at onboarding; `commit_client_onboarding`'s THIRD arm
--- (`0017_wave_b.sql:2816-2818`) activates such a client on a `carry_down_deferred` plan
+-- (`0017_wave_b.sql:2817-2819`) activates such a client on a `carry_down_deferred` plan
 -- item with the opening uncaptured, and the client workspace carries a permanent banner
 -- saying so. Until this file, nothing stopped that client's first close from SEALING on
 -- an opening nobody ever captured.
@@ -67,11 +67,23 @@
 --     capture act is `approve_opening_seed` (`0017_wave_b.sql:3991`) / its correction
 --     sibling `approve_opening_correction` (`0017:4282`) setting `state='finalized'` --
 --     MEASURED on the rig, not assumed: those two are the only bodies in the schema that
---     write that value. `reopen_opening_seed` puts it back to 'open', which correctly
---     re-arms this wall mid-correction.
+--     write that value. `reopen_opening_seed` AND `supersede_opening_item` both put it
+--     back to 'open' -- measured, those two are the only bodies in the schema that write
+--     that value -- so either one correctly re-arms this wall mid-correction. (The comment
+--     inside READ (1) names only the first; it is not edited, because that line sits inside
+--     `_close_gate_deferred_opening`'s body and moving a byte there moves its prosrc sha.)
 --   * Sealing a year against a half-drafted seed is precisely what the ruling forbids, so
 --     the wall keys on 'finalized'. Under constraint 1 accounting-correctness outranks the
 --     presentation choice; the divergence is RECORDED here, not hidden.
+--
+-- THE SECOND DIVERGENCE, found by the #509 review (N7) and recorded rather than argued away:
+-- PLAN SCOPE. The evaluator's plan/item join aggregates over EVERY non-cancelled
+-- `scope_kind='client'` plan; the web surface reads exactly ONE
+-- (`opening-register.tsx:60` -- the first non-cancelled by `created_at`). With two or more
+-- such plans the DB can wall while the banner is down. It errs SAFE, the DB being the
+-- stricter side, and it is unreachable today (`bootstrap_client_plan` refuses a second plan
+-- and the onboarding path mints one) -- but the paragraph above said "the one deliberate
+-- difference" and there are two, so this is the second.
 --
 -- A CANCELLED plan is excluded, and that is the only plan-state filter. A cancelled
 -- onboarding is an undone record (`cancel_client_onboarding` is its sole writer, measured),
