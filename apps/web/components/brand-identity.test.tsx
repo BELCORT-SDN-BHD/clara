@@ -16,6 +16,7 @@ import { join, relative, sep } from "node:path";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 import NextImage from "next/image";
+import * as nextImageModule from "next/image";
 
 import { renderComponent } from "../test/hookHarness";
 import { enableDomInspection } from "../test/domInspect";
@@ -98,6 +99,19 @@ test("the harness renders a REAL next/image component, not the CJS wrapper objec
   // React refused it with "Element type is invalid … but got: object". The
   // redirect in `test/nextImageResolve.mjs` is what fixes it; if that hook is
   // ever dropped, THIS cell says why every image test below broke.
+  //
+  // TWO assertions, because they fail for different reasons. The marker proves
+  // the REDIRECT is in effect — `next/image` itself never exports
+  // `RESOLVED_VIA_TEST_SHIM`, so seeing it means the resolve hook ran. The
+  // shape check proves the shim still UNWRAPS correctly. Without the first, a
+  // future Next that fixed its own packaging would keep this cell green while
+  // the hook silently did nothing; without the second, a shim that resolved
+  // but handed back the wrapper would too.
+  assert.equal(
+    (nextImageModule as { RESOLVED_VIA_TEST_SHIM?: boolean }).RESOLVED_VIA_TEST_SHIM,
+    true,
+    "next/image did not resolve through test/shims/nextImage.mjs — test/nextImageResolve.mjs is not registered",
+  );
   const kind = typeof NextImage;
   assert.ok(
     kind === "function" || (kind === "object" && NextImage !== null && "$$typeof" in NextImage),
@@ -432,8 +446,17 @@ test("the agent keeps its own name — the pass is a product-name fix, not a ren
 
 test("no user-facing surface says the platform is called Clara", () => {
   // The sweep the enumeration above cannot do: the shapes that only ever
-  // precede a PRODUCT name. Scoped to the message catalog, which is where
-  // every rendered string in this app lives.
+  // precede a PRODUCT name.
+  //
+  // SCOPE, stated exactly: the message catalog. That is where nearly every
+  // rendered string lives, but NOT all of them — two user-facing strings are
+  // composed in server code on purpose and are outside this walk:
+  // `lib/members/invite-mail.ts` (the invite email, English-only for a
+  // recipient with no session and no locale, per that file's own recorded
+  // boundary) and `lib/members/courier.ts` (the one fixed refusal sentence
+  // Clara owns rather than the auth provider's). Both carry the product name
+  // and both are pinned by `tests/invite-courier.test.ts`, so the estate is
+  // covered — by two instruments, not by this one.
   //
   // "to Clara" is DELIBERATELY not one of them, and the reason is a real
   // string: "The connection to Clara ended unexpectedly" is the AGENT, and a

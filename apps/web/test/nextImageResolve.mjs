@@ -9,10 +9,7 @@
 // passes through here — `next build` uses its own bundler resolution and never
 // loads this file.
 
-import { fileURLToPath } from "node:url";
-
 const SHIM_URL = new URL("./shims/nextImage.mjs", import.meta.url).href;
-const SHIM_PATH = fileURLToPath(SHIM_URL);
 
 export async function resolve(specifier, context, nextResolve) {
   // The shim imports `next/dist/...`, never `next/image`, so this cannot
@@ -24,6 +21,10 @@ export async function resolve(specifier, context, nextResolve) {
   return nextResolve(specifier, context);
 }
 
-/** Exported for `tests/next-image-interop.test.ts`, so the cell asserts against
- *  the path this hook actually redirects to rather than a re-typed copy. */
-export const NEXT_IMAGE_SHIM_PATH = SHIM_PATH;
+// PROVED BY: `components/brand-identity.test.tsx`, "the harness renders a REAL
+// next/image component, not the CJS wrapper object". That cell reads
+// `RESOLVED_VIA_TEST_SHIM` off the `next/image` namespace — a marker only the
+// shim exports — so it reds if this hook stops being registered, and it reds
+// again on the component shape if the shim stops unwrapping correctly. There
+// is deliberately no exported path constant here: nothing needs the path, and
+// an export whose only consumer is a comment is how a citation rots.

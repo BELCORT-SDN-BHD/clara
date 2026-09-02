@@ -20,9 +20,13 @@
 // `next/dist/...` deliberately — that is the one place the unwrapped component
 // actually lives, and doing it here keeps the reach inside `test/`, where a
 // runtime bridge belongs, instead of putting an interop guess into a shipped
-// component. `test/nextImageResolve.mjs` is what points `next/image` here, and
-// `tests/next-image-interop.test.ts` is the cell that reds if this shim ever
-// stops handing back a renderable component.
+// component. `test/nextImageResolve.mjs` is what points `next/image` here.
+//
+// THE CELL THAT PROTECTS THIS is `components/brand-identity.test.tsx`, "the
+// harness renders a REAL next/image component, not the CJS wrapper object". It
+// reds two ways: if the redirect stops being registered (the marker below is
+// then absent from the `next/image` namespace) and if this shim stops handing
+// back something React can render.
 
 import external from "next/dist/shared/lib/image-external.js";
 
@@ -33,3 +37,10 @@ const resolved = external?.default ?? external;
 
 export default resolved;
 export const getImageProps = external?.getImageProps ?? external?.default?.getImageProps;
+
+/** The marker that makes the protecting cell MECHANICAL rather than a comment.
+ *  `next/image` itself never exports this, so a test that sees it on the
+ *  `next/image` namespace has proved the redirect in `nextImageResolve.mjs` is
+ *  actually in effect — not merely that Next happened to ship a renderable
+ *  default this week. */
+export const RESOLVED_VIA_TEST_SHIM = true;

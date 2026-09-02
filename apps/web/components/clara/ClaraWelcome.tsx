@@ -30,15 +30,33 @@ export const CLARA_MASCOT_SRC = "/brand/clara/clara-quiet-clerk-neutral-v1.0.png
  * face on the platform's front door would invert exactly the hierarchy those
  * two decisions settled.
  *
- * THE ALT IS EMPTY, AND THAT IS THE HONEST READING. The heading directly below
- * the image is the literal word "Clara", so a described alt would announce the
- * agent's name twice in a row. The state/accessibility contract's own rule
- * governs: "the Ledger Fold and mascot are identity images, not substitutes
- * for state text", and "Clara expression assets always appear with a literal
- * `Clara` label and named UI state" — the label is the heading, the named
- * state is the welcome copy, and the image adds no fact either of them
- * withholds. The design authority's own avatar and identity uses spell it the
- * same way (`alt=""`).
+ * THE EMPTY ALT IS A DELIBERATE DIVERGENCE FROM THE DESIGN AUTHORITY, not
+ * conformance to it. Measured over every mascot reference in
+ * `clarabook-frontend@a770988`: at THIS placement the authority DESCRIBES the
+ * image in both of its implementations — `alt="Clara, the ClaraBook
+ * assistant"` (`g6-high-fidelity/…/src/components/clara-panel.jsx:604`, the
+ * `WelcomeState` this component ports) and `alt="Clara"`
+ * (`g5-design-system/…/components/patterns/clara-workspace.tsx:553`,
+ * `EmptyConversation`). Only the REPEATING per-message avatar
+ * (`clara-panel.jsx:666`) uses `alt=""`.
+ *
+ * WHY WE DIVERGE ANYWAY. The heading directly below this image is literally
+ * "I'm Clara.", so a described alt announces the agent's name twice in a row
+ * to a screen reader. The authority's own welcome headings do not sit that
+ * close to the name: the prototype's is "Good morning — I'm Clara." after a
+ * gap and a size change, and the design system's says "Ready when you are"
+ * with no name in it at all. The state/accessibility contract is satisfied
+ * either way — "Clara expression assets always appear with a literal `Clara`
+ * label and named UI state": here the label IS the heading and the named state
+ * is the welcome copy, so the image adds no fact either of them withholds, and
+ * the contract's other rule ("the Ledger Fold and mascot are identity images,
+ * not substitutes for state text") is what makes an identity image decorative
+ * rather than lossy.
+ *
+ * Recorded as diverged-by-choice in the PR body's ledger, per the FS-9
+ * conformance structure (consumed / diverged / owed). If the owner would
+ * rather match the authority, the change is `alt=""` → `alt="Clara"` here and
+ * one assertion in `brand-identity.test.tsx`.
  *
  * `unoptimized`, for the reason `brand-lockup.tsx` records in full: no
  * Cloudflare `IMAGES` binding is declared, so `/_next/image` returns the
