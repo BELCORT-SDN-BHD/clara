@@ -47,7 +47,11 @@ export default async function FirmLayout({
   // caller_context merely to shape an affordance.
   const scope = await requireFirmScope();
 
-  const t = await getTranslations("FirmShell");
+  // `Brand`, not the old `FirmShell` namespace: P6-6's ClaraBook copy pass
+  // (R1) made the platform name ONE string with two consumers — this shell and
+  // the entry lockup (`components/entry/brand-lockup.tsx`) — rather than two
+  // copies free to drift into disagreeing about what the product is called.
+  const t = await getTranslations("Brand");
 
   return (
     <CommandKProvider>

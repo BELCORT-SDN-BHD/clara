@@ -150,10 +150,12 @@ export function renderInviteEmail(args: {
   expiresAt: string;
 }): InviteMailContent {
   const firm = args.firmName ? escapeHtml(args.firmName) : null;
-  const subject = firm ? `You have been invited to ${args.firmName} on Clara` : "You have been invited to Clara";
+  const subject = firm
+    ? `You have been invited to ${args.firmName} on ClaraBook`
+    : "You have been invited to ClaraBook";
   const where = firm ? `<strong>${firm}</strong>` : "a firm";
   const html = [
-    `<p>You have been invited to join ${where} on Clara as <strong>${escapeHtml(args.role)}</strong>.</p>`,
+    `<p>You have been invited to join ${where} on ClaraBook as <strong>${escapeHtml(args.role)}</strong>.</p>`,
     `<p><a href="${escapeHtml(args.inviteUrl)}">Accept the invitation</a></p>`,
     `<p>This link works once and expires on ${escapeHtml(args.expiresAt)}. If you were not expecting it, ignore this email — nothing happens until you open the link and set a password.</p>`,
   ].join("\n");

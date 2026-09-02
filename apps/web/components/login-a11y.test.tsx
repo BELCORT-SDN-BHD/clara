@@ -152,10 +152,16 @@ test("裁-57 — the sign-up link renders, is a real link, and points at /signup
   // see — an anchor with no href at all, and one pointing somewhere else.
   //
   // The href is read off React's OWN props, the same `__reactProps$…` mechanism
-  // `clickButton`/`setFieldValue` use, because the stub DOM's `setAttribute` is
-  // a no-op — `getAttribute("href")` would return null whatever the component
-  // rendered, and would "pass" a link pointing nowhere. Same idiom as
+  // `clickButton`/`setFieldValue` use. Same idiom as
   // components/clara/onboarding-begin-keyboard.test.tsx.
+  //
+  // (This paragraph used to justify that choice with "the stub DOM's
+  // `setAttribute` is a no-op". That was already only half true — `domInspect`,
+  // enabled at the top of this file, has always installed a real attribute
+  // store — and P6-6 made the base harness store attributes too, so the reason
+  // is now simply wrong. The IDIOM is kept: reading React's own props proves
+  // what the component passed, one layer closer to the source than an
+  // attribute round-trip.)
   const h = await renderComponent(
     App(createElement(LoginForm, { createSupabaseClient: authClient(null) })),
   );
