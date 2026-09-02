@@ -20,18 +20,41 @@
 // that window, or an unexpected extra version, if this file shared their database.
 // Transaction-scoping the fixture would silence the exact cross-statement-commit
 // behaviour these cells exist to prove (FORBIDDEN — the test bodies below are otherwise
-// unchanged), so the fix is the OTHER side: give this file its OWN disposable database,
-// migrated fresh, so its estate-global writes never reach the shared clara_ci at all.
+// unchanged), so the fix is the OTHER side: give this file its OWN disposable database
+// (a clone of the ambient, already-migrated state — see the CI FIX note below), so its
+// estate-global writes never reach the shared clara_ci at all.
 //
-// Built directly on packages/db's own migration runner + its existing
-// disposable-database harness (packages/db/tests/migrate-harness.mjs, already reused
-// across a package boundary by packages/runtime/tests/correction-adjudication.test.mjs) —
-// no shared helper for a PRIVATE FULL-SCHEMA database existed for a runtime test file at
-// the time this was written, so this duplicates the minimal CREATE DATABASE / migrate /
-// DROP DATABASE pattern already proven by packages/db/tests/migrate-lock-serialization.test.mjs
-// et al. (idempotent role creation — `if not exists (select 1 from pg_roles ...)` in
-// 0002/0006/0131 — makes a from-scratch full migrate safe on a cluster that already has
-// clara_ci's roles).
+// Built directly on packages/db's own disposable-database harness
+// (packages/db/tests/migrate-harness.mjs, already reused across a package boundary by
+// packages/runtime/tests/correction-adjudication.test.mjs) — CREATE DATABASE, then
+// populate it, then DROP DATABASE, the same shape packages/db/tests/migrate-lock-
+// serialization.test.mjs et al. already prove.
+//
+// CI FIX 2026-09-02: populating that private database used to REPLAY migrate() — every
+// real migration file, from 0001, a second time on this SAME Postgres SERVER. That
+// stopped being safe the moment any migration numbered above 0154 minted a cluster-wide
+// role: 0154's own tail assertion hard-codes `(select count(*) from pg_roles where
+// rolname like 'clara%') = 14` — correct on a cluster no full migrate has ever touched,
+// but ROLES ARE CLUSTER-WIDE, not per-database. CI's own `pnpm db:migrate` estate step
+// always completes a full pass through every migration — including 0160 (`db: FS-4 C-2:
+// add the projected stripe_events store`, #484), which mints clara_stripe_webhook +
+// clara_stripe_webhook_login — BEFORE this file's setup ever ran. So this file's own
+// from-#1 replay reached 0154 (position 154 in ITS OWN sequence, well before it reached
+// 160) with the cluster already carrying those two extra roles from the estate's earlier,
+// separate, already-complete pass: pg_roles reported 16, not 14, and 0154 — merged,
+// numbered, and out of this file's authority to edit — refused with CLR10 (same class as
+// the #485 fix round's packages/runtime/tests/fs7-v17-chatturn-db.test.mjs collision;
+// reproduced byte-identical to CI's own error text on a throwaway rig by running two full
+// migrate() cycles back to back on one server).
+//
+// The fix is to stop asking migrate() to prove any migration's cluster-wide premise a
+// second time at all: clone the AMBIENT database — the estate's own, already fully
+// migrated (and therefore already 0154-clean) state — via `cloneAmbientDatabase()`
+// (packages/db/tests/migrate-harness.mjs) instead of replaying migration SQL. No
+// migration body ever runs a second time, so no migration-internal cluster-wide census
+// can misfire this way again, on this migration or a future one. pg_dump does not capture
+// roles (already correct, cluster-wide); it carries over schema, data, OWNERS and
+// PRIVILEGES faithfully — the exact security envelope this file's cells exercise.
 //
 // ORDERING IS LOAD-BEARING: the private-DB setup below runs as plain top-level `await`
 // code, NOT inside a node:test `before()` hook — a `before()` callback would run too
@@ -45,8 +68,13 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
-import { migrate } from "../../db/scripts/migrate.mjs";
-import { connectionConfig, disposableDatabaseName, setDatabaseEnv } from "../../db/tests/migrate-harness.mjs";
+import {
+  connectionConfig,
+  disposableDatabaseName,
+  setDatabaseEnv,
+  cloneAmbientDatabase,
+} from "../../db/tests/migrate-harness.mjs";
+import { childEnvForExternalTools } from "../../db/lib/pg.mjs";
 
 const DBNAME = disposableDatabaseName("clara_relay_taxonomy");
 
@@ -71,39 +99,44 @@ async function cleanupPrivateDb() {
   await admin.query(`drop database if exists "${DBNAME}" with (force)`).catch(() => {});
   // R2 (review round 2): unguarded, this could REPLACE the real failure below with a
   // connection-teardown error — the failure-path catch's own `await cleanupPrivateDb()`
-  // would reject HERE instead of reaching its `throw err`, masking whatever migrate() or
-  // the dynamic imports actually failed with. Best-effort, like the DROP just above.
+  // would reject HERE instead of reaching its `throw err`, masking whatever
+  // cloneAmbientDatabase()/setDatabaseEnv() or the dynamic imports actually failed with.
+  // Best-effort, like the DROP just above.
   await admin.end().catch(() => {});
 }
 // The NORMAL (success-path) cleanup — fires once every test in this file has run.
 after(cleanupPrivateDb);
 
 // `let`-declared above the try so the try can enclose EVERY statement that can reject
-// before this file's tests are registered (R1, review round 2): setDatabaseEnv/migrate()
-// were covered in round 1, but the three dynamic imports below were NOT, and
-// relay-testkit.mjs's own top-level `await fx.probeReady()` is a REAL query against the
-// private DB (probeReady -> rootQuery -> getPool -> makePool -> connConfig ->
+// before this file's tests are registered (R1, review round 2; the CI FIX above swapped
+// migrate() for cloneAmbientDatabase() in the same covered span): the private-DB clone
+// and setDatabaseEnv were covered in round 1, but the three dynamic imports below were
+// NOT, and relay-testkit.mjs's own top-level `await fx.probeReady()` is a REAL query
+// against the private DB (probeReady -> rootQuery -> getPool -> makePool -> connConfig ->
 // assertNoTargetSplit) — a connection refusal, a pool error, a failing probe statement,
-// or a target split (the M2 class itself) all reject there exactly as a migrate() throw
-// does, and were previously OUTSIDE the try, orphaning the database the same way.
+// or a target split (the M2 class itself) all reject there exactly as a
+// cloneAmbientDatabase()/setDatabaseEnv() throw does, and were previously OUTSIDE the
+// try, orphaning the database the same way.
 let redrive, TaxonomyHaltError, CONSUMER, WAKE_ENGINE_CONSUMER, fx, skip, drainInProcess, assertExactlyOnce, runRedriveCli;
 try {
+  // Captured BEFORE setDatabaseEnv() below redirects this process's DATABASE_URL /
+  // WORKFLOW_POSTGRES_URL / PGDATABASE — this is the ambient (estate) target's
+  // pg_dump/psql env, the clone SOURCE (see the CI FIX header note above). Passing the
+  // post-redirect env here would clone the private database from itself.
+  const sourceEnv = childEnvForExternalTools();
+  cloneAmbientDatabase(sourceEnv, DBNAME);
   restoreEnv = setDatabaseEnv(DBNAME);
-  // No explicit `dir` — migrate()'s own default resolution (dir || CLARA_MIGRATIONS_DIR ||
-  // its file-relative packages/db/migrations) is what every other rig entrypoint honors;
-  // overriding it here would silently defeat a deliberate CLARA_MIGRATIONS_DIR override
-  // (e.g. the deploy-onto-existing CI step's pattern) for this one file alone.
-  await migrate({ log: () => {} });
   // Deferred until the private database above is live — see the header note.
   ({ redrive, TaxonomyHaltError, CONSUMER, WAKE_ENGINE_CONSUMER } = await import("../lib/relay.mjs"));
   fx = await import("./relay-fixtures.mjs");
   ({ skip, drainInProcess, assertExactlyOnce, runRedriveCli } = await import("./relay-testkit.mjs"));
 } catch (err) {
   // A root after() hook registered during module evaluation does NOT survive a
-  // top-level-await REJECTION: a throw ANYWHERE in this try — setDatabaseEnv, migrate(),
-  // or any of the three dynamic imports above (relay-testkit.mjs's own top-level
-  // probeReady() query included) — fails this file's module LOAD, and node:test never
-  // reaches the point of running root-suite hooks for a file that never finished loading:
+  // top-level-await REJECTION: a throw ANYWHERE in this try — childEnvForExternalTools(),
+  // cloneAmbientDatabase(), setDatabaseEnv(), or any of the three dynamic imports above
+  // (relay-testkit.mjs's own top-level probeReady() query included) — fails this file's
+  // module LOAD, and node:test never reaches the point of running root-suite hooks for a
+  // file that never finished loading:
   // the after() above would NOT fire (verified against this repo's Node), silently
   // orphaning the disposable database (the DROP's own .catch(()=>{}) would otherwise hide
   // exactly that). So cleanup rides this SAME synchronous failure path — covering every
