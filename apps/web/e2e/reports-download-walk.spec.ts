@@ -70,13 +70,38 @@ test.describe("FS-7 e2 — the Reports tab download, in a real browser", () => {
     // THE CONTROL EXISTS BECAUSE THE DOOR SAID SO. The offer read is a live PostgREST RPC against
     // clara.list_downloadable_artifacts, so a control here is already evidence that the gate
     // executed and said yes — a UI that had derived the flag locally would render one either way.
-    const download = page.getByTestId("artifact-download").first();
+    // ADDRESSED BY ID, never `.first()`. The e2e rig accumulates fixtures across runs and each run
+    // writes its object into its OWN throwaway store, so `.first()` reaches a previous run's
+    // artifact whose object no longer exists — a 502 and no download event. Measured, not
+    // hypothesised: that is how this walk went red on its second run.
+    const download = page.locator(`[data-testid="artifact-download"][data-artifact-id="${ARTIFACT_ID}"]`);
     await expect(download).toBeVisible({ timeout: 30_000 });
 
-    const [file] = await Promise.all([
-      page.waitForEvent("download", { timeout: 60_000 }),
-      download.click(),
-    ]);
+    // THE DIAGNOSTIC IS PART OF THE CELL, not scaffolding to remove. A download that does not
+    // arrive is otherwise a bare timeout with no way to tell "the route refused" from "the click
+    // did nothing" — and this walk has already burned one round on exactly that ambiguity.
+    const seen: string[] = [];
+    page.on("console", (m) => { if (m.type() === "error") seen.push(`console.error ${m.text()}`); });
+    page.on("pageerror", (e) => seen.push(`pageerror ${e.message}`));
+    page.on("request", (r) => { seen.push(`REQ ${r.method()} ${r.url()}`); });
+    page.on("response", (r) => { seen.push(`RES ${r.status()} ${r.url()}`); });
+    page.on("requestfailed", (r) => { seen.push(`FAIL ${r.url()} ${r.failure()?.errorText}`); });
+
+    // THE CLICK'S OWN TIMEOUT IS SHORTER THAN THE DOWNLOAD WAIT, deliberately. Promise.all rejects
+    // on the FIRST rejection, so a download wait that expires before the click's actionability
+    // check does reports "no download arrived" about a click that never happened — an unattributable
+    // failure, and one this walk already spent a round on. With the click bounded first, a stalled
+    // click says so in its own words.
+    let file;
+    try {
+      [file] = await Promise.all([
+        page.waitForEvent("download", { timeout: 90_000 }),
+        download.click({ timeout: 15_000 }),
+      ]);
+    } catch (e) {
+      const observed = seen.length > 0 ? seen.join(" | ") : "(nothing)";
+      throw new Error(`no download arrived. observed: ${observed}. ${(e as Error).message}`);
+    }
 
     // THE FILENAME IS THE SERVER'S, derived from the content address — never composed here and
     // never taken from a row the browser read.
@@ -106,9 +131,14 @@ test.describe("FS-7 e2 — the Reports tab download, in a real browser", () => {
     // THE DISCRIMINATING POST-CONDITION: the page carries BOTH a downloadable row (a control) and
     // a refused one (the database's own typed reason). A page with neither, or with a control on
     // every row, fails — which is what makes this cell about the gate rather than about rendering.
-    await expect(page.getByTestId("artifact-download").first()).toBeVisible({ timeout: 30_000 });
-    const refused = page.getByTestId("artifact-download-unavailable").first();
+    await expect(page.locator(`[data-testid="artifact-download"][data-artifact-id="${ARTIFACT_ID}"]`))
+      .toBeVisible({ timeout: 30_000 });
+    const refused = page.locator(
+      `[data-testid="artifact-download-unavailable"][data-artifact-id="${PENDING_ID}"]`);
     await expect(refused).toBeVisible({ timeout: 30_000 });
     await expect(refused).toContainText("sandbox_export_not_complete");
+    // AND the refused row carries NO control — the discriminating half.
+    await expect(page.locator(`[data-testid="artifact-download"][data-artifact-id="${PENDING_ID}"]`))
+      .toHaveCount(0);
   });
 });

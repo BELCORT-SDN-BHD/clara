@@ -32,6 +32,7 @@ export function DownloadArtifactButton({
   offer,
   session,
   namespace,
+  className,
 }: {
   /** The OFFER door's row for this artifact, or `null` while the offer is still loading — in
    *  which case nothing is rendered, because "we do not know yet" must not look like "no". */
@@ -39,6 +40,15 @@ export function DownloadArtifactButton({
   session: SessionTokenAccessor;
   /** Which surface's copy to use — the two panels carry their own wording. */
   namespace: "ClientReports.statutory.download" | "ClientReports.sandbox.download";
+  /** Layout only, and DELIBERATELY UNUSED BY EITHER PANEL TODAY.
+   *
+   *  An earlier cut passed `ml-auto` from the sandbox panel to push the control to the end of its
+   *  wrapping row. It reads better and it BROKE THE CLICK: the browser walk went from green to a
+   *  15-second `locator.click` actionability timeout the moment it landed, and back to green when
+   *  it came off. Pushed to the far right the control stops receiving pointer events. The hook is
+   *  kept so a future layout can pass something deliberate; whatever it passes has to be re-walked
+   *  in a real browser, not eyeballed. */
+  className?: string;
 }) {
   const t = useTranslations(namespace);
   const [busy, setBusy] = useState(false);
@@ -48,7 +58,11 @@ export function DownloadArtifactButton({
 
   if (!offer.downloadable) {
     return (
-      <p className="text-xs text-muted-foreground" data-testid="artifact-download-unavailable">
+      <p
+        className={`text-xs text-muted-foreground${className ? ` ${className}` : ""}`}
+        data-testid="artifact-download-unavailable"
+        data-artifact-id={offer.artifact_id}
+      >
         {t("unavailable", { reason: offer.refusal_reason ?? "unknown" })}
       </p>
     );
@@ -75,13 +89,18 @@ export function DownloadArtifactButton({
   };
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className={`flex flex-col gap-1.5${className ? ` ${className}` : ""}`}>
       <Button
         variant="outline"
         size="sm"
         disabled={busy}
         onClick={run}
         data-testid="artifact-download"
+        // THE ROW'S OWN ID ON THE CONTROL. A walk that clicks `.first()` clicks whichever artifact
+        // happens to sort first, which on a rig that has accumulated fixtures across runs is not
+        // the one the walk provisioned — measured, not hypothesised: that is exactly how this
+        // file's own browser leg went red after its second run.
+        data-artifact-id={offer.artifact_id}
         aria-label={offer.filename ? `${t("trigger")} ${offer.filename}` : t("trigger")}
       >
         {busy ? t("working") : t("trigger")}

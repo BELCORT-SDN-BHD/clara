@@ -79,6 +79,14 @@ async function main() {
   console.log("[reports-walk] 2/6 building the runtime bundle (nitro)");
   run("pnpm", ["--filter", "@clara/runtime", "build"], { cwd: REPO_ROOT });
 
+  // PORTS THIS WALK OWNS, disjoint from the interview walk's and from `serve-built.mjs`'s. Every
+  // one is overridable, because "pick a different number" is the only non-destructive answer when a
+  // sibling lane already holds one — killing the holder is not this lane's to do.
+  const APP_PORT = String(process.env.CLARA_E2E_APP_PORT ?? "3110");
+  const NEXT_PORT = String(process.env.CLARA_E2E_NEXT_PORT ?? "3111");
+  const RUNTIME_PORT = String(process.env.CLARA_E2E_RUNTIME_PORT ?? "3210");
+  const APP_ORIGIN = `https://127.0.0.1:${APP_PORT}`;
+
   const JWT_ISSUER = "https://clara-reports.live-e2e.test/auth/v1";
   const JWT_AUD = "authenticated";
   const JWT_AUTH_ROLE = "clara_authenticated";
@@ -86,7 +94,7 @@ async function main() {
   const STORAGE_DIR = mkdtempSync(join(tmpdir(), "clara-e2e-store-"));
 
   console.log("[reports-walk] 3/6 starting PostgREST against the rig");
-  const postgrestPort = 55451;
+  const postgrestPort = Number(process.env.CLARA_E2E_POSTGREST_PORT ?? 55451);
   dockerBestEffort(["rm", "-f", "fs7e2-live-postgrest"]);
   const postgrestEnv = [
     "-e", `PGRST_DB_URI=${WORKFLOW_URL}`,
@@ -183,7 +191,7 @@ async function main() {
       WORKFLOW_POSTGRES_URL: WORKFLOW_URL,
       // The object store the download route reads through. Mocked STORE, real everything else.
       CLARA_TEST_STORAGE_DIR: STORAGE_DIR,
-      PORT: "3200",
+      PORT: RUNTIME_PORT,
       SUPABASE_JWT_ISSUER: JWT_ISSUER,
       SUPABASE_JWT_AUD: JWT_AUD,
       SUPABASE_JWT_SECRET: JWT_SECRET,
@@ -192,18 +200,19 @@ async function main() {
     stdio: "inherit",
   });
   runtimeChildRef.current = runtimeChild;
-  await waitHealthy("http://127.0.0.1:3200/health");
+  await waitHealthy(`http://127.0.0.1:${RUNTIME_PORT}/health`);
 
   console.log("[reports-walk] 6/6 running Playwright against the live stack");
   const pw = spawnSync("pnpm", ["exec", "playwright", "test", "-c", "e2e/live-stack/playwright.reports.config.ts"], {
     cwd: WEB_ROOT,
     env: {
       ...process.env,
-      NEXT_PUBLIC_SUPABASE_URL: "https://127.0.0.1:3100/e2e-supabase",
+      NEXT_PUBLIC_SUPABASE_URL: `${APP_ORIGIN}/e2e-supabase`,
       NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_clara_e2e_only",
-      CLARA_RUNTIME_URL: "http://127.0.0.1:3200",
-      CLARA_PUBLIC_ORIGINS: "https://127.0.0.1:3100",
-      CLARA_E2E_APP_ORIGIN: "https://127.0.0.1:3100",
+      CLARA_RUNTIME_URL: `http://127.0.0.1:${RUNTIME_PORT}`,
+      CLARA_PUBLIC_ORIGINS: APP_ORIGIN,
+      CLARA_E2E_APP_ORIGIN: APP_ORIGIN,
+      CLARA_E2E_NEXT_PORT: NEXT_PORT,
       CLARA_E2E_JWT_SECRET: JWT_SECRET,
       CLARA_E2E_JWT_ISSUER: JWT_ISSUER,
       CLARA_E2E_JWT_AUD: JWT_AUD,

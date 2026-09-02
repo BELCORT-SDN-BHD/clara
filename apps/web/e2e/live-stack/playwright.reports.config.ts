@@ -39,7 +39,10 @@ export default defineConfig({
     // trap playwright.live.config.ts documents: "node e2e/live-stack/serve-live.mjs" would double
     // the path from here.
     command: "node serve-live.mjs",
-    url: "http://127.0.0.1:3101/signup",
+    // The upstream `next start` port, and the readiness URL that proves it came up. Both are
+    // inputs so this walk can run beside another lane's harness on the same host — see
+    // serve-live.mjs's own note on the collision this closes.
+    url: `http://127.0.0.1:${process.env.CLARA_E2E_NEXT_PORT ?? "3101"}/signup`,
     reuseExistingServer: false,
     timeout: 120_000,
     stdout: "pipe",
