@@ -42,6 +42,17 @@ function findAllIn(root: Node, predicate: (n: Node) => boolean): Node[] {
   return out;
 }
 
+// Poll h.settle() until condition() is true, not a FIXED hop count — the
+// #491/v16-act-cards.test.tsx class (db-estate reds this file's refusal
+// cell under shared load; main is green). Wall-clock-bounded, named on timeout.
+async function settleUntil(h: { settle: () => Promise<void> }, condition: () => boolean, description: string, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error(`settleUntil: timed out after ${timeoutMs}ms waiting for: ${description}`);
+    await h.settle();
+  }
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -332,12 +343,12 @@ test("FOLD (Codex round-2, surface pinning gap): a refusal whose re-read RETAINS
       try {
         const trigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Reject");
         await h.fireEvent(trigger as never, "click");
-        for (let i = 0; i < 4; i++) await h.settle();
+        await settleUntil(h, () => findIn(body as never, (n) => n.tagName === "TEXTAREA") !== null, "the reject dialog's reason textarea to open");
         const textarea = findIn(body as never, (n) => n.tagName === "TEXTAREA");
         await h.act(() => { setFieldValue(textarea as never, "Trying to reject my own filed request."); });
         const confirmButton = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Reject registration");
         await h.act(() => clickButton(confirmButton as never));
-        for (let i = 0; i < 6; i++) await h.settle();
+        await settleUntil(h, () => /CLR04/.test(textOf(body as never)), "the CLR04 refusal chip to render after the reject confirm");
 
         assert.match(textOf(body as never), /CLR04/, "the refusal chip must render");
         assert.match(
