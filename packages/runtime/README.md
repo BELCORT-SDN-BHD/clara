@@ -96,6 +96,25 @@ There is deliberately no runtime status route. Human status reads use migration
 0007's masked PostgREST views and the authenticated JWT lane. CORS is confined to
 `/api/intake/*` and accepts only exact origins from the allowlist below.
 
+### The two human BYTE-READ routes
+
+Separate from intake, and the only two places raw bytes leave the runtime to a person. Both take a
+human session JWT, resolve the live principal, call a definer read granted to `clara_runtime` and to
+nothing else, and stream from Storage with the runtime's own custody credential. **No signed URL is
+ever minted and the browser never holds a Storage credential** (裁-96②).
+
+| Route | Definer read | Disposition |
+|---|---|---|
+| `GET /api/documents/:id/bytes` | `clara.get_document_for_human_read` | `inline` — the doc_review split-view displays it |
+| `GET /api/artifacts/:id/bytes` | `clara.get_artifact_for_human_read` | `attachment` — a report artifact or sandbox export is SAVED |
+
+The artifact route serves BOTH artifact families through ONE database gate
+(`clara._artifact_download_core`) and re-verifies the object's content address en route, so a
+substituted object is a 502 rather than a file the browser saves. Its refusals are not collapsed to
+one status the way the document route's are: `CLR11` is a 404 whose body is byte-identical for a
+malformed id, an unknown id and a foreign-firm id; `CLR04` is 403 and `CLR10` is 409, both carrying
+the database's own typed reason for the surface to render verbatim.
+
 ### Document environment contract
 
 | Variable | Required behavior |

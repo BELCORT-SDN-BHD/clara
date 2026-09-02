@@ -129,6 +129,32 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
 - [ ] Every proof artifact from this checklist and the Wave-G walk is retained in the Wave-G
       as-run (裁-122).
 
+## The first REAL sealed artifact — 裁-136
+
+裁-136 (owner, 2026-09-02) changed the gate-3 extraction mode from `-layout` to `-raw` so that
+`extracted_text_sha256` covers the watermark burned into the page background. `-layout` drops
+rotated text entirely, so before this ruling neither the claim scan nor the sealed hash could see
+it. **The ruling was taken at the only hash-migration-free moment**: `clara.report_artifacts` was
+empty on the live project, so no sealed artifact's hash had to be migrated and none ever will be.
+
+That guarantee holds only until the first real seal, which lands at Wave-G. From then on the mode
+is load-bearing history.
+
+- [ ] Before the first real seal, confirm the deployed `clara-render` image carries the `-raw`
+      extractor — read it off the artifact, not off the source: the mode is pinned in
+      `packages/reporting-render/lib/extract.mjs`'s `EXTRACT_FLAGS`, and it also rides in the
+      manifest's own `extraction_tool` string, so the FIRST sealed artifact's manifest is the
+      positive read. A manifest whose `extraction_tool` does not name `-raw` means the machine ran
+      an older image and the seal must be redone.
+- [ ] Record, in the Wave-G as-run, that `clara.report_artifacts` was empty immediately before the
+      first seal — this is the last moment that fact is checkable, and it is what makes "no hash
+      migration is owed" a measurement rather than a memory.
+- [ ] **After the first real seal, a change to the extraction mode is a HASH MIGRATION**, not a
+      flag edit: every sealed `extracted_text_sha256` was computed under the old mode and
+      `clara.report_artifacts` is insert-once with UPDATE trigger-blocked. Any future change needs
+      its own owner ruling and a re-derivation plan; 裁-136 is not a precedent for a second free
+      change.
+
 ## Data safety — hard constraint 14 / DR.md
 
 - [ ] A **full DB backup runs before the factory reset** — see `docs/ops/DR.md` for the backup

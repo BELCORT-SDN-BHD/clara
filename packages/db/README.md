@@ -12,15 +12,18 @@ truth (`docs/ARCHITECTURE.md` §3).
 > structural invariants, the balance/immutability/append-only triggers, and
 > money-as-cents. See `docs/plan/completed/rebuild-plan-history.md`.
 >
-> **Migration ledger — TRUED 2026-09-02 (counted, not remembered).** The repo carries **155
+> **Migration ledger — TRUED 2026-09-03 (counted, not remembered).** `main` carries **155
 > migration files, `0001`–`0160`** (the sequence skips `0032` and `0073`–`0076`, none of which
 > ever existed as files — `0073`-`0076` were claimed by the Wave-E ζ render/DR train and then
 > re-claimed at `0079`-`0083` when the frontier moved before it merged; only its OWN squash
 > subject still says "0073-0076", stale pre-renumber testimony, immutable, while the migrations
-> DIRECTORY stays the numbering authority), and **live is applied through the frontier
+> DIRECTORY stays the numbering authority). **THIS BRANCH adds one file above that frontier,**
+> `0162_fs7_e2_artifact_download_door.sql`, claimed in MERGE order: `0161` is Q-D6's on #509, this
+> one is `0162` if it merges before #493 and `0163` if not. The runner refuses a late-inserted
+> lower number, so a number belongs to whoever merges next above the frontier, never to whoever
+> authored first. And **live is applied through the frontier
 > `0153_f_t1_sst_reference_tables`, 148 migrations** (`0154`–`0160` are on `main`, merged but
-> NOT yet applied, and PR #493 is expected to claim `0161` today — each applies in its own
-> ceremony window; re-verify the live number with
+> NOT yet applied — each applies in its own ceremony window; re-verify the live number with
 > `select count(*), max(version) from clara.schema_migrations` before trusting this snapshot).
 > *(Was: "150 files through `0155`, trued 2026-08-30" — the FS-4/FS-7 trains claimed
 > `0156`–`0160` since.)* The paragraph below is the **2026-08-09 arrivals note**, kept as the record
