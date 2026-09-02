@@ -218,7 +218,7 @@ ruled-at-zero), a refinement of design part 3 §2's literal "always once amounts
 reading; the owner did not object when it was stated beside 裁-139.
 
 
-### 裁-140 — how sprint rulings reach the ADR system: digest rows + "amended by" lines, no new ADRs (owner, 2026-09-03 ~00:05 MYT)
+### 裁-140 — how sprint rulings reach the ADR system: digest rows + "amended by" lines, no new ADRs (owner, 2026-09-02 ~23:40 MYT — time re-derived from the record's write time; the lead's note clock had drifted)
 
 **The question** (大白话): the ledgers hold forty-odd rulings since 08-31; ADRs record decisions that mint standing
 law; the ones in between are rulings that AMEND an ADR's law for the sprint (裁-111 suspends ADR-0077's cross-family
@@ -239,7 +239,7 @@ the next stale record; a consolidating ADR was offered and declined as one more 
 PR, single-lane review (ADR-0069).
 
 
-### 裁-141 — ⌘K "Do" behind the allowlist (裁-37): the palette pre-filters on DB-computed role rank + transcribed door floors, guarded against drift; the door stays the only authority (owner, 2026-09-03 ~00:45 MYT)
+### 裁-141 — ⌘K "Do" behind the allowlist (裁-37): the palette pre-filters on DB-computed role rank + transcribed door floors, guarded against drift; the door stays the only authority (owner, 2026-09-03 ~00:10 MYT — time re-derived from the record's write time; the lead's note clock had drifted)
 
 **The collision (constraint 1, surfaced by the P6-5 lane, PR #519 §9).** 裁-37 says the ⌘K Do actions sit BEHIND the
 allowlist and, in its last sentence, forbids a new mechanism. `clara.wake_fn_allowlist` is by 0002's design invisible to

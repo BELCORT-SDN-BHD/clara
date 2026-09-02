@@ -187,7 +187,7 @@ re-reading find?"
 > was true on its date (this file is append-only); 裁-140 is the decision that gives the
 > law-changing subset a home. And no new ADR was minted, which is the ruling's whole point.
 >
-> **First use of the new mechanism, the same night: 裁-141** *(2026-09-03 ~00:45; permanent)*
+> **First use of the new mechanism, the same night: 裁-141** *(2026-09-03 ~00:10; permanent)*
 > **amends 裁-37** and therefore takes a §15 row rather than an ADR. 裁-37 put the ⌘K "Do" actions
 > behind `clara.wake_fn_allowlist` and, in the same breath, forbade a new mechanism — but that table
 > is invisible to application roles by `0002`'s design, so reading it from the web would need exactly
