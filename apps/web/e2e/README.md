@@ -26,6 +26,10 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
   excluded from the REST of this spec's tests and lands with FS-4's e2e instead -- 裁-92 (the
   6-digit-code confirmation) replaces the as-built confirm flow before beta, and walking it now
   would need a Supabase email-template act FS-4 immediately supersedes.
+- `firm-navigation-walk.spec.ts` — P4-6's built-app rank-shaping walk: an operator owner
+  reaches Members through Admin in two navigation clicks, while a bookkeeper sees only the
+  destinations admitted by the mock fixture rank. It proves built-app scope propagation and
+  navigation shaping, not a DB rank, RLS policy, or live `caller_context` response.
 - `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers.
 
 ## Why these specs are NOT in `apps/web/test/manifest.txt`
@@ -44,7 +48,7 @@ This suite runs today only when a human or an agent invokes `pnpm --filter @clar
 directly (or drives the same faces manually through the Playwright MCP tools, as the
 `entry-faces-walk` spec's own header describes). Landing it as a required, always-green GitHub
 Actions job — the render-drill-style CI leg described in `AGENTS.md`'s CI/CD section — is
-tracked as **FS-12** in `docs/plan/active/frontend-sprint-handoff-2026-08-31-orders.md`, not
-this train. Wiring it in early, ad hoc, on one PR would give this one train's browser leg a
-different CI shape than every other frontend train's, and FS-12 exists specifically to land
-that wiring once, uniformly, for all of them.
+**not owned by any order: 裁-86 makes the Playwright walk a per-train ACCEPTANCE instrument, not
+a CI gate; FS-11 (the reduced Wave G) first walks steps 2–4 and 6–11 in a browser.** Wiring it
+in early, ad hoc, on one PR would give this one train's browser leg a different CI shape than
+every other frontend train's, and no order carries this wiring uniformly for all of them.

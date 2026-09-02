@@ -1,7 +1,6 @@
 // GATE (b) — page-level a11y scan for T10's routes (N7, independent review,
 // 2026-08-28): the panels had a11y coverage; the PAGES (PageHeader's own h1 +
-// description) and the /admin nav (the three Link buttons to the new
-// sub-routes) did not.
+// description) and the /admin hub (its five route-card links) did not.
 //
 // WHY THIS DOES NOT IMPORT app/(firm)/admin/page.tsx DIRECTLY (a genuine
 // environment gap, not unique to T10 — probed and confirmed, 2026-08-28):
@@ -25,15 +24,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { useTranslations, NextIntlClientProvider } from "next-intl";
-import Link from "next/link";
 import { renderComponent, textOf } from "../../test/hookHarness";
-import { enableDomInspection } from "../../test/domInspect";
+import { activeElement, enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
+import { checkKeyboardWalk, focusableElements } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
+import { AdminHubView } from "../admin/admin-hub";
 import { PageHeader, PageShell } from "../common/page-shell";
-import { buttonVariants } from "../ui/button";
 import { ComplianceRegisterPanel } from "./compliance-register-panel";
 import { VendorBindingsPanel } from "./vendor-bindings-panel";
+import { SettingsPanel } from "./settings-panel";
 import messages from "../../messages/en.json";
 
 enableDomInspection();
@@ -64,30 +64,43 @@ function withMessages(children: unknown) {
 
 function AdminPageShadow() {
   const t = useTranslations("Admin");
-  const tFa = useTranslations("FirmAdminCompliance");
   return createElement(
     PageShell,
     null,
     createElement(PageHeader, { title: t("heading"), description: t("body") }),
-    createElement(
-      "nav",
-      { className: "flex flex-wrap gap-2", "aria-label": tFa("adminNavLabel") },
-      createElement(Link, { href: "/admin/compliance", className: buttonVariants({ variant: "outline", size: "sm" }) }, tFa("compliance.heading")),
-      createElement(Link, { href: "/admin/vendor-bindings", className: buttonVariants({ variant: "outline", size: "sm" }) }, tFa("vendorBindings.pageHeading")),
-      createElement(Link, { href: "/admin/registrations", className: buttonVariants({ variant: "outline", size: "sm" }) }, tFa("registrations.heading")),
-    ),
+    createElement(AdminHubView, { scope: { role_rank: 3, is_operator: true } }),
   );
 }
 
-test("AdminPage's own composition (PageHeader + the three-link nav) has zero a11y violations", async () => {
+test("AdminPage's own composition has ordered headings and named links for every visible admin surface", async () => {
   const h = await renderComponent(withMessages(createElement(AdminPageShadow)));
   try {
     const bodyText = textOf(h.container as never);
-    assert.match(bodyText, /Compliance register/, "the nav link to /admin/compliance must render with its real label");
-    assert.match(bodyText, /Vendor identity bindings/, "the nav link to /admin/vendor-bindings must render with its real label");
-    assert.match(bodyText, /Firm registrations/, "the nav link to /admin/registrations must render with its real label");
+    assert.match(bodyText, /Members/, "the hub link to /admin/members must render with its real label");
+    assert.match(bodyText, /Compliance register/, "the hub link to /admin/compliance must render with its real label");
+    assert.match(bodyText, /Vendor identity bindings/, "the hub link to /admin/vendor-bindings must render with its real label");
+    assert.match(bodyText, /Firm registrations/, "the hub link to /admin/registrations must render with its real label");
+    assert.match(bodyText, /Firm settings/, "the hub link to /admin/settings must render with its real label");
+    assert.match(bodyText, /post-beta Billing PR-1\/PR-2 lane/, "the hub must name the lane for its unbuilt billing surfaces");
     const violations = checkAccessibility(h.container as never);
     assert.deepEqual(violations, [], JSON.stringify(violations));
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("Admin hub keyboard walk reaches every visible card link in DOM order", async () => {
+  const h = await renderComponent(withMessages(createElement(AdminPageShadow)));
+  try {
+    const links = focusableElements(h.container as never).filter(
+      (node) => (node as { tagName?: string }).tagName === "A",
+    );
+    assert.equal(links.length, 5, "the operator owner hub exposes all five built admin destinations");
+    assert.deepEqual(checkKeyboardWalk(h.container as never), []);
+    for (const link of links) {
+      (link as { focus: () => void }).focus();
+      assert.equal(activeElement(), link, "keyboard focus must reach each admin card link");
+    }
   } finally {
     await h.unmount();
   }
@@ -183,6 +196,51 @@ test("/admin/vendor-bindings page composition (PageHeader + the real VendorBindi
         // firm reading only "requires an admin who did not propose it" has no idea what to DO.
         assert.match(pageText, /let Clara propose it, or add a second admin/, "pageDescription must name both lawful exits, verbatim");
         assert.doesNotMatch(pageText, /a different admin signs it/, "the retired phrasing (tells a genuinely solo firm to use a person who does not exist) must not render");
+        const violations = checkAccessibility(h.container as never);
+        assert.deepEqual(violations, [], JSON.stringify(violations));
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+// --- shadow of app/(firm)/admin/settings/page.tsx (FS-8 PR-2, 裁-97) --------
+//
+// NO synthetic h1 here, matching the two page-shadow tests above and the
+// lesson PR-1's own fix round paid for (independent review, PR #487, M2): the
+// shadow mounts the SAME real PageHeader the route's page.tsx renders, so a
+// real heading-order defect stays visible instead of being buried under an
+// extra fake h1.
+
+function AdminSettingsPageShadow() {
+  const t = useTranslations("FirmAdminCompliance.settings");
+  return createElement(
+    PageShell,
+    null,
+    createElement(PageHeader, { title: t("pageHeading"), description: t("pageDescription") }),
+    createElement(SettingsPanel),
+  );
+}
+
+const FIRM_SETTINGS_ROW = [{ id: "f1", high_stakes_amount_cents: 10000000 }];
+
+test("/admin/settings page composition (PageHeader + the real SettingsPanel) has zero a11y violations", async () => {
+  await withMockedEnv(
+    async (u) => {
+      const url = String(u);
+      if (url.includes("/rest/v1/firms")) return jsonResponse(FIRM_SETTINGS_ROW);
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(withMessages(createElement(AdminSettingsPageShadow)));
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        const pageText = textOf(h.container as never);
+        assert.match(pageText, /Firm settings/, "the page's own h1 must render");
+        assert.match(pageText, /RM 100,000\.00/, "the current threshold must render, read from the DB verbatim");
+        assert.match(pageText, /Signing capabilities/, "the capabilities section must render");
+        assert.match(pageText, /grant_firm_capability and revoke_firm_capability are live/, "the honest capabilities note must name both verbs");
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {
