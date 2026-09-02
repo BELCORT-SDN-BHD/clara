@@ -180,12 +180,12 @@ export async function handleCheckoutPost(
   // this predicate (`context.ok === true`). Read the same way here so the route
   // and the page cannot disagree about who is a member.
   //
-  // RECORDED AS A LEAD DECISION under existing law, pending the owner's
-  // confirmation at the next sitting: the security pass filed A-M4 asking only
-  // for the operator read door (shipped in `0161`, untouched here) and ruled it
-  // "gates beta operationally". Refusing at ⑤ is the accounting-safe reading of
-  // §5 applied at the route; it is additive and refuses nobody the folded door
-  // could have served.
+  // 裁-139 (owner, 2026-09-02) — 付款前拒绝, refuse before payment. The question
+  // put to the owner was: refuse here, or defer beside A-M4 with a PR-body note
+  // only. The ruling is to refuse at ⑤, before Stripe is called, with a typed
+  // flash kind and a unit cell proving zero Stripe calls and zero door calls.
+  // A-M4's operator read door (shipped in `0161`) is untouched by this; the
+  // refusal is additive and turns nobody away that the folded door could serve.
   if (result.ok && result.context !== null && typeof result.context === "object"
     && (result.context as { ok?: unknown }).ok === true) {
     return checkoutRefusal(proof.origin, { kind: "already_member" });

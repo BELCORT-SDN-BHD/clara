@@ -366,7 +366,8 @@ test("a Stripe failure refuses and leaves the intent UNSTAMPED, so a retry is sa
 });
 
 test("M6: a caller who ALREADY BELONGS TO A FIRM is refused at ⑤, before Stripe", async () => {
-  // Design §5: "no path may strand a paying customer without a firm."
+  // 裁-139 (owner, 2026-09-02): refuse before payment. Design §5: "no path may
+  // strand a paying customer without a firm."
   // `claim_paid_firm` reaches `_create_firm_core`, which refuses `CLR10 actor
   // already belongs to a firm` — so a member who completes checkout can never
   // be served by ⑧. Before this, the only membership wall was AFTER the money.
