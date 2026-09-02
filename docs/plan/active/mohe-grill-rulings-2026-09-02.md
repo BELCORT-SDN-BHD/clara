@@ -235,7 +235,8 @@ verbatim, a receipt on the row; folds into P6-5 (≈0.2 units).
 
 **Context.** 裁-125 made every user-facing legal text an agent template for beta. The terms
 template lane (opus) delivered `docs/ops/legal/clara-beta-terms.md` (844 lines, 27 `[LAWYER]`
-markers, 34 `[verify]` placeholders) and surfaced three positions only the owner can take.
+markers, 35 `[verify]` occurrences of which three are meta-references) and surfaced three positions
+only the owner can take.
 
 **Recommendation put (followed):** adopt all three as drafted — (1) the terms are a SEPARATE
 document kind from the DPA, never a combined body: combining would bundle a withdrawable PDPA
@@ -283,3 +284,27 @@ card calling `answer_interruption` (the Journals-tab pane stays as the second do
 attach control through the surviving runtime plumbing (same intake wall, same typed refusals as the
 Documents upload — no new mechanism), a Playwright leg on both. The five post-beta items get their
 Backlog row in this PR.
+
+
+### 裁-131 — Email OTP expiry is 60 minutes for both arms; C4 amended (owner, 2026-09-02 ~13:20 MYT)
+
+**Context.** The harness PR's fresh-context review (#506, M4) measured a collision the Wave-G
+checklist had papered over: Supabase's *Email OTP expiry* is ONE project setting and governs BOTH the
+six-digit confirmation code (`docs/plan/active/checkout-gate-design.md` §3.4 C4 shortened it from the
+24-hour default to 10 minutes as a brute-force wall) AND the staff-invite token the Resend courier
+delivers (`apps/web/lib/members/invite-mail.ts` mints it with `generateLink`; Supabase sends nothing
+on that arm). `apps/web/README.md` §3 asks only "≤ 24h" for invites; at 10 minutes an invitee who
+opens the mail later finds a dead link and no re-send door exists.
+
+**Recommendation put (followed):** 60 minutes for both, C4 amended. The rate wall (five attempts per
+fifteen minutes per address, 裁-107) is the real defence: a 60-minute window is 20 guesses in a
+million-code space — negligible — and invite links become usable. Alternatives priced: keep 10
+minutes + build a "resend invite" door (≈0.3 unit); keep 10 minutes and accept expired invites.
+
+**Ruling:** *"60 minutes for both, C4 amended (Recommended)."*
+
+**Alignment (all in #506):** the Wave-G checklist's Email-OTP line reads 60 minutes and names the
+collision; `apps/web/README.md` §4's "10 minutes" becomes 60 (and §3's "≤ 24h" cites this ruling);
+`checkout-gate-design.md` C4 gains a dated amendment (the 10-minute figure stands as the design's
+genesis, superseded here); the FS-11 Management-API receipt reads `mailer_otp_exp = 3600`. No code,
+no migration.

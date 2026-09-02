@@ -48,9 +48,16 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
       `{{ .ConfirmationURL }}` and never a `{{ .RedirectTo }}?token_hash=…` link.
 - [ ] Password policy is minimum **12 characters** with HIBP leaked-password protection enabled.
 - [ ] Access-token JWT expiry is **900 seconds**; refresh-token rotation remains on.
-- [ ] The invite template uses `{{ .SiteURL }}/invite/{{ .TokenHash }}` (that arm keeps its
-      link-form template). Email OTP expiry is shortened from the 24-hour default to
-      **10 minutes** (裁-36/§3.4's C4; `apps/web/README.md` §4).
+- [ ] The invite template uses `{{ .SiteURL }}/invite/{{ .TokenHash }}` — on that arm Supabase
+      SENDS NOTHING: the token is minted by `generateLink` and delivered by the Resend courier
+      (`apps/web/lib/members/invite-mail.ts`, `courier.ts`; `apps/web/README.md` §3). **Email OTP
+      expiry is ONE Supabase setting and governs BOTH the six-digit confirmation code AND the invite
+      token.** 裁-36/§3.4's C4 shortens it from the 24-hour default to **10 minutes** for the code;
+      `apps/web/README.md` §3 asks only "≤ 24h" for invites — a 10-minute invite link would be dead
+      for most invitees. **裁-131 (owner, 2026-09-02) sets the single value to 60 minutes for both
+      arms and amends C4**: the rate wall (five attempts per fifteen minutes per address, 裁-107) is
+      the brute-force defence, a 60-minute window is 20 guesses in a million. Receipt: the Management
+      API read shows `mailer_otp_exp = 3600`.
 - [ ] Proof: dated settings screenshots plus Management API reads for the redirect allowlist,
       confirmation/autoconfirm settings, template bodies, password policy/HIBP, `jwt_exp=900` and
       OTP expiry, attached to the Wave-G as-run. Cross-check `apps/web/README.md` §Security posture.

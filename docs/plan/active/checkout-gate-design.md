@@ -244,7 +244,7 @@ with both-polarity cells in part 3 §4:
 | **C1** | **attempts per address** | 5 rejected attempts per email digest per 15 minutes | `too many confirmation attempts` |
 | **C2** | **attempts per origin** | the same window keyed on the **origin digest** — because a per-address lock alone lets an attacker spray one guess each across many addresses | `too many confirmation attempts from this location` |
 | **C3** | **single use** | a consumed code cannot mint a second session — **this one is the platform's**, and is named as such rather than claimed as ours | *(Supabase refuses; our cell asserts the second POST mints nothing)* |
-| **C4** | **expiry** | the project's OTP expiry is shortened from the 24-hour default to **10 minutes** | *(the code simply fails)* |
+| **C4** | **expiry** | the project's OTP expiry is shortened from the 24-hour default to **10 minutes** — **AMENDED to 60 minutes by 裁-131 (owner, 2026-09-02)**: the setting is shared with the staff-invite token, and the rate wall (C1–C3, 裁-107) is the defence that matters — 20 guesses in a million over the hour | *(the code simply fails)* |
 
 **The attempt is recorded BEFORE the verification, never after.** Otherwise an attacker aborts the
 request after a failed guess and is never counted — the counter must survive a killed connection.

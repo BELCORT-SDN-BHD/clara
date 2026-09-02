@@ -592,8 +592,9 @@ proprietorship blurs the line further.`
   (b) Subject to (c), each party's total liability arising out of or in connection with this
       agreement, in contract, tort (including negligence) or otherwise, in any twelve-month
       period, is capped at **the greater of (i) the fees you paid us in the twelve months before
-      the claim arose and (ii) RM[verify: a real figure — RM5,000 is a placeholder, not a
-      recommendation]**.
+      the claim arose and (ii) RM 5,000**. `[LAWYER]`[verify: RM 5,000 is the owner's RULED placeholder
+      figure (裁-129, 2026-09-02) — confirm or revise it at official launch; the floor exists so that
+      the cap is never a total exclusion while beta fees are nil].
 
   > **`[LAWYER]` — READ THIS BEFORE ACCEPTING (b).** A cap expressed only as "the fees paid" is
   > **nil during Beta**, because no fee is charged. A cap of nil is not a limitation of liability;

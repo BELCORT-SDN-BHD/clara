@@ -323,7 +323,8 @@ secret-bearing URL leaves the history stack.
   `RESEND_API_KEY`, `INVITE_MAIL_FROM`. All four must be present and non-blank or the
   courier refuses 503 **before minting anything**, naming the unset variables (an invite
   whose mail cannot go out is permanently unusable AND blocks that address for seven days).
-  Keep the invite expiry short (≤ 24h): Authentication → Sessions/Email → *Email OTP expiry*.
+  The invite expiry is the SAME *Email OTP expiry* setting the confirmation code uses — 60 minutes
+  by 裁-131 (2026-09-02), not a separate knob: Authentication → Sessions/Email → *Email OTP expiry*.
 - **Verify:** send an invite to a mailbox you control, confirm the delivered URL carries both
   the `/invite/<hash>` path and the `?ct=` parameter, and confirm opening it shows the
   confirmation card **without** consuming anything (the second open must still work until
@@ -372,11 +373,13 @@ binding is "the address is the person's own", not a link tied to one browser (§
   link (that shape is 裁-92's own retired vector: a link is a value an attacker can construct
   and mail to a victim; a bare code, checked against the victim's OWN typed address, is not).
   Under Authentication → Auth Providers → Email, shorten the OTP expiry from the 24-hour
-  default to **10 minutes** (裁-36/§3.4's C4 — a named setup act with an owner receipt; no
-  route or migration can read or enforce this project setting from the repository).
+  default to **60 minutes** (裁-36/§3.4's C4 as AMENDED by 裁-131, 2026-09-02: the one setting also
+  governs the staff-invite token, so 60 minutes keeps invites usable while the rate wall carries the
+  brute-force defence — a named setup act with an owner receipt; no route or migration can read or
+  enforce this project setting from the repository).
 - **Verify (receipt):** with the project's Management API token, positively read
   `GET /v1/projects/{ref}/config/auth` and retain the JSON showing `disable_signup` is
-  `false`, `mailer_autoconfirm` is `false`, and the OTP expiry is the configured 10 minutes.
+  `false`, `mailer_autoconfirm` is `false`, and the OTP expiry is the configured 60 minutes (`mailer_otp_exp = 3600`).
   Retain a delivered *Confirm signup* message showing the bare six-digit code with no link at
   all. Re-run these reads after any project restore or auth-configuration change. This
   positive Management API read is a blocking **deploy gate**: repository code cannot read
