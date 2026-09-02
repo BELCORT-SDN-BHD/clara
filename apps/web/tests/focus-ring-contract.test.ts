@@ -180,7 +180,8 @@ describe("focus-ring contract — 裁-1's 70% is declared once and obeyed everyw
     // required and this whole treatment should be re-argued, not silently kept.
     assert.equal(resolveTokenHex(tokens, "ring"), resolveTokenHex(tokens, "primary"));
     // Read the SHIPPED class string — `cn(buttonVariants({variant}))`, which is
-    // exactly what `Button` renders (components/ui/button.tsx:93) — and never
+    // exactly what the `Button` function in components/ui/button.tsx passes to
+    // ButtonPrimitive's `className` — and never
     // the source text: this file's own comments name the removed
     // `focus-visible:ring-destructive/20` utility in prose, and a regex over
     // button.tsx would read that mention as the class still being there

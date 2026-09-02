@@ -75,8 +75,20 @@ function CommandInput({
           quietly drop the citation: `border-input` here measures 3.504:1
           against the popover, which is the SC 1.4.11 boundary this field owes.
           The tinted fill stays — it is the search-bar look, and it is not what
-          identifies the control once the edge does. `command-a11y.test.tsx`
-          reds if the `/30` comes back to the border. */}
+          identifies the control once the edge does. (Against that fill the same
+          edge measures 2.550:1; every other Input in the product is
+          `bg-transparent`, so this is the only control whose two sides differ,
+          and it is the OUTER side that identifies it.)
+
+          THE GUARD IS BROWSER-ONLY, and that is not an oversight to be fixed by
+          adding a unit cell. This is a computed-style fact — Tailwind resolves
+          `/30` to a `color-mix()` the harness has no engine for — so the cell
+          that catches a regression here is `e2e/a11y-finish-walk.spec.ts`'s
+          computed-border read on the built app, which asserts this element
+          resolves to `rgb(139, 137, 129)` and reds with `oklab(… / 0.3)` when
+          the `/30` comes back. Proven by mutant: with the `/30` restored, all
+          four plausible unit files stay 53/0 and only the browser cell reds.
+          A lane that touches this line MUST run the browser leg. */}
       <InputGroup className="h-8! rounded-lg! border-input bg-input/30 shadow-none! *:data-[slot=input-group-addon]:pl-2!">
         <CommandPrimitive.Input
           data-slot="command-input"
