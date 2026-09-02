@@ -50,7 +50,7 @@
 // PR (roles-bootstrap.sql already carries this "same-commit twin" convention).
 
 import { makeClient, targetLabel, isMain } from "../lib/pg.mjs";
-import { assertDestructiveAllowed } from "../lib/guard.mjs";
+import { assertDestructiveAllowed, EPHEMERAL_DB } from "../lib/guard.mjs";
 
 export const CHAIN_MINTED_ROLES = Object.freeze([
   // 0002_foundation.sql — the six group roles
@@ -129,6 +129,21 @@ export async function sweepChainMintedRoles({ log = () => {} } = {}) {
   const client = makeClient();
   await client.connect();
   try {
+    // Purely informational (review-518-r2, §2c's cosmetic note): every `clara`-prefixed
+    // role NOT in the literal roster — e.g. `clara_storage_docs` — is never selected,
+    // never dropped, and previously never mentioned either. Name it in the log so an
+    // operator reading the cleanup output sees it was deliberately left alone, not
+    // silently missed. This query's result plays NO part in what gets dropped below.
+    const allClaraPrefixed = await client.query("select rolname from pg_roles where rolname like 'clara%'");
+    const unrecognized = allClaraPrefixed.rows.map((r) => r.rolname).filter((n) => !CHAIN_MINTED_ROLES.includes(n));
+    if (unrecognized.length) {
+      log(
+        `role sweep: leaving ${unrecognized.length} unrecognized clara%-prefixed role(s) untouched (not in CHAIN_MINTED_ROLES): ${unrecognized
+          .sort()
+          .join(", ")}`,
+      );
+    }
+
     const present = await client.query("select rolname from pg_roles where rolname = any($1::text[])", [
       CHAIN_MINTED_ROLES,
     ]);
@@ -172,10 +187,22 @@ export async function dropDatabase(name, { log = () => {} } = {}) {
     throw new Error(`dropDatabase: refusing a non-conforming database name ${JSON.stringify(name)}`);
   }
   assertDestructiveAllowed({ action: `drop database "${name}"` });
+  // review-518-r2 F3: assertDestructiveAllowed only reasons about the CONNECTION target
+  // (e.g. PGDATABASE=postgres, already disposable via the localhost check), not the
+  // NAMED database this call is about to drop — so on any localhost cluster it would
+  // otherwise authorize dropping an arbitrary conforming name, `clara_test` (the estate
+  // suite's own) included. Hold the DROP TARGET to the same disposable-name shape the
+  // guard already reasons about elsewhere (`lib/guard.mjs`'s EPHEMERAL_DB — every drill
+  // database already ends in `_ci`).
+  if (!EPHEMERAL_DB.test(name)) {
+    throw new Error(
+      `dropDatabase: refusing "${name}" — its name does not look disposable (no ci/test/tmp/temp/scratch/ephemeral suffix). This call only drops throwaway drill databases; rename the target or use a *_ci-shaped name.`,
+    );
+  }
   const client = makeClient();
   await client.connect();
   try {
-    await client.query(`drop database if exists ${name}`);
+    await client.query(`drop database if exists ${name} with (force)`);
     log(`dropped database "${name}" (if it existed) · via ${targetLabel()}`);
   } finally {
     await client.end();

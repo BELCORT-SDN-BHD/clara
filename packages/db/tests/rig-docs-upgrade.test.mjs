@@ -11,8 +11,14 @@
 // post-step migrates the REAL migrations dir EXPLICITLY (`migrate({ dir: MIG_DIR })`)
 // so it applies the actual 0007 even when CLARA_MIGRATIONS_DIR is exported for the
 // inert green-with-skips proof. Run it against an isolated DB, e.g.:
-//   PGDATABASE=clara_docs_upgrade_ci CLARA_RIG_ALLOW_RESET=1 \
-//     node --test tests/rig-docs-upgrade.test.mjs
+//   PGDATABASE=clara_docs_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+//     CLARA_RIG_ALLOW_ROLE_SWEEP=1 node --test tests/rig-docs-upgrade.test.mjs
+// THREE gates, not two (review-518-r2 F2): `CLARA_RIG_ALLOW_RESET` (this file's own
+// schema-drop), `CLARA_ALLOW_DESTRUCTIVE` (reset()'s own guard), and
+// `CLARA_RIG_ALLOW_ROLE_SWEEP` (the cluster-wide role sweep `resetForFullReplay()`
+// calls below — see `.claude/rules/db-tests.md`'s gate paragraph and
+// `tests/rig-cluster-reset.mjs`'s header). Omitting the third gate fails closed with
+// a named `RoleSweepRefused`, not silently.
 //
 // ROLE SURVIVAL ACROSS THE FOUR CYCLES BELOW (found 2026-09-02 review of PR #485,
 // fixed here; the fix's own first cut was itself FIX REQUIRED at review-518 D1 — see

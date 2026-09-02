@@ -288,7 +288,7 @@ runs:
         echo "--- highest Wave-D-b slice on disk: $DRILL_N · drill: $DRILL ---"
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x42_split_upgrade_ci'
         PGDATABASE=clara_x42_split_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-          CLARA_RIG_DB=1 node --test "tests/$DRILL.test.mjs"
+          CLARA_RIG_DB=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 node --test "tests/$DRILL.test.mjs"
 
     # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same
     # mechanism, this step's own database (created only when a Wave-D-b slice exists
@@ -353,7 +353,7 @@ runs:
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_hrd_b_upgrade_ci'
         PGDATABASE=clara_hrd_b_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-          node --test tests/hrd-b-upgrade-drill.test.mjs
+          CLARA_RIG_ALLOW_ROLE_SWEEP=1 node --test tests/hrd-b-upgrade-drill.test.mjs
 
     # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same
     # mechanism, this step's own database. NOTE: this drill's shared kit
