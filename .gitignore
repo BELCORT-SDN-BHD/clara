@@ -75,3 +75,6 @@ spike/.env
 
 # Playwright MCP session output (snapshots, screenshots, staged upload files) — never tracked
 .playwright-mcp/
+
+# Codex CLI skills mirror (generated, machine-local)
+.agents/
