@@ -1161,10 +1161,11 @@ export const CHECKOUT_GATE_C2_COHORT = [
   ...CHECKOUT_GATE_C2_HUMAN_FNS, ...CHECKOUT_GATE_C2_WEBHOOK_FNS,
 ];
 
-// FS-4 C-3 (checkout-gate design part 2 §1.3 and part 3 §2.1): four authenticated pre-firm
+// FS-4 C-3 (checkout-gate design part 2 §1.3 and part 3 §2.1): five authenticated pre-firm
 // doors plus the auth-wall lane's exact two-verb, pre-session OTP surface.
 const CHECKOUT_GATE_C3_HUMAN_FNS = [
-  "sign_dpa", "open_checkout_intent", "record_checkout_session", "claim_paid_firm",
+  "get_current_dpa_document", "sign_dpa", "open_checkout_intent",
+  "record_checkout_session", "claim_paid_firm",
 ];
 const CHECKOUT_GATE_C3_AUTH_WALL_FNS = [
   "claim_confirmation_attempt", "settle_confirmation_attempt",

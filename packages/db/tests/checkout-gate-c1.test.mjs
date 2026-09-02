@@ -276,8 +276,17 @@ cell("c1.6 signatures -- evidence is append-only, single per user/version, and c
       [user, BETA_VERSION],
     ), "a duplicate user/version signature");
   }, { commit: false });
-  const trunc = await truncateGuardError("truncate clara.dpa_signatures");
+  const c3Applied = (await rootQuery(
+    "select to_regclass('clara.firm_registration_payments') is not null as applied",
+  )).rows[0].applied;
+  const trunc = await truncateGuardError(c3Applied
+    ? "truncate clara.dpa_signatures, clara.firm_registration_payments"
+    : "truncate clara.dpa_signatures");
   assert.equal(trunc?.code, "CLR08", `the signature TRUNCATE guard answers CLR08 (got ${trunc?.code})`);
+  // Once C-3 exists this statement names two append-only tables. Pin the message so the cell
+  // proves dpa_signatures' own guard fired, rather than accepting the payment table's CLR08.
+  assert.match(trunc.message, /dpa_signatures cannot be truncated/,
+    "the dpa_signatures TRUNCATE guard specifically, not merely some CLR08");
 });
 
 cell("c1.7a registration rate events -- digests are 32-byte, indexed, append-only evidence", async () => {
