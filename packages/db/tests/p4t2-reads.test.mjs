@@ -7,8 +7,10 @@ import assert from "node:assert/strict";
 import { opk, rootQuery, humanQuery, insertUser, createFirm, seedAdmission } from "./rig-fixtures.mjs";
 import { requestFirmRegistration, markOperator, clearOperator } from "./p4t2-fixtures.mjs";
 
-// Leave a clean is_operator slate for whichever file runs next in the same suite invocation --
-// see markOperator's own header note (p4t2-fixtures.mjs) for why this is unscoped.
+// Release every operator firm THIS file has marked (scoped, not estate-wide -- see
+// markOperator's/clearOperator's own header notes in p4t2-fixtures.mjs, PR #501 F1), so neither
+// a later file in the same suite invocation nor a concurrently-running package's own test
+// inherits a leftover flag this file is not itself still using.
 after(clearOperator);
 
 async function operatorScene(tag) {

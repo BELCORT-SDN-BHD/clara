@@ -9,6 +9,7 @@
 
 import { applyClaraStreamEvent, initialClaraStreamState, type ClaraStreamState, type SseEvent } from "./stream";
 import type { ClaraPart, MessageRow } from "./api";
+import type { LiveClarifyPart } from "./liveClarify";
 
 export type ClaraSendStatus = "idle" | "sending" | "sent" | "error";
 
@@ -26,6 +27,20 @@ export interface ClaraThreadUiState {
   sendStatus: ClaraSendStatus;
   sendError: string | null;
   activeTaskId: string | null;
+  /** 裁-132 — `clara.agent_tasks_visible.created_at` for `activeTaskId`, the RUNTIME's own
+   *  record of when this turn began. The elapsed-time indicator counts from this and from
+   *  nothing else; a turn whose start has not been read yet shows no elapsed time rather
+   *  than one measured from when this tab happened to render. */
+  turnStartedAt: string | null;
+  /** The DB's own status for `activeTaskId` at the last read — `awaiting_input` is what
+   *  distinguishes "Clara is working" from "Clara is waiting on you" after a reload. */
+  turnStatus: string | null;
+  /** The parked question, REHYDRATED from `clara.agent_interruptions` rather than folded
+   *  out of the live SSE buffer. A reload discards `stream.provisionalChunks`, so without
+   *  this the question Clara is parked on disappears from the thread while the run itself
+   *  is still waiting for it. Cleared the moment the live stream carries the same question
+   *  (`ClaraThreadView` prefers the live fold) and on every terminal `message`. */
+  parkedClarify: LiveClarifyPart | null;
   stream: ClaraStreamState;
 }
 
@@ -37,6 +52,9 @@ const emptyThreadState: ClaraThreadUiState = {
   sendStatus: "idle",
   sendError: null,
   activeTaskId: null,
+  turnStartedAt: null,
+  turnStatus: null,
+  parkedClarify: null,
   stream: initialClaraStreamState,
 };
 
@@ -111,12 +129,49 @@ export const claraThreadStore = {
     setThread(threadId, { loadError: message });
   },
 
+  /** Clears a standing load failure so the retry affordance's own read starts from the
+   *  LOADING arm rather than rendering the old error underneath a fresh attempt. Deliberately
+   *  does NOT touch `messages`/`messagesLoaded`: a retry after a SUCCESSFUL first load (a
+   *  later refetch that failed) must keep the transcript the human is reading on screen. */
+  beginLoadRetry(threadId: string): void {
+    setThread(threadId, { loadError: null });
+  },
+
   beginSend(threadId: string): void {
     setThread(threadId, { sendStatus: "sending", sendError: null, pendingUserParts: null });
   },
 
   markAccepted(threadId: string, taskId: string): void {
-    setThread(threadId, { activeTaskId: taskId, stream: initialClaraStreamState });
+    setThread(threadId, {
+      activeTaskId: taskId,
+      // The new turn's start is not known until the DB is asked for it (`hydrateRun`).
+      // Carrying the PREVIOUS turn's `created_at` forward would time this turn from the
+      // last one's clock — a wrong number rendered as a fact.
+      turnStartedAt: null,
+      turnStatus: null,
+      parkedClarify: null,
+      stream: initialClaraStreamState,
+    });
+  },
+
+  /** 裁-132 + the parked-clarify rehydration: the DB's own answer about this thread's live
+   *  run. `null` means the read saw no non-terminal task — the honest "no turn in flight"
+   *  state, which also clears any parked question that has since been answered elsewhere. */
+  hydrateRun(
+    threadId: string,
+    run: { taskId: string; status: string; startedAt: string } | null,
+    parkedClarify: LiveClarifyPart | null,
+  ): void {
+    if (run === null) {
+      setThread(threadId, { turnStartedAt: null, turnStatus: null, parkedClarify: null });
+      return;
+    }
+    setThread(threadId, {
+      activeTaskId: run.taskId,
+      turnStartedAt: run.startedAt,
+      turnStatus: run.status,
+      parkedClarify,
+    });
   },
 
   /** The ONE place a turn becomes "sent" — call this only once the stream has actually
@@ -126,12 +181,26 @@ export const claraThreadStore = {
   },
 
   markSendFailed(threadId: string, message: string): void {
-    setThread(threadId, { sendStatus: "error", sendError: message, activeTaskId: null });
+    setThread(threadId, {
+      sendStatus: "error",
+      sendError: message,
+      activeTaskId: null,
+      turnStartedAt: null,
+      turnStatus: null,
+    });
   },
 
   applyStreamEvent(threadId: string, event: SseEvent): void {
     const current = state.threads[threadId] ?? emptyThreadState;
-    setThread(threadId, { stream: applyClaraStreamEvent(current.stream, event) });
+    const stream = applyClaraStreamEvent(current.stream, event);
+    // A terminal `message` IS the authority that the turn ended (./stream.ts's header), so
+    // the rehydrated parked question and the turn clock retire with it — the same wholesale
+    // discard `applyClaraStreamEvent` already performs on `provisionalChunks`. Leaving them
+    // would keep an answered question on screen with a still-ticking timer behind it.
+    const settled = event.event === "message";
+    setThread(threadId, settled
+      ? { stream, parkedClarify: null, turnStartedAt: null, turnStatus: null }
+      : { stream });
   },
 
   /** FIX 1 — fires right before each backoff sleep. Surfaces the attempt count via

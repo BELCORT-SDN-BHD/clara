@@ -13,6 +13,7 @@ import { LoadingState, StateBanner } from "@/components/common/state";
 import { PartSlot } from "@/components/clara/PartSlot";
 import { ClaraWelcome } from "@/components/clara/ClaraWelcome";
 import { OnboardingChecklistCard } from "@/components/clara/OnboardingChecklistCard";
+import { TurnProgress } from "@/components/clara/TurnProgress";
 import { ComposerAttachmentControl, type ComposerAttachmentState } from "@/components/clara/ComposerAttachmentControl";
 import { claraWelcomeVisible } from "@/lib/clara/welcomeState";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -48,7 +49,7 @@ export function ClaraThreadView({
   const [draft, setDraft] = useState("");
   const [attachments, setAttachments] = useState<ComposerAttachmentState>({ parts: [], blocked: false });
   const [attachmentClearToken, setAttachmentClearToken] = useState(0);
-  const { state, sendMessage, retryConnection } = useClaraThread(auth, threadId ?? "");
+  const { state, sendMessage, retryConnection, retryLoad } = useClaraThread(auth, threadId ?? "");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const handleAttachmentState = useCallback((next: ComposerAttachmentState) => setAttachments(next), []);
 
@@ -68,13 +69,21 @@ export function ClaraThreadView({
   // same measurement this train made for the intake BODY and the reason the wall cannot
   // stand in for this reset.
   //
-  // Two resets, deliberately, because they own different halves: the `key` below rebuilds
-  // `useUploadQueue` (its `ref.current` rows survive a prop change — its only effect is an
-  // unmount abort cleanup), and this effect clears the parts the PARENT is holding, which
-  // no child can clear on its way out because an unmounting control fires no
-  // `onStateChange`. `threadId` joins the dependency because a different thread is a
-  // different turn context. `#507` closes the same boundary for the thread itself and is
-  // unmerged; this reset is owned here and does not depend on it.
+  // P6-5 — THIS RESET IS **NOT** RETIRED BY THE STRUCTURAL BOUNDARY, and the measurement is
+  // why. `RailMount` now keys the whole rail subtree on `clientId ?? "firm"`
+  // (components/clara/rail-mount.tsx), which does cover this component ON THE RAIL. But the
+  // rail is not this component's only mount point: `ClaraFullScreenThread` mounts it from
+  // `app/(full)/clients/[clientId]/clara/[threadId]/page.tsx`, and the App Router REUSES a
+  // page component across a params-only change — so moving between two clients' escalated
+  // threads is exactly the in-place `clientId` prop change this effect exists for, with no
+  // remount anywhere in that path. `composer-attachment-scope.test.tsx` drives precisely
+  // that shape (its own header: "both cells flip `clientId` as a PROP CHANGE with no
+  // remount — the production event") and went RED when this dependency was dropped, which is
+  // the cell doing its job.
+  //
+  // So the boundary is retired where it PROVABLY holds — the `key` on this component inside
+  // `ClaraRail`, which the mount-level key strictly subsumes — and this reset stays, because
+  // "the rail remounts" is not a claim about the full-screen route.
   useEffect(() => {
     setAttachments({ parts: [], blocked: false });
   }, [clientId, threadId]);
@@ -108,6 +117,21 @@ export function ClaraThreadView({
     () => foldLiveClarifyParts(state.stream.provisionalChunks),
     [state.stream.provisionalChunks],
   );
+
+  // THE PARKED QUESTION AFTER A RELOAD (P6-5). The live fold above reads the SSE buffer,
+  // which a page reload throws away — so a refresh while Clara is parked left the thread
+  // showing no question at all, on a run that is still waiting for one. `state.parkedClarify`
+  // is the same question re-read from `clara.agent_interruptions` (lib/clara/turnRun.ts).
+  //
+  // THE LIVE FOLD WINS WHEN BOTH EXIST, and only one of the two ever renders. Within a
+  // single uninterrupted session the stream carries the question and the rehydrate is
+  // redundant; showing both would put the SAME question on screen twice with two answer
+  // controls, and the second would address a row the first already emptied.
+  const clarifyParts = liveClarifyParts.length > 0
+    ? liveClarifyParts
+    : state.parkedClarify
+      ? [state.parkedClarify]
+      : [];
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -162,9 +186,32 @@ export function ClaraThreadView({
         )}
         {!threadId && !resolveError && <LoadingState>{t("resolving")}</LoadingState>}
         {threadId && notSignedIn && <StateBanner tone="info">{t("signInRequired")}</StateBanner>}
-        {threadId && !notSignedIn && !state.messagesLoaded && <LoadingState>{t("loading")}</LoadingState>}
-        {threadId && !notSignedIn && state.loadError && state.messagesLoaded && (
-          <StateBanner tone="error">{t("loadError", { message: state.loadError })}</StateBanner>
+        {/* THREE DISTINGUISHABLE STATES, and the error arm no longer hides behind the one
+            that only a SUCCESSFUL read can set. Before P6-5 both branches required
+            `messagesLoaded`: a failed FIRST transcript read therefore rendered the LOADING
+            state forever — no error, no retry, no second attempt (`loadedRef` fires once per
+            thread id) — while the error branch it should have fallen to could never be
+            reached, because only a success sets the flag both branches were reading. Now
+            LOADING is "no error and nothing loaded yet", ERROR is `loadError` whether or not
+            a transcript ever arrived, and the error carries the way back out.
+
+            The retry is not decoration: `retryLoad` re-arms the once-per-thread guard and
+            runs the read again, which is the only mechanism that can recover this thread
+            without a full page reload. */}
+        {threadId && !notSignedIn && !state.messagesLoaded && !state.loadError && (
+          <LoadingState>{t("loading")}</LoadingState>
+        )}
+        {threadId && !notSignedIn && state.loadError && (
+          <StateBanner
+            tone="error"
+            action={
+              <Button type="button" size="xs" variant="outline" onClick={() => void retryLoad()}>
+                {t("retryLoad")}
+              </Button>
+            }
+          >
+            {t("loadError", { message: state.loadError })}
+          </StateBanner>
         )}
         {/* DS-03 (FS-9 §3, P6-3) — the ONE place `aria-busy` belongs in this
             component. This log PERSISTS across the load: it is mounted while
@@ -181,16 +228,29 @@ export function ClaraThreadView({
             regions), #508 added task/session threading, the provisional bubble
             and the live-clarify group.
 
-            THE LOG WRAPS THE TRANSCRIPT AND ONLY THE TRANSCRIPT: the message map
-            and the provisional bubble. The live-clarify group and the
-            stream-status line are its SIBLINGS below — see the comment at the
-            closing tag for why, and do not move them back in: #508's own
-            parked-clarify cell reds naming `nested-live-region` if you do. */}
+            THE LOG WRAPS THE TRANSCRIPT AND ONLY THE TRANSCRIPT — THREE children,
+            not two: the welcome, the message map and the provisional bubble.
+            `ClaraWelcome` (#514) is the transcript's own EMPTY STATE — it renders
+            exactly where the first message will, so it belongs inside the region
+            that announces messages. (The count read "two" until #514 merged; a
+            comment that enumerates a list is a list that has to be re-counted when
+            one grows, which is why this one now says the number out loud.)
+
+            The live-clarify group, the stream-status line and the turn clock are
+            its SIBLINGS below — see the comment at the closing tag for why, and do
+            not move them back in: #508's own parked-clarify cell reds naming
+            `nested-live-region` if you do. */}
         <div
           className="space-y-3"
           role="log"
           aria-live="polite"
-          aria-busy={Boolean(threadId) && !notSignedIn && !state.messagesLoaded}
+          // MERGE (P6-3 x P6-5) — `!state.loadError` is P6-5's half, and without it this
+          // combination is a NEW defect neither branch had on its own. P6-3 wrote `aria-busy`
+          // against `!messagesLoaded` while a failed first read left that flag false forever
+          // (the stranded-rail defect); P6-5 fixed the visible half and would have left the
+          // accessible one announcing "busy" over a rendered error, indefinitely. Busy means a
+          // read is IN FLIGHT, and a failed one is not.
+          aria-busy={Boolean(threadId) && !notSignedIn && !state.messagesLoaded && !state.loadError}
         >
           {/* 裁-14 · the Clara welcome moment (#514). The gate is a pure function in
               `lib/clara/welcomeState.ts`, NOT an inline conjunction, because
@@ -257,17 +317,23 @@ export function ClaraThreadView({
             above, so it belongs beside the transcript rather than in it, and its
             own status region stays the precise announcer for "answered".
             Visual order is unchanged: this still sits between the provisional
-            bubble and the stream-status line. */}
-        {liveClarifyParts.length > 0 && (
+            bubble and the stream-status line.
+            MERGE (P6-3 x P6-5): the CONDITION is `clarifyParts`, not `liveClarifyParts` —
+            P6-5 folds the live stream's clarify and the one REHYDRATED from
+            `agent_interruptions` into one list (see its definition above), and taking main's
+            block wholesale had reverted this to the live-only source. The map below already
+            read `clarifyParts`, so the two disagreed: after a reload the group would have
+            been gated shut on an empty live buffer while holding a question it had read. */}
+        {clarifyParts.length > 0 && (
           <div className="enter-content rounded-lg bg-clara-muted p-2 text-sm">
             <p className="mb-1 text-xs font-medium text-secondary-ink">{t("role.assistant")}</p>
-            {liveClarifyParts.map((part, index) => (
+            {clarifyParts.map((part, index) => (
               <PartSlot
                 key={part.tool_call_id}
                 part={part}
                 taskId={state.activeTaskId}
                 session={auth}
-                clarifyAnswerable={index === liveClarifyParts.length - 1}
+                clarifyAnswerable={index === clarifyParts.length - 1}
               />
             ))}
           </div>
@@ -280,6 +346,15 @@ export function ClaraThreadView({
         {streamStatusLabel(state, t) && (
           <p role="status" className="text-xs text-muted-foreground italic">{streamStatusLabel(state, t)}</p>
         )}
+        {/* 裁-132. Rendered off the DB-read start alone, so it appears for a turn this tab
+            posted AND for one it found already running after a reload — the two cases a
+            client-side stopwatch cannot tell apart honestly.
+            MERGE (P6-5 x P6-3): it sits OUTSIDE the log with its status sibling above, and
+            deliberately carries NO live region of its own. P6-3 removed the nested regions
+            this component used to have; a per-second announcement is the loudest possible
+            version of that defect, and the sentence a screen reader needs ("Clara is
+            responding…") is already announced by the line above it. */}
+        <TurnProgress startedAt={state.turnStartedAt} parked={state.turnStatus === "awaiting_input"} />
         {/* Kept as two INDEPENDENT conditions, deliberately: `retryAvailable`
             can stand alone next to `streamStatusLabel`'s own "Connection
             lost." line above, and folding the Retry into the banner would

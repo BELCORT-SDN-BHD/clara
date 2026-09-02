@@ -17,7 +17,8 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/common/native-select";
 import { Badge } from "@/components/parts/PartBadge";
 import { businessDateTime } from "@/lib/business-date";
-import { isKnownFirmQuestionKind, type FirmOpenQuestionRow } from "@/lib/firm/needs-you-gaps";
+import { isKnownFirmQuestionKind, readOnboardingProposal, type FirmOpenQuestionRow } from "@/lib/firm/needs-you-gaps";
+import { OnboardingProposalDetail } from "./onboarding-proposal-detail";
 import type { ClientRow } from "@/lib/firm/reads";
 import { ErrorMessage } from "./data-state";
 
@@ -62,6 +63,10 @@ export function FirmQuestionRow({
 
   const kindLabel = isKnownFirmQuestionKind(row.kind) ? t(`firmQuestionKind.${row.kind}`) : t("firmQuestionKind.unknown", { kind: row.kind });
   const candidateCount = Array.isArray(row.candidates) ? row.candidates.length : 0;
+  // Gated on the KIND, not just on the shape: a candidate array that happens to carry a
+  // `proposed_name` under some other kind is not an onboarding proposal, and rendering it as
+  // one would be reading a shape the database never committed to for that kind.
+  const proposal = row.kind === "onboarding_proposed" ? readOnboardingProposal(row.candidates) : null;
 
   return (
     <li className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
@@ -70,6 +75,15 @@ export function FirmQuestionRow({
         <span className="text-xs text-muted-foreground">{businessDateTime(row.opened_at)}</span>
       </div>
       <p className="text-card-foreground">{row.question_text}</p>
+      {/* P6-5 ③ — the seventh kind gets the ONE thing the generic rendering could not give
+          it: the name Clara proposed and the basis she proposed it on, read out of the
+          candidate shape `wake_propose_client_onboarding`'s live body actually commits to
+          (0143:645-648). The raw `<details>` blob below still renders underneath, unchanged
+          — this adds a reading of the candidates, it does not replace or hide them. A row
+          whose candidates do not carry that shape falls through to the generic path alone. */}
+      {proposal ? (
+        <OnboardingProposalDetail proposal={proposal} questionText={row.question_text} />
+      ) : null}
       {candidateCount > 0 ? (
         <details className="text-xs text-muted-foreground">
           <summary>{t("candidatesLabel", { count: candidateCount })}</summary>

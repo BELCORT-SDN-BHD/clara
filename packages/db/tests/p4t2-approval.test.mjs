@@ -7,8 +7,10 @@ import { randomUUID } from "node:crypto";
 import { AGENT_USER_ID, CLR, assertRaises, opk, rootQuery, humanQuery, insertUser, createFirm, seedAdmission, addMember, getPool } from "./rig-fixtures.mjs";
 import { requestFirmRegistration, approveFirmRegistration, rejectFirmRegistration, rawRegistrationRequest, markOperator, clearOperator } from "./p4t2-fixtures.mjs";
 
-// Leave a clean is_operator slate for whichever file runs next in the same suite invocation --
-// see markOperator's own header note (p4t2-fixtures.mjs) for why this is unscoped.
+// Release every operator firm THIS file has marked (scoped, not estate-wide -- see
+// markOperator's/clearOperator's own header notes in p4t2-fixtures.mjs, PR #501 F1), so neither
+// a later file in the same suite invocation nor a concurrently-running package's own test
+// inherits a leftover flag this file is not itself still using.
 after(clearOperator);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

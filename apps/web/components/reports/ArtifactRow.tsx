@@ -1,9 +1,14 @@
 "use client";
 
-// One clara.report_artifacts row (0071/0127) — custody metadata only, never a
-// download link (see lib/reports/types.ts's header: no byte-download mechanism
-// exists anywhere in this catalog). A `pre_sign` row gets the Issue + Archive
-// doors (0127); a `signed_original` row gets the Retrieve custody read.
+// One clara.report_artifacts row (0071/0127) — custody metadata, the Issue + Archive doors on a
+// `pre_sign` row, the Retrieve custody read on a `signed_original` one, and — since FS-7 echelon 2
+// (裁-96②) — the real byte DOWNLOAD.
+//
+// THE DOWNLOAD CONTROL IS NOT A LINK AND IS NOT DERIVED HERE. It appears only where
+// `clara.list_downloadable_artifacts` says this artifact is downloadable, and that flag is the
+// byte door's own gate executed per row — this component never inspects `kind`, `sha256` or
+// anything else to decide. The storage key stays on screen as the custody fact it always was; it
+// is not, and never becomes, the thing the download uses.
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
@@ -13,7 +18,8 @@ import { Input } from "@/components/ui/input";
 import { EmptyState, StateBanner } from "@/components/common/state";
 import { DoorDialog } from "./DoorDialog";
 import { issueReportForApproval, archiveSignedOriginal, retrieveSignedOriginal, isDoorRefusal } from "@/lib/reports/api";
-import type { ReportArtifactRow } from "@/lib/reports/types";
+import { DownloadArtifactButton } from "./DownloadArtifactButton";
+import type { DownloadableArtifact, ReportArtifactRow } from "@/lib/reports/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 /** LOW (independent review, L3): `Number(byteSize)` on a malformed string
@@ -27,11 +33,14 @@ export function isValidByteSize(value: string): boolean {
 
 export function ArtifactRow({
   artifact,
+  offer,
   session,
   busy,
   act,
 }: {
   artifact: ReportArtifactRow;
+  /** The OFFER door's row for this artifact, or `null` while the offer read is in flight. */
+  offer: DownloadableArtifact | null;
   session: SessionTokenAccessor;
   busy: boolean;
   act: (fn: () => Promise<void>) => Promise<void>;
@@ -63,7 +72,8 @@ export function ArtifactRow({
         <span className="font-mono text-muted-foreground wrap-anywhere">{artifact.storage_key}</span>
         <Button variant="outline" size="xs" onClick={copyKey}>{copied ? t("copied") : t("copyKey")}</Button>
       </div>
-      <p className="text-xs text-muted-foreground">{t("noDownload")}</p>
+      <p className="text-xs text-muted-foreground">{t("downloadNote")}</p>
+      <DownloadArtifactButton offer={offer} session={session} namespace="ClientReports.statutory.download" />
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt className="text-muted-foreground">{t("sha256Label")}</dt>
         <dd className="truncate font-mono text-card-foreground">{artifact.sha256}</dd>
