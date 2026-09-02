@@ -26,6 +26,10 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
   excluded from the REST of this spec's tests and lands with FS-4's e2e instead -- 裁-92 (the
   6-digit-code confirmation) replaces the as-built confirm flow before beta, and walking it now
   would need a Supabase email-template act FS-4 immediately supersedes.
+- `firm-navigation-walk.spec.ts` — P4-6's built-app rank-shaping walk: an operator owner
+  reaches Members through Admin in two navigation clicks, while a bookkeeper sees only the
+  destinations admitted by the mock fixture rank. It proves built-app scope propagation and
+  navigation shaping, not a DB rank, RLS policy, or live `caller_context` response.
 - `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers.
 
 ## Why these specs are NOT in `apps/web/test/manifest.txt`
