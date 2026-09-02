@@ -310,7 +310,9 @@ export async function getClientFyEnd(clientId: string, opts: Opts = {}): Promise
   return rows[0] ?? null;
 }
 
-/** clara.close_gate_checks — the 14-row human-readable catalog
+/** clara.close_gate_checks — the human-readable catalog (fifteen rows once
+ *  Q-D6's `deferred_opening_resolved` wall is applied; the count is never
+ *  assumed here — this read enumerates whatever the catalog holds)
  *  (p_cgc_human: `true` for clara_authenticated), joined client-side against
  *  get_close_readiness's bare check_keys so CloseReadinessPanel can show a
  *  title without inventing one. */
