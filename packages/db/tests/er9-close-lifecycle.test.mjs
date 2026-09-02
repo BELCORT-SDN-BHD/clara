@@ -11,6 +11,7 @@ import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
   has0056, caught, cleanCloseableFY, freshActiveClient, setupCloseCoa, proposeFY, openFY,
   beginClose, finalizeClose, verifyClose, getCloseReadiness, listFiscalYears, plainEntry,
+  hasQd6Wall, QD6_GATE_KEY,
   AR1, AP1, RE1, REVN, EXPN, BANK1, addDaysStr,
 } from "./x56-fixtures.mjs";
 import {
@@ -103,7 +104,7 @@ test("R9.A2 the CONTRAST arm: an end date the human CHOSE is labelled 'asserted'
   assert.equal(row.length_reason, "er9 rig: a stub period, stated as required");
 });
 
-test("R9.A3 get_close_plan BEFORE any close run: all 14 catalog checks ride with their drawer, every result reads the honest 'not_yet_measured', run and receipt read 'absent' — and the goods-trading check is SHOWN, never hidden, for a services client", async (t) => {
+test("R9.A3 get_close_plan BEFORE any close run: EVERY catalog check rides with its drawer, every result reads the honest 'not_yet_measured', run and receipt read 'absent' — and the goods-trading check is SHOWN, never hidden, for a services client", async (t) => {
   if (gate(t)) return;
   const plan = await getClosePlan(world.users.alice, W.fy);
   assert.equal(plan.fiscal_year.id, W.fy);
@@ -118,11 +119,19 @@ test("R9.A3 get_close_plan BEFORE any close run: all 14 catalog checks ride with
   // document gate was added as its OWN drawer-2 row (design close-key-1-design.md §3.10,
   // D-18) rather than by widening `uncoded_documents`. The count moves WITH the key named,
   // never as a bare number, so a future arrival cannot be absorbed silently.
+  // Q-D6 (the close-seal wall) then added a FIFTEENTH, drawer 1. Its migration ships
+  // UNNUMBERED until merge prep and migrate.mjs skips it by filename until then (裁-108), so
+  // the expectation is chosen by a LIVE CATALOG witness — and both named keys are still
+  // asserted present on their own branch, never folded into a bare total.
+  const qd6 = await hasQd6Wall();
+  const expectedChecks = qd6 ? 15 : 14;
   const catalogN = (await rootQuery("select count(*)::int as n from clara.close_gate_checks")).rows[0].n;
-  assert.equal(catalogN, 14, "mandatory setup: the shipped gate catalog carries 14 checks");
-  assert.equal(plan.checks.length, 14, "EVERY applicable check rides the plan, all 14");
+  assert.equal(catalogN, expectedChecks, `mandatory setup: the shipped gate catalog carries ${expectedChecks} checks`);
+  assert.equal(plan.checks.length, expectedChecks, `EVERY applicable check rides the plan, all ${expectedChecks}`);
   assert.ok(plan.checks.some((c) => c.check_key === "undated_documents"),
     "the fourteenth is undated_documents — the F-A4 PR-1a gate for filings carrying no financial date");
+  assert.equal(plan.checks.some((c) => c.check_key === QD6_GATE_KEY), qd6,
+    "and the fifteenth is deferred_opening_resolved — present exactly when its migration has been applied, never inferred");
 
   for (const c of plan.checks) {
     assert.equal(c.result.state, "not_yet_measured",
@@ -133,7 +142,8 @@ test("R9.A3 get_close_plan BEFORE any close run: all 14 catalog checks ride with
   }
   const drawers = plan.checks.map((c) => c.drawer);
   assert.deepEqual([...drawers].sort((a, b) => a - b), drawers, "the plan is ordered by drawer");
-  assert.equal(plan.checks.filter((c) => c.drawer === 1).length, 6, "six drawer-1 identities");
+  assert.equal(plan.checks.filter((c) => c.drawer === 1).length, qd6 ? 7 : 6,
+    "six drawer-1 identities, seven once Q-D6's close-seal wall lands");
   assert.equal(plan.checks.filter((c) => c.drawer === 2).length, 6,
     "six drawer-2 default-refuse checks — five shipped by 0056 plus undated_documents (census C15)");
   assert.equal(plan.checks.filter((c) => c.drawer === 3).length, 2, "two drawer-3 advisory checks");
@@ -162,7 +172,8 @@ test("R9.B1 begin_close mints ONE in-progress run, flips the year to 'closing', 
   assert.equal(live, 1, "exactly ONE live run per fiscal year (the partial unique index)");
 
   const g = await latestGates(W.run);
-  assert.equal(g.size, 14, "all 14 checks produced a result row (census C15)");
+  assert.equal(g.size, (await hasQd6Wall()) ? 15 : 14,
+    "every catalog check produced a result row (census C15, +1 once Q-D6's wall is applied)");
   assert.ok(g.has("undated_documents"), "including the undated-document gate");
 
   // THE ZERO-ENROLMENT POSITIVE. This client has no bank accounts and no fixed assets —
@@ -208,7 +219,10 @@ test("R9.B2 the plan and the readiness read AGREE, check for check and digest fo
   assert.equal(readiness.close_run_id, W.run, "get_close_readiness resolves the SAME run");
   assert.equal(readiness.run_state, "in_progress");
   assert.equal(readiness.fy_end_source, "default_1231");
-  assert.equal(readiness.gates.length, 14);   // census C15: 0056's thirteen + undated_documents
+  // Census C15 (0056's thirteen + undated_documents), plus Q-D6's drawer-1 wall once its
+  // UNNUMBERED migration has been numbered and applied (裁-108) — a live catalog witness,
+  // never a filename and never a bare number.
+  assert.equal(readiness.gates.length, (await hasQd6Wall()) ? 15 : 14);
 
   const rByKey = new Map(readiness.gates.map((x) => [x.check_key, x]));
   for (const c of plan.checks) {
