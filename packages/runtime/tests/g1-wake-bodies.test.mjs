@@ -270,7 +270,12 @@ test("G1B-C1 a DISABLED source claims nothing; enabling through set_wake_source_
   // crashing the cell, not the loud, named assertion this comment promises. Fixing it HERE
   // alone was not enough either: p4t2-fixtures.mjs's own bare take had the identical exposure,
   // just wider (its whole critical section, not one round-trip). rig.mjs's `claimOperatorFirm`
-  // is the ONE shared fix both sides route through — never a second hand-copied loop: the
+  // is the fix the RUNTIME-side takers route through; it mirrors packages/db/tests/
+  // rig-helpers.mjs's export of the SAME name BY VALUE (different package, no cross-package
+  // import), and the db-side takers route through THAT copy. The mirror has no fail-closed
+  // divergence detector (unlike WAKE_ENGINE_TEST_PREFIX's T1), so a fix applied to one copy
+  // leaves the other exposed — the exact asymmetry behind round 2's MEDIUM; any change to
+  // either body MUST be applied to both (opus review round 3, the wording LOW). Here: the
   // UPDATE itself is the only authority asked, its answer (success, or a NAMED constraint
   // violation identifying a live holder) IS the observation, so there is no separate read to go
   // stale between it and the write, and success is confirmed by rowCount, never merely "did not
