@@ -75,7 +75,7 @@ runs:
     # `pnpm --dir` on purpose, and this is load-bearing rather than stylistic: it runs the
     # package's own scripts with the REPO'S PINNED eslint resolved from the root install,
     # whereas `npx eslint` inside a non-member package resolves nothing locally and would
-    # DOWNLOAD an unpinned eslint from the registry onto the self-hosted runner on every PR.
+    # DOWNLOAD an unpinned eslint from the registry onto the runner on every PR.
     # No install step is needed: `check` is `node --check` (syntax only) and the unit battery
     # imports nothing outside the package — `pg` is reached only by lib/db.mjs, which the
     # tests never load, and which the image installs from the package's own manifest.
@@ -155,9 +155,15 @@ runs:
     # comment in ci.yml already applies to connection strings).
     #
     # [ADR-0073 lever 3 — the ONE executable delta in this file] The pinned binary is
-    # cached at $HOME/.cache/gitleaks-<version> on the self-hosted host, version-keyed
-    # so a version bump re-downloads and an existing binary is reused byte-identical.
-    # Scan scope, config and flags are UNCHANGED.
+    # staged at $HOME/.cache/gitleaks-<version>, version-keyed so a version bump
+    # re-downloads and an existing binary is reused byte-identical.
+    # HOSTED NOTE (裁-135, 2026-09-02): on the self-hosted fleet that path was a real
+    # cross-run cache; on a throwaway hosted VM $HOME starts empty, so the ~7 MB
+    # release tarball is fetched once per lint job (measured on the migration PR's own
+    # run — a few seconds). Left as-is DELIBERATELY rather than swapped for
+    # actions/cache: the version-keyed reuse still holds within a job, and a new
+    # third-party action here would be one more SHA to pin in the one job that guards
+    # secrets. Scan scope, config and flags are UNCHANGED, on both hosts.
     - name: Gitleaks (maintained secret scan, version-pinned)
       shell: bash -e {0}
       env:

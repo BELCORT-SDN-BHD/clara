@@ -1,18 +1,24 @@
 name: Install PostgreSQL 17 client
 description: >-
   Install the v17 client so pg_dump matches the server (the wrapper picks the highest
-  installed version). ubuntu-latest ships v16, which refuses a v17 server. Moved
-  verbatim from ci.yml (ADR-0073 lever 5).
+  installed version). ubuntu-latest (Ubuntu 24.04) ships v16, which refuses a v17
+  server. Moved verbatim from ci.yml (ADR-0073 lever 5); the self-hosted flock retired
+  with the fleet (裁-135, 2026-09-02) — see the step comment.
 runs:
   using: composite
   steps:
     - name: Install PostgreSQL 17 client (for DR pg_dump)
       shell: bash -e {0}
       run: |
-        # IDEMPOTENT + HOST-LOCKED (self-hosted hardening): parallel jobs on one host
-        # raced the keyring/sources writes and the dpkg lock; flock serializes the
-        # install and the version guard makes every later run a no-op.
-        sudo flock /var/lock/clara-pgdg.lock bash -ec '
+        # IDEMPOTENT. The host-wide `sudo flock /var/lock/clara-pgdg.lock` retired with
+        # the self-hosted fleet (裁-135): it existed because PARALLEL JOBS ON ONE WSL HOST
+        # raced the keyring/sources writes and the dpkg lock, and a GitHub-hosted runner
+        # is a single-tenant, single-job, throwaway VM with no second job to race. The
+        # VERSION GUARD stays — it was never the lock's job, and it is what makes a
+        # re-entry (a composite used twice in one job, as frontier-leg does) a no-op.
+        # DPkg::Lock::Timeout is kept too: apt's own unattended-upgrades timer can still
+        # hold the lock briefly on a fresh runner image.
+        sudo bash -ec '
           if psql --version 2>/dev/null | grep -q " 17\."; then exit 0; fi
           echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/pgdg.gpg
