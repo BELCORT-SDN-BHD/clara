@@ -113,6 +113,15 @@ function scalarOrNull(value, key, dropped) {
  *  refuses exactly what the door would refuse rather than something nearby. */
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
+/** `ck_stripe_events_status_shape`'s own bound, copied from the TABLE (0160:178-182). The three
+ *  fields it covers are the only CHECK-bounded columns in `clara.stripe_events` whose values come
+ *  from `data.object`; `c5sclr.4` reads `pg_constraint` and fails if that stops being true. */
+export const STATUS_MAX_LENGTH = 64;
+/** The constraint's own character class: printable ASCII, `^[ -~]*$`. */
+const PRINTABLE_ASCII_RE = /^[ -~]*$/;
+/** The three columns `ck_stripe_events_status_shape` bounds, by their PROJECTION key. */
+export const BOUNDED_STATUS_KEYS = Object.freeze(["payment_status", "mode", "session_status"]);
+
 /** The key under which a malformed metadata field is NAMED in the stored projection. Not a
  *  denied key, and it can carry no personal data: its values come from `METADATA_KEYS`, a fixed
  *  three-name set of OUR OWN keys, never from the event's key names or values. */
@@ -141,8 +150,13 @@ function metadataValue(object, key, dropped) {
  * `stripe_event_problems` row, and Stripe re-delivering for days against something that reads
  * like an outage. "The store is the record" failed for exactly the events that are malformed.
  *
- * Throwing a 400 here would stop the retry loop but still store nothing. Nulling stores the
- * event AND produces a problem row, through machinery that already exists: with these three
+ * Throwing a 400 here would store nothing — and, corrected at r2 (NEW-2), would not even stop
+ * the retries: Stripe's current documentation recommends a 400 *precisely so that it retries*
+ * ("We recommend returning a 400 status to let Stripe automatically retry the event"), and its
+ * delivery schedule draws no 4xx/5xx distinction. So throwing would have been strictly worse
+ * than nulling — a multi-day retry loop AND nothing stored. Nulling is the only shape that
+ * terminates at all: it stores the event AND produces a problem row, through machinery that
+ * already exists. With these three
  * fields NULL, `apply_stripe_events` files `metadata_missing` with a detail naming which fields
  * were absent (0160:400-410), and `list_stripe_event_problems` shows it to an operator. That is
  * the design's "recorded as a problem" outcome reached with no DB change and no new grant — and
@@ -155,6 +169,38 @@ function metadataValue(object, key, dropped) {
  * is Stripe's to keep — the raw event is answerable by `event_id` in their dashboard, which is
  * the same division of labour 裁-91 already relies on.
  */
+/**
+ * A field the TABLE bounds. Over-long or non-printable-ASCII becomes NULL and is NAMED; a value
+ * inside the bound passes through untouched.
+ *
+ * THE SAME CLASS AS THE MALFORMED UUID, ON A DIFFERENT REFUSER (the r2 review's NEW-1). The uuid
+ * arms are raised by the FUNCTION and surface as CLR10; these three are raised by
+ * `ck_stripe_events_status_shape` on the TABLE and surface as SQLSTATE 23514 — and the first cut
+ * of the fold pre-empted only the function's arms, so a 65-character or non-ASCII
+ * `payment_status` still produced the exact shape M-1 named: a deterministic 500, no event row,
+ * no problem row, Stripe re-delivering. Measured by the reviewer through the shipped router,
+ * three separate trips.
+ *
+ * NOT REACHABLE FROM TODAY'S STRIPE API, and that is stated rather than relied on: `mode` is one
+ * of {payment, setup, subscription}, `status` one of {open, complete, expired}, `payment_status`
+ * one of {paid, unpaid, no_payment_required} — all short ASCII. It goes live the day Stripe
+ * lengthens an enum or a localised string reaches one of the three. A wall that costs four lines
+ * is not worth deferring to that day.
+ *
+ * NULL, NOT TRUNCATED. Truncating would store a value Stripe never sent, on a money surface, and
+ * `clara.stripe_events` is append-only — there is no correcting it later. Nulling is honest and
+ * it keeps the event recordable: with `payment_status` NULL the applier's own settlement test
+ * fails and it files `payment_not_settled`, which is the problem row an operator acts on.
+ */
+function scalarBounded(value, key, dropped, malformed) {
+  const v = scalarOrNull(value, key, dropped);
+  if (v === null) return null;
+  const s = String(v);
+  if (s.length <= STATUS_MAX_LENGTH && PRINTABLE_ASCII_RE.test(s)) return v;
+  malformed.push(key);
+  return null;
+}
+
 function metadataUuid(object, key, dropped, malformed) {
   const raw = metadataValue(object, key, dropped);
   if (raw === null) return null;
@@ -203,9 +249,13 @@ function projectCheckoutSession(event, dropped, malformed) {
   // the database is on its own line in this function, and nothing arrives by inheritance.
   const projection = envelope(event, dropped);
   projection.session_id = scalarOrNull(object.id, "id", dropped);
-  projection.mode = scalarOrNull(object.mode, "mode", dropped);
-  projection.session_status = scalarOrNull(object.status, "status", dropped);
-  projection.payment_status = scalarOrNull(object.payment_status, "payment_status", dropped);
+  // The three `ck_stripe_events_status_shape` bounds — nulled and named rather than passed on to
+  // a CHECK violation the route cannot turn into a stored row (NEW-1). The key each is NAMED
+  // under is its PROJECTION key, so `metadata_malformed` reads the same as the column that would
+  // have refused it.
+  projection.mode = scalarBounded(object.mode, "mode", dropped, malformed);
+  projection.session_status = scalarBounded(object.status, "session_status", dropped, malformed);
+  projection.payment_status = scalarBounded(object.payment_status, "payment_status", dropped, malformed);
   projection.amount_total = scalarOrNull(object.amount_total, "amount_total", dropped);
   projection.currency = scalarOrNull(object.currency, "currency", dropped);
   // `customer` and `subscription` are id STRINGS on an unexpanded Session and full OBJECTS on

@@ -43,6 +43,18 @@
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
 
+/**
+ * The env var naming the ONE header this module reads.
+ *
+ * ITS DEPLOYED VALUE IS PINNED BY THE OTHER SIDE, and a mismatch 503s every confirmation rather
+ * than failing quietly: `apps/web`'s Lane B (#517) sets `AUTH_WALL_CLIENT_IP_HEADER =
+ * "x-clara-client-ip"` on its server-to-server call, so `CLARA_TRUSTED_CLIENT_IP_HEADER` must be
+ * exactly `x-clara-client-ip` on the runtime. It is deliberately still a VARIABLE — the header a
+ * deployment can trust is a deployment fact (`Fly-Client-IP`, `CF-Connecting-IP`, a bare
+ * `X-Forwarded-For`), and hard-coding one would be the "a wall keyed on a client-settable header
+ * is not a wall" trap design part 1 §4.1 names. The deploy notes carry the value; this comment
+ * carries the coupling.
+ */
 export const TRUSTED_HEADER_VAR = "CLARA_TRUSTED_CLIENT_IP_HEADER";
 export const PEPPER_VAR = "CLARA_RATE_WALL_PEPPER";
 /** Both digests are exactly 32 bytes — `claim_confirmation_attempt` and `open_checkout_intent`

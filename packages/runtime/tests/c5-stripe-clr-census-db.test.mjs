@@ -25,7 +25,13 @@ import express from "express";
 import { register } from "tsx/esm/api";
 import * as rig from "./rig.mjs";
 import { cohortGate } from "./c5-cohort-gate.mjs";
-import { projectStripeEvent, METADATA_KEYS, MALFORMED_METADATA_KEY } from "../lib/stripe-projection.mjs";
+import {
+  BOUNDED_STATUS_KEYS,
+  MALFORMED_METADATA_KEY,
+  METADATA_KEYS,
+  STATUS_MAX_LENGTH,
+  projectStripeEvent,
+} from "../lib/stripe-projection.mjs";
 
 register();
 const { webhookRefusal, stripeWebhookRoutes } = await import("../src/stripeRoutes.ts");
@@ -50,8 +56,9 @@ async function doorRaises() {
   return [...r.rows[0].prosrc.matchAll(RAISE_RE)].map((m) => ({ message: m[1], code: m[3] }));
 }
 
-/** A `checkout.session.completed` whose three metadata values are whatever the caller says. */
-function eventWithMetadata(metadata) {
+/** A `checkout.session.completed` whose metadata — and, optionally, whose status fields — are
+ *  whatever the caller says. */
+function eventWithMetadata(metadata, objectOver = {}) {
   return {
     id: `evt_c5clr${Math.random().toString(16).slice(2)}`,
     object: "event",
@@ -69,6 +76,7 @@ function eventWithMetadata(metadata) {
         amount_total: 0,
         currency: "myr",
         metadata,
+        ...objectOver,
       },
     },
   };
@@ -104,15 +112,59 @@ test("c5sclr.0 N-1 — an over-limit body answers a TYPED 413, never Express's H
   }
 });
 
-test("c5sclr.1 every CLR the door raises is either pre-empted or mapped — no bare 500", { skip }, async () => {
+/**
+ * EVERYTHING THAT CAN REFUSE AN INSERT INTO `clara.stripe_events`, read from the catalog.
+ *
+ * THE INSTRUMENT HALF OF NEW-1, AND IT IS THE PART WORTH KEEPING. The first cut of this file
+ * read `record_stripe_event`'s `prosrc` ONLY, while claiming "no bare 500". The table's three
+ * CHECK constraints raise `23514` and were outside its scope entirely, so a 65-character
+ * `payment_status` produced exactly the 500 the cell's name said could not happen. That is the
+ * same lesson the chat-turn census in this PR already learned — its refusals lived in triggers,
+ * invisible to a prosrc walk — and the fix is the same: read what can refuse, not one refuser.
+ */
+async function refusalSurface() {
+  const checks = await rig.rootQuery(
+    `select c.conname, pg_get_constraintdef(c.oid) as def
+       from pg_constraint c
+      where c.conrelid = 'clara.stripe_events'::regclass and c.contype = 'c'
+      order by 1`,
+  );
+  const triggers = await rig.rootQuery(
+    `select t.tgname, p.oid::regprocedure::text as fn
+       from pg_trigger t join pg_proc p on p.oid = t.tgfoid
+      where not t.tgisinternal and t.tgrelid = 'clara.stripe_events'::regclass
+      order by 1`,
+  );
+  return { checks: checks.rows, triggers: triggers.rows };
+}
+
+test("c5sclr.1 every refuser is pre-empted or mapped — the function AND the table", { skip }, async () => {
   const raises = await doorRaises();
   assert.ok(raises.length >= 6, `the census read only ${raises.length} raises — the instrument is not reading prosrc`);
   const codes = [...new Set(raises.map((r) => r.code))];
   assert.deepEqual(codes, ["CLR10"], `the door raises codes beyond CLR10: ${JSON.stringify(codes)}`);
-  // The belt covers the whole censused set. `webhookRefusal` is the SHIPPED function, driven
-  // here rather than a copy of its predicate (裁-107).
-  for (const code of codes) {
-    const outcome = webhookRefusal(Object.assign(new Error("door refusal"), { code }));
+
+  // THE TABLE'S OWN REFUSERS. A CHECK raises 23514 and a trigger raises whatever it raises; both
+  // are invisible to a prosrc walk over the function.
+  const { checks, triggers } = await refusalSurface();
+  assert.deepEqual(
+    checks.map((c) => c.conname).sort(),
+    ["ck_stripe_events_event_id_shape", "ck_stripe_events_no_pii", "ck_stripe_events_status_shape"],
+    "the CHECK set on clara.stripe_events moved — a new constraint needs a projector pre-emption before this cell can pass",
+  );
+  // The two triggers are UPDATE/DELETE/TRUNCATE-only, so an INSERT path cannot reach them. Pinned
+  // by NAME and by their tgtype's INSERT bit being clear, not by assertion.
+  const insertTriggers = await rig.rootQuery(
+    `select t.tgname from pg_trigger t
+      where not t.tgisinternal and t.tgrelid = 'clara.stripe_events'::regclass
+        and (t.tgtype & 4) <> 0`,
+  );
+  assert.deepEqual(insertTriggers.rows, [], `an INSERT-firing trigger appeared: ${JSON.stringify(triggers)}`);
+
+  // The belt covers every code either refuser can produce. `webhookRefusal` is the SHIPPED
+  // function, driven here rather than a copy of its predicate (裁-107).
+  for (const code of [...codes, "23514"]) {
+    const outcome = webhookRefusal(Object.assign(new Error("db refusal"), { code }));
     assert.equal(outcome.status, 400, `${code} must be a named 400, not a 500`);
     assert.notDeepEqual(outcome.body, { error: "internal" }, `${code} must not answer {"error":"internal"}`);
   }
@@ -151,6 +203,67 @@ test("c5sclr.2 the three uuid arms are the reachable ones, and the projector pre
   // slot must not land in an append-only table by the back door.
   assert.equal(JSON.stringify(projection).includes("person@example.test"), false);
   assert.equal(JSON.stringify(projection).includes("not-a-uuid"), false);
+});
+
+test("c5sclr.4 NEW-1 — the three CHECK-bounded status fields, both polarities per field", { skip }, async () => {
+  const { recordStripeEvent } = await import("../lib/checkout-pools.mjs");
+  const bad = {
+    payment_status: "p".repeat(STATUS_MAX_LENGTH + 1), // over the 64-char bound
+    mode: "subscription\ninjected", // a newline — outside `^[ -~]*$`
+    status: "compléte", // non-ASCII
+  };
+  const good = { payment_status: "paid", mode: "subscription", status: "complete" };
+
+  // POLARITY A, per field: each violating value alone is nulled and NAMED, and the other two
+  // survive untouched — so the wall is per-field, not an all-or-nothing bail.
+  for (const [key, projKey] of [["payment_status", "payment_status"], ["mode", "mode"], ["status", "session_status"]]) {
+    const objectOver = { ...good, [key]: bad[key] };
+    const { projection, malformed } = projectStripeEvent(eventWithMetadata({}, objectOver));
+    assert.equal(projection[projKey], null, `${projKey} must be nulled`);
+    assert.deepEqual(malformed, [projKey], `${projKey} must be the ONLY field named`);
+    for (const other of BOUNDED_STATUS_KEYS.filter((k) => k !== projKey)) {
+      assert.notEqual(projection[other], null, `${other} must survive a sibling's violation`);
+    }
+    // The offending VALUE never reaches the projection — only our own column name.
+    assert.equal(JSON.stringify(projection).includes(bad[key]), false);
+  }
+
+  // POLARITY B: the ordinary values every real Stripe event carries pass through untouched. A
+  // wall that nulled the happy path would satisfy polarity A and break the product.
+  const ok = projectStripeEvent(eventWithMetadata({}, good));
+  assert.equal(ok.projection.payment_status, "paid");
+  assert.equal(ok.projection.mode, "subscription");
+  assert.equal(ok.projection.session_status, "complete");
+  assert.deepEqual(ok.malformed, []);
+  // Exactly at the bound is INSIDE it — an off-by-one here would null a legitimate value.
+  const edge = projectStripeEvent(eventWithMetadata({}, { ...good, payment_status: "p".repeat(STATUS_MAX_LENGTH) }));
+  assert.equal(edge.projection.payment_status.length, STATUS_MAX_LENGTH);
+  assert.deepEqual(edge.malformed, []);
+
+  // LIVE: the pre-empted event RECORDS (this is the trip the reviewer measured as a 500)…
+  const preempted = projectStripeEvent(eventWithMetadata({}, { ...good, payment_status: bad.payment_status }));
+  const receipt = await recordStripeEvent(preempted);
+  assert.equal(receipt.recorded, true, "the over-long status event must be RECORDED, not refused");
+  const stored = await rig.rootQuery("select payment_status,projection from clara.stripe_events where event_id=$1", [
+    preempted.eventId,
+  ]);
+  assert.equal(stored.rows[0].payment_status, null);
+  assert.deepEqual(stored.rows[0].projection[MALFORMED_METADATA_KEY], ["payment_status"]);
+
+  // …and the CHECK is still live, so the pre-emption is not vacuous: the same value sent past
+  // the projector raises 23514, which the shipped map turns into the named 400.
+  await assert.rejects(
+    recordStripeEvent({
+      eventId: `evt_c5bound${Math.random().toString(16).slice(2)}`,
+      eventType: "checkout.session.completed",
+      projection: { livemode: false, payment_status: bad.payment_status },
+    }),
+    (err) => {
+      assert.equal(err.code, "23514", `expected a CHECK violation, got ${err.code}`);
+      assert.deepEqual(webhookRefusal(err), { status: 400, body: { error: "event_refused_by_door" } });
+      return true;
+    },
+  );
 });
 
 test("c5sclr.3 LIVE, both polarities: the malformed event records and becomes a problem row", { skip }, async () => {

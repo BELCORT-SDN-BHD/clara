@@ -105,22 +105,29 @@ export function webhookRefusal(err: unknown): WebhookOutcome {
       ? { status: 503, body: { error: "livemode_not_configured" } }
       : { status: 403, body: { error: "livemode_mismatch" } };
   }
-  // THE DOOR'S OWN REFUSALS, AS A BELT (the #511 review's M-1). `record_stripe_event` raises six
-  // CLR10 arms; the projector now pre-empts every one of them that is reachable through this
-  // route (censused in `tests/c5-stripe-clr-census-db.test.mjs`, both directions, against the
-  // live catalog). A CLR10 arriving here therefore means the projector has a hole or a migration
-  // added an arm — and the honest answer is a NAMED 400, not `{"error":"internal"}` with a 500.
+  // THE DATABASE'S OWN REFUSALS, AS A BELT (the #511 review's M-1, widened by r2's NEW-1). Two
+  // refusers sit behind `record_stripe_event`: the FUNCTION's six `CLR10` arms, and the TABLE's
+  // three CHECK constraints, which raise SQLSTATE `23514`. The projector now pre-empts every arm
+  // of both that is reachable through this route; `tests/c5-stripe-clr-census-db.test.mjs` reads
+  // `pg_proc`, `pg_constraint` AND `pg_trigger` on `clara.stripe_events` and fails in both
+  // directions, so a migration that adds a refuser reds a cell instead of shipping a 500 loop.
   //
-  // 400 RATHER THAN 500, DELIBERATELY, AND IT IS THE LESSER OF TWO IMPERFECT ANSWERS. Nothing is
-  // recorded on this path either way, so neither code is fully honest. A 500 says "we are
-  // broken" and makes Stripe retry an event that will fail identically for days, which is how
-  // this arm produced a permanent retry loop that reads like an outage. A 400 says "this event
-  // is not one we can store", stops the loop, and surfaces in the Stripe dashboard as a failed
-  // delivery an operator can see. A problem ROW is not available on this path: `event_id` is
-  // `not null references clara.stripe_events(event_id)`, so no problem row can exist for an
-  // event the door refused, and the webhook role holds no relation privilege to write one. That
-  // gap is recorded in the PR body as a DB follow-up, not papered over here.
-  if ((err as { code?: string })?.code === "CLR10") {
+  // A CODE ARRIVING HERE MEANS THE PROJECTOR HAS A HOLE, and the honest answer is a NAMED 400,
+  // not `{"error":"internal"}` with a 500.
+  //
+  // WHAT THE 400 BUYS, CORRECTED (r2's NEW-2). It does NOT stop Stripe retrying. Stripe's current
+  // documentation is explicit both ways: the webhook-versioning guide says *"We recommend
+  // returning a 400 status to let Stripe automatically retry the event"*, and the delivery
+  // schedule — up to three days with exponential back-off in live mode — draws no 4xx/5xx
+  // distinction, listing `(400) ERR (or other 4xx status)` among PENDING statuses. So the belt
+  // buys LOG AND DASHBOARD LEGIBILITY — a named refusal instead of an anonymous internal error —
+  // and nothing else. An unforeseen refusal still costs a multi-day retry loop with nothing
+  // stored, which is precisely why the durable-trace DB follow-up matters rather than being
+  // optional: a problem ROW is unreachable on this path (`stripe_event_problems.event_id` is
+  // `not null references clara.stripe_events(event_id)`, so none can exist for an event the
+  // database refused, and the webhook role holds no relation privilege to write one).
+  const dbCode = (err as { code?: string })?.code;
+  if (dbCode === "CLR10" || dbCode === "23514") {
     return { status: 400, body: { error: "event_refused_by_door" } };
   }
   return { status: 500, body: { error: "internal" } };
