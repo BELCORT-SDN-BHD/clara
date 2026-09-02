@@ -218,6 +218,40 @@ test("clarify hydrate spells waiting, error, and gone as three distinguishable s
   );
 });
 
+test("a TRANSIENT read failure is not a dead end — the error state carries the same way back", async () => {
+  // Review R2-N1. Ending the re-read window on an error is right (spinning on a failing
+  // read is worse), but it left the error state as the one branch with no recovery, with
+  // the affordance the fold had just built sitting one branch away. A read that fails once
+  // and then succeeds must be recoverable without a page reload.
+  let failNext = true;
+  await withFetch(
+    (url) => {
+      if (!url.includes("/rest/v1/agent_interruptions")) throw new Error(`unexpected fetch: ${url}`);
+      if (failNext) return json({ message: "transient" }, 500);
+      return json([pending]);
+    },
+    async () => {
+      const h = await renderComponent(App(true));
+      try {
+        await settleUntil(h, () => /Could not check whether this question is still open/.test(h.text()), "error state");
+        assert.equal(h.find(buttonNamed("Answer")), null, "no control while the read is failing");
+
+        failNext = false;
+        const recheck = h.find(buttonNamed("Check again"));
+        assert.ok(recheck, "the error state must offer the same way back the closed window does");
+        await h.act(() => clickButton(recheck));
+
+        // Discriminating: the control can only exist after a SUCCESSFUL re-read, and the
+        // error banner must be gone rather than left standing beside a working form.
+        await settleUntil(h, () => h.find(buttonNamed("Answer")) !== null, "the control after recovering from the error");
+        assert.doesNotMatch(h.text(), /Could not check whether this question is still open/);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
 test("the row lands AFTER the chunk — the control still arrives, because the read is retried", async () => {
   // The production ordering, exactly: `runModelSegmentStepV16` writes the clarify chunk,
   // then `checkpointStep` -> `mintHookTokenStep` -> `openInterruptionStep` INSERT the row

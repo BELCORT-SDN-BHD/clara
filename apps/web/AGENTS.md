@@ -11,6 +11,11 @@ cutover. Full reference: `README.md` here.
 - The session token comes ONLY from the blessed `sessionTokenAccessor` singleton
   (`lib/session-accessor.ts`) — never a per-render accessor object literal (the 4GB-heap-OOM
   lesson, that file's own header).
+- The Clara rail (`RailMount`) mounts OUTSIDE `ClientScopeProvider`'s keyed subtree, so
+  client-owned rail state does not reset on a client switch by construction — every new piece
+  of client-owned rail state ships its own reset on `clientId` change plus a scope cell (A→B
+  and A→firm), until P6-5 lands the structural boundary (#507 the thread, #508 the attachments
+  each paid for this sentence).
 - The UI never invents a number, verb, receipt, or link. A missing backend verb renders
   honestly "not built yet" (the ⌘K "Do" precedent) — never a fake control.
 - Every string routes through next-intl; semantic Tailwind tokens only (no raw hex, no `dark:`

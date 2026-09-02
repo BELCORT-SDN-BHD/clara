@@ -15,8 +15,10 @@
 //   * even then the control renders only once a READ has SEEN a pending
 //     `agent_interruptions` row for this task. The row is the authority on whether
 //     there is anything to answer; this card never infers it from the part's presence.
-//     Absence of the row is not evidence of pendingness — it falls through to the
-//     honest "no longer awaiting an answer" empty state.
+//     Absence of the row is not evidence of pendingness — it falls through, once the
+//     re-read window below closes, to an empty state that reports the absence it saw
+//     ("No open question has been recorded for this one yet") rather than asserting a
+//     settled one, and offers a way back.
 //
 // THE DOOR IS THE JOURNALS PANE'S DOOR, byte for byte. `answerInterruption(id, { text })`
 // is exactly what components/journals/interruptions-panel.tsx's `AnswerRow` sends
@@ -186,8 +188,22 @@ export function ClarifyCard({
           reports what the read SAW rather than asserting a state it never established.
           ERROR stays its own banner and stops the window rather than spinning on it. */}
       {searching ? <LoadingState>{t("loading")}</LoadingState> : null}
+      {/* The error branch ENDS the window — spinning on a failing read is worse than
+          stopping — but it is not a dead end (fold round 2, review R2-N1). It carries the
+          same recovery affordance the closed window does, which is exactly what
+          `StateBanner`'s `action` slot exists for: a transient read failure was otherwise
+          the one state with no way back, with the control sitting one branch away. */}
       {active && state.err ? (
-        <StateBanner tone="error" title={t("readError")} code={state.clr?.code ?? undefined}>
+        <StateBanner
+          tone="error"
+          title={t("readError")}
+          code={state.clr?.code ?? undefined}
+          action={
+            <Button type="button" size="xs" variant="outline" disabled={state.loading} onClick={recheck}>
+              {t("recheck")}
+            </Button>
+          }
+        >
           {state.err}
         </StateBanner>
       ) : null}
