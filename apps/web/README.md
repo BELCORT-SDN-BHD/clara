@@ -41,9 +41,12 @@ workbench screens are **P3**.
 ## Token provenance
 
 The semantic tokens in `app/globals.css` and the local fonts in `public/brand/fonts/` are
-**ported verbatim** from the `clarabook-frontend` repo (the design-asset archive, owner
-ruling Q-A), specifically `g5-design-system/clarabook-design-system/app/globals.css` and its
-`public/brand/fonts/` at commit **a86e48a**. That repo's `docs/01-TOKEN-CONTRACT.md` is the
+**ported from `a86e48a` with five deliberate recuts toward the token contract** (radius
+literals, `--text-xl`, the motion scale, per-utility reduced-motion arms, the
+identity-canvas bridge) — `globals.css`'s own notes record each — from the
+`clarabook-frontend` repo (the design-asset archive, owner ruling Q-A), specifically
+`g5-design-system/clarabook-design-system/app/globals.css` and its `public/brand/fonts/` at
+commit **a86e48a**. That repo's `docs/01-TOKEN-CONTRACT.md` is the
 token contract of record — read it before adding or renaming a token. Highlights:
 
 - **Colour**: `--shell: #F7F7F5` (nav/app shell) vs `--surface-subtle: #F5F6F4` (quiet grouped
@@ -104,8 +107,8 @@ groups only, no URL segment added by the grouping:
 ```
 app/(firm)/    — the firm shell (FirmNav + the ONE Clara rail mount + ⌘K): firm home ·
                  needs-you · clients register · activity · admin, plus the client
-                 workspace (clients/[clientId]/ + its seven object tabs: journals ·
-                 documents · bank · close · reports · registers · knowledge) under its
+                 workspace (clients/[clientId]/ + its eight object tabs: journals ·
+                 documents · bank · close · tax · reports · registers · knowledge) under its
                  scope-activating layout.
 app/(full)/    — the Clara full-screen escalation routes (/clara/:threadId and
                  /clients/:clientId/clara/:threadId — same URLs, route groups add no
@@ -146,6 +149,15 @@ in `package.json` are **documented, not run, on this Windows box** — per the o
 handoff's own instruction, the Cloudflare build runs on WSL CI, which can and should run a
 newer Node for that one step. This is a deviation worth flagging to the owner if the CI lane
 provisioning doesn't already assume it.
+
+**What that failure actually looks like, so nobody re-diagnoses it** (recorded 2026-09-02, PR
+#505 round 3, after two people lost time to it): on Windows/Node 20.19.5, `pnpm --filter
+@clara/web cf:build` fails *reproducibly* inside OpenNext's `buildExternalNodeMiddleware` →
+`copyTracedFiles`, with `ENOENT … middleware.js.nft.json`. It is the environment mismatch
+above, **not** a regression in this app — `cf:build` is not a CI gate, and the failing step is
+only copying `.next/server/middleware.js` into `.next/standalone/`, so the Workers middleware
+is derived from the same file a plain `next build` produces. Build it on the WSL runner
+(Linux, Node >= 22) when you need the real artifact.
 
 Compatibility flags: `nodejs_compat` (required by the adapter) + `global_fetch_strictly_public`.
 `compatibility_date` is pinned to the scaffold's authoring date; bump it deliberately, not
@@ -320,7 +332,8 @@ secret-bearing URL leaves the history stack.
   `RESEND_API_KEY`, `INVITE_MAIL_FROM`. All four must be present and non-blank or the
   courier refuses 503 **before minting anything**, naming the unset variables (an invite
   whose mail cannot go out is permanently unusable AND blocks that address for seven days).
-  Keep the invite expiry short (≤ 24h): Authentication → Sessions/Email → *Email OTP expiry*.
+  The invite expiry is the SAME *Email OTP expiry* setting the confirmation code uses — 60 minutes
+  by 裁-131 (2026-09-02), not a separate knob: Authentication → Sessions/Email → *Email OTP expiry*.
 - **Verify:** send an invite to a mailbox you control, confirm the delivered URL carries both
   the `/invite/<hash>` path and the `?ct=` parameter, and confirm opening it shows the
   confirmation card **without** consuming anything (the second open must still work until
@@ -369,11 +382,13 @@ binding is "the address is the person's own", not a link tied to one browser (§
   link (that shape is 裁-92's own retired vector: a link is a value an attacker can construct
   and mail to a victim; a bare code, checked against the victim's OWN typed address, is not).
   Under Authentication → Auth Providers → Email, shorten the OTP expiry from the 24-hour
-  default to **10 minutes** (裁-36/§3.4's C4 — a named setup act with an owner receipt; no
-  route or migration can read or enforce this project setting from the repository).
+  default to **60 minutes** (裁-36/§3.4's C4 as AMENDED by 裁-131, 2026-09-02: the one setting also
+  governs the staff-invite token, so 60 minutes keeps invites usable while the rate wall carries the
+  brute-force defence — a named setup act with an owner receipt; no route or migration can read or
+  enforce this project setting from the repository).
 - **Verify (receipt):** with the project's Management API token, positively read
   `GET /v1/projects/{ref}/config/auth` and retain the JSON showing `disable_signup` is
-  `false`, `mailer_autoconfirm` is `false`, and the OTP expiry is the configured 10 minutes.
+  `false`, `mailer_autoconfirm` is `false`, and the OTP expiry is the configured 60 minutes (`mailer_otp_exp = 3600`).
   Retain a delivered *Confirm signup* message showing the bare six-digit code with no link at
   all. Re-run these reads after any project restore or auth-configuration change. This
   positive Management API read is a blocking **deploy gate**: repository code cannot read

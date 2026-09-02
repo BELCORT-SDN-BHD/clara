@@ -9,12 +9,24 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The chat-parity walk's own mock lane — a file-disjoint sibling (the same shape
+// live-stack/serve-live.mjs takes), consulted through the three hooks below so no
+// other spec's surface changes. See that file's header for what it does and does not
+// prove.
+import { handleChatParityApp, handleChatParitySupabase, startMockRuntime } from "./chat-parity-mock.mjs";
+
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
 const appOrigin = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
 const appUrl = new URL(appOrigin);
 const supabaseUrl = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? `${appOrigin}/e2e-supabase`);
 const supabasePrefix = supabaseUrl.pathname.replace(/\/$/, "");
+// The two INTERNAL ports (the public one is CLARA_E2E_APP_ORIGIN's). Overridable so a
+// second lane can run this harness on a host where another already holds the defaults —
+// the alternative measured on 2026-09-02 was an EADDRINUSE crash and no browser leg at
+// all. Defaults unchanged, so every existing invocation behaves exactly as before.
+const nextPort = Number(process.env.CLARA_E2E_NEXT_PORT ?? 3101);
+const mockRuntimePort = Number(process.env.CLARA_E2E_RUNTIME_PORT ?? 3102);
 const runtimeDir = join(e2eRoot, ".runtime", String(process.pid));
 const keyPath = join(runtimeDir, "localhost-key.pem");
 const certPath = join(runtimeDir, "localhost-cert.pem");
@@ -49,15 +61,35 @@ if (openssl.status !== 0) {
 
 const SUBJECT = "11111111-1111-1111-1111-111111111111";
 const REQUEST_ID = "22222222-2222-2222-2222-222222222222";
+const FIRM_ID = "33333333-3333-4333-8333-333333333333";
+const CLIENT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const CLIENT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const THREAD_A = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+const THREAD_B = "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb";
+const COLLEAGUE_THREAD_A = "cccccccc-1111-4111-8111-cccccccccccc";
 // The fixed "delivered" code the SKELETON journey (signup-confirm-pending.
 // spec.ts) types once Lane B wires the real attempt wall.
 const E2E_SIGNUP_CODE = "654321";
 const state = {
-  email: "owner@example.test",
+  // Default to the membership-less holding-state persona. Navigation specs
+  // opt into their fixture rank explicitly through the sign-in email prefix.
+  email: "holding@example.test",
   firmName: "E2E Accounting",
   note: null,
   registrationOpen: false,
+  firmScoped: false,
 };
+
+const clients = [
+  { id: CLIENT_A, name: "Rome Properties", status: "active", created_at: "2026-01-01T00:00:00.000Z" },
+  { id: CLIENT_B, name: "Bee Creative Solution", status: "active", created_at: "2026-02-01T00:00:00.000Z" },
+];
+
+const sessions = [
+  { id: COLLEAGUE_THREAD_A, firm_id: FIRM_ID, client_id: CLIENT_A, created_by: "44444444-4444-4444-8444-444444444444", visibility: "firm", title: "Colleague thread", created_at: "2026-09-02T02:00:00.000Z" },
+  { id: THREAD_A, firm_id: FIRM_ID, client_id: CLIENT_A, created_by: SUBJECT, visibility: "private", title: "Own A", created_at: "2026-09-02T01:00:00.000Z" },
+  { id: THREAD_B, firm_id: FIRM_ID, client_id: CLIENT_B, created_by: SUBJECT, visibility: "private", title: "Own B", created_at: "2026-09-02T01:00:00.000Z" },
+];
 
 function confirmedUser() {
   return {
@@ -103,7 +135,7 @@ function publicLocation(location) {
   try {
     const target = new URL(location);
     if (
-      target.port === "3101" &&
+      target.port === String(nextPort) &&
       (target.hostname === "127.0.0.1" || target.hostname === "localhost")
     ) {
       return new URL(`${target.pathname}${target.search}${target.hash}`, appOrigin).toString();
@@ -140,9 +172,30 @@ async function handleSupabase(request, response, url) {
     "access-control-allow-credentials": "true",
   };
 
+  if (request.method === "POST" && path === "/auth/v1/token") {
+    const body = await readJson(request);
+    const grantType = url.searchParams.get("grant_type");
+    if (grantType !== "password" && grantType !== "pkce") {
+      sendJson(response, 400, { message: "unsupported e2e grant" }, cors);
+      return;
+    }
+    if (typeof body.email === "string") state.email = body.email;
+    state.firmScoped = true;
+    sendJson(response, 200, {
+      access_token: accessToken(),
+      token_type: "bearer",
+      expires_in: 7_200,
+      expires_at: 4_102_444_800,
+      refresh_token: "e2e-refresh-token",
+      user: confirmedUser(),
+    }, cors);
+    return;
+  }
+
   if (request.method === "POST" && path === "/auth/v1/signup") {
     const body = await readJson(request);
     if (typeof body.email === "string") state.email = body.email;
+    state.firmScoped = false;
     sendJson(response, 200, {
       id: SUBJECT,
       aud: "authenticated",
@@ -157,6 +210,11 @@ async function handleSupabase(request, response, url) {
       updated_at: "2026-08-31T00:00:00.000Z",
       is_anonymous: false,
     }, cors);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/auth/v1/recover") {
+    sendJson(response, 200, {}, cors);
     return;
   }
 
@@ -183,6 +241,16 @@ async function handleSupabase(request, response, url) {
   }
 
   if (request.method === "GET" && path === "/auth/v1/user") {
+    sendJson(response, 200, confirmedUser(), cors);
+    return;
+  }
+
+  if (request.method === "PUT" && path === "/auth/v1/user") {
+    const body = await readJson(request);
+    if (typeof body.password === "string" && body.password.includes("compromised")) {
+      sendJson(response, 422, { message: "Password is known to be compromised" }, cors);
+      return;
+    }
     sendJson(response, 200, confirmedUser(), cors);
     return;
   }
@@ -222,11 +290,121 @@ async function handleSupabase(request, response, url) {
   }
 
   if (request.method === "GET" && path === "/rest/v1/caller_context") {
+    const bookkeeper = state.email.startsWith("bookkeeper@");
+    const owner = state.email.startsWith("owner@");
+    if (!bookkeeper && !owner) {
+      // Every non-navigation persona remains membership-less by default.
+      sendJson(response, 200, [], cors);
+      return;
+    }
+    sendJson(response, 200, [{
+      user_id: SUBJECT,
+      firm_id: FIRM_ID,
+      firm_name: "E2E Accounting",
+      role: bookkeeper ? "bookkeeper" : "owner",
+      role_rank: bookkeeper ? 1 : 3,
+      is_operator: owner,
+    }], cors);
+    return;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/firm_members_visible") {
+    sendJson(response, 200, [{
+      membership_id: "44444444-4444-4444-4444-444444444444",
+      user_id: SUBJECT,
+      display_name: state.email.startsWith("bookkeeper@") ? "E2E Bookkeeper" : "E2E Owner",
+      email: state.email,
+      role: state.email.startsWith("bookkeeper@") ? "bookkeeper" : "owner",
+      role_rank: state.email.startsWith("bookkeeper@") ? 1 : 3,
+      status: "active",
+      created_at: "2026-09-02T00:00:00.000Z",
+      removed_at: null,
+    }], cors);
+    return;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/firm_invites_visible") {
     sendJson(response, 200, [], cors);
     return;
   }
 
+  // FIRST, and safe there because every branch inside is scoped to the chat-parity ids
+  // and falls through otherwise (merge of origin/main `cea3da39` / #507 — see that
+  // module's own note). Running it after the generic fixtures below instead would have
+  // starved the chat-parity thread of its `chat_sessions` row, which #507's new
+  // client/thread pairing check turns into a 404.
+  if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
+
+  if (request.method === "GET" && path === "/rest/v1/clients") {
+    const filter = url.searchParams.get("id");
+    const rows = filter?.startsWith("eq.")
+      ? clients.filter((client) => client.id === filter.slice(3))
+      : clients;
+    sendJson(response, 200, rows, cors);
+    return;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/client_facts") {
+    sendJson(response, 200, [], cors);
+    return;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/chat_sessions") {
+    const filter = url.searchParams.get("id");
+    const rows = filter?.startsWith("eq.")
+      ? sessions.filter((session) => session.id === filter.slice(3))
+      : sessions;
+    sendJson(response, 200, rows, cors);
+    return;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/onboarding_plans") {
+    sendJson(response, 200, [], cors);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/list_review_queue") {
+    sendJson(response, 200, {
+      counts: { needs_you: 0, needs_review: 0, ready: 0, drafts: 0, uncoded_filings: 0, open_questions: 0, compliance_watches: 0, lint_findings: 0 },
+      sweep: null,
+      compliance: null,
+      lint: null,
+      rows: [],
+      next_cursor: null,
+    }, cors);
+    return;
+  }
+
   sendJson(response, 404, { message: `unhandled e2e Supabase route: ${request.method} ${path}` }, cors);
+}
+
+async function handleChat(request, response, url) {
+  if (request.method === "GET" && url.pathname === "/api/chat/sessions") {
+    sendJson(response, 200, { sessions });
+    return;
+  }
+  const match = /^\/api\/chat\/sessions\/([^/]+)\/messages$/.exec(url.pathname);
+  if (request.method === "GET" && match) {
+    const threadId = decodeURIComponent(match[1]);
+    const text = threadId === THREAD_A
+      ? "Own message for client A"
+      : threadId === THREAD_B
+        ? "Own message for client B"
+        : "Colleague message must not auto-open";
+    sendJson(response, 200, {
+      messages: [{
+        id: `message-${threadId}`,
+        role: "assistant",
+        parts: [{ type: "text", text }],
+        turn_key: null,
+        task_id: null,
+        seq: 1,
+        created_at: "2026-09-02T03:00:00.000Z",
+      }],
+    });
+    return;
+  }
+  sendJson(response, 404, { message: `unhandled e2e chat route: ${request.method} ${url.pathname}` });
 }
 
 const httpsServer = createHttpsServer(
@@ -239,7 +417,32 @@ const httpsServer = createHttpsServer(
       });
       return;
     }
+    // The chat legs are same-origin by construction: `lib/clara/api.ts`'s `runtimeBase()`
+    // is empty here, so the browser asks THIS server for them. They are answered before
+    // the proxy below, and never reach `next start` (which has no route for them).
+    //
+    // ORDER, resolved at the merge of origin/main `cea3da39` / #507: the chat-parity mock
+    // gets first refusal, then the parity-holes `handleChat`. That is safe in one
+    // direction only because the chat-parity mock matches EXACT ids — its own thread's
+    // `/messages`, its own thread's `/turns`, its own task's `/stream` — so it cannot
+    // swallow `/api/chat/sessions` or any thread #507 owns. The reverse order is NOT
+    // safe: `handleChat` claims the whole `/api/chat/sessions/` prefix and would answer
+    // the chat-parity thread's transcript with a canned assistant message, where a PARKED
+    // task must have an empty one (`clara.settle_chat_turn` is what writes the assistant
+    // row, and it cancels the pending interruption in the same breath).
+    handleChatParityApp(request, response, url)
+      .then((handled) => {
+        if (handled) return;
+        if (url.pathname === "/api/chat/sessions" || url.pathname.startsWith("/api/chat/sessions/")) {
+          return handleChat(request, response, url);
+        }
+        proxyToNext(request, response);
+      })
+      .catch((error) => sendJson(response, 500, { message: error instanceof Error ? error.message : "mock failure" }));
+  },
+);
 
+function proxyToNext(request, response) {
     const headers = {
       ...request.headers,
       host: appUrl.host,
@@ -249,7 +452,7 @@ const httpsServer = createHttpsServer(
     const upstream = httpRequest(
       {
         hostname: "127.0.0.1",
-        port: 3101,
+        port: nextPort,
         method: request.method,
         path: request.url,
         headers,
@@ -269,23 +472,29 @@ const httpsServer = createHttpsServer(
       else response.destroy(error);
     });
     request.pipe(upstream);
-  },
-);
+}
 
 await new Promise((resolveListen, rejectListen) => {
   httpsServer.once("error", rejectListen);
   httpsServer.listen(Number(appUrl.port), appUrl.hostname, resolveListen);
 });
 
+// The runtime the SAME-ORIGIN proxy route forwards to. `CLARA_RUNTIME_URL` is
+// server-side only and read at REQUEST time by app/api/runtime/[...path]/route.ts, so
+// pointing it here exercises the real proxy (firm-scope guard, header allow-list,
+// credential-by-leg) against a stand-in runtime rather than skipping it.
+const mockRuntime = startMockRuntime(mockRuntimePort);
+
 const nextBin = join(webRoot, "node_modules", "next", "dist", "bin", "next");
 const next = spawn(
   process.execPath,
-  [nextBin, "start", "--hostname", "127.0.0.1", "--port", "3101"],
+  [nextBin, "start", "--hostname", "127.0.0.1", "--port", String(nextPort)],
   {
     cwd: webRoot,
     env: {
       ...process.env,
       NODE_EXTRA_CA_CERTS: certPath,
+      CLARA_RUNTIME_URL: mockRuntime.origin,
     },
     stdio: "inherit",
   },
@@ -296,6 +505,7 @@ function stop(exitCode = 0) {
   if (stopping) return;
   stopping = true;
   next.kill("SIGTERM");
+  mockRuntime.server.close();
   httpsServer.close(() => {
     rmSync(runtimeDir, { recursive: true, force: true });
     process.exit(exitCode);

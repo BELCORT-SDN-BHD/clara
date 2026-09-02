@@ -76,9 +76,10 @@ honest not-built-yet flows and lives in `PROGRESS.md` rows. Nothing in this file
 - **裁-82 → 裁-85** the seat stays in the Claude Code session; lanes by fit (Codex for heavy
   execution, sonnet for bounded work, opus for judgement); a family that is out is substituted, builds
   included, recorded in the PR body. **裁-83** a reduced Wave G precedes beta.
-- **裁-84 → 裁-86** the lean ladder: ONE fresh-context opus review leg (+ a Codex read-only leg only
-  when a native lane built a money/auth surface — law 28 kept) **+ a real-browser Playwright e2e leg
-  on every frontend train**, the axe scan riding it.
+- **裁-84 → 裁-86** the lean ladder: ONE fresh-context opus review leg **+ a real-browser Playwright
+  e2e leg on every frontend train**, the axe scan riding it. **裁-111 (2026-09-01):** the
+  cross-family Codex adversarial leg is SUSPENDED until beta live — the opus lane is the complete
+  gate meanwhile; law 28 resumes at beta unless the owner rules otherwise.
 - Standing and untouched: 裁-57 paid beta · 裁-58 RM0/"trial" (never render "RM0") · 裁-62 tax inert
   · 裁-68 the tier-3 gate (DPA e-sign · rate wall · email-bound token · checkout success) ·
   裁-64①②③④ · 裁-65 P4-7 · Q1–Q9 + Q-A…F (08-27) · R1–R7 · 裁-1…裁-56.
@@ -115,6 +116,7 @@ round); never reset, never rebased by anyone else; resume only from its Known-is
 | 5 | **Reports + close-prep chat tools** (`chatTurn_v17`) + F-A5b PR-3 PDF (裁-77) | 0.4 + 0.2 + 0.6 | FS-7 |
 | 6 | P6-T tax IA shell + the honest-note sweep for paused lanes (裁-80) | 0.3 + 0.3 | FS-8 |
 | 7 | P6-3 a11y/token finish · P6-4 money input · P6-5 agentic finish · P6-6 identity · P6-R hygiene | 0.8 · 0.6 · 0.7 · 0.6 · 0.3 | orders-p6 |
+| 7b | The 09-02 gate additions (裁-116…128): tasks #14/#15/#16, the rail state bleed + thread re-point, client name in the header, route error boundaries, password recovery, the COA checklist apply button, the Q-D6 close-seal wall, FS-7 echelon 2 (PDF) | ≈1.5 + 0.3 DB + PDF | mohe-grill-rulings-2026-09-02.md |
 | 8 | The third conformance pass (裁-9's P6 entry gate) | 0.3 | FS-9 |
 | 9 | **P6-X cutover** — Workers deploy, DNS, 61-suite classification, the 裁-78 criterion | 0.5 + ceremony | FS-10 |
 | 10 | **Reduced Wave G** — reset · apply `0155` · the 16-step walk · as-run → **beta** | ceremony | FS-11 |
@@ -145,10 +147,11 @@ full-suite gates.
 - **The review ladder (裁-86, lean):** build → own suite green (the four commands) → RED-before
   proofs → push → **ONE fresh-context opus-5 xhigh read-only review** (its own context, refute-first;
   report shape in orders §A) → fold → the same reviewer re-verifies → the owner may read →
-  `gh pr merge --squash` on green CI. Law 28 is kept by the Codex-build/opus-review split; a
-  NATIVE-built money/auth/webhook/tenant-creation surface adds a Codex read-only leg. **Every
-  frontend train also walks its journey in a real browser (Playwright) on the BUILT app** — the e2e
-  leg, with the axe scan riding it. Uniform for every code PR (ADR-061).
+  `gh pr merge --squash` on green CI. **裁-111 (2026-09-01):** the cross-family Codex adversarial
+  leg is SUSPENDED until beta live — the opus lane is the complete gate for the remainder of the
+  sprint; law 28 resumes at beta unless the owner rules otherwise. **Every frontend train also
+  walks its journey in a real browser (Playwright) on the BUILT app** — the e2e leg, with the axe
+  scan riding it. Uniform for every code PR (ADR-061).
 - **A deferral's only lawful home is a `PROGRESS.md` Backlog/Known-issues row** (ADR-0075 §6). A
   paused lane's `NotBuiltNote` is swept against that row, not against a merge that will not come.
 - **Harness clock-out, every session:** true `PROGRESS.md` (posture · lanes · backlog · known
@@ -169,7 +172,9 @@ full-suite gates.
 1. Open the Stripe account; submit the Malaysian-entity KYB **today** (verification takes days;
    TEST mode does not wait for it). Authenticate the claude.ai **Stripe connector** in this session
    on the TEST-mode account (裁-87); give build lanes a TEST restricted key env-to-env; the LIVE
-   key only at the launch sitting.
+   key only at the launch sitting. **裁-126:** the sandbox account is **"BELCORT 沙盒"** for the
+   whole beta journey; the TEST restricted key lives in the user's environment as
+   `STRIPE_SECRET_KEY` (name only — the value is never printed or committed).
 2. Supabase Auth settings per `docs/ops/wave-g-setup-checklist.md` (signup ON, redirect URLs
    exactly `/signup` + /auth/confirm, confirm-email ON, autoconfirm OFF, the signup-confirmation
    mail template in the 裁-92 6-digit-code form — the checklist's token-hash instruction is

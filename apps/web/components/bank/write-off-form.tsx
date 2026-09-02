@@ -22,7 +22,7 @@ import { useTranslations } from "next-intl";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import { resolveAndBookBankLine } from "@/lib/bank/exception-doors";
-import { parseAmountToCents } from "@/lib/bank/money";
+import { MoneyInput } from "@/components/common/money-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,7 +30,21 @@ import { Textarea } from "@/components/ui/textarea";
 import { StateBanner } from "@/components/common/state";
 import { ActionRefusal } from "./action-refusal";
 
-type DraftLine = { accountCode: string; debit: string; credit: string };
+type DraftLine = {
+  accountCode: string;
+  debitCents: number | null;
+  debitValid: boolean;
+  creditCents: number | null;
+  creditValid: boolean;
+};
+
+const EMPTY_DRAFT_LINE: DraftLine = {
+  accountCode: "",
+  debitCents: null,
+  debitValid: true,
+  creditCents: null,
+  creditValid: true,
+};
 
 export function WriteOffForm({ clientId, exceptionId, onDone }: { clientId: string; exceptionId: string; onDone: () => void }) {
   const t = useTranslations("ClientBank.exceptions");
@@ -39,8 +53,8 @@ export function WriteOffForm({ clientId, exceptionId, onDone }: { clientId: stri
   const [memo, setMemo] = useState("");
   const [note, setNote] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([
-    { accountCode: "", debit: "", credit: "" },
-    { accountCode: "", debit: "", credit: "" },
+    { ...EMPTY_DRAFT_LINE },
+    { ...EMPTY_DRAFT_LINE },
   ]);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -57,13 +71,15 @@ export function WriteOffForm({ clientId, exceptionId, onDone }: { clientId: stri
     const draftLines: { account_code: string; debit_cents: number; credit_cents: number }[] = [];
     for (const l of lines) {
       if (!l.accountCode) continue;
-      const debit = l.debit ? parseAmountToCents(l.debit) : 0;
-      const credit = l.credit ? parseAmountToCents(l.credit) : 0;
-      if (debit === null || credit === null) {
+      if (!l.debitValid || !l.creditValid) {
         setFormError(t("writeOffInvalidAmount"));
         return;
       }
-      draftLines.push({ account_code: l.accountCode, debit_cents: debit, credit_cents: credit });
+      draftLines.push({
+        account_code: l.accountCode,
+        debit_cents: l.debitCents ?? 0,
+        credit_cents: l.creditCents ?? 0,
+      });
     }
     if (draftLines.length < 2 || !postingDate || !memo.trim() || !note.trim()) {
       setFormError(t("writeOffIncomplete"));
@@ -93,9 +109,29 @@ export function WriteOffForm({ clientId, exceptionId, onDone }: { clientId: stri
         <Label>{t("draftLinesLabel")}</Label>
         {lines.map((l, i) => (
           <div key={i} className="grid gap-2 sm:grid-cols-3">
-            <Input aria-label={t("accountCodeLabel", { n: i + 1 })} placeholder={t("accountCodeLabel", { n: i + 1 })} value={l.accountCode} onChange={(e) => updateLine(i, { accountCode: e.target.value })} />
-            <Input aria-label={t("debitLabel", { n: i + 1 })} inputMode="decimal" placeholder={t("debitLabel", { n: i + 1 })} value={l.debit} onChange={(e) => updateLine(i, { debit: e.target.value })} />
-            <Input aria-label={t("creditLabel", { n: i + 1 })} inputMode="decimal" placeholder={t("creditLabel", { n: i + 1 })} value={l.credit} onChange={(e) => updateLine(i, { credit: e.target.value })} />
+            <Input id={`wo-account-${exceptionId}-${i + 1}`} aria-label={t("accountCodeLabel", { n: i + 1 })} placeholder={t("accountCodeLabel", { n: i + 1 })} value={l.accountCode} onChange={(e) => updateLine(i, { accountCode: e.target.value })} />
+            <MoneyInput
+              id={`wo-debit-${exceptionId}-${i + 1}`}
+              mode="signed"
+              aria-label={t("debitLabel", { n: i + 1 })}
+              placeholder={t("debitLabel", { n: i + 1 })}
+              cents={l.debitCents}
+              onValueChange={(change) => updateLine(i, {
+                debitValid: change.ok,
+                ...(change.ok ? { debitCents: change.cents } : {}),
+              })}
+            />
+            <MoneyInput
+              id={`wo-credit-${exceptionId}-${i + 1}`}
+              mode="signed"
+              aria-label={t("creditLabel", { n: i + 1 })}
+              placeholder={t("creditLabel", { n: i + 1 })}
+              cents={l.creditCents}
+              onValueChange={(change) => updateLine(i, {
+                creditValid: change.ok,
+                ...(change.ok ? { creditCents: change.cents } : {}),
+              })}
+            />
           </div>
         ))}
       </div>

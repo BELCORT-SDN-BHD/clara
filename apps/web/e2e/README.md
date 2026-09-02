@@ -26,7 +26,27 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
   excluded from the REST of this spec's tests and lands with FS-4's e2e instead -- 裁-92 (the
   6-digit-code confirmation) replaces the as-built confirm flow before beta, and walking it now
   would need a Supabase email-template act FS-4 immediately supersedes.
-- `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers.
+- `firm-navigation-walk.spec.ts` — P4-6's built-app rank-shaping walk: an operator owner
+  reaches Members through Admin in two navigation clicks, while a bookkeeper sees only the
+  destinations admitted by the mock fixture rank. It proves built-app scope propagation and
+  navigation shaping, not a DB rank, RLS policy, or live `caller_context` response.
+- `money-input.spec.ts` — the build-gated journal MoneyInput component walk, including its
+  visible refusal contract and a WCAG A/AA axe scan.
+- `chat-parity-walk.spec.ts` — 裁-130's chat-parity walk: a PARKED clarify answered inline in
+  the thread, a document attached from the composer riding the sent turn as its document
+  reference, and the firm altitude's honest note where the affordance is absent. Axe (WCAG
+  2.0/2.1 A+AA) on both faces, with a positive control proving the scan actually inspected the
+  page. Runs on `serve-built.mjs`'s mocked stack — see `chat-parity-mock.mjs`'s header for the
+  exact line between what is real (the browser, the built bundle, the same-origin runtime proxy
+  route) and what is faked (PostgREST, the runtime's intake legs, the chat/stream legs).
+- `chat-parity-mock.mjs` — that walk's own mock lane, a file-disjoint sibling of
+  `serve-built.mjs` (the same shape `live-stack/serve-live.mjs` takes), reached through three
+  small hooks so no other spec's surface changes.
+- `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers. The two
+  INTERNAL ports are overridable — `CLARA_E2E_NEXT_PORT` (default 3101) and
+  `CLARA_E2E_RUNTIME_PORT` (default 3102), alongside the public `CLARA_E2E_APP_ORIGIN` — so a
+  second lane can run the harness while another already holds the defaults. Specs read the
+  origin from `CLARA_E2E_APP_ORIGIN` rather than re-hardcoding it.
 
 ## Why these specs are NOT in `apps/web/test/manifest.txt`
 
@@ -44,7 +64,7 @@ This suite runs today only when a human or an agent invokes `pnpm --filter @clar
 directly (or drives the same faces manually through the Playwright MCP tools, as the
 `entry-faces-walk` spec's own header describes). Landing it as a required, always-green GitHub
 Actions job — the render-drill-style CI leg described in `AGENTS.md`'s CI/CD section — is
-tracked as **FS-12** in `docs/plan/active/frontend-sprint-handoff-2026-08-31-orders.md`, not
-this train. Wiring it in early, ad hoc, on one PR would give this one train's browser leg a
-different CI shape than every other frontend train's, and FS-12 exists specifically to land
-that wiring once, uniformly, for all of them.
+**not owned by any order: 裁-86 makes the Playwright walk a per-train ACCEPTANCE instrument, not
+a CI gate; FS-11 (the reduced Wave G) first walks steps 2–4 and 6–11 in a browser.** Wiring it
+in early, ad hoc, on one PR would give this one train's browser leg a different CI shape than
+every other frontend train's, and no order carries this wiring uniformly for all of them.

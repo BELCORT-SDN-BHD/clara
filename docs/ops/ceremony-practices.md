@@ -8,8 +8,8 @@ watchers**. It does not replace any single ceremony's own runbook (`wave-b-*-cer
 runbook.md`, `DR.md`, `dsn-bridge.md`, the as-runs under `docs/plan/completed/`) — it names
 the practice each of those applies, in one place, with the commands.
 
-Maintained going forward via the standing clock-out harness-sync sweep + the `harness-links`
-gate, same as every other harness-menu file (`AGENTS.md`).
+This file is NOT listed in `AGENTS.md`'s harness menu; it is maintained through
+`PROGRESS.md`'s Backlog, per `harness-audit-rulings-2026-08-26.md` R6.
 
 ## 1 · Combined-window vs. separate ceremonies
 
