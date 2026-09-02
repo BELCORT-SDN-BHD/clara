@@ -1265,96 +1265,143 @@ cell("c3.30b W-H3 the loop actually closes -- waiting the advertised time yields
 // trivially one-sided), so neither could have caught this -- both cells below use INDEPENDENT,
 // interleaved schedules (distinct emails sharing the caller's origin; distinct origins sharing
 // the caller's email) and assert the exact computed value, pure injection, no sleep.
+// The two BLOCKER-1 cells derive their expected waits from the DB (hard constraint 2 -- the model
+// supplies no numeral), and these two statements are that derivation. Each rebuilds the population
+// the door counted, using the SAME three predicates the door's own counting query uses -- the
+// claim row excluded, the EXCLUSIVE 15-minute far edge anchored on the claim row's own
+// `attempted_at` (never on a second `now()`), and the accepted-outcome exclusion -- and then takes
+// the same `offset count-4` member (expressed as `rn = n-3`, one-based). Deriving from a DIFFERENT
+// population than the door is what let the old shape disagree with it under host delay. `$1` is
+// the email digest, `$2` the origin digest, `$3` the claim's attempt id.
+const LIMB_WAIT = `least(900,greatest(0,ceil(extract(epoch from
+  ((p.attempted_at+interval '15 minutes')-p.claimed_at)))))::int`;
+const limbCte = (column) => `
+  select a.attempted_at, s.attempted_at as claimed_at,
+         row_number() over (order by a.attempted_at asc) as rn,
+         count(*) over () as n
+    from clara.confirmation_attempts a, claimed s
+   where a.id<>$3 and a.${column}
+     and a.attempted_at>s.attempted_at-interval '15 minutes'
+     and a.outcome is distinct from 'accepted'`;
+const windowedLimbSql = `
+with claimed as (select attempted_at from clara.confirmation_attempts where id=$3),
+     e as (${limbCte("email_digest=$1")}),
+     o as (${limbCte("origin_digest=$2")})
+select (select coalesce(max(n),0) from e)::int as email_count,
+       (select coalesce(max(n),0) from o)::int as origin_count,
+       (select ${LIMB_WAIT} from e p where p.rn=p.n-3) as email_wait,
+       (select ${LIMB_WAIT} from o p where p.rn=p.n-3) as origin_wait`;
+// The sparse cell needs the figure the UNGUARDED formula would have manufactured, which is the
+// same population at `offset 0` (`rn=1`) rather than at `count-4` -- deliberately not the door's
+// offset, because the point of the cell is that the guard refuses to compute it at all.
+const windowedSparseLimbSql = `
+with claimed as (select attempted_at from clara.confirmation_attempts where id=$3),
+     e as (${limbCte("email_digest=$1")}),
+     o as (${limbCte("origin_digest=$2")})
+select (select coalesce(max(n),0) from e)::int as email_count,
+       (select coalesce(max(n),0) from o)::int as origin_count,
+       (select ${LIMB_WAIT} from e p where p.rn=p.n-3) as email_wait,
+       (select ${LIMB_WAIT} from o p where p.rn=1) as naive_origin_wait`;
+
+// TIME-PINNED (round-3 fold on #493, after a measured flake). Both cells below run their priors
+// AND the door's own insert inside ONE transaction, so `now()` is the transaction timestamp and is
+// byte-identical for every backdated prior and for the row the door appends. That is what makes
+// "899 seconds old" mean 899 seconds to the door, no matter how slow the host is. The previous
+// shape inserted nine priors in nine separate round-trips, each with its own `now()`, leaving the
+// oldest prior under one second of margin against the EXCLUSIVE far edge: under load it aged out,
+// the count fell from 5 to 4, and the door correctly returned `allowed:true` -- a red that was the
+// fixture's fault, not the door's (measured once in six focused runs). The window is NOT widened
+// and no slack is added; the clock is pinned instead, so the cell measures the predicate.
+// The expected-value queries below now filter by the SAME window and the SAME accepted-exclusion
+// the door applies, and take the same `count-4` offset, so the two derivations cannot disagree.
 cell("c3.30c BLOCKER-1 dense -- both limbs contribute; the advertised wait is the MAX, scope names the slower one", async () => {
-  const email = digest("blocker1-email");
-  const origin = digest("blocker1-origin");
-  // Five EMAIL priors (this caller's real email, five unrelated/independent origins) -- N=5>=4,
-  // contributes. Backdated to a near-boundary spread so the 2nd-oldest (F1's own offset) expires
-  // a few seconds after "now".
-  for (const secs of [899, 898, 897, 896, 895]) {
-    await rootQuery(
+  await withTxn(async (c) => {
+    const email = digest("blocker1-email");
+    const origin = digest("blocker1-origin");
+    // Five EMAIL priors (this caller's real email, five unrelated/independent origins) -- N=5>=4,
+    // contributes. A near-boundary spread, so the 2nd-oldest (F1's own offset) expires a few
+    // seconds after the claim. One statement, one `now()`.
+    const emailSecs = [899, 898, 897, 896, 895];
+    await c.query(
       `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
-       values ($1,$2,now()-make_interval(secs=>$3))`,
-      [email, digest(`blocker1-unrelated-origin-${secs}`), secs],
+       select $1,p.origin,now()-make_interval(secs=>p.secs)
+         from unnest($2::bytea[],$3::int[]) as p(origin,secs)`,
+      [email, emailSecs.map((s) => digest(`blocker1-unrelated-origin-${s}`)), emailSecs],
     );
-  }
-  // Four ORIGIN priors (this caller's real origin, four unrelated/independent emails) -- N=4,
-  // exactly at the guard boundary, contributes. Backdated LESS far back than the email group, so
-  // its oldest-of-4 (offset 0) expires LATER -- the limb that will still be blocking.
-  for (const secs of [890, 889, 888, 887]) {
-    await rootQuery(
+    // Four ORIGIN priors (this caller's real origin, four unrelated/independent emails) -- N=4,
+    // exactly at the guard boundary, contributes. Backdated LESS far back than the email group, so
+    // its oldest-of-4 (offset 0) expires LATER -- the limb that will still be blocking.
+    const originSecs = [890, 889, 888, 887];
+    await c.query(
       `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
-       values ($1,$2,now()-make_interval(secs=>$3))`,
-      [digest(`blocker1-unrelated-email-${secs}`), origin, secs],
+       select p.email,$1,now()-make_interval(secs=>p.secs)
+         from unnest($2::bytea[],$3::int[]) as p(email,secs)`,
+      [origin, originSecs.map((s) => digest(`blocker1-unrelated-email-${s}`)), originSecs],
     );
-  }
-  const sixth = await claimConfirmation(email, origin);
-  assert.equal(sixth.allowed, false);
-  const expected = await rootQuery(
-    `select
-       least(900,greatest(0,ceil(extract(epoch from
-         ((e.attempted_at+interval '15 minutes')-s.attempted_at)))))::int as email_wait,
-       least(900,greatest(0,ceil(extract(epoch from
-         ((o.attempted_at+interval '15 minutes')-s.attempted_at)))))::int as origin_wait
-     from clara.confirmation_attempts s,
-       (select attempted_at from clara.confirmation_attempts
-         where email_digest=$1 and id<>$3 order by attempted_at asc offset 1 limit 1) e,
-       (select attempted_at from clara.confirmation_attempts
-         where origin_digest=$2 and id<>$3 order by attempted_at asc offset 0 limit 1) o
-     where s.id=$3`,
-    [email, origin, sixth.attempt_id],
-  );
-  const { email_wait: emailWait, origin_wait: originWait } = expected.rows[0];
-  assert.ok(originWait > emailWait,
-    `fixture must make origin the slower limb for this cell to discriminate the single-limb bug (email=${emailWait}, origin=${originWait})`);
-  assert.equal(sixth.retry_after_seconds, Math.max(emailWait, originWait),
-    `retry_after_seconds must be the MAX of both limbs (email=${emailWait}, origin=${originWait}, got ${sixth.retry_after_seconds})`);
-  assert.equal(sixth.scope, "origin",
-    "scope must name the SLOWER limb -- the one the caller must actually outlast -- even though email fired today");
+    await c.query("set role clara_auth_wall");
+    const sixth = (await c.query(
+      "select clara.claim_confirmation_attempt($1,$2) as result", [email, origin],
+    )).rows[0].result;
+    await c.query("reset role");
+    assert.equal(sixth.allowed, false);
+    const expected = await c.query(windowedLimbSql, [email, origin, sixth.attempt_id]);
+    const {
+      email_count: emailCount, origin_count: originCount,
+      email_wait: emailWait, origin_wait: originWait,
+    } = expected.rows[0];
+    // Fixture guards on the POPULATION the door actually counted -- these are what turn a drifted
+    // or aged-out fixture into a named failure instead of a confusing value mismatch.
+    assert.deepEqual({ emailCount, originCount }, { emailCount: 5, originCount: 4 },
+      "the door must have counted exactly the nine pinned priors, five on email and four on origin");
+    assert.ok(originWait > emailWait,
+      `fixture must make origin the slower limb for this cell to discriminate the single-limb bug (email=${emailWait}, origin=${originWait})`);
+    assert.equal(sixth.retry_after_seconds, Math.max(emailWait, originWait),
+      `retry_after_seconds must be the MAX of both limbs (email=${emailWait}, origin=${originWait}, got ${sixth.retry_after_seconds})`);
+    assert.equal(sixth.scope, "origin",
+      "scope must name the SLOWER limb -- the one the caller must actually outlast -- even though email fired today");
+  }, { commit: false });
 });
 
 cell("c3.30d BLOCKER-1 sparse-limb guard -- a limb below N=4 contributes nothing, never a manufactured wait", async () => {
-  const email = digest("blocker1-sparse-email");
-  const origin = digest("blocker1-sparse-origin");
-  // Five EMAIL priors as above -- N=5, contributes, and is the ONLY real constraint here.
-  for (const secs of [899, 898, 897, 896, 895]) {
-    await rootQuery(
+  await withTxn(async (c) => {
+    const email = digest("blocker1-sparse-email");
+    const origin = digest("blocker1-sparse-origin");
+    // Five EMAIL priors as above -- N=5, contributes, and is the ONLY real constraint here.
+    const emailSecs = [899, 898, 897, 896, 895];
+    await c.query(
       `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
-       values ($1,$2,now()-make_interval(secs=>$3))`,
-      [email, digest(`blocker1-sparse-unrelated-origin-${secs}`), secs],
+       select $1,p.origin,now()-make_interval(secs=>p.secs)
+         from unnest($2::bytea[],$3::int[]) as p(origin,secs)`,
+      [email, emailSecs.map((s) => digest(`blocker1-sparse-unrelated-origin-${s}`)), emailSecs],
     );
-  }
-  // ONE origin prior only -- N=1<4. Backdated far enough (5 minutes) that the UNGUARDED formula
-  // (offset=greatest(1-4,0)=0, picking this single row as if it were a real target) would
-  // manufacture a ~10-minute wait; the guard must report this limb as contributing NOTHING.
-  await rootQuery(
-    `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
-     values ($1,$2,now()-interval '5 minutes')`,
-    [digest("blocker1-sparse-unrelated-email"), origin],
-  );
-  const sixth = await claimConfirmation(email, origin);
-  assert.equal(sixth.allowed, false);
-  const rows = await rootQuery(
-    `select
-       least(900,greatest(0,ceil(extract(epoch from
-         ((e.attempted_at+interval '15 minutes')-s.attempted_at)))))::int as email_wait,
-       least(900,greatest(0,ceil(extract(epoch from
-         ((o.attempted_at+interval '15 minutes')-s.attempted_at)))))::int as naive_origin_wait
-     from clara.confirmation_attempts s,
-       (select attempted_at from clara.confirmation_attempts
-         where email_digest=$1 and id<>$3 order by attempted_at asc offset 1 limit 1) e,
-       (select attempted_at from clara.confirmation_attempts
-         where origin_digest=$2 and id<>$3 order by attempted_at asc offset 0 limit 1) o
-     where s.id=$3`,
-    [email, origin, sixth.attempt_id],
-  );
-  const { email_wait: emailWait, naive_origin_wait: naiveOriginWait } = rows.rows[0];
-  assert.ok(naiveOriginWait > emailWait,
-    `fixture must make the UNGUARDED origin figure larger than email for this cell to discriminate the guard (email=${emailWait}, naive origin=${naiveOriginWait})`);
-  assert.equal(sixth.retry_after_seconds, emailWait,
-    `a sparse limb (N<4) must contribute nothing -- retry_after_seconds must equal email's own wait alone, not the manufactured naive origin figure ${naiveOriginWait} (got ${sixth.retry_after_seconds})`);
-  assert.equal(sixth.scope, "email",
-    "scope must name email -- origin's single prior never binds anything");
+    // ONE origin prior only -- N=1<4. Backdated far enough (5 minutes) that the UNGUARDED formula
+    // (offset=greatest(1-4,0)=0, picking this single row as if it were a real target) would
+    // manufacture a ~10-minute wait; the guard must report this limb as contributing NOTHING.
+    await c.query(
+      `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
+       values ($1,$2,now()-interval '5 minutes')`,
+      [digest("blocker1-sparse-unrelated-email"), origin],
+    );
+    await c.query("set role clara_auth_wall");
+    const sixth = (await c.query(
+      "select clara.claim_confirmation_attempt($1,$2) as result", [email, origin],
+    )).rows[0].result;
+    await c.query("reset role");
+    assert.equal(sixth.allowed, false);
+    const rows = await c.query(windowedSparseLimbSql, [email, origin, sixth.attempt_id]);
+    const {
+      email_count: emailCount, origin_count: originCount,
+      email_wait: emailWait, naive_origin_wait: naiveOriginWait,
+    } = rows.rows[0];
+    assert.deepEqual({ emailCount, originCount }, { emailCount: 5, originCount: 1 },
+      "the door must have counted exactly the six pinned priors, five on email and one on origin");
+    assert.ok(naiveOriginWait > emailWait,
+      `fixture must make the UNGUARDED origin figure larger than email for this cell to discriminate the guard (email=${emailWait}, naive origin=${naiveOriginWait})`);
+    assert.equal(sixth.retry_after_seconds, emailWait,
+      `a sparse limb (N<4) must contribute nothing -- retry_after_seconds must equal email's own wait alone, not the manufactured naive origin figure ${naiveOriginWait} (got ${sixth.retry_after_seconds})`);
+    assert.equal(sixth.scope, "email",
+      "scope must name email -- origin's single prior never binds anything");
+  }, { commit: false });
 });
 
 // ADD-1 (opus review on #493): c3.30a's fixture yields ~120s, nowhere near the 900-second
