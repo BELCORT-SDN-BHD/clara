@@ -7,6 +7,24 @@ const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 const CODE = "654321";
 
 /**
+ * Every URL assertion in this file waits on a REAL full-page navigation that a
+ * form POST has to complete first — a route handler, a door call over the mock
+ * transport, a 303, and the next render. Playwright's default `expect` timeout
+ * is 5 s, and on 2026-09-02 the whole-journey walk lost that race ONCE on this
+ * host (the firm-registration submit; the page was still on `/signup` with an
+ * EMPTY live region, so nothing had refused — the round trip simply had not
+ * landed). The same spec then passed 5/5 twice in isolation and again in a full
+ * ordered run, which is the signature of a load-dependent instrument rather
+ * than a defect in the app.
+ *
+ * This raises the WAIT, never the bar: each assertion still demands the exact
+ * URL, so a route that refuses, redirects elsewhere, or never navigates still
+ * fails. Scoped to this file deliberately — a global `expect.timeout` would
+ * slow every other spec's genuine failures down with it.
+ */
+const NAV = { timeout: 20_000 };
+
+/**
  * FS-4 C-6 Lane B — 裁-86's MANDATORY BROWSER LEG for the paid-firm gate,
  * walked against the BUILT app in real Chromium.
  *
@@ -98,12 +116,12 @@ async function reachDpaStep(page: Page, email: string) {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Six-digit code").fill(CODE);
   await page.getByRole("button", { name: "Confirm my email" }).click();
-  await expect(page).toHaveURL(`${APP_ORIGIN}/signup`);
+  await expect(page).toHaveURL(`${APP_ORIGIN}/signup`, NAV);
 
   await page.getByLabel("Your name").fill("E2E Owner");
   await page.getByLabel("Firm name").fill("E2E Accounting");
   await page.getByRole("button", { name: "Register my firm" }).click();
-  await expect(page).toHaveURL(`${APP_ORIGIN}/pending`);
+  await expect(page).toHaveURL(`${APP_ORIGIN}/pending`, NAV);
 
   await page.getByRole("link", { name: "Continue to checkout" }).click();
   await expect(page.getByRole("heading", { name: "One more thing before checkout" })).toBeVisible();
@@ -144,7 +162,7 @@ test("THE WHOLE JOURNEY: confirm → DPA → checkout → success → the firm o
   // The Stripe seam refuses on this harness (see this file's header), so the
   // design's own typed card is what must render — never a spinner, never a
   // silent stay. The person is back on the holding page with a true sentence.
-  await expect(page).toHaveURL(/\/pending\?checkout=/);
+  await expect(page).toHaveURL(/\/pending\?checkout=/, NAV);
   await expect(page.getByText(/could not reach the payment provider/i)).toBeVisible();
   await scan(page, "the stripe-unavailable card");
 
@@ -198,7 +216,7 @@ test("REFUSAL POLARITY — a wrong code and a LOCKED wall render their own cards
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Six-digit code").fill("000000");
   await page.getByRole("button", { name: "Confirm my email" }).click();
-  await expect(page).toHaveURL(/\/auth\/confirm\?flash=/);
+  await expect(page).toHaveURL(/\/auth\/confirm\?flash=/, NAV);
   await expect(page.getByText("That code didn't work")).toBeVisible();
   await scan(page, "the wrong-code card");
 
@@ -209,7 +227,7 @@ test("REFUSAL POLARITY — a wrong code and a LOCKED wall render their own cards
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Six-digit code").fill(CODE);
   await page.getByRole("button", { name: "Confirm my email" }).click();
-  await expect(page).toHaveURL(/\/auth\/confirm\?flash=/);
+  await expect(page).toHaveURL(/\/auth\/confirm\?flash=/, NAV);
   await expect(page.getByText("Too many attempts")).toBeVisible();
   await scan(page, "the locked card");
 
@@ -236,7 +254,7 @@ test("REFUSAL POLARITY — checkout before a signature refuses VERBATIM on /pend
   await page.reload();
   await page.getByRole("button", { name: "Resume checkout" }).click();
 
-  await expect(page).toHaveURL(/\/pending\?checkout=/);
+  await expect(page).toHaveURL(/\/pending\?checkout=/, NAV);
   // The DOOR'S OWN sentence and code, verbatim — never re-worded.
   await expect(page.getByText("the data processing agreement is not signed")).toBeVisible();
   await expect(page.getByText("CLR09")).toBeVisible();
@@ -273,7 +291,7 @@ test("FAIL CLOSED in a real browser: no trusted client-IP header ⇒ checkout re
   await page.context().setExtraHTTPHeaders({});
   await page.getByRole("button", { name: "Continue to checkout" }).click();
 
-  await expect(page).toHaveURL(/\/pending\?checkout=/);
+  await expect(page).toHaveURL(/\/pending\?checkout=/, NAV);
   await expect(page.getByText(/missing the configuration the abuse wall needs/i)).toBeVisible();
   // AND NOT A SINGLE CHECKOUT DOOR RAN. The digest is checked before any of
   // them, so no rate-wall attempt is spent on a request the wall cannot key.
