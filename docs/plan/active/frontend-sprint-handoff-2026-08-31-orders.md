@@ -77,7 +77,8 @@ first paragraph and AGENTS.md's working protocol.)*
 
 *Each paragraph below is one law and one day's price. They extend §0.5's instrument laws
 (`fe-train-plan-2026-08-30-orders-p4.md`), which every order already inherits; nothing here
-replaces them. The day's rulings are in `docs/plan/active/mohe-grill-rulings-2026-09-02.md`.*
+replaces them. The day's rulings are in `docs/plan/active/mohe-grill-rulings-2026-09-02-pm.md`
+(裁-132…141; 裁-129…131 are in the `-09-02` file it continues).*
 
 **Native lanes only (裁-133, owner, 15:50).** Until beta live launch there is no Codex lane of any
 kind — builds included. Every lane is native: sonnet-5 xhigh for bounded, mechanical, objectively

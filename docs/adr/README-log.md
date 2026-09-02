@@ -186,3 +186,22 @@ re-reading find?"
 > 2026-09-02 minute's sentence that "none of them amends a digest law" stands as a record of what
 > was true on its date (this file is append-only); 裁-140 is the decision that gives the
 > law-changing subset a home. And no new ADR was minted, which is the ruling's whole point.
+>
+> **First use of the new mechanism, the same night: 裁-141** *(2026-09-03 ~01:20; permanent)*
+> **amends 裁-37** and therefore takes a §15 row rather than an ADR. 裁-37 put the ⌘K "Do" actions
+> behind `clara.wake_fn_allowlist` and, in the same breath, forbade a new mechanism — but that table
+> is invisible to application roles by `0002`'s design, so reading it from the web would need exactly
+> the new SECURITY DEFINER door the ruling forbids. The owner resolved the two halves rather than
+> picking one: the palette pre-filters on the caller's DB-computed role rank plus each door's floor
+> transcribed into the web, **and a DRIFT GUARD is required** — a cell pinning every transcribed
+> floor to the live door's, because a projection of a door is exactly law 27(3)'s "spelling is not
+> identity". The door remains the only authority, so the residual risk of drift is cosmetic. This is
+> the shape 裁-140 was ruled for: an amendment recorded where the amended law lives, at the cost of
+> one row and one line.
+>
+> **Ledger housekeeping, recorded because the pointers moved.** The 2026-09-02 ledger passed the
+> repo's 500-line document ceiling, so it was split at 裁-132 into
+> `docs/plan/active/mohe-grill-rulings-2026-09-02-pm.md` — byte-for-byte, verified against the
+> committed blob — following the `-09-01` → `-09-01-pm` precedent. 裁-129…131 stay in the `-09-02`
+> file because that is where they landed (#506). §15's rows, law 28's and law 38's "amended by"
+> lines and `AGENTS.md`'s ledger chain all name the file each ruling actually lives in.
