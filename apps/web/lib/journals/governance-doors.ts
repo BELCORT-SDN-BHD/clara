@@ -68,6 +68,42 @@ export async function listPendingInterruptions(opts: Opts = {}): Promise<AgentIn
   );
 }
 
+const INTERRUPTION_SELECT =
+  "select=id,task_id,kind,question,answer,status,asked_of,answered_by,expires_at,created_at,answered_at";
+
+/** THE ADDRESSING LAW behind both reads below, measured at the live catalog
+ *  (2026-09-02): a task may open MANY interruptions over its life, but never two
+ *  PENDING at once — `clara.open_interruption`
+ *  (packages/db/migrations/0006_runtime_core.sql:1078-1124) refuses CLR13 for a fresh
+ *  token while any pending row exists on the task, and rolls its own
+ *  running→awaiting_input transition back with it. So `(task_id, status='pending')`
+ *  identifies AT MOST ONE row, and it is the only row a human can answer. Ordering a
+ *  task's rows by time and taking the newest does NOT identify anything: on a task
+ *  whose second clarify is open, that read hands the FIRST card the SECOND question's
+ *  id — an answer typed for one question delivered to another. `limit=2` keeps that
+ *  ambiguity OBSERVABLE (the exact-one idiom lib/parts/thread-action-coordinator.tsx
+ *  uses for `caller_context`) instead of truncating it into a false certainty. */
+export async function getPendingInterruptionForTask(taskId: string, opts: Opts = {}): Promise<AgentInterruptionRow | null> {
+  const rows = await getRows<AgentInterruptionRow>(
+    `agent_interruptions?task_id=eq.${encodeURIComponent(taskId)}&status=eq.pending&${INTERRUPTION_SELECT}&limit=2`,
+    opts,
+  );
+  return rows.length === 1 ? rows[0]! : null;
+}
+
+/** The settled re-read after an answer: the row is addressed by the id the card
+ *  itself just sent to `answer_interruption`, so it is exact — never "the newest row
+ *  on this task". Keeps the settled row deliberately (unlike
+ *  `listPendingInterruptions`): after an answer the card must render the DB's own
+ *  `answered` state rather than turning a just-answered row into an empty one. */
+export async function getInterruptionById(interruptionId: string, opts: Opts = {}): Promise<AgentInterruptionRow | null> {
+  const rows = await getRows<AgentInterruptionRow>(
+    `agent_interruptions?id=eq.${encodeURIComponent(interruptionId)}&${INTERRUPTION_SELECT}&limit=2`,
+    opts,
+  );
+  return rows.length === 1 ? rows[0]! : null;
+}
+
 /** clara.answer_interruption(p_id uuid, p_answer jsonb, p_op_key text) ->
  *  jsonb — bookkeeper+. Answers a pending `agent_interruptions` row, which
  *  the runtime's control listener then delivers back to the parked workflow

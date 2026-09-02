@@ -5,10 +5,16 @@ import type { NextConfig } from "next";
 import createNextIntlPlugin from "next-intl/plugin";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
+const moneyInputHarnessEnabled = process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1";
 const routeErrorProbeEnabled = process.env.CLARA_E2E_ROUTE_ERROR_PROBE === "1";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Freeze the test-harness switch into the emitted bundles. The route module
+  // and both auth-wall registries must agree on one build-time decision.
+  env: {
+    CLARA_E2E_MONEY_INPUT_HARNESS: moneyInputHarnessEnabled ? "1" : "0",
+  },
   // pnpm dependencies can be junctioned into a nested worktree. Turbopack 16
   // refuses a linked dependency outside its inferred root, so anchor the root
   // at the physical workspace that contains both this app and node_modules.
@@ -17,14 +23,26 @@ const nextConfig: NextConfig = {
       realpathSync(resolve(__dirname, "node_modules")),
       "../../..",
     ),
-    // Ordinary builds compile the inert stub. The browser harness opts in at
-    // BUILD time so no production request can turn this throw on through env.
-    resolveAlias: routeErrorProbeEnabled
-      ? {
-          "@/components/e2e/route-error-probe":
-            "@/components/e2e/route-error-probe-enabled",
-        }
-      : {},
+    // Two independent e2e opt-ins, each swapping ONE module and each decided at
+    // BUILD time so no production request can turn either on through env.
+    // Ordinary builds compile the inert stub in both cases: the money-input
+    // route resolves to a 404 stub, so production never compiles the journal
+    // editor into a public entry route's client graph, and the route-error
+    // probe resolves to a module that does not throw.
+    resolveAlias: {
+      ...(moneyInputHarnessEnabled
+        ? {
+            "@/components/e2e/money-input-harness-route":
+              "@/components/e2e/money-input-harness-route-enabled",
+          }
+        : {}),
+      ...(routeErrorProbeEnabled
+        ? {
+            "@/components/e2e/route-error-probe":
+              "@/components/e2e/route-error-probe-enabled",
+          }
+        : {}),
+    },
   },
   // DELIBERATELY no `rewrites()` for the runtime proxy (independent review
   // 2026-08-27, F1/F2): a `rewrites()` destination is baked into

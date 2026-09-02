@@ -2,7 +2,50 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseAmountToCents, formatCents, formatMyr } from "./money";
+import { parseAmountToCents, parseMoneyInput, formatCents, formatMyr } from "./money";
+
+test("parseMoneyInput: malformed text is a typed refusal, never a silent zero", () => {
+  assert.deepEqual(parseMoneyInput("not money", { signed: false }), {
+    ok: false,
+    refusal: { code: "invalid_format", input: "not money" },
+  });
+});
+
+test("parseMoneyInput: exponent notation is refused instead of becoming RM1,000.00", () => {
+  assert.deepEqual(parseMoneyInput("1e3", { signed: false }), {
+    ok: false,
+    refusal: { code: "invalid_format", input: "1e3" },
+  });
+});
+
+test("parseMoneyInput: a trailing decimal point is a typed refusal", () => {
+  assert.deepEqual(parseMoneyInput("5.", { signed: false }), {
+    ok: false,
+    refusal: { code: "invalid_format", input: "5." },
+  });
+});
+
+test("parseMoneyInput: decimal-comma input is a typed refusal before commas are removed", () => {
+  assert.deepEqual(parseMoneyInput("1234,56", { signed: false }), {
+    ok: false,
+    refusal: { code: "invalid_format", input: "1234,56" },
+  });
+});
+
+test("parseMoneyInput: signed mode accepts a negative and unsigned mode refuses it", () => {
+  assert.deepEqual(parseMoneyInput("-50.00", { signed: true }), { ok: true, cents: -5000 });
+  assert.deepEqual(parseMoneyInput("-50.00", { signed: false }), {
+    ok: false,
+    refusal: { code: "negative_not_allowed", input: "-50.00" },
+  });
+});
+
+test("parseMoneyInput: amounts outside the safe-integer cents range are refused", () => {
+  assert.deepEqual(parseMoneyInput("90071992547409.92", { signed: true }), {
+    ok: false,
+    refusal: { code: "out_of_range", input: "90071992547409.92" },
+  });
+});
 
 test("parseAmountToCents: whole numbers and two-decimal amounts", () => {
   assert.equal(parseAmountToCents("500"), 50000);

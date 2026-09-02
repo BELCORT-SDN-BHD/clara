@@ -147,6 +147,14 @@ describe("P4-3 — signup confirmation is public, and the holding route delibera
   });
 
   it("nothing else the app serves is public", () => {
+    // `/money-input-harness` is listed here because an ORDINARY build is the
+    // production shape this cell exists to defend, and the build flag is unset
+    // in every ordinary run of this suite. It is deliberately NOT hardcoded:
+    // under `CLARA_E2E_MONEY_INPUT_HARNESS=1` the harness prefix is compiled
+    // in on purpose, and a cell that reddened there would be asserting the
+    // wrong thing about the opted-in build rather than catching a defect. The
+    // dedicated P6-4 describe below measures BOTH states from real imports.
+    const harnessBuild = process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1";
     for (const pathname of [
       "/",
       "/needs-you",
@@ -156,6 +164,7 @@ describe("P4-3 — signup confirmation is public, and the holding route delibera
       "/admin/members",
       "/logout",
       "/api/runtime/threads",
+      ...(harnessBuild ? [] : ["/money-input-harness"]),
     ]) {
       assert.equal(isPublicPath(pathname), false, `${pathname} must NOT be public`);
     }
@@ -192,6 +201,59 @@ describe("P4-3 — signup confirmation is public, and the holding route delibera
       isPublicPath("/pending"),
       "the predicate answers identically for a public and a non-public path",
     );
+  });
+});
+
+describe("P6-4 harness: the test-only public wall is present only in opted-in builds", () => {
+  async function importGateState(enabled: boolean, nonce: string) {
+    const original = process.env.CLARA_E2E_MONEY_INPUT_HARNESS;
+    if (enabled) process.env.CLARA_E2E_MONEY_INPUT_HARNESS = "1";
+    else delete process.env.CLARA_E2E_MONEY_INPUT_HARNESS;
+    try {
+      const proxyModule = await import(`../lib/supabase/proxy.ts?harness-gate=${nonce}`) as {
+        PUBLIC_PATH_PREFIXES?: readonly string[];
+        isPublicPath: (pathname: string) => boolean;
+      };
+      const scopeModule = await import(`../lib/require-firm-scope.ts?harness-gate=${nonce}`) as {
+        SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
+          readonly url?: string;
+          readonly public?: true;
+        }>;
+      };
+      return { proxyModule, scopeModule };
+    } finally {
+      if (original === undefined) delete process.env.CLARA_E2E_MONEY_INPUT_HARNESS;
+      else process.env.CLARA_E2E_MONEY_INPUT_HARNESS = original;
+    }
+  }
+
+  it("imports both wall registries under flag-unset and flag-set states, cross-checked both ways", async () => {
+    const off = await importGateState(false, `off-${Date.now()}`);
+    const on = await importGateState(true, `on-${Date.now()}`);
+
+    assert.ok(Array.isArray(off.proxyModule.PUBLIC_PATH_PREFIXES), "the proxy must export the actual prefix constant this test measures");
+    assert.ok(Array.isArray(on.proxyModule.PUBLIC_PATH_PREFIXES), "the opted-in import must expose the same measured constant");
+
+    const offPrefixes = [...off.proxyModule.PUBLIC_PATH_PREFIXES!].sort();
+    const onPrefixes = [...on.proxyModule.PUBLIC_PATH_PREFIXES!].sort();
+    const offRegistry = off.scopeModule.SCOPE_UNSCOPED_SURFACES
+      .filter((surface) => surface.public)
+      .map((surface) => surface.url)
+      .sort();
+    const onRegistry = on.scopeModule.SCOPE_UNSCOPED_SURFACES
+      .filter((surface) => surface.public)
+      .map((surface) => surface.url)
+      .sort();
+
+    assert.equal(offPrefixes.includes("/money-input-harness"), false);
+    assert.equal(offRegistry.includes("/money-input-harness"), false);
+    assert.equal(off.proxyModule.isPublicPath("/money-input-harness"), false);
+    assert.deepEqual(offPrefixes, offRegistry, "flag-unset proxy and scope registries must match both ways");
+
+    assert.equal(onPrefixes.includes("/money-input-harness"), true);
+    assert.equal(onRegistry.includes("/money-input-harness"), true);
+    assert.equal(on.proxyModule.isPublicPath("/money-input-harness"), true);
+    assert.deepEqual(onPrefixes, onRegistry, "flag-set proxy and scope registries must match both ways");
   });
 });
 
