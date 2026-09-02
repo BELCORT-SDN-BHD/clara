@@ -135,8 +135,9 @@ Azure.
 `chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-09-03: the
 registry pins `chatTurn: chatTurn_v17`** (#485, `60ffbfb0`, 2026-09-02 18:18 +0800;
 `registry.ts:616` records v16→v17 — superseding the prior "TRUED 2026-09-02" v16 stamp,
-which was itself written hours before this repoint) — repo frontier is 155 migration files through `0160`
-(a NUMBER, not a count — the numbering has gaps), live DB applied through `0153`. **The
+which was itself written hours before this repoint) — repo frontier is **157 migration files
+through `0162`, measured at `a50bfac3` (count `packages/db/migrations/`, not this line — the
+numbering has gaps and this number moves every merge)**, live DB applied through `0153`. **The
 SERVING Fly bundle is machine version 70, deployed 2026-08-31 08:21Z, carrying
 `chatTurn_v16` — bundle-proven by grep on the served container** (`PROGRESS.md`'s deploy
 record). *(The 2026-08-29 truing this replaces read v15 pinned / v13 serving / frontier 0147 —

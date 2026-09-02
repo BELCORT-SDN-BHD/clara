@@ -147,9 +147,12 @@ just loudly, rather than silently).
   (`migrate: N new migration(s) applied · M total`) counts only files that passed the filter — so
   a green `pnpm db:migrate` proves nothing about a file still named `UNNUMBERED_*.sql`. A
   leading-digit name that is **not** fixed-width `NNNN_name.sql` is the other branch and throws
-  loudly instead (`:263-265`). No CI job covers the silent branch today. Three open PRs ride this
-  convention as of this truing (#509, #512, #517) — cite 裁-108 ("the number claim at merge prep
-  ARMS the tests") whenever you review one.
+  loudly instead (`:263-265`). No CI job covers the silent branch today. **The convention is
+  live whenever an open PR carries an `UNNUMBERED_*.sql` file — count it on the PRs' branches
+  (`git ls-tree origin/<branch> packages/db/migrations/ | grep UNNUMBERED`), never this line.**
+  At `0b8bb58c` (2026-09-03) that was **#517 alone** — #509 and #512 had already merged with
+  claimed numbers (0161, 0162). Cite 裁-108 ("the number claim at merge prep ARMS the tests")
+  whenever you review one.
 
 ## Deploy contract (writer-body migrations) — rule D1
 
