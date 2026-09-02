@@ -141,6 +141,14 @@ describe("P4-3 — signup confirmation is public, and the holding route delibera
   });
 
   it("nothing else the app serves is public", () => {
+    // `/money-input-harness` is listed here because an ORDINARY build is the
+    // production shape this cell exists to defend, and the build flag is unset
+    // in every ordinary run of this suite. It is deliberately NOT hardcoded:
+    // under `CLARA_E2E_MONEY_INPUT_HARNESS=1` the harness prefix is compiled
+    // in on purpose, and a cell that reddened there would be asserting the
+    // wrong thing about the opted-in build rather than catching a defect. The
+    // dedicated P6-4 describe below measures BOTH states from real imports.
+    const harnessBuild = process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1";
     for (const pathname of [
       "/",
       "/needs-you",
@@ -150,7 +158,7 @@ describe("P4-3 — signup confirmation is public, and the holding route delibera
       "/admin/members",
       "/logout",
       "/api/runtime/threads",
-      "/money-input-harness",
+      ...(harnessBuild ? [] : ["/money-input-harness"]),
     ]) {
       assert.equal(isPublicPath(pathname), false, `${pathname} must NOT be public`);
     }
