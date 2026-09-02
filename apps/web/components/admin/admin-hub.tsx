@@ -38,7 +38,7 @@ export function AdminHubView({ scope }: { scope: NavigationScope }) {
             <li key={section.id}>
               <Link
                 href={section.href}
-                className="group block h-full rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="group block h-full rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/70"
               >
                 <Card className="h-full transition-colors group-hover:bg-accent/40">
                   <CardHeader>
