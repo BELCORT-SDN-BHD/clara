@@ -299,7 +299,7 @@ gh api repos/BELCORT-SDN-BHD/clara/actions/runners/registration-token -X POST --
 ```
 
 **Stopping the services does NOT clean up a cancelled job's service containers** (measured
-2026-09-03 00:05 MYT, four hours after the four units were stopped and disabled at 21:48). The
+2026-09-03 00:05 MYT, 2h17m after the four units were stopped and disabled at 21:48). The
 post-flip cancellation sweep left **five orphaned `postgres:17` service containers** in WSL —
 named `<jobid>_postgres17_<hash>`, ephemeral host ports in the 3290x range, created 21:22–21:24
 MYT by the last self-hosted runs, with **zero runner processes still alive** to reap them. The

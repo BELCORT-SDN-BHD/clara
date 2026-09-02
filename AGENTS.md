@@ -194,7 +194,7 @@ governed them is now a **decommission note**: they are removed by `config.sh rem
 `pull_request` while the repo is public. **The four services were stopped and disabled at
 21:48 MYT on 2026-09-02** (GitHub shows all four offline; the un-registration completes later) —
 and stopping them does NOT reap a cancelled job's service containers: five orphaned
-`<jobid>_postgres17_<hash>` containers were found and removed four hours later, so the census
+`<jobid>_postgres17_<hash>` containers were found and removed 2h17m later, so the census
 step in that runbook section is part of the decommission. Every job carries a `timeout-minutes`
 ceiling — hosted minutes are billed, so a hung leg can no longer burn hours.
 
@@ -213,9 +213,10 @@ sweep-only legs below.
 **The closed-wave upgrade/contract drills and the D-b frontier matrix run on the weekly
 sweep + manual dispatch only** (ADR-0073; after merging a PR that touches a closed drill or
 the pipeline itself, run `gh workflow run ci.yml` by hand). **The first hosted sweep ran by hand
-on 2026-09-02 (run 33639097306): 12 of 13 legs green — including the D-b frontier matrix's first
-hosted proof — and `closed-wave-drills` RED on the multi-chain-one-cluster class (`0154` asserts an
-absolute 14-role census; `0160` mints two). The sweep stays red until #518's re-cut merges, and
+on 2026-09-02 (run 33639097306): of its 13 jobs, 11 succeeded — including the D-b frontier matrix's
+first hosted proof — and TWO failed: `closed-wave-drills` on the multi-chain-one-cluster class
+(`0154` asserts an absolute 14-role census; `0160` mints two), and the `ci` meta-gate with it. So:
+11 of 12 gate legs green, the meta-gate red, which is the count to quote. The sweep stays red until #518's re-cut merges, and
 re-dispatching it by hand is the only thing that re-proves that leg.** A docs-only diff skips the code
 and DB legs by classifier, the weekly sweep re-proves every leg regardless, and the
 required check `ci` is a fail-closed meta-gate over every job — a red lint blocks merge on

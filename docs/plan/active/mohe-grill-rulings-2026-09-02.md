@@ -61,10 +61,9 @@ already-ruled decisions, not new policy — the DECISION here is that the law do
 > 21:16:59Z (05:17 MYT) as `33e94855`, one merge behind `#484`/`0160` and therefore carrying four rows
 > that call #484 an open red gate — trued by the checkpoint PR this sitting produced. The sitting
 > opened on a 17-lane read-only scan (111 agents; every BLOCKER/MATERIAL finding refuted-first by an
-> independent opus verifier; a completeness critic) whose owner-facing artifact is the "Clara Beta
-> Runway" page (claude.ai artifact `62831308-47ad-4f29-b1c1-f8f446db762b` — re-published 23:25 after a
-> terminal re-login orphaned the session's artifacts; the content is the same page, refreshed through the
-> day, and the original `ff4b0d54…` link is dead). Every question below was
+> independent opus verifier; a completeness critic) whose owner-facing artifact is **the owner page
+> "Clara beta runway 0902"** (a claude.ai artifact; its id changes on every terminal re-login — the
+> current link is handed to the owner at each checkpoint, never recorded here). Every question below was
 > put ONE AT A TIME with the recommendation first and the cost stated (the grill protocol). Each entry
 > names whether the owner followed or overrode the recommendation. Landed the same day in
 > `docs/plan/active/clarabook-conformance-pass-3-2026-09-02.md` (FS-9, pre-run by the scan),
