@@ -7,6 +7,7 @@ import {
   type CheckoutFlashPayload,
 } from "@/lib/checkout/checkout-flash";
 import {
+  checkoutIdempotencyKey,
   createCheckoutSession,
   StripeSessionError,
   type CheckoutSessionCreated,
@@ -146,12 +147,51 @@ export async function handleCheckoutPost(
   }
 
   const loadRegistration = deps.loadRegistration ?? loadOwnRegistrationRequests;
-  let registration: string | null;
+  let result: OwnRegistrationResult;
   try {
-    registration = openRegistrationFrom(await loadRegistration());
+    result = await loadRegistration();
   } catch {
     return checkoutRefusal(proof.origin, { kind: "unavailable" });
   }
+
+  // A MEMBER CANNOT BE SERVED BY ⑧, SO ⑤ MUST NOT TAKE THEIR MONEY.
+  //
+  // Design §5's law is "no path may strand a paying customer without a firm".
+  // `claim_paid_firm` reaches `_create_firm_core`, which refuses `CLR10 actor
+  // already belongs to a firm` (and `uq_membership_active_user` makes one
+  // active membership a database property) — so a caller who already belongs to
+  // a firm can complete checkout and then never be served. Neither this route
+  // nor `open_checkout_intent` checked membership; the only wall was at ⑧,
+  // AFTER the money.
+  //
+  // REACHABLE WITHOUT A PAGE: `/pending` redirects members to `/`, so the
+  // resume control is never offered — but a same-origin POST from a stale tab
+  // in the member's own browser satisfies every other check (a session, an own
+  // OPEN registration, a signed DPA, a digest, an unpaid registration, a
+  // current plan).
+  //
+  // HARMLESS TODAY, NOT TOMORROW. At RM0 with `if_required` nothing is charged,
+  // so the present cost is an orphan subscription; it becomes a real charge the
+  // moment 裁-28's amounts are ruled and the mode flips to `always` — the very
+  // event this train's own migration is built around.
+  //
+  // THE FACT IS ALREADY LOADED. `loadOwnRegistrationRequests()` returns
+  // `context`, and `holding-state.ts` derives its `member` state from exactly
+  // this predicate (`context.ok === true`). Read the same way here so the route
+  // and the page cannot disagree about who is a member.
+  //
+  // RECORDED AS A LEAD DECISION under existing law, pending the owner's
+  // confirmation at the next sitting: the security pass filed A-M4 asking only
+  // for the operator read door (shipped in `0161`, untouched here) and ruled it
+  // "gates beta operationally". Refusing at ⑤ is the accounting-safe reading of
+  // §5 applied at the route; it is additive and refuses nobody the folded door
+  // could have served.
+  if (result.ok && result.context !== null && typeof result.context === "object"
+    && (result.context as { ok?: unknown }).ok === true) {
+    return checkoutRefusal(proof.origin, { kind: "already_member" });
+  }
+
+  const registration = openRegistrationFrom(result);
   if (registration === null) {
     return checkoutRefusal(proof.origin, { kind: "no_registration" });
   }
@@ -188,7 +228,11 @@ export async function handleCheckoutPost(
       registrationId: registration,
       applicant: session.subject,
       intentId: intent.intentId,
-      idempotencyKey: opKey,
+      // NOT the op key: the durable retry identity is the INTENT, which two
+      // POSTs from one applicant share. See `checkoutIdempotencyKey`'s own
+      // comment for why an op key here mints a second Session that
+      // `record_checkout_session` then refuses.
+      idempotencyKey: checkoutIdempotencyKey(intent.intentId, plan.paymentMethodCollection),
     });
 
     await recordCheckoutSession(

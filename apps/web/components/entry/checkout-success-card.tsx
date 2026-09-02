@@ -16,10 +16,9 @@ import { cn } from "@/lib/utils";
  *
  * NO OPTIMISTIC UI AND NO SPINNER. Every arm below is a positively observed
  * state, and the one that would tempt a spinner — paid money, no payment row
- * yet, because the webhook has not been applied — is the security pass's A-M4
- * stranding case. It renders a typed message pointing at support with the
- * facts a support operator needs, never an animation that implies the page is
- * about to fix itself. (It also never auto-refreshes: a page that silently
+ * yet, because the webhook has not been applied — renders a typed message
+ * pointing at support with the facts a support operator needs, never an
+ * animation that implies the page is about to fix itself. (It also never auto-refreshes: a page that silently
  * re-POSTs is a page that spends attempts nobody asked it to.)
  *
  * NO NAME AND NO ID CROSSES THE WIRE (NIT-6). There is no hidden field on the
@@ -35,9 +34,14 @@ export type CheckoutSuccessState =
   /** The registration already carries a firm: the door ran, here or in
    *  another tab. Terminal and happy. */
   | { readonly kind: "already_open" }
-  /** A-M4. Checkout completed at Stripe, and no payment row has been applied
-   *  yet — Stripe retries, and the applier sweeps every minute, so this
-   *  usually resolves on its own; it is never a state this page hides. */
+  /** Checkout completed at Stripe and no payment row has been applied yet —
+   *  Stripe retries, and the applier sweeps every minute, so this usually
+   *  resolves on its own; it is never a state this page hides.
+   *
+   *  NOT A-M4, though an earlier label said so. A-M4 is the paid-THEN-joined-a-
+   *  firm stranding, and that one reaches the person through the `refused` arm
+   *  carrying the door's own `CLR10 actor already belongs to a firm`. This is
+   *  the ordinary not-yet-delivered webhook. */
   | { readonly kind: "awaiting_payment" }
   /** No open registration for this caller at all. */
   | { readonly kind: "no_registration" }

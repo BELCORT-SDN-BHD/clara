@@ -138,8 +138,17 @@ export function SignupDpaForm({
             component's header for the measurement that decided it. */}
         <p className="text-xs text-muted-foreground">{t("dpaStepTermsFollowUp")}</p>
 
+        {/* NOT a NotBuiltNote any more. That component's dashed edge is the
+            estate's ONE signal for "named, not delivered", and `sign_dpa` IS
+            delivered — this arm now means a transport or auth failure, which is
+            an error, not a gap. Design part 1 §2.1's instruction cuts both ways:
+            the note is removed because the thing it named now exists. The
+            document-unavailable arm above KEEPS its note, because that one is
+            still a genuine "there is nothing here to sign" (part 3 §2's own
+            words: "the step renders a NotBuiltNote and the checkout control is
+            ABSENT, not disabled-looking"). */}
         {outcome?.kind === "unavailable" && (
-          <NotBuiltNote>{t("dpaStepSignedUnavailable")}</NotBuiltNote>
+          <StateBanner tone="error">{t("dpaStepSignedUnavailable")}</StateBanner>
         )}
 
         {outcome?.kind === "refused" && (

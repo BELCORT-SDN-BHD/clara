@@ -10,7 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // FS-4 C-6's own mock lane — the C-3/C-6 doors and C-5's ONE confirm endpoint.
-import { handleCheckoutMock } from "./fs4-checkout-mock.mjs";
+import { handleAuthWallMock, handleCheckoutMock } from "./fs4-checkout-mock.mjs";
 // The chat-parity walk's own mock lane — a file-disjoint sibling (the same shape
 // live-stack/serve-live.mjs takes), consulted through the three hooks below so no
 // other spec's surface changes. See that file's header for what it does and does not
@@ -507,7 +507,16 @@ await new Promise((resolveListen, rejectListen) => {
 // server-side only and read at REQUEST time by app/api/runtime/[...path]/route.ts, so
 // pointing it here exercises the real proxy (firm-scope guard, header allow-list,
 // credential-by-leg) against a stand-in runtime rather than skipping it.
-const mockRuntime = startMockRuntime(mockRuntimePort);
+// FS-4 C-6's ONE runtime route (C-5's A-M3 confirm endpoint) is delegated into
+// the same mock runtime the chat-parity lane starts, because `CLARA_RUNTIME_URL`
+// can only name one origin. See chat-parity-mock.mjs's `startMockRuntime` for
+// the merge defect that made this necessary.
+const mockRuntime = startMockRuntime(mockRuntimePort, (request, response, url) =>
+  handleAuthWallMock({
+    request, response, path: url.pathname, cors: {}, state,
+    sendJson, readJson, accessToken, signupCode: E2E_SIGNUP_CODE,
+  }),
+);
 
 const nextBin = join(webRoot, "node_modules", "next", "dist", "bin", "next");
 const next = spawn(

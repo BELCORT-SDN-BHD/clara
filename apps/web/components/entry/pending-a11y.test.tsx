@@ -38,6 +38,15 @@ enableDomInspection();
  * says so.
  */
 type QueriedNode = { getAttribute(name: string): string | null };
+/**
+ * THE TWO-SPELLING FAMILY. This guard read one NAME — `/Not built yet/` — for
+ * a family the estate writes two ways, so the `paid` card's own stale sentence
+ * ("it isn't wired up yet") walked straight past it while the cell that exists
+ * for exactly that class stayed green. Review law 3, pointed at the instrument.
+ * Widened here FIRST, as the RED-before for the copy fix.
+ */
+const STALE_NOT_BUILT = /Not built yet|isn't wired up|not wired/i;
+
 const query = (container: unknown) => (selector: string): QueriedNode | null =>
   (container as { querySelector(s: string): QueriedNode | null }).querySelector(selector);
 
@@ -120,6 +129,53 @@ for (const { state, distinctive } of STATES) {
   });
 }
 
+test("THE CHECKOUT REFUSAL CARD renders each kind's OWN copy, and a door's own sentence verbatim", async () => {
+  // WRITTEN BECAUSE A MUTANT SAID SO. Fold round 1's panel replaced the typed
+  // lookup `t(\`checkoutRefusal.${kind}\`)` with a single hard-coded sentence and
+  // NOTHING went red — the holding card's refusal arm had no cell at all. A
+  // card that says the same thing for a missing pepper, a rotated plan and a
+  // caller who already has a firm is a card that tells nobody anything.
+  const kinds = ["no_origin_digest", "stripe_unavailable", "plan_rotated",
+    "no_registration", "already_member", "unavailable"] as const;
+  const rendered = new Map<string, string>();
+  for (const kind of kinds) {
+    const h = await renderComponent(App(createElement(HoldingCard, {
+      state: { kind: "pending", firmName: "ROME PROPERTIES" },
+      checkoutRefusal: { nonce: "n", kind },
+    })));
+    try {
+      for (let i = 0; i < 2; i++) await h.settle();
+      rendered.set(kind, textOf(h.container as never));
+      assert.deepEqual(checkAccessibility(h.container as never), [], `${kind} has a11y violations`);
+    } finally {
+      await h.unmount();
+    }
+  }
+  // EACH KIND IS DISTINGUISHABLE from every other — the property a single
+  // shared sentence would break while every "it rendered" check stayed green.
+  assert.equal(new Set(rendered.values()).size, kinds.length,
+    "two checkout refusal kinds render identical text");
+  // And the member arm says the true thing rather than a generic refusal.
+  assert.match(rendered.get("already_member") as string, /already belong to a firm/i);
+
+  // THE `refused` ARM IS THE DOOR'S OWN SENTENCE, VERBATIM — never a lookup.
+  const h = await renderComponent(App(createElement(HoldingCard, {
+    state: { kind: "pending", firmName: "ROME PROPERTIES" },
+    checkoutRefusal: {
+      nonce: "n", kind: "refused", code: "CLR09",
+      message: "the data processing agreement is not signed",
+    },
+  })));
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const text = textOf(h.container as never);
+    assert.match(text, /the data processing agreement is not signed/);
+    assert.match(text, /CLR09/);
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("THE HEADING IS REAL — no synthetic h1 is propping these scans up", async () => {
   const h = await renderComponent(App(createElement(HoldingCard, { state: { kind: "invite-expected" } })));
   try {
@@ -198,7 +254,7 @@ test("THE CHECKOUT PATH IS OFFERED on the pending state, with no amount anywhere
   try {
     for (let i = 0; i < 2; i++) await h.settle();
     const text = textOf(h.container as never);
-    assert.doesNotMatch(text, /Not built yet/, "the retired not-built note is back on the pending card");
+    assert.doesNotMatch(text, STALE_NOT_BUILT, "a retired not-built sentence is back on the pending card");
     assert.match(text, /trial/i, "裁-58's trial framing is missing");
     assert.doesNotMatch(text, /\bRM\s*\d/i);
     const link = query(h.container)('a[href="/signup"]');
@@ -227,7 +283,7 @@ test("THE TWO PAID-ROAD ARMS carry REAL controls, and the firm-creating one is n
       null,
       "a LINK to /checkout would open a Session on a prefetch",
     );
-    assert.doesNotMatch(textOf(resume.container as never), /Not built yet/);
+    assert.doesNotMatch(textOf(resume.container as never), STALE_NOT_BUILT);
   } finally {
     await resume.unmount();
   }
@@ -244,7 +300,7 @@ test("THE TWO PAID-ROAD ARMS carry REAL controls, and the firm-creating one is n
       null,
       "the firm-creating POST must live on the success page, not on this card",
     );
-    assert.doesNotMatch(textOf(paid.container as never), /Not built yet/);
+    assert.doesNotMatch(textOf(paid.container as never), STALE_NOT_BUILT);
   } finally {
     await paid.unmount();
   }

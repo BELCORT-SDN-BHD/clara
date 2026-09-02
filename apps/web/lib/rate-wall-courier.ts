@@ -35,7 +35,9 @@
 // `node:crypto` are not in this app's production import graph; `grep -rn
 // 'from "node:' apps/web/app apps/web/lib apps/web/components` finds only test
 // files). So this is a second implementation, and it is PINNED three ways in
-// `./courier.test.ts`:
+// `./rate-wall-courier.test.ts` (the rename this module's own basename records
+// moved them there — a bare `courier.ts` made an existing doc reference
+// ambiguous to `check-harness-links`):
 //
 //   1. KNOWN-ANSWER VECTORS. `sha256(pepper ‖ value)` is reproducible from
 //      first principles; the test pins exact hex for fixed inputs. Any
@@ -257,8 +259,17 @@ export async function pepperedDigestHex(
  * text form, which Postgres' own `bytea` input function parses (the cluster
  * ships `bytea_output = hex`, and hex INPUT is accepted regardless of that
  * setting). `open_checkout_intent`'s `octet_length(p_origin_digest) <> 32`
- * check is what proves the round trip landed 32 bytes rather than 64
- * characters — cell `courier.pgrest` drives the real door on the rig.
+ * check is what WOULD prove the round trip landed 32 bytes rather than 64
+ * characters.
+ *
+ * IT IS NOT DRIVEN AGAINST A REAL POSTGRES, and an earlier version of this
+ * comment claimed otherwise — it cited a cell `courier.pgrest` that exists
+ * nowhere in the repo (the string occurred exactly once: in that comment).
+ * What IS pinned is the STRING SHAPE — `\x` plus 64 lowercase hex, asserted in
+ * `./rate-wall-courier.test.ts` and again on the real wire in
+ * `../tests/checkout-route.test.ts`. The bytea round trip through PostgREST
+ * into the live door is listed under "What I could NOT verify" in the PR body
+ * rather than asserted here.
  */
 export function byteaLiteral(hex: string): string {
   return `\\x${hex}`;

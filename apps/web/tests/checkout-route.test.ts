@@ -181,6 +181,79 @@ test("THE HAPPY PATH: door → plan → Stripe → stamp → 303 to Stripe, in t
   assert.equal(rec.doorCalls[2]!.args.p_session_id, "cs_test_123");
 });
 
+test("M1: the Stripe idempotency key is the INTENT's, so a retry replays one Session", async () => {
+  // THE DEFECT THIS CELL EXISTS FOR (review M1). A per-request op key meant two
+  // POSTs from one applicant — a double-click, a retry — landed on the SAME
+  // intent (`0161` reuses the applicant's one unstamped current-plan intent)
+  // with DIFFERENT idempotency keys, so Stripe minted a SECOND Session and
+  // `record_checkout_session` refused it `CLR09 checkout session already
+  // recorded`. Nothing reddened, because the only cell reading the key pinned a
+  // fixture string.
+  const rec = recorder();
+  const keys: string[] = [];
+  // Stripe's own behaviour, modelled: one Session per distinct key.
+  const byKey = new Map<string, { id: string; url: string }>();
+  let minted = 0;
+  const createSession = async (r: CheckoutSessionRequest) => {
+    rec.stripeCalls.push(r);
+    keys.push(r.idempotencyKey);
+    const existing = byKey.get(r.idempotencyKey);
+    if (existing) return existing;
+    minted += 1;
+    const created = { id: `cs_test_${minted}`, url: `${SESSION_URL}_${minted}` };
+    byKey.set(r.idempotencyKey, created);
+    return created;
+  };
+
+  // Two POSTs, each minting its OWN op key (the production default), both
+  // landing on the same intent — which is what the door actually does.
+  for (const opKey of ["op-key-first", "op-key-second"]) {
+    await withDoors(rec, HAPPY_DOORS, () =>
+      handleCheckoutPost(postRequest(), { ...deps(rec, { createSession }), newOpKey: () => opKey }),
+    );
+  }
+
+  assert.equal(keys.length, 2, "both POSTs reached Stripe");
+  assert.equal(keys[0], keys[1], "the two POSTs carried DIFFERENT idempotency keys");
+  assert.equal(minted, 1, "a second Checkout Session was minted for one intent");
+  // And the key is built from the durable identity, not from either op key.
+  assert.equal(keys[0], "int-1:if_required");
+  for (const key of keys) assert.doesNotMatch(key, /op-key-/, "an op key leaked into the key");
+
+  // The second stamp is the door's replay branch: same intent, SAME session id.
+  const stamps = rec.doorCalls.filter((c) => c.fn === "record_checkout_session");
+  assert.equal(stamps.length, 2);
+  assert.equal(stamps[0]!.args.p_session_id, stamps[1]!.args.p_session_id,
+    "the second stamp named a different Session — that is the CLR09 stranding");
+});
+
+test("M1: the collection mode is IN the key, so a mode flip cannot 400 on same-key params", async () => {
+  // Stripe answers a same-key request carrying different parameters with a 400.
+  // A plan whose `payment_method_collection` flipped without its `local_key`
+  // moving slips past the route's rotation guard (which compares keys), so the
+  // mode has to be part of the identity.
+  const rec = recorder();
+  const keys: string[] = [];
+  const createSession = async (r: CheckoutSessionRequest) => {
+    rec.stripeCalls.push(r);
+    keys.push(r.idempotencyKey);
+    return { id: "cs_test_1", url: SESSION_URL };
+  };
+  for (const mode of ["if_required", "always"]) {
+    await withDoors(
+      rec,
+      {
+        ...HAPPY_DOORS,
+        get_current_checkout_plan: () =>
+          json([{ local_key: "clara-beta-2026", payment_method_collection: mode }]),
+      },
+      () => handleCheckoutPost(postRequest(), deps(rec, { createSession })),
+    );
+  }
+  assert.deepEqual(keys, ["int-1:if_required", "int-1:always"]);
+  assert.notEqual(keys[0], keys[1], "a mode flip reused the key and would 400 at Stripe");
+});
+
 test("W-G: a cross-origin POST is 403 before ANY door, Stripe call or session read", async () => {
   const CROSS_ORIGIN: ReadonlyArray<Record<string, string>> = [
     { origin: "https://evil.example" },
@@ -290,6 +363,41 @@ test("a Stripe failure refuses and leaves the intent UNSTAMPED, so a retry is sa
     false,
     "the one-shot intent was stamped for a Session that does not exist",
   );
+});
+
+test("M6: a caller who ALREADY BELONGS TO A FIRM is refused at ⑤, before Stripe", async () => {
+  // Design §5: "no path may strand a paying customer without a firm."
+  // `claim_paid_firm` reaches `_create_firm_core`, which refuses `CLR10 actor
+  // already belongs to a firm` — so a member who completes checkout can never
+  // be served by ⑧. Before this, the only membership wall was AFTER the money.
+  //
+  // Reachable without a page: `/pending` redirects members to `/`, so the
+  // control is never offered, but a same-origin POST from a stale tab in the
+  // member's own browser satisfies every other check.
+  const rec = recorder();
+  // The SAME predicate `holding-state.ts` derives `member` from, so the route
+  // and the page cannot disagree about who is a member.
+  const member = (): OwnRegistrationResult =>
+    ({ ...openRegistration(), context: { ok: true, firm_id: "44444444-4444-4444-8444-444444444444" } }) as unknown as OwnRegistrationResult;
+
+  const response = await withDoors(rec, HAPPY_DOORS, () =>
+    handleCheckoutPost(postRequest(), deps(rec, { registration: async () => member() })),
+  );
+  assert.equal(readFlash(response).kind, "already_member");
+  // NOT A SINGLE SIDE EFFECT: no rate-wall attempt spent, no Stripe object, no
+  // intent. This is what makes it a refusal at ⑤ rather than a nicer card at ⑧.
+  assert.deepEqual(rec.doorCalls, [], "a member reached a door");
+  assert.deepEqual(rec.stripeCalls, [], "a member reached Stripe");
+
+  // MUST-NOT-RED CONTROL: the same request from a NON-member proceeds, so the
+  // refusal above is the membership predicate discriminating rather than the
+  // route refusing everyone.
+  const rec2 = recorder();
+  const ok = await withDoors(rec2, HAPPY_DOORS, () =>
+    handleCheckoutPost(postRequest(), deps(rec2)),
+  );
+  assert.equal(ok.status, 303);
+  assert.ok(rec2.doorCalls.some((c) => c.fn === "open_checkout_intent"));
 });
 
 test("no open registration, and no session, each get their own answer", async () => {

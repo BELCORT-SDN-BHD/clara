@@ -79,12 +79,51 @@ export type CheckoutSessionRequest = {
   readonly registrationId: string;
   readonly applicant: string;
   readonly intentId: string;
-  /** Stripe's own `Idempotency-Key`. The caller's op key, so a retried POST
-   *  returns the SAME Session instead of opening a second one against an
-   *  intent that can only be stamped once (`uq_checkout_intents_session_id`
-   *  would refuse the second stamp, stranding a live Session nobody records). */
+  /**
+   * Stripe's own `Idempotency-Key`, built by `checkoutIdempotencyKey()` from
+   * the DURABLE retry identity rather than from a per-request value.
+   *
+   * WHY IT IS NOT AN OP KEY, and this comment used to say the opposite of what
+   * the code did. `0161`'s own comment makes the durable identity "the
+   * applicant's one locked, unstamped CURRENT-plan intent" — an op key minted
+   * per POST is a fresh value on every retry, so two POSTs landing on the SAME
+   * intent would mint TWO Sessions, and `record_checkout_session` refuses the
+   * second with `CLR09 checkout session already recorded`
+   * (`uq_checkout_intents_session_id`). That is the exact stranding the old
+   * comment claimed was prevented. Keying on the intent makes a retry replay
+   * the SAME Session, so the second stamp takes its `replay:true` branch.
+   */
   readonly idempotencyKey: string;
 };
+
+/**
+ * The Idempotency-Key: the intent id, with the collection mode folded in.
+ *
+ * THE MODE IS IN THE KEY because Stripe answers a same-key request that
+ * carries DIFFERENT parameters with a 400. A plan whose
+ * `payment_method_collection` flipped without its `local_key` changing slips
+ * past the route's rotation guard (which compares keys, not modes), so the
+ * mode has to be part of the identity or that flip becomes a hard 400 on the
+ * money surface. A mode change now yields a fresh key and a fresh Session.
+ *
+ * THE ONE EDGE, MEASURED RATHER THAN GUESSED: Stripe's idempotency window is
+ * 24 hours and a Checkout Session expires after 24 hours, so a retry near that
+ * boundary can replay a Session that has since expired. Reachable only when a
+ * checkout died BETWEEN Stripe returning and `record_checkout_session`
+ * stamping, and was retried a day later — because once the intent is stamped,
+ * `open_checkout_intent` opens a NEW intent and the key changes with it.
+ * `clara.checkout_intents` carries no `expires_at` and `0161` rotates nothing
+ * on expiry (measured: no `expires_at`, `expiry` or `expire` anywhere in that
+ * migration), so nothing here can rotate it either. Filed as a Wave-G item in
+ * the PR body rather than answered with a rotation this lane would be
+ * inventing.
+ */
+export function checkoutIdempotencyKey(
+  intentId: string,
+  paymentMethodCollection: CheckoutSessionRequest["paymentMethodCollection"],
+): string {
+  return `${intentId}:${paymentMethodCollection}`;
+}
 
 export type CheckoutSessionCreated = {
   readonly id: string;

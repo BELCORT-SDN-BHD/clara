@@ -55,6 +55,15 @@ export type CheckoutFlashOutcome =
   | { readonly kind: "plan_rotated" }
   /** The caller has no OPEN registration to check out for. */
   | { readonly kind: "no_registration" }
+  /**
+   * The caller ALREADY BELONGS TO A FIRM, so `claim_paid_firm` could never
+   * serve them — `_create_firm_core` refuses `CLR10 actor already belongs to a
+   * firm`, and `uq_membership_active_user` makes one active membership a
+   * database property. Design §5's law is that "no path may strand a paying
+   * customer without a firm", so this refuses at ⑤ rather than taking the
+   * money at ⑤ and discovering it at ⑧.
+   */
+  | { readonly kind: "already_member" }
   /** Anything else this route could not classify. Distinct from every arm
    *  above so a card never claims a cause that was not observed. */
   | { readonly kind: "unavailable" };
@@ -119,6 +128,7 @@ export function parseCheckoutFlash(
     case "stripe_unavailable":
     case "plan_rotated":
     case "no_registration":
+    case "already_member":
     case "unavailable":
       return { nonce, kind: candidate.kind };
     default:

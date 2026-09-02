@@ -253,15 +253,40 @@ cell("c6.8 the plan door returns the CURRENT plan's key beside its mode", async 
   // the two reads would otherwise build a Session at one plan's price with
   // another plan's collection mode.
   const applicant = await insertUser("c6e");
-  const rows = await humanQuery(applicant, `select * from clara.get_current_checkout_plan()`);
-  assert.equal(rows.rowCount, 1, "the current plan is not exactly one row");
-  const current = (await rootQuery(`select local_key, payment_method_collection
-                                      from clara.billing_plans where is_current`)).rows[0];
-  assert.equal(rows.rows[0].local_key, current.local_key);
-  assert.equal(rows.rows[0].payment_method_collection, current.payment_method_collection);
-  // NO AMOUNT crosses this door. A money figure nothing reads is a figure a
-  // later lane renders.
-  assert.deepEqual(Object.keys(rows.rows[0]).sort(), ["local_key", "payment_method_collection"]);
+
+  // THE CELL COULD NOT REACH ITS OWN PREDICATE, and that is what this fixture
+  // fixes (review M5). The seeded corpus holds exactly ONE plan row, so
+  // deleting `where b.is_current` from the door left this cell green — measured
+  // by the reviewer with the filter removed past the tail. A door that returned
+  // every plan would hand `POST /checkout` an arbitrary collection mode the
+  // moment the pricing sitting seeds a second one, which is exactly the event
+  // this train is built around. `c6.2` already creates and deletes non-current
+  // rows for the CHECK; this is the same three lines.
+  const decoyKey = `c6_decoy_${randomUUID().slice(0, 8)}`;
+  await rootQuery(
+    `insert into clara.billing_plans(local_key,name,amount_cents,amounts_ruled,
+                                     payment_method_collection,is_current)
+     values ($1,'c6 decoy plan',4900,true,'always',false)`,
+    [decoyKey],
+  );
+  try {
+    const rows = await humanQuery(applicant, `select * from clara.get_current_checkout_plan()`);
+    assert.equal(rows.rowCount, 1, "the door returned more than the CURRENT plan");
+    const current = (await rootQuery(`select local_key, payment_method_collection
+                                        from clara.billing_plans where is_current`)).rows[0];
+    assert.equal(rows.rows[0].local_key, current.local_key);
+    assert.equal(rows.rows[0].payment_method_collection, current.payment_method_collection);
+    // The decoy is DISCRIMINATING: it carries the other token and a non-zero
+    // amount, so a door that ignored `is_current` would be caught by value as
+    // well as by count.
+    assert.notEqual(rows.rows[0].local_key, decoyKey);
+    assert.notEqual(rows.rows[0].payment_method_collection, "always");
+    // NO AMOUNT crosses this door. A money figure nothing reads is a figure a
+    // later lane renders.
+    assert.deepEqual(Object.keys(rows.rows[0]).sort(), ["local_key", "payment_method_collection"]);
+  } finally {
+    await rootQuery(`delete from clara.billing_plans where local_key=$1`, [decoyKey]);
+  }
 });
 
 test("c6.VACUITY CONTROL -- every declared C-6 cell executed", (t) => {

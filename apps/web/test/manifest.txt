@@ -223,6 +223,7 @@ lib/registers/opening-item-doors.test.ts
 lib/registers/opening.test.ts
 lib/registers/staff-advances-doors.test.ts
 lib/registers/staff-advances.test.ts
+lib/registration/checkout-doors.test.ts
 lib/registration/checkout-progress-reads.test.ts
 lib/registration/confirmation-resend.test.ts
 lib/registration/doors.test.ts

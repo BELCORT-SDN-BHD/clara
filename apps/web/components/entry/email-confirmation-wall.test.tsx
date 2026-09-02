@@ -194,12 +194,37 @@ test("`verified: true` with no usable session pair is NOT a verification", async
 test("a status other than 200/429 is never read as a verdict", async () => {
   const env = { CLARA_RUNTIME_URL: "https://runtime.example", CLARA_AUTH_WALL_SERVICE_TOKEN: "t" };
   const params = { email: "a@b.test", token: "123456", clientIp: "203.0.113.7" };
+  // THE FIXTURE CARRIES A COMPLETE SESSION, and that is the whole cell.
+  //
+  // It did not, and the cell was VACUOUS (review M3): with no `session`, a body
+  // that got PAST the status fence still fell to the missing-session branch and
+  // returned `unavailable` anyway — so deleting the fence left the cell green.
+  // The named gate has to be the ONLY thing that can produce the asserted
+  // value (裁-107: a cell that proves a gate discriminates must EXECUTE THE
+  // GATE). With both tokens present, only the status fence can.
+  const body = {
+    allowed: true,
+    verified: true,
+    remaining: 4,
+    session: { access_token: ACCESS, refresh_token: REFRESH },
+  };
+  // POSITIVE CONTROL, so the six refusals below cannot be the fixture being
+  // unusable: the SAME body at 200 is a verification.
+  assert.deepEqual(
+    await confirmEmailCodeWith(params, {
+      env,
+      fetchImpl: async () =>
+        new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }),
+    }),
+    { kind: "verified", session: { accessToken: ACCESS, refreshToken: REFRESH }, remaining: 4 },
+    "the fixture cannot verify at 200, so the status assertions below prove nothing",
+  );
   for (const status of [400, 401, 403, 500, 502, 503]) {
     assert.deepEqual(
       await confirmEmailCodeWith(params, {
         env,
         fetchImpl: async () =>
-          new Response(JSON.stringify({ allowed: true, verified: true, remaining: 4 }), {
+          new Response(JSON.stringify(body), {
             status,
             headers: { "content-type": "application/json" },
           }),

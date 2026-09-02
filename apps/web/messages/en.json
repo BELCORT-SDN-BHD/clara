@@ -329,7 +329,6 @@
       "retry": "Retry",
       "composerLabel": "Ask Clara",
       "composerPlaceholder": "Ask Clara…",
-      "composerLabel": "Ask Clara",
       "send": "Send",
       "sending": "Sending…",
       "attachments": {
@@ -1483,8 +1482,8 @@
     "dpaStepDescription": "Read the agreement below, then continue.",
     "dpaStepSign": "I have read this and agree",
     "dpaStepSigning": "Recording your agreement…",
-    "dpaStepSignedUnavailable": "Not built yet: the door that records your signature (`sign_dpa`) isn't wired up in this build. Nothing was recorded just now — your click did nothing but tell you that.",
-    "dpaStepDocumentUnavailable": "Not built yet: the current agreement couldn't be read. Nothing can be signed until it can, so checkout stays unreachable from here — nothing is charged and nothing is recorded.",
+    "dpaStepSignedUnavailable": "We couldn't record your signature just now. Nothing was recorded, so nothing is half-done — try again in a moment.",
+    "dpaStepDocumentUnavailable": "The current agreement couldn't be read. Nothing can be signed until it can, so checkout stays unreachable from here — nothing is charged and nothing is recorded.",
     "dpaStepBackToStatus": "Back to your registration status",
     "dpaStepSigned": "Your signature is recorded. Nothing is charged during the beta trial.",
     "dpaStepAlreadySigned": "You had already signed this version. Nothing was recorded twice.",
@@ -1506,7 +1505,7 @@
     "lockedTitle": "Too many attempts",
     "lockedDescription": "{wait, plural, =1 {Wait about a minute, or request a new code.} other {Wait about # minutes, or request a new code.}}",
     "unavailableTitle": "Confirmation isn't available yet",
-    "unavailableDescription": "Not built yet: the attempt wall this form calls (`claim_confirmation_attempt`) isn't wired up in this build, so no code can be checked from here yet. Nothing was recorded just now.",
+    "unavailableDescription": "We couldn't check your code just now, so we haven't counted this as an attempt. Your code is still good — try again in a moment.",
     "resend": "Send me a new code",
     "resending": "Sending a new code…",
     "resent": "A new code is on its way.",
@@ -1529,7 +1528,7 @@
     },
     "paid": {
       "title": "Payment received — finish opening your firm",
-      "description": "Your payment landed. One step is left, and it isn't wired up yet.",
+      "description": "Your payment landed. One step is left, and it's yours to take below.",
       "banner": "We recorded your payment. Your firm has not been created yet.",
       "finish": "Finish opening your firm"
     },
@@ -1559,12 +1558,12 @@
       "banner": "Something went wrong looking this up. This is not a decision about your registration — it means we couldn't check. Try again in a moment."
     },
     "checkoutRefusal": {
-      "refused": "Checkout was refused.",
       "no_origin_digest": "Checkout is not available right now: this deployment is missing the configuration the abuse wall needs. Nothing was charged. Please contact support.",
       "stripe_unavailable": "We could not reach the payment provider. Nothing was charged and nothing was recorded. Try again in a moment.",
       "plan_rotated": "The beta plan changed while you were starting checkout, so we stopped rather than charge you against the old one. Try again — the new plan will be used.",
       "no_registration": "There is no open firm application on your account to check out for.",
-      "unavailable": "Checkout could not be started. Nothing was charged. Try again in a moment."
+      "unavailable": "Checkout could not be started. Nothing was charged. Try again in a moment.",
+      "already_member": "You already belong to a firm, so there is nothing to buy here — one person can hold one firm. Nothing was charged. Use the link above to go to your firm."
     }
   },
   "Logout": {

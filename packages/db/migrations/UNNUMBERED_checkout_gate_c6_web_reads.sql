@@ -36,6 +36,15 @@
 -- alternative (leave the Session's collection mode unset and accept Stripe's `'always'`) to the
 -- owner rather than deciding it here.
 --
+-- IT WIDENS C-3's MONEY-STORE CENSUS, AND THAT IS A REVIEWED ACT. `get_own_checkout_progress`
+-- reads `clara.firm_registration_payments`, so it joins the closed-world roster C-3's own cell
+-- `c3.53` pins (`packages/db/tests/checkout-gate-c3.test.mjs`, "the money-store body roster is
+-- closed"). That cell is widened in the SAME PR, with the reason written beside the name. This
+-- migration does not hide the dependency and could not: `0161`'s own comment on
+-- `open_checkout_intent` sets the standard — "hiding a real dependency from a catalog census on
+-- a money surface is the wrong kind of clever." The door is a STABLE reader; it writes nothing
+-- and consumes no payment.
+--
 -- NO BODY IS REPLACED. Nothing here is a `create or replace` of a `0161` function: this cohort is
 -- purely additive (one column, two new doors), so it cannot overwrite a sibling PR's body while
 -- that PR is still in fold. D1 INVENTORY: EMPTY.

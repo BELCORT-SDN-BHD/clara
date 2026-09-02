@@ -13,18 +13,32 @@ const env = {
   NEXT_PUBLIC_SUPABASE_URL: `${appOrigin}/e2e-supabase`,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_clara_e2e_only",
   CLARA_E2E_ROUTE_ERROR_PROBE: "1",
-  // FS-4 C-6 Lane B. The confirm wall now reaches C-5's ONE runtime endpoint
-  // rather than a stub, so the walk points CLARA_RUNTIME_URL at the mock's own
-  // prefix (it serves /api/auth-wall/confirm there) and flips the gate the
-  // Lane-A skeleton left for exactly this moment.
-  CLARA_RUNTIME_URL: `${appOrigin}/e2e-supabase`,
+  // FS-4 C-6 Lane B. The confirm wall reaches C-5's ONE runtime endpoint rather
+  // than a stub, and the gate the Lane-A skeleton left for exactly this moment
+  // is flipped below.
+  //
+  // CLARA_RUNTIME_URL IS DELIBERATELY NOT SET HERE. `serve-built.mjs` owns it
+  // for the `next start` child, pointing it at the ONE mock runtime, and FS-4's
+  // auth-wall endpoint is delegated into that same runtime. Setting it here as
+  // well was a second, losing claim on one variable: merging `origin/main`
+  // silently took its override and every confirmation answered `unavailable`.
+  // No conflict marker, no red unit test — only the browser leg saw it.
   CLARA_AUTH_WALL_SERVICE_TOKEN: "e2e-auth-wall-service-token",
   CLARA_E2E_CONFIRM_WALL_WIRED: "1",
   // POST /checkout's own two inputs. The pepper and the header name are what
   // make the trusted-IP courier produce a digest at all; absent, the route
-  // refuses (design part 3 §3) — which is a real arm the walk also drives.
+  // refuses (design part 3 §3). THAT ARM IS A UNIT CELL, NOT A WALK ARM —
+  // `tests/checkout-route.test.ts`'s "FAIL CLOSED" case drives all four
+  // absent-input shapes. An earlier comment here claimed the walk drove it too;
+  // no spec mentions the digest-absent card.
   CLARA_RATE_WALL_PEPPER: "e2e-rate-wall-pepper",
-  CLARA_TRUSTED_CLIENT_IP_HEADER: "x-forwarded-for",
+  // NOT `x-forwarded-for`: Next 16.3.3 synthesizes that one from the socket
+  // (`base-server.js`, `??=`), so it is always present and the route's
+  // fail-closed arm could never be reached in a walk — the green would have
+  // meant less than it looked. This name is single-valued, set by the browser
+  // context in `playwright.config.ts`, and filled in by nothing else, so the
+  // walk drives BOTH the present and the absent arm.
+  CLARA_TRUSTED_CLIENT_IP_HEADER: "x-clara-e2e-client-ip",
   // STRIPE_SECRET_KEY IS DELIBERATELY ABSENT. With no base override (see
   // lib/checkout/stripe-session.ts for why there is none), a key here would
   // send a real outbound request to api.stripe.com from every test run — slow,

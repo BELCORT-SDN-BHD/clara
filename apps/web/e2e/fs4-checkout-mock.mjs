@@ -91,42 +91,6 @@ export async function handleCheckoutMock(ctx) {
     return true;
   }
 
-  // ── C-5's ONE confirm endpoint (A-M3) ─────────────────────────────────────
-  if (request.method === "POST" && path === "/api/auth-wall/confirm") {
-    const body = await readJson(request);
-    // Recorded so the spec can assert what `apps/web` SENT — the two fields
-    // and the forwarded client address — rather than only what came back.
-    state.authWallRequests.push({
-      body,
-      authorization: request.headers.authorization ?? null,
-      clientIp: request.headers["x-clara-client-ip"] ?? null,
-    });
-    const wall = state.authWall ?? { mode: "verify" };
-    if (wall.mode === "locked") {
-      sendJson(response, 429, {
-        allowed: false,
-        remaining: wall.remaining ?? 0,
-        scope: wall.scope ?? "email",
-        retry_after_seconds: wall.retryAfterSeconds ?? 300,
-      }, cors);
-      return true;
-    }
-    if (wall.mode === "unconfigured") {
-      sendJson(response, 503, { error: "auth_wall_unconfigured" }, cors);
-      return true;
-    }
-    const verified = body?.token === ctx.signupCode && body?.email === state.email;
-    sendJson(response, 200, {
-      allowed: true,
-      remaining: wall.remaining ?? 4,
-      verified,
-      session: verified
-        ? { access_token: ctx.accessToken(), refresh_token: "e2e-refresh-token", token_type: "bearer" }
-        : null,
-    }, cors);
-    return true;
-  }
-
   return handleCheckoutDoors(ctx, { registrationId });
 }
 
@@ -251,6 +215,60 @@ async function handleCheckoutDoors(ctx, { registrationId }) {
     }, cors);
     return true;
   }
+
+  return false;
+}
+
+/**
+ * C-5's ONE pre-session confirm endpoint (security pass A-M3), served on the
+ * RUNTIME origin rather than the Supabase-mock prefix.
+ *
+ * WHY IT LIVES ON THE RUNTIME. `CLARA_RUNTIME_URL` names one origin, and
+ * `serve-built.mjs` points it at the chat-parity lane's mock runtime. An
+ * earlier cut of this file served the endpoint under the Supabase prefix and
+ * pointed the variable there; merging `origin/main` silently took main's
+ * override and every confirmation answered `unavailable`. One runtime, both
+ * lanes' routes.
+ *
+ * @returns {Promise<boolean>} true when handled.
+ */
+export async function handleAuthWallMock(ctx) {
+  const { request, response, path, cors, state, sendJson, readJson } = ctx;
+  if (request.method === "POST" && path === "/api/auth-wall/confirm") {
+    const body = await readJson(request);
+    // Recorded so the spec can assert what `apps/web` SENT — the two fields
+    // and the forwarded client address — rather than only what came back.
+    state.authWallRequests.push({
+      body,
+      authorization: request.headers.authorization ?? null,
+      clientIp: request.headers["x-clara-client-ip"] ?? null,
+    });
+    const wall = state.authWall ?? { mode: "verify" };
+    if (wall.mode === "locked") {
+      sendJson(response, 429, {
+        allowed: false,
+        remaining: wall.remaining ?? 0,
+        scope: wall.scope ?? "email",
+        retry_after_seconds: wall.retryAfterSeconds ?? 300,
+      }, cors);
+      return true;
+    }
+    if (wall.mode === "unconfigured") {
+      sendJson(response, 503, { error: "auth_wall_unconfigured" }, cors);
+      return true;
+    }
+    const verified = body?.token === ctx.signupCode && body?.email === state.email;
+    sendJson(response, 200, {
+      allowed: true,
+      remaining: wall.remaining ?? 4,
+      verified,
+      session: verified
+        ? { access_token: ctx.accessToken(), refresh_token: "e2e-refresh-token", token_type: "bearer" }
+        : null,
+    }, cors);
+    return true;
+  }
+
 
   return false;
 }

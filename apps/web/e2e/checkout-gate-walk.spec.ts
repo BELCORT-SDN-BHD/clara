@@ -16,6 +16,14 @@ const CODE = "654321";
  * courier, the paint-only success page, the claim POST, and every flash cookie
  * and card.
  *
+ * THE TRUSTED HEADER IS ONE NOTHING ELSE FILLS IN, and that is deliberate.
+ * The harness first named `x-forwarded-for`, which Next 16.3.3 synthesizes from
+ * the socket (`base-server.js`, `??=`) — so the header was always present, the
+ * walk's digest came from a value the framework supplied, and the fail-closed
+ * arm could never be reached. It now names `x-clara-e2e-client-ip`, set by the
+ * browser context in `playwright.config.ts`, so a spec that drops it actually
+ * reaches the refusal (see the FAIL CLOSED test below).
+ *
  * WHAT IS STOOD IN FOR, and it is named rather than implied: the C-3/C-6
  * doors and C-5's confirm endpoint — see `fs4-checkout-mock.mjs`'s header. The
  * doors' OWN refusals are celled against a real Postgres in
@@ -60,6 +68,15 @@ async function control(page: Page, body: Record<string, unknown>): Promise<Contr
   const response = await page.request.post(CONTROL, { data: body });
   expect(response.ok(), "the e2e control surface did not answer").toBeTruthy();
   return (await response.json()) as ControlState;
+}
+
+/** The checkout route's own doors — the three it calls once it gets past its
+ *  input walls. Used to assert that a refusal happened BEFORE any of them. */
+function assertNoCheckoutDoors(state: ControlState) {
+  const checkoutDoors = state.doorCalls.filter((fn) =>
+    ["open_checkout_intent", "get_current_checkout_plan", "record_checkout_session"].includes(fn),
+  );
+  expect(checkoutDoors, "the refusal happened AFTER a checkout door ran").toEqual([]);
 }
 
 async function scan(page: Page, label: string) {
@@ -230,6 +247,37 @@ test("REFUSAL POLARITY — checkout before a signature refuses VERBATIM on /pend
   expect([...url.searchParams.keys()]).toEqual(["checkout"]);
   expect(url.search).not.toContain("CLR09");
   expect(url.search).not.toContain("agreement");
+});
+
+test("FAIL CLOSED in a real browser: no trusted client-IP header ⇒ checkout refuses", async ({ page }) => {
+  // THIS ARM WAS UNREACHABLE BEFORE (review NIT 4). The harness pointed
+  // `CLARA_TRUSTED_CLIENT_IP_HEADER` at `x-forwarded-for`, which Next 16.3.3
+  // synthesizes from the socket (`base-server.js`, `??=`) — so the header was
+  // ALWAYS present, the walk's digest came from one the framework filled in,
+  // and the fail-closed branch could not be driven at all. The harness now
+  // names a header nothing else fills, which is what makes this test possible.
+  //
+  // Design part 3 §3: "absent ⇒ checkout refuses". A wall that cannot be
+  // reached is a wall nobody has seen work.
+  // The signup and confirm legs NEED the header (the confirm wall keys C2 on
+  // it), so the journey runs with it and it is cleared for the checkout POST
+  // alone. Cleared at the CONTEXT level, which REPLACES the context's extra
+  // headers — `page.setExtraHTTPHeaders({})` merges rather than removes, and
+  // the first cut of this test read `stripe_unavailable` instead of the
+  // refusal because the header was still there.
+  const email = `e2e-nodigest-${Date.now()}@example.test`;
+  await reachDpaStep(page, email);
+  await page.getByRole("button", { name: "I have read this and agree" }).click();
+  await expect(page.getByText(/signature is recorded/i)).toBeVisible();
+
+  await page.context().setExtraHTTPHeaders({});
+  await page.getByRole("button", { name: "Continue to checkout" }).click();
+
+  await expect(page).toHaveURL(/\/pending\?checkout=/);
+  await expect(page.getByText(/missing the configuration the abuse wall needs/i)).toBeVisible();
+  // AND NOT A SINGLE CHECKOUT DOOR RAN. The digest is checked before any of
+  // them, so no rate-wall attempt is spent on a request the wall cannot key.
+  assertNoCheckoutDoors(await control(page, {}));
 });
 
 test("A GET can never open a Checkout Session, and never create a firm", async ({ page }) => {
