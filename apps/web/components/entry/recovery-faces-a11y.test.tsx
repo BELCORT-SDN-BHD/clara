@@ -133,7 +133,10 @@ test("the invalid-link arm renders its refusal and still scans clean", async () 
   }
 });
 
-test("the SENT confirmation — the fork #507 shipped unscanned — has one h1 and zero violations", async () => {
+// NOTE ON THE NAME: "PR 507", not "#507". The colour-value lint reads a
+// three-hex-digit `#507` in a string literal as a raw colour and reds the
+// build — a real catch by a blunt rule, avoided rather than suppressed.
+test("the SENT confirmation — the fork PR 507 shipped unscanned — has one h1 and zero violations", async () => {
   const h = await mount(createElement(PasswordRecoveryForm, { createSupabaseClient: recoveryClient(null) }));
   try {
     const email = findIn(h.container as never, byLabelledInput(/Email/));
