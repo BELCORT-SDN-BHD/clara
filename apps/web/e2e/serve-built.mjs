@@ -9,12 +9,24 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The chat-parity walk's own mock lane — a file-disjoint sibling (the same shape
+// live-stack/serve-live.mjs takes), consulted through the three hooks below so no
+// other spec's surface changes. See that file's header for what it does and does not
+// prove.
+import { handleChatParityApp, handleChatParitySupabase, startMockRuntime } from "./chat-parity-mock.mjs";
+
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
 const appOrigin = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
 const appUrl = new URL(appOrigin);
 const supabaseUrl = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? `${appOrigin}/e2e-supabase`);
 const supabasePrefix = supabaseUrl.pathname.replace(/\/$/, "");
+// The two INTERNAL ports (the public one is CLARA_E2E_APP_ORIGIN's). Overridable so a
+// second lane can run this harness on a host where another already holds the defaults —
+// the alternative measured on 2026-09-02 was an EADDRINUSE crash and no browser leg at
+// all. Defaults unchanged, so every existing invocation behaves exactly as before.
+const nextPort = Number(process.env.CLARA_E2E_NEXT_PORT ?? 3101);
+const mockRuntimePort = Number(process.env.CLARA_E2E_RUNTIME_PORT ?? 3102);
 const runtimeDir = join(e2eRoot, ".runtime", String(process.pid));
 const keyPath = join(runtimeDir, "localhost-key.pem");
 const certPath = join(runtimeDir, "localhost-cert.pem");
@@ -106,7 +118,7 @@ function publicLocation(location) {
   try {
     const target = new URL(location);
     if (
-      target.port === "3101" &&
+      target.port === String(nextPort) &&
       (target.hostname === "127.0.0.1" || target.hostname === "localhost")
     ) {
       return new URL(`${target.pathname}${target.search}${target.hash}`, appOrigin).toString();
@@ -277,6 +289,8 @@ async function handleSupabase(request, response, url) {
     return;
   }
 
+  if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
+
   sendJson(response, 404, { message: `unhandled e2e Supabase route: ${request.method} ${path}` }, cors);
 }
 
@@ -291,6 +305,17 @@ const httpsServer = createHttpsServer(
       return;
     }
 
+    // The chat legs are same-origin by construction: `lib/clara/api.ts`'s
+    // `runtimeBase()` is empty here, so the browser asks THIS server for them. They
+    // are answered before the proxy below, and never reach `next start` (which has no
+    // route for them).
+    handleChatParityApp(request, response, url)
+      .then((handled) => { if (!handled) proxyToNext(request, response); })
+      .catch((error) => sendJson(response, 500, { message: error instanceof Error ? error.message : "mock failure" }));
+  },
+);
+
+function proxyToNext(request, response) {
     const headers = {
       ...request.headers,
       host: appUrl.host,
@@ -300,7 +325,7 @@ const httpsServer = createHttpsServer(
     const upstream = httpRequest(
       {
         hostname: "127.0.0.1",
-        port: 3101,
+        port: nextPort,
         method: request.method,
         path: request.url,
         headers,
@@ -320,23 +345,29 @@ const httpsServer = createHttpsServer(
       else response.destroy(error);
     });
     request.pipe(upstream);
-  },
-);
+}
 
 await new Promise((resolveListen, rejectListen) => {
   httpsServer.once("error", rejectListen);
   httpsServer.listen(Number(appUrl.port), appUrl.hostname, resolveListen);
 });
 
+// The runtime the SAME-ORIGIN proxy route forwards to. `CLARA_RUNTIME_URL` is
+// server-side only and read at REQUEST time by app/api/runtime/[...path]/route.ts, so
+// pointing it here exercises the real proxy (firm-scope guard, header allow-list,
+// credential-by-leg) against a stand-in runtime rather than skipping it.
+const mockRuntime = startMockRuntime(mockRuntimePort);
+
 const nextBin = join(webRoot, "node_modules", "next", "dist", "bin", "next");
 const next = spawn(
   process.execPath,
-  [nextBin, "start", "--hostname", "127.0.0.1", "--port", "3101"],
+  [nextBin, "start", "--hostname", "127.0.0.1", "--port", String(nextPort)],
   {
     cwd: webRoot,
     env: {
       ...process.env,
       NODE_EXTRA_CA_CERTS: certPath,
+      CLARA_RUNTIME_URL: mockRuntime.origin,
     },
     stdio: "inherit",
   },
@@ -347,6 +378,7 @@ function stop(exitCode = 0) {
   if (stopping) return;
   stopping = true;
   next.kill("SIGTERM");
+  mockRuntime.server.close();
   httpsServer.close(() => {
     rmSync(runtimeDir, { recursive: true, force: true });
     process.exit(exitCode);
