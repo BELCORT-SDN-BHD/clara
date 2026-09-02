@@ -59,7 +59,17 @@ import {
  *    away and the browser kept a stale, half-dead session.
  */
 
-const PUBLIC_PATH_PREFIXES = ["/login", "/invite", "/signup", "/auth/confirm"];
+export const PUBLIC_PATH_PREFIXES = [
+  "/login",
+  "/invite",
+  "/signup",
+  "/auth/confirm",
+  "/forgot-password",
+  "/auth/recover",
+  ...(process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1"
+    ? ["/money-input-harness"]
+    : []),
+];
 
 /**
  * EXPORTED so `tests/proxy-matcher.test.ts` drives THIS function rather than a
@@ -98,7 +108,9 @@ export function referrerPolicyForPath(
   }
   if (
     pathname === "/auth/confirm" ||
-    pathname.startsWith("/auth/confirm/")
+    pathname.startsWith("/auth/confirm/") ||
+    pathname === "/auth/recover" ||
+    pathname.startsWith("/auth/recover/")
   ) {
     return "strict-origin";
   }

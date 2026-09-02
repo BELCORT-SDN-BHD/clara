@@ -1,7 +1,7 @@
 // F3 (independent review, fix-required, 2026-08-28): AdjustmentLinesEditor
 // had ZERO test coverage — three mutants survived green (returning null;
 // breaking the debit/credit XOR at line ~95; the T3-F1-class money-input bug
-// reintroduced in the shared CentsInput). This file drives real key
+// reintroduced in the shared MoneyInput). This file drives real key
 // sequences through the rendered editor and asserts on the emitted `lines`
 // array — never a rendered-string proxy. `enableDomInspection()` is required
 // at module top (before any render) for NextIntlClientProvider's own

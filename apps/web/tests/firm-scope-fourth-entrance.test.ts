@@ -194,6 +194,15 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
    */
   const COLOCATED_MODULE_ROSTER: ReadonlyArray<{ readonly path: string; readonly reason: string }> = [
     {
+      path: "app/(entry)/auth/recover/handler.ts",
+      reason:
+        "NOT A ROUTER FILE. This is the independently-testable PKCE exchange body " +
+        "called by the sibling app/(entry)/auth/recover/route.ts GET export. It " +
+        "exports no page, route, or HTTP-method surface; Next.js never routes to " +
+        "it or auto-imports it. The route.ts leaf remains the real entrance governed " +
+        "by the leaf census.",
+    },
+    {
       path: "app/(entry)/auth/confirm/verify/handler.ts",
       reason:
         "NOT A ROUTER FILE. This is the extracted POST-handler body for the sibling " +

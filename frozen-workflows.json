@@ -606,6 +606,26 @@
       "note": "P6-1 — the chatturn-v16 engine stamp; the metering recorder itself is v15's, by import. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
+    "packages/runtime/workflows/chatTurn.v17.impl.ts": {
+      "sha256": "ca1f82c0e53f76554d7697fad07b15ed960558d787414ef4acaaec14821f2ef2",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v17.prompt.ts": {
+      "sha256": "bce5651a3acae9593fce13dcfc44c7ff72d89c3cc6683c6489866f08fa0a0d49",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v17.tools.ts": {
+      "sha256": "d4ca4dba39c0d823dc4e8dfe539663b37473f3c9bb69e65532efdf38ee00c517",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v17.ts": {
+      "sha256": "e4e45f2c3eac3116191d731d8373635511dd3419b3694f4f308e6c7f4051b0f1",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v17.usage.ts": {
+      "sha256": "cfdca600e5fd523e4acdd7f0f54d5d209096b85d032fd07dc486d0869e869a12",
+      "note": ""
+    },
     "packages/runtime/workflows/chatTurn.v2.errors.ts": {
       "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",
       "note": "",

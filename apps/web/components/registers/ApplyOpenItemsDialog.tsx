@@ -12,10 +12,10 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { fmtCents, parseAmountToCents } from "@/lib/registers/money";
-import { Input } from "@/components/ui/input";
+import { fmtCents } from "@/lib/registers/money";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { MoneyInput } from "@/components/common/money-input";
 import { NativeSelect } from "@/components/common/native-select";
 import { ArApCounterpartyDoorDialog } from "./ArApCounterpartyDoorDialog";
 import type { AgingItem } from "@/lib/registers/aging";
@@ -35,13 +35,14 @@ export function ApplyOpenItemsDialog({
   const tc = useTranslations("Common");
   const [sourceItemId, setSourceItemId] = useState("");
   const [targetItemId, setTargetItemId] = useState("");
-  const [amountRaw, setAmountRaw] = useState("");
+  const [amountCents, setAmountCents] = useState<number | null>(null);
+  const [amountValid, setAmountValid] = useState(true);
   const [reason, setReason] = useState("");
-  const amountCents = parseAmountToCents(amountRaw);
   const canSubmit =
     sourceItemId.length > 0 &&
     targetItemId.length > 0 &&
     sourceItemId !== targetItemId &&
+    amountValid &&
     amountCents !== null &&
     amountCents > 0 &&
     reason.trim().length > 0;
@@ -91,7 +92,15 @@ export function ApplyOpenItemsDialog({
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="cp-apply-amount">{t("amountLabel")}</Label>
-          <Input id="cp-apply-amount" inputMode="decimal" value={amountRaw} onChange={(e) => setAmountRaw(e.target.value)} />
+          <MoneyInput
+            id="cp-apply-amount"
+            mode="signed"
+            cents={amountCents}
+            onValueChange={(change) => {
+              setAmountValid(change.ok);
+              if (change.ok) setAmountCents(change.cents);
+            }}
+          />
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="cp-apply-reason">{t("reasonLabel")}</Label>

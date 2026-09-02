@@ -1,6 +1,6 @@
 // FS-5 gate (b): structural accessibility at each durable-interview state.
 // This mounts through ClaraFullScreenThread, the real escalated route surface;
-// the only expected finding belongs to the pre-existing thread composer.
+// the thread composer now carries its translated accessible name.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -83,13 +83,6 @@ const OPEN_STATE = {
   items: [],
 };
 
-const PRE_EXISTING_COMPOSER_FINDING = {
-  rule: "label",
-  wcag: "1.3.1 Info and Relationships / 4.1.2 Name, Role, Value",
-  element: "textarea",
-  message: "Form elements must have an accessible name (aria-label, aria-labelledby, or an associated <label>).",
-};
-
 function App() {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -123,7 +116,7 @@ test("the real thread route stays accessible before start, at an open park, and 
         for (let i = 0; i < 6; i++) await h.settle();
 
         const beforeStart = checkAccessibility(body as never);
-        assert.deepEqual(beforeStart, [PRE_EXISTING_COMPOSER_FINDING], `before start: ${JSON.stringify(beforeStart)}`);
+        assert.deepEqual(beforeStart, [], `before start: ${JSON.stringify(beforeStart)}`);
 
         const start = h.find((node) => node.tagName === "BUTTON" && textOf(node) === "Start / continue interview");
         assert.ok(start, "the idempotent start/continue control must render inside the real thread");
@@ -132,7 +125,7 @@ test("the real thread route stays accessible before start, at an open park, and 
 
         assert.match(h.text(), /What is the client's legal name\?/, "the runtime-hydrated open park must render");
         const openPark = checkAccessibility(body as never);
-        assert.deepEqual(openPark, [PRE_EXISTING_COMPOSER_FINDING], `open park: ${JSON.stringify(openPark)}`);
+        assert.deepEqual(openPark, [], `open park: ${JSON.stringify(openPark)}`);
 
         const cancelTrigger = h.find((node) => node.tagName === "BUTTON" && textOf(node) === "Cancel onboarding");
         // N1 (review round 1): `h.find` only proves a FIRST match exists — it
@@ -146,7 +139,7 @@ test("the real thread route stays accessible before start, at an open park, and 
         const reason = findIn(body, (node) => node.tagName === "TEXTAREA" && node.getAttribute?.("aria-label") === "Reason for cancelling");
         assert.ok(reason, "opening the interview cancel door must reveal its typed-reason field");
         const openDialog = checkAccessibility(body as never);
-        assert.deepEqual(openDialog, [PRE_EXISTING_COMPOSER_FINDING], `open cancel dialog: ${JSON.stringify(openDialog)}`);
+        assert.deepEqual(openDialog, [], `open cancel dialog: ${JSON.stringify(openDialog)}`);
       } finally {
         await h.unmount();
         for (let i = 0; i < 5; i++) await h.settle();

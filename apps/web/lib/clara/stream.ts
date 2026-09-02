@@ -40,7 +40,17 @@ export type SseEvent = { event: string; data: unknown };
 
 /** Payload shapes for the three named (non-`chunk`) events, as `streamRoute.ts` sends
  *  them. `chunk`'s payload is intentionally left `unknown` — see the module doc above:
- *  we treat it as an opaque liveness signal, never as content we parse or render.
+ *  this module treats it as an opaque liveness signal and never parses it.
+ *
+ *  ONE consumer outside this module now reads the buffer, and only for one chunk kind:
+ *  `./liveClarify.ts`'s `foldLiveClarifyParts` folds a `clarify` TOOL-CALL chunk into a
+ *  `clarify` part so a PARKED question is answerable in the thread (PRD §5a). It has to
+ *  come from here because a parked clarify never reaches the persisted transcript —
+ *  `clara.settle_chat_turn` cancels the pending interruption in the same statement
+ *  sequence that inserts the assistant message. That fold changes nothing here: chunks
+ *  stay `unknown` on this side of the seam, and the terminal `message` still REPLACES
+ *  the transcript wholesale (clearing `provisionalChunks`, below) — the persisted parts
+ *  remain the authority, and the fold's output disappears the moment they arrive.
  *
  *  P2 FOLD SEAM B: `parts` below is typed as the canonical `ClaraPart` union, but
  *  `isTerminalMessagePayload`'s runtime check only proves `data` is an object with a

@@ -1,6 +1,10 @@
 "use client";
 
-// Bulk upload queue for the client Documents tab, ported MECHANISM (never look) from
+// Bulk upload queue for the client Documents tab AND, since the chat-parity train
+// (裁-130), the Clara composer's attach affordance — one queue, one transport, no second
+// upload path anywhere in this app. The composer's only differences ride in `options`:
+// `origin: "chat"` + the `sessionId` the runtime authorises against, and its own
+// `filingSource` label on the attribution act. Ported MECHANISM (never look) from
 // apps/dashboard/app/documents/useUploadQueue.ts. Files queue client-side and upload
 // at most CONCURRENCY at a time; per-file honest failure + retry; the same
 // begin→PUT→finalize→poll transport as the dashboard's /documents tab and the chat
@@ -40,9 +44,11 @@ import {
   beginIntake, finalizeIntake, INTAKE_ADOPTED, putIntakeBytes, readIntake,
   type IntakeRecoveryRefused,
 } from "./intake";
+import { isRuntimeError } from "./runtime-wire";
 import { fileToClient } from "./doors";
-import { MAX_FILE_BYTES, type IntakeFailureCode } from "./types";
+import { MAX_FILE_BYTES, type IntakeFailureCode, type IntakeOrigin } from "./types";
 import type { SessionTokenAccessor } from "@/lib/session";
+import type { WireErrorKind } from "@/lib/wire-error-kind";
 
 const CONCURRENCY = 2;
 
@@ -54,6 +60,7 @@ export type QueueItem = {
   name: string;
   size: number;
   file: File;
+  intakeId: string | null;
   documentId: string | null;
   state: QueueState;
   failureCode: IntakeFailureCode | null;
@@ -66,6 +73,8 @@ export type QueueItem = {
   /** WHICH phase an "error" state failed in — the caller picks the translated
    *  chrome phrase; `error` itself stays untranslated operational text. */
   errorPhase: QueueErrorPhase | null;
+  errorStatus: number | null;
+  errorKind: WireErrorKind | null;
   error: string | null;
 };
 
@@ -81,9 +90,16 @@ export type UploadQueue = {
   clearDone: () => void;
 };
 
-const BLANK: Pick<QueueItem, "failureCode" | "recoveryReason" | "recoveryRemedy" | "recoveryDocumentMime" | "recoveryUploadMime" | "errorPhase" | "error"> = {
+export type UploadQueueOptions = {
+  origin?: IntakeOrigin;
+  sessionId?: string;
+  filingSource?: string;
+};
+
+const BLANK: Pick<QueueItem, "failureCode" | "recoveryReason" | "recoveryRemedy" | "recoveryDocumentMime" | "recoveryUploadMime" | "errorPhase" | "errorStatus" | "errorKind" | "error"> = {
   failureCode: null, recoveryReason: null, recoveryRemedy: null,
-  recoveryDocumentMime: null, recoveryUploadMime: null, errorPhase: null, error: null,
+  recoveryDocumentMime: null, recoveryUploadMime: null, errorPhase: null,
+  errorStatus: null, errorKind: null, error: null,
 };
 
 /** A LIVE row still occupies its identity slot for dedupe purposes (N14); a
@@ -149,6 +165,7 @@ export function useUploadQueue(
   session: SessionTokenAccessor,
   onFiled: () => void,
   onRejected: (note: QueueRejection) => void,
+  options: UploadQueueOptions = {},
 ): UploadQueue {
   const ref = useRef<QueueItem[]>([]);
   const [items, setItems] = useState<QueueItem[]>([]);
@@ -179,8 +196,12 @@ export function useUploadQueue(
       controllers.current.set(localId, controller);
       const signal = controller.signal;
       try {
-        patch(localId, { state: "starting", documentId: null, ...BLANK });
-        const begun = await beginIntake({ filename: file.name, mime: file.type || "application/octet-stream", declaredBytes: file.size }, { session, signal });
+        patch(localId, { state: "starting", intakeId: null, documentId: null, ...BLANK });
+        const begun = await beginIntake(
+          { filename: file.name, mime: file.type || "application/octet-stream", declaredBytes: file.size },
+          { session, signal, origin: options.origin, sessionId: options.sessionId },
+        );
+        patch(localId, { intakeId: begun.intake_id });
         patch(localId, { state: "uploading" });
         await putIntakeBytes(begun.upload_token, begun.intake_id, file, signal);
         finalizeSent.current.add(localId); // BEFORE the await (R2) — the request may land server-side even if the client aborts waiting on its response
@@ -199,7 +220,7 @@ export function useUploadQueue(
             if (INTAKE_ADOPTED.has(row.status) && row.document_id) {
               patch(localId, { state: "filing", documentId: row.document_id });
               try {
-                await fileToClient(row.document_id, clientId, "documents_tab_upload", { session, signal });
+                await fileToClient(row.document_id, clientId, options.filingSource ?? "documents_tab_upload", { session, signal });
                 patch(localId, {
                   state: "ready",
                   recoveryReason: refused?.reason ?? null,
@@ -220,13 +241,19 @@ export function useUploadQueue(
         patch(localId, { state: "error", errorPhase: "timeout", error: null });
       } catch (err) {
         if (isAbort(err)) return; // Remove/unmount already decided this item's fate
-        patch(localId, { state: "error", errorPhase: "upload", error: (err as Error).message });
+        patch(localId, {
+          state: "error",
+          errorPhase: "upload",
+          errorStatus: isRuntimeError(err) ? err.status : null,
+          errorKind: isRuntimeError(err) ? err.kind : null,
+          error: (err as Error).message,
+        });
       } finally {
         controllers.current.delete(localId);
         finalizeSent.current.delete(localId);
       }
     },
-    [session, clientId, patch, onFiled],
+    [session, clientId, patch, onFiled, options.origin, options.sessionId, options.filingSource],
   );
 
   const pump = useCallback(() => {
@@ -257,7 +284,7 @@ export function useUploadQueue(
         }
         ref.current = [
           ...ref.current,
-          { localId: crypto.randomUUID(), name: file.name, size: file.size, file, documentId: null, state: "queued", ...BLANK },
+          { localId: crypto.randomUUID(), name: file.name, size: file.size, file, intakeId: null, documentId: null, state: "queued", ...BLANK },
         ];
       }
       sync();
@@ -268,7 +295,7 @@ export function useUploadQueue(
 
   const retry = useCallback(
     (localId: string) => {
-      patch(localId, { state: "queued", ...BLANK });
+      patch(localId, { state: "queued", intakeId: null, documentId: null, ...BLANK });
       pump();
     },
     [patch, pump],
