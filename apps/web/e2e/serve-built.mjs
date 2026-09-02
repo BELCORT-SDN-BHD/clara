@@ -49,15 +49,35 @@ if (openssl.status !== 0) {
 
 const SUBJECT = "11111111-1111-1111-1111-111111111111";
 const REQUEST_ID = "22222222-2222-2222-2222-222222222222";
+const FIRM_ID = "33333333-3333-4333-8333-333333333333";
+const CLIENT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const CLIENT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const THREAD_A = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
+const THREAD_B = "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb";
+const COLLEAGUE_THREAD_A = "cccccccc-1111-4111-8111-cccccccccccc";
 // The fixed "delivered" code the SKELETON journey (signup-confirm-pending.
 // spec.ts) types once Lane B wires the real attempt wall.
 const E2E_SIGNUP_CODE = "654321";
 const state = {
-  email: "owner@example.test",
+  // Default to the membership-less holding-state persona. Navigation specs
+  // opt into their fixture rank explicitly through the sign-in email prefix.
+  email: "holding@example.test",
   firmName: "E2E Accounting",
   note: null,
   registrationOpen: false,
+  firmScoped: false,
 };
+
+const clients = [
+  { id: CLIENT_A, name: "Rome Properties", status: "active", created_at: "2026-01-01T00:00:00.000Z" },
+  { id: CLIENT_B, name: "Bee Creative Solution", status: "active", created_at: "2026-02-01T00:00:00.000Z" },
+];
+
+const sessions = [
+  { id: COLLEAGUE_THREAD_A, firm_id: FIRM_ID, client_id: CLIENT_A, created_by: "44444444-4444-4444-8444-444444444444", visibility: "firm", title: "Colleague thread", created_at: "2026-09-02T02:00:00.000Z" },
+  { id: THREAD_A, firm_id: FIRM_ID, client_id: CLIENT_A, created_by: SUBJECT, visibility: "private", title: "Own A", created_at: "2026-09-02T01:00:00.000Z" },
+  { id: THREAD_B, firm_id: FIRM_ID, client_id: CLIENT_B, created_by: SUBJECT, visibility: "private", title: "Own B", created_at: "2026-09-02T01:00:00.000Z" },
+];
 
 function confirmedUser() {
   return {
@@ -140,9 +160,30 @@ async function handleSupabase(request, response, url) {
     "access-control-allow-credentials": "true",
   };
 
+  if (request.method === "POST" && path === "/auth/v1/token") {
+    const body = await readJson(request);
+    const grantType = url.searchParams.get("grant_type");
+    if (grantType !== "password" && grantType !== "pkce") {
+      sendJson(response, 400, { message: "unsupported e2e grant" }, cors);
+      return;
+    }
+    if (typeof body.email === "string") state.email = body.email;
+    state.firmScoped = true;
+    sendJson(response, 200, {
+      access_token: accessToken(),
+      token_type: "bearer",
+      expires_in: 7_200,
+      expires_at: 4_102_444_800,
+      refresh_token: "e2e-refresh-token",
+      user: confirmedUser(),
+    }, cors);
+    return;
+  }
+
   if (request.method === "POST" && path === "/auth/v1/signup") {
     const body = await readJson(request);
     if (typeof body.email === "string") state.email = body.email;
+    state.firmScoped = false;
     sendJson(response, 200, {
       id: SUBJECT,
       aud: "authenticated",
@@ -157,6 +198,11 @@ async function handleSupabase(request, response, url) {
       updated_at: "2026-08-31T00:00:00.000Z",
       is_anonymous: false,
     }, cors);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/auth/v1/recover") {
+    sendJson(response, 200, {}, cors);
     return;
   }
 
@@ -183,6 +229,16 @@ async function handleSupabase(request, response, url) {
   }
 
   if (request.method === "GET" && path === "/auth/v1/user") {
+    sendJson(response, 200, confirmedUser(), cors);
+    return;
+  }
+
+  if (request.method === "PUT" && path === "/auth/v1/user") {
+    const body = await readJson(request);
+    if (typeof body.password === "string" && body.password.includes("compromised")) {
+      sendJson(response, 422, { message: "Password is known to be compromised" }, cors);
+      return;
+    }
     sendJson(response, 200, confirmedUser(), cors);
     return;
   }
@@ -222,11 +278,114 @@ async function handleSupabase(request, response, url) {
   }
 
   if (request.method === "GET" && path === "/rest/v1/caller_context") {
+    const bookkeeper = state.email.startsWith("bookkeeper@");
+    const owner = state.email.startsWith("owner@");
+    if (!bookkeeper && !owner) {
+      // Every non-navigation persona remains membership-less by default.
+      sendJson(response, 200, [], cors);
+      return;
+    }
+    sendJson(response, 200, [{
+      user_id: SUBJECT,
+      firm_id: FIRM_ID,
+      firm_name: "E2E Accounting",
+      role: bookkeeper ? "bookkeeper" : "owner",
+      role_rank: bookkeeper ? 1 : 3,
+      is_operator: owner,
+    }], cors);
+    return;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/firm_members_visible") {
+    sendJson(response, 200, [{
+      membership_id: "44444444-4444-4444-4444-444444444444",
+      user_id: SUBJECT,
+      display_name: state.email.startsWith("bookkeeper@") ? "E2E Bookkeeper" : "E2E Owner",
+      email: state.email,
+      role: state.email.startsWith("bookkeeper@") ? "bookkeeper" : "owner",
+      role_rank: state.email.startsWith("bookkeeper@") ? 1 : 3,
+      status: "active",
+      created_at: "2026-09-02T00:00:00.000Z",
+      removed_at: null,
+    }], cors);
+    return;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/firm_invites_visible") {
     sendJson(response, 200, [], cors);
     return;
   }
 
+  if (request.method === "GET" && path === "/rest/v1/clients") {
+    const filter = url.searchParams.get("id");
+    const rows = filter?.startsWith("eq.")
+      ? clients.filter((client) => client.id === filter.slice(3))
+      : clients;
+    sendJson(response, 200, rows, cors);
+    return;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/client_facts") {
+    sendJson(response, 200, [], cors);
+    return;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/chat_sessions") {
+    const filter = url.searchParams.get("id");
+    const rows = filter?.startsWith("eq.")
+      ? sessions.filter((session) => session.id === filter.slice(3))
+      : sessions;
+    sendJson(response, 200, rows, cors);
+    return;
+  }
+
+  if (request.method === "GET" && path === "/rest/v1/onboarding_plans") {
+    sendJson(response, 200, [], cors);
+    return;
+  }
+
+  if (request.method === "POST" && path === "/rest/v1/rpc/list_review_queue") {
+    sendJson(response, 200, {
+      counts: { needs_you: 0, needs_review: 0, ready: 0, drafts: 0, uncoded_filings: 0, open_questions: 0, compliance_watches: 0, lint_findings: 0 },
+      sweep: null,
+      compliance: null,
+      lint: null,
+      rows: [],
+      next_cursor: null,
+    }, cors);
+    return;
+  }
+
   sendJson(response, 404, { message: `unhandled e2e Supabase route: ${request.method} ${path}` }, cors);
+}
+
+async function handleChat(request, response, url) {
+  if (request.method === "GET" && url.pathname === "/api/chat/sessions") {
+    sendJson(response, 200, { sessions });
+    return;
+  }
+  const match = /^\/api\/chat\/sessions\/([^/]+)\/messages$/.exec(url.pathname);
+  if (request.method === "GET" && match) {
+    const threadId = decodeURIComponent(match[1]);
+    const text = threadId === THREAD_A
+      ? "Own message for client A"
+      : threadId === THREAD_B
+        ? "Own message for client B"
+        : "Colleague message must not auto-open";
+    sendJson(response, 200, {
+      messages: [{
+        id: `message-${threadId}`,
+        role: "assistant",
+        parts: [{ type: "text", text }],
+        turn_key: null,
+        task_id: null,
+        seq: 1,
+        created_at: "2026-09-02T03:00:00.000Z",
+      }],
+    });
+    return;
+  }
+  sendJson(response, 404, { message: `unhandled e2e chat route: ${request.method} ${url.pathname}` });
 }
 
 const httpsServer = createHttpsServer(
@@ -235,6 +394,12 @@ const httpsServer = createHttpsServer(
     const url = new URL(request.url ?? "/", appOrigin);
     if (url.pathname === supabasePrefix || url.pathname.startsWith(`${supabasePrefix}/`)) {
       handleSupabase(request, response, url).catch((error) => {
+        sendJson(response, 500, { message: error instanceof Error ? error.message : "mock failure" });
+      });
+      return;
+    }
+    if (url.pathname === "/api/chat/sessions" || url.pathname.startsWith("/api/chat/sessions/")) {
+      handleChat(request, response, url).catch((error) => {
         sendJson(response, 500, { message: error instanceof Error ? error.message : "mock failure" });
       });
       return;

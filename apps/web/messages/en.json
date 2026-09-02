@@ -22,11 +22,19 @@
   },
   "FirmNav": {
     "ariaLabel": "Firm navigation",
+    "adminSectionsLabel": "Admin sections",
     "home": "Home",
     "needsYou": "Needs you",
     "clients": "Clients",
     "activity": "Activity",
-    "admin": "Admin"
+    "admin": "Admin",
+    "adminSections": {
+      "members": "Members",
+      "registrations": "Firm registrations",
+      "compliance": "Compliance register",
+      "vendorBindings": "Vendor identity bindings",
+      "settings": "Firm settings"
+    }
   },
   "NotFound": {
     "heading": "That page does not exist",
@@ -155,7 +163,32 @@
   },
   "Admin": {
     "heading": "Admin",
-    "body": "P2 shell — users, capabilities and the metering rollup are built in P4. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+    "body": "Manage the people, compliance and identity controls that govern this firm.",
+    "sectionsLabel": "Firm admin sections",
+    "noSections": "No admin sections are available at your rank.",
+    "unbuiltNote": "The metering rollup, tier surfaces, and /admin/billing are not built yet; they remain in the post-beta Billing PR-1/PR-2 lane recorded in PROGRESS.md.",
+    "sections": {
+      "members": {
+        "title": "Members",
+        "purpose": "Manage roles, invitations and access to this firm."
+      },
+      "registrations": {
+        "title": "Firm registrations",
+        "purpose": "Review requests to create firms on Clara."
+      },
+      "compliance": {
+        "title": "Compliance register",
+        "purpose": "Review SST-registration watches across the firm."
+      },
+      "vendorBindings": {
+        "title": "Vendor identity bindings",
+        "purpose": "Govern the evidence bindings used to identify vendors."
+      },
+      "settings": {
+        "title": "Firm settings",
+        "purpose": "Review firm controls and change the high-stakes threshold through its governed door."
+      }
+    }
   },
   "Members": {
     "pageHeading": "Members",
@@ -252,6 +285,7 @@
   },
   "ClientWorkspace": {
     "heading": "Client workspace",
+    "clientHeader": "Client: {clientName}",
     "body": "One workspace per client. The accounting objects are tabs — journals, documents, bank, close, reports, registers and knowledge.",
     "clientIdLabel": "Client ID",
     "statusLabel": "Status",
@@ -285,6 +319,7 @@
       "streamEndedUnexpectedly": "The connection to Clara ended unexpectedly.",
       "connectionLost": "Connection lost.",
       "retry": "Retry",
+      "composerLabel": "Ask Clara",
       "composerPlaceholder": "Ask Clara…",
       "send": "Send",
       "sending": "Sending…",
@@ -465,6 +500,7 @@
         "admin": "Admin",
         "adminCompliance": "Compliance register",
         "adminVendorBindings": "Vendor identity bindings",
+        "adminMembers": "Members",
         "adminRegistrations": "Firm registrations",
         "adminSettings": "Firm settings",
         "clientWorkspaceHome": "Workspace overview",
@@ -1338,7 +1374,36 @@
     "passwordLabel": "Password",
     "submit": "Sign in",
     "submitting": "Signing in…",
+    "forgotPassword": "Forgot your password?",
     "noAccount": "Starting your own firm? <link>Create an account</link>."
+  },
+  "PasswordRecovery": {
+    "title": "Reset your password",
+    "description": "Enter your email and we'll send a secure reset link.",
+    "emailLabel": "Email",
+    "submit": "Send reset link",
+    "sending": "Sending reset link…",
+    "sentTitle": "Check your email",
+    "sentDescription": "If an account can receive a reset link, the instructions are on their way.",
+    "invalidLink": "That reset link is invalid or has expired. Request a new one.",
+    "backToLogin": "Back to sign in"
+  },
+  "PasswordReset": {
+    "title": "Choose a new password",
+    "description": "Use at least 12 characters. Clara also refuses known breached passwords.",
+    "passwordLabel": "New password",
+    "submit": "Save new password",
+    "saving": "Saving password…",
+    "savedTitle": "Password updated",
+    "savedDescription": "Your new password is ready to use.",
+    "continue": "Continue to Clara"
+  },
+  "RouteError": {
+    "heading": "Something went wrong",
+    "title": "This page could not be loaded",
+    "message": "Try the page again. If it still fails, share the support code with us.",
+    "supportCode": "Support code: {digest}",
+    "retry": "Try again"
   },
   "Signup": {
     "title": "Create your account",
@@ -2489,7 +2554,6 @@
     }
   },
   "FirmAdminCompliance": {
-    "adminNavLabel": "Firm admin sections",
     "dialog": {
       "cancel": "Cancel",
       "working": "Working…"

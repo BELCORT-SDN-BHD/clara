@@ -27,9 +27,12 @@ writing a line.*
    (a subagent that did not build; the prompt names the PR, the design of record and the acceptance
    list, asks for findings as BLOCKER / MATERIAL / NIT with `file:line`, a refute-first stance, an
    explicit attempt to bypass every wall the PR claims, and a verdict `CLEAR` / `FIX REQUIRED`).
-   Money/auth/webhook/tenant-creation surfaces get the security lens in the same prompt; **if a
-   NATIVE lane built such a surface, add a Codex read-only leg** (`codex exec … -s read-only`) —
-   law 28's cross-model requirement, kept.
+   Money/auth/webhook/tenant-creation surfaces get the security lens in the same prompt.
+   **裁-111 (2026-09-01): the cross-family Codex adversarial leg is SUSPENDED until beta live** —
+   the ONE fresh-context opus review is the complete gate for the sprint; law 28 resumes at beta
+   unless the owner rules otherwise. The reviewer brief carries two standing items: the
+   bidirectional seam↔door parameter diff in the PR BODY (裁-107/107b) and the OVERCLAIM lens —
+   does anything in this diff assert an absolute where the code delivers a conditional? (裁-112)
 5. Fold on the same branch; the SAME reviewer re-verifies to `CLEAR`; the owner may read the PR;
    `gh pr merge --squash` on green CI. Never `--admin`; a stale branch takes `gh pr update-branch`.
 6. Docs-only PRs (`AGENTS.md` / `PROGRESS.md` / `docs/**` only) take the single-lane review
@@ -200,8 +203,13 @@ with RED-before cells:** signature failure → no door; replayed event → one r
 of ANOTHER caller → refuse; a consumed admission → refuse; `Origin: null` → 403; the rate wall both
 polarities; the DPA unsigned → no checkout; **a confirmation token minted by a DIFFERENT browser →
 refuse (the login-CSRF binding above), with a positive control that the initiating browser succeeds.** **Beta scope:** checkout + admission + the holding page;
-NOT invoicing (nothing invoices at RM0). **Review:** the security lens (§A step 4) is mandatory, with the
-Codex read-only leg if a native lane built it. **E2E:** signup → checkout (Stripe TEST, a test
+NOT invoicing (nothing invoices at RM0). **Review:** the security lens (§A step 4) is mandatory.
+**裁-111 (2026-09-01): the cross-family Codex adversarial leg is SUSPENDED until beta live** —
+the ONE fresh-context opus review is the complete gate for the sprint; law 28 resumes at beta
+unless the owner rules otherwise. The reviewer brief carries two standing items: the
+bidirectional seam↔door parameter diff in the PR BODY (裁-107/107b) and the OVERCLAIM lens —
+does anything in this diff assert an absolute where the code delivers a conditional? (裁-112)
+**E2E:** signup → checkout (Stripe TEST, a test
 card) → the webhook → the firm born → the firm home, in a real browser. **Stripe objects (裁-87):**
 the orchestrator creates them from the DB rows through the session's Stripe connector and records
 the ids in `stripe_object_map`; the lane's code reads them, never authors them. Size ~0.4 BE +
@@ -294,6 +302,8 @@ components under that repo's g6-high-fidelity/clarabook-prototype/ tree — as t
 surface; record deviations by ruling, never absorb them. Output: a new file docs/plan/active/clarabook-conformance-pass-3-2026-09-XX.md
 (consumed / diverged-by-ruling / owed) and the P6-6 identity items confirmed (Ledger Fold ·
 mascot · ClaraBook copy pass). Size 0.3.
+**Note:** pre-run 2026-09-02 by the checkpoint scan; record at
+`docs/plan/active/clarabook-conformance-pass-3-2026-09-02.md`.
 
 ## FS-10 · P6-X — the cutover (orders-p6 §P6-X, amended)
 
@@ -314,12 +324,16 @@ push to `main`, so until it is disconnected every docs merge re-deploys the OLD 
 project retired
 (repoint first, prove, delete second). Ceremony-grade, from merged `main`, with an as-run in
 `docs/plan/completed/`.
+**Acceptance:** OPS.x (裁-121②): the Workers deploy of apps/web carries a parts union ⊇ the
+serving runtime's emittable kinds, re-checked at every future `_vN` bump. BELCORT's `is_operator`
+is set at the Wave-G reset as its own ceremony step (裁-121③), not at the post-beta G1 ceremony.
 
 ## FS-11 · The reduced Wave G (裁-83) → beta
 
 From merged `main` after FS-10: the factory reset of the estate (`packages/db/README.md`'s reset
 scoping; ADR-0075 — every firm/client is test data; the spike/workflow schemas untouched,
-constraint 15) → apply `0155` (its pre-flight refuses on duplicates; the reset removes them, 裁-67)
+constraint 15) → apply the full unapplied span (`0154` through the frontier — `0161` expected)
+(its pre-flight refuses on duplicates; the reset removes them, 裁-67)
 → the Supabase/Resend/Cloudflare items of `docs/ops/wave-g-setup-checklist.md` proven → the
 sixteen-step walk on the desktop corpus with Stripe TEST mode (a non-zero test price + test cards
 proving charge → webhook → firm), **driven end to end in a real browser (Playwright, 裁-86)** → the as-run (a new file docs/plan/completed/wave-g-reduced-asrun-2026-09-XX.md)
@@ -332,7 +346,8 @@ proving charge → webhook → firm), **driven end to end in a real browser (Pla
   `verb-coverage-census-2026-08-28.md` superseded by FS-0's file (index row: superseded).
 - Root `README.md`, `apps/dashboard/README.md` (a SUPERSEDED banner), `apps/web/README.md` ("no
   signup route" → the ruled self-serve signup; 26 parts; P4/P6 state), `apps/web/AGENTS.md:3`,
-  `packages/runtime/README.md`'s ledger line, `frozen-evaluators.json`'s two stale UNDEPLOYED
-  notes, `.claude/skills/orchestrator-fable/SKILL.md`'s lane text and the `/grill-me` name — the
+  `packages/runtime/README.md`'s ledger line, `frozen-evaluators.json`'s four stale UNDEPLOYED
+  notes (plus the twenty-four sibling notes in `frozen-workflows.json`),
+  `.claude/skills/orchestrator-fable/SKILL.md`'s lane text and the `/grill-me` name — the
   "PR-2" truings the 2026-08-31 docs-only PR could not touch (they flip the CI classifier); one
   small PR under the full ladder.

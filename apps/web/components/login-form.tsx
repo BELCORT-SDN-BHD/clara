@@ -164,6 +164,9 @@ export function LoginForm({
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? t("submitting") : t("submit")}
           </Button>
+          <Link className="text-sm text-primary underline" href="/forgot-password">
+            {t("forgotPassword")}
+          </Link>
           {/* 裁-57 — the self-serve entrance, see this file's header. */}
           <p className="text-sm text-muted-foreground">
             {t.rich("noAccount", {
