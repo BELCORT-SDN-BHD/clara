@@ -98,7 +98,7 @@ leaked credential, a stranded run, a cross-tenant read. Everything else is judge
 | Design direction: the two-pane Agentic OS and typed `parts[]`; the live card-reader catalog | `docs/design/`; `apps/web/lib/parts/catalog.ts` + `apps/web/lib/parts/types.ts` |
 | Live CODE structure — who calls what, where a route lives · **before you grep** | `docs/references/codebase-memory-graph.md` |
 | Path-scoped mechanical rules that bind edits under their own paths (migrations, db-tests, handoffs, runtime-workflows) | `.claude/rules/` |
-| Legal/compliance pack for owner review — OpenAI DPA brief, client authorization letter (en/ms/zh), PDPA s.129 cross-border basis, and the beta signup consent text + its byte-identity law (裁-90, [`docs/ops/legal/clara-beta-dpa.md`](docs/ops/legal/clara-beta-dpa.md)) | `docs/ops/legal/` |
+| Legal/compliance pack for owner review — OpenAI DPA brief, client authorization letter (en/ms/zh), PDPA s.129 cross-border basis, the beta signup consent text + its byte-identity law (裁-90, [`docs/ops/legal/clara-beta-dpa.md`](docs/ops/legal/clara-beta-dpa.md)), and the beta terms of service template (裁-125/129 — a separate document kind, [`docs/ops/legal/clara-beta-terms.md`](docs/ops/legal/clara-beta-terms.md)); every beta legal text is an agent template refined with a lawyer at official launch, never darkened | `docs/ops/legal/` |
 | Backup, restore, DR drill, readiness, SLO | `docs/ops/DR.md` |
 | Piping a live DSN through a ceremony — the CA-pinned TLS bridge, never `sslmode=no-verify` | `docs/ops/dsn-bridge.md` |
 | The CI runner: what it is, how to operate or decommission it | `docs/ops/ci-runner.md` (**private-repo only**) |
@@ -128,7 +128,8 @@ resumes at beta unless the owner rules otherwise. Codex remains a BUILD lane thr
 review leg is suspended. Inspect every result before accepting it. *Codex lane,
 learned the hard way:* the `codex:rescue` companion queue is unreliable (it has stalled for hours
 at "starting") — prefer a direct `codex exec` via Bash, backgrounded with a file-watcher on the
-output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-08-31.md`.
+output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-02.md` (newest; the chain runs
+`-08-31` → `-09-01` → `-09-01-pm` → `-09-02`, the earlier files carrying the session state bridges).
 
 **Ground before you build.** On a new or compacted session, and before answering any
 architecture question or changing code: query the graph for structure (the
@@ -187,11 +188,15 @@ never lets one silently pass.
 Every PR gets the lint job unconditionally, docs-only diffs included — freeze-lint,
 leak-scan, gitleaks, the wiki dynamic-SQL gates, harness-links, eslint. A diff that touches
 code additionally gets, in parallel jobs
-(ADR-0073): typecheck/build + the worker-path gate (no database of its own), the
+(ADR-0073): typecheck/build + the worker-path gate + the workflow-bundle gate (registry
+pins and WDK directives reach the served artifact) + the parts-parity gate (the web reader
+covers every runtime-emittable part kind) — no database of its own; the
 deploy-onto-existing check + the estate suite (migrate → seed → every package's tests,
 against a throwaway `postgres:17` service container), the live-behavior e2es + the DR
-round-trip (a second, independent `postgres:17` pair), and the render drill (no database
-of its own).
+round-trip (a second, independent `postgres:17` pair), the render drill (no database
+of its own), and the `db-split-partition-total` gate (the x41/x42 test-corpus partition is
+total; database-free) — nine jobs in all sit under the meta-gate, including the two
+sweep-only legs below.
 **The closed-wave upgrade/contract drills and the D-b frontier matrix run on the weekly
 sweep + manual dispatch only** (ADR-0073; after merging a PR that touches a closed drill or
 the pipeline itself, run `gh workflow run ci.yml` by hand). A docs-only diff skips the code

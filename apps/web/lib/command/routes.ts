@@ -41,6 +41,8 @@
  * third assertion. There are no "planned" rows today; a future one must land
  * with its page in the same PR (port-wave plan §3.6: truing this file is
  * part of a train's OWN merge, never a later sweep).
+ * Admin child cards use registry-driven hrefs rather than literal links, so
+ * each child also needs its own exact row here to remain discoverable.
  */
 
 export type CommandRouteStatus = "built" | "planned";
@@ -116,7 +118,7 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
     scope: "firm",
     href: "/admin",
     status: "built",
-    keywords: ["admin", "members", "rbac", "tiers", "metering"],
+    keywords: ["admin", "firm controls", "tiers", "metering"],
   },
   {
     // T10 (port-wave plan §4 T10): the compliance register, under /admin.
@@ -136,12 +138,29 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
     keywords: ["vendor", "binding", "identity", "propose", "sign", "revoke"],
   },
   {
+    // P4-4/P4-6: the members, roles and invitations surface.
+    id: "adminMembers",
+    scope: "firm",
+    href: "/admin/members",
+    status: "built",
+    keywords: ["members", "roles", "rbac", "invites", "access"],
+  },
+  {
     // P4-5: the operator approval queue, under /admin.
     id: "adminRegistrations",
     scope: "firm",
     href: "/admin/registrations",
     status: "built",
     keywords: ["registrations", "approvals", "operator", "queue"],
+  },
+  {
+    // FS-8 PR-2 (裁-97): the firm-settings surface, under /admin — the
+    // high-stakes threshold control + the capabilities honest note.
+    id: "adminSettings",
+    scope: "firm",
+    href: "/admin/settings",
+    status: "built",
+    keywords: ["settings", "threshold", "high stakes", "capabilities", "owner"],
   },
 ];
 

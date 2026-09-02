@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 
 import { CommandKProvider } from "@/components/command";
 import { FirmNav } from "@/components/firm-nav";
+import { FirmScopeProvider } from "@/components/firm-scope-provider";
 import { LogoutButton } from "@/components/logout-button";
 import { RailMount } from "@/components/clara/rail-mount";
 import { requireFirmScope } from "@/lib/require-firm-scope";
@@ -41,17 +42,17 @@ export default async function FirmLayout({
 }) {
   // BEFORE the first await that produces markup, and with NO argument — the
   // spine's own suite asserts every entrance calls it bare, so an entrance
-  // cannot quietly be handed a permissive reader. The returned `FirmScope` is
-  // deliberately unused here; P4-6 is the train that consumes it for rank
-  // shaping, and reading it now would be this layout guessing that train's
-  // shape.
-  await requireFirmScope();
+  // cannot quietly be handed a permissive reader. P4-6 consumes the returned
+  // row through one request-scoped provider; no child re-reads the session or
+  // caller_context merely to shape an affordance.
+  const scope = await requireFirmScope();
 
   const t = await getTranslations("FirmShell");
 
   return (
     <CommandKProvider>
-      {/*
+      <FirmScopeProvider scope={scope}>
+        {/*
         TOKEN-ROLE FIX (P3 polish, coordinator ruling): the content column used
         to inherit `bg-shell` from this wrapper. `--shell` is the NAV/APP-SHELL
         role in the ClaraBook token contract, deliberately distinct from the
@@ -59,20 +60,21 @@ export default async function FirmLayout({
         misuse even though it read fine. `--shell` now stays on the chrome (the
         sidebar, via `--sidebar`, and the client-workspace tab header one level
         down); the content column is `--background`, the canvas.
-      */}
-      <div className="flex min-h-dvh bg-background">
-        <aside className="flex w-56 shrink-0 flex-col gap-4 border-r border-sidebar-border bg-sidebar p-4">
-          <span className="px-2.5 text-sm font-semibold text-sidebar-foreground">
-            {t("productName")}
-          </span>
-          <FirmNav />
-          <div className="mt-auto">
-            <LogoutButton />
-          </div>
-        </aside>
-        <div className="min-w-0 flex-1 bg-background">{children}</div>
-      </div>
-      <RailMount />
+        */}
+        <div className="flex min-h-dvh bg-background">
+          <aside className="flex w-56 shrink-0 flex-col gap-4 border-r border-sidebar-border bg-sidebar p-4">
+            <span className="px-2.5 text-sm font-semibold text-sidebar-foreground">
+              {t("productName")}
+            </span>
+            <FirmNav />
+            <div className="mt-auto">
+              <LogoutButton />
+            </div>
+          </aside>
+          <div className="min-w-0 flex-1 bg-background">{children}</div>
+        </div>
+        <RailMount />
+      </FirmScopeProvider>
     </CommandKProvider>
   );
 }

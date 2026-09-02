@@ -2,11 +2,12 @@
 
 **Status: P1–P3 and the whole port wave (T0–T11, 11/11) are merged on `main`.** The shell
 (Supabase SSR cookie auth, the two-level workspace chrome, the Clara rail + full-screen
-thread escalation, the 22-part catalog renderer, `⌘K`) and the full P3 product workbench
+thread escalation, the 26-part catalog renderer (24 render branches + 2 status resolvers
+since the `chatTurn_v16` bump, 2026-08-30), `⌘K`) and the full P3 product workbench
 (journals, documents, bank, close, reports, registers, knowledge) are landed, and the port
-wave has since filled those workbenches with the ported door/read surface. Still ahead: the
-**P4** firm-admin UI tranche (design of record merged, build not started) and the **P6**
-polish + cutover wave. It replaces `apps/dashboard` **at cutover**, not before — see
+wave has since filled those workbenches with the ported door/read surface. The **P4**
+firm-admin UI tranche is MERGED (P4-1…P4-5: #450 · #451 · #461 · #455 · #453,
+2026-08-31…09-01 — nav wiring P4-6 still owed). Still ahead: P4-6 and the **P6** polish + cutover wave. It replaces `apps/dashboard` **at cutover**, not before — see
 `docs/plan/active/port-wave-plan-2026-08-28.md` for the current cutover plan
 (`docs/plan/active/frontend-handoff-2026-08-23.md` §0.1 is the original at-cutover ruling).
 
@@ -40,9 +41,12 @@ workbench screens are **P3**.
 ## Token provenance
 
 The semantic tokens in `app/globals.css` and the local fonts in `public/brand/fonts/` are
-**ported verbatim** from the `clarabook-frontend` repo (the design-asset archive, owner
-ruling Q-A), specifically `g5-design-system/clarabook-design-system/app/globals.css` and its
-`public/brand/fonts/` at commit **a86e48a**. That repo's `docs/01-TOKEN-CONTRACT.md` is the
+**ported from `a86e48a` with five deliberate recuts toward the token contract** (radius
+literals, `--text-xl`, the motion scale, per-utility reduced-motion arms, the
+identity-canvas bridge) — `globals.css`'s own notes record each — from the
+`clarabook-frontend` repo (the design-asset archive, owner ruling Q-A), specifically
+`g5-design-system/clarabook-design-system/app/globals.css` and its `public/brand/fonts/` at
+commit **a86e48a**. That repo's `docs/01-TOKEN-CONTRACT.md` is the
 token contract of record — read it before adding or renaming a token. Highlights:
 
 - **Colour**: `--shell: #F7F7F5` (nav/app shell) vs `--surface-subtle: #F5F6F4` (quiet grouped
@@ -103,8 +107,8 @@ groups only, no URL segment added by the grouping:
 ```
 app/(firm)/    — the firm shell (FirmNav + the ONE Clara rail mount + ⌘K): firm home ·
                  needs-you · clients register · activity · admin, plus the client
-                 workspace (clients/[clientId]/ + its seven object tabs: journals ·
-                 documents · bank · close · reports · registers · knowledge) under its
+                 workspace (clients/[clientId]/ + its eight object tabs: journals ·
+                 documents · bank · close · tax · reports · registers · knowledge) under its
                  scope-activating layout.
 app/(full)/    — the Clara full-screen escalation routes (/clara/:threadId and
                  /clients/:clientId/clara/:threadId — same URLs, route groups add no
@@ -161,6 +165,12 @@ pnpm --filter @clara/web lint       # walks up to the root eslint.config.mjs, sa
 pnpm --filter @clara/web test       # node --test + tsx — the auth-boundary suite (tests/)
 pnpm --filter @clara/web build      # public-key class gate, then `next build`
 pnpm --filter @clara/web dev        # local dev server
+pnpm --filter @clara/web e2e        # the Playwright rig (node e2e/run.mjs) — REAL browser
+                                    # walks on the BUILT app: entry-faces, interview,
+                                    # signup-confirm-pending specs + the live-stack harness
+                                    # (e2e/live-stack/, its own README) every frontend train
+                                    # reuses per the 裁-86 browser-leg law; serve-built.mjs
+                                    # serves the production build locally. See e2e/README.md.
 ```
 
 `build` runs `scripts/check-public-key.mjs` first and **refuses to bundle** unless
@@ -313,7 +323,8 @@ secret-bearing URL leaves the history stack.
   `RESEND_API_KEY`, `INVITE_MAIL_FROM`. All four must be present and non-blank or the
   courier refuses 503 **before minting anything**, naming the unset variables (an invite
   whose mail cannot go out is permanently unusable AND blocks that address for seven days).
-  Keep the invite expiry short (≤ 24h): Authentication → Sessions/Email → *Email OTP expiry*.
+  The invite expiry is the SAME *Email OTP expiry* setting the confirmation code uses — 60 minutes
+  by 裁-131 (2026-09-02), not a separate knob: Authentication → Sessions/Email → *Email OTP expiry*.
 - **Verify:** send an invite to a mailbox you control, confirm the delivered URL carries both
   the `/invite/<hash>` path and the `?ct=` parameter, and confirm opening it shows the
   confirmation card **without** consuming anything (the second open must still work until
@@ -362,11 +373,13 @@ binding is "the address is the person's own", not a link tied to one browser (§
   link (that shape is 裁-92's own retired vector: a link is a value an attacker can construct
   and mail to a victim; a bare code, checked against the victim's OWN typed address, is not).
   Under Authentication → Auth Providers → Email, shorten the OTP expiry from the 24-hour
-  default to **10 minutes** (裁-36/§3.4's C4 — a named setup act with an owner receipt; no
-  route or migration can read or enforce this project setting from the repository).
+  default to **60 minutes** (裁-36/§3.4's C4 as AMENDED by 裁-131, 2026-09-02: the one setting also
+  governs the staff-invite token, so 60 minutes keeps invites usable while the rate wall carries the
+  brute-force defence — a named setup act with an owner receipt; no route or migration can read or
+  enforce this project setting from the repository).
 - **Verify (receipt):** with the project's Management API token, positively read
   `GET /v1/projects/{ref}/config/auth` and retain the JSON showing `disable_signup` is
-  `false`, `mailer_autoconfirm` is `false`, and the OTP expiry is the configured 10 minutes.
+  `false`, `mailer_autoconfirm` is `false`, and the OTP expiry is the configured 60 minutes (`mailer_otp_exp = 3600`).
   Retain a delivered *Confirm signup* message showing the bare six-digit code with no link at
   all. Re-run these reads after any project restore or auth-configuration change. This
   positive Management API read is a blocking **deploy gate**: repository code cannot read
@@ -457,13 +470,15 @@ registers, knowledge.
 **Still absent** (trued 2026-08-29, P-3 — this section previously listed the whole P3
 workbench here, contradicting the real workbenches those routes mount):
 
-- The **P4 firm-admin UI tranche** — firm creation, staff invite/roster, capabilities and
-  the metering rollup. The design of record is merged (#376) and the DB half is live
-  (`0141`, `0145`); the web build has not started.
+- **P4-6 nav wiring** — the P4 tranche itself is BUILT AND MERGED (trued 2026-09-02:
+  #450 invite repair · #451 scope spine · #461 entry group · #453 operator queue ·
+  #455 members/roles/invites), but
+  the new screens still lack their navigation/⌘K/admin-home doors (the reverse-nav gate
+  rides the same train).
 - The **P6 polish + cutover wave** — the `chatTurn_v16` wire bump's four Q8 part kinds
-  (裁-20; TRUED 2026-08-30, was `v15` — `v15` shipped 2026-08-29 for the unrelated F-A6 PR-2
-  and is consumed+frozen), the WCAG 2.2 SC 2.5.8 target-size gate (裁-13), the Clara mascot
-  (裁-14), the R3 focus-ring recut, and the cutover PR that retires `apps/dashboard`.
+  SHIPPED (v16 live on Fly v70 since 2026-08-31); still ahead: the WCAG 2.2 SC 2.5.8
+  target-size gate (裁-13), the Clara mascot (裁-14), the R3 focus-ring recut, and the
+  cutover PR that retires `apps/dashboard`.
 - **⌘K "Do"** — still a statically disabled row (see `lib/command/routes.ts` for Go, which
   is live and mechanically checked by `lib/command/routes.test.ts`).
 

@@ -872,6 +872,12 @@ const COA_TEMPLATE_PR_A_CLOCK_NAMES = ["publish_coa_template", "retire_coa_templ
 // roster tautological for it, so neither arm may be apply_coa_template itself.
 const COA_TEMPLATE_PR_B_CLOCK_NAMES = ["apply_coa_template"];
 
+// FS-4 C-2, `0160_checkout_gate_c2_stripe_events` -- number CLAIMED at merge prep 2026-09-01,
+// one past the live frontier 0158 (0159 concurrently claimed by another lane's PR): gate on the
+// migration's stable stem so an earlier-frontier database that does not have this function does
+// not pick up a one-name bare-token roster drift.
+const CHECKOUT_GATE_C2_CLOCK_NAMES = ["resolve_stripe_event_problem"];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -953,6 +959,7 @@ export async function s5BareTokenRoster(query) {
       || await relationExists("clara.coa_template_entity_overrides")) {
     names.push(...COA_TEMPLATE_PR_B_CLOCK_NAMES);
   }
+  if (await appliedStem("checkout_gate_c2_stripe_events$")) names.push(...CHECKOUT_GATE_C2_CLOCK_NAMES);
   return names.sort();
 }
 

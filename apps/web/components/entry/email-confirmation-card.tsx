@@ -37,27 +37,29 @@ import { Label } from "@/components/ui/label";
  * works identically either way, which is the whole cross-device point 裁-92
  * bought (design §3.2).
  *
- * THE THREE DISTINGUISHABLE REFUSAL CARDS (§3.6) plus the two defensive
- * states this module adds honestly:
+ * THE TWO DISTINGUISHABLE REFUSAL CARDS (§3.6, narrowed from three by 裁-109
+ * — see below) plus the two defensive states this module adds honestly:
  *
- *   wrong-code    the code did not match — carries the wall's OWN remaining-
- *                 attempt count (never guessed here)
- *   expired       Supabase answered `otp_expired` — N3, fix round 2026-09-01:
- *                 this does NOT mean the window definitely passed. Upstream
- *                 returns the same code for a wrong code, a truly expired
- *                 one, AND an unknown address alike, so the copy this state
- *                 renders says "that code didn't work", never "expired" —
- *                 see `verify/handler.ts`'s `isExpiredOtpError` for why
- *                 that's honest rather than a downgrade. NIT-2, same round:
- *                 carries the wall's OWN remaining-attempt count too — the
- *                 attempt is consumed either way, and this is the AMBIGUOUS
- *                 bucket where a person most needs to see the countdown
+ *   wrong-code    N3 CLOSED (裁-109, beta-gating): the FLATTENED bucket —
+ *                 a wrong code, a genuinely expired one, an unknown email,
+ *                 or a banned account's own attempt all render here now,
+ *                 identically, because Supabase's `verifyOtp` cannot
+ *                 reliably tell them apart (`otp_expired` covers the first
+ *                 three; distinguishing the fourth, `user_banned`, would
+ *                 itself be a narrower oracle — see `verify/handler.ts`'s
+ *                 header). Carries the wall's OWN remaining-attempt count
+ *                 (never guessed here). The accepted cost, stated to and
+ *                 approved by the owner: a truly-expired code no longer
+ *                 gets its own distinct card.
  *   locked        C1/C2 refused — carries the wall's OWN wait
  *   unavailable   the Lane-B seam (`confirmation-wall.ts`) has not been wired
  *                 up yet — an honest `NotBuiltNote`, never mistaken for a
  *                 real lockout
- *   invalid       a malformed submission (missing/duplicated field) — never
- *                 reached by a real browser using this form as rendered
+ *   invalid       a malformed submission, OR an unauthenticated/mismatched
+ *                 flash marker (N1 CLOSED, `../../app/(entry)/auth/confirm/
+ *                 confirm-flash.ts`) — never reached by a real browser using
+ *                 this form as rendered, and never distinguishable from each
+ *                 other by design (both are "nothing here can be trusted")
  *
  * THE FORM STAYS LIVE UNDER EVERY STATE (`signup-firm-form.tsx`'s own
  * precedent: "the REFUSAL state stays keyboard-operable — the person can
@@ -69,7 +71,6 @@ import { Label } from "@/components/ui/label";
 export type ConfirmCodeState =
   | { readonly kind: "form" }
   | { readonly kind: "wrong-code"; readonly remaining: number }
-  | { readonly kind: "expired"; readonly remaining: number }
   | { readonly kind: "locked"; readonly waitSeconds: number }
   | { readonly kind: "unavailable" }
   | { readonly kind: "invalid" };
@@ -116,7 +117,14 @@ export function EmailConfirmationCard({
     setResendStage(outcome.kind === "sent" ? "sent" : "unavailable");
   }
 
-  const showResend = state.kind === "expired" || state.kind === "locked";
+  // N3 CLOSED (裁-109): "wrong-code" now absorbs what the (removed) "expired"
+  // card used to cover, including a genuinely timed-out code — someone in
+  // that bucket has no correction to type that will ever work, so the
+  // resend affordance that used to be `expired`-only now also covers
+  // `wrong-code`. This is a safe widening, not a security question: resend
+  // runs through its own Lane-B wall (`confirmation-resend.ts`) regardless
+  // of which card asked for it.
+  const showResend = state.kind === "wrong-code" || state.kind === "locked";
 
   return (
     <Card>
@@ -128,11 +136,6 @@ export function EmailConfirmationCard({
         {state.kind === "wrong-code" && (
           <StateBanner tone="error" title={t("wrongCodeTitle")}>
             {t("wrongCodeDescription", { remaining: state.remaining })}
-          </StateBanner>
-        )}
-        {state.kind === "expired" && (
-          <StateBanner tone="warning" title={t("expiredTitle")}>
-            {t("expiredDescription", { remaining: state.remaining })}
           </StateBanner>
         )}
         {state.kind === "locked" && (

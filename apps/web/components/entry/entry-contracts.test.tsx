@@ -88,10 +88,12 @@ const inviteClient = (): InviteAuthClient => ({
   },
 });
 
+// N3 CLOSED (裁-109): "expired" no longer exists as a distinct
+// ConfirmCodeState — it flattened into "wrong-code" (verify/handler.ts's
+// header explains why). Five states remain.
 const CONFIRM_CODE_STATES: ConfirmCodeState[] = [
   { kind: "form" },
   { kind: "wrong-code", remaining: 3 },
-  { kind: "expired", remaining: 3 },
   { kind: "locked", waitSeconds: 300 },
   { kind: "unavailable" },
   { kind: "invalid" },

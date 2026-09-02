@@ -22,11 +22,19 @@
   },
   "FirmNav": {
     "ariaLabel": "Firm navigation",
+    "adminSectionsLabel": "Admin sections",
     "home": "Home",
     "needsYou": "Needs you",
     "clients": "Clients",
     "activity": "Activity",
-    "admin": "Admin"
+    "admin": "Admin",
+    "adminSections": {
+      "members": "Members",
+      "registrations": "Firm registrations",
+      "compliance": "Compliance register",
+      "vendorBindings": "Vendor identity bindings",
+      "settings": "Firm settings"
+    }
   },
   "NotFound": {
     "heading": "That page does not exist",
@@ -155,7 +163,32 @@
   },
   "Admin": {
     "heading": "Admin",
-    "body": "P2 shell — users, capabilities and the metering rollup are built in P4. See docs/plan/active/mohe-grill-rulings-2026-08-27.md Q3."
+    "body": "Manage the people, compliance and identity controls that govern this firm.",
+    "sectionsLabel": "Firm admin sections",
+    "noSections": "No admin sections are available at your rank.",
+    "unbuiltNote": "The metering rollup, tier surfaces, and /admin/billing are not built yet; they remain in the post-beta Billing PR-1/PR-2 lane recorded in PROGRESS.md.",
+    "sections": {
+      "members": {
+        "title": "Members",
+        "purpose": "Manage roles, invitations and access to this firm."
+      },
+      "registrations": {
+        "title": "Firm registrations",
+        "purpose": "Review requests to create firms on Clara."
+      },
+      "compliance": {
+        "title": "Compliance register",
+        "purpose": "Review SST-registration watches across the firm."
+      },
+      "vendorBindings": {
+        "title": "Vendor identity bindings",
+        "purpose": "Govern the evidence bindings used to identify vendors."
+      },
+      "settings": {
+        "title": "Firm settings",
+        "purpose": "Review firm controls and change the high-stakes threshold through its governed door."
+      }
+    }
   },
   "Members": {
     "pageHeading": "Members",
@@ -465,7 +498,9 @@
         "admin": "Admin",
         "adminCompliance": "Compliance register",
         "adminVendorBindings": "Vendor identity bindings",
+        "adminMembers": "Members",
         "adminRegistrations": "Firm registrations",
+        "adminSettings": "Firm settings",
         "clientWorkspaceHome": "Workspace overview",
         "journals": "Journals",
         "documents": "Documents",
@@ -1383,10 +1418,8 @@
     "submitting": "Checking your code…",
     "invalidTitle": "That wasn't a valid submission",
     "invalidDescription": "Check your email and the code, then try again.",
-    "wrongCodeTitle": "That code is not right",
-    "wrongCodeDescription": "{remaining, plural, =0 {No attempts are left for this address right now.} =1 {One attempt is left for this address.} other {# attempts are left for this address.}}",
-    "expiredTitle": "That code didn't work",
-    "expiredDescription": "It may be wrong, it may have expired, or the address may not have a pending signup — we can't tell which from here. {remaining, plural, =0 {No attempts are left for this address right now.} =1 {One attempt is left for this address.} other {# attempts are left for this address.}} Request a new one below.",
+    "wrongCodeTitle": "That code didn't work",
+    "wrongCodeDescription": "It may be wrong, it may have expired, or the address may not have a pending signup — we can't tell which from here. {remaining, plural, =0 {No attempts are left for this address right now.} =1 {One attempt is left for this address.} other {# attempts are left for this address.}} Request a new one below.",
     "lockedTitle": "Too many attempts",
     "lockedDescription": "{wait, plural, =1 {Wait about a minute, or request a new code.} other {Wait about # minutes, or request a new code.}}",
     "unavailableTitle": "Confirmation isn't available yet",
@@ -2490,7 +2523,6 @@
     }
   },
   "FirmAdminCompliance": {
-    "adminNavLabel": "Firm admin sections",
     "dialog": {
       "cancel": "Cancel",
       "working": "Working…"
@@ -2588,6 +2620,23 @@
     },
     "registrations": {
       "heading": "Firm registrations"
+    },
+    "settings": {
+      "pageHeading": "Firm settings",
+      "pageDescription": "Firm-wide risk and authority controls. Every one below is owner-only — the door itself is the wall.",
+      "thresholdHeading": "High-stakes threshold",
+      "thresholdSubheading": "The amount above which a posting needs a second person's approval (clara.set_firm_high_stakes_threshold).",
+      "loading": "Loading the current threshold…",
+      "firmNotFound": "Your firm record could not be read.",
+      "changeTrigger": "Change threshold",
+      "changeTitle": "Change the high-stakes threshold",
+      "changeDescription": "Raising or lowering this changes what may be approved by one person firm-wide. Only the firm owner may confirm this — anyone else will see the DB's own refusal after Change.",
+      "currentValueLabel": "Current threshold",
+      "newValueLabel": "New threshold (RM)",
+      "amountPlaceholder": "e.g. 100000.00",
+      "capabilitiesHeading": "Signing capabilities",
+      "capabilitiesSubheading": "Per-member close-and-attest and reopen authority.",
+      "capabilitiesNotBuilt": "Granting or revoking a member's close-and-attest or reopen capability has no surface here yet — grant_firm_capability and revoke_firm_capability are live, firm-owner-only doors (migration 0056) with no UI."
     }
   },
   "ClientOnboarding": {

@@ -6,6 +6,12 @@ import {
   type ClaimConfirmationAttempt,
   type SettleConfirmationAttempt,
 } from "./confirmation-wall";
+import {
+  confirmFlashCookie,
+  confirmFlashMaxAgeSeconds,
+  type ConfirmFlashOutcome,
+  type ConfirmFlashPayload,
+} from "../confirm-flash";
 import { proveSameOrigin } from "@/lib/same-origin";
 import { createRouteClient } from "@/lib/supabase/server";
 
@@ -20,6 +26,14 @@ import { createRouteClient } from "@/lib/supabase/server";
  * THE ATTEMPT WALL IS A LANE-B SEAM (`./confirmation-wall.ts`). Its default
  * production behaviour is to REFUSE with `{kind:"unavailable"}` — never to
  * let a caller through unchecked. See that module's header for why.
+ *
+ * N1 + N3 CLOSED (裁-109, beta-gating, most conservative option — owner
+ * ruled after a plain-language briefing: 最保守，两个都修完再上线). Both were
+ * pre-existing, measured NOT worsened by #488, found by the law-28 Codex
+ * leg reviewing that PR, and recorded there as OPEN rather than fixed —
+ * this PR is that fix, from fresh `main`, with the full ladder (fs4-
+ * pr488-review design-conformance + one fresh-context opus review + the
+ * law-28 Codex leg, a native lane building an auth surface).
  */
 
 type VerifyOtpError = { message?: string; code?: string };
@@ -51,87 +65,63 @@ export interface EmailConfirmationRouteClient {
 export type CreateEmailConfirmationRouteClient = () => Promise<EmailConfirmationRouteClient>;
 
 /**
- * N3, fix round 2026-09-01 (PR #488 Codex adversarial leg) — `otp_expired`
- * (verified against the current `supabase/auth` source via context7:
- * `ErrorCodeOTPExpired = "otp_expired"`) is Supabase's STABLE error code for
- * this branch, but it is NOT proof the code's window actually passed:
- * upstream returns the identical `otp_expired` for a wrong code, a
- * genuinely expired code, AND an email with no pending signup at all — one
- * code, three real causes this response cannot tell apart (very plausibly
- * deliberate on Supabase's side: distinguishing "unknown address" from
- * "wrong/expired code" here would be an email-enumeration oracle). This
- * function still names the `status=expired` branch — internal naming is
- * unaffected — but the CARD IT RENDERS must not claim certainty it doesn't
- * have (`messages/en.json`'s `ConfirmEmail.expiredTitle/Description`: "that
- * code didn't work", never "your code expired"). The security-relevant
- * distinction — does this failure count as a strike — does not need this
- * disambiguation either: the C1/C2 wall claimed the attempt BEFORE
- * `verifyOtp` even ran and settles it `"rejected"` on every one of these
- * three causes uniformly (`settleAttempt` below), so the wall's own
- * counting is what actually discriminates a real lockout from a rendering
- * choice — the copy does not have to.
+ * N3 CLOSED — replaces the round-3/4/5 `isExpiredOtpError` classification
+ * this file used to carry. That function only ever recognised Supabase's
+ * literal `otp_expired` code, but upstream returns that SAME code for a
+ * wrong guess, a genuinely expired code, AND an email with no pending
+ * signup — and, separately, a banned account's own attempt surfaces its
+ * OWN distinct code (`user_banned`, confirmed in the live `supabase/auth`
+ * error registry, 2026-09-01), observably different from an unknown/normal
+ * account's. Round 5 recorded both as open findings rather than fixing
+ * them; 裁-109's ruling is to close them by FLATTENING rather than special-
+ * casing `user_banned` — a special case would itself become a new,
+ * narrower oracle, which is the whole reason nothing below ever reads
+ * `error.code` again. Every verification failure — wrong code, expired
+ * code, unknown email, banned account, anything else Supabase can return —
+ * now renders through the exact same `"wrong"` flash outcome.
  *
- * TWO GAPS THIS FUNCTION DOES NOT CLOSE, NAMED SO THEY ARE NOT MISTAKEN FOR
- * FIXED (round 5, fs4-pr488-review / pr488-codex-leg). Both are inherited
- * from Supabase's own `verify.go` and this line — `error?.code ===
- * "otp_expired"` — is byte-unchanged since it was first written; round 4's
- * `remaining` on the expired card reduced the practical harm of the first
- * one but closed neither:
- * (1) THE MISCLASSIFICATION ITSELF. An ordinary wrong guess that happens to
- *     come back as anything other than the literal string `"otp_expired"`
- *     renders as "wrong"; one that happens to trigger `otp_expired` renders
- *     as "expired" — the three-way conflation the paragraph above accepts
- *     for the COPY is still live in the underlying CLASSIFICATION, not only
- *     in what the person reads.
- * (2) A NARROW ACCOUNT-STATUS ORACLE. Supabase's real error-code registry
- *     also has `user_banned` (`ErrorCodeUserBanned`, verified via context7
- *     against the live `supabase/auth` source, 2026-09-01) — a distinct
- *     code a banned account's own verification attempt can surface,
- *     observably different from the code an unknown/normal account's wrong
- *     guess produces. That differential is not manufactured by this
- *     function, but it is not closed by it either.
- * NEITHER is fixed here: whether to special-case `user_banned`, and whether
- * the wrong/expired conflation needs closing at all, are open design
- * questions going to the owner (see the PR body's open-items section), not
- * something this fix round decides unilaterally. */
-function isExpiredOtpError(error: VerifyOtpError | null): boolean {
-  return error?.code === "otp_expired";
-}
+ * THE ACCEPTED COST (stated to and accepted by the owner, 裁-109): round
+ * 4's presentational split is gone — a person whose code had genuinely
+ * timed out no longer sees a distinct "expired" card, only "that code
+ * didn't work" with the same remaining-attempt count a wrong guess would
+ * show. The security-relevant counting is unaffected either way: the
+ * C1/C2 wall settles every one of these causes as `"rejected"` uniformly,
+ * unchanged by this file.
+ */
 
 /**
- * Both redirects are built from the WALL'S OWN PROVEN origin, never
- * `request.url`'s authority — independent review of #455, MEDIUM-2 (kept
- * verbatim from the link-flow handler this file replaces): behind a proxy
- * those two diverge, and `request.url` can read an internal, plain-HTTP hop.
- * One validated value, every consumer.
+ * Mints the redirect and its unforgeable flash cookie together — N1 CLOSED.
+ * See `../confirm-flash.ts`'s header for the full mechanism (the nonce
+ * binding, the cookie's attributes, and why a cookie was chosen over a
+ * signed query param). The URL carries ONLY the marker; every value the
+ * page actually renders — `remaining`, `waitSeconds`, which of the four
+ * outcomes this is — comes from the cookie, which nobody but this server
+ * could have set for this browser.
  *
- * The query values this redirect ever carries are RESULT METADATA, never the
- * address — `status`, and the two numeric slots `remaining`/`wait`. This is
- * the SAME idiom the prior handler used for `status=invalid`; it does not
- * reopen W-H, which walls the ADDRESS specifically (part 1 §3.3).
+ * Both redirects (this one and `fixedSignupRedirect` below) are built from
+ * the WALL'S OWN PROVEN origin, never `request.url`'s authority —
+ * independent review of #455, MEDIUM-2 (kept verbatim from the link-flow
+ * handler this file replaces): behind a proxy those two diverge, and
+ * `request.url` can read an internal, plain-HTTP hop. One validated value,
+ * every consumer.
  */
-function confirmRedirect(
-  origin: string,
-  outcome: { status: "wrong"; remaining: number } | { status: "expired"; remaining: number }
-    | { status: "locked"; wait: number } | { status: "unavailable" }
-    | { status: "invalid" },
-): NextResponse {
+function confirmRedirect(origin: string, outcome: ConfirmFlashOutcome): NextResponse {
+  const nonce = crypto.randomUUID();
   const target = new URL("/auth/confirm", origin);
   target.search = "";
   target.hash = "";
-  target.searchParams.set("status", outcome.status);
-  // NIT-2, fix round 2026-09-01 (fs4-pr488-review): `expired` now carries
-  // `remaining` too, same as `wrong` — the attempt is consumed either way
-  // (settleAttempt below runs before this branches on the error shape), and
-  // after N3's honest rewording "expired" is precisely the AMBIGUOUS bucket
-  // ("may be wrong, may have expired, or no pending signup") where a person
-  // most needs to see they're walking toward lockout, not the one card that
-  // gets to hide the count.
-  if (outcome.status === "wrong" || outcome.status === "expired") {
-    target.searchParams.set("remaining", String(outcome.remaining));
-  }
-  if (outcome.status === "locked") target.searchParams.set("wait", String(outcome.wait));
-  return NextResponse.redirect(target, { status: 303 });
+  target.searchParams.set("flash", nonce);
+  const response = NextResponse.redirect(target, { status: 303 });
+  const payload: ConfirmFlashPayload = { nonce, ...outcome };
+  const cookie = confirmFlashCookie();
+  response.cookies.set(cookie.name, JSON.stringify(payload), {
+    httpOnly: true,
+    secure: cookie.secure,
+    sameSite: "strict",
+    path: "/",
+    maxAge: confirmFlashMaxAgeSeconds(outcome),
+  });
+  return response;
 }
 
 function fixedSignupRedirect(origin: string): NextResponse {
@@ -196,7 +186,7 @@ export async function handleEmailConfirmationPost(
   const email = singleNonEmptyField(form, "email");
   const token = singleNonEmptyField(form, "token");
   if (email === null || token === null) {
-    return sealResponse(confirmRedirect(proof.origin, { status: "invalid" }));
+    return sealResponse(confirmRedirect(proof.origin, { kind: "invalid" }));
   }
 
   // THE C1/C2 WALL — before verifyOtp, always. §3.4: "the attempt is recorded
@@ -217,11 +207,11 @@ export async function handleEmailConfirmationPost(
   // for why this is the chosen shape over minting a second refusal reason).
   const attempt = await claimAttempt({ email, originDigest: undefined });
   if (attempt.kind === "unavailable") {
-    return sealResponse(confirmRedirect(proof.origin, { status: "unavailable" }));
+    return sealResponse(confirmRedirect(proof.origin, { kind: "unavailable" }));
   }
   if (attempt.kind === "rejected") {
     return sealResponse(
-      confirmRedirect(proof.origin, { status: "locked", wait: attempt.retryAfterSeconds }),
+      confirmRedirect(proof.origin, { kind: "locked", waitSeconds: attempt.retryAfterSeconds }),
     );
   }
 
@@ -237,12 +227,9 @@ export async function handleEmailConfirmationPost(
   }
 
   await settleAttempt(attempt.attemptId, "rejected");
-  if (isExpiredOtpError(response.error)) {
-    return sealResponse(
-      confirmRedirect(proof.origin, { status: "expired", remaining: attempt.remaining }),
-    );
-  }
+  // N3 CLOSED — every verification failure renders identically; see this
+  // file's header for why `response.error` is never inspected here.
   return sealResponse(
-    confirmRedirect(proof.origin, { status: "wrong", remaining: attempt.remaining }),
+    confirmRedirect(proof.origin, { kind: "wrong", remaining: attempt.remaining }),
   );
 }

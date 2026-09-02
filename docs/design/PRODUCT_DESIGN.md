@@ -79,9 +79,9 @@ Precedence on any collision remains **accounting-correctness > backend contracts
 
 - **Card-catalog parity test** — live-render and hydrate-render extractors must agree, or the build fails (kills the D-2/D-4 class).
 - **No dead vocabulary** — every registered card type must have exactly one authoritative emit path and a reachability test.
-- **Opaque-first grep gate** — the build fails on `backdrop-filter` in product CSS and stray agent-only tokens outside agent surfaces (J-22).
+- **Opaque-first grep gate** — the build fails on `backdrop-filter` in product CSS and stray agent-only tokens outside agent surfaces (J-22). **(DEMANDED–NOT-BUILT, trued 2026-09-02: no such gate exists in apps/web's lint chain — rides the P6 polish wave.)**
 - **A11y floor checks** — contrast (OKLCH tokens contrast-guaranteed by construction), keyboard operability, focus management; confidence always shape+label, never hue-only or a raw digit.
-- **Honest-state lints** — no success toast without a confirmed outcome; terminal cards render inert.
+- **Honest-state lints** — no success toast without a confirmed outcome; terminal cards render inert. **(DEMANDED–NOT-BUILT, trued 2026-09-02: not in the lint chain — rides the P6 polish wave. The other three gates on this list ARE live: catalog parity, reachability, the a11y floor.)**
 
 ## 4. What Phase 4 builds first (design-critical path)
 
@@ -91,5 +91,5 @@ Status marks read as of the F6–F9 close (2026-08-09): ✅ built · ◐ part-bu
 2. ✅ `je_review` + `clarify` + `doc_review` (side-by-side evidence with region overlays) — the daily loop.
 3. ✅ The review queue (List model: sections, fuzzy filter, trust-badge accessories, split-view).
 4. ◐ Plan-as-document for close/onboarding — the ONBOARDING half is built (`/clients/plan`); the CLOSE half rides Wave E.
-5. – ⌘K Ask/Do/Go + object ActionPanels; URL-as-truth wiring (URL-as-truth is wired page-by-page; the palette is not built).
+5. ◐ ⌘K Ask/Do/Go + object ActionPanels; URL-as-truth wiring *(trued 2026-09-02: the palette IS built in apps/web — Go navigates live, Ask hands off to the Clara rail, Do is a deliberate disabled placeholder; object ActionPanels remain unbuilt)*.
 6. – The verification lane + diffs (legs before/after; doc↔entry).

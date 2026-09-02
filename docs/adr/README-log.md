@@ -82,3 +82,31 @@ re-reading find?"
 > recuts it" — the `>= 0.95` conjunct stays as R1's harmless failsafe (judgement confidence
 > mints pinned 1.0) until its Backlogged follow-up migration. The 2026-08-23 minute above
 > quotes the pre-recut wording — correct on its date, superseded here rather than rewritten.
+
+## 2026-09-02 — the pre-pause truing sweep (ADR-0077's missed minute · 裁-111 folded)
+
+> Written at the owner-ordered quiet-window sweep (seven read-only drift-scan lanes over the
+> whole harness). Two digest changes minuted: **(1) the ADR-0077 fold finally gets its
+> minute** — 0077 (signed 2026-08-31 evening, 裁-93) folded laws 84-85 into §14 directly with
+> no dated minute at the time; this entry records that fold retroactively, honestly late.
+> **(2) Law 28's cross-family read-only leg is TIME-BOXED SUSPENDED until beta live**
+> (裁-111, owner, 2026-09-01, `docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md`) — the
+> digest's law-28 entry and §14's "Law 28 KEPT" clause both gain the suspension note; the
+> opus lane is the complete review gate for the sprint, Codex stays a BUILD lane. ADR-0077's
+> own title line and point 8 predate 裁-111 and now read stale on the review-leg clause —
+> correct on their date, superseded by the ledger rather than rewritten (this file's own
+> convention). The sweep found the digest otherwise current: the five newest ADR one-liners
+> (0073…0077) match their ADRs; ADR-061's uniform intensity (law 26) is untouched by 裁-111.
+
+## 2026-09-02 — the beta checkpoint sitting minted NO digest law (裁-115 … 裁-128)
+
+> Written at the checkpoint truing so a later reader does not hunt: the fourteen rulings of
+> the 2026-09-02 morning sitting (`docs/plan/active/mohe-grill-rulings-2026-09-02.md`, §"The
+> 2026-09-02 checkpoint sitting") are SPRINT rulings — scope, sequencing, the Stripe sandbox,
+> the legal-template posture, the archive of the parked backend queue — and none of them
+> amends a digest law or an ADR. Two touch standing text elsewhere and are recorded there:
+> 裁-125 (agent-authored legal templates for beta, lawyer-refined at official launch — a
+> posture under ADR-0077's "TEST-mode beta, KYB at launch", not a new law) lives in the
+> ledger + `PROGRESS.md`'s posture; 裁-123's cleanup incident corrected a Known-issues LAW
+> line in `PROGRESS.md` (`git worktree remove --force` follows junctions on this host). The
+> digest's law-28 suspension note (裁-111) is unchanged and still time-boxed to beta live.

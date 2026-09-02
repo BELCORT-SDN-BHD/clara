@@ -105,6 +105,51 @@ export function referrerPolicyForPath(
   return null;
 }
 
+export type ConfirmCacheHeaders = { readonly cacheControl: string; readonly vary: string };
+
+/**
+ * FOLD 2 (N1 design review, 裁-109's fix) — pinning what used to be
+ * structural for free. Before the flash-cookie fix, `/auth/confirm`
+ * rendered a DIFFERENT URL per outcome (`?status=locked&wait=900` vs
+ * `?status=wrong&remaining=3`, …), so one person's card being cache-served
+ * to another was structurally impossible — there was nothing to key a cache
+ * on besides the URL, and every outcome had its own. After the fix, every
+ * outcome is the SAME URL (`/auth/confirm?flash=<nonce>`) differing only by
+ * the REQUEST COOKIE.
+ *
+ * F2 CORRECTION (fresh opus review, 2026-09-01) — the original version of
+ * this comment claimed "this repo sets no Cache-Control … on this route
+ * today." FALSE: `applyAuthState` (`response-state.ts`) already sets
+ * `Cache-Control: private, no-store` UNCONDITIONALLY on every proxied
+ * response, confirm included — this function's `cacheControl` value is the
+ * IDENTICAL string, so on the Cache-Control half it is a pinned, EXPLICIT
+ * route-level floor layered on top of an already-real global one, not a
+ * fresh assertion filling an actual gap. What was genuinely missing —
+ * `Vary: Cookie` — is the half that matters: `applyAuthState` never touches
+ * `Vary`, so before this fix there really was nothing preventing one
+ * person's rendered card from being cache-served to the next visitor
+ * (review law 2: absence of a cache header is not evidence there is no
+ * caching). See `updateSession` below for WHERE this now applies — hoisted
+ * ABOVE `applyAuthState`'s call so a `@supabase/ssr`-queued, STRICTER
+ * `Cache-Control` (a cookie refresh's own `no-cache, must-revalidate,
+ * max-age=0`) still wins over this route's floor, per `response-state.ts`'s
+ * own documented ordering invariant — this block must never run after it.
+ * `tests/proxy-matcher.test.ts` pins the returned values (the
+ * `referrerPolicyForPath` idiom immediately above, applied to a second
+ * header pair); the DELIVERY (that this function's output is actually
+ * wired into a response) is pinned in the e2e instead
+ * (`e2e/signup-confirm-pending.spec.ts`), the same instrument that already
+ * asserts `referrer-policy` off a REAL `/auth/confirm` response.
+ *
+ * Segment boundaries match `isPublicPath`/`referrerPolicyForPath` above.
+ */
+export function confirmCacheHeadersForPath(pathname: string): ConfirmCacheHeaders | null {
+  if (pathname === "/auth/confirm" || pathname.startsWith("/auth/confirm/")) {
+    return { cacheControl: "private, no-store", vary: "Cookie" };
+  }
+  return null;
+}
+
 export async function updateSession(request: NextRequest) {
   // Queued, never applied to a response inside the callback: the response
   // this function returns is not chosen until the gate decision below.
@@ -172,6 +217,61 @@ export async function updateSession(request: NextRequest) {
     // cookies forward desyncs the browser and server session state and can
     // terminate the user's session prematurely.
     response = NextResponse.next({ request });
+  }
+
+  // F2 CORRECTION (fresh opus review, 2026-09-01): this block MUST run
+  // BEFORE `applyAuthState` below, not after. `applyAuthState` sets its own
+  // `Cache-Control` floor and then, if `@supabase/ssr` queued a STRICTER
+  // one during a cookie refresh, overwrites the floor with it (`response-
+  // state.ts`'s own documented ordering invariant). Running this block
+  // AFTER `applyAuthState` would let this route's `Cache-Control` write
+  // clobber that stricter, later value right back down — inverting the
+  // invariant for confirm specifically. Hoisted here, the ordering holds:
+  // this sets an explicit route floor, and whatever `applyAuthState` does
+  // next (repeat the floor, or override with something stricter) still
+  // wins. `Vary` uses `append`, not `set` — this is the only writer of it
+  // today, but `append` is the safe idiom if Next ever adds its own RSC
+  // `Vary` value after the proxy runs.
+  //
+  // 裁-109 round (2026-09-01) — the `Cache-Control` write below is
+  // DOCUMENTARY, not protective. `applyAuthState` runs unconditionally for
+  // BOTH branches a few lines down, and its very first statement is
+  // `response.headers.set("Cache-Control", AUTH_RESPONSE_CACHE_CONTROL)` —
+  // the identical "private, no-store" literal `confirmCacheHeadersForPath`
+  // returns for this path. So the `.set()` two lines below is superseded
+  // by `applyAuthState`'s `.set()` one line later NO MATTER WHAT IT WRITES.
+  // The effective header on the wire is correct and the e2e's
+  // `cache-control` pin (`signup-confirm-pending.spec.ts`) is a real
+  // assertion against a real response — but it passes because of the
+  // GLOBAL auth floor in `response-state.ts`, not because of this
+  // route-specific line. Keep the line — it is a useful breadcrumb of
+  // intent — but do not read it as enforcement: it does NOT protect this
+  // route if the global floor is ever weakened, and the e2e pin cannot see
+  // that gap either, since it only observes the response the two writers
+  // jointly produce.
+  //
+  // `Vary`'s `append` (not `set`) is still the right idiom here, but round
+  // 2 (2026-09-02) CONFIRMED the risk this comment used to only warn
+  // about: Next 16.3.3's own App Router OVERWRITES `Vary` for this
+  // dynamic route with its own RSC negotiation tokens regardless of what
+  // this `append` call, or `applyAuthState`, put there — proven by the
+  // e2e AND a bare `curl` against the built app (see
+  // `signup-confirm-pending.spec.ts`'s own comment at its `vary`
+  // assertion for the full evidence and the two follow-up fixes that
+  // ALSO lost to this: `next.config.ts`'s `headers()`, and there being no
+  // route-segment header hook for a plain page). `Vary: Cookie` therefore
+  // does not reach a real client today — `append` is kept anyway because
+  // it costs nothing and becomes correct the moment a future Next
+  // version stops clobbering it; the e2e's assertion is written to go
+  // red exactly when that day comes, so this is not a "fix it later and
+  // forget" situation. The primary control against cross-user response
+  // caching is `Cache-Control: private, no-store` above, which Next does
+  // NOT touch and which alone forbids a shared cache from storing this
+  // response.
+  const cacheHeaders = confirmCacheHeadersForPath(request.nextUrl.pathname);
+  if (cacheHeaders !== null) {
+    response.headers.set("Cache-Control", cacheHeaders.cacheControl);
+    response.headers.append("Vary", cacheHeaders.vary);
   }
 
   // ONE application point, for BOTH branches — the pass-through and the

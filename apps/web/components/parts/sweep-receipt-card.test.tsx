@@ -96,6 +96,30 @@ function App(part: ClaraPart): ReactElement {
   });
 }
 
+/** Poll `h.settle()` (one real macrotask hop) until `condition()` is true,
+ *  instead of a FIXED hop count — a guess that only held under whatever load
+ *  existed when it was picked. CI's db-estate leg reds this file's own
+ *  "surfaces the door's CLR refusal" cell under the estate suite's shared
+ *  load (main runs green; a heavier-load run tips a fixed 6-hop wait past
+ *  its margin) — the exact class #491/v16-act-cards.test.tsx already
+ *  diagnosed and fixed there. Bounded by a real wall-clock timeout so a
+ *  genuine regression still reds, named rather than hung. Assertions stay
+ *  byte-identical; only the WAITING strategy changes. */
+async function settleUntil(
+  h: { settle: () => Promise<void> },
+  condition: () => boolean,
+  description: string,
+  timeoutMs = 5000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`settleUntil: timed out after ${timeoutMs}ms waiting for: ${description}`);
+    }
+    await h.settle();
+  }
+}
+
 const ackButton = (n: Stub) => n.tagName === "BUTTON" && textOf(n).trim() === "Acknowledge this run";
 
 function textWithElementBoundaries(node: Stub): string {
@@ -299,9 +323,9 @@ test("sweep_receipt surfaces the door's CLR refusal verbatim and keeps the run o
     async () => {
       const h = await renderComponent(App(SWEEP));
       try {
-        for (let i = 0; i < 5; i++) await h.settle();
+        await settleUntil(h, () => h.find(ackButton) != null, "the finalized run to hydrate and reveal its Acknowledge control");
         await clickButton(h.find(ackButton)!);
-        for (let i = 0; i < 6; i++) await h.settle();
+        await settleUntil(h, () => /CLR03/.test(h.text()), "the CLR03 refusal to render after the acknowledge attempt");
         const after = h.text();
         assert.match(after, /CLR03/, "the CLR code renders");
         assert.match(after, /agent identity cannot acknowledge a sweep/, "the door's own message renders verbatim, never re-worded");
