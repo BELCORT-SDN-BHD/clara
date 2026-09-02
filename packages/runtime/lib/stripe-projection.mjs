@@ -1,0 +1,223 @@
+// FS-4 C-5 — THE REDACTED STRIPE PROJECTION (裁-91, checkout-gate design part 2 §1.2).
+//
+// The raw event is verified, projected and DISCARDED. This module is the projector, and it is a
+// PURE FUNCTION of the parsed event: no I/O, no clock, no environment. Everything that decides
+// what reaches the database is visible in one file, and a cell can drive it without a rig.
+//
+// AN ALLOW-LIST, NOT A DENY-LIST, AND THAT DISTINCTION IS THE WALL. Design part 2 §1.2 states
+// it plainly: "the containment is that the projector COPIES NAMED FIELDS rather than deleting
+// unwanted ones — the difference between an allow-list and a deny-list, and why a new Stripe
+// field cannot arrive here by default." `ck_stripe_events_no_pii` (0160:181) refuses five named
+// keys at the projection's TOP LEVEL; it is the mistake-net that catches this file being edited
+// wrongly later, not the containment. A deny-list would let the next Stripe API version ship a
+// `customer_tax_ids` — or a `customer_details` nested one level down, where the CHECK cannot
+// cheaply look — straight into an append-only table with no erasure door.
+//
+// THE NESTED-PII STRIP WALL (裁-91's containment half, named in the 09-01-pm ledger as C-5's
+// obligation). An allow-list of KEYS is not sufficient on its own, because a Stripe field that
+// is a scalar today can become an object tomorrow: `session.customer` is a string id normally
+// and an EXPANDED Customer OBJECT — name, email, address, phone — the moment anyone adds
+// `expand: ['customer']` to the Session create call, or Stripe changes a default. So every
+// copied value additionally passes `scalarOrNull`: a string, a finite number, a boolean or
+// null survives; an object or an array is DROPPED to null and named in the `dropped` list the
+// route logs. The wall is structural — an object cannot reach `projection` through this
+// function whatever the key is called — rather than a list of nested keys somebody has to keep
+// current.
+//
+// AN UNRECOGNISED EVENT TYPE IS RECORDED, NOT DROPPED, AND NOT REJECTED. Design part 3 §1:
+// "Every other type is still RECORDED — the store is the record — and applied by nothing."
+// The work order's "an unrecognised event is answered with a non-2xx" is reconciled the only
+// way both sentences can both be true: an event whose TYPE has no cell here is projected to its
+// ENVELOPE ONLY (`created`, `api_version`, `livemode` — nothing at all from `data.object`, and
+// no `type`, which is its own NOT NULL column rather than a jsonb duplicate) and recorded, and
+// the route logs it loudly by id and type so it is visible.
+// "Rejected" is reserved for an event that is NOT recorded — a bad signature, a livemode
+// disagreement, a malformed envelope, a door failure — and every one of those answers non-2xx
+// so Stripe retries. Nothing is ever 200-and-dropped. The PR body states this reconciliation.
+//
+// THE APPLIER READS COLUMNS, SO THE PROJECTION MUST CARRY THEIR SOURCE KEYS. `record_stripe_event`
+// (0160:276) writes `clara.stripe_events` by reading `p_projection->>'livemode'`,
+// `->>'session_id'`, `->>'intent_id'`, `->>'registration_id'`, `->>'applicant'`,
+// `->>'amount_total'`, `->>'currency'`, `->>'payment_status'`, `->>'mode'`,
+// `->>'session_status'`, `->>'customer_id'` and `->>'subscription_id'`. Those twelve names are
+// this module's output contract, not a convenience — `PROJECTION_COLUMN_KEYS` below is the
+// single list, and the db battery asserts it against the live table's own column set so a
+// future column rename cannot silently leave a reconciliation key NULL.
+
+/** The metadata keys the checkout route writes onto the Session (design part 3 §2). */
+export const METADATA_KEYS = Object.freeze({
+  registration: "clara_registration_id",
+  applicant: "clara_applicant",
+  intent: "clara_intent_id",
+});
+
+/** The one event type the applier acts on at beta (design part 3 §1). */
+export const APPLIED_EVENT_TYPE = "checkout.session.completed";
+
+/** The projection keys `record_stripe_event` reads into typed columns. Named here so the db
+ *  battery can compare them with the live `clara.stripe_events` column set rather than trust
+ *  this comment. */
+export const PROJECTION_COLUMN_KEYS = Object.freeze([
+  "livemode",
+  "session_id",
+  "intent_id",
+  "registration_id",
+  "applicant",
+  "amount_total",
+  "currency",
+  "payment_status",
+  "mode",
+  "session_status",
+  "customer_id",
+  "subscription_id",
+]);
+
+/** The five keys `ck_stripe_events_no_pii` refuses. Kept here so a cell can prove the projector
+ *  never emits one WITHOUT relying on the CHECK to catch it — the mistake-net is not the wall. */
+export const DENIED_PROJECTION_KEYS = Object.freeze([
+  "customer_details",
+  "customer_email",
+  "billing_details",
+  "shipping_details",
+  "payment_method_details",
+]);
+
+/** A typed refusal for an envelope this projector will not accept. The route answers non-2xx. */
+export class StripeProjectionError extends Error {
+  constructor(code, message) {
+    super(message || code);
+    this.name = "StripeProjectionError";
+    this.code = code;
+  }
+}
+
+/**
+ * THE NESTED-PII STRIP WALL. Returns the value when it is a scalar Stripe could legitimately
+ * put in a typed column, and `null` otherwise — an object, an array, a function, a symbol, a
+ * NaN or an Infinity all become null and are reported to the caller as dropped.
+ *
+ * `undefined` is not "dropped" in the interesting sense (the field was simply absent), so it
+ * returns null WITHOUT being named — otherwise every optional field on every event would be
+ * logged as a strip, and a log line that fires on every request tells a reader nothing.
+ */
+function scalarOrNull(value, key, dropped) {
+  if (value === undefined || value === null) return null;
+  const t = typeof value;
+  if (t === "string" || t === "boolean") return value;
+  if (t === "number") return Number.isFinite(value) ? value : (dropped.push(key), null);
+  dropped.push(key);
+  return null;
+}
+
+/** Read `object.metadata[key]` as a scalar. Metadata values are always strings in Stripe; a
+ *  non-string is dropped by the same wall rather than coerced. */
+function metadataValue(object, key, dropped) {
+  const md = object?.metadata;
+  if (md === null || md === undefined) return null;
+  if (typeof md !== "object" || Array.isArray(md)) {
+    dropped.push("metadata");
+    return null;
+  }
+  const v = scalarOrNull(md[key], `metadata.${key}`, dropped);
+  return typeof v === "string" ? v : v === null ? null : String(v);
+}
+
+/**
+ * The envelope every projection carries, whatever the type. Nothing here comes from
+ * `data.object`.
+ *
+ * `livemode` is REQUIRED and typed: `clara.stripe_events.livemode` is `boolean not null`, so a
+ * projection without it makes `record_stripe_event`'s insert fail with a bare NOT NULL
+ * violation rather than a named refusal. Fail here, named, before the door.
+ */
+function envelope(event, dropped) {
+  if (typeof event?.livemode !== "boolean") {
+    throw new StripeProjectionError("livemode_absent", "the event carries no boolean livemode");
+  }
+  // NO `type` KEY, FOR TWO REASONS THAT AGREE. (1) It would be a DUPLICATE: the event type is
+  // its own `not null` column, written from `record_stripe_event`'s `p_type` argument, and the
+  // door never reads `projection->>'type'`. A second copy inside the jsonb is a value that can
+  // disagree with the column. (2) `scripts/check-parts-parity.mjs` refuses an object literal
+  // carrying a `type:` whose initializer is not a string literal, because that is the shape of a
+  // typed `parts[]` member and its census cannot tell one from a Stripe envelope. The gate is
+  // fail-closed and it is right to be; the duplicate had to go anyway.
+  return {
+    created: scalarOrNull(event.created, "created", dropped),
+    api_version: scalarOrNull(event.api_version, "api_version", dropped),
+    livemode: event.livemode,
+  };
+}
+
+/** The `checkout.session.completed` cell — the ONLY type whose `data.object` is read. */
+function projectCheckoutSession(event, dropped) {
+  const object = event?.data?.object;
+  if (object === null || typeof object !== "object" || Array.isArray(object)) {
+    throw new StripeProjectionError("object_absent", `${APPLIED_EVENT_TYPE} carries no data.object`);
+  }
+  // BUILT BY ASSIGNMENT, NOT BY SPREAD, AND THAT IS A GATE OBLIGATION RATHER THAN A STYLE
+  // CHOICE. `packages/runtime/scripts/check-parts-parity.mjs:302` refuses ANY object spread
+  // anywhere under `packages/runtime` outside `tests/` — the census cannot tell whether
+  // `{ ...x, type: "…" }` constructs a typed `parts[]` member, so it fails closed. Writing the
+  // fields out one per line is also the honest shape for an ALLOW-LIST: every key that reaches
+  // the database is on its own line in this function, and nothing arrives by inheritance.
+  const projection = envelope(event, dropped);
+  projection.session_id = scalarOrNull(object.id, "id", dropped);
+  projection.mode = scalarOrNull(object.mode, "mode", dropped);
+  projection.session_status = scalarOrNull(object.status, "status", dropped);
+  projection.payment_status = scalarOrNull(object.payment_status, "payment_status", dropped);
+  projection.amount_total = scalarOrNull(object.amount_total, "amount_total", dropped);
+  projection.currency = scalarOrNull(object.currency, "currency", dropped);
+  // `customer` and `subscription` are id STRINGS on an unexpanded Session and full OBJECTS on
+  // an expanded one. The strip wall turns an expansion into a null + a named drop rather than
+  // letting a Customer's name, email, address and phone ride into an append-only table.
+  projection.customer_id = scalarOrNull(object.customer, "customer", dropped);
+  projection.subscription_id = scalarOrNull(object.subscription, "subscription", dropped);
+  projection.registration_id = metadataValue(object, METADATA_KEYS.registration, dropped);
+  projection.applicant = metadataValue(object, METADATA_KEYS.applicant, dropped);
+  projection.intent_id = metadataValue(object, METADATA_KEYS.intent, dropped);
+  return projection;
+}
+
+/**
+ * Project a verified Stripe event into the redacted shape `record_stripe_event` accepts.
+ *
+ * @param {Record<string, unknown>} event the parsed event — already signature-verified
+ * @returns {{eventId: string, eventType: string, projection: Record<string, unknown>,
+ *            recognised: boolean, dropped: string[]}}
+ */
+export function projectStripeEvent(event) {
+  if (event === null || typeof event !== "object" || Array.isArray(event)) {
+    throw new StripeProjectionError("event_not_object", "the payload is not a JSON object");
+  }
+  const eventId = typeof event.id === "string" ? event.id.trim() : "";
+  const eventType = typeof event.type === "string" ? event.type.trim() : "";
+  // `ck_stripe_events_event_id_shape` (0160:176) pins `^evt_[A-Za-z0-9_]+$`, ≤255. Refusing here
+  // turns a malformed id into a named 400 instead of a CHECK violation surfacing as a 500.
+  if (!/^evt_[A-Za-z0-9_]+$/.test(eventId) || eventId.length > 255) {
+    throw new StripeProjectionError("event_id_shape", "the event id is not a well-formed evt_ id");
+  }
+  if (eventType === "" || eventType.length > 255) {
+    throw new StripeProjectionError("event_type_absent", "the event carries no usable type");
+  }
+
+  const dropped = [];
+  const recognised = eventType === APPLIED_EVENT_TYPE;
+  const projection = recognised ? projectCheckoutSession(event, dropped) : envelope(event, dropped);
+
+  // THE MISTAKE-NET, RUN HERE TOO, AND ON PURPOSE. The allow-list above already makes a denied
+  // key unreachable — there is no code path that writes one. This re-reads the produced object
+  // anyway, because an allow-list is only a wall while every cell in it stays an allow-list, and
+  // the cheapest moment to catch an edit that reached for `...object` is before the row exists.
+  // It is belt to the CHECK's braces, not a substitute for either.
+  for (const denied of DENIED_PROJECTION_KEYS) {
+    if (Object.hasOwn(projection, denied)) {
+      throw new StripeProjectionError("projection_carries_denied_key", `the projection carries ${denied}`);
+    }
+  }
+  // `eventType`, not `type`. The parts-parity census refuses any object literal carrying a
+  // `type` key it cannot resolve to a string literal — including a SHORTHAND one, which is what
+  // this used to be — because `{ type: "<kind>", … }` is the shape of a typed `parts[]` member.
+  // Renaming the field costs one word and keeps a fail-closed gate meaningful instead of
+  // teaching it an exemption for a value that is not a part kind at all.
+  return { eventId, eventType, projection, recognised, dropped };
+}
