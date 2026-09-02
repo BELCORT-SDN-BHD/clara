@@ -87,8 +87,31 @@ concurrency:
   #
   # cancel-in-progress is ALSO gated on the event: it is read from the newly-queued run,
   # so belt (the expression) and braces (the unique group) both point the same way.
+  #
+  # THE COST OF "MAIN IS NEVER CANCELLED", PRICED RATHER THAN DISCOVERED (#513 review, F3).
+  # Removing main from the cancelling group removes the only bound there was on concurrent
+  # main pipelines: N merges landing inside one CI duration now produce N complete,
+  # uncancelled, concurrently-running pipelines. That is INTENDED. Hosted runners have no
+  # fleet to contend for, so those N runs are genuinely parallel rather than queued; on a
+  # public repository they are also free of charge. The reason to keep them is not the
+  # price, though — it is that each merge's run verifies a DIFFERENT tree, and per-commit
+  # granularity is exactly what lets a bisect say WHICH merge broke main. Cancelling the
+  # older run buys a few minutes and throws that away. 裁-134's "pushes to main are never
+  # cancelled" clause was ruled against a zero-spend fleet; it is RE-RULED here on a metered
+  # one, on the bisect argument.
+  #
+  # `queue` (GitHub's documented concurrency option: `single` — the default — cancels and
+  # REPLACES an older pending run when a newer one arrives; `max` lets up to 100 pend). The
+  # displacement it guards against CANNOT happen in the shape above, because every non-PR
+  # group is keyed on github.run_id and is therefore a group of ONE; it is carried anyway as
+  # defence-in-depth. TRIPWIRE FOR WHOEVER EDITS THIS NEXT: if you ever give a non-PR event a
+  # SHARED group key, `queue: max` stops being decorative and becomes the only thing standing
+  # between a pending run and silent replacement. `queue: max` with `cancel-in-progress: true`
+  # is a documented workflow VALIDATION ERROR, which is why this is an expression and not a
+  # constant — the PR arm must stay `single`.
   group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.ref) || format('ci-{0}-{1}', github.event_name, github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  queue: ${{ github.event_name == 'pull_request' && 'single' || 'max' }}
 
 jobs:
   # =========================================================================

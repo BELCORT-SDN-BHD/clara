@@ -81,9 +81,33 @@ rather than a line in a document.
 
 This also fixes two latent shapes the old single group had: the weekly sweep's literal
 `weekly-sweep` group meant a second sweep cancelled the first, and every push to main
-shared one group, so a merge landing mid-CI cancelled the earlier merge's run. **The
-裁-134 per-slot cap (PR #513) is superseded and moot** — a per-slot cap rations a fixed
-fleet, and there is no fleet.
+shared one group, so a merge landing mid-CI cancelled the earlier merge's run. That second
+one was **measured, not theorised** (#513's review): main carried merge pairs five and ten
+minutes apart — `d8a1a7fc` 06:53:33Z → `815c97a4` 06:58:52Z, and `07791500` 11:23:12Z →
+`664b4572` 11:33:45Z — both well inside one pipeline's duration. **The 裁-134 per-slot cap
+(PR #513) is superseded and moot** — a per-slot cap rations a fixed fleet, and there is no
+fleet.
+
+**The cost of "main is never cancelled", priced rather than discovered.** Taking main out of
+the cancelling group removes the only bound there was on concurrent main pipelines: N merges
+landing inside one CI duration now produce N complete, uncancelled, concurrently-running
+pipelines. **That is the intended behaviour here.** Hosted runners have no fleet to contend
+for, so those runs are genuinely parallel rather than queued, and on a public repository they
+are free. The reason to keep them is not the price, though: each merge's run verifies a
+**different tree**, and per-commit granularity is exactly what lets a bisect say *which* merge
+broke main. Cancelling the older run buys a few minutes and throws that away. 裁-134's
+"pushes to main are never cancelled or capped" clause was ruled against a zero-spend fleet; it
+is **re-ruled here on a metered one, on the bisect argument** rather than inherited silently.
+
+**`queue`, and the tripwire that comes with it.** GitHub's `concurrency.queue` option takes
+`single` (the default: a newer arrival **cancels and replaces** an older *pending* run in the
+same group) or `max` (up to 100 may pend). The displacement it guards against cannot occur in
+the shape above, because every non-PR group is keyed on `github.run_id` and is therefore a
+group of one. It is carried anyway as defence-in-depth, and as a marker for the next editor:
+**if a non-PR event is ever given a shared group key, `queue: max` stops being decorative and
+becomes the only thing standing between a pending run and silent replacement.** `queue: max`
+together with `cancel-in-progress: true` is a documented workflow **validation error**, which
+is why the workflow sets it by expression — the `pull_request` arm must stay `single`.
 
 **Two measured losses, named rather than discovered later.** The shared Docker daemon's
 BuildKit cache does not survive between runs, so the render drill rebuilds its image cold
