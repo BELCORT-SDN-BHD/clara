@@ -137,10 +137,29 @@ function runBattery() {
     ["--test", "--test-concurrency=1", "tests/fs7-e2-artifact-download.test.mjs"],
     { cwd: join(HERE, ".."), encoding: "utf8", env: process.env, maxBuffer: 64 * 1024 * 1024 });
   const out = `${r.stdout}\n${r.stderr}`;
-  return {
-    red: [...out.matchAll(/^not ok \d+ - (D[0-9.]+)/gm)].map((m) => m[1]),
-    total: (out.match(/^# tests (\d+)/m) ?? [])[1],
-  };
+  const red = [...out.matchAll(/^not ok \d+ - (D[0-9.]+)/gm)].map((m) => m[1]);
+  // THE REASON, NOT THE COLOUR. A mutant that reds because the body no longer compiles, or because
+  // an unrelated assertion moved, is a NON-discriminating mutant wearing a discriminating result —
+  // the expensive direction. Every red cell's own message is lifted from the TAP block so a reader
+  // judges WHY it failed rather than that it failed.
+  const why = {};
+  const lines = out.split(/\r?\n/);
+  for (const cell of red) {
+    // Locate THIS cell's own TAP line by scanning lines, not by substring arithmetic: the cell id
+    // is followed by the test's description, so a `- <cell>\n` search matches nothing and silently
+    // falls back to the FIRST failure in the file — every mutant would then be reported with the
+    // same reason.
+    const at = lines.findIndex((l) => new RegExp(`^not ok \\d+ - ${cell.replace(/\./g, "\\.")}(\\s|$)`).test(l));
+    const block = at === -1 ? [] : lines.slice(at, at + 40);
+    const errAt = block.findIndex((l) => /^\s*error:/.test(l));
+    let msg = "(no error line)";
+    if (errAt !== -1) {
+      const first = block[errAt].replace(/^\s*error:\s*\|?-?\s*/, "").trim();
+      msg = first.length > 0 ? first : (block[errAt + 1] ?? "").trim();
+    }
+    why[cell] = msg.slice(0, 120);
+  }
+  return { red, why, total: (out.match(/^# tests (\d+)/m) ?? [])[1] };
 }
 
 const results = [];
@@ -148,13 +167,14 @@ for (const m of MUTANTS) {
   const mutated = m.apply(SHIPPED[m.target]);
   if (mutated === SHIPPED[m.target]) throw new Error(`${m.id}: the mutation matched nothing`);
   await applyBody(mutated);
-  const { red, total } = runBattery();
-  results.push({ ...m, red, total });
-  console.log(`${m.id.padEnd(32)} tests=${total} red=[${red.join(" ")}]`);
+  const { red, why, total } = runBattery();
+  results.push({ ...m, red, why, total });
+  console.log(`${m.id.padEnd(34)} tests=${total} red=[${red.join(" ")}]`);
+  for (const cell of red) console.log(`      ${cell}: ${why[cell]}`);
   await applyBody(SHIPPED[m.target]); // restore before the next mutant
 }
 const restored = runBattery();
-console.log(`${"RESTORED shipped bodies".padEnd(32)} tests=${restored.total} red=[${restored.red.join(" ")}]`);
+console.log(`${"RESTORED shipped bodies".padEnd(34)} tests=${restored.total} red=[${restored.red.join(" ")}]`);
 
 let bad = 0;
 for (const r of results) {
