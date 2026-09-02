@@ -191,6 +191,17 @@ pnpm --filter @clara/runtime build       # nitro build (compiles the WDK directi
 pnpm --filter @clara/runtime start       # boot the built server (reads .env if present)
 ```
 
+### The test suite needs a version-matched `pg_dump`/`psql` on PATH
+
+Two files (`tests/relay-taxonomy.test.mjs`, `tests/fs7-v17-chatturn-db.test.mjs`) give
+themselves a private database by cloning the ambient one (`pg_dump | psql`, via
+`packages/db/tests/migrate-harness.mjs`'s `cloneAmbientDatabase()`) instead of replaying
+migrations — see that helper's own header for why. The `pg_dump` binary MUST match the
+server's major version (Postgres 17), the same convention `packages/db/scripts/backup.mjs`
+documents: on a machine whose PATH `pg_dump`/`psql` are older, point `PG_DUMP`/`PSQL` at a
+matching binary (e.g. `PG_DUMP=/path/to/pg17/bin/pg_dump`). CI's `db-estate` job installs
+one via `./.github/actions/pg17-client`; without a match, both files fail to LOAD.
+
 For a health/ready check, boot with DB env set and `CLARA_START_WORLD` unset:
 
 ```sh

@@ -13,6 +13,8 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import pg from "pg";
+import { assertDestructiveAllowed } from "../lib/guard.mjs";
 
 const ENV_KEYS = ["DATABASE_URL", "WORKFLOW_POSTGRES_URL", "PGDATABASE", "PGUSER"];
 
@@ -110,12 +112,32 @@ export async function withDatabaseEnv(dbname, fn) {
  * before calling this. Credentials travel only via env, never argv, matching
  * `lib/pg.mjs`'s own convention (constraint 4). `pg_dump` does not capture roles
  * (already correct — they are cluster-wide); it carries over schema, data,
- * OWNERS and PRIVILEGES faithfully, which is the security envelope (SECURITY
- * DEFINER ownership, GRANT/REVOKE, RLS) a private-database test fixture needs to
- * preserve. `pg_dump`'s own MVCC snapshot makes this read-only-safe against any
- * concurrently-writing sibling suite on the same shared ambient database.
+ * OWNERS and PRIVILEGES (SECURITY DEFINER ownership, GRANT/REVOKE, RLS) — but
+ * NOT `COMMENT ON` bodies (`--no-comments`, rev-498 MINOR-2: 45 dropped on one
+ * measured estate; nothing reads one today). `pg_dump`'s own MVCC snapshot makes
+ * this read-only-safe against any concurrently-writing sibling suite, but the
+ * clone therefore carries THAT suite's committed state too, whatever it is at
+ * the snapshot instant — not a deterministic function of "the migrated estate"
+ * alone (rev-498 MINOR-3).
+ *
+ * **Guarded, over `sourceEnv` — not ambient `process.env`.** The very first
+ * statement is `assertDestructiveAllowed({ env: sourceEnv })`
+ * (`packages/db/lib/guard.mjs:52`) — the SAME gate `reset.mjs`/`seed.mjs`/
+ * `restore.mjs`/`restore-full.mjs`/`dr-selftest.mjs` already enforce for every
+ * other destructive data-plane operation, evaluated over the exact env this
+ * call is about to read FROM (rev-498 M2: `sourceEnv` and `process.env` agree
+ * for every caller today, but a future caller passing a `sourceEnv` derived
+ * from something else must not silently gate the wrong target). Refuses unless
+ * `CLARA_ALLOW_DESTRUCTIVE=1` is set AND the resolved source is disposable
+ * (`localhost`/`127.0.0.1`/a `*_ci`/`*_test`/`*_tmp` database) or the operator
+ * names it exactly via `CLARA_DESTRUCTIVE_TARGET`. **Necessary, not sufficient**
+ * (rev-498, #518 D3): `targetIsEphemeral` authorises ANY loopback host
+ * regardless of database name — `127.0.0.1/clara_production_copy` passes. It
+ * closes the remote-live-cluster footgun (an arbitrary ambient DSN pointing at
+ * a real project); it does not prove a LOCAL Postgres holds only disposable data.
  */
 export function cloneAmbientDatabase(sourceEnv, targetDb) {
+  assertDestructiveAllowed({ action: `cloneAmbientDatabase (pg_dump | psql clone of the ambient database into "${targetDb}")`, env: sourceEnv });
   const dumpDir = mkdtempSync(join(tmpdir(), "clara-clone-"));
   const dumpFile = join(dumpDir, "estate.sql");
   try {
@@ -131,7 +153,10 @@ export function cloneAmbientDatabase(sourceEnv, targetDb) {
     const targetEnv = { ...sourceEnv, PGDATABASE: targetDb };
     const restore = spawnSync(
       psqlBin,
-      ["-X", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", dumpFile, "--dbname", targetDb],
+      // -q (rev-498 INFO-1): unquiet, every SET/CREATE/ALTER/COPY status tag from restoring
+      // the whole estate lands as a `#` line in the TAP stream -- ~16k lines per clone,
+      // burying real output in the one job whose log people read when the estate reds.
+      ["-X", "-q", "-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", dumpFile, "--dbname", targetDb],
       { env: targetEnv, stdio: ["ignore", "inherit", "inherit"] },
     );
     if (restore.error) throw new Error(`psql failed to start (${restore.error.message})`);
@@ -139,4 +164,71 @@ export function cloneAmbientDatabase(sourceEnv, targetDb) {
   } finally {
     rmSync(dumpDir, { recursive: true, force: true });
   }
+}
+
+/**
+ * Assert a `cloneAmbientDatabase()` target actually landed real content — rev-498
+ * M1: the dump/restore's own exit-status checks catch a FAILING pg_dump/psql,
+ * never a SUCCESSFUL EMPTY one (a `sourceEnv` resolving to the wrong database, a
+ * `PG_DUMP` pointed at a schema-filtering wrapper, or a future reordering that
+ * captures `sourceEnv` after the env redirect). Measured: excluding schema
+ * `clara` from the dump leaves both `pg_dump`/`psql` at exit 0 while a consumer
+ * whose readiness probe is fail-OPEN (skip on absent schema, never throw) goes
+ * silently green with its ENTIRE battery skipped — a clone this hollow must
+ * throw here, loud, before any consumer gets the chance to skip past it.
+ *
+ * Two positive reads, by EXACT SIGNATURE where the second applies (law 3 — a
+ * bare function name is a projection, not the thing): `clara.schema_migrations`
+ * actually has rows, and `witnessSignature` (a `to_regprocedure(...)` argument,
+ * e.g. `"clara._append_event(uuid,text,uuid,uuid,uuid,text,uuid,uuid,uuid,jsonb)"`)
+ * resolves — callers name a body their OWN dependency chain actually needs, so
+ * this stays a real content check rather than a generic row-count that could
+ * pass on a schema missing exactly the thing the caller is about to use.
+ * @param {import("pg").ClientConfig} clientConfig connectionConfig(targetDb) from the caller
+ * @param {string} witnessSignature an exact `to_regprocedure()` argument
+ */
+export async function assertCloneIsPopulated(clientConfig, witnessSignature) {
+  const probe = new pg.Client(clientConfig);
+  await probe.connect();
+  try {
+    const migrations = await probe.query("select count(*)::int as n from clara.schema_migrations");
+    if (migrations.rows[0].n === 0) throw new Error("cloneAmbientDatabase() landed an EMPTY private database (0 rows in clara.schema_migrations)");
+    const witness = await probe.query("select to_regprocedure($1) as fn", [witnessSignature]);
+    if (!witness.rows[0].fn) throw new Error(`the cloned database is missing the witness ${witnessSignature} — not the real schema`);
+  } finally {
+    await probe.end();
+  }
+}
+
+/**
+ * `CREATE DATABASE "<dbname>"` on the ambient cluster, via an already-connected
+ * admin client (`connectionConfig()`, pointed at whatever the ambient target
+ * currently is — the new database does not exist yet, so there is nothing else
+ * to connect to). Guarded the same way `cloneAmbientDatabase()` is: refuses
+ * unless `CLARA_ALLOW_DESTRUCTIVE=1` names a disposable or explicitly-confirmed
+ * ambient target. Two files (`packages/runtime/tests/relay-taxonomy.test.mjs`,
+ * `packages/runtime/tests/fs7-v17-chatturn-db.test.mjs`) independently minted
+ * their own unguarded `CREATE DATABASE`/`DROP DATABASE` calls before this helper
+ * existed — this is the one shared, gated spelling both now use.
+ */
+export async function createDisposableDatabase(adminClient, dbname) {
+  assertDestructiveAllowed({ action: `createDisposableDatabase (CREATE DATABASE "${dbname}")` });
+  await adminClient.query(`create database "${dbname}"`);
+}
+
+/**
+ * `DROP DATABASE IF EXISTS "<dbname>" WITH (FORCE)`, best-effort (never throws —
+ * a teardown failure must never mask the real test failure it is cleaning up
+ * after; see the `cleanupPrivateDb`/`after()` review history on both consumers
+ * for why this stays unguarded and swallowed). `adminClient` must be connected
+ * to a DIFFERENT database than `dbname` (Postgres refuses to drop the database a
+ * connection is currently using) — callers restore the ambient target before
+ * calling this. Not gated by `assertDestructiveAllowed()`: the guard already ran
+ * at `createDisposableDatabase()`/`cloneAmbientDatabase()` for this same
+ * `dbname`, and re-checking here would risk throwing from teardown, which is
+ * exactly the class of bug PR #498's own review history (M1/R2) already fixed
+ * once for this exact code path.
+ */
+export async function dropDisposableDatabase(adminClient, dbname) {
+  await adminClient.query(`drop database if exists "${dbname}" with (force)`).catch(() => {});
 }
