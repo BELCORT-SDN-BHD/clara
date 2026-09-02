@@ -94,7 +94,14 @@ async function drain(request) {
 /** The PostgREST half. Returns true when it answered. Placed BEFORE serve-built's own
  *  404 fallback and AFTER its existing routes, so nothing already mocked changes. */
 export async function handleChatParitySupabase(request, response, path, url, sendJson, cors) {
+  // ID-SCOPED, and that is what lets this hook run BEFORE the parity-holes fixtures
+  // (merge of origin/main `cea3da39` / #507, which brought its own `clients` and
+  // `chat_sessions` lists). Each of these answers ONLY for the chat-parity ids and
+  // otherwise returns false, so the two walks' fixtures cannot starve each other in
+  // either direction. An unfiltered list falls through on purpose: the chat-parity walk
+  // navigates straight to its own thread and needs no list at all.
   if (request.method === "GET" && path === "/rest/v1/clients") {
+    if (url.searchParams.get("id") !== `eq.${CHAT_PARITY.clientId}`) return false;
     sendJson(response, 200, [{
       id: CHAT_PARITY.clientId,
       name: "ROME PROPERTIES",
@@ -104,8 +111,21 @@ export async function handleChatParitySupabase(request, response, path, url, sen
     return true;
   }
 
-  if (request.method === "GET" && (path === "/rest/v1/onboarding_plans" || path === "/rest/v1/chat_sessions")) {
-    sendJson(response, 200, [], cors);
+  // #507's `(full)/clients/[clientId]/clara/[threadId]` route now refuses a
+  // client/thread MISMATCH as not-found (`sessionBelongsToClient`,
+  // lib/clara/thread-scope.ts), so the chat-parity thread has to be a positively-seen
+  // session at its own client's altitude — the walk 404s otherwise.
+  if (request.method === "GET" && path === "/rest/v1/chat_sessions") {
+    if (url.searchParams.get("id") !== `eq.${CHAT_PARITY.threadId}`) return false;
+    sendJson(response, 200, [{
+      id: CHAT_PARITY.threadId,
+      firm_id: "33333333-3333-3333-3333-333333333333",
+      client_id: CHAT_PARITY.clientId,
+      created_by: "11111111-1111-1111-1111-111111111111",
+      visibility: "private",
+      title: "Chat parity",
+      created_at: "2026-09-02T01:00:00.000Z",
+    }], cors);
     return true;
   }
 

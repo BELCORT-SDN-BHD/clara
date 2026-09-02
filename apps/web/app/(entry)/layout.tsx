@@ -3,8 +3,9 @@ import type { ReactNode } from "react";
 import { BrandLockup } from "@/components/entry/brand-lockup";
 
 /**
- * THE (entry) ROUTE GROUP — the five faces a person meets before they are inside
- * a firm: /login, /signup, /invite/:token, /auth/confirm and /pending.
+ * THE (entry) ROUTE GROUP — the pre-firm faces a person meets before they are
+ * inside a firm, including sign-in, signup, invitation, confirmation, password
+ * recovery and the holding state.
  *
  * WHY A GROUP AND NOT A PATH SEGMENT. A Next.js route group contributes NO URL
  * segment, so /login and /invite/:token keep byte-identical URLs across P4-3's

@@ -73,14 +73,9 @@ const ITEM = {
   answered_by: "u1", answered_at: "2026-08-01T00:00:00Z", created_at: "2026-08-01T00:00:00Z", updated_at: "2026-08-01T00:00:00Z",
 };
 
-/** RETIRED 2026-09-02 (the chat-parity train). rev-t11 attributed ONE pre-existing
- *  violation to `ClaraThreadView`'s own composer textarea (a `placeholder` but no
- *  `aria-label`) and pinned it here, present, so a NEW violation would still red this
- *  test. The chat-parity train FIXED it — the textarea now carries
- *  `aria-label={t("composerLabel")}` — so the expectation is ZERO violations, which is
- *  a strictly stronger pin than the one it replaces. */
-const NO_VIOLATIONS: never[] = [];
-
+/** The rail parity train gave ClaraThreadView's composer a translated
+ *  accessible name. Both collapsed and open-dialog states therefore expect
+ *  no structural violations, rather than preserving the former exception. */
 function App() {
   return createElement(NextIntlClientProvider, {
     locale: "en",
@@ -117,8 +112,8 @@ test("the REAL full-screen thread route (card + Commit door dialog OPEN) has zer
         const collapsedViolations = checkAccessibility(body as never);
         assert.deepEqual(
           collapsedViolations,
-          NO_VIOLATIONS,
-          `collapsed — expected ZERO violations (the composer finding this cell used to pin as present was fixed by the chat-parity train) and NOTHING from T11, in particular no heading-order: ${JSON.stringify(collapsedViolations)}`,
+          [],
+          `collapsed — expected ZERO violations (the composer finding this cell used to pin as present is fixed) and NOTHING from T11, in particular no heading-order: ${JSON.stringify(collapsedViolations)}`,
         );
 
         const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Commit onboarding");
@@ -134,7 +129,7 @@ test("the REAL full-screen thread route (card + Commit door dialog OPEN) has zer
         const openViolations = checkAccessibility(body as never);
         assert.deepEqual(
           openViolations,
-          NO_VIOLATIONS,
+          [],
           `open dialog — must still be ZERO, no NEW violation introduced by the open Commit dialog: ${JSON.stringify(openViolations)}`,
         );
       } finally {

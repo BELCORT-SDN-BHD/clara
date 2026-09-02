@@ -247,6 +247,11 @@ export function ClaraThreadView({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={t("composerPlaceholder")}
+          // One accessible name, not two. #507 and #508 each added this line
+          // independently and the merge kept BOTH — a duplicate JSX attribute the
+          // auto-merge introduced silently, which is why an auto-merged file both sides
+          // touched gets read rather than trusted. Same key, same value: nothing is lost
+          // by collapsing it.
           aria-label={t("composerLabel")}
           disabled={!threadId || notSignedIn || busy}
           rows={variant === "rail" ? 2 : 3}

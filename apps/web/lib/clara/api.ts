@@ -90,11 +90,45 @@ async function expectJson<T>(res: Response, what: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Reads only the `sub` projection from the exact bearer sent to the runtime.
+ * This does not authenticate or authorise anything: the runtime independently
+ * verifies the bearer before returning the session rows. It only lets the
+ * browser choose the caller's own row from that already-authorised result.
+ */
+export function callerSubjectFromAccessToken(token: string): string | null {
+  const payload = token.split(".")[1];
+  if (!payload) return null;
+  try {
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "=");
+    const parsed: unknown = JSON.parse(globalThis.atob(base64));
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const subject = (parsed as Record<string, unknown>).sub;
+    return typeof subject === "string" && UUID_RE.test(subject) ? subject : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function listSessions(auth: SessionTokenAccessor): Promise<SessionRow[]> {
   const token = await requireToken(auth);
   const res = await runtimeFetch("/api/chat/sessions", token);
   const body = await expectJson<{ sessions: SessionRow[] }>(res, "list sessions");
   return body.sessions ?? [];
+}
+
+/** One token resolution binds the caller projection to the rows it requested. */
+export async function listSessionsForCaller(
+  auth: SessionTokenAccessor,
+): Promise<{ sessions: SessionRow[]; callerSubject: string }> {
+  const token = await requireToken(auth);
+  const callerSubject = callerSubjectFromAccessToken(token);
+  if (callerSubject === null) throw new Error("session identity is unavailable");
+  const res = await runtimeFetch("/api/chat/sessions", token);
+  const body = await expectJson<{ sessions: SessionRow[] }>(res, "list sessions");
+  return { sessions: body.sessions ?? [], callerSubject };
 }
 
 export async function createSession(

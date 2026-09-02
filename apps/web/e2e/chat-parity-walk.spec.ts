@@ -48,16 +48,22 @@ async function signIn(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/$/);
 }
 
+/** The composer's accessible name. #507 and #508 both added `Clara.thread.composerLabel`
+ *  with DIFFERENT text ("Ask Clara" vs "Message Clara") and `en.json` auto-merged without
+ *  a conflict, silently taking one — which broke the other PR's walk. Main's value wins:
+ *  it is the merged, canonical one, and `parity-holes.spec.ts` already reads it. */
+const COMPOSER = "Ask Clara";
+
 async function openThread(page: Page): Promise<void> {
   await signIn(page);
   await page.goto(`/clients/${CLIENT_ID}/clara/${THREAD_ID}`);
-  await expect(page.getByLabel("Message Clara")).toBeVisible();
+  await expect(page.getByLabel(COMPOSER)).toBeVisible();
 }
 
 test("a parked clarify is answered inline, in the thread, and the card shows the answered state", async ({ page }) => {
   await openThread(page);
 
-  await page.getByLabel("Message Clara").fill("Code this invoice");
+  await page.getByLabel(COMPOSER).fill("Code this invoice");
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
   // The parked question arrives on the live stream and is answerable there — and the
@@ -97,7 +103,7 @@ test("a document attached from the composer rides the sent turn as its document 
   // finalize -> a DB-confirmed adoption read -> the governed filing act.
   await expect(page.getByText("Filed", { exact: false })).toBeVisible({ timeout: 20_000 });
 
-  await page.getByLabel("Message Clara").fill("Read this invoice");
+  await page.getByLabel(COMPOSER).fill("Read this invoice");
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
   // The reference in the SENT turn, rendered by the transcript's own attachment card —
@@ -111,7 +117,7 @@ test("a document attached from the composer rides the sent turn as its document 
 test("the firm altitude says why there is no attach affordance instead of just not having one", async ({ page }) => {
   await signIn(page);
   await page.goto(`/clara/${THREAD_ID}`);
-  await expect(page.getByLabel("Message Clara")).toBeVisible();
+  await expect(page.getByLabel(COMPOSER)).toBeVisible();
   await expect(page.getByRole("button", { name: "Attach document" })).toHaveCount(0);
   await expect(page.getByText("Open a client's workspace to attach a document")).toBeVisible();
 });

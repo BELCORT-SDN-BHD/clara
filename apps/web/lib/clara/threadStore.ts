@@ -167,6 +167,10 @@ export const claraThreadStore = {
   },
 
   reset(threadId: string): void {
-    setThread(threadId, emptyThreadState);
+    if (!(threadId in state.threads)) return;
+    const threads = { ...state.threads };
+    delete threads[threadId];
+    state = { ...state, threads };
+    emit();
   },
 };
