@@ -470,7 +470,7 @@ is set at the Wave-G reset as its own ceremony step (裁-121③), not at the pos
 
 From merged `main` after FS-10: the factory reset of the estate (`packages/db/README.md`'s reset
 scoping; ADR-0075 — every firm/client is test data; the spike/workflow schemas untouched,
-constraint 15) → apply the full unapplied span (`0154` through the frontier — `0161` expected)
+constraint 15) → apply the full unapplied span (`0154` through the frontier — **`0164` expected once the FS-4 chain lands**: `0161` #509 Q-D6 · `0162` #512 FS-7 e2 · `0163` #493 C-3 · `0164` #517 C-6; **count the migrations directory, not this line**)
 (its pre-flight refuses on duplicates; the reset removes them, 裁-67)
 → the Supabase/Resend/Cloudflare items of `docs/ops/wave-g-setup-checklist.md` proven → the
 sixteen-step walk on the desktop corpus with Stripe TEST mode (a non-zero test price + test cards
