@@ -14,7 +14,7 @@ import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/common/native-select";
-import { CentsInput } from "./staff-advance-money-input";
+import { MoneyInput } from "@/components/common/money-input";
 import { OpeningDoorDialog } from "./OpeningDoorDialog";
 import { seedFixedAsset } from "@/lib/registers/opening-item-doors";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
@@ -112,17 +112,23 @@ export function OpeningFixedAssetDialog({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="opening-fa-cost">{t("costLabel")}</Label>
-            <CentsInput id="opening-fa-cost" ariaLabel={t("costLabel")} cents={a.cost_cents} onChange={(cost_cents) => patch({ cost_cents })} />
+            <MoneyInput id="opening-fa-cost" aria-label={t("costLabel")} cents={a.cost_cents} mode="unsigned" onValueChange={(change) => {
+              if (change.ok) patch({ cost_cents: change.cents ?? 0 });
+            }} />
           </div>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="grid gap-1.5">
             <Label htmlFor="opening-fa-accum">{t("accumulatedLabel")}</Label>
-            <CentsInput id="opening-fa-accum" ariaLabel={t("accumulatedLabel")} cents={a.accumulated_depreciation_cents ?? 0} onChange={(v) => patch({ accumulated_depreciation_cents: v })} />
+            <MoneyInput id="opening-fa-accum" aria-label={t("accumulatedLabel")} cents={a.accumulated_depreciation_cents ?? 0} mode="unsigned" onValueChange={(change) => {
+              if (change.ok) patch({ accumulated_depreciation_cents: change.cents ?? 0 });
+            }} />
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="opening-fa-residual">{t("residualLabel")}</Label>
-            <CentsInput id="opening-fa-residual" ariaLabel={t("residualLabel")} cents={a.residual_cents ?? 0} onChange={(v) => patch({ residual_cents: v })} />
+            <MoneyInput id="opening-fa-residual" aria-label={t("residualLabel")} cents={a.residual_cents ?? 0} mode="unsigned" onValueChange={(change) => {
+              if (change.ok) patch({ residual_cents: change.cents ?? 0 });
+            }} />
           </div>
         </div>
         <div className="grid gap-1.5">

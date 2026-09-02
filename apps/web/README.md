@@ -150,6 +150,15 @@ handoff's own instruction, the Cloudflare build runs on WSL CI, which can and sh
 newer Node for that one step. This is a deviation worth flagging to the owner if the CI lane
 provisioning doesn't already assume it.
 
+**What that failure actually looks like, so nobody re-diagnoses it** (recorded 2026-09-02, PR
+#505 round 3, after two people lost time to it): on Windows/Node 20.19.5, `pnpm --filter
+@clara/web cf:build` fails *reproducibly* inside OpenNext's `buildExternalNodeMiddleware` →
+`copyTracedFiles`, with `ENOENT … middleware.js.nft.json`. It is the environment mismatch
+above, **not** a regression in this app — `cf:build` is not a CI gate, and the failing step is
+only copying `.next/server/middleware.js` into `.next/standalone/`, so the Workers middleware
+is derived from the same file a plain `next build` produces. Build it on the WSL runner
+(Linux, Node >= 22) when you need the real artifact.
+
 Compatibility flags: `nodejs_compat` (required by the adapter) + `global_fetch_strictly_public`.
 `compatibility_date` is pinned to the scaffold's authoring date; bump it deliberately, not
 silently, per Cloudflare's own compatibility-date guidance.

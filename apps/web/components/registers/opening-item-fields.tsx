@@ -14,8 +14,7 @@ import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/common/native-select";
-import { CentsInput } from "./staff-advance-money-input";
-import { SignedAmountInput } from "./opening-signed-amount-input";
+import { MoneyInput } from "@/components/common/money-input";
 import { OpeningLinesEditor, sumOpeningLines } from "./opening-lines-editor";
 import { fmtCents } from "@/lib/registers/money";
 import type { OpeningItemInput, OpeningItemKind, OpeningLineInput } from "@/lib/registers/opening-types";
@@ -110,7 +109,15 @@ export function OpeningItemFields({
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor={`${idPrefix}-amount`}>{t("amountLabel")}</Label>
-            <CentsInput id={`${idPrefix}-amount`} ariaLabel={t("amountLabel")} cents={item.amount_cents ?? 0} onChange={(c) => patch({ amount_cents: c })} />
+            <MoneyInput
+              id={`${idPrefix}-amount`}
+              aria-label={t("amountLabel")}
+              cents={item.amount_cents ?? 0}
+              mode="unsigned"
+              onValueChange={(change) => {
+                if (change.ok) patch({ amount_cents: change.cents ?? 0 });
+              }}
+            />
           </div>
         </div>
       ) : null}
@@ -118,7 +125,14 @@ export function OpeningItemFields({
       {SIGNED_AMOUNT_KINDS.includes(kind) ? (
         <div className="grid gap-1.5">
           <Label htmlFor={`${idPrefix}-signed`}>{t("signedAmountLabel")}</Label>
-          <SignedAmountInput id={`${idPrefix}-signed`} cents={item.amount_cents} onChange={(amount_cents) => patch({ amount_cents })} />
+          <MoneyInput
+            id={`${idPrefix}-signed`}
+            cents={item.amount_cents}
+            mode="signed"
+            onValueChange={(change) => {
+              if (change.ok) patch({ amount_cents: change.cents });
+            }}
+          />
           <p className="text-xs text-muted-foreground">{t("signedAmountHint")}</p>
         </div>
       ) : null}
