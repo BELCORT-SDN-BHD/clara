@@ -10,8 +10,10 @@ verbatim, per the archive law.*
 *A second move, **2026-09-03** (the 09-02 pm/night truing, same cap, same law): the 2026-09-02
 morning checkpoint posture banner, the `2026-09-01` · `2026-09-02 ~03:00` · `2026-09-02 morning`
 `Session log` entries, and two CLOSED `Known issues` rows (the scope-spine fourth-entrance gap; the
-resolved Annex A.4 / R-OWNER / invariant-(a)-home trio). Each is appended under its own dated
-heading below, and each was verified present here before `PROGRESS.md` lost it.*
+resolved Annex A.4 / R-OWNER / invariant-(a)-home trio) — and, in the scan-synthesis commit later the same
+morning, three more closed `Known issues` rows (BEE's opening TB, the statement-pair coin flip, the dropped
+owner preview). Each is appended under its own dated heading below, and each was verified present here before
+`PROGRESS.md` lost it.*
 
 ## The demoted posture banner (superseded 2026-09-02 by the pre-pause truing sweep's banner)
 
@@ -160,3 +162,9 @@ hard-blocked-ids bullets; these five were the rest of the pre-09-02 posture bloc
 
 - ~~**The scope-spine census has a FOURTH-ENTRANCE GAP**~~ — **CLOSED:** #477 shipped `apps/web/tests/firm-scope-fourth-entrance.test.ts` (the `LEAF` special-file regex widened, a `"use server"` wall, an inline-directive tripwire, and a vacuity control proving the census catches a planted action); #455 merged after it.
 - ~~Annex A.4 row 7~~ (RULED+BUILT, `0128` live, `no_preparation` mode) · ~~R-OWNER/B15's second door~~ (BUILT `0106`, #311, tail-proven; D18 stands for direction-SILENT documents only) · ~~the `AGENTS.md` invariant-(a) home~~ (DECIDED (b): PRD §6 invariant 2(b) is the single home) — all resolved; full records archived verbatim in `-part2.md`/`-part3.md`/`-part6.md`.
+
+### Known issues — three more CLOSED rows, moved verbatim 2026-09-03 (the scan-synthesis commit; resolved, kept as record)
+
+- ~~**BEE's opening TB**~~ — **RESOLVED 2026-08-20** for ADR-043 by a live read; record archived
+- ~~**The statement-pair coin flip**~~ — **HEALED FORWARD-ONLY as of 2026-08-21** (`0102`'s router
+- ~~**Owner preview** at https://localhost:3100 (`main@13bc5c03`, supervisor attached)~~ — **DROPPED 2026-09-02 (裁-123)**: the stand was twelve merges stale and its supervisor dead; restand at the post-#493 main when the owner asks.

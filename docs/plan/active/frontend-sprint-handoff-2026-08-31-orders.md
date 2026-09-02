@@ -13,12 +13,15 @@ writing a line.*
    xhigh for execution-heavy implementation/debugging/test-fixing, native sonnet-5 xhigh for bounded
    work, opus-5 xhigh for judgement — every dispatch pinned (model + effort), every git-active lane
    in its own worktree, heavy lanes capped at 3–4. A family that is out is substituted for that leg
-   (builds included) and the PR body says so.
+   (builds included) and the PR body says so. **裁-133 (owner, 2026-09-02, until beta live): there is no Codex lane of any kind, builds included — for the remainder of the sprint this step reads sonnet-5 xhigh for bounded, mechanical, objectively testable work and opus-5 xhigh for judgement, security, ambiguity and every review; see §C.** Note the difference from the sentence above it: "a family that is out is substituted" describes availability, and 裁-133 is a RULING — out ≠ forbidden.
 1. Build; the four verify commands green; a RED-before proof per wall recorded in the PR body
    (mutant → which cell went red).
 2. **The e2e leg (frontend trains):** `pnpm --filter @clara/web build` → `next start` → a real
-   browser (Playwright) walks the train's journey end to end against a throwaway test firm, the
-   axe scan riding the walk; the script is checked in under apps/web/e2e/ (the first train, FS-2,
+   browser (Playwright) walks the train's journey end to end **on the BUILT app** — against
+   `apps/web/e2e/serve-built.mjs`'s **mocked** Supabase and runtime by default (no DB, no firm behind it at all), or
+   against a throwaway test firm through `apps/web/e2e/live-stack/` where the journey needs a real backend;
+   **the PR body says WHICH shape it ran** (7 of the 8 browser legs merged on 09-02 were the mock shape).
+   The axe scan rides the walk; the script is checked in under apps/web/e2e/ (the first train, FS-2,
    creates the suite) and its run is quoted in the PR body. `next dev` is not the app.
 3. Push; open the PR with a body that carries: the rung-0 census table (door → live body → args →
    refusals → grant) · test counts control vs branch by name · every new door call and its surface
@@ -185,7 +188,23 @@ pass.
 
 **REVIEWER-WORKTREE note (09-03 ~01:19).** A read-only review worktree INSIDE the repo (`.claude/worktrees/<name>`) resolves `pg` and the other workspace packages by Node's upward walk to the root pnpm store, so a reviewer that only reads and runs `packages/db` tests needs NO `node_modules` junction — and the worktree-remove hazard goes with it. Build lanes that run `next build` or the WDK build still junction per the mechanics above. Beside it, a panel rule: a mutant arm whose mutation ERRORED before landing reports GREEN, so every arm asserts the mutation APPLIED (re-read the body or the catalog) before its result counts.
 
-**STATE-BANNER clause (09-03 ~01:15).** A truing PR's state lines — the open-PR queue, review verdicts, armed/disarmed, "N of M legs" — are measured from `gh` AT COMMIT TIME and stamped with that time, and the lead's notes are read to their END before the commit (a verdict ten minutes old was missed). Every "N of M legs green" counts the meta-gate as a job and names it. A stale state line in a truing PR is a MATERIAL finding, not a nit: the reader acts on it — a queue row that omits which PR is ARMED misroutes the merge order.
+**SAME-DAY ROT (D1, 09-03 ~03:00 — seen six times in one scan).** A truing's measurements are only as fresh as the tip it shipped from, so the mechanical sweep is the LAST act before the PR, never the first, and every "TRUED &lt;date&gt;" stamp carries the sha it was measured at — a row written at 05:16 and fixed by a merge at 14:10 the same day is not a stale document, it is a document that was never stamped.
+
+**MERGED IS NOT SERVING / APPLIED / SEEDED (D2, 09-03 ~03:00).** Every state row that names a version, a migration or an external object names BOTH the repo fact and the live fact, and a deploy, apply or seed act is its OWN tracked row — never implied by a merge. Three live instances the same morning: main pins `chatTurn_v17` while the machine serves v16, `0154`–`0160` are merged and unapplied, and the Stripe Product and Price exist in the dashboard while nothing has written `stripe_object_map`.
+
+**A WRONG EXAMPLE INSIDE A CORRECT LAW (D3, 09-03 ~03:00).** An illustration inside a law is verified like the law: a named file, verb, env var or credential in a ruling gets ONE measurement before it ships, because every downstream copy inherits it — 裁-114's ruling is right and its example named the wrong secret, and the wrong example propagated into PRD §6 and ARCHITECTURE §1 and contradicted 裁-93, an EARLIER ruling on the same question.
+
+**WRONG-INSTRUMENT ABSENCE (D4, 09-03 ~03:00).** An absence claim names its instrument AND its scope in the same sentence — and for "already recorded / already in the pending PR" the instrument is **the PR DIFF at its current head**, never the scratch notes and never a file list read an hour ago. The scan lost findings in both directions to this: an a11y census scoped to a FILE when the gate is the SUITE, a grep of the tests directory when apps/web keeps tests beside components, an unscoped `grep -r` walking `.next`.
+
+**HALF-EXECUTED RETIREMENT (D5, 09-03 ~03:00).** A retirement closes BOTH halves in ONE PR — the thing, and every caller, record, backlog row and instruction that names it — and the PR body carries the census that proves the second half is empty. Live exhibits: `0118` dropped a function and left its runtime caller re-firing every two seconds; the WSL fleet was parked while three documents still cited it as current.
+
+**THE CLOSED ENUMERATION IN AN INSTRUCTION (D6, 09-03 ~03:00).** Never write a closed count or list into an instruction a later PR can extend: name the source of truth and the command that counts it — **count the file, not this line** — or accept that the list is a dated measurement and stamp it as one. "Exactly /signup and /auth/confirm" would have deleted the entry that makes password recovery work.
+
+**A `live` RECORD PINNED TO AUTHORING TIME (D7, 09-03 ~03:00).** A plan record whose index Status is `live` carries a re-measure banner naming the tip it was measured at, and its index row summarises the BANNER, not the measurement — otherwise a record filed at 06:10 and falsified by 14:19 keeps being read as current state and consumed as a gate.
+
+**STATE-BANNER clause (09-03 ~01:15).** A truing PR's state lines — the open-PR queue, review verdicts, armed/disarmed, "N of M legs" — are measured from `gh` AT COMMIT TIME and stamped with that time, and the lead's notes are read to their END before the commit (a verdict ten minutes old was missed). Every "N of M legs green" counts the meta-gate as a job and names it. A stale state line in a truing PR is a MATERIAL finding, not a nit: the reader acts on it — a queue row that omits which PR is ARMED misroutes the merge order. **Stamped at commit time AND re-read once after the push — the window between the last gh read and the push is where a merge lands. If the re-read moves a row, amend, re-push, and re-stamp; if it moves again, that is DRIFT — name it as drift in the PR body and stop. A truing PR converges, it does not chase.**
+
+**BROWSER-LEG clause (09-03 ~04:30).** The e2e leg is the REVIEW LANE'S OWN Playwright run on the built app — hosted CI carries **no browser leg at all**. Measured, not assumed: `playwright` appears **zero** times in `.github/workflows/ci.yml` and zero times under `.github/actions/`, and the single occurrence of `browser` in the workflow (`ci.yml:321`) is about `next build` inlining env values into browser bundles — it is not an e2e leg and must not be read as one. A green pipeline therefore says nothing about whether the journey works, and CI never substitutes for the walk: every frontend train's leg is run by a human-directed lane on `next start` against the built app, and its output is quoted in the PR body. Read the workflow before citing it — "CI runs the e2e" is the kind of claim that survives review because everyone assumes someone checked.
 
 **TWO-CLOCK DATE clause (09-03 ~01:15).** Never assert equality between a date derived from one clock (`current_date`, `now()::date`, JS `new Date()`) and a stored timestamp cast to a date under another: hosted runs sit in UTC while the rig or session may sit in MYT, and between 16:00 and 24:00 UTC the two days differ — every Malaysian evening. Derive the expected date from the SAME source and timezone the stored value is cast in (read `now()` in the same statement; cast both `at time zone 'UTC'`); never widen the assertion to "either day". Until the fix lands, an evening R9.E2 red is RE-RUN after 00:00 UTC, never adopted.
 

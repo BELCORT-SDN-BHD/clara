@@ -53,6 +53,8 @@ Cost stated at the ask: zero code lines, riding the truing PR's one-opus-review 
 classifier scores that PR CODE — see the header note; not ADR-0069's lane). Both texts are truings of
 already-ruled decisions, not new policy — the DECISION here is that the law documents say so.
 
+> **ERRATA (lead, 2026-09-03; owner confirmation put as B1 of the harness-sync scan).** The premise's example above names the wrong secret. `STRIPE_WEBHOOK_SECRET` is **runtime/Fly env**, not `apps/web`'s (`docs/plan/active/checkout-gate-design-part3.md`; 裁-126 routes the `whsec_` value to Fly secrets; every site of it in #511 sits under `packages/runtime/`), and 裁-93 had already ruled the webhook to `packages/runtime` BEFORE 裁-114 was written. `apps/web`'s real FS-4 credential is `STRIPE_SECRET_KEY`. **The RULING stands** — the wall it re-states (no service credential ever reaches a browser; no `NEXT_PUBLIC_` variable carries one; `apps/web`'s server-only Route Handlers are a second, browser-isolated holder) is unaffected by which credential illustrates it. `PRD.md` §6 and `ARCHITECTURE.md` inherited the same example and are NOT edited here: they are law documents and wait for the owner's answer to B1.
+
 ---
 
 # The 2026-09-02 checkpoint sitting (morning, ~08:00–10:30 MYT) — 裁-115 … 裁-128
@@ -212,8 +214,7 @@ is the owner's dashboard act once C-5's route is deployed (`whsec_` → Fly secr
 **Receipt — objects created through the session's Stripe connector from the `billing_plans` seed
 row (`local_key='clara-beta-2026'`, MYR 0, `amounts_ruled=false`), never hand-authored:**
 Product `prod_VBS7ZUaIFPedCs` ("Clara Beta"), Price `price_1UB5DZHD90w0k86XNfkgYPWq` (MYR 0 /
-month, recurring); both carry the local key and the ruling numbers in metadata; C-5 seeds them
-into `clara.stripe_object_map`. Stripe Tax stays off per 裁-54 until BELCORT's SST registration
+month, recurring); both carry the local key and the ruling numbers in metadata. **The ids are written into `clara.stripe_object_map` by an OPS ACT run as `clara_fn_owner` from merged `main` after C-5 deploys — NOT by C-5, which carries no migration and only READS the map** (trued 2026-09-03 from #511's own file set: 23 files, all under `packages/runtime/`, its only map writes being a test fixture). Stripe Tax stays off per 裁-54 until BELCORT's SST registration
 status says otherwise.
 
 ## 裁-127 · The five open owner-batch items are POST-BETA, each with a Backlog row (owner: "这些会影响 beta 吗? 没有的话就跟 recommendation")

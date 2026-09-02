@@ -216,8 +216,9 @@ the pipeline itself, run `gh workflow run ci.yml` by hand). **The first hosted s
 on 2026-09-02 (run 33639097306): of its 13 jobs, 11 succeeded — including the D-b frontier matrix's
 first hosted proof — and TWO failed: `closed-wave-drills` on the multi-chain-one-cluster class
 (`0154` asserts an absolute 14-role census; `0160` mints two), and the `ci` meta-gate with it. So:
-11 of 12 gate legs green, the meta-gate red, which is the count to quote. The sweep stays red until #518's re-cut merges, and
-re-dispatching it by hand is the only thing that re-proves that leg.** A docs-only diff skips the code
+11 of 12 gate legs green, the meta-gate red, which is the count to quote. #518's re-cut MERGED as `dfe9406c`
+(2026-09-03 04:38 MYT), so the sweep is now OWED a hand dispatch — re-dispatching it is the only
+thing that re-proves that leg, and until it runs the sweep's last word is still the red one.** A docs-only diff skips the code
 and DB legs by classifier, the weekly sweep re-proves every leg regardless, and the
 required check `ci` is a fail-closed meta-gate over every job — a red lint blocks merge on
 every PR, docs-only included.
