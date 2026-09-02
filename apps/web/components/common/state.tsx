@@ -21,8 +21,38 @@ import { cn } from "@/lib/utils";
  * years opened yet for this client."), and an illustration beside it would
  * be the only decorative element in a professional ledger surface.
  */
+/**
+ * DS-03 (FS-9 §3, P6-3) — `role="status"`, and the deliberate absence of
+ * `aria-busy` ON THIS ELEMENT.
+ *
+ * WHAT WAS MISSING. This is the app's sole loading primitive (57 call sites,
+ * re-censused 2026-09-02) and it computed NO role at all, while its sibling
+ * StateBanner has computed `role="alert"`/`"status"` since P3. So every honest
+ * loading sentence the product writes — "Loading the close plan…", the whole
+ * reason this idiom is prose rather than a skeleton — was invisible to a screen
+ * reader. `role="status"` (implicit `aria-live="polite"`) announces it when it
+ * appears, and does NOT announce on first paint, which is the wanted asymmetry:
+ * an early-return placeholder present at mount stays quiet, a load that STARTS
+ * later speaks.
+ *
+ * WHY `aria-busy` IS NOT ON THIS ELEMENT, THOUGH THE ITEM IS NAMED FOR IT.
+ * `aria-busy="true"` tells assistive tech to withhold updates to a live region
+ * until it goes false. On a TRANSIENT placeholder that is inserted already-busy
+ * and then unmounted, it never goes false — so putting it here would suppress
+ * the very announcement the role above just bought. `aria-busy` belongs on the
+ * PERSISTENT region that swaps content in place, where it can flip true->false
+ * and release the queue. That is where it now renders: ClaraThreadView's
+ * transcript log (`aria-busy` until `messagesLoaded`) and InterviewRunCard's
+ * thread. The split is the honest reading of WAI-ARIA 1.2 §6.6, not a partial
+ * implementation, and a reviewer checking "does aria-busy render" should look
+ * there rather than here.
+ */
 export function LoadingState({ children, className }: { children: ReactNode; className?: string }) {
-  return <p className={cn("max-w-prose text-sm text-muted-foreground", className)}>{children}</p>;
+  return (
+    <p role="status" className={cn("max-w-prose text-sm text-muted-foreground", className)}>
+      {children}
+    </p>
+  );
 }
 
 export function EmptyState({ children, className }: { children: ReactNode; className?: string }) {

@@ -214,49 +214,50 @@
   --clara-muted: #f4f1fb;
 
   /*
-   * FOCUS TREATMENT — RULED 2026-08-27 evening (R3), RECUT STILL OWED.
-   * The owner resolved this divergence in the direction the vendored
-   * primitives already ship: "All focus indicators unify on the shadcn 3px
-   * translucent ring (`focus-visible:ring-3 ring-ring/50`), superseding
-   * contract §9's 2px #1D4ED8 outline. This is a founder amendment of the
-   * ratified contract — a §9 recut PR is owed to clarabook-frontend."
-   * (mohe-grill-rulings-2026-08-27-evening.md R3; classified
-   * DIVERGED-BY-RULING in the 08-28 conformance audit.)
+   * FOCUS TREATMENT — R3 ARM (b) EXECUTED, P6-3 (2026-09-02). This block
+   * REPLACES the "RECUT STILL OWED" note that stood here from 2026-08-27 to
+   * this train; that note's job was to tell the next lane exactly what state
+   * it was inheriting, and this is that lane's answer.
    *
-   * WHAT IS STILL TRUE OF THE CODE BELOW: nothing has been recut yet. The
-   * flat `:focus-visible` outline is still what this file declares, so the
-   * two idioms still coexist exactly as described below. R3's execution —
-   * one global pass replacing the §9 outline treatment, plus re-deriving
-   * the contrast gate's focus pairs as the ring's COMPOSITED effective
-   * colour (an R2xR3 collision if it fails 3:1 on the cream ground goes
-   * back to the owner, never a unilateral fix) — is a named next step in
-   * PROGRESS.md, not this file's to perform. Only the heading is trued
-   * (2026-08-29): it read "not resolved either direction", which was true
-   * when written and had been superseded by R3 two days later.
+   * THE RULINGS THIS FILE NOW IMPLEMENTS
+   *   R3   (mohe-grill-rulings-2026-08-27-evening.md) — "All focus indicators
+   *        unify on the shadcn 3px translucent ring, superseding contract §9's
+   *        2px #1D4ED8 outline. This is a founder amendment of the ratified
+   *        contract — a §9 recut PR is owed to clarabook-frontend."
+   *   裁-1  (mohe-grill-rulings-2026-08-28.md) — the ring's alpha is **70%**.
+   *        The measured floor is 66% (at 65% the ring composites to 2.970:1 on
+   *        --accent, the darkest ground in this token set, and reds the 3:1
+   *        non-text gate); 70% gives headroom on every ground — the tightest is
+   *        --accent at 3.270:1. Measured by scripts/check-token-contrast.mjs's
+   *        own alphaBlend/contrastRatio, not transcribed.
+   *   裁-64③ — Button focus is an OFFSET ring, because --ring and --primary are
+   *        the same hex (#1d4ed8): a default Button's swapped border against its
+   *        own fill measures 1.000 and no halo alpha fixes it. See
+   *        components/ui/button.tsx.
    *
-   * The token contract of record (clarabook-frontend g5-design-system/
-   * docs/01-TOKEN-CONTRACT.md §9, read at `main` 2026-08-27) specifies the
-   * product's focus indicator as "a 2px #1D4ED8 indicator with 2px offset" —
-   * implemented literally below (`:focus-visible { outline: 2px solid
-   * var(--focus); outline-offset: 2px; }`, driven by `--focus-ring-width`/
-   * `--focus-ring-offset`).
+   * THE DEVIATION, RECORDED (constraint 1 — a founder amendment, not a
+   * unilateral call): contract §9 still specifies "a 2px #1D4ED8 indicator with
+   * 2px offset". This tree ships the shadcn ring at 70% instead, under R3. The
+   * §9 recut PR to clarabook-frontend remains OWED and is the owner's to file.
    *
-   * The vendored shadcn primitives instead ship shadcn's own idiom: a 3px
-   * translucent ring (`focus-visible:ring-3 focus-visible:ring-ring/50`)
-   * plus a solid border-colour swap — every Button, Input, Textarea,
-   * Select, Badge, NativeSelect and SectionTabs in this tree. Both idioms
-   * share the SAME colour (`--ring` is `var(--focus)`, #1D4ED8) — only the
-   * shape (a crisp 2px outline vs. a soft 3px halo) differs.
+   * THE BASE OUTLINE IS KEPT DELIBERATELY, AS THE FALLBACK. Deleting the flat
+   * `:focus-visible` rule at the bottom of this file would EXTEND the failure,
+   * not close it: twelve components carry the ring idiom, while every plain
+   * link, list row, `<summary>` and custom control relies on that global rule
+   * for any indicator at all. So it stays, at the SOLID --focus token (6.70:1
+   * on --background, 6.25:1 on --shell — the two `focus-ring-on-*` gate rows
+   * measure exactly it), and the ring overrides it per-component via
+   * `outline-none`. Two indicators, one colour, an explicit precedence.
    *
-   * Recorded here for the owner's brand sitting rather than unified
-   * unilaterally: rewriting every vendored primitive to the contract's
-   * flat outline is a visible product-wide look change; relaxing §9 to
-   * bless the vendored idiom is a token-contract change — neither was that
-   * pass's call to make (constraint 1, AGENTS.md — a design-vs-contract
-   * collision goes to the owner). The sitting happened and R3 took the
-   * second arm; see the heading above. See components/common/
-   * section-tabs.tsx and components/common/native-select.tsx for the two
-   * call sites whose comments point back at this note.
+   * THE ALPHA LIVES HERE, ONCE. `--focus-ring-alpha` below is the single
+   * declaration of the 70%; carriers spell it as `focus-visible:ring-ring/70`
+   * (Tailwind v4 emits a colour at that alpha, composited by the browser in
+   * sRGB gamma space — what the gate's alphaBlend reproduces). The two
+   * spellings are held in agreement MECHANICALLY: tests/focus-ring-contract.
+   * test.ts reds if a carrier's `/NN` drifts from this token, and the contrast
+   * gate's nine `focus-ring-70-on-*` rows red if the composited result stops
+   * clearing 3:1 on a ground it is drawn on. See components/common/
+   * section-tabs.tsx and native-select.tsx, which point back here.
    */
 
   /* Product semantics: identity and interaction stay separate. */
@@ -276,7 +277,31 @@
   --accent-foreground: #163d75;
   --destructive: #b42318;
   --border: var(--line);
-  --input: #c7c5bd;
+  /*
+   * 裁-2 4c, EXECUTED HERE BY 裁-64② ("the --input recut value is set in this
+   * repo by P6-3, which opens the clarabook-frontend PR in the same sitting").
+   *
+   * WAS #c7c5bd, and it never reached 3:1 on any product ground — 1.728 on
+   * --background/--card/--popover, 1.611 on --shell, 1.598 on --identity-canvas,
+   * 1.594 on --muted. components/ui/input.tsx ships `bg-transparent`, so this
+   * border is the ONLY thing identifying the control's boundary and SC 1.4.11
+   * (3:1 for UI-component boundaries) applies to it squarely.
+   *
+   * WHY #8b8981 AND NOT THE DEMO VALUE. 裁-2 4c's #8F8D85 is explicitly
+   * "illustrative": it measures 3.325 / 3.099 / 3.074 on background / shell /
+   * identity-canvas — clearing the bar by 0.074 on the tightest row this train
+   * pins — and it FAILS on --secondary (2.987) and --accent (2.850). #8b8981 is
+   * the SAME warm-grey ramp one step darker (#c7c5bd's +2/+8 R-G-B relationship
+   * preserved exactly) and clears 3:1 on EVERY ground token here:
+   * background/card/popover 3.504 · shell 3.267 · identity-canvas 3.240 ·
+   * muted 3.232 · secondary 3.148 · accent 3.004.
+   *
+   * KNOWN LOOK CHANGE, FLAGGED NOT ABSORBED: `disabled:bg-input/50` paints a
+   * DISABLED field with this token at 50%, moving #e3e2de -> #c5c4c0. WCAG
+   * exempts inactive controls from contrast, so nothing reds; it is a design
+   * consequence of the ruling, called out in the PR body for the owner.
+   */
+  --input: #8b8981;
   --ring: var(--focus);
 
   /* Semantic state colours always accompany text or icon labels. */
@@ -334,8 +359,27 @@
   --motion-duration-welcome: 220ms;
   --motion-easing-standard: ease-in-out;
   --motion-easing-out: cubic-bezier(0.23, 1, 0.32, 1);
+  /* The FALLBACK outline (see the FOCUS TREATMENT note above): its width and
+   * offset. Consumed by the `:focus-visible` rule in `@layer base` below. */
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
+  /* THE NEXT TWO TOKENS ARE ANCHORS, NOT PAINT (review N-7, said plainly).
+   * No CSS rule in this file reads `var(--focus-ring-alpha)` or
+   * `var(--target-min)` — Tailwind's `/NN` opacity modifier and its size
+   * utilities are compile-time, so neither can be driven from a custom
+   * property. They are the DECLARED value that the gates read and hold the
+   * component class strings to. Editing one alone changes nothing on screen;
+   * it makes a gate red, which is the point. */
+
+  /* 裁-1, THE ONE DECLARATION OF THE RING'S ALPHA. Carriers spell it
+   * `focus-visible:ring-ring/70`; tests/focus-ring-contract.test.ts reds if a
+   * carrier drifts from this number, so the two can never disagree silently. */
+  --focus-ring-alpha: 0.7;
+  /* 裁-13 · WCAG 2.2 SC 2.5.8 — the contract's own §5.2 target-size token
+   * (24x24 CSS px). test/a11yRules.ts's `target-size` rule reads it, and every
+   * shortfall is a VISIBLE, reasoned `data-target-size-exception`, never a
+   * silent downgrade and never an allowlist. */
+  --target-min: 24px;
 
   --sidebar: var(--shell);
   --sidebar-foreground: var(--ink);
@@ -509,6 +553,14 @@
     font-variant-numeric: lining-nums tabular-nums;
   }
 
+  /* THE FALLBACK INDICATOR — kept deliberately under R3, not superseded by it.
+   * Read the FOCUS TREATMENT note in `:root` first. Every focusable element
+   * that does NOT carry the shadcn ring idiom (plain links, list rows,
+   * `<summary>`, any custom control) gets its only focus indicator from this
+   * rule, at the SOLID --focus token. The twelve ring carriers each set
+   * `outline-none` and draw the 70% halo instead; that is the whole precedence
+   * relationship, and deleting this rule to "finish" R3 would leave everything
+   * else in the product with no indicator at all. */
   :focus-visible {
     outline: var(--focus-ring-width) solid var(--focus);
     outline-offset: var(--focus-ring-offset);

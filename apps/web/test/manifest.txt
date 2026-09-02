@@ -58,6 +58,7 @@ components/clara/onboarding-checklist-a11y.test.tsx
 components/clara/onboarding-checklist-keyboard.test.tsx
 components/clara/onboarding-checklist.test.tsx
 components/clara/thread-live-clarify.test.tsx
+components/clara/thread-live-regions.test.tsx
 components/close/close-a11y.test.tsx
 components/close/close-components.test.tsx
 components/close/close-keyboard.test.tsx
@@ -68,6 +69,7 @@ components/common/money-input.journals.test.tsx
 components/common/money-input.opening.test.tsx
 components/common/money-input.staff-advance.test.tsx
 components/common/money-input.test.tsx
+components/common/p6-3-a11y.test.tsx
 components/common/route-error.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
@@ -236,6 +238,7 @@ tests/confirm-flash.test.ts
 tests/firm-scope-db-pins.test.ts
 tests/firm-scope-fourth-entrance.test.ts
 tests/firm-scope-surfaces.test.ts
+tests/focus-ring-contract.test.ts
 tests/focusRailSubscription.test.mjs
 tests/holding-state.test.ts
 tests/invite-courier-authority.test.ts

@@ -123,15 +123,32 @@ export function ClaraThreadView({
   return (
     <ThreadActionCoordinatorProvider session={auth}>
       <div className="flex h-full flex-col">
-      <div className="flex-1 space-y-3 overflow-y-auto p-3" role="log" aria-live="polite">
+      {/* DS-04 (FS-9 §3, P6-3) — THE SCROLL REGION IS NO LONGER THE LIVE REGION.
+          This element used to carry `role="log" aria-live="polite"` itself,
+          which made every descendant a live-region update: the six StateBanners
+          below (each already `role="alert"`/`"status"` of its own), and — the
+          sharper instance the conformance pass found — InterviewRunCard's
+          `role="log" aria-live="polite"` thread, nested INSIDE this log via
+          OnboardingChecklistCard. A `log` inside a `log` has no defined
+          announcement order, and the lane's first suggested fix (drop
+          `aria-live` from this container) would NOT have fixed it, because
+          `role="log"` carries an implicit `aria-live="polite"` on its own.
+          The fix is structural: the live region moved DOWN to wrap only the
+          transcript, so the card and the banners are siblings of it rather
+          than descendants. Visual order and the scroll behaviour are
+          byte-unchanged — `space-y-3` still spaces every child, and the
+          transcript wrapper below re-declares it for its own children. */}
+      <div className="flex-1 space-y-3 overflow-y-auto p-3">
         {/* T11: the onboarding checklist card — a stateful card INLINE in the
             message stream (R7, the Manus precedent), never a side panel.
-            N5 fix (rev-t11): this is the FIRST child of the scrolling log
-            (role="log", the SAME scroll region the transcript itself lives
-            in) — it scrolls out of view like any other item as messages
-            accumulate, exactly R7's "inline in the stream" shape; it is
-            NOT pinned above the scroll. Independent of threadId's own load
-            state — see this component's own `clientId` doc comment. */}
+            N5 fix (rev-t11): this is the FIRST child of the SCROLLING region —
+            it scrolls out of view like any other item as messages accumulate,
+            exactly R7's "inline in the stream" shape; it is NOT pinned above
+            the scroll. (It was described as the first child of the *log*; after
+            DS-04 the scroll region and the log are two different elements and
+            the card belongs to the scroll one. The R7 shape is unchanged.)
+            Independent of threadId's own load state — see this component's own
+            `clientId` doc comment. */}
         <OnboardingChecklistCard clientId={clientId} session={auth} />
         {/* P3 polish: the rail's own five state spellings joined the product
             ladder. "Sign in to talk with Clara" is a STATE, not a fault, so it
@@ -149,46 +166,98 @@ export function ClaraThreadView({
         {threadId && !notSignedIn && state.loadError && state.messagesLoaded && (
           <StateBanner tone="error">{t("loadError", { message: state.loadError })}</StateBanner>
         )}
-        {/* 裁-14 · the Clara welcome moment. The gate is a pure function in
-            `lib/clara/welcomeState.ts`, NOT an inline conjunction, because
-            "NEVER a loader" is a refusal branch and belongs somewhere every
-            branch can be driven with its own RED-before mutant (review law 1).
-            It reads the same `state` this component renders from, so nothing
-            here can drift out from under it. */}
-        {claraWelcomeVisible({ threadId, notSignedIn, state }) && <ClaraWelcome />}
-        {state.messages.map((msg) => (
-          // `enter-content`: a message ARRIVING is the archetypal "prevent a
-          // jarring change". It fires per new message only — a streaming
-          // assistant turn keeps its key, so the text grows without the
-          // bubble ever re-animating.
-          <div key={msg.id} className={cn("enter-content rounded-lg p-2 text-sm", msg.role === "user" ? "bg-muted" : "bg-clara-muted")}>
-            {/* `text-secondary-ink` on the Clara-role ground, not `text-muted-
-                foreground`: the live axe scan measures the latter at 4.49:1 on
-                `--clara-muted` — the exact blind spot `secondary-ink-on-clara-muted`
-                was pinned for after InterviewRunCard hit it (check-token-contrast.mjs
-                PAIR_SPECS). The user bubble keeps the muted ink it passes on. */}
-            <p className={cn("mb-1 text-xs font-medium", msg.role === "user" ? "text-muted-foreground" : "text-secondary-ink")}>
-              {t(`role.${msg.role}`)}
-            </p>
-            {msg.parts.map((part, i) => (
-              <PartSlot key={i} part={part} taskId={msg.task_id} session={auth} />
-            ))}
-          </div>
-        ))}
-        {/* The pending bubble is PROVISIONAL, spelled with a dashed edge rather than
-            `opacity-70`. The live axe scan measured that opacity at 2.64:1 on this
-            ground — an opacity multiplier is invisible to the token-contrast gate,
-            which reads declared token pairs and not composited pixels, so a real WCAG
-            AA failure sat here behind a green lint. The border says "not yet the DB's
-            row" without touching the ink. */}
-        {state.pendingUserParts && (
-          <div className="rounded-lg border border-dashed border-border bg-muted p-2 text-sm">
-            <p className="mb-1 text-xs font-medium text-muted-foreground">{t("role.user")}</p>
-            {state.pendingUserParts.map((part, index) => (
-              <PartSlot key={index} part={part} session={auth} />
-            ))}
-          </div>
-        )}
+        {/* DS-03 (FS-9 §3, P6-3) — the ONE place `aria-busy` belongs in this
+            component. This log PERSISTS across the load: it is mounted while
+            the transcript is still being read and the messages arrive into the
+            SAME element, so it can flip true -> false and release the queued
+            announcements, which is exactly what WAI-ARIA's busy state is for.
+            (LoadingState above deliberately does NOT carry it — see that
+            primitive's own header for why marking a transient placeholder busy
+            would suppress its own announcement.)
+
+            MERGE (P6-3 x #508): this wrapper is P6-3's; what it wraps is #508's.
+            The two trains changed the same block for unrelated reasons — P6-3
+            narrowed the live region off the scroll container (DS-04, nested live
+            regions), #508 added task/session threading, the provisional bubble
+            and the live-clarify group.
+
+            THE LOG WRAPS THE TRANSCRIPT AND ONLY THE TRANSCRIPT: the message map
+            and the provisional bubble. The live-clarify group and the
+            stream-status line are its SIBLINGS below — see the comment at the
+            closing tag for why, and do not move them back in: #508's own
+            parked-clarify cell reds naming `nested-live-region` if you do. */}
+        <div
+          className="space-y-3"
+          role="log"
+          aria-live="polite"
+          aria-busy={Boolean(threadId) && !notSignedIn && !state.messagesLoaded}
+        >
+          {/* 裁-14 · the Clara welcome moment (#514). The gate is a pure function in
+              `lib/clara/welcomeState.ts`, NOT an inline conjunction, because
+              "NEVER a loader" is a refusal branch and belongs somewhere every
+              branch can be driven with its own RED-before mutant (review law 1).
+              It reads the same `state` this component renders from, so nothing
+              here can drift out from under it.
+              MERGE (P6-3 x #514): INSIDE the log, unlike the clarify group — it
+              is the transcript's own empty state, it renders where the first
+              message will, and `ClaraWelcome` declares no live region of its own
+              (checked, not assumed), so nothing nests. */}
+          {claraWelcomeVisible({ threadId, notSignedIn, state }) && <ClaraWelcome />}
+          {state.messages.map((msg) => (
+            // `enter-content`: a message ARRIVING is the archetypal "prevent a
+            // jarring change". It fires per new message only — a streaming
+            // assistant turn keeps its key, so the text grows without the
+            // bubble ever re-animating.
+            <div key={msg.id} className={cn("enter-content rounded-lg p-2 text-sm", msg.role === "user" ? "bg-muted" : "bg-clara-muted")}>
+              {/* `text-secondary-ink` on the Clara-role ground, not `text-muted-
+                  foreground`: the live axe scan measures the latter at 4.49:1 on
+                  `--clara-muted` — the exact blind spot `secondary-ink-on-clara-muted`
+                  was pinned for after InterviewRunCard hit it (check-token-contrast.mjs
+                  PAIR_SPECS). The user bubble keeps the muted ink it passes on.
+                  MERGE NOTE: P6-3 had moved BOTH roles to secondary-ink for
+                  consistency; #508's conditional is kept because it is the
+                  merged decision and both arms clear AA on their own ground
+                  (muted-foreground 4.624:1 on bg-muted, secondary-ink 7.072:1 on
+                  bg-clara-muted). P6-3's `secondary-ink-on-muted` gate row is
+                  re-sourced accordingly rather than left naming this line. */}
+              <p className={cn("mb-1 text-xs font-medium", msg.role === "user" ? "text-muted-foreground" : "text-secondary-ink")}>
+                {t(`role.${msg.role}`)}
+              </p>
+              {msg.parts.map((part, i) => (
+                <PartSlot key={i} part={part} taskId={msg.task_id} session={auth} />
+              ))}
+            </div>
+          ))}
+          {/* The pending bubble is PROVISIONAL, spelled with a dashed edge rather than
+              `opacity-70`. The live axe scan measured that opacity at 2.64:1 on this
+              ground — an opacity multiplier is invisible to the token-contrast gate,
+              which reads declared token pairs and not composited pixels, so a real WCAG
+              AA failure sat here behind a green lint. The border says "not yet the DB's
+              row" without touching the ink.
+              MERGE NOTE: this CLOSES the residual P6-3 had recorded for the owner
+              (3.459:1 under the group-opacity model, 2.647:1 before P6-3's token
+              move — #508 measured the same 2.64 and removed the opacity outright,
+              which is the better fix). P6-3's "found, not fixed" line is retired. */}
+          {state.pendingUserParts && (
+            <div className="rounded-lg border border-dashed border-border bg-muted p-2 text-sm">
+              <p className="mb-1 text-xs font-medium text-muted-foreground">{t("role.user")}</p>
+              {state.pendingUserParts.map((part, index) => (
+                <PartSlot key={index} part={part} session={auth} />
+              ))}
+            </div>
+          )}
+        </div>
+        {/* OUTSIDE the log, deliberately, and the merge is what proved it has to
+            be. `ClarifyCard` owns a `role="status"` for its answered
+            confirmation; inside the log that is a live region inside a live
+            region, which is the DS-04 defect this train exists to remove — and
+            #508's own a11y assertion caught it the moment the two branches met,
+            through the `nested-live-region` rule this train added. The card is a
+            stateful, self-announcing WIDGET, exactly like OnboardingChecklistCard
+            above, so it belongs beside the transcript rather than in it, and its
+            own status region stays the precise announcer for "answered".
+            Visual order is unchanged: this still sits between the provisional
+            bubble and the stream-status line. */}
         {liveClarifyParts.length > 0 && (
           <div className="enter-content rounded-lg bg-clara-muted p-2 text-sm">
             <p className="mb-1 text-xs font-medium text-secondary-ink">{t("role.assistant")}</p>
@@ -203,7 +272,14 @@ export function ClaraThreadView({
             ))}
           </div>
         )}
-        {streamStatusLabel(state, t) && <p className="text-xs text-muted-foreground italic">{streamStatusLabel(state, t)}</p>}
+        {/* Also outside the log, and it gains its own `role="status"`: it was
+            announced before only because it sat inside the log, and moving the
+            clarify group out would have left it the last thing in a region it
+            does not belong to. It is a connection STATE, not a transcript
+            entry. */}
+        {streamStatusLabel(state, t) && (
+          <p role="status" className="text-xs text-muted-foreground italic">{streamStatusLabel(state, t)}</p>
+        )}
         {/* Kept as two INDEPENDENT conditions, deliberately: `retryAvailable`
             can stand alone next to `streamStatusLabel`'s own "Connection
             lost." line above, and folding the Retry into the banner would
@@ -269,7 +345,14 @@ export function ClaraThreadView({
           // fixed 2/3 rows. What was drifting was only the border token —
           // `border-border` (a divider) where every other field in the product
           // uses `border-input` (a control edge).
-          className="motion-fast min-w-0 flex-1 resize-none rounded-lg border border-input bg-background p-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+          // MERGE (P6-3 x #508): both intents, neither dropped — #508's
+          // `min-w-0` (its composer-attachment row needs the flex child to be
+          // shrinkable) AND this train's `ring-ring/70` (裁-1's ruled alpha;
+          // #508 branched before the recut and carries the old /50). The carrier
+          // census in tests/focus-ring-contract.test.ts reds on the /50, so
+          // taking main's line wholesale here would have been caught — but it
+          // would have been caught as a failure rather than as a merge decision.
+          className="motion-fast min-w-0 flex-1 resize-none rounded-lg border border-input bg-background p-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-50"
         />
         <Button type="submit" disabled={!threadId || notSignedIn || busy || attachments.blocked || !draft.trim()}>
           {busy ? t("sending") : t("send")}
