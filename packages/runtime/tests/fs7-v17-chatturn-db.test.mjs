@@ -106,7 +106,7 @@ let fixture;
 // reaches 160), the cluster already carries those two roles from the
 // estate's earlier, separate, already-complete pass: pg_roles reports 16,
 // not 14, and 0154 -- merged, numbered, and out of this file's authority to
-// edit -- refuses with CLR03 `migration 0154_binding_proposal_pr_1 failed`.
+// edit -- refuses with CLR10 `migration 0154_binding_proposal_pr_1 failed` (CLR03 is this file's other code, wake_task_unbound).
 // Reproduced deterministically (same "14 to 16" text, same two roles) on a
 // throwaway rig by running any two full migrate() cycles back to back on one
 // Postgres server; confirmed byte-identical to CI run 33585826277's own
