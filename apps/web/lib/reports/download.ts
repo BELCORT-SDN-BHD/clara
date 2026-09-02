@@ -147,10 +147,14 @@ export function triggerDownload({ blob, filename }: { blob: Blob; filename: stri
   a.style.display = "none";
   document.body.appendChild(a);
   a.click();
-  a.remove();
-  // Revoked on the next tick rather than synchronously: Safari has historically cancelled an
-  // in-flight download whose object URL was revoked in the same task.
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  // THE ANCHOR AND THE OBJECT URL BOTH OUTLIVE THE CLICK BY A TICK. Removing the element or
+  // revoking the URL in the SAME task has historically cancelled an in-flight download in more
+  // than one engine, and the failure mode is the worst kind: the click looks like it worked and
+  // no file arrives. A tick costs nothing and removes the whole class.
+  setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 0);
 }
 
 /** Fetch and save, the one call a surface makes. */
