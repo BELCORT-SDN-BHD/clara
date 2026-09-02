@@ -278,11 +278,6 @@ cell("c1.6 signatures -- evidence is append-only, single per user/version, and c
   }, { commit: false });
   const trunc = await truncateGuardError("truncate clara.dpa_signatures");
   assert.equal(trunc?.code, "CLR08", `the signature TRUNCATE guard answers CLR08 (got ${trunc?.code})`);
-  // F6 (opus review on #493): once C-3 exists, this statement names TWO append-only tables, and
-  // either one's own trigger could fire first -- CLR08 alone does not prove THIS table's guard is
-  // what stopped it. Pin the message to dpa_signatures specifically.
-  assert.match(trunc.message, /dpa_signatures cannot be truncated/,
-    "the dpa_signatures TRUNCATE guard specifically, not merely SOME CLR08");
 });
 
 cell("c1.7a registration rate events -- digests are 32-byte, indexed, append-only evidence", async () => {

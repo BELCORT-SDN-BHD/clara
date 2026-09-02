@@ -2,8 +2,8 @@
 -- and OTP evidence, the minimal beta billing declaration, and the two tightly confined doors.
 -- This file is deliberately UNNUMBERED; its migration number is claimed only at merge.
 --
--- C-1 deliberately shipped sign_dpa's storage but deferred the door to this cohort. C-3 heals
--- that acknowledged build-order drift. C-2's apply_stripe_events body is not recut here: the
+-- C-1 deliberately shipped the DPA storage but deferred its application doors to this cohort.
+-- C-3 heals that acknowledged build-order drift. C-2's apply_stripe_events body is not recut here: the
 -- existence of firm_registration_payments activates its already-deployed dynamic positive path.
 
 set local statement_timeout = '5min';
@@ -76,7 +76,7 @@ begin
    where n.nspname='clara' and p.proname in (
      '_tf_confirmation_attempt_settle_stamp','_tf_frp_consumption_stamp',
      'claim_confirmation_attempt','claim_paid_firm','open_checkout_intent',
-     'record_checkout_session','settle_confirmation_attempt','sign_dpa');
+     'get_current_dpa_document','record_checkout_session','settle_confirmation_attempt','sign_dpa');
   if v_names <> '(none)' then
     raise exception 'checkout C-3 prestate: function cohort must be wholly absent; found %',v_names
       using errcode='CLR10';
@@ -318,6 +318,21 @@ create trigger t_confirmation_attempts_no_truncate before truncate on clara.conf
 -- ==============================================================================================
 -- 4. HUMAN DOORS. Pre-firm idempotency is structural; no firm-scoped op_receipt can exist yet.
 -- ==============================================================================================
+-- Frontend home: apps/web/lib/registration/dpa-doors.ts. This is a function door rather than a
+-- `_visible` view because the current beta DPA is one global row with no tenant predicate or
+-- masked projection to express. Exact EXECUTE ACLs preserve C-1's zero-direct-table-grant wall.
+create function clara.get_current_dpa_document()
+returns table(version text,body text,body_sha256 bytea,published_at timestamptz)
+  language plpgsql stable security definer set search_path=clara,pg_temp as $$
+begin
+  return query
+  select d.version,d.body,d.body_sha256,d.effective_from
+    from clara.dpa_documents d
+   where d.effective_to is null;
+end $$;
+revoke all on function clara.get_current_dpa_document() from public;
+grant execute on function clara.get_current_dpa_document() to clara_authenticated;
+
 create function clara.sign_dpa(p_version text,p_body_sha256 bytea,p_op_key text) returns jsonb
   language plpgsql security definer set search_path=clara,pg_temp as $$
 declare
@@ -849,7 +864,7 @@ begin
     from pg_class c join pg_namespace n on n.oid=c.relnamespace
     cross join lateral aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a
    where n.nspname='clara'
-     and c.relname in ('billing_plans','confirmation_attempts','firm_registration_payments')
+     and c.relname in ('billing_plans','confirmation_attempts','dpa_documents','firm_registration_payments')
      and a.grantee<>c.relowner;
   if v_n<>0 then
     raise exception 'checkout C-3 tail: % non-owner direct table grant(s) exist',v_n
@@ -908,6 +923,7 @@ begin
   foreach v_sig in array array[
     'clara._tf_frp_consumption_stamp()'::regprocedure,
     'clara._tf_confirmation_attempt_settle_stamp()'::regprocedure,
+    'clara.get_current_dpa_document()'::regprocedure,
     'clara.sign_dpa(text,bytea,text)'::regprocedure,
     'clara.open_checkout_intent(uuid,bytea,text)'::regprocedure,
     'clara.record_checkout_session(uuid,text,text)'::regprocedure,
@@ -925,7 +941,16 @@ begin
     end if;
   end loop;
 
+  select count(*) into v_n from pg_proc p
+   where p.oid='clara.get_current_dpa_document()'::regprocedure
+     and p.provolatile='s' and p.proretset;
+  if v_n<>1 then
+    raise exception 'checkout C-3 tail: DPA read door is not STABLE set-returning'
+      using errcode='CLR10';
+  end if;
+
   foreach v_sig in array array[
+    'clara.get_current_dpa_document()'::regprocedure,
     'clara.sign_dpa(text,bytea,text)'::regprocedure,
     'clara.open_checkout_intent(uuid,bytea,text)'::regprocedure,
     'clara.record_checkout_session(uuid,text,text)'::regprocedure,
@@ -1092,5 +1117,5 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice 'checkout C-3 tail: OK -- minimal G2 billing row; payment evidence with exactly stripe-event + registration uniqueness and one complete consumption stamp; OTP attempts count before verification and settle once; four authenticated doors + exact two-verb auth-wall lane; folded claim calls _create_firm_core and emits firm.created then firm_registration.paid; active taxonomy paired; forced owner-only RLS and zero app table grants; firm_admissions/create_firm untouched; C-2 applier unrecut.';
+  raise notice 'checkout C-3 tail: OK -- minimal G2 billing row; payment evidence with exactly stripe-event + registration uniqueness and one complete consumption stamp; OTP attempts count before verification and settle once; five authenticated doors (including the current-DPA body+sha read) + exact two-verb auth-wall lane; folded claim calls _create_firm_core and emits firm.created then firm_registration.paid; active taxonomy paired; forced owner-only RLS and zero app table grants; firm_admissions/create_firm untouched; C-2 applier unrecut.';
 end $tail$;

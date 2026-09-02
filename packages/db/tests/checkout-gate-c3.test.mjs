@@ -362,6 +362,58 @@ cell("c3.1 catalog -- exact C-3 tables, two payment uniques, seed, RLS and grant
     local_key: "clara-beta-2026", name: "Clara Beta", amount_cents: 0,
     currency: "MYR", amounts_ruled: false, is_current: true,
   }]);
+  const dpaDoor = await rootQuery(
+    `select p.prosecdef,p.provolatile,p.proretset,pg_get_userbyid(p.proowner) as owner,
+            p.proconfig,
+            (array_agg(coalesce(r.rolname,'PUBLIC') order by coalesce(r.rolname,'PUBLIC'))
+              filter (where a.privilege_type='EXECUTE'))::text[] as execute_acl
+       from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+       left join pg_roles r on r.oid=a.grantee
+      where p.oid='clara.get_current_dpa_document()'::regprocedure
+      group by p.oid`,
+  );
+  assert.deepEqual(dpaDoor.rows, [{
+    prosecdef: true,
+    provolatile: "s",
+    proretset: true,
+    owner: "clara_fn_owner",
+    proconfig: ["search_path=clara, pg_temp"],
+    execute_acl: ["clara_authenticated", "clara_fn_owner"],
+  }], "the DPA read door is stable, definer-owned and executable by authenticated callers only");
+  const directDpaGrants = await rootQuery(
+    `select count(*)::int as n from information_schema.role_table_grants
+      where table_schema='clara' and table_name='dpa_documents'
+        and grantee<>'clara_fn_owner'`,
+  );
+  assert.equal(directDpaGrants.rows[0].n, 0,
+    "C-1's owner-only dpa_documents base-table grant posture remains exact");
+  await expectRefusal(PG.insufficientPrivilege, () => roleQuery(
+    ROLES.authenticated,
+    "select version,body,body_sha256,effective_from from clara.dpa_documents",
+  ), /permission denied/, "authenticated caller has no direct DPA table read");
+  const currentDpa = await rootQuery(
+    `select version,body,body_sha256,effective_from as published_at
+       from clara.dpa_documents where effective_to is null`,
+  );
+  const visibleDpa = await roleQuery(
+    ROLES.authenticated,
+    "select version,body,body_sha256,published_at from clara.get_current_dpa_document()",
+  );
+  assert.equal(visibleDpa.rowCount, 1);
+  assert.deepEqual(visibleDpa.rows, currentDpa.rows,
+    "authenticated applicants read exactly the current body, sha and publication timestamp");
+  assert.deepEqual(
+    visibleDpa.rows[0].body_sha256,
+    createHash("sha256").update(visibleDpa.rows[0].body, "utf8").digest(),
+    "the returned body_sha256 matches sha256(body)",
+  );
+  // The exact execute_acl above positively excludes PUBLIC (the anonymous posture). This
+  // execution proves a second, named application role is refused rather than trusting absence.
+  await expectRefusal(PG.insufficientPrivilege, () => roleQuery(
+    ROLES.agentRo,
+    "select * from clara.get_current_dpa_document()",
+  ), /permission denied/, "non-authenticated application role cannot read the DPA door");
   const bypass = await rootQuery(
     "select rolname from pg_roles where rolbypassrls and rolname like 'clara%'",
   );
