@@ -47,10 +47,15 @@ Heavy implementation may require detailed technical reasoning. The orchestrator 
   Pin every dispatch to a full model ID and explicit effort.
   Use independent verification and deterministic quality gates.
  2. **Codex lane:** for execution-heavy and objectively testable implementation, debugging, test fixing. Prefer a **direct `codex exec` via Bash** (run in the background + watch its output file) — the `codex:codex-rescue` companion queue has been **unreliable** (it has stalled for hours at "starting"). Prefer `--model gpt-5.6-sol --effort xhigh`. Keep Codex tasks focused and specific.
-- **Grill only when it changes scope.** Use the grilling skill (`/grillme`,`/grill-with-docs`,`/loop-me`) when ambiguity would change *what* gets built or its acceptance — not for every bounded task whose spec is already clear.
+- **Grill only when it changes scope.** Use the grilling skill (`/grill-me`,`/grill-with-docs`,`/loop-me`) when ambiguity would change *what* gets built or its acceptance — not for every bounded task whose spec is already clear.
 - After a worker (Codex or a native lanes) finishes, inspect the result yourself before accepting it. Do not blindly trust worker output.
 
 ## Cross-model review
+
+**2026-09-01, 裁-111:** the cross-family Codex adversarial review leg is SUSPENDED until beta
+live; the ONE fresh-context opus review is the complete gate; Codex remains a BUILD lane; every
+frontend train also walks its journey in a real browser on the built app (裁-86). `PROGRESS.md`
+is the authority for when this changes.
 
 When a substantial change warrants an independent review pass, use the review mechanisms that are actually available in this harness.
 - **Methodlogy/Philosophy** — The engineer thinking in review an inplementation: refer mattpock's skill `/code-reviewbymatt` in aspect of the procedures, coding standards and bars of code review.
