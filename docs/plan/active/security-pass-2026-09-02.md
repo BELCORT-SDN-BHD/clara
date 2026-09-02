@@ -5,11 +5,11 @@ Nothing under the repo or its worktrees was edited.
 
 | | |
 |---|---|
-| Scope A | PR #493 `coa/fs4-c3-folded-door` @ `8d3902ae` — migration `packages/db/migrations/0161_checkout_gate_c3_folded_door.sql`, nine new objects, against merged `0158` (C-1) and `0160` (C-2) |
+| Scope A | PR #493 coa/fs4-c3-folded-door @ `8d3902ae` — migration packages/db/migrations/0161_checkout_gate_c3_folded_door.sql, nine new objects, against merged `0158` (C-1) and `0160` (C-2) |
 | Scope B | `packages/runtime/lib/authz.mjs`, `packages/runtime/src/chatRoutes.ts`, `packages/runtime/src/streamRoute.ts`, `clara.begin_chat_turn`, the share door, `apps/web/lib/clara/*` |
 | Scope C | the pre-session confirm surface **as shipped on `origin/main` `944cb586`** (NOT the stale local `main` `33e94855` — `#499` and `#495` landed after it) |
 | Rig | throwaway `postgres:17` in WSL, `secpass-rig`, `127.0.0.1:56074`, migrated `0001→0161` (156 migrations) + seeded. Password generated in-container, env-only, never printed. **Torn down: y** (see the last line) |
-| Instruments | `scratchpad/lanes/sec-pass/{attack-a,attack-b,probe-b,probe-b2,census}.mjs` — my own batteries, not the author's `checkout-gate-c3.test.mjs` |
+| Instruments | `scratchpad/lanes/sec-pass/{attack-a,attack-b,probe-b,probe-b2,census}.mjs` — my own batteries, not the author's checkout-gate-c3.test.mjs |
 
 **Bottom line: no BLOCKER against the nine new objects.** Every tenancy, ownership, replay and
 ACL wall I attacked held on the rig, including the ones the brief named as likely soft spots
@@ -204,7 +204,7 @@ info K payment consumed_at after the refusal = null (money taken, no firm, no un
 ```
 
 The refusal is correct and the transaction rolls back cleanly. What is missing is anything that
-can *see* the result. Census on the rig (`census.mjs`):
+can *see* the result. Census on the rig (census.mjs):
 
 ```
 functions naming firm_registration_payments: apply_stripe_events, claim_paid_firm, open_checkout_intent
@@ -220,7 +220,7 @@ row either — C-2's applier processed it perfectly. It is invisible.
 
 **Refutation attempted.** I checked whether this state is only reachable by a contrived setup. It
 is not: the applicant pays, then accepts a colleague's invite (or is added by `add_member`) before
-returning to `/checkout/success`. That is an ordinary Tuesday for a two-person firm. I also
+returning to /checkout/success. That is an ordinary Tuesday for a two-person firm. I also
 checked whether the replay branch rescues them — it does not; `v_req.firm_id` is still null, so
 control reaches `_create_firm_core` every time.
 
@@ -309,8 +309,8 @@ defect — recorded so the support runbook expects the call.
 `packages/db/deploy/roles-bootstrap.sql:20-33` (as amended by this PR) reads *"the census pre-0160
 reproduced exactly (12 clara_% roles + clara_storage_docs); 0160 adds two more and C-3 adds two
 more (18 schema-lane roles + clara_storage_docs)"*. 12 + 2 + 2 = 16, not 18. Measured on the rig
-(`census.mjs`): **18** `clara_%` roles after `0161`, `clara_storage_docs` absent (it is
-`deploy/storage-provision.sql`'s). So the *final* number is right and the two intermediate
+(census.mjs): **18** `clara_%` roles after `0161`, `clara_storage_docs` absent (it is
+`packages/db/deploy/storage-provision.sql`'s). So the *final* number is right and the two intermediate
 baselines are stale — pre-`0160` is 14, not 12. The number a drift check would read is correct;
 the arithmetic a reader would check it against is not.
 
@@ -318,7 +318,7 @@ the arithmetic a reader would check it against is not.
 
 ### Surface A — what held (positive evidence, all measured)
 
-Every one of these is a `REFUSED-OK` line from `attack-a.mjs` / `attack-b.mjs`, not an inference.
+Every one of these is a `REFUSED-OK` line from attack-a.mjs / attack-b.mjs, not an inference.
 
 - **Cross-registration claim.** `B claims A's PAID registration -> CLR04 not your registration
   request`. `N claims using M's paid registration id -> CLR04`.
@@ -505,7 +505,7 @@ banned-account oracle) by collapsing the `expired` classification.
 So the code-entry path is not the exposure. **Three other things are**, and they are the reason
 the FS-10 acceptance line — `PROGRESS.md:385`, *"self-serve signup unreachable in the deployed
 build until the wall is wired"* — has to be read as covering the whole `/signup` surface, not just
-`/auth/confirm`:
+/auth/confirm:
 
 1. **`/signup` step 1 sends email from the browser, unwalled.**
    `apps/web/components/entry/signup-account-form.tsx:1` is `"use client"` and `:167` calls
@@ -545,7 +545,7 @@ Tick every line before the deployed origin serves `/signup` at all. Items 1–4 
 FS-10 acceptance line itself; 5–10 are what this pass adds.
 
 1. [ ] **The C-5 runtime route exists and is wired**, replacing both stubs in
-   `confirmation-wall.ts` — otherwise `/auth/confirm` refuses every legitimate applicant.
+   `confirmation-wall.ts` — otherwise /auth/confirm refuses every legitimate applicant.
 2. [ ] **That route performs claim → `verifyOtp` → settle inside one server request.**
    `attempt_id` is request-scoped and never crosses the wire to a client; there is no
    client-callable settle endpoint; the outcome is derived from `verifyOtp`, never from the
@@ -593,7 +593,7 @@ FS-10 acceptance line itself; 5–10 are what this pass adds.
   `apply_stripe_events` directly as `clara_stripe_webhook`. That deliberately skips C-5's
   signature verification (`W-A1`/`W-A2`), which does not exist yet.
 - **A-N1 (the NULL `retry_after_seconds` race) is hand-traced, not reproduced.**
-- **I did not run the author's `packages/db/tests/checkout-gate-c3.test.mjs`.** By design — an
+- **I did not run the author's packages/db/tests/checkout-gate-c3.test.mjs.** By design — an
   independent battery is worth more than re-running the instrument under review — and my rig is
   now polluted with attack state (registrations forced back to `open` by superuser) that suite
   would rightly object to. CI's estate suite covers it on a clean throwaway.
@@ -601,7 +601,7 @@ FS-10 acceptance line itself; 5–10 are what this pass adds.
   checklist, not an exercised journey.
 - **Absence claims** in this report name their instrument inline. The two broadest: the `livemode`
   census is ripgrep over the whole repo across `*.sql|*.ts|*.tsx|*.mjs|*.js|*.md`, excluding
-  `node_modules` and `.claude/worktrees`; the "no operator read door over
+  `node_modules` and .claude/worktrees; the "no operator read door over
   `firm_registration_payments`" claim is a `pg_proc.prosrc LIKE` census plus a `pg_class` viewdef
   scan on the live rig, which cannot see a run-time-assembled relation name (none exists in this
   cohort) but does see every function and view that names the table.

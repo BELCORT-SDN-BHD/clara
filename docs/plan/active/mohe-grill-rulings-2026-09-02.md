@@ -79,7 +79,7 @@ Beta-gating from this ruling: **task #14** the float-hook silent-zero across eve
 widened to opening balances (`apps/web/components/journals/use-amount-input.ts:42-45`; folded
 into P6-4) · **task #15** the Clara rail inset (the two-pane law; `ClaraRail.tsx:61` is a `fixed`
 overlay open by default) · **task #16** P4-6 nav wiring + the reverse-direction nav gate
-(`/admin/members` was an orphan route: no nav link, no ⌘K row) · **P6-3** the a11y + token finish,
+(/admin/members was an orphan route: no nav link, no ⌘K row) · **P6-3** the a11y + token finish,
 widened to the a11y items this sitting's scan found (the skip link, `aria-busy` on loading
 regions, the nested live regions in the Clara thread, the dropdown menu's reduced-motion arm,
 the drafts-queue focus halo) · **P6-4** ONE shared signed money input · **P6-5** the agentic
@@ -125,7 +125,7 @@ gate framework cannot express it), ≈0.3 units, applying at the Wave-G reset. C
 ## 裁-120 · One extra opus security pass over #493's doors + the runtime chat authorisation (owner, per recommendation)
 Beyond #493's own fresh-context review (which carries the security lens as standard), one
 read-only opus pass over the nine new C-3 objects, `packages/runtime/lib/authz.mjs`,
-`src/chatRoutes.ts`, the session-continuation authority and the thread↔client identity shape
+`packages/runtime/src/chatRoutes.ts`, the session-continuation authority and the thread↔client identity shape
 (IA-06/IA-10 of the scan), filed as `docs/plan/active/security-pass-2026-09-02.md` so the
 evidence survives the session. Cost: one review lane beside the build lanes.
 
@@ -141,7 +141,7 @@ bump. ③ **BELCORT's `is_operator` flag is set at the Wave-G reset as its own c
 G1 three-switch ceremony) with 裁-76 (which moved that ceremony post-beta) — the operator-walled
 surfaces (`approve_firm_registration`, the Stripe problem verbs, `set_wake_source_enabled`) are
 beta surfaces. *Owner clarification recorded:* the operator MECHANISM is built (`firms.is_operator`
-+ `uq_firms_one_operator`, 0133; the walled verbs in 0133/0141/0145/0160; `/admin/registrations`
++ `uq_firms_one_operator`, 0133; the walled verbs in 0133/0141/0145/0160; /admin/registrations
 in `apps/web`); only the one-time flagging act is outstanding, and nothing about it is handled
 "from coding" — after the flag, BELCORT's owner account operates through the product's audited
 doors. Under 裁-68 self-serve paid signups need no operator approval; the queue is the fallback
@@ -163,7 +163,7 @@ redundant worktrees removed — with one INCIDENT: `git worktree remove --force`
 lane's `node_modules` junction and gutted the main checkout's `apps/web` install (tracked files
 untouched; repaired by a link-aware clean-remove + `pnpm install --frozen-lockfile`; the 09-01
 lesson that called the command junction-safe is CORRECTED — the only safe primitive is "unlink
-every reparse point first, then delete"; `scratchpad/wt-clean.mjs` is the pattern, and the
+every reparse point first, then delete"; scratchpad/wt-clean.mjs is the pattern, and the
 post-flight is a node_modules PROBE, never `git status` alone). Ruled: (a) the WSL disk-file
 compaction (66 GB file, 16 GB used inside) is scheduled in the first idle window after the
 cascade lands — the owner's elevated `diskpart`, runners stopped for the minutes it takes;
@@ -184,7 +184,7 @@ The scan found plaintext credentials in machine-local agent configs (a GitHub OA
 21st.dev key stored twice and already reported reset). **Owner amendment: the tokens still in
 use are NOT rotated** ("有效的 token 不用 rotate") — recorded as an accepted residual in Known
 issues, outside every repo gate's scope. Per recommendation: `.codex/config.toml` (two MCP mounts,
-no secret; Codex CLI reads the project-local file) is TRACKED; `.agents/` (the generated Codex
+no secret; Codex CLI reads the project-local file) is TRACKED; .agents/ (the generated Codex
 skills mirror) is gitignored, and its five corrupted skill bodies — rewritten to name models that
 do not exist ("Codex-sonnet-5", "Codex-opus-5", a `Codex --bg` command) — were restored from the
 tracked `.claude/skills` sources the same morning.

@@ -26,7 +26,7 @@ grep/read evidence, not as adversarially-confirmed claims.
 > **AUTHORING NOTE (resolved at filing, 2026-09-02).** This pass was commissioned the same
 > morning the owner ruled 裁-115…128, and the lane correctly refused to treat those citations as
 > verified because the ledger entries were not yet on any branch it could read (they were authored
-> on `harness/checkpoint-truing-2026-09-02` while the lane ran). The ledger section — `docs/plan/active/mohe-grill-rulings-2026-09-02.md`
+> on harness/checkpoint-truing-2026-09-02 while the lane ran). The ledger section — `docs/plan/active/mohe-grill-rulings-2026-09-02.md`
 > §"The 2026-09-02 checkpoint sitting" — lands in the SAME PR as this record, so every 裁-116 /
 > 裁-117 / 裁-128 citation below now resolves; the lane's inline markers were
 > removed by the orchestrator at filing and nothing else in the lane's text was changed. The lane's
@@ -42,9 +42,9 @@ grep/read evidence, not as adversarially-confirmed claims.
 | Tailwind-default-palette ban | 0 violations, same scope | DS-16 |
 | Brand fonts | byte-identical to reference (`sha256sum` match on all 3 `.ttf`) | DS-20 |
 | Light-theme-only / desktop-first | 0 real `dark:` variants (3 hits are all inside one strip-comment); no distinct mobile layout, graceful `sm:` stacking only | `apps/web/components/ui/dropdown-menu.tsx:14`; DS-20 |
-| Zero perpetual animation | 0 `animate-spin/pulse/bounce/ping/infinite` hits | DS-20 |
+| Zero perpetual animation | 0 animate-spin/pulse/bounce/ping/infinite hits | DS-20 |
 | Token contrast gate | 38 pairs, all PASS, tightest 4.64:1 (muted-foreground on identity-canvas) | `apps/web/scripts/check-token-contrast.mjs`; DS-17 |
-| next-intl coverage | 185 of 221 non-test `.tsx` under `components/` import next-intl | DS-08 instrument |
+| next-intl coverage | 185 of 221 non-test `.tsx` under components/ import next-intl | DS-08 instrument |
 | Two-level IA (Q3) | firm altitude / client altitude skeleton built and correctly cited | `mohe-grill-rulings-2026-08-27.md:29-31`; IA-13 (CONFIRMED) |
 | Client switch as a security event, at the PAGE level | `<div key={clientId}>` unmount/remount in `ClientScopeProvider` genuinely clears page-scoped state on a client-to-client navigation | `apps/web/components/client-scope-provider.tsx:10-14,66`; IA-02 (CONFIRMED) — **the Clara rail does NOT inherit this; see §3** |
 | All 26 part kinds render | catalog's own count: "24 render-branch entries + the 2 STATUS_RESOLVER_TYPES … = 26 total, matching the live `ClaraPart` union … exactly"; unknown parts fail closed at compile time (`AllCovered`/`NoExtra`) AND at runtime (visible fallback, never a silent drop) | `apps/web/lib/parts/catalog.ts:24-30,257-260`; `apps/web/components/parts/PartRenderer.tsx:235-246`; IC-11 (CONFIRMED) |
@@ -74,7 +74,7 @@ authority, marked at its own site, not silently absorbed):
   carries five self-declared "PORT DRIFT, CONFORMED (contract §N)" comments (radius scale ratios→literals,
   a `--text-xl` override, motion 120/180/240→120/160/200 + a new `--ease-out`, the global
   reduced-motion duration-zeroing removed for per-utility arms, five new `@utility` rules) — every
-  one moves TOWARD `01-TOKEN-CONTRACT.md` and AWAY from both the design-system reference and the g6
+  one moves TOWARD 01-TOKEN-CONTRACT.md and AWAY from both the design-system reference and the g6
   prototype, which independently agree with each other and disagree with the contract. None of the
   five carries a 裁/R/Q number (see §4). `apps/web/app/globals.css:96-118,129,217-372`; DS-15.
 
@@ -104,7 +104,7 @@ Each row: file:line · the contract row it fails · the train that owns it · th
 
 | Item | File:line | Contract row | Gating ruling |
 |---|---|---|---|
-| Focus ring still 50% alpha, not the ruled 70% | `apps/web/app/globals.css` (ring utilities); 12 `ring-ring/50` hits across 11 files | R3/裁-1 target alpha | `mohe-grill-rulings-2026-08-28.md:12-18` (裁-1) |
+| Focus ring still 50% alpha, not the ruled 70% | `apps/web/app/globals.css` (ring utilities); 12 ring-ring/50 hits across 11 files | R3/裁-1 target alpha | `mohe-grill-rulings-2026-08-28.md:12-18` (裁-1) |
 | `ring-offset` unbuilt | 0 hits anywhere in `apps/web/{components,app}` | 裁-64③ | `mohe-grill-rulings-2026-08-30.md:206` |
 | `--input` unchanged | `apps/web/app/globals.css:279` (`--input: #c7c5bd;`) | 裁-2 4c | `mohe-grill-rulings-2026-08-28.md` |
 | WCAG 2.2 target-size (2.5.8) gate unbuilt | 0 hits in `apps/web/test/` | 裁-13 | `mohe-grill-rulings-2026-08-28.md:190-196` |
@@ -115,7 +115,7 @@ All four: `docs/plan/active/fe-train-plan-2026-08-30-orders-p6.md:136-215` (P6-3
 
 | Item | File:line | Severity/status | Gating |
 |---|---|---|---|
-| Dropdown menu animates under `prefers-reduced-motion` | `apps/web/components/ui/dropdown-menu.tsx:69,163` — `motion-safe:` missing on the `:69` popup (only reachable site; `:163`'s submenu is dead code, `grep -rn "DropdownMenuSub"` excl. primitive → 0 hits); hardcodes `duration-100` at both | CONFIRMED, live blast radius = one dropdown on `/admin/members` | candidate (DS-01) |
+| Dropdown menu animates under `prefers-reduced-motion` | `apps/web/components/ui/dropdown-menu.tsx:69,163` — `motion-safe:` missing on the `:69` popup (only reachable site; `:163`'s submenu is dead code, `grep -rn "DropdownMenuSub"` excl. primitive → 0 hits); hardcodes `duration-100` at both | CONFIRMED, live blast radius = one dropdown on /admin/members | candidate (DS-01) |
 | No skip link | `apps/web/components/common/page-shell.tsx:23`, `apps/web/app/(entry)/layout.tsx:40` — neither `<main>` carries an `id`; landmark half (nav/aside/header) IS built | CONFIRMED but downgraded — belongs beside 裁-13 as P6-polish, not gating | no (DS-02) |
 | `aria-busy` never rendered | 0 hits across `apps/web`; 55 `<LoadingState` sites, sole loading primitive; only StateBanner has `role=` computed, LoadingState has none | CONFIRMED, dropped port (the authority's own screens implement it) | candidate (DS-03) |
 | Nested live regions | `ClaraThreadView.tsx:75` (`role="log" aria-live="polite"`) contains 6 StateBanner sites, not 8; **sharper instance found**: `InterviewRunCard.tsx:257` is its own `role="log" aria-live="polite"`, nested INSIDE ClaraThreadView's log via `OnboardingChecklistCard.tsx:218` — role="log" inside role="log", which the lane's own suggested fix (drop aria-live from the outer container) would not fix | CONFIRMED, corrected and strengthened | candidate (DS-04) |
@@ -150,7 +150,7 @@ the firm-altitude client-reachability half is unordered anywhere. `apps/web/lib/
 ### P6-6 — identity, 4/4 owed (not 3/4)
 
 `apps/web` ships **zero** Ledger Fold or mascot implementation by construction-path measurement (0
-`<svg>`, 0 tracked image files under `apps/`, no `next/image` component use, `public/` holds only
+`<svg>`, 0 tracked image files under `apps/`, no next/image component use, public/ holds only
 3 fonts + 2 licenses) — brand-lockup.tsx says so in-source. The ClaraBook copy pass has never
 started in the message catalog (`git log -S "ClaraBook" -- apps/web/messages/` = 0 commits): 7
 `en.json` strings put the AGENT's name in the PLATFORM's slot (lines 3, 4, 21, 33, 247, 1335, 1344)
@@ -190,15 +190,15 @@ order reads "taken from structural (P4-3) to **finished**" and only the structur
 
 ### task #16 — nav wiring + the reverse-direction nav gate
 
-`/admin/members` — the built P4-4 RBAC roster/invite surface — is reachable only by typing the URL:
-absent from `firm-nav.tsx`'s 5-entry sidebar, `admin/page.tsx`'s 3 sub-links, `FIRM_ROUTES`' 8 ids,
+/admin/members — the built P4-4 RBAC roster/invite surface — is reachable only by typing the URL:
+absent from `firm-nav.tsx`'s 5-entry sidebar, admin/page.tsx's 3 sub-links, `FIRM_ROUTES`' 8 ids,
 and every i18n nav label. `routes.test.ts`'s 4 assertions are all manifest→tree, so an orphan page
 passes green. **Corrected: this is not a new discovery** — it is already recorded
 (PROGRESS-503.md:102, "P4-6 nav wiring + the reverse-direction nav gate (alignment gap #4)"),
 already owned by the merged, unstarted, now-unblocked work order P4-6
 (`fe-train-plan-2026-08-30-orders-p4.md:447`), and already named beta-gating by the owner on
 2026-09-01 (`mohe-grill-rulings-2026-09-01-pm.md:372-373`, task #16), one day before this scan. A
-reverse-direction test precedent already exists in-repo: `tests/firm-scope-surfaces.test.ts`.
+reverse-direction test precedent already exists in-repo: `apps/web/tests/firm-scope-surfaces.test.ts`.
 `apps/web/lib/command/routes.ts:71-146`; IA-03.
 
 ### Client-name chrome
@@ -238,7 +238,7 @@ material residue is password recovery specifically, under 裁-57 (a PAID self-se
 ### Control-height §5.2 ruling still needed
 
 Button ships 24/28/32/36px (default 32px) and Input ships a single 32px height, where
-`01-TOKEN-CONTRACT.md:142-144` specifies `--control-sm/md/lg` = 32/36/40px. **Corrected: this is
+`01-TOKEN-CONTRACT.md:142-144` specifies --control-sm/md/lg = 32/36/40px. **Corrected: this is
 NOT apps/web's authoring error** — the design system's own reference `button.tsx`/`input.tsx` are
 byte-identical to apps/web's, and the design system's own `globals.css` declares no `--control-*`
 tokens either, so §5.2 was never implemented in EITHER repo. The 2026-08-28 resource audit read
@@ -263,7 +263,7 @@ sees what this pass added on top of the two prior audits.)*
 - Nested live regions, InterviewRunCard's the sharper instance (DS-04).
 - `drafts-queue-panel.tsx`'s halo-only focus indicator, and the gate that blesses it (DS-05) — partially recorded (the census, not this file's specific gap).
 - Per-field validation association unbuilt (DS-09).
-- `/admin/members` orphan route — **exception: this one IS already recorded**, PROGRESS-503.md:102 and task #16 (IA-03); listed here only because the finding initially miscited it as unrecorded.
+- /admin/members orphan route — **exception: this one IS already recorded**, PROGRESS-503.md:102 and task #16 (IA-03); listed here only because the finding initially miscited it as unrecorded.
 - Client workspace never names the client (IA-05).
 - No error boundaries at any route-family level (IA-07).
 - Password recovery entirely absent, in code and in Supabase config (IA-09).
@@ -278,7 +278,7 @@ sees what this pass added on top of the two prior audits.)*
 
 | Line | Status |
 |---|---|
-| Ledger Fold ported | **NOT DONE.** 0 `<svg>`, 0 tracked image assets under `apps/`, `public/` holds fonts only. |
+| Ledger Fold ported | **NOT DONE.** 0 `<svg>`, 0 tracked image assets under `apps/`, public/ holds fonts only. |
 | Mascot ported | **NOT DONE.** Same construction-path measurement as Ledger Fold; 0 hits. |
 | ClaraBook copy pass | **NOT DONE.** 0 commits ever touching `"ClaraBook"` in `apps/web/messages/`; the platform-slot census (7 en.json strings + the invite-email subject/body) has never been swept. |
 
@@ -294,10 +294,10 @@ All three: IA-08 (CONFIRMED, corrected to 4/4 owed including item ④'s finish).
   Tailwind value that wins on merge order. Already named at merge in commit `2333fced`'s own body
   ("named for the brand sitting rather than changed here") but never entered any ledger. No gating.
 - **IA-04 (no settings surface at any altitude).** Refuted, downgraded to NIT: 3 of 9 prototype
-  sections have counterparts (`/admin/members` covers both members+rbac), the firm-settings root is
+  sections have counterparts (/admin/members covers both members+rbac), the firm-settings root is
   ruled into `/admin` (Q3), the client-settings absence is a recorded reasoned decision (OQ-7,
   `port-wave-plan-2026-08-28-part2.md:413-416`), an honest placeholder note exists in `en.json:158`,
-  and PR #489 already builds `/admin/settings` (CI green, opus CLEAR, armed BEHIND). No gating.
+  and PR #489 already builds /admin/settings (CI green, opus CLEAR, armed BEHIND). No gating.
 - **IC-01 (float-hook money parsers, BLOCKER).** Refuted at BLOCKER; downgraded — see §3 P6-4.
   `type="number"` sanitization closes 3 of the original 4 bad-input rows in a real browser; the
   0-default for `""` is the file's own DOCUMENTED design decision for unsigned line inputs, not an
@@ -331,7 +331,7 @@ All three: IA-08 (CONFIRMED, corrected to 4/4 owed including item ④'s finish).
 - Whether the `@utility` motion rules and the `--text-xl` override compile as intended under
   Tailwind v4.3.3 — needs a build.
 - Rendered control geometry (heights, target sizes) — read off class strings, not a browser.
-- A prototype-vs-`apps/web` component-BEHAVIOUR diff — the g6 prototype's `src/` was cloned but not
+- A prototype-vs-`apps/web` component-BEHAVIOUR diff — the g6 prototype's src/ was cloned but not
   diffed component-by-component; parity claims here are structural (routes/components/props/copy),
   none visual.
 - Whether the runtime API's RLS boundary would refuse a cross-client `getMessages` call for IA-10 —
@@ -342,7 +342,7 @@ All three: IA-08 (CONFIRMED, corrected to 4/4 owed including item ④'s finish).
   covers the settings family, password recovery, or one-thread-per-altitude — a ruling recorded only
   in a chat transcript or memory would not appear to any of these instruments.
 - The numbering source for "alignment gap #2/#4" and "beta-gating tasks #14/#15/#16" — both are USED
-  in `PROGRESS-503.md` and the 09-01-pm ledger without an enumerated list defining them anywhere.
+  in PROGRESS-503.md and the 09-01-pm ledger without an enumerated list defining them anywhere.
 - Whether the built browser bundle genuinely contains no service credential — source-level wall and
   the `check-public-key.mjs` wiring were verified; `next build` was not run in this lane.
 - Whether `share_chat_session`'s SQL predicates behave as read against a live DB for the IA-06
