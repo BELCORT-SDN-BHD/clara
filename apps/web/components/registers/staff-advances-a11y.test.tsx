@@ -259,7 +259,7 @@ test("F3: a governed refusal (enrol_staff_advance_account) renders verbatim in t
 
 // S2 (independent review): the Book Application dialog's a11y coverage
 // previously only proved the COLLAPSED shell — the lines editor and the
-// allocations editor (each with its own NativeSelect/CentsInput/remove
+// allocations editor (each with its own NativeSelect/MoneyInput/remove
 // button) never had a live row scanned open. This adds one of each.
 test("Book Application dialog OPEN with a real allocation row has zero a11y violations", async () => {
   await withMockedEnv(mockFetchWithOutstanding, async () => {

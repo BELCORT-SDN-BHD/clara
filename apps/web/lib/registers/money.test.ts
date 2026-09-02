@@ -1,7 +1,7 @@
 // lib/registers/money.ts's `parseAmountToCents` — string-based cents parsing, pure,
 // no fetch. Had NO dedicated unit test file before this PR (only reached indirectly
 // through component tests for fa-particulars-fields.tsx / fa-row-actions.tsx /
-// opening-signed-amount-input.tsx / ApplyOpenItemsDialog.tsx). Ports
+// the shared MoneyInput / ApplyOpenItemsDialog.tsx). Ports
 // lib/bank/money.test.ts's own precedent cases for its byte-identical
 // `parseAmountToCents` body, plus the comma-hardening coverage below (sibling
 // census off PR #489/FINDING 1, raised by pr489-codex-leg's law-28 leg).
