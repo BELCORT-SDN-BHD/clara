@@ -286,6 +286,16 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
   readonly reason: string;
 }> = [
   {
+    path: "app/(e2e)/money-input-harness/page.tsx",
+    url: "/money-input-harness",
+    public: true,
+    reason:
+      "A build-gated browser-test route with no firm data or production client module: " +
+      "ordinary builds compile a server-only notFound() stub, while the explicit e2e build " +
+      "flag aliases that stub to the real journal MoneyInput harness. It must be proxy-public " +
+      "so the opted-in pre-auth Playwright run can reach it; without the flag it is a 404.",
+  },
+  {
     path: "app/(entry)/login/page.tsx",
     url: "/login",
     public: true,

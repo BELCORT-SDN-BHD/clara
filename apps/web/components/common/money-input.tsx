@@ -4,6 +4,7 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import {
   formatCents,
   parseMoneyInput,
@@ -23,10 +24,15 @@ export type MoneyInputProps = Omit<
   cents: number | null;
   mode: MoneyInputMode;
   onValueChange: (change: MoneyInputChange) => void;
+  /** Preserve the shipped empty-at-zero presentation for journal-style
+   *  fields. Set false where zero and null are distinct DB-owned states. */
+  zeroIsBlank?: boolean;
+  /** Sizes the component's wrapper when it participates in flex/grid rows. */
+  containerClassName?: string;
 };
 
-function formattedInputValue(cents: number | null, mode: MoneyInputMode): string {
-  if (cents === null || (mode === "unsigned" && cents === 0)) return "";
+function formattedInputValue(cents: number | null, zeroIsBlank: boolean): string {
+  if (cents === null || (zeroIsBlank && cents === 0)) return "";
   return formatCents(cents);
 }
 
@@ -38,6 +44,8 @@ export function MoneyInput({
   cents,
   mode,
   onValueChange,
+  zeroIsBlank = true,
+  containerClassName,
   className,
   id,
   placeholder,
@@ -46,19 +54,19 @@ export function MoneyInput({
   ...inputProps
 }: MoneyInputProps) {
   const t = useTranslations("MoneyInput");
-  const generatedId = React.useId().replaceAll(":", "");
+  const generatedId = React.useId().replace(/[^A-Za-z0-9_-]/g, "");
   const refusalId = `${id ?? `money-input-${generatedId}`}-refusal`;
-  const [raw, setRaw] = React.useState(() => formattedInputValue(cents, mode));
+  const [raw, setRaw] = React.useState(() => formattedInputValue(cents, zeroIsBlank));
   const [refusal, setRefusal] = React.useState<MoneyInputRefusal | null>(null);
   const lastEmitted = React.useRef<number | null>(cents);
 
   React.useEffect(() => {
     if (cents !== lastEmitted.current) {
-      setRaw(formattedInputValue(cents, mode));
+      setRaw(formattedInputValue(cents, zeroIsBlank));
       setRefusal(null);
       lastEmitted.current = cents;
     }
-  }, [cents, mode]);
+  }, [cents, zeroIsBlank]);
 
   function handleChange(value: string) {
     setRaw(value);
@@ -74,7 +82,11 @@ export function MoneyInput({
 
   function handleBlur() {
     const result = parseMoneyInput(raw, { signed: mode === "signed" });
-    if (result.ok) setRaw(formattedInputValue(result.cents, mode));
+    if (result.ok) {
+      // A stored zero may intentionally mount blank, but once the human types
+      // zero, blur must not erase what they just entered.
+      setRaw(result.cents === null ? "" : formatCents(result.cents));
+    }
   }
 
   const refusalCopy = refusal === null
@@ -87,7 +99,7 @@ export function MoneyInput({
   const ariaDescribedBy = [describedBy, refusalCopy ? refusalId : null].filter(Boolean).join(" ") || undefined;
 
   return (
-    <div className="grid gap-1">
+    <div className={cn("grid gap-1", containerClassName)}>
       <Input
         {...inputProps}
         id={id}
@@ -102,7 +114,7 @@ export function MoneyInput({
         onBlur={handleBlur}
       />
       {refusalCopy ? (
-        <p id={refusalId} role="alert" className="text-xs text-destructive">
+        <p id={refusalId} aria-live="polite" className="text-xs text-error">
           {refusalCopy}
         </p>
       ) : null}

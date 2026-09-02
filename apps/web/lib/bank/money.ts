@@ -21,7 +21,7 @@ export type MoneyParseResult =
   | Readonly<{ ok: false; refusal: MoneyInputRefusal }>;
 
 const MAX_SAFE_CENTS = BigInt(Number.MAX_SAFE_INTEGER);
-const DECIMAL_AMOUNT = /^(-?)(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{0,2}))?$/;
+const DECIMAL_AMOUNT = /^(-?)(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?$/;
 
 /** Parse one human-entered MYR amount without binary-float arithmetic.
  *

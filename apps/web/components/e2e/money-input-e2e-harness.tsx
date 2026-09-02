@@ -19,9 +19,8 @@ const INITIAL_LINES: EntryLineInput[] = [
   { account_code: "1000", description: "Browser harness", debit_cents: 0, credit_cents: 0 },
 ];
 
-/** E2E-only caller of the production EntryLinesEditor. SignupPage renders it
- * only when e2e/run.mjs's build-time flag and an explicit query are both set,
- * so an ordinary production build has no path to this face. */
+/** E2E-only caller of the production EntryLinesEditor. The dedicated route's
+ * build-time alias is the only production-module edge to this client module. */
 export function MoneyInputE2EHarness() {
   const [lines, setLines] = useState(INITIAL_LINES);
 

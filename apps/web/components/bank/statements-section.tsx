@@ -19,7 +19,7 @@ import { useReloadOnChange } from "@/lib/bank/reload-on-change";
 import { listBankAccounts, listBankStatements, getBankStatement } from "@/lib/bank/reads";
 import { enterBankStatement, voidBankStatement, type BankStatementLineInput } from "@/lib/bank/doors";
 import { completePendingMatch } from "@/lib/bank/match-doors";
-import { parseAmountToCents, formatMyr } from "@/lib/bank/money";
+import { formatMyr } from "@/lib/bank/money";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,11 +28,19 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SectionHeader } from "@/components/common/section-header";
 import { NativeSelect } from "@/components/common/native-select";
+import { MoneyInput } from "@/components/common/money-input";
 import { ReadState } from "./read-state";
 import { StateBanner } from "@/components/common/state";
 import { ActionRefusal } from "./action-refusal";
 
-type LineDraft = { entryDate: string; description: string; amount: string };
+type LineDraft = {
+  entryDate: string;
+  description: string;
+  amountCents: number | null;
+  amountValid: boolean;
+};
+
+const EMPTY_LINE: LineDraft = { entryDate: "", description: "", amountCents: null, amountValid: true };
 
 export function StatementsSection({ clientId }: { clientId: string }) {
   const t = useTranslations("ClientBank.statements");
@@ -100,16 +108,18 @@ export function StatementsSection({ clientId }: { clientId: string }) {
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [statementDate, setStatementDate] = useState("");
-  const [opening, setOpening] = useState("");
-  const [closing, setClosing] = useState("");
-  const [lines, setLines] = useState<LineDraft[]>([{ entryDate: "", description: "", amount: "" }]);
+  const [openingCents, setOpeningCents] = useState<number | null>(null);
+  const [openingValid, setOpeningValid] = useState(true);
+  const [closingCents, setClosingCents] = useState<number | null>(null);
+  const [closingValid, setClosingValid] = useState(true);
+  const [lines, setLines] = useState<LineDraft[]>([EMPTY_LINE]);
   const [formError, setFormError] = useState<string | null>(null);
 
   function updateLine(i: number, patch: Partial<LineDraft>) {
     setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   }
   function addLine() {
-    setLines((prev) => [...prev, { entryDate: "", description: "", amount: "" }]);
+    setLines((prev) => [...prev, { ...EMPTY_LINE }]);
   }
   function removeLine(i: number) {
     setLines((prev) => prev.filter((_, idx) => idx !== i));
@@ -118,23 +128,20 @@ export function StatementsSection({ clientId }: { clientId: string }) {
   async function submitEnter(e: FormEvent) {
     e.preventDefault();
     setFormError(null);
-    const openingCents = parseAmountToCents(opening);
-    const closingCents = parseAmountToCents(closing);
-    if (openingCents === null || closingCents === null) {
+    if (!openingValid || !closingValid || openingCents === null || closingCents === null) {
       setFormError(t("invalidAmount"));
       return;
     }
     const parsedLines: BankStatementLineInput[] = [];
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i]!;
-      const cents = parseAmountToCents(l.amount);
-      if (cents === null || !l.entryDate) {
+      if (!l.amountValid || l.amountCents === null || !l.entryDate) {
         setFormError(t("invalidLine", { n: i + 1 }));
         return;
       }
       parsedLines.push({
         line_no: i + 1, entry_date: l.entryDate, value_date: null,
-        description: l.description || null, amount_cents: cents, running_balance_cents: null,
+        description: l.description || null, amount_cents: l.amountCents, running_balance_cents: null,
       });
     }
     await enterAction.act(
@@ -154,7 +161,9 @@ export function StatementsSection({ clientId }: { clientId: string }) {
       },
       () => {
         setDocumentId(""); setPeriodStart(""); setPeriodEnd(""); setStatementDate("");
-        setOpening(""); setClosing(""); setLines([{ entryDate: "", description: "", amount: "" }]);
+        setOpeningCents(null); setOpeningValid(true);
+        setClosingCents(null); setClosingValid(true);
+        setLines([{ ...EMPTY_LINE }]);
         void statements.reload();
       },
     );
@@ -218,11 +227,29 @@ export function StatementsSection({ clientId }: { clientId: string }) {
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="opening">{t("openingLabel")}</Label>
-                <Input id="opening" inputMode="decimal" placeholder="0.00" value={opening} onChange={(e) => setOpening(e.target.value)} required />
+                <MoneyInput
+                  id="opening"
+                  mode="signed"
+                  cents={openingCents}
+                  onValueChange={(change) => {
+                    setOpeningValid(change.ok);
+                    if (change.ok) setOpeningCents(change.cents);
+                  }}
+                  required
+                />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="closing">{t("closingLabel")}</Label>
-                <Input id="closing" inputMode="decimal" placeholder="0.00" value={closing} onChange={(e) => setClosing(e.target.value)} required />
+                <MoneyInput
+                  id="closing"
+                  mode="signed"
+                  cents={closingCents}
+                  onValueChange={(change) => {
+                    setClosingValid(change.ok);
+                    if (change.ok) setClosingCents(change.cents);
+                  }}
+                  required
+                />
               </div>
             </div>
 
@@ -232,7 +259,17 @@ export function StatementsSection({ clientId }: { clientId: string }) {
                 <div key={i} className="grid grid-cols-[1fr_2fr_1fr_auto] items-center gap-2">
                   <Input type="date" aria-label={t("lineDateLabel", { n: i + 1 })} value={l.entryDate} onChange={(e) => updateLine(i, { entryDate: e.target.value })} required />
                   <Input aria-label={t("lineDescriptionLabel", { n: i + 1 })} placeholder={t("descriptionPlaceholder")} value={l.description} onChange={(e) => updateLine(i, { description: e.target.value })} />
-                  <Input inputMode="decimal" aria-label={t("lineAmountLabel", { n: i + 1 })} placeholder="-0.00" value={l.amount} onChange={(e) => updateLine(i, { amount: e.target.value })} required />
+                  <MoneyInput
+                    mode="signed"
+                    containerClassName="min-w-0"
+                    aria-label={t("lineAmountLabel", { n: i + 1 })}
+                    cents={l.amountCents}
+                    onValueChange={(change) => updateLine(i, {
+                      amountValid: change.ok,
+                      ...(change.ok ? { amountCents: change.cents } : {}),
+                    })}
+                    required
+                  />
                   <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeLine(i)} disabled={lines.length === 1}>×</Button>
                 </div>
               ))}

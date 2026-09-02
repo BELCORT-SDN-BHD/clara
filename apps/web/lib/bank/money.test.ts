@@ -18,6 +18,13 @@ test("parseMoneyInput: exponent notation is refused instead of becoming RM1,000.
   });
 });
 
+test("parseMoneyInput: a trailing decimal point is a typed refusal", () => {
+  assert.deepEqual(parseMoneyInput("5.", { signed: false }), {
+    ok: false,
+    refusal: { code: "invalid_format", input: "5." },
+  });
+});
+
 test("parseMoneyInput: decimal-comma input is a typed refusal before commas are removed", () => {
   assert.deepEqual(parseMoneyInput("1234,56", { signed: false }), {
     ok: false,

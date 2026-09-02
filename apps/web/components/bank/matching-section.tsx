@@ -181,7 +181,8 @@ export function MatchingSection({ clientId }: { clientId: string }) {
                     <input type="checkbox" aria-label={t("selectEntry")} checked={selectedEntryIds.has(c.entry_id)} onChange={() => toggleEntry(c.entry_id)} />
                     <span className="flex-1">{c.memo ?? c.entry_id} · {c.counterparty_name ?? "—"}</span>
                     <MoneyInput
-                      className="h-7 w-28" placeholder={t("matchedCentsPlaceholder")}
+                      containerClassName="w-28 shrink-0"
+                      className="h-7 w-full" placeholder={t("matchedCentsPlaceholder")}
                       aria-label={t("matchedCentsLabel")}
                       cents={matchedCents[c.entry_id] ?? null}
                       mode="signed"

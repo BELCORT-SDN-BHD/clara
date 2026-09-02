@@ -112,3 +112,20 @@ test("F1: a new asset's externally supplied cents resync the shared field", asyn
     await h.unmount();
   }
 });
+
+test("F1: a stored residual of 0 is visibly 0.00, never blank", async () => {
+  const h = await renderComponent(createElement(NextIntlClientProvider, {
+    locale: "en",
+    messages,
+    children: createElement(FaParticularsFields, {
+      idPrefix: "stored-zero",
+      value: { ...BASE, residual_cents: 0 },
+      onChange: () => {},
+    }),
+  }));
+  try {
+    assert.equal(findById(h.container, "stored-zero-residual").value, "0.00");
+  } finally {
+    await h.unmount();
+  }
+});

@@ -9,7 +9,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { renderComponent, setFieldValue } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
 import messages from "../../messages/en.json";
-import { MoneyInput, type MoneyInputChange } from "../common/money-input";
+import { MoneyInput, type MoneyInputChange } from "./money-input";
 
 enableDomInspection();
 

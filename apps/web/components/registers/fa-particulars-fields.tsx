@@ -102,6 +102,7 @@ export function FaParticularsFields({
             id={`${idPrefix}-residual`}
             cents={value.residual_cents ?? null}
             mode="unsigned"
+            zeroIsBlank={false}
             onValueChange={(change) => {
               if (change.ok) patch({ residual_cents: change.cents });
             }}

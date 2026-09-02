@@ -73,6 +73,7 @@ function App() {
 
 const LINE = { line_id: "l1", statement_id: "s1", bank_account_id: "acc1", entry_date: "2026-04-05", description: "fee", amount_cents: -1500 };
 const CANDIDATE = { entry_id: "e1", posting_date: "2026-04-05", memo: "misc payable", counterparty_name: "Acme", high_stakes: false };
+const OTHER_CANDIDATE = { entry_id: "e0", posting_date: "2026-04-04", memo: "office supplies", counterparty_name: "Beta", high_stakes: false };
 
 async function mountAndSettle() {
   const h = await renderComponent(App());
@@ -101,11 +102,11 @@ function checkboxNear(h: Awaited<ReturnType<typeof renderComponent>>, needle: st
 }
 
 function hasAncestorText(node: Node, needle: string): boolean {
-  let current = node.parentNode;
-  for (let depth = 0; current && depth < 4; depth += 1, current = current.parentNode) {
-    if (textOf(current as never).includes(needle)) return true;
+  let candidateRow = node.parentNode;
+  while (candidateRow && candidateRow.tagName !== "LI") {
+    candidateRow = candidateRow.parentNode;
   }
-  return false;
+  return candidateRow ? textOf(candidateRow as never).includes(needle) : false;
 }
 
 test("BLOCKER-2: a match_bank_line refusal renders visibly in the match card, and the matched-cents field parses a grouped amount correctly (N9)", async () => {
@@ -114,7 +115,7 @@ test("BLOCKER-2: a match_bank_line refusal renders visibly in the match card, an
     async (u, init) => {
       const url = String(u);
       if (url.includes("/rpc/list_unmatched_lines")) return jsonResponse([LINE]);
-      if (url.includes("/rpc/list_bank_match_candidates")) return jsonResponse([CANDIDATE]);
+      if (url.includes("/rpc/list_bank_match_candidates")) return jsonResponse([OTHER_CANDIDATE, CANDIDATE]);
       if (url.includes("/rpc/match_bank_line")) {
         seenMatchBodies.push(JSON.parse(String(init?.body ?? "{}")));
         return jsonResponse({ code: "CLR10", message: "the two sides do not net to zero", details: '{"reason":"match_unbalanced"}' }, 400);
@@ -129,7 +130,7 @@ test("BLOCKER-2: a match_bank_line refusal renders visibly in the match card, an
         await h.fireEvent(lineBox as never, "click", (n) => setNativeValue(n as never, "checked", true));
         for (let i = 0; i < 3; i++) await h.settle(); // load candidates for the now-selected line's account
 
-        assert.equal(checkboxes(h).length, 3, "the candidate-entry checkbox (and the ack checkbox) must now also render");
+        assert.equal(checkboxes(h).length, 4, "both candidate-entry checkboxes (and the ack checkbox) must now also render");
         const candidateBox = checkboxNear(h, "misc payable");
         await h.fireEvent(candidateBox as never, "click", (n) => setNativeValue(n as never, "checked", true));
 

@@ -9,10 +9,11 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MoneyInput } from "@/components/common/money-input";
 import { NativeSelect } from "@/components/common/native-select";
 import { FaDoorDialog } from "./FaDoorDialog";
 import { FaParticularsFields, EMPTY_PARTICULARS, particularsReadyToSubmit } from "./fa-particulars-fields";
-import { parseAmountToCents, fmtCents } from "@/lib/registers/money";
+import { fmtCents } from "@/lib/registers/money";
 import { completeFixedAssetParticulars, reviseFixedAssetParticulars, disposeFixedAsset } from "@/lib/registers/fixed-assets";
 import { sessionTokenAccessor } from "@/lib/session-accessor";
 import type { FixedAssetRow, FaParticularsInput } from "@/lib/registers/fixed-assets";
@@ -110,19 +111,18 @@ export function ReviseParticularsDialog({ clientId, asset, busy, act }: RowActio
 export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActionsProps) {
   const t = useTranslations("FixedAssetsDepreciation.actions");
   const [disposalDate, setDisposalDate] = useState("");
-  const [proceeds, setProceeds] = useState("");
+  const [proceedsCents, setProceedsCents] = useState(0);
+  const [proceedsValid, setProceedsValid] = useState(true);
   const [proceedsAccount, setProceedsAccount] = useState("");
   const [gainAccount, setGainAccount] = useState("");
   const [lossAccount, setLossAccount] = useState("");
   const [memo, setMemo] = useState("");
-  const [costPortion, setCostPortion] = useState("");
+  const [costPortionCents, setCostPortionCents] = useState<number | null>(null);
+  const [costPortionValid, setCostPortionValid] = useState(true);
 
   const assetAccounts = accounts.filter((a) => a.account_type === "asset" && a.account_class === null && a.is_active);
   const incomeAccounts = accounts.filter((a) => a.account_type === "income" && a.account_class === null && a.is_active);
   const expenseAccounts = accounts.filter((a) => a.account_type === "expense" && a.account_class === null && a.is_active);
-
-  const proceedsCents = proceeds.trim() === "" ? 0 : parseAmountToCents(proceeds);
-  const costPortionCents = costPortion.trim() === "" ? null : parseAmountToCents(costPortion);
 
   return (
     <FaDoorDialog
@@ -132,9 +132,8 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActio
       description={t("disposeDescription")}
       confirmLabel={t("dispose")}
       busy={busy}
-      confirmDisabled={!disposalDate || !gainAccount || !lossAccount || proceedsCents === null || (costPortion.trim() !== "" && costPortionCents === null)}
+      confirmDisabled={!disposalDate || !gainAccount || !lossAccount || !proceedsValid || !costPortionValid}
       onConfirm={async () => {
-        if (proceedsCents === null) return;
         await act(async () => {
           await disposeFixedAsset(sessionTokenAccessor, {
             clientId,
@@ -158,7 +157,15 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActio
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor={`fa-disp-proceeds-${asset.id}`}>{t("proceedsCentsLabel")}</Label>
-            <Input id={`fa-disp-proceeds-${asset.id}`} inputMode="decimal" placeholder="0.00" value={proceeds} onChange={(e) => setProceeds(e.target.value)} />
+            <MoneyInput
+              id={`fa-disp-proceeds-${asset.id}`}
+              mode="signed"
+              cents={proceedsCents}
+              onValueChange={(change) => {
+                setProceedsValid(change.ok);
+                if (change.ok) setProceedsCents(change.cents ?? 0);
+              }}
+            />
           </div>
         </div>
         <div className="grid gap-1.5">
@@ -196,10 +203,18 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActio
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor={`fa-disp-portion-${asset.id}`}>{t("costPortionLabel")}</Label>
-          <Input id={`fa-disp-portion-${asset.id}`} inputMode="decimal" placeholder="0.00" value={costPortion} onChange={(e) => setCostPortion(e.target.value)} />
+          <MoneyInput
+            id={`fa-disp-portion-${asset.id}`}
+            mode="signed"
+            cents={costPortionCents}
+            onValueChange={(change) => {
+              setCostPortionValid(change.ok);
+              if (change.ok) setCostPortionCents(change.cents);
+            }}
+          />
           <p className="text-xs text-muted-foreground">{t("costPortionHint")}</p>
         </div>
-        {proceedsCents !== null ? <p className="text-xs text-muted-foreground">{fmtCents(proceedsCents)}</p> : null}
+        <p className="text-xs text-muted-foreground">{fmtCents(proceedsCents)}</p>
       </div>
     </FaDoorDialog>
   );

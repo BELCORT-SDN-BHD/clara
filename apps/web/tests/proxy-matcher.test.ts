@@ -126,6 +126,7 @@ describe("P4-3 — signup confirmation is public, and the holding route delibera
       "/invite",
       "/invite/some-token-hash",
       "/signup",
+      "/money-input-harness",
       "/auth/confirm",
       "/auth/confirm/verify",
     ]) {

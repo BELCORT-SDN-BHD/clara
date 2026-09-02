@@ -18,11 +18,11 @@ import { listCounterparties } from "@/lib/bank/table-reads";
 import { listOpenItemsByCounterparty } from "@/lib/bank/match-reads";
 import { settleFromBankLine } from "@/lib/bank/match-doors";
 import { settlementDomainFor, type CounterpartyKind } from "@/lib/bank/match-types";
-import { formatMyr, parseAmountToCents } from "@/lib/bank/money";
+import { formatMyr } from "@/lib/bank/money";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { MoneyInput } from "@/components/common/money-input";
 import { NativeSelect } from "@/components/common/native-select";
 import { ReadState } from "./read-state";
 import { StateBanner } from "@/components/common/state";
@@ -35,7 +35,8 @@ export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string;
   const [kind, setKind] = useState<CounterpartyKind>("customer");
   const [counterpartyId, setCounterpartyId] = useState("");
   const [memo, setMemo] = useState("");
-  const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [amounts, setAmounts] = useState<Record<string, number | null>>({});
+  const [amountValidity, setAmountValidity] = useState<Record<string, boolean>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
   const cpKind = useReadErrKind();
@@ -73,10 +74,15 @@ export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string;
   async function submit() {
     setFormError(null);
     const allocations: { item_id: string; amount_cents: number }[] = [];
-    for (const [itemId, raw] of Object.entries(amounts)) {
-      if (!raw) continue;
-      const cents = parseAmountToCents(raw);
-      if (cents === null || cents <= 0) {
+    const editedItemIds = new Set([...Object.keys(amounts), ...Object.keys(amountValidity)]);
+    for (const itemId of editedItemIds) {
+      if (amountValidity[itemId] === false) {
+        setFormError(t("invalidAllocation"));
+        return;
+      }
+      const cents = amounts[itemId] ?? null;
+      if (cents === null) continue;
+      if (cents <= 0) {
         setFormError(t("invalidAllocation"));
         return;
       }
@@ -126,11 +132,16 @@ export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string;
             {(items.data ?? []).map((it) => (
               <li key={it.id} className="flex items-center justify-between gap-2 text-xs">
                 <span>{it.item_kind} · {it.item_date} · {formatMyr(it.outstanding_cents ?? it.amount_cents)}</span>
-                <Input
-                  className="h-7 w-28" inputMode="decimal" placeholder="0.00"
+                <MoneyInput
+                  mode="signed"
+                  className="h-7 w-full"
+                  containerClassName="w-28 shrink-0"
                   aria-label={t("allocationAmountLabel")}
-                  value={amounts[it.id] ?? ""}
-                  onChange={(e) => setAmounts((prev) => ({ ...prev, [it.id]: e.target.value }))}
+                  cents={amounts[it.id] ?? null}
+                  onValueChange={(change) => {
+                    setAmountValidity((prev) => ({ ...prev, [it.id]: change.ok }));
+                    if (change.ok) setAmounts((prev) => ({ ...prev, [it.id]: change.cents }));
+                  }}
                 />
               </li>
             ))}

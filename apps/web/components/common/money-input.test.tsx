@@ -92,6 +92,20 @@ test("MoneyInput: a grouped paste emits exact cents and blur formats through the
   }
 });
 
+test("MoneyInput: blur keeps a typed zero visible", async () => {
+  let last: MoneyInputChange | null = null;
+  const h = await renderComponent(createElement(Harness, { onChange: (change) => { last = change; } }));
+  try {
+    const input = findInput(h.container);
+    await h.act(() => { setFieldValue(input as never, "0"); });
+    assert.deepEqual(last, { ok: true, cents: 0 });
+    await h.fireEvent(input as never, "focusout");
+    assert.equal(findInput(h.container).value, "0.00", "blur must format a typed zero, never erase it");
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("MoneyInput: malformed text emits a typed refusal and visible error, never accepted zero", async () => {
   const changes: MoneyInputChange[] = [];
   const h = await renderComponent(createElement(Harness, { onChange: (change) => { changes.push(change); } }));
@@ -109,7 +123,9 @@ test("MoneyInput: malformed text emits a typed refusal and visible error, never 
     assert.ok(describedBy, "the visible refusal copy must be associated to the input");
     const refusal = h.find((node) => (node as Node).getAttribute?.("id") === describedBy) as Node | null;
     assert.ok(refusal, "aria-describedby must resolve to the rendered refusal copy");
-    assert.equal(refusal?.getAttribute?.("role"), "alert");
+    assert.equal(refusal?.getAttribute?.("aria-live"), "polite");
+    assert.equal(refusal?.getAttribute?.("role"), null, "per-keystroke refusals must not use an assertive alert role");
+    assert.doesNotMatch(describedBy, /[«»:]/, "the React-generated refusal id must be selector-safe");
   } finally {
     await h.unmount();
   }
