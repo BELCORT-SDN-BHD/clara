@@ -212,17 +212,27 @@ export async function ensureBankWakeTask(firmId, clientId) {
   const key = `${firmId}:${clientId}`;
   if (_bankWakeTasks.has(key)) return _bankWakeTasks.get(key);
   const live = await rig.rootQuery(
-    `select id from clara.agent_tasks where firm_id=$1 and client_id=$2 and kind='wake'
-       and status in ('held','running','cancel_requested')`, [firmId, clientId]);
+    `select t.id
+       from clara.agent_tasks t
+       join clara.wake_intents wi on wi.id=t.origin_intent_id
+       join clara.domain_events de on de.id=wi.event_id
+       join clara.wake_engine_sources wes
+         on wes.source_key='bank_agent'
+        and wes.carrier='wake_outbox'
+        and wes.event_type=de.event_type
+        and wes.task_kind=t.kind
+        and wes.wake_kind='bank_agent'
+      where t.firm_id=$1 and t.client_id=$2
+        and de.firm_id=t.firm_id and de.client_id=t.client_id
+        and t.status in ('held','running','cancel_requested')`, [firmId, clientId]);
   if (live.rowCount === 1) { _bankWakeTasks.set(key, live.rows[0].id); return live.rows[0].id; }
   if (live.rowCount > 1) return null;   // ambiguous by construction: let the mint's own refusal name it
-  // EXACTLY ONE active bank account -> that one; NONE -> a synthetic id (a client with no bank
-  // account can only be driving the verbs that HAVE no account subject, for which the value is
-  // never compared); SEVERAL -> null, so the gate's own wake_task_account_unbound says so out
-  // loud rather than a fixture quietly picking one.
+  // EXACTLY ONE active bank account -> that one. NONE or SEVERAL -> no payload identity, so the
+  // shipped gate's own wake_task_account_unbound refusal says so out loud. Every bank wrapper is
+  // account-required; there is no accountless-verb exception for this fixture to invent.
   const acct = await rig.rootQuery(
     "select id from clara.bank_accounts where client_id=$1 and active", [clientId]);
-  const bankAccount = acct.rowCount === 1 ? acct.rows[0].id : (acct.rowCount === 0 ? randomUUID() : null);
+  const bankAccount = acct.rowCount === 1 ? acct.rows[0].id : null;
   const seq = (await rig.rootQuery(
     "select clara._append_event($1,'bank.agent_due',$2,null,null,null,null,null,null,$3::jsonb) as seq",
     [firmId, clientId, JSON.stringify(bankAccount == null ? {} : { bank_account_id: bankAccount })])).rows[0].seq;

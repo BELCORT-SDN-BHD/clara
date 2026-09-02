@@ -1039,6 +1039,7 @@ export const G1_WAKE_ENGINE_RUNTIME_COHORT = ["_settle_wake_task"];
 // call the follow-up exists to remove.
 // ITS OWN COHORT, not an entry appended to the one above, and the reason is mechanical: this file
 // runs against databases pinned at EARLIER frontiers where this name does not exist yet, and a
+// partial cohort is deliberately a failure rather than a silently widened wall.
 // The name remains in the role allowlist, but grantMatrixFailures also proves its exact signature.
 // A proname-only cohort cannot distinguish the real door from a wrong-arity overload (review law 3).
 export const G1_PR2A_SETTLE_CAS_COHORT = ["_settle_wake_task_cas"];

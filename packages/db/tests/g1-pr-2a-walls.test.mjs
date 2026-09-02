@@ -373,11 +373,9 @@ test("p2a.F3 an act on ANOTHER of the client's bank accounts refuses; the task's
 
 test("p2a.F3b the ADMITTED pack read's receipt names the task's account as its subject", async (t) => {
   if (gatePurpose(t)) return;
-  // Its OWN account, minted here. bank_agent_receipts carries a partial unique index over
-  // (act_kind, subject_id) WHERE outcome='admitted' -- at most ONE admitted pack_read per account,
-  // ever -- so a cell that needs a genuine admission cannot reuse an account an earlier cell has
-  // already read. Without this the cell would fail on a uniqueness collision and look like a gate
-  // defect.
+  // Its OWN account, minted here. Keep the admission isolated from earlier cells: this assertion
+  // needs a fresh pack receipt whose subject can be attributed to this task/account pair alone,
+  // rather than reusing an earlier account and making the evidence ambiguous.
   // ck_coa_account_code_0009: NNNN..NNNNNNNN or NNN-[0-9A-Z]{2,4}. Four uppercase hex characters.
   const code = `172-${randomUUID().replace(/-/g, "").slice(0, 4).toUpperCase()}`;
   await upsertAccountClassed(W.users.alice, { client: CLIENT, code, name: "HSBC current (p2a f3b)", type: "asset", opKey: opk("p2a-bcoa3") });

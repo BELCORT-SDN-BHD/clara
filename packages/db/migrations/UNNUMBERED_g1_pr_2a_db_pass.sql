@@ -211,8 +211,8 @@ begin
   end if;
 
   -- 0.4 · §A/§B's two CHECKs, pinned at their PRE-EXTENSION text. Extend-only is a claim about
-  -- both directions: the tail proves every listed member survived AND that exactly the named
-  -- members were added, so this records what "every listed member" means.
+  -- both directions: §A/§B reconstruct from these exact definitions, and the tail compares each
+  -- live member set to its recorded pre-image UNION this file's additions.
   select pg_get_constraintdef(c.oid) into v_txt from pg_constraint c
     where c.conrelid = 'clara.llm_usage_events'::regclass and c.conname = 'ck_llm_usage_events_call_kind';
   if v_txt is null then
@@ -343,10 +343,10 @@ set role clara_fn_owner;
 --
 -- THIS ROSTER IS NOT CLOSED, and saying so here is the point. 裁-49 rules on exactly TWO values and
 -- this file adds exactly those two; 裁-44's `tax_prep` wake is a THIRD, and it rides F-T3 PR-9's
--- own migration, after this one. So the count below (eleven) is a MEASUREMENT of what this file
--- leaves behind, never a claim that the vocabulary is complete — and G1PR2A-A1 is written to match:
--- it requires all eleven to be present and admits `tax_prep` as the one named successor, so a
--- smuggled unknown twelfth still fails while PR-9 lands without truing a floor.
+-- own migration. The re-add below therefore starts from the RECORDED live pre-image and ORs in
+-- only these additions. A predecessor such as PR-9 can add a member without this older file
+-- deleting it on replay, while the tail still compares the live roster to exactly
+-- (recorded pre-image UNION additions).
 --
 -- (b) close_prep's login pool. The registry row says 'runtime'; #437 built closePrep_v1 to run
 -- under clara_wake_interactive on the WRITE floor (its own withWriteWakeScoped), so the row was
@@ -355,12 +355,20 @@ set role clara_fn_owner;
 -- is not a grant and changes no authority, which is exactly why a wrong value here is dangerous:
 -- it misleads a reader without failing anything.
 -- =================================================================================================
-alter table clara.llm_usage_events drop constraint ck_llm_usage_events_call_kind;
-alter table clara.llm_usage_events add constraint ck_llm_usage_events_call_kind
-  check (call_kind in ('document_extraction', 'chat', 'unattended_posting', 'freeform_read',
-                       'interview_extraction', 'filing_attribution', 'web_fetch',
-                       'tier1_policy_fetch', 'reporting',
-                       'bank_agent', 'close_prep'));
+do $call_kind_roster$
+declare
+  v_def text;
+begin
+  select v into v_def from g1_pr2a_pre where k='call_kind_def';
+  if v_def is null or v_def !~ '^CHECK \(.+\)$' then
+    raise exception 'g1_pr2a section A: recorded call-kind CHECK is outside the reconstruction grammar: %', v_def
+      using errcode='CLR10';
+  end if;
+  alter table clara.llm_usage_events drop constraint ck_llm_usage_events_call_kind;
+  execute 'alter table clara.llm_usage_events add constraint ck_llm_usage_events_call_kind ' ||
+    regexp_replace(v_def, '\)$',
+      ' OR (call_kind = ANY (ARRAY[''bank_agent''::text, ''close_prep''::text])))');
+end $call_kind_roster$;
 
 update clara.wake_engine_sources set login_pool = 'write' where source_key = 'close_prep';
 
@@ -372,12 +380,22 @@ update clara.wake_engine_sources set login_pool = 'write' where source_key = 'cl
 -- never called a tool" are different nights and a dead-letter triage reads error_code FIRST (S9's
 -- whole point). This is the destination; the runtime half -- both lanes' classifiers choosing it --
 -- is the named follow-up, for the same constraint-9 reason as §A(a).
--- EXTEND-ONLY: all six pre-existing members survive, proven member-by-member in the tail.
+-- EXTEND-ONLY: every member in the recorded pre-image survives, proven set-for-set in the tail.
 -- =================================================================================================
-alter table clara.agent_tasks drop constraint agent_tasks_error_code_check;
-alter table clara.agent_tasks add constraint agent_tasks_error_code_check
-  check (error_code in ('model_error', 'tool_error', 'timeout', 'engine_lost', 'limit', 'internal',
-                        'all_writes_refused'));
+do $error_code_roster$
+declare
+  v_def text;
+begin
+  select v into v_def from g1_pr2a_pre where k='error_code_def';
+  if v_def is null or v_def !~ '^CHECK \(.+\)$' then
+    raise exception 'g1_pr2a section B: recorded error-code CHECK is outside the reconstruction grammar: %', v_def
+      using errcode='CLR10';
+  end if;
+  alter table clara.agent_tasks drop constraint agent_tasks_error_code_check;
+  execute 'alter table clara.agent_tasks add constraint agent_tasks_error_code_check ' ||
+    regexp_replace(v_def, '\)$',
+      ' OR (error_code = ''all_writes_refused''::text))');
+end $error_code_roster$;
 
 -- =================================================================================================
 -- §C · THE PRODUCER PREREQUISITE — bank.agent_due, registered in BOTH halves of the coupled pair.
@@ -1685,6 +1703,9 @@ do $tail$
 declare
   v_sig text; v_n int; v_txt text; v_new text; v_old text; v_stripped text;
   v_gate_lines int; v_changed int := 0; v_kept int := 0; v_probe text;
+  v_pre_call_kinds text[]; v_live_call_kinds text[]; v_expected_call_kinds text[];
+  v_pre_error_codes text[]; v_live_error_codes text[]; v_expected_error_codes text[];
+  v_call_kind_count int; v_error_code_count int;
   v_bank_sigs text[] := array[
     'clara.wake_add_bank_account(uuid,text,uuid,text,text,text,text,jsonb,text,text)',
     'clara.wake_book_staff_advance_application(uuid,date,text,jsonb,jsonb,text,text,text,jsonb,text,text)',
@@ -1711,9 +1732,6 @@ declare
     'clara._tf_wakes_outbox_update()', 'clara._tf_close_runs_lifecycle()',
     'clara.cancel_agent_task(uuid,text)', 'clara.set_wake_source_enabled(text,boolean,text,text)',
     'clara.assert_wake_allowed(text,text)', 'clara.close_prep_due()'];
-  v_call_kinds text[] := array['document_extraction','chat','unattended_posting','freeform_read',
-    'interview_extraction','filing_attribution','web_fetch','tier1_policy_fetch','reporting'];
-  v_error_codes text[] := array['model_error','tool_error','timeout','engine_lost','limit','internal'];
   v_mint_walls text[] := array[
     'bad wake_kind', 'unknown firm', 'on_behalf_of must be an active bookkeeper+ of the firm',
     'autodraft wake requires a firm-congruent active client and no on_behalf_of',
@@ -1989,36 +2007,38 @@ begin
     end if;
   end loop;
 
-  -- H6 · §A/§B, extend-only in BOTH directions: every pre-existing member survives AND exactly
-  -- the named members were added (a count, so a third smuggled member fails too).
+  -- H6 · §A/§B, extend-only in BOTH directions: compare the LIVE roster to the RECORDED pre-image
+  -- UNION this file's additions. A predecessor's extra member must survive; a member introduced
+  -- by this file but absent from that union fails.
   select pg_get_constraintdef(c.oid) into v_txt from pg_constraint c
     where c.conrelid='clara.llm_usage_events'::regclass and c.conname='ck_llm_usage_events_call_kind';
-  foreach v_new in array v_call_kinds loop
-    if position('''' || v_new || '''' in v_txt) = 0 then
-      raise exception 'g1_pr2a tail: ck_llm_usage_events_call_kind LOST member %', v_new using errcode='CLR10';
-    end if;
-  end loop;
-  if position('''bank_agent''' in v_txt) = 0 or position('''close_prep''' in v_txt) = 0 then
-    raise exception 'g1_pr2a tail: ck_llm_usage_events_call_kind did not gain 裁-49''s two members' using errcode='CLR10';
+  select array_agg(distinct m[1] order by m[1]) into v_pre_call_kinds
+    from regexp_matches((select v from g1_pr2a_pre where k='call_kind_def'),
+                        '''([a-z0-9_]+)''::text', 'g') as r(m);
+  select array_agg(distinct m[1] order by m[1]) into v_live_call_kinds
+    from regexp_matches(v_txt, '''([a-z0-9_]+)''::text', 'g') as r(m);
+  select array_agg(distinct member order by member) into v_expected_call_kinds
+    from unnest(v_pre_call_kinds || array['bank_agent','close_prep']) as u(member);
+  if v_live_call_kinds is distinct from v_expected_call_kinds then
+    raise exception 'g1_pr2a tail: call-kind roster is %, expected recorded pre-image UNION additions %',
+      v_live_call_kinds, v_expected_call_kinds using errcode='CLR10';
   end if;
-  select count(*) into v_n from regexp_matches(v_txt, '''[a-z0-9_]+''::text', 'g');
-  if v_n <> array_length(v_call_kinds,1) + 2 then
-    raise exception 'g1_pr2a tail: ck_llm_usage_events_call_kind now admits % member(s), expected %', v_n, array_length(v_call_kinds,1)+2 using errcode='CLR10';
-  end if;
+  v_call_kind_count := array_length(v_live_call_kinds, 1);
+
   select pg_get_constraintdef(c.oid) into v_txt from pg_constraint c
     where c.conrelid='clara.agent_tasks'::regclass and c.conname='agent_tasks_error_code_check';
-  foreach v_new in array v_error_codes loop
-    if position('''' || v_new || '''' in v_txt) = 0 then
-      raise exception 'g1_pr2a tail: the error-code roster LOST member %', v_new using errcode='CLR10';
-    end if;
-  end loop;
-  if position('''all_writes_refused''' in v_txt) = 0 then
-    raise exception 'g1_pr2a tail: the error-code roster did not gain all_writes_refused' using errcode='CLR10';
+  select array_agg(distinct m[1] order by m[1]) into v_pre_error_codes
+    from regexp_matches((select v from g1_pr2a_pre where k='error_code_def'),
+                        '''([a-z0-9_]+)''::text', 'g') as r(m);
+  select array_agg(distinct m[1] order by m[1]) into v_live_error_codes
+    from regexp_matches(v_txt, '''([a-z0-9_]+)''::text', 'g') as r(m);
+  select array_agg(distinct member order by member) into v_expected_error_codes
+    from unnest(v_pre_error_codes || array['all_writes_refused']) as u(member);
+  if v_live_error_codes is distinct from v_expected_error_codes then
+    raise exception 'g1_pr2a tail: error-code roster is %, expected recorded pre-image UNION addition %',
+      v_live_error_codes, v_expected_error_codes using errcode='CLR10';
   end if;
-  select count(*) into v_n from regexp_matches(v_txt, '''[a-z0-9_]+''::text', 'g');
-  if v_n <> array_length(v_error_codes,1) + 1 then
-    raise exception 'g1_pr2a tail: the error-code roster now admits % member(s), expected %', v_n, array_length(v_error_codes,1)+1 using errcode='CLR10';
-  end if;
+  v_error_code_count := array_length(v_live_error_codes, 1);
 
   -- H7 · §C, the COUPLED PAIR. Coverage must still be WHOLE over the ENTIRE registry, both halves
   -- moved by exactly +1, no taxonomy version flip, and the type is client_scoped (the producer
@@ -2161,7 +2181,9 @@ begin
     end if;
   end loop;
 
-  raise notice 'g1_pr2a tail: OK -- D1 INVENTORY = 18 REPLACED WRITER BODIES: the FOURTEEN bank wake wrappers (each delta proven by surgical re-substitution), clara.mint_wake_credential, clara.mint_wake_credential_for_task (one generic live-status wall for both exact-mint kinds), clara._close_wake_ctx (0138 recut to lock and require a live task for writes while the six FOLD-2 reads remain available after cancellation), and clara._settle_wake_task (same three-argument signature, delegating only to the private compatibility body). The 17 DO-NOT-TOUCH bodies re-pin BYTE-IDENTICAL; exact before/after prosrc shas are emitted by the eighteen D1 notices above. DRAIN-WINDOW RESIDUAL: clara._settle_wake_task(uuid,text,text) can settle stale run A after rebind to run B until five-argument terminal/reconciler versions land and v1 drains; every successful short-door call audits settled_via=compat_3arg, and a zero count through the drain horizon triggers the forward D1 revocation. NEW, ALL SEVEN BODIES: clara._bank_wake_task_gate, clara._wake_task_bank_account, clara._drafted_prose_within, clara._settle_wake_task_cas, clara._settle_wake_task_compat, clara._tf_close_abandon_reason_lifecycle, clara._tf_close_run_reason_active. ROSTERS, EXTEND-ONLY AND NOT CLOSED: ck_llm_usage_events_call_kind has 11 members after this file and agent_tasks_error_code_check has 7; 裁-44''s tax_prep is the named successor. PRODUCER: bank.agent_due is registered in both coupled registries as client_scoped=true / internal_task (there were % internal_task rows before), with coverage whole and taxonomy version unmoved. PROSE: 7 new CHECKs; close_abandon_reasons ships 10 forced-RLS rows and close_runs.end_reason_code stays empty and writerless by design. UNMOVED: both wake sources remain disabled, bank_agent.login_pool=bank, % held wake row(s), and all six pinned row counts. NAMED RUNTIME FOLLOW-UPS, unchanged: (1) repoint mintBankAgentCredential at the exact task minter; (2) repoint BANK_AGENT_CALL_KIND / CLOSE_PREP_CALL_KIND; (3) settle all_writes_refused where FOLD-3 uses internal; (4) cut new versions of both terminal steps and both reconciler belts onto the strict CAS, then revoke the three-argument door after its measured drain; (5) plumb p_reason_code through both abandon doors. NOT SHIPPED: bank_agent_run_due, the close_prep task producer, or a cadence column. No table in workflow/graphile_worker/spike touched.',
+  raise notice 'g1_pr2a tail: OK -- D1 INVENTORY = 18 REPLACED WRITER BODIES: the FOURTEEN bank wake wrappers (each delta proven by surgical re-substitution), clara.mint_wake_credential, clara.mint_wake_credential_for_task (one generic live-status wall for both exact-mint kinds), clara._close_wake_ctx (0138 recut to lock and require a live task for writes while the six FOLD-2 reads remain available after cancellation), and clara._settle_wake_task (same three-argument signature, delegating only to the private compatibility body). The 17 DO-NOT-TOUCH bodies re-pin BYTE-IDENTICAL; exact before/after prosrc shas are emitted by the eighteen D1 notices above. DRAIN-WINDOW RESIDUAL: clara._settle_wake_task(uuid,text,text) can settle stale run A after rebind to run B until five-argument terminal/reconciler versions land and v1 drains; every successful short-door call audits settled_via=compat_3arg, and a zero count through the drain horizon triggers the forward D1 revocation. NEW, ALL SEVEN BODIES: clara._bank_wake_task_gate, clara._wake_task_bank_account, clara._drafted_prose_within, clara._settle_wake_task_cas, clara._settle_wake_task_compat, clara._tf_close_abandon_reason_lifecycle, clara._tf_close_run_reason_active. ROSTERS, EXTEND-ONLY AND NOT CLOSED: ck_llm_usage_events_call_kind has % members after this file and agent_tasks_error_code_check has %; both equal their RECORDED pre-image UNION this file''s additions, so a predecessor''s member survives replay. PRODUCER: bank.agent_due is registered in both coupled registries as client_scoped=true / internal_task (there were % internal_task rows before), with coverage whole and taxonomy version unmoved. PROSE: 7 new CHECKs; close_abandon_reasons ships 10 forced-RLS rows and close_runs.end_reason_code stays empty and writerless by design. UNMOVED: both wake sources remain disabled, bank_agent.login_pool=bank, % held wake row(s), and all six pinned row counts. NAMED RUNTIME FOLLOW-UPS, unchanged: (1) repoint mintBankAgentCredential at the exact task minter; (2) repoint BANK_AGENT_CALL_KIND / CLOSE_PREP_CALL_KIND; (3) settle all_writes_refused where FOLD-3 uses internal; (4) cut new versions of both terminal steps and both reconciler belts onto the strict CAS, then revoke the three-argument door after its measured drain; (5) plumb p_reason_code through both abandon doors. NOT SHIPPED: bank_agent_run_due, the close_prep task producer, or a cadence column. No table in workflow/graphile_worker/spike touched.',
+    v_call_kind_count,
+    v_error_code_count,
     (select v from g1_pr2a_pre where k='internal_task_rows_before'),
     (select v from g1_pr2a_pre where k='held_wake_rows');
 end $tail$;

@@ -67,12 +67,12 @@ after(async () => {
  *  firm-congruent ACTIVE client — MUST register its event type with client_scoped=true. When
  *  F-A3 registers bank.agent_due in clara.event_types, that flag is not optional: registered
  *  firm-level, the type can never produce a runnable bank task. */
-export const BANK_DUE_TYPE = "rig.g1b.bank_due";
+export const BANK_DUE_TYPE = "bank.agent_due";
 
 export async function ensureClientScopedWakeType() {
   await rig.rootQuery(
     `insert into clara.event_types (name, client_scoped, description)
-       values ($1, true, 'g1-bodies rig: a CLIENT-SCOPED wake-bound source, the shape bank.agent_due must have')
+       values ($1, true, 'g1-bodies rig: the registered CLIENT-SCOPED bank wake source')
      on conflict (name) do nothing`,
     [BANK_DUE_TYPE],
   );
@@ -92,7 +92,8 @@ export async function ensureClientScopedWakeType() {
  *   1. THE PAYLOAD carries bank_account_id (and optionally the due reason). readBankTaskContext
  *      reads it because clara_wake_bank has no SELECT on bank_accounts and wake_get_bank_pack
  *      requires an account — so the account must arrive WITH the work.
- *   2. THE EVENT MUST BE CLIENT-SCOPED. _tf_agent_task_insert's wake arm (0011:1223-1230)
+ *   2. THE EVENT MUST BE THE REGISTERED `bank.agent_due` SOURCE and client-scoped.
+ *      _tf_agent_task_insert's wake arm (0011:1223-1230)
  *      DERIVES the task's firm_id and client_id from wake_intents joined to domain_events, so a
  *      client_id supplied on the task INSERT is discarded. bank-agency-design.md:326 already
  *      says the belt appends a "client-scoped bank.agent_due domain event" — this is the bytes
@@ -114,7 +115,14 @@ export async function plantHeldWakeTask({ owner, client, payload }) {
   const version = await rig.activeTaxonomyVersion();
   const wi = await rig.asRuntime((c) =>
     c.query(
-      "insert into clara.wake_intents (event_id, decision, taxonomy_version) values ($1,'background_review',$2) returning id",
+      `insert into clara.wake_intents (event_id, decision, taxonomy_version)
+       values ($1,
+               (select tt.decision
+                  from clara.trigger_taxonomy tt
+                  join clara.domain_events de on de.id = $1
+                 where tt.version = $2 and tt.event_type = de.event_type),
+               $2)
+       returning id`,
       [ev.id, version],
     ),
   );
