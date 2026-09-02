@@ -25,13 +25,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { useTranslations, NextIntlClientProvider } from "next-intl";
-import Link from "next/link";
 import { renderComponent, textOf } from "../../test/hookHarness";
-import { enableDomInspection } from "../../test/domInspect";
+import { activeElement, enableDomInspection } from "../../test/domInspect";
 import { checkAccessibility } from "../../test/a11yRules";
+import { checkKeyboardWalk, focusableElements } from "../../test/keyboardWalk";
 import { configureSessionTokenSource, resetSessionTokenSource } from "../../lib/session-accessor";
+import { AdminHubView } from "../admin/admin-hub";
 import { PageHeader, PageShell } from "../common/page-shell";
-import { buttonVariants } from "../ui/button";
 import { ComplianceRegisterPanel } from "./compliance-register-panel";
 import { VendorBindingsPanel } from "./vendor-bindings-panel";
 import { SettingsPanel } from "./settings-panel";
@@ -65,32 +65,42 @@ function withMessages(children: unknown) {
 
 function AdminPageShadow() {
   const t = useTranslations("Admin");
-  const tFa = useTranslations("FirmAdminCompliance");
   return createElement(
     PageShell,
     null,
     createElement(PageHeader, { title: t("heading"), description: t("body") }),
-    createElement(
-      "nav",
-      { className: "flex flex-wrap gap-2", "aria-label": tFa("adminNavLabel") },
-      createElement(Link, { href: "/admin/compliance", className: buttonVariants({ variant: "outline", size: "sm" }) }, tFa("compliance.heading")),
-      createElement(Link, { href: "/admin/vendor-bindings", className: buttonVariants({ variant: "outline", size: "sm" }) }, tFa("vendorBindings.pageHeading")),
-      createElement(Link, { href: "/admin/registrations", className: buttonVariants({ variant: "outline", size: "sm" }) }, tFa("registrations.heading")),
-      createElement(Link, { href: "/admin/settings", className: buttonVariants({ variant: "outline", size: "sm" }) }, tFa("settings.pageHeading")),
-    ),
+    createElement(AdminHubView, { scope: { role_rank: 3, is_operator: true } }),
   );
 }
 
-test("AdminPage's own composition (PageHeader + the three-link nav) has zero a11y violations", async () => {
+test("AdminPage's own composition has ordered headings and named links for every visible admin surface", async () => {
   const h = await renderComponent(withMessages(createElement(AdminPageShadow)));
   try {
     const bodyText = textOf(h.container as never);
-    assert.match(bodyText, /Compliance register/, "the nav link to /admin/compliance must render with its real label");
-    assert.match(bodyText, /Vendor identity bindings/, "the nav link to /admin/vendor-bindings must render with its real label");
-    assert.match(bodyText, /Firm registrations/, "the nav link to /admin/registrations must render with its real label");
-    assert.match(bodyText, /Firm settings/, "the nav link to /admin/settings must render with its real label (FS-8 PR-2)");
+    assert.match(bodyText, /Members/, "the hub link to /admin/members must render with its real label");
+    assert.match(bodyText, /Compliance register/, "the hub link to /admin/compliance must render with its real label");
+    assert.match(bodyText, /Vendor identity bindings/, "the hub link to /admin/vendor-bindings must render with its real label");
+    assert.match(bodyText, /Firm registrations/, "the hub link to /admin/registrations must render with its real label");
+    assert.match(bodyText, /Firm settings/, "the hub link to /admin/settings must render with its real label");
     const violations = checkAccessibility(h.container as never);
     assert.deepEqual(violations, [], JSON.stringify(violations));
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("Admin hub keyboard walk reaches every visible card link in DOM order", async () => {
+  const h = await renderComponent(withMessages(createElement(AdminPageShadow)));
+  try {
+    const links = focusableElements(h.container as never).filter(
+      (node) => (node as { tagName?: string }).tagName === "A",
+    );
+    assert.equal(links.length, 5, "the operator owner hub exposes all five built admin destinations");
+    assert.deepEqual(checkKeyboardWalk(h.container as never), []);
+    for (const link of links) {
+      (link as { focus: () => void }).focus();
+      assert.equal(activeElement(), link, "keyboard focus must reach each admin card link");
+    }
   } finally {
     await h.unmount();
   }

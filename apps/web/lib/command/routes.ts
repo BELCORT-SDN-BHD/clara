@@ -136,6 +136,14 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
     keywords: ["vendor", "binding", "identity", "propose", "sign", "revoke"],
   },
   {
+    // P4-4/P4-6: the members, roles and invitations surface.
+    id: "adminMembers",
+    scope: "firm",
+    href: "/admin/members",
+    status: "built",
+    keywords: ["members", "roles", "rbac", "invites", "access"],
+  },
+  {
     // P4-5: the operator approval queue, under /admin.
     id: "adminRegistrations",
     scope: "firm",
