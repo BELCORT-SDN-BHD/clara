@@ -464,7 +464,7 @@ governs.
     (law 26) is unaffected. *(0073)*
 
 - **A retirement/move PR trues every closed-wave floor pinning the moved surface, in the SAME PR** (minted at PR #352, migration `0129`'s bank-rules retirement outran a stale D-b2 floor at the next sweep) — branch on a migration-STEM witness OR a catalog witness by exact signature (`to_regprocedure`, never a bare name — law 27(3)), assert exact-signature ABSENCE plus a positive control that a surviving overload still resolves. Mechanically documented `.claude/rules/db-tests.md`.
-- **The four-runner CI expansion (`clara-wsl` … `-4`, 2026-08-23) is CONFIRMED STANDING, not provisional** — owner-ruled 2026-08-26, closing `harness-audit-2026-08-23.md` ambiguity #2. *(`docs/ops/ci-runner.md` "Runner count expansion to four")*
+- **The four-runner CI expansion (`clara-wsl` … `-4`, 2026-08-23) is CONFIRMED STANDING, not provisional** — owner-ruled 2026-08-26, closing `harness-audit-2026-08-23.md` ambiguity #2. *(`docs/ops/ci-runner.md` "Runner count expansion to four")* **SUPERSEDED 2026-09-02 by 裁-135: CI runs on GitHub-hosted `ubuntu-latest`; the four instances stay registered but no event routes to them (`docs/ops/ci-runner.md` "Hosted from 2026-09-02"). Law 77 and ADR-0073's three levers are untouched — see the dated minute in `docs/adr/README-log.md`.**
 
 ## 11 · The Track-A sitting supplement (folded 2026-08-22; source ADR-0074 — the sitting's other ten rulings bind through the ADR and `docs/plan/active/wave-f-contract.md`)
 
