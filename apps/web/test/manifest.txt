@@ -32,7 +32,6 @@
 # comment describes an enforced invariant, not merely a convention.
 #
 # Blank lines and lines starting with # are ignored by both scripts above.
-
 components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
 components/admin/members-a11y.test.tsx
@@ -66,8 +65,10 @@ components/documents/documents-a11y.test.tsx
 components/documents/documents-governance-a11y.test.tsx
 components/documents/documents-governance-keyboard.test.tsx
 components/documents/lint-finding-detail.test.tsx
+components/entry/email-confirmation-origin.test.tsx
 components/entry/email-confirmation-page.test.tsx
 components/entry/email-confirmation-signup-route.test.tsx
+components/entry/email-confirmation-wall.test.tsx
 components/entry/email-confirmation.test.tsx
 components/entry/entry-contracts.test.tsx
 components/entry/password-recovery.test.tsx
@@ -149,6 +150,9 @@ lib/bank/recon-reads.test.ts
 lib/bank/reload-on-change.test.ts
 lib/bank/table-reads.test.ts
 lib/business-date.test.ts
+lib/checkout/checkout-flash.test.ts
+lib/checkout/stripe-session.test.ts
+lib/checkout/success-state.test.ts
 lib/clara/useActiveThread.test.ts
 lib/close/api.test.ts
 lib/coding/doors.test.ts
@@ -192,6 +196,7 @@ lib/parts/catalog.test.tsx
 lib/parts/hooks.test.ts
 lib/parts/single-fire-guard.test.ts
 lib/parts/thread-action-coordinator.test.ts
+lib/rate-wall/courier.test.ts
 lib/read.test.ts
 lib/registers/accounts.test.ts
 lib/registers/adjustments-workbench.test.ts
@@ -219,6 +224,8 @@ lib/wire.test.ts
 test/a11yRules.test.ts
 test/keyboardWalk.test.ts
 tests/apiLimitBanner.test.mjs
+tests/checkout-claim-route.test.ts
+tests/checkout-route.test.ts
 tests/client-scope.test.ts
 tests/confirm-flash.test.ts
 tests/firm-scope-db-pins.test.ts

@@ -1,219 +1,239 @@
-// THE LANE-B SEAM — checkout-gate-design.md §2.1 / §3.4's C1/C2 attempt wall.
+// THE CONFIRM WALL — WIRED FOR REAL by FS-4 C-6 Lane B. Lane A's honest stub
+// (`{kind:"unavailable"}` on every call, never a fabricated "allowed") retires
+// here, and so does its two-function claim/settle shape.
 //
-// FS-4 C-6 Lane A (this PR) builds the code-entry surface and the handler's
-// SHAPE; it does not, and cannot, wire the real wall. §3.5 of part 1 is why:
-// the confirming caller has no session yet, so this cannot be a
-// `clara_authenticated` PostgREST call like every other door on this train —
-// it has to go `apps/web` → the runtime (`CLARA_RUNTIME_URL`, server-to-
-// server) → `clara.claim_confirmation_attempt` / `settle_confirmation_
-// attempt`. That runtime route is C-5's, not built on this tip.
+// ============================================================================
+// WHY THIS IS NOW ONE FUNCTION AND NOT TWO — the completion contract CHANGED
+// ============================================================================
+// Lane A's contract said: "Replace `claimConfirmationAttempt` and
+// `settleConfirmationAttempt` below with real calls to the runtime route C-5
+// adds." C-5 shipped ONE route, deliberately, as the security pass's A-M3 fix,
+// and the two-call shape it anticipated is not merely unavailable — it is the
+// shape that was found to be unsafe. `packages/runtime/src/authWallRoutes.ts`
+// measured it: `clara.settle_confirmation_attempt(uuid,text)` takes a bare
+// attempt id and proves NOTHING about who claimed it (structurally it cannot —
+// the whole lane is pre-session), and `claim_confirmation_attempt`'s counting
+// predicate is `a.outcome is distinct from 'accepted'`, so an `'accepted'`
+// stamp REMOVES the row from both limbs' windows. After settling every attempt
+// as accepted, an exhausted email digest measured `{"allowed":true,
+// "remaining":4}` — a full budget again. A caller that can settle, or that
+// merely HOLDS an attempt id, can reset any budget at will and the six-digit
+// code becomes guessable at leisure.
 //
-// THE STUB BELOW ALWAYS REFUSES, HONESTLY, RATHER THAN LETTING EVERY CALLER
-// THROUGH. A six-digit code is guessable (part 1 §3.4): the whole reason
-// C1/C2 exist is that `verifyOtp` alone is not a sufficient wall. A seam that
-// defaulted to "allowed" so the happy path looked done would be building a
-// confirmation form with NO rate limit at all and calling it finished — the
-// exact shape of fake success `apps/web/AGENTS.md` forbids ("the UI never
-// invents... a missing backend verb renders honestly 'not built yet'").
-// `"unavailable"` is its own outcome, distinct from the wall's own two real
-// refusals (wrong-code, locked) precisely so the confirm page never claims a
-// lockout that did not happen — it says the true thing: this mechanism is
-// not connected yet.
+// So `POST /api/auth-wall/confirm` performs claim → verifyOtp → settle inside
+// one server request; `attempt_id` never crosses the wire; a request carrying
+// `attempt_id`, `attemptId` or `outcome` is REFUSED 400 rather than ignored;
+// and there is no `/claim` and no `/settle` route to call. This module's
+// single function is the shape that contract admits. M2's concern (an attempt
+// id threaded to the wrong settlement) is answered better than M2 asked: the
+// id exists only in one local `const` inside the runtime process.
 //
-// LANE B'S COMPLETION CONTRACT. Replace `claimConfirmationAttempt` and
-// `settleConfirmationAttempt` below with real calls to the runtime route
-// C-5 adds. Nothing else in `handler.ts` needs to change: it already
-// branches on `"allowed" | "rejected" | "unavailable"`, and the day this
-// function can genuinely return the first two, real evidence flows through
-// the exact same call sites. Do not widen the return type without updating
-// `handler.ts`'s switch — TypeScript will refuse a non-exhaustive one.
+// ============================================================================
+// WHAT THIS APP STILL OWES THE WALL: THE ADDRESS
+// ============================================================================
+// M1's finding stands and is honoured here. C2 keys on
+// `sha256(pepper ‖ proxy-observed client IP)` — one value PER ADDRESS — and
+// NEVER the browser's `Origin` header, which is identical for every visitor to
+// one deployment (five rejected guesses from anyone would lock out every
+// applicant's signup). Lane A could not supply a real value and correctly
+// refused to fabricate one.
 //
-// R4, fix round 2026-09-01 — ONE DISPLAY-BOUND TO HONOUR: `remaining` must
-// stay within [0, 5] and `retryAfterSeconds` within [0, 900] (part 1 §3.4's
-// own C1/C2 ceilings) — `app/(entry)/auth/confirm/page.tsx`'s NIT-3 clamp
-// renders anything outside those bounds as the generic `invalid` card
-// instead of the real wrong-code/locked one. A real wall that ever needs a
-// longer lockout window than 900s must widen that clamp in the SAME PR, or
-// a genuine, non-malicious lockout will render as a mystery "invalid"
-// state instead of the honest wait it actually is.
+// It can now, and the DIVISION OF LABOUR is C-5's deploy note, not a choice
+// made here: `apps/web` sits between the browser and the runtime, so the
+// address the runtime observes on its own socket is `apps/web`'s. This app
+// reads the address ITS edge observed (`CLARA_TRUSTED_CLIENT_IP_HEADER`, i.e.
+// Cloudflare's `CF-Connecting-IP`) and forwards it under
+// `AUTH_WALL_CLIENT_IP_HEADER`; the runtime computes the digest with its own
+// copy of the shared pepper. So the digest is never computed here, the pepper
+// is not needed here for this limb, and the ADDRESS makes exactly one
+// server-to-server hop and is never stored, rendered or returned.
 //
-// M1/M2, fix round 2026-09-01 (PR #488, law-28 Codex adversarial leg) —
-// TWO CONTRACT DEFECTS IN WHAT THIS SEAM HANDS LANE B, fixed here at the
-// type level so Lane B's real implementation cannot inherit either mistake.
+// The branded `OriginDigest` type Lane A minted has no subject any more —
+// nothing on this side of the wall handles a digest for the confirm limb — so
+// it is gone rather than kept as a type nobody can construct. The digest type
+// that DOES exist now lives with its computation, in `lib/rate-wall/courier.ts`,
+// which the checkout route uses because `open_checkout_intent` is a
+// `clara_authenticated` door only `apps/web` can call.
 //
-// M1 — THE FIELD NAMED `origin` WAS THE WRONG VALUE, NOT JUST A BAD NAME.
-// It was fed `handler.ts`'s `proof.origin` — `proveSameOrigin`'s CSRF proof,
-// i.e. the browser's `Origin` REQUEST HEADER. That header is IDENTICAL for
-// every visitor to one deployment (e.g. `https://app.clarabook.com`). The
-// design's C2 wall (part 1 §4 option B, part 3 §2.1) keys on a DIFFERENT
-// fact: `sha256(pepper || proxy-observed CLIENT IP)`, one value PER ADDRESS.
-// Handing the header in under any name meant to carry that digest would key
-// C2 on one shared value for the whole deployment — five rejected guesses
-// from ANYONE would lock out every applicant's signups (law 3, "spelling is
-// not identity": the field read like the digest but was never the digest).
-// Renamed to `originDigest`, typed as the opaque `OriginDigest` below so a
-// bare `string` (the header included) cannot be assigned to it by accident.
+// ============================================================================
+// THE DISPLAY BOUNDS, RECONCILED — AND THEY ARE NOW MEASURED, NOT GUESSED
+// ============================================================================
+// Lane A recorded a RECONCILIATION OWED: `../confirm-flash.ts`'s
+// `LOCKED_MAX_WAIT_SECONDS = 900` and `REMAINING_MAX = 5` rode the assumption
+// that C1/C2's window is 15 minutes and its ceiling 5, and warned that a
+// genuine lockout outside those bounds would render as a mystery "invalid".
+// That is discharged, against `0161`'s shipped body rather than against the
+// design prose:
 //
-// Lane A cannot compute a real one at this seam: nothing upstream of
-// `handleEmailConfirmationPost` reads a trusted proxy-IP header today (the
-// design's own courier for that, part 1 §4.1, is unbuilt), and this file
-// must not fabricate an IP-derived digest client-side to fill the gap — a
-// browser has no trustworthy view of its own proxy-observed address anyway.
-// Of the two honest shapes on offer — (a) let the caller pass the real
-// digest once one exists, or (b) mint a second, distinct "unavailable"
-// reason — this file takes **(a)**: `originDigest` stays a real, required
-// key of the params (nothing is silently omittable), typed `| undefined`,
-// and `handler.ts` passes `undefined` explicitly with a comment saying why.
-// (b) was rejected because the stub already has exactly one honest "the
-// real wall isn't wired up" outcome (`{kind:"unavailable"}`) that already
-// covers "no digest either" — a second reason would duplicate it without
-// the runtime route existing yet to ever tell the two apart, and widening
-// `ConfirmationAttemptOutcome` is the one change this file's own header
-// above says never to make casually ("TypeScript will refuse a non-
-// exhaustive switch"). Lane B, wiring the real runtime call, either threads
-// the trusted-header value through to this seam and drops the `undefined`
-// arm, or computes it at the point it makes the call — its choice, made
-// where the proxy header is actually readable.
+//   · `retry_after_seconds` — the door computes each limb's own wait and
+//     advertises the MAX, each wrapped in `least(900, greatest(0, …))`. So the
+//     value is an integer in [0, 900] BY THE DOOR'S OWN CLAMP.
+//   · `remaining` — `greatest(0, 4 - greatest(email_count, origin_count))`, so
+//     an integer in [0, 4], inside the clamp's [0, 5].
+//   · `scope` — `'email' | 'origin'`, the exact two tokens Lane A chose. Its
+//     MEANING is the limb the caller must outlast (the one that clears last),
+//     not the limb that happened to fire.
 //
-// M2 — THE SEAM DROPPED `attempt_id`. Design (part 3 §2.1): the claim door
-// returns `{attempt_id, allowed, remaining}` and settle takes `p_attempt
-// uuid` — the id names WHICH row this specific guess counted against.
-// Without it, a valid-code and a wrong-code request in flight together could
-// have settlement stamp the wrong row: exploitable to keep a guess from ever
-// counting against C1/C2. `attemptId` now rides the `"allowed"` outcome (the
-// only branch that ever reaches `settleAttempt` — a `"rejected"` claim never
-// calls `verifyOtp` at all, part 3 §2.1's "an attempt that is never settled
-// … counts against C1/C2 as if rejected" is exactly why it needs none), and
-// `settleConfirmationAttempt` now requires it as its first argument.
+// The runtime passes all three through UNTOUCHED (`authWallRoutes.ts`: "this
+// route computes no number the DB owns"), and nothing here recomputes or
+// re-clamps them either. The clamps in `confirm-flash.ts` therefore stop being
+// a guess about the door and become what they should be: a fail-closed check
+// on a value that crossed two process boundaries.
 
-/**
- * An opaque C2 client-address digest — `sha256(pepper || proxy-observed
- * client IP)`, part 1 §4 option B / part 3 §2.1 ("both digests are exactly
- * 32 bytes"). Branded so a caller cannot pass a bare `string` — the `Origin`
- * header included — under this name by accident (M1 above). Nothing in this
- * file constructs one; it exists so Lane B's real value has somewhere typed
- * to land.
- */
-export type OriginDigest = string & { readonly __brand: "OriginDigest" };
+import { AUTH_WALL_CLIENT_IP_HEADER } from "@/lib/rate-wall/courier";
 
-/** What the wall decided, told apart from "the wall isn't reachable at all". */
-export type ConfirmationAttemptOutcome =
+/** What the wall decided, told apart from "the wall was not reachable". */
+export type ConfirmationOutcome =
   | {
-      readonly kind: "allowed";
-      /** `clara.claim_confirmation_attempt`'s own `attempt_id` (part 3
-       *  §2.1) — the row this guess counted against. MUST be threaded back
-       *  into `settleConfirmationAttempt` unchanged (M2 above). */
-      readonly attemptId: string;
+      readonly kind: "verified";
+      /** The GoTrue session the runtime obtained. `apps/web` seals it into its
+       *  own cookie: a Supabase OTP is single use, so this app cannot re-verify
+       *  and the tokens have to travel this one hop. */
+      readonly session: VerifiedSession;
       readonly remaining: number;
     }
-  | {
-      /**
-       * 裁-103 — OWNER-CONFIRMED 2026-09-01, see the pm ledger
-       * (docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md). (Raised by
-       * fs4-pr488-review; the finding is theirs, the ruling is the
-       * owner's — a review lane is never the ruling authority on a
-       * design-vs-contract call, AGENTS.md hard constraint 1.)
-       * (superseded — see below: this paragraph only establishes that
-       * `scope` must be supplied explicitly, not what it MEANS; #493's
-       * third round amended the meaning after this was written.)
-       *
-       * KEEP THIS SHAPE — do NOT shrink it to match the design text
-       * literally: part 3 §2.1's `claim_confirmation_attempt` prose only
-       * names `{attempt_id, allowed, remaining}`, no `scope`/`wait`. 裁-103
-       * is that the real door must supply BOTH anyway — `scope` explicitly
-       * (parsing it back out of an errcode/message would be the law-3
-       * "spelling is not identity" trap) and `retryAfterSeconds` because it
-       * is derived from DB-owned window state and this UI must never
-       * compute it. Lane B WIRES these two fields through from the door's
-       * real response; it does not invent them at this seam.
-       *
-       * WHAT `scope` MEANS (裁-103, amended by #493's third round,
-       * 2026-09-01) — NOT "which wall fired". The door is being fixed to
-       * advertise `retryAfterSeconds` as the MAX of both limbs' waits (a
-       * caller refused on the email limb, who obeyed that advertised wait
-       * exactly, could otherwise be refused again on the origin limb,
-       * because the very row the door just inserted counts against BOTH).
-       * With the wait now the max over both limbs, `scope` names THE LIMB
-       * THE CALLER MUST OUTLAST — the one that clears last — so the label
-       * and the number agree; it is not a report of which check happened
-       * to trip. Token set unchanged (`"email" | "origin"`); only the
-       * MEANING of the value moved.
-       *
-       * RECONCILIATION OWED: `../confirm-flash.ts`'s `LOCKED_MAX_WAIT_
-       * SECONDS` clamp (moved there from `page.tsx` by the N1 fix, 裁-109)
-       * renders any `retryAfterSeconds` over 900 as the generic `invalid`
-       * card, on the assumption C1/C2's window is 15 minutes (part 1 §3.4).
-       * C-3 names the real window when it builds the door; if that window
-       * is not 900s, the clamp must be trued to match in the SAME/a
-       * follow-up PR, or a genuine lockout longer than the guessed ceiling
-       * renders as a mystery "invalid" instead of the honest wait it is.
-       * THE SAME RECONCILIATION applies to `../confirm-flash.ts`'s
-       * `REMAINING_MAX = 5` — it rides the identical "C1's ceiling is 5"
-       * assumption (part 1 §3.4), and a legitimate `remaining` renders as
-       * `invalid` the same way if C-3 ships a different one. Neither
-       * guessed here — flagged for whoever lands the real door next.
-       *
-       * SPELLING, NOT A MEASUREMENT (F4 correction, fresh opus review,
-       * 2026-09-01) — `scope` reads `"email" | "origin"`, not
-       * `"address" | "origin"`. An earlier version of this comment claimed
-       * "the real door C-3 ships returns `'email' | 'origin'`" — false at
-       * this sha: `claim_confirmation_attempt` does not exist anywhere in
-       * `packages/db` yet, and part 3 §2.1's own prose, quoted four lines
-       * above, returns NO `scope` field at all. There is no door to have
-       * measured. `"email"` is a CHOICE, made to align with the door's own
-       * planned column/param naming (`clara.confirmation_attempts.
-       * email_digest`, `claim_confirmation_attempt`'s `p_email_digest`,
-       * part 3 §2.1) — not a fact read off a shipped implementation. If
-       * C-3 ships a door that disagrees, THIS spelling is what gets trued,
-       * not the other way around. Type-only either way — this seam is
-       * still stubbed and returns neither today, so no behavior changes.
-       */
-      readonly kind: "rejected";
-      readonly scope: "email" | "origin";
-      readonly retryAfterSeconds: number;
-    }
+  /** The wall allowed the attempt and the code was wrong (or expired, or the
+   *  address has no pending signup, or the account is banned — 裁-109 flattens
+   *  every verification failure into this one outcome deliberately, so a
+   *  banned and an unknown address are indistinguishable, N3). */
+  | { readonly kind: "wrong"; readonly remaining: number }
+  /** C1 or C2 refused BEFORE any verification happened. */
+  | { readonly kind: "locked"; readonly scope: "email" | "origin"; readonly retryAfterSeconds: number }
+  /** The wall could not be reached or is not configured. Never a bypass. */
   | { readonly kind: "unavailable" };
 
-export type ClaimConfirmationAttemptParams = {
-  readonly email: string;
-  /**
-   * THE C2 CLIENT-ADDRESS DIGEST (part 1 §4 option B / part 3 §2.1) — NEVER
-   * the `Origin` request header (M1 above; `proveSameOrigin`'s `origin` is a
-   * same-origin CSRF proof, a DIFFERENT fact that happens to share an
-   * English word with this one). `undefined` until a caller genuinely has a
-   * proxy-observed-address digest to offer — see this module's header for
-   * why Lane A never does today, and never fabricates one to fill the gap.
-   */
-  readonly originDigest: OriginDigest | undefined;
+/** The fields this app needs to seal a cookie session, positively checked. */
+export type VerifiedSession = {
+  readonly accessToken: string;
+  readonly refreshToken: string;
 };
 
-export type ClaimConfirmationAttempt = (
-  params: ClaimConfirmationAttemptParams,
-) => Promise<ConfirmationAttemptOutcome>;
+export type ConfirmEmailCodeParams = {
+  readonly email: string;
+  readonly token: string;
+  /** The proxy-observed client address this app's OWN edge saw, forwarded to
+   *  the runtime so IT can compute the C2 digest. `null` when the courier
+   *  could not produce one — see `confirmEmailCode`'s fail-closed arm. */
+  readonly clientIp: string | null;
+};
 
-export type ConfirmationAttemptSettlement = "accepted" | "rejected";
+export type ConfirmEmailCode = (params: ConfirmEmailCodeParams) => Promise<ConfirmationOutcome>;
 
-export type SettleConfirmationAttempt = (
-  /** `ConfirmationAttemptOutcome`'s `"allowed"` arm's own `attemptId`,
-   *  unchanged — settling any other value stamps the wrong row (M2 above). */
-  attemptId: string,
-  outcome: ConfirmationAttemptSettlement,
-) => Promise<void>;
+export const CONFIRM_ENDPOINT_PATH = "/api/auth-wall/confirm";
+export const RUNTIME_URL_VAR = "CLARA_RUNTIME_URL";
+export const SERVICE_TOKEN_VAR = "CLARA_AUTH_WALL_SERVICE_TOKEN";
+/** The runtime's own timeout is its business; this is the wall this app puts
+ *  on a hop that a person is waiting behind. Exceeded ⇒ `unavailable`, never
+ *  an acceptance and never a hang. */
+export const CONFIRM_TIMEOUT_MS = 10_000;
+
+export type ConfirmEmailCodeDeps = {
+  readonly fetchImpl?: typeof fetch;
+  readonly env?: Record<string, string | undefined>;
+};
+
+/** An integer inside the door's own clamp, or null. Nothing here recomputes a
+ *  bound the DB owns; this only refuses a value that could not have come from
+ *  the shipped door, which is deploy-skew evidence rather than a policy. */
+function boundedInt(value: unknown, max: number): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= max
+    ? value
+    : null;
+}
+
+const REMAINING_MAX = 5;
+const RETRY_AFTER_MAX = 900;
 
 /**
- * THE PRODUCTION DEFAULT. Every real caller of `handleEmailConfirmationPost`
- * gets this until Lane B replaces it — never a bypass, never a fabricated
- * "allowed". See this module's header for why that is the honest choice
- * rather than a shortcut.
+ * The ONE call. Every failure class — unconfigured, unauthorised, 503, a
+ * timeout, a network error, a body this build will not act on — lands on
+ * `unavailable`, which the confirm page renders as an honest "this is not
+ * working right now". None of them is ever an acceptance.
+ *
+ * FAIL CLOSED ON A MISSING ADDRESS, HERE RATHER THAN THERE. With no client IP
+ * the runtime would answer 503 `origin_digest_unavailable` anyway; refusing
+ * before the request is sent means the applicant does not spend a round trip,
+ * and — more importantly — this app never sends a confirm request whose C2
+ * limb it knows cannot be keyed. Proceeding with a placeholder address would
+ * key C2 on one value for the whole deployment, which is M1 in a new costume.
  */
-export const claimConfirmationAttempt: ClaimConfirmationAttempt = async () => ({
-  kind: "unavailable",
-});
+export const confirmEmailCode: ConfirmEmailCode = async (params) => {
+  return confirmEmailCodeWith(params, {});
+};
 
-/**
- * Informational only — settling an attempt that could not have been claimed
- * (the stub above never returns `"allowed"`) is a no-op today. Kept as its
- * own seam so Lane B's replacement of `claimConfirmationAttempt` does not
- * also have to invent this call site from scratch.
- */
-export const settleConfirmationAttempt: SettleConfirmationAttempt = async () => {};
+export async function confirmEmailCodeWith(
+  params: ConfirmEmailCodeParams,
+  deps: ConfirmEmailCodeDeps,
+): Promise<ConfirmationOutcome> {
+  const env = deps.env ?? process.env;
+  const doFetch = deps.fetchImpl ?? fetch;
+  const base = env[RUNTIME_URL_VAR];
+  const serviceToken = env[SERVICE_TOKEN_VAR];
+  if (typeof base !== "string" || base.trim() === "") return { kind: "unavailable" };
+  if (typeof serviceToken !== "string" || serviceToken.trim() === "") return { kind: "unavailable" };
+  if (params.clientIp === null) return { kind: "unavailable" };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CONFIRM_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await doFetch(`${base.replace(/\/+$/, "")}${CONFIRM_ENDPOINT_PATH}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceToken.trim()}`,
+        "Content-Type": "application/json",
+        [AUTH_WALL_CLIENT_IP_HEADER]: params.clientIp,
+      },
+      // EXACTLY two fields. The endpoint refuses 400 on `attempt_id`,
+      // `attemptId` or `outcome`, and this app must never be the caller that
+      // discovers that: the outcome is the runtime's to derive from its own
+      // `verifyOtp` result and from nothing a client sent.
+      body: JSON.stringify({ email: params.email, token: params.token }),
+      redirect: "manual",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch {
+    return { kind: "unavailable" };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (response.status !== 200 && response.status !== 429) return { kind: "unavailable" };
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return { kind: "unavailable" };
+  }
+  if (typeof body !== "object" || body === null) return { kind: "unavailable" };
+  const answer = body as Record<string, unknown>;
+
+  if (response.status === 429) {
+    if (answer.allowed !== false) return { kind: "unavailable" };
+    const retryAfterSeconds = boundedInt(answer.retry_after_seconds, RETRY_AFTER_MAX);
+    const scope = answer.scope;
+    if (retryAfterSeconds === null || (scope !== "email" && scope !== "origin")) {
+      return { kind: "unavailable" };
+    }
+    return { kind: "locked", scope, retryAfterSeconds };
+  }
+
+  if (answer.allowed !== true) return { kind: "unavailable" };
+  const remaining = boundedInt(answer.remaining, REMAINING_MAX);
+  if (remaining === null) return { kind: "unavailable" };
+  if (answer.verified !== true) return { kind: "wrong", remaining };
+
+  // POSITIVELY CHECKED, both tokens. `verified: true` with no usable session is
+  // not evidence that a cookie session can be sealed — the same discipline
+  // `hasVerifiedSession` applied to `verifyOtp`'s own result before this hop
+  // existed, kept verbatim in spirit across the new boundary.
+  const session = answer.session;
+  if (typeof session !== "object" || session === null) return { kind: "unavailable" };
+  const s = session as Record<string, unknown>;
+  const accessToken = s.access_token;
+  const refreshToken = s.refresh_token;
+  if (typeof accessToken !== "string" || accessToken.length === 0) return { kind: "unavailable" };
+  if (typeof refreshToken !== "string" || refreshToken.length === 0) return { kind: "unavailable" };
+  return { kind: "verified", session: { accessToken, refreshToken }, remaining };
+}

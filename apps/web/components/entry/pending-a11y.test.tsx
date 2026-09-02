@@ -30,6 +30,17 @@ import { HoldingCard } from "./holding-card";
 
 enableDomInspection();
 
+/**
+ * The harness container is the inspector's own `Stub`, not an `HTMLElement`.
+ * Narrowed through `unknown` to the ONE method used — the same idiom
+ * `email-confirmation-page.test.tsx` already applies — because casting it to
+ * `HTMLElement` would be a cast that lies about the object, and TypeScript
+ * says so.
+ */
+type QueriedNode = { getAttribute(name: string): string | null };
+const query = (container: unknown) => (selector: string): QueriedNode | null =>
+  (container as { querySelector(s: string): QueriedNode | null }).querySelector(selector);
+
 type Node = { tagName?: string; childNodes?: Node[]; parentNode?: Node };
 
 function App(node: ReactElement) {
@@ -174,19 +185,67 @@ test("VACUITY CONTROL: those three matchers DO fire on the strings they hunt", a
   assert.match("RM0 per month", amount, "the amount matcher misses the string 裁-58 forbids");
 });
 
-test("THE CHECKOUT SEAM is named on the pending state, and says TRIAL not an amount", async () => {
-  // 裁-68: Stripe checkout success IS the approval for tier-3, and that surface
-  // is not built. The screen must name the gap rather than leave the applicant
-  // believing an operator is about to rule. 裁-58: the words are "trial", never
-  // an amount.
+test("THE CHECKOUT PATH IS OFFERED on the pending state, with no amount anywhere", async () => {
+  // TRUED BY FS-4 C-6 Lane B. This cell used to require the words "Not built
+  // yet" on this card, because 裁-68's checkout surface genuinely did not
+  // exist. It exists now, so design part 1 §2.1's instruction applies — "the
+  // NotBuiltNote is REMOVED because the thing it names now exists, not edited
+  // to say less" — and a cell demanding that sentence would force the card to
+  // claim a gap that is closed. What replaces it is the positive property: a
+  // real, reachable control onto the DPA step, and 裁-58's trial framing with
+  // no amount, which is the part that never changes.
   const h = await renderComponent(App(createElement(HoldingCard, { state: { kind: "pending", firmName: "ROME PROPERTIES" } })));
   try {
     for (let i = 0; i < 2; i++) await h.settle();
     const text = textOf(h.container as never);
-    assert.match(text, /Not built yet/, "the pending state does not name the missing checkout");
+    assert.doesNotMatch(text, /Not built yet/, "the retired not-built note is back on the pending card");
     assert.match(text, /trial/i, "裁-58's trial framing is missing");
     assert.doesNotMatch(text, /\bRM\s*\d/i);
+    const link = query(h.container)('a[href="/signup"]');
+    assert.ok(link, "the pending card offers no way to continue to the DPA step");
   } finally {
     await h.unmount();
+  }
+});
+
+test("THE TWO PAID-ROAD ARMS carry REAL controls, and the firm-creating one is not a GET", async () => {
+  // The discriminating property: `checkout_open` must POST (a GET to /checkout
+  // would let a prefetch open a Stripe Session and spend a rate-wall attempt),
+  // and `paid` must LINK to the paint-only success page rather than to the
+  // claim route itself (a GET must never create a tenant, M9). Before Lane B
+  // both arms were disabled buttons, so both halves of this are new behaviour.
+  const resume = await renderComponent(
+    App(createElement(HoldingCard, { state: { kind: "checkout_open", firmName: "ROME PROPERTIES" } })),
+  );
+  try {
+    for (let i = 0; i < 2; i++) await resume.settle();
+    const form = query(resume.container)('form[action="/checkout"]');
+    assert.ok(form, "the resume arm has no form posting to /checkout");
+    assert.equal(form?.getAttribute("method")?.toLowerCase(), "post");
+    assert.equal(
+      query(resume.container)('a[href="/checkout"]'),
+      null,
+      "a LINK to /checkout would open a Session on a prefetch",
+    );
+    assert.doesNotMatch(textOf(resume.container as never), /Not built yet/);
+  } finally {
+    await resume.unmount();
+  }
+
+  const paid = await renderComponent(
+    App(createElement(HoldingCard, { state: { kind: "paid", firmName: "ROME PROPERTIES" } })),
+  );
+  try {
+    for (let i = 0; i < 2; i++) await paid.settle();
+    const link = query(paid.container)('a[href="/checkout/success"]');
+    assert.ok(link, "the paid arm has no link to the success page");
+    assert.equal(
+      query(paid.container)('form[action*="/claim"]'),
+      null,
+      "the firm-creating POST must live on the success page, not on this card",
+    );
+    assert.doesNotMatch(textOf(paid.container as never), /Not built yet/);
+  } finally {
+    await paid.unmount();
   }
 });

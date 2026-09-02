@@ -1,58 +1,65 @@
-// clara.dpa_documents — the C-1 table (PR #478, `UNNUMBERED_checkout_gate_c1_
-// dpa.sql`) this train's DPA step reads from. NOT ON MAIN as this Lane-A PR
-// ships; §478's own migration grants `clara_authenticated` NOTHING on this
-// table (owner-only RLS, zero application-role grants — its header says so
-// explicitly: "C-1 creates no human door and grants no application role
-// direct table access"). So a browser read of this relation fails TODAY for
-// two independent, and eventually overlapping, reasons: the relation does
-// not exist yet, and once it does, nothing grants a read path to it. This
-// module treats both identically — see `loadCurrentDpaDocumentState` in
-// `./dpa-server-reads.ts` for the honest "unavailable" degrade.
+// THE CURRENT DPA DOCUMENT — repointed by FS-4 C-6 Lane B from a relation read
+// onto the real door, `clara.get_current_dpa_document()` (`0161`).
 //
-// THE C-1 SHAPE, measured off the live migration text rather than assumed
-// from the design packet's part-2 sketch (which omitted a body column even
-// though part 3 needs the exact bytes shown to the signer):
+// WHAT LANE A MEASURED, AND WHY THE RELATION READ COULD NEVER HAVE WORKED.
+// C-1 (`0158`) creates `clara.dpa_documents` with RLS enabled AND forced, one
+// `clara_fn_owner` policy, and ZERO application-role grants — its own header
+// says "C-1 creates no human door and grants no application role direct table
+// access". That is the estate's blanket law for every table on this train
+// (design part 2 §1), so `getRows("dpa_documents")` was not waiting for a
+// grant that was coming; it was reading a relation that would never answer.
+// C-3 healed the acknowledged build-order drift by adding the door, and the
+// door is what this module now calls. `0161`'s own comment names this file as
+// the door's frontend home.
 //
-//   clara.dpa_documents(version text primary key, body text not null,
-//     body_sha256 bytea not null, source_path text not null,
-//     effective_from timestamptz not null, effective_to timestamptz,
-//     created_at timestamptz not null default now())
-//   -- uq_dpa_documents_current: a partial unique index on (true) where
-//   -- effective_to is null — AT MOST ONE current row.
+// A READ THAT RIDES `callDoor`, LABELLED AS ONE (apps/web/AGENTS.md: "A
+// read-flavoured RPC still rides `callDoor` as transport but is NOT a governed
+// act — label it as a read at the call site"). `get_current_dpa_document()` is
+// `stable`, writes nothing, and takes no arguments; `callDoor` is only the
+// PostgREST transport here, and nothing in this module treats the answer as a
+// receipt.
 //
-// `body` IS THE EXACT TEXT TO RENDER. There is no repo-file read here: the
-// row's own `source_path` is provenance metadata (which file the seeded body
-// came from), never a path this app fetches at request time — `apps/web`
-// runs on Cloudflare Workers and has no filesystem access to `docs/` at all,
-// and even on a Node target reading arbitrary repo paths from a request
-// handler would be the wrong layer for it. The DB is the one system of
-// record for what the signer is shown (part 2 §1.1's own words: "of the
-// EXACT text served to a signer").
+// THE SHAPE IS THE DOOR'S, NOT THE TABLE'S. `returns table(version, body,
+// body_sha256, published_at)` — four columns, and `published_at` is the row's
+// `effective_from` under the door's own name. There is no `effective_to` in
+// the result and there must not be: the door's `where d.effective_to is null`
+// IS the currency test, so a client-side re-check would be a second
+// implementation of a predicate the DB already owns, free to disagree with it.
+// PostgREST returns a set-returning function as an ARRAY, and the partial
+// unique index `uq_dpa_documents_current` (on `(true) where effective_to is
+// null`) is what makes "at most one" a database property rather than a hope.
+//
+// `body` IS THE EXACT TEXT TO RENDER, and `body_sha256` is the exact hash to
+// submit back. `0158`'s own `ck_dpa_documents_body_sha` CHECK
+// (`body_sha256 = sha256(convert_to(body,'UTF8'))`) means the two cannot
+// disagree at rest, and 裁-90's byte-identity law is what `sign_dpa` enforces
+// at signing time: the hash the person submits is compared against the current
+// row's own, and a mismatch refuses `CLR10 the signed text does not match the
+// current agreement`. Nothing here recomputes the hash — see `./dpa-doors.ts`
+// for why recomputing it would delete the only thing binding a signature to
+// the bytes the signer actually saw.
+//
+// THERE IS NO REPO-FILE READ. The row's `source_path` is provenance metadata
+// (which file the seeded body came from) and is not returned by the door at
+// all; `apps/web` runs on Cloudflare Workers and has no filesystem access to
+// `docs/`. The DB is the one system of record for what a signer is shown.
 
-import { getRows } from "../read";
+import { callDoor } from "@/lib/doors";
 import type { SessionTokenAccessor } from "@/lib/session";
 
-export const DPA_DOCUMENTS_RELATION = "dpa_documents";
-
-export const DPA_DOCUMENT_COLUMNS = [
-  "version",
-  "body",
-  "body_sha256",
-  "effective_from",
-  "effective_to",
-] as const;
-
-export const DPA_DOCUMENTS_SELECT = DPA_DOCUMENT_COLUMNS.join(",");
+/** The door, by exact name. Kept as a constant so a cell asserts the SPELLING
+ *  this module actually calls rather than re-typing it (review law 3). */
+export const CURRENT_DPA_DOCUMENT_DOOR = "get_current_dpa_document";
 
 export type DpaDocumentRow = {
   readonly version: string;
   readonly body: string;
-  /** PostgREST's own text rendering of `bytea` (`\x`-prefixed hex). Opaque
-   *  here — nothing in this train recomputes or compares it; `sign_dpa`
-   *  (Lane B) is the door that will. */
+  /** PostgREST's own text rendering of `bytea` — `\x`-prefixed lowercase hex.
+   *  OPAQUE here: it is forwarded to `sign_dpa`'s `p_body_sha256` verbatim and
+   *  is never parsed, compared or recomputed on this side. */
   readonly body_sha256: string;
-  readonly effective_from: string;
-  readonly effective_to: string | null;
+  /** The row's `effective_from`, under the door's own column name. */
+  readonly published_at: string;
 };
 
 /** Runtime decoder — transport output is untrusted until every field's shape
@@ -67,32 +74,31 @@ export function isDpaDocumentRow(value: unknown): value is DpaDocumentRow {
     typeof row.body === "string" &&
     row.body.length > 0 &&
     typeof row.body_sha256 === "string" &&
-    typeof row.effective_from === "string" &&
-    (row.effective_to === null || typeof row.effective_to === "string")
+    row.body_sha256.length > 0 &&
+    typeof row.published_at === "string"
   );
 }
 
 /**
- * The CURRENT document — `effective_to IS NULL`, of which the partial unique
- * index guarantees at most one. Returns `null` for "no current row" (a
- * legitimate, honest answer — e.g. every version has been superseded, or the
- * read succeeded against zero rows); throws (a `ReadError`, from `getRows`)
- * for a genuine transport/grant failure, exactly like every other read in
- * this app. The caller (`./dpa-server-reads.ts`) is the one that decides
- * both outcomes render the same honest "unavailable" card.
+ * The CURRENT document. Returns `null` for "no current row" — a legitimate,
+ * honest answer (every version superseded, or the seed has not run) — and
+ * throws for a genuine transport or authorisation failure, exactly like every
+ * other read in this app. `./dpa-server-reads.ts` is the caller that decides
+ * both outcomes render the same honest "unavailable" card, and the design
+ * agrees: with no current row the step renders a `NotBuiltNote` and the
+ * checkout control is ABSENT, not disabled-looking (part 3 §2, NIT-8).
+ *
+ * THE FAIL-CLOSED SUCCESSOR IS STRUCTURAL, not this function's manners: even
+ * if a stale row somehow reached the form, `sign_dpa` refuses `unknown dpa
+ * version` and `that dpa version is not current`, so no signature, no
+ * checkout, no firm.
  */
 export async function loadCurrentDpaDocument(
   session: SessionTokenAccessor,
   signal?: AbortSignal,
 ): Promise<DpaDocumentRow | null> {
-  const rows = await getRows<unknown>(DPA_DOCUMENTS_RELATION, {
-    select: DPA_DOCUMENTS_SELECT,
-    filters: { effective_to: "is.null" },
-    order: "effective_from.desc",
-    limit: 1,
-    session,
-    signal,
-  });
+  const rows = await callDoor<unknown>(CURRENT_DPA_DOCUMENT_DOOR, {}, { session, signal });
+  if (!Array.isArray(rows)) return null;
   const row = rows[0];
   return isDpaDocumentRow(row) ? row : null;
 }

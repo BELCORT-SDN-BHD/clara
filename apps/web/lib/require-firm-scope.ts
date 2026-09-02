@@ -406,6 +406,24 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
       "During the P4-2/P4-3 window its two links re-enter the firm layout and loop " +
       "through the missing /pending route; P4-3 closes that temporary navigation trap.",
   },
+  {
+    path: "app/(entry)/checkout/success/page.tsx",
+    url: "/checkout/success",
+    // FS-4 C-6 Lane B. Registered WITHOUT `public: true`, and absent from
+    // proxy.ts's PUBLIC_PATH_PREFIXES — the same shape /pending has.
+    reason:
+      "STRIPE'S success_url, and a PAINT-ONLY GET. It requires a session (every " +
+      "read on it is the caller's own) and must NOT require a firm — the firm is " +
+      "what the next click creates, so requireFirmScope() would redirect the person " +
+      "who just paid to the holding page instead of letting them finish. It is not " +
+      "public either: an anonymous caller has no registration to render, and the " +
+      "proxy's own sign-in redirect is the right answer for them. It renders no " +
+      "firm-scoped data at all — five typed states read from the caller's own " +
+      "registration row and the self-scoped clara.get_own_checkout_progress door — " +
+      "and it CREATES NOTHING: the door that opens the firm sits behind an explicit " +
+      "POST on the sibling /checkout/success/claim route (design part 3 §2, M9), " +
+      "so a prefetch, a mail scanner or a restored tab cannot mint a tenant.",
+  },
 ];
 
 /**
@@ -524,5 +542,45 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
       "the handler hard-codes type=email, ignores caller redirects, requires a " +
       "positive matching session, seals the cookie response, and redirects only " +
       "to fixed entry URLs. A firm-scope check would refuse every new signup.",
+  },
+  {
+    path: "app/(entry)/checkout/route.ts",
+    // FS-4 C-6 Lane B. Server entry 2 of 3 (checkout-gate-design part 1 §1.1).
+    reason:
+      "EXEMPT BY NECESSITY. THE PAYMENT ENTRY, WHICH RUNS BEFORE A FIRM EXISTS — " +
+      "the firm is what the money buys, so requireFirmScope() would redirect every " +
+      "paying applicant to /pending, which is the page whose own button posts here. " +
+      "It returns no firm-scoped data at all: its only response is a 303, either to " +
+      "Stripe's hosted Checkout or back to /pending carrying an opaque refusal " +
+      "marker. ITS OWN WALLS, in the order they run: (1) proveSameOrigin — a " +
+      "state-changing POST that spends a rate-wall attempt and creates a Stripe " +
+      "object, refused cross-origin before anything else; (2) a resolved server " +
+      "session, or a redirect to /login; (3) the caller's OWN open registration, " +
+      "read server-side from their own session — no registration id is accepted " +
+      "from the request, whose body is never read at all; (4) the trusted-client-IP " +
+      "digest, FAIL-CLOSED (design part 3 §3: absent ⇒ checkout refuses); then " +
+      "clara.open_checkout_intent, which judges the request independently and " +
+      "refuses CLR04 for a foreign registration, CLR09 for an unsigned DPA, an " +
+      "already-paid registration, or the 24-hour rate wall. THE DB IS THE WALL; " +
+      "none of the four checks above can admit anything the door would refuse.",
+  },
+  {
+    path: "app/(entry)/checkout/success/claim/route.ts",
+    // FS-4 C-6 Lane B. Server entry 3 of 3 — the one that creates the tenant.
+    reason:
+      "EXEMPT BY NECESSITY. THE DOOR THAT CREATES THE FIRM (裁-89's folded " +
+      "claim_paid_firm). By definition the caller has no firm when it runs and one " +
+      "afterwards, so a firm-scope check would refuse exactly the request it exists " +
+      "to serve. It returns no firm-scoped data: a 303 to the firm home on success, " +
+      "or back to /checkout/success with an opaque refusal marker. Its own walls: " +
+      "proveSameOrigin first (this is the most consequential POST in the product); " +
+      "then a resolved session; then the caller's own registration and unconsumed " +
+      "payment, read server-side — the request body is never read and no id, name " +
+      "or amount crosses the wire (NIT-6). The pre-check chooses WHICH CARD to " +
+      "render for a caller with nothing to claim; it is not a second copy of the " +
+      "authority decision. claim_paid_firm still judges every request on its own " +
+      "authority — CLR04 for a foreign registration or an unverified email claim, " +
+      "CLR09 for a closed registration, no completed payment, or a missing DPA " +
+      "signature at the intent's own pinned version.",
   },
 ];
