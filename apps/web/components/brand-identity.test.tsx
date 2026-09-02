@@ -361,18 +361,25 @@ test("NEVER A LOADER, at the seam: a FAILED read paints no mascot", async () => 
     try {
       for (let i = 0; i < 5; i++) await h.settle();
       assert.equal(imagesIn(h).length, 0, "a failed read is not an empty conversation");
-      // WHAT THIS SURFACE ACTUALLY SHOWS, recorded rather than asserted as if
-      // it were right: a failed FIRST load renders the LOADING sentence, not
-      // the error banner. `claraThreadStore.hydrateFailed` sets `loadError`
-      // and leaves `messagesLoaded` false (threadStore.ts:110-112), while
-      // ClaraThreadView's banner is gated on `state.loadError &&
-      // state.messagesLoaded` — so the two never coincide on a first read and
-      // the person is left on "Loading the conversation…" indefinitely. That
-      // is a PRE-EXISTING defect, found by this cell and reported in the PR
-      // body; P6-6 does not fix it (it is thread-state behaviour, not
-      // identity), and this assertion pins today's truth so a later fix has
-      // to come here and say so.
-      assert.match(h.text(), /Loading the conversation…/);
+      // THE FIX CAME HERE, AND SAYS SO — as this cell's previous body asked it to.
+      //
+      // What this recorded before P6-5: a failed FIRST load rendered the LOADING sentence
+      // indefinitely. `claraThreadStore.hydrateFailed` sets `loadError` and leaves
+      // `messagesLoaded` false, while ClaraThreadView's error banner was gated on
+      // `state.loadError && state.messagesLoaded` — the two could never coincide on a first
+      // read, so the only branch that could report the failure required the flag only a
+      // SUCCESS sets. P6-6 pinned that truth rather than asserting it was right, and named it
+      // a pre-existing defect for a later train.
+      //
+      // P6-5 is that train. The loading arm is now "no error and nothing loaded yet", the
+      // error arm no longer requires `messagesLoaded`, and the failure carries a retry that
+      // re-arms the once-per-thread guard. This cell's own subject — no mascot under a failed
+      // read — is unchanged and still holds; what changed is what the person sees INSTEAD, and
+      // it is now the honest thing. The RED-before evidence lives in
+      // `components/clara/thread-rehydrate.test.tsx`, whose mutant M1 puts `messagesLoaded`
+      // back on the error arm and reds it.
+      assert.match(h.text(), /Could not load the conversation/, "the failure is REPORTED, not hidden behind a spinner");
+      assert.doesNotMatch(h.text(), /Loading the conversation…/, "and the loading sentence is gone with it");
     } finally {
       await h.unmount();
     }

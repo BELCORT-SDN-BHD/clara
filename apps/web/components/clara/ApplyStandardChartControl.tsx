@@ -127,6 +127,11 @@ export function ApplyStandardChartControl({
   );
 
   function toggle(family: CoaTemplateFamily) {
+    // BELT, and recorded as belt: the core checkbox renders `disabled`, so no change event
+    // reaches here for one — a mutant deleting this line reds nothing, which the fold round's
+    // panel measured and says out loud rather than dressing it up as a cell. It stays for a
+    // future rendering that is not disabled (a chip row, a keyboard-only toggle), where it
+    // would be the only thing standing between a human and rung 8's `core_family_dropped`.
     if (family.inclusion === "core") return;
     setSelected((was) => {
       const next = new Set(was);

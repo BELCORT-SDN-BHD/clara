@@ -350,6 +350,56 @@ test("裁-128: the fieldset defaults to the DATABASE's own plan, core families a
   });
 });
 
+test("裁-128: a CORE family reaches the door even when the DB's plan omits it, and cannot be unchecked", async () => {
+  // TWO HALVES, and the earlier cell only proved one. `disabled` on a core checkbox is the
+  // VISIBLE half; the SEEDING loop (`if (f.inclusion === "core") next.add(...)`) is what
+  // actually guarantees the payload carries it. A mutant that deleted the seeding left the
+  // other cell green, because that fixture's plan already kept the core family — the fixture
+  // was doing the work the code was supposed to do.
+  //
+  // So this fixture's plan `keep` is EMPTY: nothing but the seeding can put `core_ledger` in
+  // the array, and rung 8 (`core_family_dropped`) is what would refuse without it.
+  const emptyPlanRouter = (url: string): Response => {
+    if (url.includes("/rest/v1/rpc/coa_template_family_plan")) {
+      return json({ template_id: TEMPLATE_ID, client_id: CLIENT_ID, axes: {}, msic_division: null, absent_axes: [], axis: "full", keep: [], drop: ["core_ledger", "retail", "manufacturing"] });
+    }
+    return chartRouter(CHART_PENDING)(url);
+  };
+  await withFetch(emptyPlanRouter, async (calls) => {
+    const { h, body: docBody } = await mountInBody();
+    try {
+      const trigger = h.find(buttonNamed("Apply the standard chart"));
+      assert.ok(trigger);
+      await h.fireEvent(trigger, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+      const select = findIn(docBody, (n) => n.tagName === "SELECT");
+      assert.ok(select);
+      await h.act(() => setFieldValue(select, TEMPLATE_ID));
+      await settleUntil(h, () => /Core ledger/.test(textOf(docBody)), "the family roster", () => textOf(docBody));
+
+      const boxes = findAllIn(docBody, (n) => n.tagName === "INPUT" && n.type === "checkbox");
+      assert.equal(boxes[0]!.checked, true, "core is seeded IN despite the plan keeping nothing");
+      assert.equal(boxes[0]!.disabled, true, "and it cannot be taken back out");
+      // The harness itself refuses to toggle a disabled control ("assert the gate, then act"),
+      // which is the second half of the guard proved by the instrument rather than by a click
+      // that would manufacture a green.
+      assert.throws(() => setCheckboxChecked(boxes[0]!, false), /refusing to toggle a DISABLED checkbox/);
+
+      const confirm = findIn(docBody, buttonNamed("Apply the chart"));
+      assert.ok(confirm);
+      await h.act(() => clickButton(confirm));
+      await settleUntil(h, () => calls.some((c) => c.url.includes("/rest/v1/rpc/apply_coa_template")), "the door call");
+      assert.deepEqual(
+        (calls.find((c) => c.url.includes("apply_coa_template"))!.body as Record<string, unknown>).p_families,
+        ["core_ledger"],
+        "the door receives the core family — the only thing that put it there is the seeding",
+      );
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
 test("裁-128: a non-empty chart offers NO apply and says why — rung 5's refusal, before the round trip", async () => {
   const offStandard = { ...CHART_PENDING, state: "off_standard", accounts: 37 };
   await withFetch(chartRouter(offStandard), async () => {
