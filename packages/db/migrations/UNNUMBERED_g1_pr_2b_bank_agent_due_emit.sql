@@ -1,4 +1,5 @@
--- G1 PR-2b (裁-40's own follow-up; g1-wake-engine-design.md §1.1/§3.6, bank-agency-design.md §3.6,
+-- G1 PR-2b (裁-40's own follow-up; g1-wake-engine-design.md §1.1 and
+-- bank-agency-design.md §3.6,
 -- bank-agency-annexes-1-mechanics.md's reason-to-action table at §D.0's tail): the two wake-engine
 -- PRODUCERS' own DB surfaces. Rewritten in place after Codex's r1 review of #449 (HIGH-2, HIGH-3),
 -- then again after the opus r1 review of the same PR (FIND-1, FIND-6, FIND-10 below) — this file
@@ -34,7 +35,7 @@
 --
 -- WHAT THIS FILE SHIPS, and why each piece exists:
 --
---   (1) clara.emit_bank_agent_due(client, bank_account, due_key, reason) — the bank_agent
+--   (1) clara.emit_bank_agent_due(client, bank_account, subject, reason) — the bank_agent
 --       producer's sole write. clara._append_event is deliberately UNGRANTED to clara_runtime
 --       ("callable only inside definer writers", 0005 §D's own header) and no existing writer
 --       emits `bank.agent_due`, so the runtime belt needs a narrow door of its own rather than a
@@ -60,18 +61,13 @@
 --       BEFORE appending, in the SAME statement/transaction as the append, so two concurrent
 --       callers racing the identical (client, account, due_key) triple can never both succeed.
 --
---       THE due_key CONTRACT (new, and the reason this signature widened from THIS PR's own
---       first cut): F-A3's own domain due-predicate (clara.bank_agent_run_due, unbuilt — design
---       §5) is the ONLY thing that can name a stable identity for "this specific occurrence" (an
---       unmatched line, a completable reconciliation, a parked retry) — the producer belt has no
---       domain knowledge of its own. THE CONTRACT: `bank_agent_run_due(p_client)`'s `due:true`
---       reply MUST carry a `due_key` string that is STABLE across repeated due:true answers for
---       the SAME occurrence (so a re-ask before the occurrence is resolved claims the SAME row
---       and is correctly refused) and DIFFERENT for a genuinely NEW occurrence (a different
---       statement line, a fresh retry attempt after the receipt changes) — an opaque token from
---       the belt's own point of view; the predicate owns its meaning entirely. Documented again,
---       for a reader who never sees this comment, in packages/runtime/README.md and in
---       reconciler-bank-agent.mjs's own header.
+--       THE due_key CONTRACT (R2-2, Codex r3 review of #449): the runtime is not an authority
+--       allowed to mint an occurrence identity. It passes a DB row id: statement id for
+--       unmatched_lines/reconcilable, or the newest refused bank_agent_receipts id for
+--       retry_later. This door proves that id belongs to the named client/account and currently
+--       satisfies the named reason, then derives the key in SQL as
+--       sha256(client || account || reason || subject). Missing, foreign, stale, or wrong-kind
+--       subjects refuse CLR10 before the claim table is touched.
 --
 --   (2) clara.claim_close_prep_task(firm, client, fiscal_year, model_snapshot) — the close_prep
 --       producer's sole write, REPLACING this PR's own first-cut raw `insert into
@@ -108,8 +104,8 @@ set local statement_timeout = '5min'; -- precautionary; this file does no heavy 
 -- =====================================================================================
 do $$
 begin
-  if to_regprocedure('clara.emit_bank_agent_due(uuid,uuid,text,text)') is not null then
-    raise exception 'g1_pr_2b prestate: clara.emit_bank_agent_due(uuid,uuid,text,text) already exists' using errcode='CLR10';
+  if to_regprocedure('clara.emit_bank_agent_due(uuid,uuid,uuid,text)') is not null then
+    raise exception 'g1_pr_2b prestate: clara.emit_bank_agent_due(uuid,uuid,uuid,text) already exists' using errcode='CLR10';
   end if;
   if to_regprocedure('clara.claim_close_prep_task(uuid,uuid,uuid,text)') is not null then
     raise exception 'g1_pr_2b prestate: clara.claim_close_prep_task(uuid,uuid,uuid,text) already exists' using errcode='CLR10';
@@ -131,13 +127,9 @@ create table clara.bank_agent_due_claims (
   firm_id          uuid        not null,
   client_id        uuid        not null,
   bank_account_id  uuid        not null,
-  -- R2-2 (Codex r2 review of #449): the CANONICAL due_key contract, enforced at the table level
-  -- too (defense in depth alongside the function's own upfront guard below): ASCII letters,
-  -- digits, dot, underscore, colon and hyphen ONLY; non-empty; at most 256 bytes. An allowlist is
-  -- deliberate: JavaScript Unicode classes and PostgreSQL locale-sensitive POSIX classes do not
-  -- describe exactly the same language, so a "no whitespace" rule would drift across the two
-  -- layers it claimed were identical. This grammar is byte-for-byte reproducible in both.
-  due_key          text        not null check (due_key ~ '^[A-Za-z0-9._:-]+$' and octet_length(due_key) <= 256),
+  subject_id       uuid        not null,
+  -- R2-2: SQL derives exactly one lowercase SHA-256 hex identity from DB-verified inputs.
+  due_key          text        not null check (due_key ~ '^[0-9a-f]{64}$'),
   event_seq        bigint, -- set once the append below determines it; null only inside emit_bank_agent_due's own transaction
   claimed_at       timestamptz not null default now(),
   constraint uq_bank_agent_due_claims_key unique (client_id, bank_account_id, due_key)
@@ -149,21 +141,17 @@ create policy p_bank_agent_due_claims_owner on clara.bank_agent_due_claims for a
 create policy p_bank_agent_due_claims_read on clara.bank_agent_due_claims for select to clara_authenticated using (firm_id = clara.jwt_firm());
 grant select on clara.bank_agent_due_claims to clara_authenticated;
 comment on table clara.bank_agent_due_claims is
-  'G1 PR-2b (HIGH-3 fold): the bank_agent producer''s DB-owned idempotency claim -- '
-  'UNIQUE(client_id, bank_account_id, due_key) is the atomic exclusion emit_bank_agent_due claims '
-  'before appending. Written ONLY by that function; never by any human or agent verb.';
+  'G1 PR-2b (HIGH-3/R2-2 fold): the bank_agent producer''s DB-owned idempotency claim. '
+  'emit_bank_agent_due verifies subject_id against authoritative bank rows and derives due_key '
+  'in SQL before atomically claiming UNIQUE(client_id, bank_account_id, due_key). Written ONLY '
+  'by that function; never by any human or agent verb. NO-PRUNE RETENTION OBLIGATION: rows are '
+  'permanent idempotency evidence; no cleanup, TTL, DELETE, or truncation path may remove them.';
 
-create function clara.emit_bank_agent_due(p_client uuid, p_bank_account uuid, p_due_key text, p_reason text default null)
+create function clara.emit_bank_agent_due(p_client uuid, p_bank_account uuid, p_subject uuid, p_reason text)
   returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_firm uuid; v_seq bigint;
+declare v_firm uuid; v_seq bigint; v_due_key text;
 begin
-  -- R2-2 (Codex r2 review of #449): the SAME canonical due_key shape the table's own CHECK
-  -- enforces, checked upfront so a malformed key refuses cleanly (CLR10) before any claim-table
-  -- write is even attempted, rather than surfacing as a raw 23514 CHECK-violation.
-  if p_due_key is null or p_due_key !~ '^[A-Za-z0-9._:-]+$' or octet_length(p_due_key) > 256 then
-    raise exception 'emit_bank_agent_due: due_key must use only ASCII letters/digits/._:- and be at most 256 bytes (got %)', coalesce(quote_literal(p_due_key), 'null') using errcode = 'CLR10';
-  end if;
   -- R2-1 (Codex r2 review of #449, HIGH): the CLOSED emit-worthy reason set, enforced HERE —
   -- the TypeScript classifier (reconciler-bank-agent.mjs's classifyBankDueReason) is a caller
   -- CONVENIENCE, never the wall itself, because this function's ACL grants clara_runtime EXECUTE
@@ -181,50 +169,133 @@ begin
   end if;
   if not exists (
     select 1 from clara.bank_accounts ba
-     where ba.id = p_bank_account and ba.client_id = p_client and ba.active
+     where ba.id = p_bank_account and ba.firm_id = v_firm
+       and ba.client_id = p_client and ba.active
   ) then
     raise exception 'emit_bank_agent_due: bank account % is not an active account of client %', p_bank_account, p_client
       using errcode = 'CLR10';
   end if;
 
+  -- R2-2: the door, not the runtime, proves and names the occurrence. Every arm reads the
+  -- authoritative row type for that reason. The retry subject is a RECEIPT id; its subject_id
+  -- is the candidate anchor line, as Annex A.3 requires.
+  if p_reason = 'unmatched_lines' then
+    if not exists (
+      select 1
+        from clara.bank_statements s
+       where s.id = p_subject and s.firm_id = v_firm and s.client_id = p_client
+         and s.bank_account_id = p_bank_account and s.status = 'live'
+         and exists (
+           select 1 from clara.bank_statement_lines l
+            where l.statement_id = s.id
+              and not exists (
+                select 1 from clara.bank_match_line_members m
+                 where m.line_id = l.id and m.group_status in ('pending', 'live'))
+              and not coalesce((
+                select (e.status = 'open' or e.resolution_disposition = 'bank_corrective_line')
+                  from clara.bank_line_exceptions e
+                 where e.line_id = l.id
+                 order by (e.status = 'open') desc, e.created_at desc, e.id desc
+                 limit 1), false))
+    ) then
+      raise exception 'emit_bank_agent_due: subject % is not a live unmatched statement of client % account %', p_subject, p_client, p_bank_account
+        using errcode = 'CLR10';
+    end if;
+  elsif p_reason = 'reconcilable' then
+    if not exists (
+      select 1
+        from clara.bank_statements s
+       where s.id = p_subject and s.firm_id = v_firm and s.client_id = p_client
+         and s.bank_account_id = p_bank_account and s.status = 'live'
+         and not exists (
+           select 1 from clara.bank_reconciliations r
+            where r.statement_id = s.id and r.status = 'complete')
+         and not exists (
+           select 1 from clara.bank_statement_lines l
+            where l.statement_id = s.id
+              and not exists (
+                select 1 from clara.bank_match_line_members lm
+                  join clara.bank_matches bm on bm.id = lm.match_id
+                 where lm.line_id = l.id and bm.status = 'live')
+              and not coalesce((
+                select (e.status = 'open' or e.resolution_disposition = 'bank_corrective_line')
+                  from clara.bank_line_exceptions e
+                 where e.line_id = l.id
+                 order by (e.status = 'open') desc, e.created_at desc, e.id desc
+                 limit 1), false))
+    ) then
+      raise exception 'emit_bank_agent_due: subject % is not a live reconcilable statement of client % account %', p_subject, p_client, p_bank_account
+        using errcode = 'CLR10';
+    end if;
+  else
+    if not exists (
+      select 1
+        from clara.bank_agent_receipts r
+        join clara.bank_statement_lines l on l.id = r.subject_id
+        join clara.bank_statements s on s.id = l.statement_id
+       where r.id = p_subject and r.firm_id = v_firm and r.client_id = p_client
+         and r.outcome = 'refused' and r.retry_after is not null and r.retry_after <= now()
+         and l.firm_id = v_firm and l.client_id = p_client
+         and l.bank_account_id = p_bank_account
+         and s.status = 'live'
+         and r.id = (
+           select rr.id from clara.bank_agent_receipts rr
+            where rr.firm_id = v_firm and rr.client_id = p_client
+              and rr.subject_id = l.id
+            order by rr.created_at desc, rr.id desc
+            limit 1)
+         and not exists (
+           select 1 from clara.bank_agent_receipts later
+            where later.firm_id = v_firm and later.client_id = p_client
+              and later.subject_id = l.id and later.outcome = 'admitted'
+              and (later.created_at, later.id) > (r.created_at, r.id))
+    ) then
+      raise exception 'emit_bank_agent_due: subject % is not the newest retryable refused receipt of client % account %', p_subject, p_client, p_bank_account
+        using errcode = 'CLR10';
+    end if;
+  end if;
+
+  v_due_key := encode(sha256(convert_to(
+    p_client::text || p_bank_account::text || p_reason || p_subject::text, 'UTF8')), 'hex');
+
   -- HIGH-3: the atomic claim. _append_event's own firm-sequence lock (0005 §D) serializes SEQ
   -- ALLOCATION only -- it is not a dedupe. This UNIQUE insert IS the dedupe, and it happens
   -- BEFORE the append, in the same transaction, so a losing concurrent caller never appends at
   -- all (never a compensating delete, never a window where two rows briefly both exist).
-  insert into clara.bank_agent_due_claims (firm_id, client_id, bank_account_id, due_key)
-    values (v_firm, p_client, p_bank_account, p_due_key)
+  insert into clara.bank_agent_due_claims (firm_id, client_id, bank_account_id, subject_id, due_key)
+    values (v_firm, p_client, p_bank_account, p_subject, v_due_key)
   on conflict (client_id, bank_account_id, due_key) do nothing;
   if not found then
-    return jsonb_build_object('appended', false, 'reason', 'already_claimed');
+    return jsonb_build_object('appended', false, 'reason', 'already_claimed', 'due_key', v_due_key);
   end if;
 
   -- R2-1: p_reason is now GUARANTEED one of the three closed values above -- no more
   -- coalesce/fallback needed, and none SHOULD exist (a fallback is exactly the shape that let
   -- an out-of-set value silently become 'due' before this fold).
   v_seq := clara._append_event(v_firm, 'bank.agent_due', p_client, null, null, null, null, null, null,
-    jsonb_build_object('bank_account_id', p_bank_account, 'reason', p_reason));
+    jsonb_build_object('bank_account_id', p_bank_account, 'subject_id', p_subject, 'reason', p_reason));
   update clara.bank_agent_due_claims set event_seq = v_seq
-   where client_id = p_client and bank_account_id = p_bank_account and due_key = p_due_key;
-  return jsonb_build_object('appended', true, 'seq', v_seq);
+   where client_id = p_client and bank_account_id = p_bank_account and due_key = v_due_key;
+  return jsonb_build_object('appended', true, 'seq', v_seq, 'due_key', v_due_key);
 end $$;
-alter function clara.emit_bank_agent_due(uuid,uuid,text,text) owner to clara_fn_owner;
+alter function clara.emit_bank_agent_due(uuid,uuid,uuid,text) owner to clara_fn_owner;
 -- FIND-1 (opus r1 review of #449): grant AS clara_fn_owner, not as the migration runner, so the
 -- resulting ACL's grantor is the object's own owner (the tail's exact-proacl-string matrix pins
 -- this). A migration always runs as a role that is either the target role itself or a superuser
 -- (never merely a co-member), so `set role` here is unconditionally available.
 set role clara_fn_owner;
-revoke all on function clara.emit_bank_agent_due(uuid,uuid,text,text) from public;
-grant execute on function clara.emit_bank_agent_due(uuid,uuid,text,text) to clara_runtime;
+revoke all on function clara.emit_bank_agent_due(uuid,uuid,uuid,text) from public;
+grant execute on function clara.emit_bank_agent_due(uuid,uuid,uuid,text) to clara_runtime;
 reset role;
 
-comment on function clara.emit_bank_agent_due(uuid,uuid,text,text) is
+comment on function clara.emit_bank_agent_due(uuid,uuid,uuid,text) is
   'G1 PR-2b: the bank_agent producer''s sole write. clara_runtime ONLY -- the leader-guarded '
-  'cadence belt''s one call per (client, bank_account, due_key) F-A3''s own due-predicate names, '
+  'cadence belt''s one call per DB-owned subject F-A3''s own due-predicate names, '
   'client-scoped, carrying bank_account_id in the payload (g1-wake-engine-design.md, "Three '
   'producer-side contracts"). Atomically claims UNIQUE(client_id, bank_account_id, due_key) '
   'before appending (HIGH-3) -- a second call for the SAME triple returns {appended:false, '
   'reason:''already_claimed''}, never a duplicate event. Refuses CLR10 on an unknown/inactive '
-  'client, an inactive/foreign bank account, a blank due_key, or (via _append_event''s own '
+  'client, an inactive/foreign bank account, a missing/foreign/wrong-kind subject, or (via _append_event''s own '
   'insert-trigger derivation) an unregistered/firm-level event type -- the last is lane '
   'g1-pr2-db''s own registration to complete.';
 
@@ -352,7 +423,7 @@ begin
   select p.proowner::regrole::name, p.prosecdef,
          'search_path=clara, pg_temp' = any(coalesce(p.proconfig, '{}'::text[]))
     into v_emit_owner, v_emit_secdef, v_emit_path
-    from pg_proc p where p.oid = 'clara.emit_bank_agent_due(uuid,uuid,text,text)'::regprocedure;
+    from pg_proc p where p.oid = 'clara.emit_bank_agent_due(uuid,uuid,uuid,text)'::regprocedure;
   if v_emit_owner is distinct from 'clara_fn_owner' then
     raise exception 'g1_pr_2b tail: emit_bank_agent_due owner is % (want clara_fn_owner)', v_emit_owner using errcode='CLR10';
   end if;
@@ -376,9 +447,9 @@ begin
 
   -- Exact ACL: clara_runtime EXECUTE-granted, PUBLIC and clara_authenticated both refused, on
   -- BOTH new writers (the role-matrix half of HIGH-2's own pinning cell, at the DB level).
-  select has_function_privilege('clara_runtime', 'clara.emit_bank_agent_due(uuid,uuid,text,text)', 'execute'),
-         has_function_privilege('public', 'clara.emit_bank_agent_due(uuid,uuid,text,text)', 'execute'),
-         has_function_privilege('clara_authenticated', 'clara.emit_bank_agent_due(uuid,uuid,text,text)', 'execute')
+  select has_function_privilege('clara_runtime', 'clara.emit_bank_agent_due(uuid,uuid,uuid,text)', 'execute'),
+         has_function_privilege('public', 'clara.emit_bank_agent_due(uuid,uuid,uuid,text)', 'execute'),
+         has_function_privilege('clara_authenticated', 'clara.emit_bank_agent_due(uuid,uuid,uuid,text)', 'execute')
     into v_runtime_emit, v_public_emit, v_authed_emit;
   if not v_runtime_emit or v_public_emit or v_authed_emit then
     raise exception 'g1_pr_2b tail: emit_bank_agent_due ACL wrong (runtime=% public=% authed=%)', v_runtime_emit, v_public_emit, v_authed_emit using errcode='CLR10';
@@ -445,7 +516,7 @@ begin
     select coalesce(string_agg(format('%s/%s/%s/%s', g.grantor::regrole::text, g.grantee::regrole::text, g.privilege_type, g.is_grantable), ',' order by g.grantee::regrole::text), '<none>')
       into v_emit_acl
       from pg_proc p, aclexplode(p.proacl) g
-     where p.oid = 'clara.emit_bank_agent_due(uuid,uuid,text,text)'::regprocedure and g.privilege_type = 'EXECUTE';
+     where p.oid = 'clara.emit_bank_agent_due(uuid,uuid,uuid,text)'::regprocedure and g.privilege_type = 'EXECUTE';
     if v_emit_acl is distinct from 'clara_fn_owner/clara_fn_owner/EXECUTE/f,clara_fn_owner/clara_runtime/EXECUTE/f' then
       raise exception 'g1_pr_2b tail: emit_bank_agent_due EXECUTE ACL tuples are [%] (want the exact grantor/grantee/priv/grantable set)', v_emit_acl using errcode='CLR10';
     end if;
@@ -547,5 +618,54 @@ begin
     end if;
   end;
 
-  raise notice 'g1_pr_2b tail: OK -- emit_bank_agent_due(uuid,uuid,text,text) and claim_close_prep_task(uuid,uuid,uuid,text) both owned by clara_fn_owner, SECURITY DEFINER, search_path pinned, EXACT clara_runtime-only EXECUTE tuples (aclexplode); clara_runtime still cannot execute _append_event directly; both new claim tables (bank_agent_due_claims, close_prep_fy_claims) RLS-enabled+forced with the exact owner/human policy roster and exact authenticated-SELECT-only non-owner ACL; uq_agent_task_one_live_close_prep (the client-scoped live-task wall) present by property; the agent_tasks status-domain drift guard holds. No table in workflow/graphile_worker/spike touched.';
+  raise notice 'g1_pr_2b tail: OK -- emit_bank_agent_due(uuid,uuid,uuid,text) and claim_close_prep_task(uuid,uuid,uuid,text) both owned by clara_fn_owner, SECURITY DEFINER, search_path pinned, EXACT clara_runtime-only EXECUTE tuples (aclexplode); clara_runtime still cannot execute _append_event directly; both new claim tables (bank_agent_due_claims, close_prep_fy_claims) RLS-enabled+forced with the exact owner/human policy roster and exact authenticated-SELECT-only non-owner ACL; uq_agent_task_one_live_close_prep (the client-scoped live-task wall) present by property; the agent_tasks status-domain drift guard holds. No table in workflow/graphile_worker/spike touched.';
+end $$;
+
+-- R2-3 persistent apply-time twin of packages/db/tests/g1-pr2b-bank-agent-door.test.mjs: compare
+-- every ACL tuple field and every pg_policy field, never a grantee-only/sample census.
+do $$
+declare
+  v_table text; v_acl text; v_policies text; v_expected_policies text;
+  v_expected_acl constant text :=
+    'clara_fn_owner/clara_authenticated/SELECT/f,' ||
+    'clara_fn_owner/clara_fn_owner/DELETE/f,' ||
+    'clara_fn_owner/clara_fn_owner/INSERT/f,' ||
+    'clara_fn_owner/clara_fn_owner/MAINTAIN/f,' ||
+    'clara_fn_owner/clara_fn_owner/REFERENCES/f,' ||
+    'clara_fn_owner/clara_fn_owner/SELECT/f,' ||
+    'clara_fn_owner/clara_fn_owner/TRIGGER/f,' ||
+    'clara_fn_owner/clara_fn_owner/TRUNCATE/f,' ||
+    'clara_fn_owner/clara_fn_owner/UPDATE/f';
+begin
+  foreach v_table in array array['bank_agent_due_claims','close_prep_fy_claims'] loop
+    select
+      (select coalesce(string_agg(format('%s/%s/%s/%s/%s/%s', p.polname, p.polcmd,
+                 p.polpermissive,
+                 (select string_agg(x::regrole::text, '+' order by x) from unnest(p.polroles) x),
+                 coalesce(pg_get_expr(p.polqual, p.polrelid), '<null>'),
+                 coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '<null>')),
+                 ',' order by p.polname), '<none>')
+         from pg_policy p where p.polrelid = c.oid),
+      (select coalesce(string_agg(format('%s/%s/%s/%s', g.grantor::regrole::text,
+                 g.grantee::regrole::text, g.privilege_type, g.is_grantable), ','
+                 order by g.grantee::regrole::text, g.privilege_type), '<none>')
+         from aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) g)
+      into v_policies, v_acl
+      from pg_class c where c.oid = ('clara.' || v_table)::regclass;
+
+    v_expected_policies := case v_table
+      when 'bank_agent_due_claims' then
+        'p_bank_agent_due_claims_owner/*/t/clara_fn_owner/true/true,' ||
+        'p_bank_agent_due_claims_read/r/t/clara_authenticated/(firm_id = clara.jwt_firm())/<null>'
+      else
+        'p_close_prep_fy_claims_owner/*/t/clara_fn_owner/true/true,' ||
+        'p_close_prep_fy_claims_read/r/t/clara_authenticated/(firm_id = clara.jwt_firm())/<null>'
+      end;
+    if v_acl is distinct from v_expected_acl then
+      raise exception 'g1_pr_2b R2-3: %. ACL tuple census drifted: %', v_table, v_acl using errcode='CLR10';
+    end if;
+    if v_policies is distinct from v_expected_policies then
+      raise exception 'g1_pr_2b R2-3: %. full pg_policy census drifted: %', v_table, v_policies using errcode='CLR10';
+    end if;
+  end loop;
 end $$;

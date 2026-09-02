@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { rootQuery, roleQuery, endPool } from "./rig-fixtures.mjs";
 
-const EMIT_SIG = "clara.emit_bank_agent_due(uuid,uuid,text,text)";
+const EMIT_SIG = "clara.emit_bank_agent_due(uuid,uuid,uuid,text)";
 const CLAIM_SIG = "clara.claim_close_prep_task(uuid,uuid,uuid,text)";
 
 async function present(sig) {
@@ -105,14 +105,14 @@ test("uq_agent_task_one_live_close_prep: present BY PROPERTY (unique+valid+ready
 
 test("emit_bank_agent_due: driven AS clara_runtime, refuses an unknown client with CLR10 (not merely readable by root)", { skip: skipEmit }, async () => {
   await assert.rejects(
-    roleQuery("clara_runtime", "select clara.emit_bank_agent_due($1,$2,$3,$4)", [randomUUID(), randomUUID(), "g1pr2b-door-k1", "unmatched_lines"]),
+    roleQuery("clara_runtime", "select clara.emit_bank_agent_due($1,$2,$3,$4)", [randomUUID(), randomUUID(), randomUUID(), "unmatched_lines"]),
     /CLR10|unknown or inactive client/i,
   );
 });
 
 test("emit_bank_agent_due: driven AS clara_runtime, refuses an out-of-set reason with CLR10 (R2-1's own wall, exercised under the real role)", { skip: skipEmit }, async () => {
   await assert.rejects(
-    roleQuery("clara_runtime", `select clara.emit_bank_agent_due($1,$2,$3,$4)`, [randomUUID(), randomUUID(), "g1pr2b-door-k2", "chase_statement"]),
+    roleQuery("clara_runtime", `select clara.emit_bank_agent_due($1,$2,$3,$4)`, [randomUUID(), randomUUID(), randomUUID(), "chase_statement"]),
     /CLR10|closed emit-worthy reason set/i,
   );
 });
@@ -136,26 +136,41 @@ test("clara_runtime cannot SELECT or DELETE either claim table directly — the 
   }
 });
 
-test("R2-3/R1: both claim tables keep the exact owner-ALL + authenticated-SELECT policy roster and authenticated-SELECT-only non-owner ACL", { skip: skipEmit || skipClaim }, async () => {
+test("R2-3/R1: both claim tables keep the exact four-field ACL tuples and full pg_policy representation", { skip: skipEmit || skipClaim }, async () => {
+  const ownerPrivileges = ["DELETE", "INSERT", "MAINTAIN", "REFERENCES", "SELECT", "TRIGGER", "TRUNCATE", "UPDATE"];
+  const expectedAcl = [
+    "clara_fn_owner/clara_authenticated/SELECT/f",
+    ...ownerPrivileges.map((privilege) => `clara_fn_owner/clara_fn_owner/${privilege}/f`),
+  ].join(",");
   const expectedPolicies = {
-    bank_agent_due_claims: "p_bank_agent_due_claims_owner/*/clara_fn_owner,p_bank_agent_due_claims_read/r/clara_authenticated",
-    close_prep_fy_claims: "p_close_prep_fy_claims_owner/*/clara_fn_owner,p_close_prep_fy_claims_read/r/clara_authenticated",
+    bank_agent_due_claims: [
+      "p_bank_agent_due_claims_owner/*/t/clara_fn_owner/true/true",
+      "p_bank_agent_due_claims_read/r/t/clara_authenticated/(firm_id = clara.jwt_firm())/<null>",
+    ].join(","),
+    close_prep_fy_claims: [
+      "p_close_prep_fy_claims_owner/*/t/clara_fn_owner/true/true",
+      "p_close_prep_fy_claims_read/r/t/clara_authenticated/(firm_id = clara.jwt_firm())/<null>",
+    ].join(","),
   };
   for (const [table, policies] of Object.entries(expectedPolicies)) {
     const r = await rootQuery(
       `select
-         (select coalesce(string_agg(format('%s/%s/%s', p.polname, p.polcmd,
-                    (select string_agg(x::regrole::text, '+' order by x) from unnest(p.polroles) x)),
+         (select coalesce(string_agg(format('%s/%s/%s/%s/%s/%s', p.polname, p.polcmd,
+                    p.polpermissive,
+                    (select string_agg(x::regrole::text, '+' order by x) from unnest(p.polroles) x),
+                    coalesce(pg_get_expr(p.polqual, p.polrelid), '<null>'),
+                    coalesce(pg_get_expr(p.polwithcheck, p.polrelid), '<null>')),
                     ',' order by p.polname), '<none>')
             from pg_policy p where p.polrelid=c.oid) as policies,
-         (select coalesce(string_agg(g.grantee::regrole::text || ':' || g.privilege_type, ','
+         (select coalesce(string_agg(format('%s/%s/%s/%s', g.grantor::regrole::text,
+                    g.grantee::regrole::text, g.privilege_type, g.is_grantable), ','
                     order by g.grantee::regrole::text, g.privilege_type), '<none>')
-            from aclexplode(c.relacl) g where g.grantee <> 'clara_fn_owner'::regrole) as non_owner_acl
+            from aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) g) as acl
        from pg_class c where c.oid=('clara.' || $1)::regclass`,
       [table],
     );
-    assert.equal(r.rows[0].policies, policies, `${table}: policy roster drifted`);
-    assert.equal(r.rows[0].non_owner_acl, "clara_authenticated:SELECT", `${table}: unexpected non-owner table privilege`);
+    assert.equal(r.rows[0].policies, policies, `${table}: full pg_policy representation drifted`);
+    assert.equal(r.rows[0].acl, expectedAcl, `${table}: four-field ACL tuples drifted`);
   }
 });
 

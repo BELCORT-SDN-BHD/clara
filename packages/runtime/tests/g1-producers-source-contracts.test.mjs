@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import ts from "typescript";
-import { classifyBankDueReason } from "../lib/reconciler-bank-agent.mjs";
+import { classifyBankDueReason, EMIT_REASONS } from "../lib/reconciler-bank-agent.mjs";
 
 function walk(sourceFile) {
   const nodes = [];
@@ -29,6 +29,44 @@ function isDateNow(node) {
     && node.expression.name.text === "now" && node.arguments.length === 0;
 }
 
+function writerLockContract(source) {
+  const sf = ts.createSourceFile("bankAgent.v1.impl.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const nodes = walk(sf);
+  const declarations = nodes.filter((node) => ts.isVariableDeclaration(node)
+    && ts.isIdentifier(node.name) && node.name.text === "writer"
+    && node.initializer && ts.isCallExpression(node.initializer)
+    && ts.isPropertyAccessExpression(node.initializer.expression)
+    && node.initializer.expression.name.text === "getWriter"
+    && ts.isCallExpression(node.initializer.expression.expression)
+    && ts.isIdentifier(node.initializer.expression.expression.expression)
+    && node.initializer.expression.expression.expression.text === "getWritable");
+  if (declarations.length !== 1) return { ok: false, detail: `expected one writer acquisition, found ${declarations.length}` };
+
+  const releases = nodes.filter((node) => ts.isCallExpression(node)
+    && ts.isPropertyAccessExpression(node.expression)
+    && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "writer"
+    && node.expression.name.text === "releaseLock"
+    && node.arguments.length === 0);
+  if (releases.length !== 1) return { ok: false, detail: `expected one writer.releaseLock(), found ${releases.length}` };
+
+  const variableStatement = declarations[0].parent?.parent;
+  const ownerBlock = variableStatement?.parent;
+  if (!ts.isVariableStatement(variableStatement) || !ts.isBlock(ownerBlock)) {
+    return { ok: false, detail: "writer acquisition is not a direct statement in a block" };
+  }
+
+  const candidates = ownerBlock.statements.filter((statement) => ts.isTryStatement(statement)
+    && statement.pos > variableStatement.pos
+    && walk(statement.tryBlock).some((node) => ts.isCallExpression(node)
+      && ts.isIdentifier(node.expression) && node.expression.text === "drainBankStream")
+    && statement.finallyBlock?.statements.some((finallyStatement) => ts.isExpressionStatement(finallyStatement)
+      && finallyStatement.expression === releases[0]));
+  if (candidates.length !== 1) {
+    return { ok: false, detail: `expected one same-block TryStatement owning drain + direct release, found ${candidates.length}` };
+  }
+  return { ok: true, detail: "writer acquisition and direct release bind to the drain's TryStatement" };
+}
+
 test("R2-1: migration source and runtime classifier expose the SAME closed emit-reason set", async () => {
   const source = await readFile(
     new URL("../../db/migrations/UNNUMBERED_g1_pr_2b_bank_agent_due_emit.sql", import.meta.url),
@@ -40,17 +78,11 @@ test("R2-1: migration source and runtime classifier expose the SAME closed emit-
   const expected = ["reconcilable", "retry_later", "unmatched_lines"];
   assert.deepEqual(sqlReasons, expected, "the door source drifted from the ruled three-value set");
 
-  const bankAccountId = randomUUID();
-  const runtimeReasons = expected.filter((reason) => classifyBankDueReason({
-    due: true,
-    reason,
-    bank_account_id: bankAccountId,
-    due_key: "r2-1-drift",
-  }).action === "emit").sort();
-  assert.deepEqual(runtimeReasons, sqlReasons, "runtime classification and the SQL wall must admit exactly the same emit reasons");
+  assert.deepEqual([...EMIT_REASONS].sort(), sqlReasons,
+    "runtime EMIT_REASONS and the SQL wall must expose exactly the same set");
 });
 
-test("R2-2: runtime classifier enforces the canonical due_key grammar before the SQL door", () => {
+test.skip("superseded: runtime classifier due_key grammar (the runtime no longer mints keys)", () => {
   const bankAccountId = randomUUID();
   const classify = (due_key) => classifyBankDueReason({
     due: true,
@@ -120,24 +152,35 @@ test("R2-6: the real leader tick structurally derives, hands off, and success-ad
   }
 });
 
-test("R2-7: the sole writer.releaseLock() call is an AST descendant of the intended finally block", async () => {
+test("R2-7: writer acquisition and release bind to the SAME TryStatement that protects drainBankStream", async () => {
   const src = await readFile(new URL("../workflows/bankAgent.v1.impl.ts", import.meta.url), "utf8");
-  const sf = ts.createSourceFile("bankAgent.v1.impl.ts", src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const calls = walk(sf).filter((node) => ts.isCallExpression(node)
-    && ts.isPropertyAccessExpression(node.expression)
-    && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "writer"
-    && node.expression.name.text === "releaseLock"
-    && node.arguments.length === 0);
-  assert.equal(calls.length, 1, "writer.releaseLock() must appear exactly once in the shipping source");
+  const result = writerLockContract(src);
+  assert.equal(result.ok, true, result.detail);
+});
 
-  let ancestor = calls[0].parent;
-  let owningFinally = null;
-  while (ancestor) {
-    if (ts.isBlock(ancestor) && ts.isTryStatement(ancestor.parent) && ancestor.parent.finallyBlock === ancestor) {
-      owningFinally = ancestor;
-      break;
-    }
-    ancestor = ancestor.parent;
+test("R2-7 source-text mutant: an unrelated nested finally cannot satisfy the acquisition/release ownership proof", async () => {
+  const src = await readFile(new URL("../workflows/bankAgent.v1.impl.ts", import.meta.url), "utf8");
+  const mutant = src.replace(
+    "  } finally {\r\n    writer.releaseLock();\r\n  }",
+    "  } finally {\r\n    try { /* unrelated cleanup */ } finally { writer.releaseLock(); }\r\n  }",
+  ).replace(
+    "  } finally {\n    writer.releaseLock();\n  }",
+    "  } finally {\n    try { /* unrelated cleanup */ } finally { writer.releaseLock(); }\n  }",
+  );
+  assert.notEqual(mutant, src, "the nested-finally mutant must be constructed from the shipping source");
+  const result = writerLockContract(mutant);
+  assert.equal(result.ok, false, "a release owned only by an unrelated nested finally must be rejected");
+});
+
+test("R2-2: runtime requires a DB-owned subject_id and carries no due-key minting grammar", () => {
+  const classify = (subject_id) => classifyBankDueReason({
+    due: true,
+    reason: "unmatched_lines",
+    bank_account_id: "11111111-1111-4111-8111-111111111111",
+    subject_id,
+  });
+  for (const bad of [null, undefined, "", 42]) {
+    assert.equal(classify(bad).action, "anomalous", `subject_id ${JSON.stringify(bad)} must be refused`);
   }
-  assert.ok(owningFinally, "the sole writer.releaseLock() call must sit under a TryStatement's actual finallyBlock node");
+  assert.equal(classify("22222222-2222-4222-8222-222222222222").action, "emit");
 });

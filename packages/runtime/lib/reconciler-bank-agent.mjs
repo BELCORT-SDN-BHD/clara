@@ -15,7 +15,7 @@
 //                                          uuid) returns jsonb"; design §5: "the ONLY things
 //                                          missing are (1) bank_agent_run_due... F-A3's own
 //                                          obligation, unblocked by this gate").
-//   clara.emit_bank_agent_due(uuid,uuid,text,text) — THIS gate's own emission door
+//   clara.emit_bank_agent_due(uuid,uuid,uuid,text) — THIS gate's own emission door
 //                                          (UNNUMBERED_g1_pr_2b_bank_agent_due_emit.sql), needed
 //                                          because clara._append_event is deliberately ungranted
 //                                          to clara_runtime (0005 §D's own header comment:
@@ -55,7 +55,7 @@
 // event does no WORK itself (the consumer and its dispatched workflow do the actual work,
 // asynchronously, later), so nothing about a client's due-ness changes between two calls in the
 // SAME cycle — chasing would either spin forever on an unchanged due:true answer or append the
-// SAME (account, due_key) twice in one tick (which the DB claim below would correctly refuse,
+// SAME (account, subject) twice in one tick (which the DB claim below would correctly refuse,
 // but at the cost of a wasted call every cycle). A second due occurrence for the same client is
 // picked up on a LATER cycle, one at a time.
 //
@@ -67,6 +67,10 @@
 // {appended, reason} reply; there is no runtime-side pre-check left to race. `appended:false`
 // (reason `already_claimed`) is counted as `bankAgentSkipped`, exactly the outcome the pre-fold
 // cut's own runtime check produced, just without the race.
+//
+// The runtime never mints due_key: bank_agent_run_due names a DB-owned subject_id (statement id
+// for unmatched_lines/reconcilable; newest retryable refused receipt id for retry_later), and the
+// SQL door verifies the subject then derives sha256(client||account||reason||subject) itself.
 //
 // PER-CLIENT ERROR ISOLATION (the reconciler-fa.mjs precedent): a poisoned client's due-probe or
 // emit-call throw is counted (bankAgentFailed) and the belt moves on to the next client — it
@@ -82,27 +86,17 @@
 import { checkFunctionSurface } from "./pg-fn-surface.mjs";
 import { TaxonomyHaltError } from "./relay.mjs";
 
-const EMIT_REASONS = new Set(["unmatched_lines", "reconcilable", "retry_later"]);
+export const EMIT_REASONS = new Set(["unmatched_lines", "reconcilable", "retry_later"]);
 const NOTIFY_REASONS = new Set(["chase_statement"]);
 const QUIET_REASONS = new Set(["purpose_unconsented", "held", "nothing_due"]);
-
-// R2-2 (Codex r2 review of #449): the SAME canonical due_key shape emit_bank_agent_due's own SQL
-// enforces (UNNUMBERED_g1_pr_2b_bank_agent_due_emit.sql) — ASCII letters/digits/._:- only,
-// non-empty, at most 256 UTF-8 bytes. This allowlist is deliberately byte-for-byte portable:
-// JavaScript Unicode classes and PostgreSQL locale-sensitive POSIX classes are not identical.
-// Checked here too so malformed predicate output is caught as ANOMALOUS (logged, not counted —
-// the same FIND-11 bucket a missing field falls into) rather than surfacing as a raw DB failure.
-const DUE_KEY_PATTERN = /^[A-Za-z0-9._:-]+$/;
-function dueKeyShapeOk(dueKey) {
-  return typeof dueKey === "string" && DUE_KEY_PATTERN.test(dueKey) && Buffer.byteLength(dueKey, "utf8") <= 256;
-}
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** The closed reason->action switch (HIGH-1, bank-agency-annexes-1-mechanics.md §D.0's tail).
  *  PURE — no I/O — so it is unit-testable on its own and the belt below is thin glue over it.
  *
  *  FIND-11 (opus r1 review of #449) splits the old single "malformed" bucket in two, mirroring
  *  reconciler-fa.mjs's own "ANOMALOUS SHAPE, LOUD" precedent (lines 114-130 there): a RECOGNISED
- *  emit-worthy reason whose OWN required fields are missing (bank_account_id/due_key) is a
+ *  emit-worthy reason whose OWN required fields are missing (bank_account_id/subject_id) is a
  *  transient/self-healing shape hiccup in an otherwise-well-formed exchange — logged loudly but
  *  NOT counted as a belt failure, exactly like FA's malformed due-probe reply. An UNRECOGNISED
  *  reason string stays "malformed" and COUNTED (bankAgentFailed, unchanged from the first
@@ -118,11 +112,9 @@ export function classifyBankDueReason(due) {
   if (EMIT_REASONS.has(reason)) {
     if (due?.due !== true) return { action: "malformed", detail: `reason '${reason}' requires due:true (got ${JSON.stringify(due)})` };
     if (!due?.bank_account_id) return { action: "anomalous", detail: `reason '${reason}' requires bank_account_id (got ${JSON.stringify(due)})` };
-    // R2-2: a due_key that fails the canonical shape (missing, non-string, padded/whitespace,
-    // control characters, or over 256 bytes) is the SAME "anomalous" bucket as a missing
-    // due_key — the DB's own SQL wall is still the authoritative refusal if this check is ever
-    // bypassed, but catching it here avoids a wasted round-trip and a raw-exception failure count.
-    if (!dueKeyShapeOk(due?.due_key)) return { action: "anomalous", detail: `reason '${reason}' requires a canonically-shaped due_key (got ${JSON.stringify(due)})` };
+    if (typeof due?.subject_id !== "string" || !UUID_PATTERN.test(due.subject_id)) {
+      return { action: "anomalous", detail: `reason '${reason}' requires subject_id (got ${JSON.stringify(due)})` };
+    }
     return { action: "emit", reason };
   }
   if (NOTIFY_REASONS.has(reason)) {
@@ -175,7 +167,7 @@ export async function produceBankAgentWakes(client, opts = {}) {
   let emitSurface;
   try {
     dueSurface = await checkFunctionSurface(client, { signature: "clara.bank_agent_run_due(uuid)", returnType: "jsonb" });
-    emitSurface = await checkFunctionSurface(client, { signature: "clara.emit_bank_agent_due(uuid,uuid,text,text)", returnType: "jsonb" });
+    emitSurface = await checkFunctionSurface(client, { signature: "clara.emit_bank_agent_due(uuid,uuid,uuid,text)", returnType: "jsonb" });
   } catch (err) {
     // FIND-9 (opus r1 review of #449): a HALT must reach the leader even through a per-belt
     // catch (the reconciler-fa.mjs:82-87 idiom, applied to EVERY catch in this belt) — re-check
@@ -238,7 +230,7 @@ export async function produceBankAgentWakes(client, opts = {}) {
         // FIND-11 (opus r1 review of #449): a RECOGNISED emit-worthy reason with a missing
         // required field — logged loudly, but NOT counted (reconciler-fa.mjs's own "ANOMALOUS
         // SHAPE, LOUD" precedent). Distinct from "malformed" below, which stays counted.
-        log(`[reconcile] bank_agent client=${clientId} due-probe returned an anomalous shape for a recognised reason (expected {due:true,bank_account_id,due_key,...}, got ${JSON.stringify(due)}) — treating as not-due this cycle`);
+        log(`[reconcile] bank_agent client=${clientId} due-probe returned an anomalous shape for a recognised reason (expected {due:true,bank_account_id,subject_id,...}, got ${JSON.stringify(due)}) — treating as not-due this cycle`);
         continue;
       }
       if (verdict.action === "malformed") {
@@ -248,14 +240,14 @@ export async function produceBankAgentWakes(client, opts = {}) {
       }
       // verdict.action === "emit"
       const bankAccountId = due.bank_account_id;
-      const dueKey = due.due_key;
-      const reply = (await client.query("select clara.emit_bank_agent_due($1, $2, $3, $4) as r", [clientId, bankAccountId, dueKey, verdict.reason])).rows[0]?.r;
+      const subjectId = due.subject_id;
+      const reply = (await client.query("select clara.emit_bank_agent_due($1, $2, $3, $4) as r", [clientId, bankAccountId, subjectId, verdict.reason])).rows[0]?.r;
       if (reply?.appended === true) {
         out.bankAgentAppended += 1;
-        log(`[reconcile] bank_agent due client=${clientId} account=${bankAccountId} reason=${verdict.reason} due_key=${dueKey} seq=${reply.seq}`);
+        log(`[reconcile] bank_agent due client=${clientId} account=${bankAccountId} reason=${verdict.reason} subject=${subjectId} seq=${reply.seq}`);
       } else if (reply?.appended === false) {
         out.bankAgentSkipped += 1;
-        log(`[reconcile] bank_agent client=${clientId} account=${bankAccountId} due_key=${dueKey} already claimed — skipped`);
+        log(`[reconcile] bank_agent client=${clientId} account=${bankAccountId} subject=${subjectId} already claimed — skipped`);
       } else {
         out.bankAgentFailed += 1;
         log(`[reconcile] bank_agent client=${clientId} emit_bank_agent_due returned an unexpected shape (expected {appended:boolean,...}, got ${JSON.stringify(reply)})`);

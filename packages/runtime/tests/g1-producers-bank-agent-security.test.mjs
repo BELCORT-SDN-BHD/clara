@@ -11,13 +11,13 @@ import { randomUUID } from "node:crypto";
 import { rootQuery, asRuntime, buildFirm, endPool, getPool } from "./relay-fixtures.mjs";
 import {
   hasEmitDoor, ensureBankAgentDueEventType, ensureFirmLevelStubType, ensureBankAgentRunDueStub,
-  buildActiveBankAccount, eventsFor, STUB_FIRM_LEVEL_TYPE,
+  buildActiveBankAccount, buildReasonSubject, eventsFor, STUB_FIRM_LEVEL_TYPE,
 } from "./g1-producers-bank-agent-fixtures.mjs";
 import { waitBlockedByOrThrow, backendPid } from "./pg-lock-wait.mjs";
-import { classifyBankDueReason } from "../lib/reconciler-bank-agent.mjs";
+import { EMIT_REASONS } from "../lib/reconciler-bank-agent.mjs";
 
 const HAS_EMIT_DOOR = await hasEmitDoor();
-const skip = HAS_EMIT_DOOR ? false : "clara.emit_bank_agent_due(uuid,uuid,text,text) absent — apply UNNUMBERED_g1_pr_2b_bank_agent_due_emit.sql first";
+const skip = HAS_EMIT_DOOR ? false : "clara.emit_bank_agent_due(uuid,uuid,uuid,text) absent — apply UNNUMBERED_g1_pr_2b_bank_agent_due_emit.sql first";
 
 before(async () => {
   await ensureBankAgentRunDueStub();
@@ -39,7 +39,7 @@ test("HIGH-2: emit_bank_agent_due is owned by clara_fn_owner, SECURITY DEFINER, 
   const r = await rootQuery(
     `select p.proowner::regrole::name as owner, p.prosecdef as secdef,
             'search_path=clara, pg_temp' = any(coalesce(p.proconfig,'{}'::text[])) as path_pinned
-       from pg_proc p where p.oid = 'clara.emit_bank_agent_due(uuid,uuid,text,text)'::regprocedure`,
+       from pg_proc p where p.oid = 'clara.emit_bank_agent_due(uuid,uuid,uuid,text)'::regprocedure`,
   );
   assert.equal(r.rows[0].owner, "clara_fn_owner");
   assert.equal(r.rows[0].secdef, true);
@@ -47,7 +47,7 @@ test("HIGH-2: emit_bank_agent_due is owned by clara_fn_owner, SECURITY DEFINER, 
 });
 
 test("HIGH-2: the role matrix — ONLY clara_runtime may execute emit_bank_agent_due, and clara_runtime still cannot execute _append_event directly", { skip }, async () => {
-  const sig = "clara.emit_bank_agent_due(uuid,uuid,text,text)";
+  const sig = "clara.emit_bank_agent_due(uuid,uuid,uuid,text)";
   const runtime = await rootQuery("select has_function_privilege('clara_runtime', $1, 'execute') as ok", [sig]);
   assert.equal(runtime.rows[0].ok, true, "clara_runtime must be able to execute the wrapper");
   for (const role of ["public", "clara_authenticated", "clara_agent_ro"]) {
@@ -62,35 +62,36 @@ test("HIGH-2: the role matrix — ONLY clara_runtime may execute emit_bank_agent
 test("HIGH-2: NULL / inactive / foreign client, and an inactive bank account, are all refused CLR10 THROUGH THE WRAPPER ITSELF (not by calling _append_event directly)", { skip }, async () => {
   const w1 = await buildFirm("g1ba-neg1");
   const w2 = await buildFirm("g1ba-neg2");
-  const acct1 = await buildActiveBankAccount(w1, "neg1");
+  const valid = await buildReasonSubject(w1, "unmatched_lines", "neg1");
+  const acct1 = valid.bankAccountId;
 
   // NULL client.
   await assert.rejects(
-    asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [null, acct1, "k", "unmatched_lines"])),
+    asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [null, acct1, valid.subjectId, "unmatched_lines"])),
     /CLR10|unknown or inactive client/i,
   );
   // Unknown client (a fresh random uuid, never inserted).
   await assert.rejects(
-    asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [randomUUID(), acct1, "k", "unmatched_lines"])),
+    asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [randomUUID(), acct1, valid.subjectId, "unmatched_lines"])),
     /CLR10|unknown or inactive client/i,
   );
   // Inactive client — deactivate w1's client, then try its own (previously valid) account.
   await rootQuery("update clara.clients set status='archived' where id=$1", [w1.client]);
   await assert.rejects(
-    asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [w1.client, acct1, "k", "unmatched_lines"])),
+    asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [w1.client, acct1, valid.subjectId, "unmatched_lines"])),
     /CLR10|unknown or inactive client/i,
   );
   await rootQuery("update clara.clients set status='active' where id=$1", [w1.client]);
   // Foreign client — w1's account, called with w2's (different, active) client id.
   await assert.rejects(
-    asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [w2.client, acct1, "k", "unmatched_lines"])),
+    asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [w2.client, acct1, valid.subjectId, "unmatched_lines"])),
     /CLR10|not an active account/i,
   );
   // Inactive bank account — deactivate w1's own account, then call with its OWN client (correct
   // pairing, wrong account status).
   await rootQuery("update clara.bank_accounts set active=false, deactivated_at=now(), deactivated_by=$2, deactivated_reason='g1pr2b negative control' where id=$1", [acct1, w1.owner]);
   await assert.rejects(
-    asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [w1.client, acct1, "k", "unmatched_lines"])),
+    asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [w1.client, acct1, valid.subjectId, "unmatched_lines"])),
     /CLR10|not an active account/i,
   );
 });
@@ -124,9 +125,8 @@ test("R2-1: every reason OUTSIDE the closed emit-worthy set (quiet/deferred/unkn
   const acct = await buildActiveBankAccount(w, "r21");
   const refused = ["chase_statement", "purpose_unconsented", "held", "nothing_due", "some_new_reason_nobody_ruled", null, "", "   "];
   for (const reason of refused) {
-    const key = `k-r21-${randomUUID()}`;
     await assert.rejects(
-      asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [w.client, acct, key, reason])),
+      asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [w.client, acct, randomUUID(), reason])),
       /CLR10|closed emit-worthy reason set/i,
       `reason ${JSON.stringify(reason)} must be refused`,
     );
@@ -137,19 +137,18 @@ test("R2-1: every reason OUTSIDE the closed emit-worthy set (quiet/deferred/unkn
 });
 
 test("R2-1: each of the three closed emit-worthy reasons appends exactly once through the SQL door", { skip }, async () => {
-  const w = await buildFirm("g1ba-r21ok");
-  const acct = await buildActiveBankAccount(w, "r21ok");
   for (const reason of ["unmatched_lines", "reconcilable", "retry_later"]) {
-    const key = `k-r21ok-${reason}`;
-    const r = await asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4) as r", [w.client, acct, key, reason]));
+    const w = await buildFirm(`g1ba-r21ok-${reason.slice(0, 4)}`);
+    const subject = await buildReasonSubject(w, reason, `r21ok-${reason}`);
+    const r = await asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4) as r", [w.client, subject.bankAccountId, subject.subjectId, reason]));
     assert.equal(r.rows[0].r.appended, true, `${reason} must append`);
+    assert.equal((await eventsFor(subject.bankAccountId)).length, 1, `${reason} must produce exactly one event`);
   }
-  assert.equal((await eventsFor(acct)).length, 3, "the three allowed reasons must each produce one distinct event");
 });
 
 test("R2-1: the installed SQL door and runtime classifier expose the SAME closed emit-reason set", { skip }, async () => {
   const r = await rootQuery(
-    "select prosrc from pg_proc where oid='clara.emit_bank_agent_due(uuid,uuid,text,text)'::regprocedure",
+    "select prosrc from pg_proc where oid='clara.emit_bank_agent_due(uuid,uuid,uuid,text)'::regprocedure",
   );
   const source = r.rows[0]?.prosrc ?? "";
   const clauses = [...source.matchAll(/p_reason\s+not\s+in\s*\(([^)]+)\)/gi)];
@@ -158,57 +157,58 @@ test("R2-1: the installed SQL door and runtime classifier expose the SAME closed
   const expected = ["reconcilable", "retry_later", "unmatched_lines"];
   assert.deepEqual(sqlReasons, expected, "the installed door's source drifted from the ruled three-value set");
 
-  const bankAccountId = randomUUID();
-  const runtimeReasons = expected.filter((reason) => classifyBankDueReason({
-    due: true,
-    reason,
-    bank_account_id: bankAccountId,
-    due_key: "r2-1-drift",
-  }).action === "emit").sort();
-  assert.deepEqual(runtimeReasons, sqlReasons, "runtime classification and the installed SQL wall must admit exactly the same emit reasons");
+  assert.deepEqual([...EMIT_REASONS].sort(), sqlReasons,
+    "runtime EMIT_REASONS and the installed SQL wall must expose exactly the same set");
 });
 
 // =====================================================================================
-// R2-2 (Codex r2 review of #449) — the due_key canonical bounded contract, driven through the
-// SQL door. null/blank/padded/non-string-shaped/overlength/multibyte-overlength all refuse with
-// zero claims/events; the maximum valid value (256 bytes exactly) succeeds and dedupes.
+// R2-2 (Codex r3 review of #449) — the SQL door derives due_key from a DB-owned subject. Missing,
+// foreign and wrong-kind ids refuse before claims/events; repeated subjects dedupe; distinct
+// statement ids on one account derive distinct SHA-256 keys.
 // =====================================================================================
 
-test("R2-2: null, blank, padded, disallowed-character and non-ASCII due_key values all refuse CLR10, zero claims/events", { skip }, async () => {
-  const w = await buildFirm("g1ba-r22");
-  const acct = await buildActiveBankAccount(w, "r22");
-  const badKeys = [null, "", "   ", " padded", "padded ", "has space", "tab\there", "new\nline", "has/slash", "字"];
-  for (const key of badKeys) {
+test("R2-2: missing, foreign and wrong-kind subjects refuse CLR10 before any claim/event", { skip }, async () => {
+  const w1 = await buildFirm("g1ba-r22a");
+  const w2 = await buildFirm("g1ba-r22b");
+  const own = await buildReasonSubject(w1, "unmatched_lines", "r22-own");
+  const foreign = await buildReasonSubject(w2, "unmatched_lines", "r22-foreign");
+  for (const [subject, reason] of [
+    [null, "unmatched_lines"],
+    [randomUUID(), "unmatched_lines"],
+    [foreign.subjectId, "unmatched_lines"],
+    [own.lineIds[0], "unmatched_lines"],
+    [own.statementId, "retry_later"],
+  ]) {
     await assert.rejects(
-      asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [w.client, acct, key, "unmatched_lines"])),
-      /CLR10|due_key must/i,
-      `due_key ${JSON.stringify(key)} must be refused`,
+      asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [w1.client, own.bankAccountId, subject, reason])),
+      /CLR10|subject/i,
     );
   }
-  assert.equal((await eventsFor(acct)).length, 0);
-  const claims = await rootQuery("select count(*)::int as n from clara.bank_agent_due_claims where client_id=$1", [w.client]);
+  const claims = await rootQuery("select count(*)::int as n from clara.bank_agent_due_claims where client_id=$1", [w1.client]);
   assert.equal(claims.rows[0].n, 0);
+  assert.equal((await eventsFor(own.bankAccountId)).length, 0);
 });
 
-test("R2-2: an over-256-byte due_key (both single-byte and multibyte) refuses CLR10; the exact 256-byte boundary succeeds", { skip }, async () => {
-  const w = await buildFirm("g1ba-r22len");
-  const acct = await buildActiveBankAccount(w, "r22len");
-  const over256Ascii = "k".repeat(257); // 257 bytes, single-byte chars
-  const over256Multibyte = "字".repeat(86); // '字' is 3 UTF-8 bytes -> 258 bytes total, but only 86 CHARACTERS — a char-length check would wrongly admit this
-  for (const key of [over256Ascii, over256Multibyte]) {
-    await assert.rejects(
-      asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4)", [w.client, acct, key, "unmatched_lines"])),
-      /CLR10|due_key must/i,
-      `a due_key of byte-length ${Buffer.byteLength(key, "utf8")} must be refused`,
-    );
-  }
-  const exactly256 = "k".repeat(256);
-  const r = await asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4) as r", [w.client, acct, exactly256, "unmatched_lines"]));
-  assert.equal(r.rows[0].r.appended, true, "exactly 256 bytes is the valid boundary, not refused");
-  // Resubmitting the SAME max-length key dedupes, exactly like any other due_key.
-  const resubmit = await asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4) as r", [w.client, acct, exactly256, "unmatched_lines"]));
-  assert.equal(resubmit.rows[0].r.appended, false);
-  assert.equal((await eventsFor(acct)).length, 1);
+test("R2-2: the door derives the exact SHA-256 key and the same subject dedupes", { skip }, async () => {
+  const w = await buildFirm("g1ba-r22-key");
+  const subject = await buildReasonSubject(w, "unmatched_lines", "r22-key");
+  const first = await asRuntime((c) => c.query(
+    "select clara.emit_bank_agent_due($1,$2,$3,$4) as r",
+    [w.client, subject.bankAccountId, subject.subjectId, "unmatched_lines"],
+  ));
+  const expected = (await rootQuery(
+    "select encode(sha256(convert_to($1::text || $2::text || $3 || $4::text,'UTF8')),'hex') as key",
+    [w.client, subject.bankAccountId, "unmatched_lines", subject.subjectId],
+  )).rows[0].key;
+  assert.equal(first.rows[0].r.due_key, expected);
+  assert.match(expected, /^[0-9a-f]{64}$/);
+  const repeat = await asRuntime((c) => c.query(
+    "select clara.emit_bank_agent_due($1,$2,$3,$4) as r",
+    [w.client, subject.bankAccountId, subject.subjectId, "unmatched_lines"],
+  ));
+  assert.equal(repeat.rows[0].r.appended, false);
+  assert.equal(repeat.rows[0].r.reason, "already_claimed");
+  assert.equal((await eventsFor(subject.bankAccountId)).length, 1);
 });
 
 // =====================================================================================
@@ -217,8 +217,8 @@ test("R2-2: an over-256-byte due_key (both single-byte and multibyte) refuses CL
 
 test("R2-4: a GENUINE barrier — T1 holds the claim row uncommitted, T2 is PROVEN blocked on it (waitBlockedByOrThrow), then T1 releases — exactly one appended, one skipped", { skip }, async () => {
   const w = await buildFirm("g1ba-race");
-  const acct = await buildActiveBankAccount(w, "race");
-  const dueKey = `k-race-${randomUUID()}`;
+  const subject = await buildReasonSubject(w, "unmatched_lines", "race");
+  const acct = subject.bankAccountId;
 
   const pool = getPool();
   const c1 = await pool.connect();
@@ -232,13 +232,13 @@ test("R2-4: a GENUINE barrier — T1 holds the claim row uncommitted, T2 is PROV
     // holds the UNIQUE index entry's lock until T1 commits or rolls back.
     await c1.query("begin");
     const t1Pid = await backendPid(c1); // c1 is idle-in-transaction here, free to answer
-    const r1 = await c1.query("select clara.emit_bank_agent_due($1,$2,$3,$4) as r", [w.client, acct, dueKey, "unmatched_lines"]);
+    const r1 = await c1.query("select clara.emit_bank_agent_due($1,$2,$3,$4) as r", [w.client, acct, subject.subjectId, "unmatched_lines"]);
     assert.equal(r1.rows[0].r.appended, true, "T1's own claim must succeed — nothing else holds this key yet");
     // T2 fires the SAME call on its OWN (autocommitting) connection — its own INSERT ... ON
     // CONFLICT must BLOCK on T1's uncommitted row, because Postgres cannot yet know whether T1
     // will commit (making T2's insert a genuine conflict) or roll back (freeing the key). Do NOT
     // await this yet — it will not resolve until T1 releases.
-    const r2p = c2.query("select clara.emit_bank_agent_due($1,$2,$3,$4) as r", [w.client, acct, dueKey, "unmatched_lines"]);
+    const r2p = c2.query("select clara.emit_bank_agent_due($1,$2,$3,$4) as r", [w.client, acct, subject.subjectId, "unmatched_lines"]);
 
     // THE POSITIVE PROOF (review law 2): read pg_stat_activity from a THIRD connection and
     // confirm T2 is observably waiting on a Lock held by T1's own backend pid — not inferred
@@ -264,15 +264,16 @@ test("R2-4: a GENUINE barrier — T1 holds the claim row uncommitted, T2 is PROV
     c2.release();
   }
 
-  // Terminalize and resubmit the SAME key — still one (the claim never expires for bank_agent;
-  // a resolved occurrence stays resolved forever under its own due_key, by design).
-  const resubmit = await asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4) as r", [w.client, acct, dueKey, "unmatched_lines"]));
+  // Resubmit the SAME subject — still one (the claim never expires for bank_agent).
+  const resubmit = await asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4) as r", [w.client, acct, subject.subjectId, "unmatched_lines"]));
   assert.equal(resubmit.rows[0].r.appended, false);
   assert.equal((await eventsFor(acct)).length, 1, "still exactly one event after a third call with the SAME key");
 
-  // A DIFFERENT key creates the second item.
-  const secondKey = `k-race-2-${randomUUID()}`;
-  const fresh = await asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4) as r", [w.client, acct, secondKey, "reconcilable"]));
+  // A DIFFERENT statement subject on the SAME account creates the second item.
+  const second = await buildReasonSubject(w, "reconcilable", "race-2", {
+    bankAccountId: acct, periodStart: "2024-08-01", periodEnd: "2024-08-31", lineDate: "2024-08-15",
+  });
+  const fresh = await asRuntime((c) => c.query("select clara.emit_bank_agent_due($1,$2,$3,$4) as r", [w.client, acct, second.subjectId, "reconcilable"]));
   assert.equal(fresh.rows[0].r.appended, true);
   assert.equal((await eventsFor(acct)).length, 2, "a genuinely different key creates a second event");
 });

@@ -17,7 +17,7 @@
 // Per the lane brief ("stub the registration in your test fixture and say so"), this battery
 // STUBS the missing bank_agent_run_due predicate and the missing clara.event_types/
 // trigger_taxonomy registration for `bank.agent_due` as RIG-ONLY objects — never a product
-// migration. The stub's own reply shape carries `due_key` (HIGH-3's own contract, documented in
+// migration. The stub's own reply shape carries a DB-owned `subject_id` (R2-2's contract, documented in
 // reconciler-bank-agent.mjs's header and packages/runtime/README.md) and a caller-chosen
 // `reason` (HIGH-1's closed switch).
 //
@@ -35,11 +35,11 @@ import { rootQuery, asRuntime, buildFirm, endPool } from "./relay-fixtures.mjs";
 import { produceBankAgentWakes, classifyBankDueReason } from "../lib/reconciler-bank-agent.mjs";
 import {
   hasEmitDoor, ensureBankAgentDueEventType, ensureFirmLevelStubType, ensureBankAgentRunDueStub,
-  resetDueStub, stubReply, setBankAgentEnabled, buildActiveBankAccount, eventsFor,
+  resetDueStub, stubReply, setBankAgentEnabled, buildActiveBankAccount, buildReasonSubject, eventsFor,
 } from "./g1-producers-bank-agent-fixtures.mjs";
 
 const HAS_EMIT_DOOR = await hasEmitDoor();
-const skip = HAS_EMIT_DOOR ? false : "clara.emit_bank_agent_due(uuid,uuid,text,text) absent — apply UNNUMBERED_g1_pr_2b_bank_agent_due_emit.sql first";
+const skip = HAS_EMIT_DOOR ? false : "clara.emit_bank_agent_due(uuid,uuid,uuid,text) absent — apply UNNUMBERED_g1_pr_2b_bank_agent_due_emit.sql first";
 
 before(async () => {
   await ensureBankAgentRunDueStub();
@@ -62,7 +62,7 @@ after(async () => {
 
 test("classifyBankDueReason: the closed reason table, every member, both directions", () => {
   for (const reason of ["unmatched_lines", "reconcilable", "retry_later"]) {
-    const v = classifyBankDueReason({ due: true, reason, bank_account_id: randomUUID(), due_key: "k1" });
+    const v = classifyBankDueReason({ due: true, reason, bank_account_id: randomUUID(), subject_id: randomUUID() });
     assert.equal(v.action, "emit", `${reason} must emit`);
     assert.equal(v.reason, reason);
   }
@@ -71,12 +71,12 @@ test("classifyBankDueReason: the closed reason table, every member, both directi
     assert.deepEqual(classifyBankDueReason({ due: false, reason }), { action: "quiet", reason });
   }
   // Consistency checks — a reason paired with the WRONG due boolean is malformed, not silently accepted.
-  assert.equal(classifyBankDueReason({ due: false, reason: "unmatched_lines", bank_account_id: randomUUID(), due_key: "k" }).action, "malformed");
+  assert.equal(classifyBankDueReason({ due: false, reason: "unmatched_lines", bank_account_id: randomUUID(), subject_id: randomUUID() }).action, "malformed");
   assert.equal(classifyBankDueReason({ due: true, reason: "nothing_due" }).action, "malformed");
-  // FIND-11 (opus r1 review of #449): an emit reason missing bank_account_id or due_key is
+  // FIND-11 (opus r1 review of #449): an emit reason missing bank_account_id or subject_id is
   // "anomalous" (logged, not counted) — a RECOGNISED reason with a shape hiccup, distinct from a
   // genuinely unrecognised reason (still "malformed" and counted, asserted below).
-  assert.equal(classifyBankDueReason({ due: true, reason: "unmatched_lines", due_key: "k" }).action, "anomalous");
+  assert.equal(classifyBankDueReason({ due: true, reason: "unmatched_lines", subject_id: randomUUID() }).action, "anomalous");
   assert.equal(classifyBankDueReason({ due: true, reason: "unmatched_lines", bank_account_id: randomUUID() }).action, "anomalous");
   // An UNRECOGNISED reason is a counted failure, never emit/quiet/notify.
   assert.equal(classifyBankDueReason({ due: true, reason: "some_new_reason_nobody_ruled" }).action, "malformed");
@@ -92,7 +92,7 @@ test("bank_agent producer: DISABLED source appends nothing, even with a genuinel
   await resetDueStub();
   const w = await buildFirm("g1ba-off");
   const acct = await buildActiveBankAccount(w, "off");
-  await stubReply(w.client, { due: true, reason: "unmatched_lines", bank_account_id: acct, due_key: "k-off" });
+  await stubReply(w.client, { due: true, reason: "unmatched_lines", bank_account_id: acct, subject_id: randomUUID() });
   await setBankAgentEnabled(false);
   const out = await asRuntime((c) => produceBankAgentWakes(c, {}));
   assert.equal(out.bankAgentOk, true);
@@ -107,8 +107,9 @@ test("bank_agent producer: unmatched_lines/reconcilable/retry_later each emit ex
     await resetDueStub();
     const w = await buildFirm(`g1ba-${reason.slice(0, 4)}`);
     await setBankAgentEnabled(true, w.owner);
-    const acct = await buildActiveBankAccount(w, reason);
-    await stubReply(w.client, { due: true, reason, bank_account_id: acct, due_key: `k-${reason}` });
+    const subject = await buildReasonSubject(w, reason, reason);
+    const acct = subject.bankAccountId;
+    await stubReply(w.client, { due: true, reason, bank_account_id: acct, subject_id: subject.subjectId });
     const out = await asRuntime((c) => produceBankAgentWakes(c, {}));
     assert.equal(out.bankAgentOk, true);
     assert.equal(out.bankAgentAppended, 1, `${reason}: expected exactly one appended event, got ${JSON.stringify(out)}`);
@@ -153,7 +154,7 @@ test("bank_agent producer: an UNRECOGNISED reason is a counted failure, never an
   await resetDueStub();
   const w = await buildFirm("g1ba-unk");
   const acct = await buildActiveBankAccount(w, "unk");
-  await stubReply(w.client, { due: true, reason: "a_reason_nobody_ruled", bank_account_id: acct, due_key: "k-unk" });
+  await stubReply(w.client, { due: true, reason: "a_reason_nobody_ruled", bank_account_id: acct, subject_id: randomUUID() });
   await setBankAgentEnabled(true, w.owner);
   const out = await asRuntime((c) => produceBankAgentWakes(c, {}));
   assert.equal(out.bankAgentOk, true, "one poisoned client must not flip the whole belt");
@@ -165,13 +166,13 @@ test("bank_agent producer: an UNRECOGNISED reason is a counted failure, never an
 // FIND-11 (opus r1 review of #449): a RECOGNISED emit reason with a missing required field is
 // ANOMALOUS, not a counted failure — the belt continues, logs loudly, appends nothing. Two
 // cells (both required fields, each missing in turn) using the existing stub's own optional
-// bank_account_id/due_key — no fixture change needed, since stubReply already omits either as
+// bank_account_id/subject_id — no fixture change needed, since stubReply already omits either as
 // SQL NULL when the caller's reply object leaves it out.
 test("bank_agent producer: a recognised reason missing bank_account_id is ANOMALOUS — logged, appended=0, failed=0 (not counted)", { skip }, async () => {
   await resetDueStub();
   const w = await buildFirm("g1ba-anom1");
   await setBankAgentEnabled(true, w.owner);
-  await stubReply(w.client, { due: true, reason: "unmatched_lines", due_key: "k-anom1" }); // bank_account_id omitted
+  await stubReply(w.client, { due: true, reason: "unmatched_lines", subject_id: randomUUID() }); // bank_account_id omitted
   const log = [];
   const out = await asRuntime((c) => produceBankAgentWakes(c, { log: (m) => log.push(m) }));
   assert.equal(out.bankAgentOk, true);
@@ -180,12 +181,12 @@ test("bank_agent producer: a recognised reason missing bank_account_id is ANOMAL
   assert.ok(log.some((m) => /anomalous shape/.test(m)), "but it must still be logged loudly");
 });
 
-test("bank_agent producer: a recognised reason missing due_key is ANOMALOUS — logged, appended=0, failed=0 (not counted)", { skip }, async () => {
+test("bank_agent producer: a recognised reason missing subject_id is ANOMALOUS — logged, appended=0, failed=0 (not counted)", { skip }, async () => {
   await resetDueStub();
   const w = await buildFirm("g1ba-anom2");
   await setBankAgentEnabled(true, w.owner);
   const acct = await buildActiveBankAccount(w, "anom2");
-  await stubReply(w.client, { due: true, reason: "reconcilable", bank_account_id: acct }); // due_key omitted
+  await stubReply(w.client, { due: true, reason: "reconcilable", bank_account_id: acct }); // subject_id omitted
   const log = [];
   const out = await asRuntime((c) => produceBankAgentWakes(c, { log: (m) => log.push(m) }));
   assert.equal(out.bankAgentOk, true);
@@ -194,34 +195,43 @@ test("bank_agent producer: a recognised reason missing due_key is ANOMALOUS — 
   assert.ok(log.some((m) => /anomalous shape/.test(m)), "but it must still be logged loudly");
 });
 
-test("bank_agent producer: TWO TICKS with the SAME due_key append exactly ONE event (DB-owned claim, HIGH-3)", { skip }, async () => {
+test("bank_agent producer: TWO TICKS with the SAME DB subject append exactly ONE event (DB-owned claim, HIGH-3)", { skip }, async () => {
   await resetDueStub();
   const w = await buildFirm("g1ba-2t");
-  const acct = await buildActiveBankAccount(w, "2t");
-  await stubReply(w.client, { due: true, reason: "unmatched_lines", bank_account_id: acct, due_key: "k-2t" });
+  const subject = await buildReasonSubject(w, "unmatched_lines", "2t");
+  const acct = subject.bankAccountId;
+  await stubReply(w.client, { due: true, reason: "unmatched_lines", bank_account_id: acct, subject_id: subject.subjectId });
   await setBankAgentEnabled(true, w.owner);
   const first = await asRuntime((c) => produceBankAgentWakes(c, {}));
   const second = await asRuntime((c) => produceBankAgentWakes(c, {}));
   assert.equal(first.bankAgentAppended, 1, "the first tick must append the event");
-  assert.equal(second.bankAgentAppended, 0, "the second tick must append NOTHING for the same due_key");
+  assert.equal(second.bankAgentAppended, 0, "the second tick must append NOTHING for the same DB subject");
   assert.equal(second.bankAgentSkipped, 1, "and the belt must SAY it skipped, not silently do nothing");
   assert.equal((await eventsFor(acct)).length, 1, "exactly ONE bank.agent_due event for this account after two ticks");
 });
 
-test("bank_agent producer: a DIFFERENT due_key for the same account is NOT blocked by an earlier claim", { skip }, async () => {
+test("bank_agent producer: a DIFFERENT statement subject for the same account derives a distinct key", { skip }, async () => {
   await resetDueStub();
   const w = await buildFirm("g1ba-newkey");
-  const acct = await buildActiveBankAccount(w, "newkey");
-  await stubReply(w.client, { due: true, reason: "unmatched_lines", bank_account_id: acct, due_key: "k-occurrence-1" });
+  const firstSubject = await buildReasonSubject(w, "unmatched_lines", "newkey-1");
+  const acct = firstSubject.bankAccountId;
+  await stubReply(w.client, { due: true, reason: "unmatched_lines", bank_account_id: acct, subject_id: firstSubject.subjectId });
   await setBankAgentEnabled(true, w.owner);
   const first = await asRuntime((c) => produceBankAgentWakes(c, {}));
   assert.equal(first.bankAgentAppended, 1);
-  // A genuinely NEW occurrence — F-A3's own contract (reconciler-bank-agent.mjs's header): a
-  // different due_key for the SAME account is a DIFFERENT claim.
-  await stubReply(w.client, { due: true, reason: "reconcilable", bank_account_id: acct, due_key: "k-occurrence-2" });
+  const secondSubject = await buildReasonSubject(w, "reconcilable", "newkey-2", {
+    bankAccountId: acct, periodStart: "2024-08-01", periodEnd: "2024-08-31", lineDate: "2024-08-15",
+  });
+  await stubReply(w.client, { due: true, reason: "reconcilable", bank_account_id: acct, subject_id: secondSubject.subjectId });
   const second = await asRuntime((c) => produceBankAgentWakes(c, {}));
-  assert.equal(second.bankAgentAppended, 1, "a fresh occurrence (a NEW due_key) must not be blocked by an earlier claim on the same account");
+  assert.equal(second.bankAgentAppended, 1, "a fresh DB occurrence must not be blocked by an earlier claim on the same account");
   assert.equal((await eventsFor(acct)).length, 2, "TWO distinct events for this account — two distinct occurrences");
+  const keys = await rootQuery(
+    "select due_key from clara.bank_agent_due_claims where client_id=$1 and bank_account_id=$2 order by due_key",
+    [w.client, acct],
+  );
+  assert.equal(keys.rows.length, 2);
+  assert.notEqual(keys.rows[0].due_key, keys.rows[1].due_key, "the SQL door must derive distinct keys for distinct statement ids");
 });
 
 test("bank_agent producer: absent bank_agent_run_due/emit_bank_agent_due surface is DORMANT, never a failure", async () => {

@@ -76,10 +76,12 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
     clara_runtime-reachable notification door exists yet — deferred, proven to append zero
     events); `purpose_unconsented`/`held`/`nothing_due` are quiet; a recognised emit reason with
     a missing required field is ANOMALOUS (logged, not counted); anything genuinely unrecognised
-    is a counted failure, never a silent emit. **The due_key contract**: the predicate's
-    `due:true` reply must carry a `due_key` string, stable across repeated answers for the SAME
-    occurrence and distinct for a genuinely new one — `clara.emit_bank_agent_due` atomically
-    claims `UNIQUE(client_id, bank_account_id, due_key)` before appending, so idempotency is
+    is a counted failure, never a silent emit. **The occurrence identity contract**: the
+    predicate's `due:true` reply carries a DB-owned `subject_id` — a statement id for
+    `unmatched_lines`/`reconcilable`, or the newest retryable refused receipt id for
+    `retry_later`. The runtime passes that id unchanged; `clara.emit_bank_agent_due` verifies the
+    reason-specific row ownership/state and derives `sha256(client || account || reason ||
+    subject)` in SQL before atomically claiming `UNIQUE(client_id, bank_account_id, due_key)`, so idempotency is
     DB-owned, not a runtime check-then-write.
   - **close_prep**: `CLARA_CLOSE_PREP_RECONCILE_MS` (default 24h, matching `close_prep_due()`'s
     own stated cadence, 0138) gates how often the belt calls the already-shipped
