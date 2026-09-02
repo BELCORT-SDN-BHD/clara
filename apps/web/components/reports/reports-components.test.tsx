@@ -14,7 +14,7 @@ import { FreeformReadsPanel } from "./FreeformReadsPanel";
 import { StatutoryReportsPanel } from "./StatutoryReportsPanel";
 import { ExportRecipientsPanel } from "./ExportRecipientsPanel";
 import { Button } from "@/components/ui/button";
-import type { ReportArtifactRow } from "@/lib/reports/types";
+import type { DownloadableArtifact, ReportArtifactRow } from "@/lib/reports/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 function render(el: ReactElement): string {
@@ -35,12 +35,61 @@ function artifact(overrides: Partial<ReportArtifactRow>): ReportArtifactRow {
   };
 }
 
-test("ArtifactRow: a pre_sign row offers Issue + Archive, and states honestly that no byte-download door exists", () => {
-  const html = render(createElement(ArtifactRow, { artifact: artifact({}), session: noSession(), busy: false, act: async (fn) => { await fn(); } }));
+test("ArtifactRow: a pre_sign row offers Issue + Archive, and no longer claims that no download door exists", () => {
+  const html = render(createElement(ArtifactRow, { artifact: artifact({}), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); } }));
   assert.match(html, /Issue for approval/);
   assert.match(html, /Archive signed original/);
-  assert.match(html, /No byte-download door exists yet/);
+  // THE RETIRED CLAIM, asserted ABSENT rather than quietly dropped: this sentence was true through
+  // 0127 and is false after FS-7 echelon 2, and a note that outlives its fact is the honest-note
+  // failure the sweep exists to catch.
+  assert.doesNotMatch(html, /No byte-download door exists yet/);
+  assert.match(html, /never holds a storage credential and never mints a link/);
   assert.doesNotMatch(html, />Retrieve</);
+});
+
+// =============================================================================================
+// THE DOWNLOAD CONTROL — three states, and the one that matters is the middle one.
+// =============================================================================================
+function offerRow(overrides: Partial<DownloadableArtifact> = {}): DownloadableArtifact {
+  return {
+    artifact_id: "a1", family: "report_artifact", label: "pre_sign", produced_at: "2026-01-01",
+    downloadable: true, refusal_reason: null,
+    sha256: "d".repeat(64), byte_size: 1024, content_type: "application/pdf",
+    filename: "clara-report-pre_sign-dddddddddddd.pdf",
+    ...overrides,
+  };
+}
+
+test("DOWNLOAD: no control at all until the offer door has answered (a pending read is not a NO)", () => {
+  const html = render(createElement(ArtifactRow, { artifact: artifact({}), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); } }));
+  assert.doesNotMatch(html, />Download</, "a null offer renders neither a control nor a refusal");
+  assert.doesNotMatch(html, /Not downloadable/);
+});
+
+test("DOWNLOAD: the control appears ONLY when the door says downloadable", () => {
+  const yes = render(createElement(ArtifactRow, {
+    artifact: artifact({}), offer: offerRow(), session: noSession(), busy: false, act: async (fn) => { await fn(); },
+  }));
+  assert.match(yes, />Download</);
+  assert.doesNotMatch(yes, /Not downloadable/);
+});
+
+test("DOWNLOAD: a refused artifact renders the DATABASE's typed reason and NO control (never a dead link)", () => {
+  for (const reason of ["artifact_superseded", "artifact_watermark_unproven", "sandbox_export_not_complete"]) {
+    const html = render(createElement(ArtifactRow, {
+      artifact: artifact({}), offer: offerRow({ downloadable: false, refusal_reason: reason, sha256: null, byte_size: null, content_type: null, filename: null }),
+      session: noSession(), busy: false, act: async (fn) => { await fn(); },
+    }));
+    assert.doesNotMatch(html, />Download</, `a refused artifact (${reason}) must not offer a control`);
+    assert.match(html, new RegExp(`Not downloadable . ${reason}`), `the door's own reason must render verbatim (${reason})`);
+  }
+});
+
+test("DOWNLOAD: the control's accessible name names the FILE, so two rows are tellable apart by a screen reader", () => {
+  const html = render(createElement(ArtifactRow, {
+    artifact: artifact({}), offer: offerRow(), session: noSession(), busy: false, act: async (fn) => { await fn(); },
+  }));
+  assert.match(html, /aria-label="Download clara-report-pre_sign-dddddddddddd\.pdf"/);
 });
 
 // THE UNREACHABLE-DOOR REGRESSION, reports half — see components/close/
@@ -66,7 +115,7 @@ test("the trigger-enabled probe can still say NO (positive control)", () => {
 });
 
 test("BLOCKER: Issue and Archive triggers are ENABLED before their in-dialog fields are filled", () => {
-  const html = render(createElement(ArtifactRow, { artifact: artifact({}), session: noSession(), busy: false, act: async (fn) => { await fn(); } }));
+  const html = render(createElement(ArtifactRow, { artifact: artifact({}), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); } }));
   assert.ok(triggerIsEnabled(html, "Issue for approval"), "the reason field is inside the dialog this trigger opens");
   assert.ok(triggerIsEnabled(html, "Archive signed original"), "sha/byte-size/signer are inside the dialog this trigger opens");
 });
@@ -78,7 +127,7 @@ test("BLOCKER: the Register-recipient trigger is ENABLED before its in-dialog fi
 
 test("ArtifactRow: a signed_original row offers Retrieve, never Issue/Archive", () => {
   const html = render(
-    createElement(ArtifactRow, { artifact: artifact({ kind: "signed_original" }), session: noSession(), busy: false, act: async (fn) => { await fn(); } }),
+    createElement(ArtifactRow, { artifact: artifact({ kind: "signed_original" }), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); } }),
   );
   assert.match(html, />Retrieve</);
   assert.doesNotMatch(html, /Issue for approval/);
@@ -86,13 +135,13 @@ test("ArtifactRow: a signed_original row offers Retrieve, never Issue/Archive", 
 });
 
 test("ArtifactRow shows the agent_prepared / claim_removed / uncertified bands only when true", () => {
-  const plain = render(createElement(ArtifactRow, { artifact: artifact({}), session: noSession(), busy: false, act: async (fn) => { await fn(); } }));
+  const plain = render(createElement(ArtifactRow, { artifact: artifact({}), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); } }));
   assert.doesNotMatch(plain, /agent-prepared/);
 
   const flagged = render(
     createElement(ArtifactRow, {
       artifact: artifact({ prepared_by_agent: true, claim_removed: true, uncertified: true }),
-      session: noSession(), busy: false, act: async (fn) => { await fn(); },
+      offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); },
     }),
   );
   assert.match(flagged, /agent-prepared/);
@@ -102,7 +151,7 @@ test("ArtifactRow shows the agent_prepared / claim_removed / uncertified bands o
 
 // LOW (independent review): kind renders VERBATIM, never a `_` → ` ` relabel.
 test("ArtifactRow renders artifact.kind verbatim, never relabelled", () => {
-  const html = render(createElement(ArtifactRow, { artifact: artifact({ kind: "pre_sign" }), session: noSession(), busy: false, act: async (fn) => { await fn(); } }));
+  const html = render(createElement(ArtifactRow, { artifact: artifact({ kind: "pre_sign" }), offer: null, session: noSession(), busy: false, act: async (fn) => { await fn(); } }));
   assert.match(html, />pre_sign</);
   assert.doesNotMatch(html, />pre sign</);
 });
