@@ -1,7 +1,11 @@
 -- =====================================================================================
 -- Q-D6 -- THE CLOSE-SEAL WALL WHILE THE DEFERRED-OPENING BANNER IS UP.
 -- =====================================================================================
--- UNNUMBERED BY LAW (裁-108): the number is claimed at MERGE PREP, not at authoring, and
+-- NUMBERED AT MERGE PREP (裁-108): this file shipped UNNUMBERED through build and review --
+-- the number is claimed at MERGE PREP, not at authoring -- and `0161` was claimed on
+-- 2026-09-03 with the four-step below. The number is MERGE ORDER, not claim order:
+-- `migrate.mjs:341-346` refuses an unapplied file numbered at or below the highest APPLIED
+-- number, so whichever PR merges next takes the next number above main's frontier. The
 -- the four-step (rename -> citation true-up -> prove nothing mechanical keys on the
 -- FILENAME -> fresh-rig in-sequence re-verify) is the lead's act at that moment.
 --

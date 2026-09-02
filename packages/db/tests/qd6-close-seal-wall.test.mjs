@@ -9,7 +9,8 @@
 //    owner-override door ships. Drawer-1 (absolute, no attestation path) is the mechanism."
 //
 // THE 裁-108 SKIP, and why it is now HISTORY on this branch. While the migration shipped
-// UNNUMBERED, `scripts/migrate.mjs`'s file filter (`MIGRATION_LIKE = /^\d+.*\.sql$/`,
+// UNNUMBERED (it no longer does — `0161` was claimed at merge prep), `scripts/migrate.mjs`'s
+// file filter (`MIGRATION_LIKE = /^\d+.*\.sql$/`,
 // migrate.mjs:59) SILENTLY SKIPPED it — so on CI every cell below skipped LOUDLY through
 // `qd6Gate()`, and a green `db-estate` said nothing at all about the wall. **The number claim
 // (0161, merge prep 2026-09-03) is what ARMED this file**, and the fresh-rig re-verify that
@@ -61,7 +62,17 @@ let control = null;     // a client with no onboarding plan at all
 
 function qd6Gate(t) {
   if (!ready || !has56) { markSkip(); t.skip("0056 (close model) not present"); return true; }
-  if (!hasQd6) { markSkip(); t.skip("Q-D6 wall not applied (the migration is still UNNUMBERED — 裁-108)"); return true; }
+  // WHAT THIS MESSAGE MAY SAY is bounded by what the gate MEASURED — the evaluator's
+  // absence, nothing more. It used to name a cause ("still UNNUMBERED"), which stopped
+  // being true at the 0161 claim and would misdiagnose every other way the body can be
+  // missing: a rig at an older frontier, a half-applied chain, a dropped body.
+  if (!hasQd6) {
+    markSkip();
+    t.skip("Q-D6 wall absent: clara._close_gate_deferred_opening(uuid,uuid) does not resolve "
+      + "on this database, so migration 0161 was not applied to this rig (an older frontier, "
+      + "a half-applied chain, or a dropped body — this cell measured the body, not the cause)");
+    return true;
+  }
   return false;
 }
 
@@ -156,7 +167,9 @@ before(async () => {
   hasQd6 = (await rootQuery(
     "select to_regprocedure($1) is not null as ok", [EVALUATOR])).rows[0].ok;
   if (!hasQd6) {
-    noteLane("Q-D6 wall ABSENT — the migration is still UNNUMBERED and migrate.mjs skips it by filename (裁-108). Claim the number to arm this battery.");
+    noteLane("Q-D6 wall ABSENT — clara._close_gate_deferred_opening(uuid,uuid) does not resolve here, "
+      + "so migration 0161 is not applied on this rig. Migrate this rig to the frontier to arm the battery. "
+      + "(Before the 0161 claim the cause was the UNNUMBERED filename, which migrate.mjs skips silently — 裁-108.)");
     return;
   }
   world = await wb.buildWaveBWorld();

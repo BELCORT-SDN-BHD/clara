@@ -43,7 +43,8 @@ export async function hasB3() {
  *  schema_migrations row, so a renumber cannot move it.
  *
  *  WHY EVERY CATALOG-ROSTER ASSERTION IN THIS SUITE BRANCHES ON IT (裁-108): the migration
- *  ships UNNUMBERED, and `scripts/migrate.mjs`'s file filter (`/^\d+.*\.sql$/`, migrate.mjs:59)
+ *  shipped UNNUMBERED until the `0161` claim at merge prep, and `scripts/migrate.mjs`'s file
+ *  filter (`/^\d+.*\.sql$/`, migrate.mjs:59)
  *  skips anything that does not start with four digits — silently. So on CI, and on any rig
  *  migrated before the number is claimed at merge prep, the catalog is FOURTEEN rows; after
  *  the claim it is fifteen. A bare count would be red on one side or the other. The roster is
