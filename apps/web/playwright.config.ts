@@ -26,7 +26,7 @@ export default defineConfig({
     command: "node e2e/serve-built.mjs",
     // Readiness probes the built Next server directly. The browser itself uses
     // the HTTPS origin above so production's same-origin wall is exercised.
-    url: "http://127.0.0.1:3101/signup",
+    url: `http://127.0.0.1:${process.env.CLARA_E2E_NEXT_PORT ?? 3101}/signup`,
     reuseExistingServer: false,
     timeout: 120_000,
     stdout: "pipe",

@@ -23,6 +23,7 @@ import type { SessionTokenAccessor } from "@/lib/session";
 import { INTAKE_ADOPTED, type IntakeOrigin, type IntakeRow, type ProcessingTaskRow } from "./types";
 
 type Opts = { session?: SessionTokenAccessor; signal?: AbortSignal };
+type BeginOpts = Opts & { origin?: IntakeOrigin; sessionId?: string };
 
 async function requireToken(opts: Opts): Promise<string> {
   const session = opts.session ?? sessionTokenAccessor;
@@ -35,11 +36,26 @@ export type BeginIntakeRequest = { filename: string; mime: string; declaredBytes
 export type BeginIntakeResponse = { intake_id: string; upload_token: string; expires_at: string | null };
 
 /** Same-origin POST via the runtime proxy (apps/dashboard/app/shared/intake.ts:
- *  106-125's `beginIntake`, origin fixed to `"documents_tab"` — this workbench
- *  never begins a chat-origin intake). */
-export async function beginIntake(req: BeginIntakeRequest, opts: Opts = {}): Promise<BeginIntakeResponse> {
+ *  106-125's `beginIntake`). `origin` DEFAULTS to `"documents_tab"` and stays that for
+ *  every Documents-workbench caller; the Clara composer passes `"chat"` plus the
+ *  `sessionId` the runtime authorises against. That pairing is the runtime's own, not a
+ *  local convention: `packages/runtime/src/intakeRoutes.ts:94` calls
+ *  `assertSessionAccess` for a chat origin, and `packages/runtime/lib/intake.mjs:99-102`
+ *  refuses 400 unless `origin === "chat"` and a non-empty `session_id` arrive together —
+ *  which is why the guard below refuses locally rather than sending a body the wall will
+ *  reject. NO CLIENT IDENTITY rides this body in either case: filing a document to a
+ *  client is a separate governed act (`doors.ts`'s `fileToClient`). */
+export async function beginIntake(req: BeginIntakeRequest, opts: BeginOpts = {}): Promise<BeginIntakeResponse> {
   const token = await requireToken(opts);
-  const origin: IntakeOrigin = "documents_tab";
+  const origin: IntakeOrigin = opts.origin ?? "documents_tab";
+  if (origin === "chat" && !opts.sessionId) throw new Error("chat intake requires a session id");
+  const body = {
+    filename: req.filename,
+    mime: req.mime,
+    declared_bytes: req.declaredBytes,
+    origin,
+    ...(origin === "chat" ? { session_id: opts.sessionId } : {}),
+  };
   const res = await safeRuntimeFetch(
     "/api/runtime/intake/documents",
     {
@@ -48,7 +64,7 @@ export async function beginIntake(req: BeginIntakeRequest, opts: Opts = {}): Pro
       redirect: "manual", // never silently follow a 307-to-/login (runtime-wire.ts's own note)
       signal: opts.signal,
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ filename: req.filename, mime: req.mime, declared_bytes: req.declaredBytes, origin }),
+      body: JSON.stringify(body),
     },
     "begin intake",
   );

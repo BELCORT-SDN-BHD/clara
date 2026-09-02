@@ -18,7 +18,7 @@
 import type { SessionTokenAccessor } from "@/lib/session";
 
 export type { ClaraPart } from "@/lib/parts/types";
-import type { ClaraPart } from "@/lib/parts/types";
+import type { AttachmentPart, ClaraPart } from "@/lib/parts/types";
 
 export type SessionRow = {
   id: string;
@@ -160,6 +160,7 @@ export async function postTurn(
   sessionId: string,
   text: string,
   turnKey: string,
+  attachments: AttachmentPart[] = [],
 ): Promise<TurnResult> {
   let token: string;
   try {
@@ -171,7 +172,7 @@ export async function postTurn(
   try {
     res = await runtimeFetch(`/api/chat/${encodeURIComponent(sessionId)}/turns`, token, {
       method: "POST",
-      body: JSON.stringify({ turnKey, parts: [{ type: "text", text }] }),
+      body: JSON.stringify({ turnKey, parts: [{ type: "text", text }, ...attachments] }),
     });
   } catch (err) {
     return { kind: "error", message: `network error: ${(err as Error).message}` };
