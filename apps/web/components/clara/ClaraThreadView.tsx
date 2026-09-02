@@ -135,7 +135,20 @@ export function ClaraThreadView({
             // assistant turn keeps its key, so the text grows without the
             // bubble ever re-animating.
             <div key={msg.id} className={cn("enter-content rounded-lg p-2 text-sm", msg.role === "user" ? "bg-muted" : "bg-clara-muted")}>
-              <p className="mb-1 text-xs font-medium text-muted-foreground">{t(`role.${msg.role}`)}</p>
+              {/* P6-3, caught by this train's own axe leg on the built app.
+                  This role label was `text-muted-foreground`, which measures
+                  4.493:1 on `bg-clara-muted` — short of the 4.5:1 AA floor, on
+                  the transcript's most-repeated line. It is the SAME defect the
+                  裁-86 walk already caught and fixed one file away, in
+                  InterviewRunCard's per-turn label: --muted-readable is the
+                  design system's own tightest-margin token and --clara-muted is
+                  a marginally lighter, more saturated ground than the ones it
+                  was tuned against. The fix is that fix — `text-secondary-ink`,
+                  an existing catalogued prose role, 7.072:1 here and 7.279:1 on
+                  the user bubble's `bg-muted`. Both grounds are now pinned in
+                  scripts/check-token-contrast.mjs so the pair cannot regress
+                  silently a third time. */}
+              <p className="mb-1 text-xs font-medium text-secondary-ink">{t(`role.${msg.role}`)}</p>
               {msg.parts.map((part, i) => (
                 <PartSlot key={i} part={part} />
               ))}
@@ -143,7 +156,17 @@ export function ClaraThreadView({
           ))}
           {state.pendingUserText && (
             <div className="rounded-lg bg-muted p-2 text-sm opacity-70">
-              <p className="mb-1 text-xs font-medium text-muted-foreground">{t("role.user")}</p>
+              {/* The same role label, so the same token — a transcript that
+                  spelled its own speaker line two ways would be the drift this
+                  file keeps closing. RESIDUAL, RECORDED NOT ABSORBED: this
+                  bubble carries `opacity-70` as its "not yet confirmed"
+                  affordance, which composites EVERY colour in it, label
+                  included, to roughly 4.1:1. That is the opacity affordance's
+                  cost, not this token's, and trading it away is a design call
+                  for the owner rather than a fix to make here; it is also
+                  invisible to the axe leg because the bubble exists only while
+                  a send is in flight. Named in the P6-3 PR body. */}
+              <p className="mb-1 text-xs font-medium text-secondary-ink">{t("role.user")}</p>
               <p className="whitespace-pre-wrap">{state.pendingUserText}</p>
             </div>
           )}

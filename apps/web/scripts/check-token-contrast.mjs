@@ -265,6 +265,15 @@ export const PAIR_SPECS = [
     source: "components/clara/InterviewRunCard.tsx's per-turn thread role label (\"Clara · <seg>\") on the clara-role bubble — the live 裁-86 browser walk's axe scan caught the PRIOR text-muted-foreground choice at 4.49:1 on this ground (a blind spot: no PAIR_SPECS row had ever paired muted-foreground with clara-muted specifically), so this pairing is now pinned rather than left to a live-DOM-only gate." },
 
   // --- Brand/Clara accent text ---
+  // The Clara transcript's OTHER bubble ground. Added by P6-3 after its axe leg
+  // caught `text-muted-foreground` at 4.493:1 on bg-clara-muted in
+  // ClaraThreadView — the identical defect the 裁-86 walk had already found and
+  // fixed in InterviewRunCard one file away, which the row above pins. That the
+  // same pairing could regress in a sibling component with no gate noticing is
+  // why the user bubble's ground is pinned now too, not only the one that
+  // actually failed.
+  { id: "secondary-ink-on-muted", fg: (h) => h("secondary-ink"), bg: (h) => h("muted"), threshold: 4.5,
+    source: "components/clara/ClaraThreadView.tsx's per-message speaker label on the USER bubble (bg-muted), the sibling of the clara-muted row above — and the same prose role wherever a caption sits on a bg-muted panel" },
   { id: "clara-on-card", fg: (h) => h("clara"), bg: (h) => h("card"), threshold: 4.5,
     source: "components/clara/ClaraRail.tsx heading (text-clara) on the docked rail's own bg-card panel" },
   { id: "clara-on-background", fg: (h) => h("clara"), bg: (h) => h("background"), threshold: 4.5,
