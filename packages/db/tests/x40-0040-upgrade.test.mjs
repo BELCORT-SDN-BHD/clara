@@ -98,7 +98,13 @@ const REVN = "660-U40";
 async function freshDb() {
   const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
+  const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
+  // Cluster-wide role survival: this file's three callers (:271, :378, :436) each
+  // replay to the real frontier, and roles are cluster-wide — see
+  // tests/rig-cluster-reset.mjs's header (review-518 D1/D2). Requires
+  // CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step).
   await reset({ log: () => {} });
+  await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: exportPre0040(), log: () => {} });
   return { migrate };
 }

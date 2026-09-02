@@ -15,22 +15,35 @@
 //     node --test tests/rig-docs-upgrade.test.mjs
 //
 // ROLE SURVIVAL ACROSS THE FOUR CYCLES BELOW (found 2026-09-02 review of PR #485,
-// fixed here): this file runs FOUR full 0001→frontier replays in ONE process, each
-// via `reset()` + a fresh `migrate()` pass. `reset()` (scripts/reset.mjs) drops only
-// schema `clara` — roles are CLUSTER-WIDE, not schema-scoped, so a role a PRIOR
-// cycle's replay minted (today: 0160's `clara_stripe_webhook`/`_login`, idempotently
-// `create role`d) survives into the NEXT cycle's `reset()`. Migration 0154 hard-
-// asserts an exact cluster-wide `pg_roles where rolname like 'clara%'` census (14,
-// errcode CLR10) at ITS OWN position in the chain — correct for a genuinely fresh
-// cluster, but a second/third/fourth replay in this file reaches 0154 with 16
-// (14 + 0160's two, left over from cycle 1) and aborts there, well short of 0160.
-// `resetForFullReplay()` below sweeps every 'clara%' role (the SAME predicate 0154
-// itself counts) back to zero right after `reset()`, so every cycle starts from the
-// same pristine role census a truly fresh cluster would — the migrations recreate
-// every role idempotently (`if not exists`), so this reproduces a fresh cluster
-// rather than working around 0154's assertion, which is untouched and unweakened.
-// Scoped to THIS file only (never `scripts/reset.mjs`, which real deploy/DR
-// ceremonies and every other test file call without this side effect).
+// fixed here; the fix's own first cut was itself FIX REQUIRED at review-518 D1 — see
+// tests/rig-cluster-reset.mjs's header for the full cluster-shaped story): this file
+// runs FOUR full 0001→frontier replays in ONE process, each via `reset()` + a fresh
+// `migrate()` pass. `reset()` (scripts/reset.mjs) drops only schema `clara` — roles
+// are CLUSTER-WIDE, not schema-scoped, so a role a PRIOR cycle's replay minted
+// (today: 0160's `clara_stripe_webhook`/`_login`, idempotently `create role`d)
+// survives into the NEXT cycle's `reset()`. Migration 0154 hard-asserts an exact
+// cluster-wide role census (14, errcode CLR10) at ITS OWN position in the chain —
+// correct for a genuinely fresh cluster, but a second/third/fourth replay in this
+// file reaches 0154 with 16 (14 + 0160's two, left over from cycle 1) and aborts
+// there, well short of 0160.
+//
+// `resetForFullReplay()` below calls the SHARED sweep in `./rig-cluster-reset.mjs`
+// (`sweepChainMintedRoles`) right after `reset()`. That sweep drops a LITERAL roster
+// of the roles the chain mints (never a `'clara%'` wildcard — see that file's header
+// for why) and ONLY succeeds once nothing ELSE in the cluster still references them:
+// `DROP ROLE` consults `pg_shdepend` across every database, so on the real
+// closed-wave-drills CI job — ten drill steps sharing ONE Postgres service, each
+// creating its own database, no step dropping it — this file's own sweep alone is
+// NOT sufficient; the CI action (`.github/actions/closed-wave-upgrade-drills/
+// action.yml`) additionally drops each step's database and re-sweeps BETWEEN steps.
+// Within THIS file's own four cycles, the prior cycle's database is never dropped
+// (it is the SAME database throughout), so this file's sweep is the whole story
+// for cycle-to-cycle survival — the between-step action cleanup is what makes cycle
+// 1 (the FIRST thing this file does) start clean too, on the shared job. Every
+// migration in the chain recreates its own role(s) idempotently (`if not exists`),
+// so sweeping is equivalent to, not a workaround around, replaying on a fresh
+// cluster. Scoped to test files only — never `scripts/reset.mjs`, which real
+// deploy/DR ceremonies call without this side effect.
 //
 // ---------------------------------------------------------------------------
 // PROPOSED ci.yml step (a SEPARATE job step with its OWN throwaway database, like
@@ -95,29 +108,20 @@ const RESET_OK = process.env.CLARA_RIG_ALLOW_RESET === "1";
 const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
 /**
- * `reset()` (drops schema `clara`) plus a cluster-role sweep, for a file that runs
- * SEVERAL full 0001→frontier replays in one process (see the header note). Roles are
- * cluster-wide and `reset()` never touches them, so a role a PRIOR cycle's replay
- * minted (idempotently, via `create role ... if not exists`) would otherwise survive
- * into the NEXT cycle and misreport migration 0154's exact-census assertion as a
- * genuine drift. Sweeping to zero — the SAME `rolname like 'clara%'` predicate 0154
- * itself counts — makes every cycle start from the pristine role census a truly
- * fresh cluster has; each migration recreates its own role(s) idempotently on the
- * way back up, so this reproduces a fresh cluster rather than weakening what 0154
- * checks. Local to this file: never touches `scripts/reset.mjs` itself.
+ * `reset()` (drops schema `clara`) plus the shared literal-roster role sweep, for a
+ * file that runs SEVERAL full 0001→frontier replays in one process (see the header
+ * note, and `./rig-cluster-reset.mjs`'s header for the full cluster-shaped story —
+ * this alone is NOT sufficient on the real CI job, which additionally needs the
+ * between-step cleanup in `closed-wave-upgrade-drills/action.yml`). Requires
+ * `CLARA_RIG_ALLOW_ROLE_SWEEP=1` in the environment (the action sets it on this
+ * file's own step); absent that, `sweepChainMintedRoles` refuses loudly rather than
+ * silently skipping. Local to test files: never touches `scripts/reset.mjs` itself.
  */
 async function resetForFullReplay() {
   const { reset } = await import("../scripts/reset.mjs");
+  const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
   await reset({ log: () => {} });
-  await rootQuery(`
-    do $$
-    declare r record;
-    begin
-      for r in select rolname from pg_roles where rolname like 'clara%' loop
-        execute format('drop role if exists %I', r.rolname);
-      end loop;
-    end $$;
-  `);
+  await sweepChainMintedRoles({ log: () => {} });
 }
 
 /** Copy migrations 0001–0006 (NOT 0007) into a throwaway dir for a partial migrate. */
@@ -197,7 +201,7 @@ test("§3.0.2 backfill drill: 0001–0006 + cited APPROVED entries → 0007 migr
 // §3.0.2 — ambiguous / zero-match citation ABORTS the migration.
 // ===========================================================================
 
-test("§3.0.2 ambiguous citation ABORT: a cited entry that lacks EXACTLY one legacy filing aborts 0007 (zero-ambiguity proof)", async (t) => {
+test("§3.0.2 ambiguous citation ABORT: a cited entry that lacks EXACTLY one legacy filing aborts 0007 (interface expectation, unexercised — see the lane note)", async (t) => {
   if (skipUnlessReset(t)) return;
   const { migrate } = await import("../scripts/migrate.mjs");
 
@@ -208,6 +212,21 @@ test("§3.0.2 ambiguous citation ABORT: a cited entry that lacks EXACTLY one leg
 
   // Raw-insert a NULL-client document (no legacy filing will be backfilled for it)
   // and an APPROVED entry citing it → the backfill finds ZERO matches → ABORT.
+  //
+  // UNEXERCISED ON THIS RIG SHAPE (review-518 D4, confirmed deterministic and
+  // environment-independent, not flaky): `set constraints all deferred` below and
+  // the entry insert that follows are each their OWN autocommitting `rootQuery()`
+  // statement (`.claude/rules/db-tests.md`: "A pooled query() outside an explicit
+  // begin is its own transaction"), so the deferred-constraint setting lands on a
+  // DIFFERENT pooled connection from the one that runs the insert it is meant to
+  // defer — the balance-check trigger fires immediately on the insert's own commit,
+  // before journal_lines exists, and the raw insert is rejected with CLR07
+  // "unbalanced" every time. The `.catch()` below bails the cell out gracefully
+  // (an "interface expectation", not a fresh finding), so `assert.rejects` at the
+  // bottom of this test has never actually run against real ambiguous-citation
+  // data. Fixing the staging (wrap both statements in one `withTxn()`/
+  // `withActor({transaction:true})` call) is out of this round's scope — filed as
+  // a backlog row in the PR body.
   const digest = sha(randomUUID());
   const doc = await rootQuery(
     "insert into clara.documents (firm_id, client_id, sha256, original_filename, mime_type, byte_size, storage_path, status, uploaded_by) values ($1, null, $2, 'orphan.pdf', 'application/pdf', 10, 'legacy/orphan', 'ingested', $3) returning id",
