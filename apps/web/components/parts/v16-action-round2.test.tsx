@@ -331,7 +331,15 @@ test("unknown firm status, question kind, and sweep outcome render through hones
   await withMockedEnv(
     (url) => {
       if (url.includes("/rest/v1/firm_open_questions_visible")) {
-        return jsonResponse([{ ...FQ_OPEN, kind: "onboarding_proposed", status: "escalated" }]);
+        // THE FIXTURE'S KIND CHANGED IN P6-5, AND IT HAD TO. This cell is about the
+        // fail-soft arm for a kind OUTSIDE the closed array, and it used `onboarding_proposed`
+        // as that stand-in because the array had six values while the live CHECK had seven.
+        // P6-5 ③ registers the seventh, so that spelling is now a KNOWN kind with its own
+        // label — leaving it here would have turned a cell about the unknown arm into a cell
+        // asserting a registered kind renders as unrecognised, i.e. green only while the
+        // build was wrong. The stand-in is now a spelling the DB's CHECK cannot admit at all,
+        // so this cell can never again be quietly satisfied by a real value catching up to it.
+        return jsonResponse([{ ...FQ_OPEN, kind: "no_such_question_kind", status: "escalated" }]);
       }
       if (url.includes("/rest/v1/clients")) return jsonResponse(CLIENTS);
       if (url.includes("/rest/v1/rpc/get_sweep_run")) {
@@ -361,7 +369,7 @@ test("unknown firm status, question kind, and sweep outcome render through hones
         const sweepRead = calls.find((call) => call.url.includes("/rest/v1/rpc/get_sweep_run"));
         assert.deepEqual(sweepRead?.body, { p_run: "run-a" }, "the request must carry the literal run id the fixture returns");
         const text = h.text();
-        assert.match(text, /Unrecognized kind \(onboarding_proposed\)/, "an unregistered question kind must use the translated unknown arm");
+        assert.match(text, /Unrecognized kind \(no_such_question_kind\)/, "an unregistered question kind must use the translated unknown arm");
         assert.match(text, /Status not recognised/, "an unregistered status must use the translated unknown arm");
         assert.match(text, /refused_something_new/, "an unregistered outcome must preserve the DB's own spelling");
         const badge = h.find((node) => node.tagName === "SPAN" && textOf(node).trim() === unknownOutcome);
