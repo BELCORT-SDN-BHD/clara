@@ -53,7 +53,7 @@ readme), not assumed:
 |---|---|---|
 | `changes` | git, full clone | image |
 | `lint` | node 20.19.5 · pnpm 10.33.0 · curl+tar · full git history | setup actions; gitleaks 8.18.4 fetched in-job |
-| `render-drill` | node 20.19.5 · **docker** · **DejaVuSans.ttf** | docker 28.0.4 in the image; `fonts-dejavu-core` installed in-job (the image ships NO DejaVu — only `fonts-noto-color-emoji`) |
+| `render-drill` | node 20.19.5 · **docker** · **DejaVuSans.ttf** | docker 28.0.4 in the image; DejaVu is **already present** (it arrives transitively), so the in-job `fonts-dejavu-core` step short-circuits — a belt against an image refresh that drops it, not a measured requirement (see "One claim in this section was wrong" below) |
 | `build` | node · pnpm | setup actions |
 | `db-estate` | node · pnpm · **psql/pg_dump 17** · 1 × `postgres:17` service | the image ships PostgreSQL **16**, so the pg17-client composite adds PGDG `postgresql-client-17`; the service container is Docker |
 | `db-live-gates` | node · pnpm · psql/pg_dump 17 · **4 × `postgres:17` services** · disk for the DR dump | as above |
@@ -99,19 +99,41 @@ broke main. Cancelling the older run buys a few minutes and throws that away. �
 "pushes to main are never cancelled or capped" clause was ruled against a zero-spend fleet; it
 is **re-ruled here on a metered one, on the bisect argument** rather than inherited silently.
 
-**`queue`, and the tripwire that comes with it.** GitHub's `concurrency.queue` option takes
-`single` (the default: a newer arrival **cancels and replaces** an older *pending* run in the
-same group) or `max` (up to 100 may pend). The displacement it guards against cannot occur in
-the shape above, because every non-PR group is keyed on `github.run_id` and is therefore a
-group of one. It is carried anyway as defence-in-depth, and as a marker for the next editor:
-**if a non-PR event is ever given a shared group key, `queue: max` stops being decorative and
-becomes the only thing standing between a pending run and silent replacement.** `queue: max`
-together with `cancel-in-progress: true` is a documented workflow **validation error**, which
-is why the workflow sets it by expression — the `pull_request` arm must stay `single`.
+**`queue`, and exactly how far it is proven.** GitHub's `concurrency.queue` option takes `single`
+(the default: a newer arrival **cancels and replaces** an older *pending* run in the same group)
+or `max` (up to 100 may pend). `queue: max` together with `cancel-in-progress: true` is a
+documented workflow **validation error**, which is why the workflow sets it by expression — the
+`pull_request` arm must stay `single`.
 
-**Two measured losses, named rather than discovered later.** The shared Docker daemon's
-BuildKit cache does not survive between runs, so the render drill rebuilds its image cold
-each time; and the persistent pnpm store is gone, replaced by GitHub's remote cache.
+**Do not read it as a working protection.** Two things bound it. First, `max` is **decorative**
+in the shape above: every non-PR group is keyed on `github.run_id`, so it is a group of one and
+there is never a pending run to displace. Second, expression support for this key is **not
+documented**; what the runs prove (33630834296, 33631065480) is that GitHub parses the expression
+and dispatches the jobs, **not** that `max` is honoured — and that cannot be proven here, because
+nothing in this shape gives it anything to do. So the tripwire is conditional: if a non-PR event
+is ever given a **shared** group key, `queue: max` becomes the only thing standing between a
+pending run and silent replacement, **and at that moment it must be proved** (queue two runs into
+the shared group, confirm the older one still runs) rather than trusted. A protection whose first
+real use is its first test is not a protection.
+
+**One measured loss, and one that turned out not to be.** The shared Docker daemon's BuildKit
+cache genuinely does not survive between runs, so the render drill rebuilds its image cold each
+time (measured: 19s for the build step, against 8s warm on the fleet). The pnpm store was
+described in an earlier draft as a second loss; it is not. The `setup-node` cache is **warm**
+across jobs — `Cache hit for: node-cache-Linux-x64-pnpm-…` followed by `Cache restored
+successfully` in both `lint` and `build` on run 33631065480 — so what changed is where the store
+lives, not whether it is populated.
+
+### One claim in this section was wrong, and the shape of the mistake is worth keeping
+
+An earlier draft asserted the `fonts-dejavu-core` install was **required**, because the runner
+image "ships no DejaVu — only `fonts-noto-color-emoji`", citing the image's own published apt
+manifest. That manifest is a **curated subset**, so reading it answered a question it cannot
+answer: DejaVu arrives transitively and is present. The measurement that settles it is the step's
+own log — on image `20260823.283.1` it emits no apt output and takes 0-1 seconds, which is only
+reachable through the `dpkg -s` short-circuit. **Absence from the wrong instrument is not
+absence.** The step stays, because an image refresh can drop the transitive dependency and the
+drill fails rather than skips without a font; it simply does nothing today.
 
 **Security posture on hosted runners.** The RCE class the old private-repo-only order of
 operations guarded against — a fork PR executing on our machine — is closed structurally:
