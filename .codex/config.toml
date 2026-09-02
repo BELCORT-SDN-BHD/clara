@@ -1,0 +1,11 @@
+[mcp_servers.codebase-memory-mcp]
+command = "C:/Users/zhant/AppData/Local/Programs/codebase-memory-mcp/codebase-memory-mcp.exe"
+
+[mcp_servers.shadcn]
+command = "cmd"
+args = [
+    "/c",
+    "npx",
+    "shadcn@4.12.0",
+    "mcp",
+]

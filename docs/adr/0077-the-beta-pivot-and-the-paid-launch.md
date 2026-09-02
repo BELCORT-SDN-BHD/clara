@@ -53,6 +53,9 @@ says additions land as ADR entries and the digest is re-trued when one does).
   DONE only after a real-browser walk of its journey on the built app. Law 83 (ADR-0076): the
   switch ceremony is one combined G1 ceremony of three switches, post-beta (裁-40 · 44 · 59 · 76).
 
+*Dated note 2026-09-02: 裁-111 (owner, 2026-09-01) time-boxes law 28 — the cross-family Codex
+review leg is suspended until beta live; the opus lane is the complete gate meanwhile.*
+
 ## What this entry does NOT change
 
 PRD §6 (the invariants), hard constraints 1–15, the DB-owns-every-number law, the seven reserved

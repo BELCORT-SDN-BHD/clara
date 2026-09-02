@@ -1,5 +1,8 @@
 # @clara/dashboard — the Agentic OS surface
 
+> **SUPERSEDED — retiring at the FS-10 cutover.** The production frontend is `apps/web`; this
+> app still serves `app.clarabook.com` until the domain moves (`PROGRESS.md` posture).
+
 The LIVE product surface: the `/chat` two-pane transcript with the
 typed `parts[]` card catalog (je_review, doc_review, refusal, open_question,
 sweep_receipt, …), the `/queue` review queue
