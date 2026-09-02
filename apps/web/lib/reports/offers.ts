@@ -21,10 +21,19 @@ export type DownloadOffers = {
   /** The door's row for one artifact id, or `null` while the read is still in flight OR when the
    *  door returned no row for it at all (an artifact outside this client's offer). */
   offerFor: (artifactId: string) => DownloadableArtifact | null;
-  /** The door's own refusal, when the OFFER call itself was refused (below the read floor, a
-   *  client outside the firm). Rendered verbatim by the caller. */
+  /**
+   * The door's own refusal, when the OFFER call ITSELF was refused — a caller below the read floor,
+   * or a client outside the firm.
+   *
+   * BOTH PANELS RENDER IT, and that is not decoration. The artifact LIST is not a door: it is a
+   * direct RLS read whose human policy on `clara.report_artifacts` is firm-scoped with NO role rank,
+   * while `clara.list_downloadable_artifacts` floors at bookkeeper. So a firm VIEWER reads the rows,
+   * the panel draws them, and every Download control is correctly withheld — leaving a tab full of
+   * artifacts, no control anywhere, and no reason. That silent state is exactly what the door was
+   * shaped to prevent: D8.4's own comment says the door REFUSES rather than returning `[]` because
+   * an empty list "would read to a UI as 'nothing to download'". The refusal then has to be shown.
+   */
   err: string | null;
-  loaded: boolean;
 };
 
 export function useDownloadOffers(clientId: string, session: SessionTokenAccessor): DownloadOffers {
@@ -34,9 +43,8 @@ export function useDownloadOffers(clientId: string, session: SessionTokenAccesso
     for (const row of data ?? []) map.set(row.artifact_id, row);
     return map;
   }, [data]);
-  return {
-    offerFor: (artifactId: string) => byId.get(artifactId) ?? null,
-    err,
-    loaded: data != null,
-  };
+  // `loaded` was here and no caller read it. `offerFor` already answers the only question a caller
+  // asks — a null is "no offer for this row, yet or ever" and the control renders nothing for it —
+  // so a second, unread way to say the same thing was a field to keep in sync for nobody.
+  return { offerFor: (artifactId: string) => byId.get(artifactId) ?? null, err };
 }

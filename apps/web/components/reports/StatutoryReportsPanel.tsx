@@ -49,6 +49,14 @@ export function StatutoryReportsPanel({ clientId, session }: { clientId: string;
           </StateBanner>
         ) : null}
 
+        {/* THE OFFER DOOR'S OWN REFUSAL, rendered verbatim. Reachable, and measured rather than
+            assumed: the artifact list above is a direct RLS read that is firm-scoped with no role
+            rank, while the offer door floors at bookkeeper — so a firm VIEWER sees these rows with
+            no Download control on any of them. Without this banner that viewer gets no reason at
+            all, which is the silent state the door refuses (rather than returning an empty list) to
+            prevent. Never a NotBuiltNote: the door is built, this caller is not allowed. */}
+        {offers.err ? <StateBanner tone="error">{offers.err}</StateBanner> : null}
+
         {!read ? (
           err ? <StateBanner tone="error">{t("error", { message: err })}</StateBanner> : <LoadingState>{t("loading")}</LoadingState>
         ) : !read.available ? (

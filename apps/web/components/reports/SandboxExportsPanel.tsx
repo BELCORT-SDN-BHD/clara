@@ -56,6 +56,11 @@ export function SandboxExportsPanel({ clientId, session }: { clientId: string; s
             opposite direction from the one echelon 2 came to fix. */}
         <NotBuiltNote className="text-xs">{t("requestNotice")}</NotBuiltNote>
 
+        {/* The OFFER door's refusal, verbatim — the same reachable viewer case the statutory panel
+            documents. Separate from `err` below, which is the sandbox LIST's own failure: the two
+            reads have two different authorities and a reader must be able to tell which refused. */}
+        {offers.err ? <StateBanner tone="error">{offers.err}</StateBanner> : null}
+
         {err ? (
           <StateBanner tone="error">{t("error", { message: err })}</StateBanner>
         ) : !forThisClient ? (
