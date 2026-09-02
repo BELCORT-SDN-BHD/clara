@@ -2,11 +2,12 @@
 
 **Status: P1–P3 and the whole port wave (T0–T11, 11/11) are merged on `main`.** The shell
 (Supabase SSR cookie auth, the two-level workspace chrome, the Clara rail + full-screen
-thread escalation, the 22-part catalog renderer, `⌘K`) and the full P3 product workbench
+thread escalation, the 26-part catalog renderer (24 render branches + 2 status resolvers
+since the `chatTurn_v16` bump, 2026-08-30), `⌘K`) and the full P3 product workbench
 (journals, documents, bank, close, reports, registers, knowledge) are landed, and the port
-wave has since filled those workbenches with the ported door/read surface. Still ahead: the
-**P4** firm-admin UI tranche (design of record merged, build not started) and the **P6**
-polish + cutover wave. It replaces `apps/dashboard` **at cutover**, not before — see
+wave has since filled those workbenches with the ported door/read surface. The **P4**
+firm-admin UI tranche is MERGED (P4-1…P4-5: #450 · #451 · #461 · #455 · #453,
+2026-08-31…09-01 — nav wiring P4-6 still owed). Still ahead: P4-6 and the **P6** polish + cutover wave. It replaces `apps/dashboard` **at cutover**, not before — see
 `docs/plan/active/port-wave-plan-2026-08-28.md` for the current cutover plan
 (`docs/plan/active/frontend-handoff-2026-08-23.md` §0.1 is the original at-cutover ruling).
 
@@ -161,6 +162,12 @@ pnpm --filter @clara/web lint       # walks up to the root eslint.config.mjs, sa
 pnpm --filter @clara/web test       # node --test + tsx — the auth-boundary suite (tests/)
 pnpm --filter @clara/web build      # public-key class gate, then `next build`
 pnpm --filter @clara/web dev        # local dev server
+pnpm --filter @clara/web e2e        # the Playwright rig (node e2e/run.mjs) — REAL browser
+                                    # walks on the BUILT app: entry-faces, interview,
+                                    # signup-confirm-pending specs + the live-stack harness
+                                    # (e2e/live-stack/, its own README) every frontend train
+                                    # reuses per the 裁-86 browser-leg law; serve-built.mjs
+                                    # serves the production build locally. See e2e/README.md.
 ```
 
 `build` runs `scripts/check-public-key.mjs` first and **refuses to bundle** unless
@@ -339,34 +346,38 @@ leaks; the third is what stops Resend's own retained copy of the message from ho
 bearer factors for 30 days; the fourth bounds who inside the team can read what is retained
 anyway.
 
-### 4. Signup confirmation round trip and enumeration posture (round-3 review, HIGH)
+### 4. Signup confirmation round trip and enumeration posture (round-3 review, HIGH;
+    superseded by 裁-92's CODE flow, checkout-gate-design.md §3.6 — this section now
+    describes what actually ships)
 
-`components/entry/signup-account-form.tsx` pins `emailRedirectTo` to the current origin's
-`/auth/confirm` leaf. A GET there only paints the **Confirm Email** face with a
-**Confirm my email** button; the explicit button POSTs
-the token hash to `/auth/confirm/verify`, whose handler hard-codes `type: "email"`, ignores
-caller `type`/`next`, and redirects only to `/signup` after a matching session is present.
-This prevents mail scanners from confirming an attacker-chosen password merely by fetching
-the email link, and avoids the implicit-flow fragment that a server cannot read. It preserves
-PRD §8's server-verified-session requirement at the transition into the firm step.
+`/auth/confirm` is a **six-digit code form** (email + code), never a link. The GET paints
+that form only — no `.auth.` call anywhere in that execution root, so a mail scanner that
+fetches nothing (there is no link left to fetch) consumes nothing either way. The explicit
+POST to `/auth/confirm/verify` runs `proveSameOrigin` (CSRF wall, kept verbatim from the
+link-flow handler this replaced), then the C1/C2 confirmation-attempt wall
+(`app/(entry)/auth/confirm/verify/confirmation-wall.ts` — **a Lane-B seam, not wired on this
+tip**: its production default honestly refuses `{kind:"unavailable"}` rather than letting a
+guess through unchecked), then `verifyOtp({email, token, type:"signup"})`, and redirects to
+`/signup` only after a matching session is present. **Cross-device now works**: the person
+can read the code on a phone and type it into any tab, alongside their own address — the
+binding is "the address is the person's own", not a link tied to one browser (§3.1/§3.2).
 
 - **Configure:** Supabase Dashboard → Authentication → Providers → Email: *Allow new users
   to sign up* ON and *Confirm Email* ON (autoconfirm disabled). Under Authentication → Email
-  Templates → *Confirm signup*, replace the default `ConfirmationURL` link with exactly
-  `{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=email`. Here `.RedirectTo` is the exact
-  `emailRedirectTo` value passed by this app — `<origin>/auth/confirm` — whereas `.SiteURL`
-  is the project's single configured Site URL. Under URL
-  Configuration → *Redirect URLs*, add the exact `<origin>/auth/confirm` URL for every
-  deployed origin, with no wildcard.
+  Templates → *Confirm signup*, the body must emit the code and **nothing to click**:
+  `{{ .Token }}` — never `{{ .ConfirmationURL }}` and never a `{{ .RedirectTo }}?token_hash=…`
+  link (that shape is 裁-92's own retired vector: a link is a value an attacker can construct
+  and mail to a victim; a bare code, checked against the victim's OWN typed address, is not).
+  Under Authentication → Auth Providers → Email, shorten the OTP expiry from the 24-hour
+  default to **10 minutes** (裁-36/§3.4's C4 — a named setup act with an owner receipt; no
+  route or migration can read or enforce this project setting from the repository).
 - **Verify (receipt):** with the project's Management API token, positively read
   `GET /v1/projects/{ref}/config/auth` and retain the JSON showing `disable_signup` is
-  `false`, `mailer_autoconfirm` is `false`, and `uri_allow_list` contains every exact
-  `<origin>/auth/confirm` entry. Retain a delivered *Confirm signup* message showing the
-  exact `.RedirectTo` + `TokenHash` template URL above; open it twice before clicking and record that both
-  visits paint the button without consuming the token. Re-run these reads after any project
-  restore or auth-configuration change. This positive Management API read is a blocking
-  **deploy gate**: repository code cannot read hosted project settings and no UI assertion
-  substitutes for the retained response.
+  `false`, `mailer_autoconfirm` is `false`, and the OTP expiry is the configured 10 minutes.
+  Retain a delivered *Confirm signup* message showing the bare six-digit code with no link at
+  all. Re-run these reads after any project restore or auth-configuration change. This
+  positive Management API read is a blocking **deploy gate**: repository code cannot read
+  hosted project settings and no UI assertion substitutes for the retained response.
 - **Residual:** the existing-account response remains controlled by hosted Auth. With the
   required posture, Supabase returns the non-enumerating `user`/no-session shape and this app
   renders the same “Confirm your email” copy for a new user, an `identities: []` user, and
@@ -378,13 +389,28 @@ PRD §8's server-verified-session requirement at the transition into the firm st
   receipt above, not this code, is the control against that drift. P4 follow-up: require the
   signup fork to consume a same-subject server receipt minted by the explicit
   `/auth/confirm/verify` POST (signed httpOnly cookie or DB row).
-- **Blocking log-control receipt:** the initial signup confirmation GET carries `token_hash`
-  in its query string, so edge/server **access logs** can capture the bearer despite
-  `Referrer-Policy: no-referrer`. Deployment is blocked until an instrument makes a
-  **positive read** of the effective edge/server logging configuration and retains the
-  response proving either query-string redaction or short retention plus restricted ACLs.
-  A policy statement or intended setting is not evidence. The delivered-message sample and
-  this retained log-control response are both required at deployment.
+- **The GET-query log-control residual is RESOLVED, not merely re-scoped.** The link-flow
+  handler this replaced carried `token_hash` in the GET's own query string, which edge/server
+  access logs could capture. The code form has NO caller-supplied value in its GET at all —
+  `page.tsx` never reads `email`/`token` from `searchParams`, by construction (part 1 §3.3 /
+  cell W-H) — so there is nothing left for an access log to leak on that leg. The code itself
+  travels only in the POST's form body, which this deployment's `Referrer-Policy:
+  strict-origin` and the same-origin wall govern, not a query-string redaction policy.
+- **C1/C2's own residual, stated plainly (checkout-gate-design.md §3.4).** The attempt wall
+  bounds the exposure of a guessable six-digit code; it is not built on this tip
+  (`confirmation-wall.ts`'s seam always answers "unavailable" until a later train wires the
+  runtime call). Deploying this build live means EVERY confirmation attempt is honestly
+  refused until that lands — recorded here so the gap is visible, never assumed closed.
+- **The "send me a new code" resend control is walled the same way, deliberately (M3, fix
+  round 2026-09-01).** An earlier cut of this card called `supabase.auth.resend` directly
+  from the browser — reachable by an unauthenticated visitor simply by loading
+  `/auth/confirm?status=expired`, with no session and no rate limit, against Supabase's own
+  project-wide hourly email-send budget shared with every legitimate signup. The design names
+  only the COPY for this control ("or request a new code", checkout-gate-design.md:314), not
+  its transport, so `lib/registration/confirmation-resend.ts` gives it the same shape as every
+  other wall on this surface: a Lane-B seam whose production default honestly refuses
+  `{kind:"unavailable"}` today, to be wired through the SAME C1/C2 attempt wall the verify
+  path uses before Lane B ever lets it reach Supabase.
 
 ### 5. `CLARA_PUBLIC_ORIGINS` must be set on any proxied deployment (Codex round 2, N3)
 
@@ -438,13 +464,15 @@ registers, knowledge.
 **Still absent** (trued 2026-08-29, P-3 — this section previously listed the whole P3
 workbench here, contradicting the real workbenches those routes mount):
 
-- The **P4 firm-admin UI tranche** — firm creation, staff invite/roster, capabilities and
-  the metering rollup. The design of record is merged (#376) and the DB half is live
-  (`0141`, `0145`); the web build has not started.
+- **P4-6 nav wiring** — the P4 tranche itself is BUILT AND MERGED (trued 2026-09-02:
+  #450 invite repair · #451 scope spine · #461 entry group · #453 operator queue ·
+  #455 members/roles/invites), but
+  the new screens still lack their navigation/⌘K/admin-home doors (the reverse-nav gate
+  rides the same train).
 - The **P6 polish + cutover wave** — the `chatTurn_v16` wire bump's four Q8 part kinds
-  (裁-20; TRUED 2026-08-30, was `v15` — `v15` shipped 2026-08-29 for the unrelated F-A6 PR-2
-  and is consumed+frozen), the WCAG 2.2 SC 2.5.8 target-size gate (裁-13), the Clara mascot
-  (裁-14), the R3 focus-ring recut, and the cutover PR that retires `apps/dashboard`.
+  SHIPPED (v16 live on Fly v70 since 2026-08-31); still ahead: the WCAG 2.2 SC 2.5.8
+  target-size gate (裁-13), the Clara mascot (裁-14), the R3 focus-ring recut, and the
+  cutover PR that retires `apps/dashboard`.
 - **⌘K "Do"** — still a statically disabled row (see `lib/command/routes.ts` for Go, which
   is live and mechanically checked by `lib/command/routes.test.ts`).
 

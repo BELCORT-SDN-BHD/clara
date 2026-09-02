@@ -8,8 +8,12 @@
 // prove the mock, not the lane.
 //
 // Shared fixtures — and the reds that found each producer-side contract — live in
-// g1-wake-bodies.fixtures.mjs. Every synthetic source registers under a `g1b_test_` prefix and is
-// deleted in after(), so the REAL bank_agent/close_prep rows are never touched.
+// g1-wake-bodies.fixtures.mjs. Every synthetic source registers under rig.mjs's exported
+// WAKE_ENGINE_TEST_PREFIX (registerSource() throws on any other prefix) and is deleted in
+// after(), so the REAL bank_agent/close_prep rows are never touched. THE DEPENDENT READER:
+// packages/db/tests/g1-wake-engine.test.mjs's T1 cell excludes rows by exactly that prefix,
+// because CI's db-estate job runs packages/db and packages/runtime CONCURRENTLY against one
+// shared postgres — see rig.mjs's own comment on WAKE_ENGINE_TEST_PREFIX for the full class.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -218,7 +222,7 @@ test("G1B-B3 every error code both bodies can emit is inside agent_tasks' own cl
 
 test("G1B-C1 a DISABLED source claims nothing; enabling through set_wake_source_enabled claims on the NEXT cycle", { skip }, async () => {
   const w = await rig.buildFirm("g1bc1");
-  const key = `g1b_test_c1_${randomUUID().slice(0, 8)}`;
+  const key = `${rig.WAKE_ENGINE_TEST_PREFIX}c1_${randomUUID().slice(0, 8)}`;
   await registerSource({
     sourceKey: key, carrier: "wake_outbox", eventType: BANK_DUE_TYPE, taskKind: "wake",
     wakeKind: "bank_agent", workflowExport: "bankAgent", loginPool: "bank", enabled: false, actor: w.owner,
