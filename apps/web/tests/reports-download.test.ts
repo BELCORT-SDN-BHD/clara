@@ -13,8 +13,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 
 import {
   filenameFromDisposition,
@@ -150,8 +150,27 @@ test("the runtime proxy forwards content-disposition (without it, an attachment 
 });
 
 // ---------------------------------------------------------------------------------------------
-// 4. ZERO CLIENT-SIDE SIGNED-URL MINTING. The instrument and the scope are named.
+// 4. ZERO CLIENT-SIDE STORAGE-URL MINTING — the instrument, its SCOPE, and its ARMING.
+//
+// SCOPE, stated: every `.ts`/`.tsx` file, recursively, under `apps/web/lib/reports` and
+// `apps/web/components/reports`. Nothing outside those two trees is claimed by this cell.
+//
+// IT READS COMMENTS AS CODE, AND THAT IS THE DESIGN. A comment naming the minting API is exactly
+// where the next developer copies the call from, so a hit inside a comment is a finding rather
+// than a false positive. The cost of that choice is real and was paid once: a documentation
+// paragraph in `lib/reports/types.ts` spelled the three identifiers out to explain this very
+// census, and hosted CI correctly reported the instrument's own documentation. THE NEEDLE LIST
+// THEREFORE LIVES HERE AND NOWHERE ELSE — prose in a scanned file names the API in words.
 // ---------------------------------------------------------------------------------------------
+const CENSUS_ROOTS = [join(WEB, "lib", "reports"), join(WEB, "components", "reports")];
+
+/** The vendored storage client's URL-minting surface, the storage REST path, and the bucket
+ *  handle. This array is the census's whole vocabulary; nothing else spells these. */
+const FORBIDDEN = [
+  "createSignedUrl", "createSignedUrls", "getPublicUrl", "signedUrl",
+  "/storage/v1/object", "supabase.storage", ".from(\"reports\")",
+];
+
 function filesUnder(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
@@ -161,30 +180,49 @@ function filesUnder(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-test("ABSENCE, scoped and instrumented: nothing under lib/reports or components/reports mints a storage URL", () => {
-  // SCOPE: every .ts/.tsx file under apps/web/lib/reports and apps/web/components/reports.
-  // INSTRUMENT: a literal scan for the Supabase signed-URL APIs, for a storage REST path, and for
-  // the two content-addressed key prefixes the database derives. A hit on ANY of them means a
-  // storage identifier reached the browser bundle, which is what 裁-96② forbids.
-  const scope = [...filesUnder(join(WEB, "lib", "reports")), ...filesUnder(join(WEB, "components", "reports"))];
-  assert.ok(scope.length >= 10, `the scope must be non-trivial (found ${scope.length} files)`);
-  const forbidden = [
-    "createSignedUrl", "createSignedUrls", "getPublicUrl", "signedUrl",
-    "/storage/v1/object", "supabase.storage", ".from(\"reports\")",
-  ];
+/** THE CENSUS ITSELF. The claim and its positive control both run THIS function against the real
+ *  directories — never a copy of its predicate against a string literal (裁-112). */
+function storageIdentifierHits(roots: string[] = CENSUS_ROOTS): string[] {
   const hits: string[] = [];
-  for (const file of scope) {
+  for (const file of roots.flatMap((r) => filesUnder(r))) {
     const src = readFileSync(file, "utf8");
-    for (const needle of forbidden) if (src.includes(needle)) hits.push(`${file}: ${needle}`);
+    for (const needle of FORBIDDEN) if (src.includes(needle)) hits.push(`${file}: ${needle}`);
     // The key prefixes are matched as PATH SHAPES rather than words, so a comment saying the word
     // "reports" does not trip it while an actual `firms/<id>/reports/<sha>` template would.
     if (/firms\/\$\{|firms\/[0-9a-f-]{8}/.test(src)) hits.push(`${file}: a storage path template`);
   }
+  return hits;
+}
+
+test("ABSENCE, scoped and instrumented: nothing under lib/reports or components/reports mints a storage URL", () => {
+  const scope = CENSUS_ROOTS.flatMap((r) => filesUnder(r));
+  assert.ok(scope.length >= 10, `the scope must be non-trivial (found ${scope.length} files)`);
+  const hits = storageIdentifierHits();
   assert.deepEqual(hits, [], `client-side storage identifiers found:\n${hits.join("\n")}`);
 });
 
-test("the absence scan can SAY YES (positive control) — it is not vacuous", () => {
-  const control = 'const u = await supabase.storage.from("reports").createSignedUrl(k, 60);';
-  assert.ok(["createSignedUrl", "supabase.storage"].some((n) => control.includes(n)),
-    "the instrument must detect the very thing it claims is absent");
+test("the absence census is ARMED: a call site planted INSIDE the scanned path reds it", () => {
+  // The previous control asserted that a string literal contained one of the needles — a copy of
+  // the predicate, not the gate, and it would have stayed green if the directory walk, the
+  // extension filter or the roots had silently stopped covering anything. This one plants a real
+  // file inside the real scope and runs the real census over the real tree.
+  const planted = join(WEB, "lib", "reports", `census-arming-control-${process.pid}.ts`);
+  writeFileSync(planted,
+    "// scratch positive control, removed in the same test\n" +
+    "export const probe = 'supabase.storage.from(\"reports\").createSignedUrl(k, 60)';\n");
+  try {
+    const hits = storageIdentifierHits();
+    assert.ok(hits.some((h) => h.includes(basename(planted))),
+      `the census did not see a call site planted in its own scope:\n${hits.join("\n")}`);
+    // and it names WHICH needle it matched, so a later edit that quietly narrows FORBIDDEN cannot
+    // leave this control green on some other coincidental match.
+    assert.ok(hits.some((h) => h.includes(basename(planted)) && h.endsWith("createSignedUrl")),
+      `the census matched the planted file but not by the minting identifier:\n${hits.join("\n")}`);
+  } finally {
+    // Fail-closed by construction: if this ever fails to run, the planted file stays in the scope
+    // and the cell above goes RED on the next run rather than quietly passing.
+    rmSync(planted, { force: true });
+  }
+  assert.deepEqual(storageIdentifierHits(), [],
+    "the control must leave no residue behind in the scanned tree");
 });

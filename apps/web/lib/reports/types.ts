@@ -37,19 +37,24 @@
 //     `clara.get_artifact_for_human_read` (granted to clara_runtime and to nothing
 //     else) and streams the object with the runtime's storage custody credential.
 //
-// CLIENT-SIDE SIGNED-URL MINTING IS DECLINED AND INSTRUMENTED — not structurally
+// CLIENT-SIDE STORAGE-URL MINTING IS DECLINED AND INSTRUMENTED — not structurally
 // impossible, and the difference is worth the extra clause (independent review of
-// #512). `createSignedUrl`, `createSignedUrls` and `getPublicUrl` ARE in the built
-// client bundle, as minified `@supabase/storage-js` vendored inside
-// `@supabase/supabase-js`, which ships to the browser for AUTH; the browser holds
-// the anon key too. None of that is Clara code and none of it arrived with this
-// door. What keeps the decline true is the INSTRUMENT, not an absence of API:
-// `tests/reports-download.test.ts` scans every file under `lib/reports` and
-// `components/reports` for the minting calls, the storage REST path and a
-// storage-path template, carries a positive control so it cannot go vacuous, and
-// finds zero Clara-side call sites. No storage host, bucket, key or path reaches
-// this side at all. `retrieve_signed_original` and `list_sandbox_exports` still
-// return METADATA only — they are custody reads, not download doors.
+// #512). The vendored Supabase storage client's URL-minting calls DO reach the
+// browser: they are minified inside `@supabase/supabase-js`, which ships for AUTH,
+// and the browser holds the anon key. None of that is Clara code and none of it
+// arrived with this door. What keeps the decline true is the INSTRUMENT, not an
+// absence of API — `tests/reports-download.test.ts` walks every `.ts`/`.tsx` file
+// under `lib/reports` and `components/reports` and reds on a hit.
+//
+// THE NEEDLE LIST LIVES IN THAT TEST AND NOWHERE ELSE, deliberately. The census reads
+// comments AS CODE, on purpose: a comment naming the minting API is exactly where the
+// next developer copies from. So spelling those identifiers in a scanned file — this
+// one included — makes the instrument report its own documentation, which is what an
+// earlier draft of this very paragraph did on hosted CI. The census is armed by a
+// positive control that PLANTS a call site inside the scanned path and proves the red,
+// and against the real tree it finds zero Clara-side call sites. No storage host,
+// bucket, key or path reaches this side at all. `retrieve_signed_original` and
+// `list_sandbox_exports` still return METADATA only — custody reads, not download doors.
 
 export type ReportArtifactKind = "draft_watermarked" | "pre_sign" | "signed_original";
 
