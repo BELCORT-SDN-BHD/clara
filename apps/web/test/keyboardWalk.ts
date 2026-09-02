@@ -94,13 +94,49 @@ export function positiveTabIndexElements(root: Stub): Stub[] {
  *  `outline-none`/`focus-visible:outline-none` utility with no
  *  `focus-visible:ring-*`/`focus-visible:outline-*` utility alongside it to
  *  replace the ring. A plain control with neither utility at all still
- *  reads as visible: it inherits the global rule untouched. */
+ *  reads as visible: it inherits the global rule untouched.
+ *
+ *  P6-3 HARDENING (DS-05's second half). The predicate below used to accept
+ *  ANY `focus-visible:ring*` token that was not literally `-none`, which meant
+ *  `outline-none focus-visible:ring-0` — an outline deleted and replaced with a
+ *  ZERO-WIDTH ring, i.e. nothing at all — read as a visible focus indicator.
+ *  That is the same class of hole DS-05 was: a gate blessing a treatment that
+ *  is not there. A width of `0` (and its arbitrary spellings `ring-[0px]` /
+ *  `outline-[0px]`) is now rejected exactly like `-none`.
+ *
+ *  WHAT THIS STILL CANNOT SEE, said plainly: whether the replacement ring has
+ *  enough CONTRAST to be perceivable. `focus-visible:ring-3 ring-ring/10` would
+ *  pass here and be invisible on screen — which is precisely how the
+ *  drafts-queue panel's halo-only indicator sat at 2.363:1 with this function
+ *  affirmatively passing it. That half belongs to gate (a): the composited
+ *  `focus-ring-70-on-*` rows in scripts/check-token-contrast.mjs, added by the
+ *  same train. Neither gate covers the other; both are required. */
 export function hasVisibleFocusRing(node: Stub): boolean {
   const className = attr(node, "class") ?? "";
   const removesOutline = /(^|\s)(outline-none|focus-visible:outline-none)(\s|$)/.test(className);
   if (!removesOutline) return true;
-  const replacesRing = /focus-visible:(ring|outline)(?!-none)/.test(className);
-  return replacesRing;
+  for (const token of className.split(/\s+/)) {
+    const m = /^focus-visible:(ring|outline)(?:-(.+))?$/.exec(token);
+    if (!m) continue;
+    const width = m[2];
+    // Bare `focus-visible:ring` / `focus-visible:outline` are Tailwind's
+    // default-width forms — a real ring.
+    if (width === undefined) return true;
+    if (width === "none") continue;
+    // A colour-only utility (`ring-ring/70`, `outline-primary`) does not itself
+    // establish a width; keep looking rather than accepting or rejecting it.
+    if (/^\d+(?:\.\d+)?$/.test(width)) {
+      if (Number(width) > 0) return true;
+      continue;
+    }
+    const arbitraryPx = /^\[(\d+(?:\.\d+)?)(?:px|rem)]$/.exec(width);
+    if (arbitraryPx) {
+      if (Number(arbitraryPx[1]) > 0) return true;
+      continue;
+    }
+    // Any other suffix is a colour/style token, not a width. Ignore it.
+  }
+  return false;
 }
 
 function describe(node: Stub): string {
