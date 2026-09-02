@@ -44,6 +44,7 @@ components/admin/registrations-keyboard-round2.test.tsx
 components/admin/registrations-keyboard-round5.test.tsx
 components/admin/registrations-keyboard.test.tsx
 components/bank/bank-a11y.test.tsx
+components/bank/bank-money-doors.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx

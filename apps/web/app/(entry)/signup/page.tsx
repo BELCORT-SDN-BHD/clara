@@ -51,6 +51,6 @@ export async function generateMetadata() {
  * DB's own sentence. A redirect would be this page pre-empting a verdict the DB
  * is the authority on, and it would have to guess where to send them.
  */
-export default function SignupPage() {
+export default async function SignupPage() {
   return renderSignupRoute();
 }

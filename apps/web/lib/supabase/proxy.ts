@@ -59,7 +59,15 @@ import {
  *    away and the browser kept a stale, half-dead session.
  */
 
-const PUBLIC_PATH_PREFIXES = ["/login", "/invite", "/signup", "/auth/confirm", "/money-input-harness"];
+export const PUBLIC_PATH_PREFIXES = [
+  "/login",
+  "/invite",
+  "/signup",
+  "/auth/confirm",
+  ...(process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1"
+    ? ["/money-input-harness"]
+    : []),
+];
 
 /**
  * EXPORTED so `tests/proxy-matcher.test.ts` drives THIS function rather than a

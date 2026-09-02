@@ -111,7 +111,7 @@ export function ReviseParticularsDialog({ clientId, asset, busy, act }: RowActio
 export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActionsProps) {
   const t = useTranslations("FixedAssetsDepreciation.actions");
   const [disposalDate, setDisposalDate] = useState("");
-  const [proceedsCents, setProceedsCents] = useState(0);
+  const [proceedsCents, setProceedsCents] = useState<number | null>(null);
   const [proceedsValid, setProceedsValid] = useState(true);
   const [proceedsAccount, setProceedsAccount] = useState("");
   const [gainAccount, setGainAccount] = useState("");
@@ -139,7 +139,7 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActio
             clientId,
             assetId: asset.id,
             disposalDate,
-            proceedsCents,
+            proceedsCents: proceedsCents ?? 0,
             proceedsAccount: proceedsAccount || null,
             gainAccount,
             lossAccount,
@@ -163,7 +163,7 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActio
               cents={proceedsCents}
               onValueChange={(change) => {
                 setProceedsValid(change.ok);
-                if (change.ok) setProceedsCents(change.cents ?? 0);
+                if (change.ok) setProceedsCents(change.cents);
               }}
             />
           </div>
@@ -214,7 +214,9 @@ export function DisposeDialog({ clientId, asset, accounts, busy, act }: RowActio
           />
           <p className="text-xs text-muted-foreground">{t("costPortionHint")}</p>
         </div>
-        <p className="text-xs text-muted-foreground">{fmtCents(proceedsCents)}</p>
+        {proceedsCents !== null && (
+          <p className="text-xs text-muted-foreground">{fmtCents(proceedsCents)}</p>
+        )}
       </div>
     </FaDoorDialog>
   );

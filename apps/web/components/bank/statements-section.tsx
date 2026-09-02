@@ -257,12 +257,14 @@ export function StatementsSection({ clientId }: { clientId: string }) {
               <Label>{t("linesLabel")}</Label>
               {lines.map((l, i) => (
                 <div key={i} className="grid grid-cols-[1fr_2fr_1fr_auto] items-center gap-2">
-                  <Input type="date" aria-label={t("lineDateLabel", { n: i + 1 })} value={l.entryDate} onChange={(e) => updateLine(i, { entryDate: e.target.value })} required />
-                  <Input aria-label={t("lineDescriptionLabel", { n: i + 1 })} placeholder={t("descriptionPlaceholder")} value={l.description} onChange={(e) => updateLine(i, { description: e.target.value })} />
+                  <Input id={`statement-line-date-${i + 1}`} type="date" aria-label={t("lineDateLabel", { n: i + 1 })} value={l.entryDate} onChange={(e) => updateLine(i, { entryDate: e.target.value })} required />
+                  <Input id={`statement-line-description-${i + 1}`} aria-label={t("lineDescriptionLabel", { n: i + 1 })} placeholder={t("descriptionPlaceholder")} value={l.description} onChange={(e) => updateLine(i, { description: e.target.value })} />
                   <MoneyInput
+                    id={`statement-line-amount-${i + 1}`}
                     mode="signed"
                     containerClassName="min-w-0"
                     aria-label={t("lineAmountLabel", { n: i + 1 })}
+                    placeholder="-0.00"
                     cents={l.amountCents}
                     onValueChange={(change) => updateLine(i, {
                       amountValid: change.ok,

@@ -106,6 +106,42 @@ test("MoneyInput: blur keeps a typed zero visible", async () => {
   }
 });
 
+test("MoneyInput: signed stored zero renders as 0.00 by default", async () => {
+  const h = await renderComponent(createElement(Harness, {
+    mode: "signed",
+    initialCents: 0,
+    onChange: () => {},
+  }));
+  try {
+    assert.equal(
+      findInput(h.container).value,
+      "0.00",
+      "signed zero is an accounting direction-bearing value, distinct from an empty field",
+    );
+  } finally {
+    await h.unmount();
+  }
+});
+
+test("MoneyInput: the polite live region exists empty before refusal text is inserted", async () => {
+  const h = await renderComponent(createElement(Harness, { onChange: () => {} }));
+  try {
+    const before = h.find((node) => (node as Node).getAttribute?.("aria-live") === "polite") as Node | null;
+    assert.ok(before, "the live region must already be mounted before its content changes");
+    assert.equal(textOf(before as never), "", "the clean-state live region starts empty");
+    const regionId = before.getAttribute?.("id");
+    assert.ok(regionId, "the persistent live region must have the refusal id");
+
+    await h.act(() => { setFieldValue(findInput(h.container) as never, "not money"); });
+
+    const after = h.find((node) => (node as Node).getAttribute?.("id") === regionId) as Node | null;
+    assert.ok(after, "the same live-region id must remain mounted when refusal copy arrives");
+    assert.match(textOf(after as never), /Enter an amount like 1,234\.56/);
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("MoneyInput: malformed text emits a typed refusal and visible error, never accepted zero", async () => {
   const changes: MoneyInputChange[] = [];
   const h = await renderComponent(createElement(Harness, { onChange: (change) => { changes.push(change); } }));

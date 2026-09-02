@@ -9,6 +9,11 @@ const moneyInputHarnessEnabled = process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Freeze the test-harness switch into the emitted bundles. The route module
+  // and both auth-wall registries must agree on one build-time decision.
+  env: {
+    CLARA_E2E_MONEY_INPUT_HARNESS: moneyInputHarnessEnabled ? "1" : "0",
+  },
   // pnpm dependencies can be junctioned into a nested worktree. Turbopack 16
   // refuses a linked dependency outside its inferred root, so anchor the root
   // at the physical workspace that contains both this app and node_modules.

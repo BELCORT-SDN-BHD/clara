@@ -14,6 +14,7 @@ import {
   SCOPE_EXEMPT_SURFACES,
   SCOPE_UNSCOPED_SURFACES,
 } from "../lib/require-firm-scope";
+import { PUBLIC_PATH_PREFIXES } from "../lib/supabase/proxy";
 import {
   defaultExportName,
   exportedHttpMethods,
@@ -441,7 +442,12 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
   it("CELL 2 — every page.tsx has an entrance ANCESTOR or is registered unscoped", () => {
     const pages = leaves.filter((l) => !isRouteLeaf(l.file));
     const unproven = pages
-      .filter((l) => !ancestorCovered(l.file) && !SCOPE_UNSCOPED_SURFACES.some((s) => s.path === l.file))
+      .filter(
+        (l) =>
+          !ancestorCovered(l.file) &&
+          !SCOPE_UNSCOPED_SURFACES.some((s) => s.path === l.file) &&
+          !SCOPE_EXEMPT_SURFACES.some((s) => s.path === l.file),
+      )
       .map((l) => l.file);
     assert.deepEqual(unproven, [], "a page renders with no entrance above it and no registered reason");
     assert.ok(pages.length >= 15, `only ${pages.length} pages found — the walk is not seeing them`);
@@ -474,10 +480,7 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
   });
 
   it("the public entries match lib/supabase/proxy.ts, BOTH ways", () => {
-    const proxy = codeWithStrings("lib/supabase/proxy.ts");
-    const m = /const\s+PUBLIC_PATH_PREFIXES\s*=\s*\[([^\]]*)\]/.exec(proxy);
-    assert.ok(m, "proxy.ts no longer declares PUBLIC_PATH_PREFIXES where this gate can read it");
-    const declared = [...(m[1] as string).matchAll(/["']([^"']+)["']/g)].map((x) => x[1]).sort();
+    const declared = [...PUBLIC_PATH_PREFIXES].sort();
     const registered = SCOPE_UNSCOPED_SURFACES.filter((s) => s.public).map((s) => s.url).sort();
     assert.deepEqual(
       declared,
@@ -657,11 +660,15 @@ describe("HIGH-1 — the guard dominates the proxy, and owns the outbound identi
 describe("the deliberate exemptions stay exempt", () => {
   it("the registry names every exemption, each with a substantial reason", () => {
     const paths = SCOPE_EXEMPT_SURFACES.map((e) => e.path).sort();
-    assert.deepEqual(paths, [
+    const expectedPaths = [
       "app/(entry)/auth/confirm/verify/route.ts",
       "app/api/invite/route.ts",
       "app/logout/route.ts",
-    ]);
+      ...(process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1"
+        ? []
+        : ["app/(e2e)/money-input-harness/page.tsx"]),
+    ].sort();
+    assert.deepEqual(paths, expectedPaths);
     for (const entry of SCOPE_EXEMPT_SURFACES) {
       assert.ok(entry.reason.length >= 120, `${entry.path}'s reason is too thin to survive a later lane`);
       assert.match(entry.reason, /EXEMPT (BY NECESSITY|ON PRINCIPLE)/);

@@ -288,10 +288,12 @@ test("Share session dialog: opens on click, reaches Confirm/Cancel, and the trig
 // parses to, so a panel that echoed the typed input instead of ever
 // reading the DB back would have passed identically.
 let currentHighStakesCents = 10000000;
+let thresholdWriteBodies: Record<string, unknown>[] = [];
 
-function mockSettingsFetch(u: string): Response {
+function mockSettingsFetch(u: string, init?: RequestInit): Response {
   if (u.includes("/rest/v1/firms")) return jsonResponse([{ id: "f1", high_stakes_amount_cents: currentHighStakesCents }]);
   if (u.includes("/rpc/set_firm_high_stakes_threshold")) {
+    thresholdWriteBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
     const oldCents = currentHighStakesCents;
     currentHighStakesCents = 20000000; // deliberately NOT what "150000.00" parses to
     return jsonResponse({ firm_id: "f1", old_cents: oldCents, new_cents: currentHighStakesCents });
@@ -300,8 +302,10 @@ function mockSettingsFetch(u: string): Response {
 }
 
 test("Change threshold trigger is enabled from first render, regardless of role — the DB's OWNER floor is the wall, never a client-side guess", async () => {
+  currentHighStakesCents = 10000000;
+  thresholdWriteBodies = [];
   await withMockedEnv(
-    async (u) => mockSettingsFetch(String(u)),
+    async (u, init) => mockSettingsFetch(String(u), init),
     async () => {
       const h = await renderComponent(App(createElement(SettingsPanel), "Firm settings"));
       const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
@@ -372,6 +376,8 @@ test("Change threshold trigger is enabled from first render, regardless of role 
         // panel genuinely re-read rather than assumed).
         assert.doesNotMatch(textOf(body as never), /Change the high-stakes threshold/, "the dialog must actually close on a real confirm");
         assert.match(textOf(body as never), /RM 200,000\.00/, "the panel must show the DB's re-read value, not an echo of the typed 150000.00");
+        assert.equal(thresholdWriteBodies.length, 1, "the valid confirm crosses the door exactly once");
+        assert.equal(thresholdWriteBodies[0]?.p_cents, 15000000, "the door receives the exact canonical cents value");
 
         // N3 discriminating test (independent review, PR #489, fix-required):
         // reopening the dialog must not resurrect the amount just confirmed.
@@ -405,6 +411,47 @@ test("Change threshold trigger is enabled from first render, regardless of role 
           true,
           "Confirm must be disabled again on reopen — a stale non-empty amount would otherwise leave it wrongly enabled",
         );
+      } finally {
+        await h.unmount();
+        for (let i = 0; i < 3; i++) await h.settle();
+      }
+    },
+  );
+});
+
+test("Change threshold refuses an out-of-range amount before the door", async () => {
+  currentHighStakesCents = 10000000;
+  thresholdWriteBodies = [];
+  await withMockedEnv(
+    async (u, init) => mockSettingsFetch(String(u), init),
+    async () => {
+      const h = await renderComponent(App(createElement(SettingsPanel), "Firm settings"));
+      const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+      body.appendChild(h.container);
+      try {
+        for (let i = 0; i < 3; i++) await h.settle();
+        const trigger = findIn(body as never, (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold");
+        assert.ok(trigger);
+        await h.fireEvent(trigger as never, "click");
+        for (let i = 0; i < 4; i++) await h.settle();
+
+        const amountField = findIn(body as never, (n) => n.tagName === "INPUT");
+        assert.ok(amountField);
+        await h.act(() => { setFieldValue(amountField as never, "90071992547409.92"); });
+        for (let i = 0; i < 2; i++) await h.settle();
+
+        assert.match(
+          textOf(body as never),
+          /Enter a smaller amount that can be represented exactly in cents\./,
+          "the shared parser's typed out_of_range refusal must be visible",
+        );
+        const confirm = findIn(
+          body as never,
+          (n) => n.tagName === "BUTTON" && textOf(n as never) === "Change threshold" && n !== trigger,
+        );
+        assert.ok(confirm);
+        assert.equal((confirm as unknown as { disabled: boolean }).disabled, true);
+        assert.deepEqual(thresholdWriteBodies, [], "an out-of-range amount never reaches the governance door");
       } finally {
         await h.unmount();
         for (let i = 0; i < 3; i++) await h.settle();

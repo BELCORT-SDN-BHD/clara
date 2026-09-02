@@ -115,6 +115,7 @@ export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string;
         </NativeSelect>
         <ReadState hasData={counterparties.data !== null} err={counterparties.err} errKind={cpKind.kind} isEmpty={counterparties.data?.length === 0} onRetry={() => void counterparties.reload()}>
           <NativeSelect
+            id={`counterparty-${lineId}`}
             aria-label={t("counterpartyLabel")}
             className="flex-1"
             value={counterpartyId}
@@ -133,6 +134,7 @@ export function SettleLineForm({ clientId, lineId, onDone }: { clientId: string;
               <li key={it.id} className="flex items-center justify-between gap-2 text-xs">
                 <span>{it.item_kind} · {it.item_date} · {formatMyr(it.outstanding_cents ?? it.amount_cents)}</span>
                 <MoneyInput
+                  id={`allocation-${it.id}`}
                   mode="signed"
                   className="h-7 w-full"
                   containerClassName="w-28 shrink-0"

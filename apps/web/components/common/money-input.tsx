@@ -24,8 +24,9 @@ export type MoneyInputProps = Omit<
   cents: number | null;
   mode: MoneyInputMode;
   onValueChange: (change: MoneyInputChange) => void;
-  /** Preserve the shipped empty-at-zero presentation for journal-style
-   *  fields. Set false where zero and null are distinct DB-owned states. */
+  /** Override the mode-aware presentation. By default unsigned journal-style
+   *  fields mount zero as blank; signed fields keep zero visible because the
+   *  sign-bearing accounting state must stay distinct from an empty field. */
   zeroIsBlank?: boolean;
   /** Sizes the component's wrapper when it participates in flex/grid rows. */
   containerClassName?: string;
@@ -44,7 +45,7 @@ export function MoneyInput({
   cents,
   mode,
   onValueChange,
-  zeroIsBlank = true,
+  zeroIsBlank,
   containerClassName,
   className,
   id,
@@ -54,19 +55,20 @@ export function MoneyInput({
   ...inputProps
 }: MoneyInputProps) {
   const t = useTranslations("MoneyInput");
+  const blankZero = zeroIsBlank ?? mode === "unsigned";
   const generatedId = React.useId().replace(/[^A-Za-z0-9_-]/g, "");
   const refusalId = `${id ?? `money-input-${generatedId}`}-refusal`;
-  const [raw, setRaw] = React.useState(() => formattedInputValue(cents, zeroIsBlank));
+  const [raw, setRaw] = React.useState(() => formattedInputValue(cents, blankZero));
   const [refusal, setRefusal] = React.useState<MoneyInputRefusal | null>(null);
   const lastEmitted = React.useRef<number | null>(cents);
 
   React.useEffect(() => {
     if (cents !== lastEmitted.current) {
-      setRaw(formattedInputValue(cents, zeroIsBlank));
+      setRaw(formattedInputValue(cents, blankZero));
       setRefusal(null);
       lastEmitted.current = cents;
     }
-  }, [cents, zeroIsBlank]);
+  }, [blankZero, cents]);
 
   function handleChange(value: string) {
     setRaw(value);
@@ -113,11 +115,17 @@ export function MoneyInput({
         onChange={(event) => handleChange(event.target.value)}
         onBlur={handleBlur}
       />
-      {refusalCopy ? (
-        <p id={refusalId} aria-live="polite" className="text-xs text-error">
-          {refusalCopy}
-        </p>
-      ) : null}
+      {/* W3C ARIA19: the empty live-region container exists before validation
+          copy is injected, so assistive technology observes the later text
+          change instead of discovering the node and its content together. */}
+      <p
+        id={refusalId}
+        aria-live="polite"
+        aria-atomic="true"
+        className={cn("text-xs text-error", refusalCopy === null && "sr-only")}
+      >
+        {refusalCopy ?? ""}
+      </p>
     </div>
   );
 }

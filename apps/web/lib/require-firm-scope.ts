@@ -285,16 +285,20 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
   readonly public?: true;
   readonly reason: string;
 }> = [
-  {
-    path: "app/(e2e)/money-input-harness/page.tsx",
-    url: "/money-input-harness",
-    public: true,
-    reason:
-      "A build-gated browser-test route with no firm data or production client module: " +
-      "ordinary builds compile a server-only notFound() stub, while the explicit e2e build " +
-      "flag aliases that stub to the real journal MoneyInput harness. It must be proxy-public " +
-      "so the opted-in pre-auth Playwright run can reach it; without the flag it is a 404.",
-  },
+  ...(process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1"
+    ? [
+        {
+          path: "app/(e2e)/money-input-harness/page.tsx",
+          url: "/money-input-harness",
+          public: true as const,
+          reason:
+            "A build-gated browser-test route with no firm data or production client module: " +
+            "ordinary builds compile a server-only notFound() stub, while the explicit e2e build " +
+            "flag aliases that stub to the real journal MoneyInput harness. Its public-wall entry " +
+            "is compiled in by that same flag, so an ordinary production build has neither entry.",
+        },
+      ]
+    : []),
   {
     path: "app/(entry)/login/page.tsx",
     url: "/login",
@@ -407,6 +411,18 @@ export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
   readonly reason: string;
   readonly pending?: true;
 }> = [
+  ...(process.env.CLARA_E2E_MONEY_INPUT_HARNESS !== "1"
+    ? [
+        {
+          path: "app/(e2e)/money-input-harness/page.tsx",
+          reason:
+            "EXEMPT ON PRINCIPLE. In an ordinary build this authenticated leaf is only a " +
+            "server component that immediately calls notFound(); it reads no session or firm data. " +
+            "The explicit e2e build replaces this exemption with the public unscoped registration " +
+            "above, at the same time that Next aliases in the real browser harness module.",
+        },
+      ]
+    : []),
   {
     path: "app/logout/route.ts",
     reason:
