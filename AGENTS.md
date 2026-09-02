@@ -121,14 +121,18 @@ work; opus-5 xhigh where judgement, security or ambiguity dominate; a family tha
 substituted for that leg, builds included, and the PR body says so. **The lean ladder (裁-86;
 ADR-0077 signed 2026-08-31, 裁-93):** every code PR gets ONE fresh-context opus read-only review,
 and every frontend train walks its journey in a real browser (Playwright) on the built app;
-docs-only PRs take the single-lane review (ADR-0069). **The cross-family Codex adversarial leg is
-SUSPENDED until beta live launch (裁-111, owner, 2026-09-01)** — law 28 is not repealed, it is
-time-boxed: the opus lane is the complete review gate for the remainder of the sprint, and law 28
-resumes at beta unless the owner rules otherwise. Codex remains a BUILD lane throughout; only the
-review leg is suspended. Inspect every result before accepting it. *Codex lane,
-learned the hard way:* the `codex:rescue` companion queue is unreliable (it has stalled for hours
-at "starting") — prefer a direct `codex exec` via Bash, backgrounded with a file-watcher on the
-output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-02.md` (newest; the chain runs
+docs-only PRs take the single-lane review (ADR-0069). **NO CODEX LANE OF ANY KIND
+UNTIL BETA LIVE LAUNCH — native lanes only (裁-133, owner, 2026-09-02).** The cross-family Codex
+adversarial REVIEW leg was suspended first (裁-111, owner, 2026-09-01); 裁-133 suspends the BUILD
+lane beside it after three capacity/kill failures in ninety minutes cost three rounds. Neither is
+repealed — both are time-boxed and resume at beta live unless the owner rules otherwise; law 28 is
+intact and the opus lane is the complete review gate meanwhile. So for the remainder of the sprint
+the 裁-85 line above reads: **sonnet-5 xhigh for bounded, mechanical, objectively testable work;
+opus-5 xhigh for builds where judgement, security or ambiguity dominate, and for every review;
+Fable orchestrates.** Speed is the point — no capacity outages, no resume rounds. Inspect every
+result before accepting it. *Codex lane, for when it resumes — learned the hard way:* the
+`codex:rescue` companion queue is unreliable (it has stalled for hours at "starting") — prefer a
+direct `codex exec` via Bash, backgrounded with a file-watcher on the output. Ledger: `docs/plan/active/mohe-grill-rulings-2026-09-02.md` (newest; the chain runs
 `-08-31` → `-09-01` → `-09-01-pm` → `-09-02`, the earlier files carrying the session state bridges).
 
 **Ground before you build.** On a new or compacted session, and before answering any
@@ -186,8 +190,12 @@ gate. **The four self-hosted WSL2 runner instances** (`clara-wsl` … `clara-wsl
 `runs-on` label is gone from every job. The private-repo-only order of operations that
 governed them is now a **decommission note**: they are removed by `config.sh remove`
 (`docs/ops/ci-runner.md` "Re-register / decommission") and must never be re-pointed at
-`pull_request` while the repo is public. Every job carries a `timeout-minutes` ceiling —
-hosted minutes are billed, so a hung leg can no longer burn hours.
+`pull_request` while the repo is public. **The four services were stopped and disabled at
+21:48 MYT on 2026-09-02** (GitHub shows all four offline; the un-registration completes later) —
+and stopping them does NOT reap a cancelled job's service containers: five orphaned
+`<jobid>_postgres17_<hash>` containers were found and removed four hours later, so the census
+step in that runbook section is part of the decommission. Every job carries a `timeout-minutes`
+ceiling — hosted minutes are billed, so a hung leg can no longer burn hours.
 
 Every PR gets the lint job unconditionally, docs-only diffs included — freeze-lint,
 leak-scan, gitleaks, the wiki dynamic-SQL gates, harness-links, eslint. A diff that touches
@@ -203,7 +211,11 @@ total; database-free) — nine jobs in all sit under the meta-gate, including th
 sweep-only legs below.
 **The closed-wave upgrade/contract drills and the D-b frontier matrix run on the weekly
 sweep + manual dispatch only** (ADR-0073; after merging a PR that touches a closed drill or
-the pipeline itself, run `gh workflow run ci.yml` by hand). A docs-only diff skips the code
+the pipeline itself, run `gh workflow run ci.yml` by hand). **The first hosted sweep ran by hand
+on 2026-09-02 (run 33639097306): 12 of 13 legs green — including the D-b frontier matrix's first
+hosted proof — and `closed-wave-drills` RED on the multi-chain-one-cluster class (`0154` asserts an
+absolute 14-role census; `0160` mints two). The sweep stays red until #518's re-cut merges, and
+re-dispatching it by hand is the only thing that re-proves that leg.** A docs-only diff skips the code
 and DB legs by classifier, the weekly sweep re-proves every leg regardless, and the
 required check `ci` is a fail-closed meta-gate over every job — a red lint blocks merge on
 every PR, docs-only included.

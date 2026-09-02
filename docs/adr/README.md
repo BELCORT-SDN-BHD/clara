@@ -128,12 +128,8 @@ Every law still binding TODAY, deduplicated, with its source. It is a reading of
 entries through ADR-0070, not a mechanical extraction. On any divergence, the cited ADR
 governs.
 
-> **SIGNED OFF — Tao (BELCORT), 2026-08-12.** Laws 1-67 below are ratified as the
-> current standing set at the ADR-0069 harness refactor. Additions or supersessions land
-> as new ADR entries; this digest is re-trued whenever one does.
-> **Dated re-truing minutes live in [`README-log.md`](README-log.md)** — split out 2026-08-23 at this file's
-> 500-line ceiling, verbatim and append-only. Nine minutes so far (2026-08-16 · 08-18 · 08-20 · 08-21 · 08-22 ·
-> 08-23 ×2 · 08-27 · 09-02). **The laws below govern; the log records when each was re-read and what the reading found.**
+> **SIGNED OFF — Tao (BELCORT), 2026-08-12.** Laws 1-67 below are ratified as the current standing set at the ADR-0069 harness refactor. Additions or supersessions land as new ADR entries; this digest is re-trued whenever one does.
+> **Dated re-truing minutes live in [`README-log.md`](README-log.md)** — split out 2026-08-23 at this file's 500-line ceiling, verbatim and append-only. Ten minutes so far (2026-08-16 · 08-18 · 08-20 · 08-21 · 08-22 · 08-23 ×2 · 08-27 · 09-02 · 09-03). **The laws below govern; the log records when each was re-read and what the reading found.**
 
 ## 1 · Product law (the cardinal invariants)
 
@@ -254,7 +250,7 @@ governs.
     until beta live (裁-111, owner, 2026-09-01)** — not repealed: the opus lane is the complete
     review gate for the sprint, Codex builds on, law 28 resumes at beta. Same-sitting standing
     review laws await ADR folds — 裁-107(a/b) seam↔door tables · 裁-108 unnumbered-migration arming ·
-    裁-112 overclaim ownership · 裁-113 checked-not-trusted waivers (the `&&`-chain masking class banked alongside) — the ledger IS law meanwhile: `docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md`.
+    裁-112 overclaim ownership · 裁-113 checked-not-trusted waivers (the `&&`-chain masking class banked alongside) — the ledger IS law meanwhile: `docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md`. **AMENDED FURTHER by 裁-133 (owner, 2026-09-02, time-boxed until beta live): there is no Codex lane of ANY kind until beta live — the BUILD lane joins the already-suspended review leg, and every lane is native (sonnet-5 xhigh bounded · opus-5 xhigh judgement/security/review). Both resume at beta unless the owner rules otherwise; see §15 and `docs/plan/active/mohe-grill-rulings-2026-09-02.md`.**
 29. **The live eval is the standing acceptance gate for every wave.** A wave is not done
     at merged-and-reviewed; it is done when its gates close on live books. *(0027;
     re-earned at 0053, 0064)*
@@ -288,7 +284,7 @@ governs.
     `actions/checkout@v4`) and no enforced SHA-pinning (it would reject `@v4`). *(0021)*
 38. **The self-hosted CI runner (`clara-wsl`) is PRIVATE-REPO ONLY — decommission it
     BEFORE any repository visibility change.** The gate itself is unchanged. *(0067;
-    runbook `docs/ops/ci-runner.md`)*
+    runbook `docs/ops/ci-runner.md`)* **AMENDED by 裁-135 (owner, 2026-09-02, permanent until the owner reverses it at official launch): the repo IS public and CI is GitHub-hosted; the order of operations was honoured (hosted migration → full-history secret scan → the fork-PR approval wall → the flip), the four instances stay registered but no event routes to them, and the residual rule is "never re-point them at `pull_request` while the repo is public". See §10, §15 and `docs/plan/active/mohe-grill-rulings-2026-09-02.md`.**
 39. **Anti-misleading-green CI:** real migrations onto a throwaway `postgres:17`, a
     deploy-onto-existing check so an edited historical migration fails, freeze-lint,
     leak-scan, and a real DR round-trip. Destructive DB scripts refuse without a
@@ -497,4 +493,7 @@ governs.
 > `docs/plan/active/mohe-grill-rulings-2026-08-30.md:159`; minuted by ADR-0077 (signed 2026-08-31, 裁-93).
 
 ## 14 · The beta-pivot supplement (source ADR-0077, 2026-08-31 — **SIGNED at the evening sitting, 裁-93**; law)
-84. **The paid-beta gate** — three walls + Stripe checkout success; RM0/"trial" until the pricing sitting; nothing invoices until `amounts_ruled`. *(裁-57 · 58 · 68 · 73)* **85. Honest notes for a paused lane are a lawful permanent state**, swept against the lane's `PROGRESS.md` row. *(the 2026-08-31 direction)* **Law 28 KEPT** — the Codex-build/opus-review split is the cross-model pass; a native-built money surface adds a Codex read-only leg *(裁-84 → 裁-86)* — **the read-only leg then TIME-BOXED SUSPENDED until beta live by 裁-111 (owner, 2026-09-01; see law 28's own note)**; **every frontend train walks its journey in a real browser on the built app** *(裁-86)*; **law 83's ceremony is post-beta** *(裁-76)*.
+84. **The paid-beta gate** — three walls + Stripe checkout success; RM0/"trial" until the pricing sitting; nothing invoices until `amounts_ruled`. *(裁-57 · 58 · 68 · 73)* **85. Honest notes for a paused lane are a lawful permanent state**, swept against the lane's `PROGRESS.md` row. *(the 2026-08-31 direction)* **Law 28 KEPT** — the Codex-build/opus-review split is the cross-model pass; a native-built money surface adds a Codex read-only leg *(裁-84 → 裁-86)* — **the read-only leg then TIME-BOXED SUSPENDED until beta live by 裁-111 (owner, 2026-09-01; see law 28's own note)**; **every frontend train walks its journey in a real browser on the built app** *(裁-86)*; **law 83's ceremony is post-beta** *(裁-76)*. **The Codex BUILD lane is suspended too, by 裁-133 — see law 28 and §15.**
+
+## 15 · Sprint-ruling amendments (裁-140, 2026-09-03; each ruling's TEXT stays in its ledger, which governs on any divergence)
+86. **A sprint ruling enters the ADR system as a DIGEST ROW plus an "amended by" line on the ADR it amends — never as a new ADR** *(裁-140, owner, 2026-09-03; permanent)*. One row here, one dated line in [`README-log.md`](README-log.md), each stating its TIME BOX and pointing at the ledger entry; a new ADR is minted only when a ruling contradicts an ADR's text outright AND permanently. Rationale: the sprint's rulings are mostly time-boxed, so writing each as a permanent ADR would manufacture the next stale record; a consolidating ADR was offered and declined. **The rows (ledger `docs/plan/active/mohe-grill-rulings-2026-09-02.md` unless noted):** **裁-111** *(2026-09-01; UNTIL BETA LIVE, resumes unless the owner rules otherwise)* — law 28's cross-family Codex adversarial leg is SUSPENDED, not repealed; the one fresh-context opus review is the complete gate meanwhile (ledger `docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md`; amends ADR-0077 §14). **裁-125** *(2026-09-02; UNTIL OFFICIAL LAUNCH)* — every user-facing legal text ships as an agent template, lawyer-refined at launch, and is NEVER darkened or cut. **裁-129** *(2026-09-02; permanent, figure subject to the lawyer's pass)* — the beta terms are a SEPARATE document kind from the DPA (never one combined signature), an RM 5,000 liability floor, the courts of Kuala Lumpur. **裁-131** *(2026-09-02; permanent, value SET only once C-5's attempt wall is live)* — Email OTP expiry is 60 minutes for BOTH arms and `checkout-gate-design.md` C4 is amended. **裁-133** *(2026-09-02; UNTIL BETA LIVE)* — no Codex lane of any kind, builds included; native lanes only (amends ADR-0077 §14 / law 28). **裁-135** *(2026-09-02; permanent until the owner reverses it at official launch)* — the repo is PUBLIC and CI is GitHub-hosted, the owner OVERRIDING the 裁-134 recommendation; amends law 38 and supersedes 裁-134's slot cap (see §10 and the 2026-09-02 minute). **裁-139** *(2026-09-02; permanent)* — a firm member is REFUSED at `POST /checkout` before Stripe is called, under checkout design §5's "no path may strand a paying customer without a firm".

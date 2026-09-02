@@ -65,11 +65,29 @@ readme), not assumed:
 **The runner GitHub gives us** (docs.github.com, "GitHub-hosted runners", standard
 runners, read 2026-09-02): Ubuntu 24.04 for `ubuntu-latest`; **4 vCPU / 16 GB RAM / 14 GB
 SSD for PUBLIC repositories** and **2 vCPU / 8 GB RAM / 14 GB SSD for PRIVATE**;
-passwordless `sudo`. The proving run for this migration therefore ran on the *smaller*
-half — the repo was still private — and the fleet gets faster, not slower, at the
-visibility flip. Every run prints its own `nproc` / `free -h` / `df -h` / docker / psql
-in the `changes` job's "Runner facts" step, so the claim is a measurement in the log
-rather than a line in a document.
+passwordless `sudo`. The migration was proven on the *smaller* half, because the repo was
+still private when it merged.
+
+**What the runner actually reports, on both sides of the visibility flip.** The `changes`
+job's "Runner facts" step prints `nproc` / `free -h` / `df -h` / docker / psql on every
+run, which is what makes this a measurement in the log rather than a line in a document.
+Both readings below are from the same image, `ubuntu24 20260823.283.1`:
+
+| | Private (run 33622887117) | Public (run 33639097306) |
+|---|---|---|
+| cores | 2 | **4** |
+| memory, total / available | 7.8 GiB / 6.7 GiB | **15 GiB / 14 GiB** |
+| root filesystem, size / free | 72 G / 13 G | **145 G / 87 G** |
+| docker | 28.0.4 | 28.0.4 |
+| `psql` on the image | 16.15 | 16.15 |
+
+The flip roughly doubles every resource, so **"faster, not slower, after the flip" is now
+measured rather than predicted**: the render drill ran **48s** on the private shape (run
+33636322348) and **28s** on the public one (run 33639097306) — the *same tree*, exactly,
+since the merge commit and the branch tip it merged share tree `b85496ae`. Note the disk:
+GitHub's published figure is 14 GB of SSD, and what the VM reports is a 145 G root with
+87 G free. Size the disk against the measurement, not the published number, and re-read
+it from a run's own log rather than trusting this table after the next image refresh.
 
 **Concurrency — no slot cap.** One axis, two regimes:
 
@@ -148,6 +166,40 @@ runners free of charge**, which is what the visibility flip buys. The 2026-08-11
 that created the self-hosted fleet happened on the *pre-diet* pipeline — the CI diet
 (pull_request-only triggers, the docs-only classifier, the weekly sweep) and ADR-0073's
 sweep demotion both stand and are what make hosted minutes affordable now.
+
+### The first hosted sweep (run 33639097306, dispatched by hand after the flip)
+
+The migration itself could never prove the two sweep-only legs: they are
+`schedule`/`workflow_dispatch`-only and are correctly *skipped* on every pull request, so
+no PR run has ever executed them. The hand-dispatched sweep on the merge commit is what
+finally did, and it is the reason the "run the sweep by hand after a pipeline PR" practice
+below is not optional.
+
+**`db-slice-frontiers` — proven, first hosted execution.** All four matrix legs green, each
+on its own VM with its own `postgres:17`: `d-b1` 2m09s, `d-b3` 2m24s, `d-b0` 2m39s, `d-b2`
+5m43s. Four VMs at once is a shape the four-instance fleet could not schedule without
+queueing.
+
+**`closed-wave-drills` — RED, and the cause is content, not the host.**
+`packages/db/tests/rig-docs-upgrade.test.mjs` aborted with *"migration
+0154_binding_proposal_pr_1 failed and was rolled back: the clara role count moved from 14
+to 16"*. Read both ends before blaming the migration to hosted runners:
+`packages/db/migrations/0154_binding_proposal_pr_1.sql` asserts an **absolute,
+cluster-global** count of 14 `clara%` roles, and
+`packages/db/migrations/0160_checkout_gate_c2_stripe_events.sql` mints exactly two
+(`clara_stripe_webhook` and its `_login` twin). Fourteen plus two is sixteen; the
+arithmetic is exact and nothing about cores, memory or OS enters it.
+
+**The mechanism is the multi-chain-one-cluster class, armed by a merge.** This job runs many
+full migration chains into *separate databases* on **one** shared `postgres` service. Roles
+are cluster-global while `schema_migrations` is per-database, so once any drill's chain runs
+past 0160 and mints those two roles, every later drill on that cluster sees 16 when it
+reaches 0154 and aborts. It is the same class the 2026-09-02 CI-shape ruling already fixed
+in `db-live-gates`, by giving every full-fresh-migrate invocation its own pristine cluster —
+which `closed-wave-drills` does not yet have. **This red was predicted before the migration**
+(it had simply not run since 0160 landed), so there is no self-hosted control run to compare
+against; the fix lane is open as PR #518. When it lands, re-dispatch the sweep — that is the
+only thing that re-proves this leg.
 
 ## The self-hosted fleet (2026-08-11 → 2026-09-02) — parked, kept for decommission
 
@@ -245,6 +297,24 @@ gh api repos/BELCORT-SDN-BHD/clara/actions/runners/registration-token -X POST --
 ./config.sh --url https://github.com/BELCORT-SDN-BHD/clara --token <TOKEN> \
   --name clara-wsl --labels clara --unattended   # register
 ```
+
+**Stopping the services does NOT clean up a cancelled job's service containers** (measured
+2026-09-03 00:05 MYT, four hours after the four units were stopped and disabled at 21:48). The
+post-flip cancellation sweep left **five orphaned `postgres:17` service containers** in WSL —
+named `<jobid>_postgres17_<hash>`, ephemeral host ports in the 3290x range, created 21:22–21:24
+MYT by the last self-hosted runs, with **zero runner processes still alive** to reap them. The
+runner reaps a service container when the JOB ends; a job cancelled out from under it never gets
+there, so the containers (and their volumes) outlive the fleet. After stopping the units, census
+and remove them explicitly:
+
+```bash
+wsl -d Ubuntu -- docker ps -a --filter "name=_postgres17_" --format '{{.Names}}\t{{.Status}}'
+wsl -d Ubuntu -- docker rm -f -v <name>          # -v: the volume goes with it
+```
+
+Do this at a pause window, never with lane rigs live — the name filter above matches ONLY the
+runner's own service containers, and a lane's rig is named for its lane, but a wider `docker
+prune` at the wrong moment takes a live lane's database with it.
 
 ## Cost/why record
 
