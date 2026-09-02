@@ -72,7 +72,25 @@ const AGENT_ROLES = ["clara_agent_ro", "clara_wake_interactive", "clara_wake_pro
 
 test("p6-1.db.registry: v17 is the current pin and preserves v16's promotion behaviour", () => {
   assert.equal(currentChatName, "chatTurn_v17", "FS-7 succeeded P6-1 without widening the wire");
-  const representative = [{ type: "text", text: "wire identity" }];
+  // A bare text part exercises NO promotion arm at all (every version passes it through
+  // unchanged) — this is the same three-item content array fs7-v17-chatturn.test.mjs's own
+  // "fs7.v17.parts" cell builds, deliberately reused rather than re-typed, so a broken v17
+  // freeform-read or refusal promotion arm reds THIS cell too, not only that one.
+  const representative = [
+    { type: "text", text: "I found the report context." },
+    {
+      type: "tool-result",
+      toolCallId: "t-read",
+      toolName: "read_books_freeform",
+      output: { ok: true, read: { ok: true, outcome: "ok", read_id: 31 } },
+    },
+    {
+      type: "tool-result",
+      toolCallId: "t-refusal",
+      toolName: "post_journal_entry",
+      output: { ok: false, refusal: { type: "refusal", code: "CLR11", reason: "stale", message: "Refresh." } },
+    },
+  ];
   assert.deepEqual(currentPromote(representative), prompt16.toTypedParts_v16(representative));
 });
 

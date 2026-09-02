@@ -123,6 +123,11 @@ test("fs7.v17.parts: promotion and intent behaviour are identical to v16 on repr
 });
 
 test("fs7.v17.freeze: every new closure file is marked frozen and binds only its own version seams", () => {
+  // The marker is assembled at runtime (never written as the literal substring in THIS file) so
+  // check-frozen-workflows.mjs's own FROZEN_MARKER.includes() scan does not mistake this TEST for
+  // a frozen file and pull its import closure (part-shapes.mjs, registry.ts) into
+  // frozen-workflows.json — the exact false-positive a fresh-context review caught live.
+  const frozenMarkerLine = `// ${["@", "frozen"].join("")}`;
   for (const [label, source] of [
     ["entry", ENTRY_SRC],
     ["tools", TOOLS_SRC],
@@ -130,7 +135,7 @@ test("fs7.v17.freeze: every new closure file is marked frozen and binds only its
     ["impl", IMPL_SRC],
     ["usage", USAGE_SRC],
   ]) {
-    assert.match(source, /^\/\/ @frozen\r?\n/, `${label} is freeze-registered source`);
+    assert.equal(source.split(/\r?\n/, 1)[0], frozenMarkerLine, `${label} is freeze-registered source`);
   }
   assert.match(stripComments(IMPL_SRC), /buildToolsV17\(ctx, model, segment\)/);
   assert.match(stripComments(IMPL_SRC), /toTypedParts_v17\(content\)/);
