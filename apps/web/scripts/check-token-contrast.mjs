@@ -273,7 +273,7 @@ export const PAIR_SPECS = [
   // why the user bubble's ground is pinned now too, not only the one that
   // actually failed.
   { id: "secondary-ink-on-muted", fg: (h) => h("secondary-ink"), bg: (h) => h("muted"), threshold: 4.5,
-    source: "components/clara/ClaraThreadView.tsx's per-message speaker label on the USER bubble (bg-muted), the sibling of the clara-muted row above — and the same prose role wherever a caption sits on a bg-muted panel" },
+    source: "A DECLARED SENTINEL AS OF THE #508 MERGE, and it was a census row before it — the change is recorded rather than the row silently kept. P6-3 added this because it moved BOTH of ClaraThreadView's speaker labels to secondary-ink; #508 landed first with a CONDITIONAL (`text-muted-foreground` for the user role on bg-muted, `text-secondary-ink` for the Clara role on bg-clara-muted) and that merged decision was kept, so the user bubble is covered by muted-foreground-on-muted above and nothing renders secondary-ink on --muted today (re-censused at the merge: the only two secondary-ink call sites, here and InterviewRunCard, both sit on bg-clara-muted). Pinned anyway because these two labels have already drifted apart once and the day they unify this row is what measures the ground they unify onto" },
   { id: "clara-on-card", fg: (h) => h("clara"), bg: (h) => h("card"), threshold: 4.5,
     source: "components/clara/ClaraRail.tsx heading (text-clara) on the docked rail's own bg-card panel" },
   { id: "clara-on-background", fg: (h) => h("clara"), bg: (h) => h("background"), threshold: 4.5,

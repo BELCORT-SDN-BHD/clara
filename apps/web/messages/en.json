@@ -330,14 +330,54 @@
       "retry": "Retry",
       "composerLabel": "Ask Clara",
       "composerPlaceholder": "Ask Clara…",
+      "composerLabel": "Ask Clara",
       "send": "Send",
       "sending": "Sending…",
+      "attachments": {
+        "attach": "Attach document",
+        "attachHint": "Attach files through Clara's document intake",
+        "fileInputLabel": "Choose documents to attach",
+        "trayLabel": "Documents attached to this turn",
+        "retry": "Retry {filename}",
+        "remove": "Remove {filename}",
+        "firmAltitudeNote": "Open a client's workspace to attach a document — Clara files a chat attachment to the client you are working in.",
+        "localRefusalTitle": "Attachment not added",
+        "tooLargeLocal": "{filename} is larger than the {limitMb} MB upload limit.",
+        "duplicate": "{filename} is already attached to this turn.",
+        "tooMany": "A turn carries at most {limit} attachments.",
+        "runtimeRefusalTitle": "Upload refused",
+        "runtimeTooLarge": "The intake service refused this upload because it is too large.",
+        "runtimeBadType": "The intake service does not accept this file type.",
+        "runtimeBadRequest": "The intake service refused this upload because the request was invalid.",
+        "runtimeUnknown": "The intake service refused this upload."
+      },
       "role": {
         "user": "You",
         "assistant": "Clara"
       }
     },
     "parts": {
+      "attachment": {
+        "title": "Attached document",
+        "documentLabel": "document",
+        "intakeLabel": "intake"
+      },
+      "clarify": {
+        "firmVisible": "Visible to your firm",
+        "framing": "This question and its answer are visible to your firm.",
+        "loading": "Checking whether this question is still open…",
+        "empty": "No open question has been recorded for this one yet.",
+        "recheck": "Check again",
+        "readError": "Could not check whether this question is still open.",
+        "answered": "Answered by your firm",
+        "answeredWithoutText": "The answer was recorded without displayable text.",
+        "closed": "This clarification is {status} and cannot be answered.",
+        "closedPart": "Clarify {status}. {framing}",
+        "answerLabel": "Your answer",
+        "answerPlaceholder": "Type the context Clara needs",
+        "answer": "Answer",
+        "answering": "Answering…"
+      },
       "entryPosted": {
         "title": "Entry posted",
         "entryLabel": "entry",
