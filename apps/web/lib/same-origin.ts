@@ -201,3 +201,81 @@ export function isSameOriginRequest(
 ): boolean {
   return proveSameOrigin(headers, requestUrl, config).ok;
 }
+
+/**
+ * WHICH OF THIS DEPLOYMENT'S OWN PUBLIC ORIGINS DID THIS REQUEST ADDRESS?
+ *
+ * The second consumer of the MEDIUM-2 lesson at the top of this file, and it
+ * lives HERE for the same reason the courier's origin does: a surface that
+ * builds a URL the person will land on must not re-derive that origin itself.
+ * `app/(entry)/auth/recover/handler.ts` sends a browser onward after the
+ * one-time password-recovery exchange, and its previous body took
+ * `publicOrigins[0]` unconditionally — so on a deployment naming more than one
+ * origin, the recovery cookie was sealed on the origin the person actually used
+ * and the 303 bounced them to a different one with no session (independent
+ * review of #507, F1).
+ *
+ * WHY THIS IS NOT `proveSameOrigin`. That wall judges a state-changing fetch the
+ * app's own page made, and its evidence is the `Origin` header. This is a
+ * TOP-LEVEL NAVIGATION out of a mail client: there is no `Origin` header to
+ * judge, and `Sec-Fetch-Site` is `cross-site` by construction. So the question is
+ * narrower and so is the answer: not "may this request act" (the one-time code is
+ * that wall) but "which public origin of ours is this person talking to".
+ *
+ * THE EVIDENCE, in order, and why each piece counts:
+ *   1. `requestUrl`'s own origin, WHEN IT IS AN ALLOWLIST MEMBER. Direct
+ *      deployments and local development end here.
+ *   2. The `Host` header, matched against the allowlist. Behind a front door
+ *      Next sees the internal hop in `request.url` while `Host` still names the
+ *      authority the browser addressed — this is the same candidate
+ *      `proveSameOrigin` already accepts, for the same reason.
+ *   3. Nothing else. `x-forwarded-host` IS NOT CONSULTED (N3, above), and
+ *      neither is `x-forwarded-proto`: the SCHEME comes from the matched
+ *      allowlist entry, which is the OPERATOR'S statement, never from a header
+ *      the caller wrote. A caller who forges `Host` can only ever select
+ *      between origins the operator has already named — and only by pointing
+ *      their own recovery at a cookie they do not hold.
+ *
+ * FAIL-CLOSED, TWICE. Two allowlist entries sharing one host (the same authority
+ * named under both schemes) is an AMBIGUOUS answer, and an ambiguous answer is
+ * `null`, not a guess. So is a `Host` that matches nothing. `null` means "this
+ * deployment cannot say which of its own origins this is", and the caller's job
+ * is to refuse — never to fall back to an origin nobody addressed.
+ *
+ * UNCONFIGURED (`CLARA_PUBLIC_ORIGINS` unset or empty) keeps the behaviour this
+ * file already documents for that case: the allowlist is not consulted because
+ * there is none, and the request URL's own origin is the answer. That is the
+ * single-origin and local-development shape, and it is the one `e2e/run.mjs`
+ * deliberately does NOT use — it sets the variable, so the browser leg exercises
+ * the configured arm.
+ */
+export function addressedPublicOrigin(
+  headers: Headers,
+  requestUrl: string,
+  config: SameOriginConfig = readSameOriginConfig(process.env),
+): string | null {
+  let requestOrigin: string | null = null;
+  try {
+    requestOrigin = new URL(requestUrl).origin;
+  } catch {
+    // An unparseable request URL contributes no candidate. It never widens this.
+  }
+
+  if (config.publicOrigins.length === 0) return requestOrigin;
+  if (requestOrigin !== null && config.publicOrigins.includes(requestOrigin)) return requestOrigin;
+
+  // `Headers.get` joins repeated values with ", ", which matches no member's
+  // host — a duplicated Host header therefore refuses rather than picking one.
+  const hostHeader = headers.get("host");
+  if (hostHeader === null) return null;
+  const addressed = hostHeader.toLowerCase();
+  const matches = config.publicOrigins.filter((origin) => {
+    try {
+      return new URL(origin).host === addressed;
+    } catch {
+      return false;
+    }
+  });
+  if (matches.length !== 1) return null;
+  return matches[0] ?? null;
+}

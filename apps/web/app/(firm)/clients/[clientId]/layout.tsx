@@ -1,7 +1,11 @@
 import type { ReactNode } from "react";
+import { notFound } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 
 import { ClientScopeProvider } from "@/components/client-scope-provider";
 import { ClientWorkspaceNav } from "@/components/client-workspace-nav";
+import { loadClientById } from "@/lib/firm/reads";
+import { fixedTokenAccessor, resolveServerSession } from "@/lib/supabase/server-session";
 
 /**
  * The client-workspace altitude — ONE workspace, accounting objects as tabs
@@ -21,6 +25,11 @@ export default async function ClientWorkspaceLayout({
   params: Promise<{ clientId: string }>;
 }) {
   const { clientId } = await params;
+  const caller = await resolveServerSession();
+  if (caller === null) notFound();
+  const client = await loadClientById(fixedTokenAccessor(caller.accessToken), clientId);
+  if (client === null) notFound();
+  const t = await getTranslations("ClientWorkspace");
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -30,7 +39,10 @@ export default async function ClientWorkspaceLayout({
         content-card role, while the content column below it wore `--shell`.
         The two roles were exactly inverted.
       */}
-      <header className="border-b border-border bg-shell px-8 py-3">
+      <header className="flex flex-col gap-2 border-b border-border bg-shell px-8 py-3">
+        <p className="text-sm font-semibold text-foreground">
+          {t("clientHeader", { clientName: client.name })}
+        </p>
         <ClientWorkspaceNav clientId={clientId} />
       </header>
       <ClientScopeProvider clientId={clientId}>

@@ -49,6 +49,7 @@ const tools15 = await import("../workflows/chatTurn.v15.tools.ts");
 const freeform15 = await import("../workflows/chatTurn.v15.freeform.ts");
 const v15Module = await import("../workflows/chatTurn.v15.ts");
 const v16Module = await import("../workflows/chatTurn.v16.ts");
+const v17Module = await import("../workflows/chatTurn.v17.ts");
 
 const PARTS_PATH = fileURLToPath(new URL("../workflows/chatTurn.v16.parts.ts", import.meta.url));
 const ENTRY_PATH = fileURLToPath(new URL("../workflows/chatTurn.v16.ts", import.meta.url));
@@ -99,9 +100,10 @@ function admittedRead(readId, extra = {}) {
 // 1 · The registry repoint, and policy (c) for every body it moved past.
 // ==============================================================================================
 
-test("p6-1.registry: `chatTurn:` is repointed to chatTurn_v16, and it IS chatTurn.v16.ts's own function", () => {
-  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v16", "the registry pins chatTurn_v16");
-  assert.equal(registry.workflows.chatTurn, v16Module.chatTurn_v16, "...and the pinned value IS the module's own function, not a stand-in");
+test("p6-1.registry: chatTurn_v16 remains exported after the successor repoint to chatTurn_v17", () => {
+  assert.equal(registry.workflows.chatTurn.name, "chatTurn_v17", "FS-7 now pins chatTurn_v17");
+  assert.equal(registry.workflows.chatTurn, v17Module.chatTurn_v17, "the new pin IS its module's own function");
+  assert.equal(registry.chatTurn_v16, v16Module.chatTurn_v16, "P6-1's body remains reachable by identity");
   assert.notEqual(registry.workflows.chatTurn, v15Module.chatTurn_v15, "the registry no longer points chatTurn: at v15");
 });
 
@@ -404,7 +406,7 @@ test(
     // A DISCRIMINATING post-condition: exit 0 alone would also be produced by a gate that
     // checked nothing, so assert it reports having actually looked at the things it names.
     assert.match(r.stdout, /check-workflow-bundle: OK/, "the gate reports OK");
-    assert.match(r.stdout, /chatTurn pinned at v16/, "...and says which version it found pinned in the served artifact");
+    assert.match(r.stdout, /chatTurn pinned at v17/, "...and says which version it found pinned in the served artifact");
     assert.match(r.stdout, /freeform_result emitter/, "...and that the emitter survived the compile");
     assert.match(r.stdout, /superseded body\(ies\) still ship for parked runs/, "...and that policy (c) holds in the image");
   },

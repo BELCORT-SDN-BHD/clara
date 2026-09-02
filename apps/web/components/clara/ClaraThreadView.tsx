@@ -140,6 +140,7 @@ export function ClaraThreadView({
           ref={textareaRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
+          aria-label={t("composerLabel")}
           placeholder={t("composerPlaceholder")}
           disabled={!threadId || notSignedIn || busy}
           rows={variant === "rail" ? 2 : 3}
