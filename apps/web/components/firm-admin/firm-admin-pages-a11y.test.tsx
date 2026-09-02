@@ -1,7 +1,6 @@
 // GATE (b) — page-level a11y scan for T10's routes (N7, independent review,
 // 2026-08-28): the panels had a11y coverage; the PAGES (PageHeader's own h1 +
-// description) and the /admin nav (the three Link buttons to the new
-// sub-routes) did not.
+// description) and the /admin hub (its five route-card links) did not.
 //
 // WHY THIS DOES NOT IMPORT app/(firm)/admin/page.tsx DIRECTLY (a genuine
 // environment gap, not unique to T10 — probed and confirmed, 2026-08-28):
@@ -82,6 +81,7 @@ test("AdminPage's own composition has ordered headings and named links for every
     assert.match(bodyText, /Vendor identity bindings/, "the hub link to /admin/vendor-bindings must render with its real label");
     assert.match(bodyText, /Firm registrations/, "the hub link to /admin/registrations must render with its real label");
     assert.match(bodyText, /Firm settings/, "the hub link to /admin/settings must render with its real label");
+    assert.match(bodyText, /post-beta Billing PR-1\/PR-2 lane/, "the hub must name the lane for its unbuilt billing surfaces");
     const violations = checkAccessibility(h.container as never);
     assert.deepEqual(violations, [], JSON.stringify(violations));
   } finally {

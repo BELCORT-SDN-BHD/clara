@@ -32,7 +32,8 @@
       "members": "Members",
       "registrations": "Firm registrations",
       "compliance": "Compliance register",
-      "vendorBindings": "Vendor identity bindings"
+      "vendorBindings": "Vendor identity bindings",
+      "settings": "Firm settings"
     }
   },
   "NotFound": {
@@ -165,6 +166,7 @@
     "body": "Manage the people, compliance and identity controls that govern this firm.",
     "sectionsLabel": "Firm admin sections",
     "noSections": "No admin sections are available at your rank.",
+    "unbuiltNote": "The metering rollup, tier surfaces, and /admin/billing are not built yet; they remain in the post-beta Billing PR-1/PR-2 lane recorded in PROGRESS.md.",
     "sections": {
       "members": {
         "title": "Members",
@@ -181,6 +183,10 @@
       "vendorBindings": {
         "title": "Vendor identity bindings",
         "purpose": "Govern the evidence bindings used to identify vendors."
+      },
+      "settings": {
+        "title": "Firm settings",
+        "purpose": "Review firm controls and change the high-stakes threshold through its governed door."
       }
     }
   },
@@ -2517,7 +2523,6 @@
     }
   },
   "FirmAdminCompliance": {
-    "adminNavLabel": "Firm admin sections",
     "dialog": {
       "cancel": "Cancel",
       "working": "Working…"

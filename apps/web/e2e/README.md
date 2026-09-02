@@ -28,7 +28,8 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
   would need a Supabase email-template act FS-4 immediately supersedes.
 - `firm-navigation-walk.spec.ts` — P4-6's built-app rank-shaping walk: an operator owner
   reaches Members through Admin in two navigation clicks, while a bookkeeper sees only the
-  admin destinations whose live reads/doors admit bookkeeper rank.
+  destinations admitted by the mock fixture rank. It proves built-app scope propagation and
+  navigation shaping, not a DB rank, RLS policy, or live `caller_context` response.
 - `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers.
 
 ## Why these specs are NOT in `apps/web/test/manifest.txt`

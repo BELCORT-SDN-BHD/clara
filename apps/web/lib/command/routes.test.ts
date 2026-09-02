@@ -21,6 +21,8 @@
 // scripts/check-test-manifest.mjs, which globs real files and reds the build
 // rather than trusting a checked-in list. A hardcoded expectation here would just
 // be a second copy of routes.ts, drifting in the same direction.
+// The reverse census is static: a literal link may be unreachable at runtime,
+// so this gate proves source discoverability, not that the link ever renders.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -37,6 +39,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
+import { matchesQuery } from "../../components/command/command-palette";
 import { CLIENT_ROUTES, FIRM_ROUTES, type CommandRoute } from "./routes";
 import messages from "../../messages/en.json";
 
@@ -118,7 +121,11 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) sourceFiles(path, out);
-    else if (entry.isFile() && /\.[jt]sx?$/.test(entry.name)) out.push(path);
+    else if (
+      entry.isFile()
+      && !/\.(?:test|spec)\./.test(entry.name)
+      && /\.[jt]sx?$/.test(entry.name)
+    ) out.push(path);
   }
   return out;
 }
@@ -263,6 +270,10 @@ test("REVERSE GATE positive control: a planted firm page with no manifest row or
     join(fixture, "navigation.tsx"),
     'import NextLink from "next/link"; export const Nav = () => <NextLink href="/linked">Linked</NextLink>;\n',
   );
+  writeFileSync(
+    join(fixture, "orphan-only.test.tsx"),
+    'import NextLink from "next/link"; export const Probe = () => <NextLink href="/orphan">Orphan</NextLink>;\n',
+  );
 
   const orphans = orphanedFirmPages(firm, [], staticNextLinkHrefs([fixture]));
   assert.deepEqual(orphans, ["/orphan"], "the linked control must pass and the planted orphan must be observed");
@@ -293,7 +304,7 @@ test("/admin/members is present in ⌘K by its own stable row", () => {
   const admin = FIRM_ROUTES.find((route) => route.id === "admin");
   assert.ok(admin);
   assert.equal(
-    admin.keywords?.some((keyword) => keyword === "members" || keyword === "rbac"),
+    matchesQuery(["Admin", ...(admin.keywords ?? [])], "members"),
     false,
     "the generic Admin row must not win a Members search before the specific destination",
   );

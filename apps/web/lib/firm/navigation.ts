@@ -3,18 +3,30 @@ import { roleRank, type MemberRole } from "../members/reads";
 import { isOperatorConsoleEligible } from "../registration/doors";
 
 /**
- * The sidebar and the admin hub share one affordance registry. These floors are
- * copied from the LIVE reads/doors each destination exposes, never inferred from
- * its URL:
+ * The sidebar and admin hub share one affordance registry. Each floor is the
+ * lowest rank admitted by the destination's primary read, not the floor of a
+ * write that happens to live on the same page. Writes stay visible at that read
+ * floor and meet their own governed door when submitted.
  *
- * - firm home + Needs-you: viewer (`list_review_queue` enters `_human_ctx` at
- *   viewer; the home has no read of its own)
- * - client register + activity: bookkeeper (`p_clients_human` and
- *   `agent_receipts_visible`)
- * - members: admin (the invite/role/remove doors)
- * - compliance + vendor bindings: bookkeeper (their read/act doors)
- * - registrations: owner AND the caller's firm is the operator (the identical
- *   predicate exported by `registration/doors.ts`)
+ * - home: viewer baseline; the destination has no read of its own, and the
+ *   shell's `caller_context` scope has no rank floor (`0141:542-551`).
+ * - Needs-you: viewer (`list_review_queue`, `0016:4563`).
+ * - clients: viewer (`p_clients_human`, `0003:514`, and
+ *   `p_client_facts_human`, `0055:465`; both are firm-scoped with no rank).
+ * - activity: bookkeeper (`agent_receipts_visible`, `0103:410`).
+ * - Admin parent: viewer because it performs no read and exposes only children
+ *   that are independently filtered; its lowest child reads are viewer-floor
+ *   (`0016:4563` and `0002:503-504`).
+ * - members: admin for the complete roster/invite surface (email mask
+ *   `0141:517`, roster floor `0141:526`, invite floor `0141:538`, and live
+ *   `invite_member` admin door `0147:376`).
+ * - registrations: owner plus operator firm (`approve_firm_registration`,
+ *   `0145:770,782`), reusing `isOperatorConsoleEligible`.
+ * - compliance: viewer (`list_review_queue`, `0016:4563`).
+ * - vendor bindings: bookkeeper (`list_vendor_bindings`, `0028:960`, and
+ *   `get_vendor_binding`, `0028:1016`).
+ * - settings: viewer (`p_firms_human`, `0002:503-504`, no rank). Its
+ *   `set_firm_high_stakes_threshold` write remains owner-floor (`0022:357`).
  *
  * This is legibility, not authority. A hidden entry grants or revokes nothing;
  * the destination's RLS policy or governed door remains the wall.
@@ -34,30 +46,33 @@ export type FirmNavigationEntry = NavigationEntry & {
 };
 
 export type AdminNavigationEntry = NavigationEntry & {
-  readonly id: "members" | "registrations" | "compliance" | "vendorBindings";
+  readonly id: "members" | "registrations" | "compliance" | "vendorBindings" | "settings";
   readonly navMessageKey:
     | "adminSections.members"
     | "adminSections.registrations"
     | "adminSections.compliance"
-    | "adminSections.vendorBindings";
+    | "adminSections.vendorBindings"
+    | "adminSections.settings";
   readonly hubTitleKey:
     | "sections.members.title"
     | "sections.registrations.title"
     | "sections.compliance.title"
-    | "sections.vendorBindings.title";
+    | "sections.vendorBindings.title"
+    | "sections.settings.title";
   readonly hubPurposeKey:
     | "sections.members.purpose"
     | "sections.registrations.purpose"
     | "sections.compliance.purpose"
-    | "sections.vendorBindings.purpose";
+    | "sections.vendorBindings.purpose"
+    | "sections.settings.purpose";
 };
 
 export const FIRM_NAVIGATION: readonly FirmNavigationEntry[] = [
   { id: "home", href: "/", messageKey: "home", minimumRole: "viewer" },
   { id: "needsYou", href: "/needs-you", messageKey: "needsYou", minimumRole: "viewer" },
-  { id: "clients", href: "/clients", messageKey: "clients", minimumRole: "bookkeeper" },
+  { id: "clients", href: "/clients", messageKey: "clients", minimumRole: "viewer" },
   { id: "activity", href: "/activity", messageKey: "activity", minimumRole: "bookkeeper" },
-  { id: "admin", href: "/admin", messageKey: "admin", minimumRole: "bookkeeper" },
+  { id: "admin", href: "/admin", messageKey: "admin", minimumRole: "viewer" },
 ] as const;
 
 export const ADMIN_NAVIGATION: readonly AdminNavigationEntry[] = [
@@ -81,7 +96,7 @@ export const ADMIN_NAVIGATION: readonly AdminNavigationEntry[] = [
   {
     id: "compliance",
     href: "/admin/compliance",
-    minimumRole: "bookkeeper",
+    minimumRole: "viewer",
     navMessageKey: "adminSections.compliance",
     hubTitleKey: "sections.compliance.title",
     hubPurposeKey: "sections.compliance.purpose",
@@ -94,6 +109,14 @@ export const ADMIN_NAVIGATION: readonly AdminNavigationEntry[] = [
     hubTitleKey: "sections.vendorBindings.title",
     hubPurposeKey: "sections.vendorBindings.purpose",
   },
+  {
+    id: "settings",
+    href: "/admin/settings",
+    minimumRole: "viewer",
+    navMessageKey: "adminSections.settings",
+    hubTitleKey: "sections.settings.title",
+    hubPurposeKey: "sections.settings.purpose",
+  },
 ] as const;
 
 /** Fail closed on a NULL/unknown rank, matching the DB's `coalesce(rank, -1)`. */
@@ -101,8 +124,8 @@ export function hasNavigationAccess(
   scope: NavigationScope,
   entry: NavigationEntry,
 ): boolean {
-  const minimumRank = roleRank(entry.minimumRole);
-  if (minimumRank === null || (scope.role_rank ?? -1) < minimumRank) return false;
+  const minimumRank = roleRank(entry.minimumRole)!;
+  if ((scope.role_rank ?? -1) < minimumRank) return false;
   if (entry.operatorOnly) return isOperatorConsoleEligible(scope);
   return true;
 }

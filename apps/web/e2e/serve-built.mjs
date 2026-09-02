@@ -54,7 +54,9 @@ const REQUEST_ID = "22222222-2222-2222-2222-222222222222";
 // spec.ts) types once Lane B wires the real attempt wall.
 const E2E_SIGNUP_CODE = "654321";
 const state = {
-  email: "owner@example.test",
+  // Default to the membership-less holding-state persona. Navigation specs
+  // opt into their fixture rank explicitly through the sign-in email prefix.
+  email: "holding@example.test",
   firmName: "E2E Accounting",
   note: null,
   registrationOpen: false,
@@ -240,7 +242,7 @@ async function handleSupabase(request, response, url) {
     const bookkeeper = state.email.startsWith("bookkeeper@");
     const owner = state.email.startsWith("owner@");
     if (!bookkeeper && !owner) {
-      // Preserve the signup journey's membership-less holding-state fixture.
+      // Every non-navigation persona remains membership-less by default.
       sendJson(response, 200, [], cors);
       return;
     }

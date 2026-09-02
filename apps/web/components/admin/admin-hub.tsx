@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 
+import { NotBuiltNote } from "@/components/common/not-built-note";
 import { useFirmScope } from "@/components/firm-scope-provider";
 import {
   Card,
@@ -30,26 +31,29 @@ export function AdminHubView({ scope }: { scope: NavigationScope }) {
   }
 
   return (
-    <nav aria-label={t("sectionsLabel")}>
-      <ul className="grid gap-4 md:grid-cols-2">
-        {sections.map((section) => (
-          <li key={section.id}>
-            <Link
-              href={section.href}
-              className="group block h-full rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-            >
-              <Card className="h-full transition-colors group-hover:bg-accent/40">
-                <CardHeader>
-                  <CardTitle>
-                    <h2>{t(section.hubTitleKey)}</h2>
-                  </CardTitle>
-                  <CardDescription>{t(section.hubPurposeKey)}</CardDescription>
-                </CardHeader>
-              </Card>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </nav>
+    <div className="flex flex-col gap-4">
+      <nav aria-label={t("sectionsLabel")}>
+        <ul className="grid gap-4 md:grid-cols-2">
+          {sections.map((section) => (
+            <li key={section.id}>
+              <Link
+                href={section.href}
+                className="group block h-full rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                <Card className="h-full transition-colors group-hover:bg-accent/40">
+                  <CardHeader>
+                    <CardTitle>
+                      <h2>{t(section.hubTitleKey)}</h2>
+                    </CardTitle>
+                    <CardDescription>{t(section.hubPurposeKey)}</CardDescription>
+                  </CardHeader>
+                </Card>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <NotBuiltNote>{t("unbuiltNote")}</NotBuiltNote>
+    </div>
   );
 }

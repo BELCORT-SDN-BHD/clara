@@ -41,11 +41,12 @@ export function FirmNavView({
       <ul className="flex flex-col gap-1">
         {primary.map((item) => {
           const active = isActivePath(pathname, item.href);
+          const current = pathname === item.href;
           return (
             <li key={item.href}>
               <Link
                 href={item.href}
-                aria-current={active ? "page" : undefined}
+                aria-current={current ? "page" : undefined}
                 className={cn(
                   "block rounded-lg px-2.5 py-1.5 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                   active && "bg-sidebar-accent text-sidebar-accent-foreground",

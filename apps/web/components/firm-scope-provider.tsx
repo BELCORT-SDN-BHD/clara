@@ -2,9 +2,9 @@
 
 import { createContext, useContext, type ReactNode } from "react";
 
-import type { FirmScope } from "@/lib/require-firm-scope";
+import type { NavigationScope } from "@/lib/firm/navigation";
 
-const FirmScopeContext = createContext<FirmScope | null>(null);
+const FirmScopeContext = createContext<NavigationScope | null>(null);
 
 /**
  * Carries the ONE positively-read `FirmScope` from the firm layout to client
@@ -15,13 +15,13 @@ export function FirmScopeProvider({
   scope,
   children,
 }: {
-  scope: FirmScope;
+  scope: NavigationScope;
   children: ReactNode;
 }) {
   return <FirmScopeContext.Provider value={scope}>{children}</FirmScopeContext.Provider>;
 }
 
-export function useFirmScope(): FirmScope {
+export function useFirmScope(): NavigationScope {
   const scope = useContext(FirmScopeContext);
   if (scope === null) {
     throw new Error("useFirmScope must be rendered under FirmScopeProvider");

@@ -41,6 +41,8 @@
  * third assertion. There are no "planned" rows today; a future one must land
  * with its page in the same PR (port-wave plan §3.6: truing this file is
  * part of a train's OWN merge, never a later sweep).
+ * Admin child cards use registry-driven hrefs rather than literal links, so
+ * each child also needs its own exact row here to remain discoverable.
  */
 
 export type CommandRouteStatus = "built" | "planned";

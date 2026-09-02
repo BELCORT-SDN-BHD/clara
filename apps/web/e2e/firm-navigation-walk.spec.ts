@@ -24,6 +24,7 @@ test("operator owner sees the full sidebar and reaches Members in two navigation
   await expect(nav.getByRole("link", { name: "Firm registrations", exact: true })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Compliance register", exact: true })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Vendor identity bindings", exact: true })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Firm settings", exact: true })).toBeVisible();
 
   await nav.getByRole("link", { name: "Members", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/members$/);
@@ -38,7 +39,7 @@ test("operator owner sees the full sidebar and reaches Members in two navigation
   await expect(page).toHaveURL(/\/admin\/members$/);
 });
 
-test("bookkeeper sidebar hides admin- and owner-only destinations", async ({ page }) => {
+test("bookkeeper sidebar shows viewer/bookkeeper reads and hides admin- and owner-only destinations", async ({ page }) => {
   await signIn(page, "bookkeeper@example.test");
   const nav = page.getByRole("navigation", { name: "Firm navigation" });
 
@@ -46,7 +47,7 @@ test("bookkeeper sidebar hides admin- and owner-only destinations", async ({ pag
   await expect(page).toHaveURL(/\/admin$/);
   await expect(nav.getByRole("link", { name: "Compliance register", exact: true })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Vendor identity bindings", exact: true })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Firm settings", exact: true })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Members", exact: true })).toHaveCount(0);
   await expect(nav.getByRole("link", { name: "Firm registrations", exact: true })).toHaveCount(0);
-  await expect(nav.getByRole("link", { name: "Firm settings", exact: true })).toHaveCount(0);
 });
