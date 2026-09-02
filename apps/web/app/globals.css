@@ -322,13 +322,16 @@
    * The ported `--motion-duration-*` NAMES are kept (the port's own ratified
    * naming); only the values conform, and `deliberate` is renamed `panel` to
    * match the tier it actually maps to — the Clara rail is literally §7's
-   * "Clara dock reflow". `--duration-instant` (0ms) and `--duration-welcome`
-   * (220ms) are NOT defined here: nothing consumes them, and §2 bars a token
-   * without a named consumer.
+   * "Clara dock reflow".
+   *
+   * `--duration-welcome` (220ms) IS NOW DEFINED — P6-6 (裁-14, R1) gave it the
+   * named consumer §2 requires: the `enter-welcome` utility below.
+   * `--duration-instant` (0ms) is still NOT defined; nothing consumes it.
    */
   --motion-duration-fast: 120ms;
   --motion-duration-standard: 160ms;
   --motion-duration-panel: 200ms;
+  --motion-duration-welcome: 220ms;
   --motion-easing-standard: ease-in-out;
   --motion-easing-out: cubic-bezier(0.23, 1, 0.32, 1);
   --focus-ring-width: 2px;
@@ -454,6 +457,36 @@
 
   @media (prefers-reduced-motion: reduce) {
     transition: opacity var(--motion-duration-panel) var(--motion-easing-out);
+
+    @starting-style {
+      opacity: 0;
+      translate: 0;
+    }
+  }
+}
+
+/* §7's "Rare first welcome only" tier (220ms), in the one treatment its
+ * stricter Clara-mascot paragraph spells out verbatim: "opacity plus
+ * `translateY(4px)` for 220ms; never loop, float, pulse, bounce, auto-blink or
+ * track the pointer". Not a second `enter-content` (160ms, §7's per-row "row
+ * state"): this fires once, on a face met before any work is on screen — the
+ * entry lockup and the Clara welcome state, its only two call sites, where
+ * `@starting-style` makes "once" structural rather than promised. Reduced
+ * motion drops the 4px rise and KEEPS the fade, like its two siblings. */
+@utility enter-welcome {
+  opacity: 1;
+  translate: 0;
+  transition:
+    opacity var(--motion-duration-welcome) var(--motion-easing-out),
+    translate var(--motion-duration-welcome) var(--motion-easing-out);
+
+  @starting-style {
+    opacity: 0;
+    translate: 0 0.25rem;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: opacity var(--motion-duration-welcome) var(--motion-easing-out);
 
     @starting-style {
       opacity: 0;

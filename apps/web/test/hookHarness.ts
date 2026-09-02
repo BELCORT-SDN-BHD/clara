@@ -105,6 +105,8 @@ function mkNode(tag: string, doc: Stub): Stub {
   // one. `fireEvent` therefore never needs to walk this stub tree's own
   // parent chain; it only has to invoke whatever the container captured.
   const listeners: Record<string, ((evt: Stub) => void)[]> = {};
+  /** What `setAttribute` wrote — see the setAttribute/getAttribute pair below. */
+  const attributes: Record<string, string> = {};
   const node: Stub = {
     nodeType: 1,
     nodeName: tag.toUpperCase(),
@@ -112,6 +114,17 @@ function mkNode(tag: string, doc: Stub): Stub {
     childNodes: children,
     parentNode: null,
     style: {},
+    // RENDER-HARNESS EXTENSION (P6-6, the identity finish): every real element
+    // has a `dataset`, and `next/image` is the first dependency in this app to
+    // read one at MODULE SCOPE — `next/dist/shared/lib/deployment-id.ts:4` does
+    // `document.documentElement.dataset.dplId` the moment the module is
+    // evaluated, which threw "Cannot read properties of undefined (reading
+    // 'dplId')" and took down eight suites at IMPORT time, before a single
+    // assertion ran. Same class as the HTMLElement/KeyboardEvent stubs above: a
+    // property real DOM always has, absent here, crashing a dependency that had
+    // no reason to guard for it. An empty object is the whole fix — nothing in
+    // this app reads a data-* attribute back through `dataset`.
+    dataset: {},
     ownerDocument: doc,
     appendChild(c: Stub) { children.push(c); c.parentNode = node; return c; },
     removeChild(c: Stub) { const i = children.indexOf(c); if (i >= 0) children.splice(i, 1); return c; },
@@ -133,7 +146,23 @@ function mkNode(tag: string, doc: Stub): Stub {
       c.parentNode = node;
       return c;
     },
-    setAttribute() {}, removeAttribute() {},
+    // RENDER-HARNESS EXTENSION (P6-6): these were a NO-OP pair, and the read
+    // side did not exist at all. `next/image`'s mount effect calls
+    // `img.getAttribute('alt')` to warn about a missing alt — with no such
+    // method the whole render threw "img.getAttribute is not a function"
+    // inside a layout effect, which React reports only as the generic
+    // "error during concurrent rendering". Storing what react-dom writes and
+    // handing it back is both the smaller fix and the more honest stub: a
+    // no-op setter with a null getter would have made a present `alt=""` read
+    // as ABSENT and printed Next's own missing-alt error on a correct
+    // component. Nothing pre-existing reads through here (there was no reader),
+    // so this is additive.
+    setAttribute(name: string, value: unknown) { attributes[name] = String(value); },
+    getAttribute(name: string) {
+      return Object.prototype.hasOwnProperty.call(attributes, name) ? attributes[name]! : null;
+    },
+    hasAttribute(name: string) { return Object.prototype.hasOwnProperty.call(attributes, name); },
+    removeAttribute(name: string) { delete attributes[name]; },
     addEventListener(type: string, fn: (evt: Stub) => void) { (listeners[type] ??= []).push(fn); },
     removeEventListener(type: string, fn: (evt: Stub) => void) {
       if (listeners[type]) listeners[type] = listeners[type].filter((l) => l !== fn);
