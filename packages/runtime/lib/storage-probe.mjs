@@ -97,40 +97,42 @@ const DEFAULT_TIMEOUT_MS = 3_000;
 
 function configuredDelay(name, defaultMs) {
   const raw = process.env[name];
-  if (raw === undefined || raw === "") return defaultMs;
+  if (raw === undefined || raw === "") {
+    return { configured: false, parsed: defaultMs, value: defaultMs };
+  }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) {
-    console.warn(`[storage-probe] ${name} is not finite; using ${defaultMs}ms`);
-    return defaultMs;
+    return { configured: true, parsed, value: defaultMs };
   }
-  const clamped = Math.min(MAX_TIMER_MS, Math.max(MIN_TIMER_MS, Math.trunc(parsed)));
-  if (clamped !== parsed) {
+  return {
+    configured: true,
+    parsed,
+    value: Math.min(MAX_TIMER_MS, Math.max(MIN_TIMER_MS, Math.trunc(parsed))),
+  };
+}
+
+function warnIfAdjusted(name, configured, finalMs) {
+  if (configured.configured && configured.parsed !== finalMs) {
     console.warn(
-      `[storage-probe] ${name} clamped to [${MIN_TIMER_MS}, ${MAX_TIMER_MS}]: ${clamped}ms`,
+      `[storage-probe] ${name} adjusted to final ${finalMs}ms ` +
+        `(accepted range ${MIN_TIMER_MS}..${MAX_TIMER_MS}; requires 3 * timeout <= cache)`,
     );
   }
-  return clamped;
 }
 
 function probeTiming() {
-  let cacheMs = configuredDelay("CLARA_STORAGE_PROBE_CACHE_MS", DEFAULT_CACHE_MS);
-  let timeoutMs = configuredDelay("CLARA_STORAGE_PROBE_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);
+  const configuredCache = configuredDelay("CLARA_STORAGE_PROBE_CACHE_MS", DEFAULT_CACHE_MS);
+  const configuredTimeout = configuredDelay("CLARA_STORAGE_PROBE_TIMEOUT_MS", DEFAULT_TIMEOUT_MS);
+  let cacheMs = configuredCache.value;
+  let timeoutMs = configuredTimeout.value;
   if (3 * timeoutMs > cacheMs) {
     timeoutMs = DEFAULT_TIMEOUT_MS;
     if (3 * timeoutMs > cacheMs) {
       cacheMs = DEFAULT_CACHE_MS;
-      console.warn(
-        "[storage-probe] CLARA_STORAGE_PROBE_TIMEOUT_MS violates " +
-          "3 * timeout <= CLARA_STORAGE_PROBE_CACHE_MS; using 3000ms and " +
-          "CLARA_STORAGE_PROBE_CACHE_MS=60000ms",
-      );
-    } else {
-      console.warn(
-        "[storage-probe] CLARA_STORAGE_PROBE_TIMEOUT_MS violates " +
-          "3 * timeout <= CLARA_STORAGE_PROBE_CACHE_MS; using 3000ms",
-      );
     }
   }
+  warnIfAdjusted("CLARA_STORAGE_PROBE_CACHE_MS", configuredCache, cacheMs);
+  warnIfAdjusted("CLARA_STORAGE_PROBE_TIMEOUT_MS", configuredTimeout, timeoutMs);
   return { cacheMs, timeoutMs };
 }
 

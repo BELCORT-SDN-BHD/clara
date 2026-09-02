@@ -275,11 +275,15 @@ would re-open the confined agent/wake lanes' reach).
   readback. After that positive proof, one transient failure is tolerated; the
   second consecutive failure returns 503; the next success resets the count.
 
-Storage timing knobs: `CLARA_STORAGE_PROBE_CACHE_MS` defaults to `60000` (finite values
-at least `1000` are accepted; invalid/lower values fall back to the default), and controls
-only the interval after the immediate boot cycle. `CLARA_STORAGE_PROBE_TIMEOUT_MS`
-defaults to `3000` (finite positive values accepted; otherwise default) and aborts both
-storage requests at the deadline. Fly's configured 60s readiness grace delays the first check;
+Storage timing knobs: `CLARA_STORAGE_PROBE_CACHE_MS` defaults to `60000`, and
+`CLARA_STORAGE_PROBE_TIMEOUT_MS` defaults to `3000`; finite configured values for both are
+clamped to Node's safe `1000..2147483647` ms range, while non-finite values use their defaults.
+After clamping, the final pair must satisfy `3 * timeout <= cache` so the deadline plus the
+bounded settlement wait cannot overlap the next interval. A violating pair falls back to the
+`3000` ms timeout and, when that still cannot fit, the `60000` ms cache. Each configured variable
+whose effective value changes emits one warning naming only its final value. The cache controls
+only the interval after the immediate boot cycle; the timeout aborts both storage requests at its
+deadline. Fly's configured 60s readiness grace delays the first check;
 it is startup runway, not a readiness bypass, and Fly still requires a passing `/ready` response
 before routing. It exceeds the 3s default first-probe deadline, but the claim that it covers the
 whole `shared-cpu-1x` + clamd cold start is an **unmeasured assumption**. Measure

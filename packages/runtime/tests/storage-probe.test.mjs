@@ -197,9 +197,13 @@ test("readiness policy: absent or malformed storage_write verdicts fail closed",
 
   assert.equal(hardFailure(undefined), true, "an absent verdict is not positive storage evidence");
   assert.equal(hardFailure({}), true, "an empty verdict is not positive storage evidence");
-  assert.equal(hardFailure({ ok: false, pending: false }), true, "a missing failure counter fails closed");
+  assert.equal(
+    hardFailure({ ok: false, reason: "storage_error", pending: false }),
+    true,
+    "a missing failure counter fails closed",
+  );
   for (const counter of ["1", true, null, ""]) {
-    const verdict = { ok: false, pending: false, consecutive_failures: counter };
+    const verdict = { ok: false, reason: "storage_error", pending: false, consecutive_failures: counter };
     assert.equal(
       hardFailure(verdict),
       true,
@@ -208,27 +212,27 @@ test("readiness policy: absent or malformed storage_write verdicts fail closed",
     assert.equal(storageWriteHardFailureReason(verdict), "storage_verdict_malformed");
   }
   assert.equal(
-    hardFailure({ ok: false, pending: false, consecutive_failures: "nope" }),
+    hardFailure({ ok: false, reason: "storage_error", pending: false, consecutive_failures: "nope" }),
     true,
     "a malformed failure counter fails closed",
   );
   assert.equal(
-    hardFailure({ ok: true, pending: false }),
+    hardFailure({ ok: true, reason: null, pending: false }),
     true,
     "an otherwise-successful verdict with no counter fails closed",
   );
   assert.equal(
-    hardFailure({ ok: "true", pending: false, consecutive_failures: 0 }),
+    hardFailure({ ok: "true", reason: "storage_error", pending: false, consecutive_failures: 0 }),
     true,
     "a countable verdict with a non-boolean ok field fails closed",
   );
   assert.equal(
-    hardFailure({ ok: true, pending: false, consecutive_failures: -1 }),
+    hardFailure({ ok: true, reason: null, pending: false, consecutive_failures: -1 }),
     true,
     "a negative failure counter fails closed",
   );
   assert.equal(
-    hardFailure({ ok: true, pending: false, consecutive_failures: 1.5 }),
+    hardFailure({ ok: true, reason: null, pending: false, consecutive_failures: 1.5 }),
     true,
     "a fractional failure counter fails closed",
   );
@@ -240,6 +244,30 @@ test("readiness policy: absent or malformed storage_write verdicts fail closed",
   const unknownReason = { ok: true, reason: "bogus", pending: false, consecutive_failures: 0 };
   assert.equal(hardFailure(unknownReason), true, "an unknown producer reason must fail closed");
   assert.equal(storageWriteHardFailureReason(unknownReason), "storage_verdict_malformed");
+
+  const contradictoryHealthy = {
+    ok: true,
+    reason: "storage_error",
+    pending: false,
+    consecutive_failures: 0,
+  };
+  assert.equal(hardFailure(contradictoryHealthy), true, "a healthy verdict cannot carry a failure reason");
+  assert.equal(storageWriteHardFailureReason(contradictoryHealthy), "storage_verdict_malformed");
+
+  const foreignFailure = {
+    ok: false,
+    reason: "db_unreachable",
+    pending: false,
+    consecutive_failures: 1,
+  };
+  assert.equal(hardFailure(foreignFailure), true, "a storage verdict cannot carry another check's reason");
+  assert.equal(storageWriteHardFailureReason(foreignFailure), "storage_verdict_malformed");
+
+  assert.equal(
+    hardFailure({ ok: true, reason: null, pending: false, consecutive_failures: 0 }),
+    false,
+    "a healthy verdict with a null reason remains valid",
+  );
 });
 
 test("storage probe facade: two consecutive TIMEOUTS reach the hard-failure threshold", async () => {

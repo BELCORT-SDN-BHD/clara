@@ -81,6 +81,23 @@ try {
     );
   }
 
+  const doubleSlashReady = await fetch(`${BASE}/ready//`);
+  const doubleSlashBody = await doubleSlashReady.json().catch(() => ({}));
+  check(
+    "GET /ready// uses the global drain response",
+    doubleSlashReady.status === 503 && doubleSlashBody.error === "shutting_down",
+  );
+
+  const headReady = await fetch(`${BASE}/ready`, { method: "HEAD" });
+  const headReadyBody = await headReady.text();
+  check("HEAD /ready uses the readiness-handler status", headReady.status === drainReady.status);
+  check(
+    "HEAD /ready uses the readiness-handler headers",
+    headReady.headers.get("content-type") === drainReady.headers.get("content-type") &&
+      headReady.headers.get("content-length") === drainReady.headers.get("content-length"),
+  );
+  check("HEAD /ready is bodyless", headReadyBody === "");
+
   const postReady = await fetch(`${BASE}/ready`, { method: "POST" });
   const postReadyBody = await postReady.json().catch(() => ({}));
   check("POST /ready uses the global drain response", postReady.status === 503 && postReadyBody.error === "shutting_down");

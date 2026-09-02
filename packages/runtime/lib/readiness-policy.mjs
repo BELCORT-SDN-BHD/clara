@@ -20,6 +20,14 @@ export const READINESS_FAILURE_REASONS = Object.freeze([
 
 const READINESS_FAILURE_REASON_SET = new Set(READINESS_FAILURE_REASONS);
 
+const STORAGE_WRITE_FAILURE_REASON_SET = new Set([
+  "storage_probe_pending",
+  "storage_error",
+  "storage_probe_error",
+  "storage_probe_timeout",
+  "storage_probe_readback_mismatch",
+]);
+
 export function readinessFailure(check, reason, extra = {}) {
   if (!READINESS_FAILURE_REASON_SET.has(reason)) {
     throw new TypeError(`unknown readiness failure reason: ${String(reason)}`);
@@ -38,7 +46,9 @@ export function storageWriteVerdictIsValid(storageVerdict) {
     Number.isFinite(storageVerdict.consecutive_failures) &&
     storageVerdict.consecutive_failures >= 0 &&
     Number.isInteger(storageVerdict.consecutive_failures) &&
-    (storageVerdict.reason === null || READINESS_FAILURE_REASON_SET.has(storageVerdict.reason))
+    (storageVerdict.ok
+      ? storageVerdict.reason === null
+      : STORAGE_WRITE_FAILURE_REASON_SET.has(storageVerdict.reason))
   );
 }
 
