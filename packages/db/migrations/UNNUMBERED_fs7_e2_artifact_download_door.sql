@@ -290,7 +290,11 @@ begin
   -- disclosure language (packages/reporting-render/lib/layout-sandbox.mjs's
   -- sandbox_watermark_unsealed). A row that has gone missing, or whose text is blank, means the
   -- bytes cannot be shown to carry the burn -- so the download refuses too.
-  select btrim(coalesce(wpv.watermark, '')) into v_watermark
+  -- `watermark` is a jsonb OBJECT carrying the ratified text under its own `watermark` key -- the
+  -- shape layout-sandbox.mjs reads as `payload.watermark.watermark`. Read by key, never coerced
+  -- from the object: `btrim(watermark::text)` on `{"watermark":""}` is a NON-BLANK seven-character
+  -- string, so the coercion would have passed the exact row this wall exists to stop.
+  select btrim(coalesce(wpv.watermark ->> 'watermark', '')) into v_watermark
     from clara.watermark_policy_versions wpv where wpv.id = e.watermark_policy_version_id;
   if v_watermark is null or v_watermark = '' then
     raise exception 'this sandbox export has no ratified watermark text pinned'
