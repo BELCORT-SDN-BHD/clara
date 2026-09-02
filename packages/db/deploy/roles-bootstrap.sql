@@ -20,11 +20,14 @@
 -- 0160 (clara_stripe_webhook + its clara_stripe_webhook_login shell — FS-4 C-2's
 -- Stripe webhook sweep lane, PR #484, added 2026-09-02 per the estate's "role mints
 -- a same-commit roles-bootstrap twin" law — 0160 was the first role-minting
--- migration since this file was last synced), and deploy/storage-provision.sql
+-- migration since this file was last synced), 0161_checkout_gate_c3_folded_door
+-- (clara_auth_wall + its clara_auth_wall_login shell — FS-4 C-3's pre-session
+-- confirmation-attempt wall), and deploy/storage-provision.sql
 -- (clara_storage_docs). Derived and cross-checked against a live-shaped rig (apply
 -- 0001..0010 to a scratch DB → query pg_roles / pg_auth_members) — the census
--- pre-0160 reproduced exactly (12 clara_% roles + clara_storage_docs); 0160 adds two
--- more (14 + clara_storage_docs). CONVERGENCE SCOPE: on a FRESH target this produces the exact
+-- pre-0160 reproduced exactly (14 clara_% roles + clara_storage_docs); 0160 adds two
+-- more and C-3 adds two more (18 schema-lane roles + clara_storage_docs).
+-- CONVERGENCE SCOPE: on a FRESH target this produces the exact
 -- census. It does NOT remove unexpected EXTRA memberships/settings on a pre-existing
 -- role and it does NOT normalize NOLOGIN over a pre-existing login shell — so it is
 -- NOT a general-purpose "converge a drifted live cluster" tool.
@@ -93,16 +96,17 @@ declare
     'clara_wake_bank',  -- 0121 (F-A3/PR-1b): the bank wake lane's own group role
     'clara_wake_filing', -- 0126 (F-A7 β): the filing wake kind's role — group only, no login
                         -- shell and no postgres membership (reached via wake_credentials rows)
-    'clara_stripe_webhook' -- 0160 (FS-4 C-2, PR #484): the Stripe webhook sweep's own
+    'clara_stripe_webhook', -- 0160 (FS-4 C-2, PR #484): the Stripe webhook sweep's own
                         -- NOLOGIN group role, holding exactly the record/apply EXECUTE
                         -- surface and no table grants
+    'clara_auth_wall'   -- FS-4 C-3: the confirmation-attempt wall's own NOLOGIN group
   ];
   -- Login SHELLS: created NOLOGIN here; a LIVE project flips them to LOGIN out of band.
   logins text[] := array['clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login',
                          'clara_freeform_login',
     'clara_wake_bank_login',  -- 0121: nologin shell until PR-2's DSN/pool ceremony
-    'clara_stripe_webhook_login'];  -- 0160: INHERIT test-login-member shell for
-                        -- clara_stripe_webhook, itself NOLOGIN and without BYPASSRLS
+    'clara_stripe_webhook_login', -- 0160: member shell for clara_stripe_webhook
+    'clara_auth_wall_login']; -- C-3: member shell for clara_auth_wall
 begin
   -- Fail closed: never run on a live project (a login shell already LOGIN) w/o override.
   foreach r in array logins loop
@@ -187,6 +191,8 @@ grant clara_runtime         to clara_runtime_login     with inherit false, set t
 grant clara_agent_ro        to clara_agent_read_login  with inherit false, set true;
 grant clara_wake_interactive to clara_wake_write_login with inherit false, set true;
 grant clara_freeform_ro      to clara_freeform_login   with inherit false, set true;
+grant clara_stripe_webhook   to clara_stripe_webhook_login;
+grant clara_auth_wall        to clara_auth_wall_login;
 -- 0121's own membership is INHERIT-style, deliberately unlike the trio above — the plain
 -- grant mirrors the migration's exact statement (clara_wake_bank_login is created `inherit`).
 grant clara_wake_bank       to clara_wake_bank_login;
@@ -217,6 +223,8 @@ begin
     grant clara_wake_write_login to postgres with inherit false, set true;
     grant clara_freeform_ro      to postgres with inherit false, set true;
     grant clara_freeform_login   to postgres with inherit false, set true;
+    grant clara_stripe_webhook_login to postgres;
+    grant clara_auth_wall_login      to postgres;
     -- 0121's own postgres membership is a plain grant (rig-testability parity with the
     -- wake_write_login precedent) — mirrored exactly, not restyled.
     grant clara_wake_bank_login  to postgres;
@@ -275,9 +283,9 @@ end $$;
 
 -- ---------------------------------------------------------------------------
 -- 3. VERIFY (evidence — the DR drill / dr-verify diffs this against the source
---    census). Expect: 10 clara_% roles, all rolcanlogin=f rolsuper=f rolbypassrls=f
---    connlimit=-1; clara_agent_ro carries {default_transaction_read_only=on};
---    clara_storage_docs is rolinherit=f, the rest rolinherit=t.
+--    census). Expect: 19 clara_% roles total (18 schema lanes + clara_storage_docs), all
+--    rolcanlogin=f rolsuper=f rolbypassrls=f connlimit=-1; clara_agent_ro carries
+--    {default_transaction_read_only=on}; clara_storage_docs is rolinherit=f, the rest rolinherit=t.
 -- ---------------------------------------------------------------------------
 select rolname, rolcanlogin, rolsuper, rolbypassrls, rolinherit, rolconnlimit, rolconfig
   from pg_roles where rolname like 'clara\_%' order by 1;

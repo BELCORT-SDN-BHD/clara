@@ -878,6 +878,15 @@ const COA_TEMPLATE_PR_B_CLOCK_NAMES = ["apply_coa_template"];
 // not pick up a one-name bare-token roster drift.
 const CHECKOUT_GATE_C2_CLOCK_NAMES = ["resolve_stripe_event_problem"];
 
+// FS-4 C-3 is live-numbered as 0161. THREE bodies lawfully read the bare timestamp
+// clock: open_checkout_intent evaluates a rolling 24-hour rate window; claim_paid_firm stamps the
+// registration decision/payment consumption; settle_confirmation_attempt stamps the OTP outcome.
+// claim_confirmation_attempt is deliberately absent: attempted_at is a COLUMN DEFAULT and its
+// body evaluates relative to the returned attempted_at authority, so prosrc contains no bare clock.
+const CHECKOUT_GATE_C3_CLOCK_NAMES = [
+  "claim_paid_firm", "open_checkout_intent", "settle_confirmation_attempt",
+];
+
 /** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
 export async function s5BareTokenRoster(query) {
   const applied = async (pat) => (await query(
@@ -960,6 +969,7 @@ export async function s5BareTokenRoster(query) {
     names.push(...COA_TEMPLATE_PR_B_CLOCK_NAMES);
   }
   if (await appliedStem("checkout_gate_c2_stripe_events$")) names.push(...CHECKOUT_GATE_C2_CLOCK_NAMES);
+  if (await appliedStem("checkout_gate_c3_folded_door$")) names.push(...CHECKOUT_GATE_C3_CLOCK_NAMES);
   return names.sort();
 }
 
