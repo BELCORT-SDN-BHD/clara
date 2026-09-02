@@ -1,8 +1,8 @@
 -- FS-4 checkout gate, PR C-3: the folded paid-registration -> firm transaction, its payment
 -- and OTP evidence, the minimal beta billing declaration, six authenticated doors, and the confined
--- two-verb auth-wall lane. Number 0163 was claimed at merge prep under 裁-108 (the queue
--- awarded 0161 to Q-D6 #509 and 0162 to FS-7 e2 #512; this file takes the next number above
--- both, and re-cuts again if either does not land first).
+-- two-verb auth-wall lane. Number 0163 was claimed at merge prep under 裁-108: the queue awarded
+-- 0161 to Q-D6 #509 and 0162 to FS-7 e2 #512, both of which have since MERGED, so this file sits
+-- above a settled frontier and the number no longer carries a re-cut condition.
 --
 -- C-1 deliberately shipped the DPA storage but deferred its application doors to this cohort.
 -- C-3 heals that acknowledged build-order drift. C-2's apply_stripe_events body is not recut here: the

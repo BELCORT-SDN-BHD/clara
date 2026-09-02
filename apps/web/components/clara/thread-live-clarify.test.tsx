@@ -28,6 +28,45 @@ import messages from "../../messages/en.json";
 
 enableDomInspection();
 
+/** Roles whose ARIA definition carries an implicit non-off `aria-live`.
+ *  Kept in step with test/a11yRules.ts's IMPLICIT_LIVE_ROLES — the assertions
+ *  below are about announcement, so an explicit `aria-live` counts too. */
+const LIVE_ROLES = new Set(["alert", "log", "status", "marquee", "timer"]);
+
+function attrOf(n: Stub, name: string): string | null {
+  const get = n.getAttribute as ((k: string) => string | null) | undefined;
+  return typeof get === "function" ? get.call(n, name) : null;
+}
+
+function isLiveRegion(n: Stub): boolean {
+  if (n.nodeType !== 1) return false;
+  const declared = attrOf(n, "aria-live");
+  if (declared !== null) return declared.toLowerCase() !== "off";
+  const role = attrOf(n, "role");
+  return role !== null && LIVE_ROLES.has(role);
+}
+
+const regionName = (n: Stub) => attrOf(n, "role") ?? `aria-live=${attrOf(n, "aria-live")}`;
+
+/** The live regions ENCLOSING a node, innermost first — what actually decides
+ *  who announces a change to it. Deliberately EXCLUSIVE of the node itself: a
+ *  region does not announce its own insertion to a screen reader, its
+ *  ancestor-most non-busy live region does. */
+function liveRegionAncestors(node: Stub): string[] {
+  const out: string[] = [];
+  let n = (node.parentNode as Stub | null | undefined) ?? null;
+  while (n) {
+    if (isLiveRegion(n)) out.push(regionName(n));
+    n = (n.parentNode as Stub | null | undefined) ?? null;
+  }
+  return out;
+}
+
+/** Every live region in the tree, by role — the vacuity control's instrument. */
+function liveRegionRoles(root: Stub): string[] {
+  return findAllIn(root, isLiveRegion).map(regionName);
+}
+
 type Stub = Record<string, unknown>;
 type Call = { url: string; body: unknown };
 
@@ -178,6 +217,37 @@ test("a PARKED clarify reaches the thread and is answerable there, through the p
 
           assert.deepEqual(checkAccessibility(h.container as never), []);
           assert.deepEqual(checkKeyboardWalk(h.container as never), []);
+
+          // THE ANNOUNCER, ASSERTED (review R3-M2). P6-3 moved this card OUT of
+          // the transcript log to stop a live region nesting inside another one,
+          // and the correctness argument for that move is that the card owns its
+          // own `role="status"` and keeps announcing. Before the move the log was
+          // a backstop; after it, ClarifyCard's status region is LOAD-BEARING —
+          // and it had no cell. Deleting it left the whole 2080-test suite green,
+          // which is a new behaviour shipped with nothing guarding it.
+          //
+          // Asserted as a STRUCTURAL fact about the rendered tree rather than as
+          // a class-string read: the answered text sits inside exactly ONE live
+          // region, and that region is not the transcript log.
+          // The <p> carrying the text, not the region around it: a live region
+          // does not announce its own insertion, its enclosing one does, so the
+          // question "who announces this?" is only meaningful about a node
+          // INSIDE the region.
+          const answered = h.find((node) => node.tagName === "P" && /Answered by your firm/.test(textOf(node)));
+          assert.ok(answered, "the answered confirmation must be in the tree");
+          const enclosing = liveRegionAncestors(answered as Stub);
+          assert.equal(
+            enclosing.length,
+            1,
+            `the answered confirmation must sit inside exactly ONE live region, found ${JSON.stringify(enclosing)}`,
+          );
+          assert.equal(enclosing[0], "status", "…and that region is the card's own status, not the transcript log");
+
+          // The whole tree: three live regions, exactly one of them announcing
+          // the answer, zero nested. The count is the vacuity control — a tree
+          // that rendered none of them would satisfy the assertion above.
+          const allRegions = liveRegionRoles(h.container as Stub);
+          assert.deepEqual(allRegions.sort(), ["log", "status", "status"], "the transcript log, the card's status, and the stream-status line");
         } finally {
           await h.unmount();
         }

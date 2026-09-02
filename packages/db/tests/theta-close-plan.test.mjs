@@ -23,7 +23,7 @@ import { ROLES, wakeQuery } from "./rig-helpers.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
   has0056, caught, cleanCloseableFY, beginClose, finalizeClose, attestClose,
-  BANK1, REVN, addDaysStr,
+  hasQd6Wall, QD6_GATE_KEY, BANK1, REVN, addDaysStr,
 } from "./x56-fixtures.mjs";
 import { mintInteractive, filedDocument } from "./s6-helpers.mjs";
 
@@ -110,10 +110,16 @@ test("T1 the plan document tracks not_yet_measured -> measured/fail -> attested(
   assert.equal(pre.close_run.state, "absent", "no close run has begun yet");
   assert.equal(pre.receipt.state, "absent", "no receipt before any close");
   // CENSUS C15 (F-A4 PR-1a): thirteen became fourteen when `undated_documents` was added as
-  // its own drawer-2 row (D-18). The key is named, never absorbed into a bare count.
-  assert.equal(pre.checks.length, 14, "all 14 catalog checks ride the plan, unfiltered by applies_when");
+  // its own drawer-2 row (D-18); Q-D6's drawer-1 close-seal wall then makes fifteen. Its
+  // migration ships UNNUMBERED and migrate.mjs skips it by filename until the number is
+  // claimed (裁-108), so the expectation is chosen by a LIVE CATALOG witness -- and both keys
+  // are still NAMED on their own branch, never absorbed into a bare count.
+  const qd6 = await hasQd6Wall();
+  assert.equal(pre.checks.length, qd6 ? 15 : 14, "every catalog check rides the plan, unfiltered by applies_when");
   assert.ok(pre.checks.some((c) => c.check_key === "undated_documents"),
     "the fourteenth is undated_documents");
+  assert.equal(pre.checks.some((c) => c.check_key === QD6_GATE_KEY), qd6,
+    "and the fifteenth is deferred_opening_resolved -- present exactly when its migration has been applied, never inferred");
   for (const c of pre.checks) {
     assert.equal(c.result.state, "not_yet_measured", `${c.check_key}: unmeasured before any close run`);
     assert.ok(Array.isArray(c.items) && c.items.length >= 1, `${c.check_key}: carries at least the __gate__ item`);

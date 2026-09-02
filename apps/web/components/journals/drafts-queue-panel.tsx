@@ -111,7 +111,7 @@ export function DraftsQueuePanel({
                 type="button"
                 aria-expanded={expanded}
                 onClick={() => setExpandedId(expanded ? null : (entryId ?? null))}
-                className="-m-1 flex w-full items-center justify-between gap-2 rounded-md p-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="-m-1 flex w-full items-center justify-between gap-2 rounded-md p-1 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/70"
               >
                 <span className="flex items-center gap-2">
                   <QueueSectionBadge section={row.section} />

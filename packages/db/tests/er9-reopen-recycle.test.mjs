@@ -239,8 +239,26 @@ test("R9.E2 the MIRROR is an ends_on-dated prior-period adjustment: posted at th
 
   const today = await bookToday();
   assert.notEqual(today, FY_END, "mandatory setup: book-today differs from the year end, so the two clocks are distinguishable");
-  assert.equal(isoDay(m.created_at), today, "created_at is the real moment of the act");
-  assert.equal(isoDay(m.approved_at), today, "approved_at is the real moment of the act — only the ACCOUNTING date is backdated");
+  // TWO CLOCKS, NOT ONE: created_at/approved_at are `timestamptz` (a real instant), unlike
+  // posting_date above (a plain `date`, cast at line 227 via isoDay() — safe, because node-pg
+  // materializes a DATE at LOCAL midnight and isoDay() reads it back with the SAME local
+  // getters, so the round trip is invariant to the test process's OS timezone; see isoDay's
+  // own doc comment in er9-corpus-fixtures.mjs). Piping a timestamptz through isoDay() has no
+  // such invariance: it reads the instant's calendar day in the TEST PROCESS's OS timezone,
+  // while bookToday() (clara._book_today()) reads the SAME instant's calendar day cast
+  // explicitly `at time zone 'Asia/Kuala_Lumpur'` inside Postgres. Those two zones agree only
+  // when the process happens to run at Asia/Kuala_Lumpur itself (true on this rig's usual dev
+  // box) — they disagree on a UTC-zoned runner (the hosted CI default) for every run that lands
+  // between 16:00 and 24:00 UTC (00:00-08:00 MYT the next day), which is exactly what reded
+  // hosted run 33655410932: isoDay(created_at) read the UTC day while `today` read the MYT day,
+  // one ahead. Fix: cast BOTH sides inside the same statement, in the SAME zone bookToday()
+  // uses, and compare as text — never a JS Date's local getters against a timestamptz.
+  const myt = (await rootQuery(
+    `select (created_at  at time zone 'Asia/Kuala_Lumpur')::date::text as created_myt,
+            (approved_at at time zone 'Asia/Kuala_Lumpur')::date::text as approved_myt
+       from clara.journal_entries where id = $1`, [W.mirror])).rows[0];
+  assert.equal(myt.created_myt, today, "created_at is the real moment of the act");
+  assert.equal(myt.approved_myt, today, "approved_at is the real moment of the act — only the ACCOUNTING date is backdated");
 
   const orig = await lineRows(W.entry1);
   const mir = await lineRows(W.mirror);
