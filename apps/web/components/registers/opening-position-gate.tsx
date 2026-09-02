@@ -101,6 +101,12 @@ function OpeningPositionGate({
       <div className="flex flex-col gap-2">
         <StateBanner tone="info" title={t("openingPosition.deferredTitle")}>
           {deferred.question}
+          {/* Q-D6 (owner ruling, fa7b-gate-record.md:44-46) is LIVE in the books: the
+              `deferred_opening_resolved` drawer-1 close gate refuses `finalize_close` while
+              the opening is uncaptured, with no attestation path for anybody. This line is
+              the honest statement of that wall; the copy moved OUT of the not-built note
+              below, which now names only what genuinely is not built. */}
+          <p className="mt-1">{t("openingPosition.closeSealBlocked")}</p>
         </StateBanner>
         {chaseList.length > 0 ? (
           <StateBanner tone="warning" title={t("openingPosition.chaseListTitle")}>

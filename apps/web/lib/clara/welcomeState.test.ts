@@ -17,7 +17,8 @@ import type { MessageRow } from "./api";
 
 type GateState = Pick<
   ClaraThreadUiState,
-  "messages" | "messagesLoaded" | "loadError" | "pendingUserParts" | "sendStatus" | "stream"
+  | "messages" | "messagesLoaded" | "loadError" | "pendingUserParts" | "sendStatus" | "stream"
+  | "parkedClarify" | "turnStartedAt"
 >;
 
 /** A genuinely empty, genuinely settled transcript — the one case that paints. */
@@ -28,6 +29,8 @@ const settledEmpty: GateState = {
   pendingUserParts: null,
   sendStatus: "idle",
   stream: initialClaraStreamState,
+  parkedClarify: null,
+  turnStartedAt: null,
 };
 
 const aMessage = { id: "m1", role: "assistant", parts: [] } as unknown as MessageRow;
@@ -97,6 +100,32 @@ test("an idle stream with no chunks is still the welcome moment — the conjunct
   assert.equal(gate({ stream: { ...initialClaraStreamState, reconnectAttempt: 0 } }), true);
 });
 
+// ---------------------------------------------------------------------------
+// THE TWO CONJUNCTS THE P6-5 MERGE ADDED. Neither branch could reach these
+// states alone: #514 built the welcome against a transcript that is empty
+// because nothing has happened, and P6-5 made a transcript that is empty
+// because the turn that will fill it is still IN FLIGHT — read from the
+// database at mount, so it is visible on a page reload with no stream and no
+// persisted row. The combination is the defect, and these are its cells.
+// ---------------------------------------------------------------------------
+
+test("a REHYDRATED parked question suppresses the welcome — the mascot never greets someone mid-question", () => {
+  assert.equal(
+    gate({ parkedClarify: { type: "clarify", tool_call_id: "interruption:i1", question: "Which client owns this invoice?", context: null, framing: "" } }),
+    false,
+  );
+});
+
+test("a RUNNING turn found at mount suppresses the welcome — 裁-132's own line contradicts it", () => {
+  assert.equal(gate({ turnStartedAt: "2026-09-02T10:00:00.000Z" }), false);
+});
+
+test("neither new conjunct is over-broad: null on both is still the welcome moment", () => {
+  // The counter-cells. Without these, either conjunct could have been written
+  // against the wrong nullish reading and silently deleted the whole feature.
+  assert.equal(gate({ parkedClarify: null, turnStartedAt: null }), true);
+});
+
 test("a failed read is a STATE the thread already spells out — never a welcome under an error banner", () => {
   assert.equal(gate({ loadError: "load messages failed (503): " }), false);
 });
@@ -109,13 +138,15 @@ test("no thread could be resolved at all — there is nothing to be empty", () =
   assert.equal(gate({}, { threadId: null }), false);
 });
 
-test("the gate reads only the five fields it names — an unrelated store field cannot flip it", () => {
+test("the gate reads only the eight fields it names — an unrelated store field cannot flip it", () => {
   // Guards against a future conjunct being added against a field the caller
   // does not actually pass: `ClaraThreadView` hands the gate its whole `state`,
   // so a widened Pick<> would compile while this cell keeps the CONTRACT — the
-  // six fields — honest and visible. (Six since #508 merged in `stream`; the
-  // count in this comment is part of the contract, so widening it silently
-  // means editing this line and being seen to do it.)
-  const wider = { ...settledEmpty, sendError: "boom", activeTaskId: "task-1" } as GateState;
+  // EIGHT fields — honest and visible. (Six after #508 merged in `stream`; eight
+  // after the P6-5 merge added `parkedClarify` and `turnStartedAt`. The count in
+  // this comment is part of the contract, so widening it silently means editing
+  // this line and being seen to do it. `activeTaskId` left this probe when it
+  // stopped being unrelated: a task id now travels with a run the gate DOES read.)
+  const wider = { ...settledEmpty, sendError: "boom", turnStatus: "queued" } as GateState;
   assert.equal(claraWelcomeVisible({ threadId: "t1", notSignedIn: false, state: wider }), true);
 });

@@ -28,7 +28,24 @@ runs:
         # preflight once threw 3F000 there). The test then applies 0001-0004,
         # builds data through the writers, and applies 0005 itself.
         PGDATABASE=clara_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-          node --test tests/rig-events-upgrade.test.mjs
+          CLARA_RIG_ALLOW_ROLE_SWEEP=1 node --test tests/rig-events-upgrade.test.mjs
+
+    # CLUSTER-WIDE CLEANUP (review-518 D1/D2): roles are cluster-wide, not scoped to
+    # the database above, and no drill step drops its own database — so a role this
+    # step's full 0001->frontier replay minted would otherwise survive, undropped,
+    # into every LATER step's own migrate() and misfire THEIR 0154 role census.
+    # `if: always()` — a failed drill above still leaves its role-minting migrations
+    # committed (each runs in its own transaction), so cleanup must run regardless of
+    # this step's outcome. Drops the database FIRST: `drop role` consults
+    # `pg_shdepend` across every database, so it only succeeds once nothing here
+    # still references the role. See tests/rig-cluster-reset.mjs's header.
+    - name: Cluster cleanup — drop clara_upgrade_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          node tests/rig-cluster-reset.mjs --drop-database=clara_upgrade_ci --sweep-roles
 
     # Slice-5 §3.0.2/§3.11 drill (same false-green protection as the C9 step
     # above): the filing_id backfill (clean + ambiguous-citation atomic ABORT),
@@ -41,7 +58,17 @@ runs:
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_docs_upgrade_ci'
         PGDATABASE=clara_docs_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-          node --test tests/rig-docs-upgrade.test.mjs
+          CLARA_RIG_ALLOW_ROLE_SWEEP=1 node --test tests/rig-docs-upgrade.test.mjs
+
+    # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same
+    # mechanism, this step's own database.
+    - name: Cluster cleanup — drop clara_docs_upgrade_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          node tests/rig-cluster-reset.mjs --drop-database=clara_docs_upgrade_ci --sweep-roles
 
     # Slice-6 coding-floor upgrade drill (same false-green protection as the two
     # steps above): the contract-blind §11 probe-1 battery — fresh 0001→0009
@@ -56,7 +83,17 @@ runs:
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_s6_upgrade_ci'
         PGDATABASE=clara_s6_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-          node --test tests/s6-upgrade.test.mjs
+          CLARA_RIG_ALLOW_ROLE_SWEEP=1 node --test tests/s6-upgrade.test.mjs
+
+    # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same
+    # mechanism, this step's own database.
+    - name: Cluster cleanup — drop clara_s6_upgrade_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          node tests/rig-cluster-reset.mjs --drop-database=clara_s6_upgrade_ci --sweep-roles
 
     # Wave-B migration-0020 A7/A8 upgrade drill (ratchet R4 F2 — the anti-misleading-green
     # wiring). wb-0020-upgrade.test.mjs is the ONLY proof of the 19→20 path: that the apply is
@@ -80,6 +117,18 @@ runs:
         PGDATABASE=clara_wb20_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
           CLARA_RIG_DB=1 node --test tests/wave-b/wb-0020-upgrade.test.mjs
 
+    # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same
+    # mechanism, this step's own database. This drill file itself replays only a
+    # bounded early range (not the real frontier), so it carries no in-file sweep,
+    # but the CLUSTER it runs on is shared with every other step here regardless.
+    - name: Cluster cleanup — drop clara_wb20_upgrade_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          node tests/rig-cluster-reset.mjs --drop-database=clara_wb20_upgrade_ci --sweep-roles
+
     # Wave-C-a migration-0037 subledger upgrade drill (the same anti-misleading-green
     # wiring as the four drills above). x37-0037-upgrade.test.mjs is the ONLY proof that
     # 0037's §0 live probes, its §J backfill (including the reversal-unwind pass), and its
@@ -102,7 +151,17 @@ runs:
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x37_upgrade_ci'
         PGDATABASE=clara_x37_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-          CLARA_RIG_DB=1 node --test tests/x37-0037-upgrade.test.mjs
+          CLARA_RIG_DB=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 node --test tests/x37-0037-upgrade.test.mjs
+
+    # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same
+    # mechanism, this step's own database.
+    - name: Cluster cleanup — drop clara_x37_upgrade_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          node tests/rig-cluster-reset.mjs --drop-database=clara_x37_upgrade_ci --sweep-roles
 
     # Wave-C-c migration-0040 effective_date backfill upgrade drill (fix-wave E2 — the same
     # anti-misleading-green wiring as the x37-0037-upgrade drill above). x40-0040-upgrade.
@@ -129,7 +188,17 @@ runs:
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x40_upgrade_ci'
         PGDATABASE=clara_x40_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-          CLARA_RIG_DB=1 node --test tests/x40-0040-upgrade.test.mjs
+          CLARA_RIG_DB=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 node --test tests/x40-0040-upgrade.test.mjs
+
+    # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same
+    # mechanism, this step's own database.
+    - name: Cluster cleanup — drop clara_x40_upgrade_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          node tests/rig-cluster-reset.mjs --drop-database=clara_x40_upgrade_ci --sweep-roles
 
     # Wave-D-a migration-0041 FA-register deploy-onto-existing drill (the same
     # anti-misleading-green wiring as the drills above). x41-0041-upgrade.test.mjs is the
@@ -155,7 +224,19 @@ runs:
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x41_upgrade_ci'
         PGDATABASE=clara_x41_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-          CLARA_RIG_DB=1 node --test tests/x41-0041-upgrade.test.mjs
+          CLARA_RIG_DB=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 node --test tests/x41-0041-upgrade.test.mjs
+
+    # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same
+    # mechanism, this step's own database. (x41 was not in the reviewer's original
+    # list of frontier-replaying drills — found independently while folding #518;
+    # tests/x41-0041-upgrade.test.mjs:317 also calls migrate() at the real frontier.)
+    - name: Cluster cleanup — drop clara_x41_upgrade_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          node tests/rig-cluster-reset.mjs --drop-database=clara_x41_upgrade_ci --sweep-roles
 
     # [WAVE D-b SPLIT] The whole-unit x42-0042-upgrade drill is GONE — census §6 adjudicated
     # ONE DRILL PER SLICE, four drills, because each slice's deploy risk is different and each
@@ -207,7 +288,26 @@ runs:
         echo "--- highest Wave-D-b slice on disk: $DRILL_N · drill: $DRILL ---"
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x42_split_upgrade_ci'
         PGDATABASE=clara_x42_split_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-          CLARA_RIG_DB=1 node --test "tests/$DRILL.test.mjs"
+          CLARA_RIG_DB=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 node --test "tests/$DRILL.test.mjs"
+
+    # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same
+    # mechanism, this step's own database (created only when a Wave-D-b slice exists
+    # on disk; `drop database if exists` no-ops harmlessly otherwise). NOTE: this
+    # step's own shared kit (tests/x42-split-upgrade-kit.mjs `freshDb()`) ALSO calls
+    # `migrate({ dir: MIG_DIR })` at the real frontier, inside a two-reset sequence
+    # whose ORDER is explicitly load-bearing (its own comment) — found while folding
+    # #518 but NOT given an in-file sweep in this round (the file's own ordering
+    # complexity makes a rushed addition here riskier than the WO's five already-
+    # verified files); flagged as a follow-up in the PR body, not fixed here. The
+    # between-step cleanup below still protects it against CROSS-step contamination
+    # from whichever drill ran before it in this job.
+    - name: Cluster cleanup — drop clara_x42_split_upgrade_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          node tests/rig-cluster-reset.mjs --drop-database=clara_x42_split_upgrade_ci --sweep-roles
 
     # Hardening-batch Migration A (0144) recut-guard drill (same false-green protection as
     # the steps above): drives the REAL 0144 file through migrate() against a body mutated
@@ -223,6 +323,18 @@ runs:
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_hrd_a_recut_ci'
         PGDATABASE=clara_hrd_a_recut_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
           node --test tests/hrd-a-recut-guard.test.mjs
+
+    # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same
+    # mechanism, this step's own database. This drill replays only the chain BELOW
+    # 0144 (its own header comment), never reaching 0154, so it carries no in-file
+    # sweep — but the shared cluster still needs the between-step cleanup regardless.
+    - name: Cluster cleanup — drop clara_hrd_a_recut_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          node tests/rig-cluster-reset.mjs --drop-database=clara_hrd_a_recut_ci --sweep-roles
 
     # Hardening-batch Migration B (裁-16) POPULATED upgrade drill. B carries two DATA
     # conversions — the firm_admissions plaintext->hash backfill and the legacy op_receipts
@@ -241,4 +353,21 @@ runs:
       run: |
         PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_hrd_b_upgrade_ci'
         PGDATABASE=clara_hrd_b_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-          node --test tests/hrd-b-upgrade-drill.test.mjs
+          CLARA_RIG_ALLOW_ROLE_SWEEP=1 node --test tests/hrd-b-upgrade-drill.test.mjs
+
+    # See the C9 step's cleanup comment above (review-518 D1/D2) — same reason, same
+    # mechanism, this step's own database. NOTE: this drill's shared kit
+    # (tests/hrd-b-upgrade-kit.mjs `freshBaseline()`) copies every successor migration
+    # ABOVE 0147 (unbounded — reaches the real frontier) and is called once per test
+    # cell in tests/hrd-b-upgrade-drill.test.mjs (several cells, one process) — found
+    # while folding #518 but NOT given an in-file sweep in this round (out of scope,
+    # same reasoning as the x42-split kit above); flagged as a follow-up in the PR
+    # body. The between-step cleanup below still protects it against CROSS-step
+    # contamination from whichever drill ran before it in this job.
+    - name: Cluster cleanup — drop clara_hrd_b_upgrade_ci + sweep chain-minted roles
+      if: always()
+      working-directory: packages/db
+      shell: bash -e {0}
+      run: |
+        PGDATABASE=postgres CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_ALLOW_ROLE_SWEEP=1 \
+          node tests/rig-cluster-reset.mjs --drop-database=clara_hrd_b_upgrade_ci --sweep-roles

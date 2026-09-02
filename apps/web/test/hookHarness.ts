@@ -279,6 +279,34 @@ export function setFieldValue(node: Stub, value: string): void {
   });
 }
 
+/** The CHECKBOX twin of `setFieldValue`, and it exists for exactly the same reason: a control
+ *  inside an OPEN, PORTALED dialog is unreachable by `fireEvent`'s delegated dispatch (see
+ *  `clickButton`'s header for the measurement), so a checkbox in a door dialog's fieldset can
+ *  only be driven by setting `checked` and invoking the node's own committed `onChange`.
+ *
+ *  ADDED TO THE SHARED HARNESS RATHER THAN HAND-ROLLED IN ONE TEST FILE — the same discipline
+ *  `clickButton`'s own header records after three lanes wrote local copies and one of them
+ *  clicked nothing and passed. `setFieldValue` covers value-bearing fields; this covers the
+ *  one control kind it cannot.
+ *
+ *  GUARDED like `clickButton`: a DISABLED checkbox throws rather than firing its handler. A
+ *  locked control (a `core` chart family that the door refuses to drop) is asserted with
+ *  `.disabled`, never toggled through and hoped about. */
+export function setCheckboxChecked(node: Stub, checked: boolean): void {
+  if ((node as unknown as { disabled?: boolean }).disabled === true) {
+    throw new Error("setCheckboxChecked: refusing to toggle a DISABLED checkbox — assert the gate, then act");
+  }
+  setNativeValue(node, "checked", checked);
+  const propsKey = Object.keys(node as object).find((k) => k.startsWith("__reactProps"));
+  const props = propsKey ? (node as unknown as Record<string, { onChange?: (e: unknown) => void }>)[propsKey] : undefined;
+  if (!props?.onChange) throw new Error("setCheckboxChecked: no onChange prop found on this node — is it really a committed checkbox?");
+  const nativeEvent = { type: "click", target: node, defaultPrevented: false };
+  props.onChange({
+    target: node, currentTarget: node, nativeEvent,
+    persist() {}, preventDefault() {}, stopPropagation() {},
+  });
+}
+
 /** Invokes a node's own `onClick` prop DIRECTLY, bypassing `fireEvent`'s
  *  delegated dispatch entirely — the SAME reasoning `setFieldValue` above
  *  already documents for `onChange`, discovered chasing a T6 door-dialog

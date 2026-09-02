@@ -31,6 +31,8 @@ import { NeedsYouInbox } from "./needs-you-inbox";
 import messages from "../../messages/en.json";
 import type { ReviewQueueEnvelope } from "../../lib/firm/needs-you";
 
+type Stub = Record<string, unknown>;
+
 enableDomInspection();
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -231,7 +233,27 @@ test("firm needs-you inbox: a row bearing 'constructor' or 'toString' as its row
         assert.match(h.text(), /Unrecognized item \(constructor\)/, "the 'constructor' row must render the honest unrecognized-kind label");
         assert.match(h.text(), /Unrecognized item \(toString\)/, "the 'toString' row must render the honest unrecognized-kind label");
         assert.ok(!h.text().includes("[object Undefined]"), "must never render an inherited toString() call's own output");
-        assert.equal(h.find((n) => n.tagName === "BUTTON") === null, true, "neither hostile row may carry ANY inline act button");
+        // P6-5 SHARPENED THIS INSTRUMENT rather than relaxing it. It used to read "there is
+        // no <button> anywhere", which was a precise-enough proxy while the ONLY button a row
+        // could carry was an inline act. 裁-17 ④ gives every row an "Ask Clara about this"
+        // handoff — which calls NO door and dispatches one DOM event — so "zero buttons"
+        // would now fail for a reason that has nothing to do with this cell's subject.
+        //
+        // The replacement is STRICTER, not looser: it censuses every button by name and
+        // requires the multiset to be EXACTLY the two handoffs (one per hostile row). An
+        // inline act leaking onto a hostile row still reds this — it would be a third button,
+        // or a differently-named one — and so would a handoff going missing.
+        const buttonNames = [] as string[];
+        const walkButtons = (n: Stub) => {
+          if (n.tagName === "BUTTON") buttonNames.push(textOf(n).trim());
+          for (const c of (n.childNodes as Stub[] | undefined) ?? []) walkButtons(c);
+        };
+        walkButtons(h.container as Stub);
+        assert.deepEqual(
+          buttonNames,
+          ["Ask Clara about this", "Ask Clara about this"],
+          "the ONLY buttons on a hostile row are the two rail handoffs — never an inline act",
+        );
         const violations = checkAccessibility(h.container as never);
         assert.deepEqual(violations, [], JSON.stringify(violations));
       } finally {
