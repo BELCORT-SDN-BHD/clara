@@ -185,6 +185,13 @@ export const DO_ACTIONS: readonly DoActionSpec[] = [
  */
 export function isDoActionPermitted(spec: DoActionSpec, env: DoActionEnv): boolean {
   if (!meetsFloor(env.ctx, spec.floor)) return false;
+  // BELT, NO CELL — labelled exactly as `ApplyStandardChartControl`'s `toggle` guard is, and for
+  // the same reason. Every current spec's own `ready` already reads `env.client`
+  // (`startClientInterview` reads `env.client?.planState`, `bootstrapClientPlan` opens with
+  // `env.client !== null`), so `if (false && …)` here leaves the suite fully green: the mutant is
+  // NON-DISCRIMINATING and dressing one up as a cell is the expensive direction of that mistake.
+  // It stays as the altitude invariant for a future spec whose `ready` does not happen to touch
+  // the client — at which point it becomes discriminating and earns a cell.
   if (spec.altitude === "client" && env.client === null) return false;
   return spec.ready(env);
 }

@@ -40,7 +40,21 @@ export const P6_5 = {
  *  and each row carries its OWN client id, so both walks' `(created_by, client_id)` selections
  *  stay disjoint. */
 export const P6_5_SESSIONS = [
-  { id: "f0f0f0f0-0000-4000-8000-000000000000", firm_id: "33333333-3333-3333-3333-333333333333", client_id: null, created_by: "11111111-1111-1111-1111-111111111111", visibility: "private", title: "P6-5 firm", created_at: "2026-09-01T00:00:00.000Z" },
+  // THE FIRM-ALTITUDE ROW CARRIES A DISTINCT `created_by`, AND THAT IS THE WHOLE POINT.
+  // `selectOwnSession` (lib/clara/useActiveThread.ts) takes the first row matching
+  // `created_by === callerSubject && client_id === null`. Before this PR the shared list held
+  // ZERO such rows; with the shared SUBJECT here it held exactly one — MINE — so every walk in
+  // the suite that opened the rail at firm altitude resolved this lane's thread. That is the
+  // third instance of the very rule §1 of the PR proposes ("a lane must not claim a shared
+  // endpoint"), and a fixture, not a handler, is where it bit.
+  //
+  // With a distinct subject the row is unreachable as "the caller's own" — by any walk,
+  // including this one — which restores the pre-PR world exactly. This lane's own A→firm leg
+  // therefore proves the boundary by what does NOT cross (client A's transcript and draft) plus
+  // the client header being gone, rather than by rendering a firm transcript it would have had
+  // to claim the shared list to get. `e2e-fixture-ownership.test.ts` reds if this ever carries
+  // the shared subject again.
+  { id: "f0f0f0f0-0000-4000-8000-000000000000", firm_id: "33333333-3333-3333-3333-333333333333", client_id: null, created_by: "5e55e55e-5555-4555-8555-555555555555", visibility: "private", title: "P6-5 firm (unreachable by design)", created_at: "2026-09-01T00:00:00.000Z" },
   { id: "a0a0a0a0-1111-4111-8111-111111111111", firm_id: "33333333-3333-3333-3333-333333333333", client_id: "c1c1c1c1-1111-4111-8111-111111111111", created_by: "11111111-1111-1111-1111-111111111111", visibility: "private", title: "P6-5 A", created_at: "2026-09-01T00:00:00.000Z" },
   { id: "b0b0b0b0-2222-4222-8222-222222222222", firm_id: "33333333-3333-3333-3333-333333333333", client_id: "c2c2c2c2-2222-4222-8222-222222222222", created_by: "11111111-1111-1111-1111-111111111111", visibility: "private", title: "P6-5 B", created_at: "2026-09-01T00:00:00.000Z" },
 ];
@@ -191,6 +205,7 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
 
   if (request.method === "POST" && path === "/rest/v1/rpc/resolve_onboarding_plan_item") {
     const body = await readJson(request);
+    if (body.p_plan !== P6_5.planA) return false;
     state.amendments.push(String(body.p_resolution ?? ""));
     state.bankAnswer = String(body.p_resolution ?? "");
     sendJson(response, 200, { plan_id: P6_5.planA, item_id: "item-banks", state: "resolved" }, cors);
@@ -198,6 +213,7 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/coa_chart_state") {
+    if ((await readJson(request)).p_client !== P6_5.clientA) return false;
     sendJson(response, 200, {
       client_id: P6_5.clientA, seed_decision: "firm_template", seed_wants_template: true,
       accounts: state.appliedFamilies ? 51 : 0,
@@ -211,6 +227,13 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
     return true;
   }
 
+  // EXCEPTION 1 of 2, named rather than silent. `clara.list_coa_templates()` takes NO ARGUMENTS,
+  // so the request carries no subject to scope by — clause 1 of the ownership rule cannot be
+  // applied to it, and pretending otherwise with a `return false` on some invented condition
+  // would be worse than saying so. Measured: no other spec in `apps/web/e2e` calls it
+  // (`grep -rn list_coa_templates apps/web/e2e` returns this file and this lane's walk only), and
+  // `e2e-fixture-ownership.test.ts` holds that measurement as a cell — the day another walk needs
+  // it, the census reds and the two lanes settle who owns the list.
   if (request.method === "POST" && path === "/rest/v1/rpc/list_coa_templates") {
     sendJson(response, 200, [{
       template_id: P6_5.templateId, scope: "platform", firm_id: null,
@@ -223,6 +246,7 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/get_coa_template") {
+    if ((await readJson(request)).p_template !== P6_5.templateId) return false;
     sendJson(response, 200, {
       template_id: P6_5.templateId,
       families: [
@@ -235,6 +259,8 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
   }
 
   if (request.method === "POST" && path === "/rest/v1/rpc/coa_template_family_plan") {
+    const plan = await readJson(request);
+    if (plan.p_client !== P6_5.clientA || plan.p_template !== P6_5.templateId) return false;
     sendJson(response, 200, {
       template_id: P6_5.templateId, client_id: P6_5.clientA, axes: {}, msic_division: null,
       absent_axes: ["msic"], axis: "partial", keep: ["core_ledger"], drop: ["retail"],
@@ -244,6 +270,7 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
 
   if (request.method === "POST" && path === "/rest/v1/rpc/apply_coa_template") {
     const body = await readJson(request);
+    if (body.p_client !== P6_5.clientA) return false;
     state.appliedFamilies = body.p_families ?? [];
     sendJson(response, 200, {
       client_id: P6_5.clientA, template_id: P6_5.templateId, template_version: 1,
@@ -255,13 +282,19 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
 
   if (request.method === "POST" && path === "/rest/v1/rpc/begin_client_onboarding") {
     const body = await readJson(request);
-    // NO FLOOR CHECK HERE, and the absence is deliberate rather than lax. The floor this door
-    // enforces (`_human_ctx(role_rank('admin'))`, 0017:2497) is Postgres's, and Postgres is
-    // not in this walk — a mock re-implementing it would be a SECOND copy of a wall, which is
-    // exactly what the review laws forbid, and greening it would prove the copy. What the
-    // browser leg proves is the SURFACE property: below the floor, the row is not offered at
+    // EXCEPTION 2 of 2, and the one the review agreed is separately justified. Its only
+    // argument is `p_name` — a free-text client name, not an id — so there is no SUBJECT to
+    // scope by: any walk creating any client would carry a different name, and keying on this
+    // lane's own string would be scoping by a label rather than by identity ("spelling is not
+    // identity", applied to a fixture). Measured: no other spec calls it.
+    //
+    // NO FLOOR CHECK HERE either, and that absence is deliberate rather than lax. The floor
+    // this door enforces (`_human_ctx(role_rank('admin'))`, 0017:2497) is Postgres's, and
+    // Postgres is not in this walk — a mock re-implementing it would be a SECOND copy of a
+    // wall, which the review laws forbid, and greening it would prove the copy. What the
+    // browser leg proves is the SURFACE property: below the floor the row is not offered at
     // all, so this door is never reached. The verbatim rendering of a real refusal is proved
-    // where a refusal can be produced honestly — `components/command/command-do.test.tsx`.
+    // where one can be produced honestly — `components/command/command-do.test.tsx`.
     sendJson(response, 200, { client_id: P6_5.newClientId, plan_id: "plan-new", name: body.p_name }, cors);
     return true;
   }

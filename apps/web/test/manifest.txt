@@ -35,6 +35,7 @@
 
 
 
+
 components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
 components/admin/members-a11y.test.tsx
@@ -155,6 +156,7 @@ components/reports/reports-components.test.tsx
 components/reports/reports-snapshots-seeding-a11y.test.tsx
 components/reports/reports-snapshots-seeding-keyboard.test.tsx
 components/tax/tax-a11y.test.tsx
+e2e/e2e-fixture-ownership.test.ts
 lib/bank/agency-doors.test.ts
 lib/bank/doors.test.ts
 lib/bank/error-kind.test.ts

@@ -70,7 +70,7 @@ function App(): ReactElement {
   });
 }
 
-function withFetch(impl: (url: string, init?: RequestInit) => Response, run: (calls: Call[]) => Promise<void>): Promise<void> {
+function withFetch(impl: (url: string, init?: RequestInit) => Response | Promise<Response>, run: (calls: Call[]) => Promise<void>): Promise<void> {
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const calls: Call[] = [];
@@ -420,6 +420,103 @@ test("裁-128: an ALREADY-ADOPTED chart reports the adoption instead of offering
     try {
       await settleUntil(h, () => /already applied to this client \(42 accounts\)/.test(h.text()), "the adopted state");
       assert.equal(h.find(buttonNamed("Apply the standard chart")), null);
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("N3 · 裁-44 row 27: a read failure REPORTS itself in the unavailable arm and offers nothing", async () => {
+  // THE ROW HAD NO CELL. Deleting `{refusal}` from the `chart === null` arm left the file 9/9
+  // green — the fail-closed table claimed "the control reports it and offers nothing" while only
+  // the second half was proved.
+  //
+  // REACHING THE ARM HONESTLY: `chart === null` with a refusal standing needs `data` SET and
+  // `err` SET at once, which is exactly the sticky-refusal contract in lib/parts/hooks.ts — a
+  // refusal `act()` surfaces survives the follow-up reload it triggers. So: load once cleanly,
+  // apply, have the door REFUSE, and have the reload's `coa_chart_state` come back unreadable.
+  // Both halves are real production states, and their combination is the one this arm exists for.
+  let chartReads = 0;
+  const router = (url: string): Response => {
+    if (url.includes("/rest/v1/rpc/coa_chart_state")) {
+      chartReads += 1;
+      // The reload after the refusal returns a payload `readCoaChartState` cannot read.
+      return chartReads === 1 ? json(CHART_PENDING) : json({ nothing: "readable" });
+    }
+    if (url.includes("/rest/v1/rpc/apply_coa_template")) {
+      return json({ code: "CLR10", message: "this client already has accounts", details: '{"reason":"chart_not_empty"}' }, 400);
+    }
+    return chartRouter(CHART_PENDING)(url);
+  };
+
+  await withFetch(router, async () => {
+    const { h, body: docBody } = await mountInBody();
+    try {
+      const trigger = h.find(buttonNamed("Apply the standard chart"));
+      assert.ok(trigger);
+      await h.fireEvent(trigger, "click");
+      for (let i = 0; i < 6; i++) await h.settle();
+      const select = findIn(docBody, (n) => n.tagName === "SELECT");
+      assert.ok(select);
+      await h.act(() => setFieldValue(select, TEMPLATE_ID));
+      await settleUntil(h, () => /Core ledger/.test(textOf(docBody)), "the family roster", () => textOf(docBody));
+      const confirm = findIn(docBody, buttonNamed("Apply the chart"));
+      assert.ok(confirm);
+      await h.act(() => clickButton(confirm));
+
+      // The DB's own words, verbatim, in the arm that renders when the chart can no longer be read.
+      await settleUntil(h, () => /this client already has accounts/.test(textOf(docBody)), "the verbatim refusal", () => textOf(docBody));
+      assert.match(textOf(docBody), /CLR10/, "the code renders beside it");
+      assert.match(textOf(docBody), /chart-of-accounts state could not be read/, "and the unavailable arm is the one on screen");
+      assert.equal(h.find(buttonNamed("Apply the standard chart")), null, "nothing is offered from a state that could not be read");
+    } finally {
+      await h.unmount();
+    }
+  });
+});
+
+test("N3 · 裁-44 row 23: 'not read yet' and 'read, never amended' are DIFFERENT sentences", async () => {
+  // The distinction was claimed in the table and in source but pinned nowhere. `null` must read
+  // as still-looking and `[]` as a positive absence; collapsing them would tell a professional
+  // there is no correction history at the very moment the read has not landed.
+  const withRevisions = (rows: unknown[] | "never") => (url: string): Response | Promise<Response> => {
+    if (url.includes("/rest/v1/onboarding_plan_revisions")) {
+      // "never" models the read STILL IN FLIGHT — a promise that does not settle. An immediate
+      // `[]` was the first cut and it proved nothing: the read landed within one settle, so the
+      // cell asserted the loading sentence against a dialog that had already moved past it.
+      if (rows === "never") return new Promise<Response>(() => {});
+      return json(rows);
+    }
+    return baseRouter([SETTLED_BANKS])(url);
+  };
+
+  // READ, AND EMPTY — the positive absence.
+  await withFetch(withRevisions([]), async () => {
+    const { h, body: docBody } = await mountInBody();
+    try {
+      const trigger = h.find(buttonNamed("Amend resolution"));
+      assert.ok(trigger);
+      await h.fireEvent(trigger, "click");
+      await settleUntil(h, () => /has not been amended before/.test(textOf(docBody)), "the read-and-empty sentence", () => textOf(docBody));
+      assert.doesNotMatch(textOf(docBody), /Reading this item's earlier answers/, "and NOT the still-looking one");
+    } finally {
+      await h.unmount();
+    }
+  });
+
+  // NOT READ YET — the dialog is opened and the assertion made BEFORE any history is handed
+  // down, which is the state a caller sees while the trail is in flight.
+  await withFetch(withRevisions("never"), async () => {
+    const h = await renderComponent(App());
+    const docBody = (globalThis as unknown as { document: { body: Stub } }).document.body;
+    (docBody.appendChild as (c: unknown) => void)(h.container);
+    try {
+      await settleUntil(h, () => h.find(buttonNamed("Amend resolution")) !== null, "the amend trigger");
+      const trigger = h.find(buttonNamed("Amend resolution"))!;
+      await h.fireEvent(trigger, "click");
+      // ONE settle only: enough to open the dialog, not enough for the trail to arrive.
+      await h.settle();
+      assert.match(textOf(docBody), /Reading this item's earlier answers/, "null reads as still looking");
     } finally {
       await h.unmount();
     }

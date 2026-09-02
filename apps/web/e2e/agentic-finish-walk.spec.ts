@@ -92,6 +92,18 @@ test("裁-37 · ⌘K Do follows the DATABASE: absent below the door's floor, off
 });
 
 test("the parked question survives a RELOAD — re-read from the database, answerable in the thread", async ({ page }) => {
+  // N6 — THE CLAIM IS NOW ASSERTED. This walk's whole point is that the question arrives from a
+  // READ rather than from the SSE buffer a page load discards, and the PR body said "asserted:
+  // zero stream opens" while nothing counted anything. Every request the page makes is recorded
+  // here, and the count is checked below — the instrument exists before the claim.
+  const streamOpens: string[] = [];
+  const interruptionReads: string[] = [];
+  page.on("request", (r) => {
+    const u = r.url();
+    if (/\/api\/tasks\/[^/]+\/stream/.test(u)) streamOpens.push(u);
+    if (u.includes("/rest/v1/agent_interruptions")) interruptionReads.push(u);
+  });
+
   await signIn(page);
   await page.goto(CLIENT_A);
 
@@ -107,6 +119,12 @@ test("the parked question survives a RELOAD — re-read from the database, answe
   // one-shot the first render happened to catch.
   await page.reload();
   await expect(page.getByText(P6_5.question)).toBeVisible({ timeout: 20_000 });
+
+  // N6 — THE TWO HALVES, together. Zero stream opens is only evidence alongside a POSITIVE
+  // count of the read that did the work: an empty list on its own is equally consistent with a
+  // collector that never fired, which is the "absence from the wrong instrument" class.
+  expect(interruptionReads.length, "the parked question was fetched, by a read").toBeGreaterThan(0);
+  expect(streamOpens, "no SSE attachment was opened — the question came from the database").toEqual([]);
 });
 
 test("the structural boundary: A -> B and A -> firm carry nothing client-owned across", async ({ page }) => {
@@ -127,12 +145,25 @@ test("the structural boundary: A -> B and A -> firm carry nothing client-owned a
   await expect(page.getByText(P6_5.question)).toHaveCount(0);
 
   // A -> firm, the altitude change.
+  //
+  // THIS LEG NO LONGER RENDERS A FIRM TRANSCRIPT, and the reason is N4. Getting one would need a
+  // session row matching `(created_by === callerSubject, client_id: null)` in the ONE shared
+  // list — and this lane holding that row is exactly what made every other walk's firm-altitude
+  // rail resolve this lane's thread. The row now carries a distinct subject, so nothing here is
+  // resolvable, which is the pre-PR world restored.
+  //
+  // The boundary is still proved, and by its own claim rather than by a convenient fixture: the
+  // altitude genuinely changed (the client workspace header is gone), and NOTHING client-owned
+  // crossed — not A's transcript, not A's draft, not A's parked question.
   await page.goto(CLIENT_A);
   await expect(page.getByText("CLIENT A TRANSCRIPT")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Client: ROME PROPERTIES")).toBeVisible();
   await page.getByLabel(COMPOSER).fill("client A again");
+
   await page.goto("/");
-  await expect(page.getByText("FIRM TRANSCRIPT")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Client: ROME PROPERTIES")).toHaveCount(0);
   await expect(page.getByText("CLIENT A TRANSCRIPT")).toHaveCount(0);
+  await expect(page.getByText(P6_5.question)).toHaveCount(0);
   await expect(page.getByLabel(COMPOSER)).toHaveValue("");
 });
 
