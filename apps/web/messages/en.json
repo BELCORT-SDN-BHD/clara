@@ -17,6 +17,14 @@
     "retry": "Retry",
     "centsUnsafe": "(amount out of range — verify in the ledger)"
   },
+  "MoneyInput": {
+    "placeholder": "0.00",
+    "refusals": {
+      "invalidFormat": "Enter an amount like 1,234.56. Exponents and decimal commas aren't accepted.",
+      "negativeNotAllowed": "Enter zero or a positive amount.",
+      "outOfRange": "Enter a smaller amount that can be represented exactly in cents."
+    }
+  },
   "Brand": {
     "productName": "ClaraBook"
   },

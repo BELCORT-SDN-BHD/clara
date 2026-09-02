@@ -111,6 +111,12 @@ test("REVIEW journey: from the same expanded draft, the Revise control is reacha
 
     const editorInputs = focusableElements(h.container as never).filter((n) => (n as unknown as { tagName?: string }).tagName === "INPUT");
     assert.ok(editorInputs.length >= 2, "the revision editor's own account/description inputs must be keyboard-reachable");
+    const debitMoneyInput = editorInputs.find((n) => (
+      n as unknown as { getAttribute?: (name: string) => string | null }
+    ).getAttribute?.("aria-label") === "Debit");
+    assert.ok(debitMoneyInput, "the migrated shared debit MoneyInput must be keyboard-reachable in this real revision door");
+    (debitMoneyInput as unknown as { focus: () => void }).focus();
+    assert.equal(activeElement(), debitMoneyInput, "keyboard focus must land on the migrated money input itself");
 
     const saveButton = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Save revision$/i) !== null);
     const cancelButton = h.find((n) => n.tagName === "BUTTON" && textOf(n).match(/^Cancel$/i) !== null);

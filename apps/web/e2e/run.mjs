@@ -17,6 +17,7 @@ const env = {
   CLARA_E2E_APP_ORIGIN: appOrigin,
   CLARA_E2E_NEXT_PORT: nextPort,
   CLARA_PUBLIC_ORIGINS: appOrigin,
+  CLARA_E2E_MONEY_INPUT_HARNESS: "1",
   NEXT_PUBLIC_SUPABASE_URL: `${appOrigin}/e2e-supabase`,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_clara_e2e_only",
   CLARA_E2E_ROUTE_ERROR_PROBE: "1",
