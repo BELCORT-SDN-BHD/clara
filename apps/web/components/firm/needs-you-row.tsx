@@ -33,7 +33,10 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Badge } from "@/components/parts/PartBadge";
 import { fmtCents } from "@/lib/registers/money";
+import { Button } from "@/components/ui/button";
+import { focusRail } from "@/lib/command/bus";
 import { isKnownReviewQueueRowKind, type ReviewQueueRow } from "@/lib/firm/needs-you";
+import { hasOwningTab, needsYouRowHref } from "@/lib/firm/needs-you-links";
 import { getNeedsYouAffordance } from "./needs-you-affordances";
 
 export function NeedsYouRow({
@@ -60,6 +63,12 @@ export function NeedsYouRow({
   const kindLabel = isKnownReviewQueueRowKind(row.row_kind)
     ? t(`rowKind.${row.row_kind}`)
     : t("rowKind.unknown", { kind: row.row_kind });
+  const href = needsYouRowHref(row);
+  // The handoff text is built from what this row DISPLAYS — its kind label and its own
+  // question text when it has one — never from an id the human cannot see on screen.
+  const askPrefill = row.question_text
+    ? t("askPrefillWithQuestion", { kind: kindLabel, question: row.question_text })
+    : t("askPrefill", { kind: kindLabel });
 
   return (
     <li className="enter-content flex flex-col gap-2 rounded-lg border border-border bg-card p-3 text-sm">
@@ -69,11 +78,28 @@ export function NeedsYouRow({
         </Badge>
         <span className="font-medium text-card-foreground">{kindLabel}</span>
         {row.high_stakes ? <Badge tone="error">{t("highStakes")}</Badge> : null}
-        {row.client_id ? (
-          <Link href={`/clients/${row.client_id}`} className="text-xs text-primary underline-offset-4 hover:underline">
-            {t("openClient")}
+        {/* 裁-17 ④ — the link lands on the tab that OWNS this row, not the workspace root
+            (lib/firm/needs-you-links.ts holds the map and the both-ways rule behind it). The
+            LABEL follows the destination: a row that opens a specific tab says so, and one
+            that can only offer the workspace root still says "open the client" rather than
+            promising a tab it is not taking you to. */}
+        {href ? (
+          <Link href={href} className="text-xs text-primary underline-offset-4 hover:underline">
+            {hasOwningTab(row) ? t(`openTab.${row.row_kind}`) : t("openClient")}
           </Link>
         ) : null}
+        {/* 裁-17 ④ — "ask Clara about this": the row's own context handed to the rail, which
+            seeds the composer and focuses it. It never sends — sending stays the human's act
+            (lib/command/bus.ts's contract) — and it carries only fields THIS row already
+            renders, so nothing is disclosed to the composer that was not on screen. */}
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          onClick={() => focusRail({ query: askPrefill, source: "inbox" })}
+        >
+          {t("askClara")}
+        </Button>
       </div>
       {row.question_text ? <p className="text-card-foreground">{row.question_text}</p> : null}
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">

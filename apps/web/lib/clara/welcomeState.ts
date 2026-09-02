@@ -35,6 +35,25 @@ import type { ClaraThreadUiState } from "./threadStore";
  * `StateBanner`, and a welcome under either would be the mascot standing in
  * for state text — which the state/accessibility contract bars outright.
  *
+ * THE SEVENTH AND EIGHTH ARRIVED WITH THE P6-5 MERGE, and neither branch could
+ * have seen them alone — this is the combination, not either side.
+ *
+ *   `parkedClarify`   P6-5 re-reads a parked question out of
+ *                     `clara.agent_interruptions` on mount, because a page
+ *                     reload throws away the SSE buffer the live fold reads.
+ *                     That question is visible assistant content that is
+ *                     NEITHER in `messages` NOR in `provisionalChunks` — so on
+ *                     exactly the journey P6-5 built (reload while Clara is
+ *                     parked, before the turn's first row persists) the mascot
+ *                     would have greeted someone who is mid-conversation and
+ *                     being asked a question. The sixth conjunct's own reasoning,
+ *                     applied to the second way that content can arrive.
+ *   `turnStartedAt`   the same reading for a RUNNING turn found at mount: 裁-132's
+ *                     elapsed-time line says "Clara has been working on this for
+ *                     2:05", and a welcome beside it says the conversation has
+ *                     not started. A DB-read run start is positive evidence that
+ *                     it has.
+ *
  * `stream.provisionalChunks` IS THE SIXTH, AND IT ARRIVED WITH #508. That train
  * renders a live clarify card folded out of the provisional stream buffer
  * (`ClaraThreadView`'s `liveClarifyParts`), which is visible assistant content
@@ -53,7 +72,8 @@ export function claraWelcomeVisible(args: {
   notSignedIn: boolean;
   state: Pick<
     ClaraThreadUiState,
-    "messages" | "messagesLoaded" | "loadError" | "pendingUserParts" | "sendStatus" | "stream"
+    | "messages" | "messagesLoaded" | "loadError" | "pendingUserParts" | "sendStatus" | "stream"
+    | "parkedClarify" | "turnStartedAt"
   >;
 }): boolean {
   const { threadId, notSignedIn, state } = args;
@@ -65,5 +85,7 @@ export function claraWelcomeVisible(args: {
   if (state.pendingUserParts !== null) return false;
   if (state.sendStatus === "sending") return false;
   if (state.stream.provisionalChunks.length > 0) return false;
+  if (state.parkedClarify !== null) return false;
+  if (state.turnStartedAt !== null) return false;
   return true;
 }
