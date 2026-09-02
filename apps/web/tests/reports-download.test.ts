@@ -13,8 +13,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   filenameFromDisposition,
@@ -158,18 +159,34 @@ test("the runtime proxy forwards content-disposition (without it, an attachment 
 // IT READS COMMENTS AS CODE, AND THAT IS THE DESIGN. A comment naming the minting API is exactly
 // where the next developer copies the call from, so a hit inside a comment is a finding rather
 // than a false positive. The cost of that choice is real and was paid once: a documentation
-// paragraph in `lib/reports/types.ts` spelled the three identifiers out to explain this very
-// census, and hosted CI correctly reported the instrument's own documentation. THE NEEDLE LIST
-// THEREFORE LIVES HERE AND NOWHERE ELSE — prose in a scanned file names the API in words.
+// paragraph in `lib/reports/types.ts` spelled the identifiers out to explain this very census, and
+// hosted CI correctly reported the instrument's own documentation. THE NEEDLE LIST THEREFORE LIVES
+// HERE AND NOWHERE ELSE — prose in a scanned file names the API in words.
+//
+// THE CONTROL EXECUTES THE GATE, NEVER A COPY OF ITS PREDICATE (裁-112). The control this replaces
+// asserted that a hardcoded string containing "createSignedUrl" contained "createSignedUrl": it
+// exercised no walker, no scope, no needle list and no path-template regex, and it RETYPED the
+// needles, so the list it was supposed to defend could be emptied underneath it and it would still
+// pass. Below, ONE function does the scanning and BOTH the claim and the control call it — the
+// control simply points it at fixture directories instead of the real ones.
+//
+// The fixtures are BUILT AT RUN TIME under the OS temp directory rather than committed. A committed
+// fixture holding a live minting call would be a copyable example sitting in the repo, which is the
+// exact failure this whole cell exists to prevent; a temp directory is still a real directory,
+// really walked, with the real extension filter applied to it.
 // ---------------------------------------------------------------------------------------------
 const CENSUS_ROOTS = [join(WEB, "lib", "reports"), join(WEB, "components", "reports")];
 
 /** The vendored storage client's URL-minting surface, the storage REST path, and the bucket
- *  handle. This array is the census's whole vocabulary; nothing else spells these. */
+ *  handle. This array is the census's whole vocabulary; nothing else in this repo spells these. */
 const FORBIDDEN = [
   "createSignedUrl", "createSignedUrls", "getPublicUrl", "signedUrl",
   "/storage/v1/object", "supabase.storage", ".from(\"reports\")",
 ];
+
+/** A storage key TEMPLATE, matched as a path shape rather than a word, so a comment using the word
+ *  "reports" does not trip it while an actual `firms/<id>/reports/<sha>` template would. */
+const KEY_TEMPLATE = /firms\/\$\{|firms\/[0-9a-f-]{8}/;
 
 function filesUnder(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -180,16 +197,13 @@ function filesUnder(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** THE CENSUS ITSELF. The claim and its positive control both run THIS function against the real
- *  directories — never a copy of its predicate against a string literal (裁-112). */
-function storageIdentifierHits(roots: string[] = CENSUS_ROOTS): string[] {
+/** THE CENSUS ITSELF — one function, called by the claim AND by its control. */
+function scanForStorageIdentifiers(files: string[]): string[] {
   const hits: string[] = [];
-  for (const file of roots.flatMap((r) => filesUnder(r))) {
+  for (const file of files) {
     const src = readFileSync(file, "utf8");
     for (const needle of FORBIDDEN) if (src.includes(needle)) hits.push(`${file}: ${needle}`);
-    // The key prefixes are matched as PATH SHAPES rather than words, so a comment saying the word
-    // "reports" does not trip it while an actual `firms/<id>/reports/<sha>` template would.
-    if (/firms\/\$\{|firms\/[0-9a-f-]{8}/.test(src)) hits.push(`${file}: a storage path template`);
+    if (KEY_TEMPLATE.test(src)) hits.push(`${file}: a storage path template`);
   }
   return hits;
 }
@@ -197,32 +211,44 @@ function storageIdentifierHits(roots: string[] = CENSUS_ROOTS): string[] {
 test("ABSENCE, scoped and instrumented: nothing under lib/reports or components/reports mints a storage URL", () => {
   const scope = CENSUS_ROOTS.flatMap((r) => filesUnder(r));
   assert.ok(scope.length >= 10, `the scope must be non-trivial (found ${scope.length} files)`);
-  const hits = storageIdentifierHits();
+  // NAME two files the scope must contain. Without this a root silently dropping out of
+  // CENSUS_ROOTS leaves this cell green on a scope that no longer covers the code it claims.
+  for (const required of [join(WEB, "lib", "reports", "download.ts"),
+    join(WEB, "components", "reports", "StatutoryReportsPanel.tsx")]) {
+    assert.ok(scope.includes(required), `the census no longer reaches ${required}`);
+  }
+  const hits = scanForStorageIdentifiers(scope);
   assert.deepEqual(hits, [], `client-side storage identifiers found:\n${hits.join("\n")}`);
 });
 
-test("the absence census is ARMED: a call site planted INSIDE the scanned path reds it", () => {
-  // The previous control asserted that a string literal contained one of the needles — a copy of
-  // the predicate, not the gate, and it would have stayed green if the directory walk, the
-  // extension filter or the roots had silently stopped covering anything. This one plants a real
-  // file inside the real scope and runs the real census over the real tree.
-  const planted = join(WEB, "lib", "reports", `census-arming-control-${process.pid}.ts`);
-  writeFileSync(planted,
-    "// scratch positive control, removed in the same test\n" +
-    "export const probe = 'supabase.storage.from(\"reports\").createSignedUrl(k, 60)';\n");
+test("the absence census is ARMED: it reds on a dirty fixture and stays silent on a clean one", () => {
+  const root = mkdtempSync(join(tmpdir(), "clara-storage-census-"));
+  const dirty = join(root, "dirty");
+  const clean = join(root, "clean");
+  mkdirSync(join(dirty, "nested"), { recursive: true });
+  mkdirSync(clean, { recursive: true });
   try {
-    const hits = storageIdentifierHits();
-    assert.ok(hits.some((h) => h.includes(basename(planted))),
-      `the census did not see a call site planted in its own scope:\n${hits.join("\n")}`);
-    // and it names WHICH needle it matched, so a later edit that quietly narrows FORBIDDEN cannot
-    // leave this control green on some other coincidental match.
-    assert.ok(hits.some((h) => h.includes(basename(planted)) && h.endsWith("createSignedUrl")),
-      `the census matched the planted file but not by the minting identifier:\n${hits.join("\n")}`);
+    // One file, in a NESTED directory so the recursive walk is exercised too, carrying both things
+    // the census claims to catch: a minting call and a storage key template.
+    writeFileSync(join(dirty, "nested", "offer.ts"),
+      "export const u = 'supabase.storage.from(\"reports\").createSignedUrl(k, 60)';\n" +
+      "export const key = `firms/${firmId}/reports/${sha}.pdf`;\n");
+    // A file the census must NOT report, and one the extension filter must skip.
+    writeFileSync(join(clean, "offer.ts"),
+      "export const label = 'reports'; // the WORD reports is not a storage identifier\n");
+    writeFileSync(join(clean, "notes.md"), "createSignedUrl in a non-TS file is out of scope\n");
+
+    const dirtyHits = scanForStorageIdentifiers(filesUnder(dirty));
+    assert.ok(dirtyHits.some((h) => h.endsWith("createSignedUrl")),
+      `the census missed a minting call in its own fixture:\n${dirtyHits.join("\n")}`);
+    assert.ok(dirtyHits.some((h) => h.endsWith("a storage path template")),
+      `the census missed a storage key template in its own fixture:\n${dirtyHits.join("\n")}`);
+
+    const cleanHits = scanForStorageIdentifiers(filesUnder(clean));
+    assert.deepEqual(cleanHits, [],
+      `the census reported a clean fixture — it would report anything:\n${cleanHits.join("\n")}`);
+    assert.equal(filesUnder(clean).length, 1, "the extension filter must skip the .md file");
   } finally {
-    // Fail-closed by construction: if this ever fails to run, the planted file stays in the scope
-    // and the cell above goes RED on the next run rather than quietly passing.
-    rmSync(planted, { force: true });
+    rmSync(root, { recursive: true, force: true });
   }
-  assert.deepEqual(storageIdentifierHits(), [],
-    "the control must leave no residue behind in the scanned tree");
 });
