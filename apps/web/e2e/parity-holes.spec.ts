@@ -118,6 +118,22 @@ test("password recovery keyboard, refusal, success, callback, and password-polic
   await expectAccessible(page, "password-updated confirmation");
 });
 
+test("the reset face refuses a sessionless arrival with the typed invalid-link state", async ({ page }) => {
+  // F2 of the independent review of #507, measured on the built app in a fresh
+  // context — no recovery cookie exists, which is exactly the bookmarked-URL and
+  // expired-session shape. This is the cell that executes the PAGE's own fork;
+  // the unit cells drive the extracted route function.
+  await page.goto("/auth/recover/password");
+  await expect(page.getByRole("heading", { name: "Reset your password" })).toBeVisible();
+  await expect(page.getByText("That reset link is invalid or has expired. Request a new one.")).toBeVisible();
+  await expect(page.getByLabel("New password")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save new password" })).toHaveCount(0);
+  // The raw provider string the review measured here before the fold.
+  await expect(page.getByText("Auth session missing!")).toHaveCount(0);
+  await expect(page.getByLabel("Email")).toBeVisible();
+  await expectAccessible(page, "sessionless password reset");
+});
+
 test("a thrown entry page renders the route error boundary with a safe digest", async ({ page }) => {
   const response = await page.goto("/forgot-password?status=trigger-error");
   expect(response?.status()).toBe(500);

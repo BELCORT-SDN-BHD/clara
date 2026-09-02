@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { StateBanner } from "@/components/common/state";
+import { PasswordRecoveryForm } from "@/components/entry/password-recovery-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,8 +14,29 @@ import { createClient } from "@/lib/supabase/client";
 
 export interface PasswordResetAuthClient {
   auth: {
-    updateUser(attributes: { password: string }): Promise<{ error: { message: string } | null }>;
+    updateUser(attributes: { password: string }): Promise<{
+      error: {
+        message: string;
+        name?: string;
+        status?: number;
+        code?: string;
+      } | null;
+    }>;
   };
+}
+
+type PasswordResetError = NonNullable<
+  Awaited<ReturnType<PasswordResetAuthClient["auth"]["updateUser"]>>["error"]
+>;
+
+function isRecoverySessionFailure(error: PasswordResetError): boolean {
+  return error.name === "AuthSessionMissingError"
+    || error.name === "AuthInvalidJwtError"
+    || error.status === 401
+    || error.code === "session_not_found"
+    || error.code === "refresh_token_not_found"
+    || error.code === "refresh_token_already_used"
+    || error.code === "bad_jwt";
 }
 
 export function PasswordResetForm({
@@ -26,6 +48,7 @@ export function PasswordResetForm({
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [sessionInvalid, setSessionInvalid] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -34,6 +57,11 @@ export function PasswordResetForm({
     setError(null);
     const { error: updateError } = await createSupabaseClient().auth.updateUser({ password });
     if (updateError) {
+      if (isRecoverySessionFailure(updateError)) {
+        setSessionInvalid(true);
+        setSaving(false);
+        return;
+      }
       // Supabase owns the 12-character + breached-password policy; the provider
       // refusal remains byte-for-byte visible instead of being reclassified here.
       setError(updateError.message);
@@ -43,6 +71,8 @@ export function PasswordResetForm({
     setSaved(true);
     setSaving(false);
   }
+
+  if (sessionInvalid) return <PasswordRecoveryForm invalidLink />;
 
   if (saved) {
     return (
