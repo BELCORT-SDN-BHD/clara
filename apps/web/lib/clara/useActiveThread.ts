@@ -8,7 +8,6 @@
 import { useEffect, useRef, useState } from "react";
 
 import { createSession, listSessionsForCaller, type SessionRow } from "./api";
-import { claraThreadStore } from "./threadStore";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 const FIRM_ALTITUDE = "firm";
@@ -50,8 +49,26 @@ export function useActiveThreadId(
   useEffect(() => {
     let cancelled = false;
 
+    // P6-5 — THE OUTGOING THREAD'S STORE ENTRY IS NOT DELETED ANY MORE.
+    //
+    // This used to call `claraThreadStore.reset(active.current.threadId)` on an altitude
+    // change. What that deleted was the outgoing thread's `activeTaskId`, its stream status
+    // and its provisional buffer — i.e. a turn that was still RUNNING. Navigating away from
+    // client A mid-turn and back therefore returned to an empty thread with no task to
+    // re-attach to, which is the "a keyed boundary tears down a live SSE attachment"
+    // failure the structural boundary had to answer rather than inherit.
+    //
+    // It was never the wall it looked like, either. What keeps client A's transcript off
+    // client B's screen is `visibleThreadForAltitude` below (a resolution for another
+    // altitude renders as `threadId: null`, and `ClaraThreadView` reads nothing from the
+    // store without a thread id) plus `RailMount`'s structural key, which remounts this
+    // whole subtree on every switch. The store is keyed by THREAD ID and a different client
+    // resolves a different thread, so a surviving entry is unreachable from the wrong
+    // altitude by construction — see components/clara/rail-mount.tsx's own note.
+    //
+    // `active.current` is still cleared, so the ref never claims an altitude this hook has
+    // stopped resolving.
     if (active.current !== null && active.current.altitude !== altitude) {
-      claraThreadStore.reset(active.current.threadId);
       active.current = null;
     }
     setResolved({ altitude, threadId: null, error: null });

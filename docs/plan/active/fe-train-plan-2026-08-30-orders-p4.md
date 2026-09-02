@@ -96,6 +96,8 @@ both ways**: the manifest's non-comment line count before and after, and the del
   RED and record that you saw it red — an assertion that passes with the component deleted proves
   nothing (review law 2: absence is not evidence).
 
+**Also inherited, from 2026-09-02/09-03:** every LANE LAW in [`frontend-sprint-handoff-2026-08-31-orders.md`](frontend-sprint-handoff-2026-08-31-orders.md) §C — native lanes only (裁-133) · the PROCESS LAW (kill only your own PID, never a name, never a CommandLine substring) · the fold-round MUTANT PANEL as a deliverable and its buffer-restore rule on a dirty tree · PRINT-THE-THING · the eight-item MERGE-FORWARD LAW · MERGED-TREE · GATE-SHAPE · ARMED-PR — plus the 09-03 clauses that widened them: a mutant's RED is read for its REASON · FROZEN-TREE (fold in a second worktree; never edit a tree mid-suite) · `# fail 0` can sit beside `not ok` · an ABSENCE census must not be described inside the tree it scans · a truing PR's STATE BANNER is measured at commit time · the TWO-CLOCK DATE class. Each was minted by a defect that reached a PR on the day it is dated.
+
 ### 0.6 Design resources — your order NAMES the ones it used
 
 Vendored in `.claude/skills/`: the eight Emil-family skills — **`emil-design-eng`**, **`animate`**,

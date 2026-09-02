@@ -85,7 +85,12 @@ export function ClaraRail({ auth = sessionTokenAccessor, clientId }: { auth?: Se
         </div>
       </header>
       <div className="min-h-0 flex-1">
-        <ClaraThreadView key={clientId ?? "firm"} auth={auth} threadId={threadId} resolveError={error} variant="rail" clientId={clientId} />
+        {/* P6-5: the `key={clientId ?? "firm"}` #507 put HERE moved up to `RailMount`, which
+            is the one mount point for this whole subtree — see that file's own note. Same
+            law, one level higher, so it now covers the composer, the attachment tray and
+            everything a later feature adds, not just this view. A key here as well would be
+            a second copy of the same boundary with nothing extra to fence. */}
+        <ClaraThreadView auth={auth} threadId={threadId} resolveError={error} variant="rail" clientId={clientId} />
       </div>
     </aside>
   );
