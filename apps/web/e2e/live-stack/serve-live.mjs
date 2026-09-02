@@ -169,6 +169,32 @@ async function handleSupabase(request, response, url) {
     return;
   }
 
+  // THE PASSWORD GRANT — added FS-7 echelon 2, and it is the door every live walk has to use now.
+  //
+  // WHY, MEASURED RATHER THAN PREFERRED. This harness's only session door was the confirm link
+  // below, and the confirm FACE has since moved to a six-digit OTP whose handler runs the C1/C2
+  // attempt wall BEFORE `verifyOtp`. That wall's production seam
+  // (`app/(entry)/auth/confirm/verify/confirmation-wall.ts`) returns `"unavailable"`
+  // unconditionally on this tip — Lane B's runtime route (C-5) is not built — so the confirm face
+  // signs NOBODY in, in the browser, today. `interview-walk.spec.ts`'s own `establishSession` is
+  // dead for the same reason; this endpoint is what gives both walks a session again.
+  //
+  // It is the `serve-built.mjs` mock's shape with this file's REAL signed token: the app drives its
+  // own `@supabase/ssr` client through its own cookie-writing code exactly as it does against
+  // Supabase, so nothing here guesses a cookie format. The password is never checked, because this
+  // is a stand-in for the identity PROVIDER — what the walk is testing lives after the session.
+  if (request.method === "POST" && path === "/auth/v1/token") {
+    sendJson(response, 200, {
+      access_token: await mintAccessToken(OWNER_SUB),
+      token_type: "bearer",
+      expires_in: 7_200,
+      expires_at: 4_102_444_800,
+      refresh_token: "e2e-live-refresh-token",
+      user: confirmedUser(OWNER_SUB),
+    }, cors);
+    return;
+  }
+
   if (request.method === "POST" && path === "/auth/v1/verify") {
     const body = await readJson(request);
     if (body.type !== "email" || body.token_hash !== "e2e-live-token-hash") {

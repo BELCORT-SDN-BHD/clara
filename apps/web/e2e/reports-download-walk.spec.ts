@@ -31,14 +31,27 @@ const PENDING_ID = process.env.CLARA_E2E_REPORTS_PENDING_ARTIFACT_ID ?? "";
 
 const provisioned = CLIENT_ID !== "" && ARTIFACT_ID !== "" && /^[0-9a-f]{64}$/.test(EXPECTED_SHA);
 
-/** The live harness's own confirm-flow session, lifted verbatim from interview-walk.spec.ts:
- *  navigate to /auth/confirm, click the explicit button (never auto-submitted — the confirm face
- *  carries a login-CSRF binding that requires the click), and let the REAL @supabase/ssr client
- *  write its own cookies. Nothing here guesses a cookie format. */
+/**
+ * A real session through the real /login form.
+ *
+ * NOT interview-walk.spec.ts's confirm-link recipe, and the difference is a measurement rather
+ * than a preference: the confirm FACE has moved to a six-digit OTP whose handler runs the C1/C2
+ * attempt wall BEFORE `verifyOtp`, and that wall's production seam returns `"unavailable"`
+ * unconditionally on this tip (Lane B's runtime route is not built). The confirm face therefore
+ * signs nobody in, in a browser, today — its own walk is dead for the same reason, and this file
+ * says so rather than inheriting a recipe that cannot work.
+ *
+ * The password never reaches a real identity provider — `serve-live.mjs` answers the grant with a
+ * genuinely signed token for the fixture owner. Everything after that is real: the app's own
+ * @supabase/ssr client writes its own cookies, and every later read carries them.
+ */
 async function establishSession(page: Page): Promise<void> {
-  await page.goto("/auth/confirm?token_hash=e2e-live-token-hash&type=email");
-  await page.getByRole("button", { name: "Confirm my email" }).click();
-  await expect(page).not.toHaveURL(/\/auth\/confirm/, { timeout: 30_000 });
+  await page.goto("/login");
+  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible({ timeout: 30_000 });
+  await page.getByLabel("Email").fill("owner@example.test");
+  await page.getByLabel("Password").fill("Clara-e2e-password-1!");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 });
 }
 
 const reportsHref = () => `/clients/${encodeURIComponent(CLIENT_ID)}/reports`;
@@ -49,7 +62,10 @@ test.describe("FS-7 e2 — the Reports tab download, in a real browser", () => {
   test("a signed-in member opens Reports, clicks Download, and receives the sealed PDF bytes", async ({ page }) => {
     await establishSession(page);
     await page.goto(reportsHref());
-    await expect(page.getByRole("heading", { name: "Reports" })).toBeVisible({ timeout: 30_000 });
+    // level:1 AND exact — "Reports" is also a prefix of the "Statutory close reports" h2, which is
+    // a genuine Playwright strict-mode ambiguity rather than a product defect.
+    await expect(page.getByRole("heading", { name: "Reports", exact: true, level: 1 }))
+      .toBeVisible({ timeout: 30_000 });
 
     // THE CONTROL EXISTS BECAUSE THE DOOR SAID SO. The offer read is a live PostgREST RPC against
     // clara.list_downloadable_artifacts, so a control here is already evidence that the gate
@@ -82,7 +98,10 @@ test.describe("FS-7 e2 — the Reports tab download, in a real browser", () => {
     test.skip(PENDING_ID === "", "the harness supplies a second, unfinished export");
     await establishSession(page);
     await page.goto(reportsHref());
-    await expect(page.getByRole("heading", { name: "Reports" })).toBeVisible({ timeout: 30_000 });
+    // level:1 AND exact — "Reports" is also a prefix of the "Statutory close reports" h2, which is
+    // a genuine Playwright strict-mode ambiguity rather than a product defect.
+    await expect(page.getByRole("heading", { name: "Reports", exact: true, level: 1 }))
+      .toBeVisible({ timeout: 30_000 });
 
     // THE DISCRIMINATING POST-CONDITION: the page carries BOTH a downloadable row (a control) and
     // a refused one (the database's own typed reason). A page with neither, or with a control on
