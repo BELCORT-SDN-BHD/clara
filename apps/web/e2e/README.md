@@ -32,7 +32,21 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
   navigation shaping, not a DB rank, RLS policy, or live `caller_context` response.
 - `money-input.spec.ts` — the build-gated journal MoneyInput component walk, including its
   visible refusal contract and a WCAG A/AA axe scan.
-- `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers.
+- `chat-parity-walk.spec.ts` — 裁-130's chat-parity walk: a PARKED clarify answered inline in
+  the thread, a document attached from the composer riding the sent turn as its document
+  reference, and the firm altitude's honest note where the affordance is absent. Axe (WCAG
+  2.0/2.1 A+AA) on both faces, with a positive control proving the scan actually inspected the
+  page. Runs on `serve-built.mjs`'s mocked stack — see `chat-parity-mock.mjs`'s header for the
+  exact line between what is real (the browser, the built bundle, the same-origin runtime proxy
+  route) and what is faked (PostgREST, the runtime's intake legs, the chat/stream legs).
+- `chat-parity-mock.mjs` — that walk's own mock lane, a file-disjoint sibling of
+  `serve-built.mjs` (the same shape `live-stack/serve-live.mjs` takes), reached through three
+  small hooks so no other spec's surface changes.
+- `run.mjs`, `serve-built.mjs` — the build-then-serve harness; see their own headers. The two
+  INTERNAL ports are overridable — `CLARA_E2E_NEXT_PORT` (default 3101) and
+  `CLARA_E2E_RUNTIME_PORT` (default 3102), alongside the public `CLARA_E2E_APP_ORIGIN` — so a
+  second lane can run the harness while another already holds the defaults. Specs read the
+  origin from `CLARA_E2E_APP_ORIGIN` rather than re-hardcoding it.
 
 ## Why these specs are NOT in `apps/web/test/manifest.txt`
 

@@ -1,10 +1,13 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-// Reads the harness's own origin rather than re-typing it: the port is now
-// overridable so two lanes can run this suite at once (`e2e/run.mjs`), and a
-// literal here turned that into four false reds about a same-origin wall that
-// was working perfectly.
+// Reads the harness's own origin (interview-walk.spec.ts's precedent) instead of
+// re-hardcoding the default. The literal made this file green ONLY on port 3100, and
+// TWO trains hit it independently on the same day — chat parity's browser leg ran on
+// 3110 because another lane held 3100, and P6-6's ran on 3140 for the same reason.
+// Both saw the same thing: false reds about a same-origin wall that was working
+// perfectly. Recorded together because one train fixing it looks like a local tidy-up;
+// two trains fixing it the same way is the harness telling you the literal was wrong.
 const APP_ORIGIN = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 

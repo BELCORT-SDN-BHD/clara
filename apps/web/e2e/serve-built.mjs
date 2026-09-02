@@ -9,18 +9,24 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The chat-parity walk's own mock lane — a file-disjoint sibling (the same shape
+// live-stack/serve-live.mjs takes), consulted through the three hooks below so no
+// other spec's surface changes. See that file's header for what it does and does not
+// prove.
+import { handleChatParityApp, handleChatParitySupabase, startMockRuntime } from "./chat-parity-mock.mjs";
+
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
 const appOrigin = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
-// The port `next start` listens on behind the HTTPS proxy above. It was a bare
-// literal in three places, which made the whole harness single-instance: the
-// sprint's lanes are each assigned their own port range, and a second lane
-// running `pnpm --filter @clara/web e2e` would fail to bind rather than run.
-// The default is unchanged, so a plain invocation behaves exactly as before.
-const nextPort = process.env.CLARA_E2E_NEXT_PORT ?? "3101";
 const appUrl = new URL(appOrigin);
 const supabaseUrl = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? `${appOrigin}/e2e-supabase`);
 const supabasePrefix = supabaseUrl.pathname.replace(/\/$/, "");
+// The two INTERNAL ports (the public one is CLARA_E2E_APP_ORIGIN's). Overridable so a
+// second lane can run this harness on a host where another already holds the defaults —
+// the alternative measured on 2026-09-02 was an EADDRINUSE crash and no browser leg at
+// all. Defaults unchanged, so every existing invocation behaves exactly as before.
+const nextPort = Number(process.env.CLARA_E2E_NEXT_PORT ?? 3101);
+const mockRuntimePort = Number(process.env.CLARA_E2E_RUNTIME_PORT ?? 3102);
 const runtimeDir = join(e2eRoot, ".runtime", String(process.pid));
 const keyPath = join(runtimeDir, "localhost-key.pem");
 const certPath = join(runtimeDir, "localhost-cert.pem");
@@ -129,7 +135,7 @@ function publicLocation(location) {
   try {
     const target = new URL(location);
     if (
-      target.port === nextPort &&
+      target.port === String(nextPort) &&
       (target.hostname === "127.0.0.1" || target.hostname === "localhost")
     ) {
       return new URL(`${target.pathname}${target.search}${target.hash}`, appOrigin).toString();
@@ -322,6 +328,13 @@ async function handleSupabase(request, response, url) {
     return;
   }
 
+  // FIRST, and safe there because every branch inside is scoped to the chat-parity ids
+  // and falls through otherwise (merge of origin/main `cea3da39` / #507 — see that
+  // module's own note). Running it after the generic fixtures below instead would have
+  // starved the chat-parity thread of its `chat_sessions` row, which #507's new
+  // client/thread pairing check turns into a 404.
+  if (await handleChatParitySupabase(request, response, path, url, sendJson, cors)) return;
+
   if (request.method === "GET" && path === "/rest/v1/clients") {
     const filter = url.searchParams.get("id");
     const rows = filter?.startsWith("eq.")
@@ -404,13 +417,32 @@ const httpsServer = createHttpsServer(
       });
       return;
     }
-    if (url.pathname === "/api/chat/sessions" || url.pathname.startsWith("/api/chat/sessions/")) {
-      handleChat(request, response, url).catch((error) => {
-        sendJson(response, 500, { message: error instanceof Error ? error.message : "mock failure" });
-      });
-      return;
-    }
+    // The chat legs are same-origin by construction: `lib/clara/api.ts`'s `runtimeBase()`
+    // is empty here, so the browser asks THIS server for them. They are answered before
+    // the proxy below, and never reach `next start` (which has no route for them).
+    //
+    // ORDER, resolved at the merge of origin/main `cea3da39` / #507: the chat-parity mock
+    // gets first refusal, then the parity-holes `handleChat`. That is safe in one
+    // direction only because the chat-parity mock matches EXACT ids — its own thread's
+    // `/messages`, its own thread's `/turns`, its own task's `/stream` — so it cannot
+    // swallow `/api/chat/sessions` or any thread #507 owns. The reverse order is NOT
+    // safe: `handleChat` claims the whole `/api/chat/sessions/` prefix and would answer
+    // the chat-parity thread's transcript with a canned assistant message, where a PARKED
+    // task must have an empty one (`clara.settle_chat_turn` is what writes the assistant
+    // row, and it cancels the pending interruption in the same breath).
+    handleChatParityApp(request, response, url)
+      .then((handled) => {
+        if (handled) return;
+        if (url.pathname === "/api/chat/sessions" || url.pathname.startsWith("/api/chat/sessions/")) {
+          return handleChat(request, response, url);
+        }
+        proxyToNext(request, response);
+      })
+      .catch((error) => sendJson(response, 500, { message: error instanceof Error ? error.message : "mock failure" }));
+  },
+);
 
+function proxyToNext(request, response) {
     const headers = {
       ...request.headers,
       host: appUrl.host,
@@ -420,7 +452,7 @@ const httpsServer = createHttpsServer(
     const upstream = httpRequest(
       {
         hostname: "127.0.0.1",
-        port: Number(nextPort),
+        port: nextPort,
         method: request.method,
         path: request.url,
         headers,
@@ -440,23 +472,29 @@ const httpsServer = createHttpsServer(
       else response.destroy(error);
     });
     request.pipe(upstream);
-  },
-);
+}
 
 await new Promise((resolveListen, rejectListen) => {
   httpsServer.once("error", rejectListen);
   httpsServer.listen(Number(appUrl.port), appUrl.hostname, resolveListen);
 });
 
+// The runtime the SAME-ORIGIN proxy route forwards to. `CLARA_RUNTIME_URL` is
+// server-side only and read at REQUEST time by app/api/runtime/[...path]/route.ts, so
+// pointing it here exercises the real proxy (firm-scope guard, header allow-list,
+// credential-by-leg) against a stand-in runtime rather than skipping it.
+const mockRuntime = startMockRuntime(mockRuntimePort);
+
 const nextBin = join(webRoot, "node_modules", "next", "dist", "bin", "next");
 const next = spawn(
   process.execPath,
-  [nextBin, "start", "--hostname", "127.0.0.1", "--port", nextPort],
+  [nextBin, "start", "--hostname", "127.0.0.1", "--port", String(nextPort)],
   {
     cwd: webRoot,
     env: {
       ...process.env,
       NODE_EXTRA_CA_CERTS: certPath,
+      CLARA_RUNTIME_URL: mockRuntime.origin,
     },
     stdio: "inherit",
   },
@@ -467,6 +505,7 @@ function stop(exitCode = 0) {
   if (stopping) return;
   stopping = true;
   next.kill("SIGTERM");
+  mockRuntime.server.close();
   httpsServer.close(() => {
     rmSync(runtimeDir, { recursive: true, force: true });
     process.exit(exitCode);

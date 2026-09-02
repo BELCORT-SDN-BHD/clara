@@ -11,12 +11,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { claraWelcomeVisible } from "./welcomeState";
+import { initialClaraStreamState } from "./stream";
 import type { ClaraThreadUiState } from "./threadStore";
 import type { MessageRow } from "./api";
 
 type GateState = Pick<
   ClaraThreadUiState,
-  "messages" | "messagesLoaded" | "loadError" | "pendingUserText" | "sendStatus"
+  "messages" | "messagesLoaded" | "loadError" | "pendingUserParts" | "sendStatus" | "stream"
 >;
 
 /** A genuinely empty, genuinely settled transcript — the one case that paints. */
@@ -24,8 +25,9 @@ const settledEmpty: GateState = {
   messages: [],
   messagesLoaded: true,
   loadError: null,
-  pendingUserText: null,
+  pendingUserParts: null,
   sendStatus: "idle",
+  stream: initialClaraStreamState,
 };
 
 const aMessage = { id: "m1", role: "assistant", parts: [] } as unknown as MessageRow;
@@ -54,16 +56,45 @@ test("NEVER A LOADER (2): a turn is in flight before the stream has opened", () 
   assert.equal(
     gate({ sendStatus: "sending" }),
     false,
-    "between submit and stream-open the transcript is empty AND pendingUserText is still null (threadStore's own contract) — only sendStatus tells the two apart",
+    "between submit and stream-open the transcript is empty AND pendingUserParts is still null (threadStore's own contract) — only sendStatus tells the two apart",
   );
 });
 
 test("a pending user bubble is a transcript, even before the DB row exists", () => {
-  assert.equal(gate({ pendingUserText: "what is the May balance?" }), false);
+  assert.equal(gate({ pendingUserParts: [{ type: "text", text: "what is the May balance?" }] }), false);
+});
+
+test("a pending turn that is ONLY an attachment still suppresses the welcome", () => {
+  // #508 made a pending turn carry PARTS, so a person can send a document with
+  // no prose at all. Testing presence rather than emptiness is what keeps that
+  // case covered — an `.length > 0` conjunct would have been correct on the day
+  // and wrong the moment an attachment-only turn existed.
+  assert.equal(
+    gate({ pendingUserParts: [{ type: "attachment", document_id: "d1", intake_id: "i1" }] }),
+    false,
+  );
 });
 
 test("a transcript with any message is not empty", () => {
   assert.equal(gate({ messages: [aMessage] }), false);
+});
+
+test("NEVER MID-CONVERSATION: a live stream chunk is visible assistant content, even with an empty transcript", () => {
+  // The conjunct #508 made necessary. That train renders a clarify card folded
+  // out of `stream.provisionalChunks` — content the reader SEES that is not in
+  // `messages` — so `messages.length === 0` stopped being the whole answer to
+  // "is this conversation empty". Without this the mascot could greet someone
+  // underneath a live clarify question.
+  assert.equal(
+    gate({ stream: { ...initialClaraStreamState, status: "streaming", provisionalChunks: ["{\"type\":\"clarify\"}"] } }),
+    false,
+  );
+});
+
+test("an idle stream with no chunks is still the welcome moment — the conjunct is not over-broad", () => {
+  // The counter-cell: `stream` present and empty must NOT suppress the welcome,
+  // or the conjunct above would have silently deleted the whole feature.
+  assert.equal(gate({ stream: { ...initialClaraStreamState, reconnectAttempt: 0 } }), true);
 });
 
 test("a failed read is a STATE the thread already spells out — never a welcome under an error banner", () => {
@@ -82,7 +113,9 @@ test("the gate reads only the five fields it names — an unrelated store field 
   // Guards against a future conjunct being added against a field the caller
   // does not actually pass: `ClaraThreadView` hands the gate its whole `state`,
   // so a widened Pick<> would compile while this cell keeps the CONTRACT — the
-  // five fields — honest and visible.
+  // six fields — honest and visible. (Six since #508 merged in `stream`; the
+  // count in this comment is part of the contract, so widening it silently
+  // means editing this line and being seen to do it.)
   const wider = { ...settledEmpty, sendError: "boom", activeTaskId: "task-1" } as GateState;
   assert.equal(claraWelcomeVisible({ threadId: "t1", notSignedIn: false, state: wider }), true);
 });

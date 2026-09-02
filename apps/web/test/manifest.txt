@@ -49,12 +49,15 @@ components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/brand-identity.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx
+components/clara/composer-attachment-scope.test.tsx
+components/clara/composer-attachment.test.tsx
 components/clara/interview-run-a11y.test.tsx
 components/clara/interview-run-keyboard.test.tsx
 components/clara/onboarding-begin-keyboard.test.tsx
 components/clara/onboarding-checklist-a11y.test.tsx
 components/clara/onboarding-checklist-keyboard.test.tsx
 components/clara/onboarding-checklist.test.tsx
+components/clara/thread-live-clarify.test.tsx
 components/close/close-a11y.test.tsx
 components/close/close-components.test.tsx
 components/close/close-keyboard.test.tsx
@@ -108,6 +111,7 @@ components/journals/journals-governance-keyboard.test.tsx
 components/journals/journals-keyboard.test.tsx
 components/login-a11y.test.tsx
 components/login-keyboard.test.tsx
+components/parts/clarify-card.test.tsx
 components/parts/sweep-receipt-card.test.tsx
 components/parts/v14-receipt-cards.test.tsx
 components/parts/v16-act-cards.test.tsx
@@ -155,6 +159,7 @@ lib/bank/recon-reads.test.ts
 lib/bank/reload-on-change.test.ts
 lib/bank/table-reads.test.ts
 lib/business-date.test.ts
+lib/clara/liveClarify.test.ts
 lib/clara/useActiveThread.test.ts
 lib/clara/welcomeState.test.ts
 lib/close/api.test.ts

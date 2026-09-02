@@ -19,17 +19,32 @@ import type { ClaraThreadUiState } from "./threadStore";
  *                         `messages.length === 0` alone would paint the mascot
  *                         over exactly the moment the contract forbids —
  *                         "reviewing…" — and it would look deliberate.
- *   `sendStatus`          a turn is in flight. `pendingUserText` is set only
+ *   `sendStatus`          a turn is in flight. `pendingUserParts` is set only
  *                         once the stream OPENS (threadStore's own comment:
  *                         "never before — no optimistic rendering of turn
  *                         success"), so between submit and stream-open the
  *                         transcript is still empty with nothing pending, and
  *                         only the send status distinguishes it from rest.
+ *                         (It was `pendingUserText` until #508 made a pending
+ *                         turn carry PARTS, so a turn can now be pending with
+ *                         an attachment and no prose at all — which is exactly
+ *                         why this conjunct tests presence, never emptiness.)
  *
  * The remaining three are the ordinary "is this genuinely empty" reading: a
  * signed-out or failed read is a STATE the thread already spells out in a
  * `StateBanner`, and a welcome under either would be the mascot standing in
  * for state text — which the state/accessibility contract bars outright.
+ *
+ * `stream.provisionalChunks` IS THE SIXTH, AND IT ARRIVED WITH #508. That train
+ * renders a live clarify card folded out of the provisional stream buffer
+ * (`ClaraThreadView`'s `liveClarifyParts`), which is visible assistant content
+ * that is NOT in `messages` — so after the merge "messages is empty" stopped
+ * being the whole answer to "is this conversation empty". Any provisional chunk
+ * means a turn is producing output right now; a welcome under a live clarify
+ * question would be the mascot greeting someone mid-conversation. Found by
+ * reading the merged component rather than by a red test, because the state it
+ * needs (chunks present, transcript empty, nothing pending) is reachable but
+ * rare — a stream re-attached after a reload before its first row persists.
  */
 export function claraWelcomeVisible(args: {
   /** Null while the caller could not resolve or create a thread at all. */
@@ -38,7 +53,7 @@ export function claraWelcomeVisible(args: {
   notSignedIn: boolean;
   state: Pick<
     ClaraThreadUiState,
-    "messages" | "messagesLoaded" | "loadError" | "pendingUserText" | "sendStatus"
+    "messages" | "messagesLoaded" | "loadError" | "pendingUserParts" | "sendStatus" | "stream"
   >;
 }): boolean {
   const { threadId, notSignedIn, state } = args;
@@ -47,7 +62,8 @@ export function claraWelcomeVisible(args: {
   if (!state.messagesLoaded) return false;
   if (state.loadError !== null) return false;
   if (state.messages.length > 0) return false;
-  if (state.pendingUserText !== null) return false;
+  if (state.pendingUserParts !== null) return false;
   if (state.sendStatus === "sending") return false;
+  if (state.stream.provisionalChunks.length > 0) return false;
   return true;
 }
