@@ -33,6 +33,7 @@ export function FirmAdminDoorDialog({
   busy,
   confirmDisabled,
   onConfirm,
+  onOpenChange,
   children,
 }: {
   triggerLabel: string;
@@ -48,6 +49,13 @@ export function FirmAdminDoorDialog({
    *  outcome — the caller's own hydrated-part state (err/clr) is the source of
    *  truth for what happened, rendered outside this dialog. */
   onConfirm: () => Promise<void>;
+  /** Additive (ported from components/reports/DoorDialog.tsx's own T9 fix
+   *  round, F4/F9): fires on EVERY open/close transition — a caller that
+   *  wants a fresh deliberate act each time the dialog opens (a freshly-
+   *  minted op_key, a reset typed field) hooks this rather than re-deriving
+   *  open state of its own. Optional; every existing caller that does not
+   *  pass it is unaffected. */
+  onOpenChange?: (open: boolean) => void;
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -58,7 +66,13 @@ export function FirmAdminDoorDialog({
   const guardRef = useRef(createSingleFireGuard());
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        onOpenChange?.(v);
+      }}
+    >
       <DialogTrigger render={<Button variant={triggerVariant} size="sm" />}>{triggerLabel}</DialogTrigger>
       <DialogContent>
         <DialogHeader>

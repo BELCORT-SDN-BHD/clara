@@ -143,6 +143,15 @@ export const FIRM_ROUTES: FirmCommandRoute[] = [
     status: "built",
     keywords: ["registrations", "approvals", "operator", "queue"],
   },
+  {
+    // FS-8 PR-2 (裁-97): the firm-settings surface, under /admin — the
+    // high-stakes threshold control + the capabilities honest note.
+    id: "adminSettings",
+    scope: "firm",
+    href: "/admin/settings",
+    status: "built",
+    keywords: ["settings", "threshold", "high stakes", "capabilities", "owner"],
+  },
 ];
 
 /**
