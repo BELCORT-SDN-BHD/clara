@@ -3,37 +3,37 @@
   "workflows": {
     "packages/reporting-render/lib/canonical-json.mjs": {
       "sha256": "33b665f68c1e79b059f218d96f150b386235eccea66b0520c7dd97fce233c60f",
-      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/reporting-render/lib/chart.mjs": {
       "sha256": "d6cbcb5e033169062dde4a03f72b4f69cf224bff2c6767221c3e2a39bfcc3e29",
-      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/reporting-render/lib/decisions.mjs": {
       "sha256": "2f4e9ffe9d733b90173106b00d2beb3ae6c5c7d8cb749c74ae6f04fdac557139",
-      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/reporting-render/lib/layout-sandbox.mjs": {
       "sha256": "42f9d9953a8b68b3101c30ae29aba61a2b5603e3e51697b6a0162a8cd3935351",
-      "note": "Wave F Track-A, F-A5b CARD 1 — the SANDBOX assembler: the substitution seam's render-time half, where a `placeholder` block's pinned cell id becomes bytes. A SIBLING of layout.mjs rather than an export added to it, and that is forced rather than stylistic: layout.mjs is deployed:true here, so check-frozen-workflows' REHASHED-VS-BASE rule makes its body immutable versus origin/main and an added export would be rejected — correctly. Marked @frozen for the same reason its sibling is (determinism-critical, walks DB-owned payload into typesetting source). UNDEPLOYED: the deploy-lock is the ceremony's act, exactly as every layout module's entry was before the zeta ceremony ran.",
+      "note": "Wave F Track-A, F-A5b CARD 1 — the SANDBOX assembler: the substitution seam's render-time half, where a `placeholder` block's pinned cell id becomes bytes. A SIBLING of layout.mjs rather than an export added to it, and that is forced rather than stylistic: layout.mjs is deployed:true here, so check-frozen-workflows' REHASHED-VS-BASE rule makes its body immutable versus origin/main and an added export would be rejected — correctly. Marked @frozen for the same reason its sibling is (determinism-critical, walks DB-owned payload into typesetting source). Deploy-lock stamped by the ceremony (`deployed: true`), exactly as every layout module's entry now is since the zeta ceremony ran.",
       "deployed": true
     },
     "packages/reporting-render/lib/layout.mjs": {
       "sha256": "bc416972436ef18ff6b2de137facc4f172fc597efbc4ff957ad12ea20be6377b",
-      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/reporting-render/lib/lexicon.mjs": {
       "sha256": "b3397d6dc186158cfec03bebc0d483cf6ef0d01055e76b82b75d090394b16c3a",
-      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/reporting-render/lib/manifest.mjs": {
       "sha256": "bf95b2a02e40d23d065afd13e940ad0cafa630d7533e0abf6bc3c7f3a089fec9",
-      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "Wave E lane zeta — the render worker's determinism-critical module. Marked @frozen so the EXISTING workflow freeze-lint hash-locks it (design wave-e-design-reporting.md §4.2: the render worker's determinism-critical TS/JS modules sit under packages/, so the existing lint covers them once marked). Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/lib/malaysian-registration.mjs": {
@@ -583,27 +583,27 @@
     },
     "packages/runtime/workflows/chatTurn.v16.impl.ts": {
       "sha256": "bff0e0ca13e4a3918f06b60503d6988e833e961f65c882517f99719f2872bd4e",
-      "note": "P6-1 (Q8's four-card wire bump) — the v16 segment step. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "P6-1 (Q8's four-card wire bump) — the v16 segment step. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v16.parts.ts": {
       "sha256": "be7c199f2ea23ca9bea9ee11bde4b97a121bf251175df2627f12de2b81ca4a4c",
-      "note": "P6-1 — THE DECLARER of Q8's four part kinds; apps/web/lib/parts/types.ts transcribes it. A hash change here is a wire-contract change and must move the reader in the same wave. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "P6-1 — THE DECLARER of Q8's four part kinds; apps/web/lib/parts/types.ts transcribes it. A hash change here is a wire-contract change and must move the reader in the same wave. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v16.prompt.ts": {
       "sha256": "227d74b31876a88d6590b6291ea8447df30752dfdce1d43e0bdc879470258cf0",
-      "note": "P6-1 — ClaraPartV16 (22 + 4 = 26) and the one emitter this lane may lawfully carry (freeform_result). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "P6-1 — ClaraPartV16 (22 + 4 = 26) and the one emitter this lane may lawfully carry (freeform_result). Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v16.ts": {
       "sha256": "908e51723f422d5984c0fb3a7cc58bec4e10212726b5ea2d498601dbe75c141f",
-      "note": "P6-1 — the chatTurn_v16 workflow entry; registry.ts points chatTurn: here. The v15 body stays frozen and exported (policy (c)). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "P6-1 — the chatTurn_v16 workflow entry; registry.ts points chatTurn: here. The v15 body stays frozen and exported (policy (c)). Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v16.usage.ts": {
       "sha256": "f2238cc437424138738888eb756b1c3a4f39cd17f8a13e8aed5a044003609088",
-      "note": "P6-1 — the chatturn-v16 engine stamp; the metering recorder itself is v15's, by import. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "P6-1 — the chatturn-v16 engine stamp; the metering recorder itself is v15's, by import. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v17.impl.ts": {
@@ -1086,7 +1086,7 @@
     },
     "packages/runtime/workflows/witnessFacts.v1.behavior.mjs": {
       "sha256": "258a5e573223927bb99e964d33cbf4c95c8370c0517db85a5b0cb642ff5cada5",
-      "note": "F-A1 PR-2 — the witness pair's behavioural closure: two channels, one typed egress purpose (witness_extraction) dispatched ONCE PER CHANNEL, one atomic persist. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "F-A1 PR-2 — the witness pair's behavioural closure: two channels, one typed egress purpose (witness_extraction) dispatched ONCE PER CHANNEL, one atomic persist. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v1.dispatch.mjs": {
@@ -1106,57 +1106,57 @@
     },
     "packages/runtime/workflows/witnessFacts.v1.ts": {
       "sha256": "8b3f21d983f082f5c4fb63a184be107c92abbb9adf689d21903d0871e2e860f0",
-      "note": "F-A1 PR-2 — a brand-new frozen workflow CLASS for the llm_witness lane. Nothing mints its tasks until PR-3's router recut. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "F-A1 PR-2 — a brand-new frozen workflow CLASS for the llm_witness lane. Nothing mints its tasks until PR-3's router recut. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v2.behavior.mjs": {
       "sha256": "35e6bbc1b32caa80138008aa0adc3b3b581b1715d8dc1608326b08ad59510963",
-      "note": "F-A2 openers ①② — v1's behaviour with the v2 prompt/envelope closure and the per-channel coverage receipt assembled from facts v1 computed and discarded. It IMPORTS witnessFacts.v1.dispatch.mjs unchanged (same-family cross-version reuse), so that file is a member of both closures. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "F-A2 openers ①② — v1's behaviour with the v2 prompt/envelope closure and the per-channel coverage receipt assembled from facts v1 computed and discarded. It IMPORTS witnessFacts.v1.dispatch.mjs unchanged (same-family cross-version reuse), so that file is a member of both closures. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v2.envelope.mjs": {
       "sha256": "857591193bf8764ef9d35726bf519410288285f76c87713ea592faf330d7a595",
-      "note": "F-A2 opener ① — wire->writer normalization plus the witness.coverage receipt (lock 1's truncation/OCR-generation evidence and lock 3's downgraded_fields). Split from the prompt file at the 500-line gate, exactly as the v1 dispatch was split from the v1 behaviour. UNDEPLOYED.",
+      "note": "F-A2 opener ① — wire->writer normalization plus the witness.coverage receipt (lock 1's truncation/OCR-generation evidence and lock 3's downgraded_fields). Split from the prompt file at the 500-line gate, exactly as the v1 dispatch was split from the v1 behaviour. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v2.impl.ts": {
       "sha256": "fdf4397193c4e2e71aab3a22aaee76806e065e14ec88da925be19a577f423012",
-      "note": "F-A2 openers ①② — the four steps, reading their service bundle from the v2-only global slot so a straggler v1 run can never stamp :v2 provenance onto a v1-prompt read. UNDEPLOYED.",
+      "note": "F-A2 openers ①② — the four steps, reading their service bundle from the v2-only global slot so a straggler v1 run can never stamp :v2 provenance onto a v1-prompt read. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v2.prompts.mjs": {
       "sha256": "b85702ca742eebdc4cc810ca4dc91820b16ba6f80dc311d5a491e9cdec8b8215",
-      "note": "F-A2 openers ①② — the prompt closure: type_code becomes a CLASSIFICATION (the 0/33 corpus defect) and invoice.sst_registration is asked on both channels, answer-only, with the corpus-calibrated label family. FROZEN BY DECISION (design M8). UNDEPLOYED.",
+      "note": "F-A2 openers ①② — the prompt closure: type_code becomes a CLASSIFICATION (the 0/33 corpus defect) and invoice.sst_registration is asked on both channels, answer-only, with the corpus-calibrated label family. FROZEN BY DECISION (design M8). Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v2.ts": {
       "sha256": "010260db802b72be5ee6387f869fbb02270055b4c1e38c8a439957b4d1ec8d7e",
-      "note": "F-A2 openers ①② — the successor version on the llm_witness lane; registry.ts points witnessFacts: here. The workflow body is v1's, unchanged; everything that moved is inside the closure. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "F-A2 openers ①② — the successor version on the llm_witness lane; registry.ts points witnessFacts: here. The workflow body is v1's, unchanged; everything that moved is inside the closure. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v3.behavior.mjs": {
       "sha256": "2f48aa4590246c0699076d75857814d7121379048600c40949c2f377ef6ea707",
-      "note": "debt/prompts-v3 — the NEXT-ROUND QUEUE fold's behavioural closure: byte-for-byte v2's apart from the v3 prompt/envelope imports and no longer passing `pages` into witnessTextCoverage (finding 3). Reuses v2's own engine snapshot — no answer key added, so no provenance-guard change. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "debt/prompts-v3 — the NEXT-ROUND QUEUE fold's behavioural closure: byte-for-byte v2's apart from the v3 prompt/envelope imports and no longer passing `pages` into witnessTextCoverage (finding 3). Reuses v2's own engine snapshot — no answer key added, so no provenance-guard change. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v3.envelope.mjs": {
       "sha256": "98451d06f4b6171acea806f6320a397e3fdd3ce28f307a039c9aa768e05c76a7",
-      "note": "debt/prompts-v3 — wire->writer normalization plus the coverage receipt, byte-for-byte v2's except witnessTextCoverage no longer accepts or emits `pages` (finding 3: emitted empty on every text row in the 2026-08-21 re-measure, no lock reads it). UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "debt/prompts-v3 — wire->writer normalization plus the coverage receipt, byte-for-byte v2's except witnessTextCoverage no longer accepts or emits `pages` (finding 3: emitted empty on every text row in the 2026-08-21 re-measure, no lock reads it). Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v3.impl.ts": {
       "sha256": "95272f8271909d435b9e7931e7921b95761ee17612c10a5357d70bd804991ef6",
-      "note": "debt/prompts-v3 — the four steps. DELIBERATELY reads infrastructure from v2's OWN global slot (__claraWitnessFactsServicesV2) rather than minting a new one: no answer key or wire-schema change rides this version, so v2's engine snapshot is exactly right and no coupled DB migration is needed. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "debt/prompts-v3 — the four steps. DELIBERATELY reads infrastructure from v2's OWN global slot (__claraWitnessFactsServicesV2) rather than minting a new one: no answer key or wire-schema change rides this version, so v2's engine snapshot is exactly right and no coupled DB migration is needed. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v3.prompts.mjs": {
       "sha256": "96f4999fbfaf55eabb5ea83bae8f61f0701607f96c01c2546ca631594f06f9cb",
-      "note": "debt/prompts-v3 — the prompt closure carrying the NEXT-ROUND QUEUE's five ruled fixes: the MYR currency-code carve-out, the dash-is-not-a-value rule, a vision-only SST-shape reinforcement, and the owner's 2026-08-24 discount-no-net ruling (the fifth, coverage.pages, lives in the envelope file). Wire schema byte-identical to v2's. FROZEN BY DECISION (design M8). UNDEPLOYED.",
+      "note": "debt/prompts-v3 — the prompt closure carrying the NEXT-ROUND QUEUE's five ruled fixes: the MYR currency-code carve-out, the dash-is-not-a-value rule, a vision-only SST-shape reinforcement, and the owner's 2026-08-24 discount-no-net ruling (the fifth, coverage.pages, lives in the envelope file). Wire schema byte-identical to v2's. FROZEN BY DECISION (design M8). Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     },
     "packages/runtime/workflows/witnessFacts.v3.ts": {
       "sha256": "75dc1b90912657ec5f37a8acefebcffa92e85f847645091dc75d909915ba8602",
-      "note": "debt/prompts-v3 — the successor version on the llm_witness lane; registry.ts points witnessFacts: here. The workflow body is v2's (and v1's), unchanged; everything that moved is inside the closure. No coupled DB migration. UNDEPLOYED: the deploy-lock is the ceremony's act.",
+      "note": "debt/prompts-v3 — the successor version on the llm_witness lane; registry.ts points witnessFacts: here. The workflow body is v2's (and v1's), unchanged; everything that moved is inside the closure. No coupled DB migration. Deploy-lock stamped by the ceremony (`deployed: true`).",
       "deployed": true
     }
   }
