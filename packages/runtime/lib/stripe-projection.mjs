@@ -189,8 +189,34 @@ function metadataValue(object, key, dropped) {
  *
  * NULL, NOT TRUNCATED. Truncating would store a value Stripe never sent, on a money surface, and
  * `clara.stripe_events` is append-only — there is no correcting it later. Nulling is honest and
- * it keeps the event recordable: with `payment_status` NULL the applier's own settlement test
- * fails and it files `payment_not_settled`, which is the problem row an operator acts on.
+ * it keeps the event recordable rather than refused.
+ *
+ * WHAT A NULLED `payment_status` ACTUALLY DOES, CORRECTED (the r3 review's r3-1; an earlier
+ * version of this paragraph said it makes the applier file `payment_not_settled`, and that was
+ * WRONG). `apply_stripe_events`'s settlement test is
+ * `payment_status='paid' OR (mode='subscription' AND session_status='complete')`, so with
+ * `payment_status` NULL and the other two at their ordinary values the SECOND disjunct carries
+ * it and the gate PASSES. Measured on a rig by reading which gate stopped each event (the applier
+ * files the first problem it reaches, so the problem NAME identifies the gate):
+ *
+ *   payment_status NULLED, mode+status normal      -> PASSED settlement
+ *   payment_status='no_payment_required' (legal)   -> PASSED settlement  <- the identical gate
+ *   payment_status NULLED + mode='payment'         -> payment_not_settled
+ *   payment_status NULLED + session_status NULLED  -> payment_not_settled
+ *
+ * So a nulled `payment_status` and a legal `no_payment_required` are behaviourally the same
+ * event, and `payment_not_settled` is filed only when the RM0 relaxation is ALSO unavailable. At
+ * RM0 the nulling therefore opens no new path — which makes the old sentence a wrong CLAIM rather
+ * than a wrong WALL. What still holds, and is the real reason for NULL over truncation, is that
+ * the event is stored, the field is named in `metadata_malformed`, and the route logs it.
+ *
+ * THE FORWARD HAZARD, RECORDED HERE BECAUSE IT HAS A DATE. That second disjunct is 0160's own
+ * 裁-58/裁-28 tripwire — an RM0-ONLY relaxation whose comment says it MUST tighten to proof of
+ * settled payment when amounts are ruled. On that day `payment_status` becomes load-bearing, and
+ * **a NULLED `payment_status` must be treated as NOT SETTLED**, or a garbage status on a
+ * real-money session sails straight through the tightened gate. `c5sclr.5` is a drift guard that
+ * reds the moment the relaxation is tightened and says exactly this in its failure message, so
+ * the lane doing the tightening cannot miss it.
  */
 function scalarBounded(value, key, dropped, malformed) {
   const v = scalarOrNull(value, key, dropped);

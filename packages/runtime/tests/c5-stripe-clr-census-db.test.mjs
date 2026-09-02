@@ -266,6 +266,74 @@ test("c5sclr.4 NEW-1 — the three CHECK-bounded status fields, both polarities 
   );
 });
 
+test("c5sclr.5 r3-1 — the RM0 relaxation still carries a NULLED payment_status, and a tripwire for the day it stops", { skip }, async () => {
+  // WHAT THIS CELL IS. Not a wall — a DRIFT GUARD with a date on it. `apply_stripe_events`'s
+  // settlement test is `payment_status='paid' OR (mode='subscription' AND session_status=
+  // 'complete')`, and 0160's own comment marks that second disjunct as an RM0-ONLY relaxation
+  // that MUST tighten to proof of settled payment when 裁-58/裁-28 rule the amounts.
+  //
+  // Today that relaxation is what carries a NULLED `payment_status` through the gate — measured,
+  // and it refuted this fold's own earlier claim that nulling makes the applier file
+  // `payment_not_settled`. On the day the relaxation tightens, a NULLED `payment_status` becomes
+  // load-bearing and must be treated as NOT SETTLED, or a garbage status on a real-money session
+  // sails through. A comment cannot make that lane notice. A red cell can.
+  const src = await rig.rootQuery(
+    `select p.prosrc from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='clara' and p.proname='apply_stripe_events'`,
+  );
+  assert.equal(src.rowCount, 1, "exactly one apply_stripe_events body");
+  const body = src.rows[0].prosrc;
+
+  // The relaxation, read from the LIVE body rather than quoted from the migration file.
+  const relaxation = /e\.mode\s*=\s*'subscription'\s+and\s+e\.session_status\s*=\s*'complete'/;
+  assert.match(
+    body,
+    relaxation,
+    "THE 裁-58/裁-28 RM0 RELAXATION IS GONE FROM apply_stripe_events. Read this before going " +
+      "further: while it existed, a NULLED `payment_status` PASSED the settlement gate on that " +
+      "disjunct — identical to a legal 'no_payment_required'. With it tightened, `payment_status` " +
+      "is load-bearing, and `lib/stripe-projection.mjs`'s `scalarBounded` NULLS an over-long or " +
+      "non-ASCII one. A NULLED payment_status MUST now be treated as NOT SETTLED, or a garbage " +
+      "status on a real-money session sails through the tightened gate. Fix the applier (or the " +
+      "projector) BEFORE deleting this assertion.",
+  );
+
+  // And the behaviour the assertion above stands for, measured rather than inferred: with the
+  // relaxation live, a nulled payment_status and a legal `no_payment_required` reach the SAME
+  // gate, and `payment_not_settled` appears only once the relaxation cannot carry it.
+  const { recordStripeEvent, applyStripeEvents } = await import("../lib/checkout-pools.mjs");
+  const gateFor = async (over) => {
+    const eventId = `evt_c5r3${Math.random().toString(16).slice(2)}${Date.now().toString(16)}`;
+    await recordStripeEvent({
+      eventId,
+      eventType: "checkout.session.completed",
+      projection: {
+        livemode: false,
+        session_id: `cs_c5r3${Math.random().toString(16).slice(2)}`,
+        mode: "subscription",
+        session_status: "complete",
+        payment_status: "paid",
+        ...over,
+      },
+    });
+    await applyStripeEvents(500);
+    const r = await rig.rootQuery(
+      "select problem from clara.stripe_event_problems where event_id=$1 and resolved_at is null",
+      [eventId],
+    );
+    return r.rows[0]?.problem ?? "(settlement passed)";
+  };
+
+  const nulled = await gateFor({ payment_status: null });
+  const legal = await gateFor({ payment_status: "no_payment_required" });
+  assert.notEqual(nulled, "payment_not_settled", "a NULLED payment_status must NOT stop at settlement while the relaxation lives");
+  assert.equal(nulled, legal, "a NULLED payment_status and a legal 'no_payment_required' must reach the identical gate");
+  // …and the relaxation-unavailable arms DO stop there, so the cell is not merely observing that
+  // nothing ever files payment_not_settled.
+  assert.equal(await gateFor({ payment_status: null, mode: "payment" }), "payment_not_settled");
+  assert.equal(await gateFor({ payment_status: null, session_status: null }), "payment_not_settled");
+});
+
 test("c5sclr.3 LIVE, both polarities: the malformed event records and becomes a problem row", { skip }, async () => {
   const { recordStripeEvent, applyStripeEvents } = await import("../lib/checkout-pools.mjs");
 
