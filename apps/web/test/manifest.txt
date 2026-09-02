@@ -34,6 +34,7 @@
 # Blank lines and lines starting with # are ignored by both scripts above.
 
 
+
 components/admin/invite-dialog-a11y.test.tsx
 components/admin/invite-dialog-keyboard.test.tsx
 components/admin/members-a11y.test.tsx
@@ -175,6 +176,7 @@ lib/close/api.test.ts
 lib/coding/doors.test.ts
 lib/coding/loaders.test.ts
 lib/coding/reads.test.ts
+lib/command/do-action-floors.test.ts
 lib/command/do-actions.test.ts
 lib/command/routes.test.ts
 lib/documents/bytes.test.ts

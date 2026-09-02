@@ -32,10 +32,17 @@
 // No cache, no memo across opens: `CommandKProvider` mounts the palette body fresh on every
 // invocation, and the read runs then.
 //
-// **THIS IS A DEPARTURE FROM THE RULING'S LITERAL WORDING AND IS FLAGGED TO THE OWNER IN THE
-// PR BODY, NOT ABSORBED** (constraint 1: a design-vs-contract collision is the owner's call).
-// If the owner wants the wake allowlist itself, that is a DB PR minting a human-readable
-// projection of it — a new mechanism, and a separate decision.
+// **RULED: 裁-141 (owner, 2026-09-03).** The departure above was put to the owner rather than
+// absorbed (constraint 1), and THIS SHAPE STANDS: the palette pre-filters on the DB-computed
+// role rank against each door's transcribed floor plus each action's own precondition; the
+// DOOR remains the only authority; no new DB mechanism is minted; and
+// `clara.wake_fn_allowlist` stays invisible to app roles.
+//
+// 裁-141 attached ONE requirement to that, and it is `do-action-floors.test.ts`: **a drift
+// guard that reads every transcribed floor back against the live door and reds when they
+// diverge.** The reason is review law 3 — a transcribed floor is a PROJECTION of the door, not
+// the door — and the whole pre-filter below is built out of transcriptions. See `FloorSource`
+// for what each row declares and what drift actually costs.
 //
 // ============================================================================
 // FAIL-CLOSED, TWICE
@@ -59,6 +66,31 @@ import type { CallerContextRow, FirmRole } from "@/lib/identity/caller-context";
 import { meetsFloor } from "@/lib/identity/caller-context";
 
 export type DoActionId = "beginClientOnboarding" | "startClientInterview" | "bootstrapClientPlan";
+
+/**
+ * WHERE THE TRUTH FOR A ROW'S `floor` LIVES — 裁-141's drift guard, declared.
+ *
+ * A transcribed floor is a PROJECTION of the door, not the door (review law 3), and the whole
+ * ⌘K "Do" pre-filter is built out of transcriptions. The day a migration lowers
+ * `apply_coa_template` to viewer, or raises `begin_client_onboarding` to owner, every number
+ * in this file goes quietly stale: the palette keeps offering exactly what it offered
+ * yesterday, and the only thing that notices is a professional meeting a CLR04 on a row that
+ * looked available. The DB stays correct throughout — this is an honest-affordance drift, not
+ * a security one — which is precisely why nothing else would catch it.
+ *
+ * So every action names its source, and `do-action-floors.test.ts` walks THIS array and reds
+ * when a transcription and its live source disagree. Declaring the source here rather than in
+ * the cell is what makes the guard TOTAL: a new action cannot be added without one, because
+ * the type requires it and the cell asserts it covered every row.
+ */
+export type FloorSource =
+  /** A `security definer` door whose body calls `clara._human_ctx(clara.role_rank('<role>'))`.
+   *  Resolved from the LIVE body — the last surviving define across every migration in order,
+   *  dynamic `EXECUTE` splices included (`test/sqlFunctionCensus.ts`), never the first CREATE. */
+  | { kind: "sql"; fn: string }
+  /** A runtime HTTP route that floors the caller before the door is reached. `guard` is the
+   *  predicate the handler calls; `rank` is the constant that predicate compares against. */
+  | { kind: "runtimeRoute"; file: string; route: string; guard: string };
 
 /** What the palette knows about the client altitude it is sitting on, read live when a
  *  client is in scope. Every field is a DB fact or `null` for "not read" — a null never
@@ -97,6 +129,8 @@ export interface DoActionSpec {
    *                                CLR04, 0017:2662-2667). Bookkeeper.
    */
   floor: FirmRole;
+  /** 裁-141: where `floor` above was transcribed FROM, so a drift guard can re-read it. */
+  floorSource: FloorSource;
   keywords?: string[];
   /** The action's own live precondition. `true` only when a READ positively established it. */
   ready: (env: DoActionEnv) => boolean;
@@ -110,6 +144,7 @@ export const DO_ACTIONS: readonly DoActionSpec[] = [
     id: "beginClientOnboarding",
     altitude: "any",
     floor: "admin",
+    floorSource: { kind: "sql", fn: "begin_client_onboarding" },
     keywords: ["begin", "onboard", "new client", "open a file"],
     ready: (env) => env.query.trim().length > 0,
   },
@@ -120,6 +155,7 @@ export const DO_ACTIONS: readonly DoActionSpec[] = [
     id: "startClientInterview",
     altitude: "client",
     floor: "bookkeeper",
+    floorSource: { kind: "runtimeRoute", file: "packages/runtime/src/interviewRoutes.ts", route: "/api/interview/client/start", guard: "isBookkeeperPlus" },
     keywords: ["interview", "questions", "continue", "resume"],
     ready: (env) => env.client?.planState === "open" && typeof env.client.planId === "string",
   },
@@ -130,6 +166,7 @@ export const DO_ACTIONS: readonly DoActionSpec[] = [
     id: "bootstrapClientPlan",
     altitude: "client",
     floor: "admin",
+    floorSource: { kind: "sql", fn: "bootstrap_client_plan" },
     keywords: ["bootstrap", "plan", "carry down"],
     ready: (env) => env.client !== null && env.client.clientStatus === "active" && env.client.planId === null,
   },
@@ -138,6 +175,13 @@ export const DO_ACTIONS: readonly DoActionSpec[] = [
 /**
  * THE ONE PREDICATE. Both the render list and the execute gate call this — see the
  * fail-closed note above for why it is not duplicated.
+ *
+ * 裁-141 — THE FILTER SITE. This comparison is the ruled shape: a PRE-FILTER on the
+ * DB-computed rank against a TRANSCRIBED floor, sitting in front of a door that refuses on its
+ * own regardless. It is an honest-affordance gate, never the security wall. `spec.floor` is a
+ * projection of the door (review law 3), so it is held to the door by
+ * `do-action-floors.test.ts`, which re-reads every floor from its live source and reds on
+ * divergence — without that guard this line is a number nobody re-checks.
  */
 export function isDoActionPermitted(spec: DoActionSpec, env: DoActionEnv): boolean {
   if (!meetsFloor(env.ctx, spec.floor)) return false;
