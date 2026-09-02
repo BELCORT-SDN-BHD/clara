@@ -9,6 +9,7 @@ const env = {
   ...process.env,
   CLARA_E2E_APP_ORIGIN: appOrigin,
   CLARA_PUBLIC_ORIGINS: appOrigin,
+  CLARA_E2E_MONEY_INPUT_HARNESS: "1",
   NEXT_PUBLIC_SUPABASE_URL: `${appOrigin}/e2e-supabase`,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_clara_e2e_only",
 };

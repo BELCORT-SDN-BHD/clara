@@ -59,6 +59,7 @@ components/close/close-keyboard.test.tsx
 components/close/close-t1-hold-receipts.test.tsx
 components/close/close-t1-opener.test.tsx
 components/close/close-t1-proposal-readiness.test.tsx
+components/common/money-input.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/documents-a11y.test.tsx

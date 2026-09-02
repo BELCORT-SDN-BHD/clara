@@ -15,11 +15,12 @@ import { useReadErrKind } from "@/lib/bank/error-kind";
 import { useReloadOnChange } from "@/lib/bank/reload-on-change";
 import { listUnmatchedLines, listBankMatchCandidates } from "@/lib/bank/match-reads";
 import { matchBankLine, unmatchBankMatch } from "@/lib/bank/match-doors";
-import { formatMyr, parseAmountToCents } from "@/lib/bank/money";
+import { formatMyr } from "@/lib/bank/money";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MoneyInput } from "@/components/common/money-input";
 import { SectionHeader } from "@/components/common/section-header";
 import { ReadState } from "./read-state";
 import { StateBanner } from "@/components/common/state";
@@ -39,7 +40,8 @@ export function MatchingSection({ clientId }: { clientId: string }) {
   const [selectedLineIds, setSelectedLineIds] = useState<Set<string>>(new Set());
   const [settlingLineId, setSettlingLineId] = useState<string | null>(null);
   const [ackPeriodExceptions, setAckPeriodExceptions] = useState(false);
-  const [matchedCents, setMatchedCents] = useState<Record<string, string>>({});
+  const [matchedCents, setMatchedCents] = useState<Record<string, number | null>>({});
+  const [matchedMoneyValid, setMatchedMoneyValid] = useState<Record<string, boolean>>({});
 
   function toggleLine(lineId: string) {
     setSelectedLineIds((prev) => {
@@ -77,14 +79,13 @@ export function MatchingSection({ clientId }: { clientId: string }) {
     setMatchFormError(null);
     const entries: { entry_id: string; matched_cents: number }[] = [];
     for (const entryId of selectedEntryIds) {
-      const raw = matchedCents[entryId];
       // N9 fix (independent review): matched_cents is a signed RM amount the
       // human types like every OTHER money field in this build — parsed via
       // the same parseAmountToCents (comma-grouped, up to 2 decimals) rather
       // than a raw `Number.parseInt`, whose "1,234" -> 1 truncation-at-comma
       // is exactly the hostile-parsing shape a thousands-grouped amount hits.
-      const cents = raw ? parseAmountToCents(raw) : null;
-      if (cents === null || cents === 0) {
+      const cents = matchedCents[entryId] ?? null;
+      if (!matchedMoneyValid[entryId] || cents === null || cents === 0) {
         setMatchFormError(t("invalidMatchedCents"));
         return;
       }
@@ -105,6 +106,7 @@ export function MatchingSection({ clientId }: { clientId: string }) {
         setSelectedLineIds(new Set());
         setSelectedEntryIds(new Set());
         setMatchedCents({});
+        setMatchedMoneyValid({});
         setAckPeriodExceptions(false);
         // N7: a landed match changes every candidate's remaining capacity —
         // re-read it, never trust the pre-match figures to still hold.
@@ -178,11 +180,17 @@ export function MatchingSection({ clientId }: { clientId: string }) {
                   <li key={c.entry_id} className="flex items-center gap-2 text-xs">
                     <input type="checkbox" aria-label={t("selectEntry")} checked={selectedEntryIds.has(c.entry_id)} onChange={() => toggleEntry(c.entry_id)} />
                     <span className="flex-1">{c.memo ?? c.entry_id} · {c.counterparty_name ?? "—"}</span>
-                    <Input
-                      className="h-7 w-28" inputMode="decimal" placeholder={t("matchedCentsPlaceholder")}
+                    <MoneyInput
+                      className="h-7 w-28" placeholder={t("matchedCentsPlaceholder")}
                       aria-label={t("matchedCentsLabel")}
-                      value={matchedCents[c.entry_id] ?? ""}
-                      onChange={(e) => setMatchedCents((prev) => ({ ...prev, [c.entry_id]: e.target.value }))}
+                      cents={matchedCents[c.entry_id] ?? null}
+                      mode="signed"
+                      onValueChange={(change) => {
+                        setMatchedMoneyValid((prev) => ({ ...prev, [c.entry_id]: change.ok }));
+                        if (change.ok) {
+                          setMatchedCents((prev) => ({ ...prev, [c.entry_id]: change.cents }));
+                        }
+                      }}
                     />
                   </li>
                 ))}

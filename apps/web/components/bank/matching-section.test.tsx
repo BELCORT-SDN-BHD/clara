@@ -100,6 +100,14 @@ function checkboxNear(h: Awaited<ReturnType<typeof renderComponent>>, needle: st
   return box!;
 }
 
+function hasAncestorText(node: Node, needle: string): boolean {
+  let current = node.parentNode;
+  for (let depth = 0; current && depth < 4; depth += 1, current = current.parentNode) {
+    if (textOf(current as never).includes(needle)) return true;
+  }
+  return false;
+}
+
 test("BLOCKER-2: a match_bank_line refusal renders visibly in the match card, and the matched-cents field parses a grouped amount correctly (N9)", async () => {
   const seenMatchBodies: Record<string, unknown>[] = [];
   await withMockedEnv(
@@ -127,7 +135,7 @@ test("BLOCKER-2: a match_bank_line refusal renders visibly in the match card, an
 
         const centsInput = h.find(
           (n) => n.tagName === "INPUT" && (n as unknown as { type?: string }).type !== "checkbox"
-            && textOf((n.parentNode ?? {}) as Node).includes("misc payable"),
+            && hasAncestorText(n as unknown as Node, "misc payable"),
         );
         assert.ok(centsInput, "the matched-cents amount field must render inside the candidate's own row");
         await h.act(() => { setFieldValue(centsInput as never, "1,234.56"); });

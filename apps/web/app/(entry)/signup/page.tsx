@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 
 import { renderSignupRoute } from "@/components/entry/signup-route";
+import { MoneyInputE2EHarness } from "@/components/e2e/money-input-e2e-harness";
 
 export async function generateMetadata() {
   const t = await getTranslations("Signup");
@@ -51,6 +52,19 @@ export async function generateMetadata() {
  * DB's own sentence. A redirect would be this page pre-empting a verdict the DB
  * is the authority on, and it would have to guess where to send them.
  */
-export default async function SignupPage() {
+export default async function SignupPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const query = await searchParams;
+  if (process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1" && query.moneyInputE2E === "1") {
+    return (
+      <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-4 p-6">
+        <h1 className="font-serif text-2xl text-foreground">Money input browser harness</h1>
+        <MoneyInputE2EHarness />
+      </main>
+    );
+  }
   return renderSignupRoute();
 }

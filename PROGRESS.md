@@ -97,8 +97,9 @@ once it is ceremonied — or abandoned, which goes in the session log with a rea
    the webhook is wired — handed env-to-env from the owner's password manager, never pasted into
    chat; the Supabase/Resend/Cloudflare items of `docs/ops/wave-g-setup-checklist.md` are DONE (per
    the 09-01-pm ledger); the pricing/launch sitting (KYB + the lawyer's DPA swap) remains open.
-   **Remaining beta-gating work, none of which had a row before 2026-09-02:** the float-hook
-   silent-zero defect across every money input, widened to opening balances · the Clara rail inset
+   **Remaining beta-gating work, none of which had a row before 2026-09-02:** **P6-4 money input
+   BUILT on branch web/p6-4-money-input, review/merge owed** (the float-hook silent-zero defect across
+   every money input, widened to opening balances) · the Clara rail inset
    (the two-pane law, alignment gap #2) · P4-6 nav wiring + the reverse-direction nav gate
    (alignment gap #4) · the money-parser comma hardening (#495) · 裁-109's N1+N3 confirm-surface
    fixes (#499) · the five P6 polish trains · FS-9 conformance · FS-10 cutover · FS-11 the reduced

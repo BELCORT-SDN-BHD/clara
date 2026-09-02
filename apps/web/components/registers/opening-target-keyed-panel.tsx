@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { NativeSelect } from "@/components/common/native-select";
-import { CentsInput } from "./staff-advance-money-input";
+import { MoneyInput } from "@/components/common/money-input";
 import { OpeningDoorDialog } from "./OpeningDoorDialog";
 import { EmptyState } from "@/components/common/state";
 import { DataTableCard } from "@/components/common/data-table-card";
@@ -155,11 +155,23 @@ function TargetDialog({ seed, accounts, busy, act }: { seed: OpeningSeedRow; acc
         <div className="grid gap-2 sm:grid-cols-2">
           <div className="grid gap-1.5">
             <Label htmlFor="opening-target-debit">{t("debitCol")}</Label>
-            <CentsInput id="opening-target-debit" ariaLabel={t("debitCol")} cents={debit} onChange={(c) => { setDebit(c); if (c > 0) setCredit(0); }} />
+            <MoneyInput id="opening-target-debit" aria-label={t("debitCol")} cents={debit} mode="unsigned" onValueChange={(change) => {
+              if (change.ok) {
+                const cents = change.cents ?? 0;
+                setDebit(cents);
+                if (cents > 0) setCredit(0);
+              }
+            }} />
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="opening-target-credit">{t("creditCol")}</Label>
-            <CentsInput id="opening-target-credit" ariaLabel={t("creditCol")} cents={credit} onChange={(c) => { setCredit(c); if (c > 0) setDebit(0); }} />
+            <MoneyInput id="opening-target-credit" aria-label={t("creditCol")} cents={credit} mode="unsigned" onValueChange={(change) => {
+              if (change.ok) {
+                const cents = change.cents ?? 0;
+                setCredit(cents);
+                if (cents > 0) setDebit(0);
+              }
+            }} />
           </div>
         </div>
       </div>
