@@ -78,6 +78,20 @@ boots a SECOND userland, so two runner-registration copies fight one repo-level 
 up exactly one keeper (the detached-keeper recipe above). Never attempt the cure with a
 runner mid-job.
 
+### Known issues: contention-class false reds under load (2026-09-02)
+
+With 5–6 PR pipelines live on the four-runner fleet, two unrelated jobs can red in the SAME
+second for reasons that have nothing to do with either PR's content — the fleet is shared
+hardware, and a contention spike looks exactly like a real defect until you check the clock.
+Two incidents the same afternoon: a DB-session loss in two unrelated jobs 4 ms apart
+(07:00:25Z) and a wall-clock-ordered assertion (`intake-e2e.mjs:254`) flipping under load
+(09:03:48Z) — both reran green with no code change. **Standing practice: rerun once, never
+diagnose twice** — a same-second red on two different branches is contention until proven
+otherwise; only escalate to a real diagnosis if the SAME job reds twice in a row on the SAME
+commit. The concurrency cap below (裁-134) narrows this window by bounding how many heavy
+legs share the fleet at once, but does not eliminate it — 3 concurrent instances of a
+DB-service job can still contend with each other.
+
 ## Re-register / decommission
 
 ```bash
@@ -180,3 +194,52 @@ exists for this composite action (both usages are inline in `ci.yml`); the fix i
 reasoned diff, not a rig test — there is no database or migration surface here. **Standing
 practice, unchanged:** avoid merging into `main` mid-sweep where practical; the forced ref
 is the structural fix for when it happens anyway.
+
+## The zero-spend concurrency cap (裁-134, 2026-09-02)
+
+The owner ruled *"只加并发上限，不花钱"* (concurrency cap only, no spend) after the two same-
+afternoon contention incidents above, having first declined making the repo public (self-
+hosted CI is private-repo-only — going public means decommissioning all four runners and
+rotating secrets first, `docs/adr/README-log.md` 2026-09-02 entry) and declined paying for
+hosted-runner minutes. Two independent, deliberately UN-combined mechanisms:
+
+**(a) Per-branch cancel, unchanged in spirit, one bug fixed.** The workflow-level
+`concurrency:` group at the top of `ci.yml` already cancelled a PR's own superseded push
+(`github.ref` is `refs/pull/<n>/merge` — stable across a PR's own pushes, distinct from every
+other PR's). It did NOT already exempt `push`: every push to `main` shared the literal group
+name "ci-" + refs/heads/main, so a second merge landing while the first's CI was still running would
+have cancelled it — the opposite of "never cancelled." `push` now gets a run_id-keyed group
+of its own, exactly like `workflow_dispatch` and `schedule` already did, so it is always
+alone and cancel-in-progress is a structural no-op for all three.
+
+**(b) The cap: a job-level slot group on the four ADR-0073 heavy legs.** `build`,
+`db-estate`, `db-live-gates` and `render-drill` each carry their own
+`concurrency.group: ci-cap-<job>-<slot>` where `slot` is `github.event.pull_request.number %
+3`, computed once in the `changes` job (bash has `%`; the GitHub Actions expression language
+does not — confirmed against the current expressions reference, whose operator table is
+`( ) [ ] . ! < <= > >= == != && ||` only) and read back via `needs.changes.outputs.slot`.
+`cancel-in-progress` is deliberately **false** on this axis: the slot is shared ACROSS
+different PRs, and cancelling a running job here could kill a different PR's legitimate work
+— the workflow-level per-branch group above is where cancellation belongs, precisely because
+it can never contain a different PR's run. Never applied to schedule/workflow_dispatch/push
+(each computes a run_id-keyed group instead, so the cap never touches them, per the ruling).
+
+**The named hazard.** GitHub's documented default (`queue: single`) means a concurrency
+group holds at most one PENDING entry; a newer pending arrival in the same slot REPLACES
+(cancels) the one already waiting, not the one running. Concretely: with the fleet's 4th,
+5th, 6th… PR queued behind a full slot, a further push into that same slot cancels whichever
+PR was pending there, silently. **A displaced PR must be re-triggered** —
+`gh pr update-branch <n>` (if behind base) or `gh run rerun <run-id>` — it will not resume on
+its own. This is the cost of a zero-spend cap: GitHub does not offer a documented,
+zero-cost way to make a cross-PR cap "queue everyone fairly" (FIFO up to 100 pending exists
+via `queue: max`, but nothing prevents a *different* PR's pending run from being the one that
+waits — the mechanism has no per-tenant fairness, only per-group FIFO). What this cap does
+NOT give: a single atomic "at most 3 whole PR runs" gate — GitHub's per-run atomicity lives
+only in workflow-level concurrency, which is already spent on requirement (a) above and
+cannot also hold the cross-PR slot key without endangering it (one group, one
+`cancel-in-progress` boolean, shared by whoever is in it). Instead this caps each of the four
+heavy JOB TYPES independently to 3 concurrent instances fleet-wide — a very close proxy for
+"3 concurrent PR runs" given the fleet has exactly four runner instances, and it directly
+targets the axis the 2026-09-02 incidents actually broke on (concurrent DB-service jobs, an
+e2e under load), while leaving the fast, DB-service-free `lint`/`changes`/
+`db-split-partition-total` legs uncapped so a queued PR still gets fast lint feedback.

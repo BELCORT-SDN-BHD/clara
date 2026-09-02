@@ -110,3 +110,12 @@ re-reading find?"
 > ledger + `PROGRESS.md`'s posture; 裁-123's cleanup incident corrected a Known-issues LAW
 > line in `PROGRESS.md` (`git worktree remove --force` follows junctions on this host). The
 > digest's law-28 suspension note (裁-111) is unchanged and still time-boxed to beta live.
+
+## 2026-09-02 — the CI concurrency cap (裁-134, zero spend) — ADR-0073 unamended
+
+> 裁-134 (owner: 只加并发上限，不花钱) adds a per-branch cancel-in-progress fix (push-to-main was
+> wrongly sharing one group across every merge) and a zero-cost job-level slot cap (PR number
+> mod 3) on the four ADR-0073 runner-heavy legs, after two same-afternoon contention-class
+> false reds on the self-hosted fleet. This is an OPERATING addendum to `.github/workflows/
+> ci.yml` and `docs/ops/ci-runner.md`, not a digest-law or ADR-0073 change — §10's law 77 is
+> untouched.

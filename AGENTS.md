@@ -204,5 +204,11 @@ and DB legs by classifier, the weekly sweep re-proves every leg regardless, and 
 required check `ci` is a fail-closed meta-gate over every job — a red lint blocks merge on
 every PR, docs-only included.
 
+**A zero-spend concurrency cap (裁-134, 2026-09-02):** a PR's own superseded push cancels its
+own prior run (per-branch group, unchanged); the four runner-heavy legs (build, db-estate,
+db-live-gates, render-drill) are separately capped at 3 concurrent instances fleet-wide via a
+PR-number-mod-3 job-level slot group, never applied to push-to-main/schedule/workflow_dispatch
+— see `docs/ops/ci-runner.md` for the exact mechanism and its named hazard.
+
 **Ceremonies run from merged `main`, never from a branch.** A migration that replaces a live
 writer's body needs a D1 write-quiesce window; the recipes live in `docs/ops/`.

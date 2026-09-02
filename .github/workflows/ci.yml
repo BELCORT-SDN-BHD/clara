@@ -43,7 +43,24 @@ concurrency:
   # compensating control every skip leans on. workflow_dispatch gets a PER-RUN group
   # (5-lens review, 2026-08-21): ADR-0073 makes manual dispatch the closed-wave proof
   # path, and in the ref group the next push-to-main would cancel it mid-drill.
-  group: ci-${{ github.event_name == 'schedule' && 'weekly-sweep' || github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.ref }}
+  #
+  # 裁-134 (2026-09-02, zero-spend concurrency cap): `push` (main-only per the `on:` trigger
+  # above) ALSO gets a PER-RUN group now, for the identical reason workflow_dispatch does —
+  # every push to main previously fell through to plain `github.ref`, which is the SAME
+  # literal string (`refs/heads/main`) for every push, so cancel-in-progress:true was
+  # silently cancelling an in-flight merge's CI the moment a second merge landed. That is
+  # the one event this ruling requires NEVER be cancelled or capped, so it now gets the same
+  # run_id-keyed isolation as workflow_dispatch (a group that is always alone). ONLY
+  # `pull_request` still falls through to `github.ref` (refs/pull/<n>/merge — stable across
+  # every push to that SAME PR, distinct from every other PR's ref): cancel-in-progress:true
+  # here can only ever depose THIS PR's own prior run, never a different PR's, so it is safe
+  # unconditionally. The CROSS-PR cap (a fleet-wide limit on how many DIFFERENT PRs' heavy
+  # legs run at once) is a SEPARATE concern deliberately NOT folded into this one group: a
+  # single group has one cancel-in-progress boolean shared by everyone in it, but the cap
+  # needs cross-PR sharing while safe cancellation needs same-PR-EXCLUSIVE sharing — folding
+  # both into one group would let one PR's push cancel a different PR's live run. See the
+  # job-level slot cap on build/db-estate/db-live-gates/render-drill below instead.
+  group: ci-${{ github.event_name == 'schedule' && 'weekly-sweep' || github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || github.event_name == 'push' && format('push-{0}', github.run_id) || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -76,10 +93,23 @@ jobs:
     outputs:
       code: ${{ steps.classify.outputs.code }}
       db: ${{ steps.classify.outputs.db }}
+      slot: ${{ steps.slot.outputs.slot }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      # 裁-134 (2026-09-02, zero-spend concurrency cap): the CAP's slot bucket, PR number
+      # mod 3. `${{ }}` expressions have NO arithmetic operator (confirmed against the
+      # current GitHub Actions expressions reference: only ( ) [ ] . ! < <= > >= == !=
+      # && || — no +-*/%), so the literal `% 3` is computed HERE in bash, once, and read
+      # back by the four capped jobs below as a plain job output (`needs.changes.outputs.slot`,
+      # a context job-level `concurrency.group` expressions ARE allowed to read). Meaningless
+      # (and unused) on any non-pull_request event.
+      - id: slot
+        if: github.event_name == 'pull_request'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: echo "slot=$(( PR_NUMBER % 3 ))" >> "$GITHUB_OUTPUT"
       - id: classify
         env:
           EV_BEFORE: ${{ github.event.before }}
@@ -147,6 +177,23 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'false'
     runs-on: [self-hosted, linux, clara]
+    # 裁-134 (2026-09-02, zero-spend concurrency cap — owner: 只加并发上限，不花钱): at most 3
+    # concurrent render-drill legs fleet-wide, bucketed by PR number mod 3 (needs.changes.
+    # outputs.slot). This is a SEPARATE axis from the workflow-level group above: that one is
+    # per-PR (safe to cancel — a PR's own group never holds another PR's run); this one is
+    # SHARED ACROSS DIFFERENT PRs landing in the same slot, so cancel-in-progress is FALSE on
+    # purpose — cancelling here could kill a DIFFERENT PR's in-progress leg. The only thing a
+    # busy slot does is make a 4th+ contender PENDING; GitHub's documented default
+    # (`queue: single`) then means a newer pending arrival in that same slot REPLACES
+    # (cancels) the one already pending — so a displaced PR must be re-triggered
+    # (`gh pr update-branch <n>` or `gh run rerun`) once its slot frees up. Never for
+    # schedule/workflow_dispatch/push — each gets a run_id-keyed group of its own (always
+    # alone, so this cap and cancel-in-progress are both structural no-ops for them). The
+    # other three capped jobs (build, db-estate, db-live-gates) repeat this exact shape with
+    # their own job-scoped prefix; this comment is not repeated there.
+    concurrency:
+      group: ${{ github.event_name == 'pull_request' && format('ci-cap-render-drill-{0}', needs.changes.outputs.slot) || format('ci-cap-render-drill-unshared-{0}', github.run_id) }}
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -201,6 +248,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'false'
     runs-on: [self-hosted, linux, clara]
+    # 裁-134 cap (see render-drill above for the full rationale): 3 slots, pending-only.
+    concurrency:
+      group: ${{ github.event_name == 'pull_request' && format('ci-cap-build-{0}', needs.changes.outputs.slot) || format('ci-cap-build-unshared-{0}', github.run_id) }}
+      cancel-in-progress: false
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       # apps/web's build runs `scripts/check-public-key.mjs` BEFORE bundling: it
@@ -253,6 +304,10 @@ jobs:
     # an absent/garbled output must RUN the job, not skip it green.
     if: needs.changes.outputs.code != 'false'
     runs-on: [self-hosted, linux, clara]
+    # 裁-134 cap (see render-drill above for the full rationale): 3 slots, pending-only.
+    concurrency:
+      group: ${{ github.event_name == 'pull_request' && format('ci-cap-db-estate-{0}', needs.changes.outputs.slot) || format('ci-cap-db-estate-unshared-{0}', github.run_id) }}
+      cancel-in-progress: false
     services:
       postgres:
         image: postgres:17
@@ -306,6 +361,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'false'
     runs-on: [self-hosted, linux, clara]
+    # 裁-134 cap (see render-drill above for the full rationale): 3 slots, pending-only.
+    concurrency:
+      group: ${{ github.event_name == 'pull_request' && format('ci-cap-db-live-gates-{0}', needs.changes.outputs.slot) || format('ci-cap-db-live-gates-unshared-{0}', github.run_id) }}
+      cancel-in-progress: false
     services:
       postgres:
         image: postgres:17
