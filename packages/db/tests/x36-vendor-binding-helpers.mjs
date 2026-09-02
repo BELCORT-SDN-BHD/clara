@@ -187,6 +187,24 @@ export const driftApproveCore = (def) => {
   return def.replace(needle, `${needle}\n  -- rig fixture: byte drift, no behaviour; removed by restoreApproveCore`);
 };
 
+/** Insert exactly ONE behaviour-neutral byte into the live body. This is deliberately distinct
+ * from the comment vector above: the byte delta itself is measured, so a helper rewrite cannot
+ * quietly turn the claimed one-byte drift into a larger edit. */
+export const oneByteDriftApproveCore = (def) => {
+  const needle = "\nbegin\n";
+  const hits = def.split(needle).length - 1;
+  if (hits < 1) {
+    throw new Error(
+      "oneByteDriftApproveCore: top-level begin anchor is absent, so no byte would be inserted",
+    );
+  }
+  const mutated = def.replace(needle, "\nbegin \n");
+  if (Buffer.byteLength(mutated, "utf8") !== Buffer.byteLength(def, "utf8") + 1) {
+    throw new Error("oneByteDriftApproveCore: mutation was not an exact one-byte insertion");
+  }
+  return mutated;
+};
+
 /** The rig's stand-in for PR-3's own recut: plant the marker as REAL CODE. What the gate reads is
  *  the resulting sha, not this text — the text only makes the stub honest to look at. */
 export const plantMarker = (def) => {

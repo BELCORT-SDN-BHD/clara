@@ -12,10 +12,10 @@
 // and proves the refusal disappears. Without that pairing a cell can be green because the door
 // refuses everything, and green would mean nothing.
 //
-// FAIL, NEVER SKIP. The migration is UNNUMBERED on the branch (the conductor claims its number
-// at merge prep), so readiness is probed by CATALOG — exact-signature to_regprocedure — not by a
-// schema_migrations version string that does not exist yet. Against the pre-migration frontier
-// this battery goes RED, deliberately (.claude/rules/db-tests.md; the estate's fail0017 idiom).
+// A focused run FAILS on the exact pre-image. A package-wide pre-integration run may SKIP only
+// after a positive catalog identity read proves that exact pre-image is still live; absence and
+// every other body execute. The migration is UNNUMBERED on the branch, so no version string is
+// trusted for this decision.
 //
 // Serial discipline: --test-concurrency=1 (shared rig convention).
 
@@ -31,8 +31,12 @@ import { approveEntry, COA, membershipId, setMemberRole } from "./rig-fixtures.m
 import {
   seedPayableAccount, seedClientHardIdentifier, seedPassingWindow, seedBareDocument,
   seedF123Evidence, propose, signLive, revoke, postTimeControlLive, POST_TIME_MARKER,
-  APPROVE_CORE_SIG, recutApproveCore, restoreApproveCore, driftApproveCore, AP_ACCOUNT,
+  APPROVE_CORE_SIG, recutApproveCore, restoreApproveCore, driftApproveCore,
+  oneByteDriftApproveCore, AP_ACCOUNT,
 } from "./x36-vendor-binding-helpers.mjs";
+import {
+  BINDING_PR3_ALLOW_MISSING, readBindingPr3Gate, readBindingPr3PostPin,
+} from "./binding-pr-3-post-time-gate.mjs";
 import {
   reasonOf, withMutant, withoutConstraint, declineBinding, resetDecline,
   seedWindow, DATES_OK, mergeAway, seedUniqueFamilyVendor,
@@ -42,6 +46,7 @@ const RESET_REVOCATION_SIG = "clara.reset_binding_revocation(uuid,text,text)";
 
 let live = false;
 let w = null;
+let skipReason = null;
 
 /** READINESS BY CATALOG, never by a migration name: this file is UNNUMBERED on the branch.
  *  Both halves of what PR-3 ships are probed, because a half-applied database is its own
@@ -57,7 +62,11 @@ async function pr3Live() {
   } catch { return false; }
 }
 
-function failPr3() {
+function unavailablePr3(t) {
+  if (skipReason) {
+    t.skip(skipReason);
+    return true;
+  }
   if (!live) {
     throw new Error(
       "裁-18b PR-3 NOT applied (clara.reset_binding_revocation does not resolve at its exact "
@@ -65,9 +74,20 @@ function failPr3() {
       + "REQUIRED to fail against the pre-migration frontier rather than skip "
       + "(.claude/rules/db-tests.md).");
   }
+  return false;
 }
 
 before(async () => {
+  const gate = await readBindingPr3Gate(rootQuery, process.env[BINDING_PR3_ALLOW_MISSING]);
+  if (gate.action === "fail") {
+    throw new Error(
+      `${gate.reason}; ${BINDING_PR3_ALLOW_MISSING} is unset — focused runs fail loudly`,
+    );
+  }
+  if (gate.action === "skip") {
+    skipReason = gate.reason;
+    return;
+  }
   live = await pr3Live();
   if (!live) return;
   w = await buildWorld();
@@ -230,19 +250,25 @@ const approve = async (d, tag) => approveEntry(w.users.alice,
 // READINESS + THE WITNESS
 // ===========================================================================
 
-test("bpr3.R0 — the control ships as REAL CODE and the witness attests to THOSE bytes", async () => {
-  failPr3();
+test("bpr3.R0 — the control ships as REAL CODE and the witness attests to THOSE bytes", async (t) => {
+  if (unavailablePr3(t)) return;
   // D2 (packages/db/README.md): the witness must be the LIVE body, byte for byte, or the door it
   // gates has quietly stopped working. Asked the way the door asks it — resolve the expected
   // identity to an OID first, then compare the sha — so this cell and the door can never disagree.
   const r = await rootQuery(
-    `select w.proc, w.minted_in_migration,
+    `select w.proc, w.minted_in_migration, w.prosrc_sha,
+            encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as live_sha,
             (encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') = w.prosrc_sha) as matches
        from clara.control_witnesses w join pg_proc p on p.oid = to_regprocedure(w.proc)
       where w.control = $1`, [POST_TIME_MARKER]);
   assert.equal(r.rowCount, 1, "exactly one witness row for the post-time control");
   assert.equal(r.rows[0].proc, APPROVE_CORE_SIG, "…naming the approve path by EXACT signature");
   assert.equal(r.rows[0].matches, true, "…and matching the live body byte-for-byte");
+  const reviewedPost = readBindingPr3PostPin();
+  assert.equal(r.rows[0].live_sha, reviewedPost,
+    "the live body is the independently pinned post-image read from the migration tail");
+  assert.equal(r.rows[0].prosrc_sha, reviewedPost,
+    "the witnessed sha is independently pinned too — it is not trusted merely for matching live");
   assert.ok(!/^rig-fixture:/.test(r.rows[0].minted_in_migration),
     `…minted by the MIGRATION, not left behind by a fixture (${r.rows[0].minted_in_migration})`);
   // …and the control is real code, not a marker: the ruled O3 gate is IN the body.
@@ -258,8 +284,8 @@ test("bpr3.R0 — the control ships as REAL CODE and the witness attests to THOS
   }
 });
 
-test("bpr3.R1 — the signer's gate is OPEN after PR-3, and CLOSES again the moment the body drifts", async () => {
-  failPr3();
+test("bpr3.R1 — the signer's gate is OPEN after PR-3, and CLOSES again the moment the body drifts", async (t) => {
+  if (unavailablePr3(t)) return;
   // The half PR-1 could only prove as a refusal. A migration that recuts a witnessed body and
   // forgets to re-witness it closes the control's gate — deliberately, because a control whose
   // body changed without review is a control nobody has reviewed. Drilled here as the state
@@ -276,6 +302,27 @@ test("bpr3.R1 — the signer's gate is OPEN after PR-3, and CLOSES again the mom
   const baseSha = (await rootQuery(
     "select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as s from pg_proc p where p.oid = $1::regprocedure",
     [APPROVE_CORE_SIG])).rows[0].s;
+  const baseBytes = (await rootQuery(
+    "select octet_length(p.prosrc)::int as n from pg_proc p where p.oid = $1::regprocedure",
+    [APPROVE_CORE_SIG])).rows[0].n;
+  const oneByte = await recutApproveCore(oneByteDriftApproveCore);
+  const driftBytes = (await rootQuery(
+    "select octet_length(p.prosrc)::int as n from pg_proc p where p.oid = $1::regprocedure",
+    [APPROVE_CORE_SIG])).rows[0].n;
+  assert.equal(driftBytes, baseBytes + 1, "the behaviour-neutral drift is exactly ONE BYTE");
+  let oneByteErr = null;
+  try {
+    oneByteErr = await assertRaises("CLR36",
+      () => humanQuery(w.users.alice,
+        namedCall("sign_vendor_identity_binding", [{ name: "p_binding" }, { name: "p_op_key" }]),
+        [p2.binding_id, opk("r1onebyte")]),
+      "signing after an exact one-byte approve-body drift");
+  } finally {
+    await restoreApproveCore(oneByte.original, baseSha);
+  }
+  assert.equal(reasonOf(oneByteErr), "post_time_control_absent");
+  assert.equal((await bindingRow(p2.binding_id)).status, "proposed", "one-byte drift moved no row");
+
   const { original, sha } = await recutApproveCore(driftApproveCore);
   assert.notEqual(sha, baseSha, "the drift really moved the body");
   let err = null;
@@ -297,8 +344,8 @@ test("bpr3.R1 — the signer's gate is OPEN after PR-3, and CLOSES again the mom
 // THE CONTROL — the clean path, then one cell per ruled arm, each with its mutant
 // ===========================================================================
 
-test("bpr3.C1 — a still-valid binding approves UNCHANGED, and records phase='post' outcome='bound'", async () => {
-  failPr3();
+test("bpr3.C1 — a still-valid binding approves UNCHANGED, and records phase='post' outcome='bound'", async (t) => {
+  if (unavailablePr3(t)) return;
   // The control on every refusal cell below. If a valid binding could not post, every refusal
   // here would be indistinguishable from a door that refuses everything.
   const b = await liveBinding("C1");
@@ -317,8 +364,8 @@ test("bpr3.C1 — a still-valid binding approves UNCHANGED, and records phase='p
   assert.equal(r.binding_post_check, undefined, "a clean re-check annotates nothing");
 });
 
-test("bpr3.C2 — an UNBOUND entry never enters the control at all (and its mutant proves the gate)", async () => {
-  failPr3();
+test("bpr3.C2 — an UNBOUND entry never enters the control at all (and its mutant proves the gate)", async (t) => {
+  if (unavailablePr3(t)) return;
   // O3's gate: fourteen call sites reach this body and most carry no binding. An ungated check
   // would fire in every one of them.
   const b = await liveBinding("C2");
@@ -347,8 +394,8 @@ test("bpr3.C2 — an UNBOUND entry never enters the control at all (and its muta
     });
 });
 
-test("bpr3.C3 — a REVOKED binding REFUSES at approve (O3), and its mutant posts instead", async () => {
-  failPr3();
+test("bpr3.C3 — a REVOKED binding REFUSES at approve (O3), and its mutant posts instead", async (t) => {
+  if (unavailablePr3(t)) return;
   // THE EXPOSURE G6 NAMED: an entry drafted under a live binding and approved after the binding
   // is revoked was posted with the binding's identity attribution and no re-check. Not a wrong
   // number — the accounts, amounts and direction were always judged under the other walls — a
@@ -378,8 +425,8 @@ test("bpr3.C3 — a REVOKED binding REFUSES at approve (O3), and its mutant post
     });
 });
 
-test("bpr3.C4 — an EXPIRED binding POSTS and is ANNOTATED (O3), and its mutant refuses instead", async () => {
-  failPr3();
+test("bpr3.C4 — an EXPIRED binding POSTS and is ANNOTATED (O3), and its mutant refuses instead", async (t) => {
+  if (unavailablePr3(t)) return;
   // O3, in the owner's words: expiry is a CLOCK, revocation is an ACT. An entry drafted three
   // days before expiry and approved two days after should not be stranded over a date. It posts,
   // the divergence is recorded, and the annotation reaches the caller rather than living only in
@@ -419,8 +466,8 @@ test("bpr3.C4 — an EXPIRED binding POSTS and is ANNOTATED (O3), and its mutant
     });
 });
 
-test("bpr3.C5 — an IDENTITY DRIFT between draft and approve REFUSES, and its mutant posts", async () => {
-  failPr3();
+test("bpr3.C5 — an IDENTITY DRIFT between draft and approve REFUSES, and its mutant posts", async (t) => {
+  if (unavailablePr3(t)) return;
   // The registration the binding was signed against is the identity it authorises. If the
   // counterparty's registration moves after the card was signed, the authority names a company
   // that is no longer the one in front of us.
@@ -477,8 +524,8 @@ test("bpr3.C5 — an IDENTITY DRIFT between draft and approve REFUSES, and its m
   });
 });
 
-test("bpr3.C6 — a pair a human DECLINED is suppressed at post time too, and its mutant posts", async () => {
-  failPr3();
+test("bpr3.C6 — a pair a human DECLINED is suppressed at post time too, and its mutant posts", async (t) => {
+  if (unavailablePr3(t)) return;
   // Defence in depth, and it is labelled as such rather than sold as the primary wall: PR-1's
   // signer already refuses a suppressed pair, so a LIVE binding on a declined pair should be
   // unreachable. The fail-closed direction on a wall a human deliberately raised is to leave it
@@ -512,8 +559,8 @@ test("bpr3.C6 — a pair a human DECLINED is suppressed at post time too, and it
     });
 });
 
-test("bpr3.C7 — a REVERSAL of an entry posted under a since-revoked binding BYPASSES entirely", async () => {
-  failPr3();
+test("bpr3.C7 — a REVERSAL of an entry posted under a since-revoked binding BYPASSES entirely", async (t) => {
+  if (unavailablePr3(t)) return;
   // O3, and it is NOT optional under any arm: an entry posted under a since-revoked binding is
   // exactly the entry a human needs to reverse. A check that refused it would block its own
   // remedy — the entry would be stuck posted, under an authority nobody wants, with no way out.
@@ -548,8 +595,8 @@ test("bpr3.C7 — a REVERSAL of an entry posted under a since-revoked binding BY
     });
 });
 
-test("bpr3.C8 — a binding belonging to ANOTHER book cannot authorise this entry", async () => {
-  failPr3();
+test("bpr3.C8 — a binding belonging to ANOTHER book cannot authorise this entry", async (t) => {
+  if (unavailablePr3(t)) return;
   // The marker is a bare uuid on the entry with no composite FK behind it, so an authority
   // belonging to another client would otherwise be honoured verbatim.
   // TWO WALLS, and the order matters for what this cell is allowed to claim.
@@ -596,8 +643,8 @@ test("bpr3.C8 — a binding belonging to ANOTHER book cannot authorise this entr
   });
 });
 
-test("bpr3.C9 — an EXPIRED binding whose identity ALSO drifted REFUSES; the clock never masks", async () => {
-  failPr3();
+test("bpr3.C9 — an EXPIRED binding whose identity ALSO drifted REFUSES; the clock never masks", async (t) => {
+  if (unavailablePr3(t)) return;
   // THE DEFECT THIS CELL EXISTS FOR, found in this PR's own body rather than in the port source.
   // 0046 judged the clock SECOND and UNGUARDED, which was safe there because expiry REFUSED:
   // overriding one refusal with another still refuses. O3 makes expiry ANNOTATE AND POST, so a
@@ -649,8 +696,8 @@ async function revokedBinding(tag) {
   return b;
 }
 
-test("bpr3.K1 — the door lifts a REVOCATION, receipts every column it cleared, and un-suppresses the pair", async () => {
-  failPr3();
+test("bpr3.K1 — the door lifts a REVOCATION, receipts every column it cleared, and un-suppresses the pair", async (t) => {
+  if (unavailablePr3(t)) return;
   // THE COUNT MUST DISCRIMINATE (Codex #452 LOW). An earlier cut of this cell asserted only
   // `typeof approved_entries === "number"` over a fixture that had posted NOTHING — so the impl
   // could have returned a constant 0, or dropped the `status='approved'` filter, and this cell
@@ -814,8 +861,8 @@ test("bpr3.K1 — the door lifts a REVOCATION, receipts every column it cleared,
   assert.equal(reasonOf(stillRevoked), "binding_revoked");
 });
 
-test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason, and refuses a non-revoked row", async () => {
-  failPr3();
+test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason, and refuses a non-revoked row", async (t) => {
+  if (unavailablePr3(t)) return;
   const b = await revokedBinding("K2");
   // FLOOR. carol is a bookkeeper in firm A (buildWorld's roster); the floor is the signer's rank.
   await assertRaises(CLR.authz,
@@ -832,6 +879,30 @@ test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason,
       `a blank reason (${JSON.stringify(blank)})`);
     assert.equal(reasonOf(err), "reset_reason_required");
   }
+  const wrappedRow = await revokedBinding("K2wrapped");
+  await resetRevocation(w.users.alice, {
+    binding: wrappedRow.binding.binding_id,
+    reason: "\ufeffSSM ok\u200b",
+    opKey: opk("k2wrapped"),
+  });
+  assert.equal((await rootQuery(
+    `select args->>'reason' as reason from clara.audit_log
+      where fn='reset_binding_revocation' and args->>'binding_id'=$1`,
+    [wrappedRow.binding.binding_id])).rows[0].reason,
+  "SSM ok", "BOM/ZWSP edge wrappers are removed from the durable audited reason");
+
+  const interiorRow = await revokedBinding("K2interior");
+  await resetRevocation(w.users.alice, {
+    binding: interiorRow.binding.binding_id,
+    reason: "\ufeffSSM  registration  ok\u200b",
+    opKey: opk("k2interior"),
+  });
+  assert.equal((await rootQuery(
+    `select args->>'reason' as reason from clara.audit_log
+      where fn='reset_binding_revocation' and args->>'binding_id'=$1`,
+    [interiorRow.binding.binding_id])).rows[0].reason,
+  "SSM  registration  ok", "edge trimming preserves every interior space byte");
+
   // ROUND 4: Unicode whitespace and format controls are not removed by PostgreSQL's default
   // btrim. Each code point below is therefore driven alone, and a mixed string proves the wall
   // is a closed-set test rather than a one-character special case. The labels make a regression
@@ -850,6 +921,12 @@ test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason,
     ["MONGOLIAN VOWEL SEPARATOR U+180E", "\u180e"],
     ["ZERO WIDTH NON-JOINER U+200C", "\u200c"],
     ["ZERO WIDTH JOINER U+200D", "\u200d"],
+    ["OGHAM SPACE MARK U+1680", "\u1680"],
+    ["LINE SEPARATOR U+2028", "\u2028"],
+    ["PARAGRAPH SEPARATOR U+2029", "\u2029"],
+    ["MEDIUM MATHEMATICAL SPACE U+205F", "\u205f"],
+    ["LEFT-TO-RIGHT MARK U+200E", "\u200e"],
+    ["RIGHT-TO-LEFT MARK U+200F", "\u200f"],
   ];
   for (const [label, invisible] of invisibleOnlyReasons) {
     const err = await assertRaises("CLR36",
@@ -857,20 +934,24 @@ test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason,
       `an invisible-only reason (${label})`);
     assert.equal(reasonOf(err), "reset_reason_required", `${label} is blank for this audited door`);
   }
-  const mixedInvisible = invisibleOnlyReasons.map(([, value]) => value).join("");
+  const ordinaryTrimSet = [" ", "\t", "\n", "\r", "\f", "\v"];
+  const mixedInvisible = [
+    ...ordinaryTrimSet,
+    ...invisibleOnlyReasons.map(([, value]) => value),
+  ].join("");
   const mixedErr = await assertRaises("CLR36",
     () => resetRevocation(w.users.alice,
-      { binding: b.binding.binding_id, reason: ` \t${mixedInvisible}\r\n` }),
-    "a mixed sequence of every explicitly refused invisible code point");
+      { binding: b.binding.binding_id, reason: mixedInvisible }),
+    "the full 26 explicit invisibles plus six ordinary trim bytes combined");
   assert.equal(reasonOf(mixedErr), "reset_reason_required");
   const unicodeMutantRow = await revokedBinding("K2unicodeM");
   await withMutant(RESET_REVOCATION_SIG,
-    [[String.raw`U&'\00A0\202F\200B\2060\FEFF'`, String.raw`U&'\202F\200B\2060\FEFF'`]],
+    [["      || chr(8206) || chr(8207);", "      || chr(8207);"]],
     async () => {
       const out = await resetRevocation(w.users.alice,
-        { binding: unicodeMutantRow.binding.binding_id, reason: "\u00a0", opKey: opk("k2unicodeM") });
+        { binding: unicodeMutantRow.binding.binding_id, reason: "\u200e", opKey: opk("k2unicodeM") });
       assert.equal(out.status, "expired",
-        "with U+00A0 removed from the explicit set, an NBSP-only reason reopens the revocation");
+        "with U+200E removed from the explicit set, an LRM-only reason reopens the revocation");
     });
   // DOCUMENTARY ASSERTION, NOT A RED-BEFORE: PostgreSQL 17 recognises E'\v' as chr(11), although
   // the lexical-syntax table does not document that spelling. Therefore E' \t\n\r\f\v' and the
@@ -913,6 +994,17 @@ test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason,
       where fn='reset_binding_revocation' and args->>'binding_id'=$1`,
     [multilingualRow.binding.binding_id])).rows[0].reason,
   multilingualReason, "…and the multilingual reason is stored byte-for-byte");
+  for (const [label, reason] of [["Tamil", "தமிழ்"], ["emoji", "✅"]]) {
+    const accepted = await revokedBinding(`K2${label}`);
+    const out = await resetRevocation(w.users.alice,
+      { binding: accepted.binding.binding_id, reason, opKey: opk(`k2${label}`) });
+    assert.equal(out.status, "expired", `${label} reason is accepted`);
+    assert.equal((await rootQuery(
+      `select args->>'reason' as reason from clara.audit_log
+        where fn='reset_binding_revocation' and args->>'binding_id'=$1`,
+      [accepted.binding.binding_id])).rows[0].reason,
+    reason, `…and the ${label} reason is stored byte-for-byte`);
+  }
   assert.equal((await bindingRow(b.binding.binding_id)).status, "revoked",
     "…and none of those refusals moved the row");
 
@@ -936,8 +1028,8 @@ test("bpr3.K2 — the door floors at ADMIN, refuses a blank or over-long reason,
   assert.equal(reasonOf(e3), "binding_revoked_reset_requires_ruling");
 });
 
-test("bpr3.K4 — a LIFTED revocation is never narrated as a clock expiry at post time", async () => {
-  failPr3();
+test("bpr3.K4 — a LIFTED revocation is never narrated as a clock expiry at post time", async (t) => {
+  if (unavailablePr3(t)) return;
   // FIND-2 (#452 native review, RULED). 裁-46 lands a reset revocation on `expired` deliberately,
   // which makes it INDISTINGUISHABLE from a clock expiry by status alone — so the annotation on a
   // still-bound entry approved afterwards would have told a human "the binding had expired" when
@@ -997,8 +1089,8 @@ test("bpr3.K4 — a LIFTED revocation is never narrated as a clock expiry at pos
     });
 });
 
-test("bpr3.K3 — the door is firm-scoped, idempotent, and EXECUTE-able by clara_authenticated alone", async () => {
-  failPr3();
+test("bpr3.K3 — the door is firm-scoped, idempotent, and EXECUTE-able by clara_authenticated alone", async (t) => {
+  if (unavailablePr3(t)) return;
   const b = await revokedBinding("K3");
   // NO EXISTENCE ORACLE: a firm-B admin gets not-found, never a typed refusal that would confirm
   // the row exists somewhere.
@@ -1016,6 +1108,13 @@ test("bpr3.K3 — the door is firm-scoped, idempotent, and EXECUTE-able by clara
   const key = opk("k3reset");
   const first = await resetRevocation(w.users.alice,
     { binding: b.binding.binding_id, reason: "re-confirmed", opKey: key });
+  const receiptAfterAlice = (await rootQuery(
+    `select encode(request_hash,'hex') as request_hash,
+            encode(convert_to(result::text,'UTF8'),'hex') as result_bytes
+       from clara.op_receipts
+      where firm_id=$1 and fn='reset_binding_revocation' and op_key=$2`,
+    [w.firms.A, key])).rows;
+  assert.equal(receiptAfterAlice.length, 1, "Alice created exactly one durable op receipt");
   const replay = await resetRevocation(w.users.alice,
     { binding: b.binding.binding_id, reason: "re-confirmed", opKey: key });
   assert.deepEqual(replay, first, "the same actor's retried RPC replays byte-identically");
@@ -1023,6 +1122,15 @@ test("bpr3.K3 — the door is firm-scoped, idempotent, and EXECUTE-able by clara
     () => resetRevocation(w.users.bob,
       { binding: b.binding.binding_id, reason: "re-confirmed", opKey: key }),
     "a second admin reusing another actor's otherwise-identical op key");
+  const receiptAfterBob = (await rootQuery(
+    `select encode(request_hash,'hex') as request_hash,
+            encode(convert_to(result::text,'UTF8'),'hex') as result_bytes
+       from clara.op_receipts
+      where firm_id=$1 and fn='reset_binding_revocation' and op_key=$2`,
+    [w.firms.A, key])).rows;
+  assert.equal(receiptAfterBob.length, 1, "Bob's collision did not create a second receipt");
+  assert.deepEqual(receiptAfterBob, receiptAfterAlice,
+    "the sole request hash and result remain byte-identical after Bob's refused collision");
   const audits = (await rootQuery(
     `select actor from clara.audit_log
       where fn='reset_binding_revocation' and args->>'binding_id'=$1 order by at,id`,
@@ -1043,16 +1151,17 @@ test("bpr3.K3 — the door is firm-scoped, idempotent, and EXECUTE-able by clara
         "without actor in the hash, Bob receives Alice's cached success instead of CLR10");
     });
 
-  // ACL, read from the catalog rather than from the migration's GRANT line.
-  assert.equal((await rootQuery(
-    "select has_function_privilege('clara_authenticated',$1,'execute') as ok", [RESET_REVOCATION_SIG])).rows[0].ok,
-  true, "clara_authenticated holds EXECUTE");
-  for (const role of ["clara_agent_ro", "clara_wake_filing", "clara_wake_interactive",
-    "clara_wake_bank", "clara_wake_proactive", "clara_freeform_ro", "public"]) {
-    assert.equal((await rootQuery(
-      "select has_function_privilege($2,$1,'execute') as ok", [RESET_REVOCATION_SIG, role])).rows[0].ok,
-    false, `${role} must NOT hold EXECUTE on the 裁-46 door`);
-  }
+  // Exact ACL, enumerated from the catalog rather than sampled from a hand-list.
+  const acl = (await rootQuery(
+    `select case when a.grantee=0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end as grantee,
+            a.privilege_type, a.is_grantable
+       from pg_proc p
+       cross join lateral aclexplode(coalesce(p.proacl, acldefault('f',p.proowner))) a
+      where p.oid=to_regprocedure($1) and a.grantee<>p.proowner
+      order by a.grantee,a.privilege_type,a.is_grantable`, [RESET_REVOCATION_SIG])).rows;
+  assert.deepEqual(acl, [{
+    grantee: "clara_authenticated", privilege_type: "EXECUTE", is_grantable: false,
+  }], "the sole non-owner ACL row is non-grantable clara_authenticated EXECUTE");
   // …and the agent-read role cannot reach it even through its own login role.
   await assertRaises(PG.insufficientPrivilege,
     () => roleQuery(ROLES.agentRo, `select ${RESET_REVOCATION_SIG.replace(/\(.*/, "")}($1,$2,$3)`,

@@ -39,7 +39,7 @@
 -- SS0 -- D1 WRITE-QUIESCE INVENTORY: ONE LIVE AUDITED WRITER BODY.
 -- =====================================================================================
 --   1. clara._approve_entry_core(jsonb,uuid,uuid,text,text)
---      pre-image prosrc sha256 d5ab4afc85f79c2676e047ae1f2a5c622cac81f9877a502ae521531b11a3c637
+--      pre-image prosrc sha256 d5ab4afc… (the full ONE-HOME pin is in SS1)
 --      (19 431 CHARACTERS -- length(), not octet_length(); 19 444 bytes), measured on a PRISTINE replay of main at frontier
 --      0155_client_identifiers_unique -- the same value 0154's own SS1 pins and its tail
 --      re-asserts BYTE-IDENTICAL, deliberately, so this file has an undisturbed pre-image.
@@ -184,7 +184,7 @@ do $bp3_pre$
 declare
   v_n int; v_sha text; v_missing text; v_def text; r record;
   -- THE PIN. Measured on a pristine 0001..0155 replay, never copied from a comment.
-  v_pin text := 'd5ab4afc85f79c2676e047ae1f2a5c622cac81f9877a502ae521531b11a3c637';
+  v_pin constant text := 'd5ab4afc85f79c2676e047ae1f2a5c622cac81f9877a502ae521531b11a3c637';
   v_sig text := 'clara._approve_entry_core(jsonb,uuid,uuid,text,text)';
 begin
   -- (a) THE FRONTIER FLOOR. Keyed on PR-1's stem as a FLOOR, not an equality: a sibling landing
@@ -965,7 +965,18 @@ set role clara_fn_owner;
 create function clara.reset_binding_revocation(
     p_binding uuid, p_reason text, p_op_key text)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $fn$
-declare c record; v_dedupe jsonb; b record; v_reason text; v_pair record; v_posted int; v_drafts int;
+declare
+  c record; v_dedupe jsonb; b record; v_reason text; v_pair record; v_posted int; v_drafts int;
+  -- ONE HOME for the edge-trim and invisible-only classification set. The explicit members pin
+  -- every named format control; PostgreSQL's whitespace class below adds any space its current
+  -- Unicode/locale tables recognise without weakening this closed floor.
+  v_reason_ignored constant text :=
+      chr(32) || chr(9) || chr(10) || chr(13) || chr(12) || chr(11)
+      || chr(160) || chr(8239) || chr(8203) || chr(8288) || chr(65279)
+      || chr(8192) || chr(8193) || chr(8194) || chr(8195) || chr(8196) || chr(8197)
+      || chr(8198) || chr(8199) || chr(8200) || chr(8201) || chr(8202)
+      || chr(12288) || chr(6158) || chr(8204) || chr(8205)
+      || chr(5760) || chr(8232) || chr(8233) || chr(8287) || chr(8206) || chr(8207);
 begin
   c := clara._human_ctx(clara.role_rank('admin'));
   if p_op_key is null or btrim(p_op_key) = '' then
@@ -992,17 +1003,14 @@ begin
   -- The estate's 0154 siblings
   -- (decline_vendor_identity_binding, reset_binding_decline, and revoke's own spelling) carry the
   -- same single-arg idiom; that is NOT this PR's to change and is on the fix queue.
-  v_reason := nullif(btrim(coalesce(p_reason, ''), E' \t\n\r\f' || chr(11)), '');
-  -- ROUND 4: ordinary trimming is not a Unicode/invisible classifier. This second, explicit
-  -- CLOSED set refuses a reason made entirely from the exact whitespace/format controls the
-  -- review named, including mixtures with the ordinary trim bytes. No locale-dependent class
-  -- (`\s`, `[[:space:]]`, or an ICU property) gets to widen silently under an upgrade.
+  v_reason := nullif(btrim(coalesce(p_reason, ''), v_reason_ignored), '');
+  -- ROUND 5: gate on the UNION of PostgreSQL's whitespace class and the explicit, named set.
+  -- The explicit set is also the storage edge-trim set above, so a reason that passes cannot be
+  -- audited with invisible wrappers the gate itself treated as ignorable. `[[:space:]]` adds
+  -- spaces known to PostgreSQL now or after an upgrade; it can only refuse more invisible-only
+  -- input, while the explicit set keeps every named format control pinned independently.
   if v_reason is null
-     or btrim(v_reason,
-       E' \t\n\r\f' || chr(11)
-       || U&'\00A0\202F\200B\2060\FEFF'
-       || U&'\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A'
-       || U&'\3000\180E\200C\200D') = '' then
+     or regexp_replace(translate(v_reason, v_reason_ignored, ''), '[[:space:]]', '', 'g') = '' then
     raise exception 'a revocation-reset reason is required' using errcode = 'CLR36',
       detail = '{"reason":"reset_reason_required"}';
   end if;
@@ -1124,10 +1132,11 @@ select a.version, i.name, 'ignore', null
 -- =====================================================================================
 -- SS4 -- THE RE-WITNESS (packages/db/README.md deploy contract D2).
 -- =====================================================================================
--- The sha is COMPUTED FROM THE LIVE CATALOG, never written as a literal. A literal would be a
--- second, mutually-unaware copy of the one fact this row exists to carry, and the first thing to
--- drift. `proc` is the EXACT regprocedure text the door itself resolves and pins (FOLD-6: the
--- door writes the question, the registry only records the answer).
+-- The witness value is COMPUTED FROM THE LIVE CATALOG. SS5 independently pins the reviewed
+-- post-image and refuses unless BOTH this witnessed value and the live body equal that one pin;
+-- computing the row here therefore remains a read of the deployed object, not a second authority.
+-- `proc` is the EXACT regprocedure text the door itself resolves and pins (FOLD-6: the door writes
+-- the question, the registry only records the answer).
 insert into clara.control_witnesses(control, proc, prosrc_sha, minted_in_migration)
 select 'binding_post_time_recheck_v1',
        'clara._approve_entry_core(jsonb,uuid,uuid,text,text)',
@@ -1143,6 +1152,9 @@ do $bp3_tail$
 declare
   v_n int; v_sha text; v_wit record; v_expected oid; v_def text; v_bad text; r record;
   v_sig text := 'clara._approve_entry_core(jsonb,uuid,uuid,text,text)';
+  -- THE independently measured reviewed POST-image. ONE HOME: tests read this exact tail
+  -- comparison rather than copying the digest into a second constant.
+  v_post_pin constant text := '9682cb13e73669b568e669a06d2ac2f39286dc9bdbe9a0678c3dac9eb3702d32';
 begin
   -- (1) THE WITNESS IS THE LIVE BODY. Asked exactly the way clara.sign_vendor_identity_binding
   -- asks it: resolve the expected identity to an OID first, then compare the sha.
@@ -1158,12 +1170,9 @@ begin
   end if;
   select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_sha
     from pg_proc p where p.oid = v_expected;
-  if v_sha is distinct from v_wit.prosrc_sha then
-    raise exception 'binding pr-3 tail: the witness sha % does not match the live body %', v_wit.prosrc_sha, v_sha
-      using errcode='CLR10';
-  end if;
-  if v_sha = 'd5ab4afc85f79c2676e047ae1f2a5c622cac81f9877a502ae521531b11a3c637' then
-    raise exception 'binding pr-3 tail: the live body still hashes to the PRE-IMAGE -- the splice did not take'
+  if v_sha is distinct from v_post_pin or v_wit.prosrc_sha is distinct from v_post_pin then
+    raise exception 'binding pr-3 tail: reviewed post-image % does not match live body % and witness %',
+      v_post_pin, v_sha, v_wit.prosrc_sha
       using errcode='CLR10';
   end if;
   select count(*) into v_n from clara.control_witnesses;
@@ -1203,20 +1212,20 @@ begin
     raise exception 'binding pr-3 tail: clara.reset_binding_revocation resolves at % pg_proc row(s), expected 1', v_n
       using errcode='CLR10';
   end if;
-  if not has_function_privilege('clara_authenticated',
-        'clara.reset_binding_revocation(uuid,text,text)','execute') then
-    raise exception 'binding pr-3 tail: clara_authenticated cannot execute the 裁-46 door'
-      using errcode='CLR10';
-  end if;
-  -- Six other principals, each a REAL role on this frontier (censused: 14 clara_* roles), so a
-  -- typo cannot be read as "no leak" -- has_function_privilege raises on an unknown role.
-  select string_agg(t.role, ', ' order by t.role) into v_bad
-    from (values ('clara_agent_ro'),('clara_wake_filing'),('clara_wake_interactive'),
-                 ('clara_wake_bank'),('clara_wake_proactive'),('clara_freeform_ro'),
-                 ('public')) t(role)
-   where has_function_privilege(t.role,'clara.reset_binding_revocation(uuid,text,text)','execute');
-  if v_bad is not null then
-    raise exception 'binding pr-3 tail: the 裁-46 door leaks EXECUTE to %', v_bad using errcode='CLR10';
+  -- Exact ACL, enumerated rather than sampled: the sole non-owner row is a non-grantable
+  -- clara_authenticated EXECUTE. PUBLIC is grantee 0 and is named explicitly if it appears.
+  select string_agg(
+           (case when a.grantee=0 then 'PUBLIC' else pg_get_userbyid(a.grantee) end)
+             || ':' || a.privilege_type || ':' || a.is_grantable::text,
+           ',' order by a.grantee, a.privilege_type, a.is_grantable)
+    into v_bad
+    from pg_proc p
+    cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+   where p.oid = to_regprocedure('clara.reset_binding_revocation(uuid,text,text)')
+     and a.grantee <> p.proowner;
+  if v_bad is distinct from 'clara_authenticated:EXECUTE:false' then
+    raise exception 'binding pr-3 tail: exact non-owner ACL is %, expected clara_authenticated:EXECUTE:false',
+      coalesce(v_bad, '<none>') using errcode='CLR10';
   end if;
   select regexp_replace(regexp_replace(p.prosrc,'/\*.*?\*/','','gs'),'--[^\n]*','','g')
     into v_def from pg_proc p
