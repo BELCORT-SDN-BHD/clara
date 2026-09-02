@@ -47,6 +47,16 @@ after(async () => {
 
 const RAISE_RE = /raise exception\s+'((?:[^']|'')*)'([\s\S]{0,300}?)errcode\s*=\s*'([A-Z0-9]+)'/g;
 
+/** 裁-58/裁-28's RM0 settlement relaxation, as it appears in `apply_stripe_events`'s body. */
+const RELAXATION_RE = /e\.mode\s*=\s*'subscription'\s+and\s+e\.session_status\s*=\s*'complete'/g;
+/**
+ * How many times it appears — TWO, and the number is load-bearing rather than incidental. C-2
+ * duplicated the whole applier loop (once for the branch where `firm_registration_payments`
+ * exists, once for the pre-C-3 fallback) so the wiki dynamic-SQL gate could prove a literal AT
+ * the EXECUTE site. `c5sclr.5` pins the count for the reason spelled out there.
+ */
+const RELAXATION_SITES = 2;
+
 async function doorRaises() {
   const r = await rig.rootQuery(
     `select p.prosrc from pg_proc p join pg_namespace n on n.oid=p.pronamespace
@@ -284,18 +294,32 @@ test("c5sclr.5 r3-1 — the RM0 relaxation still carries a NULLED payment_status
   assert.equal(src.rowCount, 1, "exactly one apply_stripe_events body");
   const body = src.rows[0].prosrc;
 
-  // The relaxation, read from the LIVE body rather than quoted from the migration file.
-  const relaxation = /e\.mode\s*=\s*'subscription'\s+and\s+e\.session_status\s*=\s*'complete'/;
-  assert.match(
-    body,
-    relaxation,
-    "THE 裁-58/裁-28 RM0 RELAXATION IS GONE FROM apply_stripe_events. Read this before going " +
-      "further: while it existed, a NULLED `payment_status` PASSED the settlement gate on that " +
-      "disjunct — identical to a legal 'no_payment_required'. With it tightened, `payment_status` " +
-      "is load-bearing, and `lib/stripe-projection.mjs`'s `scalarBounded` NULLS an over-long or " +
-      "non-ASCII one. A NULLED payment_status MUST now be treated as NOT SETTLED, or a garbage " +
-      "status on a real-money session sails through the tightened gate. Fix the applier (or the " +
-      "projector) BEFORE deleting this assertion.",
+  // COUNTED, NOT MERELY PRESENT — the r4 review, and the distinction is the whole guard.
+  //
+  // C-2 DUPLICATED the loop body rather than hoisting it, so the wiki dynamic-SQL gate could
+  // prove a literal AT the EXECUTE site. The relaxation therefore appears TWICE: once in the
+  // `to_regclass('clara.firm_registration_payments') is not null` branch — the LIVE one once 0161
+  // is applied — and once in the pre-C-3 fallback. An `assert.match` is satisfied by EITHER copy,
+  // so a lane tightening the LIVE site alone would leave the fallback copy behind and this guard
+  // would stay GREEN while the path that actually runs had been tightened. That is precisely the
+  // failure it exists to prevent, and it is the direction that costs money.
+  //
+  // An EXACT count catches all three drifts: 1 (either site tightened, or a hoist that reduced
+  // them to one — legitimate, but it changes what "the relaxation" means and needs a human), 3
+  // (a refactor adding a site nobody accounted for), and 0 (both tightened).
+  const occurrences = (body.match(RELAXATION_RE) ?? []).length;
+  assert.equal(
+    occurrences,
+    RELAXATION_SITES,
+    `THE 裁-58/裁-28 RM0 RELAXATION COUNT MOVED IN apply_stripe_events: expected ` +
+      `${RELAXATION_SITES}, found ${occurrences}. Read this before going further. While both ` +
+      "copies existed, a NULLED `payment_status` PASSED the settlement gate on that disjunct — " +
+      "identical to a legal 'no_payment_required'. Once it is tightened, `payment_status` is " +
+      "load-bearing, and `lib/stripe-projection.mjs`'s `scalarBounded` NULLS an over-long or " +
+      "non-ASCII one. A NULLED payment_status MUST then be treated as NOT SETTLED, or a garbage " +
+      "status on a real-money session sails through the tightened gate. If you tightened ONE of " +
+      "the two sites, tighten the other too — a half-tightened applier is the worst of both. Fix " +
+      "the applier (or the projector) BEFORE changing this number.",
   );
 
   // And the behaviour the assertion above stands for, measured rather than inferred: with the
