@@ -228,11 +228,18 @@ export function ClaraThreadView({
             regions), #508 added task/session threading, the provisional bubble
             and the live-clarify group.
 
-            THE LOG WRAPS THE TRANSCRIPT AND ONLY THE TRANSCRIPT: the message map
-            and the provisional bubble. The live-clarify group and the
-            stream-status line are its SIBLINGS below — see the comment at the
-            closing tag for why, and do not move them back in: #508's own
-            parked-clarify cell reds naming `nested-live-region` if you do. */}
+            THE LOG WRAPS THE TRANSCRIPT AND ONLY THE TRANSCRIPT — THREE children,
+            not two: the welcome, the message map and the provisional bubble.
+            `ClaraWelcome` (#514) is the transcript's own EMPTY STATE — it renders
+            exactly where the first message will, so it belongs inside the region
+            that announces messages. (The count read "two" until #514 merged; a
+            comment that enumerates a list is a list that has to be re-counted when
+            one grows, which is why this one now says the number out loud.)
+
+            The live-clarify group, the stream-status line and the turn clock are
+            its SIBLINGS below — see the comment at the closing tag for why, and do
+            not move them back in: #508's own parked-clarify cell reds naming
+            `nested-live-region` if you do. */}
         <div
           className="space-y-3"
           role="log"

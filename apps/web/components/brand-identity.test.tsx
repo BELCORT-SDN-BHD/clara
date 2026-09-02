@@ -20,6 +20,7 @@ import * as nextImageModule from "next/image";
 
 import { renderComponent } from "../test/hookHarness";
 import { enableDomInspection } from "../test/domInspect";
+import { checkAccessibility } from "../test/a11yRules";
 import messages from "../messages/en.json";
 import { BrandLockup, LEDGER_FOLD_MARK_SRC } from "./entry/brand-lockup";
 import { ClaraWelcome, CLARA_MASCOT_SRC } from "./clara/ClaraWelcome";
@@ -297,8 +298,23 @@ test("§7's welcome tier exists in globals.css WITH its own reduced-motion arm",
 const THREAD = "11111111-1111-4111-8111-111111111111";
 const auth: SessionTokenAccessor = { getAccessToken: async () => "tok" };
 
+/** THE `<h1>` IS PART OF THE FIXTURE, not decoration, and it arrived with the a11y scan the
+ *  welcome cell now runs. `ClaraWelcome`'s heading is `SectionHeader level={2}`, and BOTH
+ *  production mount points give it a valid parent — that component's own header says so: the
+ *  rail sits inside a firm page whose `PageHeader` owns the `<h1>`, and the escalated route
+ *  owns its own in `ClaraFullScreenThread`. Mounting the view bare put an `<h2>` at document
+ *  root, so the scan reported a `heading-order` jump that is the FIXTURE's, not the welcome's
+ *  — and asserting `[]` against that would have been asserting a defect this app does not
+ *  have. Every sibling component suite in this repo wraps its mount the same way. */
 function threadApp() {
-  return App(createElement(ClaraThreadView, { auth, threadId: THREAD, variant: "rail" }));
+  return App(
+    createElement(
+      "div",
+      null,
+      createElement("h1", null, "Clara test context"),
+      createElement(ClaraThreadView, { auth, threadId: THREAD, variant: "rail" }),
+    ),
+  );
 }
 
 async function withFetch(impl: typeof fetch, run: () => Promise<void>): Promise<void> {
@@ -330,6 +346,23 @@ test("a loaded, empty transcript paints the welcome INSIDE the real thread view"
       for (let i = 0; i < 5; i++) await h.settle();
       assert.equal(imagesIn(h).length, 1, "the mascot is mounted by the thread view itself — deleting the mount line reds THIS, not ClaraWelcome's own cells");
       assert.match(h.text(), /I'm Clara\./);
+
+      // AN INSTRUMENT, WHERE A HUMAN READ USED TO STAND (#515 round 4). ClaraThreadView's
+      // own comment beside this mount says ClaraWelcome "declares no live region of its
+      // own (checked, not assumed)" — but nothing CHECKED it: this cell rendered the
+      // welcome and never ran the a11y rules over it, so the reviewer could give
+      // ClaraWelcome a `role="status"` and the whole suite stayed green. That is a
+      // nested live region inside the log's own `role="log" aria-live="polite"`, which is
+      // exactly the DS-04 defect P6-3 exists to remove.
+      //
+      // The scan runs HERE rather than in ClaraWelcome's own cells on purpose: nesting is
+      // a property of the TREE, and a component rendered alone has nothing to nest in.
+      // Mutant: `role="status"` on ClaraWelcome's root -> RED naming `nested-live-region`.
+      assert.deepEqual(
+        checkAccessibility(h.container as never),
+        [],
+        "the welcome renders INSIDE the transcript's live region, so it must declare none of its own",
+      );
     } finally {
       await h.unmount();
     }
