@@ -285,6 +285,20 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
   readonly public?: true;
   readonly reason: string;
 }> = [
+  ...(process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1"
+    ? [
+        {
+          path: "app/(e2e)/money-input-harness/page.tsx",
+          url: "/money-input-harness",
+          public: true as const,
+          reason:
+            "A build-gated browser-test route with no firm data or production client module: " +
+            "ordinary builds compile a server-only notFound() stub, while the explicit e2e build " +
+            "flag aliases that stub to the real journal MoneyInput harness. Its public-wall entry " +
+            "is compiled in by that same flag, so an ordinary production build has neither entry.",
+        },
+      ]
+    : []),
   {
     path: "app/(entry)/login/page.tsx",
     url: "/login",
@@ -426,12 +440,33 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
  * against: A SURFACE CALLS `requireFirmScope()` WHEN IT RENDERS OR RETURNS
  * FIRM-SCOPED DATA ON ITS OWN AUTHORITY, AND DOES NOT WHEN A GOVERNED DOOR IS
  * ALREADY THE WALL.
+ *
+ * A `page.tsx` MAY be registered here, and the widening was deliberate (PR #505
+ * round 3, NIT-1). Every other entry is a `route.ts`; the harness leaf below is
+ * the first page, because in an ordinary build it is a server component that
+ * only calls `notFound()`. This grants a page nothing it did not already have:
+ * `tests/firm-scope-surfaces.test.ts`'s both-ways public cross-check reads only
+ * `SCOPE_UNSCOPED_SURFACES.filter(public)`, so a page that were exempt AND on
+ * the proxy's public-prefix list would still red — exemption from this spine is
+ * not exemption from the auth wall, and the two registries are checked apart.
  */
 export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
   readonly path: string;
   readonly reason: string;
   readonly pending?: true;
 }> = [
+  ...(process.env.CLARA_E2E_MONEY_INPUT_HARNESS !== "1"
+    ? [
+        {
+          path: "app/(e2e)/money-input-harness/page.tsx",
+          reason:
+            "EXEMPT ON PRINCIPLE. In an ordinary build this authenticated leaf is only a " +
+            "server component that immediately calls notFound(); it reads no session or firm data. " +
+            "The explicit e2e build replaces this exemption with the public unscoped registration " +
+            "above, at the same time that Next aliases in the real browser harness module.",
+        },
+      ]
+    : []),
   {
     path: "app/(entry)/auth/recover/route.ts",
     reason:

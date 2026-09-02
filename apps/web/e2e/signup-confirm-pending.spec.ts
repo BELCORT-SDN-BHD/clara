@@ -1,7 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-const APP_ORIGIN = "https://127.0.0.1:3100";
+// Reads the harness's own origin (interview-walk.spec.ts:244's precedent) instead of
+// re-hardcoding the default. The literal made this file green ONLY on port 3100: the
+// chat-parity train's browser leg had to run on 3110 because another lane held 3100,
+// and this spec's origin assertions failed on that alone.
+const APP_ORIGIN = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 
 /**

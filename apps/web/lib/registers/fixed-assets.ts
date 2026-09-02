@@ -201,8 +201,8 @@ export function reviseFixedAssetParticulars(
 /** clara.dispose_fixed_asset(p_client, p_asset, p_disposal_date,
  *  p_proceeds_cents, p_proceeds_account, p_gain_account, p_loss_account,
  *  p_memo, p_op_key, p_cost_portion_cents) — bookkeeper+. `proceedsCents` is
- *  the caller's OWN parsed cents (lib/registers/money.ts's
- *  `parseAmountToCents` — never a float multiply); `costPortionCents` is
+ *  the caller's OWN cents from components/common/MoneyInput and the shared
+ *  lib/bank/money.ts parser (never a float multiply); `costPortionCents` is
  *  optional and, when present, must sit strictly between 0 and the asset's
  *  cost (a PARTIAL disposal — the door itself validates and splits the
  *  lineage). One un-dead disposal draft per asset — a second call while one

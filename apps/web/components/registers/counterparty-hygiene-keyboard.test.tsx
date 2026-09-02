@@ -117,6 +117,7 @@ async function mockFetchWithRenameRefusal(url: RequestInfo | URL): Promise<Respo
 // (`_aging_core`'s own `outstanding_cents <> 0` filter — a settled item
 // simply stops appearing, never a placeholder row).
 let apAgingCallCount = 0;
+let applyOpenItemsBody: Record<string, unknown> | null = null;
 const AP_AGING_S1_BEFORE = {
   as_of: "2026-08-28", domain: "ap",
   counterparties: [{
@@ -140,14 +141,17 @@ const AP_AGING_S1_AFTER = {
 };
 const STATEMENT_S1 = { counterparty_id: "v1", domain: "ap", from: "2026-01-01", to: "2026-08-28", opening_balance_cents: 0, rows: [], closing_balance_cents: 0 };
 
-async function mockFetchS1Apply(url: RequestInfo | URL): Promise<Response> {
+async function mockFetchS1Apply(url: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const u = String(url);
   if (u.includes("/rpc/ap_aging")) {
     apAgingCallCount += 1;
     return jsonResponse(apAgingCallCount === 1 ? AP_AGING_S1_BEFORE : AP_AGING_S1_AFTER);
   }
   if (u.includes("/rpc/supplier_statement")) return jsonResponse(STATEMENT_S1);
-  if (u.includes("/rpc/apply_open_items")) return jsonResponse({ group_id: "g1", domain: "ap", applied_cents: 40000 });
+  if (u.includes("/rpc/apply_open_items")) {
+    applyOpenItemsBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return jsonResponse({ group_id: "g1", domain: "ap", applied_cents: 40000 });
+  }
   return mockFetch(url);
 }
 
@@ -417,6 +421,7 @@ test("F15: a governed refusal (rename_counterparty) renders verbatim in the hygi
 // it: the fully-applied credit i2 disappears from the picker.
 test("S1: apply_open_items success re-reads aging exactly once more (1 -> 2), and the Apply dialog's own candidates reflect it", async () => {
   apAgingCallCount = 0;
+  applyOpenItemsBody = null;
   await withMockedEnv(mockFetchS1Apply, async () => {
     const h = await renderComponent(App());
     const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
@@ -468,6 +473,8 @@ test("S1: apply_open_items success re-reads aging exactly once more (1 -> 2), an
       await h.act(() => { clickButton(confirmButton as never); });
       for (let i = 0; i < 8; i++) await h.settle();
 
+      const applications = applyOpenItemsBody?.p_applications as Array<{ amount_cents?: number }> | undefined;
+      assert.equal(applications?.[0]?.amount_cents, 40000, "MoneyInput preserves apply_open_items's exact integer-cent wire argument");
       assert.equal(apAgingCallCount, 2, "exactly ONE MORE ap_aging call after the successful act — F7's onActed, never stale");
 
       // Reopen Apply — its OWN candidate pool (agingItems, from the parent's
