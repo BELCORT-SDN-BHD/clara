@@ -101,13 +101,18 @@ export const planCheck = (plan, key) => plan.checks.find((c) => c.check_key === 
  *  and wrong on the machine the ceremony is actually driven from. Measured, not assumed:
  *  the first run of this battery failed exactly that way on two cells.
  *
- *  THIS TRICK IS `date`-ONLY — it does NOT extend to a `timestamptz`. The local-getter
- *  round trip above is invariant because node-pg both WRITES and READS a `date` at LOCAL
- *  midnight, so the same local zone cancels out on both ends. A `timestamptz` carries a
- *  real instant with no such round trip: piping one through isoDay() reads its calendar
- *  day in whatever OS timezone the TEST PROCESS happens to run under, which is Asia/
- *  Kuala_Lumpur on this rig's usual dev box and UTC on hosted CI — two different answers
- *  for the same instant. Comparing a `timestamptz` column (created_at, approved_at, …) to
+ *  THIS TRICK IS `date`-ONLY — it does NOT extend to a `timestamptz`. The invariance is
+ *  READ-SIDE ONLY: node-pg materializes a DATE at LOCAL midnight and isoDay() reads it
+ *  back with the SAME local getters, so whichever OS timezone this test process happens
+ *  to run under cancels out between those two steps (the write side plays no part — no
+ *  JS Date is ever written into a `date` column in this corpus; every posting/fiscal-year
+ *  date is a plain string, e.g. addDaysStr()'s return value or a literal, bound as
+ *  `$n::date`). A `timestamptz` carries a real instant with no such read-side cancellation:
+ *  piping one through isoDay() reads its calendar day in whatever OS timezone the TEST
+ *  PROCESS happens to run under, which is Asia/Kuala_Lumpur on this rig's usual dev box
+ *  and UTC on hosted CI — two different answers for the same instant whenever the two
+ *  zones' calendar days actually disagree (16:00-24:00 UTC = 00:00-08:00 MYT the next
+ *  day). Comparing a `timestamptz` column (created_at, approved_at, …) to
  *  clara._book_today() — `(statement_timestamp() at time zone 'Asia/Kuala_Lumpur')::date`
  *  — is done by casting `at time zone 'Asia/Kuala_Lumpur'` on the timestamptz INSIDE THE
  *  SAME SQL STATEMENT and comparing as text, never by routing it through a JS Date and
