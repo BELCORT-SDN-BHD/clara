@@ -151,3 +151,57 @@ re-reading find?"
 > so cancelling a superseded main run buys minutes and throws that away. Recorded in `ci.yml`
 > and `docs/ops/ci-runner.md` rather than left implied — the #513 review's finding that the fix
 > shipped there with its cost unstated.
+
+## 2026-09-03 — how a sprint ruling enters the ADR system (裁-140): digest rows + "amended by" lines
+
+> **The question the owner settled.** The 磨合 ledgers hold forty-odd rulings since 2026-08-31.
+> An ADR records a decision that mints standing law; a sprint ruling usually AMENDS an ADR's law
+> for a time box. Until now neither shape had a home: the 2026-09-02 minute above could honestly
+> say "no digest law changes" only because the day's law-changing rulings were being carried by
+> the ledger alone. **裁-140 rules the mechanism, not the rulings:** one row in `README.md`'s
+> standing-laws section per law-changing ruling, one dated line here, an "amended by 裁-N" line
+> on the ADR whose law is amended — and **no new ADR** unless a ruling contradicts an ADR's text
+> outright AND permanently. The ledger stays the source of truth for each ruling's text; a row
+> that disagrees with its ledger entry is the row that is wrong. A consolidating ADR was offered
+> and DECLINED (one more file to maintain, and most of these expire at beta live).
+>
+> **What this reading changed in `README.md`.** A new **§15** carries eight rows, each with its
+> time box and its ledger pointer: **裁-111** (09-01) law 28's cross-family Codex review leg
+> suspended *until beta live* · **裁-125** (09-02) beta legal texts are agent templates, never
+> darkened, *until official launch* · **裁-129** (09-02) the terms are a separate document kind,
+> RM 5,000 floor, KL courts · **裁-131** (09-02) Email OTP expiry 60 minutes for both arms, C4
+> amended · **裁-133** (09-02) no Codex lane of any kind, native only, *until beta live* ·
+> **裁-135** (09-02) the repo is public and CI is hosted, the owner overriding the 裁-134
+> recommendation · **裁-139** (09-02) a firm member is refused at checkout before Stripe is
+> called. Two existing laws gained their "amended by" lines in place: **law 28** (裁-133 widens
+> 裁-111's suspension from the review leg to the BUILD lane) and **law 38** (裁-135 — the
+> private-repo-only runner law; the four instances stay registered but no event routes to them,
+> and the residual rule is "never re-point them at `pull_request` while the repo is public").
+> §14's ADR-0077 supplement carries the same pointer, so the amendment is visible from the ADR
+> it amends rather than only from the ledger. **裁-135 already had its own full minute above**
+> (2026-09-02) and is not re-minuted here — §15 gives it the row the ruling now requires.
+>
+> **What did NOT change.** No law text was rewritten and nothing was deleted: every amendment is
+> additive and dated, which is what keeps a later reader able to see the law as it stood. The
+> 2026-09-02 minute's sentence that "none of them amends a digest law" stands as a record of what
+> was true on its date (this file is append-only); 裁-140 is the decision that gives the
+> law-changing subset a home. And no new ADR was minted, which is the ruling's whole point.
+>
+> **First use of the new mechanism, the same night: 裁-141** *(2026-09-03 ~00:10; permanent)*
+> **amends 裁-37** and therefore takes a §15 row rather than an ADR. 裁-37 put the ⌘K "Do" actions
+> behind `clara.wake_fn_allowlist` and, in the same breath, forbade a new mechanism — but that table
+> is invisible to application roles by `0002`'s design, so reading it from the web would need exactly
+> the new SECURITY DEFINER door the ruling forbids. The owner resolved the two halves rather than
+> picking one: the palette pre-filters on the caller's DB-computed role rank plus each door's floor
+> transcribed into the web, **and a DRIFT GUARD is required** — a cell pinning every transcribed
+> floor to the live door's, because a projection of a door is exactly law 27(3)'s "spelling is not
+> identity". The door remains the only authority, so the residual risk of drift is cosmetic. This is
+> the shape 裁-140 was ruled for: an amendment recorded where the amended law lives, at the cost of
+> one row and one line.
+>
+> **Ledger housekeeping, recorded because the pointers moved.** The 2026-09-02 ledger passed the
+> repo's 500-line document ceiling, so it was split at 裁-132 into
+> `docs/plan/active/mohe-grill-rulings-2026-09-02-pm.md` — byte-for-byte, verified against the
+> committed blob — following the `-09-01` → `-09-01-pm` precedent. 裁-129…131 stay in the `-09-02`
+> file because that is where they landed (#506). §15's rows, law 28's and law 38's "amended by"
+> lines and `AGENTS.md`'s ledger chain all name the file each ruling actually lives in.

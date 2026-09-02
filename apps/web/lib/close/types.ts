@@ -219,7 +219,8 @@ export type CloseReadiness = {
   gates: CloseReadinessGate[];
 };
 
-/** clara.close_gate_checks — the human-readable catalog (14 live rows), read
+/** clara.close_gate_checks — the human-readable catalog (fifteen live rows
+ *  once Q-D6's close-seal wall is applied; enumerated, never counted), read
  *  via getRows (p_cgc_human: `true` for clara_authenticated, a real table
  *  grant) so CloseReadinessPanel can show a title beside get_close_readiness's
  *  bare check_key without inventing one. */
