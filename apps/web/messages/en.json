@@ -1,7 +1,7 @@
 {
   "Metadata": {
-    "title": "Clara",
-    "description": "Clara — AI-native Agentic Accounting OS for Malaysian accounting firms."
+    "title": "ClaraBook",
+    "description": "ClaraBook — AI-native Agentic Accounting OS for Malaysian accounting firms."
   },
   "Common": {
     "loading": "Loading…",
@@ -17,8 +17,17 @@
     "retry": "Retry",
     "centsUnsafe": "(amount out of range — verify in the ledger)"
   },
-  "FirmShell": {
-    "productName": "Clara"
+  "MoneyInput": {
+    "placeholder": "0.00",
+    "refusals": {
+      "invalidFormat": "Enter an amount like 1,234.56. Exponents and decimal commas aren't accepted.",
+      "negativeNotAllowed": "Enter zero or a positive amount.",
+      "outOfRange": "Enter a smaller amount that can be represented exactly in cents."
+    }
+  },
+  "Brand": {
+    "productName": "ClaraBook",
+    "skipToContent": "Skip to main content"
   },
   "FirmNav": {
     "ariaLabel": "Firm navigation",
@@ -38,7 +47,7 @@
   },
   "NotFound": {
     "heading": "That page does not exist",
-    "body": "Nothing is served at this address. If you followed a link inside Clara, the link is wrong — not the page.",
+    "body": "Nothing is served at this address. If you followed a link inside ClaraBook, the link is wrong — not the page.",
     "navLabel": "Ways back",
     "firmHome": "Firm home",
     "needsYou": "Needs you"
@@ -174,7 +183,7 @@
       },
       "registrations": {
         "title": "Firm registrations",
-        "purpose": "Review requests to create firms on Clara."
+        "purpose": "Review requests to create firms on ClaraBook."
       },
       "compliance": {
         "title": "Compliance register",
@@ -251,7 +260,7 @@
     },
     "inviteDialog": {
       "title": "Invite someone to this firm",
-      "description": "Clara emails them a single-use link. The address is how they will sign in, and it is how the invitation is checked when they accept.",
+      "description": "ClaraBook emails them a single-use link. The address is how they will sign in, and it is how the invitation is checked when they accept.",
       "emailLabel": "Email address",
       "emailPlaceholder": "name@example.com",
       "roleLabel": "Role",
@@ -277,7 +286,7 @@
       "unsupported_address": "This invitation service can only send to plain-ASCII email addresses, so nothing was created.",
       "not_permitted": "Only an admin or owner can issue an invitation. Nothing was created.",
       "mail_not_configured": "This deployment has no invitation mail set up, so nothing was created. Ask whoever runs it to configure the mail transport.",
-      "recipient_has_account": "This address already has a Clara account — ask them to sign in with it. Nothing was created.",
+      "recipient_has_account": "This address already has a ClaraBook account — ask them to sign in with it. Nothing was created.",
       "mail_unavailable": "The invitation service could not be reached, so nothing was created. Try again in a moment.",
       "mail_failed": "The invitation was created but the email did not go out, and its link cannot be recovered. Revoke it below and invite again.",
       "transport": "The invitation server could not be reached."
@@ -323,12 +332,55 @@
       "composerPlaceholder": "Ask Clara…",
       "send": "Send",
       "sending": "Sending…",
+      "welcome": {
+        "title": "I'm Clara.",
+        "description": "Ask about a client, their books, or a close that's underway."
+      },
+      "attachments": {
+        "attach": "Attach document",
+        "attachHint": "Attach files through Clara's document intake",
+        "fileInputLabel": "Choose documents to attach",
+        "trayLabel": "Documents attached to this turn",
+        "retry": "Retry {filename}",
+        "remove": "Remove {filename}",
+        "firmAltitudeNote": "Open a client's workspace to attach a document — Clara files a chat attachment to the client you are working in.",
+        "localRefusalTitle": "Attachment not added",
+        "tooLargeLocal": "{filename} is larger than the {limitMb} MB upload limit.",
+        "duplicate": "{filename} is already attached to this turn.",
+        "tooMany": "A turn carries at most {limit} attachments.",
+        "runtimeRefusalTitle": "Upload refused",
+        "runtimeTooLarge": "The intake service refused this upload because it is too large.",
+        "runtimeBadType": "The intake service does not accept this file type.",
+        "runtimeBadRequest": "The intake service refused this upload because the request was invalid.",
+        "runtimeUnknown": "The intake service refused this upload."
+      },
       "role": {
         "user": "You",
         "assistant": "Clara"
       }
     },
     "parts": {
+      "attachment": {
+        "title": "Attached document",
+        "documentLabel": "document",
+        "intakeLabel": "intake"
+      },
+      "clarify": {
+        "firmVisible": "Visible to your firm",
+        "framing": "This question and its answer are visible to your firm.",
+        "loading": "Checking whether this question is still open…",
+        "empty": "No open question has been recorded for this one yet.",
+        "recheck": "Check again",
+        "readError": "Could not check whether this question is still open.",
+        "answered": "Answered by your firm",
+        "answeredWithoutText": "The answer was recorded without displayable text.",
+        "closed": "This clarification is {status} and cannot be answered.",
+        "closedPart": "Clarify {status}. {framing}",
+        "answerLabel": "Your answer",
+        "answerPlaceholder": "Type the context Clara needs",
+        "answer": "Answer",
+        "answering": "Answering…"
+      },
       "entryPosted": {
         "title": "Entry posted",
         "entryLabel": "entry",
@@ -1382,7 +1434,7 @@
   },
   "Login": {
     "title": "Sign in",
-    "description": "Sign in to your Clara account.",
+    "description": "Sign in to your ClaraBook account.",
     "emailLabel": "Email",
     "passwordLabel": "Password",
     "submit": "Sign in",
@@ -1403,13 +1455,13 @@
   },
   "PasswordReset": {
     "title": "Choose a new password",
-    "description": "Use at least 12 characters. Clara also refuses known breached passwords.",
+    "description": "Use at least 12 characters. ClaraBook also refuses known breached passwords.",
     "passwordLabel": "New password",
     "submit": "Save new password",
     "saving": "Saving password…",
     "savedTitle": "Password updated",
     "savedDescription": "Your new password is ready to use.",
-    "continue": "Continue to Clara"
+    "continue": "Continue to ClaraBook"
   },
   "RouteError": {
     "heading": "Something went wrong",
@@ -1420,7 +1472,7 @@
   },
   "Signup": {
     "title": "Create your account",
-    "description": "Start your own firm on Clara. You'll confirm your email, then tell us about the firm.",
+    "description": "Start your own firm on ClaraBook. You'll confirm your email, then tell us about the firm.",
     "emailLabel": "Email",
     "passwordLabel": "Password",
     "submit": "Create account",
@@ -1475,7 +1527,7 @@
   },
   "Pending": {
     "metaTitle": "Your registration",
-    "checkoutNotBuilt": "Not built yet: signing your data-processing agreement and paying are not wired up. Clara's beta is a trial — nothing is charged while pricing is being set — but the doors that record your signature and start checkout ship with a later train. Continuing below takes you to that step; nothing is recorded and nothing is owed from you right now.",
+    "checkoutNotBuilt": "Not built yet: signing your data-processing agreement and paying are not wired up. ClaraBook's beta is a trial — nothing is charged while pricing is being set — but the doors that record your signature and start checkout ship with a later train. Continuing below takes you to that step; nothing is recorded and nothing is owed from you right now.",
     "pending": {
       "title": "Your registration is with us",
       "description": "We have your request. There's nothing more for you to do yet.",
@@ -2827,7 +2879,7 @@
   },
   "Registrations": {
     "heading": "Firm registrations",
-    "pageDescription": "Requests to create a new firm on Clara — approve to create the firm and its owner membership, or reject with a reason.",
+    "pageDescription": "Requests to create a new firm on ClaraBook — approve to create the firm and its owner membership, or reject with a reason.",
     "loading": "Loading your operator context…",
     "notOperator": "This console is for BELCORT's own operator firm, at owner rank. Your account does not carry that authority.",
     "queueLoading": "Loading pending registrations…",

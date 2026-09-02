@@ -112,7 +112,7 @@ describe("the pre-door capability check (FIND-1)", () => {
     assert.equal(body.code, "recipient_has_account");
     assert.equal(
       body.message,
-      "This address already has a Clara account — ask them to sign in with it.",
+      "This address already has a ClaraBook account — ask them to sign in with it.",
       "A FIXED SENTENCE CLARA OWNS — never the auth provider's own wording",
     );
     assert.equal(calls.length, 0, "the door must NOT have been called — nothing may be minted");
@@ -347,7 +347,7 @@ describe("the firm name in the subject line", () => {
     const res = await handleInviteRequest(post({ email: "new@example.test", role: "viewer" }), d);
 
     assert.equal(res.status, 200);
-    assert.equal(obs.sends[0]!.subject, "You have been invited to Clara");
+    assert.equal(obs.sends[0]!.subject, "You have been invited to ClaraBook");
     assert.ok(!obs.sends[0]!.html.includes("ROME PROPERTIES"), "an unbindable name must not reach the body either");
     assert.equal(firmReads.length, 1, "…and the read still HAPPENED — this is a binding wall, not a deleted read");
   });
@@ -370,7 +370,7 @@ describe("the firm name in the subject line", () => {
 
     assert.equal(res.status, 200, "a mismatch degrades the courtesy, it does not fail the invite");
     const sent = obs.sends[0]!;
-    assert.equal(sent.subject, "You have been invited to Clara");
+    assert.equal(sent.subject, "You have been invited to ClaraBook");
     assert.ok(
       !sent.html.includes("SOMEONE ELSE SDN BHD"),
       "A NAME FROM A DIFFERENT FIRM MUST NEVER BE MAILED — that is a disclosure about a firm the invitee has nothing to do with",
@@ -387,7 +387,7 @@ describe("the firm name in the subject line", () => {
     const res = await handleInviteRequest(post({ email: "new@example.test", role: "viewer" }), d);
     assert.equal(res.status, 200, "a courtesy read must not turn a successful invite into an error");
     assert.equal(obs.sends.length, 1);
-    assert.equal(obs.sends[0]!.subject, "You have been invited to Clara");
+    assert.equal(obs.sends[0]!.subject, "You have been invited to ClaraBook");
   });
 });
 
@@ -462,7 +462,7 @@ describe("errorFromCourierBody reconstructs the SAME classes", () => {
       ok: false,
       kind: "courier",
       code: "recipient_has_account",
-      message: "This address already has a Clara account — ask them to sign in with it.",
+      message: "This address already has a ClaraBook account — ask them to sign in with it.",
     });
     assert.ok(e instanceof InviteCourierError);
     assert.equal((e as InviteCourierError).code, "recipient_has_account");
