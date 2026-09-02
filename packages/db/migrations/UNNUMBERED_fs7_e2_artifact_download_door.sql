@@ -399,20 +399,29 @@ begin
   select clara.role_rank(fm.role) into v_rank from clara.firm_memberships fm
    where fm.user_id = c.actor and fm.firm_id = c.firm and fm.status = 'active';
 
+  -- ONE NAME, ONE MEANING, ON BOTH DOORS (independent review, NOTE-8). `produced_at` is when the
+  -- BYTES were produced — `sealed_at` on the sealed family, `finished_at` on the sandbox one, which
+  -- is exactly what the gate returns under that name. An earlier cut fed the sandbox arm
+  -- `created_at` (request time) here while the gate fed `finished_at` there, so one field name
+  -- carried two different facts depending on which door answered.
+  --
+  -- ORDERING IS A SEPARATE EXPRESSION, and it has to be: `finished_at` is null until an export
+  -- finishes, so ordering by it would sort every unfinished row to one end regardless of age. The
+  -- listing orders by the row's own arrival (`sealed_at` / `created_at`) and REPORTS `produced_at`.
   for row_ in
-    select id, produced_at, family, label from (
-      select ra.id, ra.sealed_at as produced_at, 'report_artifact'::text as family,
-             ra.kind as label
+    select id, produced_at, ordered_at, family, label from (
+      select ra.id, ra.sealed_at as produced_at, ra.sealed_at as ordered_at,
+             'report_artifact'::text as family, ra.kind as label
         from clara.report_artifacts ra
        where ra.firm_id = c.firm and ra.client_id = p_client
       union all
-      select se.id, se.created_at as produced_at, 'sandbox_export'::text as family,
-             se.state as label
+      select se.id, se.finished_at as produced_at, se.created_at as ordered_at,
+             'sandbox_export'::text as family, se.state as label
         from clara.sandbox_exports se
         join clara.sandbox_views sv on sv.id = se.sandbox_view_id and sv.firm_id = se.firm_id
        where se.firm_id = c.firm and p_client = any (sv.client_set)
     ) u
-    order by produced_at desc nulls last, id desc
+    order by ordered_at desc nulls last, id desc
     limit v_limit
   loop
     begin

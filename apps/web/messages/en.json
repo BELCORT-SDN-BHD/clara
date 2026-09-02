@@ -1273,7 +1273,6 @@
       "download": {
         "trigger": "Download",
         "working": "Downloading…",
-        "checking": "Checking availability…",
         "unavailable": "Not downloadable — {reason}",
         "failed": "Download failed: {message}"
       }

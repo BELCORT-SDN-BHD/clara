@@ -40,14 +40,37 @@ function required(name) {
   return v;
 }
 
+/**
+ * THE DISPOSABILITY GATE. This walk provisions fixtures and boots a runtime against whatever
+ * database it is handed, so it refuses anything that is not obviously a throwaway.
+ *
+ * IT WAS A TWO-NAME ALLOW-LIST AND IS NOW A DISPOSABLE-NAME RULE (independent review of #512). The
+ * two literals came in with this file, lifted from `run-live-walk.mjs`, which inherited them from
+ * `packages/runtime/tests/interview-e2e.mjs` — a chain of copies, never a decision about THIS walk.
+ * The cost was real: the reviewer could not run the browser leg at all, because its own rig was
+ * named for its own lane, and a review that cannot re-run the author's evidence is weaker for it.
+ *
+ * The wall it replaces them with is the SAME one every destructive script in this repo already
+ * uses (`packages/db/lib/guard.mjs`): loopback host, plus a name that says disposable — `clara_`
+ * and one of the `_test` / `_ci` / `_tmp` / `_rig` suffixes, or one of the two historical names the
+ * sibling harnesses still pass. That is strictly narrower than "any database", and it is not
+ * weakened for convenience: a production name has no such suffix and is refused, and the host
+ * check is unchanged.
+ */
 const WORKFLOW_URL = required("WORKFLOW_POSTGRES_URL");
 {
   const u = new URL(WORKFLOW_URL);
   const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
-  const ALLOWED_DB = /^clara_(rt_test|wave_b_ci)$/;
+  // `clara_rt_test` / `clara_wave_b_ci` are matched by the suffix rule too; they are named here so
+  // a reader of the sibling harnesses sees the continuity rather than inferring it.
+  const DISPOSABLE_DB = /^clara_[a-z0-9_]*(_test|_ci|_tmp|_rig)$/;
   const db = u.pathname.replace(/^\//, "");
-  if (!LOCAL_HOSTS.has(u.hostname) || !ALLOWED_DB.test(db)) {
-    throw new Error("hard-gated to a loopback WORKFLOW_POSTGRES_URL naming clara_rt_test or clara_wave_b_ci — refusing any other target");
+  if (!LOCAL_HOSTS.has(u.hostname) || !DISPOSABLE_DB.test(db)) {
+    throw new Error(
+      `refusing ${JSON.stringify(db)}: this walk provisions fixtures and needs a LOOPBACK host and a `
+      + "database whose name says disposable — clara_* ending in _test, _ci, _tmp or _rig "
+      + "(clara_rt_test and clara_wave_b_ci both qualify). Point WORKFLOW_POSTGRES_URL at a throwaway.",
+    );
   }
 }
 

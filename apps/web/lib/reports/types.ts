@@ -356,6 +356,9 @@ export type DownloadableArtifact = {
   family: DownloadableArtifactFamily;
   /** The row's own state word: a `report_artifacts.kind`, or a `sandbox_exports.state`. */
   label: string;
+  /** When the BYTES were produced — `sealed_at` on the sealed family, `finished_at` on the sandbox
+   *  one, the same fact the byte door returns under the same name. NULL on a row that has produced
+   *  none yet, which is why the door orders by a separate arrival key rather than by this. */
   produced_at: string | null;
   downloadable: boolean;
   /** The gate's typed reason when `downloadable` is false — rendered verbatim, never

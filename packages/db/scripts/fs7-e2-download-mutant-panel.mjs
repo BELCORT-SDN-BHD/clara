@@ -25,7 +25,6 @@
 // own `ra.firm_id = p_firm` and by the client-in-firm belt beneath it, so removing EITHER alone
 // reds nothing. M2b removes both at once, which is the mutant that actually measures the pair.
 //
-// Usage: DATABASE_URL=... node .lane-scratch/mutants.mjs
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -46,7 +45,13 @@ const GATE = body("create function clara._artifact_download_core(",
   "revoke all on function clara._artifact_download_core(uuid,uuid,uuid,int) from public;");
 const OFFER = body("create function clara.list_downloadable_artifacts(",
   "revoke all on function clara.list_downloadable_artifacts(uuid,int) from public;");
-const SHIPPED = { gate: GATE, offer: OFFER };
+// THE BYTE DOOR, added after the independent review (NOTE-3). It carries two walls of its own that
+// live in NEITHER of the bodies above — the live-membership resolution that decides which firm and
+// which rank the gate is handed, and the egress audit line — so a panel that mutated only the gate
+// and the offer left D2.3 and D7.1 as cells nothing had shown to discriminate.
+const BYTE = body("create function clara.get_artifact_for_human_read(",
+  "revoke all on function clara.get_artifact_for_human_read(uuid,uuid) from public;");
+const SHIPPED = { gate: GATE, offer: OFFER, byte: BYTE };
 
 const MUTANTS = [
   { id: "M0-control", target: "gate", mustRed: [],
@@ -101,6 +106,15 @@ const MUTANTS = [
   { id: "M8-no-covered-client-wall", target: "gate", mustRed: ["D6.4"],
     why: "deletes the sandbox covered-client wall",
     apply: (g) => g.replace("  if cardinality(v_stray) > 0 then", "  if false then") },
+
+  { id: "M10-byte-door-ignores-membership-status", target: "byte", mustRed: ["D2.3"],
+    why: "drops `status = 'active'` from the byte door's membership resolution — a REMOVED member's id then still resolves a firm, and their token buys artifacts again",
+    apply: (b) => b.replace("   where fm.user_id = p_user and fm.status = 'active';",
+                            "   where fm.user_id = p_user;") },
+
+  { id: "M11-byte-door-writes-no-egress-line", target: "byte", mustRed: ["D7.1"],
+    why: "deletes the egress audit line — bytes then leave the system with no record of who took which artifact, and nothing else in the estate would notice",
+    apply: (b) => b.replace("'get_artifact_for_human_read', p_artifact,", "'never_written', p_artifact,") },
 
   { id: "M9-offer-copies-the-predicate", target: "offer", mustRed: ["D8.2"],
     why: "THE 裁-112 MUTANT: the offer stops CALLING the gate and answers with its own copy of the predicate ('a report_artifact row exists, so it is downloadable') — the exact duplicated-gate defect the law names",
