@@ -29,11 +29,11 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { MoneyInput } from "@/components/common/money-input";
 import { Label } from "@/components/ui/label";
 import { LoadingState, StateBanner } from "@/components/common/state";
 import { FirmAdminDoorDialog } from "./FirmAdminDoorDialog";
-import { parseThresholdAmountToCents, type FirmSettingsRow } from "@/lib/firm-admin/settings";
+import type { FirmSettingsRow } from "@/lib/firm-admin/settings";
 import { fmtCents } from "@/lib/firm-admin/money";
 import type { PartHydrationState } from "@/lib/parts/hooks";
 
@@ -46,9 +46,9 @@ export function ThresholdChangeDialog({
 }) {
   const t = useTranslations("FirmAdminCompliance.settings");
   const tCommon = useTranslations("Common");
-  const [raw, setRaw] = useState("");
+  const [amountCents, setAmountCents] = useState<number | null>(null);
+  const [amountValid, setAmountValid] = useState(true);
   const firm = settingsState.data?.[0] ?? null;
-  const parsed = parseThresholdAmountToCents(raw);
 
   return (
     <FirmAdminDoorDialog
@@ -63,14 +63,21 @@ export function ThresholdChangeDialog({
       // A stale amount left over from a cancelled OR CONFIRMED edit is one stray
       // click away from a spurious re-affirmation of a number the caller never
       // reviewed this time.
-      onOpenChange={(isOpen) => { if (isOpen) setRaw(""); }}
+      onOpenChange={(isOpen) => {
+        if (isOpen) {
+          setAmountCents(null);
+          setAmountValid(true);
+        }
+      }}
       triggerLabel={t("changeTrigger")}
       title={t("changeTitle")}
       description={t("changeDescription")}
       confirmLabel={t("changeTrigger")}
       busy={settingsState.busy}
-      confirmDisabled={parsed === null}
-      onConfirm={() => settingsState.act(async () => { if (parsed !== null) await onSubmit(parsed); })}
+      confirmDisabled={!amountValid || amountCents === null || amountCents <= 0}
+      onConfirm={() => settingsState.act(async () => {
+        if (amountValid && amountCents !== null && amountCents > 0) await onSubmit(amountCents);
+      })}
     >
       {/* FINDING 2 (raised by pr489-codex-leg, law-28 leg): `settingsState.err`
           is now checked FIRST, before `firm` — not `!firm` alone. hooks.ts's
@@ -101,12 +108,15 @@ export function ThresholdChangeDialog({
           </p>
           <div className="grid gap-1.5">
             <Label htmlFor="fs-threshold-amount">{t("newValueLabel")}</Label>
-            <Input
+            <MoneyInput
               id="fs-threshold-amount"
-              inputMode="decimal"
+              mode="unsigned"
               placeholder={t("amountPlaceholder")}
-              value={raw}
-              onChange={(e) => setRaw(e.target.value)}
+              cents={amountCents}
+              onValueChange={(change) => {
+                setAmountValid(change.ok);
+                if (change.ok) setAmountCents(change.cents);
+              }}
             />
           </div>
         </div>

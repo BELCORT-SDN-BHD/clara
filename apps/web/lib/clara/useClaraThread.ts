@@ -14,6 +14,7 @@ import { getMessages, postTurn, resolveStreamAuth } from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { runClaraTaskStream } from "./stream";
 import { claraThreadStore, type ClaraThreadUiState, type ComposerFocusRequest } from "./threadStore";
+import type { AttachmentPart, ClaraPart } from "@/lib/parts/types";
 
 export function useClaraRailOpen(): boolean {
   return useSyncExternalStore(
@@ -92,7 +93,11 @@ function attachClaraStream(
 export function useClaraThread(
   auth: SessionTokenAccessor,
   threadId: string,
-): { state: ClaraThreadUiState; sendMessage: (text: string) => Promise<void>; retryConnection: () => Promise<void> } {
+): {
+  state: ClaraThreadUiState;
+  sendMessage: (text: string, attachments?: AttachmentPart[]) => Promise<boolean>;
+  retryConnection: () => Promise<void>;
+} {
   const state = useClaraThreadState(threadId);
   const loadedRef = useRef<string | null>(null);
 
@@ -113,24 +118,36 @@ export function useClaraThread(
   }, [auth, threadId]);
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, attachments: AttachmentPart[] = []) => {
       const trimmed = text.trim();
-      if (!trimmed || !threadId) return;
+      if (!trimmed || !threadId) return false;
       claraThreadStore.beginSend(threadId);
 
-      const result = await postTurn(auth, threadId, trimmed, crypto.randomUUID());
+      const parts: ClaraPart[] = [{ type: "text", text: trimmed }, ...attachments];
+      const result = await postTurn(auth, threadId, trimmed, crypto.randomUUID(), attachments);
       if (result.kind !== "accepted") {
         const message = result.kind === "limit" ? [result.message, result.resetCopy].filter(Boolean).join(" ") : result.message;
         claraThreadStore.markSendFailed(threadId, message);
-        return;
+        return false;
       }
       claraThreadStore.markAccepted(threadId, result.taskId);
 
-      try {
-        await attachClaraStream(auth, threadId, result.taskId, () => claraThreadStore.markSent(threadId, trimmed));
-      } catch (err) {
-        claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
-      }
+      // Composer clearing waits for the stream-open authority, but the stream itself
+      // keeps running in the background. This preserves the existing "sent only on
+      // open" law without keeping the form await blocked for the whole agent run.
+      return new Promise<boolean>((resolve) => {
+        let opened = false;
+        void attachClaraStream(auth, threadId, result.taskId, () => {
+          claraThreadStore.markSent(threadId, parts);
+          if (!opened) {
+            opened = true;
+            resolve(true);
+          }
+        }).catch((err: unknown) => {
+          claraThreadStore.markSendFailed(threadId, `stream error: ${(err as Error).message}`);
+          if (!opened) resolve(false);
+        });
+      });
     },
     [auth, threadId],
   );
