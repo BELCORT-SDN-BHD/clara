@@ -50,10 +50,11 @@ after(async () => {
 // P6-1 (Q8's four-card wire bump) moved it again, v15 -> v16, and v15 joins the same ladder for
 // the same reason. autoDraft is still untouched — stated because this cell's subject is the
 // PAIR, and a bump that moved only one of them is exactly what it exists to notice.
-test("registry.ts pins autoDraft_v9/chatTurn_v16 and still exports superseded v8/v15/v14/v13/v12 (policy (c))", () => {
+test("registry.ts pins autoDraft_v9/chatTurn_v17 and still exports superseded v8/v16/v15/v14/v13/v12 (policy (c))", () => {
   assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v9");
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v16");
+  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v17");
   assert.equal(typeof registryMod.autoDraft_v8, "function");
+  assert.equal(typeof registryMod.chatTurn_v16, "function");
   assert.equal(typeof registryMod.chatTurn_v15, "function");
   assert.equal(typeof registryMod.chatTurn_v14, "function");
   assert.equal(typeof registryMod.chatTurn_v13, "function");
