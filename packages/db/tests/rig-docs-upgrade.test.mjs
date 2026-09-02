@@ -14,6 +14,24 @@
 //   PGDATABASE=clara_docs_upgrade_ci CLARA_RIG_ALLOW_RESET=1 \
 //     node --test tests/rig-docs-upgrade.test.mjs
 //
+// ROLE SURVIVAL ACROSS THE FOUR CYCLES BELOW (found 2026-09-02 review of PR #485,
+// fixed here): this file runs FOUR full 0001→frontier replays in ONE process, each
+// via `reset()` + a fresh `migrate()` pass. `reset()` (scripts/reset.mjs) drops only
+// schema `clara` — roles are CLUSTER-WIDE, not schema-scoped, so a role a PRIOR
+// cycle's replay minted (today: 0160's `clara_stripe_webhook`/`_login`, idempotently
+// `create role`d) survives into the NEXT cycle's `reset()`. Migration 0154 hard-
+// asserts an exact cluster-wide `pg_roles where rolname like 'clara%'` census (14,
+// errcode CLR10) at ITS OWN position in the chain — correct for a genuinely fresh
+// cluster, but a second/third/fourth replay in this file reaches 0154 with 16
+// (14 + 0160's two, left over from cycle 1) and aborts there, well short of 0160.
+// `resetForFullReplay()` below sweeps every 'clara%' role (the SAME predicate 0154
+// itself counts) back to zero right after `reset()`, so every cycle starts from the
+// same pristine role census a truly fresh cluster would — the migrations recreate
+// every role idempotently (`if not exists`), so this reproduces a fresh cluster
+// rather than working around 0154's assertion, which is untouched and unweakened.
+// Scoped to THIS file only (never `scripts/reset.mjs`, which real deploy/DR
+// ceremonies and every other test file call without this side effect).
+//
 // ---------------------------------------------------------------------------
 // PROPOSED ci.yml step (a SEPARATE job step with its OWN throwaway database, like
 // the events/runtime upgrade steps — I do NOT edit ci.yml; this is the spec):
@@ -76,6 +94,32 @@ after(async () => {
 const RESET_OK = process.env.CLARA_RIG_ALLOW_RESET === "1";
 const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
+/**
+ * `reset()` (drops schema `clara`) plus a cluster-role sweep, for a file that runs
+ * SEVERAL full 0001→frontier replays in one process (see the header note). Roles are
+ * cluster-wide and `reset()` never touches them, so a role a PRIOR cycle's replay
+ * minted (idempotently, via `create role ... if not exists`) would otherwise survive
+ * into the NEXT cycle and misreport migration 0154's exact-census assertion as a
+ * genuine drift. Sweeping to zero — the SAME `rolname like 'clara%'` predicate 0154
+ * itself counts — makes every cycle start from the pristine role census a truly
+ * fresh cluster has; each migration recreates its own role(s) idempotently on the
+ * way back up, so this reproduces a fresh cluster rather than weakening what 0154
+ * checks. Local to this file: never touches `scripts/reset.mjs` itself.
+ */
+async function resetForFullReplay() {
+  const { reset } = await import("../scripts/reset.mjs");
+  await reset({ log: () => {} });
+  await rootQuery(`
+    do $$
+    declare r record;
+    begin
+      for r in select rolname from pg_roles where rolname like 'clara%' loop
+        execute format('drop role if exists %I', r.rolname);
+      end loop;
+    end $$;
+  `);
+}
+
 /** Copy migrations 0001–0006 (NOT 0007) into a throwaway dir for a partial migrate. */
 function exportPre0007() {
   const tmp = mkdtempSync(join(tmpdir(), "clara-pre0007-"));
@@ -111,10 +155,9 @@ function skipUnlessReset(t) {
 
 test("§3.0.2 backfill drill: 0001–0006 + cited APPROVED entries → 0007 migrates clean; a legacy ACTIVE filing (basis=legacy-0007, resolution NULL) per client_id; entries' filing_id backfilled; documents.client_id dropped", async (t) => {
   if (skipUnlessReset(t)) return;
-  const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
 
-  await reset({ log: () => {} });
+  await resetForFullReplay();
   await migrate({ dir: exportPre0007(), log: () => {} });
 
   const prefix = `docup_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`;
@@ -156,10 +199,9 @@ test("§3.0.2 backfill drill: 0001–0006 + cited APPROVED entries → 0007 migr
 
 test("§3.0.2 ambiguous citation ABORT: a cited entry that lacks EXACTLY one legacy filing aborts 0007 (zero-ambiguity proof)", async (t) => {
   if (skipUnlessReset(t)) return;
-  const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
 
-  await reset({ log: () => {} });
+  await resetForFullReplay();
   await migrate({ dir: exportPre0007(), log: () => {} });
   const prefix = `docab_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`;
   const { owner, firm, client } = await buildPre0007World(prefix);
@@ -180,7 +222,21 @@ test("§3.0.2 ambiguous citation ABORT: a cited entry that lacks EXACTLY one leg
   if (entry == null) { noteLane("ambiguous-citation ABORT could not be staged on this pre-0007 schema — recorded as an interface expectation"); return; }
   await rootQuery("insert into clara.journal_lines (entry_id, line_no, account_code, debit_cents, credit_cents) values ($1,1,'1000',$2,0),($1,2,'4000',0,$2)", [entry.rows[0].id, ROUTINE_CENTS]).catch(() => {});
 
-  await assert.rejects(() => migrate({ dir: MIG_DIR, log: () => {} }), /abort|ambig|match|filing|integrity|failed/i, "0007 ABORTS on a cited entry with no unique legacy filing");
+  // Pinned to 0007's OWN typed abort (errcode CLR17, "0007 filing_id backfill aborted"
+  // — packages/db/migrations/0007_document_pipeline.sql), not a loose "something in
+  // this migrate() call failed" match: the runner's generic wrapper text is
+  // "migration ${version} failed and was rolled back: ..." for EVERY migration
+  // failure, so a loose `/failed/i` (the prior shape here) would also accept an
+  // unrelated migration's own abort (e.g. 0154's cluster-wide role-census CLR10) as
+  // if it were proof of 0007's ambiguous-citation abort — a false green sitting
+  // between the red cells (found 2026-09-02 review of PR #485). This validator
+  // checks the SAME two facts a reader would: the exact errcode and 0007's own
+  // message text.
+  await assert.rejects(
+    () => migrate({ dir: MIG_DIR, log: () => {} }),
+    (err) => err?.code === "CLR17" && /0007 filing_id backfill aborted/.test(err?.message ?? ""),
+    "0007 ABORTS on a cited entry with no unique legacy filing (errcode CLR17, 0007's own abort text)",
+  );
   // The abort rolled 0007 back — document_filings never landed.
   const filingsTable = await rootQuery("select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='clara' and c.relname='document_filings'");
   assert.equal(filingsTable.rowCount, 0, "0007 rolled back cleanly (document_filings absent — the migration is atomic)");
@@ -192,10 +248,9 @@ test("§3.0.2 ambiguous citation ABORT: a cited entry that lacks EXACTLY one leg
 
 test("§3.0 legacy-upgrade branch: a claim-only legacy doc is verified in place by a matching intake — ONE task/charge, NO second document row, NO new document.ingested, uncitable-before → citable-after", async (t) => {
   if (skipUnlessReset(t)) return;
-  const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
 
-  await reset({ log: () => {} });
+  await resetForFullReplay();
   await migrate({ dir: exportPre0007(), log: () => {} });
   const prefix = `docug2_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`;
   const { owner, client } = await buildPre0007World(prefix);
@@ -240,10 +295,9 @@ test("§3.0 legacy-upgrade branch: a claim-only legacy doc is verified in place 
 
 test("§3.11 cutover residual sweep: historical background_review intents for document events are cancelled with the audited reason 'taxonomy-v2-cutover'", async (t) => {
   if (skipUnlessReset(t)) return;
-  const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
 
-  await reset({ log: () => {} });
+  await resetForFullReplay();
   await migrate({ dir: exportPre0007(), log: () => {} });
   const prefix = `doctx_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`;
   const { owner, client } = await buildPre0007World(prefix);
