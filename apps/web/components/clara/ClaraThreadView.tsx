@@ -72,15 +72,32 @@ export function ClaraThreadView({
   return (
     <ThreadActionCoordinatorProvider session={auth}>
       <div className="flex h-full flex-col">
-      <div className="flex-1 space-y-3 overflow-y-auto p-3" role="log" aria-live="polite">
+      {/* DS-04 (FS-9 §3, P6-3) — THE SCROLL REGION IS NO LONGER THE LIVE REGION.
+          This element used to carry `role="log" aria-live="polite"` itself,
+          which made every descendant a live-region update: the six StateBanners
+          below (each already `role="alert"`/`"status"` of its own), and — the
+          sharper instance the conformance pass found — InterviewRunCard's
+          `role="log" aria-live="polite"` thread, nested INSIDE this log via
+          OnboardingChecklistCard. A `log` inside a `log` has no defined
+          announcement order, and the lane's first suggested fix (drop
+          `aria-live` from this container) would NOT have fixed it, because
+          `role="log"` carries an implicit `aria-live="polite"` on its own.
+          The fix is structural: the live region moved DOWN to wrap only the
+          transcript, so the card and the banners are siblings of it rather
+          than descendants. Visual order and the scroll behaviour are
+          byte-unchanged — `space-y-3` still spaces every child, and the
+          transcript wrapper below re-declares it for its own children. */}
+      <div className="flex-1 space-y-3 overflow-y-auto p-3">
         {/* T11: the onboarding checklist card — a stateful card INLINE in the
             message stream (R7, the Manus precedent), never a side panel.
-            N5 fix (rev-t11): this is the FIRST child of the scrolling log
-            (role="log", the SAME scroll region the transcript itself lives
-            in) — it scrolls out of view like any other item as messages
-            accumulate, exactly R7's "inline in the stream" shape; it is
-            NOT pinned above the scroll. Independent of threadId's own load
-            state — see this component's own `clientId` doc comment. */}
+            N5 fix (rev-t11): this is the FIRST child of the SCROLLING region —
+            it scrolls out of view like any other item as messages accumulate,
+            exactly R7's "inline in the stream" shape; it is NOT pinned above
+            the scroll. (It was described as the first child of the *log*; after
+            DS-04 the scroll region and the log are two different elements and
+            the card belongs to the scroll one. The R7 shape is unchanged.)
+            Independent of threadId's own load state — see this component's own
+            `clientId` doc comment. */}
         <OnboardingChecklistCard clientId={clientId} session={auth} />
         {/* P3 polish: the rail's own five state spellings joined the product
             ladder. "Sign in to talk with Clara" is a STATE, not a fault, so it
@@ -98,25 +115,40 @@ export function ClaraThreadView({
         {threadId && !notSignedIn && state.loadError && state.messagesLoaded && (
           <StateBanner tone="error">{t("loadError", { message: state.loadError })}</StateBanner>
         )}
-        {state.messages.map((msg) => (
-          // `enter-content`: a message ARRIVING is the archetypal "prevent a
-          // jarring change". It fires per new message only — a streaming
-          // assistant turn keeps its key, so the text grows without the
-          // bubble ever re-animating.
-          <div key={msg.id} className={cn("enter-content rounded-lg p-2 text-sm", msg.role === "user" ? "bg-muted" : "bg-clara-muted")}>
-            <p className="mb-1 text-xs font-medium text-muted-foreground">{t(`role.${msg.role}`)}</p>
-            {msg.parts.map((part, i) => (
-              <PartSlot key={i} part={part} />
-            ))}
-          </div>
-        ))}
-        {state.pendingUserText && (
-          <div className="rounded-lg bg-muted p-2 text-sm opacity-70">
-            <p className="mb-1 text-xs font-medium text-muted-foreground">{t("role.user")}</p>
-            <p className="whitespace-pre-wrap">{state.pendingUserText}</p>
-          </div>
-        )}
-        {streamStatusLabel(state, t) && <p className="text-xs text-muted-foreground italic">{streamStatusLabel(state, t)}</p>}
+        {/* DS-03 (FS-9 §3, P6-3) — the ONE place `aria-busy` belongs in this
+            component. This log PERSISTS across the load: it is mounted while
+            the transcript is still being read and the messages arrive into the
+            SAME element, so it can flip true -> false and release the queued
+            announcements, which is exactly what WAI-ARIA's busy state is for.
+            (LoadingState above deliberately does NOT carry it — see that
+            primitive's own header for why marking a transient placeholder busy
+            would suppress its own announcement.) */}
+        <div
+          className="space-y-3"
+          role="log"
+          aria-live="polite"
+          aria-busy={Boolean(threadId) && !notSignedIn && !state.messagesLoaded}
+        >
+          {state.messages.map((msg) => (
+            // `enter-content`: a message ARRIVING is the archetypal "prevent a
+            // jarring change". It fires per new message only — a streaming
+            // assistant turn keeps its key, so the text grows without the
+            // bubble ever re-animating.
+            <div key={msg.id} className={cn("enter-content rounded-lg p-2 text-sm", msg.role === "user" ? "bg-muted" : "bg-clara-muted")}>
+              <p className="mb-1 text-xs font-medium text-muted-foreground">{t(`role.${msg.role}`)}</p>
+              {msg.parts.map((part, i) => (
+                <PartSlot key={i} part={part} />
+              ))}
+            </div>
+          ))}
+          {state.pendingUserText && (
+            <div className="rounded-lg bg-muted p-2 text-sm opacity-70">
+              <p className="mb-1 text-xs font-medium text-muted-foreground">{t("role.user")}</p>
+              <p className="whitespace-pre-wrap">{state.pendingUserText}</p>
+            </div>
+          )}
+          {streamStatusLabel(state, t) && <p className="text-xs text-muted-foreground italic">{streamStatusLabel(state, t)}</p>}
+        </div>
         {/* Kept as two INDEPENDENT conditions, deliberately: `retryAvailable`
             can stand alone next to `streamStatusLabel`'s own "Connection
             lost." line above, and folding the Retry into the banner would
@@ -149,7 +181,7 @@ export function ClaraThreadView({
           // fixed 2/3 rows. What was drifting was only the border token —
           // `border-border` (a divider) where every other field in the product
           // uses `border-input` (a control edge).
-          className="motion-fast flex-1 resize-none rounded-lg border border-input bg-background p-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="motion-fast flex-1 resize-none rounded-lg border border-input bg-background p-2 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-50"
         />
         <Button type="submit" disabled={!threadId || notSignedIn || busy || !draft.trim()}>
           {busy ? t("sending") : t("send")}

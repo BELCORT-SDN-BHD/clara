@@ -348,15 +348,82 @@ export const PAIR_SPECS = [
   { id: "muted-foreground-on-identity-canvas", fg: (h) => h("muted-foreground"), bg: (h) => h("identity-canvas"), threshold: 4.5,
     source: "THE TIGHTEST PAIR IN THIS BLOCK (4.636 against a 4.5 bar — 0.136 of headroom). The caption/hint role, and the most-used text colour on these faces: NotBuiltNote's body, signup's note hint, the sign-in and sign-up link lines. A --muted-readable retune of even one step reds here first, which is exactly what this row is for" },
 
-  // --- The one non-text pair: the visible focus ring itself (WCAG 1.4.11 /
-  // 2.4.7 UI-component threshold, 3:1). Named by hand because gate (c)'s
-  // keyboard walks assert this ring is VISIBLE — a ring that fails contrast
-  // against its own surface is a keyboard-walk failure wearing this gate's
-  // clothing, so it is checked here where the token declares it.
+  // --- THE FOCUS INDICATORS (WCAG 1.4.11 / 2.4.7 UI-component threshold, 3:1).
+  //
+  // There are TWO of them in this product and this block gates both, which is
+  // the P6-3 correction. Before that train these two rows were the whole story
+  // and they measured only the SOLID `--focus` token — the flat `:focus-visible`
+  // outline. Twelve components draw a TRANSLUCENT halo instead, and no pair saw
+  // it: the gate was green on a treatment that was not there, while the halo it
+  // could not see sat at 2.363:1 on white (50% alpha) and 2.245:1 on the worst
+  // gated ground. 裁-1 recut the alpha to 70% and the nine composited rows below
+  // are what make that recut MEASURED rather than asserted.
+  //
+  // (1) THE FALLBACK OUTLINE — solid --focus, `outline: 2px solid var(--focus)`
+  // in globals.css's `@layer base`. It is the indicator for every focusable
+  // element that does NOT carry the shadcn ring idiom, and it is kept
+  // deliberately (see that file's FOCUS TREATMENT note). These two rows are
+  // scoped to it and say so; they make no claim about the halo.
   { id: "focus-ring-on-background", fg: (h) => h("focus"), bg: (h) => h("background"), threshold: 3,
-    source: "globals.css :focus-visible { outline: … solid var(--focus); } against the canvas/card/popover surfaces (all #ffffff in this token set) it is drawn on" },
+    source: "THE BASE OUTLINE ONLY, not the ring: globals.css @layer base `:focus-visible { outline: var(--focus-ring-width) solid var(--focus) }`, against the canvas/card/popover surfaces (all #ffffff in this token set). This is what a plain link, list row or `<summary>` draws — anything without the shadcn idiom. The halo those twelve components draw instead is the focus-ring-70-* block below." },
   { id: "focus-ring-on-shell", fg: (h) => h("focus"), bg: (h) => h("shell"), threshold: 3,
-    source: "the same :focus-visible ring against app/(firm)/layout.tsx's <aside> (bg-sidebar) and components/firm-nav.tsx — both alias --shell" },
+    source: "THE BASE OUTLINE ONLY: the same `:focus-visible` rule against app/(firm)/layout.tsx's <aside> (bg-sidebar) and components/firm-nav.tsx's links — both alias --shell, and firm-nav's links carry no ring utility, so this rule is genuinely their only indicator." },
+
+  // (2) THE SHADCN HALO AT 70% — `focus-visible:ring-3 focus-visible:ring-ring/70`,
+  // carried by twelve components (census re-run 2026-09-02, reported by file in
+  // the P6-3 PR body). Tailwind v4 emits the `/70` as a colour at 0.7 alpha and
+  // the browser composites it over the backdrop in sRGB gamma space, which is
+  // exactly what `composite()` reproduces — the same helper and the same math
+  // the destructive-on-destructive-10 row above already relies on.
+  //
+  // WHY NINE ROWS AND NOT THE SIX THE P6 ORDER ESTIMATED. The order's six were a
+  // pre-census figure. Every row below names a construction path that was walked
+  // on this branch; the extra three came from StateBanner's `action` slot, which
+  // renders a real <Button> inside a TINTED banner at whichever of its four tones
+  // the caller passes — journals-workbench.tsx:50-56 passes `failure.tone`, which
+  // readFailure() returns as info / warning / neutral / error, with the Button
+  // rendered unconditionally. Those are three grounds the ring is genuinely drawn
+  // on that a six-row set would have left ungated. The one row that is NOT a
+  // census row declares itself as such in its own source string.
+  //
+  // MEASURED, NOT TRANSCRIBED (this file's own alphaBlend/contrastRatio, run on
+  // this branch): background/card/popover 3.574 · warning-muted 3.467 · muted
+  // 3.435 · shell 3.433 · error-muted 3.405 · info-muted 3.360 · accent 3.270.
+  // At 0.65 accent measures 2.970 and reds — which is why 裁-1's floor is 70%.
+  { id: "focus-ring-70-on-background", fg: (h, composite) => composite("ring", 0.70, h("background")), bg: (h) => h("background"), threshold: 3,
+    source: "the halo on the (firm) content column (app/(firm)/layout.tsx's bg-background column): components/admin/admin-hub.tsx:41's card Link, and every PageHeader `action` Button drawn straight on the page ground" },
+  { id: "focus-ring-70-on-card", fg: (h, composite) => composite("ring", 0.70, h("card")), bg: (h) => h("card"), threshold: 3,
+    source: "the halo inside a Card — the densest case by far (42 bg-card sites): components/journals/drafts-queue-panel.tsx:114's disclosure button (whose halo is its ENTIRE indicator — it sets outline-none with no border-ring companion, the DS-05 finding), the Clara rail composer textarea (ClaraRail.tsx:62 is bg-card, ClaraThreadView.tsx's textarea sits in it), and every part card's Buttons (PartSummaryCard.tsx:48 / PartRenderer.tsx:121 both wrap in bg-card)" },
+  { id: "focus-ring-70-on-popover", fg: (h, composite) => composite("ring", 0.70, h("popover")), bg: (h) => h("popover"), threshold: 3,
+    source: "the halo inside a Dialog — components/ui/dialog.tsx:69 is bg-popover, and every door dialog's Confirm/Cancel Button and every Input inside one is drawn on it. Kept as its own row rather than folded into card: --popover and --card are two independent declarations that both alias --surface today, and either can be re-pointed" },
+  { id: "focus-ring-70-on-shell", fg: (h, composite) => composite("ring", 0.70, h("shell")), bg: (h) => h("shell"), threshold: 3,
+    source: "the halo on the app chrome: components/common/section-tabs.tsx:77 in the client-workspace tab header (app/(firm)/clients/[clientId]/layout.tsx:42, bg-shell) and the LogoutButton in app/(firm)/layout.tsx:72's bg-sidebar aside (--sidebar aliases --shell)" },
+  { id: "focus-ring-70-on-muted", fg: (h, composite) => composite("ring", 0.70, h("muted")), bg: (h) => h("muted"), threshold: 3,
+    source: "the halo on StateBanner tone=\"neutral\" (components/common/state.tsx:50, bg-muted) carrying its `action` Retry Button — reached by components/journals/journals-workbench.tsx:50-56 whenever readFailure() returns the not_found kind, and by components/bank/read-state.tsx:66's KIND_TONE map" },
+  { id: "focus-ring-70-on-info-muted", fg: (h, composite) => composite("ring", 0.70, h("info-muted")), bg: (h) => h("info-muted"), threshold: 3,
+    source: "the same StateBanner `action` Button at tone=\"info\" (bg-info-muted) — journals-workbench.tsx:50-56 renders the Retry unconditionally beside a tone readFailure() returns as `info` for the no_session kind" },
+  { id: "focus-ring-70-on-warning-muted", fg: (h, composite) => composite("ring", 0.70, h("warning-muted")), bg: (h) => h("warning-muted"), threshold: 3,
+    source: "the same StateBanner `action` Button at tone=\"warning\" (bg-warning-muted) — readFailure()'s `forbidden` kind, journals-workbench.tsx:166" },
+  { id: "focus-ring-70-on-error-muted", fg: (h, composite) => composite("ring", 0.70, h("error-muted")), bg: (h) => h("error-muted"), threshold: 3,
+    source: "the same StateBanner `action` Button at tone=\"error\" (bg-error-muted) — components/common/route-error.tsx:24's reload control, and readFailure()'s `unauthenticated` / load-error kinds" },
+  { id: "focus-ring-70-on-accent", fg: (h, composite) => composite("ring", 0.70, h("accent")), bg: (h) => h("accent"), threshold: 3,
+    source: "A DECLARED FLOOR SENTINEL, NOT A CENSUS ROW — labelled so no reader mistakes it for a shipped composition. No ring carrier renders on --accent today (its live uses are dropdown-menu.tsx:116 / select.tsx:128's `focus:bg-accent` row highlight, which set outline-hidden and draw no ring, and firm-nav.tsx's active `bg-sidebar-accent` link, whose indicator is the base outline on --shell). It is pinned because --accent (#e8eef7) is the DARKEST ground token in this file and is therefore the binding constraint on 裁-1's alpha: it is the ground that measures 2.970 at 65% and 3.270 at 70%, i.e. the reason the ruled value is 70. A --accent retune, or any future alpha change, reds HERE first and nowhere else" },
+
+  // --- The control boundary: --input (裁-2 4c, executed by 裁-64② in P6-3).
+  // components/ui/input.tsx ships `bg-transparent`, so this border is the only
+  // thing identifying the control and SC 1.4.11's 3:1 applies to it directly.
+  // These rows land WITH the token's new value, never before it — the old
+  // #c7c5bd would have red every one of them (1.728 / 1.728 / 1.611 / 1.598).
+  { id: "input-on-background", fg: (h) => h("input"), bg: (h) => h("background"), threshold: 3,
+    source: "the control edge on the (firm) content column: components/clara/ClaraThreadView.tsx:152's composer (`border-input bg-background`) and every Input/Select/Textarea a page renders straight on the canvas" },
+  { id: "input-on-card", fg: (h) => h("input"), bg: (h) => h("card"), threshold: 3,
+    source: "the densest case: every Input, Textarea, Select trigger, NativeSelect and InputGroup inside a Card — components/ui/input.tsx:12, textarea.tsx:10, select.tsx:44, common/native-select.tsx:30, ui/input-group.tsx:17, firm/compliance-watch-affordance.tsx:140's snooze date field" },
+  { id: "input-on-popover", fg: (h) => h("input"), bg: (h) => h("popover"), threshold: 3,
+    source: "the same control edge inside a Dialog (ui/dialog.tsx:69, bg-popover) — every door dialog's fields — and the ⌘K palette's own InputGroup (ui/command.tsx:66)" },
+  { id: "input-on-shell", fg: (h) => h("input"), bg: (h) => h("shell"), threshold: 3,
+    source: "A DECLARED SENTINEL for the two remaining product grounds, named by the P6-3 order. No control renders on --shell TODAY (the bg-shell header at app/(firm)/clients/[clientId]/layout.tsx:42 holds only the tab strip; the bg-sidebar aside holds nav links and the LogoutButton), so this pins the ground rather than a shipped composition — it costs nothing and it is the ground a filter or search field would land on first" },
+  { id: "input-on-identity-canvas", fg: (h) => h("input"), bg: (h) => h("identity-canvas"), threshold: 3,
+    source: "A DECLARED SENTINEL, likewise named by the P6-3 order. Every (entry) face renders its fields inside the 裁-2 4a white Card, so the shipped composition is input-on-card; this row pins the group's own ground against the day a face puts a control outside the card" },
 ];
 
 // ---------------------------------------------------------------------------

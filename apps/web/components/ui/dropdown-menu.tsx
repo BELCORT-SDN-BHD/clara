@@ -66,7 +66,25 @@ function DropdownMenuContent({
       >
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
-          className={cn("z-50 max-h-(--available-height) w-(--anchor-width) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 outline-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:overflow-hidden data-closed:fade-out-0 data-closed:zoom-out-95", className )}
+          // DS-01 (FS-9 §3, P6-3). Two defects closed here, both of them the
+          // ones components/ui/select.tsx's SelectContent had already been
+          // corrected for — this file was simply never swept with it.
+          //
+          //   1. `duration-100` was a hardcoded millisecond value. Contract §7
+          //      puts "Popover, dropdown" on `--duration-standard` (160ms); the
+          //      `motion-standard` utility in globals.css is that token, and no
+          //      component in this tree is allowed to spell a duration itself.
+          //   2. The SCALE (`zoom-*`) and the six directional SLIDES ran
+          //      unconditionally, so `prefers-reduced-motion: reduce` got the
+          //      full movement. They are now behind `motion-safe:`; the
+          //      `fade-in-0`/`fade-out-0` pair stays unconditional, which is
+          //      the contract's own rule — "reduced motion removes position,
+          //      scale, stagger and parallax; OPACITY and explicit state copy
+          //      REMAIN" — and the reason a blanket transform-killer is wrong.
+          //
+          // `origin-(--transform-origin)` is untouched: a popover scales from
+          // its trigger, never from centre.
+          className={cn("motion-standard z-50 max-h-(--available-height) w-(--anchor-width) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none motion-safe:data-[side=bottom]:slide-in-from-top-2 motion-safe:data-[side=inline-end]:slide-in-from-left-2 motion-safe:data-[side=inline-start]:slide-in-from-right-2 motion-safe:data-[side=left]:slide-in-from-right-2 motion-safe:data-[side=right]:slide-in-from-left-2 motion-safe:data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 motion-safe:data-open:zoom-in-95 data-closed:animate-out data-closed:overflow-hidden data-closed:fade-out-0 motion-safe:data-closed:zoom-out-95", className )}
           {...props}
         />
       </MenuPrimitive.Positioner>
@@ -160,7 +178,13 @@ function DropdownMenuSubContent({
   return (
     <DropdownMenuContent
       data-slot="dropdown-menu-sub-content"
-      className={cn("w-auto min-w-[96px] rounded-lg bg-popover p-1 text-popover-foreground shadow-lg ring-1 ring-foreground/10 duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
+      // Same DS-01 treatment as DropdownMenuContent above. This submenu shell
+      // is UNREACHABLE today (`grep -rn "DropdownMenuSub" components/ app/`,
+      // excluding this file, returns 0 — re-run 2026-09-02), so it ships no
+      // live defect; it is corrected anyway because the day a submenu is used
+      // it would ship the defect fully formed, and a conformant file with one
+      // non-conformant export is exactly how the next lane inherits a trap.
+      className={cn("motion-standard w-auto min-w-[96px] rounded-lg bg-popover p-1 text-popover-foreground shadow-lg ring-1 ring-foreground/10 motion-safe:data-[side=bottom]:slide-in-from-top-2 motion-safe:data-[side=left]:slide-in-from-right-2 motion-safe:data-[side=right]:slide-in-from-left-2 motion-safe:data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 motion-safe:data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 motion-safe:data-closed:zoom-out-95", className )}
       align={align}
       alignOffset={alignOffset}
       side={side}

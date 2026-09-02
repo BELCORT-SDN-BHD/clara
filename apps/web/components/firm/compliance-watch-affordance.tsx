@@ -137,7 +137,7 @@ export function ComplianceWatchAffordance({ row, busy, error, act }: NeedsYouAff
             disabled={busy}
             min={snoozeDateBounds().min}
             max={snoozeDateBounds().max}
-            className="motion-fast h-8 w-fit rounded-lg border border-input bg-transparent px-2.5 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="motion-fast h-8 w-fit rounded-lg border border-input bg-transparent px-2.5 text-sm transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/70 disabled:cursor-not-allowed disabled:opacity-50"
           />
           <Textarea
             value={rationale}

@@ -18,7 +18,8 @@
     "centsUnsafe": "(amount out of range — verify in the ledger)"
   },
   "FirmShell": {
-    "productName": "Clara"
+    "productName": "Clara",
+    "skipToContent": "Skip to main content"
   },
   "FirmNav": {
     "ariaLabel": "Firm navigation",

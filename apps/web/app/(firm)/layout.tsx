@@ -6,6 +6,7 @@ import { FirmNav } from "@/components/firm-nav";
 import { FirmScopeProvider } from "@/components/firm-scope-provider";
 import { LogoutButton } from "@/components/logout-button";
 import { RailMount } from "@/components/clara/rail-mount";
+import { SkipLink } from "@/components/common/skip-link";
 import { requireFirmScope } from "@/lib/require-firm-scope";
 
 /**
@@ -61,7 +62,13 @@ export default async function FirmLayout({
         sidebar, via `--sidebar`, and the client-workspace tab header one level
         down); the content column is `--background`, the canvas.
         */}
-        <div className="flex min-h-dvh bg-background">
+        <div className="relative flex min-h-dvh bg-background">
+          {/* DS-02 (P6-3): the bypass-blocks affordance. FIRST in DOM order, so
+              it is the first thing Tab reaches on every firm route; `relative`
+              on this wrapper is what its `focus:absolute` positions against.
+              See components/common/skip-link.tsx for why it is mounted here and
+              deliberately not in the (entry) or (full) groups. */}
+          <SkipLink />
           <aside className="flex w-56 shrink-0 flex-col gap-4 border-r border-sidebar-border bg-sidebar p-4">
             <span className="px-2.5 text-sm font-semibold text-sidebar-foreground">
               {t("productName")}
@@ -71,7 +78,17 @@ export default async function FirmLayout({
               <LogoutButton />
             </div>
           </aside>
-          <div data-firm-workbench className="min-w-0 flex-1 bg-background">{children}</div>
+          {/* `id`/`tabIndex` are the SkipLink's anchor — the column exists for
+              every route in this group by construction, which the page-level
+              `<main>` does not. See skip-link.tsx's header. */}
+          <div
+            data-firm-workbench
+            id="main-content"
+            tabIndex={-1}
+            className="min-w-0 flex-1 bg-background outline-none"
+          >
+            {children}
+          </div>
           <RailMount />
         </div>
       </FirmScopeProvider>

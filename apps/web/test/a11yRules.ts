@@ -16,6 +16,17 @@
 // each one stands in for, and to retarget cleanly at real axe-core later if
 // this repo ever gains a real DOM). Each rule's WCAG success criterion is
 // the same one axe-core cites for that rule id.
+//
+// 裁-13 (2026-08-28) ADDED WCAG 2.2 SC 2.5.8 target-size ON TOP of Q7's 2.1 AA
+// bar. Its rule lives at the bottom of this file; read that block's own header
+// before changing what it measures, and read `TARGET_MIN_PX` below for the
+// `--target-min` coupling.
+
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { parseRootTokens } from "../scripts/check-token-contrast.mjs";
 
 export type A11yViolation = {
   rule: string;
@@ -24,6 +35,31 @@ export type A11yViolation = {
   element: string;
   message: string;
 };
+
+/**
+ * 裁-13 · THE TARGET-SIZE FLOOR, READ FROM THE TOKEN — NOT TRANSCRIBED.
+ *
+ * The token contract's §5.2 declares `--target-min`, and 裁-13 adopted SC 2.5.8
+ * "honouring the token contract's own documented-exception mechanism
+ * (`--target-min`)". A gate that hardcoded `24` would be asserting a NUMBER
+ * that happens to match a token today — the drift class this repo keeps paying
+ * for. This resolves the live declaration in `app/globals.css` through the
+ * contrast gate's own parser, so retuning the token retunes the gate, and
+ * deleting the token fails loudly here instead of silently relaxing the bar.
+ */
+export const TARGET_MIN_PX: number = (() => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const css = readFileSync(join(here, "..", "app", "globals.css"), "utf8");
+  const raw = parseRootTokens(css).get("target-min");
+  if (raw === undefined) {
+    throw new Error(
+      "--target-min is not declared in app/globals.css :root — 裁-13's target-size gate has no floor to enforce",
+    );
+  }
+  const px = /^(\d+(?:\.\d+)?)px$/.exec(raw.trim());
+  if (!px) throw new Error(`--target-min must be a px literal, got ${JSON.stringify(raw)}`);
+  return Number(px[1]);
+})();
 
 type Stub = {
   nodeType?: number;
@@ -158,6 +194,133 @@ function isFormControl(node: Stub): boolean {
   if (!node.tagName || !FORM_CONTROL_TAGS.has(node.tagName)) return false;
   if (node.tagName === "INPUT" && NON_INTERACTIVE_INPUT_TYPES.has((attr(node, "type") ?? "").toLowerCase())) return false;
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// 裁-13 · WCAG 2.2 SC 2.5.8 Target Size (Minimum) — the CI gate.
+//
+// WHAT THIS MEASURES, AND WHAT IT HONESTLY CANNOT. There is no layout engine
+// here (test/domInspect.ts's header: the axe-core spike hit the same wall), so
+// this does NOT measure a rendered box. It measures the ONE thing that is
+// unambiguous without layout: a class string that PINS a dimension to a fixed
+// pixel value below the floor. `h-5` on a button is a 20px-tall control no
+// matter what the content or the viewport does — that is a decision written
+// into the source, and it is exactly the decision SC 2.5.8 is about.
+//
+// Everything it cannot see falls through SILENTLY BY DESIGN, and that is the
+// point rather than a shortfall:
+//   - A control with no pinned dimension (the overwhelming majority — padding
+//     and content decide its box) makes NO claim here. That also disposes of
+//     SC 2.5.8's own "Inline" exception for free: a link inside a sentence
+//     carries no size utility, so it is never flagged.
+//   - The criterion's SPACING exception (an undersized target with 24px of
+//     clear space around it passes) needs real geometry. It is not implemented
+//     here and MUST NOT be faked; the browser leg runs axe-core's real
+//     `target-size` rule on the built app, which implements it properly.
+// So: green here is "no source-level shortfall", never "SC 2.5.8 holds". The
+// two instruments are complementary and the PR body says which proved what.
+//
+// THE DOCUMENTED-EXCEPTION MECHANISM (裁-13, verbatim: "every dense-table
+// shortfall becomes a visible, reasoned exception, never a silent downgrade").
+// `data-target-size-exception="<reason>"` on the control. There is deliberately
+// NO allowlist file and NO known-violation pinning: an exception must be
+// written on the element a reader is looking at, in the same diff as the
+// shortfall, and an exception with an EMPTY reason is itself a violation — so
+// the mechanism cannot be used to make a shortfall quiet.
+// ---------------------------------------------------------------------------
+
+const INTERACTIVE_ROLES = new Set([
+  "button", "link", "checkbox", "radio", "switch", "tab", "menuitem",
+  "menuitemcheckbox", "menuitemradio", "option", "treeitem", "slider", "spinbutton",
+]);
+
+/** Tailwind's spacing scale is 0.25rem per step at the default 16px root. */
+const TW_STEP_PX = 4;
+
+/**
+ * Resolves ONE Tailwind size value to CSS px, or null when it is not a fixed
+ * pixel quantity this engine may reason about (`full`, `auto`, `dvh`, a
+ * percentage, a `var()`, a `calc()`, an unknown keyword). Returning null is the
+ * fail-OPEN branch on purpose: an unmeasurable value is not evidence of a
+ * shortfall, and inventing one would manufacture false violations.
+ */
+export function twSizeToPx(value: string): number | null {
+  if (value === "px") return 1;
+  if (/^\d+(?:\.\d+)?$/.test(value)) return Number(value) * TW_STEP_PX;
+  const arbitrary = /^\[(.+)]$/.exec(value);
+  if (arbitrary) {
+    const inner = arbitrary[1]!;
+    const px = /^(\d+(?:\.\d+)?)px$/.exec(inner);
+    if (px) return Number(px[1]);
+    const rem = /^(\d+(?:\.\d+)?)rem$/.exec(inner);
+    if (rem) return Number(rem[1]) * 16;
+  }
+  return null;
+}
+
+/**
+ * The pinned width/height a class string commits to, in CSS px — `null` on an
+ * axis nothing pins. Only utilities that FIX a dimension count: `size-*`,
+ * `h-*`, `w-*`. `min-h-*`/`min-w-*` are deliberately excluded — a minimum with
+ * no maximum leaves the rendered box content-driven, so a small `min-h` is not
+ * a shortfall, and treating it as one is the false-positive this rule must not
+ * produce. A variant-prefixed utility (`sm:h-4`, `hover:size-3`) is also
+ * excluded: it applies conditionally, and this engine cannot say when.
+ */
+export function pinnedBoxPx(className: string): { w: number | null; h: number | null } {
+  let w: number | null = null;
+  let h: number | null = null;
+  for (const token of className.split(/\s+/)) {
+    if (token === "" || token.includes(":")) continue;
+    const m = /^(size|h|w)-(.+)$/.exec(token);
+    if (!m) continue;
+    const px = twSizeToPx(m[2]!);
+    if (px === null) continue;
+    if (m[1] === "size") {
+      w = px;
+      h = px;
+    } else if (m[1] === "h") h = px;
+    else w = px;
+  }
+  return { w, h };
+}
+
+// ---------------------------------------------------------------------------
+// DS-04 · NESTED LIVE REGIONS (WAI-ARIA 1.2 §5.2.7 / WCAG 4.1.3 Status
+// Messages). Added by P6-3 as a RULE rather than a one-off cell, because the
+// conformance pass found the defect twice in one component tree and the second
+// instance was the one nobody had looked for: InterviewRunCard's `role="log"`
+// thread sitting inside ClaraThreadView's `role="log"` scroll region, reached
+// through OnboardingChecklistCard — two files apart, invisible to either
+// component's own suite. A rule here means every a11y test in the estate is
+// the instrument, not just the one someone thought to write.
+//
+// A live region inside a live region has no defined announcement order: the
+// same change can be announced twice, once, or attributed to the wrong region,
+// depending on the screen reader. Note that dropping `aria-live` from the outer
+// element does NOT fix it — `role="log"`/`"status"`/`"alert"` each carry an
+// implicit `aria-live`, which is exactly the correction the conformance pass
+// had to make to the original finding's suggested fix.
+// ---------------------------------------------------------------------------
+
+/** Roles whose ARIA definition carries an implicit non-off `aria-live`. */
+const IMPLICIT_LIVE_ROLES = new Set(["alert", "log", "status", "marquee", "timer"]);
+
+function isLiveRegion(node: Stub): boolean {
+  const declared = attr(node, "aria-live");
+  if (declared !== null) return declared.toLowerCase() !== "off";
+  const role = attr(node, "role");
+  return role !== null && IMPLICIT_LIVE_ROLES.has(role);
+}
+
+/** Interactive for SC 2.5.8's purposes: something a pointer must be able to hit. */
+function isPointerTarget(node: Stub): boolean {
+  if (isAriaHidden(node)) return false;
+  if (has(node, "disabled")) return false;
+  if (attr(node, "aria-disabled") === "true") return false;
+  if (isRealButton(node) || isRealLink(node) || isFormControl(node)) return true;
+  const role = attr(node, "role");
+  return role !== null && INTERACTIVE_ROLES.has(role);
 }
 
 /**
@@ -313,6 +476,49 @@ export function checkAccessibility(root: Stub): A11yViolation[] {
         element: describe(node),
         message: "A dialog must have an accessible name (aria-label or aria-labelledby).",
       });
+    }
+
+    // nested-live-region (DS-04) — see the block above this function.
+    if (isLiveRegion(node)) {
+      let ancestor = node.parentNode ?? null;
+      while (ancestor) {
+        if (isElement(ancestor) && isLiveRegion(ancestor)) {
+          violations.push({
+            rule: "nested-live-region",
+            wcag: "4.1.3 Status Messages (WAI-ARIA 1.2 §5.2.7)",
+            element: describe(node),
+            message: `This live region is nested inside another one (${describe(ancestor)}); announcement order is undefined and a change can be read twice or attributed to the wrong region. Note that role="log"/"status"/"alert" each carry an implicit aria-live, so removing aria-live from the outer element does not resolve it — the containment does.`,
+          });
+          break;
+        }
+        ancestor = ancestor.parentNode ?? null;
+      }
+    }
+
+    // target-size (裁-13, WCAG 2.2 SC 2.5.8) — read the block above this
+    // function for exactly what this claims and what it deliberately does not.
+    if (isPointerTarget(node)) {
+      const exception = attr(node, "data-target-size-exception");
+      const { w, h } = pinnedBoxPx(attr(node, "class") ?? "");
+      const short: string[] = [];
+      if (h !== null && h < TARGET_MIN_PX) short.push(`height ${h}px`);
+      if (w !== null && w < TARGET_MIN_PX) short.push(`width ${w}px`);
+      if (exception !== null && exception.trim() === "") {
+        violations.push({
+          rule: "target-size-exception-unreasoned",
+          wcag: "2.5.8 Target Size (Minimum)",
+          element: describe(node),
+          message:
+            'data-target-size-exception is present but empty — 裁-13 requires every shortfall to be a VISIBLE, reasoned exception. Write the reason (which SC 2.5.8 exception applies, and why) or fix the size.',
+        });
+      } else if (short.length > 0 && exception === null) {
+        violations.push({
+          rule: "target-size",
+          wcag: "2.5.8 Target Size (Minimum)",
+          element: describe(node),
+          message: `Pointer target pins ${short.join(" and ")}, below the --target-min floor of ${TARGET_MIN_PX}px. Fix the size, or carry data-target-size-exception="<reason>" naming the SC 2.5.8 exception that applies.`,
+        });
+      }
     }
 
     // duplicate-id
