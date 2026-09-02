@@ -59,6 +59,7 @@ components/close/close-keyboard.test.tsx
 components/close/close-t1-hold-receipts.test.tsx
 components/close/close-t1-opener.test.tsx
 components/close/close-t1-proposal-readiness.test.tsx
+components/common/route-error.test.tsx
 components/documents/coding-lane-a11y.test.tsx
 components/documents/coding-lane-keyboard.test.tsx
 components/documents/documents-a11y.test.tsx
@@ -69,6 +70,7 @@ components/entry/email-confirmation-page.test.tsx
 components/entry/email-confirmation-signup-route.test.tsx
 components/entry/email-confirmation.test.tsx
 components/entry/entry-contracts.test.tsx
+components/entry/password-recovery.test.tsx
 components/entry/pending-a11y.test.tsx
 components/entry/signup-a11y.test.tsx
 components/entry/signup-dpa-form.test.tsx
@@ -147,6 +149,7 @@ lib/bank/recon-reads.test.ts
 lib/bank/reload-on-change.test.ts
 lib/bank/table-reads.test.ts
 lib/business-date.test.ts
+lib/clara/useActiveThread.test.ts
 lib/close/api.test.ts
 lib/coding/doors.test.ts
 lib/coding/loaders.test.ts
@@ -228,6 +231,8 @@ tests/invite-courier-egress.test.ts
 tests/invite-courier.test.ts
 tests/invite-mail-transport.test.ts
 tests/invite-verification.test.ts
+tests/parity-holes.test.ts
+tests/password-recovery-handler.test.ts
 tests/proxy-matcher.test.ts
 tests/public-key.test.ts
 tests/require-firm-scope.test.ts
