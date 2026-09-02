@@ -110,3 +110,33 @@ re-reading find?"
 > ledger + `PROGRESS.md`'s posture; 裁-123's cleanup incident corrected a Known-issues LAW
 > line in `PROGRESS.md` (`git worktree remove --force` follows junctions on this host). The
 > digest's law-28 suspension note (裁-111) is unchanged and still time-boxed to beta live.
+
+## 2026-09-02 — CI moves to GitHub-hosted runners (裁-135); ADR-0073's levers survive, its host does not
+
+> Written at the hosted-runner migration. **No digest law changes, and that is the finding.**
+> Law 77 (§10, source ADR-0073) governs per-PR CI *scope* — which gates run per-PR, which
+> demote to the weekly sweep, and that the required check `ci` is a fail-closed meta-gate. The
+> migration moves every job from the four self-hosted WSL2 runner instances to GitHub-hosted
+> `ubuntu-latest` and changes **none** of that: the same nine jobs plus the meta-gate, the same
+> docs-only classifier, the same sweep-only cadence, the same step bodies.
+>
+> **What the move DOES supersede is an economics premise, not a law.** ADR-0073's lever 3
+> (caching) and the `docs/ops/ci-runner.md` line "hybrid GitHub-hosted runners were considered
+> and DECLINED — the $0 preference stands" were both written for hardware we owned, where
+> minutes were free and a local pnpm store could stay warm between jobs. The owner reversed
+> that preference at 裁-135 (2026-09-02) — merge speed for the beta sprint, over the $0
+> preference and over the 2026-08-11 "hard no" on a public repo. **ADR-0073's text is untouched
+> and its three levers all survive the move**: the closed-wave sweep demotion, the parallel job
+> split (now genuinely parallel — one fresh VM per job rather than 4-wide across a shared
+> fleet), and the fail-closed meta-gate. Only lever 3's hosting assumption lapsed, and the
+> local store was replaced by the `setup-node` action's own `cache: pnpm`.
+>
+> Two further records, so a later reader is not misled by documents that were true on their
+> date: the **runner law in `AGENTS.md`** ("private-repo only; decommission the runner first")
+> is amended by 裁-135 in substance rather than repealed — no event routes to those runners any
+> more, so fork code cannot reach that hardware, and the residual rule (never re-point them at
+> `pull_request` while the repo is public) is recorded in `docs/ops/ci-runner.md`. And the
+> **裁-134 per-slot concurrency cap** (2026-09-02 17:50, PR #513) is **superseded and moot** —
+> a slot cap rations a fixed fleet, and hosted runners have no fleet; its one genuinely
+> load-bearing half, exempting `push`-to-main from cancellation, is carried forward in the
+> re-cut workflow-level concurrency block.

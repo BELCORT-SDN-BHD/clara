@@ -178,12 +178,16 @@ Law 1 is the floor, not the ceiling.
 
 ## CI/CD
 
-CI is GitHub Actions on **four self-hosted WSL2 runner instances** (`clara-wsl`,
-`clara-wsl-2`, `clara-wsl-3`, `clara-wsl-4` — labels
-`self-hosted, linux, clara`; expanded from two on 2026-08-23, `docs/ops/ci-runner.md`) — the same workflows and the same binding green-check gate, on
-our own hardware. It is **private-repo only**: if the repo is ever made public, decommission
-the runner *first* (`docs/ops/ci-runner.md`). An offline runner makes jobs queue visibly; it
-never lets one silently pass.
+CI is GitHub Actions on **GitHub-hosted `ubuntu-latest` runners** (Ubuntu 24.04, one fresh
+single-tenant VM per job) since **2026-09-02** (裁-135, owner — speed for the beta sprint;
+`docs/ops/ci-runner.md` "Hosted from 2026-09-02"). Same workflows, same binding green-check
+gate. **The four self-hosted WSL2 runner instances** (`clara-wsl` … `clara-wsl-4`, labels
+`self-hosted, linux, clara`) **are still registered but no event routes to them** — the
+`runs-on` label is gone from every job. The private-repo-only order of operations that
+governed them is now a **decommission note**: they are removed by `config.sh remove`
+(`docs/ops/ci-runner.md` "Re-register / decommission") and must never be re-pointed at
+`pull_request` while the repo is public. Every job carries a `timeout-minutes` ceiling —
+hosted minutes are billed, so a hung leg can no longer burn hours.
 
 Every PR gets the lint job unconditionally, docs-only diffs included — freeze-lint,
 leak-scan, gitleaks, the wiki dynamic-SQL gates, harness-links, eslint. A diff that touches
