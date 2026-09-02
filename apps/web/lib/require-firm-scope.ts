@@ -405,6 +405,15 @@ export const SCOPE_UNSCOPED_SURFACES: ReadonlyArray<{
  * against: A SURFACE CALLS `requireFirmScope()` WHEN IT RENDERS OR RETURNS
  * FIRM-SCOPED DATA ON ITS OWN AUTHORITY, AND DOES NOT WHEN A GOVERNED DOOR IS
  * ALREADY THE WALL.
+ *
+ * A `page.tsx` MAY be registered here, and the widening was deliberate (PR #505
+ * round 3, NIT-1). Every other entry is a `route.ts`; the harness leaf below is
+ * the first page, because in an ordinary build it is a server component that
+ * only calls `notFound()`. This grants a page nothing it did not already have:
+ * `tests/firm-scope-surfaces.test.ts`'s both-ways public cross-check reads only
+ * `SCOPE_UNSCOPED_SURFACES.filter(public)`, so a page that were exempt AND on
+ * the proxy's public-prefix list would still red — exemption from this spine is
+ * not exemption from the auth wall, and the two registries are checked apart.
  */
 export const SCOPE_EXEMPT_SURFACES: ReadonlyArray<{
   readonly path: string;
