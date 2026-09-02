@@ -91,10 +91,23 @@ export function skipUnlessReset(t) {
 export async function freshDb() {
   const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
+  const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
+  // Cluster-wide role survival, TWICE in this one function (review-518-r2 F1): the
+  // first migrate() below is a genuine full 0001->frontier pass (to let x41EnsureReady
+  // memoise its DB-clock anchor), staged back down to pre-0042 by the second — and the
+  // CALLING cell then migrates to the frontier AGAIN on top of that (the D-b2 chain).
+  // Roles minted by the first pass here, or by a PRIOR cell/step, survive schema-only
+  // reset()s, so both resets need the sweep — the "ORDER IS LOAD-BEARING" comment below
+  // is about MIGRATE ordering (x41EnsureReady's anchor), not role state, and a sweep
+  // placed directly after an existing reset() moves no migrate. Requires
+  // CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step; see
+  // tests/rig-cluster-reset.mjs's header).
   await reset({ log: () => {} });
+  await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
   await x41EnsureReady();
   await reset({ log: () => {} });
+  await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: exportPre0042(), log: () => {} });
   return { migrate };
 }

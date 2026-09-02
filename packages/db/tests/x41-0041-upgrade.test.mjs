@@ -81,7 +81,15 @@ function skipUnlessReset(t) {
 async function freshDb() {
   const { reset } = await import("../scripts/reset.mjs");
   const { migrate } = await import("../scripts/migrate.mjs");
+  const { sweepChainMintedRoles } = await import("./rig-cluster-reset.mjs");
+  // Cluster-wide role survival: this file's own test later replays to the real
+  // frontier (:317) — roles are cluster-wide, so a role a PRIOR closed-wave-drills
+  // CI step minted survives here regardless of this file's own single-cycle shape
+  // (review-518 D1/D2, found independently while folding #518 — not in the
+  // reviewer's original list; see tests/rig-cluster-reset.mjs's header). Requires
+  // CLARA_RIG_ALLOW_ROLE_SWEEP=1 (set by the action on this step).
   await reset({ log: () => {} });
+  await sweepChainMintedRoles({ log: () => {} });
   await migrate({ dir: exportPre0041(), log: () => {} });
   return { migrate };
 }
