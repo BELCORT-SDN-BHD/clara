@@ -86,7 +86,11 @@ test("the login face renders on the identity canvas with no console errors", asy
   await page.goto("/login");
   await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
   await expect(page.locator("main.bg-identity-canvas")).toBeVisible();
-  await expect(page.getByText("ClaraBook")).toBeVisible();
+  // `exact: true` since P6-6's copy pass: the face now says the product name
+  // twice — once as the lockup's wordmark and once inside "Sign in to your
+  // ClaraBook account." — and a substring match resolves to both. The wordmark
+  // is the one this cell is about.
+  await expect(page.getByText("ClaraBook", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
