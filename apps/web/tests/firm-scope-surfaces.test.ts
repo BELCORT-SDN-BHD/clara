@@ -659,6 +659,7 @@ describe("the deliberate exemptions stay exempt", () => {
     const paths = SCOPE_EXEMPT_SURFACES.map((e) => e.path).sort();
     assert.deepEqual(paths, [
       "app/(entry)/auth/confirm/verify/route.ts",
+      "app/(entry)/auth/recover/route.ts",
       "app/api/invite/route.ts",
       "app/logout/route.ts",
     ]);
