@@ -95,7 +95,10 @@ export const packSpliceReady = () => once("pack", () => appliedStem(F_A2_STEMS.p
  *  PR-2-dependent claim read as proven at PR-1. */
 export const PR2_PENDING = "PR-2 (autoDraft_v9 / classifySettleReceipt / the re-admit door) has not shipped";
 export const PR1B_PENDING = "PR-1b (the get_context_pack fifth splice) has not shipped";
-export const CHAT_PARITY_PENDING = "the chat-parity follow-on PR (GB-3 / §D.2c) has not shipped";
+export const CHAT_PARITY_LIMB_ABSENT =
+  "F-A2 PR-1's interactive_client limb is not applied (the durable wake_credentials CHECKs do not "
+  + "admit the kind). On the owner's D34 this limb ships IN PR-1, so this is a HALF-APPLIED PR-1, "
+  + "not a pending follow-on PR.";
 export const PR3_PENDING = "PR-3 (cutover + retirement) has not shipped";
 
 /** A skip that stays COUNTED (the wave-a2 markSkip idiom) and names the missing surface. */

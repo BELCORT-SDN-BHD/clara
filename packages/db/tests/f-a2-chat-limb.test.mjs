@@ -1,30 +1,39 @@
-// F-A2 — Annex C.13: CHAT PARITY. Most of this section rides the chat-parity FOLLOW-ON PR
-// (GB-3 / §D.2c), not PR-1..PR-4, and the file is organised around that severance.
+// F-A2 PR-1 — Annex C.13: CHAT PARITY AND ITS FAIL-CLOSED PATH. **In THIS battery**, on the
+// owner's ruling D34.
 //
-// THREE POPULATIONS OF CELL LIVE HERE, and mixing them up is how a severed limb gets reported
-// as shipped:
+// THE SEVERANCE IS OFF, AND THAT IS A CORRECTION TO AN EARLIER CUT OF THIS FILE. v5's §D.2c
+// severed the `interactive_client` limb to its own follow-on PR after GB-3 found it unbuildable
+// as written; **v6.1's D34 reversed that** and put the limb back in PR-1 in GB-3's CORRECTED
+// form. Design §5 step 2 now lists "the `interactive_client` limb … BOTH CHECKs" among PR-1's
+// contents; §D.5 reads "EXTEND, **in PR-1 (D34)**" for `mint_wake_credential`'s arms and the
+// early kind gate at `0011:1163-1165`, and "RE-KEY onto the client pin, **in PR-1**" for
+// `wake_open_question`. So every cell below is PR-1's own obligation, and the gate says so: a
+// false probe here means PR-1 is HALF-APPLIED, not that some later PR is pending. Reporting the
+// second when the first is true is the kind of diagnosis that sends a night's debugging at the
+// wrong file.
 //
-//   1. IN THE F-A2 TRAIN — the two cells about the POST path, which ships with `chatTurn_v13`.
-//      Gated on `f_a2_posting_core$`.
-//   2. THE FOLLOW-ON PR's OWN BATTERY — the new `interactive_client` wake kind, both CHECKs,
-//      both mint gates, the six roster surfaces. Skip-guarded on the follow-on PR, and written
-//      now so the PR has a battery to land against rather than one written after the fact.
+// THREE POPULATIONS OF CELL LIVE HERE, and the distinction is about WHICH PR-1 FILE each needs:
+//
+//   1. THE POST PATH — gated on `f_a2_posting_core$`. These need the ladder and the receipt.
+//   2. THE LIMB — gated on a PROBE for the durable CHECK admitting the kind, not on a stem.
+//      The probe is deliberate: it is a positive control on the thing itself, so it cannot go
+//      true because a migration merely got named right.
 //   3. THE EXTEND-ONLY REGRESSION CELLS — UNGATED, because their whole job is to record what the
 //      estate does TODAY and keep asserting it afterwards. `coding_lane`'s cell is the one that
 //      would have caught the frozen-`chatTurn_v12` behaviour change C-3 reversed, and a cell
 //      that only started running after the change could not catch it.
 //
-// WHY THE LIMB WAS SEVERED, in one paragraph, because a later reader will otherwise re-propose
-// the weakening. v2 proposed relaxing `ck_wake_credentials_client_0011` so a plain `interactive`
-// credential could carry a client. The census killed it: `list_unassigned_documents` REGRESSES,
-// `coding_lane` widens SILENTLY (it has no is-not-null guard, so a client-less credential gets
-// EMPTY today and a pinned one would suddenly return rows — changing a FROZEN workflow's answers
-// with no byte change anywhere), eight further readers flip, and it contradicts a documented PIN
-// BLOCKER. The adopted shape is a NEW KIND, an extension. Then GB-3 found that the client CHECK
-// is ITSELF a closed-world enumeration and `mint_wake_credential` carries a SECOND kind gate
-// above the arms — so the credential was unmintable as designed, and both failure modes push a
-// builder back toward the weakening. Hence: the whole limb ships as its own PR, after the DB
-// path proves live.
+// WHY A NEW KIND AND NOT A WEAKENED CHECK, kept in full because a later reader will otherwise
+// re-propose the weakening. v2 proposed relaxing `ck_wake_credentials_client_0011` so a plain
+// `interactive` credential could carry a client. The census killed it: `list_unassigned_documents`
+// REGRESSES, `coding_lane` widens SILENTLY (it has no is-not-null guard, so a client-less
+// credential gets EMPTY today and a pinned one would suddenly return rows — changing a FROZEN
+// workflow's answers with no byte change anywhere), eight further readers flip, and it
+// contradicts a documented PIN BLOCKER. The adopted shape is a NEW KIND, an EXTENSION. GB-3 then
+// found the two ways that extension is harder than it looks — the client CHECK is ITSELF a
+// closed-world enumeration, and `mint_wake_credential` carries an EARLY kind gate above the arms
+// — and both failure modes push a builder back toward the weakening. D34's corrected recipe is
+// what the CHECK-swap and both-mint-gate cells below exist to hold in place.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -35,7 +44,7 @@ import {
   ROLES, roleQuery, booksVersion, fnPresent,
   gateCore, wakePostEntry, agentDraft, interactiveCred, ensureChart, witnessedFiling,
   postReceiptRow, supplierLines, genericLines, admits, admitsAll, assertVectorShape,
-  TIER_B_RUNGS, CHAT_PARITY_PENDING, PR2_PENDING, mintWake5,
+  TIER_B_RUNGS, CHAT_PARITY_LIMB_ABSENT, PR2_PENDING, mintWake5,
 } from "./f-a2-post-world.mjs";
 
 let world = null;
@@ -58,9 +67,10 @@ const BOB = () => world.users.bob;
 const NEW_KIND = "interactive_client";
 const gateWaveA = (t) => (waveA ? false : skipHere(t, "the Wave-A wake surface (mint_wake_credential / coding_lane) is absent at this frontier"));
 
-/** Has the follow-on PR landed? Probed by the ONE thing that cannot be true without it — the
- *  durable CHECKs admitting the new kind. Probed, never assumed: a gate keyed on a migration
- *  stem this lane does not own would be a guess about someone else's file name. */
+/** Is PR-1's `interactive_client` limb applied? Probed by the ONE thing that cannot be true
+ *  without it — the durable CHECK admitting the new kind. A PROBE and not a stem gate on
+ *  purpose: the stem would go true when a file is merely NAMED right, while this goes true only
+ *  when the CHECK really admits the kind, which is the thing every cell below depends on. */
 async function chatParityLive() {
   const r = await rootQuery(
     `select count(*)::int as n from pg_constraint c join pg_class t on t.oid=c.conrelid
@@ -69,7 +79,7 @@ async function chatParityLive() {
         and pg_get_constraintdef(c.oid) like '%interactive\\_client%'`).catch(() => ({ rows: [{ n: 0 }] }));
   return r.rows[0].n > 0;
 }
-const gateChatParity = async (t) => ((await chatParityLive()) ? false : skipHere(t, CHAT_PARITY_PENDING));
+const gateChatParity = async (t) => ((await chatParityLive()) ? false : skipHere(t, CHAT_PARITY_LIMB_ABSENT));
 
 /** A chat-lane agent draft: interactive credential, director attached. */
 async function chatDraft(client, {
@@ -89,7 +99,7 @@ async function chatDraft(client, {
 }
 
 // ===========================================================================
-// 1 · IN THE F-A2 TRAIN — the post path.
+// 1 · THE POST PATH.
 // ===========================================================================
 
 test("f-a2.c13.kind a CHAT POST lands with via_wake_kind='interactive' — the post keeps the PLAIN kind", async (t) => {
@@ -165,11 +175,25 @@ test("f-a2.c13.v13 chatTurn_v13 is a NEW export with its registry repoint — ne
       assert.match(src, /chatTurn.{0,40}v13/s, `c13.v13: the registry at ${reg} points at v13`);
     }
   }
-  noteLane(`c13.v13: chatTurn versions present — ${files.map((f) => f.split("/").pop()).join(", ")}`);
+  // THE OTHER HALF OF C.13's LAST CELL: the frozen `_vN` of `chatTurn.v10.infra.ts`, which is
+  // where the pinned kind is actually minted (R-1: for `wake_open_question` ALONE). That file
+  // carries `// @frozen` on line 1, so parity cannot edit it — it ships as a NEW `_vN` with its
+  // own repoint, exactly like the toolface. A cell that checked only chatTurn_v13 would call the
+  // limb shipped while the thing that mints its credential was still frozen at v10.
+  const infra = files.filter((f) => /infra/.test(f));
+  const v10Infra = infra.filter((f) => /\.v10\.infra\./.test(f));
+  const newInfra = infra.filter((f) => !/\.v10\.infra\./.test(f));
+  if (v10Infra.length && !newInfra.length) {
+    noteLane("c13.v13: chatTurn.v10.infra.ts is present with NO successor _vN — the minting half of the limb has not shipped yet (PR-2)");
+  } else if (newInfra.length) {
+    assert.ok(v10Infra.length > 0,
+      "c13.v13: the v10 infra file SURVIVES beside its successor — a frozen file is superseded, never edited or removed");
+  }
+  noteLane(`c13.v13: chatTurn files present — ${files.map((f) => f.split("/").pop()).join(", ")}`);
 });
 
 // ===========================================================================
-// 2 · THE FOLLOW-ON PR's OWN BATTERY.
+// 2 · THE LIMB — PR-1's own, on D34.
 // ===========================================================================
 
 test("f-a2.c13.checks the CHECK-SWAP TRIO — both durable CHECKs and the second mint gate admit interactive_client", async (t) => {
@@ -199,6 +223,79 @@ test("f-a2.c13.checks the CHECK-SWAP TRIO — both durable CHECKs and the second
   const hits = src.split(NEW_KIND).length - 1;
   assert.ok(hits >= 2,
     `c13.checks/3: BOTH mint gates name the kind — the arms AND the second kind gate above them (found ${hits} occurrences; one alone means every mint still refuses 'bad wake_kind')`);
+});
+
+test("f-a2.c13.swap-validates the CHECK swap VALIDATES over every pre-existing row, and moves no existing kind's semantics", async (t) => {
+  if (gateWaveA(t)) return;
+  if (await gateChatParity(t)) return;
+  // BOTH CHECKS ARE A DROP+ADD, which is the step that can go wrong quietly. Two ways:
+  //
+  //   (1) the re-added constraint lands NOT VALID, so it admits every row already in the table
+  //       and only polices new ones — a wall that is present, named, and inert. `convalidated`
+  //       is the catalog's own answer and it is asserted here rather than assumed.
+  //   (2) the rewrite "tidies" a pre-existing disjunct while adding the third one, moving an
+  //       existing kind's semantics under cover of an extension. C-3's whole reversal was about
+  //       NOT letting a plain `interactive` credential carry a client; an extension that quietly
+  //       relaxed that would be the reversed weakening arriving by the back door.
+  //
+  // (2) is proven BEHAVIOURALLY, as a truth table through the real mint door, because
+  // `pg_get_constraintdef` normalises its output — a literal-substring test against the design's
+  // spelling would fail on formatting and pass on nothing. The door composes the mint arms with
+  // the CHECK, which is the pair a caller actually meets.
+  const con = await rootQuery(
+    `select c.conname, c.convalidated, pg_get_constraintdef(c.oid) as d
+       from pg_constraint c join pg_class t on t.oid=c.conrelid
+       join pg_namespace n on n.oid=t.relnamespace
+      where n.nspname='clara' and t.relname='wake_credentials' and c.contype='c'
+      order by c.conname`);
+  assert.ok(con.rows.length >= 2, "c13.swap-validates: both durable CHECKs are present after the swap");
+  for (const row of con.rows) {
+    assert.equal(row.convalidated, true,
+      `c13.swap-validates: ${row.conname} is VALIDATED. A NOT VALID constraint polices only new rows and silently admits every credential already on file — present, named and inert`);
+  }
+  // …and no row on file violates the new shape. A drop+add that validated against an empty table
+  // proves nothing, so the population is reported rather than assumed.
+  const rows = await rootQuery("select count(*)::int as n from clara.wake_credentials");
+  noteLane(`c13.swap-validates: the swap validated against ${rows.rows[0].n} pre-existing wake_credentials row(s)`);
+
+  // THE TRUTH TABLE. Every pre-existing kind keeps exactly the client binding it had.
+  const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [A1()])).rows[0].firm_id;
+  const attempt = async (kind, client) => {
+    try {
+      await mintWake5({ kind, firm, onBehalfOf: kind === "autodraft" ? null : BOB(), client });
+      return "minted";
+    } catch (e) { return e.code ?? "raised"; }
+  };
+  assert.equal(await attempt("autodraft", A1()), "minted", "c13.swap-validates: autodraft + client still mints");
+  assert.notEqual(await attempt("autodraft", null), "minted", "c13.swap-validates: autodraft WITHOUT a client is still refused");
+  assert.equal(await attempt("interactive", null), "minted", "c13.swap-validates: plain interactive + no client still mints");
+  assert.notEqual(await attempt("interactive", A1()), "minted",
+    "c13.swap-validates: plain interactive + a client is STILL refused — this is C-3's reversal, and an extension that relaxed it would be the weakening arriving by the back door");
+  assert.equal(await attempt("proactive", null), "minted", "c13.swap-validates: proactive + no client still mints");
+  assert.notEqual(await attempt("proactive", A1()), "minted", "c13.swap-validates: proactive + a client is still refused");
+});
+
+test("f-a2.c13.mint-gates BOTH mint gates moved — the new kind mints, and an UNKNOWN kind is still refused", async (t) => {
+  if (gateWaveA(t)) return;
+  if (await gateChatParity(t)) return;
+  // GB-3's second failure mode, forced from both ends. `mint_wake_credential` carries an EARLY
+  // kind gate ABOVE the arms — the `p_wake_kind not in ('interactive','proactive','autodraft')`
+  // raise at `0011:1163-1165` — so extending only the arms leaves every mint of the new kind
+  // refused `bad wake_kind`. The positive half proves that gate moved.
+  //
+  // THE NEGATIVE HALF IS THE ONE THAT EARNS ITS PLACE: a builder who "fixed" the early gate by
+  // DELETING it would pass the positive half and hand the estate an unbounded kind column, with
+  // only the CHECK left standing between a typo and a credential. So an unknown kind must still
+  // be refused, and refused THERE.
+  const firm = (await rootQuery("select firm_id from clara.clients where id=$1", [A1()])).rows[0].firm_id;
+  const ok = await mintWake5({ kind: NEW_KIND, firm, onBehalfOf: BOB(), client: A1() });
+  assert.ok(ok?.secret, "c13.mint-gates: the early gate was EXTENDED — the new kind mints");
+  let raised = null;
+  try { await mintWake5({ kind: "not_a_wake_kind", firm, onBehalfOf: BOB(), client: A1() }); } catch (e) { raised = e; }
+  assert.ok(raised,
+    "c13.mint-gates: an UNKNOWN kind is still refused — the early gate was extended, not deleted");
+  assert.match(`${raised.message} ${raised.detail ?? ""}`, /wake.?kind/i,
+    `c13.mint-gates: …and refused AT THE KIND GATE, naming the kind (got ${raised.code}: ${raised.message})`);
 });
 
 test("f-a2.c13.mint the new kind mints only with a firm-congruent active client, and KEEPS on_behalf_of", async (t) => {

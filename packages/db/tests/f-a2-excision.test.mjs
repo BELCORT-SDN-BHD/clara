@@ -13,7 +13,20 @@
 // them evidence rather than assertion: `x37-wave-c-a-subledger.test.mjs:1951` asserts that three
 // employee claims DO breed a `vendor_account` proposal, and `x42.prod-23`'s control half
 // (`:296-307`) asserts an ordinary approval DOES move the sighting counter. After the 8th body
-// both must be FALSE, and PR-3 re-points them. Until then, these cells hold the other end.
+// both must be FALSE.
+//
+// AND THEY RE-POINT IN **PR-1**, NOT PR-3 — corrected here, because an earlier cut of this header
+// said PR-3 and that was read off v5. **D39 (R-L1) is the CLAIM SPLIT**: B.6 had scheduled every
+// retirement breakage for PR-3, but the breeding EXCISION lands in PR-1 with the 8th body, so a
+// test whose CLAIM is breeding behaviour is falsified the moment PR-1 merges and cannot wait for
+// PR-3. D39 puts those ~40 re-points in PR-1 and says in terms that **C.8's inverted twins
+// replace them** — which is these cells. Tests whose claim is verb EXISTENCE (the roster names,
+// `execute_rule_post` and its family) still go at PR-3, which is why this battery's roster edits
+// stay strictly extend-only.
+//
+// SO THESE CELLS ARE NOT HOLDING A LINE UNTIL SOMEONE ELSE ARRIVES — they ARE the replacement,
+// landing in the same PR as the excision they describe. Nothing is silently deleted: B.7's
+// per-site dispositions carry verbatim.
 //
 // KEEP-AS-HISTORY IS NOT DELETION. The writes stop; the TABLES stay. `clara.coding_lane` is
 // reached by the FROZEN toolfaces and `_coding_lane_core` reads `coding_rules`, and
