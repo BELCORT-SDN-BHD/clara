@@ -41,9 +41,12 @@ workbench screens are **P3**.
 ## Token provenance
 
 The semantic tokens in `app/globals.css` and the local fonts in `public/brand/fonts/` are
-**ported verbatim** from the `clarabook-frontend` repo (the design-asset archive, owner
-ruling Q-A), specifically `g5-design-system/clarabook-design-system/app/globals.css` and its
-`public/brand/fonts/` at commit **a86e48a**. That repo's `docs/01-TOKEN-CONTRACT.md` is the
+**ported from `a86e48a` with five deliberate recuts toward the token contract** (radius
+literals, `--text-xl`, the motion scale, per-utility reduced-motion arms, the
+identity-canvas bridge) — `globals.css`'s own notes record each — from the
+`clarabook-frontend` repo (the design-asset archive, owner ruling Q-A), specifically
+`g5-design-system/clarabook-design-system/app/globals.css` and its `public/brand/fonts/` at
+commit **a86e48a**. That repo's `docs/01-TOKEN-CONTRACT.md` is the
 token contract of record — read it before adding or renaming a token. Highlights:
 
 - **Colour**: `--shell: #F7F7F5` (nav/app shell) vs `--surface-subtle: #F5F6F4` (quiet grouped
@@ -104,8 +107,8 @@ groups only, no URL segment added by the grouping:
 ```
 app/(firm)/    — the firm shell (FirmNav + the ONE Clara rail mount + ⌘K): firm home ·
                  needs-you · clients register · activity · admin, plus the client
-                 workspace (clients/[clientId]/ + its seven object tabs: journals ·
-                 documents · bank · close · reports · registers · knowledge) under its
+                 workspace (clients/[clientId]/ + its eight object tabs: journals ·
+                 documents · bank · close · tax · reports · registers · knowledge) under its
                  scope-activating layout.
 app/(full)/    — the Clara full-screen escalation routes (/clara/:threadId and
                  /clients/:clientId/clara/:threadId — same URLs, route groups add no

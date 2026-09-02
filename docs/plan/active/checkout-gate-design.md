@@ -451,7 +451,8 @@ land in the same PR as the objects they name** (`rig-meta.mjs`'s function and ta
 
 **Reviews.** Every PR here is judgement logic on its face (review law 1). C-2 · C-3 · C-4 · C-5
 are money / auth / webhook / tenant-creation surfaces, so §A step 4's security lens is mandatory,
-and **a Codex read-only leg is added if a native lane built them** (law 28, kept by 裁-86).
+and **a Codex read-only leg is added if a native lane built them** (law 28, kept by 裁-86)
+(superseded by 裁-111 until beta live).
 
 **Named non-goals.** No invoicing, no `issue_invoice`, no `firm_subscriptions`, no capacity
 walls, no dunning; no operator queue for tier-3 (裁-43/裁-68); no reminder mail and no deletion

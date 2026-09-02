@@ -42,12 +42,15 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
       (sign up → pay through Stripe → start; no approval queue, 裁-43/裁-68).
 - [ ] Auth → Redirect URLs contains exactly `<origin>/signup` and `<origin>/auth/confirm`; **no
       wildcard** entry.
-- [ ] Email confirmation is **ON** and autoconfirm is **OFF**. The "Confirm signup" template uses
-      `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`, not `ConfirmationURL`.
+- [ ] Email confirmation is **ON** and autoconfirm is **OFF**. Per 裁-92's CODE flow (superseding
+      this checklist's earlier token_hash link-form instruction — `apps/web/README.md` §4), the
+      "Confirm signup" template emits the bare code and nothing to click: `{{ .Token }}` — never
+      `{{ .ConfirmationURL }}` and never a `{{ .RedirectTo }}?token_hash=…` link.
 - [ ] Password policy is minimum **12 characters** with HIBP leaked-password protection enabled.
 - [ ] Access-token JWT expiry is **900 seconds**; refresh-token rotation remains on.
-- [ ] The invite template uses `{{ .SiteURL }}/invite/{{ .TokenHash }}` and Email OTP expiry is
-      **≤24 hours**.
+- [ ] The invite template uses `{{ .SiteURL }}/invite/{{ .TokenHash }}` (that arm keeps its
+      link-form template). Email OTP expiry is shortened from the 24-hour default to
+      **10 minutes** (裁-36/§3.4's C4; `apps/web/README.md` §4).
 - [ ] Proof: dated settings screenshots plus Management API reads for the redirect allowlist,
       confirmation/autoconfirm settings, template bodies, password policy/HIBP, `jwt_exp=900` and
       OTP expiry, attached to the Wave-G as-run. Cross-check `apps/web/README.md` §Security posture.
@@ -64,13 +67,27 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
 - [ ] Proof: the TEST-mode charge, its webhook delivery, and the resulting invoice/receipt
       surface, all named in the Wave-G as-run.
 
-## BELCORT operator flag — 裁-59
+## BELCORT operator flag — 裁-59 / 裁-121③
 
-- [ ] BELCORT's `is_operator` flag is set at the **G1 THREE-switch ceremony**
-      (`bank_agent` · `close_prep` · binding-expiry — 裁-59; `tax_prep` is NOT among these three,
-      裁-62/裁-59). Runbook: `docs/ops/g1-operator-firm-ceremony.md`.
-- [ ] Proof: the ceremony's as-run, naming the three switches flipped and the flag set, in one
-      combined act.
+- [ ] BELCORT's `is_operator` flag is set at the **Wave-G reset**, as its own ceremony step
+      (裁-121③, reconciling 裁-43/裁-59 with 裁-76 — the flag no longer waits on the G1
+      THREE-switch ceremony, which is post-beta). Runbook: `docs/ops/g1-operator-firm-ceremony.md`.
+- [ ] Proof: the Wave-G reset's as-run naming the flag set.
+
+## Cloudflare — the cutover (FS-10)
+
+- [ ] Account access for the Workers deploy of `clara-web`.
+- [ ] The Pages project `clara`'s Git integration **DISCONNECTED FIRST** — before the Workers
+      deploy or the DNS change (measured 2026-08-31: the Pages project builds on every PR and
+      every push to `main`, so an undisconnected integration re-deploys the OLD dashboard on
+      every docs merge).
+- [ ] The preview URL walked route by route, before the DNS change.
+- [ ] `app.clarabook.com` DNS moved from the Pages project to the Worker.
+- [ ] The Pages project retired after the proof (repoint first, prove, delete second).
+- [ ] Proof: the FS-10 ceremony's as-run in `docs/plan/completed/`.
+
+(Source: `docs/plan/active/frontend-sprint-handoff-2026-08-31.md` §7 item 3 and the FS-10 order,
+`docs/plan/active/frontend-sprint-handoff-2026-08-31-orders.md`.)
 
 ## Wave-G acceptance evidence — 裁-63
 
@@ -83,6 +100,10 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
 - [ ] Every MBB-1 gap the corpus cannot supply (BEE GL/TB for either FY, RPR Feb/Mar-2025
       statements, named producer/certifier for RS/RPR) is marked **资料缺失** in the acceptance
       record — never silently absorbed, never awaited.
+- [ ] OPS.x (裁-121②): the Workers deploy of `apps/web` carries a parts union ⊇ the serving
+      runtime's emittable kinds, re-checked at every future `_vN` bump.
+- [ ] Every proof artifact from this checklist and the Wave-G walk is retained in the Wave-G
+      as-run (裁-122).
 
 ## Data safety — hard constraint 14 / DR.md
 
