@@ -151,14 +151,13 @@ exactly the law-3 trap, and gave no DB-owned wait at all).
   own prior count is already >=4** (a limb with fewer priors can never be the reason a future call
   is refused, and computing a wait for it anyway manufactures a number from a row that constrains
   nothing — MEASURED to over-advertise by many minutes). Derived entirely from attempt timestamps
-  the DB already owns (hard constraint 2). The rounding rounds a fractional wait UP to the next
-  whole second (so a retry at the exact advertised second, under the window's inclusive `>=`
-  boundary, still finds the target row expired) — which, on its own, MEASURABLY overshoots to 901
-  when a counted prior shares the exact microsecond of the current attempt (a same-transaction
-  `now()`; opus review on #493, NEW-1). **The door therefore clamps explicitly**
-  (`least(900, ...)`), so its range is `(0, 900]` **by construction, not by the rounding's own
-  arithmetic** — a UI clamp on the displayed wait must treat `900` as a real, reachable value, not
-  an overflow, but must never need to protect against anything past it either.
+  the DB already owns (hard constraint 2). The counting window's far edge is exclusive
+  (`attempted_at > current_attempt - interval '15 minutes'`), so a prior at the exact +900-second
+  tie is already expired. Fractional waits round UP with `ceil`, while an exact whole-second wait
+  stays exact; the same-transaction fresh-row tie therefore advertises 900 and a caller retrying
+  at +900 finds that row outside the window. The defensive `least(900, ...)` remains explicit,
+  and the mathematical range is `(0, 900]`; Lane A's existing inclusive-900 display clamp needs
+  no widening.
 
 **The row is written BEFORE the verification, not after, and that ordering is the wall.** If the
 attempt were recorded on the way back, an attacker would abort the request after each failed guess

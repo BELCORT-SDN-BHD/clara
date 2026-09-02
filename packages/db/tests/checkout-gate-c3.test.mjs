@@ -1,7 +1,7 @@
 // FS-4 checkout gate, PR C-3. Design of record:
 // docs/plan/active/checkout-gate-design{,-part2,-part3}.md.
-// Every cell is independently gated so the UNNUMBERED pre-integration run skips loudly rather
-// than calling an absent cohort green. The numbered authoring suite exercises every cell.
+// Every cell is independently gated so the pre-0161 integration run skips loudly rather than
+// calling an absent cohort green. The numbered authoring suite exercises every cell.
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -25,11 +25,11 @@ import { truncateGuardError, withTxn } from "./rig-txn.mjs";
 import { twoSessions, waitBlockedByOrThrow } from "./binding-proposal-pr-1-helpers.mjs";
 
 const TABLES = ["billing_plans", "firm_registration_payments", "confirmation_attempts"];
-const EXPECTED_CELLS = 60; // +2 (c3.30a, c3.30b) F1 round; +3 (c3.30c/d/e) BLOCKER-1 + ADD-1 round
+const EXPECTED_CELLS = 66; // +6 fold cells: c3.23a/b, c3.30f and c3.52a/b/c
 // BLOCKER 2 (opus cross-family leg on #493): open_checkout_intent's body is frozen from here,
 // same idiom as create_firm's W-E3 pin (59fa533d9c03) elsewhere in this same migration. Computed
 // against the shipped 84861afc-era body via a throwaway rig; update deliberately on any real edit.
-const OPEN_CHECKOUT_INTENT_PROSRC_SHA12 = "7de3df3152c7";
+const OPEN_CHECKOUT_INTENT_PROSRC_SHA12 = "aa227c22bb7f";
 
 let live = false;
 let executed = 0;
@@ -254,7 +254,9 @@ async function directIntent({ registration, applicant, dpaVersion = null, sessio
 
 async function buildPaidChain({ user = null, tag = "paid", dpaVersion = null, sign = true } = {}) {
   const applicant = user ?? await insertUser("c3", tag);
-  const email = `${tag}_${randomUUID()}@rig.test`;
+  const storedEmail = await rootQuery("select lower(email) as email from clara.users where id=$1", [applicant]);
+  assert.equal(storedEmail.rowCount, 1, "paid-chain actor must have one stored identity email");
+  const email = storedEmail.rows[0].email;
   let signature = null;
   if (sign) signature = await signDpa(applicant, email);
   const req = await insertRegistration(applicant, tag);
@@ -323,6 +325,7 @@ async function createExistingFirm(user, tag) {
 // Catalog, table mutation walls, billing declaration and role confinement.
 // ------------------------------------------------------------------------------------------------
 cell("c3.1 catalog -- exact C-3 tables, two payment uniques, seed, RLS and grants", async () => {
+  const staleDpa = await createNoncurrentDpa("read-door-filter");
   const properties = await rootQuery(
     `select c.relname,c.relrowsecurity,c.relforcerowsecurity,pg_get_userbyid(c.relowner) as owner,
             (select count(*)::int from pg_policy p where p.polrelid=c.oid) as policies,
@@ -403,6 +406,10 @@ cell("c3.1 catalog -- exact C-3 tables, two payment uniques, seed, RLS and grant
   assert.equal(visibleDpa.rowCount, 1);
   assert.deepEqual(visibleDpa.rows, currentDpa.rows,
     "authenticated applicants read exactly the current body, sha and publication timestamp");
+  assert.equal(visibleDpa.rows[0].version, currentDpa.rows[0].version,
+    "the read door returns the current DPA version after a superseded row exists");
+  assert.notEqual(visibleDpa.rows[0].version, staleDpa.version,
+    "the superseded DPA version is not returned by the read door");
   assert.deepEqual(
     visibleDpa.rows[0].body_sha256,
     createHash("sha256").update(visibleDpa.rows[0].body, "utf8").digest(),
@@ -700,6 +707,62 @@ cell("c3.23 open happy path -- DB-selected plan and mapped Stripe price are retu
   assert.equal(stored.rows[0].registration_id, req.id);
 });
 
+cell("c3.23a open idempotency -- same op_key reuses one unstamped intent and one rate event", async () => {
+  const user = await insertUser("c3", "open_idempotent");
+  const email = (await rootQuery("select email from clara.users where id=$1", [user])).rows[0].email;
+  const req = await insertRegistration(user, "open_idempotent");
+  const origin = digest("open-idempotent");
+  const opKey = opk("open-idempotent");
+  await signDpa(user, email);
+  await ensurePriceMap();
+  const first = (await authenticatedQuery(
+    user, email,
+    "select clara.open_checkout_intent($1,$2,$3) as result", [req.id, origin, opKey],
+  )).rows[0].result;
+  const second = (await authenticatedQuery(
+    user, email,
+    "select clara.open_checkout_intent($1,$2,$3) as result", [req.id, origin, opKey],
+  )).rows[0].result;
+  assert.deepEqual(second, first, "an unstamped intent is returned byte-for-byte on retry");
+  const counts = await rootQuery(
+    `select
+       (select count(*)::int from clara.checkout_intents where registration_id=$1) as intents,
+       (select count(*)::int from clara.registration_rate_events
+         where applicant=$2 and origin_digest=$3) as rate_events`,
+    [req.id, user, origin],
+  );
+  assert.deepEqual(counts.rows[0], { intents: 1, rate_events: 1 });
+});
+
+cell("c3.23b open idempotency -- a stamped intent is consumed and a later call opens a fresh one", async () => {
+  const user = await insertUser("c3", "open_after_stamp");
+  const email = (await rootQuery("select email from clara.users where id=$1", [user])).rows[0].email;
+  const req = await insertRegistration(user, "open_after_stamp");
+  const origin = digest("open-after-stamp");
+  const opKey = opk("open-after-stamp");
+  await signDpa(user, email);
+  await ensurePriceMap();
+  const first = (await authenticatedQuery(
+    user, email,
+    "select clara.open_checkout_intent($1,$2,$3) as result", [req.id, origin, opKey],
+  )).rows[0].result;
+  await recordSession(user, first.intent_id, stripeSessionId("open-after-stamp"), email);
+  const second = (await authenticatedQuery(
+    user, email,
+    "select clara.open_checkout_intent($1,$2,$3) as result", [req.id, origin, opKey],
+  )).rows[0].result;
+  assert.notEqual(second.intent_id, first.intent_id,
+    "a session-stamped intent is consumed and cannot satisfy a later open");
+  const counts = await rootQuery(
+    `select
+       (select count(*)::int from clara.checkout_intents where registration_id=$1) as intents,
+       (select count(*)::int from clara.registration_rate_events
+         where applicant=$2 and origin_digest=$3) as rate_events`,
+    [req.id, user, origin],
+  );
+  assert.deepEqual(counts.rows[0], { intents: 2, rate_events: 2 });
+});
+
 // ------------------------------------------------------------------------------------------------
 // record_checkout_session -- entrance walls and the W-S anti-bricking polarity.
 // ------------------------------------------------------------------------------------------------
@@ -737,7 +800,7 @@ cell("c3.25 session W-S/cross-tenant -- attacker refuses and owner can still sta
   assert.deepEqual(await recordSession(owner, intent, session), { intent_id: intent, recorded: true });
 });
 
-cell("c3.26 session replay -- same value replays, different value refuses", async () => {
+cell("c3.26 session replay/collision -- same value replays; different or cross-intent value is a typed refusal", async () => {
   const owner = await insertUser("c3", "session_replay");
   const req = await insertRegistration(owner, "session_replay");
   const intent = await directIntent({ registration: req.id, applicant: owner });
@@ -808,6 +871,16 @@ cell("c3.26 session replay -- same value replays, different value refuses", asyn
     assert.match(lost.error?.message ?? "", /checkout session already recorded/);
     await loser.query("rollback");
   });
+
+  const collisionOwner = await insertUser("c3", "session_collision");
+  const collisionReq = await insertRegistration(collisionOwner, "session_collision");
+  const firstIntent = await directIntent({ registration: collisionReq.id, applicant: collisionOwner });
+  const secondIntent = await directIntent({ registration: collisionReq.id, applicant: collisionOwner });
+  const reusedSession = stripeSessionId("collision");
+  await recordSession(collisionOwner, firstIntent, reusedSession);
+  await expectRefusal(CLR.lastOwner, () => recordSession(
+    collisionOwner, secondIntent, reusedSession,
+  ), /checkout session already recorded/, "a session id already stamped on another intent is typed");
 });
 
 // ------------------------------------------------------------------------------------------------
@@ -976,7 +1049,7 @@ cell("c3.30 W-H5 -- an unsettled attempt counts fail-closed against the next win
 // the offset half of F1 -- c3.30b below is a positive control, not a discriminator (see its own
 // header note).
 // NOTE-3 (opus review on 99e7573e, MEASURED ~0.2%/run spurious mismatch): `expected` is computed
-// IN SQL, mirroring the door's own clamp+rounding expression against the SAME persisted
+// IN SQL, mirroring the door's own ceiling+rounding expression against the SAME persisted
 // attempted_at values the door read, rather than through a JS `Date` (millisecond-truncated,
 // while the door computes at microsecond precision) -- eliminating the cross-precision boundary
 // entirely while keeping the cell's discriminating power (the target row is still the
@@ -1007,8 +1080,8 @@ cell("c3.30a W-H3 exact value -- retry_after_seconds matches the DB-computed for
   assert.notEqual(new Date(oldest.attempted_at).getTime(), new Date(target.attempted_at).getTime(),
     "the fixture's five backdated rows must be distinct for this cell to discriminate the offset fix");
   const expectedRow = await rootQuery(
-    `select least(900,greatest(0,floor(extract(epoch from
-         ((a2.attempted_at+interval '15 minutes')-a6.attempted_at)))+1))::int as expected
+    `select least(900,greatest(0,ceil(extract(epoch from
+         ((a2.attempted_at+interval '15 minutes')-a6.attempted_at)))))::int as expected
        from clara.confirmation_attempts a2, clara.confirmation_attempts a6
       where a2.id=$1 and a6.id=$2`,
     [target.id, sixth.attempt_id],
@@ -1103,10 +1176,10 @@ cell("c3.30c BLOCKER-1 dense -- both limbs contribute; the advertised wait is th
   assert.equal(sixth.allowed, false);
   const expected = await rootQuery(
     `select
-       least(900,greatest(0,floor(extract(epoch from
-         ((e.attempted_at+interval '15 minutes')-s.attempted_at)))+1))::int as email_wait,
-       least(900,greatest(0,floor(extract(epoch from
-         ((o.attempted_at+interval '15 minutes')-s.attempted_at)))+1))::int as origin_wait
+       least(900,greatest(0,ceil(extract(epoch from
+         ((e.attempted_at+interval '15 minutes')-s.attempted_at)))))::int as email_wait,
+       least(900,greatest(0,ceil(extract(epoch from
+         ((o.attempted_at+interval '15 minutes')-s.attempted_at)))))::int as origin_wait
      from clara.confirmation_attempts s,
        (select attempted_at from clara.confirmation_attempts
          where email_digest=$1 and id<>$3 order by attempted_at asc offset 1 limit 1) e,
@@ -1147,10 +1220,10 @@ cell("c3.30d BLOCKER-1 sparse-limb guard -- a limb below N=4 contributes nothing
   assert.equal(sixth.allowed, false);
   const rows = await rootQuery(
     `select
-       least(900,greatest(0,floor(extract(epoch from
-         ((e.attempted_at+interval '15 minutes')-s.attempted_at)))+1))::int as email_wait,
-       least(900,greatest(0,floor(extract(epoch from
-         ((o.attempted_at+interval '15 minutes')-s.attempted_at)))+1))::int as naive_origin_wait
+       least(900,greatest(0,ceil(extract(epoch from
+         ((e.attempted_at+interval '15 minutes')-s.attempted_at)))))::int as email_wait,
+       least(900,greatest(0,ceil(extract(epoch from
+         ((o.attempted_at+interval '15 minutes')-s.attempted_at)))))::int as naive_origin_wait
      from clara.confirmation_attempts s,
        (select attempted_at from clara.confirmation_attempts
          where email_digest=$1 and id<>$3 order by attempted_at asc offset 1 limit 1) e,
@@ -1169,10 +1242,25 @@ cell("c3.30d BLOCKER-1 sparse-limb guard -- a limb below N=4 contributes nothing
 });
 
 // ADD-1 (opus review on #493): c3.30a's fixture yields ~120s, nowhere near the 900-second
-// ceiling, so nothing in the whole battery exercised least(900, ...) -- removing the clamp would
-// leave every cell green. Same transaction, same statement-level now() for five priors and the
-// claim itself: the true duration is EXACTLY 900.0, and floor(900.0)+1=901 without the clamp.
-cell("c3.30e retry_after_seconds clamps to exactly 900 on the exact-microsecond tie (NEW-1, both scopes)", async () => {
+// contract ceiling. Same transaction, same statement-level now() for five fresh priors and the
+// claim itself: the true duration is EXACTLY 900.0 and ceil(900.0)=900. A separate retry whose
+// priors are exactly 900 seconds old proves the exclusive far edge directly: equality is expired.
+cell("c3.30e exact 900-second boundary -- the far-edge tie is expired and the fresh tie advertises 900", async () => {
+  await withTxn(async (c) => {
+    const email = digest("exclusive-edge-email");
+    const origin = digest("exclusive-edge-origin");
+    await c.query(
+      `insert into clara.confirmation_attempts(email_digest,origin_digest,attempted_at)
+       select $1,$2,now()-interval '15 minutes' from generate_series(1,5)`,
+      [email, origin],
+    );
+    await c.query(`set role clara_auth_wall`);
+    const retryAt900 = await c.query(
+      "select clara.claim_confirmation_attempt($1,$2) as result", [email, origin],
+    );
+    assert.equal(retryAt900.rows[0].result.allowed, true,
+      "at the exact +900 second tie, the prior rows are expired by the exclusive far edge");
+  }, { commit: false });
   await withTxn(async (c) => {
     const email = digest("clamp-email");
     const origin = digest("clamp-origin");
@@ -1187,7 +1275,7 @@ cell("c3.30e retry_after_seconds clamps to exactly 900 on the exact-microsecond 
     );
     assert.equal(sixth.rows[0].result.allowed, false);
     assert.equal(sixth.rows[0].result.retry_after_seconds, 900,
-      `an exact-microsecond tie must clamp to 900, never 901 (got ${sixth.rows[0].result.retry_after_seconds})`);
+      `an exact-microsecond fresh tie must advertise 900 (got ${sixth.rows[0].result.retry_after_seconds})`);
   }, { commit: false });
   await withTxn(async (c) => {
     const email2 = digest("clamp-email2");
@@ -1208,8 +1296,21 @@ cell("c3.30e retry_after_seconds clamps to exactly 900 on the exact-microsecond 
     assert.equal(sixth.rows[0].result.allowed, false);
     assert.equal(sixth.rows[0].result.scope, "origin");
     assert.equal(sixth.rows[0].result.retry_after_seconds, 900,
-      `the origin scope's exact-microsecond tie must also clamp to 900 (got ${sixth.rows[0].result.retry_after_seconds})`);
+      `the origin scope's exact-microsecond fresh tie must also advertise 900 (got ${sixth.rows[0].result.retry_after_seconds})`);
   }, { commit: false });
+});
+
+cell("c3.30f accepted outcomes -- five accepted priors consume none of the counting window", async () => {
+  const email = digest("accepted-email");
+  const origin = digest("accepted-origin");
+  for (let i = 0; i < 5; i += 1) {
+    const attempt = await claimConfirmation(email, origin);
+    assert.equal(attempt.allowed, true);
+    await settleConfirmation(attempt.attempt_id, "accepted");
+  }
+  const next = await claimConfirmation(email, origin);
+  assert.equal(next.allowed, true, "accepted outcomes are excluded from both count limbs");
+  assert.equal(next.remaining, 4, "only the newly appended unsettled attempt spends the budget");
 });
 
 cell("c3.31 settle wall -- outcome is typed and a completed attempt cannot re-settle", async () => {
@@ -1267,12 +1368,16 @@ cell("c3.37 claim W6 -- another applicant's registration is not mine", async () 
   ), /not your registration request/, "claim ownership");
 });
 
-cell("c3.38 claim W10 -- verified email claim is required before replay/locking", async () => {
-  const user = await insertUser("c3", "claim_email");
-  const req = await insertRegistration(user, "claim_email");
+cell("c3.38 claim W10 -- JWT email is required and bound to the actor's stored email", async () => {
+  const chain = await buildPaidChain({ tag: "claim_email" });
   await expectRefusal(CLR.authz, () => humanQuery(
-    user, "select clara.claim_paid_firm($1,$2)", [req.id, opk()],
-  ), /verified email claim is required/, "claim email");
+    chain.user, "select clara.claim_paid_firm($1,$2)", [chain.registration, opk()],
+  ), /verified email claim is required/, "claim missing email");
+  await expectRefusal(CLR.authz, () => authenticatedQuery(
+    chain.user, `foreign-${randomUUID()}@rig.test`,
+    "select clara.claim_paid_firm($1,$2)", [chain.registration, opk()],
+  ), /verified email claim is required/, "claim foreign email");
+  assert.ok((await claim(chain)).firm_id, "the actor's own normalized stored email is admitted");
 });
 
 cell("c3.39 claim W7 -- a rejected registration is terminal", async () => {
@@ -1345,7 +1450,9 @@ cell("c3.42 W-I3 -- superseding after checkout does not move the intent's DPA pi
 
 cell("c3.43 claim W9a -- no payment row refuses", async () => {
   const user = await insertUser("c3", "w9_none");
-  const email = `w9-none-${randomUUID()}@rig.test`;
+  const email = (await rootQuery(
+    "select lower(email) as email from clara.users where id=$1", [user],
+  )).rows[0].email;
   await signDpa(user, email);
   const req = await insertRegistration(user, "w9_none");
   const session = stripeSessionId("w9none");
@@ -1605,6 +1712,55 @@ cell("c3.52 W-M2 positive -- resolved intent-not-found event produces a real pay
   assert.deepEqual(applied.rows, [{ registration_id: req.id }]);
 });
 
+cell("c3.52a unconsumed-payment read -- the operator owner sees the complete support row", async () => {
+  const chain = await buildPaidChain({ tag: "unconsumed_visible" });
+  const operator = await ensureOperator();
+  const visible = await humanQuery(
+    operator,
+    `select registration_id,applicant,stripe_session_id,recorded_at
+       from clara.list_unconsumed_registration_payments()
+      where registration_id=$1`,
+    [chain.registration],
+  );
+  assert.equal(visible.rowCount, 1);
+  assert.deepEqual(
+    {
+      registration_id: visible.rows[0].registration_id,
+      applicant: visible.rows[0].applicant,
+      stripe_session_id: visible.rows[0].stripe_session_id,
+    },
+    { registration_id: chain.registration, applicant: chain.user, stripe_session_id: chain.session },
+  );
+  assert.ok(visible.rows[0].recorded_at instanceof Date,
+    "the operator row carries the DB-owned payment recording timestamp");
+});
+
+cell("c3.52b unconsumed-payment read -- a non-operator firm owner is refused", async () => {
+  const owner = await insertUser("c3", "unconsumed_nonoperator");
+  await createExistingFirm(owner, "unconsumed_nonoperator");
+  await expectRefusal(CLR.authz, () => humanQuery(
+    owner, "select * from clara.list_unconsumed_registration_payments()",
+  ), /insufficient role/, "non-operator owner cannot read registration payments");
+});
+
+cell("c3.52c unconsumed-payment read -- an operator-firm bookkeeper is refused", async () => {
+  const operator = await ensureOperator();
+  const operatorFirm = await rootQuery(
+    `select firm_id from clara.firm_memberships
+      where user_id=$1 and status='active' and role='owner'`,
+    [operator],
+  );
+  assert.equal(operatorFirm.rowCount, 1);
+  const bookkeeper = await insertUser("c3", "unconsumed_bookkeeper");
+  await rootQuery(
+    "insert into clara.firm_memberships(firm_id,user_id,role) values ($1,$2,'bookkeeper')",
+    [operatorFirm.rows[0].firm_id, bookkeeper],
+  );
+  await expectRefusal(CLR.authz, () => humanQuery(
+    bookkeeper, "select * from clara.list_unconsumed_registration_payments()",
+  ), /insufficient role/, "operator bookkeeper cannot read registration payments");
+});
+
 // BLOCKER 2 (opus cross-family leg on #493, final run before 裁-111 suspended that leg): a
 // text-level census, however carefully comment-stripped, is the WRONG tool for an anti-regression
 // job on a money surface -- three bypasses were built and RUN against a scratch PG confirming
@@ -1628,7 +1784,7 @@ cell("c3.52 W-M2 positive -- resolved intent-not-found event produces a real pay
 // still-useful question it CAN honestly answer: "did some NEW function start touching the money
 // store" -- a real signal worth having, but not an anti-regression guard for THIS body, and not
 // a defense against (b) or (c). Named, not implied covered (R15's fail-loud-or-list-it rule).
-cell("c3.53 folded set equality -- exactly four money-store bodies; open_checkout_intent's body is SHA-pinned", async () => {
+cell("c3.53 folded set equality -- exactly five money-store bodies; open_checkout_intent's body is SHA-pinned", async () => {
   const pinned = await rootQuery(
     `select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha
        from pg_proc p where p.oid='clara.open_checkout_intent(uuid,bytea,text)'::regprocedure`,
@@ -1649,7 +1805,8 @@ cell("c3.53 folded set equality -- exactly four money-store bodies; open_checkou
       order by proname`,
   );
   assert.deepEqual(refs.rows.map((r) => r.proname), [
-    "apply_stripe_events", "claim_paid_firm", "open_checkout_intent", "record_stripe_event",
+    "apply_stripe_events", "claim_paid_firm", "list_unconsumed_registration_payments",
+    "open_checkout_intent", "record_stripe_event",
   ], "this text census only answers whether a NEW function started mentioning the money tables "
     + "-- it is not the anti-regression guard for open_checkout_intent (the SHA pin above is)");
   const retired = await rootQuery(

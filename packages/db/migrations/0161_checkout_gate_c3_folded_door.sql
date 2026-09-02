@@ -1,5 +1,5 @@
 -- FS-4 checkout gate, PR C-3: the folded paid-registration -> firm transaction, its payment
--- and OTP evidence, the minimal beta billing declaration, five human doors, and the confined
+-- and OTP evidence, the minimal beta billing declaration, six authenticated doors, and the confined
 -- two-verb auth-wall lane. Number 0161 was claimed at merge prep under 裁-108.
 --
 -- C-1 deliberately shipped the DPA storage but deferred its application doors to this cohort.
@@ -75,7 +75,8 @@ begin
     from pg_proc p join pg_namespace n on n.oid=p.pronamespace
    where n.nspname='clara' and p.proname in (
      '_tf_confirmation_attempt_settle_stamp','_tf_frp_consumption_stamp',
-     'claim_confirmation_attempt','claim_paid_firm','open_checkout_intent',
+     'claim_confirmation_attempt','claim_paid_firm','list_unconsumed_registration_payments',
+     'open_checkout_intent',
      'get_current_dpa_document','record_checkout_session','settle_confirmation_attempt','sign_dpa');
   if v_names <> '(none)' then
     raise exception 'checkout C-3 prestate: function cohort must be wholly absent; found %',v_names
@@ -318,7 +319,8 @@ create trigger t_confirmation_attempts_no_truncate before truncate on clara.conf
 -- ==============================================================================================
 -- 4. HUMAN DOORS. Pre-firm idempotency is structural; no firm-scoped op_receipt can exist yet.
 -- ==============================================================================================
--- Frontend home: apps/web/lib/registration/dpa-doors.ts. This is a function door rather than a
+-- Frontend home: apps/web/lib/registration/dpa-reads.ts (relation read to repoint) and
+-- apps/web/lib/registration/dpa-server-reads.ts (state wrapper). This is a function door rather than a
 -- `_visible` view because the current beta DPA is one global row with no tenant predicate or
 -- masked projection to express. Exact EXECUTE ACLs preserve C-1's zero-direct-table-grant wall.
 create function clara.get_current_dpa_document()
@@ -382,6 +384,8 @@ end $$;
 revoke all on function clara.sign_dpa(text,bytea,text) from public;
 grant execute on function clara.sign_dpa(text,bytea,text) to clara_authenticated;
 
+-- `p_origin_digest` is sha256(pepper || proxy-observed client IP), never the browser `Origin`
+-- header (裁-107 M1; checkout-gate design part 1 §4).
 create function clara.open_checkout_intent(
   p_registration uuid,p_origin_digest bytea,p_op_key text
 ) returns jsonb
@@ -410,7 +414,9 @@ begin
   if nullif(btrim(p_op_key),'') is null then
     raise exception 'op_key is required' using errcode='CLR10';
   end if;
-  select r.* into v_req from clara.firm_registration_requests r where r.id=p_registration;
+  -- The registration-row lock makes an absent-intent lookup below race-safe: two concurrent
+  -- retries for one applicant cannot both observe no unstamped intent and insert independently.
+  select r.* into v_req from clara.firm_registration_requests r where r.id=p_registration for update;
   if not found then
     raise exception 'unknown registration request' using errcode='CLR10';
   end if;
@@ -443,18 +449,37 @@ begin
   ) then
     raise exception 'too many firm registrations from this location today' using errcode='CLR09';
   end if;
-  -- X10 needs a real, honest read of firm_registration_payments -- this door is a genuine
-  -- fourth reader of the payments table (a read-only existence probe, never a writer). The part
-  -- 3 non-wall census this train inherited was written for the two-door era, before X10 existed
-  -- as a wall on the OPENING door at all; this PR widens the expected set to four in the census
-  -- cell itself and says so, rather than splitting the identifier to dodge the count -- hiding a
-  -- real dependency from a catalog census on a money surface is the wrong kind of clever.
+  -- X10 needs a real, honest read of firm_registration_payments. This opening door and the
+  -- operator's unconsumed-payment read door below are both named in the five-body census; hiding
+  -- a real dependency from a catalog census on a money surface is the wrong kind of clever.
   select exists (
     select 1 from clara.firm_registration_payments p
      where p.registration_id=p_registration and p.consumed_at is null
   ) into v_already_paid;
   if v_already_paid then
     raise exception 'this registration is already paid' using errcode='CLR09';
+  end if;
+
+  -- Structural retry: an unstamped intent is still usable, so return it without appending a
+  -- second rate event or opening a second Stripe-session carrier. `p_op_key` is validated above
+  -- for the shared door contract, but is deliberately not reserved: the durable identity here
+  -- is the applicant's one locked, unstamped intent. Once session_id is stamped it is consumed,
+  -- and a later call falls through to a genuinely fresh intent.
+  select i.id,i.price_local_key into v_intent,v_price_local_key
+    from clara.checkout_intents i
+   where i.registration_id=p_registration and i.applicant=v_actor and i.session_id is null
+   order by i.opened_at,i.id
+   limit 1
+   for update;
+  if found then
+    select m.stripe_id into v_stripe_price_id
+      from clara.stripe_object_map m
+     where m.object_kind='price' and m.local_key=v_price_local_key;
+    if not found then
+      raise exception 'no stripe price is mapped for this plan' using errcode='CLR10';
+    end if;
+    return jsonb_build_object(
+      'intent_id',v_intent,'price_local_key',v_price_local_key,'stripe_price_id',v_stripe_price_id);
   end if;
 
   select b.local_key into v_price_local_key
@@ -486,6 +511,7 @@ declare
   v_actor uuid;
   v_is_agent boolean;
   v_intent clara.checkout_intents%rowtype;
+  v_constraint text;
 begin
   v_actor:=clara.jwt_sub();
   if v_actor is null then
@@ -520,7 +546,15 @@ begin
   if nullif(btrim(p_session_id),'') is null then
     raise exception 'checkout session id is required' using errcode='CLR10';
   end if;
-  update clara.checkout_intents set session_id=p_session_id where id=p_intent;
+  begin
+    update clara.checkout_intents set session_id=p_session_id where id=p_intent;
+  exception when unique_violation then
+    get stacked diagnostics v_constraint=constraint_name;
+    if v_constraint is distinct from 'uq_checkout_intents_session_id' then
+      raise;
+    end if;
+    raise exception 'checkout session already recorded' using errcode='CLR09';
+  end;
   return jsonb_build_object('intent_id',p_intent,'recorded',true);
 end $$;
 revoke all on function clara.record_checkout_session(uuid,text,text) from public;
@@ -565,7 +599,9 @@ begin
     raise exception 'not your registration request' using errcode='CLR04';
   end if;
   v_email:=clara._jwt_email();
-  if v_email is null then
+  if v_email is null or v_email is distinct from (
+    select lower(u.email) from clara.users u where u.id=v_actor
+  ) then
     raise exception 'a verified email claim is required' using errcode='CLR04';
   end if;
 
@@ -641,9 +677,34 @@ end $$;
 revoke all on function clara.claim_paid_firm(uuid,text) from public;
 grant execute on function clara.claim_paid_firm(uuid,text) to clara_authenticated;
 
+-- Frontend home: apps/web/app/(firm)/admin/registrations (operator tooling). All unconsumed
+-- rows are returned, including recent ones: a support operator must see a paid-but-undelivered
+-- registration immediately rather than wait for an arbitrary aging threshold.
+create function clara.list_unconsumed_registration_payments()
+returns table(registration_id uuid,applicant uuid,stripe_session_id text,recorded_at timestamptz)
+  language plpgsql stable security definer set search_path=clara,pg_temp as $$
+declare
+  c record;
+begin
+  c:=clara._human_ctx(clara.role_rank('owner'));
+  if not exists (select 1 from clara.firms f where f.id=clara.jwt_firm() and f.is_operator) then
+    raise exception 'insufficient role' using errcode='CLR04';
+  end if;
+
+  return query
+  select p.registration_id,p.applicant,p.stripe_session_id,p.recorded_at
+    from clara.firm_registration_payments p
+   where p.consumed_at is null
+   order by p.recorded_at,p.id;
+end $$;
+revoke all on function clara.list_unconsumed_registration_payments() from public;
+grant execute on function clara.list_unconsumed_registration_payments() to clara_authenticated;
+
 -- ==============================================================================================
 -- 5. PRE-SESSION AUTH-WALL DOORS. The claim always persists before the window is evaluated.
 -- ==============================================================================================
+-- `p_origin_digest` is sha256(pepper || proxy-observed client IP), never the browser `Origin`
+-- header (裁-107 M1; checkout-gate design part 1 §4).
 create function clara.claim_confirmation_attempt(p_email_digest bytea,p_origin_digest bytea)
   returns jsonb language plpgsql security definer set search_path=clara,pg_temp as $$
 declare
@@ -687,12 +748,12 @@ begin
   select count(*)::int into v_email_count
     from clara.confirmation_attempts a
    where a.id<>v_attempt and a.email_digest=p_email_digest
-     and a.attempted_at>=v_attempted_at-interval '15 minutes'
+     and a.attempted_at>v_attempted_at-interval '15 minutes'
      and a.outcome is distinct from 'accepted';
   select count(*)::int into v_origin_count
     from clara.confirmation_attempts a
    where a.id<>v_attempt and a.origin_digest=p_origin_digest
-     and a.attempted_at>=v_attempted_at-interval '15 minutes'
+     and a.attempted_at>v_attempted_at-interval '15 minutes'
      and a.outcome is distinct from 'accepted';
   v_allowed:=(v_email_count<5 and v_origin_count<5);
   -- F5 (opus review on #493): "remaining" is attempts remaining AFTER this one, not before it --
@@ -737,12 +798,12 @@ begin
     v_retry_after:=null;
   else
     if v_email_count>=4 then
-      select least(900,greatest(0,floor(extract(epoch from
-               ((a.attempted_at+interval '15 minutes')-v_attempted_at)))+1))::int
+      select least(900,greatest(0,ceil(extract(epoch from
+               ((a.attempted_at+interval '15 minutes')-v_attempted_at)))))::int
         into v_retry_email
         from clara.confirmation_attempts a
        where a.id<>v_attempt and a.email_digest=p_email_digest
-         and a.attempted_at>=v_attempted_at-interval '15 minutes'
+         and a.attempted_at>v_attempted_at-interval '15 minutes'
          and a.outcome is distinct from 'accepted'
        order by a.attempted_at asc
        offset v_email_count-4 limit 1;
@@ -750,24 +811,24 @@ begin
       v_retry_email:=0;
     end if;
     if v_origin_count>=4 then
-      select least(900,greatest(0,floor(extract(epoch from
-               ((a.attempted_at+interval '15 minutes')-v_attempted_at)))+1))::int
+      select least(900,greatest(0,ceil(extract(epoch from
+               ((a.attempted_at+interval '15 minutes')-v_attempted_at)))))::int
         into v_retry_origin
         from clara.confirmation_attempts a
        where a.id<>v_attempt and a.origin_digest=p_origin_digest
-         and a.attempted_at>=v_attempted_at-interval '15 minutes'
+         and a.attempted_at>v_attempted_at-interval '15 minutes'
          and a.outcome is distinct from 'accepted'
        order by a.attempted_at asc
        offset v_origin_count-4 limit 1;
     else
       v_retry_origin:=0;
     end if;
-    if v_retry_email>=v_retry_origin then
+    if coalesce(v_retry_email,0)>=coalesce(v_retry_origin,0) then
       v_scope:='email';
-      v_retry_after:=v_retry_email;
+      v_retry_after:=coalesce(v_retry_email,0);
     else
       v_scope:='origin';
-      v_retry_after:=v_retry_origin;
+      v_retry_after:=coalesce(v_retry_origin,0);
     end if;
   end if;
 
@@ -928,6 +989,7 @@ begin
     'clara.open_checkout_intent(uuid,bytea,text)'::regprocedure,
     'clara.record_checkout_session(uuid,text,text)'::regprocedure,
     'clara.claim_paid_firm(uuid,text)'::regprocedure,
+    'clara.list_unconsumed_registration_payments()'::regprocedure,
     'clara.claim_confirmation_attempt(bytea,bytea)'::regprocedure,
     'clara.settle_confirmation_attempt(uuid,text)'::regprocedure
   ] loop
@@ -954,7 +1016,8 @@ begin
     'clara.sign_dpa(text,bytea,text)'::regprocedure,
     'clara.open_checkout_intent(uuid,bytea,text)'::regprocedure,
     'clara.record_checkout_session(uuid,text,text)'::regprocedure,
-    'clara.claim_paid_firm(uuid,text)'::regprocedure
+    'clara.claim_paid_firm(uuid,text)'::regprocedure,
+    'clara.list_unconsumed_registration_payments()'::regprocedure
   ] loop
     select array_agg(coalesce(r.rolname,'PUBLIC') order by coalesce(r.rolname,'PUBLIC')) into v_acl
       from pg_proc p cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
@@ -1117,5 +1180,5 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice 'checkout C-3 tail: OK -- minimal G2 billing row; payment evidence with exactly stripe-event + registration uniqueness and one complete consumption stamp; OTP attempts count before verification and settle once; five authenticated doors (including the current-DPA body+sha read) + exact two-verb auth-wall lane; folded claim calls _create_firm_core and emits firm.created then firm_registration.paid; active taxonomy paired; forced owner-only RLS and zero app table grants; firm_admissions/create_firm untouched; C-2 applier unrecut.';
+  raise notice 'checkout C-3 tail: OK -- minimal G2 billing row; payment evidence with exactly stripe-event + registration uniqueness and one complete consumption stamp; OTP attempts count before verification and settle once; six authenticated doors (including current-DPA and operator unconsumed-payment reads) + exact two-verb auth-wall lane; folded claim calls _create_firm_core and emits firm.created then firm_registration.paid; active taxonomy paired; forced owner-only RLS and zero app table grants; firm_admissions/create_firm untouched; C-2 applier unrecut.';
 end $tail$;

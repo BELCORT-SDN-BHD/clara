@@ -25,7 +25,7 @@
 -- confirmation-attempt wall), and deploy/storage-provision.sql
 -- (clara_storage_docs). Derived and cross-checked against a live-shaped rig (apply
 -- 0001..0010 to a scratch DB → query pg_roles / pg_auth_members) — the census
--- pre-0160 reproduced exactly (12 clara_% roles + clara_storage_docs); 0160 adds two
+-- pre-0160 reproduced exactly (14 clara_% roles + clara_storage_docs); 0160 adds two
 -- more and C-3 adds two more (18 schema-lane roles + clara_storage_docs).
 -- CONVERGENCE SCOPE: on a FRESH target this produces the exact
 -- census. It does NOT remove unexpected EXTRA memberships/settings on a pre-existing
