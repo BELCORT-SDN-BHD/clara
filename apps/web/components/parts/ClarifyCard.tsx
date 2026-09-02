@@ -25,15 +25,41 @@
 // `{ p_id, p_answer: { text }, p_op_key }` on the wire. The pane is untouched and keeps
 // working; this is a second caller of one door, never a second door.
 //
+// THE ROW LANDS AFTER THE CHUNK, so ONE read is not enough (fold round, review B1).
+// In the live workflow the clarify tool-call chunk is written inside
+// `runModelSegmentStepV16` and the `agent_interruptions` row is INSERTed three durable
+// WDK step boundaries later — `chatTurn.v16.ts:104` (segment) → `:105` (`checkpointStep`)
+// → `:127` (`mintHookTokenStep`) → `:129` (`openInterruptionStep`), each a `"use step"`
+// persisted to the event log. The browser holds the chunk the moment `streamRoute.ts:117`
+// forwards it, so a single mount-time read is always too early and the card would render
+// "no open question" over a question Clara is actively parked on.
+//
+// `useHydratedPart` fires exactly once (its mount effect keys on `[reloadImpl,
+// hasSession]`, and `reloadImpl` is deliberately identity-stable), so the re-read lives
+// HERE rather than in the shared hook. It is the precedent's own answer:
+// apps/dashboard/app/chat/page.tsx:118-119 says it in its own words — "Written slightly
+// after the clarify chunk streams, so retry" — and `refreshClarify` retries 5×1s. Same
+// cap, same interval, and MEASURED as the only mechanism available: there is no SSE event
+// marking the insert (nothing writes to the run's writable between `openInterruptionStep`
+// and the `await hook` park, chatTurn.v16.ts:129-131, and `streamRoute.ts` emits nothing
+// for an `awaiting_input` status), so an event-driven re-read has no event to key on.
+//
+// The cap is not a dead end. Where the dashboard simply stopped, this falls through to an
+// EMPTY state that reports what the read saw — not a settled state it never established —
+// and offers a manual re-check, so a window wider than 5s degrades to one click rather
+// than to a false sentence.
+//
 // NO OPTION CHIPS, deliberately (honest-note law): the frozen `clarifyTool`
 // inputSchema declares `{ question, context? }` and nothing else
-// (packages/runtime/workflows/chatTurn.v10.prompt.ts:213-216), and
+// (packages/runtime/workflows/chatTurn.v10.prompt.ts:213-216), and the LIVE
 // `openInterruptionStep` persists `{ type, question, context, framing }`
-// (chatTurn.impl.ts:262-267). Neither path can carry a suggested-answer list, so a chip
-// row here would be a control for data that never arrives — apps/web/AGENTS.md's "never
-// a fake control". It becomes a real feature the day the declarer emits one.
+// (chatTurn.v10.impl.ts:328 — the body `chatTurn.v16.impl.ts:41-53` re-exports and
+// `chatTurn.v16.ts:39` imports; the v1-era `chatTurn.impl.ts` is NOT the live path).
+// Neither path can carry a suggested-answer list, so a chip row here would be a control
+// for data that never arrives — apps/web/AGENTS.md's "never a fake control". It becomes a
+// real feature the day the declarer emits one.
 
-import { useCallback, useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 
 import { Badge } from "./PartBadge";
@@ -47,6 +73,12 @@ import type { ClaraPart } from "@/lib/parts/types";
 import type { SessionTokenAccessor } from "@/lib/session";
 
 type ClarifyPart = Extract<ClaraPart, { type: "clarify" }>;
+
+/** The precedent's own cap and interval (apps/dashboard/app/chat/page.tsx:124,106 —
+ *  `for (let i = 0; i < 5; i++)` around a 1s sleep). Exported so a cell can assert the
+ *  re-read is BOUNDED by reading the same number the code uses, rather than restating it. */
+export const CLARIFY_ROW_ATTEMPTS = 5;
+export const CLARIFY_ROW_INTERVAL_MS = 1_000;
 
 /** The answer jsonb the pane writes is `{ text }`; this renders whatever the DB gives
  *  back, never a re-derivation of what we think we sent. */
@@ -97,6 +129,32 @@ export function ClarifyCard({
   // standing, instead of leaving a form behind that would answer the NEXT question.
   const row = active ? state.data : null;
 
+  // The bounded, cancellable re-read (see this file's header for why one read loses the
+  // race). It runs only while this card is the answerable one, has SEEN no row, has no
+  // standing error to spin on, and has not itself answered. Each tick is one `setTimeout`
+  // cleared on unmount and on every state change that ends the window, so nothing is left
+  // running behind a card the transcript has moved past.
+  const [attempt, setAttempt] = useState(0);
+  const exhausted = attempt >= CLARIFY_ROW_ATTEMPTS;
+  const searching = active && row === null && !state.err && answeredIdRef.current === null && !exhausted;
+  const { reload } = state;
+  useEffect(() => {
+    if (!searching) return;
+    const timer = setTimeout(() => {
+      setAttempt((n) => n + 1);
+      void reload();
+    }, CLARIFY_ROW_INTERVAL_MS);
+    return () => clearTimeout(timer);
+  }, [searching, attempt, reload]);
+
+  /** The manual re-check the cap falls through to — re-arms the window rather than
+   *  leaving the human at a dead end when the runtime took longer than the precedent's
+   *  five seconds. */
+  const recheck = useCallback(() => {
+    setAttempt(0);
+    void reload();
+  }, [reload]);
+
   async function submitAnswer(value: string): Promise<void> {
     const text = value.trim();
     if (!text || !row || row.status !== "pending" || !session || state.busy) return;
@@ -121,13 +179,26 @@ export function ClarifyCard({
           out of the stream has none, so the translated equivalent stands in. */}
       <p className="text-xs text-muted-foreground">{part.framing.trim() ? part.framing : t("framing")}</p>
 
-      {active && state.loading && row === null ? <LoadingState>{t("loading")}</LoadingState> : null}
+      {/* THREE STATES, kept distinguishable across the re-read window. WAITING covers
+          both the read in flight and the gap before the row is written — to the human
+          those are one fact ("still looking"), and neither is a licence to claim the
+          question is settled. GONE is only ever reached after the window closes, and it
+          reports what the read SAW rather than asserting a state it never established.
+          ERROR stays its own banner and stops the window rather than spinning on it. */}
+      {searching ? <LoadingState>{t("loading")}</LoadingState> : null}
       {active && state.err ? (
         <StateBanner tone="error" title={t("readError")} code={state.clr?.code ?? undefined}>
           {state.err}
         </StateBanner>
       ) : null}
-      {active && !state.loading && !state.err && row === null ? <EmptyState>{t("empty")}</EmptyState> : null}
+      {active && !state.err && row === null && exhausted ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <EmptyState>{t("empty")}</EmptyState>
+          <Button type="button" size="xs" variant="outline" disabled={state.loading} onClick={recheck}>
+            {t("recheck")}
+          </Button>
+        </div>
+      ) : null}
 
       {row?.status === "answered" ? (
         <div className="rounded-lg border border-success/30 bg-success-muted p-2" role="status">

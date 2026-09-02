@@ -31,10 +31,38 @@ export const CHAT_PARITY = {
   question: "Which client owns this invoice?",
 };
 
+/** THE PRODUCTION WRITE ORDER, modelled (fold round, review B1). The runtime writes the
+ *  clarify tool-call chunk inside `runModelSegmentStepV16` and INSERTs the
+ *  `agent_interruptions` row three durable WDK step boundaries LATER —
+ *  `chatTurn.v16.ts:104` → `:105` (`checkpointStep`) → `:127` (`mintHookTokenStep`) →
+ *  `:129` (`openInterruptionStep`). The first cut of this mock answered the pending read
+ *  unconditionally from a `pending` seed, so the browser walk was green on the one
+ *  ordering production never produces, and the blocker hid under it.
+ *
+ *  The row is therefore withheld until BOTH the chunk has actually been sent AND at least
+ *  one pending read has already come back empty. Read-ORDER rather than wall-clock: it
+ *  reproduces exactly what the card experiences, and it cannot flake on a slow machine the
+ *  way a timer would. */
+const ROW_APPEARS_AFTER_EMPTY_READS = 1;
+
 const state = {
   turns: [],
+  chunkSent: false,
+  emptyReads: 0,
   interruption: { status: "pending", answer: null, answered_by: null, answered_at: null },
 };
+
+/** A fresh turn is a fresh task, so the park it will produce starts unwritten again. Keeps
+ *  the walks independent of each other's order. */
+function resetPark() {
+  state.chunkSent = false;
+  state.emptyReads = 0;
+  state.interruption = { status: "pending", answer: null, answered_by: null, answered_at: null };
+}
+
+function rowExistsYet() {
+  return state.chunkSent && state.emptyReads >= ROW_APPEARS_AFTER_EMPTY_READS;
+}
 
 function interruptionRow() {
   return {
@@ -89,7 +117,17 @@ export async function handleChatParitySupabase(request, response, path, url, sen
     const wantsPending = url.searchParams.get("status") === "eq.pending";
     const byId = url.searchParams.get("id");
     const row = interruptionRow();
-    if (byId && byId !== `eq.${CHAT_PARITY.interruptionId}`) { sendJson(response, 200, [], cors); return true; }
+    if (byId) {
+      // The settled re-read, addressed exactly. It can only follow an answer, by which
+      // point the row certainly exists.
+      sendJson(response, 200, byId === `eq.${CHAT_PARITY.interruptionId}` ? [row] : [], cors);
+      return true;
+    }
+    if (wantsPending && !rowExistsYet()) {
+      state.emptyReads += 1;
+      sendJson(response, 200, [], cors); // the row is not written yet — see ROW_APPEARS_AFTER_EMPTY_READS
+      return true;
+    }
     if (wantsPending && row.status !== "pending") { sendJson(response, 200, [], cors); return true; }
     sendJson(response, 200, [row], cors);
     return true;
@@ -157,6 +195,7 @@ export async function handleChatParityApp(request, response, url) {
 
   if (request.method === "POST" && path === `/api/chat/${CHAT_PARITY.threadId}/turns`) {
     state.turns.push(await readJson(request));
+    resetPark();
     response.writeHead(202, { "content-type": "application/json" });
     response.end(JSON.stringify({ task_id: CHAT_PARITY.taskId }));
     return true;
@@ -176,6 +215,9 @@ export async function handleChatParityApp(request, response, url) {
       input: { question: CHAT_PARITY.question },
     };
     response.write(`event: chunk\ndata: ${JSON.stringify(chunk)}\n\n`);
+    // The chunk is out; the ROW is still three step boundaries away. `rowExistsYet()`
+    // above is what makes the browser walk face the real ordering.
+    state.chunkSent = true;
     // No terminal `message`, no `done`, no close: the task is PARKED.
     return true;
   }

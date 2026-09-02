@@ -46,13 +46,23 @@ import type { SessionTokenAccessor } from "@/lib/session";
  *  `CHAT_MAX_FILES = 5`). */
 export const CHAT_MAX_ATTACHMENTS = 5;
 
+/** The queue states an item can still LEAVE on its own. Sending while one of these is in
+ *  flight would silently drop a file that was about to become attachable, so they block.
+ *  Every other state is terminal — `ready` contributes its part, and `error`/`failed`/
+ *  `stopped` contribute nothing and never will without the human acting. Blocking on
+ *  those too (fold round, review N4) bricked the composer: one failed upload left the
+ *  human unable to send ANY message, plain text included, until they found the row's
+ *  remove button — with a disabled Send that said nothing about why. The failed row stays
+ *  visible with its typed refusal beside it, and `clearDone` does not sweep it, so the
+ *  turn goes without it VISIBLY rather than silently. */
+const IN_FLIGHT = new Set(["queued", "starting", "uploading", "verifying", "filing"]);
+
 export type ComposerAttachmentState = {
   /** ONLY fully adopted-and-filed attachments — an item is a submittable part after the
    *  DB said `finalized`/`adopted` with a document_id, never after finalize's own
    *  (advisory) receipt. */
   parts: AttachmentPart[];
-  /** True while any queued item is not `ready`: submitting then would silently drop a
-   *  file the human can see sitting in the composer. */
+  /** True while any item can still become attachable — see `IN_FLIGHT`. */
   blocked: boolean;
 };
 
@@ -96,7 +106,7 @@ export function ComposerAttachmentControl({
     ));
     onStateChange({
       parts,
-      blocked: queue.items.some((item) => item.state !== "ready"),
+      blocked: queue.items.some((item) => IN_FLIGHT.has(item.state)),
     });
   }, [queue.items, onStateChange]);
 

@@ -118,7 +118,7 @@ test("the REAL full-screen thread route (card + Commit door dialog OPEN) has zer
         assert.deepEqual(
           collapsedViolations,
           NO_VIOLATIONS,
-          `collapsed — expected EXACTLY the one pre-existing, attributed composer finding and NOTHING from T11 (in particular no heading-order): ${JSON.stringify(collapsedViolations)}`,
+          `collapsed — expected ZERO violations (the composer finding this cell used to pin as present was fixed by the chat-parity train) and NOTHING from T11, in particular no heading-order: ${JSON.stringify(collapsedViolations)}`,
         );
 
         const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Commit onboarding");
@@ -135,7 +135,7 @@ test("the REAL full-screen thread route (card + Commit door dialog OPEN) has zer
         assert.deepEqual(
           openViolations,
           NO_VIOLATIONS,
-          `open dialog — must be the SAME single pre-existing finding, no NEW violation introduced by the open Commit dialog: ${JSON.stringify(openViolations)}`,
+          `open dialog — must still be ZERO, no NEW violation introduced by the open Commit dialog: ${JSON.stringify(openViolations)}`,
         );
       } finally {
         await h.unmount();

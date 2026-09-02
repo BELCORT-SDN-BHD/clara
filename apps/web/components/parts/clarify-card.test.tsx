@@ -16,6 +16,7 @@ import { createElement, type ReactElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
 
 import { PartRenderer } from "./PartRenderer";
+import { CLARIFY_ROW_ATTEMPTS, CLARIFY_ROW_INTERVAL_MS } from "./ClarifyCard";
 import { InterruptionsPanel } from "../journals/interruptions-panel";
 import { clickButton, renderComponent, setFieldValue, textOf } from "../../test/hookHarness";
 import { enableDomInspection } from "../../test/domInspect";
@@ -106,6 +107,19 @@ async function settleUntil(h: { settle: () => Promise<void> }, condition: () => 
   }
 }
 
+/** For the cells that must let the card's REAL 1s re-read interval elapse — the window is
+ *  `CLARIFY_ROW_ATTEMPTS × CLARIFY_ROW_INTERVAL_MS` of wall clock, driven by real timers
+ *  because the timer IS what is under test. The sleep keeps it from spinning hot. */
+async function settleUntilSlow(h: { settle: () => Promise<void> }, condition: () => boolean, label: string): Promise<void> {
+  const budget = CLARIFY_ROW_ATTEMPTS * CLARIFY_ROW_INTERVAL_MS + 10_000;
+  const deadline = Date.now() + budget;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}`);
+    await h.settle();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
 const buttonNamed = (name: string) => (node: Stub) => node.tagName === "BUTTON" && textOf(node).trim() === name;
 
 test("the answer control is addressed, never merely present: only an ANSWERABLE card reads, and it reads the pending row of ITS task", async () => {
@@ -156,7 +170,9 @@ test("an AMBIGUOUS task (two rows came back where the DB allows one) refuses to 
     async () => {
       const h = await renderComponent(App(true));
       try {
-        await settleUntil(h, () => /no longer awaiting an answer/.test(h.text()), "exact-one refusal");
+        // The ambiguity is refused at every read, so the card walks the whole re-read
+        // window and lands on the honest absence rather than picking one of the two.
+        await settleUntilSlow(h, () => /No open question has been recorded/.test(h.text()), "exact-one refusal");
         assert.equal(h.find(buttonNamed("Answer")), null, "two candidate rows must never resolve into one answerable row");
       } finally {
         await h.unmount();
@@ -165,16 +181,22 @@ test("an AMBIGUOUS task (two rows came back where the DB allows one) refuses to 
   );
 });
 
-test("clarify hydrate spells loading, empty, and error as three distinguishable states", async () => {
+test("clarify hydrate spells waiting, error, and gone as three distinguishable states — and an EMPTY read is never spelled as a settled one", async () => {
   let resolveRead: ((response: Response) => void) | null = null;
   await withFetch(
     () => new Promise<Response>((resolve) => { resolveRead = resolve; }),
     async () => {
       const h = await renderComponent(App(true));
       try {
-        await settleUntil(h, () => /Checking whether this question is still open/.test(h.text()), "loading state");
+        await settleUntil(h, () => /Checking whether this question is still open/.test(h.text()), "waiting state");
         resolveRead?.(json([]));
-        await settleUntil(h, () => /This question is no longer awaiting an answer/.test(h.text()), "empty state");
+        for (let i = 0; i < 8; i++) await h.settle();
+        // THE DISCRIMINATING PART. An empty read is an ABSENCE, not evidence the question
+        // settled — the runtime writes that row three durable step boundaries after the
+        // chunk the card mounted on. Before the fold's re-read, the card asserted
+        // "no longer awaiting an answer" here, on a question Clara was parked on.
+        assert.match(h.text(), /Checking whether this question is still open/, "an empty read keeps WAITING inside the re-read window");
+        assert.doesNotMatch(h.text(), /No open question has been recorded/, "…and never claims a settled state the read did not establish");
       } finally {
         await h.unmount();
       }
@@ -187,6 +209,72 @@ test("clarify hydrate spells loading, empty, and error as three distinguishable 
       const h = await renderComponent(App(true));
       try {
         await settleUntil(h, () => /Could not check whether this question is still open/.test(h.text()), "error state");
+        // An error ENDS the window rather than spinning on it.
+        assert.doesNotMatch(h.text(), /Checking whether this question is still open/);
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("the row lands AFTER the chunk — the control still arrives, because the read is retried", async () => {
+  // The production ordering, exactly: `runModelSegmentStepV16` writes the clarify chunk,
+  // then `checkpointStep` -> `mintHookTokenStep` -> `openInterruptionStep` INSERT the row
+  // three durable WDK step boundaries later (chatTurn.v16.ts:104,105,127,129). The first
+  // read finds nothing; a later one finds the row.
+  let reads = 0;
+  await withFetch(
+    (url) => {
+      if (url.includes("/rest/v1/agent_interruptions")) {
+        reads += 1;
+        return json(reads === 1 ? [] : [pending]);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App(true));
+      try {
+        await settleUntilSlow(h, () => h.find(buttonNamed("Answer")) !== null, "the control after a late row");
+        assert.ok(h.find((node) => node.tagName === "INPUT"), "the free-text answer control must render once the row exists");
+        assert.ok(reads >= 2, "one read cannot see a row written after it — the card must re-read");
+        assert.doesNotMatch(h.text(), /No open question has been recorded/, "the human is never told the question is gone while it is being opened");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+test("the re-read is BOUNDED, closes on an honest absence, and the manual re-check re-arms it", async () => {
+  let rowExists = false;
+  let reads = 0;
+  await withFetch(
+    (url) => {
+      if (url.includes("/rest/v1/agent_interruptions")) {
+        reads += 1;
+        return json(rowExists ? [pending] : []);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async () => {
+      const h = await renderComponent(App(true));
+      try {
+        await settleUntilSlow(h, () => /No open question has been recorded/.test(h.text()), "the window closing on an honest absence");
+        assert.equal(
+          reads,
+          CLARIFY_ROW_ATTEMPTS + 1,
+          "the window is one mount read plus exactly CLARIFY_ROW_ATTEMPTS retries — an unbounded loop would keep climbing",
+        );
+        assert.equal(h.find(buttonNamed("Answer")), null, "no control without a row");
+
+        // The cap is not a dead end: a runtime slower than the precedent's five seconds
+        // costs one click, not a false sentence.
+        rowExists = true;
+        const recheck = h.find(buttonNamed("Check again"));
+        assert.ok(recheck, "the closed window must offer a way back");
+        await h.act(() => clickButton(recheck));
+        await settleUntil(h, () => h.find(buttonNamed("Answer")) !== null, "the control after a manual re-check");
       } finally {
         await h.unmount();
       }

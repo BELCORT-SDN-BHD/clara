@@ -1,6 +1,7 @@
 // FS-5 gate (b): structural accessibility at each durable-interview state.
-// This mounts through ClaraFullScreenThread, the real escalated route surface;
-// the only expected finding belongs to the pre-existing thread composer.
+// This mounts through ClaraFullScreenThread, the real escalated route surface. The one
+// finding it used to expect — the thread composer's unnamed textarea — was fixed by the
+// chat-parity train, so the expectation is now ZERO at every state (see NO_VIOLATIONS).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

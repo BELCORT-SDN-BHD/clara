@@ -60,10 +60,16 @@ test("a parked clarify is answered inline, in the thread, and the card shows the
   await page.getByLabel("Message Clara").fill("Code this invoice");
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
-  // The parked question arrives on the live stream and is answerable there.
+  // The parked question arrives on the live stream and is answerable there — and the
+  // mock withholds the `agent_interruptions` row until after the chunk AND after a first
+  // read comes back empty, which is the PRODUCTION ordering (the row is INSERTed three
+  // durable WDK step boundaries after the chunk is written). Before the fold this walk
+  // was green only because the mock answered that read from a `pending` seed.
   await expect(page.getByText(QUESTION)).toBeVisible();
+  // The honest interim state, never a claim the question settled.
+  await expect(page.getByText("No open question has been recorded")).toHaveCount(0);
   const answerField = page.getByLabel("Your answer");
-  await expect(answerField).toBeVisible();
+  await expect(answerField).toBeVisible({ timeout: 15_000 });
 
   // A DISCRIMINATING post-condition: "Answered by your firm" plus the answer text can
   // only exist after the door call AND the re-read that follows it.

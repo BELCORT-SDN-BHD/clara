@@ -50,6 +50,33 @@ export function ClaraThreadView({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const handleAttachmentState = useCallback((next: ComposerAttachmentState) => setAttachments(next), []);
 
+  // THE ATTACHMENT TRAY IS CLIENT-SCOPED STATE, AND THIS VIEW OUTLIVES THE SCOPE (fold
+  // round, review M1). `attachments` holds `{intake_id, document_id}` parts for documents
+  // already FILED to one specific client. On the rail that is a leak by construction:
+  // `<RailMount />` is a SIBLING of `{children}` in `app/(firm)/layout.tsx`, while
+  // `ClientScopeProvider` lives one layout down in
+  // `app/(firm)/clients/[clientId]/layout.tsx` — nested layouts compose, so the rail is
+  // never inside the keyed subtree and never remounts on a client switch. The reviewer's
+  // probe walked it: attach under client A, navigate to the firm altitude without
+  // sending, send — and client A's `document_id` was still on the wire.
+  //
+  // Nothing downstream catches it. `clara._tf_validate_chat_attachments`
+  // (0007_document_pipeline.sql:601-633) admits on firm + task-author + adopted intake +
+  // matching document_id; there is no client scoping in that wall at all, which is the
+  // same measurement this train made for the intake BODY and the reason the wall cannot
+  // stand in for this reset.
+  //
+  // Two resets, deliberately, because they own different halves: the `key` below rebuilds
+  // `useUploadQueue` (its `ref.current` rows survive a prop change — its only effect is an
+  // unmount abort cleanup), and this effect clears the parts the PARENT is holding, which
+  // no child can clear on its way out because an unmounting control fires no
+  // `onStateChange`. `threadId` joins the dependency because a different thread is a
+  // different turn context. `#507` closes the same boundary for the thread itself and is
+  // unmerged; this reset is owned here and does not depend on it.
+  useEffect(() => {
+    setAttachments({ parts: [], blocked: false });
+  }, [clientId, threadId]);
+
   // P2 FOLD SEAM C: the ⌘K "Ask" -> composer handoff (ClaraRail's event subscriber
   // requests this; see lib/command/bus.ts's CLARA_FOCUS_RAIL_EVENT contract). A new
   // `token` is applied at most once — prefilling never overwrites a draft the human
@@ -206,6 +233,7 @@ export function ClaraThreadView({
         ) : null}
         {clientId && threadId ? (
           <ComposerAttachmentControl
+            key={`${clientId}:${threadId}`}
             clientId={clientId}
             threadId={threadId}
             session={auth}

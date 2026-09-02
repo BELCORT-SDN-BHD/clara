@@ -90,6 +90,13 @@ async function settleUntil(h: { settle: () => Promise<void> }, condition: () => 
 
 const buttonNamed = (name: string) => (node: Stub) => node.tagName === "BUTTON" && textOf(node).trim() === name;
 
+/** The tray's controls are icon-only, so they are named by `aria-label`, not by text. */
+const byAriaLabel = (pattern: RegExp) => (node: Stub) => {
+  if (node.tagName !== "BUTTON") return false;
+  const get = node.getAttribute as ((name: string) => string | null) | undefined;
+  return pattern.test(get?.call(node, "aria-label") ?? "");
+};
+
 /** `h.find` proves a FIRST match exists; a CAP is a count, which no `find` can
  *  establish (the repo's own N1 lesson, interview-run-a11y.test.tsx:138). */
 function findAllIn(root: Stub, predicate: (node: Stub) => boolean): Stub[] {
@@ -219,6 +226,95 @@ test("the sixth attachment is refused HERE, because the DB's own five-per-turn w
   );
 });
 
+/** The intake + filing legs, shared by the two cells that need an attachment to reach
+ *  "Filed". Kept out of `baseRouter` so the cells that must NOT see them still throw. */
+function intakeRouter(url: string, init?: RequestInit, onFiled?: (body: Record<string, unknown>) => void): Response | null {
+  if (url === "/api/runtime/intake/documents") return json({ intake_id: INTAKE_ID, upload_token: "upload-token", expires_at: null }, 201);
+  if (url === `/api/runtime/intake/documents/${INTAKE_ID}/bytes`) return new Response(null, { status: 204 });
+  if (url === `/api/runtime/intake/documents/${INTAKE_ID}/finalize`) return json({ status: "finalized", document_id: DOCUMENT_ID }, 202);
+  if (url.includes("/rest/v1/document_intakes_visible")) {
+    return json([{
+      id: INTAKE_ID, uploaded_by: "user-1", origin: "chat", original_filename: "invoice.pdf",
+      declared_mime: "application/pdf", declared_bytes: 3, status: "finalized", document_id: DOCUMENT_ID,
+      failure_code: null, expires_at: null,
+      created_at: "2026-09-02T00:00:00Z", updated_at: "2026-09-02T00:00:01Z",
+    }]);
+  }
+  if (url.includes("/rest/v1/rpc/record_client_resolution")) return json({ resolution_id: "resolution-1" });
+  if (url.includes("/rest/v1/rpc/file_document")) {
+    onFiled?.(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return json(null);
+  }
+  return null;
+}
+
+test("a FAILED upload does not brick the composer: a plain-text turn still sends, without it", async () => {
+  // Review N4. `blocked` used to be "any item not ready", so one errored upload left the
+  // human unable to send ANY message — plain text included — until they found the row's
+  // remove button, behind a disabled Send that said nothing about why. Only states an
+  // item can still LEAVE on its own block now. The failed row stays on screen with its
+  // typed refusal, and `clearDone` does not sweep it, so the turn goes without it VISIBLY.
+  await withFetch(
+    (url) => {
+      if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
+      const base = baseRouter(url);
+      if (base) return base;
+      if (url === "/api/runtime/intake/documents") return json({ error: "bad_request", message: "bad request" }, 400);
+      if (url === `/api/chat/${THREAD_ID}/turns`) return json({ task_id: "task-1" }, 202);
+      if (url === "/api/tasks/task-1/stream") {
+        return new Response(
+          `event: message\ndata: ${JSON.stringify({ taskId: "task-1", status: "completed", parts: [] })}\n\nevent: done\ndata: ${JSON.stringify({ taskId: "task-1", status: "completed" })}\n\n`,
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    },
+    async (calls) => {
+      const h = await renderComponent(App());
+      try {
+        await settleUntil(h, () => h.find(buttonNamed("Attach document")) !== null, "attach affordance");
+        const fileInput = h.find((node) => node.tagName === "INPUT" && node.type === "file");
+        assert.ok(fileInput);
+        const file = new File([new Uint8Array([9])], "broken.pdf", { type: "application/pdf", lastModified: 11 });
+        await h.fireEvent(fileInput, "change", (node) => { node.files = [file]; });
+        await settleUntil(h, () => /Upload refused/.test(h.text()), "the failed row");
+
+        const textarea = h.find((node) => node.tagName === "TEXTAREA");
+        assert.ok(textarea);
+        await h.act(() => setFieldValue(textarea, "never mind the file, here is my question"));
+        const send = h.find(buttonNamed("Send"));
+        assert.ok(send);
+        assert.equal(send.disabled, false, "a terminal failure must not hold the composer hostage");
+
+        // Review N3, the other half: Retry only renders on a failed row, so this is where
+        // its 24px target gets pinned.
+        const retry = h.find(byAriaLabel(/^Retry /));
+        assert.ok(retry, "a failed row must offer a retry");
+        assert.match(String(retry.className), /\bsize-6\b/, "the tray's controls sit exactly ON the 24px minimum");
+
+        const form = h.find((node) => node.tagName === "FORM");
+        assert.ok(form);
+        await h.fireEvent(form, "submit");
+        await settleUntil(h, () => calls.some((call) => call.url === `/api/chat/${THREAD_ID}/turns`), "the text-only turn");
+        const turn = calls.find((call) => call.url === `/api/chat/${THREAD_ID}/turns`);
+        assert.ok(turn);
+        assert.deepEqual(
+          (turn.body as { parts: unknown[] }).parts,
+          [{ type: "text", text: "never mind the file, here is my question" }],
+          "a failed upload contributes no part — it was never adopted",
+        );
+        assert.match(h.text(), /Upload refused/, "…and it stays on screen, so the turn going without it is visible, not silent");
+      } finally {
+        await h.unmount();
+      }
+    },
+  );
+});
+
+// The client-scope boundary for these attachments lives in
+// ./composer-attachment-scope.test.tsx — split out to keep both files under the
+// 500-line convention.
+
 test("ready attachment is filed to the activated client and rides the sent turn as its document reference", async () => {
   let messageReads = 0;
   let filedBody: Record<string, unknown> | null = null;
@@ -241,30 +337,8 @@ test("ready attachment is filed to the activated client and rides the sent turn 
       }
       const base = baseRouter(url);
       if (base) return base;
-      if (url === "/api/runtime/intake/documents") return json({ intake_id: INTAKE_ID, upload_token: "upload-token", expires_at: null }, 201);
-      if (url === `/api/runtime/intake/documents/${INTAKE_ID}/bytes`) return new Response(null, { status: 204 });
-      if (url === `/api/runtime/intake/documents/${INTAKE_ID}/finalize`) return json({ status: "finalized", document_id: DOCUMENT_ID }, 202);
-      if (url.includes("/rest/v1/document_intakes_visible")) {
-        return json([{
-          id: INTAKE_ID,
-          uploaded_by: "user-1",
-          origin: "chat",
-          original_filename: "invoice.pdf",
-          declared_mime: "application/pdf",
-          declared_bytes: 3,
-          status: "finalized",
-          document_id: DOCUMENT_ID,
-          failure_code: null,
-          expires_at: null,
-          created_at: "2026-09-02T00:00:00Z",
-          updated_at: "2026-09-02T00:00:01Z",
-        }]);
-      }
-      if (url.includes("/rest/v1/rpc/record_client_resolution")) return json({ resolution_id: "resolution-1" });
-      if (url.includes("/rest/v1/rpc/file_document")) {
-        filedBody = JSON.parse(String(init?.body));
-        return json(null);
-      }
+      const intake = intakeRouter(url, init, (body) => { filedBody = body; });
+      if (intake) return intake;
       if (url === `/api/chat/${THREAD_ID}/turns`) return json({ task_id: "task-1" }, 202);
       if (url === "/api/tasks/task-1/stream") {
         const sse = [
@@ -284,6 +358,17 @@ test("ready attachment is filed to the activated client and rides the sent turn 
         const file = new File([new Uint8Array([1, 2, 3])], "invoice.pdf", { type: "application/pdf", lastModified: 2 });
         await h.fireEvent(fileInput, "change", (node) => { node.files = [file]; });
         await settleUntil(h, () => /Filed/.test(h.text()), "adopted + filed attachment");
+
+        // Review N3: the tray's own controls sit on the THINNEST margin in this diff —
+        // `size="icon-xs"` is `size-6`, exactly 24px — and carried no assertion at all, so
+        // a future size tweak could drop them below the bar silently. Pinned by the same
+        // class-token idiom the attach button uses below (`checkAccessibility` has no
+        // target-size rule to measure with). Asserted HERE, before the send: `clearDone`
+        // sweeps the ready row afterwards. Retry is pinned on the FAILED cell, the only
+        // state it renders in.
+        const remove = h.find(byAriaLabel(/^Remove /));
+        assert.ok(remove, "a filed row must still be removable");
+        assert.match(String(remove.className), /\bsize-6\b/, "the tray's controls sit exactly ON the 24px minimum");
 
         const textarea = h.find((node) => node.tagName === "TEXTAREA");
         assert.ok(textarea);

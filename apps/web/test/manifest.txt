@@ -47,6 +47,7 @@ components/bank/bank-a11y.test.tsx
 components/bank/matching-section.test.tsx
 components/bank/reconciliation-section.test.tsx
 components/clara/ClaraThreadView.onboarding.test.tsx
+components/clara/composer-attachment-scope.test.tsx
 components/clara/composer-attachment.test.tsx
 components/clara/interview-run-a11y.test.tsx
 components/clara/interview-run-keyboard.test.tsx
