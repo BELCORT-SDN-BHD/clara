@@ -20,7 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { StateBanner } from "@/components/common/state";
-import { CentsInput } from "./close-money-input";
+import { MoneyInput } from "@/components/common/money-input";
 import { CloseDoorDialog } from "./CloseDoorDialog";
 import { recordFutureAttestation } from "@/lib/close/api";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -80,7 +80,15 @@ export function FutureAttestationPanel({ clientId, session }: { clientId: string
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="fa-expected">{t("expectedLabel")}</Label>
-            <CentsInput cents={expectedCents} onChange={setExpectedCents} ariaLabel={t("expectedLabel")} />
+            <MoneyInput
+              id="fa-expected"
+              aria-label={t("expectedLabel")}
+              cents={expectedCents}
+              mode="unsigned"
+              onValueChange={(change) => {
+                if (change.ok) setExpectedCents(change.cents ?? 0);
+              }}
+            />
           </div>
           <div className="flex gap-2">
             <div className="flex flex-col gap-1.5">

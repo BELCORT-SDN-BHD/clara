@@ -8,9 +8,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { NextIntlClientProvider } from "next-intl";
-import { renderComponent, textOf } from "../../test/hookHarness";
+import { clickButton, renderComponent, setFieldValue, setNativeValue, textOf } from "../../test/hookHarness";
 import { enableDomInspection, activeElement } from "../../test/domInspect";
 import { focusableElements, checkKeyboardWalk } from "../../test/keyboardWalk";
+import { configureSessionTokenSource, resetSessionTokenSource } from "@/lib/session-accessor";
 import messages from "../../messages/en.json";
 import { CompleteParticularsDialog, DisposeDialog } from "./fa-row-actions";
 import type { FixedAssetRow } from "@/lib/registers/fixed-assets";
@@ -27,6 +28,17 @@ function findIn(root: Node, predicate: (n: Node) => boolean): Node | null {
     if (found) return found;
   }
   return null;
+}
+
+function reactProps(node: Node): Record<string, unknown> {
+  const key = Object.keys(node).find((candidate) => candidate.startsWith("__reactProps"));
+  return key ? ((node as Record<string, unknown>)[key] as Record<string, unknown>) : {};
+}
+
+function byId(root: Node, id: string): Node {
+  const node = findIn(root, (candidate) => reactProps(candidate).id === id);
+  assert.ok(node, `expected #${id} to render`);
+  return node;
 }
 
 const ASSET: FixedAssetRow = {
@@ -91,6 +103,92 @@ test("Complete-particulars dialog: trigger is enabled from first render (no fiel
   }
 });
 
+test("Dispose dialog sends exact typed proceeds and cost-portion cents", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const bodies: Record<string, unknown>[] = [];
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  globalThis.fetch = (async (request: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(request);
+    if (!url.includes("/rpc/dispose_fixed_asset")) throw new Error(`unexpected fetch: ${url}`);
+    bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    return new Response(JSON.stringify({ status: "posted", entry_id: "e1", asset_id: "a1" }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  configureSessionTokenSource(async () => "tok");
+
+  const h = await renderComponent(
+    withProvider(createElement(DisposeDialog, {
+      clientId: "c1",
+      asset: { ...ASSET, status: "active", particulars_complete: true },
+      accounts: ACCOUNTS,
+      busy: false,
+      act: async (fn: () => Promise<void>) => { await fn(); return true; },
+    })),
+  );
+  const body = (globalThis as unknown as { document: { body: { appendChild: (c: unknown) => void } } }).document.body;
+  body.appendChild(h.container);
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const trigger = h.find((n) => n.tagName === "BUTTON" && textOf(n) === "Dispose");
+    assert.ok(trigger);
+    await h.fireEvent(trigger as never, "click");
+    for (let i = 0; i < 6; i++) await h.settle();
+
+    await h.act(() => {
+      setFieldValue(byId(body as never, "fa-disp-date-a1") as never, "2026-08-27");
+      setFieldValue(byId(body as never, "fa-disp-proceeds-a1") as never, "1,234.56");
+      setFieldValue(byId(body as never, "fa-disp-memo-a1") as never, "Sold vehicle");
+      setFieldValue(byId(body as never, "fa-disp-portion-a1") as never, "250.00");
+    });
+    for (const [id, value] of [
+      ["fa-disp-proc-acct-a1", "1500"],
+      ["fa-disp-gain-a1", "4900"],
+      ["fa-disp-loss-a1", "5900"],
+    ] as const) {
+      const select = byId(body as never, id);
+      await h.act(() => {
+        setNativeValue(select as never, "value", value);
+        const onChange = reactProps(select).onChange as ((event: unknown) => void) | undefined;
+        onChange?.({ target: select, currentTarget: select });
+      });
+    }
+    for (let i = 0; i < 2; i++) await h.settle();
+
+    const confirm = findIn(
+      body as never,
+      (node) => node.tagName === "BUTTON" && textOf(node as never) === "Dispose" && node !== trigger,
+    );
+    assert.ok(confirm);
+    await clickButton(confirm as never);
+    for (let i = 0; i < 4; i++) await h.settle();
+
+    assert.equal(bodies.length, 1);
+    const { p_op_key: opKey, ...bodyWithoutOpKey } = bodies[0]!;
+    assert.equal(typeof opKey, "string");
+    assert.deepEqual(bodyWithoutOpKey, {
+      p_client: "c1",
+      p_asset: "a1",
+      p_disposal_date: "2026-08-27",
+      p_proceeds_cents: 123456,
+      p_proceeds_account: "1500",
+      p_gain_account: "4900",
+      p_loss_account: "5900",
+      p_memo: "Sold vehicle",
+      p_cost_portion_cents: 25000,
+    });
+  } finally {
+    await h.unmount();
+    globalThis.fetch = originalFetch;
+    if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
+    resetSessionTokenSource();
+    for (let i = 0; i < 5; i++) await h.settle();
+  }
+});
+
 test("Dispose dialog: every field (date, proceeds, account selects, memo, cost portion) is keyboard-reachable and Confirm is gated on the required fields, not the trigger", async () => {
   const h = await renderComponent(
     withProvider(createElement(DisposeDialog, { clientId: "c1", asset: { ...ASSET, status: "active", particulars_complete: true }, accounts: ACCOUNTS, busy: false, act: async () => true })),
@@ -105,6 +203,12 @@ test("Dispose dialog: every field (date, proceeds, account selects, memo, cost p
 
     await h.fireEvent(trigger as never, "click");
     for (let i = 0; i < 6; i++) await h.settle();
+
+    assert.doesNotMatch(
+      textOf(body as never),
+      /0\.00/,
+      "blank proceeds must not be echoed as a fabricated 0.00 before the human types",
+    );
 
     const selects = findAll(body as never, (n) => n.tagName === "SELECT");
     assert.equal(selects.length, 3, "proceeds/gain/loss account pickers must all render as real <select> elements");
