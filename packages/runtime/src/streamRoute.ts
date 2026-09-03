@@ -61,8 +61,30 @@ export function streamRoutes(): express.Router {
       closed = true;
     });
 
+    // B-M3 (security pass, 2026-09-02) — RE-AUTHORISATION ON THE EXISTING POLL TICK.
+    //
+    // THE FINDING. `authenticate` + `assertTaskStreamAccess` ran ONCE, above, inside a single
+    // `withRuntime` before the loop, and `STREAM_MAX_MS` is thirty minutes. `lib/authz.mjs`'s own
+    // header promises the opposite: "Principal resolution … evaluated PER REQUEST (a revoked
+    // member's next turn is rejected — no cached membership)". That is true for a turn. A stream
+    // IS one request, so a member removed from the firm kept receiving the live agent transcript
+    // until the stream ended or the deadline expired. Not a way IN — a way to STAY in.
+    //
+    // THE FIX RIDES A QUERY THAT ALREADY EXISTS. This poll hit the database every `POLL_MS`
+    // anyway; it now does the access check in the SAME checkout, so the cost is one extra
+    // statement per tick and no extra connection. On `AuthError` the stream closes with an
+    // explicit `revoked` event — never a silent hang and never `done`, which would tell the
+    // client the task finished.
+    //
+    // THE BEARER IS RE-READ FROM THE ORIGINAL REQUEST, WHICH IS THE HONEST BOUND. An SSE client
+    // cannot re-present a header mid-stream, so the token cannot be refreshed here; what this
+    // re-check catches is the MEMBERSHIP going away (`resolvePrincipal` re-reads live membership
+    // per call) and the session's visibility changing. A token that EXPIRES mid-stream also
+    // closes the stream, which is correct and is why the client reconnects.
     const fetchTask = () =>
       withRuntime(async (c) => {
+        const p = await authenticate(c, req.header("authorization"));
+        await assertTaskStreamAccess(c, taskId, p);
         const r = await c.query("select status, workflow_run_id from clara.agent_tasks where id = $1", [taskId]);
         return r.rows[0] as { status: string; workflow_run_id: string | null } | undefined;
       });
@@ -119,9 +141,25 @@ export function streamRoutes(): express.Router {
           continue;
         }
       }
-      // Poll won (or the stream closed) — check task status; attach ONCE if a run
-      // appeared (never re-attach a spent readable — that would re-replay forever).
-      const t = await fetchTask();
+      // Poll won (or the stream closed) — re-authorise, then check task status; attach ONCE if a
+      // run appeared (never re-attach a spent readable — that would re-replay forever).
+      let t: { status: string; workflow_run_id: string | null } | undefined;
+      try {
+        t = await fetchTask();
+      } catch (err) {
+        // B-M3. An AuthError here means the caller LOST access mid-stream — a revoked
+        // membership, a session that went private, an expired token. Close explicitly and
+        // distinguishably: `revoked` is neither `done` (the task did not finish) nor `detached`
+        // (this is not a window expiry the client should immediately retry into). Any OTHER
+        // throw is a transient database problem, and dropping the stream for it would be worse
+        // than waiting one more tick.
+        if (err instanceof AuthError) {
+          send("revoked", { taskId, reason: err.status === 404 ? "not_found" : err.code });
+          hitDeadline = false;
+          break;
+        }
+        continue;
+      }
       if (!t) {
         hitDeadline = false;
         break;
