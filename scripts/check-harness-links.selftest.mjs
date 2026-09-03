@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import {
   checkHarnessLinks, extractPathReferences, resolveReference, looksLikePath, NON_PATH_ALLOWLIST,
-  findUnterminatedFence, isHopContentExempt,
+  findUnterminatedFence, isHopContentExempt, discoverAgentEntryPoints,
 } from "./check-harness-links.mjs";
 
 let failures = 0;
@@ -209,6 +209,86 @@ console.log("temp-dir fixture — one good link, one broken link:");
   testCase("a bare, unambiguous basename resolves via the repo-wide tracked-file fallback", () => {
     const result = checkHarnessLinks({ repoRoot: root, entryList: ["AGENTS.md"], strict: true });
     if (!result.ok) throw new Error(`expected ok=true via the basename fallback, got:\n${result.findings.join("\n")}`);
+  });
+  rm(root);
+}
+
+// ---------------------------------------------------------------------------
+// (D4) Widened SCAN ROOTS: every apps/*/AGENTS.md and packages/*/AGENTS.md that exists is
+//     scanned like a root entry point, not only reached via docs/'s one-hop rule. This is the
+//     gap rev-527 found: apps/web/AGENTS.md cites paths but was never content-scanned at all,
+//     because the one-hop rule only follows a `.md` reference that ALREADY resolves under
+//     docs/ (isUnderDocs()) — an entry point sitting outside docs/ never got pulled in.
+// ---------------------------------------------------------------------------
+console.log("\ndiscovered scan roots (D4 — apps/*/AGENTS.md, packages/*/AGENTS.md):");
+
+{
+  const root = freshFixture();
+  write(root, "docs/target.md", "# a real target\n");
+  write(
+    root,
+    "apps/web/AGENTS.md",
+    [
+      "# apps/web agent notes",
+      "a good backtick path: `docs/target.md`.",
+      "a bad backtick path: `apps/web/lib/does-not-exist-9f3a.ts`.",
+    ].join("\n"),
+  );
+  mkdirSync(join(root, "apps", "no-agents-here"), { recursive: true }); // no AGENTS.md — must be skipped, not error
+  mkdirSync(join(root, "packages"), { recursive: true }); // present but empty — must not throw
+
+  const discovered = discoverAgentEntryPoints(root);
+  testCase("discoverAgentEntryPoints() finds apps/web/AGENTS.md and skips a dir with no AGENTS.md", () => {
+    if (!discovered.includes("apps/web/AGENTS.md")) {
+      throw new Error(`expected apps/web/AGENTS.md among discovered roots, got: ${JSON.stringify(discovered)}`);
+    }
+    if (discovered.some((d) => d.includes("no-agents-here"))) {
+      throw new Error(`a directory with no AGENTS.md must not be discovered: ${JSON.stringify(discovered)}`);
+    }
+  });
+  testCase("discoverAgentEntryPoints() returns nothing for a repoRoot with no apps/ or packages/ at all", () => {
+    const bare = freshFixture();
+    const none = discoverAgentEntryPoints(bare);
+    rm(bare);
+    if (none.length !== 0) throw new Error(`expected no discovered roots, got: ${JSON.stringify(none)}`);
+  });
+
+  const result = checkHarnessLinks({ repoRoot: root, entryList: discovered, strict: false });
+  testCase("the GOOD path in a discovered apps/*/AGENTS.md resolves (no finding)", () => {
+    if (result.findings.some((f) => f.includes("docs/target.md"))) {
+      throw new Error(`the good reference must not appear in findings:\n${result.findings.join("\n")}`);
+    }
+  });
+  testCase("the BAD path in a discovered apps/*/AGENTS.md is reported — the D4 gap, closed", () => {
+    const hit = result.findings.find((f) => f.includes("does-not-exist-9f3a.ts"));
+    if (!hit) throw new Error(`expected apps/web/AGENTS.md's bad path to be reported, got:\n${result.findings.join("\n")}`);
+    if (!hit.startsWith("apps/web/AGENTS.md:")) throw new Error(`expected the finding to name apps/web/AGENTS.md, got: ${hit}`);
+  });
+
+  rm(root);
+}
+
+{
+  // isUnderDocs()'s ONE-HOP semantics stay exactly as before, rooted from a DISCOVERED entry
+  // point rather than a pinned ENTRY_LIST one — the widening changed the ROOTS, never the hop rule.
+  const root = freshFixture();
+  write(root, "apps/x/AGENTS.md", "see [the design](docs/plan/hop-from-agents.md) for more.\n");
+  write(
+    root,
+    "docs/plan/hop-from-agents.md",
+    "a broken ref one hop deep: `docs/plan/hop-from-agents-broken.md`.\nand a further link: [deeper](docs/plan/hop-from-agents-2.md).\n",
+  );
+  write(root, "docs/plan/hop-from-agents-2.md", "TWO hops from a discovered entry point: `docs/plan/never-seen.md`.\n");
+
+  const result = checkHarnessLinks({ repoRoot: root, entryList: discoverAgentEntryPoints(root), strict: false });
+  testCase("a docs/ file reached from a DISCOVERED apps/*/AGENTS.md still gets the one-hop follow", () => {
+    const hit = result.findings.find((f) => f.startsWith("docs/plan/hop-from-agents.md:"));
+    if (!hit) throw new Error(`expected a finding inside the one-hop file, got:\n${result.findings.join("\n")}`);
+  });
+  testCase("the second hop from a discovered entry point is still never reported (one hop, never further)", () => {
+    if (result.findings.some((f) => f.includes("never-seen"))) {
+      throw new Error(`recursion must stop at one hop even when rooted at a discovered entry:\n${result.findings.join("\n")}`);
+    }
   });
   rm(root);
 }
