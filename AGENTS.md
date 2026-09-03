@@ -216,9 +216,17 @@ the pipeline itself, run `gh workflow run ci.yml` by hand). **The first hosted s
 on 2026-09-02 (run 33639097306): of its 13 jobs, 11 succeeded — including the D-b frontier matrix's
 first hosted proof — and TWO failed: `closed-wave-drills` on the multi-chain-one-cluster class
 (`0154` asserts an absolute 14-role census; `0160` mints two), and the `ci` meta-gate with it. So:
-11 of 12 gate legs green, the meta-gate red, which is the count to quote. #518's re-cut MERGED as `dfe9406c`
-(2026-09-03 04:38 MYT), so the sweep is now OWED a hand dispatch — re-dispatching it is the only
-thing that re-proves that leg, and until it runs the sweep's last word is still the red one.** A docs-only diff skips the code
+11 of 12 gate legs green, the meta-gate red, which is the count to quote. **#518's re-cut merged
+(`dfe9406c`) and the sweep was re-dispatched: run 33681113121 came back RED on FIVE gate legs — the four
+`db-slice-frontiers` legs AND `closed-wave-drills` — because the role-sweep grant reached only one of the
+three actions that migrate from scratch more than once on the shared cluster. #524 (`b85cded8`) granted and
+cleaned the other two, and sweep 33707608346 on it came back 11 of 12 gate legs green with the meta-gate red:
+all four frontier legs GREEN (the grants proven), `closed-wave-drills` red on a NEW cause — `0163`'s two
+auth-wall roles are absent from the cluster-reset roster, so the sweep left them and the next drill met
+`0154`'s pin. #525 (`7422576f`) closed that at the source — the roster is now DERIVED from
+`packages/db/deploy/roles-bootstrap.sql` and pinned by a drift-guard cell — and sweep 33712469717 on it was
+dispatched at 2026-09-03 11:44 MYT. Read a sweep's verdict from `gh run view`'s job list, never from a PR's
+colours.** A docs-only diff skips the code
 and DB legs by classifier, the weekly sweep re-proves every leg regardless, and the
 required check `ci` is a fail-closed meta-gate over every job — a red lint blocks merge on
 every PR, docs-only included.
