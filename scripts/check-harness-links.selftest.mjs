@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 import {
   checkHarnessLinks, extractPathReferences, resolveReference, looksLikePath, NON_PATH_ALLOWLIST,
   findUnterminatedFence, isHopContentExempt, discoverAgentEntryPoints, main,
+  isUnderRetiredTree, RETIRED_TREE_PREFIXES,
 } from "./check-harness-links.mjs";
 
 let failures = 0;
@@ -369,6 +370,24 @@ testCase("a suffix-shorthand continuation ('-part2.md') is excluded", () => {
 testCase("NON_PATH_ALLOWLIST entries are excluded even though they match the heuristic", () => {
   if (!NON_PATH_ALLOWLIST.has("origin/main")) throw new Error("fixture assumption changed — update this test");
   if (looksLikePath("origin/main")) throw new Error("an allowlisted git ref must not be treated as a path");
+});
+// RETIRED_TREE_PREFIXES is a rule that SILENCES findings, so it gets a DISCRIMINATING
+// control in both directions: the arm it is meant to clear, and the arm it must never
+// clear. A silencing rule that also silences live paths is the expensive direction.
+testCase("a path under a RETIRED tree is excluded (the arm the rule exists for)", () => {
+  if (!RETIRED_TREE_PREFIXES.includes("apps/dashboard")) throw new Error("fixture assumption changed — update this test");
+  if (!isUnderRetiredTree("apps/dashboard")) throw new Error("the retired tree root itself must be excluded");
+  if (!isUnderRetiredTree("apps/dashboard/app/shared/bankApi.ts")) throw new Error("a path under the retired tree must be excluded");
+  if (looksLikePath("apps/dashboard/app/shared/bankApi.ts")) throw new Error("a retired-tree path must not be a path candidate");
+});
+testCase("MUST NOT RED: a LIVE tree is never swept up by the retired-tree rule", () => {
+  for (const live of ["apps/web/lib/doors.ts", "packages/db/migrations", "apps/webbing/x.ts", "docs/apps/dashboard-notes.md"]) {
+    if (isUnderRetiredTree(live)) throw new Error(`live path wrongly treated as retired: ${live}`);
+  }
+  // The prefix must bind on a SEGMENT boundary, never a bare string prefix: a future
+  // `apps/dashboard-v2/...` is a different tree and its broken paths must still red.
+  if (isUnderRetiredTree("apps/dashboard-v2/app/page.tsx")) throw new Error("prefix matched across a segment boundary");
+  if (!looksLikePath("apps/web/lib/doors.ts")) throw new Error("a live path must still be a path candidate");
 });
 testCase("extractPathReferences() reports 1-based line numbers", () => {
   const refs = extractPathReferences("line one\n[a](b.md)\n`c.md`");

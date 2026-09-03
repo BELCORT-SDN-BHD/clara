@@ -177,7 +177,46 @@ export const NON_PATH_ALLOWLIST = new Set([
   // Append-only per the ADR log's own law: the doc's bytes do not change to chase a later
   // retirement, so its dead reference is named here instead.
   "apps/dashboard/app/rules/page.tsx", // wave-e-design-skeleton-part4.md's closed Wave-E design prose; the /rules surface retired whole with F-A2 PR-3 (relocated to /close/adjustments)
+
+  // --- Modules of the RETIRED apps/dashboard tree (deleted whole at P6-X) that the prose cites
+  // by BARE BASENAME rather than by full path, so RETIRED_TREE_PREFIXES below cannot catch them.
+  // Every one was verified at the delete commit to have existed EXACTLY ONCE in origin/main, and
+  // in every case under apps/dashboard/ — so no live file is shadowed today. The residual risk is
+  // narrow and stated deliberately: a FUTURE file created with one of these basenames would have
+  // a broken citation to it silenced here, so an entry comes back OUT of this list the day that
+  // name is used again. The citations themselves are historical records of a retired surface and
+  // are not rewritten (the same law as the RETIRED block above).
+  "adjustmentApi.ts", "advancesApi.ts", "agingApi.ts", "assetsApi.ts",
+  "bankApi.ts", "bankApi.test.ts", "closeApi.ts", "coaTemplate.ts",
+  "counterpartyApi.ts", "dbSeamCensus.bindings.ts", "interviewApi.ts",
+  "onboardingApi.ts", "openingApi.ts", "openingModel.ts", "parts.ts",
+  "queueKindCatalog.ts", "reconApi.ts", "regionGeometry.ts", "reportsApi.ts",
+  "reviewApi.ts", "reviewCardTypes.ts", "reviewCopy.ts", "reviewTypes.ts",
+  "seedingApi.ts",
 ]);
+
+/**
+ * Whole TREES retired by a landed lane. A reference under one of these prefixes named a real
+ * file when the citing document was written, and the document is a historical record — the
+ * repo's standing law (see the RETIRED block above, and AGENTS.md constraint 9's append-only
+ * ethos) is that such a citation is NEVER rewritten to erase it.
+ *
+ * A prefix rule rather than ~53 individual entries, and the narrowness is the point: it can
+ * only ever silence a path under a directory that NO LONGER EXISTS, so unlike a bare-basename
+ * entry it cannot hide a broken reference to a live file. If a tree named here is ever
+ * recreated, its entry must come out on the same commit.
+ */
+export const RETIRED_TREE_PREFIXES = Object.freeze([
+  // Deleted whole at P6-X (裁-158): the legacy Next.js 15 dashboard, superseded by apps/web.
+  // 174 backticked citations across 48 documents pointed into it at the delete commit.
+  "apps/dashboard",
+]);
+
+/** True if a backtick span names the retired tree itself or anything beneath it. */
+export function isUnderRetiredTree(content) {
+  const t = content.replace(/^\.?\//, "").replace(/\/+$/, "");
+  return RETIRED_TREE_PREFIXES.some((p) => t === p || t.startsWith(`${p}/`));
+}
 
 /**
  * Content that carries a "/" or a path-like extension but CANNOT be a single repo path, by its
@@ -310,6 +349,7 @@ const SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i; // http://, https://, ftp://, ...
 /** True if a backtick span's content should be treated as a candidate repo path. */
 export function looksLikePath(content) {
   if (NON_PATH_ALLOWLIST.has(content)) return false;
+  if (isUnderRetiredTree(content)) return false;
   if (SCHEME_RE.test(content) || /^mailto:/i.test(content)) return false;
   if (SUFFIX_SHORTHAND_RE.test(content) || BARE_EXT_RE.test(content)) return false;
   if (STRUCTURALLY_NOT_A_PATH_RE.test(content)) return false;

@@ -38,7 +38,7 @@ runs:
         fi
 
     # `pnpm -r --if-present test` runs EVERY package's test (not just @clara/db)
-    # so a test added to @clara/runtime or @clara/dashboard can't silently skip
+    # so a test added to @clara/runtime or @clara/web can't silently skip
     # CI. Runs after seed because the db smoke test asserts against the migrated
     # + seeded schema. Folds in the former `--filter @clara/db test` step.
     #
@@ -49,9 +49,12 @@ runs:
     - name: Migrate + seed + tests — all packages (ephemeral postgres:17)
       shell: bash -e {0}
       env:
-        # Un-skips the rig-gated suites (the dashboard queue-kind parity probe +
-        # the runtime interview plan-db tests) against the shared migrated DB —
-        # they are pollution-proof by construction (they stage their own fixtures).
+        # Un-skips the rig-gated suites against the shared migrated DB — they are
+        # pollution-proof by construction (they stage their own fixtures). The
+        # dashboard queue-kind parity probe and the DB↔surface seam census that
+        # this variable used to arm were DELETED with apps/dashboard at P6-X; the
+        # runtime interview plan-db tests remain, so the variable is still load-
+        # bearing. See the P6-X PR body for the disposition of both instruments.
         CLARA_RIG_DB: "1"
       run: |
         pnpm db:migrate

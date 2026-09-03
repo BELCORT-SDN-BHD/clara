@@ -329,7 +329,7 @@ jobs:
       - uses: ./.github/actions/setup-workspace
       - name: Typecheck (tsc across TS packages)
         run: pnpm typecheck
-      - name: Build (nitro runtime + next dashboard)
+      - name: Build (nitro runtime + apps/web)
         run: pnpm build
       # MUST run after Build: the image-layout half reads .output/server/index.mjs. The
       # structured/XML lane was dead in every deployed image because nitro inlines the

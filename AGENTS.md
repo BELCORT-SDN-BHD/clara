@@ -24,7 +24,7 @@ Nothing else in this repo outranks them.
 pnpm install
 pnpm typecheck   # tsc across the TS packages
 pnpm lint        # full root lint chain from package.json (the source of truth, including recursive package lint)
-pnpm build       # nitro runtime + apps/web (production) + apps/dashboard (legacy, retiring at P6 cutover)
+pnpm build       # nitro runtime + apps/web (production) — the sole frontend since the P6-X source delete
 pnpm test        # per-package tests
 ```
 

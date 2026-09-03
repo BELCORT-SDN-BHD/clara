@@ -251,4 +251,4 @@ CI applies every migration to a **throwaway `postgres:17` service container**
 This package is intentionally plain ESM (`.mjs`) — no build step, runnable
 directly by `node` in CI. It has no `tsc` typecheck; correctness is proven by
 `tests/pipeline.test.mjs`. TypeScript packages (`@clara/runtime`,
-`@clara/dashboard`) carry the `typecheck` gate.
+`@clara/web`) carry the `typecheck` gate.
