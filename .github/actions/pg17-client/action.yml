@@ -22,6 +22,19 @@ runs:
           if psql --version 2>/dev/null | grep -q " 17\."; then exit 0; fi
           echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/pgdg.gpg
-          apt-get update -o DPkg::Lock::Timeout=180
+          # SCOPED to the pgdg list only (measured on rev-527, hosted run 33715529960,
+          # job db-live-gates: a BARE apt-get update refreshes every apt source the
+          # runner image ships, and packages.microsoft.com answered 403 Forbidden --
+          # the whole job died before pgdg, which fetched fine, was even used). All
+          # three -o flags together are what scope it: Dir::Etc::sourcelist swaps the
+          # primary list apt reads for pgdg.list alone; Dir::Etc::sourceparts=- then
+          # disables the DEFAULT walk of every *.list/*.sources file under
+          # sources.list.d (else apt reads the whole directory anyway, sourcelist or
+          # not, and every third-party entry the runner image ships is back in play);
+          # APT::Get::List-Cleanup=0 stops apt deleting the cached index files for
+          # the sources this scoped run does not visit. A third-party source outage
+          # can no longer red this leg -- the runner images own pre-populated caches
+          # cover the base Ubuntu archives this scoped run does not refresh.
+          apt-get update -o DPkg::Lock::Timeout=180 -o Dir::Etc::sourcelist="sources.list.d/pgdg.list" -o Dir::Etc::sourceparts="-" -o APT::Get::List-Cleanup="0"
           apt-get install -y -o DPkg::Lock::Timeout=180 postgresql-client-17'
         pg_dump --version
