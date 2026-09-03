@@ -1,7 +1,9 @@
+import { cookies } from "next/headers";
 import { getTranslations } from "next-intl/server";
 import { redirect } from "next/navigation";
 
 import { HoldingCard } from "@/components/entry/holding-card";
+import { checkoutFlashCookie, parseCheckoutFlash } from "@/lib/checkout/checkout-flash";
 import { holdingStateFrom, type HoldingDecision } from "@/lib/registration/holding-state";
 import { loadOwnRegistrationRequests } from "@/lib/registration/server-reads";
 
@@ -62,7 +64,21 @@ export async function generateMetadata() {
  * driven directly by `tests/holding-state.test.ts` with a RED-before mutant
  * each, rather than being reachable only through a live request scope.
  */
-export default async function PendingPage() {
+export default async function PendingPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  // A refusal from POST /checkout, if this render follows one. The URL carries
+  // only an opaque marker; every rendered value comes from an httpOnly,
+  // SameSite=Strict cookie nobody but this server could have set for this
+  // browser. See lib/checkout/checkout-flash.ts for why a money-surface
+  // refusal must never be linkable.
+  const params = await searchParams;
+  const marker = typeof params.checkout === "string" ? params.checkout : undefined;
+  const jar = await cookies();
+  const checkoutRefusal = parseCheckoutFlash(jar.get(checkoutFlashCookie().name)?.value, marker);
+
   let state: HoldingDecision;
   try {
     const result = await loadOwnRegistrationRequests();
@@ -71,5 +87,5 @@ export default async function PendingPage() {
     state = { kind: "read-failed", reason: "read_error" };
   }
   if (state.kind === "member") redirect("/");
-  return <HoldingCard state={state} />;
+  return <HoldingCard state={state} checkoutRefusal={checkoutRefusal} />;
 }

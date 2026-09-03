@@ -1999,7 +1999,7 @@ cell("c3.52c unconsumed-payment read -- an operator-firm bookkeeper is refused",
 // still-useful question it CAN honestly answer: "did some NEW function start touching the money
 // store" -- a real signal worth having, but not an anti-regression guard for THIS body, and not
 // a defense against (b) or (c). Named, not implied covered (R15's fail-loud-or-list-it rule).
-cell("c3.53 folded set equality -- exactly five money-store bodies; open_checkout_intent's body is SHA-pinned", async () => {
+cell("c3.53 folded set equality -- the money-store body roster is closed; open_checkout_intent's body is SHA-pinned", async () => {
   const pinned = await rootQuery(
     `select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') as sha
        from pg_proc p where p.oid='clara.open_checkout_intent(uuid,bytea,text)'::regprocedure`,
@@ -2020,7 +2020,23 @@ cell("c3.53 folded set equality -- exactly five money-store bodies; open_checkou
       order by proname`,
   );
   assert.deepEqual(refs.rows.map((r) => r.proname), [
-    "apply_stripe_events", "claim_paid_firm", "list_unconsumed_registration_payments",
+    "apply_stripe_events", "claim_paid_firm",
+    // WIDENED BY FS-4 C-6 (#517), deliberately and with the reason recorded here rather than
+    // discovered during a merge-prep conflict. `clara.get_own_checkout_progress` is C-6's
+    // self-scoped web read door, and it reads `clara.firm_registration_payments` BY DESIGN
+    // (0164_checkout_gate_c6_web_reads.sql, the `paid_unconsumed` arm): `/pending`'s two
+    // 裁-74 arms and `/checkout/success`'s `claimable` arm have no other read path, because that
+    // table grants every application role nothing, permanently (design part 2 §1). It is a
+    // STABLE reader — it writes nothing and consumes no payment — so it widens the roster
+    // without widening the money surface.
+    //
+    // THIS CENSUS DID ITS JOB. It is the cell that caught the widening on the merged tree when
+    // C-6's own rig could not (that rig had C-3's SQL but none of these cells), and the
+    // standard it sits under is `0163`'s own comment on `open_checkout_intent`: "hiding a real
+    // dependency from a catalog census on a money surface is the wrong kind of clever." Adding
+    // a name here is a reviewed act; the SHA pin above is what actually guards this door's body.
+    "get_own_checkout_progress",
+    "list_unconsumed_registration_payments",
     "open_checkout_intent", "record_stripe_event",
   ], "this text census only answers whether a NEW function started mentioning the money tables "
     + "-- it is not the anti-regression guard for open_checkout_intent (the SHA pin above is)");

@@ -5,8 +5,27 @@
 // pointer) or hold the shared `router` advisory lock via a spawned runner, and
 // must never overlap. Every relay here is FIRM-SCOPED so it only drains its own
 // fresh fixture firm. Contract: docs/plan/completed/slice3-event-spine-contract.md §2.9.
+//
+// ONE TEARDOWN REGISTRANT PER POOL (fix-relay-teardown, 2026-09-03): this file
+// used to register its OWN top-level `after(() => fx.endPool())` here, so any
+// importer got the pool closed "for free" alongside relay-taxonomy.test.mjs's
+// own `after(cleanupPrivateDb)` — two registrants on the same module-singleton
+// pool (`relay-fixtures.mjs`'s `_pool`). This clause is HYGIENE, not the fix
+// for CI job 100523835379's 57P01: the removed registrant here ran strictly
+// AFTER `cleanupPrivateDb` on every Node version measured (a hook that runs
+// after an error cannot cause it) — an initial PR (#534) claimed otherwise and
+// was corrected on review (rev-534 F-2, kept here rather than deleted, 裁-112).
+// The real channel is `pool.end()` (pg-pool 3.14.0) resolving before the
+// underlying socket actually closes, so an idle backend can still be attached
+// when `relay-taxonomy.test.mjs`'s own `DROP DATABASE ... WITH (FORCE)` lands —
+// fixed there by draining `pg_stat_activity` to 0 before the drop plus a
+// window-scoped `pool.on('error', …)` (see that file's `cleanupPrivateDb`).
+// `endPool` stays a PLAIN exported function with NO implicit hook regardless:
+// every importer that needs the pool closed registers its own SINGLE
+// `after(fx.endPool)` (relay-drain.test.mjs / relay-runner.test.mjs /
+// relay-unit.test.mjs each do), and relay-taxonomy.test.mjs's own
+// `cleanupPrivateDb` stays the SOLE registrant for that file.
 
-import { after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -20,10 +39,6 @@ export { sleep };
 // SKIP cleanly when the 0005 schema is absent (probe once per file/process).
 export const READY = await fx.probeReady();
 export const skip = READY ? false : "Slice-3 (0005) schema absent — migrate the target first";
-
-after(async () => {
-  await fx.endPool();
-});
 
 // ---------------------------------------------------------------------------
 // Child-process (runner) harness — used by the kill / split-brain / reconnect /

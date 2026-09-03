@@ -254,7 +254,17 @@ export async function handleChatParityApp(request, response, url) {
 }
 
 /** The runtime's three intake legs, behind the REAL same-origin proxy. */
-export function startMockRuntime(port = Number(process.env.CLARA_E2E_RUNTIME_PORT ?? 3102)) {
+/**
+ * The ONE mock runtime origin. `serve-built.mjs` points `CLARA_RUNTIME_URL`
+ * here, so every lane's runtime route has to be reachable from it — hence
+ * `delegate`, an optional handler tried before the 404. FS-4 C-6 passes C-5's
+ * `POST /api/auth-wall/confirm` in that way rather than standing up a second
+ * runtime origin the app could not be pointed at twice.
+ *
+ * @param {number} port
+ * @param {(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse, url: URL) => Promise<boolean>} [delegate]
+ */
+export function startMockRuntime(port = Number(process.env.CLARA_E2E_RUNTIME_PORT ?? 3102), delegate) {
   const server = createHttpServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     const json = (status, body) => {
@@ -275,6 +285,13 @@ export function startMockRuntime(port = Number(process.env.CLARA_E2E_RUNTIME_POR
     }
     if (request.method === "POST" && url.pathname === `/api/intake/documents/${CHAT_PARITY.intakeId}/finalize`) {
       void readJson(request).then(() => json(202, { status: "finalized", document_id: CHAT_PARITY.documentId }));
+      return;
+    }
+    if (delegate) {
+      void delegate(request, response, url).then((handled) => {
+        if (handled) return;
+        json(404, { error: "not_found", message: `unhandled e2e runtime route: ${request.method} ${url.pathname}` });
+      });
       return;
     }
     json(404, { error: "not_found", message: `unhandled e2e runtime route: ${request.method} ${url.pathname}` });

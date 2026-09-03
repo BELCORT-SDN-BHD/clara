@@ -486,7 +486,11 @@ const PLATFORM_SLOT = [
   "PasswordReset.description",
   "PasswordReset.continue",
   "Signup.description",
-  "Pending.checkoutNotBuilt",
+  // `Pending.checkoutNotBuilt` STOOD HERE and was removed by FS-4 C-6 (#517).
+  // The key itself is gone from the catalogue: it said signing and paying were
+  // "not built yet", C-6 built them, and design part 1 §2.1 removes a NotBuiltNote
+  // when the thing exists rather than editing it to say less. Nothing rendered it —
+  // `/pending` now carries the real controls — so this slot has no string to police.
   "Registrations.pageDescription",
 ] as const;
 

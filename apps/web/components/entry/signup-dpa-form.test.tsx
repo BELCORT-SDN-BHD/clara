@@ -140,9 +140,16 @@ test("clicking sign reaches the Lane-B seam and renders its answer honestly — 
     );
     assert.notEqual(calls[0]?.bodySha256, "", "the hash sent to the seam must never be empty");
     assert.ok(calls[0]?.opKey, "sign_dpa's required p_op_key must not be sent empty");
-    // THE DISCRIMINATING POST-CONDITION: an honest "not wired" note appears,
-    // and it is NOT the same text as a success would render.
-    assert.match(textOf(h.container as never), /door that records your signature.*isn't wired up/i);
+    // THE DISCRIMINATING POST-CONDITION: an honest FAILURE card appears, and it
+    // is NOT the same text as a success would render.
+    //
+    // RE-POINTED (review M2). This used to require the sentence "the door that
+    // records your signature isn't wired up" — so the suite REQUIRED a claim
+    // this PR had made false: `sign_dpa` is called for real now, and this arm
+    // means a transport or auth failure. A cell that pins stale copy is a cell
+    // that defends it.
+    assert.match(textOf(h.container as never), /couldn't record your signature/i);
+    assert.doesNotMatch(textOf(h.container as never), /Not built yet|isn't wired up/i);
     assert.doesNotMatch(textOf(h.container as never), /signature recorded|agreement signed/i);
     assert.deepEqual(checkAccessibility(h.container as never), []);
 

@@ -9,6 +9,8 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// FS-4 C-6's own mock lane — the C-3/C-6 doors and C-5's ONE confirm endpoint.
+import { handleAuthWallMock, handleCheckoutMock } from "./fs4-checkout-mock.mjs";
 // The chat-parity walk's own mock lane — a file-disjoint sibling (the same shape
 // live-stack/serve-live.mjs takes), consulted through the three hooks below so no
 // other spec's surface changes. See that file's header for what it does and does not
@@ -82,6 +84,18 @@ const state = {
   note: null,
   registrationOpen: false,
   firmScoped: false,
+  // FS-4 C-6: the checkout journey's own progression, advanced only by the
+  // acts that advance it in production — a signature, a stamped session, an
+  // applied payment, a claim.
+  dpaSigned: false,
+  checkoutOpen: false,
+  paidUnconsumed: false,
+  firmOpened: false,
+  // The auth wall's scripted verdict, so a spec can drive the locked and
+  // wrong-code polarities without inventing a rate wall in the browser.
+  authWall: { mode: "verify" },
+  authWallRequests: [],
+  doorCalls: [],
 };
 
 const clients = [
@@ -182,6 +196,16 @@ async function handleSupabase(request, response, url) {
     "access-control-allow-origin": appOrigin,
     "access-control-allow-credentials": "true",
   };
+
+  // FS-4 C-6's half — its own module (this file is at the 500-line gate); see
+  // that header for what the browser leg does and does not prove.
+  if (await handleCheckoutMock({
+    request, response, path, cors, state, sendJson, readJson,
+    appOrigin, accessToken, subject: SUBJECT, registrationId: REQUEST_ID,
+    firmId: FIRM_ID, signupCode: E2E_SIGNUP_CODE,
+  })) {
+    return;
+  }
 
   if (request.method === "POST" && path === "/auth/v1/token") {
     const body = await readJson(request);
@@ -500,7 +524,16 @@ await new Promise((resolveListen, rejectListen) => {
 // server-side only and read at REQUEST time by app/api/runtime/[...path]/route.ts, so
 // pointing it here exercises the real proxy (firm-scope guard, header allow-list,
 // credential-by-leg) against a stand-in runtime rather than skipping it.
-const mockRuntime = startMockRuntime(mockRuntimePort);
+// FS-4 C-6's ONE runtime route (C-5's A-M3 confirm endpoint) is delegated into
+// the same mock runtime the chat-parity lane starts, because `CLARA_RUNTIME_URL`
+// can only name one origin. See chat-parity-mock.mjs's `startMockRuntime` for
+// the merge defect that made this necessary.
+const mockRuntime = startMockRuntime(mockRuntimePort, (request, response, url) =>
+  handleAuthWallMock({
+    request, response, path: url.pathname, cors: {}, state,
+    sendJson, readJson, accessToken, signupCode: E2E_SIGNUP_CODE,
+  }),
+);
 
 const nextBin = join(webRoot, "node_modules", "next", "dist", "bin", "next");
 const next = spawn(

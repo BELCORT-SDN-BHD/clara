@@ -1,15 +1,25 @@
-// The §2.1 checkout-progress probe (checkout-progress-reads.ts's header).
-// FS-4 C-6: `checkout_intents` and `firm_registration_payments` do not exist
-// on `main` yet, so the discriminating claim this file makes is the DEGRADE
-// itself — every failure shape (a missing relation, a permission denial, a
-// genuine network error) must fold to `false`, INDEPENDENTLY per fact, never
-// throw and never guess a positive from an absence.
+// The §2.1 checkout-progress probe, REPOINTED by FS-4 C-6 Lane B onto
+// `clara.get_own_checkout_progress(uuid)` — one self-scoped door, replacing
+// two relation reads that were unreachable by construction (the two C-3
+// tables grant every application role nothing, permanently; the module's own
+// header carries the measurement).
+//
+// WHAT THESE CELLS CLAIM, AND WHAT THEY DELIBERATELY DO NOT. The DEGRADE is
+// still the load-bearing property: every failure shape — a missing door, a
+// governed refusal, a malformed row, a network error — must fold to "nothing
+// was observed" and never throw, because `/pending` renders `pending` from
+// that answer and an absence must never be reported as "the person has not
+// opened checkout" (review law 2). What is NEW is that the two facts now
+// arrive TOGETHER, in one snapshot, so a `paid` card can no longer be built
+// from a payment that was consumed between two separate round trips.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
   NO_CHECKOUT_PROGRESS,
+  OWN_CHECKOUT_PROGRESS_DOOR,
+  checkoutProgressFrom,
   probeCheckoutProgress,
 } from "./checkout-progress-reads";
 import type { SessionTokenAccessor } from "@/lib/session";
@@ -22,7 +32,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-async function withEnv<T>(impl: typeof fetch, run: () => Promise<T>): Promise<T> {
+async function withFetch<T>(impl: typeof fetch, run: () => Promise<T>): Promise<T> {
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
@@ -36,102 +46,118 @@ async function withEnv<T>(impl: typeof fetch, run: () => Promise<T>): Promise<T>
   }
 }
 
-test("neither relation exists yet: BOTH facts degrade to false, independently, never throwing", async () => {
-  await withEnv(
-    (async () => jsonResponse({ code: "42P01", message: "relation does not exist" }, 404)) as typeof fetch,
+test("the door does not exist yet: the probe degrades to nothing observed, never throwing", async () => {
+  await withFetch(
+    (async () => jsonResponse({ code: "42883", message: "function does not exist" }, 404)) as typeof fetch,
     async () => {
-      const progress = await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT);
-      assert.deepEqual(progress, NO_CHECKOUT_PROGRESS);
+      assert.deepEqual(
+        await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT),
+        NO_CHECKOUT_PROGRESS,
+      );
     },
   );
 });
 
-test("a permission denial (the table exists but grants nothing) degrades identically to an absent table", async () => {
-  await withEnv(
-    (async () => jsonResponse({ code: "42501", message: "permission denied" }, 403)) as typeof fetch,
+test("a governed refusal degrades identically — a foreign registration is owed no answer", async () => {
+  // `get_own_checkout_progress` raises CLR04 `not your registration request`
+  // for somebody else's row. That is caught here like every other cause on
+  // purpose: a caller asking about a registration that is not theirs must not
+  // even learn the difference between "refused" and "nothing there".
+  await withFetch(
+    (async () => jsonResponse({ code: "CLR04", message: "not your registration request" }, 403)) as typeof fetch,
     async () => {
-      const progress = await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT);
-      assert.deepEqual(progress, NO_CHECKOUT_PROGRESS);
+      assert.deepEqual(
+        await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT),
+        NO_CHECKOUT_PROGRESS,
+      );
     },
   );
 });
 
-test("ONE relation failing must not blind the OTHER — each probe is independent", async () => {
-  await withEnv(
-    (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("checkout_intents")) {
-        return jsonResponse({ code: "42P01", message: "relation does not exist" }, 404);
-      }
-      return jsonResponse([{ id: "row-1" }]);
+test("a transport failure degrades rather than propagating into the holding page", async () => {
+  await withFetch(
+    (async () => { throw new Error("ECONNRESET"); }) as typeof fetch,
+    async () => {
+      assert.deepEqual(
+        await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT),
+        NO_CHECKOUT_PROGRESS,
+      );
+    },
+  );
+});
+
+test("the door's own two booleans are carried through, both polarities, in ONE call", async () => {
+  for (const row of [
+    { checkout_open: true, paid_unconsumed: false },
+    { checkout_open: false, paid_unconsumed: true },
+    { checkout_open: true, paid_unconsumed: true },
+    { checkout_open: false, paid_unconsumed: false },
+  ]) {
+    let calls = 0;
+    await withFetch(
+      (async () => { calls += 1; return jsonResponse([row]); }) as typeof fetch,
+      async () => {
+        assert.deepEqual(await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT), {
+          checkoutOpen: row.checkout_open,
+          paidUnconsumed: row.paid_unconsumed,
+        });
+      },
+    );
+    assert.equal(calls, 1, "the two facts must arrive in ONE snapshot, not two round trips");
+  }
+});
+
+test("the probe calls the door BY NAME and passes the registration, and nothing else", async () => {
+  const seen: Array<{ url: string; body: unknown }> = [];
+  await withFetch(
+    (async (input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push({ url: String(input), body: JSON.parse(String(init?.body ?? "null")) });
+      return jsonResponse([{ checkout_open: false, paid_unconsumed: false }]);
     }) as typeof fetch,
-    async () => {
-      const progress = await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT);
-      assert.equal(progress.checkoutOpen, false, "the missing relation must not report progress");
-      assert.equal(progress.paidUnconsumed, true, "the OTHER relation's real row was lost");
-    },
+    async () => { await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT); },
   );
+  assert.equal(seen.length, 1);
+  assert.match(seen[0]!.url, new RegExp(`/rpc/${OWN_CHECKOUT_PROGRESS_DOOR}$`));
+  // The APPLICANT is deliberately NOT a parameter: the door reads `jwt_sub()`
+  // itself, so there is no caller-supplied identity for it to be wrong about.
+  assert.deepEqual(seen[0]!.body, { p_registration: REGISTRATION });
 });
 
-test("a checkout_intents row with a non-null session_id → checkoutOpen: true", async () => {
-  await withEnv(
-    (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("checkout_intents")) return jsonResponse([{ session_id: "cs_test_123" }]);
-      return jsonResponse([]);
-    }) as typeof fetch,
-    async () => {
-      const progress = await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT);
-      assert.deepEqual(progress, { checkoutOpen: true, paidUnconsumed: false });
-    },
-  );
+test("a malformed row is NO observation, not a weak one", () => {
+  // Every one of these would be a positive `paid` or `checkout_open` card
+  // built on a value the door did not actually return. The decoder is what
+  // stops a shape change from silently promoting garbage into a state.
+  for (const rows of [
+    null,
+    {},
+    [],
+    [null],
+    [{ checkout_open: "true", paid_unconsumed: false }],
+    [{ checkout_open: true, paid_unconsumed: "yes" }],
+    [{ checkout_open: 1, paid_unconsumed: 0 }],
+    [{ checkoutOpen: true, paidUnconsumed: true }],
+    [{ checkout_open: true }],
+  ]) {
+    assert.deepEqual(checkoutProgressFrom(rows), NO_CHECKOUT_PROGRESS, JSON.stringify(rows));
+  }
+  // MUST-NOT-RED control: the well-formed shape is still read.
+  assert.deepEqual(checkoutProgressFrom([{ checkout_open: true, paid_unconsumed: true }]), {
+    checkoutOpen: true,
+    paidUnconsumed: true,
+  });
 });
 
-test("a checkout_intents row with session_id NULL is NOT checkoutOpen — the filter, and the guard, both matter", async () => {
-  await withEnv(
+test("the retired relation reads are gone: no request names either C-3 table", async () => {
+  const urls: string[] = [];
+  await withFetch(
     (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      // PostgREST would refuse this filter to return a null row at all, but the
-      // guard in checkout-progress-reads.ts must not trust the shape blindly.
-      if (url.includes("checkout_intents")) return jsonResponse([{ session_id: null }]);
-      return jsonResponse([]);
+      urls.push(String(input));
+      return jsonResponse([{ checkout_open: true, paid_unconsumed: true }]);
     }) as typeof fetch,
-    async () => {
-      const progress = await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT);
-      assert.equal(progress.checkoutOpen, false);
-    },
+    async () => { await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT); },
   );
-});
-
-test("a firm_registration_payments row → paidUnconsumed: true", async () => {
-  await withEnv(
-    (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("firm_registration_payments")) return jsonResponse([{ id: "pay-1" }]);
-      return jsonResponse([]);
-    }) as typeof fetch,
-    async () => {
-      const progress = await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT);
-      assert.deepEqual(progress, { checkoutOpen: false, paidUnconsumed: true });
-    },
-  );
-});
-
-test("both probes scope by registration_id AND applicant — the composite pair, not applicant alone", async () => {
-  const seenFilters: string[] = [];
-  await withEnv(
-    (async (input: RequestInfo | URL) => {
-      const url = String(input);
-      seenFilters.push(url);
-      return jsonResponse([]);
-    }) as typeof fetch,
-    async () => {
-      await probeCheckoutProgress(accessor, REGISTRATION, APPLICANT);
-    },
-  );
-  assert.equal(seenFilters.length, 2, "exactly one query per relation");
-  for (const url of seenFilters) {
-    assert.match(url, new RegExp(`registration_id=eq\\.${REGISTRATION}`));
-    assert.match(url, new RegExp(`applicant=eq\\.${APPLICANT}`));
+  assert.ok(urls.length > 0, "VACUITY CONTROL: no request was observed at all");
+  for (const url of urls) {
+    assert.equal(/checkout_intents|firm_registration_payments/.test(url), false, url);
   }
 });

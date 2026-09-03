@@ -218,10 +218,12 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
     {
       path: "app/(entry)/auth/confirm/verify/confirmation-wall.ts",
       reason:
-        "NOT A ROUTER FILE. This is the FS-4 C-6 Lane-B seam for the C1/C2 " +
-        "confirmation-attempt wall (checkout-gate-design-part3.md §2.1) — a pair of " +
-        "typed function exports (`claimConfirmationAttempt`, " +
-        "`settleConfirmationAttempt`) that `handler.ts` calls before `verifyOtp`. It " +
+        "NOT A ROUTER FILE. This is the FS-4 C-6 seam for the C1/C2 " +
+        "confirmation-attempt wall (checkout-gate-design-part3.md §2.1) — ONE typed " +
+        "function export (`confirmEmailCode`) that `handler.ts` calls, and which " +
+        "reaches C-5's single `POST /api/auth-wall/confirm` endpoint server-to-server. " +
+        "Lane B collapsed the earlier claim/settle PAIR into this one call because a " +
+        "caller that can settle an attempt can zero out the rate wall (A-M3). It " +
         "exports no page/route/HTTP-method surface, its basename matches no LEAF or " +
         "SPECIAL_FILE pattern, and Next.js never routes to it, auto-imports it, or " +
         "treats it as any kind of special file. Colocated with handler.ts for the " +
@@ -243,6 +245,36 @@ describe("WALL 1 — every layout-adjacent special file classifies, or this suit
         "into the other's own directory — the real entrance `firm-scope-surfaces." +
         "test.ts` governs is `page.tsx`'s default export and route.ts's POST export, " +
         "neither of which this module is.",
+    },
+    {
+      path: "app/(entry)/checkout/handler.ts",
+      reason:
+        "NOT A ROUTER FILE. FS-4 C-6 Lane B: the extracted body of `POST /checkout` " +
+        "(checkout-gate-design part 1 §1.1's server entry 2 of 3), called by the " +
+        "sibling app/(entry)/checkout/route.ts, whose only export is a POST that " +
+        "forwards to `handleCheckoutPost`. It exports no page/route/HTTP-method " +
+        "surface, its basename matches no LEAF or SPECIAL_FILE pattern, and Next.js " +
+        "never routes to it, auto-imports it, or treats it as any kind of special " +
+        "file — it exists so every refusal branch (cross-origin, no session, no open " +
+        "registration, no origin digest, a door refusal, a plan rotation, Stripe " +
+        "unavailable) is driven directly by a cell instead of only through a live " +
+        "request scope. The real entrance `firm-scope-surfaces.test.ts` governs is " +
+        "route.ts's POST export, and it is registered in `SCOPE_EXEMPT_SURFACES`.",
+    },
+    {
+      path: "app/(entry)/checkout/success/claim/handler.ts",
+      reason:
+        "NOT A ROUTER FILE. FS-4 C-6 Lane B: the extracted body of " +
+        "`POST /checkout/success/claim` (server entry 3 of 3 — the door that creates " +
+        "the firm, 裁-89's folded `claim_paid_firm`), called by the sibling " +
+        "route.ts, whose only export is a POST that forwards to " +
+        "`handleClaimPaidFirmPost`. It exports no page/route/HTTP-method surface, " +
+        "its basename matches no LEAF or SPECIAL_FILE pattern, and Next.js never " +
+        "routes to it, auto-imports it, or treats it as any kind of special file. " +
+        "Extracted for the same reason as its sibling above, and with more at stake: " +
+        "this is the most consequential POST in the product, so every branch of it " +
+        "is a cell. The real entrance is route.ts's POST export, registered in " +
+        "`SCOPE_EXEMPT_SURFACES`.",
     },
   ];
 
