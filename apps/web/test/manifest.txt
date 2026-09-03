@@ -172,6 +172,7 @@ lib/business-date.test.ts
 lib/checkout/checkout-flash.test.ts
 lib/checkout/stripe-session.test.ts
 lib/checkout/success-state.test.ts
+lib/clara/api.test.ts
 lib/clara/liveClarify.test.ts
 lib/clara/turnRun.test.ts
 lib/clara/useActiveThread.test.ts

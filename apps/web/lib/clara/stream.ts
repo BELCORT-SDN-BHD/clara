@@ -224,7 +224,6 @@ async function* readSseEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<
 }
 
 export interface OpenTaskStreamOptions {
-  runtimeBase: string;
   token: string;
   taskId: string;
   signal: AbortSignal;
@@ -232,16 +231,36 @@ export interface OpenTaskStreamOptions {
   fetchImpl?: typeof fetch;
 }
 
-/** Attaches to `/api/tasks/:id/stream` via a streaming `fetch` (never `EventSource` —
- *  the route authenticates on the `Authorization` header, which `EventSource` cannot
- *  send: `streamRoute.ts:29`, `apps/dashboard/app/chat/api.ts` `streamTask` doc).
- *  Resolving THIS promise is "the server stream opens" — the one instant callers may
- *  treat a turn as sent (hard constraint: no optimistic rendering of turn success). */
+/** Attaches to the runtime's `/api/tasks/:id/stream` via a streaming `fetch` (never
+ *  `EventSource` — the route authenticates on the `Authorization` header, which
+ *  `EventSource` cannot send: `streamRoute.ts:29`, `apps/dashboard/app/chat/api.ts`
+ *  `streamTask` doc). Resolving THIS promise is "the server stream opens" — the one
+ *  instant callers may treat a turn as sent (hard constraint: no optimistic rendering
+ *  of turn success).
+ *
+ *  SAME-ORIGIN, through `app/api/runtime/[...path]/route.ts`, on the path that maps to
+ *  the runtime route above (`/api/runtime/tasks/…` → `<runtime>/api/tasks/…`, route.ts:53
+ *  — see `lib/clara/api.ts`'s header for the whole finding and the `/api/api` hazard).
+ *  It streams by construction rather than by hope: the proxy returns
+ *  `new Response(res.body, …)` (`route.ts:121`) with `content-type` and `cache-control`
+ *  on its response allow-list (`:113-114`), so the runtime's `text/event-stream` and
+ *  `no-cache, no-transform` (`packages/runtime/src/streamRoute.ts:47-53`) survive, and
+ *  `signal: req.signal` (`:80`) carries the abort onward. The one header the outbound
+ *  allow-list drops, `accept`, is not read by `streamRoute.ts` — it sets the SSE headers
+ *  unconditionally. The remaining unknown is whether a Route Handler's streamed body
+ *  survives OpenNext-on-Workers; nothing in this repo can answer that, and the FS-10
+ *  preview walk (step S14) is the instrument that does.
+ *
+ *  `redirect: "manual"` for the reason `lib/clara/api.ts`'s `runtimeFetch` carries it,
+ *  and it matters MOST here: an unauthenticated 307 to `/login`, followed, is a 200
+ *  `text/html` body this reader would parse as SSE — no events, a graceless close, and
+ *  eight silent reattach attempts. Manual, `res.ok` is false and the attach throws. */
 export async function openTaskStream(opts: OpenTaskStreamOptions): Promise<AsyncGenerator<SseEvent>> {
   const doFetch = opts.fetchImpl ?? fetch;
-  const res = await doFetch(`${opts.runtimeBase}/api/tasks/${encodeURIComponent(opts.taskId)}/stream`, {
+  const res = await doFetch(`/api/runtime/tasks/${encodeURIComponent(opts.taskId)}/stream`, {
     headers: { authorization: `Bearer ${opts.token}`, accept: "text/event-stream" },
     cache: "no-store",
+    redirect: "manual",
     signal: opts.signal,
   });
   if (!res.ok || !res.body) throw new Error(`stream attach failed (${res.status})`);

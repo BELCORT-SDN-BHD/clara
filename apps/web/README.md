@@ -137,7 +137,10 @@ P-3: this paragraph read "the workbench tab pages are placeholder shells".)*
 ## Cloudflare
 
 Deployed via `@opennextjs/cloudflare` (Node.js runtime on Workers, not the Edge runtime).
-`wrangler.jsonc` declares no bindings yet — this is the foundation scaffold only.
+`wrangler.jsonc` declares no KV/R2/D1/service bindings yet; it DOES declare a `vars` block, so
+the Worker's non-secret configuration lives in the repo rather than only in the Cloudflare
+account (secrets stay with `wrangler secret put` and are named, values empty, in
+`.env.example`) — see that file's own comments for which is which and why.
 
 **Known deviation, by design:** `wrangler@4.126.0` (and its transitive deps
 `@cloudflare/kv-asset-handler`, `miniflare`) require **Node >= 22**; this monorepo's root

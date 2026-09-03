@@ -15,11 +15,11 @@ import { handleAuthWallMock, handleCheckoutMock } from "./fs4-checkout-mock.mjs"
 // live-stack/serve-live.mjs takes), consulted through the three hooks below so no
 // other spec's surface changes. See that file's header for what it does and does not
 // prove.
-import { handleChatParityApp, handleChatParitySupabase, startMockRuntime } from "./chat-parity-mock.mjs";
-// P6-5's own lane, the same file-disjoint shape, consulted through the two hooks below.
+import { handleChatParityRuntime, handleChatParitySupabase, startMockRuntime } from "./chat-parity-mock.mjs";
+// P6-5's own lane, the same file-disjoint shape, consulted through the three hooks below.
 // Every branch inside is scoped to ITS OWN ids and falls through otherwise, so it can run
 // beside the chat-parity lane without either starving the other's fixtures.
-import { P6_5_SESSIONS, handleP6_5App, handleP6_5Supabase } from "./agentic-finish-mock.mjs";
+import { P6_5_SESSIONS, handleP6_5App, handleP6_5Runtime, handleP6_5Supabase } from "./agentic-finish-mock.mjs";
 
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..");
@@ -414,10 +414,13 @@ async function handleSupabase(request, response, url) {
   sendJson(response, 404, { message: `unhandled e2e Supabase route: ${request.method} ${path}` }, cors);
 }
 
+/** The shared chat legs, AS THE RUNTIME SEES THEM (the chat/SSE repoint): the ONE session
+ *  list every walk's rail reads, plus a canned transcript per thread. Returns true when it
+ *  answered, so the runtime delegate chain can fall through to FS-4 C-6's confirm route. */
 async function handleChat(request, response, url) {
   if (request.method === "GET" && url.pathname === "/api/chat/sessions") {
     sendJson(response, 200, { sessions });
-    return;
+    return true;
   }
   const match = /^\/api\/chat\/sessions\/([^/]+)\/messages$/.exec(url.pathname);
   if (request.method === "GET" && match) {
@@ -438,9 +441,12 @@ async function handleChat(request, response, url) {
         created_at: "2026-09-02T03:00:00.000Z",
       }],
     });
-    return;
+    return true;
   }
-  sendJson(response, 404, { message: `unhandled e2e chat route: ${request.method} ${url.pathname}` });
+  // NOT a 404 any more: this is one link in the runtime delegate chain, and answering
+  // 404 here would swallow FS-4 C-6's confirm route. The mock runtime's own fallback
+  // owns the unhandled case.
+  return false;
 }
 
 const httpsServer = createHttpsServer(
@@ -453,30 +459,20 @@ const httpsServer = createHttpsServer(
       });
       return;
     }
-    // The chat legs are same-origin by construction: `lib/clara/api.ts`'s `runtimeBase()`
-    // is empty here, so the browser asks THIS server for them. They are answered before
-    // the proxy below, and never reach `next start` (which has no route for them).
+    // THE CHAT LEGS NO LONGER LIVE HERE, and their old comment said why they had to
+    // move: `runtimeBase()` was empty in this harness, so the browser asked THIS server
+    // for `/api/chat/*` and `/api/tasks/*` and "they never reach `next start`" — the
+    // suite was green on an origin the deployed Worker does not have, which is exactly
+    // how the launch blocker survived CI. They are RUNTIME legs now (the delegate chain
+    // where `startMockRuntime` is called below), and the browser's `/api/runtime/chat/*`
+    // and `/api/runtime/tasks/*` requests fall through to `proxyToNext` like every other
+    // app request — traversing `next start`, the firm-scope guard and the real proxy.
     //
-    // ORDER, resolved at the merge of origin/main `cea3da39` / #507: the chat-parity mock
-    // gets first refusal, then the parity-holes `handleChat`. That is safe in one
-    // direction only because the chat-parity mock matches EXACT ids — its own thread's
-    // `/messages`, its own thread's `/turns`, its own task's `/stream` — so it cannot
-    // swallow `/api/chat/sessions` or any thread #507 owns. The reverse order is NOT
-    // safe: `handleChat` claims the whole `/api/chat/sessions/` prefix and would answer
-    // the chat-parity thread's transcript with a canned assistant message, where a PARKED
-    // task must have an empty one (`clara.settle_chat_turn` is what writes the assistant
-    // row, and it cancels the pending interruption in the same breath).
-    // P6-5's lane sits between them, for the SAME reason and with the same property: its
-    // `/messages` handlers match three exact thread ids and nothing else, and it claims the
-    // shared `/api/chat/sessions` list only after the chat-parity mock has declined it (that
-    // walk navigates straight to its own thread and never reads a list).
-    handleChatParityApp(request, response, url)
-      .then((handled) => handled || handleP6_5App(request, response, url))
+    // What stays here is P6-5's ONE app-origin control endpoint (`/e2e-p6-5/reset`),
+    // which is not a runtime route and never was.
+    handleP6_5App(request, response, url)
       .then((handled) => {
         if (handled) return;
-        if (url.pathname === "/api/chat/sessions" || url.pathname.startsWith("/api/chat/sessions/")) {
-          return handleChat(request, response, url);
-        }
         proxyToNext(request, response);
       })
       .catch((error) => sendJson(response, 500, { message: error instanceof Error ? error.message : "mock failure" }));
@@ -528,12 +524,28 @@ await new Promise((resolveListen, rejectListen) => {
 // the same mock runtime the chat-parity lane starts, because `CLARA_RUNTIME_URL`
 // can only name one origin. See chat-parity-mock.mjs's `startMockRuntime` for
 // the merge defect that made this necessary.
-const mockRuntime = startMockRuntime(mockRuntimePort, (request, response, url) =>
-  handleAuthWallMock({
+//
+// THE CHAT LEGS JOIN THAT CHAIN, in the SAME ORDER they had on the app origin and for
+// the same reasons (#507's merge resolution, carried here verbatim): the chat-parity
+// mock gets first refusal because it matches EXACT ids — its own thread's `/messages`,
+// its own thread's `/turns`, its own task's `/stream` — so it cannot swallow
+// `/api/chat/sessions` or any thread #507 owns. The reverse order is NOT safe:
+// `handleChat` claims the whole `/api/chat/sessions/` prefix and would answer the
+// chat-parity thread's transcript with a canned assistant message, where a PARKED task
+// must have an empty one (`clara.settle_chat_turn` writes the assistant row, and it
+// cancels the pending interruption in the same breath). P6-5's lane sits between them,
+// with the same property: three exact thread ids and nothing else, and it never claims
+// the shared session list. `handleChat` is last of the three and now returns false on a
+// miss, so FS-4 C-6's confirm route still reaches its own handler.
+const mockRuntime = startMockRuntime(mockRuntimePort, async (request, response, url) => {
+  if (await handleChatParityRuntime(request, response, url)) return true;
+  if (await handleP6_5Runtime(request, response, url)) return true;
+  if (await handleChat(request, response, url)) return true;
+  return handleAuthWallMock({
     request, response, path: url.pathname, cors: {}, state,
     sendJson, readJson, accessToken, signupCode: E2E_SIGNUP_CODE,
-  }),
-);
+  });
+});
 
 const nextBin = join(webRoot, "node_modules", "next", "dist", "bin", "next");
 const next = spawn(

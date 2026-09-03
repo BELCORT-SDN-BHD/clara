@@ -313,16 +313,25 @@ export async function handleP6_5Supabase(request, response, path, url, sendJson,
   return false;
 }
 
-/** The same-origin chat legs for this walk's three threads. */
+/** This lane's ONE app-origin control endpoint. Not a runtime route and never was —
+ *  the walk POSTs it directly to reset the lane's own fixture state. */
 export async function handleP6_5App(request, response, url) {
-  const path = url.pathname;
-
-  if (request.method === "POST" && path === "/e2e-p6-5/reset") {
+  if (request.method === "POST" && url.pathname === "/e2e-p6-5/reset") {
     resetP6_5();
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ reset: true }));
     return true;
   }
+  return false;
+}
+
+/** The chat legs for this walk's three threads, AS THE RUNTIME SEES THEM. They moved out
+ *  of the app-origin handler above when the chat lane was repointed at the same-origin
+ *  proxy: the browser now asks for `/api/runtime/chat/sessions/<id>/messages`, which the
+ *  proxy forwards here as `/api/chat/sessions/<id>/messages` (route.ts:53). Paths
+ *  unchanged; the hop that reaches them is real. */
+export async function handleP6_5Runtime(request, response, url) {
+  const path = url.pathname;
 
   // `/api/chat/sessions` is DELIBERATELY NOT CLAIMED HERE — see `P6_5_SESSIONS`. There is one
   // session list per server, and this lane's rows are appended to it rather than answered

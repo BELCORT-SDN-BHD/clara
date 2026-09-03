@@ -118,10 +118,9 @@ function App(): ReactElement {
 function withFetch(impl: (url: string, init?: RequestInit) => Promise<Response> | Response, run: (calls: Call[]) => Promise<void>): Promise<void> {
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const originalRuntime = process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
   const calls: Call[] = [];
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  delete process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
+  // No runtime-base variable to unset: the chat lane is same-origin (lib/clara/api.ts).
   globalThis.fetch = (async (input, init) => {
     const url = String(input);
     let body: unknown = null;
@@ -135,8 +134,6 @@ function withFetch(impl: (url: string, init?: RequestInit) => Promise<Response> 
     globalThis.fetch = originalFetch;
     if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
-    if (originalRuntime === undefined) delete process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
-    else process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL = originalRuntime;
   });
 }
 
@@ -181,9 +178,9 @@ test("a PARKED clarify reaches the thread and is answerable there, through the p
   try {
     await withFetch(
       (url) => {
-        if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
-        if (url === `/api/chat/${THREAD_ID}/turns`) return json({ task_id: TASK_ID }, 202);
-        if (url === `/api/tasks/${TASK_ID}/stream`) return parked.response;
+        if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
+        if (url === `/api/runtime/chat/${THREAD_ID}/turns`) return json({ task_id: TASK_ID }, 202);
+        if (url === `/api/runtime/tasks/${TASK_ID}/stream`) return parked.response;
         if (url.includes("/rest/v1/rpc/answer_interruption")) {
           row = { ...row, status: "answered", answer: { text: "ROME PROPERTIES" }, answered_by: "u1", answered_at: "2026-09-02T00:05:00Z" };
           return json({ status: "answered" });
@@ -272,9 +269,9 @@ test("with two clarify rounds live, ONLY the still-parked one carries a control 
   try {
     await withFetch(
       (url) => {
-        if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
-        if (url === `/api/chat/${THREAD_ID}/turns`) return json({ task_id: TASK_ID }, 202);
-        if (url === `/api/tasks/${TASK_ID}/stream`) return parked.response;
+        if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
+        if (url === `/api/runtime/chat/${THREAD_ID}/turns`) return json({ task_id: TASK_ID }, 202);
+        if (url === `/api/runtime/tasks/${TASK_ID}/stream`) return parked.response;
         if (url.includes("/rest/v1/agent_interruptions")) return json([pendingSecond]);
         if (url.includes("/rest/v1/caller_context")) return json([]);
         throw new Error(`unexpected fetch: ${url}`);

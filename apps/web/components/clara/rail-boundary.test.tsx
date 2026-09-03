@@ -57,10 +57,10 @@ const messageFor = (threadId: string, text: string) => ({
 });
 
 function router(url: string): Response {
-  if (url.endsWith("/api/chat/sessions")) return json({ sessions: SESSIONS });
-  if (url.includes(`/api/chat/sessions/${THREAD_A}/messages`)) return json(messageFor(THREAD_A, "CLIENT A TRANSCRIPT"));
-  if (url.includes(`/api/chat/sessions/${THREAD_B}/messages`)) return json(messageFor(THREAD_B, "CLIENT B TRANSCRIPT"));
-  if (url.includes(`/api/chat/sessions/${THREAD_FIRM}/messages`)) return json(messageFor(THREAD_FIRM, "FIRM TRANSCRIPT"));
+  if (url.endsWith("/api/runtime/chat/sessions")) return json({ sessions: SESSIONS });
+  if (url.includes(`/api/runtime/chat/sessions/${THREAD_A}/messages`)) return json(messageFor(THREAD_A, "CLIENT A TRANSCRIPT"));
+  if (url.includes(`/api/runtime/chat/sessions/${THREAD_B}/messages`)) return json(messageFor(THREAD_B, "CLIENT B TRANSCRIPT"));
+  if (url.includes(`/api/runtime/chat/sessions/${THREAD_FIRM}/messages`)) return json(messageFor(THREAD_FIRM, "FIRM TRANSCRIPT"));
   if (url.includes("agent_tasks_visible")) return json([]);
   if (url.includes("/rest/v1/clients")) return json([]);
   if (url.includes("/rest/v1/onboarding_plans")) return json([]);
@@ -71,16 +71,13 @@ function router(url: string): Response {
 function withFetch(run: () => Promise<void>): Promise<void> {
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const originalRuntime = process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  delete process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
+  // No runtime-base variable to unset: the chat lane is same-origin (lib/clara/api.ts).
   globalThis.fetch = (async (input: RequestInfo | URL) => router(String(input))) as typeof fetch;
   return run().finally(() => {
     globalThis.fetch = originalFetch;
     if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
-    if (originalRuntime === undefined) delete process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
-    else process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL = originalRuntime;
   });
 }
 

@@ -25,11 +25,16 @@ import { buildOutbound } from "@/lib/runtime/outbound";
 // (wire.ts's fail-closed precedent: a missing destination is a configuration fact to
 // surface honestly, not to paper over).
 //
-// Scope: this proxies `/api/runtime/*` to the runtime's `/api/*` — today that is
-// exactly the document-intake legs (lib/documents/intake.ts: begin/bytes/finalize)
-// and the document-bytes evidence viewer (lib/documents/bytes.ts). It carries no
-// per-route allowlist of its own; the runtime is the authority on which paths exist
-// (an unknown path 404s from the runtime itself, forwarded verbatim).
+// Scope: this proxies `/api/runtime/*` to the runtime's `/api/*` — the document-intake
+// legs (lib/documents/intake.ts: begin/bytes/finalize), the document-bytes evidence
+// viewer (lib/documents/bytes.ts), the durable interview runner (lib/interview/api.ts)
+// and, since the FS-10 pre-cutover fix, the CHAT and TASK-STREAM legs
+// (lib/clara/api.ts, lib/clara/stream.ts — which previously rode a build-time browser
+// URL that was measurably dead on a deployed origin either way it was set). It carries
+// no per-route allowlist of its own; the runtime is the authority on which paths exist
+// (an unknown path 404s from the runtime itself, forwarded verbatim). That list is
+// therefore a description of today's callers, not a gate — nothing here has to change
+// when a new runtime route acquires a caller.
 
 function runtimeBase(): string | null {
   const url = process.env.CLARA_RUNTIME_URL;

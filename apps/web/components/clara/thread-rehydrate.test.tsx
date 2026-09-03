@@ -55,10 +55,9 @@ function App(): ReactElement {
 function withFetch(impl: (url: string) => Response, run: (calls: string[]) => Promise<void>): Promise<void> {
   const originalFetch = globalThis.fetch;
   const originalUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const originalRuntime = process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
   const calls: string[] = [];
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
-  delete process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
+  // No runtime-base variable to unset: the chat lane is same-origin (lib/clara/api.ts).
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     calls.push(url);
@@ -68,8 +67,6 @@ function withFetch(impl: (url: string) => Response, run: (calls: string[]) => Pr
     globalThis.fetch = originalFetch;
     if (originalUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     else process.env.NEXT_PUBLIC_SUPABASE_URL = originalUrl;
-    if (originalRuntime === undefined) delete process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL;
-    else process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL = originalRuntime;
   });
 }
 
@@ -99,7 +96,7 @@ test("a FAILED first transcript read reports the failure and offers a retry — 
     (url) => {
       const shared = NO_RUN(url);
       if (shared) return shared;
-      if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) {
+      if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) {
         attempts += 1;
         // The first read fails the way a real one does — a 500 from the runtime.
         if (attempts === 1) return json({ error: "internal" }, 500);
@@ -141,7 +138,7 @@ test("a load failure AFTER a successful read keeps the transcript on screen unde
     (url) => {
       const shared = NO_RUN(url);
       if (shared) return shared;
-      if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) {
+      if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) {
         attempts += 1;
         if (attempts === 1) {
           return json({ messages: [{ id: "m1", role: "assistant", parts: [{ type: "text", text: "The first transcript." }], turn_key: null, task_id: null, seq: 1, created_at: "2026-09-02T00:00:00Z" }] });
@@ -172,7 +169,7 @@ test("a MOUNT during a parked turn re-attaches the question from the DB — no s
   // provisional buffer at all. Everything on screen has to come from a read.
   await withFetch(
     (url) => {
-      if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
+      if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
       if (url.includes("agent_tasks_visible")) return json([{ id: TASK_ID, status: "awaiting_input", created_at: new Date(Date.now() - 42_000).toISOString() }]);
       if (url.includes("agent_interruptions")) {
         return json([{
@@ -193,7 +190,7 @@ test("a MOUNT during a parked turn re-attaches the question from the DB — no s
         await settleUntil(h, () => h.find(buttonNamed("Answer")) !== null, "the inline answer control");
 
         assert.equal(
-          calls.filter((u) => u.includes("/api/tasks/")).length,
+          calls.filter((u) => u.includes("/api/runtime/tasks/")).length,
           0,
           "no stream was opened — this question came from the database, which is the only place it exists after a reload",
         );
@@ -213,7 +210,7 @@ test("a MOUNT during a parked turn re-attaches the question from the DB — no s
 test("a RUNNING turn found at mount shows the working line; a settled thread shows no clock at all", async () => {
   await withFetch(
     (url) => {
-      if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
+      if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
       if (url.includes("agent_tasks_visible")) return json([{ id: TASK_ID, status: "running", created_at: new Date(Date.now() - 125_000).toISOString() }]);
       if (url.includes("caller_context")) return json([]);
       throw new Error(`unexpected fetch: ${url}`);
@@ -233,7 +230,7 @@ test("a RUNNING turn found at mount shows the working line; a settled thread sho
 test("NO RUN means NO clock — an elapsed line with nothing behind it is a fabricated measurement", async () => {
   await withFetch(
     (url) => {
-      if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
+      if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) return json({ messages: [] });
       if (url.includes("agent_tasks_visible")) return json([]);
       if (url.includes("caller_context")) return json([]);
       throw new Error(`unexpected fetch: ${url}`);
@@ -255,7 +252,7 @@ test("NO RUN means NO clock — an elapsed line with nothing behind it is a fabr
 test("a run read that FAILS leaves no clock and no question, and does not disturb the transcript", async () => {
   await withFetch(
     (url) => {
-      if (url.includes(`/api/chat/sessions/${THREAD_ID}/messages`)) {
+      if (url.includes(`/api/runtime/chat/sessions/${THREAD_ID}/messages`)) {
         return json({ messages: [{ id: "m1", role: "assistant", parts: [{ type: "text", text: "A settled answer." }], turn_key: null, task_id: null, seq: 1, created_at: "2026-09-02T00:00:00Z" }] });
       }
       if (url.includes("agent_tasks_visible")) return json({ error: "internal" }, 500);

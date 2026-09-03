@@ -38,7 +38,11 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
   2.0/2.1 A+AA) on both faces, with a positive control proving the scan actually inspected the
   page. Runs on `serve-built.mjs`'s mocked stack — see `chat-parity-mock.mjs`'s header for the
   exact line between what is real (the browser, the built bundle, the same-origin runtime proxy
-  route) and what is faked (PostgREST, the runtime's intake legs, the chat/stream legs).
+  route) and what is faked (PostgREST and the runtime itself — its intake legs AND its chat and
+  task-stream legs, all of them now reached THROUGH that proxy). Since the chat/SSE repoint this
+  walk is also the local proof that a turn and a live SSE attach survive the proxy under
+  `next start`; whether a streamed body survives OpenNext-on-Workers is a different question,
+  and the FS-10 preview walk owns it.
 - `chat-parity-mock.mjs` — that walk's own mock lane, a file-disjoint sibling of
   `serve-built.mjs` (the same shape `live-stack/serve-live.mjs` takes), reached through three
   small hooks so no other spec's surface changes.

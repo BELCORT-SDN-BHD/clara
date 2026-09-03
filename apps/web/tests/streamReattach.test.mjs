@@ -49,7 +49,7 @@ function sseResponse(frames) {
 test("detached triggers exactly one reattach, which then runs to done", async () => {
   const calls = [];
   const fetchImpl = async (url, init) => {
-    calls.push({ url, authorization: init.headers.authorization });
+    calls.push({ url, authorization: init.headers.authorization, redirect: init.redirect });
     if (calls.length === 1) {
       return sseResponse([frame("chunk", { n: 1 }), frame("detached", { taskId: "t1", reason: "stream_window_expired" })]);
     }
@@ -64,7 +64,6 @@ test("detached triggers exactly one reattach, which then runs to done", async ()
   const events = [];
   const { sleepImpl } = fakeSleep();
   await runClaraTaskStream({
-    runtimeBase: "http://runtime.test",
     token: "tok-123",
     taskId: "t1",
     signal: new AbortController().signal,
@@ -75,7 +74,14 @@ test("detached triggers exactly one reattach, which then runs to done", async ()
   });
 
   assert.equal(calls.length, 2, "exactly one reattach — a second fetch to the same stream route");
-  assert.equal(calls[0].url, "http://runtime.test/api/tasks/t1/stream");
+  // SAME-ORIGIN, and both attaches, not just the first: a reattach that fell back to a
+  // cross-origin base would be a working stream in this test and a CORS-blocked one in a
+  // browser. The path is the runtime's `/api/tasks/:id/stream` with its `/api` prefix
+  // replaced by `/api/runtime` — `app/api/runtime/[...path]/route.ts` re-adds `/api/`.
+  for (const call of calls) {
+    assert.equal(call.url, "/api/runtime/tasks/t1/stream");
+    assert.equal(call.redirect, "manual", "a 307 to /login must never be read as an SSE body");
+  }
   assert.equal(calls[0].authorization, "Bearer tok-123");
   assert.equal(opens.length, 2, "onOpen fires once per attach");
   assert.deepEqual(events, ["chunk", "detached", "chunk", "message", "done"]);
@@ -86,7 +92,6 @@ test("an already-aborted signal never attaches at all", async () => {
   const controller = new AbortController();
   controller.abort();
   await runClaraTaskStream({
-    runtimeBase: "http://runtime.test",
     token: "tok",
     taskId: "t1",
     signal: controller.signal,
@@ -103,7 +108,6 @@ test("a clean single-attach done never reattaches", async () => {
   let fetchCalls = 0;
   const events = [];
   await runClaraTaskStream({
-    runtimeBase: "http://runtime.test",
     token: "tok",
     taskId: "t1",
     signal: new AbortController().signal,
@@ -124,8 +128,7 @@ test("a non-ok response throws with the status in the message", async () => {
   await assert.rejects(
     () =>
       runClaraTaskStream({
-        runtimeBase: "http://runtime.test",
-        token: "tok",
+            token: "tok",
         taskId: "t1",
         signal: new AbortController().signal,
         fetchImpl: async () => new Response(null, { status: 404 }),
@@ -150,7 +153,6 @@ test("a multi-detach cycle backs off exponentially and the attempt counter incre
   const { sleepImpl, calls: sleptFor } = fakeSleep();
   const attempts = [];
   await runClaraTaskStream({
-    runtimeBase: "http://runtime.test",
     token: "tok",
     taskId: "t1",
     signal: new AbortController().signal,
@@ -189,7 +191,6 @@ test("the give-up ceiling lands the thread store in connection-lost with no furt
   const { sleepImpl } = fakeSleep();
 
   await runClaraTaskStream({
-    runtimeBase: "http://runtime.test",
     token: "tok",
     taskId: "t1",
     signal: new AbortController().signal,
@@ -232,7 +233,6 @@ test("a clean close with no terminal event surfaces visibly, stops the spinner, 
   const reconnectAttempts = [];
   let snapshotAtUngracefulClose = null;
   await runClaraTaskStream({
-    runtimeBase: "http://runtime.test",
     token: "tok",
     taskId: "t1",
     signal: new AbortController().signal,

@@ -10,6 +10,45 @@
     // https://developers.cloudflare.com/workers/configuration/compatibility-flags/#global-fetch-strictly-public
     "global_fetch_strictly_public"
   ],
+  // THE WORKER'S NON-SECRET CONFIGURATION, WITH A HOME IN THE REPO.
+  //
+  // Until this block existed, every one of these lived only in the Cloudflare account:
+  // nothing in the repo said what the deployed Worker was configured with, and nothing
+  // went red when a value was missing or wrong. That is the exact shape the 2026-07-26
+  // intake incident punished (docs/ops/incident-2026-07-26-intake-storage.md:41-56) — a
+  // single unset runtime URL, invisible in the tree, diagnosed only from a failing upload.
+  //
+  // WHAT MAY LIVE HERE: values that are PUBLIC FACTS about this deployment. A secret must
+  // never appear in this file — it is committed. Secrets stay with `wrangler secret put`
+  // and are listed (names only) in apps/web/.env.example: SUPABASE_SERVICE_ROLE_KEY,
+  // RESEND_API_KEY, CLARA_RATE_WALL_PEPPER, CLARA_AUTH_WALL_SERVICE_TOKEN,
+  // STRIPE_SECRET_KEY.
+  //
+  // ONE NAME, ONE HOME. A name declared here is NOT also set with `wrangler secret put`;
+  // the deploy-time list in the FS-10 cutover record drops these three accordingly.
+  //
+  // INVITE_MAIL_FROM is deliberately ABSENT: it is not a secret, but its value is a
+  // deployment fact (the verified Resend sending address) that this repo does not state,
+  // and inventing one here would be worse than leaving it to the ceremony. Its name's
+  // repo-visible home is .env.example.
+  "vars": {
+    // The runtime origin the same-origin proxy forwards to, read at REQUEST time by
+    // app/api/runtime/[...path]/route.ts. Since the FS-10 pre-cutover fix this carries
+    // the chat and task-stream legs as well as intake, the bytes viewer and the
+    // interview runner — i.e. every runtime call the browser makes. Unset ⇒ a typed
+    // 503 and no chat at all, which is why it belongs somewhere a reader can see it.
+    "CLARA_RUNTIME_URL": "https://clara-runtime.fly.dev",
+    // The exact public origins this app answers as (scheme + host, comma-separated).
+    // lib/same-origin.ts compares the browser's Origin against this list rather than
+    // trusting X-Forwarded-Host, which is written by whoever spoke to us.
+    "CLARA_PUBLIC_ORIGINS": "https://app.clarabook.com",
+    // On apps/web this is CF-Connecting-IP — the header THIS app's own Cloudflare edge
+    // sets. Never X-Forwarded-For: any client can send it, and a wall keyed on a
+    // client-settable header is a form field the attacker fills in. The RUNTIME's
+    // same-named variable takes a different correct value (X-Clara-Client-IP); see
+    // apps/web/.env.example for why the two differ.
+    "CLARA_TRUSTED_CLIENT_IP_HEADER": "CF-Connecting-IP"
+  },
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
