@@ -372,3 +372,74 @@ re-reading find?"
 > unknown, not merely unverified**), and the *Confirm signup* template confirmed to carry
 > `{{ .Token }}`. All three are read back at the Wave-G walk; the checklist's two proof-bearing boxes
 > stay OPEN until then, because each names a Management API read as its proof.
+
+## 2026-09-03 — §15's per-ruling rows move to a sibling at the digest's 500-line ceiling
+
+> Mechanical, not a ruling. `README.md` stood at **exactly 500 lines** after 裁-146's row, and the
+> ceiling here is the PreToolUse max-file-size hook rather than a CI gate — so the next ruling row
+> would have BLOCKED an agent's write instead of reding a run. The per-ruling rows (the body of item
+> 86 and item 87, 裁-111 through 裁-146) were moved **byte-for-byte** into
+> [`README-rulings-2026-09.md`](README-rulings-2026-09.md) — md5 `e860d0fc8186a233722af7385ff2dae0`,
+> 16,777 bytes, proven on both sides of the move by the script that did it — and the digest keeps the
+> **law** (item 86, re-authored to state it and to point here). Every row minted after the split is
+> written in the sibling, never in the digest. The convention is the ruling ledgers' own
+> (`mohe-grill-rulings-2026-09-02-pm.md` continues `-09-02`; `-09-03` continues that), and the
+> precedent for splitting a digest at its ceiling is the 2026-08-23 archive move. This log is
+> unaffected: minutes keep landing here.
+
+## 2026-09-03 — 裁-147: the C-2 operator screen is post-beta; a manual check line holds its place
+
+> **裁-147** (owner, ≈17:12 MYT by the shell clock, on B6 of the §9 sitting — 「照建议」). FS-4 C-2's two
+> operator doors, `clara.list_stripe_event_problems` and `clara.resolve_stripe_event_problem`
+> (`0160_checkout_gate_c2_stripe_events.sql`, both walled to an owner of the operator firm), have
+> **zero callers** across `apps` and `packages/runtime`, while the design promises an operator review
+> surface. Ruled: **build the screen after beta live** (a Backlog row), and **now** add ONE manual line
+> to `docs/ops/wave-g-setup-checklist.md` — at the walk and again at cutover, the list door (or a
+> select on `clara.stripe_event_problems`) must come back EMPTY of unresolved rows before the cutover
+> proceeds, any row cleared through `resolve_stripe_event_problem` with its reason. The owner's own
+> condition travels with it: the check is cheap **only if that checklist line exists**. Executed in the
+> checklist's Billing (Stripe) section and in `docs/plan/active/checkout-gate-design-part2.md`, whose
+> M4 "where it is watched" sentence now names the checklist line as the interim surface. Digest row 88.
+
+## 2026-09-03 — 裁-148: the non-zero checkout walk moves to the real-money switch
+
+> **裁-148** (owner, ≈17:16 MYT by the shell clock, on B7 — 「B7 照建议」, after the ≈17:14 alignment that
+> the billing model, KYB and the lawyer-refined legal texts are all pre-上市 backlog while the BETA
+> versions of those texts ship WITH beta as agent templates). The Wave-G checklist demanded a
+> **non-zero** test-price checkout — written before 裁-126 fixed the whole beta in the Stripe sandbox at
+> **MYR 0**. Since the checkout door reads only the CURRENT plan, honouring both would mean temporarily
+> making a priced plan current at the walk, for a path beta never takes. Ruled: **walk checkout once at
+> the seeded beta price (sandbox, MYR 0)**; the non-zero proof — charge, webhook, invoice — belongs to
+> the **real-money switch ceremony** with Stripe live mode and KYB (裁-125/126); **no temporary
+> current-plan switch at Wave-G**. The 裁-58 dissent is re-homed, not withdrawn. The pre-上市 roadmap
+> agreed in the same exchange — beta live → the pricing sitting (裁-58) → the tier tranche (裁-144) →
+> the lawyer's pass → the real-money switch + KYB + the non-zero walk = 上市 — is recorded as an ordered
+> block in `PROGRESS.md`'s Backlog. Digest row 89.
+
+## 2026-09-03 — 裁-149: the runtime's background-client error contract (option C)
+
+> **裁-149** (owner, ≈17:22 MYT by the shell clock, on B8 — 「照建议」 = option C, asked for in plain
+> language first: 「解释清楚这个, 我不是很明白」). `packages/runtime/lib/relay.mjs` attaches no `'error'`
+> listener to its pool or to the leader's dedicated client, so any idle-backend error becomes an
+> `uncaughtException` and the process dies (Fly restarts it; durable runs resume). Ruled **hybrid**:
+> the **general pool** gets a listener that logs, counts and raises a health flag on `/ready` — an
+> availability signal, never a silent swallow — while the **leader's session stays crash-loud**,
+> because its loss releases the advisory lock and a standby takes over, which is the designed failover.
+> The behaviour is written as a CONTRACT in `docs/ARCHITECTURE.md`, per pool, since relay's failover
+> semantics depend on it; the work is a **post-beta** product PR of about half a lane-unit riding a v7x
+> deploy, with a mutant proving the leader path still crashes. Today's fail-loud behaviour is safe and
+> stands until then. This closes §9 of the owner page: no owner ruling is open before beta live.
+> Digest row 90.
+
+## 2026-09-03 — 裁-150: the harness is the handover; the session closes after the beta-live e2e
+
+> **裁-150** (owner, ≈18:02 MYT by the shell clock). After the Wave-G walk and the launch sitting this
+> session ENDS, and the repo is the handover: hard constraint 8 already makes the repo the system of
+> record and `PROGRESS.md` the state authority, so every open item must live there as a Backlog or
+> Known-issues row carrying its **owner · next step · ruling number**, with the machine-local memory
+> holding lessons and preferences only. **No next lanes** are dispatched on an agent's initiative — the
+> owner reads Backlog and Known issues and decides what to perfect, and the next session starts on his
+> ask. The Backlog is therefore written as an ordered PICK-LIST: the pre-上市 roadmap (裁-148) first,
+> then the post-beta product PRs already ruled (裁-147, 裁-149), then the day's technical rows. Two
+> truings remain: this afternoon's, and the final clock-out truing after the launch sitting. Digest
+> row 91.

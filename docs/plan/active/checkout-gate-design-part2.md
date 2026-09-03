@@ -207,6 +207,7 @@ walled to an **owner of the operator firm** — the same `firms.is_operator` pre
 lets the next sweep re-attempt the event: the recovery path for a payment whose metadata was
 momentarily unresolvable. **Where it is watched:** the operator firm's review surface, and an open
 unresolved row is a beta-checklist item — named here, not left to a runbook nobody opens.
+**RE-POINTED 2026-09-03 by 裁-147 (owner, ≈17:12 MYT): the review SURFACE above does not exist** — a census over `apps` and `packages/runtime` returns ZERO callers of either door — so the screen is ruled **post-beta** (a `PROGRESS.md` Backlog row, owner = the first post-beta UI lane) and the beta-checklist item this paragraph promises is now a real line in `docs/ops/wave-g-setup-checklist.md` under Billing (Stripe): at the Wave-G walk AND again at cutover the operator runs the list door — or a plain select on `clara.stripe_event_problems` — and the result must be EMPTY of unresolved rows before the cutover proceeds. **Until the screen exists, that checklist line IS the surface**, which is the ruling's own condition: the manual check is cheap only if the line exists. Nothing else in M4 changes — the doors, their wall and the resolution semantics are as built.
 
 **The applier's step-1 disjunct is an RM0-scoped relaxation, and it is marked as one (M10).**
 `payment_status = 'paid'` OR (`mode='subscription'` AND `status='complete'`) — **the second

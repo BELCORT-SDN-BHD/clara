@@ -187,12 +187,32 @@ runtime. Secrets move env-to-env and are never printed.
       `265a8ee7`, 2026-09-03). Proof: the as-run's `select object_kind, local_key, stripe_id`
       plus one `open_checkout_intent` call that does NOT raise `CLR10`. Without this seed a beta
       signup dies at `CLR10 no stripe price is mapped for this plan`.
-- [ ] **The Wave-G walk exercises checkout in Stripe TEST mode at a non-zero test price**, with
-      test cards — this is the 裁-58 dissent's mitigation: the real-money charge path is not
-      exercised before launch, so the charge/webhook/invoice path must be proven in test mode
-      instead. A zero-amount or skipped checkout does not satisfy this line.
-- [ ] Proof: the TEST-mode charge, its webhook delivery, and the resulting invoice/receipt
-      surface, all named in the Wave-G as-run.
+- [ ] **The Wave-G walk exercises checkout ONCE at the SEEDED BETA PRICE — Stripe sandbox, MYR 0
+      (re-cut by 裁-148, owner, 2026-09-03 ≈17:16 MYT).** This line used to demand a NON-ZERO test
+      price, written before 裁-126 fixed the whole beta in the sandbox and 裁-58 left every plan at
+      RM0/`trial`. The two cannot both hold: `open_checkout_intent` reads only the **current** plan,
+      so a priced plan can be seeded but not walked unless it is temporarily made current — an ops
+      act on the admission plane, at the walk, for a path beta never takes. **No such temporary
+      switch happens at Wave-G.** A skipped checkout still does not satisfy this line: the session
+      must be created, completed and admitted.
+- [ ] Proof: the sandbox Checkout Session, its webhook delivery, the `firm_registration_payments`
+      row it wrote and the firm it admitted, all named in the Wave-G as-run.
+- [ ] **The NON-ZERO price walk belongs to the REAL-MONEY SWITCH ceremony, not here (裁-148).** The
+      charge, its webhook and the resulting invoice/receipt surface are proven there, with Stripe
+      **live mode** and KYB beside them (裁-125/126) and `CLARA_STRIPE_LIVEMODE` flipped in the same
+      act. The 裁-58 dissent's mitigation is not withdrawn — it is re-homed to the only ceremony
+      where the charge path is real. Owner: the pricing sitting → the real-money switch.
+- [ ] **AT THE WALK AND AGAIN AT CUTOVER — the Stripe problem-event queue must be EMPTY (裁-147,
+      owner, 2026-09-03 ≈17:12 MYT).** The operator runs `clara.list_stripe_event_problems()` (or a
+      plain `select * from clara.stripe_event_problems where resolved_at is null`) and the result
+      must carry **no unresolved rows** before the cutover proceeds; anything present is cleared
+      through `clara.resolve_stripe_event_problem(problem, resolution, op_key)` with its reason,
+      which re-arms the next sweep to retry the event. Both doors are walled to an OWNER of the
+      operator firm (`0160_checkout_gate_c2_stripe_events.sql`), so this is BELCORT's own act after
+      the `is_operator` step below. **There is no screen yet** — it is a post-beta Backlog row under
+      裁-147, and this line is what makes the manual check cheap enough to be the interim answer.
+- [ ] Proof: the two queries and their output pasted into the Wave-G as-run, once at the walk and
+      once at cutover; an empty result is a positive read and is recorded as one.
 
 ## BELCORT operator flag — 裁-59 / 裁-121③
 
@@ -200,6 +220,72 @@ runtime. Secrets move env-to-env and are never printed.
       (裁-121③, reconciling 裁-43/裁-59 with 裁-76 — the flag no longer waits on the G1
       THREE-switch ceremony, which is post-beta). Runbook: `docs/ops/g1-operator-firm-ceremony.md`.
 - [ ] Proof: the Wave-G reset's as-run naming the flag set.
+
+## Product walk — the owner sees the core path with their own eyes
+
+*Added 2026-09-03 ≈18:25 MYT at the owner's ask — 「e2e 也有onboard, upload doc… all core features 都可以实现
+right?」 — because every line ABOVE this section proves the ADMISSION path (mail, signup, checkout, the operator
+flag) and none of them proves the PRODUCT. **Not a ruling**: an owner-requested walk, recorded as one. **WHO:**
+the owner supplies the eyes and does each step in the real UI; the lead supplies the instrument named beside it
+and files the evidence in the Wave-G as-run. **WHAT A FAILURE DOES:** it becomes a `PROGRESS.md` Known-issues row
+for the launch sitting with what was seen and where it stopped — it does NOT silently block the cutover, and it is
+never worked around by touching a mechanism (hard constraint 14). Every route and door below was measured on
+`main` at `5eab358d`; where a surface is not shipped the line says so instead of inventing one. **Migrations
+`0154`…`0164` apply at the reset, so anything they carry is walked AFTER it, not before.**
+
+- [ ] **1 · Onboard a client company.** From the firm's client register `/clients`
+      (`apps/web/app/(firm)/clients/page.tsx`), start onboarding and reach a client that appears in the register.
+      The engine is the durable **`clientOnboarding_v4`** workflow — the live registry pin at
+      `packages/runtime/workflows/registry.ts:129`, serving on v71 — and the surfaces are the chat lane's
+      `apps/web/components/clara/OnboardingChecklistCard.tsx` and `InterviewRunCard.tsx` (the FS-5 interview
+      runner, #483), reached by the ⌘K **Do** action `begin_client_onboarding`
+      (`apps/web/lib/command/do-actions.ts`). **Instrument:** the new client's row in `/clients` plus the run's
+      own workflow id in the as-run. **Note before the walk:** onboarding STARTS in the chat lane, not from a
+      button on the register; if the owner cannot find the entry point from `/clients`, that is a discoverability
+      finding for the launch sitting, not a build failure.
+- [ ] **2 · Upload documents and see what Clara read.** Attach a document in the chat composer or through the
+      client's **Documents** tab (`apps/web/app/(firm)/clients/[clientId]/documents/page.tsx` →
+      `documents-workbench.tsx`), which rides the Slice-5 intake pair
+      `POST /api/intake/documents` then `PUT /api/intake/documents/:id/bytes`
+      (`packages/runtime/src/intakeRoutes.ts`). **Instrument:** the extraction result rendered in
+      `apps/web/components/documents/document-extract-panel.tsx` — the OCR/extraction output visible in the UI,
+      not merely a stored row — plus the document's own detail view. A document that uploads but shows no
+      extraction is the finding worth having.
+- [ ] **3 · Upload a bank statement and see the lines.** Same intake path, read by the statement reader
+      (`packages/runtime/lib/statement-parse.mjs`, `statement-grammar.mjs`, `statement-corroboration.mjs`).
+      **Instrument:** the client's **Bank** tab (`apps/web/app/(firm)/clients/[clientId]/bank/page.tsx` →
+      `bank-workbench.tsx`, `statements-section.tsx`) listing the statement and its lines. The figures are the
+      DB's, never the model's (hard constraint 2) — read them off the tab, not off a chat reply.
+- [ ] **4 · The agent's reconciliation drafts appear, and a human decides.** The matcher and the auto-draft belt
+      (`packages/runtime/lib/matcher.mjs`, `autodraft.mjs`) propose; the human POSTS or REFUSES in the client's
+      **Journals** tab (`apps/web/components/journals/drafts-queue-panel.tsx` → `JournalsDoorDialog.tsx`, and
+      `posted-panel.tsx` for the result), or settles a line in Bank's `settle-line-form.tsx`. **Instrument:** one
+      draft adopted and one REFUSED, both visible afterwards with their receipts — the refusal half is the one
+      that proves the human control, so do not skip it. Manual bookkeeping by hand in the same tab counts as the
+      second half of this line.
+- [ ] **5 · Chat to close.** In the chat lane, run a close-prep turn — `chatTurn_v17`, FS-7 echelon 1, SERVING on
+      v71 — and land a close proposal or an agent-act receipt the human then adopts or withdraws.
+      **Instrument:** the client's **Close** tab (`apps/web/components/close/CloseProposalPanel.tsx`,
+      `AgentActReceiptsPanel.tsx`, `CloseDoorDialog.tsx`). **Law 71 binds the walk:** preparation is
+      agent-lawful, while finalize, reopen, attest and settle are HUMAN-ONLY — a walk that finds the agent doing
+      one of those four is a defect, not a feature.
+- [ ] **6 · A report renders.** Enqueue a render and take the artifact. The belt is `renderEnqueueDue`
+      (`packages/runtime/lib/leader.mjs`, one of the leader's five `*Due` predicates) and the surfaces are
+      `apps/web/components/reports/RenderJobQueuePanel.tsx`, `ArtifactRow.tsx` and `DownloadArtifactButton.tsx`
+      on the client's **Reports** tab. **Instrument:** the rendered PDF actually opened by the owner, plus the
+      `clara.report_artifacts` row behind it. **The download door is FS-7 echelon 2 (`0162`, #512) — merged, and
+      it only APPLIES at this reset**, so this line runs after the migration span, never before it.
+- [ ] **7 · The fixture estate re-runs end to end through the REAL doors.** Hard constraint 13: BELCORT is the
+      operator firm and every other firm — ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE SOLUTION · the
+      synthetic ROME PUBLIC ADVISORY · the slice-era RLS fixtures Alara and Borneo — is a resettable TEST fixture,
+      factory-reset and re-run at this e2e. **Instrument:** `packages/db/scripts/reset.mjs` then
+      `packages/db/scripts/seed.mjs` and `packages/db/scripts/onboard-rpr.mjs`, each printing its own counts, with
+      the applied-migration count and frontier read back afterwards (expect `0164`, 159 files) and the RS trial
+      balance re-read as the standing pin (`trial_balance_as_of`, 3,396,500 = 3,396,500). A fixture firm that does
+      not come back is a stop-the-line finding; a figure that comes back DIFFERENT is a stop-the-line finding.
+- [ ] Proof for the whole section: the Wave-G as-run carries, per numbered line, what the owner saw and the
+      instrument's own output — and every line that did not pass is copied into `PROGRESS.md` Known issues with
+      its number before the launch sitting begins.
 
 ## Cloudflare — the cutover (FS-10)
 
