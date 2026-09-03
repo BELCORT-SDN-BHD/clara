@@ -8,25 +8,23 @@
 //
 // ONE TEARDOWN REGISTRANT PER POOL (fix-relay-teardown, 2026-09-03): this file
 // used to register its OWN top-level `after(() => fx.endPool())` here, so any
-// importer got the pool closed "for free". relay-taxonomy.test.mjs ALSO
-// registers its own `after(cleanupPrivateDb)`, which itself closes the SAME
-// module-singleton pool (`relay-fixtures.mjs`'s `_pool`) before it drops that
-// file's private disposable database (`DROP DATABASE ... WITH (FORCE)`) — two
-// independent, uncoordinated registrants racing to close/use the same
-// resource. On this Node version the two hooks happened to run strictly
-// sequentially (empirically confirmed), so the race never surfaced via
-// node:test's own scheduler locally, but a standalone reproduction (racing
-// `pool.end()` against `DROP DATABASE ... WITH (FORCE)` on the same target via
-// `Promise.allSettled` instead of node:test's serialized hooks) reproduces the
-// exact CI signature (`FATAL: terminating connection due to administrator
-// command`) 20/20 — the physical hazard two uncoordinated registrants risk is
-// real regardless of whether THIS Node version's hook scheduler happens to
-// serialize them today. So `endPool` is now a PLAIN exported function with NO
-// implicit hook: every importer that needs the pool closed registers its own
-// SINGLE `after(fx.endPool)` (relay-drain.test.mjs / relay-runner.test.mjs /
+// importer got the pool closed "for free" alongside relay-taxonomy.test.mjs's
+// own `after(cleanupPrivateDb)` — two registrants on the same module-singleton
+// pool (`relay-fixtures.mjs`'s `_pool`). This clause is HYGIENE, not the fix
+// for CI job 100523835379's 57P01: the removed registrant here ran strictly
+// AFTER `cleanupPrivateDb` on every Node version measured (a hook that runs
+// after an error cannot cause it) — an initial PR (#534) claimed otherwise and
+// was corrected on review (rev-534 F-2, kept here rather than deleted, 裁-112).
+// The real channel is `pool.end()` (pg-pool 3.14.0) resolving before the
+// underlying socket actually closes, so an idle backend can still be attached
+// when `relay-taxonomy.test.mjs`'s own `DROP DATABASE ... WITH (FORCE)` lands —
+// fixed there by draining `pg_stat_activity` to 0 before the drop plus a
+// window-scoped `pool.on('error', …)` (see that file's `cleanupPrivateDb`).
+// `endPool` stays a PLAIN exported function with NO implicit hook regardless:
+// every importer that needs the pool closed registers its own SINGLE
+// `after(fx.endPool)` (relay-drain.test.mjs / relay-runner.test.mjs /
 // relay-unit.test.mjs each do), and relay-taxonomy.test.mjs's own
-// `cleanupPrivateDb` stays the SOLE registrant for that file, still awaiting
-// `endPool()` to completion before the disposable-database drop.
+// `cleanupPrivateDb` stays the SOLE registrant for that file.
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
