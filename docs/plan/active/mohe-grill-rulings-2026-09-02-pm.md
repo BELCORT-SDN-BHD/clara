@@ -297,3 +297,178 @@ until the Wave-G reset, so C-5's roles (`clara_stripe_webhook_login` 0160, `clar
 exist on live yet; the C-5 ceremony's DB half sits inside FS-11's reset (backup → factory reset → apply
 0154…0164 → seed → `is_operator` → the `stripe_object_map` ops act → the C-5 flips → the secrets → the sandbox
 round trip). The runtime deploy itself stays safe to ship first (every C-5 name refuses per request, never at boot).
+
+
+### 裁-143 — B2: the OPERATOR tier and its hard cap, written into PRD §2 and beside §4 item 1 (owner, 2026-09-03 ≈15:05 MYT, shell clock)
+
+**The question** (B2, put verbatim on the "Clara Beta Runway" page §9 table, one at a time with the
+recommendation first and the cost stated):
+
+> 「运营方公司这一层不在产品法里 · the operator tier is not in product law（§9 B2）. BELCORT 作为运营方
+> （is_operator）能跨公司看所有注册申请——DB、UI 都上线了，PRD 只写了四级权限、ARCHITECTURE 零提及。
+> 今天 flag 全关（fail-closed）不漏；FS-11 会打开它，而 beta 会继续加跨租户的运营方读。要不要写进 PRD
+> 并划定"只能看注册申请和 Stripe 问题、永远看不到别家帐本"的上限——你裁。」
+
+Measured on the pre-ruling tree (`60f4eaf5`), which is what the question rests on: zero hits for
+"operator firm" or `is_operator` in `docs/product/PRD.md` and zero in `docs/ARCHITECTURE.md`, while
+`clara.firms.is_operator` plus `uq_firms_one_operator` have been live since `0133_g1_wake_engine.sql`
+with the flag gating objects across `0133`/`0145`/`0160`/`0163`. §2's RBAC ladder names four levels
+and stops, so a reader of the law documents cannot learn that one firm in the estate sees anything at
+all outside its own walls.
+
+**Recommendation put (followed):** write it into `docs/product/PRD.md` §2 (a short paragraph beside
+the four-level ladder) and into §4 beside item 1 (the tier in full) as a **SEPARATE TIER BESIDE the
+four permission levels, never a fifth level above the firm owner**, carrying a **HARD CAP**: the
+operator may see **registration applications and Stripe problem events ONLY**, never any figure of
+another firm's books; and the flag **defaults OFF (fail-closed) today**, FS-11's reset being what
+turns it on. Cost stated: one docs-only PR, single-lane review (ADR-0069).
+
+**Ruling:** *"照建議。"*
+
+**Alignment.** Shipped in this PR. `docs/product/PRD.md` §2 gains the "OPERATOR tier — beside the
+ladder, never above it" paragraph directly after the one-firm-per-user gates. The tier in full landed
+as a NAMED subsection of §4, "The OPERATOR tier (BELCORT) — item 1's operator side", not as a
+numbered `§4.1`: **the PRD carries no `§4.1` heading** (§4 is a 21-item list whose only subsections are
+§4.94/§4.95/§4.96), the self-serve-signup statement the tier belongs beside is **§4 item 1**, and
+minting a new section number the ruling's shorthand implied would have created an anchor nothing else
+in the repo uses. The cap is four numbered rules, naming all THREE things the flag unlocks in the code
+today rather than only the two the ruling's shorthand names: (1) the two READ queues — registration
+applications (`clara.firm_registration_requests_visible` + `clara.approve_firm_registration` /
+`clara.reject_firm_registration`, `0145_p4_tranche2_registration_operator_alias.sql`, plus the
+cross-firm paid-but-unclaimed queue `clara.list_unconsumed_registration_payments`,
+`0163_checkout_gate_c3_folded_door.sql`, behind the operator screen at /admin/registrations) and Stripe
+problem events (`clara.list_stripe_event_problems` / `clara.resolve_stripe_event_problem`, `0160_checkout_gate_c2_stripe_events.sql` — DB doors with no screen yet, the gap `PROGRESS.md` records as
+B6); (2) the ONE control that reads nothing, the estate-wide wake-source switch
+`clara.set_wake_source_enabled` (`0133_g1_wake_engine.sql`), with `clara.caller_context`
+(`0141_p4_tranche1_invite_rbac.sql`) merely SURFACING the flag for navigation while gating on nothing;
+(3) never a figure of another firm's books — both queues are pre-firm admission-plane objects
+(ARCHITECTURE §1a), no operator door reads a book table, so **§6 is UNTOUCHED by design** and the
+subsection carries one cross-reference sentence to invariant 2's tenancy wall and the Split-trust
+corollary instead; (4) default OFF, fail-closed, and flipped ONLY by the raw owner-run one-shot
+ceremony `docs/ops/g1-operator-firm-ceremony.md` — never an app screen or API by design — with no firm
+carrying it today (裁-43) and BELCORT marked at FS-11's reset as its own ceremony step (裁-121③). The
+tier is written as OPERATIONAL-SUPPORT tooling, and nothing in it is client-facing (clients are not
+users, §2). `docs/ARCHITECTURE.md` §3.3 gains ONE sentence naming the same capped, flag-gated widening
+beside the four structural invariants. `docs/adr/README.md` §15 and `README-log.md` get the 裁-140-shape
+row and dated line; no new ADR. **Amends:** PRD §2, PRD §4 (a new named subsection beside item 1),
+ARCHITECTURE §3.3 — and ADR-0075, whose operator-firm rewrite of constraint 13 now has its product-law
+counterpart. Not fixing: the tier would have stayed an undocumented DB privilege that no product reader
+could audit, and the first person to widen it would have had no law text to widen against.
+
+**Follow-up in the same message, no ruling needed:** the owner asked, in 大白话, how the UI differs
+across the personas (BELCORT's operator view · an invited RBAC member · a self-signup firm that has
+paid · one that has only signed up). It is a UX explanation, not a decision; the persona map is
+answered on the page as a §9 note under B2.
+
+
+### 裁-144 — B3: billing's TIER tranche goes to the backlog, completed before 上市 and not before beta live (owner, 2026-09-03 ≈15:18 MYT, shell clock)
+
+**The question** (B3, put verbatim on the same "Clara Beta Runway" page §9 table, immediately after
+B2):
+
+> 「PRD §8 把"按席位收费、Active-Client 名额、每月 AI 额度、issue_invoice 会拒绝"写在 beta 关键路径上，
+> 但这些一行代码都没有（全仓库 0 次）。要不要把这格拆成"beta 要做（Checkout + webhook + 准入门，已建）"
+> 和"beta 之后（席位、名额、额度、开票）"，两句保证改成将来式？」
+
+The census behind it, re-measured on this branch: **zero** files under `packages/db/migrations`
+contain `billing_usage_rates`, `firm_subscriptions`, `client_lifecycle_events`,
+`evaluate_firm_billing_v1`, `invoice_lines`, `get_firm_invoice` or `issue_invoice`, and
+`issue_invoice` returns zero hits across `packages/db`, `packages/runtime` and `apps` — the function
+PRD §8 promised would "refuse" does not exist; that code census is the whole scope of the claim, and
+the name survives only in design and ruling prose under `docs/` (20 hits there). What DOES exist:
+`clara.billing_plans` (`0163_checkout_gate_c3_folded_door.sql`:196, with
+`amounts_ruled boolean not null default false` at :203), plus `stripe_object_map` and `stripe_events`
+in two migration files each.
+
+**Recommendation put (followed):** re-cut PRD §8's billing cell **in place, with the date** — the
+style §8's tax row already uses ("原地加日期") — into the half that is BUILT for beta and the half
+that is BACKLOG before the official launch, with the unbuilt guarantees stated in the future tense
+and the old citations kept. Cost stated: one cell in the docs PR already open for 裁-143.
+
+**Ruling:** *"如果没有的话先放进backlog,把这个initial plan 记录清楚, 我们上市前在完备它, 我们betalivelaunch
+now. 至少现在有最基础的userflow now right?"*
+
+**Alignment.** Shipped in the same PR as 裁-143. `docs/product/PRD.md` §8's billing cell is re-cut in
+place: **BETA (built — FS-4 + C-2/C-5)** = Stripe Checkout + webhooks + the fail-closed admission gate
++ `clara.billing_plans` (`0163`, `amounts_ruled=false` → RM0); **BEFORE THE OFFICIAL LAUNCH 上市
+(backlog, 裁-144)** = paid seats, Active-Client slots, the shared firm-wide AI allowance in RM and its
+overage, and invoicing — the tier tranche of `docs/plan/active/billing-design.md` §5, i.e. the rest of
+PR-1 (`billing_usage_rates`, `firm_subscriptions`, `client_lifecycle_events`, the four lifecycle
+doors, the two capacity walls) and all of PR-2 (`evaluate_firm_billing_v1`, `invoices`/`invoice_lines`,
+`get_firm_invoice`, the issuance door), plus an AI usage ledger. The 裁-71④ scope note and every old
+citation (裁-42, 裁-50–56, 裁-57, 裁-58, 裁-68) are KEPT, not deleted, and the ringgit amounts still
+defer to the pricing sitting (裁-58). **One correction inside the re-cut:** "`issue_invoice` refuses"
+is replaced by "no invoice is issued in beta" — a guarantee may not be carried by a function that does
+not exist (law 3's class: a name is not the thing).
+
+**The owner's closing question, answered as a FACT (no ruling needed):** 至少现在有最基础的 userflow
+now right? — **yes.** The built path is signup → the emailed 6-digit confirmation code → the DPA
+signature → Stripe Checkout (sandbox, RM0) → the one-transaction folded admission door → a born firm;
+plus invites/RBAC and the /pending holding surface, with the operator flag arriving through the G1
+ceremony at FS-11. Beta live launches on that half.
+
+**"把这个 initial plan 记录清楚":** the 08-30 design set is already in the repo and stays the record —
+`docs/plan/active/billing-design.md` (+ its §5 build sequence), `docs/plan/active/billing-annexes.md`,
+`docs/plan/active/billing-gate-record.md`, `docs/plan/active/billing-survey.md`. The owner's own
+2026-09-03 text is to be filed verbatim beside them as a new plan record (the ruling names it
+docs/plan/active/billing-model-owner-spec-2026-09-03.md — **measured NOT on disk as of this commit**,
+so it is written here bare and OWED to a follow-up lane; this PR does not create it and cites no path
+that does not exist).
+
+**Amends:** PRD §8's billing cell. Not fixing: §8 would have kept promising four beta-critical billing
+behaviours that have never had a line of code, and naming a refusal door that does not exist — the
+exact shape a reader plans a launch against.
+
+
+### 裁-145 — B4: PRD §9.3's signup-gate composition is annotated in place — FIVE items, the email-bound token retired (owner, 2026-09-03 ≈15:27 MYT, shell clock)
+
+**The question** (B4, put verbatim on the same "Clara Beta Runway" page §9 table):
+
+> 「裁-129 之后注册那一步要多勾一份 Beta 服务条款（第五样），而 PRD §9.3 还写四样，里面的"email-bound
+> token"早被裁-89 作废、从没建过。要不要在 §9.3 后面加一条注明日期的说明？」
+
+The premise, verified before the edit: PRD §9 item 3 ("Billing model + scale guardrails") states the
+tier-3 gate composition as **"DPA e-sign + rate wall + email-bound token + Stripe checkout success"**
+— four items, from 裁-57/58/68. 裁-89 (`mohe-grill-rulings-2026-08-31.md`:300) folded claim →
+create-firm → close-registration into ONE transaction and retired the mint-then-spend admission-token
+shape "before it is ever built", which `docs/ARCHITECTURE.md` §1a already records as "no admission
+token survives". Measured 2026-09-03: **zero** hits for `email_bound`, `email-bound` or `bound_token`
+across `apps/` and `packages/` — never built, exactly as the question says. 裁-129 minted the Beta
+terms of service as a SEPARATE document kind from the DPA (`docs/ops/legal/clara-beta-terms.md`,
+on disk), which is the fifth thing the step carries.
+
+**Recommendation put (followed):** add ONE dated note after PRD §9.3 in the "原地加日期" style §8's tax
+row already uses — the step carries FIVE items after 裁-129, the Beta terms being the fifth; the
+email-bound token line is RETIRED by 裁-89 and was never built. The original four-item text is
+annotated, never deleted. Cost stated: one paragraph in the docs PR already open for 裁-143/144.
+
+**Ruling:** *"照建议, btw: 第一步的Supabase 寄確認信使用什么服务? supabase 有原生的? 还是也是resend?"*
+
+**Alignment.** Shipped in the same PR as 裁-143/144. `docs/product/PRD.md` §9 item 3 keeps its
+original sentence and gains the trailing dated note: the composition now names FIVE items, the Beta
+terms of service is the fifth (裁-129's separate document kind, 裁-125's agent template), the
+email-bound token is RETIRED (裁-89 · ARCHITECTURE §1a) and measured never built, and **four of the
+five are live** — DPA e-sign · Beta terms · rate wall · Stripe checkout success. 裁-58's open
+ringgit-amounts question is untouched and stays OPEN, so item 3 remains a genuinely open question
+rather than being quietly closed by an annotation.
+
+**The `btw` half of the same sentence — B5's subject, answered from the repo as a FACT (no ruling
+needed):** who sends step 1's confirmation mail. **Supabase's own auth mailer** does, and the call
+that triggers it is **`supabase.auth.signUp`** — `apps/web/components/entry/signup-account-form.tsx`
+:167, where email confirmation being enabled makes it resolve `{ user, session: null }` and Supabase
+posts the mail. The password reset rides the same Supabase auth mailer. The RESEND control on the
+confirmation card is **not** the sender and does not send anything today: the only export of
+`apps/web/lib/registration/confirmation-resend.ts` always returns `{kind:"unavailable"}`, pending its
+walled route handler — the `supabase.auth.resend(...)` spellings in that file are COMMENTS (a retired
+browser-side cut removed by the M3 fix round, and the future contract), plus a shipped test that
+asserts no reachable path to it. **Resend the vendor is wired for INVITATIONS only**: `RESEND_API_KEY`
+occurs in this repo solely on the invite path — `apps/web/lib/members/invite-mail.ts`:48,
+`apps/web/README.md`:338, `.env.example`:97 and that path's four test files — measured, zero
+occurrences anywhere in the registration/confirmation path. **Not measurable from the repo, and
+therefore not asserted:** whether the Supabase project has CUSTOM SMTP configured behind that
+mailer is a Supabase dashboard fact; if the owner wants Supabase's confirmation mail to leave via
+Resend's SMTP it is a console setting, not a code change.
+
+**Amends:** PRD §9 item 3 (annotated in place). Not fixing: the one list a reader consults for
+"what does signup actually collect" would have kept naming a token that was retired before it was
+built, and omitting the terms document customers must now sign.

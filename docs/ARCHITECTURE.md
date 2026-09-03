@@ -149,6 +149,8 @@ The agent's freeform read path no longer relies on a lexical verb filter. Two la
 - Wake allowlist — the runtime mints a wake credential whose grants are the allowlist for that wake kind; the DB is the backstop (a `[proactive]` credential has EXECUTE only on `record_notification`).
 - Role floors + plan→approve — `assert_can_*` floors on every writer; approval binds to an expected revision token (fixes GAP0-5); posted lines immutable via trigger (fixes GAP0-4).
 
+Beside these four sits exactly ONE capped, flag-gated widening of what a firm's members may read, named here so it cannot grow silently: the **OPERATOR tier** (`clara.firms.is_operator`, `0133_g1_wake_engine.sql` — `not null default false`, `uq_firms_one_operator` admitting at most one operator firm ever, flipped only by the raw owner-run one-shot ceremony `docs/ops/g1-operator-firm-ceremony.md` and carried by NO firm until FS-11's reset marks BELCORT, 裁-121③) lets the single operator firm read **registration applications and Stripe problem events ONLY** — both pre-firm admission-plane objects (§1a), never a book table — beside the one estate-wide wake-source control that reads no firm's data, so it can never surface a figure of another firm's books; PRD §4's "The OPERATOR tier" carries the cap as law and PRD §6's tenancy wall is untouched by it (裁-143).
+
 ### 3.4 Maker/checker (Gate-1 C4)
 - Every entry stores `maker_actor` (drafter/last human editor) and `checker_actor` (approver), modelled as distinct identities.
 - `approve_entry` on the **high-stakes lane** RAISES if `checker_actor = maker_actor` and the firm has ≥2 eligible humans; solo firms record a `self_approval_attestation`.

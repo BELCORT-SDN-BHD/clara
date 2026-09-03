@@ -48,6 +48,16 @@ strict superior** (equal rank stays allowed: owner-on-owner, admin-on-admin), an
 self-demotion or self-removal** — both hard DB gates on `set_member_role` / `remove_member` /
 `revoke_invite` (裁-94, `0157_member_door_rank_walls.sql`).
 
+**The OPERATOR tier — beside the ladder, never above it** *(裁-143, owner, 2026-09-03)*. One firm
+in the estate runs the estate rather than keeping books in it: **BELCORT, the operator firm**
+(ADR-0075, which rewrote `AGENTS.md`'s hard constraint 13 to say so), marked by the single
+`clara.firms.is_operator` flag. It is **operational-support tooling and a separate tier, not a fifth
+level**: the flag confers nothing inside any firm's books, an operator firm's own members still hold
+`viewer…owner` within their own firm exactly as any other firm's do, and what the tier may SEE is
+hard-capped to two pre-firm queues (registration applications · Stripe problem events) plus one
+estate control that reads nothing. The tier, its cap, its doors and its ceremony-only, default-off
+posture are **§4 · "The OPERATOR tier"**, beside item 1.
+
 **Segregation of duties (Gate-1 C4) — a first-class model, not prose:**
 - Every entry records its **maker** (the human or agent that drafted/last-edited it) and its **checker** (the approver), as distinct modelled identities.
 - On the **high-stakes lane** (tax-affecting, closed-period, large-amount, year-end close, opening balances) the checker **must be a different human** from the last human editor — a hard DB gate where the firm has ≥2 eligible staff.
@@ -92,6 +102,58 @@ self-demotion or self-removal** — both hard DB gates on `set_member_role` / `r
 19. **Activity feed / audit trail** — append-only history + receipts; actor + maker/checker attribution; reverse-not-delete with required reason; close lifecycle writes receipts (fixes GAP5-2).
 20. **The per-client knowledge wiki** (§6a) — Clara's compounding client memory, informing every decision.
 21. Members/RBAC, ⌘K command palette, settings, export/job-lane/session overlays.
+
+### The OPERATOR tier (BELCORT) — item 1's operator side: operational support only, capped and ceremony-flipped
+
+*(裁-143, owner, 2026-09-03. The tier has been in the DB since `0133_g1_wake_engine.sql` and was
+named in no product-law document until this subsection. §4 carries no numbered `§4.1` heading — this
+is item 1's operator side and is cited as "§4 · The OPERATOR tier".)*
+
+**The tier.** Item 1 admits firms through a fail-closed admission gate; somebody has to work that
+gate and clean up after the payments behind it, and that somebody is **BELCORT, the operator firm**
+— the single row of `clara.firms` whose `is_operator` flag is true (**ADR-0075**, which rewrote
+`AGENTS.md`'s hard constraint 13 to name BELCORT the operator and every other firm in the estate a
+resettable test fixture). This is **operational-support tooling, not a product surface**: it is a
+column, not a scope — `is_operator boolean not null default false` plus `uq_firms_one_operator`, a
+`((true))`-keyed partial unique index letting **at most one firm in the whole estate ever** carry it
+true, both minted by `0133`. It sits **beside** §2's `viewer < bookkeeper < admin < owner` ladder and
+is **never a fifth level above the firm owner**: an operator firm's own members hold the same four
+levels inside their own firm as anyone else, and every operator door carries BOTH gates — the owner
+floor AND the operator-firm predicate — so an operator-firm admin is refused exactly as a
+non-operator owner is. (Clients still do not log in, §2; nothing here is a client-facing surface.)
+
+**The hard cap — LAW for this tier. Two queues and one control, and nothing else:**
+
+1. **Two read queues.** **(a) Registration applications** — `clara.firm_registration_requests_visible`,
+   a view with two scopes of which OPERATOR is one (an applicant reads their own row without the
+   flag, with the deciding operator's identity masked), and its decisions
+   `clara.approve_firm_registration` / `clara.reject_firm_registration`
+   (`0145_p4_tranche2_registration_operator_alias.sql`), plus the cross-firm queue of
+   paid-but-unclaimed registrations `clara.list_unconsumed_registration_payments`
+   (`0163_checkout_gate_c3_folded_door.sql`) behind the operator screen at /admin/registrations.
+   **(b) Stripe problem events** — `clara.list_stripe_event_problems` /
+   `clara.resolve_stripe_event_problem` (`0160_checkout_gate_c2_stripe_events.sql`); DB doors today,
+   with no operator screen yet.
+2. **One control, which reads nothing.** `clara.set_wake_source_enabled` (`0133_g1_wake_engine.sql`)
+   is the estate-wide on/off switch for a wake-execution source across every firm, not just the
+   caller's own. It is a control, not a read: it returns no firm's data, and it broadcasts a minimal
+   `{source,on}` receipt. (`clara.caller_context`, `0141_p4_tranche1_invite_rbac.sql`, SURFACES the
+   flag so the web can render operator navigation; it gates on nothing.)
+3. **Never any figure of another firm's books** — not a balance, not a journal line, not a document,
+   not a client. No operator door reads a book table and the flag opens no RLS policy over one: both
+   queues above are **pre-firm admission-plane** objects (ARCHITECTURE §1a), which is where a paying
+   customer exists before their firm does. This tier therefore adds **no exception** to §6 invariant
+   2's tenancy wall or to the Split-trust corollary's forced RLS + EXECUTE-only grants — §6 governs
+   unchanged, and widening this tier past these three unlocks is a §6 question, never a §4 one.
+4. **Default OFF, fail-closed, and flipped only by ceremony.** `0133` marks ZERO firms and its own
+   tail RAISES if any firm already carries the flag. The flip is a **raw, owner-run, audited SQL
+   UPDATE in a one-shot ceremony** — `docs/ops/g1-operator-firm-ceremony.md` — **never an app screen
+   and never an API, by design**. **By construction no firm carries it yet** — the column defaults
+   false, `0133`'s tail refuses to apply if any firm already carries it, and the only act that sets
+   it is the ceremony above, which has not been run (裁-43 filed that marking to Wave G; the live
+   estate is not read from here) — so the tier is inert: BELCORT is marked at **FS-11**'s reduced
+   Wave-G reset as its own
+   ceremony step (裁-121③), and that is when it turns on.
 
 ### §4.94 — MyInvois scope
 
@@ -205,7 +267,7 @@ The prior build had no event layer, no context pack, and no stale-context detect
 | Automated import/post into external ERP | File export only (CSV/PDF/XLSX) — never an ERP import/post. |
 | Editing the DB schema from the app | Schema is operator-versioned; the app/agent does DML only. |
 | An autonomy-dial settings page | Autonomy lives in the Agentic Charter (ADR-0071) + the structural invariants; there is no dial — the posture is uniform and permanent. |
-| ~~Billing/subscriptions (deferred pre-launch)~~ — **SCOPE NOTE, not a non-goal (裁-71④):** billing is IN SCOPE for beta | Stripe Checkout + webhooks, paid seats/Active-Client-slots, a firm-wide AI allowance in RM, on the critical path (裁-42, 裁-50–56, 裁-57, 裁-58, 裁-68). Only the ringgit AMOUNTS defer to a dedicated pricing sitting — `amounts_ruled=false` until then, checkout runs at RM0/trial, `issue_invoice` refuses. |
+| ~~Billing/subscriptions (deferred pre-launch)~~ — **SCOPE NOTE, not a non-goal (裁-71④):** billing is IN SCOPE, and **SPLIT BY DATE 2026-09-03 (裁-144)** | **BETA — BUILT (FS-4 + C-2/C-5):** Stripe Checkout + webhooks + the fail-closed admission gate + `clara.billing_plans` (`0163_checkout_gate_c3_folded_door.sql`, `amounts_ruled=false` → checkout runs at RM0/trial) — this is the half beta live launches on. **BEFORE THE OFFICIAL LAUNCH 上市 — BACKLOG (裁-144, 2026-09-03):** paid seats, Active-Client slots, the shared firm-wide AI allowance in RM and its overage, and invoicing **WILL BE** built — the tier tranche of `docs/plan/active/billing-design.md` §5 (the rest of PR-1 + all of PR-2) plus an AI usage ledger; measured 2026-09-03, none of it exists yet, so **no invoice is issued in beta** *(this replaces the earlier "`issue_invoice` refuses" — **no such function exists**: a code census over `packages/db`, `packages/runtime` and `apps` returns zero hits for the name, which survives only in design and ruling prose under `docs/`)*. Standing from 裁-71④ and unchanged (裁-42, 裁-50–56, 裁-57, 裁-58, 裁-68): the ringgit AMOUNTS defer to a dedicated pricing sitting (裁-58), `amounts_ruled=false` until then. |
 | Held WebSocket chat | SSE only. |
 | Outbound MyInvois issuance | Track C is inbound-only — the local no-egress UBL parse is live (ADR-025/026/027); API pull + issuance stay future scope. |
 | Multi-entity / group consolidation | Single-entity books per client. |
@@ -225,6 +287,6 @@ The prior build had no event layer, no context pack, and no stale-context detect
 
 1. **Runtime choice — RESOLVED (ADR-008).** The AI SDK 7 model layer + Workflow DevKit durable substrate (`@workflow/world-postgres`), self-hosted on our own Postgres, behind a swap-seam (named fallback: LangGraph JS + PostgresSaver). See `docs/ARCHITECTURE.md` §4.0 + `docs/phase2-research/runtime-recommendation.md`. Kept here for provenance; no longer open.
 2. **C6 compliance execution** — the DPA, firm-facing disclosure, and PDPA cross-border transfer check remain OPEN. **AMENDED/ESCALATED by ADR-0074/TA-P3 (ratified 2026-08-22): C6 is on the CRITICAL PATH**, not merely a later vendor-trace gate: the firm-level narrow document-read purpose sends material out during onboarding, so every new client carries one owner-signature step and the three pre-ruling clients need a supplementary line. Vendor trace export remains structurally OFF under §6.16 until its checklist is complete.
-3. **Billing model + scale guardrails** — **PART-RESOLVED 2026-08-30:** 裁-57/58/68 closed the free-tier question (paid beta, no invited-free tier) and the tier-3 gate composition (DPA e-sign + rate wall + email-bound token + Stripe checkout success). The pricing shape remains the 裁-42 per-firm model; **only the ringgit amounts remain OPEN** until the pricing sitting, with every plan RM0/`trial` meanwhile. Laws 76/81 already settled the usage-cap half.
+3. **Billing model + scale guardrails** — **PART-RESOLVED 2026-08-30:** 裁-57/58/68 closed the free-tier question (paid beta, no invited-free tier) and the tier-3 gate composition (DPA e-sign + rate wall + email-bound token + Stripe checkout success). The pricing shape remains the 裁-42 per-firm model; **only the ringgit amounts remain OPEN** until the pricing sitting, with every plan RM0/`trial` meanwhile. Laws 76/81 already settled the usage-cap half. **ANNOTATED IN PLACE 2026-09-03 (裁-145) — the gate composition above now names FIVE items, not four, and one of the four is retired.** The **fifth** is the **Beta terms of service** (`docs/ops/legal/clara-beta-terms.md`) — a SEPARATE document kind from the DPA, never one combined signature (裁-129), shipped as an agent template refined with a lawyer at official launch (裁-125) — so the signup step carries the terms alongside the DPA e-sign. The **email-bound token is RETIRED**: 裁-89 folded claim → create-firm → close-registration into ONE transaction, so no admission token survives (ARCHITECTURE §1a), and it was **never built** — measured 2026-09-03, zero hits for `email_bound` / `email-bound` / `bound_token` under `apps/` and `packages/`. Four of the five are therefore live (DPA e-sign · Beta terms · rate wall · Stripe checkout success). The original four-item text above is kept for provenance, not rewritten. *(裁-58's amounts question is unaffected and stays OPEN.)*
 4. **Tax-computation v1 vs v1.1 — RESOLVED.** The owner ruled F-T3 ALL-IN for Wave F, not slipped to v1.1; see `docs/plan/active/tax-computation-design.md` v1.2 and `PROGRESS.md`'s F-T3 lane. Kept here for provenance; no longer open. *(裁-62/裁-80, 2026-08-31: the module is INERT AT BETA — the ALL-IN scope stands, its activation waits on tax's own sitting.)*
 5. **MyInvois depth** — Track B built; Track C inbound UBL parse LIVE as a local no-egress engine (Wave A2, ADR-025/026/027); API pull + outbound issuance deferred. **STATUS: PART-RESOLVED** — the inbound half is settled and live (§4.94); only API pull + outbound issuance stay open, and §8 holds outbound issuance as a non-goal meanwhile.
