@@ -99,7 +99,13 @@ build prints three `ERROR failed to read input source map … @ai-sdk/*/dist/ind
 
 ## Sessions after the restart
 
-sessions after the restart: <the lead's read>
+sessions after the restart: 11 clara sessions, all `clara_runtime_login`, all idle; oldest
+idle 9 s at 12:53; zero idle older than 120 s at 12:55 — no stale sessions from the pre-deploy
+process; the same 11 as before the deploy (12:13 and 12:48 reads).
+
+wakeEngine lag 20842 / heldForDisabledSource 119 unchanged across two reads 20 s apart — a
+STANDING state (both `wake_engine_sources` disabled by design, PR-4's), `ok: true`; not a
+deploy regression.
 
 ## Frozen-workflows stamp
 
