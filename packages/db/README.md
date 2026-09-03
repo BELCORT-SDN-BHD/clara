@@ -13,7 +13,8 @@ truth (`docs/ARCHITECTURE.md` §3).
 > money-as-cents. See `docs/plan/completed/rebuild-plan-history.md`.
 >
 > **Migration ledger — TRUED 2026-09-03 (counted, not remembered).** `main` carries **158
-> migration files, `0001`–`0163`, counted at `265a8ee7`; count the directory, not this line** (the sequence skips `0032` and `0073`–`0076`, none of which
+> migration files, `0001`–`0163`, counted at `265a8ee7`; count the directory, not this line**
+> (the sequence skips `0032` and `0073`–`0076`, none of which
 > ever existed as files — `0073`-`0076` were claimed by the Wave-E ζ render/DR train and then
 > re-claimed at `0079`-`0083` when the frontier moved before it merged; only its OWN squash
 > subject still says "0073-0076", stale pre-renumber testimony, immutable, while the migrations
@@ -22,7 +23,8 @@ truth (`docs/ARCHITECTURE.md` §3).
 > MERGED · `0162` FS-7 e2 (#512), MERGED · `0163` FS-4 C-3 (#493), MERGED at `265a8ee7` · `0164`
 > Lane B's C-6 (#517), claimed at this branch's own merge prep and settled ONCE THIS PR MERGES.**
 > Every number below `0164` has landed, so this file's number carries no re-cut condition —
-> and if another train merges above `0163` first, this one re-cuts rather than inserting under it. The runner refuses a
+> and if another train merges above `0163` first, this one re-cuts rather than inserting under
+> it. The runner refuses a
 > late-inserted lower number, so a number belongs to whoever merges next above the frontier,
 > never to whoever authored first. And **live is applied through the frontier
 > `0153_f_t1_sst_reference_tables`, 148 migrations** (`0154`–`0163` are on `main`, merged but
