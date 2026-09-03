@@ -2,7 +2,8 @@
 
 > The eighth ledger, continuing [`mohe-grill-rulings-2026-09-02.md`](mohe-grill-rulings-2026-09-02.md)
 > (裁-110 · 114 · 115…131) exactly as `-09-01-pm` continued `-09-01`. **The chain to date:**
-> `-08-29` → `-08-30` → `-08-31` → `-09-01` → `-09-01-pm` → `-09-02` → **this file, the newest**.
+> `-08-29` → `-08-30` → `-08-31` → `-09-01` → `-09-01-pm` → `-09-02` → **this file** → `-09-03`,
+> which is now **the newest** (裁-146 onward — see this file's closing line).
 > The split happened at the 09-02 pm/night truing, when the `-09-02` file passed the repo's
 > 500-line document ceiling; 裁-129…131 stay there because that is where they landed (#506), and
 > everything from 裁-132 is here, moved byte-for-byte.
@@ -472,3 +473,13 @@ Resend's SMTP it is a console setting, not a code change.
 **Amends:** PRD §9 item 3 (annotated in place). Not fixing: the one list a reader consults for
 "what does signup actually collect" would have kept naming a token that was retired before it was
 built, and omitting the terms document customers must now sign.
+
+---
+
+**裁-146 onward live in [`mohe-grill-rulings-2026-09-03.md`](mohe-grill-rulings-2026-09-03.md)**
+— the NINTH ledger, opened at this file's 500-line ceiling exactly as this file was opened at the
+`-09-02` file's (裁-146: Supabase Auth's SMTP is pointed at Resend and the Wave-G "Mail" line becomes
+a launch gate, certifying only on a real signup confirmation received at a NON-team address).
+裁-143/144/145 stay here because that is where they landed (#535), even though they were ruled on
+2026-09-03. **The `-09-03` file is the NEWEST ledger — read it, not this one, for the current
+state.**
