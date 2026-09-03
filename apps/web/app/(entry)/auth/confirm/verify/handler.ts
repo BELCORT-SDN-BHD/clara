@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
 
 import {
-  claimConfirmationAttempt as defaultClaimConfirmationAttempt,
-  settleConfirmationAttempt as defaultSettleConfirmationAttempt,
-  type ClaimConfirmationAttempt,
-  type SettleConfirmationAttempt,
+  confirmEmailCode as defaultConfirmEmailCode,
+  type ConfirmEmailCode,
 } from "./confirmation-wall";
 import {
   confirmFlashCookie,
@@ -12,51 +10,57 @@ import {
   type ConfirmFlashOutcome,
   type ConfirmFlashPayload,
 } from "../confirm-flash";
+import { proxyObservedClientIp } from "@/lib/rate-wall-courier";
 import { proveSameOrigin } from "@/lib/same-origin";
 import { createRouteClient } from "@/lib/supabase/server";
 
 /**
- * 裁-92 — the CODE flow. §3.6 of checkout-gate-design.md is the exact table
- * this file implements: `proveSameOrigin` survives VERBATIM (it was never the
- * binding — it is the CSRF wall on a state-changing route, and stays one
- * regardless of what the route verifies); what changed is everything after
- * it — the C1/C2 attempt wall runs BEFORE `verifyOtp`, and `verifyOtp` itself
- * now takes `{email, token, type:'signup'}` instead of a token hash.
+ * 裁-92 — the CODE flow, WIRED FOR REAL by FS-4 C-6 Lane B. §3.6 of
+ * checkout-gate-design.md is the table this file implements: `proveSameOrigin`
+ * survives VERBATIM (it was never the binding — it is the CSRF wall on a
+ * state-changing route, and stays one regardless of what the route verifies),
+ * and everything after it is the C1/C2 wall running BEFORE the verification.
  *
- * THE ATTEMPT WALL IS A LANE-B SEAM (`./confirmation-wall.ts`). Its default
- * production behaviour is to REFUSE with `{kind:"unavailable"}` — never to
- * let a caller through unchecked. See that module's header for why.
+ * WHAT CHANGED FROM LANE A, AND WHY IT IS NOT A WIDENING. Lane A ran
+ * `verifyOtp` in THIS process, between a claim call and a settle call. C-5's
+ * A-M3 fix moves all three into one runtime request, because a caller that can
+ * settle an attempt — or that merely holds its id — can zero out the rate wall
+ * (see `./confirmation-wall.ts`'s header for the measurement). So this handler
+ * no longer calls `verifyOtp` at all; it hands the runtime the two fields the
+ * person typed plus the address this app's edge observed, and gets back a
+ * verdict. The route is still one of §1.1's three server entries, still makes
+ * a DIRECT server-to-server call rather than going through the generic proxy
+ * (§3.5: the proxy is entrance 3 of the scope spine and would refuse a caller
+ * who by definition has no session), and still adds no fourth entry.
  *
- * N1 + N3 CLOSED (裁-109, beta-gating, most conservative option — owner
- * ruled after a plain-language briefing: 最保守，两个都修完再上线). Both were
- * pre-existing, measured NOT worsened by #488, found by the law-28 Codex
- * leg reviewing that PR, and recorded there as OPEN rather than fixed —
- * this PR is that fix, from fresh `main`, with the full ladder (fs4-
- * pr488-review design-conformance + one fresh-context opus review + the
- * law-28 Codex leg, a native lane building an auth surface).
+ * THE SEALING MOVED WITH IT, AND STAYS POSITIVE. `hasVerifiedSession`'s job —
+ * "a null session is not evidence of success" — is now done in two places that
+ * cannot disagree: `confirmEmailCode` refuses to report `verified` without
+ * both tokens present as non-empty strings, and this handler only seals a
+ * cookie when `setSession` itself reports a session back. `error: null` alone
+ * has never been accepted here and is not accepted now.
+ *
+ * N3 IS UNCHANGED (裁-109). Every verification failure — wrong code, expired
+ * code, unknown email, banned account — renders through the same `"wrong"`
+ * flash. Nothing in this file reads an error code, and the runtime reports
+ * only a boolean, so the flattening is now structural rather than a discipline
+ * this file has to keep.
+ *
+ * N1 IS UNCHANGED. The URL carries only an opaque marker; every rendered value
+ * comes from the unforgeable flash cookie.
  */
 
-type VerifyOtpError = { message?: string; code?: string };
-
-type VerifyEmailResponse = {
-  data: {
-    user: { id: string } | null;
-    session: {
-      access_token: string;
-      user: { id: string };
-    } | null;
-  };
-  error: VerifyOtpError | null;
-};
-
+/** What this handler needs from a Supabase route client: a way to install a
+ *  session into the cookie jar, and the seal that flushes it onto a response.
+ *  Narrower than the whole client, so a cell can drive it without standing up
+ *  auth. */
 export interface EmailConfirmationRouteClient {
   supabase: {
     auth: {
-      verifyOtp(params: {
-        type: "signup";
-        email: string;
-        token: string;
-      }): Promise<VerifyEmailResponse>;
+      setSession(params: { access_token: string; refresh_token: string }): Promise<{
+        data: { session: { access_token: string } | null };
+        error: { message?: string } | null;
+      }>;
     };
   };
   sealResponse<T extends NextResponse>(response: T): T;
@@ -65,45 +69,12 @@ export interface EmailConfirmationRouteClient {
 export type CreateEmailConfirmationRouteClient = () => Promise<EmailConfirmationRouteClient>;
 
 /**
- * N3 CLOSED — replaces the round-3/4/5 `isExpiredOtpError` classification
- * this file used to carry. That function only ever recognised Supabase's
- * literal `otp_expired` code, but upstream returns that SAME code for a
- * wrong guess, a genuinely expired code, AND an email with no pending
- * signup — and, separately, a banned account's own attempt surfaces its
- * OWN distinct code (`user_banned`, confirmed in the live `supabase/auth`
- * error registry, 2026-09-01), observably different from an unknown/normal
- * account's. Round 5 recorded both as open findings rather than fixing
- * them; 裁-109's ruling is to close them by FLATTENING rather than special-
- * casing `user_banned` — a special case would itself become a new,
- * narrower oracle, which is the whole reason nothing below ever reads
- * `error.code` again. Every verification failure — wrong code, expired
- * code, unknown email, banned account, anything else Supabase can return —
- * now renders through the exact same `"wrong"` flash outcome.
+ * Mints the redirect and its unforgeable flash cookie together.
  *
- * THE ACCEPTED COST (stated to and accepted by the owner, 裁-109): round
- * 4's presentational split is gone — a person whose code had genuinely
- * timed out no longer sees a distinct "expired" card, only "that code
- * didn't work" with the same remaining-attempt count a wrong guess would
- * show. The security-relevant counting is unaffected either way: the
- * C1/C2 wall settles every one of these causes as `"rejected"` uniformly,
- * unchanged by this file.
- */
-
-/**
- * Mints the redirect and its unforgeable flash cookie together — N1 CLOSED.
- * See `../confirm-flash.ts`'s header for the full mechanism (the nonce
- * binding, the cookie's attributes, and why a cookie was chosen over a
- * signed query param). The URL carries ONLY the marker; every value the
- * page actually renders — `remaining`, `waitSeconds`, which of the four
- * outcomes this is — comes from the cookie, which nobody but this server
- * could have set for this browser.
- *
- * Both redirects (this one and `fixedSignupRedirect` below) are built from
- * the WALL'S OWN PROVEN origin, never `request.url`'s authority —
- * independent review of #455, MEDIUM-2 (kept verbatim from the link-flow
- * handler this file replaces): behind a proxy those two diverge, and
- * `request.url` can read an internal, plain-HTTP hop. One validated value,
- * every consumer.
+ * Both redirects are built from the WALL'S OWN PROVEN origin, never
+ * `request.url`'s authority — independent review of #455, MEDIUM-2, kept
+ * verbatim: behind a proxy those two diverge, and `request.url` can read an
+ * internal, plain-HTTP hop. One validated value, every consumer.
  */
 function confirmRedirect(origin: string, outcome: ConfirmFlashOutcome): NextResponse {
   const nonce = crypto.randomUUID();
@@ -131,25 +102,8 @@ function fixedSignupRedirect(origin: string): NextResponse {
   return NextResponse.redirect(target, { status: 303 });
 }
 
-/** A successful verification must positively carry one matching user/session
- * pair. `error: null` without that session is not evidence that the cookie
- * session needed by `/signup` exists. */
-function hasVerifiedSession(response: VerifyEmailResponse): boolean {
-  const userId = response.data.user?.id;
-  const session = response.data.session;
-  return (
-    response.error === null &&
-    typeof userId === "string" &&
-    userId.length > 0 &&
-    typeof session?.access_token === "string" &&
-    session.access_token.length > 0 &&
-    session.user.id === userId
-  );
-}
-
 /** Exactly one non-empty string field, or `null` — the same "reject a
- *  duplicated or blank field outright" discipline the prior token_hash
- *  handler used, extended to two fields instead of one. */
+ *  duplicated or blank field outright" discipline the prior handler used. */
 function singleNonEmptyField(form: FormData, name: string): string | null {
   const values = form.getAll(name);
   return values.length === 1 && typeof values[0] === "string" && values[0].length > 0
@@ -158,15 +112,13 @@ function singleNonEmptyField(form: FormData, name: string): string | null {
 }
 
 /**
- * POST is the sole token-consuming execution root. `proveSameOrigin` runs
- * first and unconditionally — before the body is even read — exactly as the
- * link-flow handler did.
+ * POST is the sole code-consuming execution root. `proveSameOrigin` runs first
+ * and unconditionally — before the body is even read.
  */
 export async function handleEmailConfirmationPost(
   request: Request,
-  createClient: CreateEmailConfirmationRouteClient = createRouteClient,
-  claimAttempt: ClaimConfirmationAttempt = defaultClaimConfirmationAttempt,
-  settleAttempt: SettleConfirmationAttempt = defaultSettleConfirmationAttempt,
+  createClient: CreateEmailConfirmationRouteClient = createRouteClient as unknown as CreateEmailConfirmationRouteClient,
+  confirmCode: ConfirmEmailCode = defaultConfirmEmailCode,
 ): Promise<Response> {
   // This is a login/session-creating mutation. A cross-origin page must not be
   // able to submit its own guess into somebody else's browser. Refused before
@@ -174,10 +126,7 @@ export async function handleEmailConfirmationPost(
   // no cookie-writing capability at all.
   const proof = proveSameOrigin(request.headers, request.url);
   if (!proof.ok) {
-    return NextResponse.json(
-      { ok: false, error: "cross-origin" },
-      { status: 403 },
-    );
+    return NextResponse.json({ ok: false, error: "cross-origin" }, { status: 403 });
   }
 
   const form = await request.formData();
@@ -189,47 +138,53 @@ export async function handleEmailConfirmationPost(
     return sealResponse(confirmRedirect(proof.origin, { kind: "invalid" }));
   }
 
-  // THE C1/C2 WALL — before verifyOtp, always. §3.4: "the attempt is recorded
-  // BEFORE the verification, never after," so a killed connection still
-  // costs an attempt. The Lane-B seam's production default refuses with
-  // `"unavailable"` — see confirmation-wall.ts's header.
-  //
-  // M1, fix round 2026-09-01 (PR #488 Codex adversarial leg): `originDigest`
-  // is deliberately `undefined` here, NOT `proof.origin`. `proof.origin` is
-  // `proveSameOrigin`'s CSRF proof — the `Origin` request header, identical
-  // for every visitor to this deployment — never the C2 client-address
-  // digest (`confirmation-wall.ts`'s `OriginDigest`: sha256(pepper ||
-  // proxy-observed client IP), part 1 §4 option B). Feeding the header in
-  // under the digest's name would key C2 on one shared value for the whole
-  // deployment. Nothing upstream of this handler reads a trusted proxy-IP
-  // header today, so there is no honest value to supply yet; Lane B adds it
-  // when it wires the real runtime call (see confirmation-wall.ts's header
-  // for why this is the chosen shape over minting a second refusal reason).
-  const attempt = await claimAttempt({ email, originDigest: undefined });
-  if (attempt.kind === "unavailable") {
+  // THE C2 INPUT — the address THIS app's edge observed, never `proof.origin`.
+  // `proof.origin` is `proveSameOrigin`'s CSRF proof (the browser's `Origin`
+  // header), identical for every visitor to this deployment; feeding it into
+  // the rate wall under any name would key C2 on one shared value and let five
+  // rejected guesses from anyone lock out every applicant. That was M1 on PR
+  // #488 and it is not being paid for twice. `null` here (no configured
+  // header, or a value that does not parse as an IP) fails closed inside
+  // `confirmEmailCode` — the wall is never keyed on a placeholder.
+  const clientIp = proxyObservedClientIp((name) => request.headers.get(name));
+
+  // THE C1/C2 WALL AND THE VERIFICATION, in one runtime request, in that
+  // order. §3.4: "the attempt is recorded BEFORE the verification, never
+  // after," so a killed connection still costs an attempt — the ordering is
+  // the door's, and this app cannot reorder it even by accident because it
+  // cannot reach the two verbs separately.
+  const outcome = await confirmCode({ email, token, clientIp });
+  if (outcome.kind === "unavailable") {
     return sealResponse(confirmRedirect(proof.origin, { kind: "unavailable" }));
   }
-  if (attempt.kind === "rejected") {
+  if (outcome.kind === "locked") {
     return sealResponse(
-      confirmRedirect(proof.origin, { kind: "locked", waitSeconds: attempt.retryAfterSeconds }),
+      confirmRedirect(proof.origin, { kind: "locked", waitSeconds: outcome.retryAfterSeconds }),
+    );
+  }
+  if (outcome.kind === "wrong") {
+    return sealResponse(
+      confirmRedirect(proof.origin, { kind: "wrong", remaining: outcome.remaining }),
     );
   }
 
-  const response = await supabase.auth.verifyOtp({ type: "signup", email, token });
-
-  // M2, fix round 2026-09-01: `attempt.attemptId` — the exact row this guess
-  // was claimed against (part 3 §2.1) — rides both settlement calls below,
-  // never a bare outcome string. Settling without it let a wrong-code and a
-  // valid-code request in flight together stamp each other's attempt row.
-  if (hasVerifiedSession(response)) {
-    await settleAttempt(attempt.attemptId, "accepted");
-    return sealResponse(fixedSignupRedirect(proof.origin));
+  // VERIFIED. Install the runtime's session into this browser's cookie jar.
+  // The seal is what actually writes it onto the response, exactly as before.
+  const sealed = await supabase.auth.setSession({
+    access_token: outcome.session.accessToken,
+    refresh_token: outcome.session.refreshToken,
+  });
+  // POSITIVE CHECK, not `error === null`. A null error with no session is not
+  // evidence that the cookie session `/signup` needs now exists — the same
+  // property `hasVerifiedSession` enforced against `verifyOtp`'s result.
+  const installed = sealed.data.session;
+  if (sealed.error !== null || typeof installed?.access_token !== "string"
+    || installed.access_token.length === 0) {
+    // The code IS spent — a Supabase OTP is single use, and the runtime
+    // already settled the attempt `accepted`. Saying "that code didn't work"
+    // would be false and would send the person to burn another one. This is
+    // our failure, and `unavailable` is the one outcome that says so.
+    return sealResponse(confirmRedirect(proof.origin, { kind: "unavailable" }));
   }
-
-  await settleAttempt(attempt.attemptId, "rejected");
-  // N3 CLOSED — every verification failure renders identically; see this
-  // file's header for why `response.error` is never inspected here.
-  return sealResponse(
-    confirmRedirect(proof.origin, { kind: "wrong", remaining: attempt.remaining }),
-  );
+  return sealResponse(fixedSignupRedirect(proof.origin));
 }
