@@ -26,6 +26,9 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
       courier **fails closed** (refuses its own same-origin POSTs) when this is unset — do not
       just confirm it is set, confirm the fail-closed behaviour under a deliberately-unset probe
       first.
+- [ ] Flip `clara_auth_wall_login` to `LOGIN` out of band and set
+      `CLARA_AUTH_WALL_DATABASE_URL` in the runtime environment only; migration `0163` deliberately
+      ships and tail-proves the role as `NOLOGIN`, so this is a deploy ceremony, never repo-held DDL.
 - [ ] Proof: **`wrangler secret list` for the `clara-web` Worker** (values redacted; all four
       names are `apps/web`-only — `git grep` over `apps/dashboard` and `packages/runtime` = 0
       hits). ADR-024 dropped Vercel; `apps/web/wrangler.jsonc:3` names the Worker `clara-web`.
@@ -78,10 +81,8 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
       registration).
 - [ ] `clara.stripe_object_map` carries `('product','clara-beta-2026','prod_VBS7ZUaIFPedCs')` and
       `('price','clara-beta-2026','price_1UB5DZHD90w0k86XNfkgYPWq')` — an OPS ACT run **after**
-      the reset applies `0160` and the checkout-gate C-3 migration (claimed as 0163 on #493's
-      branch, stem `checkout_gate_c3_folded_door`, as of this 2026-09-03 measurement — 裁-108
-      numbers are claimed at merge prep, so re-check the frontier before quoting a number rather
-      than trusting this one). Proof: the as-run's `select object_kind, local_key, stripe_id`
+      the reset applies `0160` and `0163_checkout_gate_c3_folded_door.sql` (#493, **MERGED**
+      `265a8ee7`, 2026-09-03). Proof: the as-run's `select object_kind, local_key, stripe_id`
       plus one `open_checkout_intent` call that does NOT raise `CLR10`. Without this seed a beta
       signup dies at `CLR10 no stripe price is mapped for this plan`.
 - [ ] **The Wave-G walk exercises checkout in Stripe TEST mode at a non-zero test price**, with

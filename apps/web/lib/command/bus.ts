@@ -33,10 +33,18 @@
 export const CLARA_FOCUS_RAIL_EVENT = "clara:focus-rail";
 
 export interface ClaraFocusRailDetail {
-  /** The raw text the user had typed into ⌘K's Ask section, if any. */
+  /** The text to seed the rail composer with — ⌘K's Ask input, or the context an inbox row
+   *  hands over. NEVER auto-sent: the rail seeds and focuses, and sending stays the human's
+   *  act (`useFocusRailSubscription`'s own contract). */
   query: string;
-  /** Request origin. Always "cmdk" today; kept explicit for forward-compat. */
-  source: "cmdk";
+  /**
+   * Request origin. `"cmdk"` is the palette (the Ask row, and a Do dispatch handing the
+   * human to the rail where the run renders itself); `"inbox"` is 裁-17 ④'s "ask Clara about
+   * this" handoff from a needs-you row. The field was already "kept explicit for
+   * forward-compat" — this is that forward, and it is a widening of a payload nothing
+   * branches on, not a new transport.
+   */
+  source: "cmdk" | "inbox";
 }
 
 export type ClaraFocusRailEvent = CustomEvent<ClaraFocusRailDetail>;

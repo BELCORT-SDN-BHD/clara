@@ -23,8 +23,8 @@ must reproduce (Lane A §1):
   `graphile_worker` (+ its `migrations` tracker) — captured as **one consistent unit**
   so the engine **resumes** rather than re-bootstraps.
 - **Roles (cluster-level — NOT in a `pg_dump`):** the clara-custom roles `roles-bootstrap.sql`
-  enumerates — 17 today (10 group + 6 login shells + `clara_storage_docs`); count the file, not
-  this line — recreated
+  enumerates — 19 at `265a8ee7` (11 group + 7 login shells + `clara_storage_docs`); count the
+  file, not this line — recreated
   by `packages/db/deploy/roles-bootstrap.sql` (§2).
 - **Ownership + the GRANT/REVOKE/RLS matrix:** the two-lane security model **is** the
   grants + `clara_fn_owner` object ownership. A `SECURITY DEFINER` writer executes as
@@ -39,7 +39,7 @@ must reproduce (Lane A §1):
 | Artifact | Role |
 |---|---|
 | `scripts/backup.mjs --profile full` (`pnpm db:backup:full`) | dumps the four authoritative schemas **WITH owners + privileges**; asserts the full inventory; writes a globals **evidence/diff** artifact (not restored). |
-| `packages/db/deploy/roles-bootstrap.sql` | idempotent recreation of the clara-custom roles `roles-bootstrap.sql` enumerates — 17 today (10 group + 6 login shells + `clara_storage_docs`); count the file, not this line — with exact attributes/memberships/settings. **FRESH-TARGET-ONLY — never on a live project** (it fails closed if a login shell is already LOGIN unless `-v allow_relogin_reset=1`; re-running on live would NOLOGIN the pools). **Run FIRST** on a fresh target. |
+| `packages/db/deploy/roles-bootstrap.sql` | idempotent recreation of the clara-custom roles `roles-bootstrap.sql` enumerates — 19 at `265a8ee7` (11 group + 7 login shells + `clara_storage_docs`); count the file, not this line — with exact attributes/memberships/settings. **FRESH-TARGET-ONLY — never on a live project** (it fails closed if a login shell is already LOGIN unless `-v allow_relogin_reset=1`; re-running on live would NOLOGIN the pools). **Run FIRST** on a fresh target. |
 | `packages/db/scripts/restore-full.mjs` (`pnpm db:restore:full`) | one destructive-guard; runs roles-bootstrap → single-transaction restore → prints the manual post-restore checklist. Does **not** auto-run ceremonies or touch Storage. |
 | `packages/db/scripts/dr-verify.mjs` (`pnpm db:dr:verify`) | the §5 verification battery — diffs source↔target across every fidelity category, enforces a completeness floor, refuses a self-comparison; exits non-zero on any FAIL. `CLARA_DR_STRICT=1` for the live drill (canary + AP REQUIRED). |
 | `packages/db/deploy/write-login-ceremony.sql` · `packages/db/deploy/read-logins-ceremony.sql` · `packages/db/deploy/storage-provision.sql` · `packages/db/deploy/acl-baseline.sql` | the post-restore ceremonies a dump can't carry: the write-pool LOGIN password, the runtime + read-pool LOGIN passwords (`clara_runtime_login` / `clara_agent_read_login`), Storage, and the public-schema ACL baseline. |
@@ -64,9 +64,9 @@ project. Copy the exact string out of the guard's refusal message rather than ty
    `supabase_*`). Snapshot `pg_extension`; confirm it is a superset of the source's.
    Confirm `postgres` is **BYPASSRLS** (else the verify parity probes under-count).
 2. **Roles bootstrap.** `psql -f deploy/roles-bootstrap.sql`. Creates the clara-custom roles
-   `roles-bootstrap.sql` enumerates — 17 today (10 group + 6 login shells + `clara_storage_docs`);
-   count the file, not this line — + memberships + the `clara_agent_ro` read-only setting. No
-   passwords yet; every login role stays NOLOGIN.
+   `roles-bootstrap.sql` enumerates — 19 at `265a8ee7` (11 group + 7 login shells +
+   `clara_storage_docs`); count the file, not this line — + memberships + the `clara_agent_ro`
+   read-only setting. No passwords yet; every login role stays NOLOGIN.
 3. **Full restore.** `pnpm db:restore:full --file <full-dump.sql>` (re-runs
    roles-bootstrap idempotently, then a single-transaction restore). On success the
    books, the durable trio (incl. the parked canary), ownership, and the full grant
@@ -128,7 +128,7 @@ project. Copy the exact string out of the guard's refusal message rather than ty
 ### POST-RESTORE CEREMONIES checklist (none are carried by the dump)
 
 ```
-roles-bootstrap.sql   -> (restore-full runs it)   recreate the clara-custom roles (17 today; count the file, not this line)
+roles-bootstrap.sql   -> (restore-full runs it)   recreate the clara-custom roles (19 at 265a8ee7; count the file, not this line)
 <full restore>        -> restore-full             schema+data+owners+GRANT/RLS matrix
 storage-provision.sql + firm-docs bucket + bytes  Storage recovery (out-of-band)
 write-login-ceremony.sql                          write-pool LOGIN + password

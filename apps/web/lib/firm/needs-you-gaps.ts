@@ -27,10 +27,19 @@ import type { SessionTokenAccessor } from "@/lib/session";
 
 // --- clara.firm_open_questions_visible (0137:248-261, 14 cols) --------------
 
-/** The closed 6-value CHECK, read from the live table itself
- *  (0103_f_a7_pi_additive.sql:563-565). Extend this array (never a standalone
- *  string literal) the day a seventh kind ships — the same discipline
- *  lib/firm/needs-you.ts's REVIEW_QUEUE_ROW_KINDS already applies. */
+/** The closed CHECK, read from the live table itself. Created with SIX values at
+ *  `0103_f_a7_pi_additive.sql:563-565` and WIDENED TO SEVEN at
+ *  `0142_fa7b_pr_a_client_onboarding_open.sql:219-222`, which drops and re-adds
+ *  `firm_open_questions_kind_check` with `onboarding_proposed` appended; 0142's own tail
+ *  (:535-541) asserts the live constraint text is byte-exactly that seven-value world, and
+ *  `0148_promotion_dup_open_wall.sql:196-201` re-reads it a third time before keying an
+ *  index on the value. Nothing after 0142 widens it again (measured: every `alter table …
+ *  firm_open_questions_kind_check` in `packages/db/migrations/*.sql`, 2026-09-02).
+ *
+ *  P6-5 ③ extends the ARRAY, never a standalone string literal — the same discipline
+ *  lib/firm/needs-you.ts's REVIEW_QUEUE_ROW_KINDS applies, and the reason this file's own
+ *  comment stated it: a bare literal at one call site is a seventh copy of the vocabulary
+ *  that nothing keeps in step with the DB. */
 export const FIRM_QUESTION_KINDS = [
   "unattributed",
   "collision",
@@ -38,9 +47,44 @@ export const FIRM_QUESTION_KINDS = [
   "identity_document",
   "correction_proposed",
   "promotion_proposed",
+  "onboarding_proposed",
 ] as const;
 
 export type FirmQuestionKind = (typeof FIRM_QUESTION_KINDS)[number];
+
+/**
+ * `onboarding_proposed`'s candidate shape — the ONE kind whose candidates the live body
+ * commits to, and it commits to it exactly:
+ * `clara.wake_propose_client_onboarding` builds the array itself at
+ * `0143_proposal_basis_resolved.sql:645-648` as a ONE-element
+ * `[{ proposed_name, basis: { citations, sightings } }]`, and `sightings` there is the
+ * DB-DERIVED figure from `clara._resolve_proposal_basis` — that migration's own comment
+ * (HIGH-2, 裁-22) records that the model's raw claimed count is persisted NOWHERE, because
+ * PRD §6 invariant 1 forbids a model-claimed numeral in a durable, human-visible place.
+ *
+ * So this projection renders a DB-owned number, not a model's. It is deliberately narrow:
+ * anything it cannot positively read comes back null and the card falls through to the
+ * generic candidates rendering every other kind uses (this module invents no per-kind
+ * semantics a live body has not committed to — the header's own rule).
+ */
+export type OnboardingProposalCandidate = {
+  proposedName: string;
+  citationCount: number | null;
+  sightings: number | null;
+};
+
+export function readOnboardingProposal(candidates: unknown): OnboardingProposalCandidate | null {
+  if (!Array.isArray(candidates) || candidates.length === 0) return null;
+  const first = candidates[0];
+  if (typeof first !== "object" || first === null) return null;
+  const row = first as Record<string, unknown>;
+  const proposedName = typeof row.proposed_name === "string" ? row.proposed_name.trim() : "";
+  if (!proposedName) return null;
+  const basis = typeof row.basis === "object" && row.basis !== null ? (row.basis as Record<string, unknown>) : null;
+  const citations = basis && Array.isArray(basis.citations) ? basis.citations.length : null;
+  const sightings = basis && Number.isInteger(basis.sightings) ? (basis.sightings as number) : null;
+  return { proposedName, citationCount: citations, sightings };
+}
 
 export function isKnownFirmQuestionKind(kind: string): kind is FirmQuestionKind {
   return (FIRM_QUESTION_KINDS as readonly string[]).includes(kind);

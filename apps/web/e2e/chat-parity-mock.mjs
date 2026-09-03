@@ -130,6 +130,14 @@ export async function handleChatParitySupabase(request, response, path, url, sen
   }
 
   if (request.method === "GET" && path === "/rest/v1/agent_interruptions") {
+    // TASK-SCOPED, added by P6-5 and required by this module's own ID-SCOPED discipline.
+    // This branch used to claim EVERY `agent_interruptions` read regardless of subject, and
+    // answer it from the chat-parity park — so a sibling walk asking about its OWN task got
+    // `[]` (this walk's park has not started) and its question silently never rendered. The
+    // by-id read is left unscoped-by-task on purpose: it carries no `task_id` filter at all,
+    // and its own id comparison below is already exact.
+    const taskFilter = url.searchParams.get("task_id");
+    if (taskFilter && taskFilter !== `eq.${CHAT_PARITY.taskId}`) return false;
     // The filters are HONOURED, not ignored: the card asks "what is pending on this
     // task" first and "this exact row by id" after it has answered, and a mock that
     // answered both with the same row would hide a card that never learned the

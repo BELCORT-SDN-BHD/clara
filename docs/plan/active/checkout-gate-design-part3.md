@@ -73,7 +73,7 @@ them** — they are marked.
 | route | what changes |
 |---|---|
 | /auth/confirm + /auth/confirm/verify **(裁-92)** | the GET becomes a **code-entry form** (address + six digits, the address typed or read from this browser's own signup state — **never from a URL parameter**, part 1 §3.3). The POST keeps its shape and changes its input: `proveSameOrigin` **verbatim**, then the C1/C2 attempt wall through the runtime (§2.1), then `verifyOtp({email, token, type:'signup'})`, then seal. `hasVerifiedSession` unchanged. **`Referrer-Policy` on this page must be `strict-origin`, never `no-referrer`** — FS-2's NEW-A: `no-referrer` makes real browsers send `Origin: null` on the form POST, which this wall 403s. **`Origin: null` is never accepted.** |
-| `/signup` step 2 **(client door call)** | gains the DPA step. The text is **read** by a server component from `dpa_documents` (body + sha) and passed down as props; **`sign_dpa` is then called from the client over PostgREST, exactly as step ③ already calls `claim_identity` and `request_firm_registration`** — `signup-firm-form.tsx` is `"use client"` and uses `callDoor`. **This is a decision, not an omission:** an unnamed server-side step under a no-Server-Actions heading is where a build lane reaches for an action. `sign_dpa` is a governed door, the caller is the person, and the client-RPC pattern is already built and reviewed. If a later lane needs it server-side, it adds POST /signup/dpa as a route handler and registers it — never an action. The sha submitted is the one the person was shown. The existing `NotBuiltNote` is **removed because the thing it names now exists**. **Under 裁-90 the beta row SHIPS**, so the step renders the delegated text with an honest placeholder note — *"this is Clara's beta data-processing agreement, pending review by the owner's lawyer before launch"* — wording that says review is **owed**, never that it happened. **The fail-closed successor still stands and is structural, not a default:** `sign_dpa` refuses `unknown dpa version` and `that dpa version is not current`, so an absent or fully-superseded table still refuses X7 → no checkout → no firm. With no current row the step renders a `NotBuiltNote` and the checkout control is **absent, not disabled-looking**: nothing may imply a signature was recorded when none was (NIT-8) |
+| `/signup` step 2 **(client door call)** | gains the DPA step. The text is **read** by a server component through `get_current_dpa_document()` (`version`, `body`, `body_sha256`, `published_at`) and passed down as props; the SECURITY DEFINER read door is executable by `clara_authenticated` only, while `dpa_documents` keeps C-1's owner-only policy and zero direct application-role grants. **`sign_dpa` is then called from the client over PostgREST, exactly as step ③ already calls `claim_identity` and `request_firm_registration`** — `signup-firm-form.tsx` is `"use client"` and uses `callDoor`. **This is a decision, not an omission:** an unnamed server-side step under a no-Server-Actions heading is where a build lane reaches for an action. `sign_dpa` is a governed door, the caller is the person, and the client-RPC pattern is already built and reviewed. If a later lane needs it server-side, it adds POST /signup/dpa as a route handler and registers it — never an action. The sha submitted is the one the person was shown. The existing `NotBuiltNote` is **removed because the thing it names now exists**. **Under 裁-90 the beta row SHIPS**, so the step renders the delegated text with an honest placeholder note — *"this is Clara's beta data-processing agreement, pending review by the owner's lawyer before launch"* — wording that says review is **owed**, never that it happened. **The fail-closed successor still stands and is structural, not a default:** `sign_dpa` refuses `unknown dpa version` and `that dpa version is not current`, so an absent or fully-superseded table still refuses X7 → no checkout → no firm. With no current row the step renders a `NotBuiltNote` and the checkout control is **absent, not disabled-looking**: nothing may imply a signature was recorded when none was (NIT-8) |
 | POST /checkout (new, server-only) | reads the trusted client-IP header → digest → `open_checkout_intent` → creates the Stripe Checkout Session in **subscription mode** at the zero-amount price id the door returned, with **`payment_method_collection` read from the plan row** — `'if_required'` while the plan's amount is 0, `'always'` once 裁-28's amounts are ruled. **裁-88's configurability rule is the law here, and G13 (test-mode beta) is why it bites now rather than later — this is config-driven, not the flat `'always'` v2 pinned:** at RM0 a real beta customer would otherwise be asked for a card in TEST mode, i.e. a test card, to open a real firm. The value is a column on the plan row the Session is built from (the billing brief's configurability law), so it flips at the pricing sitting with no code change; Wave G still exercises the `'always'` arm against a non-zero test price and `metadata: {clara_registration_id, clara_applicant, clara_intent_id}` → `record_checkout_session` → 303 to Stripe |
 | /checkout/success (new) | **Stripe's `success_url` is a top-level navigation, so this arrives as a GET.** The GET is therefore **paint-only** — it renders "your payment went through; open your firm" with an explicit button — and a sibling route.ts POST calls **one door**, `claim_paid_firm` (裁-89), which claims, creates and closes in a single transaction, then redirects to the firm home. **This is the same GET-is-inert discipline the confirm page already has, applied to the route that CREATES THE FIRM** (M9); the first draft applied it to the confirmation and not here. Every refusal renders verbatim; **no optimistic UI**. The firm name is read **inside the door** from `firm_registration_requests.firm_name` — **the registration is the authority, and no name crosses the wire at all**, never a form field re-typed on the success page (NIT-6) |
 | `/pending` | the three new arms of part 1 §2.1 |
@@ -110,14 +110,54 @@ clara.confirmation_attempts(
 **`clara.claim_confirmation_attempt(p_email_digest bytea, p_origin_digest bytea) → jsonb`** —
 appends the attempt row **first**, then evaluates C1 and C2 over the preceding window.
 
-| # | wall | refusal | errcode |
-|---|---|---|---|
-| C1 | ≤ 5 rejected attempts per **email digest** per 15 minutes | `too many confirmation attempts` | `CLR09` |
-| C2 | ≤ 5 rejected attempts per **origin digest** per 15 minutes | `too many confirmation attempts from this location` | `CLR09` |
-| — | both digests are exactly 32 bytes | `a digest is required` | `CLR10` |
+**As-built correction (NIT8, #493 opus review): C1/C2 do not `raise` — they return.** The digest
+CHECK below is the only limb of this door that raises an exception; C1 and C2 are read from the
+attempt row's own evidence and reported back as data (`allowed:false`, plus `scope` and
+`retry_after_seconds` below), never thrown, because the caller still needs a live `attempt_id` and
+a wait to render even on refusal — an exception would have nothing to attach either to. The table
+below names which wall a given refusal came from, not a literal error the door raises for it:
 
-Returns `{attempt_id, allowed, remaining}` — `remaining` is what the "that code is not right" card
-renders, because a person near lockout deserves to know.
+| # | wall | as-reported when it fires | (only the digest-shape limb raises) |
+|---|---|---|---|
+| C1 | ≤ 5 rejected attempts per **email digest** per 15 minutes | `allowed:false, scope:'email'` | — |
+| C2 | ≤ 5 rejected attempts per **origin digest** per 15 minutes | `allowed:false, scope:'origin'` | — |
+| — | both digests are exactly 32 bytes | — | `a digest is required`, `CLR10` |
+
+**Returns `{attempt_id, allowed, remaining, scope, retry_after_seconds}`** (`scope`/
+`retry_after_seconds` folded in at 裁-103, #488's seam review — the original `{attempt_id,
+allowed, remaining}` left the caller to infer WHICH wall fired from an errcode or message string,
+exactly the law-3 trap, and gave no DB-owned wait at all).
+
+- **`remaining`** is attempts remaining **after this one** — the card renders once this guess has
+  already been spent, so the last allowed attempt (the 5th) reports `0`, never `1` (F5, #493 opus
+  review: an earlier build reported "attempts remaining before this one," which showed a nonzero
+  count to a caller who in fact had none left).
+- **`scope`** is `null` on the allowed path; `'email'` or `'origin'` on refusal. **Redefined by
+  the BLOCKER-1 fix below (opus cross-family leg, RULED): `scope` names the limb the caller must
+  actually outlast — whichever of the two independently-computed waits is longer — not
+  necessarily the wall whose own threshold triggered today's specific refusal.** The two can
+  differ: a caller can be refused today because their EMAIL count crossed 5, while their ORIGIN
+  count (below 5 today, but already carrying its own aging priors plus this new attempt) is what
+  is still blocking at the moment email would have cleared. Naming the limb that actually
+  constrains the retry is the only label that helps the caller, which is why the redefinition is
+  taken rather than treated as a regression. `'email'` takes precedence on an exact tie between
+  the two computed waits, matching this table's own C1-then-C2 ordering. (F2, #493 opus review:
+  the door's token is `'email'`, not `'address'` as an earlier seam draft assumed — `'email'`
+  matches this table's own column and the `email_digest` name; the seam's union is trued to match
+  the door, not the reverse. Unaffected by the redefinition — the token set is unchanged.)
+- **`retry_after_seconds`** is `null` on the allowed path; on refusal, **the MAX of the two limbs'
+  independently-computed waits** (BLOCKER 1, above) — each limb's own whole-second wait until
+  enough of ITS counted attempts age out of the 15-minute window, **computed only for a limb whose
+  own prior count is already >=4** (a limb with fewer priors can never be the reason a future call
+  is refused, and computing a wait for it anyway manufactures a number from a row that constrains
+  nothing — MEASURED to over-advertise by many minutes). Derived entirely from attempt timestamps
+  the DB already owns (hard constraint 2). The counting window's far edge is exclusive
+  (`attempted_at > current_attempt - interval '15 minutes'`), so a prior at the exact +900-second
+  tie is already expired. Fractional waits round UP with `ceil`, while an exact whole-second wait
+  stays exact; the same-transaction fresh-row tie therefore advertises 900 and a caller retrying
+  at +900 finds that row outside the window. The defensive `least(900, ...)` remains explicit,
+  and the mathematical range is `(0, 900]`; Lane A's existing inclusive-900 display clamp needs
+  no widening.
 
 **The row is written BEFORE the verification, not after, and that ordering is the wall.** If the
 attempt were recorded on the way back, an attacker would abort the request after each failed guess

@@ -6,7 +6,7 @@
 // terminal `message`, refetch `getMessages` for the authoritative transcript (never
 // hand-assemble the user's own row from what we assume we sent — the DB is asked).
 
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { onFocusRail } from "@/lib/command/bus";
 
@@ -14,6 +14,7 @@ import { getMessages, postTurn, resolveStreamAuth } from "./api";
 import type { SessionTokenAccessor } from "@/lib/session";
 import { runClaraTaskStream } from "./stream";
 import { claraThreadStore, type ClaraThreadUiState, type ComposerFocusRequest } from "./threadStore";
+import { readRunByTaskId, readThreadRunSnapshot } from "./turnRun";
 import type { AttachmentPart, ClaraPart } from "@/lib/parts/types";
 
 export function useClaraRailOpen(): boolean {
@@ -97,13 +98,25 @@ export function useClaraThread(
   state: ClaraThreadUiState;
   sendMessage: (text: string, attachments?: AttachmentPart[]) => Promise<boolean>;
   retryConnection: () => Promise<void>;
+  retryLoad: () => Promise<void>;
 } {
   const state = useClaraThreadState(threadId);
   const loadedRef = useRef<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
+  // THE FIRST TRANSCRIPT READ IS RETRYABLE, and this effect is why it has to be (#514's
+  // review, found on main). `loadedRef` fires the read once per thread id; a FAILED first
+  // read left `messagesLoaded` false forever, and ClaraThreadView's loading arm keyed on
+  // exactly that — so the rail sat on "Loading the conversation…" with no error, no retry
+  // and no second attempt, while the honest error branch (which also required
+  // `messagesLoaded`) could never render. `loadAttempt` joins the dependency so `retryLoad`
+  // re-arms the ref and runs the read again; nothing else about the once-per-thread rule
+  // changed.
   useEffect(() => {
-    if (!threadId || loadedRef.current === threadId) return;
-    loadedRef.current = threadId;
+    if (!threadId) return;
+    const key = `${threadId}#${loadAttempt}`;
+    if (loadedRef.current === key) return;
+    loadedRef.current = key;
     let cancelled = false;
     getMessages(auth, threadId)
       .then((messages) => {
@@ -115,7 +128,40 @@ export function useClaraThread(
     return () => {
       cancelled = true;
     };
-  }, [auth, threadId]);
+  }, [auth, threadId, loadAttempt]);
+
+  const retryLoad = useCallback(async () => {
+    if (!threadId) return;
+    claraThreadStore.beginLoadRetry(threadId);
+    setLoadAttempt((n) => n + 1);
+  }, [threadId]);
+
+  // REHYDRATE THE RUN (裁-132 + the parked-clarify rehydration). A mount — a page reload
+  // included — asks the DB what this thread's live run is, so the turn clock counts from
+  // the RUNTIME's own `created_at` and a question Clara is parked on comes back on screen
+  // instead of vanishing with the discarded SSE buffer. Fail-quiet by design: a failed run
+  // read must not paint an error over a transcript that loaded fine, so it leaves the
+  // thread with no claimed run (the same state as "no turn in flight"), which is the
+  // fail-closed arm — no timer, no question, nothing asserted.
+  useEffect(() => {
+    if (!threadId) return;
+    let cancelled = false;
+    void readThreadRunSnapshot(threadId, { session: auth })
+      .then(({ run, parkedClarify }) => {
+        if (cancelled) return;
+        claraThreadStore.hydrateRun(
+          threadId,
+          run ? { taskId: run.id, status: run.status, startedAt: run.created_at } : null,
+          parkedClarify,
+        );
+      })
+      .catch(() => {
+        if (!cancelled) claraThreadStore.hydrateRun(threadId, null, null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [auth, threadId, loadAttempt]);
 
   const sendMessage = useCallback(
     async (text: string, attachments: AttachmentPart[] = []) => {
@@ -131,6 +177,22 @@ export function useClaraThread(
         return false;
       }
       claraThreadStore.markAccepted(threadId, result.taskId);
+
+      // 裁-132: the turn's start comes from the DB's own row for the task the runtime just
+      // minted, never from `Date.now()` at the moment this promise resolved. Fired and not
+      // awaited — the composer must not wait on a progress indicator — and fail-quiet: no
+      // start read means no elapsed time rendered, which is the honest arm.
+      void readRunByTaskId(result.taskId, { session: auth })
+        .then((run) => {
+          if (run) {
+            claraThreadStore.hydrateRun(
+              threadId,
+              { taskId: run.id, status: run.status, startedAt: run.created_at },
+              null,
+            );
+          }
+        })
+        .catch(() => {});
 
       // Composer clearing waits for the stream-open authority, but the stream itself
       // keeps running in the background. This preserves the existing "sent only on
@@ -166,5 +228,5 @@ export function useClaraThread(
     }
   }, [auth, threadId]);
 
-  return { state, sendMessage, retryConnection };
+  return { state, sendMessage, retryConnection, retryLoad };
 }

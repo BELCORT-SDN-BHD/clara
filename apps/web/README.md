@@ -8,7 +8,8 @@ the SERVING Fly bundle still v16 until the next deploy; `packages/runtime/README
 (journals, documents, bank, close, reports, registers, knowledge) are landed, and the port
 wave has since filled those workbenches with the ported door/read surface. The **P4**
 firm-admin UI tranche is MERGED, P4-1…P4-6 all six (#450 · #451 · #461 · #455 · #453 ·
-**#504** `c72459f4`, 2026-08-31…09-02). Still ahead: **P6-5 (#519) and the cutover PR**. It replaces `apps/dashboard` **at cutover**, not before — see
+**#504** `c72459f4`, 2026-08-31…09-02). P6-5 also MERGED (#519 `1697714b`, 2026-09-02). Still
+ahead: **the cutover PR**. It replaces `apps/dashboard` **at cutover**, not before — see
 `docs/plan/active/port-wave-plan-2026-08-28.md` for the current cutover plan
 (`docs/plan/active/frontend-handoff-2026-08-23.md` §0.1 is the original at-cutover ruling).
 
@@ -176,9 +177,9 @@ pnpm --filter @clara/web test       # node --test + tsx — the auth-boundary su
 pnpm --filter @clara/web build      # public-key class gate, then `next build`
 pnpm --filter @clara/web dev        # local dev server
 pnpm --filter @clara/web e2e        # the Playwright rig (node e2e/run.mjs) — REAL browser
-                                    # walks EVERY `e2e/*.spec.ts` on the BUILT app (nine
-                                    # today; count the directory, not this line — e2e/README.md
-                                    # lists them) + the live-stack harness (e2e/live-stack/,
+                                    # walks EVERY `e2e/*.spec.ts` on the BUILT app (eleven
+                                    # at `265a8ee7`; count `apps/web/e2e/*.spec.ts`, not this
+                                    # line — e2e/README.md lists them) + the live-stack harness (e2e/live-stack/,
                                     # its own README) every frontend train reuses per the
                                     # 裁-86 browser-leg law; serve-built.mjs serves the
                                     # production build locally. The interview specs SKIP
@@ -487,9 +488,12 @@ workbench here, contradicting the real workbenches those routes mount):
 - The **P6 polish wave** — the `chatTurn_v16` wire bump's four Q8 part kinds
   SHIPPED (v16 live on Fly v70 since 2026-08-31); the WCAG 2.2 SC 2.5.8 target-size gate
   (裁-13), the Clara mascot (裁-14) and the R3 focus-ring recut all SHIPPED (#514, #515);
-  still ahead: **P6-5 (#519)** and the cutover PR that retires `apps/dashboard`.
-- **⌘K "Do"** — still a statically disabled row (see `lib/command/routes.ts` for Go, which
-  is live and mechanically checked by `lib/command/routes.test.ts`).
+  P6-5 also SHIPPED (#519 `1697714b`); still ahead: **the cutover PR** that retires
+  `apps/dashboard`.
+- **⌘K "Do"** — re-measured 2026-09-03: no longer a statically disabled row — #519 built the
+  real rank-gated form (an act the caller cannot perform is ABSENT, never shown disabled;
+  `components/command/command-palette.tsx:81`, `command-do.test.tsx`), alongside Go
+  (`lib/command/routes.ts`, mechanically checked by `lib/command/routes.test.ts`).
 
 See `docs/plan/active/mohe-grill-rulings-2026-08-27.md` Q9 for the phase plan and
 `docs/plan/active/port-wave-plan-2026-08-28-part2.md` §8 for P6's specification.
