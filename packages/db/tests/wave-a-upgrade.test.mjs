@@ -35,10 +35,20 @@ function exportUpTo(maxNum) {
   return tmp;
 }
 
-/** A deterministic catalog SIGNATURE of schema clara — the Codex-26 dump surface. */
-async function signature() {
+/** The max clara.taxonomy_versions.version right after a migrate() run returns — read as
+ *  the VERY FIRST thing so the window it can race a concurrent writer in is one round-trip,
+ *  not the seven-plus round-trips signature() itself takes before it reaches the taxonomy
+ *  section. See the #485/#490 comment on the taxonomy query inside signature() below. */
+async function taxonomyBaselineVersion() {
+  return Number((await rootQuery("select coalesce(max(version), 0) as v from clara.taxonomy_versions")).rows[0].v);
+}
+
+/** A deterministic catalog SIGNATURE of schema clara — the Codex-26 dump surface.
+ *  `baselineVersion` is the value `taxonomyBaselineVersion()` observed for THIS migrate
+ *  run — required, never re-derived here (see the #485/#490 comment below). */
+async function signature(baselineVersion) {
   const parts = [];
-  const q = async (label, sql) => { const r = await rootQuery(sql); parts.push(`## ${label}\n` + r.rows.map((x) => JSON.stringify(x)).join("\n")); };
+  const q = async (label, sql, params) => { const r = await rootQuery(sql, params); parts.push(`## ${label}\n` + r.rows.map((x) => JSON.stringify(x)).join("\n")); };
   await q("functions", `select p.proname, pg_get_function_identity_arguments(p.oid) as args, p.prosecdef,
       coalesce((select string_agg(a.grantee::regrole::text||'='||a.privilege_type, ',' order by a.grantee::regrole::text||a.privilege_type) from aclexplode(p.proacl) a), 'owner-only') as acl
      from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' order by p.proname, args`);
@@ -49,7 +59,62 @@ async function signature() {
   await q("policies", `select c.relname, pol.polname, pol.polcmd from pg_policy pol join pg_class c on c.oid=pol.polrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='clara' order by c.relname, pol.polname`);
   await q("triggers", `select c.relname, t.tgname from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='clara' and not t.tgisinternal order by c.relname, t.tgname`);
   await q("constraints", `select c.relname as tbl, con.conname, con.contype, pg_get_constraintdef(con.oid) as def from pg_constraint con join pg_class c on c.oid=con.conrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='clara' order by c.relname, con.conname`);
-  await q("taxonomy", `select tt.version, tt.event_type, tt.decision from clara.trigger_taxonomy tt order by tt.version, tt.event_type`);
+  // Scoped against the #485/#490 class (committed estate-global taxonomy writes vs
+  // pointer-resolving/unscoped-roster reads under `pnpm -r` concurrency — both halves
+  // must hold; packages/runtime/tests/relay-taxonomy.test.mjs's own private-database
+  // hardening is the other half). An UNSCOPED `select * from clara.trigger_taxonomy`
+  // reads every version ever inserted, so ANY concurrent writer minting a brand-new
+  // version — exactly what relay-taxonomy's own (f) flip cell used to do against this
+  // SAME shared database — makes the "fresh" and "upgrade" catalog captures diverge by
+  // row count alone: a false red having nothing to do with the migration under test.
+  // Hardened regardless of which writer it was, since any concurrent insert breaks an
+  // unscoped snapshot the same way. The estate's own immune exemplars for a
+  // scoped-vs-unscoped taxonomy read: Set-dedup (x38-wave-c-b-bank.test.mjs:2149 —
+  // `event_type = any($1)` narrows to the exact types under test, then a `new
+  // Set(...).size` dedups across versions) and highest-version + existence
+  // (wave-b/wb-0020-events.test.mjs:63 — `order by version desc limit 1`, existence
+  // only). Neither fits here unchanged: this cell needs the full (version, event_type,
+  // decision) SHAPE compared across two independent migration paths, not a presence
+  // check against a closed list of named types — weakening it to existence-only would
+  // drop the very thing probe 26 exists to prove. So the third option: scope the
+  // snapshot to the versions the migration run just under test actually established.
+  //
+  // A bound computed AS A LIVE SUBQUERY here (`<= (select max(version) from
+  // taxonomy_versions)`) is NOT enough, despite running in the same statement/snapshot —
+  // a concurrent writer's INSERT that already COMMITTED at any point since migrate()
+  // returned (there are SEVEN other round-trips in this function before execution ever
+  // reaches this line: functions/tables/table_acls/columns/policies/triggers/constraints)
+  // is already visible to a live subquery too, so it would be counted right along with
+  // the legitimate rows (measured empirically: a live-subquery bound still diverged
+  // fresh-vs-upgrade under the RED-before repro, because the concurrent writer commits
+  // BEFORE this statement even starts, not during it). The bound has to be a VALUE the
+  // caller observed immediately after ITS OWN migrate() returned — `baselineVersion`,
+  // threaded in as `$1` — so anything a concurrent writer commits AFTER that observation,
+  // no matter how many round-trips later this query actually runs, is excluded.
+  //
+  // `<= $1` alone covers only a NEW-VERSION writer (relay-taxonomy's own pre-fix (f)
+  // flip). It does NOT cover a writer that inserts an ADDITIVE row under the CURRENTLY
+  // ACTIVE version — relay-fixtures.mjs's ensureWakeType() does exactly this (called by
+  // every emit/pump helper, so relay-drain/runner/redrive/unit still fire it against the
+  // shared clara_ci; Part A's private database only covers relay-taxonomy.test.mjs
+  // itself). The estate's own precedent for THAT shape is AB-7's `not like 'rig.%'`
+  // (s6-tasks.test.mjs:93, wave-a-shape.test.mjs:182) — ensureWakeType's own
+  // WAKE_EVENT_TYPE is the reserved `rig.relay.wake`, and no migration ever registers a
+  // `rig.%` event type (checked against every migration file), so the exclusion is FREE:
+  // it can only ever drop rows a shipped migration never produced, never weakening the
+  // fresh-vs-upgrade parity proof. The one construction path that COULD emit one is
+  // 0007_document_pipeline.sql's whole-table sweep (`insert into trigger_taxonomy(...)
+  // select 2, e.name, ... from clara.event_types e`, ~line 2695) — impossible here
+  // regardless, since both the fresh and upgrade paths start from reset(), so
+  // event_types at 0007 holds only 0005's literals, never a rig.% row.
+  await q(
+    "taxonomy",
+    `select tt.version, tt.event_type, tt.decision from clara.trigger_taxonomy tt
+       where tt.version <= $1
+         and tt.event_type not like 'rig.%'
+       order by tt.version, tt.event_type`,
+    [baselineVersion],
+  );
   return parts.join("\n");
 }
 async function surfaceClean() {
@@ -70,14 +135,16 @@ test("probe 26: 0011 compiles clean on FRESH and on a 0010-UPGRADE image, and th
   await reset({ log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
   if (!(await waveAReady())) { markSkip(); noteLane("0011 not on disk yet — fresh migrate reached 0010 only; parity probe skipped"); t.skip("0011 not yet built on disk"); return; }
+  const freshBaseline = await taxonomyBaselineVersion(); // observed FIRST — see signature()'s taxonomy comment
   await surfaceClean();
-  const sigFresh = await signature();
+  const sigFresh = await signature(freshBaseline);
   // UPGRADE: reset → migrate 0001→0010 → migrate ALL (applies only 0011).
   await reset({ log: () => {} });
   await migrate({ dir: exportUpTo(10), log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
+  const upgradeBaseline = await taxonomyBaselineVersion();
   await surfaceClean();
-  const sigUpgrade = await signature();
+  const sigUpgrade = await signature(upgradeBaseline);
   if (sigFresh !== sigUpgrade) {
     // Surface the FIRST divergent section for the orchestrator.
     const fa = sigFresh.split("\n"), ua = sigUpgrade.split("\n");
@@ -124,9 +191,11 @@ test("probe 26: two independent fresh bootstraps reach an IDENTICAL surface (det
   await reset({ log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
   if (!(await waveAReady())) { markSkip(); t.skip("0011 not yet built on disk"); return; }
-  const sig1 = await signature();
+  const baseline1 = await taxonomyBaselineVersion();
+  const sig1 = await signature(baseline1);
   await reset({ log: () => {} });
   await migrate({ dir: MIG_DIR, log: () => {} });
-  const sig2 = await signature();
+  const baseline2 = await taxonomyBaselineVersion();
+  const sig2 = await signature(baseline2);
   assert.equal(sig1, sig2, "two independent bootstraps produce byte-identical catalogs (deterministic migration)");
 });
