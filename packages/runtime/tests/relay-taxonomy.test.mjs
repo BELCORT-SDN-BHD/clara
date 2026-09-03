@@ -25,9 +25,13 @@
 // estate-global writes never reach the shared clara_ci at all.
 //
 // Built directly on packages/db's own disposable-database harness
-// (packages/db/tests/migrate-harness.mjs, reused across a package boundary by
-// correction-adjudication.test.mjs) — CREATE DATABASE, then populate it, then DROP
-// DATABASE, the shape migrate-lock-serialization.test.mjs et al. already prove.
+// (packages/db/tests/migrate-harness.mjs, already reused across a package boundary —
+// packages/runtime/tests/correction-adjudication.test.mjs reaches into
+// packages/db/tests/rig-docs-fixtures.mjs the same way this file reaches into
+// migrate-harness.mjs, fixed per rev-498 MINOR-4: the earlier draft of this comment
+// named migrate-harness.mjs as what correction-adjudication.test.mjs imports, which is
+// false — it imports rig-docs-fixtures.mjs) — CREATE DATABASE, then populate it, then
+// DROP DATABASE, the shape migrate-lock-serialization.test.mjs et al. already prove.
 //
 // CI FIX 2026-09-02: populating that private database used to REPLAY migrate() — every
 // migration file, from 0001, a second time on this SAME Postgres SERVER. Unsafe the

@@ -21,14 +21,24 @@
 // rev-498 M2 correction: a bare `assert.throws(...)` on the error MESSAGE is a
 // law-3 spelling check, not proof pg_dump never ran -- a `pg_dump` that merely
 // FAILED to start (wrong binary, PATH miss) throws a DIFFERENT message but
-// still passes a loose "did it throw" assertion. `cloneAmbientDatabase()`
-// creates its `mkdtempSync("clara-clone-*")` scratch dir strictly AFTER the
-// guard check, so a real structural proof is: snapshot that directory family
-// under `tmpdir()` before the guarded call, assert the set is UNCHANGED after
-// -- the dump pipeline never got far enough to create anything, independent of
-// what pg_dump itself would have done. (Endorsed as the right instrument by
-// the rev-498 review's own fold-list reply: "the scratch-dir-snapshot design
-// ... is the right instrument.")
+// still passes a loose "did it throw" assertion. So the cell ALSO snapshots
+// the `clara-clone-*` scratch-directory family under `tmpdir()` (the one
+// `mkdtempSync()` creates strictly AFTER the guard check) before and after the
+// guarded call, asserting the set is unchanged.
+//
+// rev-498 SECOND ROUND MINOR-1 correction (the prior version of this comment
+// overclaimed): that snapshot is a LEAK DETECTOR, not a structural "never
+// spawned" proof -- `cloneAmbientDatabase()`'s own `finally { rmSync(dumpDir) }`
+// removes the scratch dir on EVERY path, including one where `pg_dump`
+// genuinely ran to completion, so an unchanged snapshot would ALSO be what a
+// real (non-refused) clone leaves behind once its own cleanup runs. Real
+// value: it catches the refusal path failing to clean up after itself, and
+// (endorsed by the reviewer as the right instrument for THAT purpose) it is
+// good enough as a same-process sanity check here. It reads the SHARED
+// `tmpdir()` by name PREFIX, not a process-scoped path, so a sibling lane's
+// own clone landing inside this exact snapshot window could in principle
+// pollute it -- a local multi-lane-host risk, not a CI one (each CI job runs
+// in its own single-tenant VM).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -71,8 +81,9 @@ test("migrate-harness destructive guard: CLARA_ALLOW_DESTRUCTIVE unset -> create
       /is destructive and REFUSED/,
       "cloneAmbientDatabase() must refuse without CLARA_ALLOW_DESTRUCTIVE=1, before pg_dump ever starts (a sync throw, not a rejection -- this helper is not async)",
     );
-    // THE load-bearing assertion (rev-498 M2): a structural proof pg_dump never
-    // spawned, not a message-string match -- see the file header note.
+    // THE load-bearing assertion (rev-498 M2): a leak-detector check, not a
+    // message-string match -- see the file header note for what this does and
+    // does not prove.
     assert.deepEqual(cloneScratchDirs(), scratchBefore, "cloneAmbientDatabase() must refuse BEFORE creating its pg_dump scratch directory -- the dump pipeline must never start");
   } finally {
     // Defensive: only fires if a mutant (or a future regression) let CREATE DATABASE
