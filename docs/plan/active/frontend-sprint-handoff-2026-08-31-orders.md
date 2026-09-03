@@ -80,84 +80,13 @@ first paragraph and AGENTS.md's working protocol.)*
 
 *Each paragraph below is one law and one day's price. They extend §0.5's instrument laws
 (`fe-train-plan-2026-08-30-orders-p4.md`), which every order already inherits; nothing here
-replaces them. The day's rulings are in `docs/plan/active/mohe-grill-rulings-2026-09-02-pm.md`
-(裁-132…141; 裁-129…131 are in the `-09-02` file it continues).*
+replaces them. The days' rulings are in `docs/plan/active/mohe-grill-rulings-2026-09-02-pm.md`
+(裁-132…145; 裁-129…131 are in the `-09-02` file it continues) and, from 裁-146, in
+`docs/plan/active/mohe-grill-rulings-2026-09-03.md` — the newest.*
 
 **Native lanes only (裁-133, owner, 15:50).** Until beta live launch there is no Codex lane of any kind — builds included. Every lane is native: sonnet-5 xhigh for bounded, mechanical, objectively testable work; opus-5 xhigh where judgement, security or ambiguity dominates, and for every review. The Codex REVIEW leg was already suspended by 裁-111; both resume at beta live unless the owner rules otherwise. Fable stays the orchestrator, and the 3–4 heavy-lane host cap still binds — native lanes run the same suites.
 
-**PROCESS LAW (14:53, re-cut 21:40 after a second breach).** NEVER kill processes by NAME
-(`Get-Process node | Stop-Process`, `taskkill /IM node.exe`, `pkill node`) and never by a
-CommandLine SUBSTRING. The host runs other lanes, reviewers and long-lived tooling as node
-processes; a name-kill took down two sibling lanes mid-round, and a `*test-concurrency*` filter
-killed two more root trees because `--test-concurrency=1` is in the SHARED db test script and
-therefore identifies the ESTATE's suites, not one lane's. The only lawful kill is the PID you
-captured when you spawned the process (keep the handle: `$proc.Id` / `$!`), then its tree by THAT
-pid (`taskkill /PID <pid> /T`). A dev server or Playwright you started is yours by PID; nothing
-else on this host is.
-
-**FOLD-ROUND DELIVERABLE (16:20).** Every fold round ships a MUTANT PANEL as a stated deliverable: for each new or changed cell, the one-line mutant of the shipped body that must red it (run it, quote the red), plus a MUST-NOT-RED control (the unmutated body, full focused count) and an md5/byte check that every mutated file is restored. A cell whose own named defect leaves it green is not a cell — rewrite it before pushing. Twice in one day a fold shipped exactly that.
-
-**MUTANT-PANEL RESTORE LAW (19:40).** A panel that restores mutated files from git
-(`git restore` / `git checkout --`) is safe only on a COMMITTED tree. During a fold round —
-uncommitted edits present — the panel captures each file's buffer before mutating and restores THAT
-buffer, then compares `git status --short` before and after (never against empty) and md5s every
-touched file against its pre-mutation hash. A git-restoring panel silently reverted two uncommitted
-fold edits; a panel that destroys the round it is verifying is worse than no panel.
-
-**PRINT-THE-THING LAW (20:30, widened 00:35).** An instrument that returns a boolean over something
-a human could read must PRINT the thing instead: a citation verifier prints the target LINE of
-every `file:line` it checks (an in-range check is not a resolves-to-the-right-thing check); a count
-control prints the census it counted; a mutant panel prints the failing cell names, not "red". And
-printing is not enough on its own — print a value that LOOKS like the thing (a 32-hex check on a
-digest probe): one panel printed the column header `md5` as its "value" for a whole round, because
-its psql wrapper dropped `-t -A`, and still passed.
-
-**MERGE-FORWARD LAW (17:40, items 6–8 added the same night).** A git auto-merge is not a
-resolution. After ANY merge of origin/main into a branch: (1) diff shared message catalogues
-(`apps/web/messages/en.json`) at the VALUE level for keys BOTH sides touched — and with a RAW-TEXT
-duplicate-sibling-key scan too, because `JSON.parse` keeps the last of two siblings and a
-value-level diff can never see one; (2) grep every auto-merged TSX for duplicate JSX attributes and
-every touched file for duplicate declarations (`const x` twice is a hard SyntaxError), with a
-scanner that carries its own positive control; (3) when both sides retired the same pin, take one
-shape wholesale after a line-set diff, never a textual interleave; (4) re-run a prefix-dispatching
-e2e harness in BOTH orders when two PRs add handlers for overlapping prefixes; (5) stage first —
-root lint mid-merge is meaningless (an unmerged path sits three times in the index and the links
-checker misresolves basenames); (6) run the three a11y gates and the contrast gate on the MERGED
-tree, not only the browser leg (a live region nested inside another existed in neither branch
-alone); (7) re-read every gate whose PREMISE names a set the other side widened ("messages is
-empty" stopped meaning "the conversation is empty" once a live clarify card became visible content
-outside `messages`); (8) diff the e2e harness's composed ENVIRONMENT between both parents and the
-merge (every `env:` / `process.env` assignment in the walk scripts and `apps/web/playwright.config.ts`) and
-compose on ONE origin per variable — main and a branch each set `CLARA_RUNTIME_URL` in different
-places, git merged both without a marker, and every confirmation answered "unavailable" until the
-browser leg caught it. Conflict markers mark textual overlap, never semantic collision.
-
-**MERGED-TREE LAW (22:00).** A lane that applies a sibling PR's migration as SQL but does not carry
-that PR's TEST FILES has not tested the merged tree — it has tested its own branch against a
-schema. So: (a) a lane whose rig stands on a sibling's unmerged migration says in its report WHICH
-of that sibling's cells its rig lacked; (b) the reviewer re-runs the estate suite on the MERGED tree
-(both PRs' test files) on a fresh CONTAINER — a second database on an existing rig is not clean,
-roles are cluster-level and `0154`'s role-count tail refuses; (c) **"introduces zero new failures"
-is a merged-tree claim and is only made from a merged-tree run.**
-
-**GATE-SHAPE LAW (22:10).** "Green on my rig" proves nothing until the rig has the GATE'S shape.
-The weekly-sweep job runs ten drill steps against ONE `postgres:17` service, each in its own
-database, none dropped; roles are cluster-wide and `DROP ROLE` consults `pg_shdepend` across every
-database — so every later step inherits every earlier step's roles and objects. A fix to a CI-only
-drill is verified by reproducing the job's step SEQUENCE on one container (the preceding steps' end
-state included) and then the fixed step, with a negative control (the sequence without the fix) that
-must still red. Read `.github/actions/*/action.yml` for the shape before the first measurement — a
-fix that was green twice on a one-database cluster reded in 652 ms on the job's.
-
-**ARMED-PR LAW (23:35).** Auto-merge is the grant for the REVIEWED tip only. A push onto an armed
-PR — a fix, a merge-forward with any resolution, anything but a pure fast-forward of main with
-measured zero overlap — would merge on green with no eyes on it. So: (a) the lane's report says in
-its FIRST line "pushed onto an ARMED PR: `<sha>`"; (b) the lead disarms before CI greens and
-dispatches a re-verify of the delta, to the same reviewer where one exists; (c) a lane never
-re-arms. The one exception (a pure fast-forward of main with measured zero overlap) is still named
-in the report.
-
-**Two standing riders, from the same day.** *Re-read every touched COMMENT against the code before you push* — three rounds on one train shipped a comment describing the resolution the round had just replaced. *And a merged condition needs a mutant per arm* — when two arms merge into one predicate, a panel anchored on the old text reports ANCHOR-MISSING, which counts as "did not red", never as a pass.
+***The 2026-09-02 clauses were MOVED on 2026-09-03 to `frontend-sprint-handoff-2026-08-31-orders-c-archive-2026-09-02.md` — a sibling in this directory — and they BIND IDENTICALLY:*** the PROCESS LAW (kill by the PID you captured, never by a name or a CommandLine substring) · the FOLD-ROUND DELIVERABLE (every fold round ships a mutant panel) · the MUTANT-PANEL RESTORE LAW (buffer-restore, never `git restore`, on an uncommitted tree) · PRINT-THE-THING · the eight-item MERGE-FORWARD LAW · MERGED-TREE · GATE-SHAPE · ARMED-PR · and the two standing riders. Only their physical home changed: this file stood at exactly 500 lines, which the PreToolUse max-file-size hook refuses to exceed, so the day's new clauses forced the move. Read them there before your first push.
 
 **MUTANT-PANEL LAW, second clause (09-03 ~00:30).** A mutant's RED is read for its REASON, never its colour. #519's M27 moved a door's floor inside a migration body and reded — for an unterminated dollar-quote, because `String.replace` with a STRING replacement interprets `$` patterns and turned the `$$` body opener into `$`. A non-discriminating mutant wearing a discriminating result is the expensive direction. So: any replacement text containing `$` goes through a replacement FUNCTION; every panel row prints the failing cell's NAME and its assertion message; and a RED whose message names something other than the property under test is NOT a pass. A guard that is its own instrument — a drift guard, a census — carries a positive control before it is trusted.
 
@@ -212,6 +141,30 @@ in the report.
 **ROLE ⇒ ROSTER clause (09-03 ~10:50, from sweep #2's drill red).** A migration that mints a role (`create role clara_…`) joins `packages/db/deploy/roles-bootstrap.sql` — the existing estate law — **AND** the cluster-reset roster `CHAIN_MINTED_ROLES` in `packages/db/tests/rig-cluster-reset.mjs` in the SAME commit; or the roster is DERIVED from the bootstrap file so that there is one source instead of two lists that can disagree. #493's `0163` minted `clara_auth_wall` and `clara_auth_wall_login`, the between-step sweep left them ("unrecognized … untouched") because the roster is a literal list that had never heard of them, and the next from-scratch migrate died one step later on `0154`'s absolute role-count pin. **#525 (`7422576f`, 09-03 11:43) took the derivation branch** — the roster is now derived from the bootstrap file and pinned by `packages/db/tests/chain-minted-roles-drift-guard.test.mjs` — so a reviewer of any migration that mints a role RUNS that cell. And a sweep that meets a `clara%` role it does not know **FAILS CLOSED naming the role**: a warning that defers the failure to a cryptic place downstream is a false pass.
 
 **STATE-LINE rule (09-03 ~05:30, #520's NEW-12).** One state, ONE copy: a `PROGRESS.md` Lanes or Next line states the STEP and the RULING and then points at the banner — *"tip and arming: see the banner"* — and a commit sha, a review verdict and an armed/disarmed fact live in the BANNER only. #520 converted the #493 / #509 / #519 rows that way and left four clauses still restating a tip; all four had already diverged by the time it merged. A row that restates a moving fact is a second copy of the state, and the second copy is always the stale one.
+
+**ONE-AUTHOR clause (09-03 ~13:32).** `PROGRESS.md` — and the orders' §C, the ADR digest and its rulings sibling, and the ruling ledgers — are edited by the **TRUING lane only**. A build or fix lane never touches them: it puts its CLOSURE LINE in its PR body and its report — the Known-issues or Backlog row it resolves, in that row's own words, with its PR number and "merged, not serving until `<deploy>`" wherever the D2 law applies — and the lead hands it to the next truing's opening list. Two PRs editing `PROGRESS.md` in one window conflict at merge and break the STATE-BANNER discipline, which is one author, one measurement, one re-read. Minted after two lanes reached for the file in a single afternoon.
+
+**PORT-ASSIGNMENT, second sentence — the ORIGIN clause (09-03 ~13:45).** A Playwright spec follows `baseURL` for its page-driving half, but a **hardcoded origin inside its own `page.request` calls dials the OLD port** — so on a reassigned range the spec looks HALF-ALIVE: page cells green, request cells red on `ECONNREFUSED`, which reads like a defect and is not one. Every spec reads `CLARA_E2E_APP_ORIGIN`; a lane assigned a range greps its specs for a literal port BEFORE it reads a red as a defect, and a reviewer enumerates the literal-port sites (`grep -rn "3100"` over the e2e tree) as part of the browser leg. **Corollary:** an origin fix sweeps the WHOLE FILE for every literal host, not just the const — a `not.toContain("127.0.0.1:3100")` one screen below the fixed const is VACUOUS on every other port (an injected defect stayed green 55/0), so derive the needle from the origin (`new URL(APP_ORIGIN).host`) and inject the defect the cell exists to catch, on the assigned ports, before accepting the fix.
+
+**ARTIFACT-IDENTITY · BINARY-SAFE-GREP · BARE-ROUTE (09-03 ~13:55, three faces of one afternoon).** **(1) Identity is read ON THE MACHINE.** `fly deploy --remote-only` builds remotely, so the served bundle is NOT the local build of the same commit (measured: 8,772,597 B / sha `5dbbbaff…` served vs 8,772,097 B / `4582a5ca…` local — 500 bytes apart, identical counts). A deploy record states the SERVED identity (bytes + sha256 read over `fly ssh`) and, if it names the local build at all, names it as a DIFFERENT artifact. **(2) Count a bundle with `-a`.** Plain `grep -o` on a binary-classified file SUPPRESSES its output while `grep -c` still counts lines, producing "occurrences < lines", an impossibility that shipped twice in one day. Use `grep -ac` for lines and `grep -oa … | wc -l` for occurrences, and LABEL which form each number is. **(3) Only TRACKED repo paths go in backticks in tracked markdown.** harness-links reads any backticked span containing a slash as a file path and reds the PR; routes, URLs, build outputs, container paths and remote paths are written BARE — the allowlist is for regenerated text, not for prose. A document unreachable by the hop today (a new as-run) is still armed to red the truing PR that first cites it, so census the file for backticked slash-spans and PLANT the future citation in a throwaway before pushing. **(4)** The lead's own fold lines get the same MEASURE-BEFORE-WRITE rule as a lane's — two folds in one afternoon each carried an unmeasured claim.
+
+**BACKGROUND-VERIFIER, the SATURATION half (09-03 ~13:20, the half that never reached this file).** Host **saturation** is the processor queue length against logical CPUs plus free RAM (119–202 on 24 at 60 % CPU with 3.5 GB free = saturated) — the condition under which Chromium sessions die mid-assertion (`Protocol error … session closed`, `net::ERR_ABORTED … frame was detached`). Those are INFRASTRUCTURE reds, not behaviour: re-run the reded specs alone twice, and a red that survives isolation is the lane's. A Playwright run taken under another leg's contention measures the HOST, not the tree, so **one browser leg at a time on this host** stays the law and a lane waits for a sibling's leg rather than taking a deciding measurement beside it.
+
+**PORTABLE-INSTRUMENT clause (09-03 ~14:00).** An instrument left "beside the review for the fold" is reusable only if it takes its tree as an ARGUMENT (`--repo <path>`, or `process.cwd()`), never a fixed checkout path: a REF-addressed script (`git show <ref>:file`, correct in itself) that runs from the main checkout's cwd hits a worktree's isolation guard when a folder tries to use it — and the guard is RIGHT to refuse. Reviewers parameterise the root and say so in the report; folders reproduce the proof with their own instrument rather than editing another lane's script, and NAME the substitution in the report.
+
+**MUTANT-PRODUCES-THE-VALUE clause (09-03 ~14:12).** A mutant proves a cell only if it PRODUCES the value the assertion hunts for. One injection stayed green 55/0 — not because the assertion was inert but because `request.url` carries the INTERNAL dev-server port while the needle is the PUBLIC origin's host: the strings could never match, so the green proved nothing in either direction. Before reading a mutant's green as "the fix does not work" (or a cell as vacuous), PRINT the value the mutant actually delivers to the assertion and show it is the hunted one. Record a discarded mutant and its reason; never replace one silently.
+
+**ONE-TEARDOWN clause (09-03 ~13:03, AMENDED ~14:45 when the mechanism was settled).** The clause stands as HYGIENE — one teardown registrant per resource; a shared testkit exports a plain close instead of registering its own top-level `after()`; a `DROP DATABASE … WITH (FORCE)` is issued only after that resource's close has been AWAITED. But it was minted on a WRONG causal claim, and the correction is the load-bearing half: **two root `after()` hooks do not race** (node:test 20.19.5 runs them sequentially in registration order, re-measured). The CI `FATAL: terminating connection due to administrator command` class is instead: pg-pool's `pool.end()` resolves BEFORE the sockets close (fire-and-forget `client.end`), so a FORCE drop immediately after kills a still-attached idle backend → 57P01 on that socket → a pool with no `'error'` listener re-throws → `uncaughtException` → the FILE reds though every cell passed. It bites under CI's db+runtime concurrency on 2-core runners and almost never on an idle 24-core host. So: (1) before any FORCE drop, **DRAIN** — poll `pg_stat_activity where datname = $1` to zero with a bounded deadline; FORCE is the backstop, never the plan; (2) a teardown that ends a pool attaches a **window-scoped** `pool.on('error')` so a straggler's FATAL is reported rather than thrown; (3) **a lane whose RED-before does NOT red stops and re-diagnoses before writing any causal claim into a shared file** — a hook that runs after the error cannot cause the error, and the lane's own 0/20 said so.
+
+**CONDUCTOR law, third and fourth sentences (09-03 ~14:02 and ~16:02).** **Third — the OVERTAKE rule:** while an armed PR's run is in flight, arm NOTHING that is UP-TO-DATE with main, docs or code. An up-to-date PR whose run greens first MERGES first and knocks the armed one BEHIND — a full run wasted. A BEHIND PR may be armed at any time (it cannot overtake; the conductor sequences it by queue order after the current merge), so a CLEAR verdict on an up-to-date PR is HELD — recorded, not armed — until the current armed PR merges. **Fourth:** the merge state is **READ in the same call as the arming** (`gh pr view --json mergeStateStatus` printed beside `gh pr merge --auto`), never assumed from queue position — a fold lane's merge-forward silently makes a PR UP-TO-DATE, and an armed up-to-date PR with a code-scored run in flight is the overtake shape exactly. If the read says BLOCKED/CLEAN while another armed run is mid-flight, disarm and re-arm after that merge.
+
+**MECHANICAL-KEEP-BOTH clause (09-03 ~18:00).** A keep-both resolution of two PRs colliding at a file's TAIL is done by TOOL, never by retyping either side: `git checkout --theirs <file>` for the side that must stay whole and then append yours, or take yours and apply the other side's hunk as a **zero-context patch** (`git diff -U0 … | git apply --unidiff-zero -`; a normal apply fails on the EOF context). Prove it: content md5s of BOTH sides' regions, captured BEFORE the merge, match at the MERGE commit; the fold that follows is a SEPARATE commit read as a diff; the other side's region — the CONTROL — still matches at the tip. A reviewer captures those baselines outside the run being checked, and adds a **gate-sentence baseline** (the one sentence that must survive a legitimately-rewritten line) wherever a ceiling forces text to grow WITHIN a line rather than by lines.
+
+**THE DEPLOY-LOCK KEYS ON THE IMAGE (09-03 ~13:38).** A frozen-workflow manifest's deploy-lock is decided by what is IN THE IMAGE, never by the ceremony's headline closure: **every entry merged before the deploy's build commit ships in that build**, whether or not it belongs to the closure the deploy is named after. A ceremony record that stamps only its own headline entries leaves the rest re-baselineable with CI green — the shipped gate was executed and proved exactly that on a serving body. So a deploy-lock census enumerates every manifest entry added since the last full lock, judged by MERGE TIME against the build commit, and the runbook's own `--lock-deployed` does the stamping.
+
+**PREDICATE-COPY, second instance (09-03 ~13:47, 裁-112(c) applied to a gate's own selftest).** A selftest whose cases hand-compose the entry list the shipped `main()` composes is a COPY of the predicate: unwire discovery inside `main()` and the gate prints a truthful-looking banner, exits 0, and the selftest stays ALL GREEN. At least ONE cell must drive the EXPORTED entry point against a fixture (broken → non-zero, clean → zero). This was the day's third instance of the same class, after a sentinel and the truing's own state line — treat "the cells pass" as evidence only once one of them executes the shipping path.
+
+**STATE-BANNER, third sentence (09-03 ~13:20).** A truing PR's banner that names its OWN PR is structurally one commit behind its tip — the PR number exists only after the push — so write that line as "#N (this PR)" without a sha, and say it once rather than re-stamping. The STATE-LINE rule binds the truing's own new lines above all: a state line the PR itself authors (a Lanes or Next row) states step + ruling and POINTS at the banner, never carries a second copy — one truing shipped a lane as "DRAFT at step 2" in three re-authored lines beside a banner that said MERGED.
 
 ## FS-0 · The live-catalog verb census (裁-75) — size 0.3, no product code
 

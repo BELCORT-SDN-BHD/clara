@@ -1,4 +1,4 @@
-# The 2026-09-03 rulings — the Mail launch gate (裁-146 … )
+# The 2026-09-03 rulings — the Mail launch gate, the last three §9 answers, and the post-launch agenda (裁-146…150)
 
 > The ninth ledger, continuing [`mohe-grill-rulings-2026-09-02-pm.md`](mohe-grill-rulings-2026-09-02-pm.md)
 > (裁-132…145 once PR #535 merges; **裁-132…141 is what stands on `main` at the moment this file was
@@ -231,7 +231,166 @@ so the record shows what was deferred and that nothing was quietly dropped:
    which is exactly the rot a back-pointer exists to prevent.
 3. **DONE** — `docs/adr/README.md` item 86's row-location list gains 裁-146 and this file, so the
    §15 index of which ledger holds which ruling stays complete.
-4. **Still owed, and not this PR's to take:** the digest is now at **exactly 500 lines**, the repo's
-   document ceiling. 裁-147's row cannot be written until `docs/adr/README.md` is split — the same
-   move `README-log.md` itself came from on 2026-08-23 (`docs/adr/README.md`'s own note records it).
-   A split plan is owed BEFORE the next law-changing ruling, not before this merge.
+4. ~~**Still owed, and not this PR's to take:**~~ **DISCHARGED 2026-09-03 by the afternoon truing.**
+   The digest stood at **exactly 500 lines**, the repo's document ceiling, so 裁-147's row could not
+   be written until `docs/adr/README.md` was split — the same move `README-log.md` itself came from
+   on 2026-08-23. The split ran first in the truing PR: §15's per-ruling rows moved **byte-for-byte**
+   (md5 `e860d0fc8186a233722af7385ff2dae0`, 16,777 bytes, proven on both sides) into
+   [`../../adr/README-rulings-2026-09.md`](../../adr/README-rulings-2026-09.md), the digest keeping
+   the law and pointing there, and 裁-147…150's rows are written in the sibling.
+
+---
+
+### 裁-147 — B6: the C-2 operator problem-event SCREEN is post-beta; a manual check line holds its place (owner, 2026-09-03 ≈17:12 MYT, shell clock)
+
+**The question** (B6, from the owner page's §9 table, verbatim):
+
+> C-2 上线了两扇运营方门（列出 Stripe 出问题的事件、标记已处理），设计文件说"必须有人看，所以要有界面 + beta
+> 清单一项"；实际零调用、清单里没有。现在指定谁建界面，还是记为 beta 之后、期间在 Wave-G 清单加一行人工 select？
+
+**The recommendation put with it** (the grill protocol — recommendation first, cost stated):
+
+> beta 之后建界面，现在加一行人工检查（"切换时不得有未处理的 stripe_event_problems"）+ PROGRESS backlog 一行。
+> 运营方在 Wave-G 走查和切换时各跑一次 select——便宜，但前提是清单那行存在。
+
+**The owner's words, verbatim:** 「照建议」 — the recommendation ACCEPTED, not overridden.
+
+**The ruling.** (1) The operator screen for the two C-2 doors —
+`clara.list_stripe_event_problems(boolean)` and `clara.resolve_stripe_event_problem(uuid, text, text)`,
+both minted by `0160_checkout_gate_c2_stripe_events.sql` and walled to an OWNER of the operator firm by
+the same predicate `approve_firm_registration` uses — is **built AFTER beta live**, as a `PROGRESS.md`
+Backlog row owned by the first post-beta UI lane. (2) **Now**, `docs/ops/wave-g-setup-checklist.md`
+gains ONE manual line: at the Wave-G walk **and** again at cutover the operator runs the list door (or
+a plain select on `clara.stripe_event_problems`) and the result must be EMPTY of unresolved rows before
+the cutover proceeds; a non-empty result is cleared through `resolve_stripe_event_problem` with its
+reason, which re-arms the next sweep to retry the event. (3) `docs/plan/active/checkout-gate-design-part2.md`'s
+M4 paragraph — "the problems must be watched by someone, so they have a surface", with "**where it is
+watched:** the operator firm's review surface" — is re-pointed at that checklist line as the interim
+surface, so the design no longer promises a screen that does not exist.
+
+**The measurement behind it.** A census over `apps` and `packages/runtime` returns **zero** callers of
+either door. The runtime's own recovery note (`packages/runtime/lib/stripe-projection.mjs`, the #511
+review's M-1 comment) names the DOOR rather than a screen — "`list_stripe_event_problems` shows it to
+an operator" — so it is accurate as written and is left untouched; the screen promise lives only in the
+design document, which is where the re-point lands. That also keeps this a docs-only PR: a docs-shaped
+edit inside `packages/runtime` scores CODE under the CI path classifier.
+
+**The owner's own condition, carried forward:** the check is cheap **only if the checklist line exists**.
+That is why the line goes into the checklist rather than into a runbook — the design's words, "named
+here, not left to a runbook nobody opens".
+
+**Amends:** `docs/ops/wave-g-setup-checklist.md` (Billing/Stripe), `docs/plan/active/checkout-gate-design-part2.md`
+(M4), `PROGRESS.md` (a Backlog pick-list row). Digest row 88 in `README-rulings-2026-09.md`; log minute
+the same day. PRD §2's operator cap (裁-143) already names this queue as one of the tier's two read
+queues and is UNTOUCHED.
+
+---
+
+### 裁-148 — B7: the non-zero checkout walk moves to the REAL-MONEY SWITCH (owner, 2026-09-03 ≈17:16 MYT, shell clock)
+
+**The alignment that preceded it** (the owner, ≈17:14, verbatim):
+
+> 所以真的收费模型and KYB and all term and condition 的是like 上市official launch 前做的事right? in backlog
+> 我们择日在完善的对吗? just make sure wea re allign.
+
+Confirmed, with one nuance stated back: the **BETA versions** of the legal texts — the DPA e-signature,
+the beta terms of service, the consent text — ship **WITH** beta as agent templates that users actually
+sign (裁-125); the **lawyer-refined** versions come before 上市.
+
+**The question** (B7, as posed in the §9 table): the Wave-G checklist's checkout line requires a walk at
+a **non-zero** test price, while 裁-126 fixes the whole beta in the Stripe sandbox and 裁-58 leaves every
+plan at **MYR 0**. A priced plan can be seeded without a schema change, but the checkout door reads only
+the **current** plan — so a priced plan can be seeded and not walked unless it is temporarily made
+current at the walk.
+
+**The recommendation put with it:**
+
+> 挪到真钱开关。裁-125/126 已经把真钱和 KYB 放在那一场；beta 全程沙盒、全程 MYR 0，非零价格证明的是 beta 用不到的
+> 路径。清单那一行改成"按种下的 beta 价格走一次（沙盒）；非零价格走查属于真钱开关仪式"。
+
+**The owner's words, verbatim:** 「B7 照建议」.
+
+**The ruling.** (1) The checklist's checkout line is re-cut: **walk checkout ONCE at the seeded beta
+price (sandbox, MYR 0)**; the non-zero-price proof — the charge, its webhook delivery and the resulting
+invoice/receipt surface — belongs to the **real-money switch ceremony**, with Stripe live mode and KYB
+beside it (裁-125/126). (2) **No temporary "make the priced plan current" ops act at Wave-G.** (3) The
+裁-58 dissent's mitigation is not withdrawn — it is re-homed to the ceremony that can actually discharge
+it, which is the only place the charge path is real.
+
+**The pre-上市 roadmap, as aligned in the same exchange** (recorded here because three rulings now point
+at it, and written into `PROGRESS.md`'s Backlog as the ordered block the owner reads): **beta live** on
+the built half (agent-template legal texts, RM 0) → **the pricing sitting** (裁-58) → **the billing TIER
+tranche** (裁-144) → **the lawyer's pass** over the DPA, the beta terms and the consent text (裁-125) →
+**the real-money switch + KYB + the non-zero checkout walk** = **上市**.
+
+**Amends:** `docs/ops/wave-g-setup-checklist.md` (Billing/Stripe), `PROGRESS.md` (the Backlog roadmap
+block). Digest row 89. **Open owner questions after this ruling: B8 only.**
+
+---
+
+### 裁-149 — B8: the runtime's background-client error CONTRACT — option C (owner, 2026-09-03 ≈17:22 MYT, shell clock)
+
+**The question** (B8, added to §9 at ≈14:50 from rev-534's finding, as posed): the production relay pool
+(`packages/runtime/lib/relay.mjs`, `makePool()`) and the leader's dedicated client (`makeClient()`)
+attach no `'error'` listener. pg's contract turns any idle-client error — a backend terminated by a
+failover, a pooler restart, a maintenance kill — into an `uncaughtException`, so the runtime process
+dies; Fly restarts it and durable runs resume by design. Options: **A** keep crash-as-contract (zero
+code) · **B** log-and-recycle everywhere (which swallows the leader's loss into a silent stall) ·
+**C** the hybrid.
+
+**The owner asked for it in plain language first** (verbatim): 「解释清楚这个, 我不是很明白」 — answered with
+the switchboard analogy (an ordinary line is re-plugged quietly; the duty line dies loudly so a deputy
+takes over). **Then, verbatim:** 「照建议」 — i.e. **option C**.
+
+**The ruling.** (1) The **general pool** gets an `'error'` listener that logs at error level, **counts**,
+and raises a health flag on `/ready`; it never swallows silently, and the pool recycles the client — so
+an ordinary idle-backend kill costs users nothing and still leaves a trace. The reasoning is that the
+relay pool is the runner's REAL connection pool, which makes a background error there an **availability
+signal**, not noise: swallowing it would convert a lost backend into a silent stall. (2) The **leader's
+dedicated session** stays **CRASH-LOUD**. Its loss releases the session-level advisory lock and a standby
+takes over — the designed failover — so no listener may turn a lost backend into a silent stall on that
+path. (3) The chosen behaviour is stated as a **CONTRACT** in `docs/ARCHITECTURE.md` — what a background
+client error does to the process, per pool — because `packages/runtime/lib/relay.mjs`'s failover semantics depend on it.
+(4) **Timing: after beta live.** A product PR of roughly **half a lane-unit** (the listener, the health
+flag, cells including a **mutant that proves the leader path still crashes** — the reviewer's own 5/5
+uncaught vs 0/5 caught pair is the instrument), riding a v7x deploy. Today's fail-loud behaviour is safe
+and stands until then. Every other `new Pool` in the runtime is censused in that PR.
+
+**Provenance:** found by rev-534 while settling the CI relay-taxonomy teardown class. That class's
+TEST-side cure merged as #534 `e7577af6`; this row is the **product** half, which #534 deliberately did
+not touch.
+
+**Amends:** `docs/ARCHITECTURE.md` (the contract, at the post-beta PR — not today), `PROGRESS.md` (a
+Known-issues row re-cut to "ruled 裁-149, scheduled after beta" plus a Backlog pick-list row). Digest
+row 90. **With this ruling §9 of the owner page is EMPTY: no owner question is open before beta live.**
+
+---
+
+### 裁-150 — the post-launch agenda: the harness is the handover, and there are NO next lanes (owner, 2026-09-03 ≈18:02 MYT, shell clock)
+
+**The owner's words, verbatim:**
+
+> beta e2e 后所有东西都被harness 记录好了right? like backlog and knownissue..etc , beta live launch e2e 后我
+> 就要close 这个session 了, 接下来的东西就是我自己看backlog/knownissue 再决定怎么完善这产品. no next lanes 了ok?
+> you knwo what i mean? alliggn ours agenda of this product.
+
+**The ruling** (alignment confirmed, not a recommendation the owner picked from — this one he stated and
+the lead aligned to it):
+
+1. **After the beta-live e2e — the Wave-G walk plus the launch sitting — THIS SESSION CLOSES.** The repo
+   is the handover, which is hard constraint 8 already: the repo is the system of record and
+   `PROGRESS.md` is the state authority. Every open item must therefore live there as a **Backlog** row
+   or a **Known-issues** row carrying its **owner · next step · ruling number**; the machine-local memory
+   cache holds lessons and preferences only, never state.
+2. **NO next lanes are dispatched after launch.** The owner reads Backlog and Known issues and decides
+   what to perfect; the next session starts on his ask, not on an agent's initiative.
+3. The **pre-上市 roadmap** (裁-148) stays in the Backlog as the ordered list he will pick from, followed
+   by the post-beta product PRs already ruled (**裁-147** the operator screen, **裁-149** the pool error
+   contract) and then the day's technical rows.
+4. **Two truings remain in this session:** the afternoon truing (this one — the afternoon's state, the
+   two document splits, 裁-147…150) and the **FINAL clock-out truing** after the launch sitting, which
+   inherits this shape and adds the launch facts, every row trued, the housekeeping (worktrees, rigs,
+   the conductor and the monitors torn down) and a memory refresh of lessons only.
+
+**Amends:** `PROGRESS.md` (the posture line's closing sentence, and the Backlog re-written as the owner's
+ordered pick-list). Digest row 91.
