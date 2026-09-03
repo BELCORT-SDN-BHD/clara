@@ -55,11 +55,13 @@ be raised to the beta's expected signup volume.
    address and an `emailRedirectTo` of the deployed origin's /auth/confirm route. That call is what
    makes Supabase Auth send the confirmation message; nothing else in the app asks for one.
 2. **NOT by any `supabase.auth.resend` call.** Census with its scope stated, `git grep "auth\.resend"`
-   over tracked files: **three under `apps/`** — two source modules under
+   over tracked files: **exactly three under `apps/`** — two source modules under
    `apps/web/lib/registration` plus one README line (`apps/web/README.md:426`, the same retired
-   defect described in prose) — and **seven repo-wide**, the other four being documents: the two ADR
-   digests, `docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md` (where the M3 defect was ruled) and
-   this ledger itself. **None of the seven is a live send path.** The two modules:
+   defect described in prose). **Every other occurrence is document prose — the ADR digests and the
+   ruling ledgers — and none of them is a send path.** The repo-wide NUMBER is deliberately not
+   stated: this census went stale inside its own PR once a sibling ruling's fold added another
+   sentence about the defect, so only the `apps/` count, which is the half that carries the claim,
+   is numbered. The two modules:
    `apps/web/lib/registration/confirmation-resend.ts` (a module header
    describing the retired M3 defect — a browser-side, unauthenticated, unwalled resend button that the
    2026-09-01 fix round removed — and Lane B's completion contract for a future server-side route) and

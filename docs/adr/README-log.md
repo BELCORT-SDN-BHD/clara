@@ -339,9 +339,11 @@ re-reading find?"
 > in all three of its carriers (measured on that PR's head `303f8586`), so in either merge order
 > nothing is left to correct. No live code calls resend — `requestConfirmationResend`
 > (`apps/web/lib/registration/confirmation-resend.ts:52`) returns `{kind:"unavailable"}`
-> unconditionally; `git grep` finds the string in three files under `apps/` (two modules plus a
-> README line) and seven repo-wide, the rest being documents. 裁-145's ruling and its conclusion were
-> never in question.
+> unconditionally; `git grep` finds the string in exactly three files under `apps/` (two modules plus
+> a README line), and every other occurrence is document prose — the ADR digests and the ruling
+> ledgers — none of it a send path. The repo-wide number is left unstated on purpose: it moves
+> whenever a ruling writes about the defect. 裁-145's ruling and its conclusion were never in
+> question.
 > **The gate, which is the operative half:** Wave-G's "Mail" line certifies **only after a real signup
 > confirmation is sent to and received at a NON-team address through the custom SMTP** — not on a
 > settings screenshot, and not on a message delivered to a team address, which is what the default
