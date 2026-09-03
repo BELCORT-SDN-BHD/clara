@@ -5,8 +5,29 @@
 // pointer) or hold the shared `router` advisory lock via a spawned runner, and
 // must never overlap. Every relay here is FIRM-SCOPED so it only drains its own
 // fresh fixture firm. Contract: docs/plan/completed/slice3-event-spine-contract.md §2.9.
+//
+// ONE TEARDOWN REGISTRANT PER POOL (fix-relay-teardown, 2026-09-03): this file
+// used to register its OWN top-level `after(() => fx.endPool())` here, so any
+// importer got the pool closed "for free". relay-taxonomy.test.mjs ALSO
+// registers its own `after(cleanupPrivateDb)`, which itself closes the SAME
+// module-singleton pool (`relay-fixtures.mjs`'s `_pool`) before it drops that
+// file's private disposable database (`DROP DATABASE ... WITH (FORCE)`) — two
+// independent, uncoordinated registrants racing to close/use the same
+// resource. On this Node version the two hooks happened to run strictly
+// sequentially (empirically confirmed), so the race never surfaced via
+// node:test's own scheduler locally, but a standalone reproduction (racing
+// `pool.end()` against `DROP DATABASE ... WITH (FORCE)` on the same target via
+// `Promise.allSettled` instead of node:test's serialized hooks) reproduces the
+// exact CI signature (`FATAL: terminating connection due to administrator
+// command`) 20/20 — the physical hazard two uncoordinated registrants risk is
+// real regardless of whether THIS Node version's hook scheduler happens to
+// serialize them today. So `endPool` is now a PLAIN exported function with NO
+// implicit hook: every importer that needs the pool closed registers its own
+// SINGLE `after(fx.endPool)` (relay-drain.test.mjs / relay-runner.test.mjs /
+// relay-unit.test.mjs each do), and relay-taxonomy.test.mjs's own
+// `cleanupPrivateDb` stays the SOLE registrant for that file, still awaiting
+// `endPool()` to completion before the disposable-database drop.
 
-import { after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -20,10 +41,6 @@ export { sleep };
 // SKIP cleanly when the 0005 schema is absent (probe once per file/process).
 export const READY = await fx.probeReady();
 export const skip = READY ? false : "Slice-3 (0005) schema absent — migrate the target first";
-
-after(async () => {
-  await fx.endPool();
-});
 
 // ---------------------------------------------------------------------------
 // Child-process (runner) harness — used by the kill / split-brain / reconnect /
