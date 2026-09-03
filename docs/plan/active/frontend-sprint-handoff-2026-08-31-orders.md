@@ -441,7 +441,11 @@ surface; record deviations by ruling, never absorb them. Output: a new file docs
 (consumed / diverged-by-ruling / owed) and the P6-6 identity items confirmed (Ledger Fold ·
 mascot · ClaraBook copy pass). Size 0.3.
 **Note:** pre-run 2026-09-02 by the checkpoint scan; record at
-`docs/plan/active/clarabook-conformance-pass-3-2026-09-02.md`.
+`docs/plan/active/clarabook-conformance-pass-3-2026-09-02.md`. **SIGNED OFF 2026-09-03** — FS-9 is
+CLOSED as P6's entry gate. The verdict, the per-line table with its evidence, the re-fetch
+discharge, and the four things the sign-off deliberately does NOT close all live in that record's
+head banner and in its row in [`index.md`](index.md); they are never restated here, so a reader
+acts on the record, not on a second copy of it.
 
 ## FS-10 · P6-X — the cutover (orders-p6 §P6-X, amended)
 
