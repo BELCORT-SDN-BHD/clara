@@ -81,17 +81,24 @@ Consumers subscribe to the event stream and maintain derived read models: the pe
 
 Three new event-stream consumers join the existing five loops (Wave A2.1, ADR-028/029/030): **`classify`** (document-type resolution, §7), **`facts_gate`** (the classify-first facts dispatch — a document with no resolved kind is routed through the classify lane first, then its facts re-fire: `invoice`/`credit_note`/`debit_note` → `invoice_facts`, XML → `local_facts`, other kinds → a `skipped_kind` receipt), and **`sst_watch`** (the SST registration compliance watch on `entry.approved`, §8). The SST watch also carries a **daily repair belt on the reconciler** — a first-cycle-at-boot sweep that re-evaluates every active client from the books (catching pre-existing crossings, backdating, reversals, schedule/classification changes) and writes one append-only evaluation receipt. The belt evaluates **one client per statement, never all clients in one call**: the evaluator's state transition emits a domain event whose first act row-locks the firm's `firm_event_seq` counter until commit, so a single all-clients transaction would hold that lock across the whole sweep and stall every concurrent writer (approval, draft, chat turn, ingest) behind it — per-client statements take and release the lock per client instead.
 
-**The reconciler now carries FIVE daily belts, not one** (as-built 2026-08-06, all on the
-leader's daily flag — `opts.autopostRules` / `sstWatches` / `lintBelt` / `faRuns` / `adjRuns` —
-some feature-detecting their own DB surface so a runtime image can boot before its migration
-lands): the **autopost-rule expiry/nudge** sweep (Wave A2.1, `0015`, WA2-R10 never-auto-renew —
-**DB-RETIRED / RUNTIME-STILL-WIRED: the DB function `reconcile_autopost_rules()` and the whole
-CODING-rules EXECUTION tier were RETIRED at `0118` (F-A2 PR-3, 2026-08-25 ceremony), but the
-reconciler's belt caller was never unwired — `reconciler.mjs:673` still fires it every cycle
-behind a bare try/catch (no `to_regprocedure` feature-detect), so the call fails and the belt
-retries every poll in the deployed path; unwire per `docs/plan/active/f-a2-annexes-1-estate.md:95`.
-The separate, later BANK-rules machine retired WHOLE at `0129` (F-A3 PR-3, 2026-08-26
-ceremony)**) · `sst_watch` (above, `0016`) · the per-client **wiki-lint** belt (Wave B) · the
+**The reconciler carries FOUR daily belts today, not five** (as-built 2026-09-03, all on the
+leader's daily flag — `opts.sstWatches` / `lintBelt` / `faRuns` / `adjRuns` — the FA and
+adjustment belts feature-detecting their own DB surface so a runtime image can boot before its
+migration lands). A fifth belt, the **autopost-rule expiry/nudge** sweep (Wave A2.1, `0015`,
+WA2-R10 never-auto-renew), RETIRED WHOLE — the DB function `reconcile_autopost_rules()` and the
+whole CODING-rules EXECUTION tier were dropped at `0118` (F-A2 PR-3, 2026-08-25 ceremony), and
+its runtime caller (`reconciler.mjs`'s belt registration + `leader.mjs`'s cadence knob) retired
+with it: the first PR-3 pass left the caller wired, firing the dropped call every ~2s poll,
+invisible in `beltErrors`, until it was unwired in full. Unlike the FA/adjustment belts (whose
+DB surface arrives AFTER the runtime image by design, so a `to_regprocedure` feature-detect
+boots them dormant until their migration lands), this belt's DB half is gone for good — there
+is no future migration to wait for, so the call path was removed rather than feature-detected
+(`docs/plan/active/f-a2-annexes-1-estate.md` §B.1: "RETIRE (drop the verb)"). **Merged, NOT
+SERVING until the next runtime deploy (`v72`)** — v71 (deployed 2026-09-03 04:51Z from
+`344f7ad8`) predates this fix and still carries the wired caller (the README's Leader-loop bullet's law). The
+separate, later BANK-rules machine retired WHOLE at `0129` (F-A3 PR-3, 2026-08-26 ceremony)
+the same way.
+The four survivors: `sst_watch` (above, `0016`) · the per-client **wiki-lint** belt (Wave B) · the
 **FA depreciation-run** belt (Wave D-a, `0041`, `to_regprocedure`-guarded) · the
 **recurring-adjustment** belt (Wave D-b2, `0045`, `to_regprocedure`-guarded). Each belt is
 **failure-isolated** — an error logs and retries next cycle rather than
@@ -141,6 +148,8 @@ The agent's freeform read path no longer relies on a lexical verb filter. Two la
 - Provenance CHECK — document-origin writers validate `(document_id, source_doc_sha256)` against `documents`; RAISES on mismatch.
 - Wake allowlist — the runtime mints a wake credential whose grants are the allowlist for that wake kind; the DB is the backstop (a `[proactive]` credential has EXECUTE only on `record_notification`).
 - Role floors + plan→approve — `assert_can_*` floors on every writer; approval binds to an expected revision token (fixes GAP0-5); posted lines immutable via trigger (fixes GAP0-4).
+
+Beside these four sits exactly ONE capped, flag-gated widening of what a firm's members may read, named here so it cannot grow silently: the **OPERATOR tier** (`clara.firms.is_operator`, `0133_g1_wake_engine.sql` — `not null default false`, `uq_firms_one_operator` admitting at most one operator firm ever, flipped only by the raw owner-run one-shot ceremony `docs/ops/g1-operator-firm-ceremony.md` and carried by NO firm until FS-11's reset marks BELCORT, 裁-121③) lets the single operator firm read **registration applications and Stripe problem events ONLY** — both pre-firm admission-plane objects (§1a), never a book table — beside the one estate-wide wake-source control that reads no firm's data, so it can never surface a figure of another firm's books; PRD §4's "The OPERATOR tier" carries the cap as law and PRD §6's tenancy wall is untouched by it (裁-143).
 
 ### 3.4 Maker/checker (Gate-1 C4)
 - Every entry stores `maker_actor` (drafter/last human editor) and `checker_actor` (approver), modelled as distinct identities.

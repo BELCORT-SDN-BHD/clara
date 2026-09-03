@@ -41,6 +41,7 @@ import {
   cloneAmbientDatabase,
   createDisposableDatabase,
   dropDisposableDatabase,
+  waitForBackendsClear,
 } from "../../db/tests/migrate-harness.mjs";
 
 const { register } = await import("tsx/esm/api");
@@ -174,6 +175,15 @@ async function dropPrivateDatabase(name) {
   const client = new pg.Client(connectionConfig());
   await client.connect();
   try {
+    // rev-534 F-2: drain pg_stat_activity to 0 (bounded) BEFORE the FORCE drop —
+    // same shared helper + same shape as relay-taxonomy.test.mjs's cleanupPrivateDb
+    // (see its header note); WITH (FORCE) below stays only as the backstop.
+    const drain = await waitForBackendsClear(client, name);
+    console.log(
+      drain.cleared
+        ? "fs7-v17-chatturn-db: teardown drain: 0 backends remained before the FORCE drop"
+        : `fs7-v17-chatturn-db: teardown drain: gave up after the deadline — ${drain.remaining} backend(s) still attached`,
+    );
     await dropDisposableDatabase(client, name);
   } finally {
     await client.end();

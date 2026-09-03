@@ -227,3 +227,85 @@ re-reading find?"
 > Split-trust corollary now reads "example corrected by 裁-142" and names `STRIPE_SECRET_KEY`, and
 > ARCHITECTURE §1 names `SUPABASE_SERVICE_ROLE_KEY` and `STRIPE_SECRET_KEY` while marking
 > `STRIPE_WEBHOOK_SECRET` as RUNTIME env. This minute records the missing row, not a new decision.
+
+## 2026-09-03 — 裁-143: the OPERATOR tier and its hard cap enter the product law
+
+> **裁-143** (owner, ~15:05 MYT, on B2 of the harness scan — *"照建議。"*): the **OPERATOR tier**
+> — BELCORT, the one firm whose `clara.firms.is_operator` is true — is written into
+> `docs/product/PRD.md` §2 and into §4 beside item 1 as a **separate tier beside the four
+> permission levels, never a fifth level above the firm owner**, and as operational-support
+> tooling rather than a product surface. Measured on the pre-ruling tree (`60f4eaf5`): zero hits
+> for "operator firm" or `is_operator` in `PRD.md` and zero in `ARCHITECTURE.md`, so a shipped
+> permission concept — live in the DB since `0133_g1_wake_engine.sql` — was readable only in SQL.
+> **The hard cap**, as ruled: two read queues (registration applications · Stripe problem events)
+> plus the single estate-wide wake-source control that reads no firm's data, and **never any
+> figure of another firm's books**. **PRD §6 is untouched by design** — both queues are pre-firm
+> admission-plane objects and no operator door reads a book table, so the cap points at invariant
+> 2's existing tenancy wall rather than adding law text to §6; `docs/ARCHITECTURE.md` §3.3 names
+> the same widening in one sentence beside the four structural invariants.
+> The flag stays **default OFF and fail-closed**, carried by no firm today (裁-43), flipped only
+> by the raw owner-run one-shot ceremony `docs/ops/g1-operator-firm-ceremony.md` — never an app
+> screen or API — at FS-11's Wave-G reset (裁-121③).
+> Recorded per 裁-140 (a digest row plus this dated line, no new ADR); the ledger entry in
+> `docs/plan/active/mohe-grill-rulings-2026-09-02-pm.md` is the source of truth and governs on any
+> divergence. **Anchor note:** the ruling's shorthand said "§4.1"; the PRD carries no such heading
+> (§4 is a 21-item list whose only subsections are §4.94/§4.95/§4.96), so the tier landed as a
+> named §4 subsection beside **item 1** — the self-serve-signup capability it belongs to — rather
+> than as a newly minted section number.
+
+## 2026-09-03 — 裁-144: billing's tier tranche goes to the backlog; beta live launches on the built half
+
+> **裁-144** (owner, ≈15:18 MYT by the shell clock, on B3 of the same sitting — *"如果没有的话先放进
+> backlog,把这个initial plan 记录清楚, 我们上市前在完备它, 我们betalivelaunch now. 至少现在有最基础的
+> userflow now right?"*): billing's **TIER tranche is a BACKLOG item, completed before the official
+> launch 上市 and NOT before beta live**. `docs/product/PRD.md` §8's billing cell is re-cut **in
+> place, with the date** — the style §8's tax row already uses — into **BETA (built: Stripe Checkout
+> + webhooks + the fail-closed admission gate + `clara.billing_plans`,
+> `0163_checkout_gate_c3_folded_door.sql`, `amounts_ruled=false` → RM0/trial)** and **BEFORE 上市
+> (backlog: paid seats, Active-Client slots, the shared firm-wide AI allowance in RM and its
+> overage, invoicing — the tier tranche of `docs/plan/active/billing-design.md` §5, the rest of PR-1
+> plus all of PR-2, and an AI usage ledger)**, with the unbuilt half stated in the future tense.
+> **The census that prompted it:** zero files under `packages/db/migrations` carry
+> `billing_usage_rates`, `firm_subscriptions`, `client_lifecycle_events`,
+> `evaluate_firm_billing_v1`, `invoice_lines`, `get_firm_invoice` or `issue_invoice` — so §8's
+> standing promise that "`issue_invoice` refuses" rested on a function that **does not exist** —
+> that code census is the whole scope of the claim, and the name survives only in docs prose. It is
+> re-worded to **"no invoice is issued in beta"**; the 裁-71④ scope note and every
+> earlier citation (裁-42, 裁-50–56, 裁-57, 裁-58, 裁-68) are kept, and the ringgit amounts still
+> defer to the pricing sitting (裁-58). The owner's closing question — 至少现在有最基础的 userflow now
+> right? — is answered as a fact, not a ruling: yes, signup → the emailed confirmation code → the DPA
+> signature → Stripe Checkout (sandbox, RM0) → a born firm, plus invites and /pending.
+> Recorded per 裁-140 (a digest row plus this dated line, no new ADR); the ledger entry in
+> `docs/plan/active/mohe-grill-rulings-2026-09-02-pm.md` governs on any divergence. The owner's own
+> 2026-09-03 billing text is still OWED as a plan record beside the 08-30 design set — named in the
+> ruling as docs/plan/active/billing-model-owner-spec-2026-09-03.md, measured **not on disk** at this
+> commit, so it is written bare here and no citation to it was planted.
+
+## 2026-09-03 — 裁-145: the signup gate names five items, and the email-bound token is retired
+
+> **裁-145** (owner, ≈15:27 MYT by the shell clock, on B4 — *"照建议, btw: 第一步的Supabase 寄確認信使用
+> 什么服务? supabase 有原生的? 还是也是resend?"*): `docs/product/PRD.md` §9 item 3 is **annotated in
+> place, with the date** — the "原地加日期" style §8's tax row already uses. The tier-3 gate composition
+> that 裁-57/58/68 fixed as *"DPA e-sign + rate wall + email-bound token + Stripe checkout success"*
+> now names **FIVE** items: the fifth is the **Beta terms of service**
+> (`docs/ops/legal/clara-beta-terms.md`), a separate document kind from the DPA and never one
+> combined signature (裁-129), shipped as an agent template refined with a lawyer at official launch
+> (裁-125). And one of the original four is **retired**: the **email-bound token** went with 裁-89's
+> fold of claim → create-firm → close-registration into ONE transaction — *"no admission token
+> survives"*, `docs/ARCHITECTURE.md` §1a — and was **never built**, measured 2026-09-03 as zero hits
+> for `email_bound` / `email-bound` / `bound_token` across `apps/` and `packages/`. Four of the five
+> are therefore live: DPA e-sign · Beta terms · rate wall · Stripe checkout success. The original
+> sentence is kept for provenance, and 裁-58's open ringgit-amounts question is untouched, so item 3
+> remains genuinely open rather than closed by an annotation.
+> **The `btw` half, answered from the repo as a FACT (no ruling needed) — this is B5's subject:**
+> step 1's confirmation mail is sent by **Supabase's own auth mailer**, triggered by
+> **`supabase.auth.signUp`** (`apps/web/components/entry/signup-account-form.tsx`:167); the password
+> reset rides the same mailer. The confirmation card's RESEND control is not the sender and sends
+> nothing today — its seam always returns `{kind:"unavailable"}` pending a walled route handler.
+> **Resend the vendor is wired for INVITATIONS only** — `RESEND_API_KEY` occurs in this repo solely
+> on the invite path (`apps/web/lib/members/invite-mail.ts`, `apps/web/README.md`, `.env.example` and
+> that path's tests), with zero occurrences in the registration/confirmation path. Whether that
+> Supabase project has **custom SMTP** configured behind its mailer is a dashboard fact, not
+> measurable from the repo, and is not asserted here.
+> Recorded per 裁-140 (a digest row plus this dated line, no new ADR); the ledger entry in
+> `docs/plan/active/mohe-grill-rulings-2026-09-02-pm.md` governs on any divergence.

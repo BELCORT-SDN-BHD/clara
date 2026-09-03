@@ -284,7 +284,7 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     // nothing checks. Pinning the one old spelling would have caught the one old
     // sentence; this catches the shape.
     const entryLeaves = leaves.filter((leaf) => leaf.file.startsWith("app/(entry)/"));
-    assert.equal(entryLeaves.length, 9, "the current entry route-leaf census changed");
+    assert.equal(entryLeaves.length, 12, "the current entry route-leaf census changed");
     const layout = SCOPE_UNSCOPED_SURFACES.find((surface) => surface.path === "app/(entry)/layout.tsx");
     assert.ok(layout, "the entry layout is absent from the unscoped registry");
 
@@ -368,7 +368,7 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     );
   });
 
-  it("the seven (entry) pages classify, and /pending is NOT public", () => {
+  it("the eight (entry) pages classify, and /pending is NOT public", () => {
     // The census's "EVERY leaf classifies" cell would also pass if every page
     // were registered wrongly-but-consistently, so this derives the page set
     // from the route tree and pins the CLASS of each. These pages sit under a
@@ -377,7 +377,7 @@ describe("MEDIUM-3 — every route leaf is classified, or this suite reds", () =
     const entryPages = leaves
       .filter((leaf) => leaf.file.startsWith("app/(entry)/") && leaf.file.endsWith("/page.tsx"))
       .map((leaf) => leaf.file);
-    assert.equal(entryPages.length, 7, "the current entry page census changed");
+    assert.equal(entryPages.length, 8, "the current entry page census changed");
     for (const file of entryPages) {
       assert.equal(classify({ file, url: "" }), "registered unscoped", `${file} is not registered unscoped`);
       assert.equal(ancestorCovered(file), false, `${file} claims an entrance ancestor it does not have`);
@@ -689,6 +689,8 @@ describe("the deliberate exemptions stay exempt", () => {
     const expectedPaths = [
       "app/(entry)/auth/confirm/verify/route.ts",
       "app/(entry)/auth/recover/route.ts",
+      "app/(entry)/checkout/route.ts",
+      "app/(entry)/checkout/success/claim/route.ts",
       "app/api/invite/route.ts",
       "app/logout/route.ts",
       ...(process.env.CLARA_E2E_MONEY_INPUT_HARNESS === "1"

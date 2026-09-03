@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useRef, useState } from "react";
 
-import { signDpa as defaultSignDpa, type SignDpa } from "@/lib/registration/dpa-doors";
+import { signDpa as defaultSignDpa, type SignDpa, type SignDpaOutcome } from "@/lib/registration/dpa-doors";
 import type { DpaDocumentState } from "@/lib/registration/dpa-server-reads";
 import { newOpKey } from "@/lib/registration/op-key";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { NotBuiltNote } from "@/components/common/not-built-note";
+import { StateBanner } from "@/components/common/state";
 
 /**
  * SIGNUP's THIRD STEP — the DPA e-sign (checkout-gate-design.md §1.1 step ④,
@@ -36,17 +37,29 @@ import { NotBuiltNote } from "@/components/common/not-built-note";
  *  ABSENT, not disabled-looking" — nothing here may imply a document exists
  *  to sign when none could be shown.
  *
- *  A click on "sign" — `signDpa` is a Lane-B seam
- *  (`lib/registration/dpa-doors.ts`) whose production default always
- *  answers `{kind:"unavailable"}`. The click is real, the request is real,
- *  and the answer is an honest "not wired yet" rather than a fabricated
- *  signature. See that module's header for the full split rationale.
+ *  A click on "sign" that the door REFUSES — `sign_dpa` raises `CLR10 the
+ *  signed text does not match the current agreement` when the document was
+ *  superseded between render and click (裁-90's byte-identity law), and
+ *  `CLR09 that dpa version is not current` for a stale version. The DB's own
+ *  sentence renders VERBATIM; nothing here re-words it and nothing retries.
  *
- * NAVIGATION: this step does not redirect anywhere on its own — there is no
- * built checkout to send anyone to yet. The one control besides "sign" is a
- * plain `<Link>` back to `/pending`, so a person who arrives here is never
- * stranded with no way forward at all; `/pending`'s own "registered" arm is
- * where the next real action (once Lane B lands) will live.
+ * NAVIGATION, WIRED BY LANE B. A recorded signature reveals the next step —
+ * a real `<form method="post" action="/checkout">`, which is ⑤. It is a form
+ * POST and not a `<Link>` because `/checkout` is POST-only by design: a GET
+ * there could be run by a prefetch or a pasted link, and it opens a Stripe
+ * Session and spends a rate-wall attempt. The plain `<Link>` back to
+ * `/pending` stays, so nobody is stranded.
+ *
+ * 裁-129'S SECOND DOCUMENT KIND IS NOT PRESENTED, AND SAYING SO IS THE POINT.
+ * The beta terms of service exists as a text (`docs/ops/legal/
+ * clara-beta-terms.md`) but `clara.dpa_documents` has NO `kind` column on
+ * this tip — measured: `0158`'s `create table` declares `version, body,
+ * body_sha256, source_path, effective_from, effective_to, created_at`, and
+ * `get_current_dpa_document()` returns the one current row with no kind to
+ * select on. So there is exactly one document to sign here and exactly one
+ * signature to record. The follow-up line below says the terms are coming and
+ * are NOT covered by this signature; a second checkbox recording nothing
+ * would be the fake receipt this app forbids.
  */
 export function SignupDpaForm({
   document,
@@ -57,7 +70,7 @@ export function SignupDpaForm({
 }) {
   const t = useTranslations("Signup");
   const [signing, setSigning] = useState(false);
-  const [signedOutcome, setSignedOutcome] = useState<"unavailable" | null>(null);
+  const [outcome, setOutcome] = useState<SignDpaOutcome | null>(null);
   // A, fix round 2026-09-01: minted ONCE and held for the component's
   // lifetime — `sign_dpa` takes a required `p_op_key` (checkout-gate-design-
   // part2.md:51) and this seam's caller owns that key, per the identical
@@ -87,7 +100,7 @@ export function SignupDpaForm({
 
   async function handleSign() {
     setSigning(true);
-    setSignedOutcome(null);
+    setOutcome(null);
     // M2 fix round: the hash sent here MUST be the hash of the body THIS
     // RENDER shows — never re-derived, never re-read. `document` is the exact
     // prop the CardContent below prints `document.body` from, so
@@ -96,7 +109,7 @@ export function SignupDpaForm({
     // re-read later. The `document.kind === "ready"` guard is closure-
     // narrowing paperwork only — this function is never reachable except from
     // the "ready" render below (see the "unavailable" early return above).
-    const outcome = document.kind === "ready"
+    const answer = document.kind === "ready"
       ? await sign({
           version: document.version,
           bodySha256: document.bodySha256,
@@ -104,11 +117,10 @@ export function SignupDpaForm({
         })
       : { kind: "unavailable" as const };
     setSigning(false);
-    // `outcome.kind` is exhaustively either "signed" or "unavailable" today;
-    // the production seam only ever answers the latter. Either way this
-    // component never invents a redirect or a success state the door did
-    // not actually report — see the header.
-    if (outcome.kind === "unavailable") setSignedOutcome("unavailable");
+    // Whatever the door said, verbatim — this component never invents a
+    // success state, and the checkout control below appears only on the arm
+    // that carries a real signature id.
+    setOutcome(answer);
   }
 
   return (
@@ -122,18 +134,53 @@ export function SignupDpaForm({
           {document.body}
         </div>
 
-        {signedOutcome === "unavailable" && (
-          <NotBuiltNote>{t("dpaStepSignedUnavailable")}</NotBuiltNote>
+        {/* 裁-129 — the SECOND document kind is named, not signed. See this
+            component's header for the measurement that decided it. */}
+        <p className="text-xs text-muted-foreground">{t("dpaStepTermsFollowUp")}</p>
+
+        {/* NOT a NotBuiltNote any more. That component's dashed edge is the
+            estate's ONE signal for "named, not delivered", and `sign_dpa` IS
+            delivered — this arm now means a transport or auth failure, which is
+            an error, not a gap. Design part 1 §2.1's instruction cuts both ways:
+            the note is removed because the thing it named now exists. The
+            document-unavailable arm above KEEPS its note, because that one is
+            still a genuine "there is nothing here to sign" (part 3 §2's own
+            words: "the step renders a NotBuiltNote and the checkout control is
+            ABSENT, not disabled-looking"). */}
+        {outcome?.kind === "unavailable" && (
+          <StateBanner tone="error">{t("dpaStepSignedUnavailable")}</StateBanner>
         )}
 
-        <Button
-          type="button"
-          className="w-full"
-          disabled={signing}
-          onClick={() => void handleSign()}
-        >
-          {signing ? t("dpaStepSigning") : t("dpaStepSign")}
-        </Button>
+        {outcome?.kind === "refused" && (
+          <StateBanner tone="error" code={outcome.code}>
+            {outcome.message}
+          </StateBanner>
+        )}
+
+        {outcome?.kind === "signed" ? (
+          <>
+            <StateBanner tone="info">
+              {outcome.replay ? t("dpaStepAlreadySigned") : t("dpaStepSigned")}
+            </StateBanner>
+            {/* ⑤ — a REAL form POST. `/checkout` is POST-only on purpose (a GET
+                there would open a Stripe Session on a prefetch), so this is a
+                form and not a link. */}
+            <form method="post" action="/checkout">
+              <Button type="submit" className="w-full">
+                {t("dpaStepContinueToCheckout")}
+              </Button>
+            </form>
+          </>
+        ) : (
+          <Button
+            type="button"
+            className="w-full"
+            disabled={signing}
+            onClick={() => void handleSign()}
+          >
+            {signing ? t("dpaStepSigning") : t("dpaStepSign")}
+          </Button>
+        )}
 
         <Link href="/pending" className="text-sm text-primary underline">
           {t("dpaStepBackToStatus")}

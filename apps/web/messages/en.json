@@ -1540,9 +1540,13 @@
     "dpaStepDescription": "Read the agreement below, then continue.",
     "dpaStepSign": "I have read this and agree",
     "dpaStepSigning": "Recording your agreement…",
-    "dpaStepSignedUnavailable": "Not built yet: the door that records your signature (`sign_dpa`) isn't wired up in this build. Nothing was recorded just now — your click did nothing but tell you that.",
-    "dpaStepDocumentUnavailable": "Not built yet: the current agreement couldn't be read. Nothing can be signed until it can, so checkout stays unreachable from here — nothing is charged and nothing is recorded.",
-    "dpaStepBackToStatus": "Back to your registration status"
+    "dpaStepSignedUnavailable": "We couldn't record your signature just now. Nothing was recorded, so nothing is half-done — try again in a moment.",
+    "dpaStepDocumentUnavailable": "The current agreement couldn't be read. Nothing can be signed until it can, so checkout stays unreachable from here — nothing is charged and nothing is recorded.",
+    "dpaStepBackToStatus": "Back to your registration status",
+    "dpaStepSigned": "Your signature is recorded. Nothing is charged during the beta trial.",
+    "dpaStepAlreadySigned": "You had already signed this version. Nothing was recorded twice.",
+    "dpaStepContinueToCheckout": "Continue to checkout",
+    "dpaStepTermsFollowUp": "Clara's beta terms of service is a separate document and is not covered by this signature. It is being prepared and you will be asked to accept it before launch."
   },
   "ConfirmEmail": {
     "metaTitle": "Confirm your email",
@@ -1559,7 +1563,7 @@
     "lockedTitle": "Too many attempts",
     "lockedDescription": "{wait, plural, =1 {Wait about a minute, or request a new code.} other {Wait about # minutes, or request a new code.}}",
     "unavailableTitle": "Confirmation isn't available yet",
-    "unavailableDescription": "Not built yet: the attempt wall this form calls (`claim_confirmation_attempt`) isn't wired up in this build, so no code can be checked from here yet. Nothing was recorded just now.",
+    "unavailableDescription": "We couldn't check your code just now, so we haven't counted this as an attempt. Your code is still good — try again in a moment.",
     "resend": "Send me a new code",
     "resending": "Sending a new code…",
     "resent": "A new code is on its way.",
@@ -1567,26 +1571,24 @@
   },
   "Pending": {
     "metaTitle": "Your registration",
-    "checkoutNotBuilt": "Not built yet: signing your data-processing agreement and paying are not wired up. ClaraBook's beta is a trial — nothing is charged while pricing is being set — but the doors that record your signature and start checkout ship with a later train. Continuing below takes you to that step; nothing is recorded and nothing is owed from you right now.",
     "pending": {
       "title": "Your registration is with us",
       "description": "We have your request. There's nothing more for you to do yet.",
       "banner": "This registration is open. You'll be able to sign in to your firm once it's live.",
-      "continueToCheckout": "Continue to checkout"
+      "continueToCheckout": "Continue to checkout",
+      "trialNote": "Clara's beta is a trial — nothing is charged while pricing is being set. Checkout is the step that opens your firm."
     },
     "checkout_open": {
       "title": "Your firm is not open yet",
       "description": "You started checkout. There's nothing more for you to do yet.",
       "banner": "A checkout session is open for this registration. You'll be able to sign in to your firm once payment completes.",
-      "resume": "Resume checkout",
-      "notBuilt": "Not built yet: the checkout resume route. Your open checkout session is recorded; the page that lets you return to it ships with a later train."
+      "resume": "Resume checkout"
     },
     "paid": {
       "title": "Payment received — finish opening your firm",
-      "description": "Your payment landed. One step is left, and it isn't wired up yet.",
+      "description": "Your payment landed. One step is left, and it's yours to take below.",
       "banner": "We recorded your payment. Your firm has not been created yet.",
-      "finish": "Finish opening your firm",
-      "notBuilt": "Not built yet: the door that opens your firm from a completed payment. Your payment is recorded and nothing is lost; this page ships with a later train."
+      "finish": "Finish opening your firm"
     },
     "rejected": {
       "title": "This registration wasn't accepted",
@@ -1612,6 +1614,14 @@
       "title": "We couldn't read your registration",
       "description": "Nothing was read, so nothing below is a statement about your registration.",
       "banner": "Something went wrong looking this up. This is not a decision about your registration — it means we couldn't check. Try again in a moment."
+    },
+    "checkoutRefusal": {
+      "no_origin_digest": "Checkout is not available right now: this deployment is missing the configuration the abuse wall needs. Nothing was charged. Please contact support.",
+      "stripe_unavailable": "We could not reach the payment provider. Nothing was charged and nothing was recorded. Try again in a moment.",
+      "plan_rotated": "The beta plan changed while you were starting checkout, so we stopped rather than charge you against the old one. Try again — the new plan will be used.",
+      "no_registration": "There is no open firm application on your account to check out for.",
+      "unavailable": "Checkout could not be started. Nothing was charged. Try again in a moment.",
+      "already_member": "You already belong to a firm, so there is nothing to buy here — one person can hold one firm. Nothing was charged. Use the link above to go to your firm."
     }
   },
   "Logout": {
@@ -1648,7 +1658,10 @@
     "heading": "Opening balances & carry-down",
     "noSeedYet": "No opening seed has been created for this client yet.",
     "noPlanNote": "This client has no onboarding plan yet — an opening seed cannot be created until one exists.",
-    "dialog": { "cancel": "Cancel", "working": "Working…" },
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
     "openingPosition": {
       "loading": "Checking the client's opening position…",
       "firstYearZero": "No opening seed needed — this client's opening position was recorded as zero at onboarding (a first-year, first-trading client).",
@@ -1659,7 +1672,11 @@
     },
     "seed": {
       "heading": "Opening seed",
-      "states": { "open": "Open", "finalized": "Finalized", "cancelled": "Cancelled" },
+      "states": {
+        "open": "Open",
+        "finalized": "Finalized",
+        "cancelled": "Cancelled"
+      },
       "createTrigger": "Create opening seed",
       "createTitle": "Create the opening seed",
       "createDescription": "Starts the carry-down lifecycle for this client — draft items, tie out, then approve.",
@@ -1776,7 +1793,11 @@
       "accumulatedLabel": "Accumulated depreciation",
       "residualLabel": "Residual value",
       "methodLabel": "Depreciation method",
-      "methods": { "straight_line": "Straight-line", "reducing_balance": "Reducing balance", "none": "None (non-depreciable)" },
+      "methods": {
+        "straight_line": "Straight-line",
+        "reducing_balance": "Reducing balance",
+        "none": "None (non-depreciable)"
+      },
       "usefulLifeLabel": "Useful life (months)",
       "rateBpsLabel": "Annual rate (basis points)",
       "startDateLabel": "Depreciation start date",
@@ -1800,10 +1821,17 @@
   },
   "FixedAssetsDepreciation": {
     "chartAccountsLoading": "Loading the chart of accounts — the Complete/Dispose account pickers need this to finish before they can be confirmed.",
-    "dialog": { "cancel": "Cancel", "working": "Working…" },
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
     "particulars": {
       "methodLabel": "Depreciation method",
-      "methods": { "straight_line": "Straight-line", "reducing_balance": "Reducing balance", "none": "None (non-depreciable)" },
+      "methods": {
+        "straight_line": "Straight-line",
+        "reducing_balance": "Reducing balance",
+        "none": "None (non-depreciable)"
+      },
       "startDateLabel": "In-service (start) date",
       "usefulLifeLabel": "Useful life (months)",
       "rateBpsLabel": "Annual rate (basis points)",
@@ -1875,9 +1903,15 @@
       "heading": "Depreciation authority",
       "subheading": "The cadence Clara is authorised to run scheduled depreciation on.",
       "none": "No depreciation authority has been proposed for this client yet.",
-      "status": { "proposed": "Proposed", "live": "Live" },
+      "status": {
+        "proposed": "Proposed",
+        "live": "Live"
+      },
       "cadenceLabel": "Cadence",
-      "cadence": { "monthly": "Monthly", "annual": "Annual" },
+      "cadence": {
+        "monthly": "Monthly",
+        "annual": "Annual"
+      },
       "rampEarned": "Autopost ramp earned — a reviewed run has posted under this authority.",
       "rampNotEarned": "Autopost ramp not yet earned — the next run posts as a draft.",
       "fyEndFallback": "No fiscal year end is on file for this client — defaulting to 31 December.",
@@ -1897,7 +1931,10 @@
       "empty": "No depreciation runs yet.",
       "periodCol": "Period",
       "modeCol": "Mode",
-      "mode": { "post": "Posted", "draft": "Draft" },
+      "mode": {
+        "post": "Posted",
+        "draft": "Draft"
+      },
       "chargedCol": "Charged",
       "entriesCol": "Entries",
       "runTrigger": "Run depreciation",
@@ -1915,7 +1952,10 @@
     }
   },
   "AdjustmentsAccounts": {
-    "dialog": { "cancel": "Cancel", "working": "Working…" },
+    "dialog": {
+      "cancel": "Cancel",
+      "working": "Working…"
+    },
     "linesEditor": {
       "lineNo": "#",
       "account": "Account",
@@ -1933,7 +1973,10 @@
       "description": "An admin must sign this before it can run. Lines are the template's own recipe — every occurrence posts them unchanged.",
       "nameLabel": "Name",
       "cadenceLabel": "Cadence",
-      "cadence": { "monthly": "Monthly", "annual": "Annual" },
+      "cadence": {
+        "monthly": "Monthly",
+        "annual": "Annual"
+      },
       "autoReverseLabel": "Auto-reverse each occurrence at the start of the next period",
       "startDateLabel": "Start date",
       "endDateLabel": "End date (optional)",
@@ -1995,7 +2038,12 @@
       "empty": "No pair reversals raised for this client.",
       "raised": "Raised",
       "status": "Status",
-      "statuses": { "pending": "Pending", "approving": "Approving", "completed": "Completed", "cancelled": "Cancelled" }
+      "statuses": {
+        "pending": "Pending",
+        "approving": "Approving",
+        "completed": "Completed",
+        "cancelled": "Cancelled"
+      }
     },
     "approvePair": {
       "trigger": "Approve",
@@ -2019,10 +2067,19 @@
       "codeLabel": "Account code",
       "nameLabel": "Name",
       "typeLabel": "Type",
-      "types": { "asset": "Asset", "liability": "Liability", "equity": "Equity", "income": "Income", "expense": "Expense" },
+      "types": {
+        "asset": "Asset",
+        "liability": "Liability",
+        "equity": "Equity",
+        "income": "Income",
+        "expense": "Expense"
+      },
       "classLabel": "Class (optional)",
       "classNone": "None",
-      "classes": { "payable": "Payable", "receivable": "Receivable" },
+      "classes": {
+        "payable": "Payable",
+        "receivable": "Receivable"
+      },
       "specialLabel": "Special account slot (optional)",
       "specialNone": "None — an ordinary account",
       "specials": {
@@ -2989,5 +3046,40 @@
     "cancel": "Cancel",
     "working": "Working…",
     "rejectConfirm": "Reject registration"
+  },
+  "CheckoutSuccess": {
+    "metaTitle": "Opening your firm",
+    "backToStatus": "Back to your status",
+    "claimable": {
+      "title": "Your payment went through",
+      "description": "One step is left, and it is yours to take.",
+      "banner": "We recorded your payment. Opening your firm creates it and signs you in.",
+      "open": "Open my firm"
+    },
+    "already_open": {
+      "title": "Your firm is open",
+      "description": "This was already done — nothing ran twice.",
+      "banner": "Your firm exists and your payment is recorded against it.",
+      "go": "Go to your firm"
+    },
+    "awaiting_payment": {
+      "title": "We have not seen your payment yet",
+      "description": "Your money is not lost. We cannot open your firm until the payment is recorded.",
+      "banner": "Stripe has not told us about this payment yet, and it retries on its own. Leave this page and come back, or check your status. If it has not cleared after a while, contact support and tell them you paid but your firm is not open — they can see the payment."
+    },
+    "no_registration": {
+      "title": "There is no firm application to finish",
+      "description": "Nothing here is waiting on you.",
+      "banner": "We could not find an open firm application for your account."
+    },
+    "unavailable": {
+      "title": "We could not read your status",
+      "description": "Nothing was changed.",
+      "banner": "Something went wrong reading where your application stands. Nothing was recorded and nothing was lost. Try again in a moment."
+    },
+    "refused": {
+      "title": "That did not go through",
+      "description": "The system refused it, and here is exactly what it said."
+    }
   }
 }

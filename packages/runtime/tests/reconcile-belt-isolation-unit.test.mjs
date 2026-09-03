@@ -32,6 +32,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reconcileTasks, runReconcilerSweep } from "../lib/reconciler.mjs";
+import * as reconcilerModule from "../lib/reconciler.mjs";
 import { reconcileFaRuns } from "../lib/reconciler-fa.mjs";
 import { reconcileAdjustmentRuns } from "../lib/reconciler-adjustments.mjs";
 import { reconcileRenderEnqueue } from "../lib/reconciler-render.mjs";
@@ -341,6 +342,68 @@ test("a probe failure inside a DAILY belt skips that belt ONLY — the sweep beh
   assert.equal(swept.adjOk, false, "…and so does the adjustment belt, independently");
   assert.deepEqual(swept.beltErrors, [], "both contained THEMSELVES — nothing escaped to the assembly wrapper");
   assert.equal(typeof swept.pruned, "number", "the trace prune, sequenced last of all, still ran");
+});
+
+// ---------------------------------------------------------------------------
+// The autopost belt — RETIRED WHOLE at `0118` (F-A2 PR-3), not merely dormant.
+// Unlike the FA/ADJ belts above (whose migration has not landed YET and will), this
+// belt's DB function is dropped for good, so the call path itself is gone — a
+// feature-detect here would misstate a permanent retirement as a temporary one. The
+// caller was missed in the original PR-3 commit and re-fired the dropped call on
+// every ~2s poll until this fix (docs/plan/active/f-a2-annexes-1-estate.md §B.1: the
+// artifact's own disposition is "RETIRE (drop the verb)").
+// ---------------------------------------------------------------------------
+
+/** A client that would have answered the OLD `select clara.reconcile_autopost_rules()` query
+ *  validly (a pre-0118 frontier shape) — the POSITIVE CONTROL: if the call path still existed,
+ *  THIS client is exactly what would have made it succeed with autopostOk:true. */
+function preRetirementStubClient(open = []) {
+  const queries = [];
+  return {
+    queries,
+    query(sql, params) {
+      const s = String(sql).trim();
+      queries.push({ sql: s, params });
+      if (/runtime_heartbeats/.test(s)) return Promise.resolve({ rows: [], rowCount: 0 });
+      if (/reconcile_autopost_rules/.test(s)) return Promise.resolve({ rows: [{ r: { expired: 3, nudged: 1 } }], rowCount: 1 });
+      if (/status in \('running','awaiting_input'\)/.test(s)) {
+        const rows = open.map((t) => ({ id: t.id, status: t.status, workflow_run_id: `wf-${t.id}` }));
+        return Promise.resolve({ rows, rowCount: rows.length });
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    },
+  };
+}
+
+test("autopost belt: the export itself is GONE — reconcileAutopostRules is no longer on the module", () => {
+  assert.equal(typeof reconcilerModule.reconcileAutopostRules, "undefined",
+    "0118 dropped clara.reconcile_autopost_rules(); this caller retires with it — a re-add here is exactly the regression this battery guards");
+});
+
+test("autopost belt: RETIRED — never queried on a frontier where the function does not exist (the real shape today)", async () => {
+  const client = sweepClient({
+    open: [{ id: randomUUID(), status: "running" }],
+    failOn: (sql) => (/reconcile_autopost_rules/.test(sql) ? new Error("function clara.reconcile_autopost_rules() does not exist") : null),
+  });
+  const swept = await runReconcilerSweep(client, { ...chatDeps(() => {}), autopostRules: true });
+  assert.ok(!client.queries.some((q) => /reconcile_autopost_rules/.test(q.sql)),
+    "the belt is never issued at all — not attempted-and-caught, GONE from the call path");
+  assert.deepEqual(swept.beltErrors, [], "so nothing named 'autopost rules' can appear as a contained failure either");
+  assert.ok(!("autopostOk" in swept) && !("autopostExpired" in swept) && !("autopostNudged" in swept),
+    "no autopost-shaped keys survive in the receipt — a caller's old `swept.autopostOk` read now sees undefined");
+});
+
+test("autopost belt: POSITIVE CONTROL — even a client ready to answer the OLD query validly is never asked", async () => {
+  // This client is a pre-0118 frontier: `select clara.reconcile_autopost_rules()` resolves
+  // cleanly with a real {expired,nudged} shape. If the call path still existed, this exact
+  // fixture is what would have produced autopostOk:true. It never sees the query — proving
+  // the skip above is not "the mock happens to refuse it", it is that the code no longer asks,
+  // independent of what the database would have said.
+  const client = preRetirementStubClient([{ id: randomUUID(), status: "running" }]);
+  const swept = await runReconcilerSweep(client, { ...chatDeps(() => {}), autopostRules: true });
+  assert.ok(!client.queries.some((q) => /reconcile_autopost_rules/.test(q.sql)),
+    "STILL never asked, even though this fixture was ready to answer — the retirement is unconditional, not DB-state-dependent");
+  assert.ok(!("autopostOk" in swept), "a stub-satisfied old query would have produced autopostOk:true — it is simply absent instead");
 });
 
 test("render enqueue: its surface probe is isolated like its dispatch sibling (renderEnqueueOk:false, not a throw)", async () => {

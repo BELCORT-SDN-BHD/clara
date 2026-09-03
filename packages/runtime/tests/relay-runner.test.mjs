@@ -3,7 +3,7 @@
 // advisory lock and/or mutate the global pointer, so the whole suite runs with
 // --test-concurrency=1. Contract: docs/plan/completed/slice3-event-spine-contract.md §2.9.
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 
 import * as fx from "./relay-fixtures.mjs";
@@ -19,6 +19,11 @@ import {
   assertExactlyOnce,
   sleep,
 } from "./relay-testkit.mjs";
+
+// ONE teardown registrant per pool (fix-relay-teardown, 2026-09-03): relay-testkit.mjs
+// no longer registers its own implicit after() hook (see its header note) — this file
+// does not drop a private database, so it owns the sole close of the shared pool.
+after(fx.endPool);
 
 // ===========================================================================
 // (X2) RECONNECT — the runner survives a killed connection and resumes draining

@@ -15,9 +15,11 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
 - **The chat loop** (versioned `workflows/chatTurn.vN.ts` files, each with its
   FROZEN closure `chatTurn.vN.impl.ts` / `.prompt.ts` / `.tools.ts`; the registry
   in `workflows/registry.ts` pins **`chatTurn_v17`** since #485 (`60ffbfb0`, 2026-09-02
-  18:18 +0800; `registry.ts:616` records v16→v17). **The registry pin is not the serving
-  bundle**: the SERVING Fly bundle is still machine version 70 (deployed 2026-08-31), carrying
-  v16, until the next deploy; earlier versions stay frozen +
+  18:18 +0800; `registry.ts:616` records v16→v17). **TRUED 2026-09-03 12:51 MYT: the registry
+  pin now matches the serving bundle** — `fly deploy` from merged main `344f7ad8` (#511) took
+  machine `48ee715b763048` to **VERSION 71**, serving `chatTurn_v17` (bundle-proven: `chatTurn_v17`
+  ×9 grepped from the served `/app/.output/server/index.mjs`; `docs/ops/runtime-deploy-2026-09-03-v71-chatturn-v17-c5.md`);
+  earlier versions stay frozen +
   reachable for parked runs per Appendix A): a coding-capable advisor with the `draft_journal_entry` write
   tool plus the four Wave-E authoring tools (metric preview/draft, report-spec
   draft, report preview — the last a named structural refusal until the OBO
@@ -33,11 +35,15 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
 - **Control listener** (`lib/control.mjs`): leased clarify delivery + cancel
   settlement. **Leader loop** (`lib/leader.mjs`): routing + drain (`lib/drain.mjs`)
   + reconcile (`lib/reconciler.mjs`; the DB function `clara.reconcile_autopost_rules()`
-  and the rest of the rules-execution tier RETIRED with F-A2 PR-3 at `0118`, but the
-  reconciler's belt caller was never unwired — `reconciler.mjs:673` still fires it every
-  cycle behind a bare try/catch with no `to_regprocedure` feature-detect, so the call fails
-  and retries every poll in the deployed path; unwire per
-  `docs/plan/active/f-a2-annexes-1-estate.md:95`).
+  and the rest of the rules-execution tier RETIRED with F-A2 PR-3 at `0118` — the
+  reconciler's belt caller was RETIRED WITH IT, closing the gap a first pass at PR-3
+  left open (the caller kept firing the dropped call every poll, invisible in
+  `beltErrors`, until this fix; `docs/plan/active/f-a2-annexes-1-estate.md` §B.1 names
+  the artifact's disposition as "RETIRE (drop the verb)", both DB and caller halves).
+  **Merged, NOT SERVING until the next runtime deploy (`v72`)** — v71 (deployed
+  2026-09-03 04:51Z from `344f7ad8`) predates this fix and still carries the wired
+  caller (the same registry-pin-vs-serving-bundle law as the chatTurn bullet
+  above).
   **Consumer lanes**, each on its OWN dedicated connection + advisory lock:
   matcher (`lib/matcher.mjs`),
   autodraft (`lib/autodraft.mjs`), local_facts (`lib/local-facts.mjs`),
@@ -163,18 +169,18 @@ Azure.
 
 ## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
 
-`chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-09-03: the
+`chatTurn_v2` (Slice 6) added the narrow WRITE capability. **TRUED 2026-09-03 12:51 MYT: the
 registry pins `chatTurn: chatTurn_v17`** (#485, `60ffbfb0`, 2026-09-02 18:18 +0800;
-`registry.ts:616` records v16→v17 — superseding the prior "TRUED 2026-09-02" v16 stamp,
-which was itself written hours before this repoint) — repo frontier is **158 migration files
-through `0163`, measured at `265a8ee7` (#493 merged; count `packages/db/migrations/`, not this
-line — the numbering has gaps and this number moves every merge)**, live DB applied through
-`0153`. **The
-SERVING Fly bundle is machine version 70, deployed 2026-08-31 08:21Z, carrying
-`chatTurn_v16` — bundle-proven by grep on the served container** (`PROGRESS.md`'s deploy
-record). *(The 2026-08-29 truing this replaces read v15 pinned / v13 serving / frontier 0147 —
-three pins stale at once; version claims here rot fast, so trust the registry + the served
-bundle over this snapshot.)* The freeform ceremony above remains a hard precondition of any
+`registry.ts:616` records v16→v17) **and the SERVING bundle now matches it** — repo frontier is
+**158 migration files through `0163`, measured at `265a8ee7` (#493 merged; count
+`packages/db/migrations/`, not this line — the numbering has gaps and this number moves every
+merge)**, live DB applied through `0153`. **The
+SERVING Fly bundle is machine version 71, deployed 2026-09-03 04:51:44Z (12:51 MYT), carrying
+`chatTurn_v17` — bundle-proven by grep on the served container**
+(`docs/ops/runtime-deploy-2026-09-03-v71-chatturn-v17-c5.md`, superseding the prior "machine
+version 70 / v16" stamp this line carried since the 2026-08-31 v16 ceremony). *(Version claims
+here rot fast, so trust the registry + the served bundle over this snapshot.)* The freeform
+ceremony above remains a hard precondition of any
 redeploy. **v15 = F-A6's audited
 freeform read** — one read-only SELECT the model composes and the database runs as
 `clara_freeform_ro`, on the fifth login and its own pool. v1–v14
