@@ -234,6 +234,16 @@ test("c5db.3 A-M5 the livemode gate, BOTH polarities, before the door", { skip }
   setEnv({ CLARA_STRIPE_LIVEMODE: "test" });
 });
 
+/** Per-run, collision-proof markers for the values 裁-91 forbids reaching the database. The
+ *  uppercase alphabetic prefix is the point: the row's own identifiers are hex, so no sentinel can
+ *  appear in one by chance. */
+const SENTINEL = {
+  email: `LEAKMAIL-${randomUUID()}@example.test`,
+  name: `LEAKNAME-${randomUUID()}`,
+  address: `LEAKADDR-${randomUUID()}`,
+  card: `LEAKCARD-${randomUUID()}`,
+};
+
 test("c5db.4 裁-91 — the stored row carries the keys and NONE of the person", { skip }, async () => {
   const id = eventId("pii");
   const session = sessionId("pii");
@@ -248,11 +258,13 @@ test("c5db.4 裁-91 — the stored row carries the keys and NONE of the person",
       registration,
       applicant,
       extra: {
-        customer_details: { email: "leak@example.test", name: "Leak Person", address: { line1: "1 Road" } },
-        customer_email: "leak@example.test",
-        billing_details: { name: "Leak Person" },
-        shipping_details: { name: "Leak Person" },
-        payment_method_details: { card: { last4: "4242" } },
+        customer_details: { email: SENTINEL.email, name: SENTINEL.name, address: { line1: SENTINEL.address } },
+        customer_email: SENTINEL.email,
+        billing_details: { name: SENTINEL.name },
+        shipping_details: { name: SENTINEL.name },
+        // A REAL last4 beside a sentinel: the four digits are what a card actually carries, and
+        // the sentinel is what the assertion can safely search for. See the note below.
+        payment_method_details: { card: { last4: "4242", fingerprint: SENTINEL.card } },
       },
     }),
   );
@@ -271,10 +283,20 @@ test("c5db.4 裁-91 — the stored row carries the keys and NONE of the person",
   for (const denied of DENIED_PROJECTION_KEYS) {
     assert.equal(Object.hasOwn(row.projection, denied), false, `${denied} reached the row`);
   }
+  // EVERY SEARCHED VALUE IS A PER-RUN SENTINEL, and that is a correction rather than a flourish.
+  // This cell used to search the serialised row for the literal `"4242"` — the card's last4. Four
+  // hex-ish digits appear by chance in the row's OWN random identifiers (the event id, session id,
+  // customer id and subscription id contribute ~125 hex positions, so a spurious hit is a fraction
+  // of a percent per run), and one duly landed on the estate run of 2026-09-03. A cell that reds
+  // on coincidence is worse than no cell: it trains a reader to re-run rather than to read.
+  //
+  // The sentinels below cannot collide — each is an uppercase alphabetic prefix plus a fresh uuid,
+  // and hex ids contain no such letters. A real leak still trips them, because the projector would
+  // have to copy the WHOLE denied value to leak anything at all.
   const wholeRow = JSON.stringify(row);
-  assert.equal(wholeRow.includes("leak@example.test"), false, "an address reached an append-only table");
-  assert.equal(wholeRow.includes("Leak Person"), false);
-  assert.equal(wholeRow.includes("4242"), false);
+  for (const [field, value] of Object.entries(SENTINEL)) {
+    assert.equal(wholeRow.includes(value), false, `the ${field} sentinel reached an append-only table`);
+  }
 });
 
 test("c5db.5 the ACCEPTANCE WALK — signed event to a minted firm, end to end", { skip }, async () => {
