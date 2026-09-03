@@ -29,6 +29,37 @@ that PROVES it — read this before the Wave-G factory reset + estate e2e, not a
 - [ ] Flip `clara_auth_wall_login` to `LOGIN` out of band and set
       `CLARA_AUTH_WALL_DATABASE_URL` in the runtime environment only; migration `0163` deliberately
       ships and tail-proves the role as `NOLOGIN`, so this is a deploy ceremony, never repo-held DDL.
+
+### FS-4 C-6 — the four `apps/web` variables, and the one that carries two correct values
+
+The checkout gate puts the rate wall's pepper and the trusted-client-IP header in `apps/web`
+(design part 3 §3, "M3: it sits with its READER"), so these are set on the WEB app, not only the
+runtime. Secrets move env-to-env and are never printed.
+
+- [ ] `CLARA_RATE_WALL_PEPPER` on `apps/web` — **the identical value the runtime holds.** The two
+      rate-wall limbs (the confirm attempt wall and the checkout rate wall) key on
+      `sha256(pepper ‖ value)`; two different peppers split one wall into two that never see each
+      other's counts. Absent ⇒ `POST /checkout` refuses (fail-closed, by design).
+- [ ] `CLARA_TRUSTED_CLIENT_IP_HEADER` on `apps/web` — **`CF-Connecting-IP`**, the one header this
+      app's own Cloudflare edge sets. Never `X-Forwarded-For`: any client can send it, and a wall
+      keyed on a client-settable header is a form field the attacker fills in (design part 1 §4.1).
+- [ ] **`CLARA_TRUSTED_CLIENT_IP_HEADER` on the RUNTIME — `X-Clara-Client-IP`.** Same variable
+      NAME, different correct VALUE, and this is the line most likely to be got wrong. `apps/web`
+      sits between the browser and the runtime, so the address the runtime observes on its own
+      socket is `apps/web`'s; `apps/web` therefore forwards the address ITS edge saw under this
+      fixed header name (`AUTH_WALL_CLIENT_IP_HEADER`, a constant in
+      `apps/web/lib/rate-wall-courier.ts`, not a fourth variable). Set the runtime to any other
+      name and the runtime auth-wall confirm endpoint answers 503 for every applicant, with nothing in either
+      app's configuration looking wrong.
+- [ ] `CLARA_AUTH_WALL_SERVICE_TOKEN` on `apps/web` — **the identical value the runtime holds.**
+      The confirm endpoint has no user session to check (the caller is confirming in order to get
+      one), so this bearer is what proves the caller is `apps/web`'s server and not the open
+      internet. Mismatched ⇒ 401 on every confirmation.
+- [ ] `STRIPE_SECRET_KEY` on `apps/web` — the TEST-mode restricted key until the launch sitting
+      (裁-81/87). 裁-114 makes `apps/web`'s server-only Route Handlers a lawful second holder;
+      it is read by `POST /checkout` alone and never bundled.
+- [ ] Proof for the pepper and the service token: compare a **hash** of each value across the two
+      environments, never the values themselves.
 - [ ] Proof: **`wrangler secret list` for the `clara-web` Worker** (values redacted; all four
       names are `apps/web`-only — `git grep` over `apps/dashboard` and `packages/runtime` = 0
       hits). ADR-024 dropped Vercel; `apps/web/wrangler.jsonc:3` names the Worker `clara-web`.

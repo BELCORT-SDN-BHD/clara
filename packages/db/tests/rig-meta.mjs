@@ -1181,6 +1181,20 @@ export const CHECKOUT_GATE_C2_COHORT = [
   ...CHECKOUT_GATE_C2_HUMAN_FNS, ...CHECKOUT_GATE_C2_WEBHOOK_FNS,
 ];
 
+// FS-4 C-6 (`0164_checkout_gate_c6_web_reads` — number claimed at merge prep): the TWO
+// read doors `apps/web`'s entry faces cannot render truthfully without. Both are
+// clara_authenticated ONLY, both are STABLE SECURITY DEFINER, and neither has a wake sibling —
+// there is no agent path to "which plan is current" or "how far along is MY checkout", by the
+// design's own shape rather than by omission.
+//   get_current_checkout_plan — the plan row's Checkout-Session collection mode (G13 / 裁-88),
+//     read as a door so billing_plans keeps its zero-application-grant posture.
+//   get_own_checkout_progress — the applicant's OWN checkout/payment progress, self-scoped on
+//     clara.jwt_sub() and refusing CLR04 for a foreign registration. It exists because
+//     checkout_intents and firm_registration_payments grant every application role NOTHING,
+//     permanently, so /pending's two 裁-74 arms have no other read path.
+const CHECKOUT_GATE_C6_HUMAN_FNS = ["get_current_checkout_plan", "get_own_checkout_progress"];
+
+export const CHECKOUT_GATE_C6_COHORT = [...CHECKOUT_GATE_C6_HUMAN_FNS];
 // FS-4 C-3 (checkout-gate design part 2 §1.3 and part 3 §2.1): six authenticated pre-firm/
 // operator-support doors plus the auth-wall lane's exact two-verb, pre-session OTP surface.
 const CHECKOUT_GATE_C3_HUMAN_FNS = [
@@ -1464,6 +1478,10 @@ export const ALLOWED = {
     // FS-4 C-2: the operator firm's Stripe-problem reconciliation queue; owner+operator wall
     // body-enforced. The webhook ingest/sweep verbs live on their dedicated role below.
     ...CHECKOUT_GATE_C2_HUMAN_FNS,
+    // FS-4 C-6: the two apps/web read doors — the current plan's Checkout-Session collection
+    // mode, and the applicant's OWN checkout progress (self-scoped on jwt_sub). See the block
+    // above for why each is a door rather than a table grant.
+    ...CHECKOUT_GATE_C6_HUMAN_FNS,
     // FS-4 C-3: DPA, checkout and folded paid-registration claim doors. Every identity and
     // ownership floor is body-enforced; the pre-session OTP pair lives on its isolated role.
     ...CHECKOUT_GATE_C3_HUMAN_FNS,
@@ -1833,6 +1851,7 @@ export async function grantMatrixFailures() {
   }
   failures.push(...cohortFailures("P4 tranche 2 registration + operator approval", P4T2_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-2 projected Stripe store", CHECKOUT_GATE_C2_COHORT, liveNames));
+  failures.push(...cohortFailures("FS-4 C-6 apps/web read doors", CHECKOUT_GATE_C6_COHORT, liveNames));
   failures.push(...cohortFailures("FS-4 C-3 folded checkout door", CHECKOUT_GATE_C3_COHORT, liveNames));
   // 裁-21 PR-a — frontier-tolerant by cohortFailures' own rule: a cohort that is entirely
   // absent (every pre-PR-a chain) returns no failure, while a PARTIAL cohort — one of the

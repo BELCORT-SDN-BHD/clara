@@ -69,6 +69,7 @@ import {
   cloneAmbientDatabase,
   createDisposableDatabase,
   dropDisposableDatabase,
+  waitForBackendsClear,
   assertCloneIsPopulated,
 } from "../../db/tests/migrate-harness.mjs";
 import { childEnvForExternalTools } from "../../db/lib/pg.mjs";
@@ -81,20 +82,48 @@ await admin.connect();
 let restoreEnv = () => {};
 let cleaned = false;
 /** Idempotent teardown — shared by the setup-failure catch below AND the normal after()
- *  hook, so it is safe to call from both without a double-drop. */
+ *  hook, so it is safe to call from both without a double-drop.
+ *
+ * rev-534 F-2: the file's SOLE `after()` registrant (relay-testkit.mjs's own removed
+ * registrant ran strictly AFTER this one on every Node version measured — not the CI
+ * 57P01's cause). Real channel: `pool.end()` (pg-pool 3.14.0) resolves before the
+ * socket actually closes, so an idle backend can survive into the FORCE drop. Fix:
+ * (1) drain `pg_stat_activity` to 0 (bounded, `waitForBackendsClear()`) before the
+ * drop — FORCE stays only as the backstop; (2) a window-scoped `pool.on('error', …)`,
+ * attached right before `endPool()`, catches any 57P01 still landing in that window as
+ * a reported straggler instead of an uncaught exception. Errors outside this window
+ * still crash loud, unchanged.
+ */
 async function cleanupPrivateDb() {
   if (cleaned) return;
   cleaned = true;
+  const teardownErrors = [];
   try {
     const mod = await import("./relay-fixtures.mjs"); // side-effect-free at import time
+    const pool = mod.getPool();
+    // BEFORE endPool() — the error can arrive the instant .end() starts (pg-pool's
+    // client.end(cb) is fire-and-forget). Scoped to this one pool reference.
+    pool.on("error", (e) => teardownErrors.push(e));
     await mod.endPool();
   } catch {
     /* best-effort — the pool may never have been created */
   }
   restoreEnv();
+  const drain = await waitForBackendsClear(admin, DBNAME);
+  console.log(
+    drain.cleared
+      ? "relay-taxonomy: teardown drain: 0 backends remained on the private database before the FORCE drop"
+      : `relay-taxonomy: teardown drain: gave up after the deadline — ${drain.remaining} backend(s) still attached; WITH (FORCE) will terminate them`,
+  );
   // dropDisposableDatabase() is itself best-effort/never-throws (teardown must never
   // mask the real failure below) — see its own header note in migrate-harness.mjs.
   await dropDisposableDatabase(admin, DBNAME);
+  if (teardownErrors.length > 0) {
+    // RECORDS, never swallows silently — printed by name, not discarded.
+    for (const e of teardownErrors) {
+      console.error(`relay-taxonomy: teardown straggler caught (not fatal, expected during the FORCE drop): ${e?.code ?? "?"} ${e?.message ?? e}`);
+    }
+  }
   // R2 (review round 2): unguarded, this could REPLACE the real failure below with a
   // connection-teardown error, masking whatever createDisposableDatabase()/
   // cloneAmbientDatabase()/setDatabaseEnv() or the dynamic imports actually failed

@@ -217,6 +217,45 @@ export async function createDisposableDatabase(adminClient, dbname) {
 }
 
 /**
+ * Poll `pg_stat_activity` on `adminClient` (connected to a DIFFERENT database
+ * than `dbname`, the same requirement `dropDisposableDatabase()` has) until no
+ * backend is attached to `dbname`, or `timeoutMs` elapses — call this AFTER
+ * every pool pointed at `dbname` has been closed and BEFORE
+ * `dropDisposableDatabase()` (rev-534 F-2, minted from CI job 100523835379's
+ * real channel). `pool.end()` (node-postgres / pg-pool) resolves once every
+ * client has been TOLD to end but does not itself await the underlying
+ * socket's close (`_remove()`'s own `client.end(cb)` is fire-and-forget), so
+ * an idle backend can still be attached to `dbname` for a few ms after
+ * `endPool()` resolves — on a contended host that window is wide enough for
+ * `DROP DATABASE ... WITH (FORCE)` to `TerminateOtherDBBackends` a socket that
+ * is still mid-close, surfacing as `FATAL: terminating connection due to
+ * administrator command` (57P01) on that connection. `WITH (FORCE)` stays as
+ * the BACKSTOP for whatever this bounded poll does not catch — this narrows
+ * the window, it does not replace the force flag. Best-effort like
+ * `dropDisposableDatabase()`: a probe failure or a timeout both fall through
+ * to that backstop rather than throwing from teardown. FAILS OPEN AND PRINTS
+ * NOTHING ITSELF — the caller logs `{ cleared, remaining }` (PRINT-THE-THING:
+ * a silent wait is an absence-shaped instrument); a caller that discards the
+ * result cannot tell "drained cleanly" from "gave up with N attached".
+ * @returns {Promise<{ cleared: boolean, remaining: number }>}
+ */
+export async function waitForBackendsClear(adminClient, dbname, { timeoutMs = 5000, stepMs = 50 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  let remaining = -1;
+  for (;;) {
+    try {
+      const r = await adminClient.query("select count(*)::int as n from pg_stat_activity where datname = $1", [dbname]);
+      remaining = r.rows[0].n;
+      if (remaining === 0) return { cleared: true, remaining: 0 };
+    } catch {
+      return { cleared: false, remaining }; // best-effort — fall through to the FORCE-drop backstop
+    }
+    if (Date.now() >= deadline) return { cleared: false, remaining };
+    await new Promise((res) => setTimeout(res, stepMs));
+  }
+}
+
+/**
  * `DROP DATABASE IF EXISTS "<dbname>" WITH (FORCE)`, best-effort (never throws —
  * a teardown failure must never mask the real test failure it is cleaning up
  * after; see the `cleanupPrivateDb`/`after()` review history on both consumers
@@ -227,7 +266,9 @@ export async function createDisposableDatabase(adminClient, dbname) {
  * at `createDisposableDatabase()`/`cloneAmbientDatabase()` for this same
  * `dbname`, and re-checking here would risk throwing from teardown, which is
  * exactly the class of bug PR #498's own review history (M1/R2) already fixed
- * once for this exact code path.
+ * once for this exact code path. Callers should call `waitForBackendsClear()`
+ * first (rev-534 F-2) — `WITH (FORCE)` here is the backstop for whatever that
+ * bounded drain does not catch, not the primary mechanism.
  */
 export async function dropDisposableDatabase(adminClient, dbname) {
   await adminClient.query(`drop database if exists "${dbname}" with (force)`).catch(() => {});

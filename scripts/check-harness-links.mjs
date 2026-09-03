@@ -3,14 +3,26 @@
 // actually point somewhere real, or the harness silently rots the moment a file moves.
 //
 // SCOPE: a pinned ENTRY_LIST of "read this first" docs (AGENTS.md, PROGRESS.md,
-// docs/adr/README.md, docs/plan/index.md). Each is parsed for markdown links `[text](path)`
-// AND backtick-quoted repo paths; every referenced path must exist on disk. Referenced `.md`
-// files that live under docs/ are followed ONE hop (so an index file's own references are
-// validated too — e.g. docs/plan/index.md pointing at wave-e-contract.md, and THAT file's own
-// paths get checked), never further. External URLs, in-page anchors, and anything inside a
+// docs/adr/README.md, docs/plan/index.md), PLUS every `apps/*/AGENTS.md` and
+// `packages/*/AGENTS.md` that exists on disk today — discovered by directory listing at run
+// time (never a hardcoded roster: an app or package that grows an AGENTS.md is covered the day
+// it lands, D6 — see discoverAgentEntryPoints()). Each of these is parsed for markdown links
+// `[text](path)` AND backtick-quoted repo paths; every referenced path must exist on disk.
+// Referenced `.md` files that live under docs/ are followed ONE hop from ANY scanned root (so
+// an index file's own references are validated too — e.g. docs/plan/index.md pointing at
+// wave-e-contract.md, and THAT file's own paths get checked, or apps/web/AGENTS.md pointing at
+// a docs/ design doc), never further. External URLs, in-page anchors, and anything inside a
 // fenced code block are ignored. docs/adr/ additionally gets a BIDIRECTIONAL check: every file
 // actually on disk under docs/adr/ must be referenced by docs/adr/README.md's own index, not
 // just the reverse.
+//
+// THE D4 GAP THIS CLOSES (rev-527, measured 2026-09-02/03): the one-hop recursion only ever
+// pulls a file into scanning when something ALREADY-SCANNED references it AND it resolves under
+// docs/ (isUnderDocs()) — so an agent entry point like apps/web/AGENTS.md, which the root
+// AGENTS.md cites by path but which does not itself live under docs/, was never content-scanned
+// at all: a broken backtick path planted inside it left the gate GREEN at 0 broken with the
+// reference total unmoved. Widening the SCAN ROOTS (this file's ENTRY_LIST-plus-discovery), not
+// the one-hop rule, closes it — isUnderDocs()'s one-hop semantics are unchanged.
 //
 // THE BACKTICK HEURISTIC (owner-ruled, "by heuristic"): a backtick span is a path CANDIDATE only
 // when it contains "/" or ends in .md/.mjs/.sql/.ts/.json — this naturally excludes function
@@ -47,7 +59,10 @@
 //      An explicit markdown link is never excluded by any of it, so the fix for anything
 //      load-bearing is to write it as a link, not a backtick span.
 //   3. ONE HOP, NEVER FURTHER — a reference two documents deep is not checked.
-//   4. SCOPE IS THE FOUR ENTRY FILES plus what they reach. A doc nothing points at is unscanned.
+//   4. SCOPE IS THE PINNED ENTRY FILES, THE DISCOVERED apps/*/AGENTS.md and packages/*/AGENTS.md,
+//      plus what any of those reach one hop into docs/. A doc nothing among those points at is
+//      unscanned — an apps/ or packages/ directory with no AGENTS.md contributes nothing,
+//      silently, same as before this widening.
 //
 // Findings 11 and 12 of the Codex adversarial round named (1) and (2). Both are ruled trade-offs,
 // recorded here rather than closed.
@@ -67,6 +82,33 @@ export const ENTRY_LIST = Object.freeze([
   "docs/adr/README.md",
   "docs/plan/index.md",
 ]);
+
+/**
+ * Every `apps/<name>/AGENTS.md` and `packages/<name>/AGENTS.md` that exists on disk today,
+ * found by directory listing rather than a literal roster — a hardcoded list silently stops
+ * covering a new app or package the day it grows an AGENTS.md (D6). These are DISCOVERED scan
+ * roots, not pinned ENTRY_LIST members: an app or package directory with no AGENTS.md simply
+ * contributes nothing, silently, exactly as before this widening — it is never a
+ * MISSING-ENTRY-FILE finding. Returns repo-relative POSIX paths, sorted for a stable order.
+ */
+export function discoverAgentEntryPoints(repoRoot) {
+  const found = [];
+  for (const parent of ["apps", "packages"]) {
+    let entries;
+    try {
+      entries = readdirSync(join(repoRoot, parent), { withFileTypes: true });
+    } catch {
+      continue; // no apps/ or packages/ directory at all (e.g. a selftest fixture root)
+    }
+    for (const ent of entries) {
+      if (!ent.isDirectory()) continue;
+      if (existsSync(join(repoRoot, parent, ent.name, "AGENTS.md"))) {
+        found.push([parent, ent.name, "AGENTS.md"].join("/"));
+      }
+    }
+  }
+  return found.sort();
+}
 
 // Known backtick spans that pass the path heuristic (slash or a path-like extension) but name
 // something other than a repo file. Every entry needs a one-line reason — this list is a named
@@ -124,6 +166,7 @@ export const NON_PATH_ALLOWLIST = new Set([
 
   // --- Produced or remote directories, and working dirs, that are gitignored by design.
   "packages/db/backups/", // where a dump lands; gitignored ("dumps may hold data" — DR.md)
+  "node_modules/next/dist/server/lib/generate-agent-files.js", // apps/web/AGENTS.md's `nextjs-agent-rules` block is written/re-added by `next dev` ITSELF (see its own BEGIN/END markers), not this repo's prose — it names its own generator inside node_modules/, gitignored and unresolvable from a bare checkout. Surfaced only once the D4 widening below started scanning apps/web/AGENTS.md's content at all. (The block's sibling mention two lines up, `node_modules/next/dist/docs/`, already clears the identifier-shorthand heuristic — an underscore segment, no recognised extension — and needs no entry here.)
   "reports/", // the produced-report storage prefix the reporting design writes under, not a repo dir
   ".tmp/h2/", // a Codex-lane sandbox working dir (the §7-A h2 evidence run); .tmp/ is gitignored
   "//run", // DR.md's own illustration of a DOUBLED-slash mount path, quoted to show the bug shape
@@ -679,7 +722,12 @@ export function checkHarnessLinks({ repoRoot, entryList = ENTRY_LIST, strict = S
 
 export function main({ repoRoot } = {}) {
   const root = repoRoot ?? execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
-  const { ok, findings, warnings, entriesChecked, refsChecked } = checkHarnessLinks({ repoRoot: root });
+  const discovered = discoverAgentEntryPoints(root);
+  const entryList = [...ENTRY_LIST, ...discovered];
+  if (discovered.length > 0) {
+    console.log(`check-harness-links: scanning ${discovered.length} discovered agent entry point(s): ${discovered.join(", ")}`);
+  }
+  const { ok, findings, warnings, entriesChecked, refsChecked } = checkHarnessLinks({ repoRoot: root, entryList });
 
   for (const w of warnings) console.warn(`check-harness-links: WARN — ${w}`);
 

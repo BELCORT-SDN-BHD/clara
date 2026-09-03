@@ -1,6 +1,7 @@
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 
+import type { CheckoutFlashPayload } from "@/lib/checkout/checkout-flash";
 import type { HoldingState } from "@/lib/registration/holding-state";
 import { cn } from "@/lib/utils";
 import {
@@ -10,7 +11,6 @@ import {
   CardHeader,
 } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { NotBuiltNote } from "@/components/common/not-built-note";
 import { StateBanner } from "@/components/common/state";
 import { LogoutButton } from "@/components/logout-button";
 
@@ -45,15 +45,15 @@ import { LogoutButton } from "@/components/logout-button";
  * gating it on membership would strand the very people this screen exists for.
  *
  * ===========================================================================
- * THE CHECKOUT SEAM (裁-58, 裁-68) — honest, dated, and named
+ * THE CHECKOUT SEAM (裁-58, 裁-68) — NOW BUILT
  * ===========================================================================
  * Under 裁-68 the tier-3 gate is three walls plus payment, and **Stripe checkout
  * success IS the approval** — there is no operator queue for a self-serve firm
- * (裁-43, restated by 裁-57). That surface does not exist on this tip: no
- * checkout route, no plan flag, no webhook. So this card names the missing train
- * in a `NotBuiltNote` rather than either (a) inventing a "Continue to payment"
- * control that goes nowhere, or (b) staying silent and letting the applicant
- * believe an operator is about to rule on them.
+ * (裁-43, restated by 裁-57). Every piece of that now exists: the DPA door
+ * (`sign_dpa`), `POST /checkout`, C-5's webhook and applier, and the folded
+ * `claim_paid_firm`. So the `NotBuiltNote` this card used to carry is REMOVED
+ * rather than narrowed — design part 1 §2.1's own instruction, "removed by this
+ * train because the thing it names now exists, not edited to say less".
  *
  * 裁-58 binds the words: every plan is FREE until the amounts are ruled, and the
  * UI renders a TRIAL state — **never "RM0"** (裁-42's design wall stands). The
@@ -61,39 +61,51 @@ import { LogoutButton } from "@/components/logout-button";
  * `components/entry/pending-a11y.test.tsx` pins
  * that no entry-face string contains an RM amount at all.
  *
- * WHAT THE DB STILL SAYS, MEANWHILE. `request_firm_registration` writes an
- * `open` row that `approve_firm_registration` decides, so the pending and
- * rejected renderings below report the operator-queue model the DB actually
- * implements today. This screen tells the truth about both: the row's real
- * status, and the fact that the payment step that will supersede that queue is
- * not built. Reporting only one of the two would be a half-truth either way.
+ * WHAT THE DB SAYS, AND WHY BOTH ROADS STILL RENDER. `request_firm_registration`
+ * writes an `open` row, and TWO doors can now close it: the operator's
+ * `approve_firm_registration`, and the self-serve `claim_paid_firm` this train
+ * wires. So `rejected` and `approved` keep reporting the operator road — it is
+ * still real, for an invited firm — while the three arms below carry the paid
+ * road. The card reports the row's actual status either way and never guesses
+ * which road a given applicant is on.
  *
  * ===========================================================================
- * FS-4 C-6 (裁-92, checkout-gate-design.md §2.1) — THE THREE NEW ARMS, AND
- * WHAT LANE A COULD AND COULD NOT WIRE
+ * FS-4 C-6 (裁-92, checkout-gate-design.md §2.1) — THE THREE ARMS, ALL LIVE
  * ===========================================================================
- * `pending` NOW CARRIES A REAL CONTROL: "continue to checkout" links to
- * `/signup`, which — once an open registration exists — renders the DPA step
- * (`signup-dpa-form.tsx`) instead of the firm form again. That link WORKS
- * today; nothing about it is stubbed. What the `NotBuiltNote` beside it names
- * is narrowed accordingly: it used to say checkout did not exist AT ALL (no
- * route, no plan flag, no webhook); now it names only what Lane A did not
- * wire — the DPA signature is not durably recorded (`sign_dpa` is a Lane-B
- * seam) and there is no `/checkout` route yet (Lane B / C-5).
+ * `pending` — "continue to checkout" links to `/signup`, which, once an open
+ * registration exists, renders the DPA step (`signup-dpa-form.tsx`) instead of
+ * the firm form again. A `<Link>`, because that destination is a real GET page.
  *
- * `checkout_open` and `paid` are new SIBLING kinds, not a field on `pending`
- * — see holding-state.ts's header for why. Their controls ("resume
- * checkout", "finish opening your firm") point at routes this train does not
- * add (`/checkout`, `/checkout/success` — Lane B / C-6 completion), so they
- * render as a DISABLED button beside its own `NotBuiltNote` rather than a
- * `<Link>` that would 404: "an honest disabled/coming state on the action,
- * never a dead link" (the C-6 Lane-A/B split's own words). Today neither kind
- * is reachable from a live read — `checkout-progress-reads.ts` cannot see a
- * `checkout_intents` or `firm_registration_payments` row until C-2/C-3 land
- * and grant one — but the rendering is real and tested now, so the day those
- * reads start succeeding this card needs no further change.
+ * `checkout_open` — "resume checkout" is a FORM POST to `/checkout`, not a
+ * link, and the difference is load-bearing twice over. `/checkout` is POST-only
+ * (a GET would let a prefetch open a Stripe Session and spend a rate-wall
+ * attempt), and re-POSTing mints a FRESH Session rather than reopening the
+ * stored one: `open_checkout_intent` reuses only an UNSTAMPED current-plan
+ * intent, so a stamped one is never handed back. That is what closes N4 — the
+ * "check the Stripe session's status and expiry first" contract PR #488 left
+ * for this lane. There is nothing stale to check, because nothing stored is
+ * reused.
+ *
+ * `paid` — "finish opening your firm" is a `<Link>` to `/checkout/success`,
+ * which is a PAINT-ONLY GET. The door that creates the firm sits behind an
+ * explicit POST on that page (M9): a GET that minted a tenant would be run by
+ * a prefetch, a mail scanner or a restored tab.
+ *
+ * BOTH NEW ARMS ARE NOW REACHABLE FROM A LIVE READ.
+ * `checkout-progress-reads.ts` calls `clara.get_own_checkout_progress`, the
+ * self-scoped door this train adds — the two C-3 tables themselves stay
+ * ungranted to every application role, permanently, which is why a door and
+ * not a grant.
  */
-export function HoldingCard({ state }: { state: HoldingState }) {
+export function HoldingCard({
+  state,
+  checkoutRefusal = null,
+}: {
+  state: HoldingState;
+  /** The outcome of a `POST /checkout` that refused and redirected here, read
+   *  from its unforgeable flash cookie. `null` on an ordinary visit. */
+  checkoutRefusal?: CheckoutFlashPayload | null;
+}) {
   const t = useTranslations("Pending");
 
   return (
@@ -103,6 +115,22 @@ export function HoldingCard({ state }: { state: HoldingState }) {
         <CardDescription>{t(`${state.kind}.description`)}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        {/* THE CHECKOUT REFUSAL, ABOVE THE STATE. A person who just tried to
+            pay and was refused needs to read WHY before they read where their
+            application stands. A door's refusal renders its own CLR code and
+            its own sentence, verbatim (apps/web/AGENTS.md); every other arm
+            has one typed card and no invented cause. */}
+        {checkoutRefusal !== null && (
+          <StateBanner
+            tone="error"
+            code={checkoutRefusal.kind === "refused" ? checkoutRefusal.code : undefined}
+          >
+            {checkoutRefusal.kind === "refused"
+              ? checkoutRefusal.message
+              : t(`checkoutRefusal.${checkoutRefusal.kind}`)}
+          </StateBanner>
+        )}
+
         {state.kind === "pending" && (
           <>
             <StateBanner tone="info" title={state.firmName}>
@@ -117,7 +145,10 @@ export function HoldingCard({ state }: { state: HoldingState }) {
             >
               {t("pending.continueToCheckout")}
             </Link>
-            <NotBuiltNote>{t("checkoutNotBuilt")}</NotBuiltNote>
+            {/* 裁-58 — the words are TRIAL, never an amount. This line used to
+                live inside the retired NotBuiltNote; the framing outlives the
+                note, so it stays as a plain true statement. */}
+            <p className="text-xs text-muted-foreground">{t("pending.trialNote")}</p>
           </>
         )}
 
@@ -126,13 +157,17 @@ export function HoldingCard({ state }: { state: HoldingState }) {
             <StateBanner tone="info" title={state.firmName}>
               {t("checkout_open.banner")}
             </StateBanner>
-            {/* /checkout does not exist on this tip (Lane B / C-5). A disabled
-                button, never a <Link>: a dead link is worse than an honest
-                "not yet". */}
-            <Button variant="outline" className="w-full" disabled>
-              {t("checkout_open.resume")}
-            </Button>
-            <NotBuiltNote>{t("checkout_open.notBuilt")}</NotBuiltNote>
+            {/* WIRED (Lane B). A form POST, never a <Link>: /checkout is
+                POST-only, and re-POSTing it mints a FRESH Stripe Session
+                rather than re-opening a stored one — open_checkout_intent
+                reuses only an UNSTAMPED current-plan intent, so a stale
+                session_id can never produce a dead link (N4, closed by the
+                control's shape rather than by a freshness field). */}
+            <form method="post" action="/checkout" className="w-full">
+              <Button type="submit" variant="outline" className="w-full">
+                {t("checkout_open.resume")}
+              </Button>
+            </form>
           </>
         )}
 
@@ -141,12 +176,16 @@ export function HoldingCard({ state }: { state: HoldingState }) {
             <StateBanner tone="info" title={state.firmName}>
               {t("paid.banner")}
             </StateBanner>
-            {/* /checkout/success does not exist on this tip either (Lane B /
-                C-6 completion, `claim_paid_firm`). Same discipline as above. */}
-            <Button variant="outline" className="w-full" disabled>
+            {/* WIRED (Lane B). A <Link> here, not a form: /checkout/success is
+                a PAINT-ONLY GET that reads the person's state and offers the
+                explicit claim POST on its own page. The door that creates the
+                firm is one deliberate click further on (M9). */}
+            <Link
+              href="/checkout/success"
+              className={cn(buttonVariants({ variant: "outline" }), "w-full")}
+            >
               {t("paid.finish")}
-            </Button>
-            <NotBuiltNote>{t("paid.notBuilt")}</NotBuiltNote>
+            </Link>
           </>
         )}
 
