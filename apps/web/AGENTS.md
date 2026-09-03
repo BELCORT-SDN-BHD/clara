@@ -53,6 +53,51 @@ Cloudflare Workers, replacing apps/dashboard at cutover. Full reference: `README
   in a summary line elsewhere on the page) is a vacuous green, and it will survive deleting the
   very component the test exists to prove.
 
+## Lane laws for frontend trains (minted 2026-08-31 → 09-03)
+
+Every law below is stated here as a POINTER, not a copy — the full text, reasoning and measured
+cost sit at the source cited; read that before applying the law, not this line. Source of truth
+for the clause names: `docs/plan/active/frontend-sprint-handoff-2026-08-31-orders.md` section C.
+
+- **PORT-ASSIGNMENT.** A lane's dev-server port range is the one named in its work order; an
+  "address in use" is resolved by finding the OWNING PID first, never by a name or
+  command-line-substring kill, and only one Playwright leg runs on this host at a time. Orders
+  §C, PORT-ASSIGNMENT clause.
+- **BACKGROUND-VERIFIER.** A backgrounded Playwright run is unpiped and teed to a file (a piped
+  `grep` makes "still running" and "0 bytes" read the same), its `next start` child is confirmed
+  dead by PID before a retry, and BROWSER liveness is read by the process's `ExecutablePath`
+  under `ms-playwright`, never by process name. Orders §C, BACKGROUND-VERIFIER clause.
+- **`ensureRealFocus`.** Every keyboard-first Playwright walk anchors its first key press on
+  `apps/web/e2e/helpers.ts:40`'s `ensureRealFocus(page)`, never a bare `bringToFront()` or a
+  sleep — a fresh navigation is the vulnerable shape, a page that already had a real prior
+  interaction is not. The measured mechanism lives in PR #510's own fold body; that helper's
+  header comment repeats an earlier "session init" account which the PR itself flags as
+  imprecise (the actual grant fires per frame session), so read the PR for the mechanism, not
+  the header.
+- **MERGE-FORWARD LAW, the frontend items.** After merging origin/main onto any apps/web branch:
+  a value-level diff of `apps/web/messages/en.json` for keys both sides touched, PLUS a raw-text
+  duplicate-sibling-key scan (`JSON.parse` silently keeps the last of two identical keys); a grep
+  of every auto-merged `.tsx` for duplicate JSX attributes AND every touched file for duplicate
+  declarations (`const x` twice is a hard SyntaxError), with a scanner that carries its own
+  positive control; the three a11y gates, the contrast gate and the browser leg re-run on the
+  MERGED tree, never on either parent alone; a diff of the e2e harness's composed environment
+  between both parents and the merge. Orders §C, MERGE-FORWARD LAW items 1, 2, 6 and 8.
+- **The fold-round mutant panel.** Every fold round on an apps/web PR ships the mutant panel as a
+  stated deliverable (the mutant, the red it produced, a MUST-NOT-RED control, a byte/md5 restore
+  check); on an uncommitted tree the panel restores each mutated file from a buffer it captured
+  itself, never `git restore` / `git checkout --`. Orders §C, FOLD-ROUND DELIVERABLE and
+  MUTANT-PANEL RESTORE LAW clauses.
+- **The "not built yet" copy rule, once #517 lands.** #517's review (its M2) widens the guard in
+  `apps/web/components/entry/pending-a11y.test.tsx` from one literal to the CLASS of
+  honest-absence phrasing, so a `NotBuiltNote` is removed the moment the verb/route/control it
+  names is actually wired, never softened to a hedge that says the same thing more quietly, and
+  a differently-worded dashed-edge card cannot walk past the guard unnoticed. On `main` today
+  that file's cell still asserts the OPPOSITE — that the note IS present — because #517 has not
+  merged; this bullet states the rule #517 ships, not the rule main enforces yet.
+- **The manifest gate, the contrast gate and the colour-literal ban** are existing house law and
+  are not restated here — see `apps/web/README.md` and `apps/web/scripts/check-test-manifest.mjs`
+  / `apps/web/scripts/check-token-contrast.mjs`.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
