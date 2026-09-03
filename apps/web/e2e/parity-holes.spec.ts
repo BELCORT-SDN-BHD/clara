@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
+import { ensureRealFocus } from "./helpers";
+
 const CLIENT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const CLIENT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const THREAD_A = "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa";
@@ -87,7 +89,10 @@ test("password recovery keyboard, refusal, success, callback, and password-polic
   await expect(page.getByRole("heading", { name: "Reset your password" })).toBeVisible();
   await expectAccessible(page, "password recovery request");
 
-  await page.bringToFront();
+  // Same fresh-page focus-grant race entry-faces-walk.spec.ts's keyboard-pass
+  // cells close (PR #510) -- anchor on it rather than relying on the axe scan
+  // above to have incidentally spent enough time for the race to have closed.
+  await ensureRealFocus(page);
   await page.keyboard.press("Tab");
   await expect(page.getByLabel("Email")).toBeFocused();
   await page.keyboard.press("Tab");

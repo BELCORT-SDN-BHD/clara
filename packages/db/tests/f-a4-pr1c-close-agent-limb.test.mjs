@@ -16,7 +16,7 @@ import {
   opk, approveEntry, filedDocument, draftEntryV3, freshResolution,
 } from "./wave-a-fixtures.mjs";
 import { ROLES, CLR, asRole } from "./rig-helpers.mjs";
-import { beginClose, attestClose, EXPN, BANK1 } from "./x56-fixtures.mjs";
+import { beginClose, attestClose, hasQd6Wall, EXPN, BANK1 } from "./x56-fixtures.mjs";
 import {
   RATIONALE, MODEL, caught, derivedOpKey, mintClosePrepSession, mintUnboundClosePrep,
   VERBS, receiptById, proposalRows, tokens, inPeriodDraft, inPeriodDraftFull,
@@ -149,7 +149,10 @@ test("fa4c.A3 the dry run ARMS NOTHING (F4's repair): no run, no gate rows, no s
   const dry = await VERBS.dryRun(sc.s, { client: sc.client, fy: sc.fy });
   assert.equal(dry.status, "acted", "the dry run answers");
   assert.equal(dry.result.dry_run, true, "and says it is a dry run");
-  assert.equal(dry.result.checks.length, 14, "over the whole fourteen-row catalog (census C15)");
+  // Census C15's fourteen, plus Q-D6's drawer-1 wall once its UNNUMBERED migration has been
+  // numbered and applied (裁-108) — a live catalog witness, never a filename.
+  assert.equal(dry.result.checks.length, (await hasQd6Wall()) ? 15 : 14,
+    "over the WHOLE catalog (census C15)");
 
   const post = await rootQuery(
     `select (select count(*) from clara.close_gate_results g join clara.close_runs r on r.id=g.close_run_id

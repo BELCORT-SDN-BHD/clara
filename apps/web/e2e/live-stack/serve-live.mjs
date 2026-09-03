@@ -38,6 +38,12 @@ import { SignJWT } from "jose";
 const e2eRoot = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(e2eRoot, "..", "..");
 const appOrigin = process.env.CLARA_E2E_APP_ORIGIN ?? "https://127.0.0.1:3100";
+// THE UPSTREAM `next start` PORT IS AN INPUT, not a constant — added FS-7 echelon 2, and it is a
+// cross-lane collision fix rather than a preference. This host runs several lanes' e2e harnesses at
+// once, and 3101 was hardcoded here and in `../serve-built.mjs` both: a second lane's walk finds the
+// port held, Playwright reports only "already used", and the honest remedy is a disjoint port — NOT
+// killing whatever holds it, which on a shared host is somebody else's live run.
+const NEXT_PORT = String(process.env.CLARA_E2E_NEXT_PORT ?? "3101");
 const appUrl = new URL(appOrigin);
 const supabaseUrl = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? `${appOrigin}/e2e-supabase`);
 const supabasePrefix = supabaseUrl.pathname.replace(/\/$/, "");
@@ -169,6 +175,32 @@ async function handleSupabase(request, response, url) {
     return;
   }
 
+  // THE PASSWORD GRANT — added FS-7 echelon 2, and it is the door every live walk has to use now.
+  //
+  // WHY, MEASURED RATHER THAN PREFERRED. This harness's only session door was the confirm link
+  // below, and the confirm FACE has since moved to a six-digit OTP whose handler runs the C1/C2
+  // attempt wall BEFORE `verifyOtp`. That wall's production seam
+  // (`app/(entry)/auth/confirm/verify/confirmation-wall.ts`) returns `"unavailable"`
+  // unconditionally on this tip — Lane B's runtime route (C-5) is not built — so the confirm face
+  // signs NOBODY in, in the browser, today. `interview-walk.spec.ts`'s own `establishSession` is
+  // dead for the same reason; this endpoint is what gives both walks a session again.
+  //
+  // It is the `serve-built.mjs` mock's shape with this file's REAL signed token: the app drives its
+  // own `@supabase/ssr` client through its own cookie-writing code exactly as it does against
+  // Supabase, so nothing here guesses a cookie format. The password is never checked, because this
+  // is a stand-in for the identity PROVIDER — what the walk is testing lives after the session.
+  if (request.method === "POST" && path === "/auth/v1/token") {
+    sendJson(response, 200, {
+      access_token: await mintAccessToken(OWNER_SUB),
+      token_type: "bearer",
+      expires_in: 7_200,
+      expires_at: 4_102_444_800,
+      refresh_token: "e2e-live-refresh-token",
+      user: confirmedUser(OWNER_SUB),
+    }, cors);
+    return;
+  }
+
   if (request.method === "POST" && path === "/auth/v1/verify") {
     const body = await readJson(request);
     if (body.type !== "email" || body.token_hash !== "e2e-live-token-hash") {
@@ -197,7 +229,7 @@ async function handleSupabase(request, response, url) {
 function publicLocation(location) {
   try {
     const target = new URL(location);
-    if (target.port === "3101" && (target.hostname === "127.0.0.1" || target.hostname === "localhost")) {
+    if (target.port === NEXT_PORT && (target.hostname === "127.0.0.1" || target.hostname === "localhost")) {
       return new URL(`${target.pathname}${target.search}${target.hash}`, appOrigin).toString();
     }
   } catch {
@@ -219,7 +251,7 @@ const httpsServer = createHttpsServer(
 
     const headers = { ...request.headers, host: appUrl.host, "x-forwarded-host": appUrl.host, "x-forwarded-proto": "https" };
     const upstream = httpRequest(
-      { hostname: "127.0.0.1", port: 3101, method: request.method, path: request.url, headers },
+      { hostname: "127.0.0.1", port: Number(NEXT_PORT), method: request.method, path: request.url, headers },
       (upstreamResponse) => {
         const responseHeaders = { ...upstreamResponse.headers };
         const location = responseHeaders.location;
@@ -244,7 +276,7 @@ await new Promise((resolveListen, rejectListen) => {
 const nextBin = join(webRoot, "node_modules", "next", "dist", "bin", "next");
 const next = spawn(
   process.execPath,
-  [nextBin, "start", "--hostname", "127.0.0.1", "--port", "3101"],
+  [nextBin, "start", "--hostname", "127.0.0.1", "--port", NEXT_PORT],
   { cwd: webRoot, env: { ...process.env, NODE_EXTRA_CA_CERTS: certPath }, stdio: "inherit" },
 );
 

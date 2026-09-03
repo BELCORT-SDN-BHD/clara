@@ -102,6 +102,63 @@ describe("hasVisibleFocusRing", () => {
       await h.unmount();
     }
   });
+
+  // P6-3 HARDENING (DS-05's second half). Before this train the predicate
+  // accepted any `focus-visible:ring*` that was not literally `-none`, so a
+  // ZERO-WIDTH replacement read as a visible indicator. Each arm below reds if
+  // that hole is reopened.
+  it("RED: outline-none replaced by a ZERO-WIDTH ring draws nothing and must not pass", async () => {
+    const h = await renderComponent(createElement("button", { className: "outline-none focus-visible:ring-0" }, "A"));
+    try {
+      const [btn] = focusableElements(h.container as never);
+      assert.equal(hasVisibleFocusRing(btn as never), false);
+    } finally {
+      await h.unmount();
+    }
+  });
+
+  it("RED: the arbitrary spelling of zero is rejected too — focus-visible:outline-[0px]", async () => {
+    const h = await renderComponent(
+      createElement("button", { className: "outline-none focus-visible:outline-[0px]" }, "A"),
+    );
+    try {
+      const [btn] = focusableElements(h.container as never);
+      assert.equal(hasVisibleFocusRing(btn as never), false);
+    } finally {
+      await h.unmount();
+    }
+  });
+
+  it("RED: a COLOUR-only replacement sets no width, so Tailwind emits no ring at all", async () => {
+    const h = await renderComponent(
+      createElement("button", { className: "outline-none focus-visible:ring-ring/70" }, "A"),
+    );
+    try {
+      const [btn] = focusableElements(h.container as never);
+      assert.equal(hasVisibleFocusRing(btn as never), false);
+    } finally {
+      await h.unmount();
+    }
+  });
+
+  it("PASS: the SHIPPED idiom at its two real spellings still reads as visible", async () => {
+    // The literal class strings twelve components carry — `ring-3` (ten of
+    // them) and badge.tsx's `ring-[3px]`. A hardening that reds the product's
+    // own idiom is a broken gate, not a strict one.
+    for (const className of [
+      "outline-none focus-visible:ring-3 focus-visible:ring-ring/70",
+      "outline-none focus-visible:ring-[3px] focus-visible:ring-ring/70",
+      "outline-none focus-visible:outline-2",
+    ]) {
+      const h = await renderComponent(createElement("button", { className }, "A"));
+      try {
+        const [btn] = focusableElements(h.container as never);
+        assert.equal(hasVisibleFocusRing(btn as never), true, className);
+      } finally {
+        await h.unmount();
+      }
+    }
+  });
 });
 
 describe("checkKeyboardWalk — combined", () => {

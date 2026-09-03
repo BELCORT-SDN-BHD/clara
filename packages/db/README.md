@@ -12,18 +12,23 @@ truth (`docs/ARCHITECTURE.md` §3).
 > structural invariants, the balance/immutability/append-only triggers, and
 > money-as-cents. See `docs/plan/completed/rebuild-plan-history.md`.
 >
-> **Migration ledger — TRUED 2026-09-02 (counted, not remembered).** The repo carries **155
-> migration files, `0001`–`0160`** (the sequence skips `0032` and `0073`–`0076`, none of which
+> **Migration ledger — TRUED 2026-09-03 (counted, not remembered).** `main` carries **157
+> migration files, `0001`–`0162`** (the sequence skips `0032` and `0073`–`0076`, none of which
 > ever existed as files — `0073`-`0076` were claimed by the Wave-E ζ render/DR train and then
 > re-claimed at `0079`-`0083` when the frontier moved before it merged; only its OWN squash
 > subject still says "0073-0076", stale pre-renumber testimony, immutable, while the migrations
-> DIRECTORY stays the numbering authority), and **live is applied through the frontier
-> `0153_f_t1_sst_reference_tables`, 148 migrations** (`0154`–`0160` are on `main`, merged but
-> NOT yet applied, and PR #493 is expected to claim `0161` today — each applies in its own
-> ceremony window; re-verify the live number with
+> DIRECTORY stays the numbering authority). **THIS BRANCH adds one file above that frontier,**
+> `0163_checkout_gate_c3_folded_door.sql`. The tail, in number order: **`0161` Q-D6 (#509),
+> MERGED · `0162` FS-7 e2 (#512), MERGED · `0163` FS-4 C-3 (#493), this branch · `0164` Lane B's
+> C-6 (#517), which claims at its own merge prep.** Both numbers ahead of `0163` have landed, so
+> this file's number is settled and no longer carries a re-cut condition. The runner refuses a
+> late-inserted lower number, so a number belongs to whoever merges next above the frontier,
+> never to whoever authored first. And **live is applied through the frontier
+> `0153_f_t1_sst_reference_tables`, 148 migrations** (`0154`–`0162` are on `main`, merged but
+> NOT yet applied — each applies in its own ceremony window; re-verify the live number with
 > `select count(*), max(version) from clara.schema_migrations` before trusting this snapshot).
 > *(Was: "150 files through `0155`, trued 2026-08-30" — the FS-4/FS-7 trains claimed
-> `0156`–`0160` since.)* The paragraph below is the **2026-08-09 arrivals note**, kept as the record
+> `0156`–`0163` since.)* The paragraph below is the **2026-08-09 arrivals note**, kept as the record
 > of that batch rather than rewritten:
 >
 > The most recent arrivals
@@ -64,7 +69,7 @@ scripts/restore-full.mjs   full DR restore: roles-bootstrap -> restore -> ceremo
 scripts/dr-selftest.mjs    real dump+restore round-trip in a throwaway schema
 scripts/dr-verify.mjs      full-profile restore verification battery (source<->target)
 scripts/dr-verify-util.mjs · dr-verify-checks.mjs   the battery's helpers + §4 probes
-deploy/roles-bootstrap.sql idempotent recreation of the 10 clara-custom roles (DR step 1; FRESH-TARGET-ONLY)
+deploy/roles-bootstrap.sql idempotent recreation of 18 schema-lane roles + the Storage role (DR step 1; FRESH-TARGET-ONLY)
 deploy/read-logins-ceremony.sql  runtime + read-pool LOGIN ceremony (post-restore; mirrors write-login)
 deploy/acl-baseline.sql    HIGH-10 public-schema ACL baseline (ceremony; post-restore re-apply)
 tests/pipeline.test.mjs    migrate -> seed -> assert (node --test)

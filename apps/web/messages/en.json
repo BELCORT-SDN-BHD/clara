@@ -1,7 +1,7 @@
 {
   "Metadata": {
-    "title": "Clara",
-    "description": "Clara — AI-native Agentic Accounting OS for Malaysian accounting firms."
+    "title": "ClaraBook",
+    "description": "ClaraBook — AI-native Agentic Accounting OS for Malaysian accounting firms."
   },
   "Common": {
     "loading": "Loading…",
@@ -25,8 +25,9 @@
       "outOfRange": "Enter a smaller amount that can be represented exactly in cents."
     }
   },
-  "FirmShell": {
-    "productName": "Clara"
+  "Brand": {
+    "productName": "ClaraBook",
+    "skipToContent": "Skip to main content"
   },
   "FirmNav": {
     "ariaLabel": "Firm navigation",
@@ -46,7 +47,7 @@
   },
   "NotFound": {
     "heading": "That page does not exist",
-    "body": "Nothing is served at this address. If you followed a link inside Clara, the link is wrong — not the page.",
+    "body": "Nothing is served at this address. If you followed a link inside ClaraBook, the link is wrong — not the page.",
     "navLabel": "Ways back",
     "firmHome": "Firm home",
     "needsYou": "Needs you"
@@ -82,6 +83,27 @@
       "unknown": "Unrecognized item ({kind})"
     },
     "openClient": "Open client",
+    "openTab": {
+      "draft": "Open the journals tab",
+      "uncoded_filing": "Open the documents tab",
+      "coding_task": "Open the documents tab",
+      "open_question": "Open the documents tab",
+      "lint_finding": "Open the journals tab",
+      "fixed_asset_incomplete": "Open the registers tab",
+      "staff_advance_incomplete": "Open the registers tab"
+    },
+    "askClara": "Ask Clara about this",
+    "askPrefill": "About this {kind} in my Needs-you inbox — what should I look at first?",
+    "askPrefillWithQuestion": "About this {kind} in my Needs-you inbox: \"{question}\" — what should I look at first?",
+    "onboardingProposal": {
+      "proposedName": "Clara proposes opening a client file named \"{name}\".",
+      "citationsLabel": "Citations",
+      "sightingsLabel": "Sightings",
+      "acceptNotBuilt": "Accepting this proposal in one step is not built: no door records that a plan came from this proposal. Resolve or dismiss the question below, then open the client file yourself if you agree.",
+      "documentNotAddressable": "The document behind this proposal has no client yet, so it has no workspace tab to open.",
+      "ask": "Ask Clara about this",
+      "askPrefill": "Clara proposed a new client file named \"{name}\": \"{question}\" — what is the proposal based on?"
+    },
     "reviewSeedingProposals": "Review in Reports",
     "loadMore": "Load more",
     "loadingMore": "Loading more…",
@@ -103,6 +125,7 @@
       "identity_document": "Identity document",
       "correction_proposed": "Correction proposed",
       "promotion_proposed": "Promotion proposed",
+      "onboarding_proposed": "New client proposed",
       "unknown": "Unrecognized kind ({kind})"
     },
     "candidatesLabel": "Candidates ({count})",
@@ -182,7 +205,7 @@
       },
       "registrations": {
         "title": "Firm registrations",
-        "purpose": "Review requests to create firms on Clara."
+        "purpose": "Review requests to create firms on ClaraBook."
       },
       "compliance": {
         "title": "Compliance register",
@@ -259,7 +282,7 @@
     },
     "inviteDialog": {
       "title": "Invite someone to this firm",
-      "description": "Clara emails them a single-use link. The address is how they will sign in, and it is how the invitation is checked when they accept.",
+      "description": "ClaraBook emails them a single-use link. The address is how they will sign in, and it is how the invitation is checked when they accept.",
       "emailLabel": "Email address",
       "emailPlaceholder": "name@example.com",
       "roleLabel": "Role",
@@ -285,7 +308,7 @@
       "unsupported_address": "This invitation service can only send to plain-ASCII email addresses, so nothing was created.",
       "not_permitted": "Only an admin or owner can issue an invitation. Nothing was created.",
       "mail_not_configured": "This deployment has no invitation mail set up, so nothing was created. Ask whoever runs it to configure the mail transport.",
-      "recipient_has_account": "This address already has a Clara account — ask them to sign in with it. Nothing was created.",
+      "recipient_has_account": "This address already has a ClaraBook account — ask them to sign in with it. Nothing was created.",
       "mail_unavailable": "The invitation service could not be reached, so nothing was created. Try again in a moment.",
       "mail_failed": "The invitation was created but the email did not go out, and its link cannot be recovered. Revoke it below and invite again.",
       "transport": "The invitation server could not be reached."
@@ -327,11 +350,19 @@
       "streamEndedUnexpectedly": "The connection to Clara ended unexpectedly.",
       "connectionLost": "Connection lost.",
       "retry": "Retry",
+      "retryLoad": "Try again",
+      "turnProgress": {
+        "running": "Clara has been working on this for {elapsed}.",
+        "parked": "Clara has been waiting on your answer for {elapsed}."
+      },
       "composerLabel": "Ask Clara",
       "composerPlaceholder": "Ask Clara…",
-      "composerLabel": "Ask Clara",
       "send": "Send",
       "sending": "Sending…",
+      "welcome": {
+        "title": "I'm Clara.",
+        "description": "Ask about a client, their books, or a close that's underway."
+      },
       "attachments": {
         "attach": "Attach document",
         "attachHint": "Attach files through Clara's document intake",
@@ -570,8 +601,22 @@
     },
     "do": {
       "heading": "Do",
-      "disabledLabel": "Dispatch a run — not built yet",
-      "hint": "Not connected yet"
+      "loading": "Checking what you can dispatch…",
+      "empty": "Nothing to dispatch from here. Clara only offers runs your firm role can start, and only where the client's own state allows one.",
+      "readError": "Couldn't check what you can dispatch: {message}",
+      "dispatchHint": "Dispatch",
+      "dispatching": "Dispatching…",
+      "actions": {
+        "beginClientOnboarding": {
+          "label": "Open a new client file for \"{query}\""
+        },
+        "startClientInterview": {
+          "label": "Start or continue this client's onboarding interview"
+        },
+        "bootstrapClientPlan": {
+          "label": "Create this client's onboarding plan"
+        }
+      }
     }
   },
   "ClientWorkspaceNav": {
@@ -1231,7 +1276,7 @@
       "claimRemoved": "claim removed",
       "uncertified": "uncertified",
       "sealedBy": "sealed",
-      "noDownload": "No byte-download door exists yet — copy the storage key and retrieve the file through ops tooling. A signed-URL download route is a named follow-up, not built in this pass.",
+      "downloadNote": "Downloads are fetched through Clara's own server-side door — the browser never holds a storage credential and never mints a link.",
       "copyKey": "Copy storage key",
       "copied": "Copied",
       "runLabel": "run",
@@ -1265,6 +1310,12 @@
         "heading": "Agent receipts",
         "empty": "No agent-act receipts yet for this client.",
         "directedBy": "directed by"
+      },
+      "download": {
+        "trigger": "Download",
+        "working": "Downloading…",
+        "unavailable": "Not downloadable — {reason}",
+        "failed": "Download failed: {message}"
       }
     },
     "sandbox": {
@@ -1289,6 +1340,12 @@
           "displayNamePlaceholder": "Display name",
           "basisPlaceholder": "Basis for receiving exports"
         }
+      },
+      "download": {
+        "trigger": "Download",
+        "working": "Downloading…",
+        "unavailable": "Not downloadable — {reason}",
+        "failed": "Download failed: {message}"
       }
     },
     "freeform": {
@@ -1417,7 +1474,7 @@
   },
   "Login": {
     "title": "Sign in",
-    "description": "Sign in to your Clara account.",
+    "description": "Sign in to your ClaraBook account.",
     "emailLabel": "Email",
     "passwordLabel": "Password",
     "submit": "Sign in",
@@ -1438,13 +1495,13 @@
   },
   "PasswordReset": {
     "title": "Choose a new password",
-    "description": "Use at least 12 characters. Clara also refuses known breached passwords.",
+    "description": "Use at least 12 characters. ClaraBook also refuses known breached passwords.",
     "passwordLabel": "New password",
     "submit": "Save new password",
     "saving": "Saving password…",
     "savedTitle": "Password updated",
     "savedDescription": "Your new password is ready to use.",
-    "continue": "Continue to Clara"
+    "continue": "Continue to ClaraBook"
   },
   "RouteError": {
     "heading": "Something went wrong",
@@ -1455,7 +1512,7 @@
   },
   "Signup": {
     "title": "Create your account",
-    "description": "Start your own firm on Clara. You'll confirm your email, then tell us about the firm.",
+    "description": "Start your own firm on ClaraBook. You'll confirm your email, then tell us about the firm.",
     "emailLabel": "Email",
     "passwordLabel": "Password",
     "submit": "Create account",
@@ -1510,7 +1567,7 @@
   },
   "Pending": {
     "metaTitle": "Your registration",
-    "checkoutNotBuilt": "Not built yet: signing your data-processing agreement and paying are not wired up. Clara's beta is a trial — nothing is charged while pricing is being set — but the doors that record your signature and start checkout ship with a later train. Continuing below takes you to that step; nothing is recorded and nothing is owed from you right now.",
+    "checkoutNotBuilt": "Not built yet: signing your data-processing agreement and paying are not wired up. ClaraBook's beta is a trial — nothing is charged while pricing is being set — but the doors that record your signature and start checkout ship with a later train. Continuing below takes you to that step; nothing is recorded and nothing is owed from you right now.",
     "pending": {
       "title": "Your registration is with us",
       "description": "We have your request. There's nothing more for you to do yet.",
@@ -1597,7 +1654,8 @@
       "firstYearZero": "No opening seed needed — this client's opening position was recorded as zero at onboarding (a first-year, first-trading client).",
       "deferredTitle": "Carry-down deferred at onboarding",
       "chaseListTitle": "Still needed before this client's opening can be keyed",
-      "notBuiltNote": "The FY1 basis-of-preparation cost figure and the close-seal block while this banner is up are not built on this surface yet."
+      "closeSealBlocked": "Sealing a close is blocked until this client's opening position is captured and approved. A drawer-1 close gate refuses to finalize, and there is no override.",
+      "notBuiltNote": "The FY1 basis-of-preparation cost figure is not built on this surface yet."
     },
     "seed": {
       "heading": "Opening seed",
@@ -2736,8 +2794,52 @@
       "resolveDescription": "Record how \"{item}\" was settled.",
       "resolveConfirm": "Resolve",
       "resolvePlaceholder": "How was this settled?",
-      "alreadySettled": "This item is no longer pending — its own state above is the record.",
-      "planNotOpen": "The onboarding plan is no longer open — nothing more can be resolved on it."
+      "alreadySettledAmendable": "This item is no longer pending. To correct the answer, close this and use Amend resolution — it records a new resolution and keeps the old one.",
+      "planNotOpen": "The onboarding plan is no longer open — nothing more can be resolved on it.",
+      "amendTrigger": "Amend resolution",
+      "amendTitle": "Amend this item's resolution",
+      "amendDescription": "Record a corrected answer for \"{item}\".",
+      "amendConfirm": "Record the amendment",
+      "amendPlaceholder": "What is the corrected answer?",
+      "amendCurrentLabel": "The answer standing now",
+      "amendNoCurrent": "No answer is recorded on this item.",
+      "amendHistoryLabel": "Earlier answers, superseded",
+      "amendHistoryEntry": "{at} — {answer}",
+      "amendHistoryNone": "This answer has not been amended before.",
+      "amendHistoryLoading": "Reading this item's earlier answers…",
+      "amendAppendOnlyNote": "Amending records a NEW resolution. The answer above is superseded, never erased — every version stays on the plan's permanent revision trail."
+    },
+    "chart": {
+      "loading": "Reading this client's chart-of-accounts state…",
+      "stateUnavailable": "This client's chart-of-accounts state could not be read.",
+      "state": {
+        "adopted": "The firm's standard chart is already applied to this client ({accounts} accounts).",
+        "declined": "This client is being built on its own chart, so there is no standard chart to apply.",
+        "off_standard": "This client already has {accounts} accounts, so the standard chart cannot be applied on top — that would leave two accounts for one meaning. Build on the chart it has, or start the client again.",
+        "undecided": "No chart-of-accounts decision has been recorded yet — the onboarding interview asks for it.",
+        "pending": "The firm's standard chart is ready to apply.",
+        "no_client": "This client isn't visible to your session.",
+        "unknown": "This client's chart state reads \"{state}\", which this build does not recognise."
+      },
+      "planClosedNote": "The onboarding plan is closed. Applying the standard chart is a separate act and is still available.",
+      "noTemplates": "Your firm has no published chart-of-accounts template to apply.",
+      "applyTrigger": "Apply the standard chart",
+      "applyTitle": "Apply the firm's standard chart of accounts",
+      "applyDescription": "This plants the chosen families' accounts into this client's empty chart and records the adoption. It cannot be undone by re-running it — a client's chart is applied once.",
+      "applyConfirm": "Apply the chart",
+      "templateLabel": "Chart template",
+      "templateNone": "Choose a template…",
+      "templateOption": "{title} (v{version}) — {accounts} accounts",
+      "familiesLegend": "Account families to plant",
+      "coreNote": "— always included",
+      "selectAtLeastOne": "Choose at least one family.",
+      "axis": {
+        "coreOnly": "Clara knows none of this client's entity type, trade nature or industry code, so she proposes only the always-included families. Missing: {axes}.",
+        "partial": "Clara could not read every fact her proposal depends on. Missing: {axes}.",
+        "partialUnnamed": "Clara could not read every fact her proposal depends on."
+      },
+      "receipt": "Applied: {accounts} accounts across {families} families. Adoption {adoption}.",
+      "recheck": "Re-check"
     },
     "card": {
       "loading": "Loading the onboarding plan…",
@@ -2862,7 +2964,7 @@
   },
   "Registrations": {
     "heading": "Firm registrations",
-    "pageDescription": "Requests to create a new firm on Clara — approve to create the firm and its owner membership, or reject with a reason.",
+    "pageDescription": "Requests to create a new firm on ClaraBook — approve to create the firm and its owner membership, or reject with a reason.",
     "loading": "Loading your operator context…",
     "notOperator": "This console is for BELCORT's own operator firm, at owner rank. Your account does not carry that authority.",
     "queueLoading": "Loading pending registrations…",

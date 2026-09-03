@@ -351,3 +351,154 @@ export async function verifyReportCanonical(key, expectedSha256) {
   if (actual !== expectedSha256) throw new StorageError("checksum_mismatch", "report canonical readback hash mismatch");
   return { sha256: actual };
 }
+
+// ---------------------------------------------------------------------------
+// THE ARTIFACT PREFIXES — the READ half of the two sealed-artifact families (FS-7 echelon 2,
+// 裁-96②), plus the sandbox family's WRITE half.
+//
+// TWO PREFIXES, ONE KEY SPACE, AND THE SHAPE IS THE DATABASE'S. `firms/<firm>/reports/<sha>.<ext>`
+// is what clara.report_artifacts' ck_ra_content_addressed CHECK derives; `firms/<firm>/sandbox/
+// <sha>.pdf` is what clara.complete_sandbox_export refuses to deviate from. This validator admits
+// exactly those two and nothing else, so a key that reached here from anywhere but one of those
+// two writers cannot be fetched — the traversal wall is the SHAPE, not an escaping pass.
+//
+// IT IS DELIBERATELY NOT A WIDENING OF safeReportKey. That validator is the seal path's own, its
+// callers pass only `reports/` keys, and loosening it would silently let a report writer put bytes
+// under the sandbox prefix. A second, read-side validator that admits both is additive: neither
+// writer's wall moves.
+export function safeArtifactKey(key) {
+  const value = String(key || "");
+  if (!/^firms\/[0-9a-f-]{36}\/reports\/[0-9a-f]{64}\.(pdf|json)$/i.test(value)
+      && !/^firms\/[0-9a-f-]{36}\/sandbox\/[0-9a-f]{64}\.pdf$/i.test(value)) {
+    throw new StorageError("storage_error", "canonical artifact storage key is invalid");
+  }
+  return value;
+}
+
+function artifactLocalPath(key) {
+  return join(testRoot(), ...safeArtifactKey(key).split("/"));
+}
+function artifactObjectUrl(base, key) {
+  return `${base}/${safeArtifactKey(key).split("/").map(encodeURIComponent).join("/")}`;
+}
+
+async function artifactResponseFor(key) {
+  if (process.env.RELAY_TEST_MODE === "1") {
+    const injected = globalThis.__claraStorageForTest;
+    if (injected?.get) return injected.get(key);
+    // A MISSING OBJECT IS A StorageError IN BOTH MODES, and that costs one stat to guarantee.
+    // Without it the local path raises a bare ENOENT from the stream, which a route's error mapper
+    // reads as an unrecognised internal fault (500) while the real Supabase path raises a
+    // StorageError (502) for the identical condition — so the local test would have been measuring
+    // a different failure than the deployed one. Measured, not assumed: this is the divergence the
+    // FS-7 e2 route battery's missing-object cell actually caught.
+    const path = artifactLocalPath(key);
+    try {
+      const fh = await open(path, "r");
+      await fh.close();
+    } catch {
+      throw new StorageError("storage_error", "artifact storage read failed (object absent)");
+    }
+    return createReadStream(path);
+  }
+  const { base, jwt } = realConfig();
+  const response = await fetch(artifactObjectUrl(base, key), {
+    headers: { authorization: `Bearer ${jwt}`, apikey: jwt },
+  });
+  if (!response.ok || !response.body) {
+    throw new StorageError("storage_error", `artifact storage read failed (${response.status})`);
+  }
+  return response.body;
+}
+
+/**
+ * Download one sealed artifact to a local path, hashing EN ROUTE and refusing on mismatch.
+ *
+ * THE HASH IS NOT OPTIONAL HERE, unlike downloadCanonical's. Both artifact families are
+ * content-addressed — the sha256 IS the last path segment — so a byte stream that does not hash to
+ * the expected value is either a tampered object or the wrong object, and there is no third
+ * reading. Serving it to a human would hand them a document the estate cannot vouch for, which is
+ * the one thing a download door exists to prevent.
+ */
+export async function downloadArtifactCanonical(key, destination, expectedSha256) {
+  if (typeof expectedSha256 !== "string" || !/^[0-9a-f]{64}$/.test(expectedSha256)) {
+    throw new StorageError("storage_error", "an artifact download requires the row's own sha256");
+  }
+  const body = await artifactResponseFor(safeArtifactKey(key));
+  await mkdir(dirname(destination), { recursive: true });
+  const hash = createHash("sha256");
+  const tee = async function* () {
+    for await (const chunk of body) {
+      hash.update(chunk);
+      yield chunk;
+    }
+  };
+  await pipeline(tee(), createWriteStream(destination, { flags: "w", mode: 0o600 }));
+  const actual = hash.digest("hex");
+  if (actual !== expectedSha256) {
+    await rm(destination, { force: true }).catch(() => {});
+    throw new StorageError("checksum_mismatch", "the stored artifact no longer matches its sealed sha256");
+  }
+  return { path: destination, sha256: actual };
+}
+
+/**
+ * Put one sandbox export's bytes at their content address. Overwrite-impossible (`x-upsert:false`),
+ * the putReportCanonical shape exactly — including the Supabase quirk where a duplicate arrives as
+ * HTTP 400 carrying `{"statusCode":"409"}` in the body, which is idempotent SUCCESS for a
+ * content-addressed key and must never be treated as a fatal error.
+ */
+export async function putSandboxCanonical(filePath, key, mime = "application/pdf") {
+  const value = safeArtifactKey(key);
+  if (!/\/sandbox\//.test(value)) {
+    throw new StorageError("storage_error", "a sandbox export writes under the sandbox prefix only");
+  }
+  if (process.env.RELAY_TEST_MODE === "1") {
+    const injected = globalThis.__claraStorageForTest;
+    if (injected?.put) return injected.put(filePath, key, mime);
+    const dest = artifactLocalPath(key);
+    await mkdir(dirname(dest), { recursive: true });
+    try {
+      await pipeline(createReadStream(filePath), createWriteStream(dest, { flags: "wx", mode: 0o600 }));
+      return { created: true, existed: false };
+    } catch (err) {
+      if (err?.code === "EEXIST") return { created: false, existed: true };
+      await rm(dest, { force: true }).catch(() => {});
+      throw err;
+    }
+  }
+  const { base, jwt } = realConfig();
+  const response = await fetch(artifactObjectUrl(base, key), {
+    method: "POST",
+    headers: { authorization: `Bearer ${jwt}`, apikey: jwt, "content-type": mime, "x-upsert": "false" },
+    body: createReadStream(filePath),
+    duplex: "half",
+  });
+  if (response.ok) return { created: true, existed: false };
+  const raw = await response.text().catch(() => "");
+  let inner = null;
+  try { inner = JSON.parse(raw); } catch { /* not JSON — fall through to the raw body */ }
+  if (response.status === 409 || String(inner?.statusCode) === "409" || inner?.error === "Duplicate") {
+    return { created: false, existed: true };
+  }
+  throw new StorageError(
+    "storage_error",
+    `sandbox storage upload failed (${response.status})${raw ? ` ${raw.slice(0, 200)}` : ""}`,
+  );
+}
+
+/** The sandbox family's read-back hash, the verifyReportCanonical sibling. */
+export async function hashSandboxCanonical(key) {
+  const body = await artifactResponseFor(safeArtifactKey(key));
+  const hash = createHash("sha256");
+  for await (const chunk of body) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+export async function verifySandboxCanonical(key, expectedSha256) {
+  const actual = await hashSandboxCanonical(key);
+  if (actual !== expectedSha256) {
+    throw new StorageError("checksum_mismatch", "sandbox canonical readback hash mismatch");
+  }
+  return { sha256: actual };
+}

@@ -47,6 +47,13 @@ owns the shared config — `testDir: "./e2e"`, one shared `webServer`, one brows
   `CLARA_E2E_RUNTIME_PORT` (default 3102), alongside the public `CLARA_E2E_APP_ORIGIN` — so a
   second lane can run the harness while another already holds the defaults. Specs read the
   origin from `CLARA_E2E_APP_ORIGIN` rather than re-hardcoding it.
+- `helpers.ts` — shared spec-level instruments, ONE spelling each. Today: `ensureRealFocus(page)`
+  (PR #510), the positive precondition every keyboard-first walk anchors on instead of a bare
+  `bringToFront()` or a sleep — see its own header for the race it closes. `entry-faces-walk.spec.ts`'s
+  login and signup keyboard-pass cells and `parity-holes.spec.ts`'s password-recovery keyboard-pass
+  cell all call it; any new keyboard-driven walk (a fresh `page.goto()` immediately followed by a
+  `page.keyboard.press(...)`, with no real click or `locator.focus()` establishing focus first)
+  should too.
 
 ## Why these specs are NOT in `apps/web/test/manifest.txt`
 

@@ -105,6 +105,8 @@ function mkNode(tag: string, doc: Stub): Stub {
   // one. `fireEvent` therefore never needs to walk this stub tree's own
   // parent chain; it only has to invoke whatever the container captured.
   const listeners: Record<string, ((evt: Stub) => void)[]> = {};
+  /** What `setAttribute` wrote — see the setAttribute/getAttribute pair below. */
+  const attributes: Record<string, string> = {};
   const node: Stub = {
     nodeType: 1,
     nodeName: tag.toUpperCase(),
@@ -112,6 +114,17 @@ function mkNode(tag: string, doc: Stub): Stub {
     childNodes: children,
     parentNode: null,
     style: {},
+    // RENDER-HARNESS EXTENSION (P6-6, the identity finish): every real element
+    // has a `dataset`, and `next/image` is the first dependency in this app to
+    // read one at MODULE SCOPE — `next/dist/shared/lib/deployment-id.ts:4` does
+    // `document.documentElement.dataset.dplId` the moment the module is
+    // evaluated, which threw "Cannot read properties of undefined (reading
+    // 'dplId')" and took down eight suites at IMPORT time, before a single
+    // assertion ran. Same class as the HTMLElement/KeyboardEvent stubs above: a
+    // property real DOM always has, absent here, crashing a dependency that had
+    // no reason to guard for it. An empty object is the whole fix — nothing in
+    // this app reads a data-* attribute back through `dataset`.
+    dataset: {},
     ownerDocument: doc,
     appendChild(c: Stub) { children.push(c); c.parentNode = node; return c; },
     removeChild(c: Stub) { const i = children.indexOf(c); if (i >= 0) children.splice(i, 1); return c; },
@@ -133,7 +146,23 @@ function mkNode(tag: string, doc: Stub): Stub {
       c.parentNode = node;
       return c;
     },
-    setAttribute() {}, removeAttribute() {},
+    // RENDER-HARNESS EXTENSION (P6-6): these were a NO-OP pair, and the read
+    // side did not exist at all. `next/image`'s mount effect calls
+    // `img.getAttribute('alt')` to warn about a missing alt — with no such
+    // method the whole render threw "img.getAttribute is not a function"
+    // inside a layout effect, which React reports only as the generic
+    // "error during concurrent rendering". Storing what react-dom writes and
+    // handing it back is both the smaller fix and the more honest stub: a
+    // no-op setter with a null getter would have made a present `alt=""` read
+    // as ABSENT and printed Next's own missing-alt error on a correct
+    // component. Nothing pre-existing reads through here (there was no reader),
+    // so this is additive.
+    setAttribute(name: string, value: unknown) { attributes[name] = String(value); },
+    getAttribute(name: string) {
+      return Object.prototype.hasOwnProperty.call(attributes, name) ? attributes[name]! : null;
+    },
+    hasAttribute(name: string) { return Object.prototype.hasOwnProperty.call(attributes, name); },
+    removeAttribute(name: string) { delete attributes[name]; },
     addEventListener(type: string, fn: (evt: Stub) => void) { (listeners[type] ??= []).push(fn); },
     removeEventListener(type: string, fn: (evt: Stub) => void) {
       if (listeners[type]) listeners[type] = listeners[type].filter((l) => l !== fn);
@@ -245,6 +274,34 @@ export function setFieldValue(node: Stub, value: string): void {
   const props = propsKey ? (node as unknown as Record<string, { onChange?: (e: unknown) => void }>)[propsKey] : undefined;
   const nativeEvent = { type: "input", target: node, defaultPrevented: false };
   props?.onChange?.({
+    target: node, currentTarget: node, nativeEvent,
+    persist() {}, preventDefault() {}, stopPropagation() {},
+  });
+}
+
+/** The CHECKBOX twin of `setFieldValue`, and it exists for exactly the same reason: a control
+ *  inside an OPEN, PORTALED dialog is unreachable by `fireEvent`'s delegated dispatch (see
+ *  `clickButton`'s header for the measurement), so a checkbox in a door dialog's fieldset can
+ *  only be driven by setting `checked` and invoking the node's own committed `onChange`.
+ *
+ *  ADDED TO THE SHARED HARNESS RATHER THAN HAND-ROLLED IN ONE TEST FILE — the same discipline
+ *  `clickButton`'s own header records after three lanes wrote local copies and one of them
+ *  clicked nothing and passed. `setFieldValue` covers value-bearing fields; this covers the
+ *  one control kind it cannot.
+ *
+ *  GUARDED like `clickButton`: a DISABLED checkbox throws rather than firing its handler. A
+ *  locked control (a `core` chart family that the door refuses to drop) is asserted with
+ *  `.disabled`, never toggled through and hoped about. */
+export function setCheckboxChecked(node: Stub, checked: boolean): void {
+  if ((node as unknown as { disabled?: boolean }).disabled === true) {
+    throw new Error("setCheckboxChecked: refusing to toggle a DISABLED checkbox — assert the gate, then act");
+  }
+  setNativeValue(node, "checked", checked);
+  const propsKey = Object.keys(node as object).find((k) => k.startsWith("__reactProps"));
+  const props = propsKey ? (node as unknown as Record<string, { onChange?: (e: unknown) => void }>)[propsKey] : undefined;
+  if (!props?.onChange) throw new Error("setCheckboxChecked: no onChange prop found on this node — is it really a committed checkbox?");
+  const nativeEvent = { type: "click", target: node, defaultPrevented: false };
+  props.onChange({
     target: node, currentTarget: node, nativeEvent,
     persist() {}, preventDefault() {}, stopPropagation() {},
   });

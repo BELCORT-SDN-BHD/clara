@@ -41,11 +41,13 @@ select nspname, pg_get_userbyid(nspowner) as public_owner,
 -- lanes are: it must reach exactly its 35 enumerated relations and nothing the public schema
 -- happens to expose. Leaving it out would have made the newest, widest-reading role the ONE
 -- lane the ACL baseline does not confine.
--- FS-4 C-2 adds the webhook executor and its login on the same non-human-lane rule.
+-- FS-4 C-2 adds the webhook executor/login; C-3 adds the auth-wall executor/login on the same
+-- non-human-lane rule.
 select unnest(array['clara_agent_ro','clara_wake_interactive','clara_wake_proactive',
                     'clara_agent_read_login','clara_wake_write_login',
                     'clara_freeform_ro','clara_freeform_login',
-                    'clara_stripe_webhook','clara_stripe_webhook_login']) as confined_role;
+                    'clara_stripe_webhook','clara_stripe_webhook_login',
+                    'clara_auth_wall','clara_auth_wall_login']) as confined_role;
 
 \echo ''
 \echo '===== EXISTENCE CHECK (fail-closed — a typo must not silently confine nothing) ====='
@@ -54,7 +56,8 @@ declare
   confined text[] := array['clara_agent_ro','clara_wake_interactive','clara_wake_proactive',
                            'clara_agent_read_login','clara_wake_write_login',
                            'clara_freeform_ro','clara_freeform_login',
-                           'clara_stripe_webhook','clara_stripe_webhook_login'];
+                           'clara_stripe_webhook','clara_stripe_webhook_login',
+                           'clara_auth_wall','clara_auth_wall_login'];
   c text;
   missing text := '';
 begin
@@ -76,7 +79,8 @@ declare
   confined text[] := array['clara_agent_ro','clara_wake_interactive','clara_wake_proactive',
                            'clara_agent_read_login','clara_wake_write_login',
                            'clara_freeform_ro','clara_freeform_login',
-                           'clara_stripe_webhook','clara_stripe_webhook_login'];
+                           'clara_stripe_webhook','clara_stripe_webhook_login',
+                           'clara_auth_wall','clara_auth_wall_login'];
   rn text;
   usage_snapshot text[];
   temp_snapshot text[];
@@ -162,14 +166,15 @@ declare
   confined text[] := array['clara_agent_ro','clara_wake_interactive','clara_wake_proactive',
                            'clara_agent_read_login','clara_wake_write_login',
                            'clara_freeform_ro','clara_freeform_login',
-                           'clara_stripe_webhook','clara_stripe_webhook_login'];
+                           'clara_stripe_webhook','clara_stripe_webhook_login',
+                           'clara_auth_wall','clara_auth_wall_login'];
   c text;
   bad text := '';
 begin
-  -- (a) ALL NINE confined roles must lack effective public USAGE AND effective TEMP
+  -- (a) ALL ELEVEN confined roles must lack effective public USAGE AND effective TEMP
   --     (Codex LOW-1: loop the whole array, not just the three group roles; assert TEMP;
-  --     F-A6 PR-1 widened the array from five to seven; FS-4 C-2 widens it to nine — see the
-  --     EXISTENCE/APPLY blocks).
+  --     F-A6 PR-1 widened the array from five to seven; FS-4 C-2 widens it to nine and C-3 to
+  --     eleven — see the EXISTENCE/APPLY blocks).
   foreach c in array confined loop
     if has_schema_privilege(c, 'public', 'USAGE') then
       bad := bad || format('%s still has public USAGE (revoke no-oped — deploy role likely does not own public). ', c);
