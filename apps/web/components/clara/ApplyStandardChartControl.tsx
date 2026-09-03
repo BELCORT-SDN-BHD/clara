@@ -41,6 +41,7 @@ import { useTranslations } from "next-intl";
 
 import { Button } from "@/components/ui/button";
 import { EmptyState, LoadingState, StateBanner } from "@/components/common/state";
+import { NotBuiltNote } from "@/components/common/not-built-note";
 import { NativeSelect } from "@/components/common/native-select";
 import { useHydratedPart } from "@/lib/parts/hooks";
 import {
@@ -181,6 +182,26 @@ export function ApplyStandardChartControl({
             ? t(`state.${stateKey}`, { accounts: chart.accounts ?? 0 })
             : t("state.unknown", { state: chart.state })}
         </EmptyState>
+        {stateKey === "adopted" ? (
+          <>
+            {/* GATE 1 disposition (P6-X exit gate, 2026-09-03): `clara.get_coa_template_adoption`
+                (packages/db/migrations/0156_coa_apply_template.sql:1038) is EXECUTE-granted to
+                clara_authenticated and unwired. Annex D names this card, and the client chart
+                register, as its home (docs/plan/active/coa-template-annexes.md:168). The line
+                above reads only `coa_chart_state`'s account count — the adoption's own rationale,
+                basis, proposer/adopter and receipt id are never read here. Owed to the "COA PR-d"
+                lane (PROGRESS.md). */}
+            <NotBuiltNote className="text-xs">{t("adoptionRecordNotBuilt")}</NotBuiltNote>
+            {/* GATE 1 disposition (P6-X exit gate, 2026-09-03): `clara.add_coa_template_family`
+                (packages/db/migrations/0156_coa_apply_template.sql:911) is EXECUTE-granted to
+                clara_authenticated and unwired. Annex D names this card as its home
+                (docs/plan/active/coa-template-annexes.md:167) — "T11's onboarding checklist
+                card" — which ships `apply_coa_template` only; there is no affordance here to add
+                a further family to a chart already adopted. Owed to the "COA PR-d" lane
+                (PROGRESS.md). */}
+            <NotBuiltNote className="text-xs">{t("addFamilyNotBuilt")}</NotBuiltNote>
+          </>
+        ) : null}
       </div>
     );
   }

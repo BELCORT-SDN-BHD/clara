@@ -1450,6 +1450,7 @@
       "name": "Name",
       "type": "Type",
       "inactive": "Inactive",
+      "driftNotBuilt": "A drift check against this client's adopted chart-of-accounts template — codes it is missing, or that were renamed or retyped since the template was applied — is not available yet. This table shows the chart of accounts as recorded, with no comparison against the template.",
       "types": {
         "asset": "Asset",
         "liability": "Liability",
@@ -2896,7 +2897,9 @@
         "partialUnnamed": "Clara could not read every fact her proposal depends on."
       },
       "receipt": "Applied: {accounts} accounts across {families} families. Adoption {adoption}.",
-      "recheck": "Re-check"
+      "recheck": "Re-check",
+      "adoptionRecordNotBuilt": "The adopted template's full record — its rationale, the axes it was based on, and who proposed and adopted it — is not shown yet. Only the account count above is read.",
+      "addFamilyNotBuilt": "Adding a further account family to a chart that has already adopted the standard template is not available yet."
     },
     "card": {
       "loading": "Loading the onboarding plan…",

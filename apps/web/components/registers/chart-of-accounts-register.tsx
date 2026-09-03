@@ -34,6 +34,7 @@ import { DataTableCard } from "@/components/common/data-table-card";
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ErrorMessage } from "@/components/firm/data-state";
 import { LoadingState, EmptyState } from "@/components/common/state";
+import { NotBuiltNote } from "@/components/common/not-built-note";
 import { UpsertAccountDialog } from "./UpsertAccountDialog";
 
 export function ChartOfAccountsRegister({ clientId }: { clientId: string }) {
@@ -74,6 +75,16 @@ export function ChartOfAccountsRegister({ clientId }: { clientId: string }) {
       <SectionHeader level={2} action={<UpsertAccountDialog busy={busy} onSubmit={submitUpsert} />}>
         {t("heading")}
       </SectionHeader>
+      {/* GATE 1 disposition (P6-X exit gate, 2026-09-03): `clara.coa_template_drift`
+          (packages/db/migrations/0156_coa_apply_template.sql:1130) is EXECUTE-granted to
+          clara_authenticated and has zero occurrences anywhere in apps/web. Annex D names
+          this exact file as its home: "a StateBanner, never a UI-computed count"
+          (docs/plan/active/coa-template-annexes.md:169). Owed to the "COA PR-d" lane
+          (PROGRESS.md's "Annex G's admin editor over 0150's nine COA doors" row, which also
+          owes 0156's firm_coa_drift its /admin surface). This table renders the chart as
+          recorded, with NO comparison against the client's adopted template — no
+          never_adopted/off_template/missing/renamed/retyped classification is surfaced. */}
+      <NotBuiltNote className="text-xs">{t("driftNotBuilt")}</NotBuiltNote>
       {data.length === 0 ? (
         <EmptyState>{t("empty")}</EmptyState>
       ) : (
