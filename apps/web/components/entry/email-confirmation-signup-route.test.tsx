@@ -12,7 +12,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { handleEmailConfirmationPost } from "../../app/(entry)/auth/confirm/verify/handler";
-import type { ClaimConfirmationAttempt } from "../../app/(entry)/auth/confirm/verify/confirmation-wall";
+import type { ConfirmEmailCode } from "../../app/(entry)/auth/confirm/verify/confirmation-wall";
 import {
   isConfirmedUser,
   UnreadableAuthUserError,
@@ -36,11 +36,17 @@ import { SignupFirmForm } from "./signup-firm-form";
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const SUBJECT = "11111111-1111-1111-1111-111111111111";
 
-const allowWall = (remaining = 5): ClaimConfirmationAttempt => async () => ({
-  kind: "allowed",
-  // M2, fix round 2026-09-01: "allowed" now carries the wall's own attempt
-  // id — a fixed fixture value here since this file never asserts on it.
-  attemptId: "attempt-fixture-1",
+/** The wall's VERIFIED answer, carrying the session the runtime obtained.
+ *
+ *  FS-4 C-6 Lane B: this used to be a claim stub whose "allowed" arm let the
+ *  handler run `verifyOtp` itself. C-5's A-M3 fix put claim → verify → settle
+ *  inside one runtime request (a caller that can settle — or that merely holds
+ *  an attempt id — can zero out the rate wall), so what the handler receives
+ *  now is the verdict AND the session, and what this cell proves is unchanged:
+ *  a verified confirmation writes a cookie the NEXT /signup request can use. */
+const verifiedWall = (accessToken: string, remaining = 5): ConfirmEmailCode => async () => ({
+  kind: "verified",
+  session: { accessToken, refreshToken: "refresh-token" },
   remaining,
 });
 
@@ -120,9 +126,22 @@ test("NEW-5: the confirmation response cookie drives the next /signup request", 
       throw new Error("the Auth-only SSR adapter must not open a WebSocket");
     }
   } as unknown as typeof WebSocket;
+  // The handler no longer talks to GoTrue itself — the runtime did that. What
+  // reaches the network here is whatever `setSession` needs to hydrate the
+  // session it was handed (`/auth/v1/user`), and the assertion is that NOTHING
+  // ELSE does: a request to `/auth/v1/verify` from this process would mean the
+  // app was re-verifying a single-use OTP the runtime already consumed.
+  const authCalls: string[] = [];
   globalThis.fetch = async (input) => {
     const url = input instanceof Request ? input.url : String(input);
-    assert.match(url, /\/auth\/v1\/verify$/);
+    authCalls.push(new URL(url).pathname);
+    assert.match(url, /\/auth\/v1\//);
+    if (url.endsWith("/auth/v1/user")) {
+      return new Response(
+        JSON.stringify({ id: SUBJECT, email_confirmed_at: "2026-08-31T01:02:03Z" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
     return new Response(JSON.stringify({
       access_token: accessToken,
       refresh_token: "refresh-token",
@@ -139,9 +158,14 @@ test("NEW-5: the confirmation response cookie drives the next /signup request", 
       async () => createRouteClient({
         cookieStore: routeCookies as unknown as ServerCookieStore,
       }),
-      allowWall(),
+      verifiedWall(accessToken),
     );
     assert.equal(response.headers.get("location"), "https://app.clarabook.example/signup");
+    assert.deepEqual(
+      authCalls.filter((path) => path.endsWith("/verify")),
+      [],
+      "apps/web re-verified a single-use OTP the runtime had already consumed",
+    );
     const getSetCookie = (response.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie;
     const setCookies = getSetCookie?.call(response.headers) ?? [response.headers.get("set-cookie") ?? ""];
     assert.ok(setCookies.some((value) => value.startsWith("__Host-clara-auth=")));

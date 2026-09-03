@@ -9,6 +9,8 @@ import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared
 import { SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import ts from "typescript";
 
+import { readCode } from "../../test/sourceOracle";
+
 import { InviteAcceptForm, type InviteAuthClient } from "../invite-accept-form";
 import { LoginForm, type LoginAuthClient } from "../login-form";
 import messages from "../../messages/en.json";
@@ -321,7 +323,7 @@ test("N6: live entry prose names only the moved route-group paths", () => {
   }
 });
 
-test("LOW-4 (superseded by FS-4 C-6): the DPA gate moved off the account step, and the seam is honest about not being wired", () => {
+test("LOW-4: the DPA gate lives on its own step, and the door call is real", () => {
   // v1 carried a checkbox on THIS form; checkout-gate-design.md §1.1 moved
   // the real DPA e-sign to /signup step 2 (signup-dpa-form.tsx), once an
   // open registration exists to sign against. This form must no longer
@@ -336,15 +338,38 @@ test("LOW-4 (superseded by FS-4 C-6): the DPA gate moved off the account step, a
     "a DPA checkbox reappeared on the account step",
   );
 
-  // The new home describes its click as an honest not-wired seam, never a
-  // fabricated signature.
-  const dpaFormSource = readFileSync(
-    join(WEB_ROOT, "components/entry/signup-dpa-form.tsx"),
-    "utf8",
+  // TRUED BY LANE B. This used to require the DPA form to describe its click
+  // as an honest not-wired SEAM; the seam is gone and `sign_dpa` is called for
+  // real, so requiring that sentence would now force the form to lie in the
+  // opposite direction. What the cell asserts instead is the property that
+  // outlives both states: the door's own answer decides what renders, and the
+  // form never fabricates a signature.
+  const dpaDoorSource = readCode(join(WEB_ROOT, "lib/registration/dpa-doors.ts")).code;
+  assert.match(
+    dpaDoorSource,
+    /callDoor(?:<[\s\S]*?>)?\(\s*SIGN_DPA_DOOR/,
+    "sign_dpa is not actually called — the seam is back",
   );
-  assert.match(dpaFormSource, /Lane-B seam/i);
-  assert.doesNotMatch(dpaFormSource, /this is the wall/i);
-
-  const dpaDoorSource = readFileSync(join(WEB_ROOT, "lib/registration/dpa-doors.ts"), "utf8");
-  assert.match(dpaDoorSource, /never a fabricated success/i);
+  // The three arguments the door requires, by name. A dropped `p_op_key` is
+  // the exact defect PR #488's fix round found in the seam's own shape.
+  for (const param of ["p_version", "p_body_sha256", "p_op_key"]) {
+    assert.ok(dpaDoorSource.includes(param), `sign_dpa is called without ${param}`);
+  }
+  // AND THE HASH IS NOT RECOMPUTED. 裁-90's byte-identity law lives or dies on
+  // `p_body_sha256` being the hash of the bytes the person was SHOWN; a fresh
+  // read here would make the door agree with itself unconditionally.
+  // The pattern hunts a hash COMPUTATION, not the word. A first cut used a
+  // bare /sha256/i and reddened on `bodySha256` and `p_body_sha256` — the
+  // parameter names that carry the hash are the very thing this cell wants
+  // present, so matching them is the "spelling is not identity" trap pointed
+  // at the instrument. Word boundaries exclude both spellings; a real call
+  // site (`crypto.subtle.digest`, `createHash(`, a bare `sha256(`) does not.
+  const computesHash = /\bsubtle\s*\.\s*digest\b|\bcreateHash\s*\(|\bsha256\s*\(/i;
+  assert.match("await crypto.subtle.digest('SHA-256', x)", computesHash);
+  assert.doesNotMatch("params.bodySha256", computesHash);
+  assert.equal(
+    computesHash.test(dpaDoorSource),
+    false,
+    "dpa-doors.ts computes a hash; it must forward the caller's verbatim",
+  );
 });

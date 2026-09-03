@@ -21,6 +21,12 @@ export default defineConfig({
     ...devices["Desktop Chrome"],
     baseURL: appOrigin,
     ignoreHTTPSErrors: true,
+    // The address a real edge proxy would have observed. The harness points
+    // `CLARA_TRUSTED_CLIENT_IP_HEADER` at this name precisely BECAUSE Next
+    // never fills it in (unlike `x-forwarded-for`, which it synthesizes from
+    // the socket), so a spec that wants the fail-closed arm can drop it per
+    // request and actually reach that branch.
+    extraHTTPHeaders: { "x-clara-e2e-client-ip": "203.0.113.7" },
     trace: "retain-on-failure",
   },
   projects: [
