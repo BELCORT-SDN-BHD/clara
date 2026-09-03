@@ -53,7 +53,7 @@ Cost stated at the ask: zero code lines, riding the truing PR's one-opus-review 
 classifier scores that PR CODE — see the header note; not ADR-0069's lane). Both texts are truings of
 already-ruled decisions, not new policy — the DECISION here is that the law documents say so.
 
-> **ERRATA (lead, 2026-09-03; owner confirmation put as B1 of the harness-sync scan).** The premise's example above names the wrong secret. `STRIPE_WEBHOOK_SECRET` is **runtime/Fly env**, not `apps/web`'s (`docs/plan/active/checkout-gate-design-part3.md`; 裁-126 routes the `whsec_` value to Fly secrets; every site of it in #511 sits under `packages/runtime/`), and 裁-93 had already ruled the webhook to `packages/runtime` BEFORE 裁-114 was written. `apps/web`'s real FS-4 credential is `STRIPE_SECRET_KEY`. **The RULING stands** — the wall it re-states (no service credential ever reaches a browser; no `NEXT_PUBLIC_` variable carries one; `apps/web`'s server-only Route Handlers are a second, browser-isolated holder) is unaffected by which credential illustrates it. `PRD.md` §6 and `ARCHITECTURE.md` inherited the same example and are NOT edited here: they are law documents and wait for the owner's answer to B1.
+> **ERRATA — corrected by 裁-142 (owner, 2026-09-03): the premise's example named the wrong secret; the ruling stands.**
 
 ---
 
