@@ -2,12 +2,17 @@
 // (X1) fairness/anti-starvation guarantee. Contract:
 // docs/plan/completed/slice3-event-spine-contract.md §2.9.
 
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 
 import { runRelayCycle, makeClient } from "../lib/relay.mjs";
 import * as fx from "./relay-fixtures.mjs";
 import { skip, drainInProcess, assertExactlyOnce, sleep } from "./relay-testkit.mjs";
+
+// ONE teardown registrant per pool (fix-relay-teardown, 2026-09-03): relay-testkit.mjs
+// no longer registers its own implicit after() hook (see its header note) — this file
+// does not drop a private database, so it owns the sole close of the shared pool.
+after(fx.endPool);
 
 // ===========================================================================
 // (e) BOOTSTRAP — a brand-new firm (no checkpoint) with > one batch fully drains

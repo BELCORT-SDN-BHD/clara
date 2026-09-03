@@ -30,6 +30,26 @@ import { HoldingCard } from "./holding-card";
 
 enableDomInspection();
 
+/**
+ * The harness container is the inspector's own `Stub`, not an `HTMLElement`.
+ * Narrowed through `unknown` to the ONE method used — the same idiom
+ * `email-confirmation-page.test.tsx` already applies — because casting it to
+ * `HTMLElement` would be a cast that lies about the object, and TypeScript
+ * says so.
+ */
+type QueriedNode = { getAttribute(name: string): string | null };
+/**
+ * THE TWO-SPELLING FAMILY. This guard read one NAME — `/Not built yet/` — for
+ * a family the estate writes two ways, so the `paid` card's own stale sentence
+ * ("it isn't wired up yet") walked straight past it while the cell that exists
+ * for exactly that class stayed green. Review law 3, pointed at the instrument.
+ * Widened here FIRST, as the RED-before for the copy fix.
+ */
+const STALE_NOT_BUILT = /Not built yet|isn't wired up|not wired/i;
+
+const query = (container: unknown) => (selector: string): QueriedNode | null =>
+  (container as { querySelector(s: string): QueriedNode | null }).querySelector(selector);
+
 type Node = { tagName?: string; childNodes?: Node[]; parentNode?: Node };
 
 function App(node: ReactElement) {
@@ -109,6 +129,53 @@ for (const { state, distinctive } of STATES) {
   });
 }
 
+test("THE CHECKOUT REFUSAL CARD renders each kind's OWN copy, and a door's own sentence verbatim", async () => {
+  // WRITTEN BECAUSE A MUTANT SAID SO. Fold round 1's panel replaced the typed
+  // lookup `t(\`checkoutRefusal.${kind}\`)` with a single hard-coded sentence and
+  // NOTHING went red — the holding card's refusal arm had no cell at all. A
+  // card that says the same thing for a missing pepper, a rotated plan and a
+  // caller who already has a firm is a card that tells nobody anything.
+  const kinds = ["no_origin_digest", "stripe_unavailable", "plan_rotated",
+    "no_registration", "already_member", "unavailable"] as const;
+  const rendered = new Map<string, string>();
+  for (const kind of kinds) {
+    const h = await renderComponent(App(createElement(HoldingCard, {
+      state: { kind: "pending", firmName: "ROME PROPERTIES" },
+      checkoutRefusal: { nonce: "n", kind },
+    })));
+    try {
+      for (let i = 0; i < 2; i++) await h.settle();
+      rendered.set(kind, textOf(h.container as never));
+      assert.deepEqual(checkAccessibility(h.container as never), [], `${kind} has a11y violations`);
+    } finally {
+      await h.unmount();
+    }
+  }
+  // EACH KIND IS DISTINGUISHABLE from every other — the property a single
+  // shared sentence would break while every "it rendered" check stayed green.
+  assert.equal(new Set(rendered.values()).size, kinds.length,
+    "two checkout refusal kinds render identical text");
+  // And the member arm says the true thing rather than a generic refusal.
+  assert.match(rendered.get("already_member") as string, /already belong to a firm/i);
+
+  // THE `refused` ARM IS THE DOOR'S OWN SENTENCE, VERBATIM — never a lookup.
+  const h = await renderComponent(App(createElement(HoldingCard, {
+    state: { kind: "pending", firmName: "ROME PROPERTIES" },
+    checkoutRefusal: {
+      nonce: "n", kind: "refused", code: "CLR09",
+      message: "the data processing agreement is not signed",
+    },
+  })));
+  try {
+    for (let i = 0; i < 2; i++) await h.settle();
+    const text = textOf(h.container as never);
+    assert.match(text, /the data processing agreement is not signed/);
+    assert.match(text, /CLR09/);
+  } finally {
+    await h.unmount();
+  }
+});
+
 test("THE HEADING IS REAL — no synthetic h1 is propping these scans up", async () => {
   const h = await renderComponent(App(createElement(HoldingCard, { state: { kind: "invite-expected" } })));
   try {
@@ -174,19 +241,67 @@ test("VACUITY CONTROL: those three matchers DO fire on the strings they hunt", a
   assert.match("RM0 per month", amount, "the amount matcher misses the string 裁-58 forbids");
 });
 
-test("THE CHECKOUT SEAM is named on the pending state, and says TRIAL not an amount", async () => {
-  // 裁-68: Stripe checkout success IS the approval for tier-3, and that surface
-  // is not built. The screen must name the gap rather than leave the applicant
-  // believing an operator is about to rule. 裁-58: the words are "trial", never
-  // an amount.
+test("THE CHECKOUT PATH IS OFFERED on the pending state, with no amount anywhere", async () => {
+  // TRUED BY FS-4 C-6 Lane B. This cell used to require the words "Not built
+  // yet" on this card, because 裁-68's checkout surface genuinely did not
+  // exist. It exists now, so design part 1 §2.1's instruction applies — "the
+  // NotBuiltNote is REMOVED because the thing it names now exists, not edited
+  // to say less" — and a cell demanding that sentence would force the card to
+  // claim a gap that is closed. What replaces it is the positive property: a
+  // real, reachable control onto the DPA step, and 裁-58's trial framing with
+  // no amount, which is the part that never changes.
   const h = await renderComponent(App(createElement(HoldingCard, { state: { kind: "pending", firmName: "ROME PROPERTIES" } })));
   try {
     for (let i = 0; i < 2; i++) await h.settle();
     const text = textOf(h.container as never);
-    assert.match(text, /Not built yet/, "the pending state does not name the missing checkout");
+    assert.doesNotMatch(text, STALE_NOT_BUILT, "a retired not-built sentence is back on the pending card");
     assert.match(text, /trial/i, "裁-58's trial framing is missing");
     assert.doesNotMatch(text, /\bRM\s*\d/i);
+    const link = query(h.container)('a[href="/signup"]');
+    assert.ok(link, "the pending card offers no way to continue to the DPA step");
   } finally {
     await h.unmount();
+  }
+});
+
+test("THE TWO PAID-ROAD ARMS carry REAL controls, and the firm-creating one is not a GET", async () => {
+  // The discriminating property: `checkout_open` must POST (a GET to /checkout
+  // would let a prefetch open a Stripe Session and spend a rate-wall attempt),
+  // and `paid` must LINK to the paint-only success page rather than to the
+  // claim route itself (a GET must never create a tenant, M9). Before Lane B
+  // both arms were disabled buttons, so both halves of this are new behaviour.
+  const resume = await renderComponent(
+    App(createElement(HoldingCard, { state: { kind: "checkout_open", firmName: "ROME PROPERTIES" } })),
+  );
+  try {
+    for (let i = 0; i < 2; i++) await resume.settle();
+    const form = query(resume.container)('form[action="/checkout"]');
+    assert.ok(form, "the resume arm has no form posting to /checkout");
+    assert.equal(form?.getAttribute("method")?.toLowerCase(), "post");
+    assert.equal(
+      query(resume.container)('a[href="/checkout"]'),
+      null,
+      "a LINK to /checkout would open a Session on a prefetch",
+    );
+    assert.doesNotMatch(textOf(resume.container as never), STALE_NOT_BUILT);
+  } finally {
+    await resume.unmount();
+  }
+
+  const paid = await renderComponent(
+    App(createElement(HoldingCard, { state: { kind: "paid", firmName: "ROME PROPERTIES" } })),
+  );
+  try {
+    for (let i = 0; i < 2; i++) await paid.settle();
+    const link = query(paid.container)('a[href="/checkout/success"]');
+    assert.ok(link, "the paid arm has no link to the success page");
+    assert.equal(
+      query(paid.container)('form[action*="/claim"]'),
+      null,
+      "the firm-creating POST must live on the success page, not on this card",
+    );
+    assert.doesNotMatch(textOf(paid.container as never), STALE_NOT_BUILT);
+  } finally {
+    await paid.unmount();
   }
 });

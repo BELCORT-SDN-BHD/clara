@@ -1,111 +1,104 @@
-// THE LANE-B SEAM — `clara.sign_dpa` (checkout-gate-design-part2.md §1.1).
+// `clara.sign_dpa` — WIRED FOR REAL by FS-4 C-6 Lane B. Lane A's honest stub
+// (which always answered `{kind:"unavailable"}` rather than fabricate a
+// signature) has done its job and retires here.
 //
-// FS-4 C-6 Lane A builds the DPA step's UI and its read
-// (`dpa-server-reads.ts`); it does not call `sign_dpa` for real. Two
-// independent reasons, both worth naming rather than papering over:
+// A CLIENT CALL, WHICH IS THE DESIGN'S OWN DECISION AND NOT AN OMISSION.
+// checkout-gate-design part 1 §1.1 settles step ④ explicitly: "`sign_dpa` is
+// called the same way ③ calls its doors — from the client, over PostgREST".
+// The caller is the person, the door is governed, and `signup-firm-form.tsx`
+// already calls `claim_identity` / `request_firm_registration` this way. It
+// carries no server-only value — unlike ⑤, whose origin digest is the rate
+// wall's key and therefore may never travel to a browser. If a later lane
+// needs this server-side, it adds `POST /signup/dpa` as a route handler and
+// registers it — never a Server Action.
 //
-//   1. `sign_dpa` is not in C-1 as actually built (measured against the live
-//      migration text, PR #478 `UNNUMBERED_checkout_gate_c1_dpa.sql`): that
-//      cohort creates the four tables and seeds the beta placeholder row,
-//      and grants NOTHING to `clara_authenticated` — "C-1 creates no human
-//      door". The door itself lands in a later PR.
-//   2. Even once it exists, calling a real governed door from a Lane-A PR
-//      would be exactly the "wall call" this train's split explicitly
-//      reserves for Lane B (the work order's own words).
+// TWO THINGS THIS FUNCTION MUST NOT DO, both inherited from Lane A's contract
+// and both still true now that the call is real:
 //
-// THE STUB BELOW ALWAYS REPORTS "unavailable" — never a fabricated success.
-// A checkbox (or a button) that looked like it recorded a signature while
-// recording nothing is the precise fake receipt `apps/web/AGENTS.md`
-// forbids, and it is the exact defect `signup-account-form.tsx`'s v1 DPA
-// checkbox was built to avoid with a `NotBuiltNote` — moving the gate here
-// must not lose that discipline.
+//  · `params.bodySha256` IS FORWARDED VERBATIM. Never recomputed, never
+//    re-read from a fresh `get_current_dpa_document()` call inside here. It is
+//    the hash of the exact bytes `signup-dpa-form.tsx` rendered to the person.
+//    The design's whole point (part 2 §1.1, "that last wall is the one that
+//    matters"; 裁-90's byte-identity law) is that `sign_dpa` re-validates the
+//    SUBMITTED hash against the row's current value and refuses `CLR10 the
+//    signed text does not match the current agreement` on a mismatch — e.g.
+//    the document was superseded between render and click. Recomputing here
+//    would make the door agree with itself unconditionally and silently delete
+//    the only thing binding a signature to what the signer saw.
+//  · `params.opKey` IS THE CALLER'S, minted once per attempt and held in a
+//    `useRef`. Minting one here would hand every retry of the same click a new
+//    key. (`sign_dpa` is also structurally idempotent on `dpa_signatures`'
+//    `unique (user_id, dpa_version)`, so a double-click replays rather than
+//    double-signs — but the op_key contract is worth keeping right.)
 //
-// LANE B'S COMPLETION CONTRACT — read this before touching `signDpa`.
-// Replace the body below with a real `callDoor("sign_dpa", { p_version:
-// params.version, p_body_sha256: params.bodySha256, p_op_key: params.opKey })`
-// once the door exists and is granted, exactly as `lib/identity/doors.ts`'s
-// `claimIdentity` calls `claim_identity`.
-//
-// A — fix round 2026-09-01 (PR #488, fs4-pr488-review's mid-round addition):
-// `clara.sign_dpa(p_version text, p_body_sha256 bytea, p_op_key text)`
-// (checkout-gate-design-part2.md:51) is THREE required params and refuses
-// `op_key is required` -> CLR10 on a missing one. This seam's params were
-// missing the third — a literal implementation of the seam would have hit
-// CLR10 on every real call. `opKey` is now part of `SignDpaParams`, and the
-// CALLER MINTS AND HOLDS IT — never this function. `signup-dpa-form.tsx`
-// mints one with `crypto.randomUUID()` and keeps it in a `useRef` for the
-// lifetime of the component (`signup-firm-form.tsx`'s own op_key idiom,
-// that file's header), so a transport failure after the door already
-// committed replays the receipt on retry instead of colliding with it.
-// Minting a fresh key per call here (inside `signDpa`, on every invocation)
-// would be the wrong fix even though it satisfies the type: it hands every
-// retry of the SAME click a NEW key, defeating the idempotency the key
-// exists for. (The blast radius is bounded regardless — `sign_dpa` is also
-// structurally idempotent on `dpa_signatures`' `unique (user_id,
-// dpa_version)`, survey F6, so a double-click replays rather than double-
-// signs — but the op_key contract is still worth getting right before Lane
-// B builds the real call on top of it.)
-//
-// THE ONE THING THIS REPLACEMENT MUST NOT DO (M2, fix round 2026-09-01):
-// `params.bodySha256` MUST be forwarded to `p_body_sha256` VERBATIM, exactly
-// as the caller supplied it — never recomputed, never re-read from a fresh
-// `clara.dpa_documents` select inside this function. `params.bodySha256` is
-// the hash of the exact bytes `signup-dpa-form.tsx` rendered to the person
-// (see that file's own `handleSign` comment); the design's OWN point
-// (checkout-gate-design-part2.md §1.1: "that last wall is the one that
-// matters") is that `sign_dpa` re-validates that submitted hash against the
-// row's CURRENT value and refuses CLR10 on a mismatch — e.g. the document was
-// superseded between render and click. Recomputing the hash here from a
-// fresh read would make the door agree with itself unconditionally and
-// silently delete the only thing binding a signature to the bytes the signer
-// actually saw. If a fresh read is added for some OTHER reason, its hash
-// must never replace `params.bodySha256` in the argument sent to the door.
-//
-// Nothing in `signup-dpa-form.tsx` needs to change beyond removing its own
-// "seam" framing: the component already renders whatever this function
-// returns, and it already threads the shown document's own hash through
-// (`DpaDocumentState.ready.bodySha256`, from `dpa-server-reads.ts`).
+// THE RETURN IS WIDENED, and 裁-107(a) is why it is widened NOW rather than
+// left at Lane A's bare `{kind:"signed"}`. That ruling's rule: a dropped door
+// PARAMETER is a defect by default, a dropped RETURN FIELD is a decision by
+// default — and Lane A's own note named the field that would matter first
+// ("`replay` is the field that will matter FIRST ... Lane B widens this arm
+// when that receipt surface is built"). That surface is built here: the DPA
+// step now has a next step to route a real signature to (checkout), and the
+// difference between "we just recorded your signature" and "you had already
+// signed this" is a sentence the person reads. `signature_id` and `signed_at`
+// ride along as the receipt evidence this estate's discipline wants.
+
+import { callDoor, isDoorRefusal } from "@/lib/doors";
 
 export type SignDpaParams = {
   readonly version: string;
   readonly bodySha256: string;
   /** Minted and held by the CALLER (`signup-dpa-form.tsx`'s `useRef`), never
-   *  by this function — see the header's item A for why re-minting per call
-   *  would be the wrong fix even though it type-checks. */
+   *  by this function — see the header for why re-minting per call would be
+   *  the wrong fix even though it type-checks. */
   readonly opKey: string;
 };
 
-// NOTE FOR THE SEAM↔DOOR COMPLETION TABLE (PR #488): `sign_dpa`'s real
-// success/replay carries `{signature_id, signed_at, replay}` (survey F6);
-// the bare `"signed"` below drops all three.
-//
-// 裁-107(a) — OWNER-CONFIRMED 2026-09-01, see the pm ledger
-// (docs/plan/active/mohe-grill-rulings-2026-09-01-pm.md). (Raised by
-// fs4-pr488-review; the finding is theirs, the ruling is the owner's.)
-//
-// THIS IS A LAWFUL DECISION TODAY, NOT A DEFECT — the rule that tells this
-// case apart from M1/M2/A: a dropped PARAM is a defect by default (the door
-// refuses without it, silently and unrecoverably — sign_dpa's own `op_key
-// is required` -> CLR10 is exactly that shape, which is why A was a fix); a
-// dropped RETURN FIELD is a decision by default (the call still succeeds,
-// `{kind:"signed"}` is true whether the door minted a fresh signature or
-// replayed one, so nothing is fabricated, and widening the return later is
-// additive and compile-checked at every consumer the moment one exists).
-// `signup-dpa-form.tsx` has no next step to route a real signature to yet
-// (its own header: "there is no built checkout to send anyone to"), so
-// inventing fields nothing here reads would be shape ahead of need.
-//
-// THE KNOWN WIDENING, named so it is not rediscovered: `replay` is the
-// field that will matter FIRST. The moment a receipt surface exists,
-// "you signed this on <date>" versus a bare "signed" becomes a real
-// distinction, and `signature_id`/`signed_at` are the evidence this
-// estate's receipt discipline will want. Lane B widens this arm when that
-// receipt surface is built — not before.
 export type SignDpaOutcome =
-  | { readonly kind: "signed" }
+  | {
+      readonly kind: "signed";
+      readonly signatureId: string;
+      readonly signedAt: string;
+      /** The door's own `replay` marker: true when this call found an existing
+       *  signature rather than minting one. */
+      readonly replay: boolean;
+    }
+  /** A governed refusal, carried VERBATIM — `CLR10 unknown dpa version`,
+   *  `CLR09 that dpa version is not current`, `CLR10 the signed text does not
+   *  match the current agreement`, `CLR04` for an agent or unknown actor. The
+   *  form renders the DB's own sentence; nothing here re-words it, and nothing
+   *  retries it (apps/web/AGENTS.md). */
+  | { readonly kind: "refused"; readonly code: string; readonly message: string }
+  /** Transport, auth, or a response this build will not act on. Distinct from
+   *  a refusal: nothing was decided, so a retry is meaningful. */
   | { readonly kind: "unavailable" };
 
 export type SignDpa = (params: SignDpaParams) => Promise<SignDpaOutcome>;
 
-/** THE PRODUCTION DEFAULT. See this module's header. */
-export const signDpa: SignDpa = async () => ({ kind: "unavailable" });
+export const SIGN_DPA_DOOR = "sign_dpa";
+
+/** THE PRODUCTION IMPLEMENTATION. */
+export const signDpa: SignDpa = async (params) => {
+  try {
+    const out = await callDoor<Record<string, unknown>>(SIGN_DPA_DOOR, {
+      p_version: params.version,
+      p_body_sha256: params.bodySha256,
+      p_op_key: params.opKey,
+    });
+    const signatureId = out?.signature_id;
+    const signedAt = out?.signed_at;
+    // POSITIVELY checked. A 200 that carries no signature id is not evidence
+    // that a signature exists, and the one thing this UI must never do is show
+    // a receipt for a row nobody saw (apps/web/AGENTS.md: the UI never invents
+    // a receipt).
+    if (typeof signatureId !== "string" || signatureId.length === 0
+      || typeof signedAt !== "string" || signedAt.length === 0) {
+      return { kind: "unavailable" };
+    }
+    return { kind: "signed", signatureId, signedAt, replay: out?.replay === true };
+  } catch (err) {
+    if (isDoorRefusal(err)) {
+      return { kind: "refused", code: err.code ?? "CLR", message: err.message };
+    }
+    return { kind: "unavailable" };
+  }
+};

@@ -9,8 +9,9 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { DPA_DOCUMENT_COLUMNS, isDpaDocumentRow } from "./dpa-reads";
+import { CURRENT_DPA_DOCUMENT_DOOR, isDpaDocumentRow } from "./dpa-reads";
 import { loadCurrentDpaDocumentState } from "./dpa-server-reads";
+import { readCode } from "../../test/sourceOracle";
 
 const MIGRATIONS_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -22,8 +23,7 @@ test("isDpaDocumentRow validates every declared field's shape", () => {
     version: "clara-beta-2026-08-a",
     body: "This is Clara's beta data-processing agreement.",
     body_sha256: "\\x1234",
-    effective_from: "2026-08-31T00:00:00Z",
-    effective_to: null,
+    published_at: "2026-08-31T00:00:00Z",
   };
   assert.equal(isDpaDocumentRow(valid), true);
 
@@ -31,8 +31,8 @@ test("isDpaDocumentRow validates every declared field's shape", () => {
     { ...valid, version: "" },
     { ...valid, body: "" },
     { ...valid, body_sha256: 1234 },
-    { ...valid, effective_from: null },
-    { ...valid, effective_to: 42 },
+    { ...valid, published_at: null },
+    { ...valid, body_sha256: "" },
     { version: "v1" }, // missing every other field
   ];
   for (const bad of invalidCases) {
@@ -63,46 +63,66 @@ test("loadCurrentDpaDocumentState: ANY throw from the read degrades to unavailab
   assert.deepEqual(state, { kind: "unavailable" });
 });
 
-test("NIT-5: DPA_DOCUMENT_COLUMNS drift tripwire against C-1's real `create table`, once it lands", () => {
-  // Verified 2026-09-01 against `UNNUMBERED_checkout_gate_c1_dpa.sql`
-  // (branch coa/fs4-c1-dpa, PR #478): `create table clara.dpa_documents(
-  // version text primary key, body text not null, body_sha256 bytea not
-  // null, source_path text not null, effective_from timestamptz not null,
-  // effective_to timestamptz, created_at timestamptz not null default
-  // now(), ...)`. That file is NOT on `main` yet, and migration numbers are
-  // claimed only at merge (constraint 10) — its filename on `main` will
-  // differ from the unnumbered one on the open branch. So this searches
-  // every migration file's CONTENT for the live `create table` rather than
-  // one fixed path, and is a documented no-op until one matches: "the door
-  // isn't built yet" stays honest, but the day it lands with a renamed or
-  // reordered column, this reds instead of silently degrading to
-  // "unavailable forever" (dpa-server-reads.ts's own catch-all).
-  let liveColumns: string[] | null = null;
+test("NIT-5: the DOOR's own return columns are the drift tripwire, once C-3 lands", () => {
+  // REPOINTED by Lane B. This used to watch `create table clara.dpa_documents`
+  // — the wrong subject: `apps/web` never reads that relation and structurally
+  // cannot (C-1 grants `clara_authenticated` nothing on it, permanently). What
+  // this module actually consumes is `clara.get_current_dpa_document()`'s
+  // `returns table(...)` list, so that is what must not drift under it.
+  //
+  // A DOCUMENTED NO-OP UNTIL C-3 (#493, `0163`) IS ON THIS TREE — and it ARMS
+  // ITSELF the moment it is (裁-108: a migration's arrival is what arms the
+  // cells that read it). The scan is content-based rather than path-based
+  // because migration numbers are claimed at merge (constraint 10), so the
+  // filename on `main` differs from the one on the open branch.
+  const requiredFields = ["version", "body", "body_sha256", "published_at"] as const;
+  let returned: string[] | null = null;
   for (const entry of readdirSync(MIGRATIONS_DIR)) {
     if (!entry.endsWith(".sql")) continue;
     const source = readFileSync(join(MIGRATIONS_DIR, entry), "utf8");
-    const match = /create\s+table\s+clara\.dpa_documents\s*\(([\s\S]*?)\n\);/i.exec(source);
+    const match = new RegExp(
+      `create\\s+function\\s+clara\\.${CURRENT_DPA_DOCUMENT_DOOR}\\s*\\(\\s*\\)\\s*\\r?\\n?\\s*returns\\s+table\\s*\\(([^)]*)\\)`,
+      "i",
+    ).exec(source);
     if (!match) continue;
-    liveColumns = (match[1] ?? "")
+    returned = (match[1] ?? "")
       .split(",")
-      .map((line) => line.trim().split(/\s+/)[0] ?? "")
-      .filter((name) => name.length > 0 && !name.startsWith("constraint"));
+      .map((part) => part.trim().split(/\s+/)[0] ?? "")
+      .filter((name) => name.length > 0);
     break;
   }
-
-  if (liveColumns === null) {
-    // C-1 has not merged onto this branch's tree yet — nothing to check
-    // against. Not a pass in disguise: the cell above (`isDpaDocumentRow`)
-    // is what actually exercises this shape's runtime handling today.
-    return;
-  }
-
-  for (const column of DPA_DOCUMENT_COLUMNS) {
+  if (returned === null) return; // C-3 has not merged onto this tree yet.
+  for (const field of requiredFields) {
     assert.ok(
-      liveColumns.includes(column),
-      `DPA_DOCUMENT_COLUMNS reads "${column}", which C-1's live migration no longer declares`,
+      returned.includes(field),
+      `${CURRENT_DPA_DOCUMENT_DOOR}() no longer returns "${field}", which isDpaDocumentRow requires`,
     );
   }
+});
+
+test("NIT-5b: the retired dpa_documents relation read is gone from this app", () => {
+  // The positive form of the repoint. `apps/web` must not read the relation at
+  // all any more — a leftover relation read would degrade to "unavailable"
+  // forever and look like an infrastructure gap rather than a defect.
+  //
+  // DRIVEN THROUGH THE SHARED COMMENT-STRIPPING ORACLE, and the first cut of
+  // this cell is why: a bare regex over the raw file matched the module's own
+  // header, which EXPLAINS the retired call by naming it. The cell reddened on
+  // a comment — "spelling is not identity" (review law 3) applied to the
+  // instrument itself. `stripComments` is the same machinery W-R's roster and
+  // W-H2b's tripwire use, so this reads CODE.
+  const path = join(dirname(fileURLToPath(import.meta.url)), "dpa-reads.ts");
+  const raw = readFileSync(path, "utf8");
+  const code = readCode(path).code;
+
+  assert.match(raw, /getRows/, "VACUITY CONTROL: the header no longer explains what was retired");
+  assert.equal(
+    /\bgetRows\s*[<(]/.test(code),
+    false,
+    "dpa-reads.ts still issues a relation read in CODE; the door is the only read path",
+  );
+  assert.match(code, new RegExp(`\\bcallDoor\\b`), "the module does not call a door at all");
+  assert.ok(code.includes(CURRENT_DPA_DOCUMENT_DOOR), "the door name is not in the module's code");
 });
 
 test("VACUITY CONTROL: a resolved session with no dpa read override still degrades (no live table on this tip)", async () => {
