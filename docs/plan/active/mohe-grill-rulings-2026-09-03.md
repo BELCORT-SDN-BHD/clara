@@ -121,6 +121,25 @@ be raised to the beta's expected signup volume.
    address. Point 3 of the ruling is that test, and a configured settings page is not it: the whole
    reason the gate is a received message is that every settings screen looks identical whether or
    not delivery works.
+   **Two of those three moved the same afternoon, and the record keeps them at their true weight.**
+   (i) **MEASURED, ≈16:55 MYT:** a Supabase *Invite user* mail sent through the new custom SMTP
+   arrived at a private address outside the project's Supabase team, From
+   "Clara <no-reply@mail.clarabook.com>", subject "You've been invited". That proves the transport
+   and the sender identity end to end and retires the *Email address not authorized* wall as a
+   measurement. It is the **Invite-user template arm, not the signup-code arm** — fired from the
+   dashboard rather than through the app's own courier path (which mints by `generateLink` and
+   delivers through Resend, `apps/web/lib/members/invite-mail.ts`), exercising a different template
+   from *Confirm signup*, and carrying a LINK where the confirmation arm must carry a CODE. So:
+   transport PROVEN, **the signup-confirmation arm NOT certified, the gate still open**. A working
+   transport is a precondition of the gate, never the gate. (ii) **REPORTED, ≈17:00 MYT, words only
+   — a report, not a measurement (裁-112), with no read-back:** the test user deleted, the Rate
+   Limits raise applied — **the raised value was not stated, so no number is recorded anywhere; it
+   is unknown, not merely unverified** — and the *Confirm signup* template confirmed to carry
+   `{{ .Token }}`. All three are read back at the Wave-G walk, and the checklist's two proof-bearing
+   boxes stay OPEN meanwhile: ticking a box that names a Management API read on words alone is the
+   class 裁-112 exists to forbid, and for the template box `security-pass-2026-09-02.md` item 8
+   already demands "a Management API read, not a screenshot of the editor". Not among the three, and
+   not to be conflated: the 裁-131 OTP expiry stays gated on C-5's attempt wall being live.
 
 **Recommendation put (followed):** point Supabase Auth's SMTP at Resend, so that ONE verified sending
 domain and ONE provider carry every message the product sends; make the Wave-G "Mail" line a launch
@@ -194,15 +213,23 @@ delivers to nobody outside BELCORT's own Supabase team and answers every real ap
 address not authorized*. That failure is invisible from the app: `supabase.auth.signUp` resolves
 normally, the UI paints "check your email", and the person never receives anything.
 
-**Owed, and named rather than smuggled** (both are one-line follow-ups this PR deliberately does not
-take, because a sibling PR holds each file and a conflict would cost a CI cycle):
+**The four sibling-held touches — named while they were owed, and DISCHARGED in this PR's fold once
+their holders merged** (#535 as `db74fc97`, #536 as `72c56048`, both on 2026-09-03). They were held
+back rather than fought over because two PRs editing one file conflict at merge; they are listed here
+so the record shows what was deferred and that nothing was quietly dropped:
 
-1. `docs/plan/index.md` owes a row for this file, and its `-09-02-pm` row (line 159) is stale on
-   **BOTH** halves, not one: the range "裁-132…141" becomes 裁-132…145 once #535 lands, **and** the
-   phrase "and the NEWEST" moves to this file's row. PR #536 holds that file at the time of writing.
-2. `docs/plan/active/mohe-grill-rulings-2026-09-02-pm.md` owes **two** touches, not one: the closing
-   back-pointer to this file, in the shape `mohe-grill-rulings-2026-09-02.md` already carries — and,
-   in the same edit, its **line 5**, whose chain still ends "→ **this file, the newest**". A closing
-   line alone would leave the header self-contradicting three lines from the top, which is exactly the
-   rot a back-pointer exists to prevent. PR #535 appends to that file's end, so this PR's version of
-   the first touch would land on the same lines.
+1. **DONE** — `docs/plan/index.md` gains a row for this file, and its `-09-02-pm` row (line 159) was
+   stale on **BOTH** halves, not one: the range "裁-132…141" is re-cut to 裁-132…145 (#535's three
+   landed there) **and** the phrase "and the NEWEST" moves to this file's new row. Fixing one half
+   and not the other would have left the index worse than before.
+2. **DONE** — `docs/plan/active/mohe-grill-rulings-2026-09-02-pm.md` took **two** touches, not one:
+   the closing back-pointer to this file, in the shape `mohe-grill-rulings-2026-09-02.md` already
+   carries — and, in the same edit, its **line 5**, whose chain ended "→ **this file, the newest**".
+   A closing line alone would have left that header self-contradicting three lines from the top,
+   which is exactly the rot a back-pointer exists to prevent.
+3. **DONE** — `docs/adr/README.md` item 86's row-location list gains 裁-146 and this file, so the
+   §15 index of which ledger holds which ruling stays complete.
+4. **Still owed, and not this PR's to take:** the digest is now at **exactly 500 lines**, the repo's
+   document ceiling. 裁-147's row cannot be written until `docs/adr/README.md` is split — the same
+   move `README-log.md` itself came from on 2026-08-23 (`docs/adr/README.md`'s own note records it).
+   A split plan is owed BEFORE the next law-changing ruling, not before this merge.

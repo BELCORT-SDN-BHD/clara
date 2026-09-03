@@ -355,3 +355,18 @@ re-reading find?"
 > file's 500-line ceiling — is the source of truth and governs on any divergence. **裁-102 is NOT
 > closed by this**: the server-side wall on the signup send path remains unbuilt, and
 > `docs/plan/active/security-pass-2026-09-02.md` item 6 says so in its re-cut form.
+> **The owner's acts of the same afternoon, at their true weight.** **MEASURED:** custom SMTP was
+> configured ≈16:08 MYT (Enable custom SMTP ON, host smtp.resend.com, sender
+> no-reply@mail.clarabook.com, sender name Clara; port, username and password below the fold and not
+> read back), and at **≈16:55** a Supabase *Invite user* mail sent through it arrived at a private
+> address OUTSIDE the project's Supabase team. That is the **Invite-user template arm, not the
+> signup-code arm** — fired from the dashboard rather than the app's own courier path, a different
+> template from *Confirm signup*, carrying a LINK where the confirmation arm must carry a CODE. The
+> transport and the sender identity are therefore PROVEN and the *Email address not authorized* wall
+> is retired as a measurement, while **the signup-confirmation arm is NOT certified and the gate
+> stays open**: a working transport is a precondition of the gate, never the gate.
+> **REPORTED, not measured (裁-112) — words only, no read-back, ≈17:00:** the test user deleted, the
+> Rate Limits raise applied (**the raised value was not stated, so no number is recorded anywhere —
+> unknown, not merely unverified**), and the *Confirm signup* template confirmed to carry
+> `{{ .Token }}`. All three are read back at the Wave-G walk; the checklist's two proof-bearing boxes
+> stay OPEN until then, because each names a Management API read as its proof.

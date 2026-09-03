@@ -85,7 +85,16 @@ server-only invite route (`apps/web/app/api/invite/route.ts` → `apps/web/lib/m
 form back (Enable custom SMTP ON, host smtp.resend.com, sender no-reply@mail.clarabook.com, sender
 name Clara); the port, username and password fields were below the fold and are not recorded as read.
 That is the ARRANGEMENT standing up, not the gate closing: Wave-G's "Mail" line still certifies only
-on a received message. **The sender** is **no-reply@mail.clarabook.com** — on the one domain
+on a received message. **Delivery to a NON-team address is PROVEN, ≈16:55 MYT 2026-09-03** — a
+Supabase *Invite user* mail, sent through the new custom SMTP, arrived at a private address outside
+the project's Supabase team, From "Clara <no-reply@mail.clarabook.com>". That is the **Invite-user
+template arm, not the signup-code arm**: it proves the transport and the sender identity end to end
+and retires the *Email address not authorized* wall as a measurement, while **the
+signup-confirmation arm is NOT certified and the gate stays open**. Three further acts were
+**REPORTED DONE by the owner ≈17:00 MYT — a report, not a measurement (裁-112), with no read-back**:
+the test user deleted, the Rate Limits raise applied (**the raised value was not stated, so no
+number is recorded**), and the *Confirm signup* template confirmed to carry `{{ .Token }}`. All
+three are read back at the Wave-G walk. **The sender** is **no-reply@mail.clarabook.com** — on the one domain
 verified in the Resend dashboard (owner's reading, 2026-09-03: exactly one domain, status Verified),
 a sending subdomain distinct from the app origin app.clarabook.com. The same address serves both
 senders, so the estate has ONE verified sending identity. It reaches the code only through the

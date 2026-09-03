@@ -52,6 +52,23 @@ verified sending domain, one no-reply sender.*
       dead-end it. Its box is the pending FS-10 note, not a new one here (see the Signup-gate
       section's own "do not double-file it here"), and /auth/recover must be in Auth → Redirect URLs —
       already a Signup-gate line.
+      **Delivery to a NON-team address PROVEN ≈16:55 MYT 2026-09-03** — a Supabase *Invite user* mail
+      went out through the new custom SMTP and arrived at a private address outside the project's
+      Supabase team, From "Clara <no-reply@mail.clarabook.com>", subject "You've been invited". That
+      retires the default mailer's *Email address not authorized* wall as a measured fact rather than
+      a settings reading. **It is the Invite-user template arm, NOT the signup-code arm, and it does
+      not certify this section:** it was fired from the dashboard rather than through the app's own
+      courier path, it exercised a different template from *Confirm signup*, and it carried a LINK
+      where the confirmation arm must carry a CODE. Transport PROVEN; the signup-confirmation arm NOT
+      certified; the gate below still open.
+      **REPORTED DONE by the owner ≈17:00 MYT 2026-09-03 — a report, not a measurement (裁-112), with
+      no read-back:** the test user from that delivery proof deleted, the Rate Limits raise applied
+      (**the raised value was not stated, so this checklist records no number**), and the *Confirm
+      signup* template confirmed to carry `{{ .Token }}`. **All three are read back at the Wave-G
+      walk**, and the two boxes immediately below — the rate-limit raise and the `{{ .Token }}`
+      re-confirm — stay OPEN until then: each names a Management API read as its proof, and the
+      template box is the 裁-92 bypass wall, where `docs/plan/active/security-pass-2026-09-02.md`
+      item 8 already demands "a Management API read, not a screenshot of the editor".
 - [ ] **Then raise the auth mail rate limit.** Saving custom SMTP applies an initial **30 messages
       per hour** to the project's auth mail (the same official guide); set "emails sent per hour" on
       Authentication → Rate Limits to the beta's expected signup volume. From here the delivery cap is
