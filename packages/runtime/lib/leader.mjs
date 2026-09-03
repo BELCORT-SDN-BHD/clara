@@ -4,7 +4,8 @@
 //   1. routing  — domain_events -> wake_intents        (lib/relay.mjs, Slice 3)
 //   2. drain    — wake_intents -> agent_tasks + outbox  (lib/drain.mjs)
 //   3. reconcile — converge task rows with engine truth + expiry + prune + the
-//      daily autopost-rule expiry sweep (reconciler; Wave A2.1 §7)
+//      SST/lint/FA/adjustment daily repair belts (reconciler; Wave A2.1 §7's own
+//      autopost-rule expiry sweep retired with its DB function at `0118`, F-A2 PR-3)
 // plus a 'world' heartbeat (process-liveness proxy for /ready). A missing/empty
 // active taxonomy HALTs the loop and EXITS the process non-zero (crash-only; the
 // supervisor / Fly restarts) — an un-routable state is never silently swallowed.
@@ -40,13 +41,13 @@ const POLL_INTERVAL_MS = Number(process.env.CLARA_LEADER_POLL_MS || 2000);
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
 const PRUNE_EVERY = Number(process.env.CLARA_LEADER_PRUNE_EVERY || 50);
-// Finite-guarded: junk or non-positive CLARA_AUTOPOST_RECONCILE_HOURS falls back to 24h —
-// a NaN here would make the due-check permanently false and silently DISABLE the
-// WA2-R10 expiry sweep, the one failure mode this knob must never have.
-const AUTOPOST_RECONCILE_HOURS = Number(process.env.CLARA_AUTOPOST_RECONCILE_HOURS);
-const AUTOPOST_RECONCILE_MS =
-  (Number.isFinite(AUTOPOST_RECONCILE_HOURS) && AUTOPOST_RECONCILE_HOURS > 0 ? AUTOPOST_RECONCILE_HOURS : 24) * 3600000;
-// Finite-guarded like the autopost cadence: junk or non-positive CLARA_SST_RECONCILE_MS
+// The autopost-rule expiry sweep's own cadence knob (CLARA_AUTOPOST_RECONCILE_HOURS,
+// AUTOPOST_RECONCILE_MS, autopostReconcileDue) retired here WITH the belt it gated — its DB
+// function, clara.reconcile_autopost_rules(), was dropped whole at `0118` (F-A2 PR-3,
+// 2026-08-25 ceremony; f-a2-annexes-1-estate.md §B.1: "RETIRE (drop the verb)"). The caller
+// was missed in that PR and re-fired the dropped call on every ~2s poll until this fix — see
+// reconciler.mjs's own retirement comment for the full account.
+// Finite-guarded like the (retired) autopost cadence: junk or non-positive CLARA_SST_RECONCILE_MS
 // falls back to 24h — a NaN would make the due-check permanently false and silently
 // DISABLE the SST repair belt. The DB surfaces stale_evaluator only past 48h, so a 24h
 // cadence stays well under that staleness floor.
@@ -77,14 +78,6 @@ const ADJ_RECONCILE_MS = Number.isFinite(ADJ_RECONCILE_MS_ENV) && ADJ_RECONCILE_
 // the migration itself.
 const RENDER_ENQUEUE_MS_ENV = Number(process.env.CLARA_RENDER_ENQUEUE_MS);
 const RENDER_ENQUEUE_MS = Number.isFinite(RENDER_ENQUEUE_MS_ENV) && RENDER_ENQUEUE_MS_ENV > 0 ? RENDER_ENQUEUE_MS_ENV : 24 * 3600000;
-
-/** True iff the daily autopost-rule expiry sweep is due (pure — the since-last-run
- *  guard; lastRunMs=0 makes the first cycle after (re)boot run it immediately, which
- *  is safe: the DB fn is a state transition + notification-deduped, so an extra run
- *  is a no-op). Wave A2.1 §7 / WA2-R10. */
-export function autopostReconcileDue(lastRunMs, nowMs, intervalMs = AUTOPOST_RECONCILE_MS) {
-  return nowMs - lastRunMs >= intervalMs;
-}
 
 /** True iff the daily SST compliance-watch repair belt is due (pure — the since-last-run
  *  guard; lastRunMs=0 makes the first cycle after (re)boot run it immediately, which is
@@ -155,7 +148,6 @@ export function startLeaderLoop(deps) {
   const loop = (async () => {
     let backoff = RECONNECT_BASE_MS;
     let iteration = 0;
-    let lastAutopostRun = 0; // 0 ⇒ the first cycle after boot runs the daily autopost sweep
     let lastSstRun = 0; // 0 ⇒ the first cycle after boot runs the SST repair belt (catches pre-existing crossings post-0016)
     let lastLintRun = 0; // 0 ⇒ the first cycle after boot runs the wiki lint belt (catches pre-existing conditions post-0017, WB-R8 daily cadence)
     let lastFaRun = 0; // 0 ⇒ first cycle after boot runs the depreciation sweep (reconciler-fa.mjs feature-detects 0041 itself, so a pre-0041 boot is a cheap no-op)
@@ -180,7 +172,6 @@ export function startLeaderLoop(deps) {
           try {
             const routed = await runRelayCycle(client, { log });
             const drained = await drainCycle(client, { log });
-            const autopostDue = autopostReconcileDue(lastAutopostRun, Date.now());
             const sstDue = sstReconcileDue(lastSstRun, Date.now());
             const lintDue = lintReconcileDue(lastLintRun, Date.now());
             const faDue = depreciationRunDue(lastFaRun, Date.now());
@@ -188,13 +179,11 @@ export function startLeaderLoop(deps) {
             const swept = await runReconcilerSweep(client, {
               ...deps,
               prune: iteration % PRUNE_EVERY === 0,
-              autopostRules: autopostDue,
               sstWatches: sstDue,
               lintBelt: lintDue,
               faRuns: faDue,
               adjRuns: adjDue,
             });
-            if (autopostDue && swept.autopostOk) lastAutopostRun = Date.now(); // a failed autopost sweep retries next cycle
             if (sstDue && swept.sstOk) lastSstRun = Date.now(); // a failed SST belt retries next cycle
             if (lintDue && swept.lintOk) lastLintRun = Date.now(); // a failed lint belt retries next cycle
             if (faDue && swept.faOk) lastFaRun = Date.now(); // a failed FA sweep retries next cycle

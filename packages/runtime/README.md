@@ -33,11 +33,14 @@ v2.1; `docs/ARCHITECTURE.md` §4 + Appendix A; migration
 - **Control listener** (`lib/control.mjs`): leased clarify delivery + cancel
   settlement. **Leader loop** (`lib/leader.mjs`): routing + drain (`lib/drain.mjs`)
   + reconcile (`lib/reconciler.mjs`; the DB function `clara.reconcile_autopost_rules()`
-  and the rest of the rules-execution tier RETIRED with F-A2 PR-3 at `0118`, but the
-  reconciler's belt caller was never unwired — `reconciler.mjs:673` still fires it every
-  cycle behind a bare try/catch with no `to_regprocedure` feature-detect, so the call fails
-  and retries every poll in the deployed path; unwire per
-  `docs/plan/active/f-a2-annexes-1-estate.md:95`).
+  and the rest of the rules-execution tier RETIRED with F-A2 PR-3 at `0118` — the
+  reconciler's belt caller was RETIRED WITH IT, closing the gap a first pass at PR-3
+  left open (the caller kept firing the dropped call every poll, invisible in
+  `beltErrors`, until this fix; `docs/plan/active/f-a2-annexes-1-estate.md` §B.1 names
+  the artifact's disposition as "RETIRE — drop the verb", both DB and caller halves).
+  **Merged, NOT SERVING until the next runtime deploy** (the SERVING Fly bundle is
+  machine version 70 today; this fix rides `v72`, not the already-queued `v71` — same
+  "the registry pin is not the serving bundle" law as the chatTurn version above).
   **Consumer lanes**, each on its OWN dedicated connection + advisory lock:
   matcher (`lib/matcher.mjs`),
   autodraft (`lib/autodraft.mjs`), local_facts (`lib/local-facts.mjs`),

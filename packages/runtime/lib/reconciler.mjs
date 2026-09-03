@@ -501,29 +501,23 @@ export async function reconcileAutoDraftTasks(client, deps) {
 }
 
 // ---------------------------------------------------------------------------
-// Autopost-rule expiry/nudge sweep (Wave A2.1 §7 / migration 0015 S3 — WA2-R10
-// never-auto-renew). clara.reconcile_autopost_rules() hard-expires live autopost
-// rules past expires_at (+ notification) and writes the ¾-term no-recent-post
-// nudges; the returned {expired, nudged} counts are the receipt. The fn is
-// runtime-GROUP-granted (the reconcile_sweep_runs precedent — a plain call on the
-// clara_runtime connection, NOT the execute_rule_post login-direct dance). Errors
-// are isolated: log + autopostOk:false, so the leader retries next cycle and the
-// other sweepers are never blocked.
+// Autopost-rule expiry/nudge sweep — RETIRED (Wave A2.1 §7 / migration 0015 S3 —
+// WA2-R10 never-auto-renew). clara.reconcile_autopost_rules() and the whole
+// CODING-rules EXECUTION tier were DROPPED at `0118` (F-A2 PR-3, 2026-08-25
+// ceremony; f-a2-annexes-1-estate.md §B.1 names this artifact "RETIRE (drop the
+// verb)"). Unlike the FA/adjustment belts below — whose DB surface arrives AFTER
+// this runtime image by design and which therefore feature-detect with
+// `to_regprocedure` so they can light up the moment their migration lands — this
+// function's DB half is gone FOR GOOD, on purpose: there is no future migration to
+// wait for, so a feature-detect here would misstate a permanent retirement as a
+// dormant one. The belt caller is retired the same way its sibling execute_rule_post
+// caller was (rule-post.mjs, deleted whole in the same PR) — see leader.mjs's own
+// header and packages/runtime/README.md §2.2 for the caller-side half of this
+// retirement. This caller was missed in the original PR-3 commit (it only touched a
+// comment here) and re-fired `select clara.reconcile_autopost_rules()` on every
+// ~2s poll from 0118 until this fix, its "does not exist" error swallowed and
+// invisible in beltErrors (this function caught before belt() ever saw a throw).
 // ---------------------------------------------------------------------------
-
-/** @param {import("pg").ClientBase} client  a clara_runtime connection */
-export async function reconcileAutopostRules(client, opts = {}) {
-  const log = opts.log ?? (() => {});
-  try {
-    const r = (await client.query("select clara.reconcile_autopost_rules() as r")).rows[0]?.r ?? {};
-    const out = { autopostOk: true, autopostExpired: Number(r?.expired ?? 0), autopostNudged: Number(r?.nudged ?? 0) };
-    log(`[reconcile] autopost rules expired=${out.autopostExpired} nudged=${out.autopostNudged}`);
-    return out;
-  } catch (err) {
-    log(`[reconcile] reconcile_autopost_rules error: ${err?.message ?? err}`);
-    return { autopostOk: false, autopostExpired: 0, autopostNudged: 0 };
-  }
-}
 
 // The SST compliance-watch daily repair belt (Wave A2.1 §2.2 / migration 0016) lives in
 // reconciler-sst.mjs (module-size budget, the reconciler-documents.mjs precedent) and is
@@ -571,11 +565,12 @@ function isLeaderHalt(err) {
 
 /**
  * Run every sweeper once + a heartbeat. Trace prune runs on a coarser cadence
- * (opts.prune=true) so it does not scan on every fast sweep; the autopost-rule
- * expiry sweep runs on the leader's daily flag (opts.autopostRules=true); the SST
+ * (opts.prune=true) so it does not scan on every fast sweep; the SST
  * compliance-watch repair belt runs on the leader's daily flag (opts.sstWatches=true);
  * the per-client wiki-lint belt runs on the leader's daily flag (opts.lintBelt=true); the FA
  * belt (opts.faRuns=true) and the D-b adjustment belt (opts.adjRuns=true) run on the same flag.
+ * (The sixth daily flag this sweep once carried, opts.autopostRules, retired with its DB
+ * function at `0118` — see the comment above reconcileSstWatches's own belt block.)
  *
  * EVERY belt is individually contained (see the wrapper's own comment): one belt's escape
  * costs that belt this cycle and never the belts behind it. The result carries `heartbeatOk`
@@ -584,7 +579,7 @@ function isLeaderHalt(err) {
  * error that still propagates — the leader owns it.
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {{enqueueChatTurn:Function, getRun:Function, log?:Function, prune?:boolean,
- *          autopostRules?:boolean, sstWatches?:boolean, lintBelt?:boolean, faRuns?:boolean,
+ *          sstWatches?:boolean, lintBelt?:boolean, faRuns?:boolean,
  *          adjRuns?:boolean}} deps
  */
 export async function runReconcilerSweep(client, deps) {
@@ -666,11 +661,12 @@ export async function runReconcilerSweep(client, deps) {
     intakeRecovery = await belt("intake artifact recovery", () => deps.recoverDocumentIntakes(), intakeRecovery);
   }
   const spool = await belt("spool TTL sweep", () => sweepSpoolTtl(), { spoolRemoved: 0 });
-  // The five DAILY belts fall back to their OWN ok:false, never to `{}`. leader.mjs advances the
-  // 24h cadence only on a truthy `*Ok` (lines 191-195), so an absent key would already retry next
+  // The four DAILY belts below fall back to their OWN ok:false, never to `{}`. leader.mjs
+  // advances the 24h cadence only on a truthy `*Ok`, so an absent key would already retry next
   // cycle — but saying it explicitly is the difference between a contract and an accident, and it
-  // is the one thing a reviewer should not have to derive from undefined-is-falsy.
-  const autopost = deps.autopostRules ? await belt("autopost rules", () => reconcileAutopostRules(client, { log }), { autopostOk: false }) : {};
+  // is the one thing a reviewer should not have to derive from undefined-is-falsy. (A fifth belt,
+  // the autopost-rule expiry sweep, lived here until its DB function retired at `0118` — see the
+  // comment above reconcileSstWatches's own block.)
   const sst = deps.sstWatches ? await belt("sst watches", () => reconcileSstWatches(client, { log }), { sstOk: false }) : {};
   const lint = deps.lintBelt ? await belt("lint belt", () => reconcileLintBelt(client, { log }), { lintOk: false }) : {};
   const fa = deps.faRuns ? await belt("fa runs", () => reconcileFaRuns(client, { log }), { faOk: false }) : {};
@@ -682,5 +678,5 @@ export async function runReconcilerSweep(client, deps) {
   // assertion pass for a belt that never ran. `beltErrors` names them positively instead — the
   // autodraft edge's own law (a failure that is COUNTED stays visible; a failure that is only
   // logged is one grep away from invisible).
-  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...sst, ...lint, ...fa, ...adj, ...wake, ...prune };
+  return { heartbeatOk: true, beltErrors, ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...sst, ...lint, ...fa, ...adj, ...wake, ...prune };
 }
